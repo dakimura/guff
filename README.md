@@ -14,23 +14,29 @@ CLI バイナリ名は **`guff`** です（クレート名は `guff-lint`）。
 
 ## インストール
 
-リポジトリを clone したうえで、次のいずれかで入れます。
+次のいずれかで入れます。
 
-### 方法 A: `cargo install`（推奨）
+### 方法 A: `cargo install --git`（clone 不要）
 
 ```bash
-git clone <this-repo> me
-cd me/projects/guff
-cargo install --path crates/guff-lint
+cargo install --git https://github.com/dakimura/guff --locked guff-lint
 ```
 
-これで `~/.cargo/bin/guff` が入ります。`PATH` に `~/.cargo/bin` が入っていることを確認してください。
+### 方法 B: clone してローカルからインストール（推奨）
+
+```bash
+git clone https://github.com/dakimura/guff.git
+cd guff
+cargo install --path crates/guff-lint --locked
+```
+
+いずれも `~/.cargo/bin/guff` が入ります。`PATH` に `~/.cargo/bin` が入っていることを確認してください。
 
 ```bash
 guff --help
 ```
 
-### 方法 B: リリース用にバイナリだけビルド
+### 方法 C: リリース用にバイナリだけビルド
 
 ```bash
 cargo build --release -p guff-lint
@@ -38,7 +44,7 @@ cargo build --release -p guff-lint
 cp target/release/guff /usr/local/bin/   # 好みの場所へ
 ```
 
-### 方法 C: ソースから都度実行
+### 方法 D: ソースから都度実行
 
 ```bash
 cargo run -p guff-lint -- run ./...
