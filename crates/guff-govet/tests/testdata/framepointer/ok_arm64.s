@@ -1,0 +1,5 @@
+TEXT ·good1(SB), 0, $0
+	STPW (R29, R30), -32(RSP)
+	MOVD $0, R29
+	LDPW 32(RSP), (R29, R30)
+	RET

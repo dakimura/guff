@@ -1,0 +1,22 @@
+[package]
+name = "guff-types"
+description = "A Rust port of Go's go/types package (type-checker for Go source), built on guff-ast and guff-constant."
+keywords = ["go", "types", "typechecker", "port"]
+categories = ["parser-implementations", "development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_types"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-constant = { path = "../guff-constant" }
+guff-types-errors = { path = "../guff-types-errors" }
+guff-version = { path = "../guff-version" }
+guff-goversion = { path = "../guff-goversion" }
+
+[dev-dependencies]
+guff-exportdata = { path = "../guff-exportdata" }

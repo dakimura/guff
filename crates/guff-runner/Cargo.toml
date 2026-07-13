@@ -1,0 +1,18 @@
+[package]
+name = "guff-runner"
+description = "go/analysis driver for guff — parallel analyzer execution over loaded packages."
+keywords = ["go", "analysis", "linter", "runner"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_runner"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-packages = { path = "../guff-packages" }
+guff-types = { path = "../guff-types" }

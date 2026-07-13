@@ -1,0 +1,5 @@
+TEXT ·good1(SB), 0, $0
+	PUSHQ BP
+	MOVQ $0, BP
+	POPQ BP
+	RET

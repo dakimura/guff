@@ -1,0 +1,20 @@
+[package]
+name = "guff-analysis"
+description = "A Rust port of golang.org/x/tools/go/analysis (go/analysis framework for linters)."
+keywords = ["go", "analysis", "linter", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_analysis"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-constant = { path = "../guff-constant" }
+guff-packages = { path = "../guff-packages" }
+guff-types = { path = "../guff-types" }
+guff-ssa = { path = "../guff-ssa" }
+guff-pattern = { path = "../guff-pattern" }

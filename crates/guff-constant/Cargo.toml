@@ -1,0 +1,16 @@
+[package]
+name = "guff-constant"
+description = "A Rust port of Go's go/constant package (untyped constant values and operations)."
+keywords = ["go", "constant", "port"]
+categories = ["parser-implementations", "development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_constant"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+dashu = "0.4"

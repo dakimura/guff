@@ -1,0 +1,15 @@
+[package]
+name = "guff-version"
+description = "A Rust port of Go's go/version package (operations on Go versions in toolchain name syntax, e.g. 'go1.21.0')."
+keywords = ["go", "version", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_version"
+path = "src/lib.rs"
+
+[dependencies]
+guff-gover = { path = "../guff-gover" }

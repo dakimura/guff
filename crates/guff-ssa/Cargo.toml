@@ -1,0 +1,18 @@
+[package]
+name = "guff-ssa"
+description = "A Rust port of Go's go/ssa package (static single assignment form for Go source)."
+keywords = ["go", "ssa", "port"]
+categories = ["parser-implementations", "development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_ssa"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-constant = { path = "../guff-constant" }
+guff-packages = { path = "../guff-packages" }
+guff-types = { path = "../guff-types" }

@@ -1,0 +1,80 @@
+//! Render Go expressions as source-like strings for diagnostic suggestions.
+
+use guff::ast::{CallExpr, Expr, IndexExpr, SelectorExpr, StarExpr};
+use guff::token::Token;
+
+/// Render an expression for use in diagnostic messages.
+pub fn render_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::ParenExpr(p) => format!("({})", render_expr(&p.x)),
+        Expr::UnaryExpr(u) => format!("{}{}", token_str(u.op), render_expr(&u.x)),
+        Expr::BinaryExpr(b) => format!(
+            "{} {} {}",
+            render_expr(&b.x),
+            token_str(b.op),
+            render_expr(&b.y)
+        ),
+        Expr::SelectorExpr(SelectorExpr { x, sel, .. }) => {
+            format!("{}.{}", render_expr(x), sel.name)
+        }
+        Expr::CallExpr(CallExpr { fun, args, .. }) => {
+            let mut s = render_expr(fun);
+            s.push('(');
+            for (i, arg) in args.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(", ");
+                }
+                s.push_str(&render_expr(arg));
+            }
+            s.push(')');
+            s
+        }
+        Expr::IndexExpr(IndexExpr { x, index, .. }) => {
+            format!("{}[{}]", render_expr(x), render_expr(index))
+        }
+        Expr::StarExpr(StarExpr { x, .. }) => format!("*{}", render_expr(x)),
+        _ => "<expr>".to_string(),
+    }
+}
+
+fn token_str(op: Token) -> &'static str {
+    match op {
+        Token::NOT => "!",
+        Token::EQL => "==",
+        Token::NEQ => "!=",
+        Token::LSS => "<",
+        Token::LEQ => "<=",
+        Token::GTR => ">",
+        Token::GEQ => ">=",
+        Token::OR => "||",
+        Token::AND => "&&",
+        Token::ADD => "+",
+        Token::SUB => "-",
+        Token::MUL => "*",
+        Token::QUO => "/",
+        Token::REM => "%",
+        Token::ARROW => "<-",
+        _ => "?",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use guff::ast::{Ident, UnaryExpr};
+
+    #[test]
+    fn renders_ident_and_unary() {
+        let x = Expr::Ident(Ident::new_ident("x"));
+        assert_eq!(render_expr(&x), "x");
+        let not_x = Expr::UnaryExpr(UnaryExpr {
+            op_pos: Default::default(),
+            op: Token::NOT,
+            x: Box::new(x),
+            id: 0,
+        });
+        assert_eq!(render_expr(&not_x), "!x");
+    }
+}

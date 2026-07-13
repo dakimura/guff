@@ -1,0 +1,11 @@
+TEXT ·bad1(SB), 0, $0
+	MOVQ $0, BP
+	RET
+TEXT ·bad2(SB), 0, $0
+	MOVQ AX, BP
+	RET
+TEXT ·good1(SB), 0, $0
+	PUSHQ BP
+	MOVQ $0, BP
+	POPQ BP
+	RET

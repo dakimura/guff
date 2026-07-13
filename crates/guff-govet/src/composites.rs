@@ -1,0 +1,156 @@
+//! `composites` — check for unkeyed composite literals of imported struct types.
+//!
+//! Port of `golang.org/x/tools/go/analysis/passes/composite`.
+
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use guff::ast::{CompositeLit, Expr};
+use guff::walk::NodeRef;
+use guff_analysis::passes::inspect;
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::arena::TypeData;
+use guff_types::lookup::deref;
+use guff_types::named::named_obj;
+use guff_types::typestring::type_string;
+
+use crate::expreq::unparen;
+
+fn trim_test_suffix(path: &str) -> &str {
+    path.strip_suffix("_test").unwrap_or(path)
+}
+
+fn is_whitelisted_type(name: &str) -> bool {
+    static WHITELIST: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    WHITELIST
+        .get_or_init(|| {
+            [
+                "image/color.Alpha16",
+                "image/color.Alpha",
+                "image/color.CMYK",
+                "image/color.Gray16",
+                "image/color.Gray",
+                "image/color.NRGBA64",
+                "image/color.NRGBA",
+                "image/color.NYCbCrA",
+                "image/color.RGBA64",
+                "image/color.RGBA",
+                "image/color.YCbCr",
+                "image.Point",
+                "image.Rectangle",
+                "image.Uniform",
+                "unicode.Range16",
+                "unicode.Range32",
+                "testing.InternalBenchmark",
+                "testing.InternalExample",
+                "testing.InternalTest",
+                "testing.InternalFuzzTarget",
+            ]
+            .into_iter()
+            .collect()
+        })
+        .contains(name)
+}
+
+fn is_same_package_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
+    let artifacts = match pass.pkg().type_artifacts.as_ref() {
+        Some(a) => a,
+        None => return false,
+    };
+    let types = &artifacts.types;
+    match types.get(typ) {
+        TypeData::Struct(_) => true,
+        TypeData::Pointer(p) => is_same_package_type(pass, p.elem()),
+        TypeData::Named(_) => {
+            let obj = named_obj(types, typ);
+            let Some(obj_pkg) = obj.pkg(&artifacts.objects) else {
+                return false;
+            };
+            let Some(pass_pkg) = pass.type_pkg() else {
+                return false;
+            };
+            let obj_path = trim_test_suffix(artifacts.packages.get(obj_pkg).path());
+            let pass_path = trim_test_suffix(artifacts.packages.get(pass_pkg).path());
+            obj_path == pass_path
+        }
+        TypeData::TypeParam(_) => true,
+        _ => false,
+    }
+}
+
+fn struct_type(types: &guff_types::arena::TypeArena, typ: guff_types::TypeId) -> Option<guff_types::TypeId> {
+    let (elem, _) = deref(types, typ);
+    let u = elem.underlying(types);
+    match types.get(u) {
+        TypeData::Struct(_) => Some(u),
+        _ => None,
+    }
+}
+
+fn has_keyed_element(lit: &CompositeLit) -> bool {
+    lit.elts.iter().any(|e| matches!(unparen(e), Expr::KeyValueExpr(_)))
+}
+
+fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
+    if lit.elts.is_empty() || has_keyed_element(lit) {
+        return None;
+    }
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = info.types.get(&lit.id)?.typ;
+    if !guff_types::predicates::is_valid(&artifacts.types, typ) {
+        return None;
+    }
+    if is_same_package_type(pass, typ) {
+        return None;
+    }
+    let type_name = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    if is_whitelisted_type(&type_name) {
+        return None;
+    }
+    if struct_type(&artifacts.types, typ).is_none() {
+        return None;
+    }
+    Some(format!("{type_name} struct literal uses unkeyed fields"))
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let inspect = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "composites requires inspect analyzer".to_string())?
+        .clone();
+
+    let mut pending = Vec::new();
+    inspect.preorder(pass.files(), |n| {
+        let NodeRef::CompositeLit(lit) = n else {
+            return;
+        };
+        if let Some(message) = check_literal(pass, lit) {
+            pending.push((lit.lbrace.0 as u32, message));
+        }
+    });
+
+    for (pos, message) in pending {
+        pass.reportf(pos, message);
+    }
+    Ok(None)
+}
+
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(|| Analyzer {
+        name: "composites",
+        doc: "check for unkeyed composite literals of struct types from other packages",
+        url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/composite",
+        run: run as RunFn,
+        run_despite_errors: true,
+        requires: vec![inspect::analyzer()],
+        fact_types: vec![],
+    })
+}

@@ -1,0 +1,28 @@
+[package]
+name = "guff-staticcheck"
+description = "Rust port of honnef.co/go/tools staticcheck and simple analyzers."
+keywords = ["go", "staticcheck", "linter", "analysis"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_staticcheck"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-pattern = { path = "../guff-pattern" }
+guff-constant = { path = "../guff-constant" }
+guff-types = { path = "../guff-types" }
+guff-ssa = { path = "../guff-ssa" }
+regex = "1"
+url = "2"
+
+[dev-dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-types = { path = "../guff-types" }

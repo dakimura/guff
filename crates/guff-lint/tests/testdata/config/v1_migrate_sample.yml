@@ -1,0 +1,12 @@
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - gosimple
+    - gofmt
+    - revive
+linters-settings:
+  govet:
+    enable-all: true
+  gofmt:
+    simplify: false

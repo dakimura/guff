@@ -1,0 +1,608 @@
+//! `go list -json` driver.
+//!
+//! Port of `golist.go` (`goListDriver`, `createDriverResponse`).
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+
+use serde::Deserialize;
+
+use crate::config::Config;
+use crate::load_mode::LoadMode;
+use crate::package::{DriverResponse, Error, ErrorKind, Module, ModuleError, Package};
+use crate::typecheck::TypecheckEnv;
+
+/// Errors from the `go list` driver.
+#[derive(Debug)]
+pub enum GoListError {
+    GoNotFound(String),
+    CommandFailed { status: String, stderr: String },
+    Json(String),
+    List(Error),
+    Internal(String),
+}
+
+impl std::fmt::Display for GoListError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GoNotFound(msg) => write!(f, "'go list' driver requires 'go': {msg}"),
+            Self::CommandFailed { status, stderr } => {
+                write!(f, "go list failed ({status}): {stderr}")
+            }
+            Self::Json(msg) => write!(f, "JSON decoding failed: {msg}"),
+            Self::List(err) => write!(f, "{err}"),
+            Self::Internal(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for GoListError {}
+
+impl From<GoListError> for crate::LoadError {
+    fn from(value: GoListError) -> Self {
+        Self::Driver(value.to_string())
+    }
+}
+
+/// Loads packages by invoking `go list -json`.
+pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, GoListError> {
+    let mode = cfg.effective_mode();
+    let args = golist_args(cfg, patterns, 0);
+    let stdout = invoke_go(cfg, &args)?;
+
+    let mut response = DriverResponse::default();
+    let env = cfg.resolved_env();
+    response.compiler = "gc".to_string();
+    response.arch = TypecheckEnv::from_env(&env, "gc").arch;
+    let mut seen: HashMap<String, JsonPackage> = HashMap::new();
+    let mut additional_errors: HashMap<String, Vec<Error>> = HashMap::new();
+
+    let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonPackage>();
+    for item in stream {
+        let p = item.map_err(|e| GoListError::Json(e.to_string()))?;
+        if p.import_path.is_empty() {
+            if let Some(err) = p.error {
+                return Err(GoListError::List(Error {
+                    pos: err.pos,
+                    msg: err.err,
+                    kind: ErrorKind::List,
+                }));
+            }
+            return Err(GoListError::Internal(format!(
+                "package missing import path: {p:?}"
+            )));
+        }
+
+        if let Some(old) = seen.get(&p.import_path) {
+            if old.error.is_none() && p.error.is_none() {
+                if old != &p {
+                    return Err(GoListError::Internal(format!(
+                        "go list gives conflicting information for package {}",
+                        p.import_path
+                    )));
+                }
+                continue;
+            }
+            if old.error.is_some() && p.error.is_none() {
+                continue;
+            }
+        }
+        seen.insert(p.import_path.clone(), p.clone());
+
+        let pkg = json_package_to_package(&p, cfg)?;
+        if !p.dep_only {
+            response.roots.push(pkg.id.clone());
+        }
+        response.packages.push(Arc::new(pkg));
+    }
+
+    for (id, pkg) in response
+        .packages
+        .iter_mut()
+        .map(|p| (p.id.clone(), Arc::make_mut(p)))
+    {
+        if let Some(extra) = additional_errors.remove(&id) {
+            pkg.errors.extend(extra);
+        }
+    }
+
+    let _ = mode; // mode informs golist_args; refine clears fields later.
+    Ok(response)
+}
+
+fn json_package_to_package(p: &JsonPackage, cfg: &Config) -> Result<Package, GoListError> {
+    let dir = PathBuf::from(&p.dir);
+    let mut pkg = Package {
+        name: p.name.clone(),
+        id: p.import_path.clone(),
+        dir: dir.clone(),
+        target: path_from_maybe_relative(&p.target, &dir),
+        go_files: abs_join(&dir, &merge_slices(&p.go_files, &p.cgo_files)),
+        compiled_go_files: filter_compiled_go_files(abs_join(
+            &dir,
+            &p.compiled_go_files,
+        )),
+        other_files: abs_join(&dir, &other_files(p)),
+        embed_files: abs_join(&dir, &p.embed_files),
+        embed_patterns: abs_join(&dir, &p.embed_patterns),
+        ignored_files: abs_join(
+            &dir,
+            &merge_slices(&p.ignored_go_files, &p.ignored_other_files),
+        ),
+        for_test: p.for_test.clone(),
+        deps: p.deps.clone(),
+        module: p.module.as_ref().map(json_module_to_module),
+        ..Package::default()
+    };
+
+    if p.export.is_empty() {
+        pkg.export_file = PathBuf::new();
+    } else if Path::new(&p.export).is_absolute() {
+        pkg.export_file = PathBuf::from(&p.export);
+    } else {
+        pkg.export_file = dir.join(&p.export);
+    }
+
+    if let Some(space) = pkg.id.find(' ') {
+        pkg.pkg_path = pkg.id[..space].to_string();
+    } else {
+        pkg.pkg_path = pkg.id.clone();
+    }
+
+    if pkg.pkg_path == "unsafe" {
+        pkg.compiled_go_files.clear();
+    } else if pkg.compiled_go_files.is_empty() {
+        pkg.compiled_go_files = pkg.go_files.clone();
+    }
+
+    if let Some(err) = &p.error {
+        pkg.errors.push(Error {
+            pos: err.pos.clone(),
+            msg: err.err.clone(),
+            kind: ErrorKind::List,
+        });
+    }
+
+    pkg.imports = build_import_stubs(&p.imports, &p.import_map);
+
+    let _ = cfg;
+    Ok(pkg)
+}
+
+fn json_module_to_module(m: &JsonModule) -> Module {
+    Module {
+        path: m.path.clone(),
+        version: m.version.clone().unwrap_or_default(),
+        replace: m.replace.as_ref().map(|r| Box::new(json_module_to_module(r))),
+        main: m.main,
+        indirect: m.indirect,
+        dir: PathBuf::from(m.dir.as_deref().unwrap_or_default()),
+        go_mod: PathBuf::from(m.go_mod.as_deref().unwrap_or_default()),
+        go_version: m.go_version.clone().unwrap_or_default(),
+        error: m.error.as_ref().map(|e| ModuleError {
+            err: e.err.clone(),
+        }),
+    }
+}
+
+fn build_import_stubs(imports: &[String], import_map: &HashMap<String, String>) -> HashMap<String, Arc<Package>> {
+    let mut ids: HashMap<String, bool> = imports.iter().map(|id| (id.clone(), true)).collect();
+    let mut out = HashMap::new();
+    for (path, id) in import_map {
+        out.insert(
+            path.clone(),
+            Arc::new(Package {
+                id: id.clone(),
+                ..Package::default()
+            }),
+        );
+        ids.remove(id);
+    }
+    for id in ids.keys() {
+        if id == "C" {
+            continue;
+        }
+        out.insert(
+            id.clone(),
+            Arc::new(Package {
+                id: id.clone(),
+                ..Package::default()
+            }),
+        );
+    }
+    out
+}
+
+fn golist_args(cfg: &Config, patterns: &[String], go_version: u32) -> Vec<String> {
+    let mode = cfg.effective_mode();
+    const FIND_FLAGS: LoadMode = LoadMode(
+        LoadMode::NEED_IMPORTS.0
+            | LoadMode::NEED_TYPES.0
+            | LoadMode::NEED_SYNTAX.0
+            | LoadMode::NEED_TYPES_INFO.0,
+    );
+
+    let mut args = vec![
+        "list".to_string(),
+        "-e".to_string(),
+        json_flag(cfg, go_version),
+        format!(
+            "-compiled={}",
+            mode.contains(LoadMode::NEED_COMPILED_GO_FILES)
+                || mode.contains(LoadMode::NEED_SYNTAX)
+                || mode.contains(LoadMode::NEED_TYPES)
+                || mode.contains(LoadMode::NEED_TYPES_INFO)
+                || mode.contains(LoadMode::NEED_TYPES_SIZES)
+        ),
+        format!("-test={}", cfg.tests),
+        format!("-export={}", uses_export_data(cfg)),
+        format!("-deps={}", mode.contains(LoadMode::NEED_IMPORTS)),
+        format!(
+            "-find={}",
+            !cfg.tests && (mode & FIND_FLAGS) == LoadMode::empty() && !uses_export_data(cfg)
+        ),
+    ];
+
+    if go_version >= 21 {
+        args.push("-pgo=off".to_string());
+    }
+
+    args.extend(cfg.build_flags.clone());
+    args.push("--".to_string());
+    if patterns.is_empty() {
+        args.push(".".to_string());
+    } else {
+        args.extend(patterns.iter().cloned());
+    }
+    args
+}
+
+fn json_flag(cfg: &Config, go_version: u32) -> String {
+    if go_version < 19 {
+        return "-json".to_string();
+    }
+
+    let mode = cfg.effective_mode();
+    let mut fields = Vec::new();
+    let mut added = HashMap::<String, bool>::new();
+    let mut add = |list: &[&str]| {
+        for f in list {
+            if !added.contains_key(*f) {
+                added.insert((*f).to_string(), true);
+                fields.push((*f).to_string());
+            }
+        }
+    };
+
+    add(&["Name", "ImportPath", "Error"]);
+    if mode.contains(LoadMode::NEED_FILES)
+        || mode.contains(LoadMode::NEED_TYPES)
+        || mode.contains(LoadMode::NEED_TYPES_INFO)
+    {
+        add(&[
+            "Dir",
+            "GoFiles",
+            "IgnoredGoFiles",
+            "IgnoredOtherFiles",
+            "CFiles",
+            "CgoFiles",
+            "CXXFiles",
+            "MFiles",
+            "HFiles",
+            "FFiles",
+            "SFiles",
+            "SwigFiles",
+            "SwigCXXFiles",
+            "SysoFiles",
+        ]);
+        if cfg.tests {
+            add(&["TestGoFiles", "XTestGoFiles"]);
+        }
+    }
+    if mode.contains(LoadMode::NEED_TYPES) || mode.contains(LoadMode::NEED_TYPES_INFO) {
+        add(&["Dir", "CompiledGoFiles"]);
+    }
+    if mode.contains(LoadMode::NEED_COMPILED_GO_FILES) {
+        add(&["Dir", "CompiledGoFiles", "Export"]);
+    }
+    if mode.contains(LoadMode::NEED_IMPORTS) {
+        add(&["DepOnly", "Imports", "ImportMap"]);
+        if cfg.tests {
+            add(&["TestImports", "XTestImports"]);
+        }
+    }
+    if mode.contains(LoadMode::NEED_DEPS) {
+        add(&["DepOnly", "Deps"]);
+    }
+    if uses_export_data(cfg) {
+        add(&["Dir", "Export"]);
+    }
+    if mode.contains(LoadMode::NEED_FOR_TEST) {
+        add(&["ForTest"]);
+    }
+    if mode.contains(LoadMode::NEED_MODULE) {
+        add(&["Module"]);
+    }
+    if mode.contains(LoadMode::NEED_EMBED_FILES) {
+        add(&["EmbedFiles"]);
+    }
+    if mode.contains(LoadMode::NEED_EMBED_PATTERNS) {
+        add(&["EmbedPatterns"]);
+    }
+    if mode.contains(LoadMode::NEED_TARGET) {
+        add(&["Target"]);
+    }
+
+    format!("-json={}", fields.join(","))
+}
+
+fn uses_export_data(cfg: &Config) -> bool {
+    let mode = cfg.effective_mode();
+    mode.contains(LoadMode::NEED_EXPORT_FILE)
+        || (mode.contains(LoadMode::NEED_TYPES) && !mode.contains(LoadMode::NEED_DEPS))
+}
+
+fn invoke_go(cfg: &Config, args: &[String]) -> Result<String, GoListError> {
+    let mut cmd = Command::new("go");
+    if !cfg.dir.as_os_str().is_empty() {
+        cmd.current_dir(&cfg.dir);
+    }
+    cmd.args(args);
+    cmd.envs(parse_env(&cfg.resolved_env()));
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            GoListError::GoNotFound(e.to_string())
+        } else {
+            GoListError::GoNotFound(e.to_string())
+        }
+    })?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        return Err(GoListError::CommandFailed {
+            status: output.status.to_string(),
+            stderr,
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn parse_env(env: &[String]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for entry in env {
+        if let Some((k, v)) = entry.split_once('=') {
+            out.push((k.to_string(), v.to_string()));
+        }
+    }
+    out
+}
+
+fn abs_join(dir: &Path, files: &[String]) -> Vec<PathBuf> {
+    files
+        .iter()
+        .map(|f| {
+            let p = Path::new(f);
+            if p.is_absolute() {
+                p.to_path_buf()
+            } else {
+                dir.join(p)
+            }
+        })
+        .collect()
+}
+
+fn path_from_maybe_relative(path: &str, dir: &Path) -> PathBuf {
+    if path.is_empty() {
+        return PathBuf::new();
+    }
+    let p = Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        dir.join(p)
+    }
+}
+
+fn filter_compiled_go_files(files: Vec<PathBuf>) -> Vec<PathBuf> {
+    files
+        .into_iter()
+        .filter(|f| {
+            match f.extension().and_then(|s| s.to_str()) {
+                Some("go") => true,
+                None => true, // cgo-processed cache file
+                Some(_) => false,
+            }
+        })
+        .collect()
+}
+
+fn merge_slices(a: &[String], b: &[String]) -> Vec<String> {
+    let mut out = a.to_vec();
+    out.extend_from_slice(b);
+    out
+}
+
+fn other_files(p: &JsonPackage) -> Vec<String> {
+    let mut out = Vec::new();
+    for slice in [
+        &p.c_files,
+        &p.cxx_files,
+        &p.m_files,
+        &p.h_files,
+        &p.f_files,
+        &p.s_files,
+        &p.swig_files,
+        &p.swig_cxx_files,
+        &p.syso_files,
+    ] {
+        out.extend_from_slice(slice);
+    }
+    out
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct JsonPackage {
+    #[serde(rename = "ImportPath")]
+    import_path: String,
+    #[serde(default, rename = "Dir")]
+    dir: String,
+    #[serde(default, rename = "Name")]
+    name: String,
+    #[serde(default, rename = "Target")]
+    target: String,
+    #[serde(default, rename = "Export")]
+    export: String,
+    #[serde(default, rename = "GoFiles")]
+    go_files: Vec<String>,
+    #[serde(default, rename = "CompiledGoFiles")]
+    compiled_go_files: Vec<String>,
+    #[serde(default, rename = "IgnoredGoFiles")]
+    ignored_go_files: Vec<String>,
+    #[serde(default, rename = "IgnoredOtherFiles")]
+    ignored_other_files: Vec<String>,
+    #[serde(default, rename = "EmbedPatterns")]
+    embed_patterns: Vec<String>,
+    #[serde(default, rename = "EmbedFiles")]
+    embed_files: Vec<String>,
+    #[serde(default, rename = "CFiles")]
+    c_files: Vec<String>,
+    #[serde(default, rename = "CgoFiles")]
+    cgo_files: Vec<String>,
+    #[serde(default, rename = "CXXFiles")]
+    cxx_files: Vec<String>,
+    #[serde(default, rename = "MFiles")]
+    m_files: Vec<String>,
+    #[serde(default, rename = "HFiles")]
+    h_files: Vec<String>,
+    #[serde(default, rename = "FFiles")]
+    f_files: Vec<String>,
+    #[serde(default, rename = "SFiles")]
+    s_files: Vec<String>,
+    #[serde(default, rename = "SwigFiles")]
+    swig_files: Vec<String>,
+    #[serde(default, rename = "SwigCXXFiles")]
+    swig_cxx_files: Vec<String>,
+    #[serde(default, rename = "SysoFiles")]
+    syso_files: Vec<String>,
+    #[serde(default, rename = "Imports")]
+    imports: Vec<String>,
+    #[serde(default, rename = "ImportMap")]
+    import_map: HashMap<String, String>,
+    #[serde(default, rename = "Deps")]
+    deps: Vec<String>,
+    #[serde(default, rename = "Module")]
+    module: Option<JsonModule>,
+    #[serde(default, rename = "ForTest")]
+    for_test: String,
+    #[serde(default, rename = "DepOnly")]
+    dep_only: bool,
+    #[serde(default, rename = "Error")]
+    error: Option<JsonPackageError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct JsonModule {
+    #[serde(rename = "Path")]
+    path: String,
+    #[serde(default, rename = "Version")]
+    version: Option<String>,
+    #[serde(default, rename = "Replace")]
+    replace: Option<Box<JsonModule>>,
+    #[serde(default, rename = "Main")]
+    main: bool,
+    #[serde(default, rename = "Indirect")]
+    indirect: bool,
+    #[serde(default, rename = "Dir")]
+    dir: Option<String>,
+    #[serde(default, rename = "GoMod")]
+    go_mod: Option<String>,
+    #[serde(default, rename = "GoVersion")]
+    go_version: Option<String>,
+    #[serde(default, rename = "Error")]
+    error: Option<JsonModuleError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct JsonModuleError {
+    #[serde(rename = "Err")]
+    err: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct JsonPackageError {
+    #[serde(default, rename = "ImportStack")]
+    import_stack: Vec<String>,
+    #[serde(default, rename = "Pos")]
+    pos: String,
+    #[serde(rename = "Err")]
+    err: String,
+}
+
+/// Returns true when `go` is available on PATH.
+pub fn go_available() -> bool {
+    Command::new("go")
+        .arg("version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Canonicalize a local pattern the way golangci-lint does.
+pub fn normalize_pattern(pattern: &str) -> String {
+    let p = Path::new(pattern);
+    if pattern.starts_with('.') || p.has_root() || starts_with_drive_letter(pattern) {
+        pattern.to_string()
+    } else {
+        format!(".{}{pattern}", std::path::MAIN_SEPARATOR)
+    }
+}
+
+fn starts_with_drive_letter(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\'
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_pattern_adds_dot_slash_for_bare_name() {
+        assert_eq!(
+            normalize_pattern("foo"),
+            format!(".{}foo", std::path::MAIN_SEPARATOR)
+        );
+    }
+
+    #[test]
+    fn normalize_pattern_keeps_dot_relative() {
+        assert_eq!(normalize_pattern("./foo"), "./foo");
+    }
+
+    #[test]
+    fn json_flag_includes_imports_when_needed() {
+        let cfg = Config {
+            mode: LoadMode::NEED_IMPORTS,
+            ..Config::default()
+        };
+        let flag = json_flag(&cfg, 22);
+        assert!(flag.contains("Imports"));
+        assert!(flag.contains("ImportMap"));
+    }
+
+    #[test]
+    fn uses_export_data_for_types_without_deps() {
+        let cfg = Config {
+            mode: LoadMode::NEED_TYPES,
+            ..Config::default()
+        };
+        assert!(uses_export_data(&cfg));
+    }
+}

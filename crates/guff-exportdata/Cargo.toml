@@ -1,0 +1,22 @@
+[package]
+name = "guff-exportdata"
+description = "A Rust port of golang.org/x/tools/go/gcexportdata (read compiler export data)."
+keywords = ["go", "exportdata", "types", "port"]
+categories = ["parser-implementations", "development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_exportdata"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-types = { path = "../guff-types" }
+guff-constant = { path = "../guff-constant" }
+dashu = "0.4"
+thiserror = "2"
+
+[dev-dependencies]
+guff-types = { path = "../guff-types" }

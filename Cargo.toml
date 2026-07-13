@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/guff-ast",
+    "crates/guff-build",
+    "crates/guff-packages",
+    "crates/guff-constant",
+    "crates/guff-gover",
+    "crates/guff-goversion",
+    "crates/guff-types",
+    "crates/guff-types-errors",
+    "crates/guff-exportdata",
+    "crates/guff-pattern",
+    "crates/guff-analysis",
+    "crates/guff-runner",
+    "crates/guff-staticcheck",
+    "crates/guff-govet",
+    "crates/guff-errcheck",
+    "crates/guff-ineffassign",
+    "crates/guff-unused",
+    "crates/guff-lint",
+    "crates/guff-ssa",
+    "crates/guff-version",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BSD-3-Clause"

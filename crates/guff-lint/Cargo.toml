@@ -1,0 +1,33 @@
+[package]
+name = "guff-lint"
+description = "Multi-linter CLI for guff — orchestrates staticcheck and future standard linters."
+keywords = ["go", "linter", "staticcheck", "golangci"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "guff"
+path = "src/main.rs"
+
+[lib]
+name = "guff_lint"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-staticcheck = { path = "../guff-staticcheck" }
+guff-govet = { path = "../guff-govet" }
+guff-errcheck = { path = "../guff-errcheck" }
+guff-ineffassign = { path = "../guff-ineffassign" }
+guff-unused = { path = "../guff-unused" }
+
+[dev-dependencies]
+tempfile = "3"

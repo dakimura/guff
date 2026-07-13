@@ -1,0 +1,19 @@
+[package]
+name = "guff-packages"
+description = "A Rust port of golang.org/x/tools/go/packages (Go package loading for linters)."
+keywords = ["go", "packages", "port"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_packages"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-exportdata = { path = "../guff-exportdata" }
+guff-types = { path = "../guff-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
