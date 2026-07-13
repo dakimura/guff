@@ -594,6 +594,15 @@ pub fn analyzer() -> &'static Analyzer {
 
 （新しいセッションほど上）
 
+### 2026-07-14 — pattern エンジン照合バグ修正（`guff run` 実プログラム検証）
+
+- **タスク**: 独立リポジトリ化後の実プログラム検証で判明した pattern 誤検出の修正
+- **変更**（すべて `guff-pattern/src/match.rs`）:
+  - `match_expr_node`/`match_ident_node`/`match_optional_stmt`/`match_optional_else` が `match_node_inner` の結果を**破棄**して常に成功を返していた。そのため `CallExpr` の関数部が未検証となり、`(CallExpr (Builtin "append") [_])`（SA4021）が **append 以外の任意の 1 引数呼び出し**（`os.Open(x)` / `fmt.Println(x)` / `uint(0)` 等）にマッチして誤検出。結果を伝播（`?`）するよう修正。
+  - 破棄バグに隠れていた 2 件を併せて修正: `match_object`/`match_integer_literal` が `_`（ワイルドカード）で必ず None を返す件、`symbol_name_for_object` がセレクタ経由のパッケージ関数（`pkg.Func`）で「メソッド扱い→レシーバ無しで None」になる件。
+- **影響**: SA4021 誤検出解消。pattern DSL を使う**全ルールが正確化**（回帰テストで露呈した **SA4009 / S1010 / S1024 / S1028 / SA4025** を含む）。
+- **テスト**: guff-pattern / guff-staticcheck green（全ワークスペース 1806 tests）
+
 ### 2026-07-13 — Phase 0 完了 + SA1015/1019 + SC-30/31/40
 
 - **タスク**: P0-a–e、`StdlibDeprecations`（SA1019）、SA1015 buildir 準備、SuggestedFix、generated fact、stdlib E2E

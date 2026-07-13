@@ -189,7 +189,7 @@ govet は `x/tools` の analysis pass 群。1 pass = 1 `Analyzer` が基本。
 | GV-15 | `loopclosure` | T1 | 中 | ✅ |
 | GV-16 | `lostcancel` | T2 | 高 | ✅ |
 | GV-17 | `nilfunc` | T1 | 中 | ✅ |
-| GV-18 | `printf`（本番品質） | T2 | 高 | ✅（GV-01 と統合） |
+| GV-18 | `printf`（本番品質） | T2 | 高 | ✅（GV-01 と統合。引数個数・型照合・`%[n]`/`*`/Fprintf/`%w`、`go vet` 一致） |
 | GV-19 | `shift` | T1 | 高 | ✅ |
 | GV-20 | `sigchanyzer` | T1 | 中 | ✅ |
 | GV-21 | `slog` | T1 | 中 | ✅ |
@@ -645,6 +645,7 @@ git clone --depth 1 https://github.com/segmentio/golines.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-14 | 独立リポジトリ化（`dakimura/guff`）後、`guff run` を実 Go プログラムで安定化。型チェッカ 2 バグ修正: `subst_named` を `instantiate()`（context キャッシュ）経由にし再帰ジェネリック（`type T[P] struct{ next *T[P] }` 系）のスタックオーバーフローを解消 / 型付き符号なし定数の `^`（ビット補数）を型幅でマスク（`1<<(^uintptr(0)>>63)` 等の OOM 解消）。pattern エンジン修正: サブパターン照合結果の破棄バグ + `(Object _)`/`(IntegerLiteral _)` ワイルドカード + pkg 関数シンボル解決（SA4021 等の誤検出解消、SA4009/S1010/S1024/S1028/SA4025 が正確化）。printf（GV-01/18）本番品質化。全ワークスペース 1806 テスト ✅ |
 | 2026-07-14 | standard プリセット完走: errcheck 本実装（excludes/blank/assert）、ineffassign（generated 除外 + 追加 testdata）、unused（型・定数・メソッド・const グループ）、staticcheck 137 analyzers ✅ |
 | 2026-07-14 | govet 完走: `framepointer`（amd64/arm64 アセンブリ解析、linux/darwin のみ）。govet 29/29 ✅ |
 | 2026-07-14 | govet +14: `buildtag`, `cgocall`, `directive`, `ifaceassert`, `loopclosure`, `sigchanyzer`, `slog`, `stdmethods`, `tests`, `timeformat`, `unmarshal`, `unsafeptr`, `httpresponse`, `lostcancel`。共有ヘルパー `govet_util.rs`、各 pass testdata + `checks_test`（55 件）。govet 28/30（残り `framepointer`） |

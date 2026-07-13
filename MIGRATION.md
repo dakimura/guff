@@ -52,6 +52,10 @@ crates/
 - テスト数: **750 tests passing**（chunk81時点、`cargo test -p guff-types`）。作業のたびにこの数を増やしていく。
 - 進捗率: types2 の非テストLOCのうち **約45%** 移植済み（構造層）。残りはCheckerエンジン約8.8K LOC。
 
+> **2026-07-14 修正（`guff run` を実 Go プログラムに掛けて判明した型チェッカのバグ 2 件）**:
+> 1. **再帰ジェネリックのインスタンス化が無限再帰**。`subst.rs` の `subst_named` が context キャッシュを引かずに `new_named_instance` を直接呼んでいたため、`type T[P] struct{ next *T[P] }` のような自己参照ジェネリックを具体化するとインスタンスを毎回生成し直してスタックオーバーフローした（`package main` が `runtime` を型チェックするだけで発生）。→ 重複排除する `instantiate()` 経由に修正。
+> 2. **型付き符号なし定数のビット補数 `^` が型幅でマスクされない**。`expr.rs` の `unary` が `constant.UnaryOp` の精度引数を `0` 固定（コード内 `DEFERRED` 済み）にしていたため、`^uint(0)` が bignum の `-1` になり、`-1 >> k` が `-1` のまま → シフト量が `u64::MAX` 相当となって `1<<(^uintptr(0)>>63)` 等が巨大定数を畳み込み OOM した。→ 符号なし型のとき `prec = sizeof(T)*8` を渡すよう実装。
+
 ### 移植済みのもの（chunk 1〜17）
 - **型の種類（全部）**: Basic, Array, Slice, Pointer, Map, Chan, Tuple, Struct, Signature, Interface, Union, Named, Alias, TypeParam
 - **オブジェクトの種類**: Var, Func, TypeName, Const, Nil, Builtin（**まだ無い: Label, PkgName**）
