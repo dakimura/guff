@@ -64,6 +64,50 @@ fn printf_allows_valid_format() {
 }
 
 #[test]
+fn printf_flags_wrong_arg_type() {
+    let dir = support::testdata("printf");
+    let stub = dir.join("stub/fmt/print.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/wrongtype",
+        &dir.join("wrongtype.go"),
+        &[("fmt", &stub)],
+    );
+    let messages = support::run_analyzer(printf_analyzer(), &pkg);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("wrong type")));
+    assert!(messages.iter().any(|m| m.contains("%d") && m.contains("string")));
+    assert!(messages.iter().any(|m| m.contains("%s") && m.contains("int")));
+    assert!(messages.iter().any(|m| m.contains("%t") && m.contains("int")));
+}
+
+#[test]
+fn printf_flags_arg_count() {
+    let dir = support::testdata("printf");
+    let stub = dir.join("stub/fmt/print.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/argcount",
+        &dir.join("argcount.go"),
+        &[("fmt", &stub)],
+    );
+    let messages = support::run_analyzer(printf_analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("reads arg #2, but call has 1 arg")));
+    assert!(messages.iter().any(|m| m.contains("needs 1 arg but has 2 args")));
+}
+
+#[test]
+fn printf_allows_stringer_and_composites() {
+    let dir = support::testdata("printf");
+    let stub = dir.join("stub/fmt/print.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/ok2",
+        &dir.join("ok2.go"),
+        &[("fmt", &stub)],
+    );
+    assert!(support::run_analyzer(printf_analyzer(), &pkg).is_empty(), "{:?}", support::run_analyzer(printf_analyzer(), &pkg));
+}
+
+#[test]
 fn assign_flags_self_assignment() {
     let dir = support::testdata("assign");
     let pkg = support::typecheck_pkg("example.com/govet/assign", &dir.join("bad.go"));
