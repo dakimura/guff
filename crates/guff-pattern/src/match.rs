@@ -318,12 +318,21 @@ impl<'a> Matcher<'a> {
             NodeRef::SelectorExpr(sel) => &sel.sel,
             _ => return None,
         };
-        let want = object_name(o.name.as_ref())?;
-        if id.name != want {
-            return None;
-        }
+        // The node must denote an object (Go's `Object` pattern).
         let obj = object_of(&self.env, id)?;
-        Some(MatchValue::Object(obj))
+        // Match the name sub-pattern. `_` (Any) accepts any object; a string
+        // requires an exact name match. Without the Any arm, `(Object _)`
+        // never matches.
+        match o.name.as_ref() {
+            Node::Any => Some(MatchValue::Object(obj)),
+            _ => {
+                let want = object_name(o.name.as_ref())?;
+                if id.name != want {
+                    return None;
+                }
+                Some(MatchValue::Object(obj))
+            }
+        }
     }
 
     fn match_symbol(&mut self, s: &Symbol, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
@@ -335,15 +344,22 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_integer_literal(&mut self, lit: &IntegerLiteral, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
-        let want = match lit.value.as_ref() {
-            Node::String(s) => s.clone(),
-            _ => return None,
-        };
+        // The node must be a constant integer expression.
         let val = integer_literal_value(&self.env, node)?;
-        if val.to_string() != want {
-            return None;
+        // Match the value sub-pattern. `_` (Any) accepts any integer literal;
+        // a string requires an exact value match. Without the Any arm,
+        // `(IntegerLiteral _)` never matches.
+        match lit.value.as_ref() {
+            Node::Any => Some(MatchValue::Node(node)),
+            Node::String(s) => {
+                if val.to_string() == *s {
+                    Some(MatchValue::Node(node))
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
-        Some(MatchValue::Node(node))
     }
 
     fn match_truly_constant(&mut self, t: &TrulyConstantExpression, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
@@ -622,12 +638,12 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_expr_node(&mut self, pat: &Node, expr: &'a Expr) -> Option<()> {
-        self.match_node_inner(pat, expr_node_ref(expr)?);
+        self.match_node_inner(pat, expr_node_ref(expr)?)?;
         Some(())
     }
 
     fn match_ident_node(&mut self, pat: &Node, id: &'a AstIdent) -> Option<()> {
-        self.match_node_inner(pat, NodeRef::Ident(id));
+        self.match_node_inner(pat, NodeRef::Ident(id))?;
         Some(())
     }
 
@@ -677,7 +693,7 @@ impl<'a> Matcher<'a> {
             Node::Any => Some(()),
             _ => {
                 let s = stmt?;
-                self.match_node_inner(pat, stmt_node_ref(s)?);
+                self.match_node_inner(pat, stmt_node_ref(s)?)?;
                 Some(())
             }
         }
@@ -699,7 +715,7 @@ impl<'a> Matcher<'a> {
             Node::Any => Some(()),
             _ => {
                 let s = else_?;
-                self.match_node_inner(pat, stmt_node_ref(s)?);
+                self.match_node_inner(pat, stmt_node_ref(s)?)?;
                 Some(())
             }
         }
@@ -920,14 +936,19 @@ fn symbol_name_for_object(
 
     match objects.get(obj_id) {
         ObjectData::Func(_) => {
+            // A method (function with a receiver) is named `(RecvType).Method`.
+            // A package-level function accessed via a selector (`pkg.Func`) also
+            // arrives here with `sel = Some`, but has no receiver — in that case
+            // fall through to the package-qualified name instead of bailing out.
             if let Some(sel) = sel {
                 let sig = obj_id.typ(objects)?;
-                let recv = signature_recv(type_arena, sig)?;
-                let recv_type = recv.typ(objects)?;
-                let recv_str = guff_types::typestring::type_string(
-                    type_arena, objects, packages, recv_type, None,
-                );
-                return Some(format!("({recv_str}).{}", sel.sel.name));
+                if let Some(recv) = signature_recv(type_arena, sig) {
+                    let recv_type = recv.typ(objects)?;
+                    let recv_str = guff_types::typestring::type_string(
+                        type_arena, objects, packages, recv_type, None,
+                    );
+                    return Some(format!("({recv_str}).{}", sel.sel.name));
+                }
             }
             let name = obj_id.name(objects);
             match obj_id.pkg(objects) {
