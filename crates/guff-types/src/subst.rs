@@ -418,7 +418,14 @@ fn subst_named(
     if !changed {
         return typ;
     }
-    crate::instantiate::new_named_instance(arena, oarena, ctxt, orig_id, new_targs)
+    // Route through `instantiate`, which consults the context cache before
+    // constructing a fresh instance. Calling `new_named_instance` directly here
+    // would bypass that lookup, so a recursive generic reference (e.g.
+    // `type T[P] struct { next *T[P] }`) would allocate and re-expand a new
+    // instance on every visit and recurse forever. Going through the cache lets
+    // the in-progress instance registered by `new_named_instance` (before it
+    // expands the underlying) short-circuit the recursion.
+    crate::instantiate::instantiate(arena, oarena, ctxt, orig_id, new_targs)
 }
 
 // ----------------------------------------------------------------------------
