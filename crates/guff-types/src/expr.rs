@@ -40,7 +40,8 @@ use crate::conversions::is_pointer;
 use crate::pointer::{new_pointer, pointer_elem};
 use crate::predicates::{
     comparable, default_type, has_nil, identical, is_boolean, is_integer, is_integer_or_float,
-    is_interface, is_numeric, is_string, is_type_param, is_typed, is_untyped, is_valid,
+    is_interface, is_numeric, is_string, is_type_param, is_typed, is_unsigned, is_untyped,
+    is_valid,
 };
 
 impl Checker {
@@ -381,9 +382,21 @@ impl Checker {
             match &x.val {
                 Some(Value::Unknown) | None => return,
                 Some(v) => {
-                    // DEFERRED: precision for unsigned ^ (needs Sizes); 0 is
-                    // correct for untyped constants.
-                    x.val = Some(unary_op(op, v.clone(), 0));
+                    // Bitwise complement (`^`) of a *typed unsigned* constant
+                    // must be masked to the type's bit width, matching Go's
+                    // `constant.UnaryOp(XOR, x, prec)`. Without this, `^uint(0)`
+                    // folds to the bignum `-1` instead of `2^64-1`; a later
+                    // `-1 >> k` then stays `-1`, and reading it as a shift count
+                    // yields `u64::MAX`, producing an astronomically large
+                    // shift (e.g. runtime's `1 << (^uintptr(0) >> 63)`), which
+                    // exhausts memory. Untyped constants keep prec 0 (arbitrary
+                    // precision), as Go does.
+                    let prec = if op == Token::XOR && is_unsigned(&self.types, typ) {
+                        (self.conf_sizeof(typ) * 8).max(0) as usize
+                    } else {
+                        0
+                    };
+                    x.val = Some(unary_op(op, v.clone(), prec));
                     x.expr = Some(Expr::UnaryExpr(e.clone()));
                     // DEFERRED: check.overflow(x).
                     return;

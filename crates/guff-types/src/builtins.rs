@@ -741,7 +741,7 @@ impl Checker {
     }
 
     /// `(conf *Config) sizeof(T)`.
-    fn conf_sizeof(&self, t: TypeId) -> i64 {
+    pub(crate) fn conf_sizeof(&self, t: TypeId) -> i64 {
         self.effective_sizes()
             .sizeof(&self.types, &self.objects, &self.packages, t)
     }
