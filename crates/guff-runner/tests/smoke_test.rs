@@ -2,7 +2,7 @@
 //!
 //! Uses `typecheck_package` + `run_on_packages` so CI does not require `go` on
 //! PATH. Full `go list` → `load` → `run` is covered by `guff-packages` integration
-//! tests and documented in `docs/ADDING-ANALYZER.md` (see deferral PL02).
+//! tests and documented in `docs/DEVELOPMENT.md` §5 (see deferral PL02).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

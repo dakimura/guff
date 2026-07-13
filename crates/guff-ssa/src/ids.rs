@@ -1,4 +1,4 @@
-//! Typed arena handles for SSA objects (see MIGRATION.md §1a).
+//! Typed arena handles for SSA objects (see docs/DEVELOPMENT.md §2.3).
 //!
 //! Each id is a `NonZeroU32` newtype so `Option<Id>` occupies 4 bytes. Ids are
 //! 1-indexed internally; index 0 is reserved as the niche.

@@ -137,13 +137,14 @@ cargo test -p guff-lint
 cargo run -p guff-lint -- run ./path/to/go/module
 ```
 
-新しい analyzer の追加手順: [`docs/ADDING-ANALYZER.md`](docs/ADDING-ANALYZER.md)
+開発ガイド・アーキテクチャ・現状・残タスク（golangci-lint 互換の高速 linter へのロードマップ）・
+analyzer 追加手順は、すべて 1 本にまとめてあります:
 
-移植進捗・内部設計メモ:
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **開発の唯一の正典**
 
-- [`docs/LINTER-MIGRATION.md`](docs/LINTER-MIGRATION.md) — マルチ linter 移植
-- [`docs/STATICCHECK-MIGRATION.md`](docs/STATICCHECK-MIGRATION.md) — staticcheck 個別ルール
-- [`PRE-LINTER-PLAN.md`](PRE-LINTER-PLAN.md) — 解析基盤（完了済み）
+> 以前分かれていた `MIGRATION.md` / `PRE-LINTER-PLAN.md` / `docs/LINTER-MIGRATION.md` /
+> `docs/STATICCHECK-MIGRATION.md` / `docs/ADDING-ANALYZER.md` / `projects/guff-ssa-MIGRATION.md`
+> は上記に統合しました（原文は git 履歴に残っています）。
 
 ## ライセンス
 

@@ -1,0 +1,502 @@
+# guff 開発ガイド & ロードマップ（唯一の正典）
+
+> このファイルは、以前分かれていた次の 5 つの計画書を **1 本に統合** したものです。
+> `MIGRATION.md` / `PRE-LINTER-PLAN.md` / `docs/LINTER-MIGRATION.md` /
+> `docs/STATICCHECK-MIGRATION.md` / `docs/ADDING-ANALYZER.md`。
+> これらの原文は git 履歴に残っています（`git log -- docs/LINTER-MIGRATION.md` 等）。
+> 以後、設計・進捗・残タスクの更新はこの 1 ファイルに集約してください。
+
+---
+
+## 0. このドキュメントの使い方（作業者へ）
+
+- あなたは 1 回のセッションで **1 タスク**だけ進めます（§4.3 の作業サイクル）。
+- 迷ったら「既存コードに倣う」。新しい書き方を発明しない。
+- 変更したら必ず `cargo build` と `cargo test`（該当クレート）を通す。**テストが赤いまま次へ進まない。**
+- 残タスクは §8 のロードマップに **R番号（R1, R2…）** で載っています。着手するときは
+  そのタスクの「完了条件（Done when）」と「テスト」を満たしてから完了にする。
+- 大きな作業は「後回し（deferral）」してよいが、**必ずコード内に `// DEFERRED:` コメントと、
+  §8 の該当タスクへのメモを残す**。黙って省略しない。安全なデフォルト（`false`/`None`/空 `Vec`）を返す。
+
+---
+
+## 1. guff とは / ゴール
+
+**guff は Go 向けの linter を Rust で書き直したもの**です。最終ゴールは:
+
+> **golangci-lint 互換の高速 linter** ——
+> 既存の `.golangci.yml` を持つ Go プロジェクトで golangci-lint の代わりに `guff` を実行しても
+> 同等の結果が、より速く得られる状態。
+
+現在は golangci-lint v2 の **`standard` プリセット相当**（staticcheck / govet / errcheck /
+ineffassign / unused の 5 系統）を、パッケージロード → 型チェック → `go/analysis` 実行まで
+**1 本のパイプライン**でこなせます。CLI バイナリ名は `guff`（クレート名 `guff-lint`）。
+
+「golangci-lint 互換」を名乗るために足りていないものは §8 に全部書いてあります。
+
+---
+
+## 2. アーキテクチャ
+
+### 2.1 パイプライン
+
+```
+go list / モジュールグラフ (guff-packages)
+  → ビルドタグ適用・パッケージ列挙 (guff-build)
+  → 型チェック（ソース / export data） (guff-types, guff-exportdata)
+  → go/analysis Pass 生成 (guff-analysis)
+  → Analyzer を action DAG で実行 (guff-runner)
+  → Diagnostic 収集
+       ↑
+  guff-lint CLI（設定・linter 選択・診断表示）
+```
+
+### 2.2 クレート地図
+
+| 層 | クレート | 役割（Go 相当） |
+|----|----------|-----------------|
+| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused` | 各 linter の Analyzer 群 |
+| **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
+| **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
+| **SSA** | `guff-ssa` | `go/ssa`（buildir） |
+| **Load / types** | `guff-packages`, `guff-build`, `guff-exportdata`, `guff-types`, `guff-constant` | パッケージロード・型検査・export data |
+| **AST** | `guff-ast` | `go/token` / `scanner` / `ast` / `parser` |
+| **Version** | `guff-version`, `guff-gover`, `guff-goversion`, `guff-types-errors` | Go バージョン・型エラーコード |
+
+依存の流れ（下 → 上）:
+
+```
+guff-ast / guff-constant / guff-version*
+  → guff-types ← guff-exportdata
+  → guff-build → guff-packages
+  → guff-ssa / guff-pattern / guff-analysis
+  → guff-runner
+  → guff-{staticcheck,govet,errcheck,ineffassign,unused}
+  → guff-lint
+```
+
+### 2.3 型チェッカのアリーナモデル（`guff-types`）
+
+Go の `cmd/compile/internal/types2` を移植したもの。**Go のポインタは全部 ID に変換**する:
+
+- `*Type` → `TypeId`、オブジェクト → `ObjectId`、`*Scope` → `ScopeId`、`*Package` → `PackageId`
+- `nil` → `Option::None`
+- 実体は `TypeArena` / `ObjectArena` / `ScopeArena` / `PackageArena` に格納
+- `Checker` 構造体（`src/check.rs`）がこの 4 アリーナ + `universe` + `conf: Config` +
+  `info: Info` + `ctxt: Context`（ジェネリクスのインスタンスキャッシュ）などを所有する
+- 主要ファイル: `expr.rs`（式）, `decl.rs`（宣言）, `typexpr.rs`（型式）, `stmt.rs`（文）,
+  `call.rs`（呼び出し）, `builtins.rs`（組込関数）, `index.rs`, `subst.rs`/`instantiate.rs`（ジェネリクス）,
+  `check_lookup.rs`, `check_assign.rs`, `errors.rs`/`format.rs`（エラー収集・整形）
+
+### 2.4 解析フレームワーク（`guff-analysis`）
+
+golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
+
+- `Analyzer`（`src/analyzer.rs`）: `name`, `doc`, `url`, `run: RunFn`, `requires`, `fact_types`
+- `Pass`（`src/pass.rs`）: analyzer から AST・型情報・他 analyzer の結果・診断出力にアクセスする窓口
+  （`pass.files()`, `pass.types_info()`, `pass.result_of::<T>(other())`, `pass.reportf(pos, msg)`）
+- `inspect` パス（`src/passes/inspect.rs`）: AST の preorder walk。ほぼ全 analyzer が `requires`
+- `code` モジュール: `call_name`, 定数抽出などの補助
+- `facts`（`src/facts.rs` + `passes/facts/generated`）: パッケージ間で伝播する事実（generated 判定など）
+- `callcheck`（`src/callcheck.rs`）: 関数呼び出し引数検証フレームワーク（SA1000 系で使用）
+- `guff-pattern`: 構造パターンマッチ DSL（§5.1）
+- `buildir` パス（`guff-ssa`）: SSA/IR を構築（`build_package_for_analysis`）
+
+---
+
+## 3. 現在の状況（正直なスナップショット）
+
+> 最終更新: 2026-07-14。ワークスペース全体 **1806 tests green**。
+
+### 3.1 型チェッカ（`guff-types`）
+- 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
+  operand・conversions・assignments・typestring）**完了**。
+- Checker エンジン本体もほぼ完走（`check_files` 到達、宣言・式・文・呼び出し・組込・ジェネリクス
+  end-to-end・importer・unused/dot/blank import・mono・sizes・version）。
+- **残**: `initorder.rs`（パッケージ初期化順, Step 34）, `recording.rs`（AST ノード ID が前提, Step 37）,
+  `util.rs` 一部（Step 39）, および D01/D02/D03/D04/D07/D10/D13/D16 の未了分（→ §8 R19）。
+
+### 3.2 解析フレームワーク（PRE-LINTER Phase 0–7）
+- Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
+- **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL11（真の並列実行）, PL07（GOCACHE 管理）,
+  PL05（ctrlflow）, PL02（go 無し driver）, SSA `RangeStmt`（→ §8 各タスク）。
+
+### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
+- naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150 tests green**。
+- 型機構（subst/canonizer/typeset/instantiate データモデル）と builder コア（emit・alloc/local・
+  param/result spill・selector・assign・複合リテラル各種）まで移植済み。golden 逆アセンブル比較で検証。
+- **残**: `methods.rs` とメソッドラッパ（`createWrapper`/`$thunk`/`$bound`）, FromSyntax インスタンス本体の
+  subst 適用ビルド, `InstantiateGenerics` オーケストレーション, メソッド呼び出し emit（E25+）,
+  そして `RangeStmt`（→ §8 R17）。これらが揃うと IR ベースの linter（SA1015 等）を default で駆動できる。
+
+### 3.3 実装済み linter
+| linter | 状態 | 規模 |
+|--------|------|------|
+| `guff-staticcheck` | ✅ **137 analyzers**（simple S* 37 + staticcheck SA* 100） | ST* / QF* は **未着手** |
+| `guff-govet` | ✅ **29/29** passes（printf は引数個数・型照合まで, `go vet` 一致） | — |
+| `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
+| `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
+| `guff-unused` | ✅（単一パッケージ; 型・定数・メソッド・const グループ） | whole-program 版は未 |
+
+### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
+現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
+
+| 項目 | 現状 | golangci-lint との差（ギャップ） |
+|------|------|------------------------------------|
+| サブコマンド | `run`, `migrate` のみ | `linters`/`version`/`help`/`cache`/`fmt` 無し |
+| run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential` | `--fix`, `--out-format`, `--timeout`, `-j/--concurrency`, `--issues-exit-code`, `--build-tags` 無し |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索、v1/v2 の **linter 選択のみ**解釈 | `issues`(exclude-rules 等) / `severity` / `run` / `output` / `linters-settings` は**読むが未適用**（opaque 格納のみ） |
+| プリセット | `standard`/`fast`/`all`/`none`。ただし linter が 5 つしか無いので `standard`==`all`、`fast` は staticcheck を抜くだけ | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
+| 出力 | テキストのみ・**stderr** に出力 | JSON/colored/checkstyle/sarif/tab/github-actions 等・formatter 抽象・stdout 出力が無い |
+| nolint | **未実装**（`//nolint` を一切解釈しない） | `//nolint[:linter]` と `nolintlint` が無い |
+| キャッシュ | **無し**（毎回コールド） | 永続キャッシュ（`GOLANGCI_LINT_CACHE` 相当・増分再解析）が無い |
+| 並列 | 名前に反して**実質シーケンシャル**（PL11 未了。`Package`/AST が `!Sync`） | マルチコア並列が無い |
+| 終了コード | 0=クリーン / 1=指摘あり / 2=エラー（固定） | `--issues-exit-code` で変更不可 |
+| autofix | **未実装**（`SuggestedFix`/`TextEdit` のデータ型はあるが誰も適用しない） | `--fix` が無い |
+
+---
+
+## 4. 規約（必ず守る）
+
+### 4.1 Go → Rust 機械的翻訳ルール
+- 可変長 printf は無い。`check.errorf(pos, Code, "x %s", y)` → `self.error(pos, Code, &format!("x {}", y))`。
+- エラーは即時報告せず `self.errors` に**収集**する（型チェッカ）。analyzer は `pass.reportf` で出す。
+- 型名を出すときは `guff_types::typestring::type_string(...)` を使う。
+- `assert()` → `assert!`、`nil` → `Option::None`、Go ポインタ → ID（`Copy`）。
+- 借用チェッカ対策: 再帰前にフィールドをローカルへスナップショットしてから可変借用を取る。
+
+### 4.2 クレート命名
+| パターン | 例 | いつ |
+|---------|-----|------|
+| `guff-<linter名>` | `guff-errcheck`, `guff-revive` | golangci と 1:1 の主要 linter |
+| `guff-<upstream名>` | `guff-gostaticanalysis` | 同一 org の小 linter を束ねる |
+| `guff-<カテゴリ>` | `guff-style`, `guff-comment` | 小さなスタンドアロン linter 群 |
+| `guff-lint` | — | CLI + レジストリ + nolint |
+| `guff-fmt` | — | formatter 群（gofmt 等） |
+
+**ルール**: 1 クレート = `analyzers() -> Vec<&'static Analyzer>` を公開。登録は `guff-lint` が行う。
+
+### 4.3 作業サイクル（1 セッション = 1 タスク）
+1. 参考にする Go ソースを読む（§9 の clone URL 参照）。
+2. 該当クレートに `Analyzer` を定義（`requires` は最小限）。
+3. `tests/testdata/<case>/` に小さな fixture（1 診断/1 ファイルが理想）。
+4. `cargo test -p guff-<name>`。
+5. `guff-lint` レジストリに登録。
+6. **§3 の状況表と §8 の該当タスクを更新**（チェックを付ける / 完了メモ）。
+
+---
+
+## 5. 新しい analyzer（linter）の追加手順
+
+参考実装: `crates/guff-analysis/src/passes/printast.rs`, `printf.rs`（型不要/型必要の両例）。
+既存 linter は `crates/guff-govet/src/*.rs`（AST 系）と `crates/guff-staticcheck/src/*.rs`（パターン系）。
+
+1. **analyzer を定義**
+   - `crates/guff-<crate>/src/<name>.rs` を作る。
+   - `fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError>` を書く
+     （AST は `pass.files()`、型は `pass.types_info()`、出力は `pass.reportf(pos, msg)`）。
+   - `pub fn analyzer() -> &'static Analyzer` を `OnceLock` で公開し、
+     `name`/`doc`/`url`/`run as RunFn`/`run_despite_errors`/`requires`（例 `vec![inspect::analyzer()]`）/
+     `fact_types` を埋める。`mod.rs`（または crate の `analyzers()`）から公開する。
+   - **他 analyzer に依存**するなら `requires` に列挙 → `pass.result_of::<T>(other::analyzer())` で結果取得。
+   - **型が必要**なら load mode を `LOAD_SYNTAX` 相当にする（`guff-runner/src/load_mode.rs` の
+     `infer_load_mode` は facts を出さない限り AST のみになる点に注意）。
+2. **グラフ検証**: `guff_analysis::validate::validate(&[analyzer()])` を単体テストで呼ぶ（requires の循環を検出）。
+3. **testdata**: `tests/testdata/<case>/` に `bad.go`（検出されるべき）と `ok.go`（検出されない）を置く。
+   標準ライブラリを使う場合は `stub/<pkg>/*.go` に最小スタブを置き、`typecheck_with_deps` に渡す。
+4. **統合テスト**: `crates/guff-<crate>/tests/checks_test.rs` に、fixture を型チェックし
+   `run_analyzer(analyzer(), &pkg)` の診断を assert するテストを足す。
+5. `cargo test -p guff-<crate>`。
+6. `guff-lint` レジストリ（`crates/guff-lint/src/registry.rs`）に登録し、プリセットに入れるか決める。
+
+### 5.1 パターン DSL（`guff-pattern`）
+
+staticcheck の `pattern` パッケージ相当。Go の AST ノードを s 式で書く:
+
+```
+(CallExpr (Builtin "append") [_])          # append(x) の 1 引数呼び出し（SA4021）
+(SliceExpr x@(Object _) low (CallExpr (Builtin "len") [x]) nil)   # s[x:len(s)]（S1010）
+(BinaryExpr (IntegerLiteral _) "/" (IntegerLiteral _))            # 定数/定数（SA4025）
+```
+
+- `_` = ワイルドカード、`name@(...)` = 束縛、`[...]` = リスト、`(Object "名前")` /
+  `(Builtin "名前")` / `(Symbol "pkg.Func")` = 型情報を使う照合。
+- 実体は `crates/guff-pattern/src/{lexer,parser,pattern,match}.rs`。
+- **注意（2026-07-14 の教訓）**: サブパターンの照合結果を必ず `?` で伝播すること。
+  過去に `match_expr_node` 等が結果を捨てて常に成功し、`CallExpr` の関数部が未検証になって
+  SA4021 が全ファイル誤検出した。ワイルドカード `_` は各 matcher で明示対応が要る。
+
+---
+
+## 8. ロードマップ — 「golangci-lint 互換の高速 linter」を名乗るために
+
+このセクションが本書の核心。**「互換」と「高速」を主張できる状態**を、検証可能なマイルストーン
+A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / どこを触る / 参考 / 手順 / 完了条件 / テスト」を付けた。
+経験の浅い作業者は、依存関係（各タスクの「前提」）を守り、R番号の小さい順に進めるとよい。
+
+### 「互換」の定義（受け入れ基準の親）
+1. 実在する `.golangci.yml` を読み込んでエラーにならない（設定互換）。
+2. 同じ設定で golangci-lint と guff を同じコードに掛けたとき、**指摘集合がほぼ一致**する
+   （差分は §8 Milestone G の差分テストで定量化し、既知差分として文書化できる）。
+3. 出力フォーマット（少なくとも `text` colored と `json`）が CI で差し替え可能。
+4. `//nolint` を尊重する。
+5. `--fix` で自動修正できる（golangci-lint と同等の範囲）。
+
+### 「高速」の定義
+6. マルチコア並列で解析する。
+7. 永続キャッシュで増分再解析ができる。
+8. 代表的 OSS リポジトリで golangci-lint と同等以上の wall-clock（ベンチで実証）。
+
+---
+
+### Milestone A — ドロップイン CLI / 設定互換
+
+> ゴール: 既存プロジェクトが `guff run ./...` に置き換えても「設定が効く」。
+
+#### R1. 診断を stdout に出し、終了コードを設定可能にする
+- **目的/なぜ**: golangci-lint は指摘を stdout に出し、CI は stdout をパースする。現状 guff は stderr。
+  また `--issues-exit-code`（デフォルト 1）が無いと CI 制御に使えない。
+- **どこ**: `crates/guff-lint/src/lib.rs`（`print_text`, `run_and_print`）, `src/main.rs`（`RunArgs`）。
+- **手順**: (1) `print_text` の出力先を stdout に変更。(2) `--issues-exit-code <int>`（default 1）を追加し、
+  指摘ありのとき返す。(3) 内部エラーは 2 のまま。
+- **完了条件**: `guff run ... > out.txt` に指摘が入る。`--issues-exit-code 0` で指摘があっても 0 を返す。
+- **テスト**: `tests/` で stdout をキャプチャして assert、終了コードを検証。
+
+#### R2. `.golangci.yml` の完全パースと適用（issues / run / severity）
+- **目的/なぜ**: 互換の中核。今は linter の enable/disable しか効かない。実プロジェクトは
+  `issues.exclude-rules` などに強く依存している。
+- **どこ**: `crates/guff-lint/src/config.rs`（`ConfigV2`/`ConfigV1` に構造体追加）、
+  新規 `src/exclude.rs`（後処理フィルタ）。
+- **参考**: golangci-lint の `pkg/config/*.go`（`Issues`, `Run`, `Severity`, `Output`）と
+  `pkg/result/processors/*`（exclude, exclude-rules, nolint, max-per-linter, uniq-by-line, path-prettifier）。
+- **手順**:
+  1. `ConfigV2` に `issues`（`exclude`, `exclude-rules`[linters/path/path-except/text/source], `exclude-dirs`,
+     `exclude-files`, `exclude-use-default`(bool), `max-issues-per-linter`, `max-same-issues`,
+     `new`/`new-from-rev`）、`run`（`build-tags`, `tests`, `go`, `timeout`, `concurrency`）、`severity`、
+     `output` を追加して serde でパース。
+  2. 診断を出した後に通す**後処理パイプライン**を作る（Go の `result/processors` を順に再現）:
+     path で除外 → exclude-rules で除外 → デフォルト除外（`exclude-use-default: true` のとき golangci の
+     既定除外集合）→ linter/line ごとの上限 → severity 付与。
+  3. `run.build-tags` は `guff-build`/`guff-packages` のビルドタグに渡す。
+- **完了条件**: 代表的な `.golangci.yml` を食わせてパースエラー無し。`exclude-rules` で特定ファイルの
+  指摘が消える。
+- **テスト**: 設定 fixture（`testdata/config/*.yml`）+ その設定で期待される除外結果のスナップショット。
+
+#### R3. `//nolint` ディレクティブと `nolintlint`
+- **目的/なぜ**: 互換の必須項目。既存コードは `//nolint:...` で意図的に抑制している。
+- **前提**: AST がコメント位置を保持していること（**R32 の recording/ノード ID に依存する場合あり**。
+  最低限、コメントの行番号が取れれば実装可能）。
+- **どこ**: 新規 `crates/guff-lint/src/nolint.rs`、後処理で診断をフィルタ。`nolintlint` は
+  `guff-lint` 内 or `guff-style` の analyzer として。
+- **参考**: golangci-lint `pkg/result/processors/nolint.go`、`pkg/golinters/nolintlint`。
+- **手順**: (1) 各ファイルのコメントを走査し、`//nolint`（全 linter）と `//nolint:a,b`（特定）を、
+  行末指定/直上行指定/ブロック指定の規則で収集。(2) 診断を (行, linter名) で突き合わせて抑制。
+  (3) `nolintlint`: 使われていない nolint・書式不正・説明必須(`require-explanation`) を報告。
+- **完了条件**: `//nolint:staticcheck` の行の staticcheck 指摘が消える。未使用 nolint を報告できる。
+- **テスト**: nolint 付き fixture で抑制を確認、`nolintlint` の testdata。
+
+#### R4. per-linter 設定（`linters-settings`）の各 analyzer への配線
+- **目的/なぜ**: `errcheck.check-blank`, `govet.enable/disable`, `staticcheck.checks`,
+  `gocyclo.min-complexity` などが効かないと「互換」と言えない。
+- **どこ**: `guff-analysis` の `Analyzer`/`Pass` に設定を渡す仕組みを新設（例: `Pass` に
+  `settings: &LinterSettings` を持たせる、または analyzer 構築時にクロージャで束縛）。
+  `guff-lint` が config から各 analyzer 用設定を組み立てて runner に渡す。
+- **手順**: (1) 型付き設定構造体を linter ごとに定義。(2) `guff-lint` で config → 設定へ変換。
+  (3) runner → Pass 経由で analyzer が参照。まず errcheck / govet / staticcheck の主要キーから。
+- **完了条件**: `errcheck: check-blank: true` で `_ = f()` が検出されるようになる（設定で挙動が変わる）。
+- **テスト**: 同じコードに対し設定違いで指摘が変わることを確認。
+
+#### R5. 補助サブコマンドと run フラグ
+- **目的/なぜ**: `guff linters`（利用可能/有効な linter 一覧）, `guff version`, `--timeout`,
+  `-j/--concurrency`, `--build-tags` は移行時に必ず使われる。
+- **どこ**: `crates/guff-lint/src/main.rs`。
+- **完了条件**: `guff linters` が enabled/available を表示。`guff version` がバージョンを出す。
+- **テスト**: 各サブコマンドの出力を assert。
+
+---
+
+### Milestone B — 出力フォーマット互換
+
+> ゴール: CI が期待するフォーマットで出せる。少なくとも colored text と JSON。
+
+#### R6. formatter 抽象 + テキスト整形の移設
+- **どこ**: 新規 `crates/guff-lint/src/format/mod.rs`（`trait Formatter { fn print(&self, issues, w) }`）。
+  既存 `format.rs` を `format/text.rs` に移す。`--out-format <name>`（複数指定可）を追加。
+- **完了条件**: `--out-format text` が現行と同じ出力。抽象越しに動く。
+
+#### R7. JSON 出力（golangci-lint スキーマ準拠）
+- **なぜ**: 最も使われる機械可読フォーマット。互換の要。
+- **参考**: golangci-lint `pkg/printers/json.go`。トップレベル `{"Issues": [...], "Report": {...}}`、
+  各 Issue に `FromLinter`, `Text`, `Severity`, `SourceLines`, `Pos{Filename,Offset,Line,Column}`,
+  `Replacement`。
+- **完了条件**: `--out-format json` が golangci-lint と同じキー構造を出す（フィールド名一致）。
+- **テスト**: JSON をパースしてキー/値を検証。可能なら golangci-lint 実出力とのスナップショット比較。
+
+#### R8. その他フォーマット（colored-line-number, checkstyle, sarif, tab, github-actions）
+- **参考**: golangci-lint `pkg/printers/*.go` に各実装がある。優先度: colored-line-number（既定）→
+  github-actions（CI 注釈）→ checkstyle/sarif（企業 CI）→ tab。
+- **完了条件**: 各フォーマットが対応ツールで読める。
+
+---
+
+### Milestone C — 高速（性能）
+
+> ゴール: 「fast」を数字で主張できる。
+
+#### R9. 真のパッケージ/analyzer 並列実行（PL11）
+- **目的/なぜ**: 現在は実質シングルスレッド（`action.rs` の並列分岐も同一スレッド実行）。
+  「fast」の前提。golangci-lint はワーカー並列。
+- **障害**: 現状 `guff_packages::Package` / AST が `RefCell` を含み `!Sync`。
+- **どこ**: `crates/guff-runner/src/action.rs`（`exec_all`）、`crates/guff-packages`（Package の共有可能化）。
+- **手順**: (1) 解析中は AST/型情報を**不変共有**にする（`Arc` 化 or 解析用イミュータブルビューを作る）。
+  (2) パッケージ単位で `rayon` などのスレッドプールに投げる（依存グラフの葉から）。
+  (3) analyzer 内の `RefCell` 依存を洗い出して除去 or `Send+Sync` を満たす形へ。
+- **完了条件**: マルチコアで wall-clock が対コア数でスケール。結果は逐次実行と**完全一致**（決定的）。
+- **テスト**: 逐次 vs 並列で診断集合が一致することを大きめ fixture で確認。ベンチ（R11）で速度確認。
+
+#### R10. 永続キャッシュ（増分再解析）
+- **目的/なぜ**: 「fast」の本命。2 回目以降が速くないと golangci-lint に勝てない。
+- **参考**: golangci-lint `internal/cache`（`GOLANGCI_LINT_CACHE`）。
+- **どこ**: 新規 `crates/guff-runner/src/cache.rs`。
+- **手順**: (1) キャッシュキー = ファイル内容ハッシュ + 有効 analyzer 集合 + 設定 + guff バージョン +
+  go バージョン + ビルドタグ。(2) パッケージ単位で診断結果を保存/復元し、未変更パッケージは再解析しない。
+  (3) 保存先は `$GOLANGCI_LINT_CACHE` or OS キャッシュディレクトリ。`guff cache clean` も用意。
+- **完了条件**: 2 回目の実行が大幅に短縮。ファイルを変えたパッケージだけ再解析される。
+- **テスト**: 1 ファイル変更後、そのパッケージのみ再解析されることをログ/計測で確認。
+
+#### R11. ベンチマークハーネス（対 golangci-lint）
+- **目的/なぜ**: 「高速」を主張するには実測が要る。
+- **どこ**: 新規 `benchmarks/`（スクリプト + 対象 OSS リポジトリのリスト）。
+- **手順**: 数個の代表 OSS リポジトリで、同一プリセットで golangci-lint と guff の wall-clock を測り、
+  コールド/ウォーム両方を記録。結果を §3 か README にテーブルで載せる。
+- **完了条件**: 再現可能なベンチスクリプトと数値表。
+- **テスト**: スクリプトが CI（or 手動）で回る。
+
+---
+
+### Milestone D — 自動修正
+
+#### R12. `--fix`（SuggestedFix / TextEdit の適用）
+- **目的/なぜ**: golangci-lint 互換の重要機能。データ型（`Diagnostic.suggested_fixes`,
+  `TextEdit`）は既にあるが誰も適用していない。
+- **どこ**: `crates/guff-lint/src/fix.rs`（新規）、`main.rs` に `--fix`。
+- **参考**: golangci-lint `pkg/result/processors/fixer.go`、go/analysis の `applyFixes`。
+- **手順**: (1) 全診断の TextEdit を収集。(2) ファイルごとに**オフセット降順**でソートし、重なりを排除
+  （重複時は最初の 1 つだけ適用）。(3) ファイルに書き戻す。(4) 修正した診断は出力から除く。
+- **完了条件**: `guff run --fix` が SA1004 等の quickfix を実ファイルに適用する。
+- **テスト**: 修正前/後のファイルスナップショット。
+
+---
+
+### Milestone E — linter の網羅（golangci-lint のラインナップに追随）
+
+> golangci-lint は 100+ linter を束ねる。全部は不要でも、主要どころを揃えないと「互換」の説得力が弱い。
+> 各 linter は §5 の手順で 1 個ずつ追加する。**1 タスク = 数 linter** を目安に。
+
+#### R13. go/analysis 系 linter（`guff-gostaticanalysis` ほか）
+- nilerr, nilnil, forcetypeassert, makezero, mirror, nilnesserr（`guff-gostaticanalysis`）。
+- errorlint, errname, err113, errchkjson, wrapcheck, rowserrcheck（error 系）。
+- bodyclose, noctx, contextcheck, sqlclosecheck, spancheck, fatcontext（context/resource 系）。
+- gosec, gocritic, unparam, unconvert, exhaustive, exhaustruct, copyloopvar, perfsprint,
+  usestdlibvars, usetesting, durationcheck, goconst, musttag, loggercheck, sloglint, testifylint ほか。
+- **完了条件**: 各 linter に bad/ok testdata、`go vet`/golangci 相当の指摘、レジストリ登録。
+
+#### R14. スタンドアロン linter
+- `guff-revive`（独自ルールエンジン）, `guff-misspell`, `guff-dupl`。
+- `guff-style` バンドル: funlen, gocyclo, gocognit, cyclop, nestif, lll, whitespace, wsl, nlreturn,
+  dogsled, nakedret, prealloc, predeclared, mnd, goprintffuncname, nosprintfhostport, asciicheck, tagalign。
+- `guff-comment`: godot, godox, dupword。`guff-import`: depguard, gomodguard, gomoddirectives。
+
+#### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
+- gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
+- golangci-lint v2 は `formatters` セクションを持つので、config 互換のためにも必要。
+
+#### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）
+- 現在 `guff-staticcheck` は S* + SA* のみ。ST1xxx / QF1xxx を追加すると staticcheck 完全互換に近づく。
+
+---
+
+### Milestone F — 土台の穴（breadth/speed を塞ぐ前提）
+
+#### R17. SSA の残作業（`RangeStmt` ＋ メソッド機構 E25+）
+- **なぜ**: `RangeStmt` 未実装のため SA1015 が buildir を default require できず inspect のみ。S1029 も
+  AST 簡易版。さらに `methods.rs`/メソッドラッパ（`$thunk`/`$bound`）/`InstantiateGenerics`/メソッド呼び出し
+  emit が未了（§3.2.1）。今後の IR ベース linter（gosec の一部等）に必要。
+- **どこ**: `crates/guff-ssa`（builder / methods）。
+- **完了条件**: `for k, v := range x` を SSA 化し、メソッド呼び出しを含む IR がビルドできる。
+  SA1015 を buildir require に戻して green。golden 逆アセンブル比較を維持。
+
+#### R18. `typeindex` の移植
+- **なぜ**: 呼び出しサイトの高速索引。pattern 系全 linter と errcheck の性能最適化。機能ブロッカーでは
+  ないが「高速」に効く。
+- **参考**: staticcheck `go/ir` + `analysis/facts/typeindex`。
+- **どこ**: `guff-analysis` にフレームワーク追加。
+
+#### R19. 型チェッカの残り（initorder / recording / util）
+- `initorder.rs`（Step 34）: パッケージ初期化順。init-cycle 検出や一部 linter が依存。
+- `recording.rs`（Step 37）: **AST ノード ID の記録**。nolint の行対応（R3）や正確な位置情報に効く。
+- `util.rs`（Step 39）残、および D01/D02/D03/D04/D07/D10/D13/D16 の未了分（旧 `MIGRATION.md` の
+  deferral 表 = git 履歴参照）。
+
+#### R20. オフライン/`go` 無し driver（PL02）と GOCACHE 管理（PL07）
+- **なぜ**: `go` バイナリに依存しない環境・CI サンドボックスでの実行と、キャッシュ配置の整合。
+- **どこ**: `guff-packages`（driver 抽象）、`guff-runner`（cache パス）。
+
+---
+
+### Milestone G — 互換性の検証（「互換」を名乗る根拠）
+
+> A〜F を作っても、**実測で一致を示さない限り「互換」とは言えない**。ここが主張の裏付け。
+
+#### R21. 差分テストハーネス（guff vs golangci-lint）
+- **目的**: 同一コーパス・同一設定で両者を実行し、指摘集合を diff。linter ごとに一致率（precision/recall）を出す。
+- **どこ**: 新規 `compat/`（対象リポジトリ一覧、両ツール実行、正規化、diff レポート）。
+- **手順**: (1) 数十リポジトリを固定。(2) golangci-lint（参照）と guff を standard プリセットで実行。
+  (3) `file:line:linter:message` に正規化して差分を集計。(4) 既知差分を許容リストに登録し、
+  新規差分が出たら CI で落とす。
+- **完了条件**: 一致率レポートが生成され、CI ゲートになる。
+- **テスト**: ハーネス自体のスモークテスト。
+
+#### R22. `.golangci.yml` コーパスのパース検証
+- 実在の `.golangci.yml`（有名 OSS のもの）を集めて、**パースエラー 0** を保証するテスト。
+
+#### R23. 互換性マトリクスの公開
+- どの linter・どの設定キー・どの出力フォーマットが「対応済/部分/未対応」かを表にして README/本書に載せる。
+- **これが揃って初めて「golangci-lint 互換の高速 linter」と公に主張できる。**
+
+---
+
+## 9. 付録
+
+### 9.1 上流ソースの取得（参考実装を読むとき）
+```bash
+git clone --depth 1 https://github.com/golangci/golangci-lint.git   # CLI/config/printers/processors
+git clone --depth 1 https://github.com/golang/tools.git             # go/analysis, go/packages, passes
+git clone --depth 1 https://github.com/dominikh/go-tools.git        # staticcheck / simple / pattern / unused
+git clone --depth 1 https://github.com/golangci/go-printf-func-name.git
+git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
+# 型チェッカ: Go 本体の src/cmd/compile/internal/types2
+```
+
+### 9.2 マイルストーン → 主張の対応
+| 主張 | 必要マイルストーン |
+|------|--------------------|
+| 「golangci-lint 互換」 | A（設定/CLI）+ B（出力）+ D（--fix）+ E（linter 網羅）+ G（差分実証） |
+| 「高速」 | C（並列+キャッシュ+ベンチ）+ F（typeindex 等） |
+
+### 9.3 進捗の更新場所
+- 状況 → §3 の表。
+- 残タスクの消化 → §8 の該当 R 番号に完了メモ/日付。
+- 新しい linter → §3.3 の表に 1 行。
+
+---
+
+## 10. セッション記録（新しいものほど上）
+
+| 日付 | 内容 |
+|------|------|
+| 2026-07-14 | 5 つの計画書（MIGRATION / PRE-LINTER-PLAN / LINTER-MIGRATION / STATICCHECK-MIGRATION / ADDING-ANALYZER）を本書に統合。§8 に golangci-lint 互換 + 高速化のロードマップ（R1–R23 / Milestone A–G）を追記 |
+| 2026-07-14 | 独立リポジトリ化（`dakimura/guff`）後、`guff run` を実 Go プログラムで安定化。型チェッカ 2 バグ（再帰ジェネリックの subst 無限再帰 / 符号なし定数の `^` 精度）修正。pattern エンジンのサブパターン照合破棄バグ + ワイルドカード/pkg 関数シンボル修正（SA4021 等の誤検出解消）。printf を引数個数・型照合まで実装し `go vet` 一致。全 1806 テスト green |
+| 2026-07-14 | standard プリセット完走: errcheck / ineffassign / unused 本実装、staticcheck 137 analyzers、govet 29/29 |
+| 2026-07-13 | `guff-lint` CLI 骨格、standard プリセット、`migrate`、解析基盤（PRE-LINTER Phase 0–7）、型チェッカ Checker エンジン |

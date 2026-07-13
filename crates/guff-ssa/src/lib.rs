@@ -9,9 +9,9 @@
 //! trait objects or `Rc<RefCell<..>>`. Type information is carried around as
 //! `guff_types` `TypeId`/`ObjectId` and borrowed read-only.
 //!
-//! See `projects/guff-ssa-MIGRATION.md` for the porting roadmap.
+//! See `docs/DEVELOPMENT.md` (§3.2.1, §8 R17) for the SSA porting roadmap.
 
-// Modules are added chunk by chunk (see MIGRATION.md §4).
+// Modules are added chunk by chunk (see docs/DEVELOPMENT.md).
 pub mod arena;
 pub mod block;
 pub mod blockopt;
