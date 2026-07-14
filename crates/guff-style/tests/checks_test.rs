@@ -1,8 +1,8 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, dogsled, funlen, goconst, gocyclo, goprintffuncname, lll, perfsprint,
-    usestdlibvars, usetesting,
+    asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
+    goprintffuncname, lll, nestif, perfsprint, usestdlibvars, usetesting,
 };
 
 #[test]
@@ -291,4 +291,58 @@ fn lll_flags_long_lines() {
 fn lll_allows_short_lines() {
     let pkg = support::typecheck_fixture("lll", "example.com/lll/ok", "ok.go");
     assert!(support::run_analyzer(lll(), &pkg).is_empty());
+}
+
+#[test]
+fn gocognit_flags_high_cognitive_complexity() {
+    let pkg = support::typecheck_fixture("gocognit", "example.com/gocognit", "bad.go");
+    let messages = support::run_analyzer(gocognit(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("HighCognitive") && m.contains("cognitive complexity")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn gocognit_allows_low_cognitive_complexity() {
+    let pkg = support::typecheck_fixture("gocognit", "example.com/gocognit/ok", "ok.go");
+    assert!(support::run_analyzer(gocognit(), &pkg).is_empty());
+}
+
+#[test]
+fn nestif_flags_deep_nesting() {
+    let pkg = support::typecheck_fixture("nestif", "example.com/nestif", "bad.go");
+    let messages = support::run_analyzer(nestif(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("complex nested blocks") && m.contains("if a")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn nestif_allows_shallow_nesting() {
+    let pkg = support::typecheck_fixture("nestif", "example.com/nestif/ok", "ok.go");
+    assert!(support::run_analyzer(nestif(), &pkg).is_empty());
+}
+
+#[test]
+fn cyclop_flags_high_complexity() {
+    let pkg = support::typecheck_fixture("cyclop", "example.com/cyclop", "bad.go");
+    let messages = support::run_analyzer(cyclop(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("HighComplexity") && m.contains("cyclomatic complexity")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn cyclop_allows_low_complexity() {
+    let pkg = support::typecheck_fixture("cyclop", "example.com/cyclop/ok", "ok.go");
+    assert!(support::run_analyzer(cyclop(), &pkg).is_empty());
 }
