@@ -2,7 +2,8 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
-    goprintffuncname, lll, nestif, perfsprint, usestdlibvars, usetesting,
+    goprintffuncname, lll, nakedret, nestif, nosprintfhostport, perfsprint, predeclared,
+    usestdlibvars, usetesting,
 };
 
 #[test]
@@ -345,4 +346,82 @@ fn cyclop_flags_high_complexity() {
 fn cyclop_allows_low_complexity() {
     let pkg = support::typecheck_fixture("cyclop", "example.com/cyclop/ok", "ok.go");
     assert!(support::run_analyzer(cyclop(), &pkg).is_empty());
+}
+
+#[test]
+fn nakedret_flags_long_naked_returns() {
+    let pkg = support::typecheck_fixture("nakedret", "example.com/nakedret", "bad.go");
+    let messages = support::run_analyzer(nakedret(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("naked return") && m.contains("LongNamed")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn nakedret_allows_short_or_explicit() {
+    let pkg = support::typecheck_fixture("nakedret", "example.com/nakedret/ok", "ok.go");
+    assert!(support::run_analyzer(nakedret(), &pkg).is_empty());
+}
+
+#[test]
+fn nosprintfhostport_flags_host_port_sprintf() {
+    let pkg = support::typecheck_fixture(
+        "nosprintfhostport",
+        "example.com/nosprintfhostport",
+        "bad.go",
+    );
+    let messages = support::run_analyzer(nosprintfhostport(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("net.JoinHostPort") && m.contains("fmt.Sprintf")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.len() >= 2,
+        "expected both host:port and auth URL hits, got {messages:?}"
+    );
+}
+
+#[test]
+fn nosprintfhostport_allows_safe_sprintf() {
+    let pkg = support::typecheck_fixture(
+        "nosprintfhostport",
+        "example.com/nosprintfhostport/ok",
+        "ok.go",
+    );
+    assert!(support::run_analyzer(nosprintfhostport(), &pkg).is_empty());
+}
+
+#[test]
+fn predeclared_flags_shadowed_identifiers() {
+    let pkg = support::typecheck_fixture("predeclared", "example.com/predeclared", "bad.go");
+    let messages = support::run_analyzer(predeclared(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("function len") && m.contains("predeclared")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("variable error") && m.contains("predeclared")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("variable true") && m.contains("predeclared")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn predeclared_allows_non_shadowing_names() {
+    let pkg = support::typecheck_fixture("predeclared", "example.com/predeclared/ok", "ok.go");
+    assert!(support::run_analyzer(predeclared(), &pkg).is_empty());
 }

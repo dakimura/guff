@@ -15,6 +15,9 @@
 //! - [`gocognit`]
 //! - [`nestif`]
 //! - [`cyclop`]
+//! - [`nakedret`]
+//! - [`nosprintfhostport`]
+//! - [`predeclared`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (whitespace, wsl, nlreturn, …) and per-linter settings for the above.
@@ -29,8 +32,11 @@ mod goconst;
 mod gocyclo;
 mod goprintffuncname;
 mod lll;
+mod nakedret;
 mod nestif;
+mod nosprintfhostport;
 mod perfsprint;
+mod predeclared;
 mod usestdlibvars;
 mod usetesting;
 
@@ -44,8 +50,11 @@ pub use goconst::analyzer as goconst;
 pub use gocyclo::analyzer as gocyclo;
 pub use goprintffuncname::analyzer as goprintffuncname;
 pub use lll::analyzer as lll;
+pub use nakedret::analyzer as nakedret;
 pub use nestif::analyzer as nestif;
+pub use nosprintfhostport::analyzer as nosprintfhostport;
 pub use perfsprint::analyzer as perfsprint;
+pub use predeclared::analyzer as predeclared;
 pub use usestdlibvars::analyzer as usestdlibvars;
 pub use usetesting::analyzer as usetesting;
 
@@ -68,5 +77,8 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gocognit(),
         nestif(),
         cyclop(),
+        nakedret(),
+        nosprintfhostport(),
+        predeclared(),
     ]
 }
