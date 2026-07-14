@@ -9,15 +9,21 @@
 //! - [`dogsled`]
 //! - [`asciicheck`]
 //! - [`goprintffuncname`]
+//! - [`funlen`]
+//! - [`gocyclo`]
+//! - [`lll`]
 //!
-//! DEFERRED (see DEVELOPMENT.md R13 / R14): remaining style bundle
-//! (funlen, gocyclo, …) and per-linter settings for the above.
+//! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
+//! (gocognit, nestif, whitespace, …) and per-linter settings for the above.
 
 mod asciicheck;
 mod copyloopvar;
 mod dogsled;
+mod funlen;
 mod goconst;
+mod gocyclo;
 mod goprintffuncname;
+mod lll;
 mod perfsprint;
 mod usestdlibvars;
 mod usetesting;
@@ -25,8 +31,11 @@ mod usetesting;
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
 pub use dogsled::analyzer as dogsled;
+pub use funlen::analyzer as funlen;
 pub use goconst::analyzer as goconst;
+pub use gocyclo::analyzer as gocyclo;
 pub use goprintffuncname::analyzer as goprintffuncname;
+pub use lll::analyzer as lll;
 pub use perfsprint::analyzer as perfsprint;
 pub use usestdlibvars::analyzer as usestdlibvars;
 pub use usetesting::analyzer as usetesting;
@@ -44,5 +53,8 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         dogsled(),
         asciicheck(),
         goprintffuncname(),
+        funlen(),
+        gocyclo(),
+        lll(),
     ]
 }

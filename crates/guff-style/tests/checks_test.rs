@@ -1,8 +1,8 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, dogsled, goconst, goprintffuncname, perfsprint, usestdlibvars,
-    usetesting,
+    asciicheck, copyloopvar, dogsled, funlen, goconst, gocyclo, goprintffuncname, lll, perfsprint,
+    usestdlibvars, usetesting,
 };
 
 #[test]
@@ -237,4 +237,58 @@ fn goprintffuncname_allows_correct_names() {
         "ok.go",
     );
     assert!(support::run_analyzer(goprintffuncname(), &pkg).is_empty());
+}
+
+#[test]
+fn funlen_flags_too_many_statements() {
+    let pkg = support::typecheck_fixture("funlen", "example.com/funlen", "bad.go");
+    let messages = support::run_analyzer(funlen(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("TooManyStatements") && m.contains("too many statements")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn funlen_allows_short_functions() {
+    let pkg = support::typecheck_fixture("funlen", "example.com/funlen/ok", "ok.go");
+    assert!(support::run_analyzer(funlen(), &pkg).is_empty());
+}
+
+#[test]
+fn gocyclo_flags_high_complexity() {
+    let pkg = support::typecheck_fixture("gocyclo", "example.com/gocyclo", "bad.go");
+    let messages = support::run_analyzer(gocyclo(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("HighComplexity") && m.contains("cyclomatic complexity")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn gocyclo_allows_low_complexity() {
+    let pkg = support::typecheck_fixture("gocyclo", "example.com/gocyclo/ok", "ok.go");
+    assert!(support::run_analyzer(gocyclo(), &pkg).is_empty());
+}
+
+#[test]
+fn lll_flags_long_lines() {
+    let pkg = support::typecheck_fixture("lll", "example.com/lll", "bad.go");
+    let messages = support::run_analyzer(lll(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("characters long") && m.contains("120")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn lll_allows_short_lines() {
+    let pkg = support::typecheck_fixture("lll", "example.com/lll/ok", "ok.go");
+    assert!(support::run_analyzer(lll(), &pkg).is_empty());
 }
