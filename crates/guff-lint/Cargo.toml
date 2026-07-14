@@ -34,6 +34,7 @@ guff-gostaticanalysis = { path = "../guff-gostaticanalysis" }
 guff-error = { path = "../guff-error" }
 guff-context = { path = "../guff-context" }
 guff-style = { path = "../guff-style" }
+guff-comment = { path = "../guff-comment" }
 
 [dev-dependencies]
 tempfile = "3"

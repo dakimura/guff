@@ -22,6 +22,7 @@ members = [
     "crates/guff-error",
     "crates/guff-context",
     "crates/guff-style",
+    "crates/guff-comment",
     "crates/guff-lint",
     "crates/guff-ssa",
     "crates/guff-version",

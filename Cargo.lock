@@ -354,6 +354,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "guff-comment"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
+]
+
+[[package]]
 name = "guff-constant"
 version = "0.1.0"
 dependencies = [
@@ -455,6 +466,7 @@ dependencies = [
  "clap",
  "guff-analysis",
  "guff-ast",
+ "guff-comment",
  "guff-context",
  "guff-errcheck",
  "guff-error",
