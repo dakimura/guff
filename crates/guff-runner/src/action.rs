@@ -153,13 +153,17 @@ fn merge_facts(dst: &mut FactStore, src: &FactStore) {
 }
 
 /// Result graph from a round of analysis.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Graph {
     pub roots: Vec<Arc<Action>>,
     all: Vec<Arc<Action>>,
 }
 
 impl Graph {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
     pub fn all_actions(&self) -> &[Arc<Action>] {
         &self.all
     }
@@ -187,6 +191,7 @@ pub fn analyze(
         analyzers,
         packages,
         sequential,
+        None,
         Arc::new(SettingsBag::default()),
     )
 }
@@ -196,6 +201,7 @@ pub fn analyze_with_settings(
     analyzers: &[&'static Analyzer],
     packages: &[Arc<Package>],
     sequential: bool,
+    concurrency: Option<usize>,
     settings: Arc<SettingsBag>,
 ) -> Result<Graph, ValidateError> {
     validate(analyzers)?;
@@ -285,7 +291,7 @@ pub fn analyze_with_settings(
         }
     }
 
-    exec_all(&roots, sequential);
+    exec_all(&roots, sequential, concurrency);
 
     for act in &all {
         if !act.is_root.load(Ordering::Relaxed) {
@@ -319,21 +325,92 @@ fn topo_postorder(roots: &[Arc<Action>]) -> Vec<Arc<Action>> {
     out
 }
 
-pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool) {
+pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Option<usize>) {
     let order = topo_postorder(roots);
     if sequential {
-        for act in order {
+        for act in &order {
             act.execute();
         }
         return;
     }
 
-    // `Package` is not `Sync` today (AST uses `RefCell`), so cross-thread package
-    // sharing is deferred (PL11). Independent roots still run through the same
-    // topological schedule until AST storage is shareable across workers.
-    for act in order {
-        act.execute();
+    let workers = concurrency.unwrap_or_else(|| {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    });
+    if workers <= 1 {
+        for act in &order {
+            act.execute();
+        }
+        return;
     }
+
+    // Wavefront schedule: each wave is a maximal set of actions whose deps are
+    // already done, then rayon's pool runs the wave in parallel. Matching the
+    // sequential topo order's diagnostic root walk keeps output deterministic
+    // after collection (roots still walk in construction order).
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(workers)
+        .build()
+        .expect("rayon thread pool");
+    pool.install(|| {
+        for wave in dependency_waves(&order) {
+            rayon::scope(|s| {
+                for act in &wave {
+                    let act = Arc::clone(act);
+                    s.spawn(move |_| act.execute());
+                }
+            });
+        }
+    });
+}
+
+/// Groups actions into waves where every action in a wave has all dependencies
+/// in earlier waves (or no deps). Actions within a wave are independent.
+fn dependency_waves(order: &[Arc<Action>]) -> Vec<Vec<Arc<Action>>> {
+    let mut completed = HashSet::new();
+    let mut remaining: HashSet<usize> = order
+        .iter()
+        .map(|a| Arc::as_ptr(a) as usize)
+        .collect();
+    let by_ptr: HashMap<usize, Arc<Action>> = order
+        .iter()
+        .map(|a| (Arc::as_ptr(a) as usize, Arc::clone(a)))
+        .collect();
+
+    let mut waves = Vec::new();
+    while !remaining.is_empty() {
+        let mut wave = Vec::new();
+        for &ptr in &remaining {
+            let act = &by_ptr[&ptr];
+            if act
+                .deps
+                .iter()
+                .all(|d| completed.contains(&(Arc::as_ptr(d) as usize)))
+            {
+                wave.push(Arc::clone(act));
+            }
+        }
+        assert!(
+            !wave.is_empty(),
+            "action dependency cycle detected in exec_all"
+        );
+        // Stable order within a wave: match topo_postorder appearance.
+        wave.sort_by_key(|a| {
+            order
+                .iter()
+                .position(|o| Arc::ptr_eq(o, a))
+                .unwrap_or(usize::MAX)
+        });
+        for act in &wave {
+            let ptr = Arc::as_ptr(act) as usize;
+            completed.insert(ptr);
+            remaining.remove(&ptr);
+        }
+        waves.push(wave);
+    }
+    waves
 }
 
 fn clone_result(result: &AnalysisResult) -> AnalysisResult {

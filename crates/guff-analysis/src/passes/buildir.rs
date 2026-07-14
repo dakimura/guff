@@ -29,8 +29,8 @@ pub struct BuildIrResult {
     pub src_funcs: Vec<FuncId>,
 }
 
-// The analysis runner executes one package at a time (see PL11). `Program` is
-// not formally `Send` yet because type-checker arenas are single-threaded.
+// SSA results are immutable after construction. The type-checker arenas behind
+// `Program` are not formally proven `Sync`, but analysis only reads them.
 unsafe impl Send for BuildIrResult {}
 unsafe impl Sync for BuildIrResult {}
 

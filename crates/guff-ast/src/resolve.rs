@@ -166,7 +166,7 @@ pub fn new_package(
             Vec::with_capacity(file.unresolved.len());
         for ident in std::mem::take(&mut file.unresolved) {
             if let Some(obj) = lookup_chain(&file_scope, &ident.name) {
-                *ident.obj.borrow_mut() = Some(obj);
+                *ident.obj.lock().unwrap() = Some(obj);
             } else {
                 let pos = ident.pos();
                 let name = ident.name.clone();

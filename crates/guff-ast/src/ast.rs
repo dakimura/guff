@@ -296,14 +296,15 @@ pub struct BadExpr {
 /// Note: the `obj` field is deprecated in Go (the `ast.Object` model is
 /// superseded by `go/types`). It is included here only so that
 /// [`crate::scope`], [`crate::resolve`], and [`crate::parser_resolver`]
-/// have somewhere to record their results. Wrapped in a `RefCell` so
-/// the resolver pass can write through `&Ident` while the rest of the
-/// AST is held immutably.
-#[derive(Debug, Clone, Default)]
+/// have somewhere to record their results. Wrapped in a `Mutex` so the
+/// resolver pass can write through `&Ident` while the rest of the AST is
+/// held immutably, and so loaded packages / analysis actions are `Sync`
+/// for multi-threaded runners (R9 / PL11).
+#[derive(Debug, Default)]
 pub struct Ident {
     pub name_pos: Pos,
     pub name: String,
-    pub obj: std::cell::RefCell<Option<std::sync::Arc<crate::scope::Object>>>,
+    pub obj: std::sync::Mutex<Option<std::sync::Arc<crate::scope::Object>>>,
     /// Stable per-node identity, used by `go/types`'s `Info.Defs`/`Info.Uses`
     /// maps (Go keys those on the `*ast.Ident` pointer; we cannot, because the
     /// type checker clones `Expr`/`Ident` freely — a clone must denote the same
@@ -313,6 +314,17 @@ pub struct Ident {
     pub id: u32,
 }
 
+impl Clone for Ident {
+    fn clone(&self) -> Self {
+        Self {
+            name_pos: self.name_pos,
+            name: self.name.clone(),
+            obj: std::sync::Mutex::new(self.obj.lock().unwrap().clone()),
+            id: self.id,
+        }
+    }
+}
+
 impl Ident {
     /// `new_ident("Foo")` — convenience for ASTs built by hand
     /// (matches Go's `ast.NewIdent`).
@@ -320,7 +332,7 @@ impl Ident {
         Self {
             name_pos: Pos::default(),
             name: name.into(),
-            obj: std::cell::RefCell::new(None),
+            obj: std::sync::Mutex::new(None),
             id: 0,
         }
     }

@@ -271,7 +271,8 @@ pub struct RunConfig {
     /// Enforced whole-run deadline (`--timeout` / default `1m`).
     #[serde(default)]
     pub timeout: Option<String>,
-    /// DEFERRED full effect until R9 (true parallelism); `1` forces sequential in R5.
+    /// Worker count for the action DAG (`-j`). `1` forces sequential; other
+    /// values size the rayon thread pool (R9).
     #[serde(default)]
     pub concurrency: Option<i32>,
     #[serde(default, rename = "issues-exit-code")]

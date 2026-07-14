@@ -184,3 +184,38 @@ fn cli_accepts_timeout_and_concurrency_flags() {
     );
     assert!(!out.stdout.is_empty());
 }
+
+#[test]
+fn cli_cache_status_and_clean() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cache_dir = tmp.path().join("guff-cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    std::fs::write(cache_dir.join("README"), b"x").unwrap();
+
+    let status = Command::new(bin())
+        .args(["cache", "status"])
+        .env("GUFF_CACHE", &cache_dir)
+        .output()
+        .expect("spawn cache status");
+    assert!(
+        status.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&status.stdout);
+    assert!(stdout.contains("Dir:"));
+    assert!(stdout.contains(cache_dir.to_str().unwrap()));
+    assert!(stdout.contains("Size:"));
+
+    let clean = Command::new(bin())
+        .args(["cache", "clean"])
+        .env("GUFF_CACHE", &cache_dir)
+        .output()
+        .expect("spawn cache clean");
+    assert!(
+        clean.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    assert!(!cache_dir.exists());
+}

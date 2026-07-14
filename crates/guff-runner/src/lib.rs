@@ -8,11 +8,17 @@
 //!   `github.com/golangci/golangci-lint/pkg/goanalysis`
 
 mod action;
+mod cache;
 mod load_mode;
 mod memory;
 mod runner;
 
 pub use action::{analyze, analyze_with_settings, Action, Graph};
+pub use cache::{
+    build_salt, cache_dir_size, clean_cache, default_cache_dir, detect_go_version, load_from_cache,
+    save_to_cache, CacheError, CacheStats, CachedDiagnostic, HashMode, IssueCache,
+    ENV_GOLANGCI_LINT_CACHE, ENV_GUFF_CACHE,
+};
 pub use load_mode::{
     ast_only_load_mode, infer_load_mode, load_mode_for_analyzers, types_load_mode,
     union_load_modes,

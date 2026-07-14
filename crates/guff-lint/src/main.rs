@@ -12,6 +12,7 @@ use guff_lint::{
     LinterDefault, LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputFormatKind,
     RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
+use guff_runner::{cache_dir_size, clean_cache, default_cache_dir};
 
 #[derive(Parser)]
 #[command(name = "guff", about = "Run Go linters through the guff analysis pipeline")]
@@ -30,6 +31,8 @@ enum Commands {
     Version(VersionArgs),
     /// List enabled / disabled linters for the current configuration.
     Linters(LintersArgs),
+    /// Cache control and information.
+    Cache(CacheArgs),
 }
 
 #[derive(Parser)]
@@ -76,15 +79,18 @@ struct RunArgs {
     timeout: Option<String>,
 
     /// Number of concurrent workers (`run.concurrency`). `1` forces sequential.
-    /// True multi-core parallel execution is deferred (R9); values > 1 are accepted
-    /// for CLI/config compatibility.
     #[arg(short = 'j', long = "concurrency")]
     concurrency: Option<usize>,
 
-    /// Output format (`text`, `line-number`; repeatable). Default: `text`.
-    /// JSON / checkstyle / sarif arrive in later milestones (R7/R8).
+    /// Output format (repeatable). Default: `text`.
+    /// Supported: `text`, `line-number`, `colored-line-number`, `json`,
+    /// `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
     #[arg(long = "out-format", value_name = "FORMAT")]
     out_format: Vec<String>,
+
+    /// Disable the persistent issues cache.
+    #[arg(long = "no-cache")]
+    no_cache: bool,
 }
 
 #[derive(Parser)]
@@ -128,6 +134,20 @@ struct LintersArgs {
     disable: Vec<String>,
 }
 
+#[derive(Parser)]
+struct CacheArgs {
+    #[command(subcommand)]
+    command: CacheCommand,
+}
+
+#[derive(Subcommand)]
+enum CacheCommand {
+    /// Remove the cache directory.
+    Clean,
+    /// Show cache directory and size.
+    Status,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -158,6 +178,13 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Commands::Linters(args) => match linters_cmd(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Cache(args) => match cache_cmd(args) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("guff: {err}");
@@ -222,7 +249,6 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
 
     let timeout = resolve_timeout(args.timeout.as_deref(), loaded.timeout.as_deref())?;
     let concurrency = args.concurrency.or(loaded.concurrency);
-    // DEFERRED (R9): concurrency > 1 does not yet spawn a thread pool.
     let sequential = args.sequential || concurrency == Some(1);
 
     let out_formats = if args.out_format.is_empty() {
@@ -243,6 +269,8 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         timeout,
         concurrency,
         out_formats,
+        use_cache: !args.no_cache,
+        cache_dir: None,
     })
 }
 
@@ -453,4 +481,36 @@ fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
         );
     }
     Ok(())
+}
+
+fn cache_cmd(args: CacheArgs) -> Result<(), RunError> {
+    let dir = default_cache_dir().map_err(|e| RunError::Message(e.to_string()))?;
+    match args.command {
+        CacheCommand::Clean => {
+            clean_cache(&dir).map_err(|e| RunError::Message(e.to_string()))?;
+            eprintln!("guff: cleaned cache at {}", dir.display());
+        }
+        CacheCommand::Status => {
+            let size = cache_dir_size(&dir);
+            println!("Dir: {}", dir.display());
+            println!("Size: {}", prettify_bytes(size));
+        }
+    }
+    Ok(())
+}
+
+fn prettify_bytes(n: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let n = n as f64;
+    if n >= GB {
+        format!("{:.1} GB", n / GB)
+    } else if n >= MB {
+        format!("{:.1} MB", n / MB)
+    } else if n >= KB {
+        format!("{:.1} KB", n / KB)
+    } else {
+        format!("{n} B")
+    }
 }

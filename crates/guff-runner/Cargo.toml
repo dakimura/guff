@@ -16,3 +16,10 @@ guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
 guff-packages = { path = "../guff-packages" }
 guff-types = { path = "../guff-types" }
+rayon = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

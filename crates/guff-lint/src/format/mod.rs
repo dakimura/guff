@@ -1,14 +1,26 @@
 //! Issue output formatters (golangci `pkg/printers` equivalent).
 //!
-//! R6 introduces the [`Formatter`] trait and the text formatter.
-//! JSON is R7; colored / checkstyle / sarif / etc. are R8.
+//! R6: [`Formatter`] + text. R7: JSON. R8: colored / checkstyle / sarif / tab /
+//! github-actions.
 
+mod checkstyle;
+mod color;
+mod github;
+mod json;
+mod sarif;
+mod severity;
+mod tab;
 mod text;
 
 use std::io::{self, Write};
 
 use crate::exclude::Issue;
 
+pub use checkstyle::CheckstyleFormatter;
+pub use github::GithubActionsFormatter;
+pub use json::{JsonFormatter, JsonReport, JsonWarning};
+pub use sarif::SarifFormatter;
+pub use tab::TabFormatter;
 pub use text::{format_diagnostic_text, format_issue_text, TextFormatter};
 
 /// Prints a slice of issues to a writer.
@@ -17,30 +29,43 @@ pub trait Formatter {
     fn print(&self, issues: &[Issue], w: &mut dyn Write) -> io::Result<()>;
 }
 
-/// Supported `--out-format` names for this release.
-///
-/// Additional formats land in R7 (json) / R8 (colored, checkstyle, …).
+/// Supported `--out-format` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutputFormatKind {
     /// Plain `file:line:col: message (analyzer)` (also `line-number`).
     Text,
+    /// Colored text + source line/caret when available (`colored-line-number`).
+    Colored,
+    /// golangci-lint JSON schema (`{"Issues":[...],"Report":...}`).
+    Json,
+    /// Checkstyle XML (`version="5.0"`).
+    Checkstyle,
+    /// SARIF 2.1.0 JSON.
+    Sarif,
+    /// Tab-aligned columns.
+    Tab,
+    /// Tab + colors (`colored-tab`).
+    ColoredTab,
+    /// GitHub Actions workflow commands (`::error file=…`).
+    GithubActions,
 }
 
 impl OutputFormatKind {
-    /// Parse a single format name. Accepts guff `text` and golangci aliases
-    /// that currently render as text (`line-number`, `colored-line-number`).
+    /// Parse a single format name (guff + golangci aliases).
     pub fn parse(name: &str) -> Result<Self, String> {
         match name {
             "text" | "line-number" => Ok(Self::Text),
-            // Colors DEFERRED to R8; for now emit the same as text.
-            "colored-line-number" => Ok(Self::Text),
-            "json" => Err(
-                "output format \"json\" is not implemented yet (planned R7); use --out-format text"
-                    .into(),
-            ),
+            "colored-line-number" | "colored" => Ok(Self::Colored),
+            "json" => Ok(Self::Json),
+            "checkstyle" => Ok(Self::Checkstyle),
+            "sarif" => Ok(Self::Sarif),
+            "tab" => Ok(Self::Tab),
+            "colored-tab" => Ok(Self::ColoredTab),
+            "github-actions" | "github" => Ok(Self::GithubActions),
             other => Err(format!(
-                "unknown output format {other:?}; supported: text, line-number \
-                 (json/checkstyle/sarif/… come in later milestones)"
+                "unknown output format {other:?}; supported: text, line-number, \
+                 colored-line-number, json, checkstyle, sarif, tab, colored-tab, \
+                 github-actions"
             )),
         }
     }
@@ -48,24 +73,40 @@ impl OutputFormatKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Text => "text",
+            Self::Colored => "colored-line-number",
+            Self::Json => "json",
+            Self::Checkstyle => "checkstyle",
+            Self::Sarif => "sarif",
+            Self::Tab => "tab",
+            Self::ColoredTab => "colored-tab",
+            Self::GithubActions => "github-actions",
         }
     }
 
     pub fn formatter(self) -> Box<dyn Formatter> {
         match self {
             Self::Text => Box::new(TextFormatter::new()),
+            Self::Colored => Box::new(TextFormatter::colored()),
+            Self::Json => Box::new(JsonFormatter::new()),
+            Self::Checkstyle => Box::new(CheckstyleFormatter::new()),
+            Self::Sarif => Box::new(SarifFormatter::new()),
+            Self::Tab => Box::new(TabFormatter::new()),
+            Self::ColoredTab => Box::new(TabFormatter::colored()),
+            Self::GithubActions => Box::new(GithubActionsFormatter::new()),
         }
     }
 }
 
 /// Resolve CLI `--out-format` values (repeatable). Empty → `[Text]`.
+///
+/// `format:path` suffixes are accepted for golangci compatibility; writing to a
+/// path instead of the shared writer is DEFERRED (still print to `w`).
 pub fn resolve_out_formats(cli: &[String]) -> Result<Vec<OutputFormatKind>, String> {
     if cli.is_empty() {
         return Ok(vec![OutputFormatKind::Text]);
     }
     let mut out = Vec::with_capacity(cli.len());
     for raw in cli {
-        // golangci also accepts `format:path`; path writing is DEFERRED (R8).
         let name = raw.split_once(':').map(|(n, _)| n).unwrap_or(raw.as_str());
         out.push(OutputFormatKind::parse(name)?);
     }
@@ -119,14 +160,27 @@ mod tests {
         );
         assert_eq!(
             OutputFormatKind::parse("colored-line-number").unwrap(),
-            OutputFormatKind::Text
+            OutputFormatKind::Colored
         );
     }
 
     #[test]
-    fn parse_json_deferred() {
-        let err = OutputFormatKind::parse("json").unwrap_err();
-        assert!(err.contains("R7") || err.contains("not implemented"));
+    fn parse_r8_formats() {
+        assert_eq!(OutputFormatKind::parse("json").unwrap(), OutputFormatKind::Json);
+        assert_eq!(
+            OutputFormatKind::parse("checkstyle").unwrap(),
+            OutputFormatKind::Checkstyle
+        );
+        assert_eq!(OutputFormatKind::parse("sarif").unwrap(), OutputFormatKind::Sarif);
+        assert_eq!(OutputFormatKind::parse("tab").unwrap(), OutputFormatKind::Tab);
+        assert_eq!(
+            OutputFormatKind::parse("colored-tab").unwrap(),
+            OutputFormatKind::ColoredTab
+        );
+        assert_eq!(
+            OutputFormatKind::parse("github-actions").unwrap(),
+            OutputFormatKind::GithubActions
+        );
     }
 
     #[test]
@@ -140,6 +194,14 @@ mod tests {
             resolve_out_formats(&["text:/tmp/out.txt".into()]).unwrap(),
             vec![OutputFormatKind::Text]
         );
+        assert_eq!(
+            resolve_out_formats(&["json:/tmp/out.json".into()]).unwrap(),
+            vec![OutputFormatKind::Json]
+        );
+        assert_eq!(
+            resolve_out_formats(&["checkstyle:/tmp/cs.xml".into()]).unwrap(),
+            vec![OutputFormatKind::Checkstyle]
+        );
     }
 
     #[test]
@@ -150,5 +212,31 @@ mod tests {
             .unwrap();
         let s = String::from_utf8(buf).unwrap();
         assert_eq!(s, "bad.go:5:2: unchecked error (errcheck)\n");
+    }
+
+    #[test]
+    fn json_formatter_via_print_issues() {
+        let mut buf = Vec::new();
+        print_issues(&[OutputFormatKind::Json], &[sample_issue()], &mut buf).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["Issues"][0]["FromLinter"], "errcheck");
+        assert_eq!(v["Issues"][0]["Text"], "unchecked error");
+        assert!(v["Report"].is_null());
+    }
+
+    #[test]
+    fn github_actions_via_print_issues() {
+        let mut buf = Vec::new();
+        print_issues(
+            &[OutputFormatKind::GithubActions],
+            &[sample_issue()],
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(
+            s,
+            "::error file=bad.go,line=5,col=2::unchecked error (errcheck)\n"
+        );
     }
 }

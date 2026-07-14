@@ -459,7 +459,7 @@ impl Parser {
         Ident {
             name_pos: pos,
             name,
-            obj: RefCell::new(None),
+            obj: std::sync::Mutex::new(None),
             id: crate::ast::next_node_id(),
         }
     }
@@ -1716,7 +1716,7 @@ impl Parser {
                             let sel = Ident {
                                 name_pos: pos,
                                 name: "_".to_string(),
-                                obj: RefCell::new(None),
+                                obj: std::sync::Mutex::new(None),
                                 id: crate::ast::next_node_id(),
                             };
                             x = Expr::SelectorExpr(SelectorExpr {
@@ -2521,7 +2521,7 @@ impl Parser {
                 ident = Some(Ident {
                     name_pos: self.pos,
                     name: ".".to_string(),
-                    obj: RefCell::new(None),
+                    obj: std::sync::Mutex::new(None),
                     id: crate::ast::next_node_id(),
                 });
                 self.next();
@@ -3285,7 +3285,7 @@ func describe(i Item) string {
         if let Decl::GenDecl(g) = &f.decls[1] {
             if let Spec::ValueSpec(v) = &g.specs[0] {
                 if let Expr::Ident(used) = &v.values[0] {
-                    assert!(used.obj.borrow().is_some(), "A should resolve");
+                    assert!(used.obj.lock().unwrap().is_some(), "A should resolve");
                 }
             }
         }

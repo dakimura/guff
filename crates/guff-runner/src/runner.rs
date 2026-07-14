@@ -9,28 +9,50 @@ use guff_analysis::{Analyzer, Diagnostic, SettingsBag, ValidateError};
 use guff_packages::{load, Config, LoadError, LoadMode, Package};
 
 use crate::action::{analyze_with_settings, Graph};
+use crate::cache::{load_from_cache, save_to_cache, CacheStats, IssueCache};
 use crate::load_mode::load_mode_for_analyzers;
 use crate::memory::trim_packages;
 
 /// Options controlling runner behavior.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RunnerOptions {
     /// Run analyzers sequentially (useful for tests and deterministic ordering).
     pub sequential: bool,
+    /// Worker count for the action DAG (`-j` / `run.concurrency`).
+    ///
+    /// Ignored when [`Self::sequential`] is true or when set to `Some(1)`.
+    /// `None` uses [`std::thread::available_parallelism`].
+    pub concurrency: Option<usize>,
     /// After analysis, drop syntax and type artifacts from non-root packages.
     ///
     /// See [`crate::memory`] and deferral PL06 for full `decUse` semantics.
     pub release_memory: bool,
     /// Per-linter settings shared with every [`guff_analysis::Pass`].
     pub settings: Arc<SettingsBag>,
+    /// Optional persistent issues cache (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE`).
+    pub cache: Option<Arc<IssueCache>>,
+}
+
+impl std::fmt::Debug for RunnerOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunnerOptions")
+            .field("sequential", &self.sequential)
+            .field("concurrency", &self.concurrency)
+            .field("release_memory", &self.release_memory)
+            .field("settings", &self.settings)
+            .field("cache", &self.cache.as_ref().map(|c| c.dir()))
+            .finish()
+    }
 }
 
 impl Default for RunnerOptions {
     fn default() -> Self {
         Self {
             sequential: false,
+            concurrency: None,
             release_memory: false,
             settings: Arc::new(SettingsBag::default()),
+            cache: None,
         }
     }
 }
@@ -58,26 +80,62 @@ impl std::error::Error for RunnerError {}
 pub struct RunResult {
     pub packages: Vec<Arc<Package>>,
     pub graph: Graph,
+    /// Diagnostics restored from the persistent cache (not present in [`Self::graph`]).
+    pub cached_diagnostics: Vec<(String, Diagnostic)>,
+    /// Hit/miss summary when a cache was configured.
+    pub cache_stats: CacheStats,
 }
 
 impl RunResult {
     pub fn diagnostics(&self) -> Vec<(String, Diagnostic)> {
-        self.graph.root_diagnostics()
+        let mut out = self.graph.root_diagnostics();
+        out.extend(self.cached_diagnostics.iter().cloned());
+        out
     }
 }
 
 /// Runs analyzers on already-loaded packages.
+///
+/// When [`RunnerOptions::cache`] is set, unchanged packages are skipped and their
+/// diagnostics are loaded from disk (golangci `loadIssuesFromCache`).
 pub fn run_on_packages(
     analyzers: &[&'static Analyzer],
     packages: &[Arc<Package>],
     opts: &RunnerOptions,
 ) -> Result<RunResult, ValidateError> {
-    let graph = analyze_with_settings(
-        analyzers,
-        packages,
-        opts.sequential,
-        Arc::clone(&opts.settings),
-    )?;
+    let sequential = opts.sequential || opts.concurrency == Some(1);
+    let concurrency = if sequential {
+        None
+    } else {
+        opts.concurrency
+    };
+
+    let (cached_diagnostics, to_analyze, cache_stats) = if let Some(cache) = &opts.cache {
+        load_from_cache(cache, packages)
+    } else {
+        (
+            Vec::new(),
+            packages.to_vec(),
+            CacheStats::default(),
+        )
+    };
+
+    let graph = if to_analyze.is_empty() {
+        Graph::empty()
+    } else {
+        analyze_with_settings(
+            analyzers,
+            &to_analyze,
+            sequential,
+            concurrency,
+            Arc::clone(&opts.settings),
+        )?
+    };
+
+    if let Some(cache) = &opts.cache {
+        save_to_cache(cache, &to_analyze, &graph.root_diagnostics());
+    }
+
     let mut pkgs = packages.to_vec();
     if opts.release_memory {
         let root_ids: Vec<String> = packages.iter().map(|p| p.id.clone()).collect();
@@ -86,6 +144,8 @@ pub fn run_on_packages(
     Ok(RunResult {
         packages: pkgs,
         graph,
+        cached_diagnostics,
+        cache_stats,
     })
 }
 

@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-14。ワークスペース全体 **1806 tests green**。
+> 最終更新: 2026-07-14。ワークスペース全体 **1896 tests green**。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -119,8 +119,9 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ### 3.2 解析フレームワーク（PRE-LINTER Phase 0–7）
 - Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
-- **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL11（真の並列実行）, PL07（GOCACHE 管理）,
+- **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL07（GOCACHE 管理）,
   PL05（ctrlflow）, PL02（go 無し driver）, SSA `RangeStmt`（→ §8 各タスク）。
+  PL11（真の並列実行）は **R9 で完了**。
 
 ### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
 - naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150 tests green**。
@@ -144,14 +145,14 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `migrate`, `version`, `linters` | `help`/`cache`/`fmt` 無し |
-| run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format` | `--fix` 無し。`--out-format` は `text`/`line-number` のみ（JSON は R7）。`-j>1` の真の並列は R9 待ち |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency: 1` で sequential。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text のみ実装） | `issues.new`/`new-from-rev`（diff 除外）・真の `run.concurrency` 並列（R9）・JSON 等（R7/R8）・errcheck exclude-functions 等は未 |
+| サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
+| run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache` | `--fix` 無し |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
 | プリセット | `standard`/`fast`/`all`/`none`。ただし linter が 5 つしか無いので `standard`==`all`、`fast` は staticcheck を抜くだけ | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
-| 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）。stdout | JSON（R7）・colored/checkstyle/sarif/tab/github-actions（R8）未 |
+| 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
-| キャッシュ | **無し**（毎回コールド） | 永続キャッシュ（`GOLANGCI_LINT_CACHE` 相当・増分再解析）が無い |
-| 並列 | 名前に反して**実質シーケンシャル**（PL11 未了。`Package`/AST が `!Sync`） | マルチコア並列が無い |
+| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュ・ロード/型チェックのスキップは未 |
+| 並列 | ✅ action DAG を rayon ウェーブフロントで並列実行。`-j`/`run.concurrency` でワーカー数。`Ident::obj` を `Mutex` 化し `Package: Sync` | ロード/型チェックはまだ逐次。ベンチ実証は R11 |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | **未実装**（`SuggestedFix`/`TextEdit` のデータ型はあるが誰も適用しない） | `--fix` が無い |
 
@@ -335,7 +336,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了メモ**: `version`（`--short`）/ `linters`（config・`--preset`/`--enable`/`--disable` 反映の
   Enabled/Disabled 一覧）。`--timeout` + `run.timeout`（Go duration、既定 `1m`、`0` で無効、超過で
   exit 4）。`-j/--concurrency` + `run.concurrency`（`1` → sequential）。`--build-tags` は既存。
-  DEFERRED: concurrency > 1 の真の並列（→ R9）。
+  DEFERRED（当時）: concurrency > 1 の真の並列（→ **R9 で完了**）。
   テスト: `tests/cli_test.rs`。
 
 ---
@@ -351,21 +352,30 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了メモ**: `Formatter` + `OutputFormatKind::Text` / `TextFormatter`。`--out-format`
   （`text` / `line-number` / `colored-line-number`→text）。config `output.formats`/
   `output.format` もベストエフォート適用（未実装名は stderr で無視）。
-  DEFERRED: JSON（R7）、色付き・ソース行下線・`format:path` 書き出し（R8）。
+  DEFERRED（当時）: JSON（→ R7）、色付き・ソース行下線（→ R8 で完了）、`format:path` 書き出し（未）。
   テスト: `tests/format_test.rs` + `format` ユニットテスト。
 
-#### R7. JSON 出力（golangci-lint スキーマ準拠）
+#### R7. JSON 出力（golangci-lint スキーマ準拠） ✅ 完了 (2026-07-14)
 - **なぜ**: 最も使われる機械可読フォーマット。互換の要。
 - **参考**: golangci-lint `pkg/printers/json.go`。トップレベル `{"Issues": [...], "Report": {...}}`、
   各 Issue に `FromLinter`, `Text`, `Severity`, `SourceLines`, `Pos{Filename,Offset,Line,Column}`,
-  `Replacement`。
+  `ExpectNoLint` / `ExpectedNoLintLinter`（`SuggestedFixes`/`LineRange` は omitempty）。
 - **完了条件**: `--out-format json` が golangci-lint と同じキー構造を出す（フィールド名一致）。
 - **テスト**: JSON をパースしてキー/値を検証。可能なら golangci-lint 実出力とのスナップショット比較。
+- **完了メモ**: `format/json.rs` の `JsonFormatter`。`OutputFormatKind::Json`。空 Issues は `[]`、
+  `Report` は現状常に `null`（`JsonReport` 型は用意）。`SourceLines` は単一行キャプチャ時のみ配列。
+  DEFERRED: Report への warnings/linter 一覧埋め込み、`SuggestedFixes` JSON 化、golangci 実機スナップショット。
+  テスト: `format/json.rs` ユニット + `tests/format_test.rs` CLI。
 
-#### R8. その他フォーマット（colored-line-number, checkstyle, sarif, tab, github-actions）
+#### R8. その他フォーマット（colored-line-number, checkstyle, sarif, tab, github-actions） ✅ 完了 (2026-07-14)
 - **参考**: golangci-lint `pkg/printers/*.go` に各実装がある。優先度: colored-line-number（既定）→
   github-actions（CI 注釈）→ checkstyle/sarif（企業 CI）→ tab。
 - **完了条件**: 各フォーマットが対応ツールで読める。
+- **完了メモ**: `TextFormatter::colored`（ANSI bold/red + source/`^` caret）、
+  `GithubActionsFormatter`（`::error file=…`；v2 では削除済みだが CI 向けに復元）、
+  `CheckstyleFormatter`（XML 5.0）、`SarifFormatter`（2.1.0・driver=`guff`）、
+  `TabFormatter` / `colored-tab`。`format:path` への実ファイル書き出しは DEFERRED。
+  テスト: 各 formatter ユニット + `tests/format_test.rs` CLI。
 
 ---
 
@@ -373,7 +383,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 > ゴール: 「fast」を数字で主張できる。
 
-#### R9. 真のパッケージ/analyzer 並列実行（PL11）
+#### R9. 真のパッケージ/analyzer 並列実行（PL11） ✅ 完了 (2026-07-14)
 - **目的/なぜ**: 現在は実質シングルスレッド（`action.rs` の並列分岐も同一スレッド実行）。
   「fast」の前提。golangci-lint はワーカー並列。
 - **障害**: 現状 `guff_packages::Package` / AST が `RefCell` を含み `!Sync`。
@@ -383,8 +393,13 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   (3) analyzer 内の `RefCell` 依存を洗い出して除去 or `Send+Sync` を満たす形へ。
 - **完了条件**: マルチコアで wall-clock が対コア数でスケール。結果は逐次実行と**完全一致**（決定的）。
 - **テスト**: 逐次 vs 並列で診断集合が一致することを大きめ fixture で確認。ベンチ（R11）で速度確認。
+- **完了メモ**: `Ident::obj` を `RefCell` → `Mutex` にし `Package: Sync`。`exec_all` が依存ウェーブフロント
+  + rayon プールで並列実行。`RunnerOptions.concurrency` / `-j` / `run.concurrency` をプールサイズに配線
+  （未指定は `available_parallelism`）。結果の一致は診断多重集合で検証。
+  DEFERRED: ロード/型チェック並列、wall-clock スケール実証（→ R11 ベンチ）。
+  テスト: `crates/guff-runner/tests/parallel_test.rs`。
 
-#### R10. 永続キャッシュ（増分再解析）
+#### R10. 永続キャッシュ（増分再解析） ✅ 完了 (2026-07-14)
 - **目的/なぜ**: 「fast」の本命。2 回目以降が速くないと golangci-lint に勝てない。
 - **参考**: golangci-lint `internal/cache`（`GOLANGCI_LINT_CACHE`）。
 - **どこ**: 新規 `crates/guff-runner/src/cache.rs`。
@@ -393,6 +408,11 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   (3) 保存先は `$GOLANGCI_LINT_CACHE` or OS キャッシュディレクトリ。`guff cache clean` も用意。
 - **完了条件**: 2 回目の実行が大幅に短縮。ファイルを変えたパッケージだけ再解析される。
 - **テスト**: 1 ファイル変更後、そのパッケージのみ再解析されることをログ/計測で確認。
+- **完了メモ**: `IssueCache` が SHA-256 コンテンツハッシュ（NeedAllDeps）+ salt（guff/go 版・analyzers・
+  tags・settings）でキー化。hit パッケージは analysis スキップし診断を JSON から復元。
+  `GUFF_CACHE` > `GOLANGCI_LINT_CACHE` > `{UserCacheDir}/guff`。`guff cache clean`/`status`、
+  `--no-cache`。DEFERRED: facts 永続化、ロード/型チェックのスキップ（ヒットでも load は走る）。
+  テスト: `cache.rs` ユニット + `tests/cache_test.rs` + `cli_test` cache サブコマンド。
 
 #### R11. ベンチマークハーネス（対 golangci-lint）
 - **目的/なぜ**: 「高速」を主張するには実測が要る。
@@ -525,6 +545,10 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-14 | **R10 完了**: パッケージ単位 issues 永続キャッシュ（`IssueCache`）。未変更 pkg は再解析スキップ。`GUFF_CACHE`/`GOLANGCI_LINT_CACHE`、`guff cache clean`/`status`、`--no-cache`。facts キャッシュと load スキップは DEFERRED。`tests/cache_test.rs` |
+| 2026-07-14 | **R9 完了**: `Ident::obj` を `Mutex` 化して `Package: Sync`。action DAG を依存ウェーブフロント + rayon で並列実行。`-j`/`run.concurrency` をワーカー数に配線。逐次 vs 並列の診断一致を `tests/parallel_test.rs` で検証。wall-clock スケール実証は R11 DEFERRED |
+| 2026-07-14 | **R8 完了**: colored-line-number / github-actions / checkstyle / sarif / tab / colored-tab。`format:path` 書き出しは DEFERRED。`tests/format_test.rs` |
+| 2026-07-14 | **R7 完了**: `--out-format json`（golangci `Issues`/`Report`/`FromLinter`/`Pos` 等キー一致）。`JsonFormatter` + `serde_json`。Report 埋め込み・SuggestedFixes は DEFERRED。`tests/format_test.rs` |
 | 2026-07-14 | **R6 完了**: `Formatter` 抽象 + `format/text.rs` 移設、`--out-format text`（`line-number` 別名）。JSON/colored 等は R7/R8 DEFERRED。`tests/format_test.rs` |
 | 2026-07-14 | **R5 完了**: `guff version` / `guff linters`、`--timeout`（`run.timeout`・既定 1m・exit 4）、`-j/--concurrency`（`1` → sequential）。真の並列は R9 DEFERRED。`tests/cli_test.rs` |
 | 2026-07-14 | **R4 完了**: `linters.settings` 配線。`SettingsBag` → Pass、errcheck `check-blank`/`check-type-assertions`、govet enable/disable、staticcheck `checks`。exclude-functions 等は DEFERRED |

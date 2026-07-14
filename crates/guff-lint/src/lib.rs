@@ -24,8 +24,9 @@ pub use exclude::{
     DEFAULT_EXCLUDE_DIRS,
 };
 pub use format::{
-    format_diagnostic_text, format_issue_text, print_issues, resolve_out_formats, Formatter,
-    OutputFormatKind, TextFormatter,
+    format_diagnostic_text, format_issue_text, print_issues, resolve_out_formats,
+    CheckstyleFormatter, Formatter, GithubActionsFormatter, JsonFormatter, JsonReport,
+    JsonWarning, OutputFormatKind, SarifFormatter, TabFormatter, TextFormatter,
 };
 pub use nolint::{NolintIndex, NOLINTLINT_NAME};
 pub use registry::{
@@ -61,7 +62,10 @@ use std::time::Duration;
 
 use guff_analysis::{Analyzer, SettingsBag};
 use guff_packages::{load, load_for_go_analysis, Config};
-use guff_runner::{run_on_packages, RunnerError, RunnerOptions, RunResult};
+use guff_runner::{
+    build_salt, default_cache_dir, detect_go_version, run_on_packages, IssueCache, RunnerError,
+    RunnerOptions, RunResult,
+};
 
 /// Options for [`run_linters`].
 #[derive(Debug, Clone)]
@@ -83,11 +87,15 @@ pub struct LintOptions {
     pub timeout: Option<Duration>,
     /// Requested concurrency (`-j` / `run.concurrency`).
     ///
-    /// `Some(1)` forces sequential. Values `> 1` are accepted for CLI/config
-    /// compatibility; true multi-core parallel execution is DEFERRED to R9.
+    /// `Some(1)` forces sequential. Values `> 1` (or `None` with available
+    /// parallelism) size the runner's rayon thread pool.
     pub concurrency: Option<usize>,
     /// Output formats (`--out-format`, default `[Text]`).
     pub out_formats: Vec<OutputFormatKind>,
+    /// Use persistent issues cache (default true). Disable with `--no-cache`.
+    pub use_cache: bool,
+    /// Override cache directory (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE` otherwise).
+    pub cache_dir: Option<std::path::PathBuf>,
 }
 
 impl LintOptions {
@@ -104,6 +112,8 @@ impl LintOptions {
             timeout: Some(Duration::from_secs(60)),
             concurrency: None,
             out_formats: vec![OutputFormatKind::Text],
+            use_cache: true,
+            cache_dir: None,
         }
     }
 }
@@ -121,14 +131,22 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         ..Config::default()
     };
     let packages = load(&cfg, &opts.patterns).map_err(RunnerError::Load)?;
-    // concurrency == 1 forces sequential; true multi-core parallel is DEFERRED (R9).
     let sequential = opts.sequential || opts.concurrency == Some(1);
+
+    let cache = if opts.use_cache {
+        open_issue_cache(opts)
+    } else {
+        None
+    };
+
     let result = run_on_packages(
         &opts.analyzers,
         &packages,
         &RunnerOptions {
             sequential,
+            concurrency: opts.concurrency,
             settings: std::sync::Arc::clone(&opts.settings),
+            cache,
             ..RunnerOptions::default()
         },
     )
@@ -138,6 +156,36 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         run: result,
         filter: opts.filter.clone(),
     })
+}
+
+fn open_issue_cache(opts: &LintOptions) -> Option<std::sync::Arc<IssueCache>> {
+    let dir = match &opts.cache_dir {
+        Some(p) => p.clone(),
+        None => match default_cache_dir() {
+            Ok(p) => p,
+            Err(_) => return None,
+        },
+    };
+    let mut names: Vec<&str> = opts.analyzers.iter().map(|a| a.name).collect();
+    names.sort_unstable();
+    let mut settings_fp = format!("keys={:?}", opts.settings);
+    if let Some(ec) = opts.settings.get::<guff_errcheck::Options>("errcheck") {
+        settings_fp.push_str(&format!(" errcheck={ec:?}"));
+    }
+    let salt = build_salt(
+        guff_version(),
+        &names,
+        &opts.build_tags,
+        &settings_fp,
+        &detect_go_version(),
+    );
+    match IssueCache::open(dir, salt) {
+        Ok(c) => Some(std::sync::Arc::new(c)),
+        Err(err) => {
+            eprintln!("guff: cache disabled ({err})");
+            None
+        }
+    }
 }
 
 /// Output from [`run_linters`].

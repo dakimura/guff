@@ -643,7 +643,7 @@ fn ident(e: &Expr) -> Option<&Ident> {
 fn is_zero_initializer(e: &Expr) -> bool {
     match e {
         Expr::BasicLit(l) => matches!(l.value.as_str(), "0" | "0.0" | "0." | ".0" | "\"\""),
-        Expr::Ident(id) => (id.name == "false" || id.name == "nil") && id.obj.borrow().is_none(),
+        Expr::Ident(id) => (id.name == "false" || id.name == "nil") && id.obj.lock().unwrap().is_none(),
         _ => false,
     }
 }

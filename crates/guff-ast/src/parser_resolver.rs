@@ -69,7 +69,7 @@ pub fn resolve_file<'a>(
         let mut still: Vec<&Ident> = Vec::new();
         for ident in r.unresolved.drain(..) {
             let obj = r.pkg_scope.lookup(&ident.name);
-            *ident.obj.borrow_mut() = obj.clone();
+            *ident.obj.lock().unwrap() = obj.clone();
             if obj.is_none() {
                 still.push(ident);
             }
@@ -124,7 +124,7 @@ impl<'a> Resolver<'a> {
         if let Some(scope) = self.label_scope.clone() {
             for ident in labels {
                 let obj = scope.lookup(&ident.name);
-                *ident.obj.borrow_mut() = obj.clone();
+                *ident.obj.lock().unwrap() = obj.clone();
                 if obj.is_none() {
                     if let Some(eh) = &self.decl_err {
                         eh(ident.pos(), &format!("label {} undefined", ident.name));
@@ -162,7 +162,7 @@ impl<'a> Resolver<'a> {
             // decl.(*ast.Ident)` matching in Go).
             let skip_set_on_ident = matches!(decl, ObjDecl::None);
             if !skip_set_on_ident {
-                *ident.obj.borrow_mut() = Some(Arc::clone(&arc));
+                *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
             }
 
             if ident.name != "_" {
@@ -193,11 +193,11 @@ impl<'a> Resolver<'a> {
                 let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
                 obj.decl = ObjDecl::AssignStmt(Box::new(assign.clone()));
                 let arc = Arc::new(obj);
-                *ident.obj.borrow_mut() = Some(Arc::clone(&arc));
+                *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
                 if ident.name != "_" {
                     if let Some(alt) = scope.insert(Arc::clone(&arc)) {
                         // Redeclaration of existing var in same scope.
-                        *ident.obj.borrow_mut() = Some(alt);
+                        *ident.obj.lock().unwrap() = Some(alt);
                     } else {
                         new_count += 1;
                     }
@@ -225,7 +225,7 @@ impl<'a> Resolver<'a> {
                 // Receiver type-parameter idents in scope are skipped
                 // (matches Go's check that obj.Decl isn't *Ident).
                 if !matches!(obj.decl, ObjDecl::None) {
-                    *ident.obj.borrow_mut() = Some(obj);
+                    *ident.obj.lock().unwrap() = Some(obj);
                 }
                 return;
             }
@@ -557,10 +557,10 @@ impl<'a> Resolver<'a> {
             let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
             obj.decl = ObjDecl::AssignStmt(Box::new(decl.clone()));
             let arc = Arc::new(obj);
-            *ident.obj.borrow_mut() = Some(Arc::clone(&arc));
+            *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
             if ident.name != "_" {
                 if let Some(alt) = scope.insert(Arc::clone(&arc)) {
-                    *ident.obj.borrow_mut() = Some(alt);
+                    *ident.obj.lock().unwrap() = Some(alt);
                 } else {
                     new_count += 1;
                 }
@@ -834,8 +834,8 @@ mod tests {
         // Idents in the GenDecl now carry .obj
         if let Decl::GenDecl(g) = &file.decls[0] {
             if let Spec::ValueSpec(v) = &g.specs[0] {
-                assert!(v.names[0].obj.borrow().is_some());
-                assert!(v.names[1].obj.borrow().is_some());
+                assert!(v.names[0].obj.lock().unwrap().is_some());
+                assert!(v.names[1].obj.lock().unwrap().is_some());
             }
         }
     }
@@ -901,7 +901,7 @@ mod tests {
         if let Decl::GenDecl(g) = &file.decls[1] {
             if let Spec::ValueSpec(v) = &g.specs[0] {
                 if let Expr::Ident(used) = &v.values[0] {
-                    assert!(used.obj.borrow().is_some(), "use of A should resolve");
+                    assert!(used.obj.lock().unwrap().is_some(), "use of A should resolve");
                 }
             }
         }
