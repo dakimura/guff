@@ -6,9 +6,11 @@
 //! - [`durationcheck`]
 //! - [`errorlint`]
 //! - [`wrapcheck`]
+//! - [`errchkjson`]
 
 mod durationcheck;
 mod err113;
+mod errchkjson;
 mod errname;
 mod errorlint;
 mod util;
@@ -16,6 +18,7 @@ mod wrapcheck;
 
 pub use durationcheck::analyzer as durationcheck;
 pub use err113::analyzer as err113;
+pub use errchkjson::analyzer as errchkjson;
 pub use errname::analyzer as errname;
 pub use errorlint::analyzer as errorlint;
 pub use wrapcheck::analyzer as wrapcheck;
@@ -29,5 +32,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         durationcheck(),
         errorlint(),
         wrapcheck(),
+        errchkjson(),
     ]
 }

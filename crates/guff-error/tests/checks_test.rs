@@ -1,6 +1,6 @@
 mod support;
 
-use guff_error::{durationcheck, err113, errname, errorlint, wrapcheck};
+use guff_error::{durationcheck, err113, errchkjson, errname, errorlint, wrapcheck};
 
 #[test]
 fn errname_flags_bad_type_and_var_names() {
@@ -113,5 +113,41 @@ fn wrapcheck_allows_wrapped_error() {
         support::run_analyzer(wrapcheck(), &pkg).is_empty(),
         "{:?}",
         support::run_analyzer(wrapcheck(), &pkg)
+    );
+}
+
+#[test]
+fn errchkjson_flags_blank_and_unsupported() {
+    let dir = support::testdata("errchkjson");
+    let pkg = support::typecheck_pkg("example.com/errchkjson", &dir.join("bad.go"));
+    let messages = support::run_analyzer(errchkjson(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("encoding/json.Marshal") && m.contains("is not checked")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("unsupported type") && m.contains("chan")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("unsafe type") && m.contains("float64")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn errchkjson_allows_checked_safe_and_unsafe() {
+    let dir = support::testdata("errchkjson");
+    let pkg = support::typecheck_pkg("example.com/errchkjson/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(errchkjson(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(errchkjson(), &pkg)
     );
 }
