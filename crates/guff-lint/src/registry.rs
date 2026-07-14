@@ -38,6 +38,9 @@ pub fn analyzers_for_linter_with_settings(
         "forcetypeassert" => Some(vec![guff_gostaticanalysis::forcetypeassert()]),
         "nilnil" => Some(vec![guff_gostaticanalysis::nilnil()]),
         "makezero" => Some(vec![guff_gostaticanalysis::makezero()]),
+        "errname" => Some(vec![guff_error::errname()]),
+        "err113" => Some(vec![guff_error::err113()]),
+        "durationcheck" => Some(vec![guff_error::durationcheck()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -52,7 +55,10 @@ pub fn is_meta_linter(name: &str) -> bool {
 
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "durationcheck",
+    "err113",
     "errcheck",
+    "errname",
     "forcetypeassert",
     "govet",
     "ineffassign",
@@ -71,7 +77,10 @@ pub fn known_linter_names() -> &'static [&'static str] {
 /// One-line description for `guff linters` (golangci-style).
 pub fn linter_description(name: &str) -> &'static str {
     match name {
+        "durationcheck" => "Checks for multiplying duration by duration.",
+        "err113" => "Checks the errors handling expressions according to Go 1.13.",
         "errcheck" => "Checks for unchecked errors.",
+        "errname" => "Checks that sentinel errors are prefixed with Err and types with Error.",
         "forcetypeassert" => "Finds forced type assertions that may panic.",
         "govet" => "Vet examines Go source code and reports suspicious constructs.",
         "ineffassign" => "Detects when assignments to existing variables are not used.",

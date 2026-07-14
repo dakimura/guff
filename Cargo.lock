@@ -373,6 +373,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "guff-error"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-constant",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
+]
+
+[[package]]
 name = "guff-exportdata"
 version = "0.1.0"
 dependencies = [
@@ -433,6 +445,7 @@ dependencies = [
  "guff-analysis",
  "guff-ast",
  "guff-errcheck",
+ "guff-error",
  "guff-gostaticanalysis",
  "guff-govet",
  "guff-ineffassign",
