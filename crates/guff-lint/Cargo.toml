@@ -17,6 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 guff-ast = { path = "../guff-ast" }
@@ -31,3 +32,4 @@ guff-unused = { path = "../guff-unused" }
 
 [dev-dependencies]
 tempfile = "3"
+guff-types = { path = "../guff-types" }

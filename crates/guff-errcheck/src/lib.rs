@@ -42,7 +42,11 @@ fn make_analyzer(run: RunFn) -> Analyzer {
 }
 
 fn run_default(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    run(pass, Options::default())
+    let opts = pass
+        .settings::<Options>("errcheck")
+        .copied()
+        .unwrap_or_default();
+    run(pass, opts)
 }
 
 fn run_blank(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

@@ -1,8 +1,11 @@
 //! Analyzer registry: linter name → `go/analysis` passes.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use guff_analysis::Analyzer;
+
+use crate::settings::LinterSettings;
 
 /// Names in the golangci-lint v2 `standard` preset.
 pub const STANDARD_LINTER_NAMES: &[&str] = &[
@@ -18,19 +21,106 @@ pub const FAST_LINTER_NAMES: &[&str] = &["govet", "errcheck", "ineffassign", "un
 
 /// Returns analyzers registered under `name`, if any.
 pub fn analyzers_for_linter(name: &str) -> Option<Vec<&'static Analyzer>> {
-    match name {
+    analyzers_for_linter_with_settings(name, &LinterSettings::default())
+}
+
+/// Like [`analyzers_for_linter`], applying `linters.settings` (govet/staticcheck filters).
+pub fn analyzers_for_linter_with_settings(
+    name: &str,
+    settings: &LinterSettings,
+) -> Option<Vec<&'static Analyzer>> {
+    let analyzers = match name {
         "staticcheck" => Some(guff_staticcheck::analyzers()),
         "govet" => Some(guff_govet::analyzers()),
         "errcheck" => Some(guff_errcheck::analyzers()),
         "ineffassign" => Some(guff_ineffassign::analyzers()),
         "unused" => Some(guff_unused::analyzers()),
+        // Meta / post-processor linters (no go/analysis passes).
+        "nolintlint" => Some(Vec::new()),
         _ => None,
-    }
+    }?;
+    Some(settings.apply_to_analyzers(name, analyzers))
 }
+
+/// True for linters implemented as post-processors (no Analyzer DAG nodes).
+pub fn is_meta_linter(name: &str) -> bool {
+    matches!(name, "nolintlint")
+}
+
+/// All linter names known to the registry (including meta / post-processor ones).
+pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "errcheck",
+    "govet",
+    "ineffassign",
+    "nolintlint",
+    "staticcheck",
+    "unused",
+];
 
 /// All linter names known to the registry.
 pub fn known_linter_names() -> &'static [&'static str] {
-    STANDARD_LINTER_NAMES
+    KNOWN_LINTER_NAMES
+}
+
+/// One-line description for `guff linters` (golangci-style).
+pub fn linter_description(name: &str) -> &'static str {
+    match name {
+        "errcheck" => "Checks for unchecked errors.",
+        "govet" => "Vet examines Go source code and reports suspicious constructs.",
+        "ineffassign" => "Detects when assignments to existing variables are not used.",
+        "nolintlint" => "Reports unused //nolint directives.",
+        "staticcheck" => "Checks for bugs, performance and style issues.",
+        "unused" => "Checks Go code for unused constants, variables, functions and types.",
+        _ => "",
+    }
+}
+
+/// Split known linters into enabled / disabled sets for the current selection.
+///
+/// Unknown names in the selection (not yet implemented) are listed under enabled
+/// so `guff linters` still reflects the config; they may not run.
+pub fn partition_linters(selection: &crate::config::LinterSelection) -> (Vec<String>, Vec<String>) {
+    let mut enabled = selection.resolve_names();
+    enabled.sort();
+    let enabled_set: std::collections::HashSet<String> = enabled.iter().cloned().collect();
+
+    let mut disabled: Vec<String> = known_linter_names()
+        .iter()
+        .copied()
+        .filter(|n| !enabled_set.contains(*n))
+        .map(|s| s.to_string())
+        .collect();
+    disabled.sort();
+
+    (enabled, disabled)
+}
+
+/// Format golangci-lint–style enabled/disabled listing to `out`.
+pub fn format_linters_listing(
+    enabled: &[String],
+    disabled: &[String],
+    out: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
+    writeln!(out, "Enabled by your configuration linters:")?;
+    for name in enabled {
+        let desc = linter_description(name);
+        if desc.is_empty() {
+            writeln!(out, "{name}")?;
+        } else {
+            writeln!(out, "{name}: {desc}")?;
+        }
+    }
+    writeln!(out)?;
+    writeln!(out, "Disabled by your configuration linters:")?;
+    for name in disabled {
+        let desc = linter_description(name);
+        if desc.is_empty() {
+            writeln!(out, "{name}")?;
+        } else {
+            writeln!(out, "{name}: {desc}")?;
+        }
+    }
+    Ok(())
 }
 
 /// Resolves a list of linter names to analyzers. Unknown names are skipped with
@@ -39,10 +129,19 @@ pub fn resolve_linters(
     names: &[String],
     on_unknown: &mut dyn FnMut(&str),
 ) -> Vec<&'static Analyzer> {
+    resolve_linters_with_settings(names, &LinterSettings::default(), on_unknown)
+}
+
+/// Like [`resolve_linters`], applying per-linter settings filters.
+pub fn resolve_linters_with_settings(
+    names: &[String],
+    settings: &LinterSettings,
+    on_unknown: &mut dyn FnMut(&str),
+) -> Vec<&'static Analyzer> {
     let mut out = Vec::new();
     let mut seen = HashMap::<&str, ()>::new();
     for name in names {
-        let Some(analyzers) = analyzers_for_linter(name) else {
+        let Some(analyzers) = analyzers_for_linter_with_settings(name, settings) else {
             on_unknown(name);
             continue;
         };
@@ -70,9 +169,31 @@ pub fn standard_analyzers() -> Vec<&'static Analyzer> {
     analyzers
 }
 
+/// Map an analyzer pass name (`errcheck`, `SA1004`, `printf`, …) to its
+/// golangci linter name (`errcheck`, `staticcheck`, `govet`, …).
+///
+/// Unknown analyzers are returned unchanged (so exclude-rules that name a
+/// pass directly still work).
+pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
+    static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    let map = MAP.get_or_init(|| {
+        let mut m = HashMap::new();
+        for &linter in STANDARD_LINTER_NAMES {
+            if let Some(analyzers) = analyzers_for_linter(linter) {
+                for a in analyzers {
+                    m.insert(a.name, linter);
+                }
+            }
+        }
+        m
+    });
+    map.get(analyzer).copied().unwrap_or(analyzer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{GovetSettings, LinterSettings, StaticcheckSettings};
 
     #[test]
     fn standard_includes_staticcheck() {
@@ -96,5 +217,35 @@ mod tests {
         let analyzers = resolve_linters(&["nope".into()], &mut |n| unknown.push(n.to_string()));
         assert!(analyzers.is_empty());
         assert_eq!(unknown, vec!["nope"]);
+    }
+
+    #[test]
+    fn govet_settings_disable_all_enable_printf() {
+        let settings = LinterSettings {
+            govet: GovetSettings {
+                disable_all: true,
+                enable: vec!["printf".into()],
+                ..GovetSettings::default()
+            },
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("govet", &settings).expect("govet");
+        assert_eq!(analyzers.len(), 1);
+        assert_eq!(analyzers[0].name, "printf");
+    }
+
+    #[test]
+    fn staticcheck_settings_disable_check() {
+        let settings = LinterSettings {
+            staticcheck: StaticcheckSettings {
+                checks: Some(vec!["all".into(), "-SA1004".into()]),
+            },
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("staticcheck", &settings).expect("staticcheck");
+        assert!(!analyzers.iter().any(|a| a.name == "SA1004"));
+        assert!(analyzers.iter().any(|a| a.name == "SA1000"));
     }
 }

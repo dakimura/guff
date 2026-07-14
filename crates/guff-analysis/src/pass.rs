@@ -16,6 +16,7 @@ use guff_types::Sizes;
 use crate::analyzer::{AnalysisResult, Analyzer};
 use crate::diagnostic::Diagnostic;
 use crate::facts::{Fact, FactStore, ObjectFact, PackageFact};
+use crate::settings::SettingsBag;
 
 /// Information passed to an analyzer's run function.
 ///
@@ -33,6 +34,7 @@ pub struct Pass<'a> {
     facts: &'a mut FactStore,
     other_files: Vec<String>,
     ignored_files: Vec<String>,
+    settings: Arc<SettingsBag>,
 }
 
 /// Inputs needed to construct a [`Pass`].
@@ -46,6 +48,8 @@ pub struct PassInput<'a> {
     pub diagnostics: &'a mut Vec<Diagnostic>,
     pub result_of: HashMap<&'static str, Arc<AnalysisResult>>,
     pub facts: &'a mut FactStore,
+    /// Per-linter settings for this analysis run (shared across packages).
+    pub settings: Arc<SettingsBag>,
 }
 
 impl<'a> PassInput<'a> {
@@ -75,6 +79,7 @@ impl<'a> PassInput<'a> {
             facts: self.facts,
             other_files,
             ignored_files,
+            settings: self.settings,
         }
     }
 }
@@ -114,6 +119,16 @@ impl<'a> Pass<'a> {
 
     pub fn ignored_files(&self) -> &[String] {
         &self.ignored_files
+    }
+
+    /// Shared settings bag for this run (see [`SettingsBag`]).
+    pub fn settings_bag(&self) -> &SettingsBag {
+        &self.settings
+    }
+
+    /// Typed settings previously stored under `key` (usually a linter name).
+    pub fn settings<T: Any + Send + Sync>(&self, key: &str) -> Option<&T> {
+        self.settings.get(key)
     }
 
     pub fn result_of<T: Any>(&self, analyzer: &'static Analyzer) -> Option<&T> {
@@ -243,6 +258,7 @@ mod tests {
             diagnostics: &mut diags,
             result_of: HashMap::new(),
             facts: &mut facts,
+            settings: Arc::new(crate::SettingsBag::default()),
         }
         .build();
 
@@ -269,6 +285,7 @@ mod tests {
             diagnostics: &mut diags,
             result_of: HashMap::new(),
             facts: &mut facts,
+            settings: Arc::new(crate::SettingsBag::default()),
         }
         .build();
 

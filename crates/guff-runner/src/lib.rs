@@ -12,7 +12,7 @@ mod load_mode;
 mod memory;
 mod runner;
 
-pub use action::{analyze, Action, Graph};
+pub use action::{analyze, analyze_with_settings, Action, Graph};
 pub use load_mode::{
     ast_only_load_mode, infer_load_mode, load_mode_for_analyzers, types_load_mode,
     union_load_modes,

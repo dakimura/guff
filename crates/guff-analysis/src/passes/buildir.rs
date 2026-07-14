@@ -155,6 +155,7 @@ mod tests {
             diagnostics: &mut diags,
             result_of: std::collections::HashMap::new(),
             facts: &mut facts,
+            settings: std::sync::Arc::new(crate::SettingsBag::default()),
         }
         .build();
 

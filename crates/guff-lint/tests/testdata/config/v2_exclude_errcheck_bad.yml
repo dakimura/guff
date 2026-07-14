@@ -1,0 +1,14 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+issues:
+  exclude-use-default: false
+  exclude-dirs-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    - path: "bad\\.go"
+      linters:
+        - errcheck

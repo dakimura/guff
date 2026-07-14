@@ -15,6 +15,7 @@ mod facts;
 mod pass;
 mod pattern_match;
 pub mod passes;
+mod settings;
 mod ssa_util;
 mod validate;
 
@@ -33,4 +34,5 @@ pub use facts::{
     Fact, FactStore, FactTypeId, ObjectFact, PackageFact, StringFact,
 };
 pub use pass::{Pass, PassInput};
+pub use settings::SettingsBag;
 pub use validate::{validate, ValidateError};

@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use guff::position::FileSet;
 use guff_analysis::{
-    AnalysisResult, Analyzer, Diagnostic, FactStore, PassInput, validate, ValidateError,
+    AnalysisResult, Analyzer, Diagnostic, FactStore, PassInput, SettingsBag, validate,
+    ValidateError,
 };
 use guff_packages::Package;
 use guff_types::default_sizes;
@@ -21,6 +22,7 @@ pub struct Action {
     pub package: Arc<Package>,
     pub is_root: std::sync::atomic::AtomicBool,
     pub deps: Vec<Arc<Action>>,
+    settings: Arc<SettingsBag>,
     state: Mutex<ActionState>,
 }
 
@@ -118,6 +120,7 @@ impl Action {
             diagnostics: &mut diagnostics,
             result_of,
             facts: &mut facts,
+            settings: Arc::clone(&self.settings),
         }
         .build();
 
@@ -180,6 +183,21 @@ pub fn analyze(
     packages: &[Arc<Package>],
     sequential: bool,
 ) -> Result<Graph, ValidateError> {
+    analyze_with_settings(
+        analyzers,
+        packages,
+        sequential,
+        Arc::new(SettingsBag::default()),
+    )
+}
+
+/// Like [`analyze`], but forwards a shared [`SettingsBag`] into every [`Pass`].
+pub fn analyze_with_settings(
+    analyzers: &[&'static Analyzer],
+    packages: &[Arc<Package>],
+    sequential: bool,
+    settings: Arc<SettingsBag>,
+) -> Result<Graph, ValidateError> {
     validate(analyzers)?;
 
     let mut actions: HashMap<(*const Analyzer, String), Arc<Action>> = HashMap::new();
@@ -188,6 +206,7 @@ pub fn analyze(
     fn mk_action(
         analyzer: &'static Analyzer,
         package: Arc<Package>,
+        settings: &Arc<SettingsBag>,
         actions: &mut HashMap<(*const Analyzer, String), Arc<Action>>,
         all: &mut Vec<Arc<Action>>,
     ) -> Arc<Action> {
@@ -198,13 +217,25 @@ pub fn analyze(
 
         let mut deps = Vec::new();
         for req in &analyzer.requires {
-            deps.push(mk_action(req, Arc::clone(&package), actions, all));
+            deps.push(mk_action(
+                req,
+                Arc::clone(&package),
+                settings,
+                actions,
+                all,
+            ));
             if !req.fact_types.is_empty() {
                 let mut paths: Vec<String> = package.imports.keys().cloned().collect();
                 paths.sort();
                 for path in paths {
                     if let Some(dep_pkg) = package.imports.get(&path) {
-                        deps.push(mk_action(req, Arc::clone(dep_pkg), actions, all));
+                        deps.push(mk_action(
+                            req,
+                            Arc::clone(dep_pkg),
+                            settings,
+                            actions,
+                            all,
+                        ));
                     }
                 }
             }
@@ -215,7 +246,13 @@ pub fn analyze(
             paths.sort();
             for path in paths {
                 if let Some(dep_pkg) = package.imports.get(&path) {
-                    deps.push(mk_action(analyzer, Arc::clone(dep_pkg), actions, all));
+                    deps.push(mk_action(
+                        analyzer,
+                        Arc::clone(dep_pkg),
+                        settings,
+                        actions,
+                        all,
+                    ));
                 }
             }
         }
@@ -225,6 +262,7 @@ pub fn analyze(
             package,
             is_root: std::sync::atomic::AtomicBool::new(false),
             deps,
+            settings: Arc::clone(settings),
             state: Mutex::new(ActionState::default()),
         });
         actions.insert(key, Arc::clone(&act));
@@ -235,7 +273,13 @@ pub fn analyze(
     let mut roots = Vec::new();
     for &analyzer in analyzers {
         for pkg in packages {
-            let act = mk_action(analyzer, Arc::clone(pkg), &mut actions, &mut all);
+            let act = mk_action(
+                analyzer,
+                Arc::clone(pkg),
+                &settings,
+                &mut actions,
+                &mut all,
+            );
             act.is_root.store(true, Ordering::Relaxed);
             roots.push(act);
         }

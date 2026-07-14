@@ -102,3 +102,76 @@ fn migrate_rejects_v2_without_skip() {
     let err = migrate_config_file(&dest, false).unwrap_err();
     assert!(err.to_string().contains("already v2"));
 }
+
+#[test]
+fn parse_v2_full_issues_run_severity_output() {
+    let contents = fs::read_to_string(testdata("v2_full_issues.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    assert!(cfg.is_v2());
+
+    let issues = cfg.issues();
+    assert!(!issues.exclude_use_default);
+    assert_eq!(issues.exclude_rules.len(), 3);
+    assert_eq!(issues.exclude_rules[0].path.as_deref(), Some("_test\\.go"));
+    assert_eq!(
+        issues.exclude_rules[0].linters,
+        vec!["errcheck".to_string()]
+    );
+    assert_eq!(
+        issues.exclude_rules[2].path_except.as_deref(),
+        Some("_test\\.go")
+    );
+    assert_eq!(issues.max_issues_per_linter, 0);
+
+    let run = cfg.run();
+    assert_eq!(run.build_tags, vec!["integration".to_string()]);
+    assert_eq!(run.tests, Some(true));
+    assert_eq!(run.timeout.as_deref(), Some("5m"));
+    assert_eq!(run.concurrency, Some(4));
+    assert_eq!(run.go.as_deref(), Some("1.22"));
+
+    let severity = cfg.severity();
+    assert_eq!(severity.default_severity.as_deref(), Some("warning"));
+    assert_eq!(severity.rules.len(), 1);
+    assert_eq!(severity.rules[0].severity, "error");
+
+    assert_eq!(cfg.output().sort_results, Some(true));
+}
+
+#[test]
+fn exclude_rules_filter_errcheck_on_bad_go() {
+    use guff_lint::{IssueFilter, IssuesConfig, SeverityConfig};
+
+    let contents = fs::read_to_string(testdata("v2_exclude_errcheck_bad.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let filter = IssueFilter::from_config(cfg.issues(), cfg.severity());
+
+    let mk = |file: &str, linter: &str| guff_lint::Issue {
+        from_linter: linter.into(),
+        analyzer: linter.into(),
+        text: "unchecked error".into(),
+        severity: String::new(),
+        filename: file.into(),
+        line: 8,
+        column: 2,
+        source_line: None,
+        diagnostic: guff_analysis::Diagnostic {
+            message: "unchecked error".into(),
+            ..Default::default()
+        },
+    };
+
+    let kept = filter.apply(
+        vec![
+            mk("/proj/pkg/bad.go", "errcheck"),
+            mk("/proj/pkg/ok.go", "errcheck"),
+        ],
+        &[],
+    );
+    assert_eq!(kept.len(), 1);
+    assert!(kept[0].filename.ends_with("ok.go"));
+
+    // Ensure IssuesConfig type is exercised as a configured filter, not Default.
+    let _ = IssuesConfig::default();
+    let _ = SeverityConfig::default();
+}

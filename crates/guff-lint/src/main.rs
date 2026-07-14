@@ -2,11 +2,15 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use guff_lint::{
-    discover_config, load_config, migrate_config_file, resolve_linters, run_and_print,
-    standard_analyzers, ConfigError, LinterDefault, LinterSelection, LintOptions,
+    discover_config, format_linters_listing, guff_version, is_meta_linter, load_config,
+    migrate_config_file, parse_go_duration, partition_linters, resolve_linters_with_settings,
+    resolve_out_formats, run_and_print, version_banner, ConfigError, ConfigFile, IssueFilter,
+    LinterDefault, LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputFormatKind,
+    RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
 
 #[derive(Parser)]
@@ -22,6 +26,10 @@ enum Commands {
     Run(RunArgs),
     /// Migrate a golangci-lint v1 config file to v2 format.
     Migrate(MigrateArgs),
+    /// Display the guff version.
+    Version(VersionArgs),
+    /// List enabled / disabled linters for the current configuration.
+    Linters(LintersArgs),
 }
 
 #[derive(Parser)]
@@ -53,6 +61,30 @@ struct RunArgs {
     /// Run analyzers sequentially (tests / deterministic output).
     #[arg(long)]
     sequential: bool,
+
+    /// Exit code when at least one issue is found (default: 1).
+    #[arg(long, default_value_t = 1)]
+    issues_exit_code: i32,
+
+    /// Build tags passed to `go list` (repeatable; merged with `run.build-tags`).
+    #[arg(long = "build-tags")]
+    build_tags: Vec<String>,
+
+    /// Timeout for the whole run (Go duration: `1m`, `5m`, `30s`). `0` disables.
+    /// Default: config `run.timeout`, else `1m`.
+    #[arg(long)]
+    timeout: Option<String>,
+
+    /// Number of concurrent workers (`run.concurrency`). `1` forces sequential.
+    /// True multi-core parallel execution is deferred (R9); values > 1 are accepted
+    /// for CLI/config compatibility.
+    #[arg(short = 'j', long = "concurrency")]
+    concurrency: Option<usize>,
+
+    /// Output format (`text`, `line-number`; repeatable). Default: `text`.
+    /// JSON / checkstyle / sarif arrive in later milestones (R7/R8).
+    #[arg(long = "out-format", value_name = "FORMAT")]
+    out_format: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -66,11 +98,45 @@ struct MigrateArgs {
     skip_validation: bool,
 }
 
+#[derive(Parser)]
+struct VersionArgs {
+    /// Display only the version number.
+    #[arg(long)]
+    short: bool,
+}
+
+#[derive(Parser)]
+struct LintersArgs {
+    /// Read config from this path (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Do not read a configuration file.
+    #[arg(long)]
+    no_config: bool,
+
+    /// Preset linter set (`standard` = golangci-lint v2 default).
+    #[arg(long, visible_alias = "default")]
+    preset: Option<String>,
+
+    /// Enable an additional linter by name (repeatable).
+    #[arg(long = "enable")]
+    enable: Vec<String>,
+
+    /// Disable a linter from the preset (repeatable).
+    #[arg(long = "disable")]
+    disable: Vec<String>,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         Commands::Run(args) => match run_cmd(args) {
             Ok(code) => ExitCode::from(code as u8),
+            Err(err @ RunError::Timeout) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(EXIT_TIMEOUT as u8)
+            }
             Err(err) => {
                 eprintln!("guff: {err}");
                 ExitCode::from(2)
@@ -83,41 +149,139 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Commands::Version(args) => {
+            if args.short {
+                println!("{}", guff_version());
+            } else {
+                println!("{}", version_banner());
+            }
+            ExitCode::SUCCESS
+        }
+        Commands::Linters(args) => match linters_cmd(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
     }
 }
 
-fn run_cmd(args: RunArgs) -> Result<i32, guff_lint::RunError> {
-    let selection = load_linter_selection(&args)?;
+fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
+    let loaded = load_run_config(
+        args.no_config,
+        args.config.as_ref(),
+        args.preset.as_deref(),
+        &args.enable,
+        &args.disable,
+    )?;
+    let selection = loaded.selection;
     let linter_names = selection.resolve_names();
+    let settings = &loaded.linter_settings;
+
+    let report_unused_nolint = linter_names.iter().any(|n| n == NOLINTLINT_NAME);
 
     let mut unknown = Vec::new();
     let analyzers = if linter_names.is_empty() && args.enable.is_empty() {
-        standard_analyzers()
+        // Apply settings filters even on the implicit standard preset.
+        resolve_linters_with_settings(
+            &guff_lint::STANDARD_LINTER_NAMES
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
+            settings,
+            &mut |_| {},
+        )
     } else {
-        resolve_linters(&linter_names, &mut |n| unknown.push(n.to_string()))
+        let real: Vec<String> = linter_names
+            .iter()
+            .filter(|n| !is_meta_linter(n))
+            .cloned()
+            .collect();
+        resolve_linters_with_settings(&real, settings, &mut |n| unknown.push(n.to_string()))
     };
 
     for name in &unknown {
         eprintln!("guff: linter {name:?} is not available yet");
     }
 
-    if analyzers.is_empty() {
+    if analyzers.is_empty() && !report_unused_nolint {
         eprintln!("guff: no linters to run");
         return Ok(0);
     }
 
+    let mut build_tags = loaded.build_tags;
+    for t in &args.build_tags {
+        if !build_tags.iter().any(|x| x == t) {
+            build_tags.push(t.clone());
+        }
+    }
+
+    let mut filter = loaded.filter;
+    filter.report_unused_nolint = report_unused_nolint;
+
+    let timeout = resolve_timeout(args.timeout.as_deref(), loaded.timeout.as_deref())?;
+    let concurrency = args.concurrency.or(loaded.concurrency);
+    // DEFERRED (R9): concurrency > 1 does not yet spawn a thread pool.
+    let sequential = args.sequential || concurrency == Some(1);
+
+    let out_formats = if args.out_format.is_empty() {
+        loaded.out_formats
+    } else {
+        resolve_out_formats(&args.out_format).map_err(RunError::Message)?
+    };
+
     run_and_print(&LintOptions {
         patterns: args.patterns,
         analyzers,
-        sequential: args.sequential,
+        sequential,
+        issues_exit_code: args.issues_exit_code,
+        build_tags,
+        tests: loaded.tests,
+        filter,
+        settings: settings.to_bag(),
+        timeout,
+        concurrency,
+        out_formats,
     })
 }
 
-fn load_linter_selection(args: &RunArgs) -> Result<LinterSelection, ConfigError> {
-    let file_selection = if args.no_config {
+/// Resolve timeout: CLI > config > default `1m`. `0` disables.
+fn resolve_timeout(
+    cli: Option<&str>,
+    config: Option<&str>,
+) -> Result<Option<Duration>, RunError> {
+    let raw = cli.or(config).unwrap_or(DEFAULT_TIMEOUT);
+    let d = parse_go_duration(raw).map_err(|e| RunError::Message(format!("invalid --timeout: {e}")))?;
+    if d.is_zero() {
+        Ok(None)
+    } else {
+        Ok(Some(d))
+    }
+}
+
+struct LoadedRun {
+    selection: LinterSelection,
+    filter: IssueFilter,
+    build_tags: Vec<String>,
+    tests: bool,
+    linter_settings: LinterSettings,
+    timeout: Option<String>,
+    concurrency: Option<usize>,
+    out_formats: Vec<OutputFormatKind>,
+}
+
+fn load_run_config(
+    no_config: bool,
+    config: Option<&PathBuf>,
+    preset: Option<&str>,
+    enable: &[String],
+    disable: &[String],
+) -> Result<LoadedRun, ConfigError> {
+    let file: Option<ConfigFile> = if no_config {
         None
     } else {
-        let path = match &args.config {
+        let path = match config {
             Some(p) => Some(p.clone()),
             None => discover_config(&std::env::current_dir().unwrap_or_default()),
         };
@@ -127,22 +291,145 @@ fn load_linter_selection(args: &RunArgs) -> Result<LinterSelection, ConfigError>
         }
     };
 
-    let base = file_selection
+    let base = file
         .as_ref()
         .map(|c| c.linter_selection())
         .unwrap_or_default();
 
-    let cli_default = args
-        .preset
-        .as_deref()
-        .map(|p| {
-            LinterDefault::parse(p).unwrap_or_else(|| {
-                eprintln!("guff: unknown preset {p:?}, using standard");
-                LinterDefault::Standard
-            })
-        });
+    let cli_default = preset.map(|p| {
+        LinterDefault::parse(p).unwrap_or_else(|| {
+            eprintln!("guff: unknown preset {p:?}, using standard");
+            LinterDefault::Standard
+        })
+    });
 
-    Ok(base.with_cli_overrides(cli_default, &args.enable, &args.disable))
+    let selection = base.with_cli_overrides(cli_default, enable, disable);
+
+    let (issues, severity, run, output, linter_settings) = match &file {
+        Some(c) => (
+            c.issues().clone(),
+            c.severity().clone(),
+            c.run().clone(),
+            c.output().clone(),
+            LinterSettings::from_yaml(c.linter_settings_raw()),
+        ),
+        None => (
+            IssuesConfig::default(),
+            SeverityConfig::default(),
+            Default::default(),
+            Default::default(),
+            LinterSettings::default(),
+        ),
+    };
+
+    // --no-config: still apply empty/default filter (no path excludes from file).
+    let filter = if no_config {
+        IssueFilter::from_config(
+            &IssuesConfig {
+                exclude_use_default: false,
+                max_issues_per_linter: 0,
+                max_same_issues: 0,
+                exclude_dirs_use_default: Some(false),
+                ..IssuesConfig::default()
+            },
+            &SeverityConfig::default(),
+        )
+    } else {
+        IssueFilter::from_config(&issues, &severity)
+    };
+
+    // Config `output.formats` / `output.format` — CLI `--out-format` overrides.
+    // Only `text`/`line-number` are applied today; other names fall back to text with a note.
+    let out_formats = formats_from_output_config(&output);
+
+    Ok(LoadedRun {
+        selection,
+        filter,
+        build_tags: run.build_tags,
+        tests: run.tests.unwrap_or(false),
+        linter_settings,
+        timeout: run.timeout,
+        concurrency: run.concurrency.map(|n| n.max(0) as usize),
+        out_formats,
+    })
+}
+
+/// Best-effort parse of `output.formats` / deprecated `output.format`.
+/// Unknown or unimplemented formats are skipped with a stderr note (config must not fail the run).
+fn formats_from_output_config(output: &guff_lint::OutputConfig) -> Vec<OutputFormatKind> {
+    let mut names: Vec<String> = Vec::new();
+
+    if let Some(legacy) = &output.format {
+        if !legacy.is_empty() {
+            names.push(legacy.clone());
+        }
+    }
+
+    match &output.formats {
+        serde_yaml::Value::Null => {}
+        serde_yaml::Value::String(s) => {
+            for part in s.split(',') {
+                let part = part.trim();
+                if !part.is_empty() {
+                    // `text:path` → name only for now.
+                    names.push(part.split(':').next().unwrap_or(part).to_string());
+                }
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                match item {
+                    serde_yaml::Value::String(s) => names.push(s.clone()),
+                    serde_yaml::Value::Mapping(m) => {
+                        if let Some(serde_yaml::Value::String(f)) =
+                            m.get(serde_yaml::Value::String("format".into()))
+                        {
+                            names.push(f.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if names.is_empty() {
+        return vec![OutputFormatKind::Text];
+    }
+
+    let mut kinds = Vec::new();
+    for name in &names {
+        match OutputFormatKind::parse(name) {
+            Ok(k) => {
+                if !kinds.contains(&k) {
+                    kinds.push(k);
+                }
+            }
+            Err(e) => {
+                eprintln!("guff: ignoring output format {name:?}: {e}");
+            }
+        }
+    }
+    if kinds.is_empty() {
+        vec![OutputFormatKind::Text]
+    } else {
+        kinds
+    }
+}
+
+fn linters_cmd(args: LintersArgs) -> Result<(), ConfigError> {
+    let loaded = load_run_config(
+        args.no_config,
+        args.config.as_ref(),
+        args.preset.as_deref(),
+        &args.enable,
+        &args.disable,
+    )?;
+    let (enabled, disabled) = partition_linters(&loaded.selection);
+    format_linters_listing(&enabled, &disabled, &mut std::io::stdout())
+        .map_err(|e| ConfigError::Io(e))?;
+    Ok(())
 }
 
 fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {

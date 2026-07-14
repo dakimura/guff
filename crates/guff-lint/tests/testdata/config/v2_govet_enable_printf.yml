@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - printf

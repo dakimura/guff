@@ -1,0 +1,48 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  disable:
+    - unused
+run:
+  build-tags:
+    - integration
+  tests: true
+  timeout: 5m
+  concurrency: 4
+  go: "1.22"
+issues:
+  exclude-use-default: false
+  exclude-dirs-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude:
+    - "should be ignored by text"
+  exclude-dirs:
+    - third_party$
+  exclude-files:
+    - ".*\\.generated\\.go$"
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - errcheck
+    - path: "vendor/"
+      text: "SA1000"
+      linters:
+        - staticcheck
+    - path-except: "_test\\.go"
+      linters:
+        - funlen
+      source: "^//go:generate "
+severity:
+  default-severity: warning
+  rules:
+    - linters:
+        - errcheck
+      severity: error
+output:
+  sort-results: true
+  path-prefix: ""
+  print-linter-name: true

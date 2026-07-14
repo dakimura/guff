@@ -5,10 +5,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use guff_analysis::{Analyzer, Diagnostic, ValidateError};
+use guff_analysis::{Analyzer, Diagnostic, SettingsBag, ValidateError};
 use guff_packages::{load, Config, LoadError, LoadMode, Package};
 
-use crate::action::{analyze, Graph};
+use crate::action::{analyze_with_settings, Graph};
 use crate::load_mode::load_mode_for_analyzers;
 use crate::memory::trim_packages;
 
@@ -21,6 +21,8 @@ pub struct RunnerOptions {
     ///
     /// See [`crate::memory`] and deferral PL06 for full `decUse` semantics.
     pub release_memory: bool,
+    /// Per-linter settings shared with every [`guff_analysis::Pass`].
+    pub settings: Arc<SettingsBag>,
 }
 
 impl Default for RunnerOptions {
@@ -28,6 +30,7 @@ impl Default for RunnerOptions {
         Self {
             sequential: false,
             release_memory: false,
+            settings: Arc::new(SettingsBag::default()),
         }
     }
 }
@@ -69,7 +72,12 @@ pub fn run_on_packages(
     packages: &[Arc<Package>],
     opts: &RunnerOptions,
 ) -> Result<RunResult, ValidateError> {
-    let graph = analyze(analyzers, packages, opts.sequential)?;
+    let graph = analyze_with_settings(
+        analyzers,
+        packages,
+        opts.sequential,
+        Arc::clone(&opts.settings),
+    )?;
     let mut pkgs = packages.to_vec();
     if opts.release_memory {
         let root_ids: Vec<String> = packages.iter().map(|p| p.id.clone()).collect();

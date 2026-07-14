@@ -144,15 +144,15 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `migrate` のみ | `linters`/`version`/`help`/`cache`/`fmt` 無し |
-| run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential` | `--fix`, `--out-format`, `--timeout`, `-j/--concurrency`, `--issues-exit-code`, `--build-tags` 無し |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索、v1/v2 の **linter 選択のみ**解釈 | `issues`(exclude-rules 等) / `severity` / `run` / `output` / `linters-settings` は**読むが未適用**（opaque 格納のみ） |
+| サブコマンド | `run`, `migrate`, `version`, `linters` | `help`/`cache`/`fmt` 無し |
+| run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format` | `--fix` 無し。`--out-format` は `text`/`line-number` のみ（JSON は R7）。`-j>1` の真の並列は R9 待ち |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency: 1` で sequential。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text のみ実装） | `issues.new`/`new-from-rev`（diff 除外）・真の `run.concurrency` 並列（R9）・JSON 等（R7/R8）・errcheck exclude-functions 等は未 |
 | プリセット | `standard`/`fast`/`all`/`none`。ただし linter が 5 つしか無いので `standard`==`all`、`fast` は staticcheck を抜くだけ | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
-| 出力 | テキストのみ・**stderr** に出力 | JSON/colored/checkstyle/sarif/tab/github-actions 等・formatter 抽象・stdout 出力が無い |
-| nolint | **未実装**（`//nolint` を一切解釈しない） | `//nolint[:linter]` と `nolintlint` が無い |
+| 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）。stdout | JSON（R7）・colored/checkstyle/sarif/tab/github-actions（R8）未 |
+| nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | **無し**（毎回コールド） | 永続キャッシュ（`GOLANGCI_LINT_CACHE` 相当・増分再解析）が無い |
 | 並列 | 名前に反して**実質シーケンシャル**（PL11 未了。`Package`/AST が `!Sync`） | マルチコア並列が無い |
-| 終了コード | 0=クリーン / 1=指摘あり / 2=エラー（固定） | `--issues-exit-code` で変更不可 |
+| 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | **未実装**（`SuggestedFix`/`TextEdit` のデータ型はあるが誰も適用しない） | `--fix` が無い |
 
 ---
@@ -254,7 +254,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 > ゴール: 既存プロジェクトが `guff run ./...` に置き換えても「設定が効く」。
 
-#### R1. 診断を stdout に出し、終了コードを設定可能にする
+#### R1. 診断を stdout に出し、終了コードを設定可能にする ✅ 完了 (2026-07-14)
 - **目的/なぜ**: golangci-lint は指摘を stdout に出し、CI は stdout をパースする。現状 guff は stderr。
   また `--issues-exit-code`（デフォルト 1）が無いと CI 制御に使えない。
 - **どこ**: `crates/guff-lint/src/lib.rs`（`print_text`, `run_and_print`）, `src/main.rs`（`RunArgs`）。
@@ -262,8 +262,10 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   指摘ありのとき返す。(3) 内部エラーは 2 のまま。
 - **完了条件**: `guff run ... > out.txt` に指摘が入る。`--issues-exit-code 0` で指摘があっても 0 を返す。
 - **テスト**: `tests/` で stdout をキャプチャして assert、終了コードを検証。
+- **完了メモ**: `run_and_print` → stdout、`LintOptions::issues_exit_code` + CLI フラグ、
+  `tests/run_output_test.rs`（ライブラリ + CLI バイナリ）で検証。
 
-#### R2. `.golangci.yml` の完全パースと適用（issues / run / severity）
+#### R2. `.golangci.yml` の完全パースと適用（issues / run / severity） ✅ 完了 (2026-07-14)
 - **目的/なぜ**: 互換の中核。今は linter の enable/disable しか効かない。実プロジェクトは
   `issues.exclude-rules` などに強く依存している。
 - **どこ**: `crates/guff-lint/src/config.rs`（`ConfigV2`/`ConfigV1` に構造体追加）、
@@ -282,8 +284,14 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了条件**: 代表的な `.golangci.yml` を食わせてパースエラー無し。`exclude-rules` で特定ファイルの
   指摘が消える。
 - **テスト**: 設定 fixture（`testdata/config/*.yml`）+ その設定で期待される除外結果のスナップショット。
+- **完了メモ**: `IssuesConfig`/`RunConfig`/`SeverityConfig`/`OutputConfig` を serde パース。
+  `exclude.rs` の `IssueFilter` が dirs/files/text/rules/default-excludes/max-*/uniq-by-line/severity を適用。
+  `run.build-tags` → `go list -tags=...`、`run.tests` → `Config.tests`。
+  DEFERRED: `issues.new`/`new-from-rev`（git diff）。`run.timeout` は R5 で実効化。
+  `run.concurrency` の真の並列は R9。
+  テスト: `v2_full_issues.yml` パース、`v2_exclude_errcheck_bad.yml` + `tests/exclude_test.rs`。
 
-#### R3. `//nolint` ディレクティブと `nolintlint`
+#### R3. `//nolint` ディレクティブと `nolintlint` ✅ 完了 (2026-07-14)
 - **目的/なぜ**: 互換の必須項目。既存コードは `//nolint:...` で意図的に抑制している。
 - **前提**: AST がコメント位置を保持していること（**R32 の recording/ノード ID に依存する場合あり**。
   最低限、コメントの行番号が取れれば実装可能）。
@@ -295,8 +303,12 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   (3) `nolintlint`: 使われていない nolint・書式不正・説明必須(`require-explanation`) を報告。
 - **完了条件**: `//nolint:staticcheck` の行の staticcheck 指摘が消える。未使用 nolint を報告できる。
 - **テスト**: nolint 付き fixture で抑制を確認、`nolintlint` の testdata。
+- **完了メモ**: `NolintIndex` が `PARSE_COMMENTS` で再パースし、同一行 + 直前行の AST 展開レンジを構築。
+  `IssueFilter::apply` の exclude 後段で抑制。`--enable nolintlint` で未使用ディレクティブを報告。
+  DEFERRED: NeedsMachineOnly / NeedsExplanation / NeedsSpecific（書式・説明必須）。
+  テスト: `tests/nolint_test.rs` + `testdata/run/nolint_{errcheck,unused}`。
 
-#### R4. per-linter 設定（`linters-settings`）の各 analyzer への配線
+#### R4. per-linter 設定（`linters-settings`）の各 analyzer への配線 ✅ 完了 (2026-07-14)
 - **目的/なぜ**: `errcheck.check-blank`, `govet.enable/disable`, `staticcheck.checks`,
   `gocyclo.min-complexity` などが効かないと「互換」と言えない。
 - **どこ**: `guff-analysis` の `Analyzer`/`Pass` に設定を渡す仕組みを新設（例: `Pass` に
@@ -306,13 +318,25 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   (3) runner → Pass 経由で analyzer が参照。まず errcheck / govet / staticcheck の主要キーから。
 - **完了条件**: `errcheck: check-blank: true` で `_ = f()` が検出されるようになる（設定で挙動が変わる）。
 - **テスト**: 同じコードに対し設定違いで指摘が変わることを確認。
+- **完了メモ**: `guff_analysis::SettingsBag` を `Pass` / `RunnerOptions` に配線。
+  `guff-lint/src/settings.rs` が `linters.settings` / v1 `linters-settings` をパースし、
+  errcheck は Pass-time（`check-blank` / `check-type-assertions`）、govet は
+  `enable`/`disable`/`disable-all`/`enable-all`、staticcheck は `checks`（`all`/`-SAxxxx`）で
+  選択時フィルタ。DEFERRED: errcheck `exclude-functions` / `disable-default-exclusions`、
+  staticcheck initialisms 等、他 linter の settings。
+  テスト: `tests/settings_test.rs` + `testdata/config/v2_errcheck_check_blank.yml` 等。
 
-#### R5. 補助サブコマンドと run フラグ
+#### R5. 補助サブコマンドと run フラグ ✅ 完了 (2026-07-14)
 - **目的/なぜ**: `guff linters`（利用可能/有効な linter 一覧）, `guff version`, `--timeout`,
   `-j/--concurrency`, `--build-tags` は移行時に必ず使われる。
 - **どこ**: `crates/guff-lint/src/main.rs`。
 - **完了条件**: `guff linters` が enabled/available を表示。`guff version` がバージョンを出す。
 - **テスト**: 各サブコマンドの出力を assert。
+- **完了メモ**: `version`（`--short`）/ `linters`（config・`--preset`/`--enable`/`--disable` 反映の
+  Enabled/Disabled 一覧）。`--timeout` + `run.timeout`（Go duration、既定 `1m`、`0` で無効、超過で
+  exit 4）。`-j/--concurrency` + `run.concurrency`（`1` → sequential）。`--build-tags` は既存。
+  DEFERRED: concurrency > 1 の真の並列（→ R9）。
+  テスト: `tests/cli_test.rs`。
 
 ---
 
@@ -320,10 +344,15 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 > ゴール: CI が期待するフォーマットで出せる。少なくとも colored text と JSON。
 
-#### R6. formatter 抽象 + テキスト整形の移設
+#### R6. formatter 抽象 + テキスト整形の移設 ✅ 完了 (2026-07-14)
 - **どこ**: 新規 `crates/guff-lint/src/format/mod.rs`（`trait Formatter { fn print(&self, issues, w) }`）。
   既存 `format.rs` を `format/text.rs` に移す。`--out-format <name>`（複数指定可）を追加。
 - **完了条件**: `--out-format text` が現行と同じ出力。抽象越しに動く。
+- **完了メモ**: `Formatter` + `OutputFormatKind::Text` / `TextFormatter`。`--out-format`
+  （`text` / `line-number` / `colored-line-number`→text）。config `output.formats`/
+  `output.format` もベストエフォート適用（未実装名は stderr で無視）。
+  DEFERRED: JSON（R7）、色付き・ソース行下線・`format:path` 書き出し（R8）。
+  テスト: `tests/format_test.rs` + `format` ユニットテスト。
 
 #### R7. JSON 出力（golangci-lint スキーマ準拠）
 - **なぜ**: 最も使われる機械可読フォーマット。互換の要。
@@ -496,6 +525,12 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-14 | **R6 完了**: `Formatter` 抽象 + `format/text.rs` 移設、`--out-format text`（`line-number` 別名）。JSON/colored 等は R7/R8 DEFERRED。`tests/format_test.rs` |
+| 2026-07-14 | **R5 完了**: `guff version` / `guff linters`、`--timeout`（`run.timeout`・既定 1m・exit 4）、`-j/--concurrency`（`1` → sequential）。真の並列は R9 DEFERRED。`tests/cli_test.rs` |
+| 2026-07-14 | **R4 完了**: `linters.settings` 配線。`SettingsBag` → Pass、errcheck `check-blank`/`check-type-assertions`、govet enable/disable、staticcheck `checks`。exclude-functions 等は DEFERRED |
+| 2026-07-14 | **R3 完了**: `//nolint` / `//nolint:linter` フィルタ（同一行・直前行 AST 展開）+ `nolintlint` 未使用報告。書式/説明必須は DEFERRED |
+| 2026-07-14 | **R2 完了**: `.golangci.yml` の `issues`/`run`/`severity`/`output` パース + 除外後処理パイプライン（`exclude.rs`）。`exclude-rules` で指摘抑制、`run.build-tags`/`tests` を load に配線。diff 除外・timeout/concurrency 実効は DEFERRED |
+| 2026-07-14 | **R1 完了**: 診断を stdout へ出力、`--issues-exit-code`（既定 1）追加。`tests/run_output_test.rs` で検証 |
 | 2026-07-14 | 5 つの計画書（MIGRATION / PRE-LINTER-PLAN / LINTER-MIGRATION / STATICCHECK-MIGRATION / ADDING-ANALYZER）を本書に統合。§8 に golangci-lint 互換 + 高速化のロードマップ（R1–R23 / Milestone A–G）を追記 |
 | 2026-07-14 | 独立リポジトリ化（`dakimura/guff`）後、`guff run` を実 Go プログラムで安定化。型チェッカ 2 バグ（再帰ジェネリックの subst 無限再帰 / 符号なし定数の `^` 精度）修正。pattern エンジンのサブパターン照合破棄バグ + ワイルドカード/pkg 関数シンボル修正（SA4021 等の誤検出解消）。printf を引数個数・型照合まで実装し `go vet` 一致。全 1806 テスト green |
 | 2026-07-14 | standard プリセット完走: errcheck / ineffassign / unused 本実装、staticcheck 137 analyzers、govet 29/29 |

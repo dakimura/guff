@@ -144,6 +144,219 @@ pub struct ConfigV2 {
     pub linters: LintersV2,
     #[serde(default, skip_serializing_if = "FormattersV2::is_empty")]
     pub formatters: FormattersV2,
+    #[serde(default, skip_serializing_if = "IssuesConfig::is_default")]
+    pub issues: IssuesConfig,
+    #[serde(default, skip_serializing_if = "RunConfig::is_default")]
+    pub run: RunConfig,
+    #[serde(default, skip_serializing_if = "SeverityConfig::is_default")]
+    pub severity: SeverityConfig,
+    #[serde(default, skip_serializing_if = "OutputConfig::is_default")]
+    pub output: OutputConfig,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_max_issues_per_linter() -> i32 {
+    50
+}
+
+fn default_max_same_issues() -> i32 {
+    3
+}
+
+/// `issues` section (golangci-lint v1 / v2 top-level).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssuesConfig {
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default, rename = "exclude-rules")]
+    pub exclude_rules: Vec<ExcludeRule>,
+    #[serde(default, rename = "exclude-dirs")]
+    pub exclude_dirs: Vec<String>,
+    #[serde(default, rename = "exclude-files")]
+    pub exclude_files: Vec<String>,
+    #[serde(default = "default_true", rename = "exclude-use-default")]
+    pub exclude_use_default: bool,
+    #[serde(default, rename = "exclude-case-sensitive")]
+    pub exclude_case_sensitive: bool,
+    #[serde(default, rename = "exclude-dirs-use-default")]
+    pub exclude_dirs_use_default: Option<bool>,
+    #[serde(default = "default_max_issues_per_linter", rename = "max-issues-per-linter")]
+    pub max_issues_per_linter: i32,
+    #[serde(default = "default_max_same_issues", rename = "max-same-issues")]
+    pub max_same_issues: i32,
+    #[serde(default, rename = "uniq-by-line")]
+    pub uniq_by_line: Option<bool>,
+    /// DEFERRED: diff-based filtering (→ R2 follow-up / processor port).
+    #[serde(default)]
+    pub new: bool,
+    #[serde(default, rename = "new-from-rev")]
+    pub new_from_rev: Option<String>,
+    #[serde(default, rename = "new-from-merge-base")]
+    pub new_from_merge_base: Option<String>,
+    #[serde(default, rename = "new-from-patch")]
+    pub new_from_patch: Option<String>,
+    #[serde(default)]
+    pub include: Vec<String>,
+}
+
+impl Default for IssuesConfig {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            exclude_rules: Vec::new(),
+            exclude_dirs: Vec::new(),
+            exclude_files: Vec::new(),
+            exclude_use_default: true,
+            exclude_case_sensitive: false,
+            exclude_dirs_use_default: None,
+            max_issues_per_linter: 50,
+            max_same_issues: 3,
+            uniq_by_line: None,
+            new: false,
+            new_from_rev: None,
+            new_from_merge_base: None,
+            new_from_patch: None,
+            include: Vec::new(),
+        }
+    }
+}
+
+impl IssuesConfig {
+    fn is_default(&self) -> bool {
+        self.exclude.is_empty()
+            && self.exclude_rules.is_empty()
+            && self.exclude_dirs.is_empty()
+            && self.exclude_files.is_empty()
+            && self.exclude_use_default
+            && !self.exclude_case_sensitive
+            && self.exclude_dirs_use_default.is_none()
+            && self.max_issues_per_linter == 50
+            && self.max_same_issues == 3
+            && self.uniq_by_line.is_none()
+            && !self.new
+            && self.new_from_rev.is_none()
+            && self.new_from_merge_base.is_none()
+            && self.new_from_patch.is_none()
+            && self.include.is_empty()
+    }
+}
+
+/// One `issues.exclude-rules` entry.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExcludeRule {
+    #[serde(default)]
+    pub linters: Vec<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default, rename = "path-except")]
+    pub path_except: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+/// `run` section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RunConfig {
+    #[serde(default, rename = "build-tags")]
+    pub build_tags: Vec<String>,
+    #[serde(default)]
+    pub tests: Option<bool>,
+    #[serde(default)]
+    pub go: Option<String>,
+    /// Enforced whole-run deadline (`--timeout` / default `1m`).
+    #[serde(default)]
+    pub timeout: Option<String>,
+    /// DEFERRED full effect until R9 (true parallelism); `1` forces sequential in R5.
+    #[serde(default)]
+    pub concurrency: Option<i32>,
+    #[serde(default, rename = "issues-exit-code")]
+    pub issues_exit_code: Option<i32>,
+    #[serde(default, rename = "modules-download-mode")]
+    pub modules_download_mode: Option<String>,
+}
+
+impl RunConfig {
+    fn is_default(&self) -> bool {
+        self.build_tags.is_empty()
+            && self.tests.is_none()
+            && self.go.is_none()
+            && self.timeout.is_none()
+            && self.concurrency.is_none()
+            && self.issues_exit_code.is_none()
+            && self.modules_download_mode.is_none()
+    }
+}
+
+/// `severity` section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SeverityConfig {
+    #[serde(default, rename = "default-severity")]
+    pub default_severity: Option<String>,
+    #[serde(default, rename = "case-sensitive")]
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub rules: Vec<SeverityRule>,
+}
+
+impl SeverityConfig {
+    fn is_default(&self) -> bool {
+        self.default_severity.is_none() && !self.case_sensitive && self.rules.is_empty()
+    }
+}
+
+/// One `severity.rules` entry.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SeverityRule {
+    #[serde(default)]
+    pub linters: Vec<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default, rename = "path-except")]
+    pub path_except: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub severity: String,
+}
+
+/// `output` section. `formats` / deprecated `format` feed `--out-format` resolution (R6).
+/// JSON and other formatters: R7/R8.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OutputConfig {
+    #[serde(default)]
+    pub formats: serde_yaml::Value,
+    #[serde(default, rename = "print-issued-lines")]
+    pub print_issued_lines: Option<bool>,
+    #[serde(default, rename = "print-linter-name")]
+    pub print_linter_name: Option<bool>,
+    #[serde(default, rename = "sort-results")]
+    pub sort_results: Option<bool>,
+    #[serde(default, rename = "path-prefix")]
+    pub path_prefix: Option<String>,
+    #[serde(default, rename = "show-stats")]
+    pub show_stats: Option<bool>,
+    /// Deprecated single-format string.
+    #[serde(default)]
+    pub format: Option<String>,
+}
+
+impl OutputConfig {
+    fn is_default(&self) -> bool {
+        self.formats.is_null()
+            && self.print_issued_lines.is_none()
+            && self.print_linter_name.is_none()
+            && self.sort_results.is_none()
+            && self.path_prefix.is_none()
+            && self.show_stats.is_none()
+            && self.format.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -179,6 +392,14 @@ struct ConfigV1 {
     linters: LintersV1,
     #[serde(default, rename = "linters-settings")]
     linters_settings: serde_yaml::Value,
+    #[serde(default)]
+    issues: IssuesConfig,
+    #[serde(default)]
+    run: RunConfig,
+    #[serde(default)]
+    severity: SeverityConfig,
+    #[serde(default)]
+    output: OutputConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -276,6 +497,42 @@ impl ConfigFile {
         match self {
             Self::V1(v1) => v1.linter_selection(),
             Self::V2(v2) => v2.linter_selection(),
+        }
+    }
+
+    pub fn issues(&self) -> &IssuesConfig {
+        match self {
+            Self::V1(v1) => &v1.issues,
+            Self::V2(v2) => &v2.issues,
+        }
+    }
+
+    pub fn run(&self) -> &RunConfig {
+        match self {
+            Self::V1(v1) => &v1.run,
+            Self::V2(v2) => &v2.run,
+        }
+    }
+
+    pub fn severity(&self) -> &SeverityConfig {
+        match self {
+            Self::V1(v1) => &v1.severity,
+            Self::V2(v2) => &v2.severity,
+        }
+    }
+
+    pub fn output(&self) -> &OutputConfig {
+        match self {
+            Self::V1(v1) => &v1.output,
+            Self::V2(v2) => &v2.output,
+        }
+    }
+
+    /// Raw `linters.settings` (v2) or `linters-settings` (v1) YAML.
+    pub fn linter_settings_raw(&self) -> &serde_yaml::Value {
+        match self {
+            Self::V1(v1) => &v1.linters_settings,
+            Self::V2(v2) => &v2.linters.settings,
         }
     }
 
@@ -465,6 +722,10 @@ pub(crate) fn migrate_v1_to_v2(v1: &ConfigV1) -> ConfigV2 {
             enable: dedupe_normalized(formatters_enable),
             settings: formatter_settings,
         },
+        issues: v1.issues.clone(),
+        run: v1.run.clone(),
+        severity: v1.severity.clone(),
+        output: v1.output.clone(),
     }
 }
 
