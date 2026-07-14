@@ -3,7 +3,7 @@ mod support;
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
     goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
-    predeclared, usestdlibvars, usetesting, whitespace,
+    prealloc, predeclared, tagalign, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -494,4 +494,81 @@ fn mnd_flags_magic_numbers() {
 fn mnd_allows_ignored_literals() {
     let pkg = support::typecheck_fixture("mnd", "example.com/mnd/ok", "ok.go");
     assert!(support::run_analyzer(mnd(), &pkg).is_empty());
+}
+
+#[test]
+fn prealloc_flags_range_append() {
+    let pkg = support::typecheck_fixture("prealloc", "example.com/prealloc", "bad.go");
+    let messages = support::run_analyzer(prealloc(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Consider preallocating dest")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn prealloc_allows_make_capacity() {
+    let pkg = support::typecheck_fixture("prealloc", "example.com/prealloc/ok", "ok.go");
+    assert!(support::run_analyzer(prealloc(), &pkg).is_empty());
+}
+
+#[test]
+fn tagalign_flags_misaligned_tags() {
+    let pkg = support::typecheck_fixture("tagalign", "example.com/tagalign", "bad.go");
+    let messages = support::run_analyzer(tagalign(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("tag is not aligned")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn tagalign_allows_aligned_sorted_tags() {
+    let pkg = support::typecheck_fixture("tagalign", "example.com/tagalign/ok", "ok.go");
+    assert!(support::run_analyzer(tagalign(), &pkg).is_empty());
+}
+
+#[test]
+fn wsl_flags_cuddle_violations() {
+    let pkg = support::typecheck_fixture("wsl", "example.com/wsl", "bad.go");
+    let messages = support::run_analyzer(wsl(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("if statements should only be cuddled with assignments")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("used in the if statement itself")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("only one cuddle assignment allowed before if")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("declarations should never be cuddled")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("assignments should only be cuddled with other assignments")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn wsl_allows_proper_spacing() {
+    let pkg = support::typecheck_fixture("wsl", "example.com/wsl/ok", "ok.go");
+    let messages = support::run_analyzer(wsl(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }

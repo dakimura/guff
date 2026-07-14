@@ -66,6 +66,9 @@ pub fn analyzers_for_linter_with_settings(
         "whitespace" => Some(vec![guff_style::whitespace()]),
         "nlreturn" => Some(vec![guff_style::nlreturn()]),
         "mnd" => Some(vec![guff_style::mnd()]),
+        "prealloc" => Some(vec![guff_style::prealloc()]),
+        "tagalign" => Some(vec![guff_style::tagalign()]),
+        "wsl" => Some(vec![guff_style::wsl()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -110,13 +113,16 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "nolintlint",
     "nosprintfhostport",
     "perfsprint",
+    "prealloc",
     "predeclared",
     "staticcheck",
+    "tagalign",
     "unused",
     "usestdlibvars",
     "usetesting",
     "whitespace",
     "wrapcheck",
+    "wsl",
 ];
 
 /// All linter names known to the registry.
@@ -157,13 +163,16 @@ pub fn linter_description(name: &str) -> &'static str {
         "nolintlint" => "Reports unused //nolint directives.",
         "nosprintfhostport" => "Checks for misuse of Sprintf to construct a host with port in a URL.",
         "perfsprint" => "Checks that fmt.Sprintf can be replaced with a faster alternative.",
+        "prealloc" => "Finds slice declarations that could potentially be pre-allocated.",
         "predeclared" => "Finds code that shadows one of Go's predeclared identifiers.",
         "staticcheck" => "Checks for bugs, performance and style issues.",
+        "tagalign" => "Checks that struct tags are well aligned.",
         "unused" => "Checks Go code for unused constants, variables, functions and types.",
         "usestdlibvars" => "Suggests replacing magic literals with stdlib constants.",
         "usetesting" => "Reports uses of functions with replacements in the testing package.",
         "whitespace" => "Checks for unnecessary newlines at the start and end of blocks.",
         "wrapcheck" => "Checks that errors returned from external packages are wrapped.",
+        "wsl" => "Add or remove empty lines.",
         _ => "",
     }
 }

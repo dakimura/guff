@@ -21,9 +21,13 @@
 //! - [`whitespace`]
 //! - [`nlreturn`]
 //! - [`mnd`]
+//! - [`prealloc`]
+//! - [`tagalign`]
+//! - [`wsl`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
-//! (wsl, prealloc, tagalign, …) and per-linter settings for the above.
+//! (`guff-revive` / `guff-misspell` / `guff-dupl` / comment / import crates)
+//! and per-linter settings / SuggestedFix for the above.
 
 mod asciicheck;
 mod copyloopvar;
@@ -41,10 +45,13 @@ mod nestif;
 mod nlreturn;
 mod nosprintfhostport;
 mod perfsprint;
+mod prealloc;
 mod predeclared;
+mod tagalign;
 mod usestdlibvars;
 mod usetesting;
 mod whitespace;
+mod wsl;
 
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
@@ -62,10 +69,13 @@ pub use nestif::analyzer as nestif;
 pub use nlreturn::analyzer as nlreturn;
 pub use nosprintfhostport::analyzer as nosprintfhostport;
 pub use perfsprint::analyzer as perfsprint;
+pub use prealloc::analyzer as prealloc;
 pub use predeclared::analyzer as predeclared;
+pub use tagalign::analyzer as tagalign;
 pub use usestdlibvars::analyzer as usestdlibvars;
 pub use usetesting::analyzer as usetesting;
 pub use whitespace::analyzer as whitespace;
+pub use wsl::analyzer as wsl;
 
 use guff_analysis::Analyzer;
 
@@ -92,5 +102,8 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         whitespace(),
         nlreturn(),
         mnd(),
+        prealloc(),
+        tagalign(),
+        wsl(),
     ]
 }

@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-style` に whitespace / nlreturn / mnd を追加）。
+> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-style` に prealloc / tagalign / wsl を追加）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **20**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd） | R14 バンドル残り（wsl/prealloc/tagalign 等）・settings は **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | R14 残（revive/misspell/dupl・comment/import クレート）・settings は **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -152,7 +152,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache`, `--fix` | `format:path` 書き出し・errcheck exclude-functions 等は未 |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
-| プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/errchkjson/noctx/fatcontext/copyloopvar/usetesting/usestdlibvars/perfsprint/goconst/dogsled/asciicheck/goprintffuncname/funlen/gocyclo/lll/gocognit/nestif/cyclop/nakedret/nosprintfhostport/predeclared/whitespace/nlreturn/mnd） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
+| プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/errchkjson/noctx/fatcontext/copyloopvar/usetesting/usestdlibvars/perfsprint/goconst/dogsled/asciicheck/goprintffuncname/funlen/gocyclo/lll/gocognit/nestif/cyclop/nakedret/nosprintfhostport/predeclared/whitespace/nlreturn/mnd/prealloc/tagalign/wsl） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュ・ロード/型チェックのスキップは未 |
@@ -509,7 +509,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
      / **goconst**（golangci 既定 min-len=3 / min-occurrences=3 / exclude call）
      / **dogsled**（golangci 既定 max-blank-identifiers=2）/ **asciicheck** / **goprintffuncname**
      / **funlen** / **gocyclo** / **lll** / **gocognit** / **nestif** / **cyclop**
-     / **nakedret** / **nosprintfhostport** / **predeclared** / **whitespace** / **nlreturn** / **mnd**（R14 で追加）
+     / **nakedret** / **nosprintfhostport** / **predeclared** / **whitespace** / **nlreturn** / **mnd**
+     / **prealloc** / **tagalign** / **wsl**（R14）
   いずれも `--enable` で有効化。テストは各クレートの `tests/checks_test.rs`。
   **DEFERRED（同タスク内の残り）**:
   - `nilerr` / `nilnesserr` — SSA（→ R17）
@@ -529,11 +530,13 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   dogsled / asciicheck / goprintffuncname / **funlen**（60 lines / 40 stmts）/ **gocyclo**（min=30）/
   **lll**（120 / tab-width=1）/ **gocognit**（min=30）/ **nestif**（min=5）/ **cyclop**（max=10）/
   **nakedret**（max-func-lines=30）/ **nosprintfhostport** / **predeclared**（qualified=false）/
-  **whitespace**（multi-if/multi-func 既定オフ）/ **nlreturn**（block-size=1）/ **mnd**（全 checks・0/1 無視）済。
+  **whitespace**（multi-if/multi-func 既定オフ）/ **nlreturn**（block-size=1）/ **mnd**（全 checks・0/1 無視）/
+  **prealloc**（simple / range-loops 既定）/ **tagalign**（align+sort 既定）/
+  **wsl**（v4 既定 cuddle の主要ルール）済。
   settings・`gocyclo:ignore` / `gocognit:ignore`・PARSE_COMMENTS 前提の funlen コメント除外・
   cyclop package-average・nakedret SuggestedFix / skip-test-files・predeclared ignore/qualified・
-  whitespace SuggestedFix / multi-*・nlreturn SuggestedFix・mnd settings・**wsl** / **prealloc** /
-  **tagalign** は DEFERRED。）
+  whitespace SuggestedFix / multi-*・nlreturn SuggestedFix・mnd settings・prealloc settings・
+  tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・settings は DEFERRED。）
 - `guff-comment`: godot, godox, dupword。`guff-import`: depguard, gomodguard, gomoddirectives。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
@@ -641,6 +644,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-15 | **R14 続き**: `guff-style` に `prealloc`（slice 事前確保）/ `tagalign`（struct tag 整列+sort）/ `wsl`（v4 既定 cuddle 主要ルール）を追加しレジストリ登録。settings・SuggestedFix・wsl 完全パリティ/`wsl_v5` は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-style` に `whitespace`（不要な先頭/末尾改行）/ `nlreturn`（return/branch 前の空行）/ `mnd`（マジックナンバー）を追加しレジストリ登録。wsl/prealloc/tagalign・settings・SuggestedFix は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-style` に `nakedret`（長い関数の naked return）/ `nosprintfhostport`（host:port の Sprintf）/ `predeclared`（予約識別子のシャドー）を追加しレジストリ登録。settings・SuggestedFix・qualified は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-style` に `gocognit`（認知的複雑度）/ `nestif`（深い if ネスト）/ `cyclop`（循環的複雑度 max=10）を追加しレジストリ登録。settings・ignore・package-average は DEFERRED |
