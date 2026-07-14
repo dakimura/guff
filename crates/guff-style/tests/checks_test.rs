@@ -1,6 +1,6 @@
 mod support;
 
-use guff_style::{copyloopvar, usestdlibvars, usetesting};
+use guff_style::{copyloopvar, goconst, perfsprint, usestdlibvars, usetesting};
 
 #[test]
 fn copyloopvar_flags_redundant_copies() {
@@ -88,4 +88,64 @@ fn usestdlibvars_allows_stdlib_constants() {
         "ok.go",
     );
     assert!(support::run_analyzer(usestdlibvars(), &pkg).is_empty());
+}
+
+#[test]
+fn perfsprint_flags_fmt_shortcuts() {
+    let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint", "bad.go");
+    let messages = support::run_analyzer(perfsprint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("string-format") && m.contains("fmt.Sprintf")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("error-format") && m.contains("errors.New")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("bool-format") && m.contains("FormatBool")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("integer-format") && m.contains("Itoa")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("hex-format") && m.contains("EncodeToString")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn perfsprint_allows_complex_fmt() {
+    let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint/ok", "ok.go");
+    assert!(support::run_analyzer(perfsprint(), &pkg).is_empty());
+}
+
+#[test]
+fn goconst_flags_repeated_strings() {
+    let pkg = support::typecheck_fixture("goconst", "example.com/goconst", "bad.go");
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("needconst") && m.contains("3 occurrences")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goconst_allows_below_threshold() {
+    let pkg = support::typecheck_fixture("goconst", "example.com/goconst/ok", "ok.go");
+    assert!(support::run_analyzer(goconst(), &pkg).is_empty());
 }
