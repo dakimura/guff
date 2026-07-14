@@ -2,8 +2,8 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
-    goprintffuncname, lll, nakedret, nestif, nosprintfhostport, perfsprint, predeclared,
-    usestdlibvars, usetesting,
+    goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
+    predeclared, usestdlibvars, usetesting, whitespace,
 };
 
 #[test]
@@ -424,4 +424,74 @@ fn predeclared_flags_shadowed_identifiers() {
 fn predeclared_allows_non_shadowing_names() {
     let pkg = support::typecheck_fixture("predeclared", "example.com/predeclared/ok", "ok.go");
     assert!(support::run_analyzer(predeclared(), &pkg).is_empty());
+}
+
+#[test]
+fn whitespace_flags_leading_and_trailing() {
+    let pkg = support::typecheck_fixture("whitespace", "example.com/whitespace", "bad.go");
+    let messages = support::run_analyzer(whitespace(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("unnecessary leading newline")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("unnecessary trailing newline")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn whitespace_allows_tight_blocks() {
+    let pkg = support::typecheck_fixture("whitespace", "example.com/whitespace/ok", "ok.go");
+    assert!(support::run_analyzer(whitespace(), &pkg).is_empty());
+}
+
+#[test]
+fn nlreturn_flags_missing_blank_before_return() {
+    let pkg = support::typecheck_fixture("nlreturn", "example.com/nlreturn", "bad.go");
+    let messages = support::run_analyzer(nlreturn(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("return with no blank line before")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn nlreturn_allows_alone_or_blanked_returns() {
+    let pkg = support::typecheck_fixture("nlreturn", "example.com/nlreturn/ok", "ok.go");
+    assert!(support::run_analyzer(nlreturn(), &pkg).is_empty());
+}
+
+#[test]
+fn mnd_flags_magic_numbers() {
+    let pkg = support::typecheck_fixture("mnd", "example.com/mnd", "bad.go");
+    let messages = support::run_analyzer(mnd(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Magic number") && m.contains("<condition>")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Magic number") && m.contains("<argument>")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Magic number") && m.contains("<return>")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn mnd_allows_ignored_literals() {
+    let pkg = support::typecheck_fixture("mnd", "example.com/mnd/ok", "ok.go");
+    assert!(support::run_analyzer(mnd(), &pkg).is_empty());
 }
