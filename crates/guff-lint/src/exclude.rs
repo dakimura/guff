@@ -482,6 +482,38 @@ fn read_source_line(filename: &str, line: i64) -> Option<String> {
     lines.get(idx).cloned()
 }
 
+/// Build an [`Issue`] from a cached diagnostic's already-resolved position
+/// (filename/line/column stored in the issues cache), without a `FileSet`.
+/// The lazy warm path uses this so cache hits never need parsing/type-checking.
+#[allow(clippy::too_many_arguments)]
+pub fn issue_from_cached(
+    analyzer: &str,
+    filename: &str,
+    line: i64,
+    column: i64,
+    message: &str,
+    category: &str,
+    url: &str,
+) -> Issue {
+    let source_line = read_source_line(filename, line);
+    Issue {
+        from_linter: linter_name_for_analyzer(analyzer).to_string(),
+        analyzer: analyzer.to_string(),
+        text: message.to_string(),
+        severity: String::new(),
+        filename: filename.to_string(),
+        line,
+        column,
+        source_line,
+        diagnostic: Diagnostic {
+            message: message.to_string(),
+            category: category.to_string(),
+            url: url.to_string(),
+            ..Diagnostic::default()
+        },
+    }
+}
+
 /// Convenience: build issues from diagnostics and apply `filter`.
 pub fn process_diagnostics(
     fset: &FileSet,

@@ -69,6 +69,7 @@ fn nolint_errcheck_suppresses_finding() {
         )
         .expect("run"),
         filter,
+        cached_issues: Vec::new(),
     };
 
     assert!(
@@ -113,6 +114,7 @@ fn nolintlint_reports_unused_directive() {
         )
         .expect("run"),
         filter,
+        cached_issues: Vec::new(),
     };
 
     let issues = result.issues();

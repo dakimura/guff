@@ -37,12 +37,31 @@ pub fn load(cfg: &Config, patterns: &[String]) -> Result<Vec<Arc<Package>>, Load
     load_with_driver(cfg, patterns, &default_driver())
 }
 
+/// Like [`load`] but also returns every loaded package (roots and transitive
+/// dependencies), not just the roots. The full set lets callers build a
+/// complete dependency-hash registry for the issues cache.
+pub fn load_graph(
+    cfg: &Config,
+    patterns: &[String],
+) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
+    load_graph_with_driver(cfg, patterns, &default_driver())
+}
+
 /// Like [`load`] but accepts a custom [`Driver`] (for tests).
 pub fn load_with_driver<D: Driver>(
     cfg: &Config,
     patterns: &[String],
     driver: &D,
 ) -> Result<Vec<Arc<Package>>, LoadError> {
+    load_graph_with_driver(cfg, patterns, driver).map(|(roots, _all)| roots)
+}
+
+/// Like [`load_graph`] but accepts a custom [`Driver`] (for tests).
+pub fn load_graph_with_driver<D: Driver>(
+    cfg: &Config,
+    patterns: &[String],
+    driver: &D,
+) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
     let requested_mode = cfg.mode.normalize();
     let effective_cfg = Config {
         mode: requested_mode.implied(),
@@ -57,7 +76,7 @@ fn refine(
     cfg: &Config,
     requested_mode: LoadMode,
     response: DriverResponse,
-) -> Result<Vec<Arc<Package>>, LoadError> {
+) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
     let mut by_id: HashMap<String, Arc<Package>> = HashMap::new();
     for pkg in response.packages {
         by_id.insert(pkg.id.clone(), pkg);
@@ -90,8 +109,13 @@ fn refine(
         }
     }
 
+    // All loaded packages, in a deterministic order (by id), for callers that
+    // need the full dependency set (e.g. the issues-cache hash registry).
+    let mut all: Vec<Arc<Package>> = by_id.into_values().collect();
+    all.sort_by(|a, b| a.id.cmp(&b.id));
+
     let _ = cfg;
-    Ok(roots)
+    Ok((roots, all))
 }
 
 fn connect_imports(by_id: &mut HashMap<String, Arc<Package>>) {

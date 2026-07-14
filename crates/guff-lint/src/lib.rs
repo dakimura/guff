@@ -20,8 +20,8 @@ pub use config::{
 
 pub use duration::parse_go_duration;
 pub use exclude::{
-    default_exclude_patterns, process_diagnostics, DefaultExcludePattern, Issue, IssueFilter,
-    DEFAULT_EXCLUDE_DIRS,
+    default_exclude_patterns, issue_from_cached, process_diagnostics, DefaultExcludePattern, Issue,
+    IssueFilter, DEFAULT_EXCLUDE_DIRS,
 };
 pub use format::{
     format_diagnostic_text, format_issue_text, print_issues, resolve_out_formats,
@@ -61,10 +61,12 @@ use std::thread;
 use std::time::Duration;
 
 use guff_analysis::{Analyzer, SettingsBag};
-use guff_packages::{load, load_for_go_analysis, Config};
+use guff_packages::{
+    load_for_go_analysis, load_graph, typecheck_roots, Config, LoadMode, TypecheckEnv,
+};
 use guff_runner::{
-    build_salt, default_cache_dir, detect_go_version, run_on_packages, IssueCache, RunnerError,
-    RunnerOptions, RunResult,
+    build_salt, default_cache_dir, detect_go_version, run_on_packages, HashMode, IssueCache,
+    RunnerError, RunnerOptions, RunResult,
 };
 
 /// Options for [`run_linters`].
@@ -124,24 +126,89 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     if !opts.build_tags.is_empty() {
         build_flags.push(format!("-tags={}", opts.build_tags.join(",")));
     }
-    let cfg = Config {
-        mode: load_for_go_analysis(),
+    let sequential = opts.sequential || opts.concurrency == Some(1);
+
+    // Lazy load: first resolve package *metadata only* (`go list`, no parsing or
+    // type-checking). This is enough to compute issues-cache keys and decide
+    // which packages actually need work. Full analysis mode is kept separately
+    // for the packages that miss the cache.
+    let analysis_mode = load_for_go_analysis();
+    // Metadata mode = analysis mode minus the parse/type-check bits. Enough for
+    // `go list` + cache-key computation; no source is parsed or type-checked.
+    let metadata_mode = LoadMode::NEED_NAME
+        | LoadMode::NEED_FILES
+        | LoadMode::NEED_COMPILED_GO_FILES
+        | LoadMode::NEED_IMPORTS
+        | LoadMode::NEED_DEPS
+        | LoadMode::NEED_EXPORT_FILE;
+    let meta_cfg = Config {
+        mode: metadata_mode,
+        build_flags: build_flags.clone(),
+        tests: opts.tests,
+        ..Config::default()
+    };
+    let full_cfg = Config {
+        mode: analysis_mode,
         build_flags,
         tests: opts.tests,
         ..Config::default()
     };
-    let packages = load(&cfg, &opts.patterns).map_err(RunnerError::Load)?;
-    let sequential = opts.sequential || opts.concurrency == Some(1);
 
+    let (roots, all_packages) =
+        load_graph(&meta_cfg, &opts.patterns).map_err(RunnerError::Load)?;
+
+    // Build the cache with a complete dependency-hash registry over *all* loaded
+    // packages (roots + transitive deps) so `NeedAllDeps` hashing is
+    // deterministic and warm runs hit reliably.
     let cache = if opts.use_cache {
-        open_issue_cache(opts)
+        open_issue_cache(opts).map(|mut c| {
+            if let Err(err) = c.set_dep_hashes(&all_packages) {
+                eprintln!("guff: cache dep-hash registry failed ({err})");
+            }
+            std::sync::Arc::new(c)
+        })
     } else {
         None
     };
 
+    // Partition roots into cache hits (issues restored from disk — no parsing)
+    // and misses (need type-checking + analysis).
+    let mut cached_issues: Vec<Issue> = Vec::new();
+    let mut miss_ids: Vec<String> = Vec::new();
+    let mut hit_roots: Vec<std::sync::Arc<guff_packages::Package>> = Vec::new();
+    let mut hits = 0usize;
+    for root in &roots {
+        let restored = cache
+            .as_ref()
+            .and_then(|c| c.get_cached(root, HashMode::NeedAllDeps).ok());
+        match restored {
+            Some(diags) => {
+                hits += 1;
+                hit_roots.push(std::sync::Arc::clone(root));
+                for d in diags {
+                    let action_id = format!("{}@{}", d.analyzer, root.pkg_path);
+                    cached_issues.push(issue_from_cached(
+                        action_id.split('@').next().unwrap_or(&d.analyzer),
+                        &d.filename,
+                        d.line,
+                        d.column,
+                        &d.message,
+                        &d.category,
+                        &d.url,
+                    ));
+                }
+            }
+            None => miss_ids.push(root.id.clone()),
+        }
+    }
+
+    // Type-check + analyze only the packages that missed the cache.
+    let env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
+    let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
+
     let result = run_on_packages(
         &opts.analyzers,
-        &packages,
+        &miss_roots,
         &RunnerOptions {
             sequential,
             concurrency: opts.concurrency,
@@ -151,14 +218,31 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         },
     )
     .map_err(RunnerError::Validate)?;
+
+    if std::env::var_os("GUFF_DEBUG_CACHE").is_some() {
+        eprintln!(
+            "guff: cache hits={} misses={} (lazy: type-checked {} of {} roots)",
+            hits,
+            miss_ids.len(),
+            miss_roots.len(),
+            roots.len(),
+        );
+    }
+
+    // Package list for output/nolint: type-checked misses (carry the `FileSet`
+    // for fresh diagnostics) plus metadata-only hits (supply source paths).
+    let mut packages = miss_roots;
+    packages.extend(hit_roots);
+
     Ok(LintResult {
         packages,
         run: result,
         filter: opts.filter.clone(),
+        cached_issues,
     })
 }
 
-fn open_issue_cache(opts: &LintOptions) -> Option<std::sync::Arc<IssueCache>> {
+fn open_issue_cache(opts: &LintOptions) -> Option<IssueCache> {
     let dir = match &opts.cache_dir {
         Some(p) => p.clone(),
         None => match default_cache_dir() {
@@ -180,7 +264,7 @@ fn open_issue_cache(opts: &LintOptions) -> Option<std::sync::Arc<IssueCache>> {
         &detect_go_version(),
     );
     match IssueCache::open(dir, salt) {
-        Ok(c) => Some(std::sync::Arc::new(c)),
+        Ok(c) => Some(c),
         Err(err) => {
             eprintln!("guff: cache disabled ({err})");
             None
@@ -193,22 +277,23 @@ pub struct LintResult {
     pub packages: Vec<std::sync::Arc<guff_packages::Package>>,
     pub run: RunResult,
     pub filter: IssueFilter,
+    /// Issues restored from the persistent cache for packages that were not
+    /// re-analyzed. Positions are already resolved (no `FileSet` needed).
+    pub cached_issues: Vec<Issue>,
 }
 
 impl LintResult {
     /// Issues after applying the configured post-processing filter.
     pub fn issues(&self) -> Vec<Issue> {
-        let fset = self
-            .packages
-            .iter()
-            .find_map(|p| p.fset.as_ref())
-            .expect("package missing fset");
-        process_diagnostics(
-            fset,
-            &self.run.diagnostics(),
-            &self.filter,
-            &self.packages,
-        )
+        // Cache-restored issues carry resolved positions already. Freshly
+        // analyzed diagnostics (cache misses) are resolved against the shared
+        // `FileSet` of the type-checked packages. Both streams then go through
+        // the same filter pipeline (exclude rules, //nolint, severity, limits).
+        let mut issues = self.cached_issues.clone();
+        if let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) {
+            issues.extend(IssueFilter::collect_issues(fset, &self.run.diagnostics()));
+        }
+        self.filter.apply(issues, &self.packages)
     }
 
     pub fn diagnostic_count(&self) -> usize {

@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rayon::prelude::*;
+
 use guff::parser::{parse_file, Mode};
 use guff::position::FileSet;
 use guff_exportdata::ExportImporter;
@@ -105,20 +107,85 @@ pub fn typecheck_packages(
         root_ids.to_vec()
     };
 
-    for id in targets {
-        let Some(pkg) = by_id.get_mut(&id) else {
-            continue;
-        };
-        typecheck_package(
-            Arc::make_mut(pkg),
-            &fset,
-            &export_paths,
-            &dep_graph,
-            sizes,
-            env,
-            mode,
-        );
+    // Type-check targets in parallel. Each package resolves its dependencies
+    // from on-disk export data (`.a` files) via a private `Checker`/importer —
+    // it never reads sibling packages out of `by_id` — so the targets are
+    // independent and can be checked concurrently. The shared `FileSet` uses
+    // interior locking, making concurrent parsing safe. Results are cloned out,
+    // checked off-map, then written back, so the map is untouched during the
+    // parallel phase.
+    let checked: Vec<(String, Package)> = targets
+        .par_iter()
+        .filter_map(|id| {
+            let mut pkg = (**by_id.get(id)?).clone();
+            typecheck_package(
+                &mut pkg,
+                &fset,
+                &export_paths,
+                &dep_graph,
+                sizes,
+                env,
+                mode,
+            );
+            Some((id.clone(), pkg))
+        })
+        .collect();
+
+    for (id, pkg) in checked {
+        by_id.insert(id, Arc::new(pkg));
     }
+}
+
+/// Type-check exactly `target_ids` from source, resolving dependencies from
+/// on-disk export data. Unlike [`typecheck_packages`], this never expands to the
+/// whole graph even when `mode` contains [`LoadMode::NEED_DEPS`] — it is the
+/// lazy path used to type-check only the packages that missed the issues cache.
+///
+/// `all` must contain every loaded package (roots and transitive deps) so
+/// export paths and the dependency graph are complete. Returns the type-checked
+/// target packages, in `target_ids` order, each sharing one `FileSet`.
+pub fn typecheck_roots(
+    all: &[Arc<Package>],
+    target_ids: &[String],
+    mode: LoadMode,
+    env: &TypecheckEnv,
+) -> Vec<Arc<Package>> {
+    if target_ids.is_empty() || !needs_typecheck(mode) {
+        return Vec::new();
+    }
+
+    let by_id: HashMap<String, Arc<Package>> =
+        all.iter().map(|p| (p.id.clone(), Arc::clone(p))).collect();
+
+    let fset = FileSet::new();
+    let sizes = env.sizes();
+    let export_paths = collect_export_paths(&by_id);
+    let dep_graph: HashMap<String, Vec<String>> = by_id
+        .iter()
+        .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
+        .collect();
+
+    let mut checked: HashMap<String, Arc<Package>> = target_ids
+        .par_iter()
+        .filter_map(|id| {
+            let mut pkg = (**by_id.get(id)?).clone();
+            typecheck_package(
+                &mut pkg,
+                &fset,
+                &export_paths,
+                &dep_graph,
+                sizes,
+                env,
+                mode,
+            );
+            Some((id.clone(), Arc::new(pkg)))
+        })
+        .collect();
+
+    target_ids
+        .iter()
+        .filter_map(|id| checked.remove(id))
+        .collect()
 }
 
 fn collect_export_paths(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {

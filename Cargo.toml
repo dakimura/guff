@@ -27,3 +27,19 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "BSD-3-Clause"
+
+# Release profile tuned for a latency-sensitive CLI. `lto = "fat"` and
+# `codegen-units = 1` trade longer build times for a faster binary (measurable
+# on the parse/typecheck hot path). `panic = "unwind"` is kept deliberately:
+# guff-lint isolates linter panics with `catch_unwind`, so `"abort"` would break
+# per-linter fault isolation.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true
+
+# Faster iteration for benchmarks without full release build times.
+[profile.bench]
+inherits = "release"

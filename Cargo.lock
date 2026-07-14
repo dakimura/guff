@@ -443,6 +443,7 @@ dependencies = [
  "guff-ast",
  "guff-exportdata",
  "guff-types",
+ "rayon",
  "serde",
  "serde_json",
 ]

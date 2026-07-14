@@ -40,8 +40,15 @@ impl SettingsBag {
 
 impl fmt::Debug for SettingsBag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keys are sorted so the output is deterministic across runs. This
+        // matters beyond debugging: the issues-cache salt fingerprints the
+        // settings via this `Debug` impl, and an unsorted `HashMap` iteration
+        // order would change the salt every run, flipping every package between
+        // cache hit and miss (see guff-runner cache salt).
+        let mut keys: Vec<&String> = self.map.keys().collect();
+        keys.sort();
         f.debug_struct("SettingsBag")
-            .field("keys", &self.map.keys().collect::<Vec<_>>())
+            .field("keys", &keys)
             .finish()
     }
 }

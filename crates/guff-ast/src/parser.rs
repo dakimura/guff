@@ -2976,7 +2976,11 @@ pub fn parse_file(
     src: &[u8],
     mode: Mode,
 ) -> Result<File, ErrorList> {
-    let pos_file = fset.add_file(filename, fset.base(), src.len() as i64);
+    // `base = -1` lets the FileSet allocate the base atomically under its write
+    // lock. Passing `fset.base()` here is a read-then-write race when multiple
+    // files are parsed into a shared FileSet concurrently (guff-packages
+    // type-checks packages in parallel).
+    let pos_file = fset.add_file(filename, -1, src.len() as i64);
     let file_start = pos_file.pos(0);
     let file_end = pos_file.end();
     let p = Rc::new(RefCell::new(Parser::new(Arc::clone(&pos_file), src, mode)));
@@ -3025,7 +3029,11 @@ pub fn parse_expr_from(
     src: &[u8],
     mode: Mode,
 ) -> Result<Expr, ErrorList> {
-    let pos_file = fset.add_file(filename, fset.base(), src.len() as i64);
+    // `base = -1` lets the FileSet allocate the base atomically under its write
+    // lock. Passing `fset.base()` here is a read-then-write race when multiple
+    // files are parsed into a shared FileSet concurrently (guff-packages
+    // type-checks packages in parallel).
+    let pos_file = fset.add_file(filename, -1, src.len() as i64);
     let p = Rc::new(RefCell::new(Parser::new(pos_file, src, mode)));
     let errors_handle = Rc::clone(&p.borrow().errors);
 

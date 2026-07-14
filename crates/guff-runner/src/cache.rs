@@ -221,6 +221,15 @@ pub struct IssueCache {
     salt: String,
     file_hashes: Mutex<HashMap<PathBuf, [u8; 32]>>,
     pkg_hashes: Mutex<HashMap<String, HashMap<u8, String>>>,
+    /// `import path`/`id` → self-hash for every loaded package (roots + deps).
+    ///
+    /// Populated once via [`Self::set_dep_hashes`] so transitive dependency
+    /// hashing (`NeedAllDeps`) can resolve each entry in the flat, complete,
+    /// deterministic `Package::deps` list — instead of walking the in-memory
+    /// import graph, whose depth is nondeterministic (import stubs are cloned
+    /// at inconsistent resolution depth during loading, which flipped every
+    /// package between cache hit and miss run to run).
+    dep_self_hashes: HashMap<String, String>,
 }
 
 impl IssueCache {
@@ -238,7 +247,43 @@ impl IssueCache {
             salt: salt.into(),
             file_hashes: Mutex::new(HashMap::new()),
             pkg_hashes: Mutex::new(HashMap::new()),
+            dep_self_hashes: HashMap::new(),
         })
+    }
+
+    /// Register the self-hash of every loaded package (roots and transitive
+    /// dependencies) so `NeedAllDeps`/`NeedDirectDeps` hashing is deterministic
+    /// and complete. Keyed by both `pkg_path` and `id` because `Package::deps`
+    /// and `imports` reference packages by import path while `id` may carry a
+    /// test suffix. Call once, before the cache is shared for reads/writes.
+    pub fn set_dep_hashes(&mut self, packages: &[Arc<Package>]) -> Result<(), CacheError> {
+        for pkg in packages {
+            let h = self.self_hash(pkg)?;
+            if !pkg.pkg_path.is_empty() {
+                self.dep_self_hashes.insert(pkg.pkg_path.clone(), h.clone());
+            }
+            if !pkg.id.is_empty() {
+                self.dep_self_hashes.insert(pkg.id.clone(), h);
+            }
+        }
+        Ok(())
+    }
+
+    /// Self-only content hash of a package (its own files, independent of deps).
+    pub fn self_hash(&self, pkg: &Package) -> Result<String, CacheError> {
+        let mut files: Vec<PathBuf> = pkg.compiled_go_files.clone();
+        files.extend(pkg.ignored_files.iter().cloned());
+        files.sort();
+
+        let mut h = Sha256::new();
+        h.update(b"package hash\n");
+        h.update(format!("pkgpath {}\n", pkg.pkg_path).as_bytes());
+        for f in &files {
+            let fh = self.file_hash(f)?;
+            let display = f.to_string_lossy();
+            h.update(format!("file {display} {}\n", hex_encode(&fh)).as_bytes());
+        }
+        Ok(hex_encode(&h.finalize()))
     }
 
     pub fn dir(&self) -> &Path {
@@ -247,6 +292,29 @@ impl IssueCache {
 
     pub fn salt(&self) -> &str {
         &self.salt
+    }
+
+    /// Load raw cached diagnostics for `pkg` (filename/line/column preserved as
+    /// stored), without needing a `FileSet`. Used by the lazy path to skip
+    /// parsing/type-checking entirely for packages that hit the cache — the
+    /// stored positions are already resolved, so no `FileSet` remap is needed.
+    pub fn get_cached(
+        &self,
+        pkg: &Package,
+        mode: HashMode,
+    ) -> Result<Vec<CachedDiagnostic>, CacheError> {
+        let key = self.action_id(pkg, mode)?;
+        let path = self.entry_path(&key);
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(CacheError::Message("missing".into()));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let entry: CachedEntry =
+            serde_json::from_slice(&bytes).map_err(|e| CacheError::Message(e.to_string()))?;
+        Ok(entry.diagnostics)
     }
 
     /// Load cached diagnostics for `pkg`, rematerializing positions into `fset`.
@@ -384,42 +452,51 @@ impl IssueCache {
     }
 
     fn compute_pkg_hashes(&self, pkg: &Package) -> Result<HashMap<u8, String>, CacheError> {
-        let mut files: Vec<PathBuf> = pkg.compiled_go_files.clone();
-        files.extend(pkg.ignored_files.iter().cloned());
-        files.sort();
+        let self_hash = self.self_hash(pkg)?;
 
-        let mut h_self = Sha256::new();
-        h_self.update(b"package hash\n");
-        h_self.update(format!("pkgpath {}\n", pkg.pkg_path).as_bytes());
-        for f in &files {
-            let fh = self.file_hash(f)?;
-            let display = f.to_string_lossy();
-            h_self.update(format!("file {display} {}\n", hex_encode(&fh)).as_bytes());
-        }
-        let self_hash = hex_encode(&h_self.finalize());
-
-        let mut imps: Vec<_> = pkg.imports.values().cloned().collect();
-        imps.sort_by(|a, b| a.pkg_path.cmp(&b.pkg_path));
-
-        let mut h_direct = Sha256::new();
-        h_direct.update(format!("self {self_hash}\n").as_bytes());
-        for dep in &imps {
-            if dep.pkg_path == "unsafe" {
+        // Direct imports: hash each direct dependency's self-hash. Resolve
+        // through the registry by import path (stable and complete); fall back
+        // to hashing the in-memory import stub only when the dependency was not
+        // registered (e.g. `unsafe`, or a synthetic package).
+        let mut direct: Vec<(String, String)> = Vec::new();
+        for (path, dep) in &pkg.imports {
+            if path == "unsafe" || dep.pkg_path == "unsafe" {
                 continue;
             }
-            let dep_hash = self.package_hash(dep, HashMode::NeedOnlySelf)?;
-            h_direct.update(format!("import {} {}\n", dep.pkg_path, dep_hash).as_bytes());
+            let dep_hash = match self.lookup_dep_hash(path, dep) {
+                Some(h) => h,
+                None => self.self_hash(dep)?,
+            };
+            direct.push((path.clone(), dep_hash));
+        }
+        direct.sort();
+        let mut h_direct = Sha256::new();
+        h_direct.update(format!("self {self_hash}\n").as_bytes());
+        for (path, dep_hash) in &direct {
+            h_direct.update(format!("import {path} {dep_hash}\n").as_bytes());
         }
         let direct_hash = hex_encode(&h_direct.finalize());
 
+        // All deps: fold in every transitive dependency's self-hash using the
+        // flat, sorted, complete `deps` list from `go list`. This is fully
+        // deterministic — unlike walking `imports`, whose graph depth varies
+        // run to run. Dependencies missing from the registry contribute their
+        // path only (still deterministic).
+        let mut deps = pkg.deps.clone();
+        deps.sort();
+        deps.dedup();
         let mut h_all = Sha256::new();
         h_all.update(format!("self {self_hash}\n").as_bytes());
-        for dep in &imps {
-            if dep.pkg_path == "unsafe" {
+        for dep_path in &deps {
+            if dep_path == "unsafe" {
                 continue;
             }
-            let dep_hash = self.package_hash(dep, HashMode::NeedAllDeps)?;
-            h_all.update(format!("import {} {}\n", dep.pkg_path, dep_hash).as_bytes());
+            let dep_hash = self
+                .dep_self_hashes
+                .get(dep_path)
+                .cloned()
+                .unwrap_or_default();
+            h_all.update(format!("dep {dep_path} {dep_hash}\n").as_bytes());
         }
         let all_hash = hex_encode(&h_all.finalize());
 
@@ -428,6 +505,16 @@ impl IssueCache {
         out.insert(HashMode::NeedDirectDeps as u8, direct_hash);
         out.insert(HashMode::NeedAllDeps as u8, all_hash);
         Ok(out)
+    }
+
+    /// Resolve a direct dependency's self-hash from the registry (by import
+    /// path, then by id), falling back to `None` when unregistered.
+    fn lookup_dep_hash(&self, path: &str, dep: &Package) -> Option<String> {
+        self.dep_self_hashes
+            .get(path)
+            .or_else(|| self.dep_self_hashes.get(&dep.pkg_path))
+            .or_else(|| self.dep_self_hashes.get(&dep.id))
+            .cloned()
     }
 
     fn file_hash(&self, path: &Path) -> Result<[u8; 32], CacheError> {

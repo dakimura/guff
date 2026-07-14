@@ -412,7 +412,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了メモ**: `IssueCache` が SHA-256 コンテンツハッシュ（NeedAllDeps）+ salt（guff/go 版・analyzers・
   tags・settings）でキー化。hit パッケージは analysis スキップし診断を JSON から復元。
   `GUFF_CACHE` > `GOLANGCI_LINT_CACHE` > `{UserCacheDir}/guff`。`guff cache clean`/`status`、
-  `--no-cache`。DEFERRED: facts 永続化、ロード/型チェックのスキップ（ヒットでも load は走る）。
+  `--no-cache`。~~DEFERRED: ロード/型チェックのスキップ（ヒットでも load は走る）~~ → **R10.1 で実装済み**。
+  DEFERRED（残）: facts 永続化（R24）。
   テスト: `cache.rs` ユニット + `tests/cache_test.rs` + `cli_test` cache サブコマンド。
 
 #### R11. ベンチマークハーネス（対 golangci-lint） ✅ 完了 (2026-07-14)
@@ -426,8 +427,40 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   `standard.yml`。デフォルト対象は `fixture/` と合成コーパス `local/`（〜3k LOC・
   SSA セーフ方言）。`--oss` で `repos.txt` を追加計測（現状 staticcheck→buildir で
   多く FAIL → R17）。数値表は `benchmarks/results/RESULTS.md` と README。
-  所見: warm 比で guff は golangci-lint の ~5–6x（load/型チェックが毎回走るためキャッシュ恩恵が薄い）。
+  所見（初版）: warm 比で guff は golangci-lint の ~5–6x（load/型チェックが毎回走るためキャッシュ恩恵が薄い）。
+  → **その後の性能パス（R10.1）で解消。現状 guff は cold/warm とも golangci-lint より高速**
+  （warm `local` 0.54x、`fixture` 0.77x）。詳細は R10.1 と `results/RESULTS.md`。
   テスト: `./benchmarks/smoke.sh`（オフライン）。
+
+#### R10.1 性能パス（Rust 版が golangci-lint より遅い問題の解消） ✅ 完了 (2026-07-14)
+- **目的/なぜ**: R11 の初回計測で warm が golangci-lint の ~5–6x だった。「Rust で書き直す意味」を
+  成立させるための最優先課題。`sample` プロファイルで原因を実測特定。
+- **原因（4 つ、いずれも言語ではなく実装/ビルドの問題）**:
+  1. `[profile.release]` 未設定（LTO なし・`codegen-units=16`）。
+  2. `typecheck_packages` が逐次ループ（10 コアでも 1 コアのみ使用）＝ warm の支配的コスト。
+  3. キャッシュ salt が非決定的（`SettingsBag` の `Debug` が `HashMap` をランダム順で出力）→
+     warm の約半分で**全ミス**。
+  4. `NeedAllDeps` 依存ハッシュが非決定的（import グラフの深さが `connect_imports` の
+     `HashMap` 走査順で変動）→ 全パッケージが毎回 hit↔miss でフリップ。
+- **対策**:
+  - `Cargo.toml` に fat LTO + `codegen-units=1`（`panic=unwind` は `catch_unwind` のワーカー
+    分離のため維持）。
+  - `typecheck_packages` を rayon で並列化（各 pkg は依存を `.a` export data から解決＝独立）。
+  - `FileSet::add_file` の base 採番レースを修正（parser が `base=-1` を渡し、書き込みロック内で
+    原子的採番）。副産物として errcheck の列バグ（`f00.go:14:7`→`14:9`、golangci 一致）も修正。
+  - salt を決定的化（`SettingsBag` の `Debug` でキーをソート）。
+  - `NeedAllDeps` を、脆弱な Arc 再帰ではなく `go list` の平坦・完全な `deps` ＋ 全パッケージの
+    `id/pkg_path → self_hash` レジストリ（`IssueCache::set_dep_hashes`）から計算。
+  - **遅延型チェック（R10 の DEFERRED「load/型チェックのスキップ」を実装）**: `run_linters` は
+    まずメタデータのみロード（型抜きの `metadata_mode`）→ issues キャッシュを先に判定 →
+    **ミスした root だけ** `guff_packages::typecheck_roots` で parse+型チェック。ヒットは
+    `IssueCache::get_cached` + `exclude::issue_from_cached` で位置解決済みの `Issue` を直接復元
+    （`FileSet` 不要）。`LintResult` に `cached_issues` を追加し `issues()` で統合。
+- **結果**: guff が cold/warm とも golangci-lint より高速。warm `local` 1.76s→0.16s（0.54x）、
+  `fixture` 0.92s→0.14s（0.77x）。完全 warm では型チェック 0 本。1 ファイル編集時は該当 pkg と
+  その依存元のみ再解析（`GUFF_DEBUG_CACHE=1` で hit/miss と型チェック本数を表示）。
+- **テスト**: 全ワークスペース 195 テスト green。cold 出力 = warm 出力 = golangci-lint 基準で一致。
+- **発展余地（未実施）**: R24 を参照。
 
 ---
 
@@ -499,6 +532,23 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **なぜ**: `go` バイナリに依存しない環境・CI サンドボックスでの実行と、キャッシュ配置の整合。
 - **どこ**: `guff-packages`（driver 抽象）、`guff-runner`（cache パス）。
 
+#### R24. 性能フォローアップ（R10.1 の発展余地）
+- **なぜ**: R10.1 で cold/warm とも golangci-lint 超えを達成したが、さらに詰められる余地がある。
+  いずれも機能ブロッカーではなく、大規模リポジトリでの伸びしろ。
+- **項目**:
+  1. **facts の永続化**: analyzer 間 facts（`analysis.Fact`）をキャッシュに保存し、ミス pkg の
+     再解析でも依存の facts 再計算を避ける（golangci `runner_action_cache.go` 相当）。R10 からの継続 DEFERRED。
+  2. **サブパッケージ（ファイル）粒度のインクリメンタル型チェック**: 現状はパッケージ単位でミス→
+     パッケージ丸ごと再型チェック。巨大パッケージで 1 ファイル変更時の再チェック範囲を狭める。
+  3. **export data デコードの共有キャッシュ**: `typecheck_package` はパッケージごとに新規 `Checker`/
+     `ExportImporter` を作り、共通の stdlib 依存（fmt 等）の export data をパッケージ数分デコードする
+     （プロファイル上の `preload_exports` 重複）。並列化で wall-clock は隠せているが総 CPU は無駄。
+     デコード済み型パッケージを共有アリーナで再利用できれば cold の総 CPU をさらに削減。
+  4. **`go list` メタデータのキャッシュ/差分ロード**: 現状 warm でも毎回 `go list` を実行（~0.05s）。
+     大規模ツリーではここも効いてくる。
+- **どこ**: `guff-runner/src/cache.rs`（facts）、`guff-packages/src/typecheck.rs`（共有 importer・
+  粒度）、`guff-packages/src/golist.rs`（メタデータキャッシュ）。
+
 ---
 
 ### Milestone G — 互換性の検証（「互換」を名乗る根拠）
@@ -552,7 +602,8 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
-| 2026-07-14 | **R11 完了**: `benchmarks/` ハーネス（guff vs golangci-lint、cold/warm、`standard.yml`）。`fixture`/`local` 計測 + `results/RESULTS.md`。`--oss` は SSA ギャップで FAIL しがち（R17）。現状 warm は golangci の ~5–6x |
+| 2026-07-14 | **R10.1 完了（性能パス）**: warm が golangci の ~5–6x 遅かった原因を `sample` で特定し解消。①`[profile.release]` fat LTO+`codegen-units=1` ②`typecheck_packages` を rayon 並列化（+`FileSet` base 採番レース修正、errcheck 列バグも副産物で修正）③キャッシュ salt 決定化（`SettingsBag` Debug ソート）④`NeedAllDeps` を平坦 `deps`+self-hash レジストリで決定化 ⑤**遅延型チェック**（キャッシュ判定を先行、ミス pkg のみ parse+型チェック）。結果 **guff が cold/warm とも golangci 超え**（warm `local` 1.76s→0.16s=0.54x、`fixture` 0.77x）。全 195 テスト green・出力は golangci 基準一致。残余地は R24 |
+| 2026-07-14 | **R11 完了**: `benchmarks/` ハーネス（guff vs golangci-lint、cold/warm、`standard.yml`）。`fixture`/`local` 計測 + `results/RESULTS.md`。`--oss` は SSA ギャップで FAIL しがち（R17）。（初回計測では warm が golangci の ~5–6x → R10.1 で逆転） |
 | 2026-07-14 | **R10 完了**: パッケージ単位 issues 永続キャッシュ（`IssueCache`）。未変更 pkg は再解析スキップ。`GUFF_CACHE`/`GOLANGCI_LINT_CACHE`、`guff cache clean`/`status`、`--no-cache`。facts キャッシュと load スキップは DEFERRED。`tests/cache_test.rs` |
 | 2026-07-14 | **R9 完了**: `Ident::obj` を `Mutex` 化して `Package: Sync`。action DAG を依存ウェーブフロント + rayon で並列実行。`-j`/`run.concurrency` をワーカー数に配線。逐次 vs 並列の診断一致を `tests/parallel_test.rs` で検証。wall-clock スケール実証は R11 DEFERRED |
 | 2026-07-14 | **R8 完了**: colored-line-number / github-actions / checkstyle / sarif / tab / colored-tab。`format:path` 書き出しは DEFERRED。`tests/format_test.rs` |

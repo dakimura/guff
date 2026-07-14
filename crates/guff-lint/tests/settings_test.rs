@@ -64,6 +64,7 @@ fn run_errcheck(pkg: Arc<Package>, settings: &LinterSettings) -> LintResult {
         packages: vec![pkg],
         run,
         filter: IssueFilter::default(),
+        cached_issues: Vec::new(),
     }
 }
 

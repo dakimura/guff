@@ -57,6 +57,7 @@ fn lint_errcheck_fixture() -> LintResult {
         packages: vec![pkg],
         run,
         filter: guff_lint::IssueFilter::default(),
+        cached_issues: Vec::new(),
     }
 }
 
@@ -104,6 +105,7 @@ fn exit_code_is_zero_when_clean() {
         packages: vec![pkg],
         run,
         filter: guff_lint::IssueFilter::default(),
+        cached_issues: Vec::new(),
     };
     assert_eq!(result.diagnostic_count(), 0);
     assert_eq!(result.exit_code(1), 0);

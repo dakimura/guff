@@ -21,10 +21,12 @@ pub use config::Config;
 pub use dedup::{filter_duplicate_packages, filter_test_main_packages};
 pub use driver::{default_driver, Driver, GoListDriver};
 pub use golist::{go_available, go_list_driver, normalize_pattern, GoListError};
-pub use load::{load, load_with_driver, LoadError};
+pub use load::{load, load_graph, load_graph_with_driver, load_with_driver, LoadError};
 pub use load_mode::LoadMode;
 pub use package::{
     DriverResponse, Error, ErrorKind, Module, ModuleError, Package, TypecheckArtifacts,
 };
 pub use preset::load_for_go_analysis;
-pub use typecheck::{needs_typecheck, typecheck_package, typecheck_packages, TypecheckEnv};
+pub use typecheck::{
+    needs_typecheck, typecheck_package, typecheck_packages, typecheck_roots, TypecheckEnv,
+};
