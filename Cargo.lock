@@ -464,6 +464,7 @@ dependencies = [
  "guff-packages",
  "guff-runner",
  "guff-staticcheck",
+ "guff-style",
  "guff-types",
  "guff-unused",
  "regex",
@@ -533,6 +534,17 @@ dependencies = [
  "guff-types",
  "regex",
  "url",
+]
+
+[[package]]
+name = "guff-style"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
 ]
 
 [[package]]

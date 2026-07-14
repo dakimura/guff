@@ -1,0 +1,22 @@
+[package]
+name = "guff-style"
+description = "Rust ports of style/modernization go/analysis linters (copyloopvar, usetesting, usestdlibvars, …)."
+keywords = ["go", "linter", "style", "analysis"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_style"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-types = { path = "../guff-types" }
+
+[dev-dependencies]
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-types = { path = "../guff-types" }

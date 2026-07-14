@@ -45,6 +45,9 @@ pub fn analyzers_for_linter_with_settings(
         "wrapcheck" => Some(vec![guff_error::wrapcheck()]),
         "noctx" => Some(vec![guff_context::noctx()]),
         "fatcontext" => Some(vec![guff_context::fatcontext()]),
+        "copyloopvar" => Some(vec![guff_style::copyloopvar()]),
+        "usetesting" => Some(vec![guff_style::usetesting()]),
+        "usestdlibvars" => Some(vec![guff_style::usestdlibvars()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -59,6 +62,7 @@ pub fn is_meta_linter(name: &str) -> bool {
 
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "copyloopvar",
     "durationcheck",
     "err113",
     "errcheck",
@@ -74,6 +78,8 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "nolintlint",
     "staticcheck",
     "unused",
+    "usestdlibvars",
+    "usetesting",
     "wrapcheck",
 ];
 
@@ -85,6 +91,7 @@ pub fn known_linter_names() -> &'static [&'static str] {
 /// One-line description for `guff linters` (golangci-style).
 pub fn linter_description(name: &str) -> &'static str {
     match name {
+        "copyloopvar" => "Detects unnecessary copies of loop variables (Go 1.22+).",
         "durationcheck" => "Checks for multiplying duration by duration.",
         "err113" => "Checks the errors handling expressions according to Go 1.13.",
         "errcheck" => "Checks for unchecked errors.",
@@ -100,6 +107,8 @@ pub fn linter_description(name: &str) -> &'static str {
         "nolintlint" => "Reports unused //nolint directives.",
         "staticcheck" => "Checks for bugs, performance and style issues.",
         "unused" => "Checks Go code for unused constants, variables, functions and types.",
+        "usestdlibvars" => "Suggests replacing magic literals with stdlib constants.",
+        "usetesting" => "Reports uses of functions with replacements in the testing package.",
         "wrapcheck" => "Checks that errors returned from external packages are wrapped.",
         _ => "",
     }

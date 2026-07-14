@@ -56,7 +56,7 @@ go list / モジュールグラフ (guff-packages)
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context` | 各 linter の Analyzer 群 |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style` | 各 linter の Analyzer 群 |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -72,7 +72,7 @@ guff-ast / guff-constant / guff-version*
   → guff-build → guff-packages
   → guff-ssa / guff-pattern / guff-analysis
   → guff-runner
-  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context}
+  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context,style}
   → guff-lint
 ```
 
@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-14。ワークスペース全体 **1896 tests green**。
+> 最終更新: 2026-07-15。ワークスペース全体 **1896+ tests green**（本セッションで `guff-style` 6 tests 追加）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -142,6 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **5**（errname / err113 / durationcheck / errorlint / wrapcheck） | errchkjson / rowserrcheck 等は **DEFERRED** |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED** |
+| `guff-style` | ✅ **3**（copyloopvar / usetesting / usestdlibvars） | perfsprint / goconst・R14 バンドル残りは **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -151,7 +152,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache`, `--fix` | `format:path` 書き出し・errcheck exclude-functions 等は未 |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
-| プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/noctx/fatcontext） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
+| プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/noctx/fatcontext/copyloopvar/usetesting/usestdlibvars） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュ・ロード/型チェックのスキップは未 |
@@ -498,22 +499,25 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - gosec, gocritic, unparam, unconvert, exhaustive, exhaustruct, copyloopvar, perfsprint,
   usestdlibvars, usetesting, durationcheck, goconst, musttag, loggercheck, sloglint, testifylint ほか。
 - **完了条件**: 各 linter に bad/ok testdata、`go vet`/golangci 相当の指摘、レジストリ登録。
-- **進捗メモ (2026-07-14)**:
+- **進捗メモ (2026-07-15)**:
   1. `guff-gostaticanalysis`: forcetypeassert / nilnil / makezero
   2. `guff-error`: errname / err113 / durationcheck / **errorlint** / **wrapcheck**
   3. `guff-context`: **noctx**（AST call-name; upstream は buildssa）/ **fatcontext**
+  4. `guff-style`（新）: **copyloopvar** / **usetesting** / **usestdlibvars**（HTTP method/status 既定オン）
   いずれも `--enable` で有効化。テストは各クレートの `tests/checks_test.rs`。
   **DEFERRED（同タスク内の残り）**:
   - `nilerr` / `nilnesserr` — SSA（→ R17）
   - `mirror` — 大テーブル
   - `errorlint` の errorf 既定オフ / allowed マップ完全版、`wrapcheck` の package-glob / interface-regexp 設定
-  - `errchkjson` / `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck / gosec ほか
+  - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar` の settings 配線
+  - `errchkjson` / `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck / gosec / perfsprint / goconst ほか
     （R13 続きセッションで数個ずつ）
 
 #### R14. スタンドアロン linter
 - `guff-revive`（独自ルールエンジン）, `guff-misspell`, `guff-dupl`。
 - `guff-style` バンドル: funlen, gocyclo, gocognit, cyclop, nestif, lll, whitespace, wsl, nlreturn,
   dogsled, nakedret, prealloc, predeclared, mnd, goprintffuncname, nosprintfhostport, asciicheck, tagalign。
+  （クレート自体は R13 で新設済み。copyloopvar / usetesting / usestdlibvars 済。）
 - `guff-comment`: godot, godox, dupword。`guff-import`: depguard, gomodguard, gomoddirectives。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
@@ -621,6 +625,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-15 | **R13 続き**: 新 `guff-style` に `copyloopvar` / `usetesting` / `usestdlibvars`（HTTP 既定）を実装しレジストリ登録。perfsprint/goconst・optional テーブル等は DEFERRED |
 | 2026-07-14 | **R13 続き**: `errorlint` / `wrapcheck`（`guff-error`）+ `noctx` / `fatcontext`（新 `guff-context`）。レジストリ登録・testdata。noctx は AST 版（SSA 不要） |
 | 2026-07-14 | **R13 続き**: `guff-error` クレート新設。`errname` / `err113` / `durationcheck` を実装しレジストリ登録（`--enable`）。errorlint ほかは DEFERRED |
 | 2026-07-14 | **R13 部分完了**: `guff-gostaticanalysis` クレート新設。`forcetypeassert` / `nilnil` / `makezero` を実装し `guff-lint` レジストリに登録（`--enable`）。nilerr/nilnesserr（SSA）・mirror・その他多数は DEFERRED |
