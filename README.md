@@ -142,6 +142,17 @@ analyzer 追加手順は、すべて 1 本にまとめてあります:
 
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **開発の唯一の正典**
 
+### ベンチマーク（対 golangci-lint）
+
+```bash
+cargo build --release -p guff-lint
+./benchmarks/smoke.sh          # オフライン smoke
+./benchmarks/run.sh            # fixture + local コーパス
+```
+
+最新の数値表: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md)。
+詳細は [`benchmarks/README.md`](benchmarks/README.md)。
+
 > 以前分かれていた `MIGRATION.md` / `PRE-LINTER-PLAN.md` / `docs/LINTER-MIGRATION.md` /
 > `docs/STATICCHECK-MIGRATION.md` / `docs/ADDING-ANALYZER.md` / `projects/guff-ssa-MIGRATION.md`
 > は上記に統合しました（原文は git 履歴に残っています）。
@@ -192,6 +203,7 @@ guff-lint  (bin: guff)
 ```
 guff/
 ├── Cargo.toml              # workspace 定義
+├── benchmarks/             # vs golangci-lint wall-clock harness (R11)
 ├── crates/
 │   ├── guff-lint/          # CLI エントリ (bin: guff)
 │   ├── guff-runner/        # 解析ドライバ
@@ -202,5 +214,5 @@ guff/
 │   ├── guff-ssa/           # SSA
 │   ├── guff-staticcheck/   # …
 │   └── …
-└── docs/                   # 移植メモ・開発ガイド
+└── docs/                   # 開発ガイド（DEVELOPMENT.md）
 ```

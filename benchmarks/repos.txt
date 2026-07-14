@@ -1,0 +1,11 @@
+# Target corpora for optional `./benchmarks/run.sh --oss`.
+# Format: <name> <git-url> <ref>
+#
+# NOTE: many real modules hit guff SSA / type-checker gaps under the
+# `standard` preset (staticcheck → buildir). Failed runs are recorded as
+# FAIL in the summary — use `fixture` / `local` for apples-to-apples timing
+# until R17 lands.
+
+intern https://github.com/josharian/intern.git v1.0.0
+xid https://github.com/rs/xid.git v1.6.0
+toml https://github.com/BurntSushi/toml.git v1.4.0

@@ -10,3 +10,9 @@
 
 # Environment
 .env
+
+# Benchmark corpus clones and raw run artifacts (keep RESULTS.md)
+/benchmarks/corpus/
+/benchmarks/results/*.tsv
+/benchmarks/results/*.md
+!/benchmarks/results/RESULTS.md

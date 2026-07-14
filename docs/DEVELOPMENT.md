@@ -152,7 +152,8 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュ・ロード/型チェックのスキップは未 |
-| 並列 | ✅ action DAG を rayon ウェーブフロントで並列実行。`-j`/`run.concurrency` でワーカー数。`Ident::obj` を `Mutex` 化し `Package: Sync` | ロード/型チェックはまだ逐次。ベンチ実証は R11 |
+| 並列 | ✅ action DAG を rayon ウェーブフロントで並列実行。`-j`/`run.concurrency` でワーカー数。`Ident::obj` を `Mutex` 化し `Package: Sync` | ロード/型チェックはまだ逐次。実 OSS の wall-clock は R11 で計測開始（現状 guff は warmup 比で golangci より遅い） |
+| ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・同一 `standard.yml`）。`fixture`/`local` で再現可能。`results/RESULTS.md` | 実 OSS は SSA 未実装で FAIL しがち（→ R17）。load スキップ無しで warm 恩恵は小さい |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | **未実装**（`SuggestedFix`/`TextEdit` のデータ型はあるが誰も適用しない） | `--fix` が無い |
 
@@ -396,7 +397,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了メモ**: `Ident::obj` を `RefCell` → `Mutex` にし `Package: Sync`。`exec_all` が依存ウェーブフロント
   + rayon プールで並列実行。`RunnerOptions.concurrency` / `-j` / `run.concurrency` をプールサイズに配線
   （未指定は `available_parallelism`）。結果の一致は診断多重集合で検証。
-  DEFERRED: ロード/型チェック並列、wall-clock スケール実証（→ R11 ベンチ）。
+  DEFERRED: ロード/型チェック並列。wall-clock スケールは R11 で計測開始（現状は guff 側が遅い）。
   テスト: `crates/guff-runner/tests/parallel_test.rs`。
 
 #### R10. 永続キャッシュ（増分再解析） ✅ 完了 (2026-07-14)
@@ -414,13 +415,19 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   `--no-cache`。DEFERRED: facts 永続化、ロード/型チェックのスキップ（ヒットでも load は走る）。
   テスト: `cache.rs` ユニット + `tests/cache_test.rs` + `cli_test` cache サブコマンド。
 
-#### R11. ベンチマークハーネス（対 golangci-lint）
+#### R11. ベンチマークハーネス（対 golangci-lint） ✅ 完了 (2026-07-14)
 - **目的/なぜ**: 「高速」を主張するには実測が要る。
 - **どこ**: 新規 `benchmarks/`（スクリプト + 対象 OSS リポジトリのリスト）。
 - **手順**: 数個の代表 OSS リポジトリで、同一プリセットで golangci-lint と guff の wall-clock を測り、
   コールド/ウォーム両方を記録。結果を §3 か README にテーブルで載せる。
 - **完了条件**: 再現可能なベンチスクリプトと数値表。
 - **テスト**: スクリプトが CI（or 手動）で回る。
+- **完了メモ**: `benchmarks/run.sh`（cold/warm・median・`FAIL` 検知）+ `smoke.sh` + 共有
+  `standard.yml`。デフォルト対象は `fixture/` と合成コーパス `local/`（〜3k LOC・
+  SSA セーフ方言）。`--oss` で `repos.txt` を追加計測（現状 staticcheck→buildir で
+  多く FAIL → R17）。数値表は `benchmarks/results/RESULTS.md` と README。
+  所見: warm 比で guff は golangci-lint の ~5–6x（load/型チェックが毎回走るためキャッシュ恩恵が薄い）。
+  テスト: `./benchmarks/smoke.sh`（オフライン）。
 
 ---
 
@@ -545,6 +552,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-14 | **R11 完了**: `benchmarks/` ハーネス（guff vs golangci-lint、cold/warm、`standard.yml`）。`fixture`/`local` 計測 + `results/RESULTS.md`。`--oss` は SSA ギャップで FAIL しがち（R17）。現状 warm は golangci の ~5–6x |
 | 2026-07-14 | **R10 完了**: パッケージ単位 issues 永続キャッシュ（`IssueCache`）。未変更 pkg は再解析スキップ。`GUFF_CACHE`/`GOLANGCI_LINT_CACHE`、`guff cache clean`/`status`、`--no-cache`。facts キャッシュと load スキップは DEFERRED。`tests/cache_test.rs` |
 | 2026-07-14 | **R9 完了**: `Ident::obj` を `Mutex` 化して `Package: Sync`。action DAG を依存ウェーブフロント + rayon で並列実行。`-j`/`run.concurrency` をワーカー数に配線。逐次 vs 並列の診断一致を `tests/parallel_test.rs` で検証。wall-clock スケール実証は R11 DEFERRED |
 | 2026-07-14 | **R8 完了**: colored-line-number / github-actions / checkstyle / sarif / tab / colored-tab。`format:path` 書き出しは DEFERRED。`tests/format_test.rs` |
