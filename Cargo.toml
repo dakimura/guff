@@ -18,6 +18,7 @@ members = [
     "crates/guff-errcheck",
     "crates/guff-ineffassign",
     "crates/guff-unused",
+    "crates/guff-gostaticanalysis",
     "crates/guff-lint",
     "crates/guff-ssa",
     "crates/guff-version",

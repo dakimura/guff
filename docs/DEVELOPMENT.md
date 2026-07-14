@@ -56,7 +56,7 @@ go list / モジュールグラフ (guff-packages)
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused` | 各 linter の Analyzer 群 |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis` | 各 linter の Analyzer 群 |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -72,7 +72,7 @@ guff-ast / guff-constant / guff-version*
   → guff-build → guff-packages
   → guff-ssa / guff-pattern / guff-analysis
   → guff-runner
-  → guff-{staticcheck,govet,errcheck,ineffassign,unused}
+  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis}
   → guff-lint
 ```
 
@@ -139,6 +139,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
 | `guff-unused` | ✅（単一パッケージ; 型・定数・メソッド・const グループ） | whole-program 版は未 |
+| `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -148,7 +149,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache`, `--fix` | `format:path` 書き出し・errcheck exclude-functions 等は未 |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
-| プリセット | `standard`/`fast`/`all`/`none`。ただし linter が 5 つしか無いので `standard`==`all`、`fast` は staticcheck を抜くだけ | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
+| プリセット | `standard`/`fast`/`all`/`none`。ただし linter が少数なので `standard`==`all`（5 系統）、`fast` は staticcheck を抜くだけ。`forcetypeassert`/`nilnil`/`makezero` は `--enable` で追加可 | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュ・ロード/型チェックのスキップは未 |
@@ -488,13 +489,20 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 > golangci-lint は 100+ linter を束ねる。全部は不要でも、主要どころを揃えないと「互換」の説得力が弱い。
 > 各 linter は §5 の手順で 1 個ずつ追加する。**1 タスク = 数 linter** を目安に。
 
-#### R13. go/analysis 系 linter（`guff-gostaticanalysis` ほか）
+#### R13. go/analysis 系 linter（`guff-gostaticanalysis` ほか）🟡 部分完了 (2026-07-14)
 - nilerr, nilnil, forcetypeassert, makezero, mirror, nilnesserr（`guff-gostaticanalysis`）。
 - errorlint, errname, err113, errchkjson, wrapcheck, rowserrcheck（error 系）。
 - bodyclose, noctx, contextcheck, sqlclosecheck, spancheck, fatcontext（context/resource 系）。
 - gosec, gocritic, unparam, unconvert, exhaustive, exhaustruct, copyloopvar, perfsprint,
   usestdlibvars, usetesting, durationcheck, goconst, musttag, loggercheck, sloglint, testifylint ほか。
 - **完了条件**: 各 linter に bad/ok testdata、`go vet`/golangci 相当の指摘、レジストリ登録。
+- **進捗メモ (2026-07-14)**: クレート `guff-gostaticanalysis` を新設し、AST 系 3 つを実装・登録
+  （`forcetypeassert` / `nilnil` / `makezero`）。いずれも `--enable` で有効化（standard には入れない）。
+  テスト: `crates/guff-gostaticanalysis/tests/checks_test.rs`。
+  **DEFERRED（同タスク内の残り）**:
+  - `nilerr` / `nilnesserr` — `buildssa` 依存（→ R17 SSA 後に着手しやすい）。
+  - `mirror` — checkers 多数の大テーブル移植。
+  - error / context / gosec ほかの個別 linter（R13 続きセッションで数個ずつ）。
 
 #### R14. スタンドアロン linter
 - `guff-revive`（独自ルールエンジン）, `guff-misspell`, `guff-dupl`。
@@ -607,6 +615,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-14 | **R13 部分完了**: `guff-gostaticanalysis` クレート新設。`forcetypeassert` / `nilnil` / `makezero` を実装し `guff-lint` レジストリに登録（`--enable`）。nilerr/nilnesserr（SSA）・mirror・その他多数は DEFERRED |
 | 2026-07-14 | **R12 完了**: `--fix` で `SuggestedFix`/`TextEdit` をソースに適用（オフセット降順・重なり排除）。修正済み診断は出力から除外。SA1004（`time.Sleep`）で検証。`fix.rs` + `tests/fix_test.rs` |
 | 2026-07-14 | **R10.1 完了（性能パス）**: warm が golangci の ~5–6x 遅かった原因を `sample` で特定し解消。①`[profile.release]` fat LTO+`codegen-units=1` ②`typecheck_packages` を rayon 並列化（+`FileSet` base 採番レース修正、errcheck 列バグも副産物で修正）③キャッシュ salt 決定化（`SettingsBag` Debug ソート）④`NeedAllDeps` を平坦 `deps`+self-hash レジストリで決定化 ⑤**遅延型チェック**（キャッシュ判定を先行、ミス pkg のみ parse+型チェック）。結果 **guff が cold/warm とも golangci 超え**（warm `local` 1.76s→0.16s=0.54x、`fixture` 0.77x）。全 195 テスト green・出力は golangci 基準一致。残余地は R24 |
 | 2026-07-14 | **R11 完了**: `benchmarks/` ハーネス（guff vs golangci-lint、cold/warm、`standard.yml`）。`fixture`/`local` 計測 + `results/RESULTS.md`。`--oss` は SSA ギャップで FAIL しがち（R17）。（初回計測では warm が golangci の ~5–6x → R10.1 で逆転） |

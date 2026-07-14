@@ -35,6 +35,9 @@ pub fn analyzers_for_linter_with_settings(
         "errcheck" => Some(guff_errcheck::analyzers()),
         "ineffassign" => Some(guff_ineffassign::analyzers()),
         "unused" => Some(guff_unused::analyzers()),
+        "forcetypeassert" => Some(vec![guff_gostaticanalysis::forcetypeassert()]),
+        "nilnil" => Some(vec![guff_gostaticanalysis::nilnil()]),
+        "makezero" => Some(vec![guff_gostaticanalysis::makezero()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -50,8 +53,11 @@ pub fn is_meta_linter(name: &str) -> bool {
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "errcheck",
+    "forcetypeassert",
     "govet",
     "ineffassign",
+    "makezero",
+    "nilnil",
     "nolintlint",
     "staticcheck",
     "unused",
@@ -66,8 +72,11 @@ pub fn known_linter_names() -> &'static [&'static str] {
 pub fn linter_description(name: &str) -> &'static str {
     match name {
         "errcheck" => "Checks for unchecked errors.",
+        "forcetypeassert" => "Finds forced type assertions that may panic.",
         "govet" => "Vet examines Go source code and reports suspicious constructs.",
         "ineffassign" => "Detects when assignments to existing variables are not used.",
+        "makezero" => "Finds slice declarations with non-zero initial length and later appends.",
+        "nilnil" => "Checks that there is no simultaneous return of nil error and an invalid value.",
         "nolintlint" => "Reports unused //nolint directives.",
         "staticcheck" => "Checks for bugs, performance and style issues.",
         "unused" => "Checks Go code for unused constants, variables, functions and types.",
@@ -178,7 +187,10 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
     static MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
     let map = MAP.get_or_init(|| {
         let mut m = HashMap::new();
-        for &linter in STANDARD_LINTER_NAMES {
+        for &linter in KNOWN_LINTER_NAMES {
+            if is_meta_linter(linter) {
+                continue;
+            }
             if let Some(analyzers) = analyzers_for_linter(linter) {
                 for a in analyzers {
                     m.insert(a.name, linter);
