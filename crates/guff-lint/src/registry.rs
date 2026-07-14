@@ -51,6 +51,9 @@ pub fn analyzers_for_linter_with_settings(
         "usestdlibvars" => Some(vec![guff_style::usestdlibvars()]),
         "perfsprint" => Some(vec![guff_style::perfsprint()]),
         "goconst" => Some(vec![guff_style::goconst()]),
+        "dogsled" => Some(vec![guff_style::dogsled()]),
+        "asciicheck" => Some(vec![guff_style::asciicheck()]),
+        "goprintffuncname" => Some(vec![guff_style::goprintffuncname()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -65,7 +68,9 @@ pub fn is_meta_linter(name: &str) -> bool {
 
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "asciicheck",
     "copyloopvar",
+    "dogsled",
     "durationcheck",
     "err113",
     "errcheck",
@@ -75,6 +80,7 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "fatcontext",
     "forcetypeassert",
     "goconst",
+    "goprintffuncname",
     "govet",
     "ineffassign",
     "makezero",
@@ -97,7 +103,9 @@ pub fn known_linter_names() -> &'static [&'static str] {
 /// One-line description for `guff linters` (golangci-style).
 pub fn linter_description(name: &str) -> &'static str {
     match name {
+        "asciicheck" => "Checks that identifiers do not contain non-ASCII characters.",
         "copyloopvar" => "Detects unnecessary copies of loop variables (Go 1.22+).",
+        "dogsled" => "Checks assignments with too many blank identifiers.",
         "durationcheck" => "Checks for multiplying duration by duration.",
         "err113" => "Checks the errors handling expressions according to Go 1.13.",
         "errcheck" => "Checks for unchecked errors.",
@@ -107,6 +115,7 @@ pub fn linter_description(name: &str) -> &'static str {
         "fatcontext" => "Detects nested contexts in loops and function literals.",
         "forcetypeassert" => "Finds forced type assertions that may panic.",
         "goconst" => "Finds repeated strings that could be replaced by a constant.",
+        "goprintffuncname" => "Checks that printf-like functions are named with an f suffix.",
         "govet" => "Vet examines Go source code and reports suspicious constructs.",
         "ineffassign" => "Detects when assignments to existing variables are not used.",
         "makezero" => "Finds slice declarations with non-zero initial length and later appends.",

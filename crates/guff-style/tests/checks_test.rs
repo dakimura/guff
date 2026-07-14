@@ -1,6 +1,9 @@
 mod support;
 
-use guff_style::{copyloopvar, goconst, perfsprint, usestdlibvars, usetesting};
+use guff_style::{
+    asciicheck, copyloopvar, dogsled, goconst, goprintffuncname, perfsprint, usestdlibvars,
+    usetesting,
+};
 
 #[test]
 fn copyloopvar_flags_redundant_copies() {
@@ -148,4 +151,90 @@ fn goconst_flags_repeated_strings() {
 fn goconst_allows_below_threshold() {
     let pkg = support::typecheck_fixture("goconst", "example.com/goconst/ok", "ok.go");
     assert!(support::run_analyzer(goconst(), &pkg).is_empty());
+}
+
+#[test]
+fn dogsled_flags_too_many_blanks() {
+    let pkg = support::typecheck_fixture("dogsled", "example.com/dogsled", "bad.go");
+    let messages = support::run_analyzer(dogsled(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("declaration has 3 blank identifiers")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("declaration has 4 blank identifiers")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn dogsled_allows_two_or_fewer_blanks() {
+    let pkg = support::typecheck_fixture("dogsled", "example.com/dogsled/ok", "ok.go");
+    assert!(support::run_analyzer(dogsled(), &pkg).is_empty());
+}
+
+#[test]
+fn asciicheck_flags_non_ascii_idents() {
+    let pkg = support::typecheck_fixture("asciicheck", "example.com/asciicheck", "bad.go");
+    let messages = support::run_analyzer(asciicheck(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("TéstFunc") && m.contains("non-ASCII")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("téstConst") && m.contains("non-ASCII")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("téstParam") && m.contains("non-ASCII")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn asciicheck_allows_ascii_idents() {
+    let pkg = support::typecheck_fixture("asciicheck", "example.com/asciicheck/ok", "ok.go");
+    assert!(support::run_analyzer(asciicheck(), &pkg).is_empty());
+}
+
+#[test]
+fn goprintffuncname_flags_missing_f_suffix() {
+    let pkg = support::typecheck_fixture(
+        "goprintffuncname",
+        "example.com/goprintffuncname",
+        "bad.go",
+    );
+    let messages = support::run_analyzer(goprintffuncname(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("prinfLikeFunc") && m.contains("prinfLikeFuncf")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("prinfLikeFuncAny") && m.contains("should be named")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("prinfLikeFuncWithExtraArgs")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goprintffuncname_allows_correct_names() {
+    let pkg = support::typecheck_fixture(
+        "goprintffuncname",
+        "example.com/goprintffuncname/ok",
+        "ok.go",
+    );
+    assert!(support::run_analyzer(goprintffuncname(), &pkg).is_empty());
 }
