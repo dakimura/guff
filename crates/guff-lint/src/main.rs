@@ -91,6 +91,10 @@ struct RunArgs {
     /// Disable the persistent issues cache.
     #[arg(long = "no-cache")]
     no_cache: bool,
+
+    /// Apply suggested fixes to source files and omit fixed issues from output.
+    #[arg(long)]
+    fix: bool,
 }
 
 #[derive(Parser)]
@@ -271,6 +275,7 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         out_formats,
         use_cache: !args.no_cache,
         cache_dir: None,
+        fix: args.fix,
     })
 }
 

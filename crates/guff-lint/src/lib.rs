@@ -6,6 +6,7 @@
 mod config;
 mod duration;
 mod exclude;
+mod fix;
 mod format;
 mod nolint;
 mod registry;
@@ -35,6 +36,7 @@ pub use registry::{
     partition_linters, resolve_linters, resolve_linters_with_settings, standard_analyzers,
     KNOWN_LINTER_NAMES, STANDARD_LINTER_NAMES,
 };
+pub use fix::{apply_fixes, FixError};
 pub use settings::{
     ErrcheckSettings, GovetSettings, LinterSettings, StaticcheckSettings,
 };
@@ -98,6 +100,8 @@ pub struct LintOptions {
     pub use_cache: bool,
     /// Override cache directory (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE` otherwise).
     pub cache_dir: Option<std::path::PathBuf>,
+    /// Apply the first suggested fix for each diagnostic to source files (`--fix`).
+    pub fix: bool,
 }
 
 impl LintOptions {
@@ -116,6 +120,7 @@ impl LintOptions {
             out_formats: vec![OutputFormatKind::Text],
             use_cache: true,
             cache_dir: None,
+            fix: false,
         }
     }
 }
@@ -328,6 +333,18 @@ impl LintResult {
     pub fn print_text(&self, out: &mut dyn Write) -> io::Result<usize> {
         self.print_with(&[OutputFormatKind::Text], out)
     }
+
+    /// Filtered issues, optionally applying suggested fixes to disk.
+    pub fn issues_and_fix(&self, apply_fix: bool) -> Result<(Vec<Issue>, usize), FixError> {
+        let issues = self.issues();
+        if !apply_fix {
+            return Ok((issues, 0));
+        }
+        let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) else {
+            return Ok((issues, 0));
+        };
+        apply_fixes(fset, &issues)
+    }
 }
 
 /// Run linters and print text diagnostics to stdout.
@@ -353,10 +370,16 @@ pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, Run
 
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
     let result = run_linters(opts)?;
-    result
-        .print_with(&opts.out_formats, out)
-        .map_err(RunError::Io)?;
-    Ok(result.exit_code(opts.issues_exit_code))
+    let (issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
+    if fixes_applied > 0 {
+        eprintln!("guff: fixed {fixes_applied} issue(s)");
+    }
+    print_issues(&opts.out_formats, &issues, out).map_err(RunError::Io)?;
+    Ok(if issues.is_empty() {
+        0
+    } else {
+        opts.issues_exit_code
+    })
 }
 
 /// Run on a worker thread and abort the process-visible wait when `timeout` elapses.
@@ -434,5 +457,11 @@ impl From<RunnerError> for RunError {
 impl From<ConfigError> for RunError {
     fn from(value: ConfigError) -> Self {
         Self::Config(value)
+    }
+}
+
+impl From<FixError> for RunError {
+    fn from(value: FixError) -> Self {
+        Self::Message(value.to_string())
     }
 }
