@@ -41,6 +41,10 @@ pub fn analyzers_for_linter_with_settings(
         "errname" => Some(vec![guff_error::errname()]),
         "err113" => Some(vec![guff_error::err113()]),
         "durationcheck" => Some(vec![guff_error::durationcheck()]),
+        "errorlint" => Some(vec![guff_error::errorlint()]),
+        "wrapcheck" => Some(vec![guff_error::wrapcheck()]),
+        "noctx" => Some(vec![guff_context::noctx()]),
+        "fatcontext" => Some(vec![guff_context::fatcontext()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -59,14 +63,18 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "err113",
     "errcheck",
     "errname",
+    "errorlint",
+    "fatcontext",
     "forcetypeassert",
     "govet",
     "ineffassign",
     "makezero",
     "nilnil",
+    "noctx",
     "nolintlint",
     "staticcheck",
     "unused",
+    "wrapcheck",
 ];
 
 /// All linter names known to the registry.
@@ -81,14 +89,18 @@ pub fn linter_description(name: &str) -> &'static str {
         "err113" => "Checks the errors handling expressions according to Go 1.13.",
         "errcheck" => "Checks for unchecked errors.",
         "errname" => "Checks that sentinel errors are prefixed with Err and types with Error.",
+        "errorlint" => "Finds error comparison and type assertion issues with wrapped errors.",
+        "fatcontext" => "Detects nested contexts in loops and function literals.",
         "forcetypeassert" => "Finds forced type assertions that may panic.",
         "govet" => "Vet examines Go source code and reports suspicious constructs.",
         "ineffassign" => "Detects when assignments to existing variables are not used.",
         "makezero" => "Finds slice declarations with non-zero initial length and later appends.",
         "nilnil" => "Checks that there is no simultaneous return of nil error and an invalid value.",
+        "noctx" => "Finds HTTP/DB/network calls that should take a context.",
         "nolintlint" => "Reports unused //nolint directives.",
         "staticcheck" => "Checks for bugs, performance and style issues.",
         "unused" => "Checks Go code for unused constants, variables, functions and types.",
+        "wrapcheck" => "Checks that errors returned from external packages are wrapped.",
         _ => "",
     }
 }

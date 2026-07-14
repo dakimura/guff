@@ -20,6 +20,7 @@ members = [
     "crates/guff-unused",
     "crates/guff-gostaticanalysis",
     "crates/guff-error",
+    "crates/guff-context",
     "crates/guff-lint",
     "crates/guff-ssa",
     "crates/guff-version",

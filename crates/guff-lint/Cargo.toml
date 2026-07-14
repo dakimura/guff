@@ -32,6 +32,7 @@ guff-ineffassign = { path = "../guff-ineffassign" }
 guff-unused = { path = "../guff-unused" }
 guff-gostaticanalysis = { path = "../guff-gostaticanalysis" }
 guff-error = { path = "../guff-error" }
+guff-context = { path = "../guff-context" }
 
 [dev-dependencies]
 tempfile = "3"

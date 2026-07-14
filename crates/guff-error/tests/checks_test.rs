@@ -1,6 +1,6 @@
 mod support;
 
-use guff_error::{durationcheck, err113, errname};
+use guff_error::{durationcheck, err113, errname, errorlint, wrapcheck};
 
 #[test]
 fn errname_flags_bad_type_and_var_names() {
@@ -69,5 +69,49 @@ fn durationcheck_allows_duration_times_int_cast() {
         support::run_analyzer(durationcheck(), &pkg).is_empty(),
         "{:?}",
         support::run_analyzer(durationcheck(), &pkg)
+    );
+}
+
+#[test]
+fn errorlint_flags_error_comparison() {
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint", &dir.join("bad.go"));
+    let messages = support::run_analyzer(errorlint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("comparing with") && m.contains("errors.Is")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn errorlint_allows_nil_check() {
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint/ok", &dir.join("ok.go"));
+    assert!(support::run_analyzer(errorlint(), &pkg).is_empty());
+}
+
+#[test]
+fn wrapcheck_flags_unwrapped_external_error() {
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck", &dir.join("bad.go"));
+    let messages = support::run_analyzer(wrapcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("external package") && m.contains("unwrapped")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn wrapcheck_allows_wrapped_error() {
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(wrapcheck(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(wrapcheck(), &pkg)
     );
 }
