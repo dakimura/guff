@@ -136,12 +136,20 @@ pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,
 ) -> Vec<String> {
+    run_analyzer_with_settings(analyzer, pkg, &RunnerOptions::default())
+}
+
+pub fn run_analyzer_with_settings(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    options: &RunnerOptions,
+) -> Vec<String> {
     let result = run_on_packages(
         &[analyzer],
         std::slice::from_ref(pkg),
         &RunnerOptions {
             sequential: true,
-            ..RunnerOptions::default()
+            ..options.clone()
         },
     )
     .expect("run analyzer");

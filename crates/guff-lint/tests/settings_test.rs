@@ -203,3 +203,32 @@ fn parse_v2_misspell_settings() {
     assert_eq!(opts.ignore_words, vec!["amercia"]);
     assert_eq!(opts.extra_words.len(), 1);
 }
+
+#[test]
+fn parse_v2_style_linter_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_style_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.gocyclo.min_complexity, Some(50));
+    assert_eq!(settings.dogsled.max_blank_identifiers, Some(4));
+    assert_eq!(settings.funlen.statements, Some(50));
+    let bag = settings.to_bag();
+    assert_eq!(
+        bag.get::<guff_style::GocycloOptions>("gocyclo")
+            .unwrap()
+            .min_complexity,
+        50
+    );
+    assert_eq!(
+        bag.get::<guff_style::DogsledOptions>("dogsled")
+            .unwrap()
+            .max_blank_identifiers,
+        4
+    );
+    assert_eq!(
+        bag.get::<guff_style::FunlenOptions>("funlen")
+            .unwrap()
+            .statements,
+        50
+    );
+}

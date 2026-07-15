@@ -4,8 +4,7 @@
 //! Default matches golangci-lint: `min-complexity=30` (report when complexity
 //! is strictly greater than this).
 //!
-//! DEFERRED: `linters.settings.gocognit.min-complexity` wiring;
-//! `//gocognit:ignore` directive support (needs PARSE_COMMENTS).
+//! DEFERRED: `//gocognit:ignore` directive support (needs PARSE_COMMENTS).
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -15,8 +14,7 @@ use guff::token::Token;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint default for `linters.settings.gocognit.min-complexity`.
-const MIN_COMPLEXITY: usize = 30;
+use crate::options::GocognitOptions;
 
 fn recv_string(expr: &Expr) -> String {
     match expr {
@@ -414,6 +412,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "gocognit requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<GocognitOptions>("gocognit")
+        .copied()
+        .unwrap_or_default();
+    let min_complexity = options.min_complexity;
+
     let mut pending = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
@@ -421,12 +425,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             };
             let c = complexity(f);
-            if c > MIN_COMPLEXITY {
+            if c > min_complexity {
                 let name = func_name(f);
                 pending.push((
                     f.name.name_pos.0 as u32,
                     format!(
-                        "cognitive complexity {c} of func {} is high (> {MIN_COMPLEXITY})",
+                        "cognitive complexity {c} of func {} is high (> {min_complexity})",
                         format_code(&name)
                     ),
                 ));

@@ -19,6 +19,11 @@ pub struct LinterSettings {
     pub revive: ReviveSettings,
     pub dupl: DuplSettings,
     pub misspell: MisspellSettings,
+    pub gocyclo: GocycloSettings,
+    pub gocognit: GocognitSettings,
+    pub nestif: NestifSettings,
+    pub dogsled: DogsledSettings,
+    pub funlen: FunlenSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -114,6 +119,45 @@ pub struct MisspellExtraWordSetting {
     pub correction: String,
 }
 
+/// `linters.settings.gocyclo` / `linters-settings.gocyclo`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GocycloSettings {
+    #[serde(default, rename = "min-complexity")]
+    pub min_complexity: Option<usize>,
+}
+
+/// `linters.settings.gocognit` / `linters-settings.gocognit`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GocognitSettings {
+    #[serde(default, rename = "min-complexity")]
+    pub min_complexity: Option<usize>,
+}
+
+/// `linters.settings.nestif` / `linters-settings.nestif`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NestifSettings {
+    #[serde(default, rename = "min-complexity")]
+    pub min_complexity: Option<usize>,
+}
+
+/// `linters.settings.dogsled` / `linters-settings.dogsled`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DogsledSettings {
+    #[serde(default, rename = "max-blank-identifiers")]
+    pub max_blank_identifiers: Option<usize>,
+}
+
+/// `linters.settings.funlen` / `linters-settings.funlen`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct FunlenSettings {
+    #[serde(default)]
+    pub lines: Option<usize>,
+    #[serde(default)]
+    pub statements: Option<usize>,
+    #[serde(default, rename = "ignore-comments")]
+    pub ignore_comments: Option<bool>,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -151,6 +195,31 @@ impl LinterSettings {
                 out.misspell = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("gocyclo".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GocycloSettings>(v.clone()) {
+                out.gocyclo = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("gocognit".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GocognitSettings>(v.clone()) {
+                out.gocognit = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("nestif".into())) {
+            if let Ok(s) = serde_yaml::from_value::<NestifSettings>(v.clone()) {
+                out.nestif = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("dogsled".into())) {
+            if let Ok(s) = serde_yaml::from_value::<DogsledSettings>(v.clone()) {
+                out.dogsled = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("funlen".into())) {
+            if let Ok(s) = serde_yaml::from_value::<FunlenSettings>(v.clone()) {
+                out.funlen = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -169,6 +238,11 @@ impl LinterSettings {
         bag.insert("revive", self.revive.to_guff_revive());
         bag.insert("dupl", self.dupl.to_guff_dupl());
         bag.insert("misspell", self.misspell.to_guff_misspell());
+        bag.insert("gocyclo", self.gocyclo.to_guff_gocyclo());
+        bag.insert("gocognit", self.gocognit.to_guff_gocognit());
+        bag.insert("nestif", self.nestif.to_guff_nestif());
+        bag.insert("dogsled", self.dogsled.to_guff_dogsled());
+        bag.insert("funlen", self.funlen.to_guff_funlen());
         Arc::new(bag)
     }
 
@@ -311,6 +385,55 @@ impl MisspellSettings {
                 })
                 .collect(),
             mode: self.mode.clone().unwrap_or_default(),
+        }
+    }
+}
+
+impl GocycloSettings {
+    pub fn to_guff_gocyclo(&self) -> guff_style::GocycloOptions {
+        let defaults = guff_style::GocycloOptions::default();
+        guff_style::GocycloOptions {
+            min_complexity: self.min_complexity.unwrap_or(defaults.min_complexity),
+        }
+    }
+}
+
+impl GocognitSettings {
+    pub fn to_guff_gocognit(&self) -> guff_style::GocognitOptions {
+        let defaults = guff_style::GocognitOptions::default();
+        guff_style::GocognitOptions {
+            min_complexity: self.min_complexity.unwrap_or(defaults.min_complexity),
+        }
+    }
+}
+
+impl NestifSettings {
+    pub fn to_guff_nestif(&self) -> guff_style::NestifOptions {
+        let defaults = guff_style::NestifOptions::default();
+        guff_style::NestifOptions {
+            min_complexity: self.min_complexity.unwrap_or(defaults.min_complexity),
+        }
+    }
+}
+
+impl DogsledSettings {
+    pub fn to_guff_dogsled(&self) -> guff_style::DogsledOptions {
+        let defaults = guff_style::DogsledOptions::default();
+        guff_style::DogsledOptions {
+            max_blank_identifiers: self
+                .max_blank_identifiers
+                .unwrap_or(defaults.max_blank_identifiers),
+        }
+    }
+}
+
+impl FunlenSettings {
+    pub fn to_guff_funlen(&self) -> guff_style::FunlenOptions {
+        let defaults = guff_style::FunlenOptions::default();
+        guff_style::FunlenOptions {
+            lines: self.lines.unwrap_or(defaults.lines),
+            statements: self.statements.unwrap_or(defaults.statements),
+            ignore_comments: self.ignore_comments.unwrap_or(defaults.ignore_comments),
         }
     }
 }

@@ -3,8 +3,6 @@
 //!
 //! Default matches golangci-lint: `min-complexity=5` (report when complexity
 //! is greater than or equal to this).
-//!
-//! DEFERRED: `linters.settings.nestif.min-complexity` wiring.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -14,8 +12,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint default for `linters.settings.nestif.min-complexity`.
-const MIN_COMPLEXITY: usize = 5;
+use crate::options::NestifOptions;
 
 fn expr_string(e: &Expr) -> String {
     match e {
@@ -190,10 +187,10 @@ impl NestVisitor {
     }
 }
 
-fn check_if(stmt: &guff::ast::IfStmt) -> Option<(u32, String)> {
+fn check_if(stmt: &guff::ast::IfStmt, min_complexity: usize) -> Option<(u32, String)> {
     let mut v = NestVisitor::new();
     v.visit_if(stmt);
-    if v.complexity < MIN_COMPLEXITY {
+    if v.complexity < min_complexity {
         return None;
     }
     Some((
@@ -206,13 +203,13 @@ fn check_if(stmt: &guff::ast::IfStmt) -> Option<(u32, String)> {
     ))
 }
 
-fn find_root_ifs(stmt: &Stmt, pending: &mut Vec<(u32, String)>) {
+fn find_root_ifs(stmt: &Stmt, min_complexity: usize, pending: &mut Vec<(u32, String)>) {
     walk::inspect(walk::stmt_ref(stmt), |n| {
         let Some(n) = n else {
             return true;
         };
         if let NodeRef::IfStmt(if_stmt) = n {
-            if let Some(issue) = check_if(if_stmt) {
+            if let Some(issue) = check_if(if_stmt, min_complexity) {
                 pending.push(issue);
             }
             return false;
@@ -226,6 +223,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "nestif requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<NestifOptions>("nestif")
+        .copied()
+        .unwrap_or_default();
+    let min_complexity = options.min_complexity;
+
     let mut pending = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
@@ -236,7 +239,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             };
             for stmt in &body.list {
-                find_root_ifs(stmt, &mut pending);
+                find_root_ifs(stmt, min_complexity, &mut pending);
             }
         }
     }

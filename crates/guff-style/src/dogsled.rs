@@ -2,8 +2,6 @@
 //! (golangci-lint rewrite in `pkg/golinters/dogsled`).
 //!
 //! Default matches golangci-lint: `max-blank-identifiers=2`.
-//!
-//! DEFERRED: `max-blank-identifiers` settings wiring.
 
 use std::sync::OnceLock;
 
@@ -12,8 +10,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint default for `linters.settings.dogsled.max-blank-identifiers`.
-const MAX_BLANK_IDENTIFIERS: usize = 2;
+use crate::options::DogsledOptions;
 
 fn blank_count(assign: &AssignStmt) -> usize {
     assign
@@ -23,7 +20,7 @@ fn blank_count(assign: &AssignStmt) -> usize {
         .count()
 }
 
-fn check_func(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_func(func: &FuncDecl, max_blank: usize, pending: &mut Vec<(u32, String)>) {
     let Some(body) = &func.body else {
         return;
     };
@@ -32,7 +29,7 @@ fn check_func(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
             continue;
         };
         let n = blank_count(assign);
-        if n > MAX_BLANK_IDENTIFIERS {
+        if n > max_blank {
             let pos = assign
                 .lhs
                 .first()
@@ -48,6 +45,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "dogsled requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<DogsledOptions>("dogsled")
+        .copied()
+        .unwrap_or_default();
+    let max_blank = options.max_blank_identifiers;
+
     let mut pending = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -55,7 +58,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             if let NodeRef::FuncDecl(f) = n {
-                check_func(f, &mut pending);
+                check_func(f, max_blank, &mut pending);
             }
             true
         });

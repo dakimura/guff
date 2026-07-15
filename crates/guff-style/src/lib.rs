@@ -29,6 +29,8 @@
 //! (`guff-revive` / `guff-dupl`)
 //! and per-linter settings / SuggestedFix for the above.
 
+mod options;
+
 mod asciicheck;
 mod copyloopvar;
 mod cyclop;
@@ -53,6 +55,9 @@ mod usetesting;
 mod whitespace;
 mod wsl;
 
+pub use options::{
+    DogsledOptions, FunlenOptions, GocognitOptions, GocycloOptions, NestifOptions,
+};
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
 pub use cyclop::analyzer as cyclop;

@@ -4,8 +4,8 @@
 //! Defaults match ultraware/golangci when settings are unset:
 //! `lines=60`, `statements=40`, `ignore-comments=true`.
 //!
-//! DEFERRED: `linters.settings.funlen` wiring; reliable comment stripping when
-//! packages are parsed without `PARSE_COMMENTS` (production typecheck).
+//! DEFERRED: reliable comment stripping when packages are parsed without
+//! `PARSE_COMMENTS` (production typecheck).
 
 use std::sync::OnceLock;
 
@@ -14,9 +14,7 @@ use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-const DEFAULT_LINE_LIMIT: usize = 60;
-const DEFAULT_STMT_LIMIT: usize = 40;
-const IGNORE_COMMENTS: bool = true;
+use crate::options::FunlenOptions;
 
 fn check_inline_func(expr: &Expr) -> usize {
     match expr {
@@ -64,12 +62,17 @@ fn func_end(f: &FuncDecl) -> Pos {
         .unwrap_or_else(|| f.ty.end())
 }
 
-fn get_lines(fset: &FileSet, f: &FuncDecl, file_comments: &[guff::ast::CommentGroup]) -> usize {
+fn get_lines(
+    fset: &FileSet,
+    f: &FuncDecl,
+    file_comments: &[guff::ast::CommentGroup],
+    ignore_comments: bool,
+) -> usize {
     let start_line = fset.position(func_pos(f)).line;
     let end_line = fset.position(func_end(f)).line;
     let line_count = end_line.saturating_sub(start_line).saturating_sub(1) as usize;
 
-    if !IGNORE_COMMENTS {
+    if !ignore_comments {
         return line_count;
     }
 
@@ -88,6 +91,7 @@ fn check_func(
     fset: &FileSet,
     file_comments: &[guff::ast::CommentGroup],
     decl: &FuncDecl,
+    options: FunlenOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
     let Some(body) = &decl.body else {
@@ -95,24 +99,24 @@ fn check_func(
     };
 
     let stmts = parse_stmts(&body.list);
-    if stmts > DEFAULT_STMT_LIMIT {
+    if stmts > options.statements {
         pending.push((
             decl.name.name_pos.0 as u32,
             format!(
                 "Function '{}' has too many statements ({} > {})",
-                decl.name.name, stmts, DEFAULT_STMT_LIMIT
+                decl.name.name, stmts, options.statements
             ),
         ));
         return;
     }
 
-    let lines = get_lines(fset, decl, file_comments);
-    if lines > DEFAULT_LINE_LIMIT {
+    let lines = get_lines(fset, decl, file_comments, options.ignore_comments);
+    if lines > options.lines {
         pending.push((
             decl.name.name_pos.0 as u32,
             format!(
                 "Function '{}' is too long ({} > {})",
-                decl.name.name, lines, DEFAULT_LINE_LIMIT
+                decl.name.name, lines, options.lines
             ),
         ));
     }
@@ -123,12 +127,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "funlen requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<FunlenOptions>("funlen")
+        .copied()
+        .unwrap_or_default();
+
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
         for decl in &file.decls {
             if let Decl::FuncDecl(f) = decl {
-                check_func(&fset, &file.comments, f, &mut pending);
+                check_func(&fset, &file.comments, f, options, &mut pending);
             }
         }
     }

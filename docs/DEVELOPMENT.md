@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | settings・SuggestedFix は **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen の主要キー）。ignore ディレクティブ・SuggestedFix・残 style linter settings は **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
@@ -523,7 +523,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `nilerr` / `nilnesserr` — SSA（→ R17）
   - `mirror` — 大テーブル
   - `errorlint` の errorf 既定オフ / allowed マップ完全版、`wrapcheck` の package-glob / interface-regexp 設定
-  - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar`・`perfsprint`・`goconst`・`dogsled` の settings 配線
+  - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar`・`perfsprint`・`goconst` の settings 配線
+  - `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` の `linters.settings` 配線は **完了**（2026-07-16）
   - `perfsprint` の concat-loop / fiximports、`goconst` の match-constant / numbers / find-duplicates
   - `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）
   - `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck — SSA（→ R17）
@@ -543,7 +544,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   settings・`gocyclo:ignore` / `gocognit:ignore`・PARSE_COMMENTS 前提の funlen コメント除外・
   cyclop package-average・nakedret SuggestedFix / skip-test-files・predeclared ignore/qualified・
   whitespace SuggestedFix / multi-*・nlreturn SuggestedFix・mnd settings・prealloc settings・
-  tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・settings は DEFERRED。）
+  tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・残 style linter settings は DEFERRED。）
+  `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` の `linters.settings` 配線済み。
 - `guff-comment`: **godot**（declarations + period 既定）/ **godox**（TODO/BUG/FIXME）/ **dupword**
   （comments + string literals）。settings・SuggestedFix・godot scope/capital・dupword keyword
   フィルタは DEFERRED。
@@ -661,6 +663,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13/R14 続き**: `linters.settings` を `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` に配線（`min-complexity` / `max-blank-identifiers` / `lines`・`statements`・`ignore-comments`）。テスト: `v2_style_settings.yml` + `guff-style` settings integration tests |
 | 2026-07-16 | **R14 残完了**: `linters.settings.revive` の `confidence` / `ignore-generated-header`、`dupl.threshold`、`misspell`（locale / ignore-words / extra-words / mode=restricted）を YAML → `SettingsBag` に配線。テスト: `v2_revive_confidence.yml` / `v2_dupl_threshold.yml` / `v2_misspell_restricted.yml` + 各クレート integration tests |
 | 2026-07-16 | **R14 続き**: `linters.settings.revive` の global/per-rule `severity` を YAML → `SettingsBag` → `Diagnostic.severity` → `Issue.severity` に配線。`severity: @linter` で revive 由来の severity を保持。テスト: `v2_revive_severity.yml` / `revive_applies_per_rule_and_global_severity` |
 | 2026-07-16 | **R14 続き**: `guff-revive` に extended revive rules **8** 件（comments-density / datarace / enforce-map-style / enforce-slice-style / enforce-switch-style / enforce-repeated-arg-type-style / package-directory-mismatch / forbidden-call-in-wg-go）を追加。golint-default 23 + extended 77 = **100 rules**。`linters.settings.revive` YAML 配線（`guff-lint` → `SettingsBag` → `guff_revive::Settings`）。per-rule severity は DEFERRED |

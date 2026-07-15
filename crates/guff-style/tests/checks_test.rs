@@ -572,3 +572,109 @@ fn wsl_allows_proper_spacing() {
     let messages = support::run_analyzer(wsl(), &pkg);
     assert!(messages.is_empty(), "{messages:?}");
 }
+
+#[test]
+fn gocyclo_respects_min_complexity_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocycloOptions;
+
+    let pkg = support::typecheck_fixture("gocyclo", "example.com/gocyclo", "bad.go");
+    assert!(
+        !support::run_analyzer(gocyclo(), &pkg).is_empty(),
+        "default min-complexity=30 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocyclo",
+        GocycloOptions {
+            min_complexity: 50,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gocyclo(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "min-complexity=50 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn dogsled_respects_max_blank_identifiers_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::DogsledOptions;
+
+    let pkg = support::typecheck_fixture("dogsled", "example.com/dogsled", "bad.go");
+    assert!(
+        !support::run_analyzer(dogsled(), &pkg).is_empty(),
+        "default max-blank-identifiers=2 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "dogsled",
+        DogsledOptions {
+            max_blank_identifiers: 4,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        dogsled(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "max-blank-identifiers=4 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn funlen_respects_statements_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::FunlenOptions;
+
+    let pkg = support::typecheck_fixture("funlen", "example.com/funlen", "bad.go");
+    assert!(
+        !support::run_analyzer(funlen(), &pkg).is_empty(),
+        "default statements=40 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "funlen",
+        FunlenOptions {
+            statements: 50,
+            ..FunlenOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        funlen(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "statements=50 should suppress bad.go: {messages:?}"
+    );
+}

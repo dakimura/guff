@@ -3,8 +3,7 @@
 //!
 //! Default matches golangci-lint: `min-complexity=30`.
 //!
-//! DEFERRED: `linters.settings.gocyclo.min-complexity` wiring; `gocyclo:ignore`
-//! directive support.
+//! DEFERRED: `gocyclo:ignore` directive support.
 
 use std::sync::OnceLock;
 
@@ -14,8 +13,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint default for `linters.settings.gocyclo.min-complexity`.
-const MIN_COMPLEXITY: usize = 30;
+use crate::options::GocycloOptions;
 
 fn recv_string(expr: &Expr) -> String {
     match expr {
@@ -76,14 +74,15 @@ fn report_if_high(
     name: &str,
     pos: u32,
     root: NodeRef<'_>,
+    min_complexity: usize,
     pending: &mut Vec<(u32, String)>,
 ) {
     let c = complexity(root);
-    if c > MIN_COMPLEXITY {
+    if c > min_complexity {
         pending.push((
             pos,
             format!(
-                "cyclomatic complexity {c} of func {} is high (> {MIN_COMPLEXITY})",
+                "cyclomatic complexity {c} of func {} is high (> {min_complexity})",
                 format_code(name)
             ),
         ));
@@ -95,6 +94,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "gocyclo requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<GocycloOptions>("gocyclo")
+        .copied()
+        .unwrap_or_default();
+    let min_complexity = options.min_complexity;
+
     let mut pending = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
@@ -104,6 +109,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         &func_name(f),
                         f.name.name_pos.0 as u32,
                         NodeRef::FuncDecl(f),
+                        min_complexity,
                         &mut pending,
                     );
                 }
@@ -126,7 +132,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 .first()
                                 .map(|n| n.name_pos.0 as u32)
                                 .unwrap_or(lit.ty.pos().0 as u32);
-                            report_if_high(name, pos, NodeRef::FuncLit(lit), &mut pending);
+                            report_if_high(name, pos, NodeRef::FuncLit(lit), min_complexity, &mut pending);
                         }
                     }
                 }

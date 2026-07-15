@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  enable:
+    - gocyclo
+    - dogsled
+    - funlen
+  settings:
+    gocyclo:
+      min-complexity: 50
+    dogsled:
+      max-blank-identifiers: 4
+    funlen:
+      statements: 50
