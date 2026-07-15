@@ -53,5 +53,29 @@ func goodIfReturn() error {
 }
 
 func goodFormat() {
-	fmt.Print("hello")
+	_, _ = fmt.Print("hello")
+}
+
+func goodImportShadow() string {
+	return fmt.Sprintf("%s", "ok")
+}
+
+func goodConstLogical(a int) bool {
+	return a > 0
+}
+
+func goodTimeDate() time.Time {
+	return time.Date(2023, 1, 15, 12, 30, 45, 0, time.UTC)
+}
+
+func goodUnhandledError() error {
+	return errors.New("x")
+}
+
+type goodStructTag struct {
+	Name string `json:"name,omitempty"`
+}
+
+func goodUnnecessaryStmt() int {
+	return 1
 }

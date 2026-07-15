@@ -70,6 +70,13 @@ fn revive_flags_extended_rule_violations() {
             "unconditional-recursion:",
             "if-return:",
             "unnecessary-format:",
+            "cognitive-complexity:",
+            "constant-logical-expr:",
+            "import-shadowing:",
+            "struct-tag:",
+            "time-date:",
+            "unhandled-error:",
+            "unnecessary-stmt:",
         ] {
             assert!(
                 messages.iter().any(|m| m.contains(needle)),

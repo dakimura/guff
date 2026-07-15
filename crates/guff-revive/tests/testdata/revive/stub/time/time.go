@@ -14,3 +14,5 @@ func Date(year int, month int, day, hour, min, sec, nsec int, loc *Location) Tim
 
 type Location struct{}
 
+var UTC *Location
+

@@ -5,6 +5,8 @@ mod blank_imports;
 mod bare_return;
 mod bool_literal_in_expr;
 mod call_to_gc;
+mod cognitive_complexity;
+mod constant_logical_expr;
 mod context_as_argument;
 mod context_keys_type;
 mod cyclomatic;
@@ -17,6 +19,7 @@ mod error_strings;
 mod errorf;
 mod exported;
 mod if_return;
+mod import_shadowing;
 mod increment_decrement;
 mod indent_error_flow;
 mod package_comments;
@@ -24,13 +27,17 @@ mod range;
 mod receiver_naming;
 mod redefines_builtin_id;
 mod string_of_int;
+mod struct_tag;
 mod superfluous_else;
+mod time_date;
 mod time_equal;
 mod time_naming;
 mod unchecked_type_assertion;
 mod unconditional_recursion;
 mod unexported_return;
+mod unhandled_error;
 mod unnecessary_format;
+mod unnecessary_stmt;
 mod unreachable_code;
 mod unused_parameter;
 mod use_errors_new;
@@ -87,8 +94,15 @@ pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     run("unnecessary-format", unnecessary_format::apply);
     run("use-errors-new", use_errors_new::apply);
     run("waitgroup-by-value", waitgroup_by_value::apply);
+    run("cognitive-complexity", cognitive_complexity::apply);
+    run("constant-logical-expr", constant_logical_expr::apply);
+    run("import-shadowing", import_shadowing::apply);
+    run("struct-tag", struct_tag::apply);
+    run("time-date", time_date::apply);
+    run("unhandled-error", unhandled_error::apply);
+    run("unnecessary-stmt", unnecessary_stmt::apply);
     out
 }
 
-// DEFERRED (R14): remaining extended revive rules (struct-tag, time-date,
-// import-shadowing, cognitive-complexity, …) and `linters.settings.revive` YAML wiring.
+// DEFERRED (R14): remaining extended revive rules (add-constant, argument-limit,
+// early-return, string-format, …) and `linters.settings.revive` YAML wiring.

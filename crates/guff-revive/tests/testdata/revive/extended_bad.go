@@ -93,3 +93,29 @@ func badIfReturn() error {
 func badUnnecessaryFormat() {
 	fmt.Printf("hello")
 }
+
+func badImportShadow() {
+	fmt := 1
+	_ = fmt
+}
+
+func badConstLogical(a int) bool {
+	return a == a
+}
+
+func badTimeDate() time.Time {
+	return time.Date(2023, 0, 15, 25, 70, 61, 1e9, nil)
+}
+
+func badUnhandledError() {
+	errors.New("x")
+}
+
+type badStructTag struct {
+	name string `json:"name,unknownopt"`
+	private string `json:"private"`
+}
+
+func badUnnecessaryStmt() {
+	return
+}

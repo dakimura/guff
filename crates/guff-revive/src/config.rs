@@ -52,6 +52,13 @@ pub const EXTENDED_RULES: &[&str] = &[
     "unnecessary-format",
     "use-errors-new",
     "waitgroup-by-value",
+    "cognitive-complexity",
+    "constant-logical-expr",
+    "import-shadowing",
+    "struct-tag",
+    "time-date",
+    "unhandled-error",
+    "unnecessary-stmt",
 ];
 
 /// Enables [`EXTENDED_RULES`] for the duration of `f` (integration tests).

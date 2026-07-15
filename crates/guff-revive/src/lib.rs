@@ -8,7 +8,7 @@
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
 //! (per-rule enable/disable, arguments, severity, confidence); remaining extended
-//! rules (struct-tag, time-date, cognitive-complexity, …).
+//! rules (add-constant, argument-limit, early-return, string-format, …).
 
 mod config;
 mod failure;
