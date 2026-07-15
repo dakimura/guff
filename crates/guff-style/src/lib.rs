@@ -26,7 +26,7 @@
 //! - [`wsl`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
-//! (`guff-revive` / `guff-misspell` / `guff-dupl` / import crates)
+//! (`guff-revive` / `guff-misspell` / `guff-dupl`)
 //! and per-linter settings / SuggestedFix for the above.
 
 mod asciicheck;

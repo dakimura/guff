@@ -449,6 +449,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "guff-import"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
+]
+
+[[package]]
 name = "guff-ineffassign"
 version = "0.1.0"
 dependencies = [
@@ -472,6 +483,7 @@ dependencies = [
  "guff-error",
  "guff-gostaticanalysis",
  "guff-govet",
+ "guff-import",
  "guff-ineffassign",
  "guff-packages",
  "guff-runner",

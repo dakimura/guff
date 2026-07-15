@@ -23,6 +23,7 @@ members = [
     "crates/guff-context",
     "crates/guff-style",
     "crates/guff-comment",
+    "crates/guff-import",
     "crates/guff-lint",
     "crates/guff-ssa",
     "crates/guff-version",
