@@ -45,3 +45,49 @@ fn revive_allows_clean_code() {
 fn revive_analyzer_graph_is_valid() {
     validate(&[revive()]).expect("valid analyzer graph");
 }
+
+#[test]
+fn revive_flags_extended_rule_violations() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        for needle in [
+            "atomic:",
+            "bare-return:",
+            "bool-literal-in-expr:",
+            "call-to-gc:",
+            "cyclomatic:",
+            "duplicated-imports:",
+            "use-errors-new:",
+            "waitgroup-by-value:",
+            "string-of-int:",
+            "time-equal:",
+            "unchecked-type-assertion:",
+            "unconditional-recursion:",
+            "if-return:",
+            "unnecessary-format:",
+        ] {
+            assert!(
+                messages.iter().any(|m| m.contains(needle)),
+                "missing {needle} in {messages:?}"
+            );
+        }
+    });
+}
+
+#[test]
+fn revive_extended_allows_clean_code() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended/ok",
+            "extended_ok.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(messages.is_empty(), "{messages:?}");
+    });
+}

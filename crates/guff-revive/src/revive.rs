@@ -14,7 +14,7 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "Fast, configurable, extensible, flexible, and beautiful linter for Go. Drop-in replacement of golint.",
         url: "https://github.com/mgechev/revive",
         run: run as RunFn,
-        run_despite_errors: false,
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })

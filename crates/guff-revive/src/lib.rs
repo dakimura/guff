@@ -7,8 +7,8 @@
 //! rules. Full revive has 80+ rules with TOML configuration.
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
-//! (per-rule enable/disable, arguments, severity, confidence); extended rules
-//! (atomic, cyclomatic, struct-tag, …).
+//! (per-rule enable/disable, arguments, severity, confidence); remaining extended
+//! rules (struct-tag, time-date, cognitive-complexity, …).
 
 mod config;
 mod failure;
@@ -18,7 +18,7 @@ mod revive;
 mod rules;
 mod util;
 
-pub use config::DEFAULT_RULES;
+pub use config::{DEFAULT_RULES, EXTENDED_RULES, with_extended_rules};
 pub use revive::analyzer as revive;
 
 use guff_analysis::Analyzer;
