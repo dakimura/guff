@@ -1,0 +1,22 @@
+[package]
+name = "guff-revive"
+description = "Rust port of golangci-lint's revive linter (golint-default rules subset)."
+keywords = ["go", "linter", "revive", "analysis"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_revive"
+path = "src/lib.rs"
+
+[dependencies]
+guff-ast = { path = "../guff-ast" }
+guff-analysis = { path = "../guff-analysis" }
+guff-types = { path = "../guff-types" }
+
+[dev-dependencies]
+guff-packages = { path = "../guff-packages" }
+guff-runner = { path = "../guff-runner" }
+guff-types = { path = "../guff-types" }

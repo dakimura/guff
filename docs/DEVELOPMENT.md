@@ -56,7 +56,7 @@ go list / モジュールグラフ (guff-packages)
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl` | 各 linter の Analyzer 群 |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -72,7 +72,7 @@ guff-ast / guff-constant / guff-version*
   → guff-build → guff-packages
   → guff-ssa / guff-pattern / guff-analysis
   → guff-runner
-  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context,style,comment,import,misspell,dupl}
+  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context,style,comment,import,misspell,dupl,revive}
   → guff-lint
 ```
 
@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-misspell` を追加）。
+> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-revive` を追加）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -144,9 +144,10 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
 | `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | settings・SuggestedFix は **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
-| `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED**；R14 残は revive |
+| `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | settings（locale / ignore-words / extra-words / mode）は **DEFERRED** |
 | `guff-dupl` | ✅ **1**（dupl） | settings（`threshold` YAML 配線）は **DEFERRED** |
+| `guff-revive` | ✅ **1**（revive） | golint-default 9 rules；settings・残 rule は **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -552,7 +553,11 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   settings（locale UK / ignore-words / extra-words / mode=restricted）は DEFERRED。
 - `guff-dupl`: **dupl**（golangci/dupl suffix-tree クローン検出；既定 threshold=150）。
   `linters.settings.dupl.threshold` YAML 配線は DEFERRED。
-- R14 残: `guff-revive`。
+- `guff-revive`: **revive**（golint-default 9 rules: blank-imports / dot-imports /
+  empty-block / error-naming / error-strings / increment-decrement /
+  redefines-builtin-id / receiver-naming / time-naming）。`linters.settings.revive`
+  YAML 配線と残 rule（package-comments / exported / var-naming 等）は DEFERRED。
+- R14 残: なし（revive 初版完了；拡張 rule・settings は DEFERRED）。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
@@ -659,6 +664,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-15 | **R14 完了**: 新 `guff-revive` に `revive`（golint-default 9 rules）を追加しレジストリ登録。`linters.settings.revive` YAML 配線と残 rule は DEFERRED |
 | 2026-07-15 | **R14 続き**: 新 `guff-dupl` に `dupl`（golangci/dupl クローン検出・既定 threshold=150）を追加しレジストリ登録。`linters.settings.dupl.threshold` YAML 配線は DEFERRED |
 | 2026-07-15 | **R14 続き**: 新 `guff-import` に `depguard`（既定 `$gostd` only）/ `gomoddirectives`（replace 禁止）/ `gomodguard`（blocked・local-replace）を追加しレジストリ登録。settings・gomodguard_v2 は DEFERRED |
 | 2026-07-15 | **R14 続き**: 新 `guff-comment` に `godot`（宣言コメントの句点）/ `godox`（TODO/BUG/FIXME）/ `dupword`（重複語）を追加しレジストリ登録。settings・SuggestedFix・godot scope/capital は DEFERRED |

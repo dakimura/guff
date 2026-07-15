@@ -500,6 +500,7 @@ dependencies = [
  "guff-ineffassign",
  "guff-misspell",
  "guff-packages",
+ "guff-revive",
  "guff-runner",
  "guff-staticcheck",
  "guff-style",
@@ -542,6 +543,17 @@ version = "0.1.0"
 dependencies = [
  "guff-ast",
  "guff-constant",
+ "guff-types",
+]
+
+[[package]]
+name = "guff-revive"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
  "guff-types",
 ]
 

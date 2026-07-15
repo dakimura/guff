@@ -1,0 +1,99 @@
+//! `error-strings` — error strings should not be capitalized or end with punctuation.
+
+use guff::ast::{CallExpr, Expr};
+use guff::token::Token;
+use guff::walk::{self, NodeRef};
+use guff_analysis::Pass;
+
+use crate::failure::Failure;
+use crate::util::{basic_lit_string, is_pkg_dot_name, unparen};
+
+const MESSAGE: &str =
+    "error strings should not be capitalized or end with punctuation or a newline";
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut failures = Vec::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            if let NodeRef::CallExpr(call) = n {
+                check_call(call, &mut failures);
+            }
+            true
+        });
+    }
+    failures
+}
+
+fn matches_error_fn(fun: &Expr) -> bool {
+    is_pkg_dot_name(fun, "fmt", "Errorf")
+        || is_pkg_dot_name(fun, "errors", "New")
+        || is_pkg_dot_name(fun, "errors", "Errorf")
+        || is_pkg_dot_name(fun, "errors", "WithMessage")
+        || is_pkg_dot_name(fun, "errors", "Wrap")
+        || is_pkg_dot_name(fun, "errors", "WithMessagef")
+        || is_pkg_dot_name(fun, "errors", "Wrapf")
+}
+
+fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
+    if !matches_error_fn(&call.fun) {
+        return;
+    }
+    let msg = call
+        .args
+        .first()
+        .and_then(|a| match unparen(a) {
+            Expr::BasicLit(lit) => Some(lit),
+            _ => None,
+        })
+        .or_else(|| {
+            call.args.get(1).and_then(|a| match unparen(a) {
+                Expr::BasicLit(lit) => Some(lit),
+                _ => None,
+            })
+        });
+    let Some(lit) = msg else {
+        return;
+    };
+    if lit.kind != Some(Token::STRING) {
+        return;
+    }
+    let Some(s) = basic_lit_string(lit) else {
+        return;
+    };
+    if s.is_empty() || lint_error_string(s) {
+        return;
+    }
+    failures.push(Failure {
+        rule: "error-strings",
+        pos: lit.pos().0 as u32,
+        message: MESSAGE.into(),
+    });
+}
+
+fn lint_error_string(s: &str) -> bool {
+    let Some(last) = s.chars().last() else {
+        return true;
+    };
+    if last == '.' || last == ':' || last == '!' || last == '\n' {
+        return false;
+    }
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return true;
+    };
+    if !first.is_uppercase() {
+        return true;
+    }
+    for c in chars {
+        if c.is_whitespace() {
+            break;
+        }
+        if c.is_uppercase() || c.is_ascii_digit() {
+            return true;
+        }
+    }
+    false
+}
