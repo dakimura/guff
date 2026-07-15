@@ -1,10 +1,11 @@
-// Package extendedtest exercises revive extended rules.
-package extendedtest
+// Package util exercises revive extended rules.
+package util
 
 import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 import "os"
 import "os"
 import dot "dot"
+import BadAlias "example.com/badalias"
 
 var counter int64
 
@@ -342,3 +344,79 @@ func badFunctionLength() int {
 	_ = s
 	return t
 }
+
+//no space comment
+var badURL = "http://example.com/path"
+
+type confusingNaming struct{}
+
+func (c confusingNaming) Foo() {}
+func (c confusingNaming) foo() {}
+
+type confusingFields struct {
+	Foo int
+	foo int
+}
+
+type valueRecv struct{ n int }
+
+func (v valueRecv) badModify() { v.n = 1 }
+
+func badUselessBreak(x int) {
+	switch x {
+	case 1:
+		fmt.Print("a")
+		break
+	}
+}
+
+func badUselessFallthrough(x int) {
+	switch x {
+	case 1:
+		fallthrough
+	case 2:
+		fmt.Print("b")
+	}
+}
+
+func badMapLookup(m map[string]int) {
+	for k := range m {
+		if k == "target" {
+			return
+		}
+	}
+}
+
+func badRangeAddr() {
+	xs := []int{1, 2}
+	for _, v := range xs {
+		_ = &v
+	}
+}
+
+func badMultilineIfInit() {
+	if x := struct {
+		a int
+	}{
+		a: 1,
+	}; x.a > 0 {
+		fmt.Print(x.a)
+	}
+}
+
+func badSlicesSort() {
+	nums := []int{1, 2}
+	sort.Ints(nums)
+}
+
+func badStringFormat() {
+	fmt.Println("INVALID")
+}
+
+func badEpochNaming() {
+	t := time.Now()
+	x := t.Unix()
+	_ = x
+}
+
+var badK = 1

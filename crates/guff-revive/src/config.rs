@@ -87,7 +87,72 @@ pub const EXTENDED_RULES: &[&str] = &[
     "optimize-operands-order",
     "range-val-in-closure",
     "confusing-results",
+    "confusing-naming",
+    "imports-blocklist",
+    "string-format",
+    "file-header",
+    "import-alias-naming",
+    "useless-break",
+    "useless-fallthrough",
+    "modifies-value-receiver",
+    "range-val-address",
+    "unsecure-url-scheme",
+    "banned-characters",
+    "file-length-limit",
+    "filename-format",
+    "multiline-if-init",
+    "package-naming",
+    "use-slices-sort",
+    "inefficient-map-lookup",
+    "redundant-test-main-exit",
+    "comment-spacings",
+    "epoch-naming",
 ];
+
+/// Package import paths blocked when extended rules are enabled (integration tests).
+pub fn imports_blocklist_entries() -> &'static [&'static str] {
+    if EXTENDED_ENABLED.with(|f| f.get()) {
+        &["os"]
+    } else {
+        &[]
+    }
+}
+
+/// Required file-header regex when extended rules are enabled; empty disables the rule.
+pub fn file_header_pattern() -> &'static str {
+    if EXTENDED_ENABLED.with(|f| f.get()) {
+        "Copyright"
+    } else {
+        ""
+    }
+}
+
+/// Banned identifier substrings when extended rules are enabled.
+pub fn banned_characters() -> &'static [&'static str] {
+    if EXTENDED_ENABLED.with(|f| f.get()) {
+        &["\u{212a}"]
+    } else {
+        &[]
+    }
+}
+
+/// Maximum file length when extended rules are enabled (`0` = disabled).
+pub fn file_length_limit_max() -> usize {
+    if EXTENDED_ENABLED.with(|f| f.get()) {
+        350
+    } else {
+        0
+    }
+}
+
+/// `string-format` subrules for integration tests: `(scope, regex, message)`.
+pub fn string_format_rules() -> &'static [(&'static str, &'static str, &'static str)] {
+    if EXTENDED_ENABLED.with(|f| f.get()) {
+        &[("fmt.Println", "/^ok$/", "string must be ok")]
+    } else {
+        &[]
+    }
+}
 
 /// Enables [`EXTENDED_RULES`] for the duration of `f` (integration tests).
 pub fn with_extended_rules<R>(f: impl FnOnce() -> R) -> R {

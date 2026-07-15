@@ -105,12 +105,62 @@ fn revive_flags_extended_rule_violations() {
             "optimize-operands-order:",
             "range-val-in-closure:",
             "confusing-results:",
+            "confusing-naming:",
+            "imports-blocklist:",
+            "string-format:",
+            "file-header:",
+            "import-alias-naming:",
+            "useless-break:",
+            "useless-fallthrough:",
+            "modifies-value-receiver:",
+            "range-val-address:",
+            "unsecure-url-scheme:",
+            "banned-characters:",
+            "file-length-limit:",
+            "multiline-if-init:",
+            "package-naming:",
+            "use-slices-sort:",
+            "inefficient-map-lookup:",
+            "comment-spacings:",
+            "epoch-naming:",
         ] {
             assert!(
                 messages.iter().any(|m| m.contains(needle)),
                 "missing {needle} in {messages:?}"
             );
         }
+    });
+}
+
+#[test]
+fn revive_flags_filename_format_violation() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/badfile",
+            "bad file.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("filename-format:")),
+            "missing filename-format in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_redundant_test_main_exit() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/util_test",
+            "extended_bad_test.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("redundant-test-main-exit:")),
+            "missing redundant-test-main-exit in {messages:?}"
+        );
     });
 }
 

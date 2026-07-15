@@ -11,3 +11,5 @@ func Sprintf(format string, a ...interface{}) string { return "" }
 func Printf(format string, a ...interface{}) (int, error) { return 0, nil }
 
 func Print(a ...interface{}) (int, error) { return 0, nil }
+
+func Println(a ...interface{}) (int, error) { return 0, nil }

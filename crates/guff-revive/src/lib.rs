@@ -8,7 +8,7 @@
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
 //! (per-rule enable/disable, arguments, severity, confidence); remaining extended
-//! rules (string-format, imports-blocklist, confusing-naming, …).
+//! rules (datarace, enforce-*-style, comments-density, package-directory-mismatch, …).
 
 mod astfmt;
 mod config;

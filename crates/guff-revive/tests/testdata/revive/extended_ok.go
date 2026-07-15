@@ -1,4 +1,5 @@
 // Package extendedtest is a clean fixture for revive extended rules.
+// Copyright guff test fixtures
 package extendedtest
 
 import (
