@@ -201,6 +201,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
                         &d.message,
                         &d.category,
                         &d.url,
+                        &d.severity,
                     ));
                 }
             }

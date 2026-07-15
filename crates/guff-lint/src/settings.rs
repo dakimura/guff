@@ -56,10 +56,13 @@ pub struct StaticcheckSettings {
 /// `linters.settings.revive` / `linters-settings.revive`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ReviveSettings {
+    /// Default severity for revive failures (`warning`, `error`, …).
+    #[serde(default)]
+    pub severity: Option<String>,
     /// Per-rule enablement and arguments. `None` = golint-default rules only.
     #[serde(default)]
     pub rules: Option<Vec<ReviveRuleSetting>>,
-    // DEFERRED: severity, confidence, ignore-generated-header.
+    // DEFERRED: confidence, ignore-generated-header.
 }
 
 /// One revive rule entry from golangci-lint YAML.
@@ -70,7 +73,10 @@ pub struct ReviveRuleSetting {
     pub arguments: Vec<serde_yaml::Value>,
     #[serde(default)]
     pub disabled: bool,
-    // DEFERRED: severity, exclude.
+    /// Per-rule severity override (`warning`, `error`, …).
+    #[serde(default)]
+    pub severity: Option<String>,
+    // DEFERRED: exclude.
 }
 
 impl LinterSettings {
@@ -223,10 +229,14 @@ impl ReviveSettings {
                         .map(convert_revive_argument)
                         .collect(),
                     disabled: rule.disabled,
+                    severity: rule.severity.clone(),
                 })
                 .collect()
         });
-        guff_revive::Settings { rules }
+        guff_revive::Settings {
+            severity: self.severity.clone(),
+            rules,
+        }
     }
 }
 
@@ -302,22 +312,32 @@ errcheck:
         let yaml: serde_yaml::Value = serde_yaml::from_str(
             r#"
 revive:
+  severity: warning
   rules:
     - name: enforce-map-style
       arguments: ["make"]
     - name: comments-density
       arguments: [15]
+      severity: error
 "#,
         )
         .unwrap();
         let s = LinterSettings::from_yaml(&yaml);
+        assert_eq!(s.revive.severity.as_deref(), Some("warning"));
         assert_eq!(s.revive.rules.as_ref().map(|r| r.len()), Some(2));
         assert_eq!(s.revive.rules.as_ref().unwrap()[0].name, "enforce-map-style");
+        assert_eq!(
+            s.revive.rules.as_ref().unwrap()[1].severity.as_deref(),
+            Some("error")
+        );
         let bag = s.to_bag();
         let revive = bag
             .get::<guff_revive::Settings>("revive")
             .expect("revive settings");
+        assert_eq!(revive.severity.as_deref(), Some("warning"));
         assert!(revive.rule("enforce-map-style").is_some());
+        assert_eq!(revive.rule_severity("comments-density"), Some("error"));
+        assert_eq!(revive.rule_severity("enforce-map-style"), Some("warning"));
     }
 
     #[test]

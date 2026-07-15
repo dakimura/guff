@@ -149,3 +149,17 @@ fn settings_bag_carries_errcheck_options() {
     assert!(opts.check_blank);
     assert!(opts.check_asserts);
 }
+
+#[test]
+fn parse_v2_revive_severity_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_revive_severity.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.revive.severity.as_deref(), Some("warning"));
+    let dot = settings
+        .revive
+        .rules
+        .as_ref()
+        .and_then(|rules| rules.iter().find(|r| r.name == "dot-imports"));
+    assert_eq!(dot.and_then(|r| r.severity.as_deref()), Some("error"));
+}

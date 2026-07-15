@@ -16,6 +16,8 @@ pub struct Diagnostic {
     pub category: String,
     /// Human-readable message.
     pub message: String,
+    /// Optional severity from the linter (`warning`, `error`, …). Empty when unset.
+    pub severity: String,
     /// Optional link to additional documentation.
     pub url: String,
     /// Optional quick fixes for the diagnostic.

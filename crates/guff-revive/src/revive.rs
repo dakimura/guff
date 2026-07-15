@@ -3,8 +3,9 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn};
 
+use crate::config;
 use crate::rules;
 
 pub fn analyzer() -> &'static Analyzer {
@@ -26,7 +27,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "revive requires inspect analyzer".to_string())?;
 
     for failure in rules::run_enabled_rules(pass) {
-        pass.reportf(failure.pos, failure.format());
+        pass.report(Diagnostic {
+            pos: failure.pos,
+            message: failure.format(),
+            severity: config::rule_severity(pass, failure.rule),
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: warning
+      rules:
+        - name: dot-imports
+          severity: error
+        - name: blank-imports

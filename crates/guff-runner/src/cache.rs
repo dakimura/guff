@@ -199,6 +199,8 @@ pub struct CachedDiagnostic {
     pub category: String,
     pub message: String,
     pub url: String,
+    #[serde(default)]
+    pub severity: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -351,6 +353,7 @@ impl IssueCache {
                     end,
                     category: cd.category,
                     message: cd.message,
+                    severity: cd.severity,
                     url: cd.url,
                     suggested_fixes: Vec::new(),
                     related: Vec::new(),
@@ -397,6 +400,7 @@ impl IssueCache {
                 category: diag.category.clone(),
                 message: diag.message.clone(),
                 url: diag.url.clone(),
+                severity: diag.severity.clone(),
             });
         }
         let entry = CachedEntry {

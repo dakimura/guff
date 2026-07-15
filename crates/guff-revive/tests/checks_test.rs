@@ -240,3 +240,58 @@ fn revive_extended_allows_clean_code() {
         assert!(messages.is_empty(), "{messages:?}");
     });
 }
+
+#[test]
+fn revive_applies_per_rule_and_global_severity() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let settings = Settings {
+        severity: Some("warning".into()),
+        rules: Some(vec![
+            RuleSetting {
+                name: "dot-imports".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: Some("error".into()),
+            },
+            RuleSetting {
+                name: "blank-imports".into(),
+                arguments: Vec::new(),
+                disabled: false,
+                severity: None,
+            },
+        ]),
+    };
+    let mut bag = SettingsBag::new();
+    bag.insert("revive", settings);
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture("revive", "example.com/revive", "bad.go");
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+
+    let severities: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.severity.clone())
+        .collect();
+    assert!(
+        severities.iter().any(|s| s == "error"),
+        "dot-imports should be error: {severities:?}"
+    );
+    assert!(
+        severities.iter().any(|s| s == "warning"),
+        "blank-imports should inherit global warning: {severities:?}"
+    );
+}

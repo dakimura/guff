@@ -134,6 +134,13 @@ pub fn rule_enabled(pass: &Pass<'_>, name: &str) -> bool {
     DEFAULT_RULES.contains(&name)
 }
 
+pub fn rule_severity(pass: &Pass<'_>, name: &str) -> String {
+    effective_settings(pass)
+        .rule_severity(name)
+        .unwrap_or_default()
+        .to_string()
+}
+
 pub fn rule_arguments(pass: &Pass<'_>, name: &str) -> Vec<RuleArgument> {
     effective_settings(pass)
         .rule(name)
@@ -247,6 +254,7 @@ pub fn extended_test_settings() -> Settings {
             name: (*name).to_string(),
             arguments: extended_test_arguments(name),
             disabled: false,
+            severity: None,
         });
     }
     for name in EXTENDED_RULES {
@@ -254,9 +262,11 @@ pub fn extended_test_settings() -> Settings {
             name: (*name).to_string(),
             arguments: extended_test_arguments(name),
             disabled: false,
+            severity: None,
         });
     }
     Settings {
+        severity: None,
         rules: Some(rules),
     }
 }

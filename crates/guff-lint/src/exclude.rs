@@ -265,7 +265,7 @@ impl IssueFilter {
                 from_linter,
                 analyzer,
                 text: diag.message.clone(),
-                severity: String::new(),
+                severity: diag.severity.clone(),
                 filename,
                 line,
                 column,
@@ -494,13 +494,14 @@ pub fn issue_from_cached(
     message: &str,
     category: &str,
     url: &str,
+    severity: &str,
 ) -> Issue {
     let source_line = read_source_line(filename, line);
     Issue {
         from_linter: linter_name_for_analyzer(analyzer).to_string(),
         analyzer: analyzer.to_string(),
         text: message.to_string(),
-        severity: String::new(),
+        severity: severity.to_string(),
         filename: filename.to_string(),
         line,
         column,
@@ -509,6 +510,7 @@ pub fn issue_from_cached(
             message: message.to_string(),
             category: category.to_string(),
             url: url.to_string(),
+            severity: severity.to_string(),
             ..Diagnostic::default()
         },
     }
@@ -660,5 +662,24 @@ mod tests {
         );
         assert_eq!(kept[0].severity, "error");
         assert_eq!(kept[1].severity, "warning");
+    }
+
+    #[test]
+    fn severity_at_linter_keeps_revive_rule_severity() {
+        let severity = SeverityConfig {
+            default_severity: Some("@linter".into()),
+            ..SeverityConfig::default()
+        };
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &severity);
+        let mut issue = issue("revive", "a.go", "dot-imports: should not use dot imports");
+        issue.severity = "warning".into();
+        let kept = filter.apply(vec![issue], &[]);
+        assert_eq!(kept[0].severity, "warning");
     }
 }

@@ -147,7 +147,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | settings（locale / ignore-words / extra-words / mode）は **DEFERRED** |
 | `guff-dupl` | ✅ **1**（dupl） | settings（`threshold` YAML 配線）は **DEFERRED** |
-| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **77 rules**（計 100）；`linters.settings.revive` YAML 配線済み；per-rule severity は **DEFERRED** |
+| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **77 rules**（計 100）；`linters.settings.revive` YAML 配線済み（rules・arguments・global/per-rule severity）；ignore-generated-header は **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -554,8 +554,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - `guff-dupl`: **dupl**（golangci/dupl suffix-tree クローン検出；既定 threshold=150）。
   `linters.settings.dupl.threshold` YAML 配線は DEFERRED。
 - `guff-revive`: **revive**（golint-default **23 rules** + extended **77 rules**: … prior 69 … / comments-density / datarace / enforce-map-style / enforce-slice-style / enforce-switch-style / enforce-repeated-arg-type-style / package-directory-mismatch / forbidden-call-in-wg-go）。
-  `linters.settings.revive` YAML 配線済み（rules リスト・arguments）。per-rule severity / ignore-generated-header は **DEFERRED**。
-- R14 残: revive per-rule severity 配線（DEFERRED）。
+  `linters.settings.revive` YAML 配線済み（rules リスト・arguments・global/per-rule severity）。ignore-generated-header は **DEFERRED**。
+- R14 残: revive `confidence` / `ignore-generated-header` 配線（DEFERRED）。dupl threshold・misspell settings 等。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
@@ -662,6 +662,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R14 続き**: `linters.settings.revive` の global/per-rule `severity` を YAML → `SettingsBag` → `Diagnostic.severity` → `Issue.severity` に配線。`severity: @linter` で revive 由来の severity を保持。テスト: `v2_revive_severity.yml` / `revive_applies_per_rule_and_global_severity` |
 | 2026-07-16 | **R14 続き**: `guff-revive` に extended revive rules **8** 件（comments-density / datarace / enforce-map-style / enforce-slice-style / enforce-switch-style / enforce-repeated-arg-type-style / package-directory-mismatch / forbidden-call-in-wg-go）を追加。golint-default 23 + extended 77 = **100 rules**。`linters.settings.revive` YAML 配線（`guff-lint` → `SettingsBag` → `guff_revive::Settings`）。per-rule severity は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-revive` に extended revive rules **20** 件（confusing-naming / imports-blocklist / string-format / file-header / import-alias-naming / useless-break / useless-fallthrough / modifies-value-receiver / range-val-address / unsecure-url-scheme / banned-characters / file-length-limit / filename-format / multiline-if-init / package-naming / use-slices-sort / inefficient-map-lookup / redundant-test-main-exit / comment-spacings / epoch-naming）を追加。golint-default 23 + extended 69 = **92 rules**。`linters.settings.revive` と残 extended rules は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-revive` に extended revive rules **20** 件（flag-parameter / function-length / function-result-limit / use-any / use-fmt-print / unused-receiver / modifies-parameter / identical-branches / identical-ifelseif-branches / identical-ifelseif-conditions / identical-switch-branches / identical-switch-conditions / line-length-limit / max-control-nesting / nested-structs / unexported-naming / empty-lines / optimize-operands-order / range-val-in-closure / confusing-results）を追加。golint-default 23 + extended 49 = **72 rules**。`linters.settings.revive` と残 extended rules は DEFERRED |
