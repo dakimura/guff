@@ -264,6 +264,8 @@ fn revive_applies_per_rule_and_global_severity() {
                 severity: None,
             },
         ]),
+        confidence: None,
+        ignore_generated_header: false,
     };
     let mut bag = SettingsBag::new();
     bag.insert("revive", settings);
@@ -294,4 +296,60 @@ fn revive_applies_per_rule_and_global_severity() {
         severities.iter().any(|s| s == "warning"),
         "blank-imports should inherit global warning: {severities:?}"
     );
+}
+
+#[test]
+fn revive_filters_failures_below_confidence_threshold() {
+    use guff_revive::{with_settings, Settings};
+
+    with_settings(Settings {
+        confidence: Some(0.9),
+        ..Settings::default()
+    }, || {
+        let pkg = support::typecheck_fixture("revive", "example.com/footest", "stutter_bad.go");
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("stutters")),
+            "0.8-confidence stutter hints should be filtered at 0.9: {messages:?}"
+        );
+    });
+
+    with_settings(Settings {
+        confidence: Some(0.1),
+        ..Settings::default()
+    }, || {
+        let pkg = support::typecheck_fixture("revive", "example.com/footest", "stutter_bad.go");
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().any(|m| m.contains("stutters")),
+            "stutter hints should remain at 0.1: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_skips_generated_files_when_configured() {
+    use guff_revive::{with_settings, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/generated",
+        "generated_bad.go",
+    );
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("dot-imports:")),
+        "generated file should be linted by default: {without:?}"
+    );
+
+    with_settings(Settings {
+        ignore_generated_header: true,
+        ..Settings::default()
+    }, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.is_empty(),
+            "ignore-generated-header should skip generated files: {messages:?}"
+        );
+    });
 }

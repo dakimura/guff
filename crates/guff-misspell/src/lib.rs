@@ -3,15 +3,16 @@
 //!
 //! Registered as golangci-lint linter name [`misspell`].
 //!
-//! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.misspell` (locale /
-//! ignore-words / extra-words / mode=restricted); locale UK.
+//! Registered as golangci-lint linter name [`misspell`].
 
 mod case;
 mod misspell;
 mod notwords;
+mod options;
 mod replacer;
 
 pub use misspell::analyzer as misspell;
+pub use options::{ExtraWord, Options};
 pub use replacer::{Diff, Replacer};
 
 use guff_analysis::Analyzer;

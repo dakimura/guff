@@ -9,12 +9,13 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 
+use crate::options::Options;
 use crate::replacer::{Diff, Replacer};
 
-static REPLACER: OnceLock<Replacer> = OnceLock::new();
-
-fn replacer() -> &'static Replacer {
-    REPLACER.get_or_init(Replacer::new)
+fn replacer_for(pass: &Pass<'_>) -> Replacer {
+    pass.settings::<Options>("misspell")
+        .map(|opts| Replacer::from_options(opts))
+        .unwrap_or_else(Replacer::new)
 }
 
 fn report_diff(pass: &mut Pass<'_>, file_pos: Pos, diff: &Diff) {
@@ -51,7 +52,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "misspell requires inspect analyzer".to_string())?;
 
-    let replacer = replacer();
+    let options = pass
+        .settings::<Options>("misspell")
+        .cloned()
+        .unwrap_or_default();
+    let replacer = replacer_for(pass);
     let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
     let mut pending: Vec<(Pos, Diff)> = Vec::new();
 
@@ -66,7 +71,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         };
         let file_pos = file.pos();
-        for diff in replacer.find_diffs(&content) {
+        let diffs = if options.restricted() {
+            replacer.find_diffs_in_comments(&content)
+        } else {
+            replacer.find_diffs(&content)
+        };
+        for diff in diffs {
             pending.push((file_pos, diff));
         }
     }

@@ -7,8 +7,13 @@ use regex::Regex;
 
 use crate::case::{apply_case, case_style, CaseStyle};
 use crate::notwords::remove_not_words;
+use crate::options::Options;
 
 static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-zA-Z0-9']+").unwrap());
+static LINE_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"//[^\n]*").unwrap());
+static BLOCK_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/\*[\s\S]*?\*/").unwrap());
 
 /// A single spelling correction in a line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,12 +30,36 @@ pub struct Replacer {
 }
 
 impl Replacer {
-    /// Default replacer using `DictMain` (golangci/misspell default).
+    /// Default replacer using `DictMain` + US locale (golangci/misspell default).
     pub fn new() -> Self {
-        static MAIN: LazyLock<HashMap<String, String>> = LazyLock::new(load_main_dict);
-        Self {
-            corrected: MAIN.clone(),
+        Self::from_options(&Options {
+            locale: "US".into(),
+            ..Options::default()
+        })
+    }
+
+    /// Build a replacer from golangci-lint `linters.settings.misspell`.
+    pub fn from_options(options: &Options) -> Self {
+        let mut corrected = load_main_dict();
+        match options.locale.to_ascii_uppercase().as_str() {
+            "" => {}
+            "US" => corrected.extend(load_dict_tsv(include_str!("../data/dict_us.tsv"))),
+            "UK" | "GB" => corrected.extend(load_dict_tsv(include_str!("../data/dict_uk.tsv"))),
+            _ => {}
         }
+        for word in &options.extra_words {
+            if word.typo.is_empty() || word.correction.is_empty() {
+                continue;
+            }
+            corrected.insert(
+                word.typo.to_ascii_lowercase(),
+                word.correction.to_ascii_lowercase(),
+            );
+        }
+        for ignore in &options.ignore_words {
+            corrected.remove(&ignore.to_ascii_lowercase());
+        }
+        Self { corrected }
     }
 
     /// Find misspellings in `input` (default golangci mode: full file as plain text).
@@ -41,6 +70,28 @@ impl Replacer {
             diffs.extend(self.diffs_in_line(line_body, line_idx + 1));
         }
         diffs
+    }
+
+    /// Find misspellings in comments only (`mode: restricted`).
+    pub fn find_diffs_in_comments(&self, input: &str) -> Vec<Diff> {
+        let mut diffs = Vec::new();
+        for m in LINE_COMMENT_RE.find_iter(input) {
+            diffs.extend(self.diffs_in_region(input, m.start(), m.as_str()));
+        }
+        for m in BLOCK_COMMENT_RE.find_iter(input) {
+            diffs.extend(self.diffs_in_region(input, m.start(), m.as_str()));
+        }
+        diffs
+    }
+
+    fn diffs_in_region(&self, input: &str, start: usize, text: &str) -> Vec<Diff> {
+        let (line, base_col) = offset_to_line_col(input, start);
+        let mut out = Vec::new();
+        for mut diff in self.diffs_in_line(text, line) {
+            diff.column += base_col;
+            out.push(diff);
+        }
+        out
     }
 
     fn diffs_in_line(&self, line: &str, line_num: usize) -> Vec<Diff> {
@@ -85,16 +136,23 @@ fn load_dict_tsv(data: &str) -> HashMap<String, String> {
 }
 
 fn load_main_dict() -> HashMap<String, String> {
-    let mut map = load_dict_tsv(include_str!("../data/dict_main.tsv"));
-    for (k, v) in load_dict_tsv(include_str!("../data/dict_us.tsv")) {
-        map.insert(k, v);
-    }
-    map
+    load_dict_tsv(include_str!("../data/dict_main.tsv"))
+}
+
+fn offset_to_line_col(input: &str, offset: usize) -> (usize, usize) {
+    let before = &input[..offset.min(input.len())];
+    let line = before.matches('\n').count() + 1;
+    let column = before
+        .rfind('\n')
+        .map(|idx| offset - idx - 1)
+        .unwrap_or(offset);
+    (line, column)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::options::{ExtraWord, Options};
 
     #[test]
     fn replace_common_typos() {
@@ -123,5 +181,48 @@ mod tests {
     fn clean_text_has_no_diffs() {
         let r = Replacer::new();
         assert!(r.find_diffs("foo other bar").is_empty());
+    }
+
+    #[test]
+    fn uk_locale_prefers_british_spelling() {
+        let r = Replacer::from_options(&Options {
+            locale: "UK".into(),
+            ..Options::default()
+        });
+        let diffs = r.find_diffs("favorite color");
+        assert!(diffs.iter().any(|d| d.corrected == "favourite"));
+        assert!(diffs.iter().any(|d| d.corrected == "colour"));
+    }
+
+    #[test]
+    fn ignore_words_skip_corrections() {
+        let r = Replacer::from_options(&Options {
+            locale: "US".into(),
+            ignore_words: vec!["amercia".into()],
+            ..Options::default()
+        });
+        assert!(r.find_diffs("Amercia").is_empty());
+    }
+
+    #[test]
+    fn extra_words_add_corrections() {
+        let r = Replacer::from_options(&Options {
+            extra_words: vec![ExtraWord {
+                typo: "iff".into(),
+                correction: "if".into(),
+            }],
+            ..Options::default()
+        });
+        let diffs = r.find_diffs("iff x");
+        assert!(diffs.iter().any(|d| d.corrected == "if"));
+    }
+
+    #[test]
+    fn restricted_mode_checks_comments_only() {
+        let r = Replacer::new();
+        let input = "package p\n// grill brocoli now\nvar x = \"Amercia\"\n";
+        let diffs = r.find_diffs_in_comments(input);
+        assert!(diffs.iter().any(|d| d.corrected == "broccoli"));
+        assert!(!diffs.iter().any(|d| d.original == "Amercia"));
     }
 }

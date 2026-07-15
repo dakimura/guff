@@ -163,3 +163,43 @@ fn parse_v2_revive_severity_settings() {
         .and_then(|rules| rules.iter().find(|r| r.name == "dot-imports"));
     assert_eq!(dot.and_then(|r| r.severity.as_deref()), Some("error"));
 }
+
+#[test]
+fn parse_v2_revive_confidence_and_generated_header() {
+    let contents = fs::read_to_string(testdata_config("v2_revive_confidence.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.revive.confidence, Some(0.9));
+    assert!(settings.revive.ignore_generated_header);
+    let bag = settings.to_bag();
+    let revive = bag.get::<guff_revive::Settings>("revive").unwrap();
+    assert_eq!(revive.confidence_threshold(), 0.9);
+    assert!(revive.ignore_generated_header);
+}
+
+#[test]
+fn parse_v2_dupl_threshold_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_dupl_threshold.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.dupl.threshold, Some(30));
+    let bag = settings.to_bag();
+    let opts = bag.get::<guff_dupl::Options>("dupl").unwrap();
+    assert_eq!(opts.threshold, 30);
+}
+
+#[test]
+fn parse_v2_misspell_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_misspell_restricted.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.misspell.locale.as_deref(), Some("US"));
+    assert_eq!(settings.misspell.ignore_words, vec!["amercia"]);
+    assert_eq!(settings.misspell.mode.as_deref(), Some("restricted"));
+    let bag = settings.to_bag();
+    let opts = bag.get::<guff_misspell::Options>("misspell").unwrap();
+    assert_eq!(opts.locale, "US");
+    assert!(opts.restricted());
+    assert_eq!(opts.ignore_words, vec!["amercia"]);
+    assert_eq!(opts.extra_words.len(), 1);
+}

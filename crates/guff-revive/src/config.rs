@@ -118,7 +118,7 @@ pub const EXTENDED_RULES: &[&str] = &[
     "forbidden-call-in-wg-go",
 ];
 
-fn effective_settings(pass: &Pass<'_>) -> Settings {
+pub fn effective_settings(pass: &Pass<'_>) -> Settings {
     if let Some(s) = pass.settings::<Settings>("revive") {
         return s.clone();
     }
@@ -268,6 +268,8 @@ pub fn extended_test_settings() -> Settings {
     Settings {
         severity: None,
         rules: Some(rules),
+        confidence: None,
+        ignore_generated_header: false,
     }
 }
 

@@ -22,16 +22,35 @@ pub enum RuleArgument {
 }
 
 /// Revive settings passed through [`guff_analysis::Pass`] or test hooks.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     /// Default severity for failures when a rule does not set one.
     pub severity: Option<String>,
     /// When `None`, only [`super::config::DEFAULT_RULES`] run (golint behaviour).
     /// When `Some`, only listed rules (minus `disabled`) run.
     pub rules: Option<Vec<RuleSetting>>,
+    /// Minimum failure confidence to report (revive default: 0.8).
+    pub confidence: Option<f64>,
+    /// When true, skip diagnostics in generated files.
+    pub ignore_generated_header: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            severity: None,
+            rules: None,
+            confidence: None,
+            ignore_generated_header: false,
+        }
+    }
 }
 
 impl Settings {
+    /// Effective confidence threshold (golangci-lint / revive default: 0.8).
+    pub fn confidence_threshold(&self) -> f64 {
+        self.confidence.unwrap_or(0.8)
+    }
     pub fn rule(&self, name: &str) -> Option<&RuleSetting> {
         let rules = self.rules.as_ref()?;
         rules.iter().find(|r| r.name == name)

@@ -3,8 +3,8 @@
 //!
 //! Registered as golangci-lint linter name [`dupl`].
 //!
-//! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.dupl.threshold` YAML
-//! wiring in `guff-lint` (analyzer reads [`Options`] from `SettingsBag` when set).
+//! Reads [`Options`] from [`guff_analysis::SettingsBag`] when set via
+//! `guff-lint` `linters.settings.dupl.threshold`.
 
 mod dupl;
 mod engine;

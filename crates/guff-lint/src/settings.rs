@@ -17,6 +17,8 @@ pub struct LinterSettings {
     pub govet: GovetSettings,
     pub staticcheck: StaticcheckSettings,
     pub revive: ReviveSettings,
+    pub dupl: DuplSettings,
+    pub misspell: MisspellSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -54,7 +56,7 @@ pub struct StaticcheckSettings {
 }
 
 /// `linters.settings.revive` / `linters-settings.revive`.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReviveSettings {
     /// Default severity for revive failures (`warning`, `error`, …).
     #[serde(default)]
@@ -62,7 +64,12 @@ pub struct ReviveSettings {
     /// Per-rule enablement and arguments. `None` = golint-default rules only.
     #[serde(default)]
     pub rules: Option<Vec<ReviveRuleSetting>>,
-    // DEFERRED: confidence, ignore-generated-header.
+    /// Minimum failure confidence to report (revive default: 0.8).
+    #[serde(default)]
+    pub confidence: Option<f64>,
+    /// When true, skip diagnostics in generated files.
+    #[serde(default, rename = "ignore-generated-header")]
+    pub ignore_generated_header: bool,
 }
 
 /// One revive rule entry from golangci-lint YAML.
@@ -77,6 +84,34 @@ pub struct ReviveRuleSetting {
     #[serde(default)]
     pub severity: Option<String>,
     // DEFERRED: exclude.
+}
+
+/// `linters.settings.dupl` / `linters-settings.dupl`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DuplSettings {
+    /// Token-count threshold for clone detection (golangci default: 150).
+    #[serde(default)]
+    pub threshold: Option<i32>,
+}
+
+/// `linters.settings.misspell` / `linters-settings.misspell`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MisspellSettings {
+    #[serde(default)]
+    pub locale: Option<String>,
+    #[serde(default, rename = "ignore-words")]
+    pub ignore_words: Vec<String>,
+    #[serde(default, rename = "extra-words")]
+    pub extra_words: Vec<MisspellExtraWordSetting>,
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
+/// One `extra-words` entry from golangci-lint YAML.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MisspellExtraWordSetting {
+    pub typo: String,
+    pub correction: String,
 }
 
 impl LinterSettings {
@@ -106,6 +141,16 @@ impl LinterSettings {
                 out.revive = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("dupl".into())) {
+            if let Ok(s) = serde_yaml::from_value::<DuplSettings>(v.clone()) {
+                out.dupl = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("misspell".into())) {
+            if let Ok(s) = serde_yaml::from_value::<MisspellSettings>(v.clone()) {
+                out.misspell = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -122,6 +167,8 @@ impl LinterSettings {
             },
         );
         bag.insert("revive", self.revive.to_guff_revive());
+        bag.insert("dupl", self.dupl.to_guff_dupl());
+        bag.insert("misspell", self.misspell.to_guff_misspell());
         Arc::new(bag)
     }
 
@@ -236,6 +283,34 @@ impl ReviveSettings {
         guff_revive::Settings {
             severity: self.severity.clone(),
             rules,
+            confidence: self.confidence,
+            ignore_generated_header: self.ignore_generated_header,
+        }
+    }
+}
+
+impl DuplSettings {
+    pub fn to_guff_dupl(&self) -> guff_dupl::Options {
+        guff_dupl::Options {
+            threshold: self.threshold.unwrap_or(guff_dupl::DEFAULT_THRESHOLD),
+        }
+    }
+}
+
+impl MisspellSettings {
+    pub fn to_guff_misspell(&self) -> guff_misspell::Options {
+        guff_misspell::Options {
+            locale: self.locale.clone().unwrap_or_default(),
+            ignore_words: self.ignore_words.clone(),
+            extra_words: self
+                .extra_words
+                .iter()
+                .map(|w| guff_misspell::ExtraWord {
+                    typo: w.typo.clone(),
+                    correction: w.correction.clone(),
+                })
+                .collect(),
+            mode: self.mode.clone().unwrap_or_default(),
         }
     }
 }
