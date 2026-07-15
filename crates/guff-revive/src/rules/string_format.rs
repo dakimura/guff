@@ -20,7 +20,7 @@ struct Subrule {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let raw = config::string_format_rules();
+    let raw = config::string_format_rules(pass);
     if raw.is_empty() {
         return Vec::new();
     }

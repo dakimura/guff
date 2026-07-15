@@ -262,6 +262,36 @@ pub fn line_of(pass: &Pass<'_>, pos: i64) -> usize {
         .max(0) as usize
 }
 
+/// Returns true when the module Go version is at least `major.minor`, or unknown.
+pub fn go_version_at_least(pass: &Pass<'_>, major: u32, minor: u32) -> bool {
+    let Some(version) = pass
+        .pkg()
+        .module
+        .as_ref()
+        .map(|m| m.go_version.as_str())
+        .filter(|s| !s.is_empty())
+    else {
+        return true;
+    };
+    let (maj, min) = parse_go_version(version);
+    maj > major || (maj == major && min >= minor)
+}
+
+fn parse_go_version(version: &str) -> (u32, u32) {
+    let stripped = version.strip_prefix("go").unwrap_or(version);
+    let mut parts = stripped.split('.');
+    let major = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    (major, minor)
+}
+
+pub fn is_ident_dot_name(fun: &Expr, recv: &str, name: &str) -> bool {
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(fun) else {
+        return false;
+    };
+    matches!(unparen(x), Expr::Ident(Ident { name: n, .. }) if n == recv) && sel.name == name
+}
+
 pub fn expr_string(e: &Expr) -> String {
     match e {
         Expr::Ident(id) => id.name.clone(),

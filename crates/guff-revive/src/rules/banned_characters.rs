@@ -8,7 +8,7 @@ use crate::config;
 use crate::failure::Failure;
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let banned = config::banned_characters();
+    let banned = config::banned_characters(pass);
     if banned.is_empty() {
         return Vec::new();
     }
@@ -18,8 +18,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             let Some(NodeRef::Ident(id)) = n else {
                 return true;
             };
-            for ch in banned {
-                if id.name.contains(ch) {
+            for ch in &banned {
+                if id.name.contains(ch.as_str()) {
                     failures.push(Failure {
                         rule: "banned-characters",
                         pos: id.name_pos.0 as u32,

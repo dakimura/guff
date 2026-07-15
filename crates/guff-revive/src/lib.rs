@@ -5,10 +5,6 @@
 //!
 //! This session implements the golint-default rule subset as individual Rust
 //! rules. Full revive has 80+ rules with TOML configuration.
-//!
-//! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
-//! (per-rule enable/disable, arguments, severity, confidence); remaining extended
-//! rules (datarace, enforce-*-style, comments-density, package-directory-mismatch, …).
 
 mod astfmt;
 mod config;
@@ -17,10 +13,12 @@ mod ifelse;
 mod names;
 mod revive;
 mod rules;
+mod settings;
 mod util;
 
-pub use config::{DEFAULT_RULES, EXTENDED_RULES, with_extended_rules};
+pub use config::{DEFAULT_RULES, EXTENDED_RULES, extended_test_settings, with_extended_rules, with_settings};
 pub use revive::analyzer as revive;
+pub use settings::{RuleArgument, RuleSetting, Settings};
 
 use guff_analysis::Analyzer;
 

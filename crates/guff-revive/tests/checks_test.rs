@@ -123,6 +123,12 @@ fn revive_flags_extended_rule_violations() {
             "inefficient-map-lookup:",
             "comment-spacings:",
             "epoch-naming:",
+            "comments-density:",
+            "datarace:",
+            "enforce-map-style:",
+            "enforce-slice-style:",
+            "enforce-switch-style:",
+            "forbidden-call-in-wg-go:",
         ] {
             assert!(
                 messages.iter().any(|m| m.contains(needle)),
@@ -160,6 +166,64 @@ fn revive_flags_redundant_test_main_exit() {
         assert!(
             messages.iter().any(|m| m.contains("redundant-test-main-exit:")),
             "missing redundant-test-main-exit in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_enforce_repeated_arg_type_style() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules
+            .iter_mut()
+            .find(|r| r.name == "enforce-repeated-arg-type-style")
+        {
+            rule.arguments = vec![guff_revive::RuleArgument::String("short".into())];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(guff_revive::revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("enforce-repeated-arg-type-style:")),
+            "missing enforce-repeated-arg-type-style in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_flags_package_directory_mismatch() {
+    let mut settings = guff_revive::extended_test_settings();
+    if let Some(rules) = settings.rules.as_mut() {
+        if let Some(rule) = rules.iter_mut().find(|r| r.name == "package-directory-mismatch") {
+            rule.arguments = vec![guff_revive::RuleArgument::Map({
+                let mut map = std::collections::HashMap::new();
+                map.insert(
+                    "ignore-directories".into(),
+                    guff_revive::RuleArgument::List(Vec::new()),
+                );
+                map
+            })];
+        }
+    }
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(guff_revive::revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("package-directory-mismatch:")),
+            "missing package-directory-mismatch in {messages:?}"
         );
     });
 }

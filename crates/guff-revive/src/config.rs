@@ -1,12 +1,13 @@
-//! Enabled revive rules (golint defaults when no user config is supplied).
-//!
-//! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
-//! (per-rule enable/disable, arguments, severity, confidence).
+//! Enabled revive rules and per-rule arguments.
 
-use std::cell::Cell;
+use std::cell::RefCell;
+
+use guff_analysis::Pass;
+
+use crate::settings::{RuleArgument, Settings};
 
 thread_local! {
-    static EXTENDED_ENABLED: Cell<bool> = const { Cell::new(false) };
+    static THREAD_SETTINGS: RefCell<Option<Settings>> = const { RefCell::new(None) };
 }
 
 /// Rule names enabled by default (mirrors revive / golangci-lint golint set).
@@ -107,63 +108,168 @@ pub const EXTENDED_RULES: &[&str] = &[
     "redundant-test-main-exit",
     "comment-spacings",
     "epoch-naming",
+    "comments-density",
+    "datarace",
+    "enforce-map-style",
+    "enforce-slice-style",
+    "enforce-switch-style",
+    "enforce-repeated-arg-type-style",
+    "package-directory-mismatch",
+    "forbidden-call-in-wg-go",
 ];
 
-/// Package import paths blocked when extended rules are enabled (integration tests).
-pub fn imports_blocklist_entries() -> &'static [&'static str] {
-    if EXTENDED_ENABLED.with(|f| f.get()) {
-        &["os"]
-    } else {
-        &[]
+fn effective_settings(pass: &Pass<'_>) -> Settings {
+    if let Some(s) = pass.settings::<Settings>("revive") {
+        return s.clone();
     }
-}
-
-/// Required file-header regex when extended rules are enabled; empty disables the rule.
-pub fn file_header_pattern() -> &'static str {
-    if EXTENDED_ENABLED.with(|f| f.get()) {
-        "Copyright"
-    } else {
-        ""
-    }
-}
-
-/// Banned identifier substrings when extended rules are enabled.
-pub fn banned_characters() -> &'static [&'static str] {
-    if EXTENDED_ENABLED.with(|f| f.get()) {
-        &["\u{212a}"]
-    } else {
-        &[]
-    }
-}
-
-/// Maximum file length when extended rules are enabled (`0` = disabled).
-pub fn file_length_limit_max() -> usize {
-    if EXTENDED_ENABLED.with(|f| f.get()) {
-        350
-    } else {
-        0
-    }
-}
-
-/// `string-format` subrules for integration tests: `(scope, regex, message)`.
-pub fn string_format_rules() -> &'static [(&'static str, &'static str, &'static str)] {
-    if EXTENDED_ENABLED.with(|f| f.get()) {
-        &[("fmt.Println", "/^ok$/", "string must be ok")]
-    } else {
-        &[]
-    }
-}
-
-/// Enables [`EXTENDED_RULES`] for the duration of `f` (integration tests).
-pub fn with_extended_rules<R>(f: impl FnOnce() -> R) -> R {
-    EXTENDED_ENABLED.with(|flag| flag.set(true));
-    let out = f();
-    EXTENDED_ENABLED.with(|flag| flag.set(false));
-    out
+    THREAD_SETTINGS.with(|slot| slot.borrow().clone().unwrap_or_default())
 }
 
 /// Returns whether `name` is enabled under the current configuration.
-pub fn rule_enabled(name: &str) -> bool {
+pub fn rule_enabled(pass: &Pass<'_>, name: &str) -> bool {
+    let settings = effective_settings(pass);
+    if let Some(rules) = settings.rules.as_ref() {
+        return rules.iter().any(|r| r.name == name && !r.disabled);
+    }
     DEFAULT_RULES.contains(&name)
-        || (EXTENDED_ENABLED.with(|flag| flag.get()) && EXTENDED_RULES.contains(&name))
+}
+
+pub fn rule_arguments(pass: &Pass<'_>, name: &str) -> Vec<RuleArgument> {
+    effective_settings(pass)
+        .rule(name)
+        .map(|r| r.arguments.clone())
+        .unwrap_or_default()
+}
+
+pub fn rule_arg_string(pass: &Pass<'_>, name: &str, index: usize) -> Option<String> {
+    let args = rule_arguments(pass, name);
+    match args.get(index)? {
+        RuleArgument::String(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+pub fn rule_arg_int(pass: &Pass<'_>, name: &str, index: usize) -> Option<i64> {
+    let args = rule_arguments(pass, name);
+    match args.get(index)? {
+        RuleArgument::Integer(n) => Some(*n),
+        _ => None,
+    }
+}
+
+pub fn rule_arg_string_list(pass: &Pass<'_>, name: &str, index: usize) -> Vec<String> {
+    let args = rule_arguments(pass, name);
+    let Some(RuleArgument::List(items)) = args.get(index) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| match item {
+            RuleArgument::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn rule_arg_map(pass: &Pass<'_>, name: &str, index: usize) -> Option<std::collections::HashMap<String, RuleArgument>> {
+    let args = rule_arguments(pass, name);
+    match args.get(index)? {
+        RuleArgument::Map(m) => Some(m.clone()),
+        _ => None,
+    }
+}
+
+pub fn imports_blocklist_entries(pass: &Pass<'_>) -> Vec<String> {
+    rule_arg_string_list(pass, "imports-blocklist", 0)
+}
+
+pub fn file_header_pattern(pass: &Pass<'_>) -> String {
+    rule_arg_string(pass, "file-header", 0).unwrap_or_default()
+}
+
+pub fn banned_characters(pass: &Pass<'_>) -> Vec<String> {
+    rule_arg_string_list(pass, "banned-characters", 0)
+}
+
+pub fn file_length_limit_max(pass: &Pass<'_>) -> usize {
+    rule_arg_int(pass, "file-length-limit", 0)
+        .and_then(|n| usize::try_from(n).ok())
+        .unwrap_or(0)
+}
+
+pub fn string_format_rules(pass: &Pass<'_>) -> Vec<(String, String, String)> {
+    let args = rule_arguments(pass, "string-format");
+    let mut out = Vec::new();
+    for arg in args {
+        let RuleArgument::List(items) = arg else {
+            continue;
+        };
+        if items.len() < 3 {
+            continue;
+        }
+        let Some(RuleArgument::String(scope)) = items.first() else {
+            continue;
+        };
+        let Some(RuleArgument::String(regex)) = items.get(1) else {
+            continue;
+        };
+        let Some(RuleArgument::String(message)) = items.get(2) else {
+            continue;
+        };
+        out.push((scope.clone(), regex.clone(), message.clone()));
+    }
+    out
+}
+
+fn extended_test_arguments(name: &str) -> Vec<RuleArgument> {
+    match name {
+        "imports-blocklist" => vec![RuleArgument::List(vec![RuleArgument::String("os".into())])],
+        "file-header" => vec![RuleArgument::String("Copyright".into())],
+        "banned-characters" => vec![RuleArgument::List(vec![RuleArgument::String("\u{212a}".into())])],
+        "file-length-limit" => vec![RuleArgument::Integer(350)],
+        "string-format" => vec![RuleArgument::List(vec![
+            RuleArgument::String("fmt.Println".into()),
+            RuleArgument::String("/^ok$/".into()),
+            RuleArgument::String("string must be ok".into()),
+        ])],
+        "comments-density" => vec![RuleArgument::Integer(10)],
+        "enforce-map-style" => vec![RuleArgument::String("make".into())],
+        "enforce-slice-style" => vec![RuleArgument::String("make".into())],
+        _ => Vec::new(),
+    }
+}
+
+/// Settings that enable golint-default + extended rules for integration tests.
+pub fn extended_test_settings() -> Settings {
+    let mut rules = Vec::new();
+    for name in DEFAULT_RULES {
+        rules.push(crate::settings::RuleSetting {
+            name: (*name).to_string(),
+            arguments: extended_test_arguments(name),
+            disabled: false,
+        });
+    }
+    for name in EXTENDED_RULES {
+        rules.push(crate::settings::RuleSetting {
+            name: (*name).to_string(),
+            arguments: extended_test_arguments(name),
+            disabled: false,
+        });
+    }
+    Settings {
+        rules: Some(rules),
+    }
+}
+
+/// Runs `f` with [`extended_test_settings`] installed (integration tests).
+pub fn with_extended_rules<R>(f: impl FnOnce() -> R) -> R {
+    with_settings(extended_test_settings(), f)
+}
+
+/// Runs `f` with the given revive settings (integration tests / CLI bag).
+pub fn with_settings<R>(settings: Settings, f: impl FnOnce() -> R) -> R {
+    THREAD_SETTINGS.with(|slot| *slot.borrow_mut() = Some(settings));
+    let out = f();
+    THREAD_SETTINGS.with(|slot| *slot.borrow_mut() = None);
+    out
 }

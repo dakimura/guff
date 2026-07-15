@@ -10,12 +10,14 @@ mod bool_literal_in_expr;
 mod call_to_gc;
 mod cognitive_complexity;
 mod comment_spacings;
+mod comments_density;
 mod confusing_naming;
 mod confusing_results;
 mod constant_logical_expr;
 mod context_as_argument;
 mod context_keys_type;
 mod cyclomatic;
+mod datarace;
 mod defer;
 mod deep_exit;
 mod dot_imports;
@@ -23,6 +25,10 @@ mod duplicated_imports;
 mod early_return;
 mod empty_block;
 mod empty_lines;
+mod enforce_map_style;
+mod enforce_repeated_arg_type_style;
+mod enforce_slice_style;
+mod enforce_switch_style;
 mod epoch_naming;
 mod error_naming;
 mod error_return;
@@ -33,6 +39,7 @@ mod file_header;
 mod file_length_limit;
 mod filename_format;
 mod flag_parameter;
+mod forbidden_call_in_wg_go;
 mod function_length;
 mod function_result_limit;
 mod get_return;
@@ -56,6 +63,7 @@ mod multiline_if_init;
 mod nested_structs;
 mod optimize_operands_order;
 mod package_comments;
+mod package_directory_mismatch;
 mod package_naming;
 mod range;
 mod range_val_address;
@@ -101,7 +109,7 @@ use crate::failure::Failure;
 pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     let mut out = Vec::new();
     let mut run = |name: &str, f: fn(&Pass<'_>) -> Vec<Failure>| {
-        if config::rule_enabled(name) {
+        if config::rule_enabled(pass, name) {
             out.extend(f(pass));
         }
     };
@@ -197,9 +205,13 @@ pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     run("redundant-test-main-exit", redundant_test_main_exit::apply);
     run("comment-spacings", comment_spacings::apply);
     run("epoch-naming", epoch_naming::apply);
+    run("comments-density", comments_density::apply);
+    run("datarace", datarace::apply);
+    run("enforce-map-style", enforce_map_style::apply);
+    run("enforce-slice-style", enforce_slice_style::apply);
+    run("enforce-switch-style", enforce_switch_style::apply);
+    run("enforce-repeated-arg-type-style", enforce_repeated_arg_type_style::apply);
+    run("package-directory-mismatch", package_directory_mismatch::apply);
+    run("forbidden-call-in-wg-go", forbidden_call_in_wg_go::apply);
     out
 }
-
-// DEFERRED (R14): remaining extended revive rules (datarace, enforce-*-style,
-// comments-density, package-directory-mismatch, forbidden-call-in-wg-go, …)
-// and `linters.settings.revive` YAML wiring.

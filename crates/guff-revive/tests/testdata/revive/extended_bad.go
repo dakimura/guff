@@ -420,3 +420,25 @@ func badEpochNaming() {
 }
 
 var badK = 1
+
+var badEnforceMap = map[string]int{}
+
+var badEnforceSlice = []int{}
+
+func badDataRaceNamed() (result int) {
+	go func() {
+		result = 1
+	}()
+	return result
+}
+
+func badEnforceRepeatedArg(a int, b int) int {
+	return a + b
+}
+
+func badForbiddenWgGo() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		wg.Done()
+	})
+}

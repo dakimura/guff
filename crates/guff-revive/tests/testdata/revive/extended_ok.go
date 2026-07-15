@@ -1,6 +1,25 @@
-// Package extendedtest is a clean fixture for revive extended rules.
+// Package ok is a clean fixture for revive extended rules.
 // Copyright guff test fixtures
-package extendedtest
+//
+// Additional comments to satisfy comments-density in integration tests.
+// Line two of padding comments.
+// Line three of padding comments.
+// Line four of padding comments.
+// Line five of padding comments.
+// Line six of padding comments.
+// Line seven of padding comments.
+// Line eight of padding comments.
+// Line nine of padding comments.
+// Line ten of padding comments.
+// Line eleven of padding comments.
+// Line twelve of padding comments.
+// Line thirteen of padding comments.
+// Line fourteen of padding comments.
+// Line fifteen of padding comments.
+// Line sixteen of padding comments.
+// Line seventeen of padding comments.
+// Line eighteen of padding comments.
+package ok
 
 import (
 	"errors"
@@ -200,6 +219,8 @@ func goodIdenticalSwitch(x int) {
 		_, _ = fmt.Print(labelOne)
 	case two:
 		_, _ = fmt.Print(labelTwo)
+	default:
+		_, _ = fmt.Print(labelOk)
 	}
 }
 
@@ -209,6 +230,8 @@ func goodIdenticalSwitchCond(x int) {
 		_, _ = fmt.Print(labelA)
 	case x < zero:
 		_, _ = fmt.Print(labelB)
+	default:
+		_, _ = fmt.Print(labelOk)
 	}
 }
 

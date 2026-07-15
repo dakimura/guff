@@ -16,6 +16,7 @@ pub struct LinterSettings {
     pub errcheck: ErrcheckSettings,
     pub govet: GovetSettings,
     pub staticcheck: StaticcheckSettings,
+    pub revive: ReviveSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -52,6 +53,26 @@ pub struct StaticcheckSettings {
     // DEFERRED: initialisms, dot-import-whitelist, http-status-code-whitelist.
 }
 
+/// `linters.settings.revive` / `linters-settings.revive`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ReviveSettings {
+    /// Per-rule enablement and arguments. `None` = golint-default rules only.
+    #[serde(default)]
+    pub rules: Option<Vec<ReviveRuleSetting>>,
+    // DEFERRED: severity, confidence, ignore-generated-header.
+}
+
+/// One revive rule entry from golangci-lint YAML.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ReviveRuleSetting {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: Vec<serde_yaml::Value>,
+    #[serde(default)]
+    pub disabled: bool,
+    // DEFERRED: severity, exclude.
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -74,6 +95,11 @@ impl LinterSettings {
                 out.staticcheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("revive".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ReviveSettings>(v.clone()) {
+                out.revive = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -89,6 +115,7 @@ impl LinterSettings {
                 check_asserts: self.errcheck.check_type_assertions,
             },
         );
+        bag.insert("revive", self.revive.to_guff_revive());
         Arc::new(bag)
     }
 
@@ -183,6 +210,57 @@ fn filter_staticcheck(
         .collect()
 }
 
+impl ReviveSettings {
+    pub fn to_guff_revive(&self) -> guff_revive::Settings {
+        let rules = self.rules.as_ref().map(|rules| {
+            rules
+                .iter()
+                .map(|rule| guff_revive::RuleSetting {
+                    name: rule.name.clone(),
+                    arguments: rule
+                        .arguments
+                        .iter()
+                        .map(convert_revive_argument)
+                        .collect(),
+                    disabled: rule.disabled,
+                })
+                .collect()
+        });
+        guff_revive::Settings { rules }
+    }
+}
+
+fn convert_revive_argument(value: &serde_yaml::Value) -> guff_revive::RuleArgument {
+    match value {
+        serde_yaml::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                guff_revive::RuleArgument::Integer(i)
+            } else {
+                guff_revive::RuleArgument::String(n.to_string())
+            }
+        }
+        serde_yaml::Value::String(s) => guff_revive::RuleArgument::String(s.clone()),
+        serde_yaml::Value::Sequence(seq) => {
+            guff_revive::RuleArgument::List(seq.iter().map(convert_revive_argument).collect())
+        }
+        serde_yaml::Value::Mapping(map) => {
+            let mut out = std::collections::HashMap::new();
+            for (k, v) in map {
+                let key = match k {
+                    serde_yaml::Value::String(s) => s.clone(),
+                    serde_yaml::Value::Number(n) => n.to_string(),
+                    other => format!("{other:?}"),
+                };
+                out.insert(key, convert_revive_argument(v));
+            }
+            guff_revive::RuleArgument::Map(out)
+        }
+        serde_yaml::Value::Bool(b) => guff_revive::RuleArgument::String(b.to_string()),
+        serde_yaml::Value::Null => guff_revive::RuleArgument::String(String::new()),
+        serde_yaml::Value::Tagged(tagged) => convert_revive_argument(&tagged.value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +295,29 @@ errcheck:
         assert!(!kept.contains(&"SA1004"));
         assert!(kept.contains(&"SA1000"));
         assert!(kept.contains(&"S1000"));
+    }
+
+    #[test]
+    fn parse_revive_rules_settings() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+revive:
+  rules:
+    - name: enforce-map-style
+      arguments: ["make"]
+    - name: comments-density
+      arguments: [15]
+"#,
+        )
+        .unwrap();
+        let s = LinterSettings::from_yaml(&yaml);
+        assert_eq!(s.revive.rules.as_ref().map(|r| r.len()), Some(2));
+        assert_eq!(s.revive.rules.as_ref().unwrap()[0].name, "enforce-map-style");
+        let bag = s.to_bag();
+        let revive = bag
+            .get::<guff_revive::Settings>("revive")
+            .expect("revive settings");
+        assert!(revive.rule("enforce-map-style").is_some());
     }
 
     #[test]

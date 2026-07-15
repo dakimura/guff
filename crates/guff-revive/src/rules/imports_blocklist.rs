@@ -8,7 +8,7 @@ use crate::config;
 use crate::failure::Failure;
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let entries = config::imports_blocklist_entries();
+    let entries = config::imports_blocklist_entries(pass);
     if entries.is_empty() {
         return Vec::new();
     }

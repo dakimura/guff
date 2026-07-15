@@ -8,7 +8,7 @@ use crate::config;
 use crate::failure::Failure;
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let max = config::file_length_limit_max();
+    let max = config::file_length_limit_max(pass);
     if max == 0 {
         return Vec::new();
     }

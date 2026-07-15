@@ -38,7 +38,8 @@ pub use registry::{
 };
 pub use fix::{apply_fixes, FixError};
 pub use settings::{
-    ErrcheckSettings, GovetSettings, LinterSettings, StaticcheckSettings,
+    ErrcheckSettings, GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings,
+    StaticcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.

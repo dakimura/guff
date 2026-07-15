@@ -7,11 +7,11 @@ use crate::config;
 use crate::failure::Failure;
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let pattern = config::file_header_pattern();
+    let pattern = config::file_header_pattern(pass);
     if pattern.is_empty() {
         return Vec::new();
     }
-    let Ok(regex) = Regex::new(pattern) else {
+    let Ok(regex) = Regex::new(&pattern) else {
         return Vec::new();
     };
 
