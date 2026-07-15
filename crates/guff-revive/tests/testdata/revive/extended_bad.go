@@ -12,6 +12,7 @@ import (
 
 import "os"
 import "os"
+import dot "dot"
 
 var counter int64
 
@@ -118,4 +119,43 @@ type badStructTag struct {
 
 func badUnnecessaryStmt() {
 	return
+}
+
+func badArgLimit(a, b, c, d, e, f, g, h, i int) {}
+
+func badAddConstant() {
+	_ = 42
+	_ = "repeat"
+	_ = "repeat"
+	_ = "repeat"
+}
+
+func badEarlyReturn(x int) {
+	if x > 0 {
+		fmt.Print("big")
+	} else {
+		return
+	}
+}
+
+func badDeepExit() {
+	os.Exit(1)
+}
+
+func GetValue() {}
+
+func badUnnecessaryIf(flag bool) bool {
+	if flag {
+		return true
+	} else {
+		return false
+	}
+}
+
+func badDefer() {
+	for i := 0; i < 10; i++ {
+		defer fmt.Print(i)
+	}
+	recover()
+	_ = dot.X
 }

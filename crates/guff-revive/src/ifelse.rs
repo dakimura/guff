@@ -1,4 +1,4 @@
-//! Shared if-else chain analysis (revive `superfluous-else` / `indent-error-flow`).
+//! Shared if-else chain analysis (`superfluous-else` / `indent-error-flow` / `early-return`).
 
 use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, IfStmt, Stmt};
 use guff::token::Token;
@@ -25,6 +25,10 @@ impl BranchKind {
         !matches!(self, Self::Empty | Self::Regular)
     }
 
+    fn is_empty(self) -> bool {
+        self == Self::Empty
+    }
+
     fn returns(self) -> bool {
         self == Self::Return
     }
@@ -49,6 +53,30 @@ struct Branch {
     has_decls: bool,
 }
 
+impl Branch {
+    fn is_empty(&self) -> bool {
+        self.kind.is_empty()
+    }
+
+    fn short_string(&self) -> String {
+        match self.kind {
+            BranchKind::Empty => "{ }".into(),
+            BranchKind::Regular => "{ ... }".into(),
+            BranchKind::Return => "{ ... return }".into(),
+            BranchKind::Continue => "{ ... continue }".into(),
+            BranchKind::Break => "{ ... break }".into(),
+            BranchKind::Goto => "{ ... goto }".into(),
+            BranchKind::Panic => "{ ... panic() }".into(),
+            BranchKind::Exit => "{ ... os.Exit() }".into(),
+        }
+    }
+
+    fn is_short(&self) -> bool {
+        // Approximation: empty blocks are short; detailed stmt analysis is DEFERRED.
+        self.is_empty()
+    }
+}
+
 struct Chain {
     if_branch: Branch,
     has_else: bool,
@@ -56,6 +84,7 @@ struct Chain {
     has_initializer: bool,
     has_prior_non_deviating: bool,
     at_block_end: bool,
+    block_end_kind: BranchKind,
 }
 
 pub fn apply_indent_error_flow(pass: &Pass<'_>) -> Vec<Failure> {
@@ -64,6 +93,10 @@ pub fn apply_indent_error_flow(pass: &Pass<'_>) -> Vec<Failure> {
 
 pub fn apply_superfluous_else(pass: &Pass<'_>) -> Vec<Failure> {
     apply(pass, "superfluous-else", check_superfluous_else)
+}
+
+pub fn apply_early_return(pass: &Pass<'_>) -> Vec<Failure> {
+    apply(pass, "early-return", check_early_return)
 }
 
 fn apply(
@@ -146,6 +179,7 @@ fn visit_if(
         ),
         has_prior_non_deviating: false,
         at_block_end,
+        block_end_kind: end_kind,
     };
 
     let Some(else_stmt) = &if_stmt.else_ else {
@@ -294,5 +328,47 @@ fn check_superfluous_else(chain: &Chain) -> Option<String> {
     Some(format!(
         "if block ends with {}, so drop this else and outdent its block",
         chain.if_branch.kind.long_string()
+    ))
+}
+
+fn check_early_return(chain: &Chain) -> Option<String> {
+    if chain.has_else {
+        if !chain.else_branch.kind.deviates() {
+            return None;
+        }
+    } else if !chain.at_block_end
+        || !chain.block_end_kind.deviates()
+        || chain.if_branch.is_short()
+    {
+        return None;
+    }
+
+    if chain.has_prior_non_deviating && !chain.if_branch.is_empty() {
+        return None;
+    }
+
+    if chain.has_else && chain.if_branch.kind.deviates() {
+        return None;
+    }
+
+    if !chain.at_block_end && (chain.has_initializer || chain.if_branch.has_decls) {
+        return None;
+    }
+
+    if !chain.has_else {
+        return Some(format!(
+            "if c {{ ... }} can be rewritten if !c {{ {} }} ... to reduce nesting",
+            chain.block_end_kind.long_string()
+        ));
+    }
+
+    let else_str = chain.else_branch.short_string();
+    if chain.if_branch.is_empty() {
+        return Some(format!(
+            "if c {{ }} else {else_str} can be simplified to if !c {else_str}"
+        ));
+    }
+    Some(format!(
+        "if c {{ ... }} else {else_str} can be simplified to if !c {else_str} ..."
     ))
 }

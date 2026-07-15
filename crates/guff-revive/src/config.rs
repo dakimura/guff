@@ -59,6 +59,14 @@ pub const EXTENDED_RULES: &[&str] = &[
     "time-date",
     "unhandled-error",
     "unnecessary-stmt",
+    "add-constant",
+    "argument-limit",
+    "early-return",
+    "deep-exit",
+    "get-return",
+    "redundant-import-alias",
+    "unnecessary-if",
+    "defer",
 ];
 
 /// Enables [`EXTENDED_RULES`] for the duration of `f` (integration tests).

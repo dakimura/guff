@@ -9,14 +9,26 @@ import (
 	"time"
 )
 
+const (
+	zero       = 0
+	one        = 1
+	year2023   = 2023
+	monthJan   = 1
+	day15      = 15
+	hour12     = 12
+	minute30   = 30
+	second45   = 45
+	nanosecond = 0
+)
+
 var counter int64
 
 func goodAtomic() {
-	atomic.AddInt64(&counter, 1)
+	atomic.AddInt64(&counter, one)
 }
 
 func goodReturn() int {
-	return 1
+	return one
 }
 
 func goodBoolLiteral(x bool) bool {
@@ -24,7 +36,7 @@ func goodBoolLiteral(x bool) bool {
 }
 
 func goodWaitGroup(wg *sync.WaitGroup) {
-	wg.Add(1)
+	wg.Add(one)
 }
 
 func goodStringOfInt(n int) string {
@@ -42,10 +54,10 @@ func goodTypeAssert(v any) (int, bool) {
 }
 
 func goodRecursion(n int) int {
-	if n <= 0 {
-		return 0
+	if n <= zero {
+		return zero
 	}
-	return goodRecursion(n - 1)
+	return goodRecursion(n - one)
 }
 
 func goodIfReturn() error {
@@ -61,11 +73,11 @@ func goodImportShadow() string {
 }
 
 func goodConstLogical(a int) bool {
-	return a > 0
+	return a > zero
 }
 
 func goodTimeDate() time.Time {
-	return time.Date(2023, 1, 15, 12, 30, 45, 0, time.UTC)
+	return time.Date(year2023, monthJan, day15, hour12, minute30, second45, nanosecond, time.UTC)
 }
 
 func goodUnhandledError() error {
@@ -77,5 +89,38 @@ type goodStructTag struct {
 }
 
 func goodUnnecessaryStmt() int {
-	return 1
+	return one
+}
+
+func goodArgLimit(a, b, c int) int {
+	return a + b + c
+}
+
+func goodAddConstant() string {
+	return "once"
+}
+
+func goodEarlyReturn(x int) {
+	if x <= zero {
+		return
+	}
+	_, _ = fmt.Print("big")
+}
+
+func goodDeepExit() {
+	_, _ = fmt.Print("ok")
+}
+
+func getValue() int {
+	return one
+}
+
+func goodUnnecessaryIf(flag bool) bool {
+	return flag
+}
+
+func goodDefer() {
+	defer func() {
+		_ = recover()
+	}()
 }

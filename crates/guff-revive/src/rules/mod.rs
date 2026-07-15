@@ -1,5 +1,7 @@
 //! Revive rule implementations (golint-default subset).
 
+mod add_constant;
+mod argument_limit;
 mod atomic;
 mod blank_imports;
 mod bare_return;
@@ -10,20 +12,25 @@ mod constant_logical_expr;
 mod context_as_argument;
 mod context_keys_type;
 mod cyclomatic;
+mod defer;
+mod deep_exit;
 mod dot_imports;
 mod duplicated_imports;
+mod early_return;
 mod empty_block;
 mod error_naming;
 mod error_return;
 mod error_strings;
 mod errorf;
 mod exported;
+mod get_return;
 mod if_return;
 mod import_shadowing;
 mod increment_decrement;
 mod indent_error_flow;
 mod package_comments;
 mod range;
+mod redundant_import_alias;
 mod receiver_naming;
 mod redefines_builtin_id;
 mod string_of_int;
@@ -37,6 +44,7 @@ mod unconditional_recursion;
 mod unexported_return;
 mod unhandled_error;
 mod unnecessary_format;
+mod unnecessary_if;
 mod unnecessary_stmt;
 mod unreachable_code;
 mod unused_parameter;
@@ -101,8 +109,16 @@ pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     run("time-date", time_date::apply);
     run("unhandled-error", unhandled_error::apply);
     run("unnecessary-stmt", unnecessary_stmt::apply);
+    run("add-constant", add_constant::apply);
+    run("argument-limit", argument_limit::apply);
+    run("early-return", early_return::apply);
+    run("deep-exit", deep_exit::apply);
+    run("get-return", get_return::apply);
+    run("redundant-import-alias", redundant_import_alias::apply);
+    run("unnecessary-if", unnecessary_if::apply);
+    run("defer", defer::apply);
     out
 }
 
-// DEFERRED (R14): remaining extended revive rules (add-constant, argument-limit,
-// early-return, string-format, …) and `linters.settings.revive` YAML wiring.
+// DEFERRED (R14): remaining extended revive rules (string-format, flag-parameter,
+// function-length, …) and `linters.settings.revive` YAML wiring.

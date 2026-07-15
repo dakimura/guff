@@ -77,6 +77,14 @@ fn revive_flags_extended_rule_violations() {
             "time-date:",
             "unhandled-error:",
             "unnecessary-stmt:",
+            "add-constant:",
+            "argument-limit:",
+            "early-return:",
+            "deep-exit:",
+            "get-return:",
+            "redundant-import-alias:",
+            "unnecessary-if:",
+            "defer:",
         ] {
             assert!(
                 messages.iter().any(|m| m.contains(needle)),
