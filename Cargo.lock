@@ -384,6 +384,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "guff-dupl"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
+ "sha1",
+]
+
+[[package]]
 name = "guff-errcheck"
 version = "0.1.0"
 dependencies = [
@@ -479,6 +491,7 @@ dependencies = [
  "guff-ast",
  "guff-comment",
  "guff-context",
+ "guff-dupl",
  "guff-errcheck",
  "guff-error",
  "guff-gostaticanalysis",
@@ -979,6 +992,17 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]

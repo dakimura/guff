@@ -56,7 +56,7 @@ go list / モジュールグラフ (guff-packages)
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell` | 各 linter の Analyzer 群 |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl` | 各 linter の Analyzer 群 |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -72,7 +72,7 @@ guff-ast / guff-constant / guff-version*
   → guff-build → guff-packages
   → guff-ssa / guff-pattern / guff-analysis
   → guff-runner
-  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context,style,comment,import,misspell}
+  → guff-{staticcheck,govet,errcheck,ineffassign,unused,gostaticanalysis,error,context,style,comment,import,misspell,dupl}
   → guff-lint
 ```
 
@@ -144,8 +144,9 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
 | `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | settings・SuggestedFix は **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
-| `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED**；R14 残は revive/dupl |
+| `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED**；R14 残は revive |
 | `guff-misspell` | ✅ **1**（misspell） | settings（locale / ignore-words / extra-words / mode）は **DEFERRED** |
+| `guff-dupl` | ✅ **1**（dupl） | settings（`threshold` YAML 配線）は **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -549,7 +550,9 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   settings（rules / replace-local / allowed・blocked・version・gomodguard_v2）は DEFERRED。
 - `guff-misspell`: **misspell**（golangci/misspell `DictMain` + US locale；既定 mode=plain text）。
   settings（locale UK / ignore-words / extra-words / mode=restricted）は DEFERRED。
-- R14 残: `guff-revive`, `guff-dupl`。
+- `guff-dupl`: **dupl**（golangci/dupl suffix-tree クローン検出；既定 threshold=150）。
+  `linters.settings.dupl.threshold` YAML 配線は DEFERRED。
+- R14 残: `guff-revive`。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
@@ -656,7 +659,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
-| 2026-07-15 | **R14 続き**: 新 `guff-misspell` に `misspell`（golangci/misspell 辞書・SuggestedFix 付き）を追加しレジストリ登録。locale/ignore-words/mode=restricted settings は DEFERRED |
+| 2026-07-15 | **R14 続き**: 新 `guff-dupl` に `dupl`（golangci/dupl クローン検出・既定 threshold=150）を追加しレジストリ登録。`linters.settings.dupl.threshold` YAML 配線は DEFERRED |
 | 2026-07-15 | **R14 続き**: 新 `guff-import` に `depguard`（既定 `$gostd` only）/ `gomoddirectives`（replace 禁止）/ `gomodguard`（blocked・local-replace）を追加しレジストリ登録。settings・gomodguard_v2 は DEFERRED |
 | 2026-07-15 | **R14 続き**: 新 `guff-comment` に `godot`（宣言コメントの句点）/ `godox`（TODO/BUG/FIXME）/ `dupword`（重複語）を追加しレジストリ登録。settings・SuggestedFix・godot scope/capital は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-style` に `prealloc`（slice 事前確保）/ `tagalign`（struct tag 整列+sort）/ `wsl`（v4 既定 cuddle 主要ルール）を追加しレジストリ登録。settings・SuggestedFix・wsl 完全パリティ/`wsl_v5` は DEFERRED |
