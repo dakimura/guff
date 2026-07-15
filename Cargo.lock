@@ -485,6 +485,7 @@ dependencies = [
  "guff-govet",
  "guff-import",
  "guff-ineffassign",
+ "guff-misspell",
  "guff-packages",
  "guff-runner",
  "guff-staticcheck",
@@ -496,6 +497,18 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+]
+
+[[package]]
+name = "guff-misspell"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-runner",
+ "guff-types",
+ "regex",
 ]
 
 [[package]]

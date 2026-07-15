@@ -24,6 +24,7 @@ members = [
     "crates/guff-style",
     "crates/guff-comment",
     "crates/guff-import",
+    "crates/guff-misspell",
     "crates/guff-lint",
     "crates/guff-ssa",
     "crates/guff-version",

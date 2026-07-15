@@ -36,6 +36,7 @@ guff-context = { path = "../guff-context" }
 guff-style = { path = "../guff-style" }
 guff-comment = { path = "../guff-comment" }
 guff-import = { path = "../guff-import" }
+guff-misspell = { path = "../guff-misspell" }
 
 [dev-dependencies]
 tempfile = "3"
