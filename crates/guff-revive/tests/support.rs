@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use guff::parser::{parse_file, Mode};
+use guff::parser::{parse_file, Mode, PARSE_COMMENTS};
 use guff::position::FileSet;
 use guff_packages::{Error, ErrorKind, Package, TypecheckArtifacts};
 use guff_runner::{run_on_packages, RunnerOptions};
@@ -53,7 +53,8 @@ pub fn typecheck_with_deps(
         .file_name()
         .and_then(|s| s.to_str())
         .expect("main file name");
-    let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
+    let parse_mode = Mode::NONE | PARSE_COMMENTS;
+    let main_file = parse_file(&fset, main_name, &main_src, parse_mode).expect("parse main");
 
     let mut check = Checker::new(Config::default());
     for (import_path, dep_path) in deps {
@@ -62,7 +63,7 @@ pub fn typecheck_with_deps(
             .file_name()
             .and_then(|s| s.to_str())
             .expect("dep file name");
-        let file = parse_file(&fset, name, &src, Mode::NONE).expect("parse dependency");
+        let file = parse_file(&fset, name, &src, parse_mode).expect("parse dependency");
         check.add_dependency_source(*import_path, vec![file]);
     }
     check.check_files(vec![main_file.clone()]);
