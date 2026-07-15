@@ -244,6 +244,24 @@ pub fn imports_package(pass: &Pass<'_>, import_path: &str) -> bool {
     false
 }
 
+pub fn is_exported_ident(name: &str) -> bool {
+    name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase())
+}
+
+pub fn is_bool_type_expr(expr: &Expr) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if name == "bool")
+}
+
+pub fn line_of(pass: &Pass<'_>, pos: i64) -> usize {
+    pass.fset()
+        .position(guff::position::Pos(pos))
+        .line
+        .max(0) as usize
+}
+
 pub fn expr_string(e: &Expr) -> String {
     match e {
         Expr::Ident(id) => id.name.clone(),

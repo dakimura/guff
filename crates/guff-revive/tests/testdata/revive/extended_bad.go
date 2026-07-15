@@ -159,3 +159,186 @@ func badDefer() {
 	recover()
 	_ = dot.X
 }
+
+func badFlagParameter(enabled bool) {
+	if enabled {
+		fmt.Print("on")
+	}
+}
+
+func badFunctionResults() (int, int, int, int) {
+	return 0, 0, 0, 0
+}
+
+func badUseAny(v interface{}) {}
+
+func badUseFmtPrint() {
+	print("hello")
+}
+
+type badUnusedReceiver struct{}
+
+func (r badUnusedReceiver) noop() {
+	fmt.Print("x")
+}
+
+func badModifiesParameter(x int) {
+	x = 1
+}
+
+func badIdenticalBranches(x int) {
+	if x > 0 {
+		fmt.Print("same")
+	} else {
+		fmt.Print("same")
+	}
+}
+
+func badIdenticalIfElseIf(x int) {
+	if x == 1 {
+		fmt.Print("same")
+	} else if x == 2 {
+		fmt.Print("same")
+	}
+}
+
+func badIdenticalIfElseIfCond(x int) {
+	if x > 0 {
+		fmt.Print("a")
+	} else if x > 0 {
+		fmt.Print("b")
+	}
+}
+
+func badIdenticalSwitch(x int) {
+	switch x {
+	case 1:
+		fmt.Print("same")
+	case 2:
+		fmt.Print("same")
+	}
+}
+
+func badIdenticalSwitchCond() {
+	switch {
+	case true:
+		fmt.Print("a")
+	case true:
+		fmt.Print("b")
+	}
+}
+
+var badLongLine = "012345678901234567890123456789012345678901234567890123456789012345678901234567890"
+
+func badMaxControlNesting() {
+	if true {
+		if true {
+			if true {
+				if true {
+					if true {
+						if true {
+							fmt.Print("deep")
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+type badNestedStruct struct {
+	inner struct{ x int }
+}
+
+func badUnexportedNaming() {
+	ExportedLocal := 1
+	_ = ExportedLocal
+}
+
+func badEmptyLines() {
+
+	fmt.Print("x")
+
+}
+
+func badOptimizeOperands(flag bool) bool {
+	return expensive() && flag
+}
+
+func expensive() bool {
+	return true
+}
+
+func badRangeValInClosure() {
+	for i := range []int{1} {
+		go func() { fmt.Print(i) }()
+	}
+}
+
+func badConfusingResults() (int, int) {
+	return 0, 0
+}
+
+func badFunctionLength() int {
+	var a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t int
+	_ = a
+	_ = b
+	_ = c
+	_ = d
+	_ = e
+	_ = f
+	_ = g
+	_ = h
+	_ = i
+	_ = j
+	_ = k
+	_ = l
+	_ = m
+	_ = n
+	_ = o
+	_ = p
+	_ = q
+	_ = r
+	_ = s
+	_ = t
+	_ = a
+	_ = b
+	_ = c
+	_ = d
+	_ = e
+	_ = f
+	_ = g
+	_ = h
+	_ = i
+	_ = j
+	_ = k
+	_ = l
+	_ = m
+	_ = n
+	_ = o
+	_ = p
+	_ = q
+	_ = r
+	_ = s
+	_ = t
+	_ = a
+	_ = b
+	_ = c
+	_ = d
+	_ = e
+	_ = f
+	_ = g
+	_ = h
+	_ = i
+	_ = j
+	_ = k
+	_ = l
+	_ = m
+	_ = n
+	_ = o
+	_ = p
+	_ = q
+	_ = r
+	_ = s
+	return t
+}

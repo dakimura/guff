@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-revive` extended rules を 8 件追加）。
+> 最終更新: 2026-07-15。ワークスペース全体 **1900+ tests green**（本セッションで `guff-revive` extended rules を **20** 件追加）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -147,7 +147,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | settings（locale / ignore-words / extra-words / mode）は **DEFERRED** |
 | `guff-dupl` | ✅ **1**（dupl） | settings（`threshold` YAML 配線）は **DEFERRED** |
-| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **29 rules**（計 52）；settings・残 extended rules は **DEFERRED** |
+| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **49 rules**（計 72）；settings・残 extended rules は **DEFERRED** |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -553,8 +553,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   settings（locale UK / ignore-words / extra-words / mode=restricted）は DEFERRED。
 - `guff-dupl`: **dupl**（golangci/dupl suffix-tree クローン検出；既定 threshold=150）。
   `linters.settings.dupl.threshold` YAML 配線は DEFERRED。
-- `guff-revive`: **revive**（golint-default **23 rules** + extended **29 rules**: atomic / bare-return / bool-literal-in-expr / call-to-gc / cognitive-complexity / constant-logical-expr / cyclomatic / duplicated-imports / if-return / import-shadowing / string-of-int / struct-tag / time-date / time-equal / unchecked-type-assertion / unconditional-recursion / unhandled-error / unnecessary-format / unnecessary-stmt / use-errors-new / waitgroup-by-value / add-constant / argument-limit / early-return / deep-exit / get-return / redundant-import-alias / unnecessary-if / defer）。
-  `linters.settings.revive` YAML 配線と残 extended rules（string-format, flag-parameter, function-length, …）は DEFERRED。
+- `guff-revive`: **revive**（golint-default **23 rules** + extended **49 rules**: atomic / bare-return / bool-literal-in-expr / call-to-gc / cognitive-complexity / constant-logical-expr / cyclomatic / duplicated-imports / if-return / import-shadowing / string-of-int / struct-tag / time-date / time-equal / unchecked-type-assertion / unconditional-recursion / unhandled-error / unnecessary-format / unnecessary-stmt / use-errors-new / waitgroup-by-value / add-constant / argument-limit / early-return / deep-exit / get-return / redundant-import-alias / unnecessary-if / defer / flag-parameter / function-length / function-result-limit / use-any / use-fmt-print / unused-receiver / modifies-parameter / identical-branches / identical-ifelseif-branches / identical-ifelseif-conditions / identical-switch-branches / identical-switch-conditions / line-length-limit / max-control-nesting / nested-structs / unexported-naming / empty-lines / optimize-operands-order / range-val-in-closure / confusing-results）。
+  `linters.settings.revive` YAML 配線と残 extended rules（string-format, imports-blocklist, confusing-naming, …）は DEFERRED。
 - R14 残: 残 extended revive rules・settings 配線（DEFERRED）。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
@@ -662,7 +662,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
-| 2026-07-15 | **R14 続き**: `guff-revive` に extended revive rules **8** 件（add-constant / argument-limit / early-return / deep-exit / get-return / redundant-import-alias / unnecessary-if / defer）を追加。golint-default 23 + extended 29 = **52 rules**。`linters.settings.revive` と残 extended rules は DEFERRED |
+| 2026-07-15 | **R14 続き**: `guff-revive` に extended revive rules **20** 件（flag-parameter / function-length / function-result-limit / use-any / use-fmt-print / unused-receiver / modifies-parameter / identical-branches / identical-ifelseif-branches / identical-ifelseif-conditions / identical-switch-branches / identical-switch-conditions / line-length-limit / max-control-nesting / nested-structs / unexported-naming / empty-lines / optimize-operands-order / range-val-in-closure / confusing-results）を追加。golint-default 23 + extended 49 = **72 rules**。`linters.settings.revive` と残 extended rules は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-revive` に extended revive rules **14** 件（atomic / bare-return / bool-literal-in-expr / call-to-gc / cyclomatic / duplicated-imports / if-return / string-of-int / time-equal / unchecked-type-assertion / unconditional-recursion / unnecessary-format / use-errors-new / waitgroup-by-value）を追加。golint-default 23 + extended 14 = **37 rules**。`config::with_extended_rules` + `extended_bad.go`/`extended_ok.go` で検証。`linters.settings.revive` と残 extended rules は DEFERRED |
 | 2026-07-15 | **R14 続き**: `guff-revive` に golint-default 残り 14 rule（package-comments / exported / var-naming / range / errorf / error-return / unexported-return / context-as-argument / context-keys-type / indent-error-flow / superfluous-else / unused-parameter / unreachable-code / var-declaration）を追加。計 23 rule。`linters.settings.revive` と extended rules は DEFERRED |
 | 2026-07-15 | **R14 完了**: 新 `guff-revive` に `revive`（golint-default 9 rules）を追加しレジストリ登録。`linters.settings.revive` YAML 配線と残 rule は DEFERRED |

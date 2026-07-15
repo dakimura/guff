@@ -12,6 +12,7 @@ import (
 const (
 	zero       = 0
 	one        = 1
+	two        = 2
 	year2023   = 2023
 	monthJan   = 1
 	day15      = 15
@@ -19,6 +20,13 @@ const (
 	minute30   = 30
 	second45   = 45
 	nanosecond = 0
+	labelA     = "a"
+	labelB     = "b"
+	labelOne   = "one"
+	labelTwo   = "two"
+	labelOk    = "ok"
+	labelX     = "x"
+	labelBig   = "big"
 )
 
 var counter int64
@@ -77,7 +85,16 @@ func goodConstLogical(a int) bool {
 }
 
 func goodTimeDate() time.Time {
-	return time.Date(year2023, monthJan, day15, hour12, minute30, second45, nanosecond, time.UTC)
+	return time.Date(
+		year2023,
+		monthJan,
+		day15,
+		hour12,
+		minute30,
+		second45,
+		nanosecond,
+		time.UTC,
+	)
 }
 
 func goodUnhandledError() error {
@@ -104,11 +121,11 @@ func goodEarlyReturn(x int) {
 	if x <= zero {
 		return
 	}
-	_, _ = fmt.Print("big")
+	_, _ = fmt.Print(labelBig)
 }
 
 func goodDeepExit() {
-	_, _ = fmt.Print("ok")
+	_, _ = fmt.Print(labelOk)
 }
 
 func getValue() int {
@@ -123,4 +140,116 @@ func goodDefer() {
 	defer func() {
 		_ = recover()
 	}()
+}
+
+func goodFlagParameter(enabled bool) {
+	_ = enabled
+}
+
+func goodFunctionResults() (int, error) {
+	return zero, nil
+}
+
+func goodUseAny(v any) {
+	_ = v
+}
+
+func goodUseFmtPrint() {
+	_, _ = fmt.Print("hello")
+}
+
+type goodUnusedReceiver struct{}
+
+func (r *goodUnusedReceiver) used() {
+	_ = r
+	_, _ = fmt.Print(labelOk)
+}
+
+func goodModifiesParameter(x int) int {
+	return x + one
+}
+
+func goodIdenticalBranches(x int) {
+	if x > zero {
+		_, _ = fmt.Print(labelA)
+	} else {
+		_, _ = fmt.Print(labelB)
+	}
+}
+
+func goodIdenticalIfElseIf(x int) {
+	if x == one {
+		_, _ = fmt.Print(labelOne)
+	} else if x == two {
+		_, _ = fmt.Print(labelTwo)
+	}
+}
+
+func goodIdenticalIfElseIfCond(x int) {
+	if x > zero {
+		_, _ = fmt.Print(labelA)
+	} else if x < zero {
+		_, _ = fmt.Print(labelB)
+	}
+}
+
+func goodIdenticalSwitch(x int) {
+	switch x {
+	case one:
+		_, _ = fmt.Print(labelOne)
+	case two:
+		_, _ = fmt.Print(labelTwo)
+	}
+}
+
+func goodIdenticalSwitchCond(x int) {
+	switch {
+	case x > zero:
+		_, _ = fmt.Print(labelA)
+	case x < zero:
+		_, _ = fmt.Print(labelB)
+	}
+}
+
+func goodMaxControlNesting() {
+	if true {
+		_, _ = fmt.Print(labelOk)
+	}
+}
+
+type goodNestedStruct struct {
+	x int
+}
+
+func goodUnexportedNaming() {
+	local := one
+	_ = local
+}
+
+func goodEmptyLines() {
+	_, _ = fmt.Print(labelX)
+}
+
+func goodOptimizeOperands(flag bool) bool {
+	return flag && expensiveOk()
+}
+
+func expensiveOk() bool {
+	return true
+}
+
+func goodRangeValInClosure() {
+	items := []int{one}
+	for _, item := range items {
+		captured := item
+		go func() { _, _ = fmt.Print(captured) }()
+	}
+}
+
+func goodConfusingResults() (count int, err error) {
+	return zero, nil
+}
+
+func goodFunctionLength() int {
+	return one
 }

@@ -8,9 +8,9 @@
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): `linters.settings.revive` YAML wiring
 //! (per-rule enable/disable, arguments, severity, confidence); remaining extended
-//! rules (add-constant, argument-limit, early-return, deep-exit, get-return,
-//! redundant-import-alias, unnecessary-if, defer, …).
+//! rules (string-format, imports-blocklist, confusing-naming, …).
 
+mod astfmt;
 mod config;
 mod failure;
 mod ifelse;
