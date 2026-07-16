@@ -1,8 +1,6 @@
 //! Port of golangci-lint's `lll` (`pkg/golinters/lll`).
 //!
 //! Defaults match golangci-lint: `line-length=120`, `tab-width=1`.
-//!
-//! DEFERRED: `linters.settings.lll` wiring; `format:path` unrelated.
 
 use std::fs;
 use std::sync::OnceLock;
@@ -10,22 +8,22 @@ use std::sync::OnceLock;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint defaults for `linters.settings.lll`.
-const LINE_LENGTH: usize = 120;
-const TAB_WIDTH: usize = 1;
+use crate::options::LllOptions;
 
 const GO_COMMENT_DIRECTIVE_PREFIX: &str = "//go:";
 
 fn check_file(
     path: &std::path::Path,
     line_start: impl Fn(usize) -> Option<u32>,
+    line_length: usize,
+    tab_width: usize,
     pending: &mut Vec<(u32, String)>,
 ) {
     let Ok(src) = fs::read_to_string(path) else {
         return;
     };
 
-    let tab_spaces = " ".repeat(TAB_WIDTH);
+    let tab_spaces = " ".repeat(tab_width);
     let mut multi_import = false;
 
     for (idx, raw_line) in src.lines().enumerate() {
@@ -49,14 +47,14 @@ fn check_file(
         }
 
         let line_len = line.chars().count();
-        if line_len > LINE_LENGTH {
+        if line_len > line_length {
             let Some(pos) = line_start(line_number) else {
                 continue;
             };
             pending.push((
                 pos,
                 format!(
-                    "The line is {line_len} characters long, which exceeds the maximum of {LINE_LENGTH} characters."
+                    "The line is {line_len} characters long, which exceeds the maximum of {line_length} characters."
                 ),
             ));
         }
@@ -67,6 +65,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "lll requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<LllOptions>("lll")
+        .copied()
+        .unwrap_or_default();
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
@@ -90,6 +93,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 Some(ft.line_start(line).0 as u32)
             },
+            options.line_length,
+            options.tab_width,
             &mut pending,
         );
     }

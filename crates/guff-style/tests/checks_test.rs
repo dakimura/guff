@@ -678,3 +678,142 @@ fn funlen_respects_statements_setting() {
         "statements=50 should suppress bad.go: {messages:?}"
     );
 }
+
+#[test]
+fn cyclop_respects_max_complexity_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::CyclopOptions;
+
+    let pkg = support::typecheck_fixture("cyclop", "example.com/cyclop", "bad.go");
+    assert!(
+        !support::run_analyzer(cyclop(), &pkg).is_empty(),
+        "default max-complexity=10 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "cyclop",
+        CyclopOptions {
+            max_complexity: 20,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        cyclop(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "max-complexity=20 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn lll_respects_line_length_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::LllOptions;
+
+    let pkg = support::typecheck_fixture("lll", "example.com/lll", "bad.go");
+    assert!(
+        !support::run_analyzer(lll(), &pkg).is_empty(),
+        "default line-length=120 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "lll",
+        LllOptions {
+            line_length: 200,
+            ..LllOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        lll(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "line-length=200 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn nakedret_respects_max_func_lines_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::NakedretOptions;
+
+    let pkg = support::typecheck_fixture("nakedret", "example.com/nakedret", "bad.go");
+    assert!(
+        !support::run_analyzer(nakedret(), &pkg).is_empty(),
+        "default max-func-lines=30 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "nakedret",
+        NakedretOptions {
+            max_func_lines: 50,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        nakedret(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "max-func-lines=50 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn nlreturn_respects_block_size_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::NlreturnOptions;
+
+    let pkg = support::typecheck_fixture("nlreturn", "example.com/nlreturn", "bad.go");
+    assert!(
+        !support::run_analyzer(nlreturn(), &pkg).is_empty(),
+        "default block-size=1 should flag bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "nlreturn",
+        NlreturnOptions { block_size: 10 },
+    );
+    let messages = support::run_analyzer_with_settings(
+        nlreturn(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "block-size=10 should suppress bad.go: {messages:?}"
+    );
+}

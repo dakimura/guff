@@ -24,6 +24,10 @@ pub struct LinterSettings {
     pub nestif: NestifSettings,
     pub dogsled: DogsledSettings,
     pub funlen: FunlenSettings,
+    pub cyclop: CyclopSettings,
+    pub lll: LllSettings,
+    pub nakedret: NakedretSettings,
+    pub nlreturn: NlreturnSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -158,6 +162,38 @@ pub struct FunlenSettings {
     pub ignore_comments: Option<bool>,
 }
 
+/// `linters.settings.cyclop` / `linters-settings.cyclop`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct CyclopSettings {
+    #[serde(default, rename = "max-complexity")]
+    pub max_complexity: Option<usize>,
+    // DEFERRED: package-average, skipTests.
+}
+
+/// `linters.settings.lll` / `linters-settings.lll`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct LllSettings {
+    #[serde(default, rename = "line-length")]
+    pub line_length: Option<usize>,
+    #[serde(default, rename = "tab-width")]
+    pub tab_width: Option<usize>,
+}
+
+/// `linters.settings.nakedret` / `linters-settings.nakedret`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NakedretSettings {
+    #[serde(default, rename = "max-func-lines")]
+    pub max_func_lines: Option<usize>,
+    // DEFERRED: skip-test-files.
+}
+
+/// `linters.settings.nlreturn` / `linters-settings.nlreturn`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NlreturnSettings {
+    #[serde(default, rename = "block-size")]
+    pub block_size: Option<i64>,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -220,6 +256,26 @@ impl LinterSettings {
                 out.funlen = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("cyclop".into())) {
+            if let Ok(s) = serde_yaml::from_value::<CyclopSettings>(v.clone()) {
+                out.cyclop = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("lll".into())) {
+            if let Ok(s) = serde_yaml::from_value::<LllSettings>(v.clone()) {
+                out.lll = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("nakedret".into())) {
+            if let Ok(s) = serde_yaml::from_value::<NakedretSettings>(v.clone()) {
+                out.nakedret = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("nlreturn".into())) {
+            if let Ok(s) = serde_yaml::from_value::<NlreturnSettings>(v.clone()) {
+                out.nlreturn = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -243,6 +299,10 @@ impl LinterSettings {
         bag.insert("nestif", self.nestif.to_guff_nestif());
         bag.insert("dogsled", self.dogsled.to_guff_dogsled());
         bag.insert("funlen", self.funlen.to_guff_funlen());
+        bag.insert("cyclop", self.cyclop.to_guff_cyclop());
+        bag.insert("lll", self.lll.to_guff_lll());
+        bag.insert("nakedret", self.nakedret.to_guff_nakedret());
+        bag.insert("nlreturn", self.nlreturn.to_guff_nlreturn());
         Arc::new(bag)
     }
 
@@ -434,6 +494,43 @@ impl FunlenSettings {
             lines: self.lines.unwrap_or(defaults.lines),
             statements: self.statements.unwrap_or(defaults.statements),
             ignore_comments: self.ignore_comments.unwrap_or(defaults.ignore_comments),
+        }
+    }
+}
+
+impl CyclopSettings {
+    pub fn to_guff_cyclop(&self) -> guff_style::CyclopOptions {
+        let defaults = guff_style::CyclopOptions::default();
+        guff_style::CyclopOptions {
+            max_complexity: self.max_complexity.unwrap_or(defaults.max_complexity),
+        }
+    }
+}
+
+impl LllSettings {
+    pub fn to_guff_lll(&self) -> guff_style::LllOptions {
+        let defaults = guff_style::LllOptions::default();
+        guff_style::LllOptions {
+            line_length: self.line_length.unwrap_or(defaults.line_length),
+            tab_width: self.tab_width.unwrap_or(defaults.tab_width),
+        }
+    }
+}
+
+impl NakedretSettings {
+    pub fn to_guff_nakedret(&self) -> guff_style::NakedretOptions {
+        let defaults = guff_style::NakedretOptions::default();
+        guff_style::NakedretOptions {
+            max_func_lines: self.max_func_lines.unwrap_or(defaults.max_func_lines),
+        }
+    }
+}
+
+impl NlreturnSettings {
+    pub fn to_guff_nlreturn(&self) -> guff_style::NlreturnOptions {
+        let defaults = guff_style::NlreturnOptions::default();
+        guff_style::NlreturnOptions {
+            block_size: self.block_size.unwrap_or(defaults.block_size),
         }
     }
 }

@@ -212,6 +212,10 @@ fn parse_v2_style_linter_settings() {
     assert_eq!(settings.gocyclo.min_complexity, Some(50));
     assert_eq!(settings.dogsled.max_blank_identifiers, Some(4));
     assert_eq!(settings.funlen.statements, Some(50));
+    assert_eq!(settings.cyclop.max_complexity, Some(20));
+    assert_eq!(settings.lll.line_length, Some(200));
+    assert_eq!(settings.nakedret.max_func_lines, Some(50));
+    assert_eq!(settings.nlreturn.block_size, Some(10));
     let bag = settings.to_bag();
     assert_eq!(
         bag.get::<guff_style::GocycloOptions>("gocyclo")
@@ -230,5 +234,27 @@ fn parse_v2_style_linter_settings() {
             .unwrap()
             .statements,
         50
+    );
+    assert_eq!(
+        bag.get::<guff_style::CyclopOptions>("cyclop")
+            .unwrap()
+            .max_complexity,
+        20
+    );
+    assert_eq!(
+        bag.get::<guff_style::LllOptions>("lll").unwrap().line_length,
+        200
+    );
+    assert_eq!(
+        bag.get::<guff_style::NakedretOptions>("nakedret")
+            .unwrap()
+            .max_func_lines,
+        50
+    );
+    assert_eq!(
+        bag.get::<guff_style::NlreturnOptions>("nlreturn")
+            .unwrap()
+            .block_size,
+        10
     );
 }

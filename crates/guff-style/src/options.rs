@@ -73,3 +73,61 @@ impl Default for FunlenOptions {
         }
     }
 }
+
+/// `linters.settings.cyclop` / `linters-settings.cyclop`.
+#[derive(Debug, Clone, Copy)]
+pub struct CyclopOptions {
+    pub max_complexity: usize,
+}
+
+impl Default for CyclopOptions {
+    fn default() -> Self {
+        Self {
+            max_complexity: 10,
+        }
+    }
+}
+
+/// `linters.settings.lll` / `linters-settings.lll`.
+#[derive(Debug, Clone, Copy)]
+pub struct LllOptions {
+    pub line_length: usize,
+    pub tab_width: usize,
+}
+
+impl Default for LllOptions {
+    fn default() -> Self {
+        Self {
+            line_length: 120,
+            tab_width: 1,
+        }
+    }
+}
+
+/// `linters.settings.nakedret` / `linters-settings.nakedret`.
+#[derive(Debug, Clone, Copy)]
+pub struct NakedretOptions {
+    pub max_func_lines: usize,
+}
+
+impl Default for NakedretOptions {
+    fn default() -> Self {
+        Self {
+            max_func_lines: 30,
+        }
+    }
+}
+
+/// `linters.settings.nlreturn` / `linters-settings.nlreturn`.
+#[derive(Debug, Clone, Copy)]
+pub struct NlreturnOptions {
+    pub block_size: i64,
+}
+
+impl Default for NlreturnOptions {
+    fn default() -> Self {
+        Self {
+            block_size: 1,
+        }
+    }
+}

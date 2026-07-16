@@ -5,8 +5,7 @@
 //! complexity is strictly greater than this). Package-average check is off
 //! by default (`package-average=0`).
 //!
-//! DEFERRED: `linters.settings.cyclop` wiring (`max-complexity`,
-//! `package-average`); `skipTests` flag.
+//! DEFERRED: `package-average`; `skipTests` flag.
 
 use std::sync::OnceLock;
 
@@ -16,8 +15,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// cyclop / golangci-lint default for `max-complexity`.
-const MAX_COMPLEXITY: usize = 10;
+use crate::options::CyclopOptions;
 
 fn complexity(root: NodeRef<'_>) -> usize {
     let mut complexity = 0usize;
@@ -49,6 +47,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "cyclop requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<CyclopOptions>("cyclop")
+        .copied()
+        .unwrap_or_default();
+    let max_complexity = options.max_complexity;
+
     let mut pending = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
@@ -56,11 +60,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             };
             let c = complexity(NodeRef::FuncDecl(f));
-            if c > MAX_COMPLEXITY {
+            if c > max_complexity {
                 pending.push((
                     f.name.name_pos.0 as u32,
                     format!(
-                        "calculated cyclomatic complexity for function {} is {c}, max is {MAX_COMPLEXITY}",
+                        "calculated cyclomatic complexity for function {} is {c}, max is {max_complexity}",
                         f.name.name
                     ),
                 ));

@@ -3,7 +3,7 @@
 //!
 //! Default matches golangci-lint / upstream: `block-size=1`.
 //!
-//! DEFERRED: `linters.settings.nlreturn` wiring (`block-size`); SuggestedFix.
+//! DEFERRED: SuggestedFix.
 
 use std::sync::OnceLock;
 
@@ -14,8 +14,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint / upstream default for `linters.settings.nlreturn.block-size`.
-const BLOCK_SIZE: i64 = 1;
+use crate::options::NlreturnOptions;
 
 fn line(fset: &FileSet, pos: guff::position::Pos) -> i64 {
     fset.position(pos).line
@@ -35,13 +34,18 @@ fn branch_name(stmt: &Stmt) -> &'static str {
     }
 }
 
-fn inspect_block(fset: &FileSet, block: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn inspect_block(
+    fset: &FileSet,
+    block: &[Stmt],
+    block_size: i64,
+    pending: &mut Vec<(u32, String)>,
+) {
     for (i, stmt) in block.iter().enumerate() {
         if !matches!(stmt, Stmt::BranchStmt(_) | Stmt::ReturnStmt(_)) {
             continue;
         }
 
-        if i == 0 || line(fset, stmt.pos()) - line(fset, block[0].pos()) < BLOCK_SIZE {
+        if i == 0 || line(fset, stmt.pos()) - line(fset, block[0].pos()) < block_size {
             return;
         }
 
@@ -59,6 +63,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "nlreturn requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<NlreturnOptions>("nlreturn")
+        .copied()
+        .unwrap_or_default();
+    let block_size = options.block_size;
+
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
@@ -67,9 +77,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             match n {
-                NodeRef::BlockStmt(b) => inspect_block(&fset, &b.list, &mut pending),
-                NodeRef::CaseClause(c) => inspect_block(&fset, &c.body, &mut pending),
-                NodeRef::CommClause(c) => inspect_block(&fset, &c.body, &mut pending),
+                NodeRef::BlockStmt(b) => inspect_block(&fset, &b.list, block_size, &mut pending),
+                NodeRef::CaseClause(c) => inspect_block(&fset, &c.body, block_size, &mut pending),
+                NodeRef::CommClause(c) => inspect_block(&fset, &c.body, block_size, &mut pending),
                 _ => {}
             }
             true

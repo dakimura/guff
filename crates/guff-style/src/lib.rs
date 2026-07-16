@@ -56,7 +56,8 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    DogsledOptions, FunlenOptions, GocognitOptions, GocycloOptions, NestifOptions,
+    CyclopOptions, DogsledOptions, FunlenOptions, GocognitOptions, GocycloOptions, LllOptions,
+    NakedretOptions, NestifOptions, NlreturnOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;

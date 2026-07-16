@@ -3,8 +3,7 @@
 //!
 //! Default matches golangci-lint: `max-func-lines=30`.
 //!
-//! DEFERRED: `linters.settings.nakedret` wiring (`max-func-lines`,
-//! `skip-test-files`); SuggestedFix for explicit named returns.
+//! DEFERRED: `skip-test-files`; SuggestedFix for explicit named returns.
 
 use std::sync::OnceLock;
 
@@ -14,8 +13,7 @@ use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint default for `linters.settings.nakedret.max-func-lines`.
-const MAX_FUNC_LINES: usize = 30;
+use crate::options::NakedretOptions;
 
 struct FuncInfo {
     name: String,
@@ -25,6 +23,7 @@ struct FuncInfo {
 
 struct ReturnsVisitor<'a> {
     fset: &'a FileSet,
+    max_func_lines: usize,
     functions: Vec<FuncInfo>,
     pending: &'a mut Vec<(u32, String)>,
 }
@@ -53,6 +52,7 @@ fn push_func(
     func_type: &FuncType,
     start: guff::position::Pos,
     end: guff::position::Pos,
+    max_func_lines: usize,
 ) {
     let start_line = v.fset.position(start).line;
     let end_line = v.fset.position(end).line;
@@ -63,7 +63,7 @@ fn push_func(
     v.functions.push(FuncInfo {
         name,
         func_length: length,
-        report_naked: length > MAX_FUNC_LINES && has_named_returns(func_type),
+        report_naked: length > max_func_lines && has_named_returns(func_type),
     });
 }
 
@@ -77,13 +77,27 @@ impl<'a> Visitor<'a> for ReturnsVisitor<'a> {
                     .as_ref()
                     .map(|b| b.end())
                     .unwrap_or_else(|| f.ty.end());
-                push_func(self, f.name.name.clone(), &f.ty, start, end);
+                push_func(
+                    self,
+                    f.name.name.clone(),
+                    &f.ty,
+                    start,
+                    end,
+                    self.max_func_lines,
+                );
             }
             NodeRef::FuncLit(lit) => {
                 let start = lit.ty.pos();
                 let end = lit.body.end();
                 let line = self.fset.position(start).line;
-                push_func(self, format!("<func():{line}>"), &lit.ty, start, end);
+                push_func(
+                    self,
+                    format!("<func():{line}>"),
+                    &lit.ty,
+                    start,
+                    end,
+                    self.max_func_lines,
+                );
             }
             NodeRef::ReturnStmt(ret) => {
                 check_return(self, ret);
@@ -120,11 +134,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "nakedret requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<NakedretOptions>("nakedret")
+        .copied()
+        .unwrap_or_default();
+    let max_func_lines = options.max_func_lines;
+
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
         let mut visitor = ReturnsVisitor {
             fset: &fset,
+            max_func_lines,
             functions: Vec::new(),
             pending: &mut pending,
         };
