@@ -1,6 +1,6 @@
 mod support;
 
-use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1006, st1011, st1012, st1013, st1015, st1017, st1018, st1019, st1020, st1021, st1022, st1023};
+use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1006, st1011, st1012, st1013, st1015, st1017, st1018, st1019, st1020, st1021, st1022, st1023, qf1004, qf1005, qf1007, qf1009};
 use guff_types::sizes_for;
 
 #[test]
@@ -2603,4 +2603,109 @@ fn st1013_custom_http_status_whitelist() {
         messages.is_empty(),
         "http-status-code-whitelist including 506 should silence ST1013: {messages:?}"
     );
+}
+
+#[test]
+fn qf1009_flags_time_equality() {
+    let dir = support::testdata("qf1009");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1009",
+        &dir.join("bad.go"),
+        &[("time", &dir.join("stub/time/time.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1009::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("time.Time.Equal")));
+}
+
+#[test]
+fn qf1009_allows_equal_method() {
+    let dir = support::testdata("qf1009");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1009/ok",
+        &dir.join("ok.go"),
+        &[("time", &dir.join("stub/time/time.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1009::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1005_flags_expandable_pow() {
+    let dir = support::testdata("qf1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1005",
+        &dir.join("bad.go"),
+        &[("math", &dir.join("stub/math/math.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1005::analyzer(), &pkg);
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages.iter().all(|m| m.contains("math.Pow")));
+}
+
+#[test]
+fn qf1005_allows_non_expandable_pow() {
+    let dir = support::testdata("qf1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1005/ok",
+        &dir.join("ok.go"),
+        &[("math", &dir.join("stub/math/math.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1005::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1007_flags_conditional_assignment() {
+    let dir = support::testdata("qf1007");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1007");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1007::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages
+        .iter()
+        .all(|m| m.contains("merge conditional assignment")));
+}
+
+#[test]
+fn qf1007_allows_non_mergeable() {
+    let dir = support::testdata("qf1007");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/qf1007/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1007::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1004_flags_replace_split_with_minus_one() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004",
+        &dir.join("bad.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1004::analyzer(), &pkg);
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("ReplaceAll")));
+    assert!(messages.iter().any(|m| m.contains("Split")));
+}
+
+#[test]
+fn qf1004_allows_replace_all_and_nonzero_n() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004/ok",
+        &dir.join("ok.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(qf1004::analyzer(), &pkg).is_empty());
 }
