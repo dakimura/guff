@@ -2957,6 +2957,11 @@ fn gocritic_flags_common_patterns() {
         "WaitGroup.Done",
         "strings.Split method",
         "arguments order looks reversed",
+        "must go before the",
+        "Code generated .* DO NOT EDIT",
+        "put a space between",
+        "Deprecated: ` (note the casing)",
+        "from/to types are identical",
     ];
     for needle in expect {
         assert!(

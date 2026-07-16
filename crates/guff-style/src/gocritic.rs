@@ -1,34 +1,45 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented default/stable checkers (29):
+//! Implemented default/stable checkers (34):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
 //!   `switchTrue`, `underef`, `unslice`, `valSwap`
 //! - batch 2: `argOrder`, `badCond`, `dupBranchBody`, `dupSubExpr`, `flagName`,
 //!   `mapKey`, `offBy1`, `regexpMust`, `typeSwitchVar`, `unlambda`, `wrapperFunc`
+//! - batch 3: `caseOrder`, `codegenComment`, `commentFormatting`,
+//!   `deprecatedComment`, `sloppyTypeAssert`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining default checks (caseOrder, codegenComment,
-//! commentFormatting, deprecatedComment, sloppyTypeAssert, …), enable-all
-//! extras, per-check `settings` params, SuggestedFix, wrapperFunc/unlambda/
-//! typeSwitchVar full type-aware parity.
+//! DEFERRED: remaining enable-all extras (opinionated/experimental),
+//! per-check `settings` params, SuggestedFix, caseOrder expression-switch
+//! overlap, wrapperFunc/unlambda/typeSwitchVar full type-aware parity.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use std::fs;
+use std::path::Path;
+use std::sync::{Arc, OnceLock};
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Expr, FieldList, FuncDecl, FuncLit,
-    IfStmt, IndexExpr, SliceExpr, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
+    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl, Expr, FieldList,
+    File, FuncDecl, FuncLit, IfStmt, IndexExpr, SliceExpr, StarExpr, Stmt, SwitchStmt,
+    TypeAssertExpr, TypeSwitchStmt,
 };
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::{FileSet, Pos};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::{api_identical, api_implements};
+use guff_types::predicates::is_interface;
+use guff_types::TypeId;
+use regex::Regex;
 
 use crate::options::GocriticOptions;
 
@@ -41,7 +52,11 @@ const DEFAULT_CHECKS: &[&str] = &[
     "badCall",
     "badCond",
     "captLocal",
+    "caseOrder",
+    "codegenComment",
+    "commentFormatting",
     "defaultCaseOrder",
+    "deprecatedComment",
     "dupArg",
     "dupBranchBody",
     "dupCase",
@@ -57,6 +72,7 @@ const DEFAULT_CHECKS: &[&str] = &[
     "regexpMust",
     "singleCaseSwitch",
     "sloppyLen",
+    "sloppyTypeAssert",
     "switchTrue",
     "typeSwitchVar",
     "underef",
@@ -1468,6 +1484,424 @@ fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Str
     );
 }
 
+fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    Some(info.types.get(&expr.id())?.typ)
+}
+
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_identical(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        a,
+        b,
+    )
+}
+
+fn type_implements(pass: &Pass<'_>, v: TypeId, iface: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        v,
+        iface,
+    )
+}
+
+fn type_is_interface(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    is_interface(&artifacts.types, typ)
+}
+
+fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>) {
+    // DEFERRED: expression-switch overlapping ranges (upstream TODO).
+    struct IfaceSeen {
+        node_text: String,
+        typ: TypeId,
+    }
+    let mut ifaces: Vec<IfaceSeen> = Vec::new();
+    for clause in &stmt.body.list {
+        let Stmt::CaseClause(cc) = clause else {
+            continue;
+        };
+        for x in &cc.list {
+            let Some(typ) = type_of(pass, x) else {
+                let concrete = expr_text(x).unwrap_or_else(|| "?".into());
+                report(
+                    pending,
+                    cc.case.0 as u32,
+                    format!("type is not defined {concrete}"),
+                );
+                return;
+            };
+            for iface in &ifaces {
+                if type_implements(pass, typ, iface.typ) {
+                    let concrete = expr_text(x).unwrap_or_else(|| "?".into());
+                    report(
+                        pending,
+                        cc.case.0 as u32,
+                        format!(
+                            "case {concrete} must go before the {} case",
+                            iface.node_text
+                        ),
+                    );
+                    break;
+                }
+            }
+            if type_is_interface(pass, typ) {
+                ifaces.push(IfaceSeen {
+                    node_text: expr_text(x).unwrap_or_else(|| "?".into()),
+                    typ,
+                });
+            }
+        }
+    }
+}
+
+fn check_sloppy_type_assert(
+    pass: &Pass<'_>,
+    assert: &TypeAssertExpr,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if assert.ty.is_none() {
+        return;
+    }
+    let info = match pass.types_info() {
+        Some(i) => i,
+        None => return,
+    };
+    let Some(to_tav) = info.types.get(&assert.id) else {
+        // Fall back to the asserted type expression.
+        let Some(ty_expr) = assert.ty.as_ref() else {
+            return;
+        };
+        let Some(to_type) = type_of(pass, ty_expr) else {
+            return;
+        };
+        let Some(from_type) = type_of(pass, &assert.x) else {
+            return;
+        };
+        if types_identical(pass, to_type, from_type) {
+            report(
+                pending,
+                assert.lparen.0 as u32,
+                "type assertion from/to types are identical",
+            );
+        }
+        return;
+    };
+    let Some(from_type) = type_of(pass, &assert.x) else {
+        return;
+    };
+    if types_identical(pass, to_tav.typ, from_type) {
+        report(
+            pending,
+            assert.lparen.0 as u32,
+            "type assertion from/to types are identical",
+        );
+    }
+}
+
+fn codegen_bad_comment_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        let patterns = [
+            r"this (?:file|code) (?:was|is) auto(?:matically)? generated",
+            r"this (?:file|code) (?:was|is) generated automatically",
+            r"this (?:file|code) (?:was|is) generated by",
+            r"this (?:file|code) (?:was|is) (?:auto(?:matically)? )?generated",
+            r"this (?:file|code) (?:was|is) generated",
+            r"code in this file (?:was|is) auto(?:matically)? generated",
+            r"generated (?:file|code) - do not edit",
+        ];
+        Regex::new(&format!("(?i){}", patterns.join("|"))).expect("codegenComment RE")
+    })
+}
+
+fn comment_fmt_key_value_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^//[\w-]+:.*$").expect("commentFormatting key:value RE"))
+}
+
+const COMMENT_FMT_PARTS: &[&str] = &[
+    "//go:generate ",
+    "//line /",
+    "//nolint ",
+    "//noinspection ",
+    "//region",
+    "//endregion",
+    "//<editor-fold",
+    "//</editor-fold",
+    "//export ",
+    "///",
+    "//+",
+    "//#",
+    "//-",
+    "//!",
+];
+
+fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+    if cg.list.first().is_some_and(|c| c.text.starts_with("/*")) {
+        return;
+    }
+    'outer: for comment in &cg.list {
+        let text = comment.text.as_str();
+        if text.len() <= "// ".len() {
+            continue;
+        }
+        for p in COMMENT_FMT_PARTS {
+            if text.len() >= p.len() && text[..p.len()].eq_ignore_ascii_case(p) {
+                continue 'outer;
+            }
+        }
+        if text.eq_ignore_ascii_case("//nolint") {
+            continue;
+        }
+        if comment_fmt_key_value_re().is_match(text) {
+            continue;
+        }
+        let rest = &text["//".len()..];
+        let Some(r) = rest.chars().next() else {
+            continue;
+        };
+        if matches!(r, '+' | '-' | '#' | '!') || r.is_whitespace() {
+            continue;
+        }
+        report(
+            pending,
+            comment.slash.0 as u32,
+            "put a space between `//` and comment text",
+        );
+        return;
+    }
+}
+
+const DEPRECATED_PREFIX: &str = "Deprecated: ";
+
+fn deprecated_common_patterns() -> &'static [&'static str] {
+    &[
+        "this type is deprecated",
+        "this function is deprecated",
+        "[[deprecated]]",
+        "note: deprecated",
+        "deprecated in",
+        "deprecated. use",
+        "deprecated! use",
+        "deprecated use",
+    ]
+}
+
+fn deprecated_common_typos() -> &'static [&'static str] {
+    &[
+        "DPRECATED: ",
+        "DERECATED: ",
+        "DEPECATED: ",
+        "DEPEKATED: ",
+        "DEPRCATED: ",
+        "DEPREATED: ",
+        "DEPRECTED: ",
+        "DEPRECAED: ",
+        "DEPRECATD: ",
+        "DEPRECATE: ",
+        "DERPECATE: ",
+        "DERPECATED: ",
+        "DEPREACTED: ",
+    ]
+}
+
+fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+    let mut prev = String::new();
+    for comment in &doc.list {
+        if comment.text.starts_with("/*") {
+            continue;
+        }
+        let raw_line = comment.text.strip_prefix("//").unwrap_or(&comment.text);
+        let l = raw_line.trim();
+        if raw_line.len() < DEPRECATED_PREFIX.len() {
+            prev = l.to_string();
+            continue;
+        }
+        let upcase = l.to_uppercase();
+        if upcase.starts_with("DEPRECATED: ") && !l.starts_with(DEPRECATED_PREFIX) {
+            let prefix = &l[.."DEPRECATED: ".len()];
+            report(
+                pending,
+                comment.slash.0 as u32,
+                format!("use `Deprecated: ` (note the casing) instead of `{prefix}`"),
+            );
+            return;
+        }
+        if l.starts_with("Deprecated, ") {
+            report(
+                pending,
+                comment.slash.0 as u32,
+                "use `:` instead of `,` in `Deprecated, `",
+            );
+            return;
+        }
+        for pat in deprecated_common_patterns() {
+            if l.len() >= pat.len() && l[..pat.len()].eq_ignore_ascii_case(pat) {
+                report(
+                    pending,
+                    comment.slash.0 as u32,
+                    "the proper format is `Deprecated: `",
+                );
+                return;
+            }
+        }
+        for typo in deprecated_common_typos() {
+            if upcase.starts_with(typo) {
+                let word = l.split(':').next().unwrap_or(l);
+                report(
+                    pending,
+                    comment.slash.0 as u32,
+                    format!("typo in `{word}`; should be `Deprecated`"),
+                );
+                return;
+            }
+        }
+        if l.starts_with(DEPRECATED_PREFIX) && !prev.is_empty() {
+            report(
+                pending,
+                comment.slash.0 as u32,
+                "`Deprecated: ` notices should be in a dedicated paragraph, separated from the rest",
+            );
+            return;
+        }
+        prev = l.to_string();
+    }
+}
+
+fn check_codegen_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+    let re = codegen_bad_comment_re();
+    for comment in &doc.list {
+        if re.is_match(&comment.text) {
+            report(
+                pending,
+                comment.slash.0 as u32,
+                "comment should match `Code generated .* DO NOT EDIT.` regexp",
+            );
+            return;
+        }
+    }
+}
+
+fn reparse_with_comments(path: &Path) -> Option<(Arc<FileSet>, File)> {
+    let src = fs::read(path).ok()?;
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    Some((fset, file))
+}
+
+fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
+    let ft = fset.file(file_pos)?;
+    if line < 1 || line as usize > ft.line_count() {
+        return None;
+    }
+    Some(ft.line_start(line as usize).0 as u32)
+}
+
+fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
+    let mut out = Vec::new();
+    if let Some(doc) = &file.doc {
+        out.push(doc);
+    }
+    for decl in &file.decls {
+        match decl {
+            Decl::GenDecl(g) => {
+                if let Some(doc) = &g.doc {
+                    out.push(doc);
+                }
+            }
+            Decl::FuncDecl(f) => {
+                if let Some(doc) = &f.doc {
+                    out.push(doc);
+                }
+            }
+            Decl::BadDecl(_) => {}
+        }
+    }
+    out
+}
+
+fn run_comment_checks(
+    pass: &Pass<'_>,
+    set: &HashSet<String>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let need_codegen = enabled(set, "codegenComment");
+    let need_fmt = enabled(set, "commentFormatting");
+    let need_depr = enabled(set, "deprecatedComment");
+    if !need_codegen && !need_fmt && !need_depr {
+        return;
+    }
+
+    let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
+    let n = pass.files().len();
+    for i in 0..n {
+        let file = &pass.files()[i];
+        let Some(path) = paths.get(i) else {
+            continue;
+        };
+        let Some((re_fset, parsed)) = reparse_with_comments(path) else {
+            continue;
+        };
+
+        if need_codegen {
+            if let Some(doc) = &parsed.doc {
+                let mut local = Vec::new();
+                check_codegen_comment(doc, &mut local);
+                for (pos, msg) in local {
+                    // pos is from reparse fset; remap via line.
+                    let line = re_fset.position(Pos(pos as i64)).line;
+                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                        report(pending, mapped, msg);
+                    }
+                }
+            }
+        }
+
+        if need_fmt {
+            for cg in &parsed.comments {
+                let mut local = Vec::new();
+                check_comment_formatting(cg, &mut local);
+                for (pos, msg) in local {
+                    let line = re_fset.position(Pos(pos as i64)).line;
+                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                        report(pending, mapped, msg);
+                    }
+                }
+            }
+        }
+
+        if need_depr {
+            for doc in declaration_docs(&parsed) {
+                let mut local = Vec::new();
+                check_deprecated_comment(doc, &mut local);
+                for (pos, msg) in local {
+                    let line = re_fset.position(Pos(pos as i64)).line;
+                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                        report(pending, mapped, msg);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
@@ -1564,6 +1998,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "typeSwitchVar") {
                         check_type_switch_var(s, &mut pending);
                     }
+                    if enabled(&set, "caseOrder") {
+                        check_case_order(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::ForStmt(s) if enabled(&set, "badCond") => {
                     check_bad_cond_for(s, &mut pending);
@@ -1651,11 +2088,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         }
                     }
                 }
+                NodeRef::TypeAssertExpr(a) if enabled(&set, "sloppyTypeAssert") => {
+                    check_sloppy_type_assert(pass, a, &mut pending);
+                }
                 _ => {}
             }
             true
         });
     }
+
+    run_comment_checks(pass, &set, &mut pending);
 
     for (pos, message) in pending {
         pass.reportf(pos, message);
