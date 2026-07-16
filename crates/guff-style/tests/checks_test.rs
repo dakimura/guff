@@ -1648,6 +1648,140 @@ fn perfsprint_respects_disabled_integer_format() {
 }
 
 #[test]
+fn perfsprint_err_error_off_by_default() {
+    let pkg = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/err_error",
+        "err_error.go",
+    );
+    let messages = support::run_analyzer(perfsprint(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains(".Error()")),
+        "err-error defaults to false: {messages:?}"
+    );
+}
+
+#[test]
+fn perfsprint_err_error_when_enabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PerfsprintOptions;
+
+    let pkg = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/err_error_on",
+        "err_error.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            err_error: true,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        perfsprint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("error-format") && m.contains("err.Error()")),
+        "err-error=true should suggest err.Error(): {messages:?}"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains(".Error()"))
+            .count(),
+        3,
+        "expected Sprint/Sprintf %s/%v: {messages:?}"
+    );
+}
+
+#[test]
+fn perfsprint_int_conversion_when_disabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PerfsprintOptions;
+
+    let pkg = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/int_conv",
+        "int_conversion.go",
+    );
+
+    // Default (int-conversion=true): cast-requiring and non-cast types.
+    let default_msgs = support::run_analyzer(perfsprint(), &pkg);
+    assert!(
+        default_msgs.iter().any(|m| m.contains("Itoa")),
+        "{default_msgs:?}"
+    );
+    assert!(
+        default_msgs.iter().any(|m| m.contains("FormatUint")),
+        "{default_msgs:?}"
+    );
+    assert_eq!(
+        default_msgs
+            .iter()
+            .filter(|m| m.contains("integer-format"))
+            .count(),
+        5,
+        "int/int8/int64/uint/uint64: {default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            int_conversion: false,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        perfsprint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    // int and int64/uint64 need no cast — still flagged.
+    assert!(
+        messages.iter().any(|m| m.contains("strconv.Itoa")),
+        "plain int should still flag: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("FormatInt")),
+        "int64 should still flag: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("FormatUint") && !m.contains("uint64(")),
+        "uint64 should still flag without cast: {messages:?}"
+    );
+    // int8 / uint require casts — suppressed.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("integer-format"))
+            .count(),
+        3,
+        "int-conversion=false should keep only int/int64/uint64: {messages:?}"
+    );
+}
+
+#[test]
 fn goconst_respects_min_occurrences_setting() {
     use std::sync::Arc;
 

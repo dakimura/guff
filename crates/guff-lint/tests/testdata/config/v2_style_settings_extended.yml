@@ -25,6 +25,9 @@ linters:
       q: true
     perfsprint:
       integer-format: false
+      int-conversion: false
+      err-error: true
+      errorf: false
       bool-format: false
       concat-loop: false
       loop-other-ops: true

@@ -302,6 +302,9 @@ fn parse_v2_style_extended_linter_settings() {
     assert_eq!(settings.predeclared.ignore, vec!["len".to_string()]);
     assert_eq!(settings.predeclared.qualified, Some(true));
     assert_eq!(settings.perfsprint.integer_format, Some(false));
+    assert_eq!(settings.perfsprint.int_conversion, Some(false));
+    assert_eq!(settings.perfsprint.err_error, Some(true));
+    assert_eq!(settings.perfsprint.errorf, Some(false));
     assert_eq!(settings.perfsprint.concat_loop, Some(false));
     assert_eq!(settings.perfsprint.loop_other_ops, Some(true));
     assert_eq!(settings.goconst.min_occurrences, Some(10));
@@ -360,6 +363,21 @@ fn parse_v2_style_extended_linter_settings() {
         bag.get::<guff_style::PerfsprintOptions>("perfsprint")
             .unwrap()
             .loop_other_ops
+    );
+    assert!(
+        !bag.get::<guff_style::PerfsprintOptions>("perfsprint")
+            .unwrap()
+            .int_conversion
+    );
+    assert!(
+        bag.get::<guff_style::PerfsprintOptions>("perfsprint")
+            .unwrap()
+            .err_error
+    );
+    assert!(
+        !bag.get::<guff_style::PerfsprintOptions>("perfsprint")
+            .unwrap()
+            .errorf
     );
     assert_eq!(settings.copyloopvar.check_alias, Some(true));
     assert_eq!(settings.usetesting.os_setenv, Some(true));

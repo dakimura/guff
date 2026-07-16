@@ -20,6 +20,9 @@ func bad() {
 	_ = fmt.Sprintf("%d", i)
 	_ = fmt.Sprint(42)
 
+	var i8 int8
+	_ = fmt.Sprintf("%d", i8)
+
 	var i64 int64
 	_ = fmt.Sprintf("%d", i64)
 

@@ -4,7 +4,11 @@
 //! (string / bool / integer / hex / errors.New) and concat-loop
 //! (string concatenation in loops → `strings.Builder`).
 //!
-//! DEFERRED: fiximports, `err-error` / remaining settings flags.
+//! Settings: `integer-format` / `int-conversion` / `error-format` / `err-error` /
+//! `errorf` / `string-format` / `sprintf1` / `strconcat` / `bool-format` /
+//! `hex-format` / `concat-loop` / `loop-other-ops`.
+//!
+//! DEFERRED: fiximports.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
@@ -18,8 +22,9 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::api_implements;
+use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
-use guff_types::arena::TypeData;
 use guff_types::TypeId;
 
 use crate::options::PerfsprintOptions;
@@ -142,6 +147,58 @@ fn go_quote(s: &str) -> String {
     format!("{:?}", s) // Rust Debug quotes similarly enough for ASCII format fragments.
 }
 
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+/// Whether `typ` implements the universe `error` interface.
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    )
+}
+
+/// Upstream clears sub-flags when a parent format group is disabled.
+fn effective_options(options: PerfsprintOptions) -> PerfsprintOptions {
+    let mut o = options;
+    if !o.integer_format {
+        o.int_conversion = false;
+    }
+    if !o.error_format {
+        o.err_error = false;
+        o.errorf = false;
+    }
+    if !o.string_format {
+        o.sprintf1 = false;
+        o.strconcat = false;
+    }
+    o
+}
+
 struct Pending {
     pos: u32,
     end: u32,
@@ -213,7 +270,10 @@ fn check_call(
     let mut report = |checker: &str, msg: String, fixes: Vec<SuggestedFix>| {
         let enabled = match checker {
             "integer-format" => options.integer_format,
+            // errors.New rewrite: parent error-format + errorf sub-flag.
             "error-format" => options.error_format && options.errorf,
+            // err.Error() rewrite: err-error (cleared when error-format is off).
+            "err-error" => options.err_error,
             "string-format" => {
                 options.string_format
                     || (options.sprintf1 && fn_name == "fmt.Sprintf" && call.args.len() == 1)
@@ -225,10 +285,16 @@ fn check_call(
         if !enabled {
             return;
         }
+        // Upstream always labels err.Error() under the error-format checker name.
+        let label = if checker == "err-error" {
+            "error-format"
+        } else {
+            checker
+        };
         pending.push(Pending {
             pos: call.pos().0 as u32,
             end: call.end().0 as u32,
-            message: format!("{checker}: {msg}"),
+            message: format!("{label}: {msg}"),
             fixes,
         });
     };
@@ -248,6 +314,21 @@ fn check_call(
                 vec![replace_whole_call(call, "Just use string value", text)],
             );
         }
+        return;
+    }
+
+    // Known false positive if err is nil: fmt.Sprint(nil) does not panic like nil.Error().
+    if implements_error(pass, value_type) && one_of(verb_ref, &["%v", "%s"]) {
+        let err_call = format!("{}.Error()", expr_string(value));
+        report(
+            "err-error",
+            format!("{fn_name} can be replaced with {err_call}"),
+            vec![replace_whole_call(
+                call,
+                &format!("Use {err_call}"),
+                err_call,
+            )],
+        );
         return;
     }
 
@@ -289,11 +370,14 @@ fn check_call(
         }
     }
 
-    if is_basic(
-        pass,
-        value_type,
-        &[BasicKind::Int8, BasicKind::Int16, BasicKind::Int32],
-    ) && one_of(verb_ref, &["%v", "%d"])
+    // int8/16/32 → strconv.Itoa(int(...)) requires a cast (`int-conversion`).
+    if options.int_conversion
+        && is_basic(
+            pass,
+            value_type,
+            &[BasicKind::Int8, BasicKind::Int16, BasicKind::Int32],
+        )
+        && one_of(verb_ref, &["%v", "%d"])
     {
         report(
             "integer-format",
@@ -349,16 +433,19 @@ fn check_call(
         return;
     }
 
-    if is_basic(
-        pass,
-        value_type,
-        &[
-            BasicKind::Uint8,
-            BasicKind::Uint16,
-            BasicKind::Uint32,
-            BasicKind::Uint,
-        ],
-    ) && one_of(verb_ref, &["%v", "%d", "%x"])
+    // uint/uint8/16/32 → FormatUint(uint64(...)) requires a cast (`int-conversion`).
+    if options.int_conversion
+        && is_basic(
+            pass,
+            value_type,
+            &[
+                BasicKind::Uint8,
+                BasicKind::Uint16,
+                BasicKind::Uint32,
+                BasicKind::Uint,
+            ],
+        )
+        && one_of(verb_ref, &["%v", "%d", "%x"])
     {
         let base = if verb_ref == "%x" { "16" } else { "10" };
         report(
@@ -750,10 +837,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "perfsprint requires inspect analyzer".to_string())?;
 
-    let options = pass
-        .settings::<PerfsprintOptions>("perfsprint")
-        .copied()
-        .unwrap_or_default();
+    let options = effective_options(
+        pass
+            .settings::<PerfsprintOptions>("perfsprint")
+            .copied()
+            .unwrap_or_default(),
+    );
 
     let mut pending = Vec::new();
     check_concat_loops(pass, &options, &mut pending);
