@@ -54,6 +54,7 @@ pub struct LinterSettings {
     pub depguard: DepguardSettings,
     pub gomoddirectives: GomoddirectivesSettings,
     pub gomodguard: GomodguardSettings,
+    pub modernize: ModernizeSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -711,6 +712,14 @@ pub struct DupwordSettings {
     pub comments_only: Option<bool>,
 }
 
+/// `linters.settings.modernize` / `linters-settings.modernize`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ModernizeSettings {
+    /// Checker names to disable (golangci-lint compatible).
+    #[serde(default)]
+    pub disable: Vec<String>,
+}
+
 /// `linters.settings.depguard` / `linters-settings.depguard`.
 ///
 /// Empty `rules` → analyzer default (`Main` / `$gostd` only).
@@ -987,6 +996,11 @@ impl LinterSettings {
         if let Some(v) = map.get(serde_yaml::Value::String("gomodguard_v2".into())) {
             merge_gomodguard_v2(&mut out.gomodguard, v);
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("modernize".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ModernizeSettings>(v.clone()) {
+                out.modernize = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1043,6 +1057,7 @@ impl LinterSettings {
             self.gomoddirectives.to_guff_gomoddirectives(),
         );
         bag.insert("gomodguard", self.gomodguard.to_guff_gomodguard());
+        bag.insert("modernize", self.modernize.to_guff_modernize());
         Arc::new(bag)
     }
 
@@ -1719,6 +1734,14 @@ impl GomodguardSettings {
         guff_import::GomodguardOptions {
             blocked_modules: self.blocked_modules.clone(),
             local_replace_directives: self.local_replace_directives,
+        }
+    }
+}
+
+impl ModernizeSettings {
+    pub fn to_guff_modernize(&self) -> guff_style::ModernizeOptions {
+        guff_style::ModernizeOptions {
+            disable: self.disable.clone(),
         }
     }
 }

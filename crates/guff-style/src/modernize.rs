@@ -1,0 +1,767 @@
+//! Port of [`golang.org/x/tools/go/analysis/passes/modernize`](https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize)
+//! (golangci-lint wrapper: `linters.settings.modernize.disable`).
+//!
+//! Implemented checkers (default on):
+//! - `any` — `interface{}` → `any` (Go 1.18+)
+//! - `plusbuild` — obsolete `// +build` beside `//go:build` (Go 1.18+)
+//! - `forvar` — redundant `x := x` in range loops (Go 1.22+)
+//! - `rangeint` — `for i := 0; i < n; i++` → `for i := range n` (Go 1.22+; simplified)
+//! - `minmax` — if/else → `min`/`max` pattern 1 (Go 1.21+)
+//! - `fmtappendf` — `[]byte(fmt.Sprint*)` → `fmt.Append*` (Go 1.19+)
+//! - `omitzero` — `json:",omitempty"` on struct fields (Go 1.24+)
+//! - `slicessort` — `sort.Slice` with natural order → `slices.Sort` (Go 1.21+)
+//!
+//! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
+//! errorsastype, mapsloop, newexpr, reflecttypefor, slicesbackward,
+//! slicescontains, stditerators, stringscut, stringscutprefix, stringsseq,
+//! stringsbuilder, testingcontext, unsafefuncs, waitgroupgo, and full
+//! rangeint/minmax edge-case parity with upstream.
+
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use guff::ast::{
+    AssignStmt, BinaryExpr, CallExpr, Expr, Field, File, ForStmt, FuncLit, IfStmt, IncDecStmt,
+    InterfaceType, RangeStmt, Stmt, StructType,
+};
+use guff::token::Token;
+use guff::walk::{self, NodeRef};
+use guff_analysis::code;
+use guff_analysis::passes::inspect;
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
+use guff_types::alias::unalias_readonly;
+use guff_types::arena::TypeData;
+use guff_types::basic::BasicKind;
+use guff_types::predicates::{is_float, is_string};
+use guff_types::OperandMode;
+
+use crate::options::ModernizeOptions;
+
+fn enabled(opts: &ModernizeOptions, name: &str) -> bool {
+    !opts.disable.iter().any(|d| d == name)
+}
+
+fn go_at_least(pass: &Pass<'_>, pos: u32, want: &str) -> bool {
+    code::version_compare(&code::stdlib_version(pass, pos), want) >= 0
+}
+
+fn ident_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+fn expr_text(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::BasicLit(lit) => Some(lit.value.clone()),
+        Expr::SelectorExpr(sel) => {
+            let x = expr_text(&sel.x)?;
+            Some(format!("{x}.{}", sel.sel.name))
+        }
+        Expr::CallExpr(call) if call.args.len() == 1 => {
+            let fun = expr_text(&call.fun)?;
+            let arg = expr_text(&call.args[0])?;
+            Some(format!("{fun}({arg})"))
+        }
+        Expr::IndexExpr(ix) => {
+            let x = expr_text(&ix.x)?;
+            let index = expr_text(&ix.index)?;
+            Some(format!("{x}[{index}]"))
+        }
+        Expr::ParenExpr(p) => expr_text(&p.x).map(|inner| format!("({inner})")),
+        _ => None,
+    }
+}
+
+fn is_empty_interface(iface: &InterfaceType) -> bool {
+    iface.methods.list.is_empty()
+}
+
+fn check_any(pass: &Pass<'_>, iface: &InterfaceType, pending: &mut Vec<Diagnostic>) {
+    if !is_empty_interface(iface) {
+        return;
+    }
+    let pos = iface.interface_.0 as u32;
+    if !go_at_least(pass, pos, "go1.18") {
+        return;
+    }
+    let end = iface.methods.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "interface{} can be replaced by any".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace interface{} by any".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: "any".into(),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn check_plusbuild(file: &File, pending: &mut Vec<Diagnostic>) {
+    for group in &file.comments {
+        let mut saw_go_build = false;
+        for c in &group.list {
+            let text = c.text.as_str();
+            if saw_go_build && text.starts_with("// +build ") {
+                let pos = c.slash.0 as u32;
+                let end = c.end().0 as u32;
+                pending.push(Diagnostic {
+                    pos,
+                    end,
+                    category: String::new(),
+                    message: "+build line is no longer needed".into(),
+                    suggested_fixes: vec![SuggestedFix {
+                        message: "Remove obsolete +build line".into(),
+                        text_edits: vec![TextEdit {
+                            pos,
+                            end,
+                            new_text: String::new(),
+                        }],
+                    }],
+                    related: Vec::new(),
+                    url: String::new(),
+                    severity: String::new(),
+                });
+                break;
+            }
+            if text.starts_with("//go:build ") {
+                saw_go_build = true;
+            }
+        }
+    }
+}
+
+fn is_loop_var_redecl(assign: &AssignStmt, loop_vars: &HashSet<&str>) -> bool {
+    if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != assign.rhs.len() {
+        return false;
+    }
+    for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
+        let Some(l) = ident_name(lhs) else {
+            return false;
+        };
+        let Some(r) = ident_name(rhs) else {
+            return false;
+        };
+        if l != r || !loop_vars.contains(l) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_forvar(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Diagnostic>) {
+    if range_stmt.tok != Some(Token::DEFINE) {
+        return;
+    }
+    let pos = range_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.22") {
+        return;
+    }
+    let mut loop_vars = HashSet::new();
+    if let Some(name) = range_stmt.key.as_ref().and_then(ident_name) {
+        if name != "_" {
+            loop_vars.insert(name);
+        }
+    }
+    if let Some(name) = range_stmt.value.as_ref().and_then(ident_name) {
+        if name != "_" {
+            loop_vars.insert(name);
+        }
+    }
+    if loop_vars.is_empty() {
+        return;
+    }
+    for stmt in &range_stmt.body.list {
+        let Stmt::AssignStmt(assign) = stmt else {
+            break;
+        };
+        if !is_loop_var_redecl(assign, &loop_vars) {
+            break;
+        }
+        let pos = assign
+            .lhs
+            .first()
+            .map(|e| e.pos().0 as u32)
+            .unwrap_or(assign.tok_pos.0 as u32);
+        let end = assign
+            .rhs
+            .last()
+            .map(|e| e.end().0 as u32)
+            .unwrap_or(assign.tok_pos.0 as u32);
+        pending.push(Diagnostic {
+            pos,
+            end,
+            category: String::new(),
+            message: "copying variable is unneeded".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove redundant re-declaration".into(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: String::new(),
+                }],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
+fn is_simple_inc(post: &Stmt, index_name: &str) -> bool {
+    match post {
+        Stmt::IncDecStmt(IncDecStmt { x, tok, .. }) => {
+            *tok == Token::INC && ident_name(x) == Some(index_name)
+        }
+        Stmt::AssignStmt(a)
+            if a.tok == Some(Token::AddAssign)
+                && a.lhs.len() == 1
+                && a.rhs.len() == 1
+                && ident_name(&a.lhs[0]) == Some(index_name) =>
+        {
+            matches!(&a.rhs[0], Expr::BasicLit(lit) if lit.value == "1")
+        }
+        _ => false,
+    }
+}
+
+fn limit_is_safe(pass: &Pass<'_>, limit: &Expr) -> bool {
+    match limit {
+        Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_) => true,
+        Expr::CallExpr(call) => {
+            // Allow len(slice) only.
+            code::is_call_to(pass, call, "len")
+                && call.args.len() == 1
+                && matches!(
+                    type_kind(pass, &call.args[0]),
+                    Some(TypeKind::Slice | TypeKind::Array | TypeKind::String)
+                )
+        }
+        Expr::ParenExpr(p) => limit_is_safe(pass, &p.x),
+        _ => false,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TypeKind {
+    Slice,
+    Array,
+    String,
+    Struct,
+    Other,
+}
+
+fn type_kind(pass: &Pass<'_>, expr: &Expr) -> Option<TypeKind> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = info.types.get(&expr.id())?.typ;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    Some(match artifacts.types.get(under) {
+        TypeData::Slice(_) => TypeKind::Slice,
+        TypeData::Array(_) => TypeKind::Array,
+        TypeData::Struct(_) => TypeKind::Struct,
+        _ if is_string(&artifacts.types, under) => TypeKind::String,
+        _ => TypeKind::Other,
+    })
+}
+
+fn is_float_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&expr.id()) else {
+        return false;
+    };
+    is_float(&artifacts.types, tav.typ.underlying(&artifacts.types))
+}
+
+fn field_type_is_struct(pass: &Pass<'_>, field: &Field) -> bool {
+    let Some(ty) = field.ty.as_ref() else {
+        return false;
+    };
+    type_kind(pass, ty) == Some(TypeKind::Struct)
+}
+
+fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
+    let pos = for_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.22") {
+        return;
+    }
+    let Some(Stmt::AssignStmt(init)) = for_stmt.init.as_deref() else {
+        return;
+    };
+    if init.lhs.len() != 1 || init.rhs.len() != 1 {
+        return;
+    }
+    if init.tok != Some(Token::DEFINE) && init.tok != Some(Token::ASSIGN) {
+        return;
+    }
+    let Some(index_name) = ident_name(&init.lhs[0]) else {
+        return;
+    };
+    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+        return;
+    }
+    let Some(Expr::BinaryExpr(BinaryExpr { x, op, y, .. })) = for_stmt.cond.as_ref() else {
+        return;
+    };
+    if *op != Token::LSS || ident_name(x) != Some(index_name) {
+        return;
+    }
+    let Some(post) = for_stmt.post.as_deref() else {
+        return;
+    };
+    if !is_simple_inc(post, index_name) {
+        return;
+    }
+    if !limit_is_safe(pass, y) {
+        return;
+    }
+    let Some(limit_text) = expr_text(y) else {
+        return;
+    };
+    // Prefer `range slice` when limit is len(slice).
+    let range_expr = if let Expr::CallExpr(call) = y.as_ref() {
+        if code::is_call_to(pass, call, "len") && call.args.len() == 1 {
+            expr_text(&call.args[0]).unwrap_or(limit_text.clone())
+        } else {
+            limit_text.clone()
+        }
+    } else {
+        limit_text.clone()
+    };
+
+    let end = for_stmt
+        .post
+        .as_ref()
+        .map(|p| p.end().0 as u32)
+        .unwrap_or(for_stmt.for_.0 as u32);
+
+    let new_text = if init.tok == Some(Token::DEFINE) {
+        format!("for {index_name} := range {range_expr}")
+    } else {
+        format!("for {index_name} = range {range_expr}")
+    };
+
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: format!("for loop can be modernized using range over {range_expr}"),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace 3-clause for with range-over-int".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text,
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_assign_block(body: &guff::ast::BlockStmt) -> Option<&AssignStmt> {
+    if body.list.len() != 1 {
+        return None;
+    }
+    match &body.list[0] {
+        Stmt::AssignStmt(a)
+            if a.tok == Some(Token::ASSIGN) && a.lhs.len() == 1 && a.rhs.len() == 1 =>
+        {
+            Some(a)
+        }
+        _ => None,
+    }
+}
+
+fn inequality_sign(op: Token) -> Option<i32> {
+    match op {
+        Token::LSS | Token::LEQ => Some(-1),
+        Token::GTR | Token::GEQ => Some(1),
+        _ => None,
+    }
+}
+
+fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+    if if_stmt.init.is_some() {
+        return;
+    }
+    let pos = if_stmt.if_.0 as u32;
+    if !go_at_least(pass, pos, "go1.21") {
+        return;
+    }
+    let Expr::BinaryExpr(compare) = &if_stmt.cond else {
+        return;
+    };
+    let Some(mut sign) = inequality_sign(compare.op) else {
+        return;
+    };
+    let Some(tassign) = is_assign_block(&if_stmt.body) else {
+        return;
+    };
+    let Some(Stmt::BlockStmt(fblock)) = if_stmt.else_.as_deref() else {
+        return;
+    };
+    let Some(fassign) = is_assign_block(fblock) else {
+        return;
+    };
+    if !code::same_non_dynamic(pass, &tassign.lhs[0], &fassign.lhs[0]) {
+        return;
+    }
+    let a = compare.x.as_ref();
+    let b = compare.y.as_ref();
+    let rhs = &tassign.rhs[0];
+    let rhs2 = &fassign.rhs[0];
+    if code::same_non_dynamic(pass, rhs, a) && code::same_non_dynamic(pass, rhs2, b) {
+        // keep sign
+    } else if code::same_non_dynamic(pass, rhs2, a) && code::same_non_dynamic(pass, rhs, b) {
+        sign = -sign;
+    } else {
+        return;
+    }
+    // Skip floats (NaN concerns).
+    if is_float_expr(pass, a) || is_float_expr(pass, b) {
+        return;
+    }
+    let sym = if sign < 0 { "min" } else { "max" };
+    let Some(lhs_text) = expr_text(&tassign.lhs[0]) else {
+        return;
+    };
+    let Some(a_text) = expr_text(a) else {
+        return;
+    };
+    let Some(b_text) = expr_text(b) else {
+        return;
+    };
+    let end = if_stmt
+        .else_
+        .as_ref()
+        .map(|e| e.end().0 as u32)
+        .unwrap_or(if_stmt.body.rbrace.0 as u32);
+    pending.push(Diagnostic {
+        pos: compare.op_pos.0 as u32,
+        end: compare.y.end().0 as u32,
+        category: String::new(),
+        message: format!("if/else statement can be modernized using {sym}"),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace if statement with {sym}"),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("{lhs_text} = {sym}({a_text}, {b_text})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_byte_slice_type_expr(fun: &Expr) -> bool {
+    // `[]byte` is an ArrayType with no length (Go AST convention for slices).
+    let Expr::ArrayType(arr) = fun else {
+        return false;
+    };
+    if arr.len.is_some() {
+        return false;
+    }
+    matches!(arr.elt.as_ref(), Expr::Ident(id) if id.name == "byte" || id.name == "uint8")
+}
+
+fn is_byte_slice_conversion(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    if call.args.len() != 1 {
+        return false;
+    }
+    if is_byte_slice_type_expr(&call.fun) {
+        return true;
+    }
+    // Fallback: typed conversion via types info.
+    let info = pass.types_info();
+    let artifacts = pass.pkg().type_artifacts.as_ref();
+    let (Some(info), Some(artifacts)) = (info, artifacts) else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&call.fun.id()) else {
+        return false;
+    };
+    if tav.mode != OperandMode::TypeExpr {
+        return false;
+    }
+    let typ = unalias_readonly(&artifacts.types, tav.typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Slice(s) => {
+            let elem = s.elem().underlying(&artifacts.types);
+            matches!(
+                artifacts.types.get(elem),
+                TypeData::Basic(b) if b.kind() == BasicKind::Uint8
+            )
+        }
+        _ => false,
+    }
+}
+
+fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    // Look for []byte(fmt.Sprintf/Sprint/Sprintln(...))
+    if !is_byte_slice_conversion(pass, call) {
+        return;
+    }
+    let Expr::CallExpr(inner) = &call.args[0] else {
+        return;
+    };
+    let Some(name) = code::call_name(pass, &inner.fun) else {
+        return;
+    };
+    let append_name = match name.as_str() {
+        "fmt.Sprintf" => "Appendf",
+        "fmt.Sprint" => "Append",
+        "fmt.Sprintln" => "Appendln",
+        _ => return,
+    };
+    let pos = call.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.19") {
+        return;
+    }
+    if inner.args.is_empty() {
+        return;
+    }
+    let args: Option<Vec<String>> = inner.args.iter().map(expr_text).collect();
+    let Some(args) = args else {
+        return;
+    };
+    let args_joined = args.join(", ");
+    let end = call.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: format!("[]byte(fmt.{}) can be modernized using fmt.{append_name}", {
+            name.strip_prefix("fmt.").unwrap_or(&name)
+        }),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace with fmt.{append_name}"),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("fmt.{append_name}(nil, {args_joined})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn json_omitempty_span(tag_value: &str) -> Option<(usize, usize)> {
+    // tag_value includes surrounding quotes, e.g. `"json:\"foo,omitempty\""`
+    let unquoted = if (tag_value.starts_with('"') && tag_value.ends_with('"'))
+        || (tag_value.starts_with('`') && tag_value.ends_with('`'))
+    {
+        &tag_value[1..tag_value.len() - 1]
+    } else {
+        tag_value
+    };
+    // Decode simple Go string escapes for \" inside double-quoted tags.
+    let decoded = if tag_value.starts_with('"') {
+        unquoted.replace("\\\"", "\"").replace("\\\\", "\\")
+    } else {
+        unquoted.to_string()
+    };
+    for part in decoded.split_whitespace() {
+        let Some(rest) = part.strip_prefix("json:") else {
+            continue;
+        };
+        let val = rest.trim_matches('"');
+        if let Some(idx) = val.find(",omitempty") {
+            // Report on the whole tag literal; SuggestedFix replaces omitempty → omitzero in raw.
+            let _ = idx;
+            return Some((0, tag_value.len()));
+        }
+    }
+    None
+}
+
+fn check_omitzero(pass: &Pass<'_>, field: &Field, pending: &mut Vec<Diagnostic>) {
+    if !field_type_is_struct(pass, field) {
+        return;
+    }
+    let Some(tag) = field.tag.as_ref() else {
+        return;
+    };
+    let pos = tag.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.24") {
+        return;
+    }
+    if json_omitempty_span(&tag.value).is_none() {
+        return;
+    }
+    let end = tag.end().0 as u32;
+    let new_tag = tag.value.replace(",omitempty", ",omitzero");
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "Omitempty has no effect on nested struct fields".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace omitempty with omitzero (behavior change)".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: new_tag,
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_natural_less(pass: &Pass<'_>, lit: &FuncLit, slice: &Expr) -> bool {
+    if lit.body.list.len() != 1 {
+        return false;
+    }
+    let Stmt::ReturnStmt(ret) = &lit.body.list[0] else {
+        return false;
+    };
+    if ret.results.len() != 1 {
+        return false;
+    }
+    let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = &ret.results[0] else {
+        return false;
+    };
+    if *op != Token::LSS {
+        return false;
+    }
+    let (Expr::IndexExpr(ix), Expr::IndexExpr(iy)) = (x.as_ref(), y.as_ref()) else {
+        return false;
+    };
+    code::same_non_dynamic(pass, &ix.x, slice)
+        && code::same_non_dynamic(pass, &iy.x, slice)
+        && ident_name(&ix.index) == Some("i")
+        && ident_name(&iy.index) == Some("j")
+}
+
+fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    if !code::is_call_to(pass, call, "sort.Slice") || call.args.len() != 2 {
+        return;
+    }
+    let pos = call.fun.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.21") {
+        return;
+    }
+    let Expr::FuncLit(lit) = &call.args[1] else {
+        return;
+    };
+    if !is_natural_less(pass, lit, &call.args[0]) {
+        return;
+    }
+    let Some(slice_text) = expr_text(&call.args[0]) else {
+        return;
+    };
+    let end = call.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end: call.fun.end().0 as u32,
+        category: String::new(),
+        message: "sort.Slice can be modernized using slices.Sort".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace sort.Slice call by slices.Sort".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("slices.Sort({slice_text})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    let _ = pass
+        .result_of::<inspect::InspectResult>(inspect::analyzer())
+        .ok_or_else(|| "modernize requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<ModernizeOptions>("modernize")
+        .cloned()
+        .unwrap_or_default();
+
+    let mut pending = Vec::new();
+    for file in pass.files() {
+        if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
+            check_plusbuild(file, &mut pending);
+        }
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::InterfaceType(iface) if enabled(&options, "any") => {
+                    check_any(pass, iface, &mut pending);
+                }
+                NodeRef::RangeStmt(s) if enabled(&options, "forvar") => {
+                    check_forvar(pass, s, &mut pending);
+                }
+                NodeRef::ForStmt(s) if enabled(&options, "rangeint") => {
+                    check_rangeint(pass, s, &mut pending);
+                }
+                NodeRef::IfStmt(s) if enabled(&options, "minmax") => {
+                    check_minmax(pass, s, &mut pending);
+                }
+                NodeRef::CallExpr(c) => {
+                    if enabled(&options, "fmtappendf") {
+                        check_fmtappendf(pass, c, &mut pending);
+                    }
+                    if enabled(&options, "slicessort") {
+                        check_slicessort(pass, c, &mut pending);
+                    }
+                }
+                NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {
+                    for field in &fields.list {
+                        check_omitzero(pass, field, &mut pending);
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+
+    for d in pending {
+        pass.report(d);
+    }
+    Ok(None)
+}
+
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(|| Analyzer {
+        name: "modernize",
+        doc: "suggests simplifications to Go code using modern language and library features",
+        url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize",
+        run: run as RunFn,
+        run_despite_errors: false,
+        requires: vec![inspect::analyzer()],
+        fact_types: vec![],
+    })
+}

@@ -2,8 +2,8 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen, gocognit,
-    goconst, gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
-    nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
+    goconst, gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
+    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
     unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
@@ -2808,4 +2808,111 @@ fn exptostd_flags_exp_constraints() {
 fn exptostd_allows_non_exp_maps() {
     let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd/ok", "ok.go");
     assert!(support::run_analyzer(exptostd(), &pkg).is_empty());
+}
+
+#[test]
+fn modernize_flags_common_patterns() {
+    let pkg = support::typecheck_fixture("modernize", "example.com/modernize", "bad.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("interface{} can be replaced by any")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("for loop can be modernized using range")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("if/else statement can be modernized using min")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("fmt.Appendf") || m.contains("Appendf")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("sort.Slice can be modernized using slices.Sort")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("copying variable is unneeded")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_allows_modern_code() {
+    let pkg = support::typecheck_fixture("modernize", "example.com/modernize/ok", "ok.go");
+    assert!(
+        support::run_analyzer(modernize(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(modernize(), &pkg)
+    );
+}
+
+#[test]
+fn modernize_flags_obsolete_plusbuild() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/plusbuild", "plusbuild.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("+build line is no longer needed")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_disable_skips_checkers() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::ModernizeOptions;
+
+    let pkg = support::typecheck_fixture("modernize", "example.com/modernize", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "modernize",
+        ModernizeOptions {
+            disable: vec!["any".into(), "rangeint".into(), "minmax".into()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        modernize(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("interface{} can be replaced by any")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("for loop can be modernized using range")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("if/else statement can be modernized using min")),
+        "{messages:?}"
+    );
 }

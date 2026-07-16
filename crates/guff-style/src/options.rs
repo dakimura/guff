@@ -688,3 +688,14 @@ impl UsestdlibvarsOptions {
             || self.time_date_month
     }
 }
+
+/// `linters.settings.modernize` / `linters-settings.modernize`.
+///
+/// By default all implemented checkers are enabled. Names in `disable` are
+/// skipped (golangci-lint compatible). Unknown / deferred checker names are
+/// accepted so configs that disable `newexpr` etc. still parse.
+#[derive(Debug, Clone, Default)]
+pub struct ModernizeOptions {
+    pub disable: Vec<String>,
+}
+

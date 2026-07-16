@@ -774,3 +774,25 @@ fn parse_v2_import_settings() {
     // Smoke: empty DepguardSettings round-trips to empty rules (analyzer default).
     let _ = DepguardSettings::default();
 }
+
+#[test]
+fn parse_v2_modernize_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_modernize_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.modernize.disable,
+        vec![
+            "omitzero".to_string(),
+            "newexpr".to_string(),
+            "any".to_string()
+        ]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ModernizeOptions>("modernize")
+        .expect("modernize options");
+    assert_eq!(opts.disable.len(), 3);
+    assert!(opts.disable.iter().any(|d| d == "omitzero"));
+    assert!(opts.disable.iter().any(|d| d == "newexpr"));
+}
