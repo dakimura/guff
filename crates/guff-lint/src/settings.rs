@@ -511,6 +511,13 @@ pub struct TestifylintBoolCompareSettings {
     pub ignore_custom_types: bool,
 }
 
+/// Nested `expected-actual` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintExpectedActualSettings {
+    #[serde(default)]
+    pub pattern: Option<String>,
+}
+
 /// `linters.settings.testifylint` / `linters-settings.testifylint`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct TestifylintSettings {
@@ -524,6 +531,8 @@ pub struct TestifylintSettings {
     pub disable: Vec<String>,
     #[serde(default, rename = "bool-compare")]
     pub bool_compare: TestifylintBoolCompareSettings,
+    #[serde(default, rename = "expected-actual")]
+    pub expected_actual: TestifylintExpectedActualSettings,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -1484,6 +1493,7 @@ impl TestifylintSettings {
             enable: self.enable.clone(),
             disable: self.disable.clone(),
             bool_compare_ignore_custom_types: self.bool_compare.ignore_custom_types,
+            expected_actual_pattern: self.expected_actual.pattern.clone(),
         }
     }
 }

@@ -2417,6 +2417,18 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("regexp")),
         "regexp: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("error-is-as")),
+        "error-is-as: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("encoded-compare")),
+        "encoded-compare: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("expected-actual")),
+        "expected-actual: {messages:?}"
+    );
 }
 
 #[test]

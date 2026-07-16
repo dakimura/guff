@@ -5,29 +5,35 @@
 //!
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
-//! `equal-values`, `error-nil`, `float-compare`, `len`, `negative-positive`,
-//! `nil-compare`, `regexp`, `useless-assert`, `zero`.
+//! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
+//! `float-compare`, `len`, `negative-positive`, `nil-compare`, `regexp`,
+//! `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (encoded-compare, error-is-as, expected-actual,
-//! formatter, go-require, mock-expect, require-error, suite-*, time-compare),
-//! SuggestedFix / TextEdit, bool-compare custom-type casting in messages,
-//! compares time.Time helpers.
+//! DEFERRED: remaining checkers (formatter, go-require, mock-expect, require-error,
+//! suite-*, time-compare), SuggestedFix / TextEdit, bool-compare custom-type casting
+//! in messages, compares time.Time helpers, encoded-compare autofix text edits,
+//! error-is-as CollectT special-case / full ErrorAs pointer diagnostics edge cases.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{BasicLit, BinaryExpr, CallExpr, CompositeLit, Expr, File, Ident, ImportSpec, SelectorExpr};
+use guff::ast::{
+    ArrayType, BasicLit, BinaryExpr, CallExpr, CompositeLit, Expr, File, Ident, ImportSpec,
+    SelectorExpr, StarExpr, UnaryExpr,
+};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::api_implements;
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED};
+use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
 use guff_types::named::named_obj;
 use guff_types::predicates::identical;
 use guff_types::TypeId;
+use regex::Regex;
 
 use crate::options::TestifylintOptions;
 
@@ -44,8 +50,11 @@ const IMPLEMENTED: &[&str] = &[
     "compares",
     "contains",
     "empty",
+    "encoded-compare",
     "equal-values",
+    "error-is-as",
     "error-nil",
+    "expected-actual",
     "float-compare",
     "len",
     "negative-positive",
@@ -54,6 +63,10 @@ const IMPLEMENTED: &[&str] = &[
     "useless-assert",
     "zero",
 ];
+
+/// Upstream `DefaultExpectedVarPattern`.
+const DEFAULT_EXPECTED_ACTUAL_PATTERN: &str =
+    r"(^(exp(ected)?|want(ed)?)([A-Z]\w*)?$)|(^(\w*[a-z])?(Exp(ected)?|Want(ed)?)$)";
 
 /// Default-on checkers in upstream (suite-thelper is off by default).
 fn default_enabled() -> HashSet<String> {
@@ -286,6 +299,364 @@ fn has_string_type(pass: &Pass<'_>, expr: &Expr) -> bool {
     match artifacts.types.get(under) {
         TypeData::Basic(b) => b.info().contains(IS_STRING),
         _ => false,
+    }
+}
+
+fn has_bytes_type(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    let TypeData::Slice(s) = artifacts.types.get(under) else {
+        return false;
+    };
+    match artifacts.types.get(s.elem()) {
+        TypeData::Basic(b) => matches!(b.kind(), BasicKind::Uint8),
+        _ => false,
+    }
+}
+
+fn is_string_or_bytes(pass: &Pass<'_>, expr: &Expr) -> bool {
+    has_string_type(pass, expr) || has_bytes_type(pass, expr)
+}
+
+fn is_ident_with_name(expr: &Expr, name: &str) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name: n, .. }) if n == name)
+}
+
+fn is_byte_array(expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::ArrayType(ArrayType { len: None, elt, .. }) if is_ident_with_name(elt, "byte")
+    )
+}
+
+fn is_errors_is_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "errors", "Is")
+}
+
+fn is_errors_as_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "errors", "As")
+}
+
+fn is_fmt_sprintf_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a [Expr]> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if is_pkg_fn_call(pass, ce, "fmt", "Sprintf") {
+        Some(ce.args.as_slice())
+    } else {
+        None
+    }
+}
+
+fn is_json_raw_message_cast(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "encoding/json", "RawMessage")
+}
+
+fn is_json_object_or_array(s: &str) -> bool {
+    let mut s = s.trim().to_string();
+    // Match Go `strconv.Unquote` best-effort for double-quoted inputs.
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        if let Ok(v) = serde_json::from_str::<String>(&s) {
+            s = v;
+        }
+    } else if s.len() >= 2 && s.starts_with('`') && s.ends_with('`') {
+        s = s[1..s.len() - 1].to_string();
+    }
+    let s = s.trim();
+    if s.is_empty() || !(s.starts_with('{') || s.starts_with('[')) {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(s).is_ok()
+}
+
+fn words_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"[A-Z]+(?:[a-z]*|$)|[a-z]+").expect("words regex"))
+}
+
+fn json_ident_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"json|JSON|Json").expect("json ident regex"))
+}
+
+fn json_negative_word_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)^(invalid|bad|malformed|broken|corrupt|wrong)$")
+            .expect("json negative regex")
+    })
+}
+
+fn yaml_word_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"yaml|YAML|Yaml|^(yml|YML|Yml)$").expect("yaml word regex")
+    })
+}
+
+fn split_into_words(s: &str) -> Vec<&str> {
+    words_re().find_iter(s).map(|m| m.as_str()).collect()
+}
+
+fn has_word_matching(s: &str, re: &Regex) -> bool {
+    split_into_words(s).into_iter().any(|w| re.is_match(w))
+}
+
+fn is_json_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if let Some(s) = code::expr_to_string(pass, expr) {
+        if is_json_object_or_array(&s) {
+            return true;
+        }
+    }
+    if let Expr::Ident(id) = unparen(expr) {
+        if json_ident_re().is_match(&id.name)
+            && !has_word_matching(&id.name, json_negative_word_re())
+            && is_string_or_bytes(pass, expr)
+        {
+            return true;
+        }
+    }
+    if let Some(args) = is_fmt_sprintf_call(pass, expr) {
+        if let Some(first) = args.first() {
+            return is_json_style_expr(pass, first);
+        }
+    }
+    false
+}
+
+fn is_yaml_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::Ident(id) = unparen(expr) else {
+        return false;
+    };
+    is_string_or_bytes(pass, expr) && has_word_matching(&id.name, yaml_word_re())
+}
+
+fn encoded_unwrap<'a>(pass: &Pass<'_>, expr: &'a Expr) -> (&'a Expr, bool) {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return (expr, false);
+    };
+    if ce.args.is_empty() {
+        return (expr, false);
+    }
+    if is_json_raw_message_cast(pass, ce) {
+        if is_nil(pass, &ce.args[0]) {
+            return encoded_unwrap(pass, &ce.args[0]);
+        }
+        let (inner, _) = encoded_unwrap(pass, &ce.args[0]);
+        return (inner, true);
+    }
+    if is_ident_with_name(&ce.fun, "string")
+        || is_byte_array(&ce.fun)
+        || is_pkg_fn_call(pass, ce, "strings", "Replace")
+        || is_pkg_fn_call(pass, ce, "strings", "ReplaceAll")
+        || is_pkg_fn_call(pass, ce, "strings", "Trim")
+        || is_pkg_fn_call(pass, ce, "strings", "TrimSpace")
+    {
+        return encoded_unwrap(pass, &ce.args[0]);
+    }
+    (expr, false)
+}
+
+fn is_basic_lit(expr: &Expr) -> bool {
+    match unparen(expr) {
+        Expr::UnaryExpr(UnaryExpr { op: Token::SUB, x, .. }) => is_basic_lit(x),
+        Expr::BasicLit(_) => true,
+        _ => false,
+    }
+}
+
+fn is_untyped_const(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(
+        artifacts.types.get(under),
+        TypeData::Basic(b) if b.info().contains(IS_UNTYPED)
+    )
+}
+
+fn is_typed_const(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&expr.id()) else {
+        return false;
+    };
+    tav.val.is_some()
+}
+
+fn is_ident_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if pattern.is_match(name))
+}
+
+fn is_struct_var_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::SelectorExpr(SelectorExpr { x, .. }) if is_ident_named_after_pattern(pattern, x)
+    )
+}
+
+fn is_struct_field_named_after_pattern(pattern: &Regex, expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::SelectorExpr(SelectorExpr { sel, .. }) if pattern.is_match(&sel.name)
+    )
+}
+
+fn is_casted_basic_lit_or_expected(ce: &CallExpr, pattern: &Regex) -> bool {
+    if ce.args.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(fn_id) = unparen(&ce.fun) else {
+        return false;
+    };
+    match fn_id.name.as_str() {
+        "complex64" | "complex128" => true,
+        "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "int" | "int8" | "int16" | "int32"
+        | "int64" | "float32" | "float64" | "rune" | "string" => {
+            is_basic_lit(&ce.args[0]) || is_ident_named_after_pattern(pattern, &ce.args[0])
+        }
+        _ => false,
+    }
+}
+
+fn is_expected_value_factory(pass: &Pass<'_>, ce: &CallExpr, pattern: &Regex) -> bool {
+    match unparen(&ce.fun) {
+        Expr::Ident(id) => pattern.is_match(&id.name),
+        Expr::SelectorExpr(sel) => {
+            if is_pkg_fn_call(pass, ce, "time", "Date") {
+                return true;
+            }
+            pattern.is_match(&sel.sel.name)
+        }
+        _ => false,
+    }
+}
+
+fn expected_actual_pattern(opts: &TestifylintOptions) -> Regex {
+    let pat = opts
+        .expected_actual_pattern
+        .as_deref()
+        .unwrap_or(DEFAULT_EXPECTED_ACTUAL_PATTERN);
+    Regex::new(pat).unwrap_or_else(|_| {
+        Regex::new(DEFAULT_EXPECTED_ACTUAL_PATTERN).expect("default expected-actual pattern")
+    })
+}
+
+fn is_expected_value_candidate(pass: &Pass<'_>, expr: &Expr, pattern: &Regex) -> bool {
+    match unparen(expr) {
+        Expr::StarExpr(StarExpr { x, .. }) => is_expected_value_candidate(pass, x, pattern),
+        Expr::UnaryExpr(UnaryExpr {
+            op: Token::AND | Token::SUB,
+            x,
+            ..
+        }) => is_expected_value_candidate(pass, x, pattern),
+        Expr::CompositeLit(_) => true,
+        Expr::CallExpr(ce) => {
+            if let Some(lv) = is_builtin_len_call(pass, expr) {
+                return is_ident_named_after_pattern(pattern, lv);
+            }
+            matches!(unparen(&ce.fun), Expr::ParenExpr(_))
+                || is_casted_basic_lit_or_expected(ce, pattern)
+                || is_expected_value_factory(pass, ce, pattern)
+        }
+        _ => {
+            is_basic_lit(expr)
+                || is_untyped_const(pass, expr)
+                || is_typed_const(pass, expr)
+                || is_ident_named_after_pattern(pattern, expr)
+                || is_struct_var_named_after_pattern(pattern, expr)
+                || is_struct_field_named_after_pattern(pattern, expr)
+        }
+    }
+}
+
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    )
+}
+
+fn is_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(artifacts.types.get(under), TypeData::Interface(_))
+}
+
+fn check_error_as_target(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    if call.args.len() < 2 {
+        return;
+    }
+    let target = &call.args[1];
+    if is_empty_interface(pass, target) {
+        return;
+    }
+    let Some(typ) = type_of(pass, target) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let TypeData::Pointer(pt) = artifacts.types.get(typ) else {
+        report_msg(
+            "error-is-as",
+            call,
+            &format!(
+                "second argument to {} must be a non-nil pointer to either a type that implements error, or to any interface type",
+                call_fn_string(call)
+            ),
+            pending,
+        );
+        return;
+    };
+    let elem = pt.elem();
+    if let Some(err) = universe_error(pass) {
+        if elem == err {
+            report_msg(
+                "error-is-as",
+                call,
+                &format!("second argument to {} should not be *error", call_fn_string(call)),
+                pending,
+            );
+            return;
+        }
+    }
+    if !is_interface_type(pass, elem) && !implements_error(pass, elem) {
+        report_msg(
+            "error-is-as",
+            call,
+            &format!(
+                "second argument to {} must be a non-nil pointer to either a type that implements error, or to any interface type",
+                call_fn_string(call)
+            ),
+            pending,
+        );
     }
 }
 
@@ -1211,6 +1582,180 @@ fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, St
     }
 }
 
+fn check_error_is_as(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    match call.fn_name_trimmed.as_str() {
+        "Error" => {
+            if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
+                // DEFERRED: skip when selector is *assert.CollectT.
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "invalid usage of {}.Error, use {}.ErrorIs instead",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "NoError" => {
+            if call.args.len() >= 2 && is_error(pass, &call.args[1]) {
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "invalid usage of {}.NoError, use {}.NotErrorIs instead",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "IsType" => {
+            if call.args.len() >= 2
+                && (is_error(pass, &call.args[0]) || is_error(pass, &call.args[1]))
+            {
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "use {}.ErrorIs or {}.ErrorAs depending on the case",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "IsNotType" => {
+            if call.args.len() >= 2
+                && (is_error(pass, &call.args[0]) || is_error(pass, &call.args[1]))
+            {
+                report_msg(
+                    "error-is-as",
+                    call,
+                    &format!(
+                        "use {}.NotErrorIs or {}.NotErrorAs depending on the case",
+                        call.selector_x, call.selector_x
+                    ),
+                    pending,
+                );
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+                return;
+            };
+            if ce.args.len() != 2 {
+                return;
+            }
+            let proposed = if is_errors_is_call(pass, ce) {
+                "ErrorIs"
+            } else if is_errors_as_call(pass, ce) {
+                "ErrorAs"
+            } else {
+                return;
+            };
+            report_use("error-is-as", call, proposed, pending);
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+                return;
+            };
+            if ce.args.len() != 2 {
+                return;
+            }
+            let proposed = if is_errors_is_call(pass, ce) {
+                "NotErrorIs"
+            } else if is_errors_as_call(pass, ce) {
+                "NotErrorAs"
+            } else {
+                return;
+            };
+            report_use("error-is-as", call, proposed, pending);
+        }
+        "ErrorAs" | "NotErrorAs" => check_error_as_target(pass, call, pending),
+        _ => {}
+    }
+}
+
+fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let (a, a_explicit_json) = encoded_unwrap(pass, &call.args[0]);
+    let (b, b_explicit_json) = encoded_unwrap(pass, &call.args[1]);
+    if !is_string_or_bytes(pass, a) || !is_string_or_bytes(pass, b) {
+        return;
+    }
+    let proposed = if a_explicit_json
+        || b_explicit_json
+        || is_json_style_expr(pass, a)
+        || is_json_style_expr(pass, b)
+    {
+        "JSONEq"
+    } else if is_yaml_style_expr(pass, a) || is_yaml_style_expr(pass, b) {
+        "YAMLEq"
+    } else {
+        return;
+    };
+    report_use("encoded-compare", call, proposed, pending);
+}
+
+fn check_expected_actual(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal"
+        | "EqualExportedValues"
+        | "EqualValues"
+        | "Exactly"
+        | "InDelta"
+        | "InDeltaMapValues"
+        | "InDeltaSlice"
+        | "InEpsilon"
+        | "InEpsilonSlice"
+        | "IsNotType"
+        | "IsType"
+        | "JSONEq"
+        | "NotEqual"
+        | "NotEqualValues"
+        | "NotSame"
+        | "Same"
+        | "WithinDuration"
+        | "YAMLEq" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let pattern = expected_actual_pattern(opts);
+    let first = &call.args[0];
+    let second = &call.args[1];
+    let left = is_expected_value_candidate(pass, first, &pattern);
+    let right = is_expected_value_candidate(pass, second, &pattern);
+    if right && !left {
+        report_msg(
+            "expected-actual",
+            call,
+            "need to reverse actual and expected values",
+            pending,
+        );
+    }
+}
+
 fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
     match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" => {
@@ -1629,6 +2174,24 @@ fn check_call(
     }
     if enabled.contains("nil-compare") {
         check_nil_compare(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("error-is-as") {
+        check_error_is_as(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("encoded-compare") {
+        check_encoded_compare(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("expected-actual") {
+        check_expected_actual(pass, call, opts, pending);
         if pending.len() > before {
             return;
         }

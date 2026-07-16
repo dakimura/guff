@@ -6,5 +6,8 @@ linters:
       enable:
         - bool-compare
         - empty
+        - expected-actual
       bool-compare:
         ignore-custom-types: true
+      expected-actual:
+        pattern: "^wanted$"

@@ -93,6 +93,14 @@ func Regexp(t TestingT, rx interface{}, str interface{}, msgAndArgs ...interface
 func NotRegexp(t TestingT, rx interface{}, str interface{}, msgAndArgs ...interface{}) bool {
 	return true
 }
+func ErrorAs(t TestingT, err error, target interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotErrorAs(t TestingT, err error, target interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func JSONEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
+func YAMLEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 
 func (a *Assertions) Equal(expected, actual interface{}, msgAndArgs ...interface{}) bool {
 	return true

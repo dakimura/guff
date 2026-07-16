@@ -612,6 +612,7 @@ dependencies = [
  "guff-runner",
  "guff-types",
  "regex",
+ "serde_json",
 ]
 
 [[package]]

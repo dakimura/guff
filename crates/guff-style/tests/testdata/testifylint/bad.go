@@ -1,6 +1,7 @@
 package testifylint
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -19,6 +20,12 @@ func TestBad(t *testing.T) {
 	ts := time.Time{}
 	signed := -1
 	pos := 1
+	errSentinel := errors.New("sentinel")
+	body := `{"x":1}`
+	expectedJSON := `{}`
+	expectedYML := "k: v"
+	conf := "k: v"
+	expected := 42
 
 	assert.Equal(t, false, result)
 	assert.Equal(t, true, result)
@@ -44,6 +51,17 @@ func TestBad(t *testing.T) {
 	assert.Contains(t, arr, 1, 2)
 	assert.EqualValues(t, 42, pos)
 	assert.Regexp(t, regexp.MustCompile(`hi`), str)
+
+	assert.Error(t, err, errSentinel)
+	assert.True(t, errors.Is(err, errSentinel))
+	assert.IsType(t, err, errSentinel)
+
+	assert.Equal(t, `{"foo":"bar"}`, body)
+	assert.Equal(t, expectedJSON, body)
+	assert.Equal(t, expectedYML, conf)
+
+	assert.Equal(t, pos, expected)
+	assert.Equal(t, pos, 42)
 }
 
 var a, b int

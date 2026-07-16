@@ -544,6 +544,8 @@ pub struct TestifylintOptions {
     pub disable: Vec<String>,
     /// `bool-compare.ignore-custom-types` (default false).
     pub bool_compare_ignore_custom_types: bool,
+    /// `expected-actual.pattern`. `None` → upstream default pattern.
+    pub expected_actual_pattern: Option<String>,
 }
 
 impl Default for TestifylintOptions {
@@ -554,6 +556,7 @@ impl Default for TestifylintOptions {
             enable: Vec::new(),
             disable: Vec::new(),
             bool_compare_ignore_custom_types: false,
+            expected_actual_pattern: None,
         }
     }
 }

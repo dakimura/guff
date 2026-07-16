@@ -539,16 +539,32 @@ fn parse_v2_testifylint_settings() {
     assert!(!settings.testifylint.enable_all);
     assert_eq!(
         settings.testifylint.enable,
-        vec!["bool-compare".to_string(), "empty".to_string()]
+        vec![
+            "bool-compare".to_string(),
+            "empty".to_string(),
+            "expected-actual".to_string()
+        ]
     );
     assert!(settings.testifylint.bool_compare.ignore_custom_types);
+    assert_eq!(
+        settings.testifylint.expected_actual.pattern.as_deref(),
+        Some("^wanted$")
+    );
     let bag = settings.to_bag();
     let opts = bag
         .get::<guff_style::TestifylintOptions>("testifylint")
         .expect("testifylint options");
     assert!(opts.disable_all);
-    assert_eq!(opts.enable, vec!["bool-compare".to_string(), "empty".to_string()]);
+    assert_eq!(
+        opts.enable,
+        vec![
+            "bool-compare".to_string(),
+            "empty".to_string(),
+            "expected-actual".to_string()
+        ]
+    );
     assert!(opts.bool_compare_ignore_custom_types);
+    assert_eq!(opts.expected_actual_pattern.as_deref(), Some("^wanted$"));
 }
 
 #[test]
