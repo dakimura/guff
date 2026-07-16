@@ -10,19 +10,24 @@
 //! - `fmtappendf` — `[]byte(fmt.Sprint*)` → `fmt.Append*` (Go 1.19+)
 //! - `omitzero` — `json:",omitempty"` on struct fields (Go 1.24+)
 //! - `slicessort` — `sort.Slice` with natural order → `slices.Sort` (Go 1.21+)
+//! - `stringscutprefix` — `HasPrefix`+`TrimPrefix` → `CutPrefix` (Go 1.20+; pattern 1)
+//! - `slicescontains` — search loop → `slices.Contains` (Go 1.21+; return true/false)
+//! - `stringsseq` — `range strings.Split/Fields` → `SplitSeq`/`FieldsSeq` (Go 1.24+)
+//! - `waitgroupgo` — `Add(1)`+`go`+`Done` → `WaitGroup.Go` (Go 1.25+)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
 //! errorsastype, mapsloop, newexpr, reflecttypefor, slicesbackward,
-//! slicescontains, stditerators, stringscut, stringscutprefix, stringsseq,
-//! stringsbuilder, testingcontext, unsafefuncs, waitgroupgo, and full
+//! stditerators, stringscut, stringsbuilder, testingcontext, unsafefuncs,
+//! HasPrefix/TrimPrefix pattern 2 / bytes variants, slicescontains ContainsFunc /
+//! break variants, waitgroupgo trailing-Done / SuggestedFix import edits, and full
 //! rangeint/minmax edge-case parity with upstream.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, CallExpr, Expr, Field, File, ForStmt, FuncLit, IfStmt, IncDecStmt,
-    InterfaceType, RangeStmt, Stmt, StructType,
+    AssignStmt, BinaryExpr, BlockStmt, CallExpr, Expr, Field, File, ForStmt, FuncLit, GoStmt,
+    IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -32,10 +37,12 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::alias::unalias_readonly;
-use guff_types::arena::TypeData;
+use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
+use guff_types::named::named_obj;
 use guff_types::predicates::{is_float, is_string};
-use guff_types::OperandMode;
+use guff_types::signature::signature_recv;
+use guff_types::{OperandMode, TypeId};
 
 use crate::options::ModernizeOptions;
 
@@ -696,6 +703,408 @@ fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
     });
 }
 
+fn find_first_call_named<'a>(
+    pass: &Pass<'_>,
+    stmt: &'a Stmt,
+    name: &str,
+) -> Option<&'a CallExpr> {
+    let mut found = None;
+    walk::inspect(walk::stmt_ref(stmt), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if found.is_some() {
+            return false;
+        }
+        if let NodeRef::CallExpr(c) = n {
+            if code::is_call_to(pass, c, name) {
+                found = Some(c);
+                return false;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+    if if_stmt.init.is_some() || if_stmt.body.list.is_empty() {
+        return;
+    }
+    let Expr::CallExpr(has_call) = &if_stmt.cond else {
+        return;
+    };
+    let pos = has_call.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.20") {
+        return;
+    }
+    if has_call.args.len() != 2 {
+        return;
+    }
+    let (trim_name, cut_name, var_name, message, fix_message) =
+        if code::is_call_to(pass, has_call, "strings.HasPrefix") {
+            (
+                "strings.TrimPrefix",
+                "CutPrefix",
+                "after",
+                "HasPrefix + TrimPrefix can be simplified to CutPrefix",
+                "Replace HasPrefix/TrimPrefix with CutPrefix",
+            )
+        } else if code::is_call_to(pass, has_call, "strings.HasSuffix") {
+            (
+                "strings.TrimSuffix",
+                "CutSuffix",
+                "before",
+                "HasSuffix + TrimSuffix can be simplified to CutSuffix",
+                "Replace HasSuffix/TrimSuffix with CutSuffix",
+            )
+        } else {
+            return;
+        };
+    let Some(trim_call) = find_first_call_named(pass, &if_stmt.body.list[0], trim_name) else {
+        return;
+    };
+    if trim_call.args.len() != 2 {
+        return;
+    }
+    if !code::same_non_dynamic(pass, &has_call.args[0], &trim_call.args[0])
+        || !code::same_non_dynamic(pass, &has_call.args[1], &trim_call.args[1])
+    {
+        return;
+    }
+    let Some(s_text) = expr_text(&has_call.args[0]) else {
+        return;
+    };
+    let Some(affix_text) = expr_text(&has_call.args[1]) else {
+        return;
+    };
+    let end = has_call.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: message.into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: fix_message.into(),
+            text_edits: vec![
+                TextEdit {
+                    pos,
+                    end,
+                    new_text: format!(
+                        "{var_name}, ok := strings.{cut_name}({s_text}, {affix_text}); ok"
+                    ),
+                },
+                TextEdit {
+                    pos: trim_call.pos().0 as u32,
+                    end: trim_call.end().0 as u32,
+                    new_text: var_name.into(),
+                },
+            ],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_return_bool(ret: &ReturnStmt, want: bool) -> bool {
+    if ret.results.len() != 1 {
+        return false;
+    }
+    matches!(
+        &ret.results[0],
+        Expr::Ident(id) if id.name == if want { "true" } else { "false" }
+    )
+}
+
+fn check_slicescontains(
+    pass: &Pass<'_>,
+    block: &BlockStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
+    for i in 0..block.list.len().saturating_sub(1) {
+        let Stmt::RangeStmt(rng) = &block.list[i] else {
+            continue;
+        };
+        let Stmt::ReturnStmt(after) = &block.list[i + 1] else {
+            continue;
+        };
+        if !is_return_bool(after, false) {
+            continue;
+        }
+        let pos = rng.for_.0 as u32;
+        if !go_at_least(pass, pos, "go1.21") {
+            continue;
+        }
+        if type_kind(pass, &rng.x) != Some(TypeKind::Slice) {
+            continue;
+        }
+        if rng.body.list.len() != 1 {
+            continue;
+        }
+        let Stmt::IfStmt(if_stmt) = &rng.body.list[0] else {
+            continue;
+        };
+        if if_stmt.init.is_some() || if_stmt.else_.is_some() {
+            continue;
+        }
+        if if_stmt.body.list.len() != 1 {
+            continue;
+        }
+        let Stmt::ReturnStmt(ret_true) = &if_stmt.body.list[0] else {
+            continue;
+        };
+        if !is_return_bool(ret_true, true) {
+            continue;
+        }
+        let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = &if_stmt.cond else {
+            continue;
+        };
+        if *op != Token::EQL {
+            continue;
+        }
+        let elem = rng.value.as_ref();
+        let needle = if elem.is_some_and(|e| code::same_non_dynamic(pass, e, x)) {
+            y.as_ref()
+        } else if elem.is_some_and(|e| code::same_non_dynamic(pass, e, y)) {
+            x.as_ref()
+        } else {
+            continue;
+        };
+        let Some(slice_text) = expr_text(&rng.x) else {
+            continue;
+        };
+        let Some(needle_text) = expr_text(needle) else {
+            continue;
+        };
+        let end = after.return_.0 as u32;
+        // Prefer end of last result if present.
+        let end = after
+            .results
+            .last()
+            .map(|e| e.end().0 as u32)
+            .unwrap_or(end);
+        pending.push(Diagnostic {
+            pos,
+            end,
+            category: String::new(),
+            message: "loop can be modernized using slices.Contains".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace loop with slices.Contains".into(),
+                text_edits: vec![TextEdit {
+                    pos,
+                    end,
+                    new_text: format!("return slices.Contains({slice_text}, {needle_text})"),
+                }],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
+fn split_or_fields_seq_name(pass: &Pass<'_>, call: &CallExpr) -> Option<&'static str> {
+    if code::is_call_to(pass, call, "strings.Split") {
+        Some("SplitSeq")
+    } else if code::is_call_to(pass, call, "strings.Fields") {
+        Some("FieldsSeq")
+    } else {
+        None
+    }
+}
+
+fn check_stringsseq(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Diagnostic>) {
+    let pos = range_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.24") {
+        return;
+    }
+    // SplitSeq/FieldsSeq are iter.Seq (value only); reject non-blank keys.
+    if let Some(key) = range_stmt.key.as_ref() {
+        if ident_name(key) != Some("_") {
+            return;
+        }
+    }
+    let Expr::CallExpr(call) = &range_stmt.x else {
+        return;
+    };
+    let Some(seq_name) = split_or_fields_seq_name(pass, call) else {
+        return;
+    };
+    let Some(fun_text) = expr_text(&call.fun) else {
+        return;
+    };
+    // strings.Split → strings.SplitSeq (replace the selector leaf).
+    let new_fun = if let Some(prefix) = fun_text.rsplit_once('.') {
+        format!("{}.{}", prefix.0, seq_name)
+    } else {
+        seq_name.to_string()
+    };
+    let end = call.fun.end().0 as u32;
+    pending.push(Diagnostic {
+        pos: call.fun.pos().0 as u32,
+        end,
+        category: String::new(),
+        message: format!(
+            "Ranging over {} allocates a slice; consider using {}",
+            fun_text,
+            new_fun
+        ),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace with {new_fun}"),
+            text_edits: vec![TextEdit {
+                pos: call.fun.pos().0 as u32,
+                end,
+                new_text: new_fun,
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg: &str, name: &str) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let typ = match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => unalias_readonly(&artifacts.types, p.elem()),
+        _ => typ,
+    };
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let obj = named_obj(&artifacts.types, typ);
+    if obj.name(&artifacts.objects) != name {
+        return false;
+    }
+    obj.pkg(&artifacts.objects)
+        .is_some_and(|p| artifacts.packages.get(p).path() == pkg)
+}
+
+fn is_waitgroup_method(pass: &Pass<'_>, call: &CallExpr, method: &str) -> bool {
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    if sel.sel.name != method {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&sel.sel.id).copied() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return false;
+    }
+    let Some(sig_id) = obj_id.typ(&artifacts.objects) else {
+        return false;
+    };
+    let Some(recv) = signature_recv(&artifacts.types, sig_id) else {
+        return false;
+    };
+    let Some(recv_typ) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    is_named_pkg_type(pass, recv_typ, "sync", "WaitGroup")
+}
+
+fn waitgroup_recv(call: &CallExpr) -> Option<&Expr> {
+    match &*call.fun {
+        Expr::SelectorExpr(sel) => Some(sel.x.as_ref()),
+        _ => None,
+    }
+}
+
+fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
+    for i in 0..block.list.len().saturating_sub(1) {
+        let Stmt::ExprStmt(add_stmt) = &block.list[i] else {
+            continue;
+        };
+        let Expr::CallExpr(add_call) = &add_stmt.x else {
+            continue;
+        };
+        if !is_waitgroup_method(pass, add_call, "Add") || add_call.args.len() != 1 {
+            continue;
+        }
+        if !code::is_integer_literal(pass, &add_call.args[0], 1) {
+            continue;
+        }
+        let Some(add_recv) = waitgroup_recv(add_call) else {
+            continue;
+        };
+        let Stmt::GoStmt(GoStmt { go_, call: go_call }) = &block.list[i + 1] else {
+            continue;
+        };
+        if !go_call.args.is_empty() {
+            continue;
+        }
+        let Expr::FuncLit(lit) = &*go_call.fun else {
+            continue;
+        };
+        if lit.ty.results.as_ref().is_some_and(|f| !f.list.is_empty()) {
+            continue;
+        }
+        if lit.body.list.is_empty() {
+            continue;
+        }
+        let Stmt::DeferStmt(defer_stmt) = &lit.body.list[0] else {
+            continue;
+        };
+        if !is_waitgroup_method(pass, &defer_stmt.call, "Done") {
+            continue;
+        }
+        let Some(done_recv) = waitgroup_recv(&defer_stmt.call) else {
+            continue;
+        };
+        if !code::same_non_dynamic(pass, add_recv, done_recv) {
+            continue;
+        }
+        let pos = go_.0 as u32;
+        if !go_at_least(pass, pos, "go1.25") {
+            continue;
+        }
+        let Some(recv_text) = expr_text(add_recv) else {
+            continue;
+        };
+        pending.push(Diagnostic {
+            pos,
+            end: lit.ty.end().0 as u32,
+            category: String::new(),
+            message: "Goroutine creation can be simplified using WaitGroup.Go".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Simplify by using WaitGroup.Go".into(),
+                text_edits: vec![
+                    TextEdit {
+                        pos: add_stmt.x.pos().0 as u32,
+                        end: add_stmt.x.end().0 as u32,
+                        new_text: String::new(),
+                    },
+                    TextEdit {
+                        pos,
+                        end: go_call.pos().0 as u32,
+                        new_text: format!("{recv_text}.Go("),
+                    },
+                    TextEdit {
+                        pos: defer_stmt.defer_.0 as u32,
+                        end: defer_stmt.call.end().0 as u32,
+                        new_text: String::new(),
+                    },
+                ],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -719,14 +1128,32 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::InterfaceType(iface) if enabled(&options, "any") => {
                     check_any(pass, iface, &mut pending);
                 }
-                NodeRef::RangeStmt(s) if enabled(&options, "forvar") => {
-                    check_forvar(pass, s, &mut pending);
+                NodeRef::RangeStmt(s) => {
+                    if enabled(&options, "forvar") {
+                        check_forvar(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "stringsseq") {
+                        check_stringsseq(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::ForStmt(s) if enabled(&options, "rangeint") => {
                     check_rangeint(pass, s, &mut pending);
                 }
-                NodeRef::IfStmt(s) if enabled(&options, "minmax") => {
-                    check_minmax(pass, s, &mut pending);
+                NodeRef::IfStmt(s) => {
+                    if enabled(&options, "minmax") {
+                        check_minmax(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "stringscutprefix") {
+                        check_stringscutprefix(pass, s, &mut pending);
+                    }
+                }
+                NodeRef::BlockStmt(b) => {
+                    if enabled(&options, "slicescontains") {
+                        check_slicescontains(pass, b, &mut pending);
+                    }
+                    if enabled(&options, "waitgroupgo") {
+                        check_waitgroupgo(pass, b, &mut pending);
+                    }
                 }
                 NodeRef::CallExpr(c) => {
                     if enabled(&options, "fmtappendf") {

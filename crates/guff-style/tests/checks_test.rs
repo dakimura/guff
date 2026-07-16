@@ -2982,6 +2982,44 @@ fn modernize_flags_common_patterns() {
             .any(|m| m.contains("copying variable is unneeded")),
         "{messages:?}"
     );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("HasPrefix + TrimPrefix can be simplified to CutPrefix")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("loop can be modernized using slices.Contains")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_stringsseq() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/stringsseq", "stringsseq.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("SplitSeq") || m.contains("FieldsSeq")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_waitgroupgo() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/waitgroupgo", "waitgroupgo.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("WaitGroup.Go")),
+        "{messages:?}"
+    );
 }
 
 #[test]

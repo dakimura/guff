@@ -3,6 +3,7 @@ package modernize
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 func takeAny(x interface{}) {}
@@ -36,6 +37,22 @@ func forVar(items []int) {
 		v := v
 		_ = v
 	}
+}
+
+func cutPrefix(s, pre string) string {
+	if strings.HasPrefix(s, pre) {
+		return strings.TrimPrefix(s, pre)
+	}
+	return s
+}
+
+func containsNeedle(s []int, needle int) bool {
+	for _, v := range s {
+		if v == needle {
+			return true
+		}
+	}
+	return false
 }
 
 type Nested struct {

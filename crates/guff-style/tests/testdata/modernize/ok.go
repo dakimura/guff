@@ -3,6 +3,8 @@ package modernize
 import (
 	"fmt"
 	"slices"
+	"strings"
+	"sync"
 )
 
 func takeAny(x any) {}
@@ -29,6 +31,29 @@ func forVar(items []int) {
 	for _, v := range items {
 		_ = v
 	}
+}
+
+func cutPrefix(s, pre string) string {
+	if after, ok := strings.CutPrefix(s, pre); ok {
+		return after
+	}
+	return s
+}
+
+func containsNeedle(s []int, needle int) bool {
+	return slices.Contains(s, needle)
+}
+
+func rangeSplit(s string) {
+	for part := range strings.SplitSeq(s, ",") {
+		_ = part
+	}
+}
+
+func spawn(wg *sync.WaitGroup) {
+	wg.Go(func() {
+		_ = 1
+	})
 }
 
 type Nested struct {
