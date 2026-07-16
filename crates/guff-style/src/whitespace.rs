@@ -4,9 +4,10 @@
 //! Defaults match golangci-lint: `multi-if=false`, `multi-func=false`
 //! (only unnecessary leading/trailing newlines).
 //!
-//! DEFERRED: `multi-if` / `multi-func` enforcement when enabled; SuggestedFix;
+//! DEFERRED: SuggestedFix; `ignore-leading` / `ignore-trailing` settings;
 //! full comment-first/last accuracy when package load lacks `PARSE_COMMENTS`.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{BlockStmt, CommentGroup, Decl, File, FuncDecl};
@@ -21,10 +22,19 @@ struct WhitespaceVisitor<'a> {
     fset: &'a FileSet,
     comments: &'a [CommentGroup],
     pending: &'a mut Vec<(u32, String)>,
+    want_newline: HashMap<i64, bool>,
+    multi_if: bool,
+    multi_func: bool,
 }
 
 fn pos_line(fset: &FileSet, pos: Pos) -> i64 {
     fset.position(pos).line
+}
+
+fn check_multi_line(v: &mut WhitespaceVisitor<'_>, body: &BlockStmt, start: Pos, end: Pos) {
+    if pos_line(v.fset, end) > pos_line(v.fset, start) {
+        v.want_newline.insert(body.lbrace.0, true);
+    }
 }
 
 /// First/last content inside a block (statement or comment), plus opening pos.
@@ -93,12 +103,28 @@ fn check_end(fset: &FileSet, end: Pos, last: (Pos, Pos)) -> Option<(u32, String)
 }
 
 fn check_block(v: &mut WhitespaceVisitor<'_>, stmt: &BlockStmt) {
-    let (opening, first, last) = first_and_last(v.comments, v.fset, stmt);
+    let want_newline = v.want_newline.get(&stmt.lbrace.0).copied().unwrap_or(false);
+    let comments = if want_newline {
+        &[][..]
+    } else {
+        v.comments
+    };
+    let (opening, first, last) = first_and_last(comments, v.fset, stmt);
+
     if let Some(first) = first {
-        if let Some(msg) = check_start(v.fset, opening, first) {
-            v.pending.push(msg);
+        let start_msg = check_start(v.fset, opening, first);
+        if want_newline && start_msg.is_none() && !stmt.list.is_empty() {
+            v.pending.push((
+                opening.0 as u32,
+                "multi-line statement should be followed by a newline".into(),
+            ));
+        } else if !want_newline {
+            if let Some(msg) = start_msg {
+                v.pending.push(msg);
+            }
         }
     }
+
     if let Some(last) = last {
         if let Some(msg) = check_end(v.fset, stmt.rbrace, last) {
             v.pending.push(msg);
@@ -108,8 +134,22 @@ fn check_block(v: &mut WhitespaceVisitor<'_>, stmt: &BlockStmt) {
 
 impl<'a> Visitor<'a> for WhitespaceVisitor<'a> {
     fn enter(&mut self, node: NodeRef<'a>) -> bool {
-        if let NodeRef::BlockStmt(stmt) = node {
-            check_block(self, stmt);
+        match node {
+            NodeRef::IfStmt(stmt) if self.multi_if => {
+                check_multi_line(self, &stmt.body, stmt.cond.pos(), stmt.cond.end());
+            }
+            NodeRef::FuncLit(stmt) if self.multi_func => {
+                check_multi_line(self, &stmt.body, stmt.ty.pos(), stmt.ty.end());
+            }
+            NodeRef::FuncDecl(stmt) if self.multi_func => {
+                if let Some(body) = &stmt.body {
+                    check_multi_line(self, body, stmt.ty.pos(), stmt.ty.end());
+                }
+            }
+            NodeRef::BlockStmt(stmt) => {
+                check_block(self, stmt);
+            }
+            _ => {}
         }
         true
     }
@@ -119,6 +159,8 @@ fn run_func(
     fset: &FileSet,
     comments: &[CommentGroup],
     decl: &FuncDecl,
+    multi_if: bool,
+    multi_func: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
     if decl.body.is_none() {
@@ -128,16 +170,25 @@ fn run_func(
         fset,
         comments,
         pending,
+        want_newline: HashMap::new(),
+        multi_if,
+        multi_func,
     };
     walk::walk(&mut visitor, NodeRef::FuncDecl(decl));
 }
 
-fn run_file(file: &File, fset: &FileSet, pending: &mut Vec<(u32, String)>) {
+fn run_file(
+    file: &File,
+    fset: &FileSet,
+    multi_if: bool,
+    multi_func: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
     for decl in &file.decls {
         let Decl::FuncDecl(f) = decl else {
             continue;
         };
-        run_func(fset, &file.comments, f, pending);
+        run_func(fset, &file.comments, f, multi_if, multi_func, pending);
     }
 }
 
@@ -150,8 +201,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<WhitespaceOptions>("whitespace")
         .copied()
         .unwrap_or_default();
-    // DEFERRED: multi-if / multi-func checks when options.multi_if / options.multi_func.
-    let _ = options;
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
@@ -160,7 +209,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !name.ends_with(".go") {
             continue;
         }
-        run_file(file, &fset, &mut pending);
+        run_file(
+            file,
+            &fset,
+            options.multi_if,
+            options.multi_func,
+            &mut pending,
+        );
     }
 
     for (pos, message) in pending {

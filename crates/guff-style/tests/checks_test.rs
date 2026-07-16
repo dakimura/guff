@@ -449,6 +449,142 @@ fn whitespace_allows_tight_blocks() {
 }
 
 #[test]
+fn whitespace_multi_if_requires_leading_newline_when_enabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::WhitespaceOptions;
+
+    let pkg = support::typecheck_fixture(
+        "whitespace",
+        "example.com/whitespace/multiif",
+        "multi_if_bad.go",
+    );
+    assert!(
+        support::run_analyzer(whitespace(), &pkg).is_empty(),
+        "multi-if off should not flag multi_if_bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "whitespace",
+        WhitespaceOptions {
+            multi_if: true,
+            ..WhitespaceOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        whitespace(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("multi-line statement should be followed by a newline")),
+        "multi-if=true should flag multi_if_bad.go: {messages:?}"
+    );
+
+    let ok_pkg = support::typecheck_fixture(
+        "whitespace",
+        "example.com/whitespace/multiif/ok",
+        "multi_if_ok.go",
+    );
+    let mut ok_bag = SettingsBag::new();
+    ok_bag.insert(
+        "whitespace",
+        WhitespaceOptions {
+            multi_if: true,
+            ..WhitespaceOptions::default()
+        },
+    );
+    let ok_messages = support::run_analyzer_with_settings(
+        whitespace(),
+        &ok_pkg,
+        &RunnerOptions {
+            settings: Arc::new(ok_bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        ok_messages.is_empty(),
+        "multi-if=true should allow multi_if_ok.go: {ok_messages:?}"
+    );
+}
+
+#[test]
+fn whitespace_multi_func_requires_leading_newline_when_enabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::WhitespaceOptions;
+
+    let pkg = support::typecheck_fixture(
+        "whitespace",
+        "example.com/whitespace/multifunc",
+        "multi_func_bad.go",
+    );
+    assert!(
+        support::run_analyzer(whitespace(), &pkg).is_empty(),
+        "multi-func off should not flag multi_func_bad.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "whitespace",
+        WhitespaceOptions {
+            multi_func: true,
+            ..WhitespaceOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        whitespace(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("multi-line statement should be followed by a newline")),
+        "multi-func=true should flag multi_func_bad.go: {messages:?}"
+    );
+
+    let ok_pkg = support::typecheck_fixture(
+        "whitespace",
+        "example.com/whitespace/multifunc/ok",
+        "multi_func_ok.go",
+    );
+    let mut ok_bag = SettingsBag::new();
+    ok_bag.insert(
+        "whitespace",
+        WhitespaceOptions {
+            multi_func: true,
+            ..WhitespaceOptions::default()
+        },
+    );
+    let ok_messages = support::run_analyzer_with_settings(
+        whitespace(),
+        &ok_pkg,
+        &RunnerOptions {
+            settings: Arc::new(ok_bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        ok_messages.is_empty(),
+        "multi-func=true should allow multi_func_ok.go: {ok_messages:?}"
+    );
+}
+
+#[test]
 fn nlreturn_flags_missing_blank_before_return() {
     let pkg = support::typecheck_fixture("nlreturn", "example.com/nlreturn", "bad.go");
     let messages = support::run_analyzer(nlreturn(), &pkg);

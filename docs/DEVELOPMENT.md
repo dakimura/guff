@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace / mnd / prealloc / tagalign / wsl / perfsprint / goconst の主要キー）。ignore ディレクティブ・SuggestedFix・残 style linter settings（goconst numbers 等・whitespace multi-* 実効・wsl 完全パリティ）は **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint / goconst の主要キー）。ignore ディレクティブ・SuggestedFix・残 style linter settings（goconst numbers 等・wsl 完全パリティ）は **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
@@ -525,6 +525,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `errorlint` の errorf 既定オフ / allowed マップ完全版、`wrapcheck` の package-glob / interface-regexp 設定
   - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar` settings 配線
   - `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線は **完了**（2026-07-16）
+  - `whitespace` `multi-if` / `multi-func` 実効化は **完了**（2026-07-16）
   - `perfsprint` の concat-loop / fiximports、`goconst` の match-constant / numbers / find-duplicates
   - `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）
   - `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck — SSA（→ R17）
@@ -543,7 +544,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   **wsl**（v4 既定 cuddle の主要ルール）済。
   settings・`gocyclo:ignore` / `gocognit:ignore`・PARSE_COMMENTS 前提の funlen コメント除外・
   cyclop `package-average` / `skip-tests`・nakedret `skip-test-files` / SuggestedFix・predeclared ignore/qualified・
-  whitespace SuggestedFix / multi-* 実効・nlreturn SuggestedFix・mnd settings・prealloc settings・
+  whitespace SuggestedFix・nlreturn SuggestedFix・mnd settings・prealloc settings・
   tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・残 style linter settings（goconst numbers 等）は DEFERRED。）
   `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線済み。
 - `guff-comment`: **godot**（declarations + period 既定）/ **godox**（TODO/BUG/FIXME）/ **dupword**
@@ -663,6 +664,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13/R14 続き**: `whitespace` `multi-if` / `multi-func` 実効化（upstream ultraware/whitespace 準拠）。テスト: `multi_if_*` / `multi_func_*` fixtures + settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `cyclop` `package-average` / `skip-tests`、`nakedret` `skip-test-files`、`predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` YAML → `SettingsBag` 配線。テスト: `v2_style_settings_extended.yml` + `guff-style` settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `linters.settings` を `cyclop` / `lll` / `nakedret` / `nlreturn` に配線（`max-complexity` / `line-length`・`tab-width` / `max-func-lines` / `block-size`）。テスト: `v2_style_settings.yml` 拡張 + `guff-style` settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `linters.settings` を `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` に配線（`min-complexity` / `max-blank-identifiers` / `lines`・`statements`・`ignore-comments`）。テスト: `v2_style_settings.yml` + `guff-style` settings integration tests |
