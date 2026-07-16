@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unsafe"
 )
 
 func takeAny(x any) {}
@@ -59,6 +60,15 @@ func spawn(wg *sync.WaitGroup) {
 	wg.Go(func() {
 		_ = 1
 	})
+}
+
+func alreadyCut(s string) string {
+	x, _, _ := strings.Cut(s, ",")
+	return x
+}
+
+func alreadyAdd(ptr unsafe.Pointer) unsafe.Pointer {
+	return unsafe.Add(ptr, 1)
 }
 
 type Nested struct {

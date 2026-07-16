@@ -3086,6 +3086,62 @@ fn modernize_flags_testingcontext() {
 }
 
 #[test]
+fn modernize_flags_unsafefuncs() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/unsafefuncs",
+        "unsafefuncs.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("unsafe.Add"))
+            .count()
+            >= 2,
+        "{messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("namedUP")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_importcomment() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/importcomment",
+        "importcomment.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("canonical import path comment")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_stringscut() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringscut",
+        "stringscut.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("strings.Cut"))
+            .count()
+            >= 2,
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_allows_modern_code() {
     let pkg = support::typecheck_fixture("modernize", "example.com/modernize/ok", "ok.go");
     assert!(

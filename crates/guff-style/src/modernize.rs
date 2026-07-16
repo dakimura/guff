@@ -18,23 +18,30 @@
 //! - `slicesbackward` — reverse index loop → `slices.Backward` (Go 1.23+; simplified)
 //! - `reflecttypefor` — `reflect.TypeOf` → `TypeFor` (Go 1.22+; `(*T)(nil).Elem` + simple vars)
 //! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
+//! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
+//! - `importcomment` — obsolete `package p // import "path"` comments
+//! - `stringscut` — `strings.Split(N)(…)[0]` → `strings.Cut` (Go 1.18+; Split/SplitN only)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! errorsastype, newexpr, stditerators, stringscut, stringsbuilder, unsafefuncs,
-//! mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving), HasPrefix/TrimPrefix
-//! pattern 2 / bytes variants, slicescontains ContainsFunc / break variants,
-//! waitgroupgo trailing-Done / SuggestedFix import edits, reflecttypefor
-//! complicated/unnamed types & unused-var deletion, slicesbackward mutation/
-//! non-`s[i]` use analysis full parity, testingcontext sole-use via typeindex,
-//! and full rangeint/minmax edge-case parity with upstream.
+//! errorsastype, newexpr, stditerators, stringsbuilder, stringscut Index/Contains
+//! / bytes variants, unsafefuncs Slice/String helpers, importcomment Module==nil
+//! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
+//! HasPrefix/TrimPrefix pattern 2 / bytes variants, slicescontains ContainsFunc /
+//! break variants, waitgroupgo trailing-Done / SuggestedFix import edits,
+//! reflecttypefor complicated/unnamed types & unused-var deletion, slicesbackward
+//! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
+//! typeindex, and full rangeint/minmax edge-case parity with upstream.
 
 use std::collections::HashSet;
+use std::fs;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, Expr, Field, File, ForStmt, FuncDecl, FuncLit,
-    GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
+    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CommentGroup, Expr, Field, File, ForStmt, FuncDecl,
+    FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
 };
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
@@ -48,7 +55,7 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
 use guff_types::named::named_obj;
-use guff_types::predicates::{is_float, is_interface, is_string};
+use guff_types::predicates::{is_float, is_integer, is_interface, is_string};
 use guff_types::typestring::type_string;
 use guff_types::signature::signature_recv;
 use guff_types::{ObjectId, OperandMode, TypeId};
@@ -1916,6 +1923,285 @@ fn check_testingcontext(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
     }
 }
 
+fn is_basic_kind(pass: &Pass<'_>, typ: TypeId, kind: BasicKind) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Basic(b) if b.kind() == kind)
+}
+
+fn as_type_conversion<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<(TypeId, &'a Expr)> {
+    let expr = match expr {
+        Expr::ParenExpr(p) => p.x.as_ref(),
+        other => other,
+    };
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    if call.args.len() != 1 {
+        return None;
+    }
+    let info = pass.types_info()?;
+    let tav = info.types.get(&call.fun.id())?;
+    if tav.mode != OperandMode::TypeExpr {
+        return None;
+    }
+    Some((tav.typ, &call.args[0]))
+}
+
+/// `unsafe.Pointer(uintptr(ptr) + offset)` → `unsafe.Add(ptr, offset)` (Go 1.17+).
+fn check_unsafefuncs(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    if call.args.len() != 1 {
+        return;
+    }
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(tav) = info.types.get(&call.fun.id()) else {
+        return;
+    };
+    if tav.mode != OperandMode::TypeExpr {
+        return;
+    }
+    if !is_basic_kind(pass, tav.typ, BasicKind::UnsafePointer) {
+        return;
+    }
+    let pos = call.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.17") {
+        return;
+    }
+    let Expr::BinaryExpr(sum) = &call.args[0] else {
+        return;
+    };
+    if sum.op != Token::ADD {
+        return;
+    }
+    let Some(x_ty) = type_of(pass, &sum.x) else {
+        return;
+    };
+    if !is_basic_kind(pass, x_ty, BasicKind::Uintptr) {
+        return;
+    }
+    let Some((_, ptr_expr)) = as_type_conversion(pass, &sum.x) else {
+        return;
+    };
+    let Some(ptr_ty) = type_of(pass, ptr_expr) else {
+        return;
+    };
+    if !is_basic_kind(pass, ptr_ty, BasicKind::UnsafePointer) {
+        return;
+    }
+    let Some(ptr_text) = expr_text(ptr_expr) else {
+        return;
+    };
+    // Drop uintptr(...) around the offset when the conversion target is uintptr.
+    let offset_expr = match as_type_conversion(pass, &sum.y) {
+        Some((t, inner)) if is_basic_kind(pass, t, BasicKind::Uintptr) => {
+            let artifacts = pass.pkg().type_artifacts.as_ref();
+            let ok = artifacts.is_some_and(|a| {
+                matches!(inner, Expr::BasicLit(_))
+                    || type_of(pass, inner).is_some_and(|it| {
+                        let under = unalias_readonly(&a.types, it).underlying(&a.types);
+                        is_integer(&a.types, under)
+                    })
+            });
+            if ok {
+                inner
+            } else {
+                sum.y.as_ref()
+            }
+        }
+        _ => sum.y.as_ref(),
+    };
+    let Some(offset_text) = expr_text(offset_expr) else {
+        return;
+    };
+    let pos = sum.x.pos().0 as u32;
+    let end = sum.y.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "pointer + integer can be simplified using unsafe.Add".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Simplify pointer addition using unsafe.Add".into(),
+            text_edits: vec![TextEdit {
+                pos: call.pos().0 as u32,
+                end: call.end().0 as u32,
+                new_text: format!("unsafe.Add({ptr_text}, {offset_text})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn is_import_comment(text: &str) -> bool {
+    let text = text.trim();
+    text.starts_with("import \"") && text.ends_with('"')
+}
+
+/// Obsolete `package p // import "path"` comments (ignored in module mode).
+///
+/// Package-line trailing comments are dropped unless `PARSE_COMMENTS` is set,
+/// so we re-parse like gocritic's comment checkers.
+fn check_importcomment(pass: &Pass<'_>, file_idx: usize, file: &File, pending: &mut Vec<Diagnostic>) {
+    // DEFERRED: skip when Package.module is None (GOPATH mode), matching upstream.
+    let Some(path) = pass.pkg().compiled_go_files.get(file_idx) else {
+        return;
+    };
+    let Ok(src) = fs::read(path) else {
+        return;
+    };
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let re_fset = FileSet::new();
+    let Ok(parsed) = parse_file(&re_fset, name, &src, PARSE_COMMENTS) else {
+        return;
+    };
+    let pkg_end = parsed.name.end();
+    let pkg_line = re_fset.position(pkg_end).line;
+    let Some(ft) = pass.fset().file(file.pos()) else {
+        return;
+    };
+    for group in &parsed.comments {
+        if group.list.len() != 1 {
+            continue;
+        }
+        let c = &group.list[0];
+        if c.pos().0 < pkg_end.0 {
+            continue;
+        }
+        let comment_line = re_fset.position(c.pos()).line;
+        if comment_line > pkg_line {
+            break;
+        }
+        if comment_line != pkg_line {
+            continue;
+        }
+        let text = CommentGroup {
+            list: group.list.clone(),
+        }
+        .text();
+        if !is_import_comment(&text) {
+            continue;
+        }
+        if pkg_line < 1 || pkg_line as usize > ft.line_count() {
+            continue;
+        }
+        let re_pos = re_fset.position(c.pos());
+        let mapped_start =
+            ft.line_start(pkg_line as usize).0 as u32 + (re_pos.column as u32).saturating_sub(1);
+        let mapped_end = mapped_start + (c.end().0 - c.pos().0) as u32;
+        pending.push(Diagnostic {
+            pos: mapped_start,
+            end: mapped_end,
+            category: String::new(),
+            message: "canonical import path comment is ignored in module mode".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove obsolete import path comment".into(),
+                text_edits: vec![TextEdit {
+                    pos: file.name.end().0 as u32,
+                    end: mapped_end,
+                    new_text: String::new(),
+                }],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
+/// `x := strings.Split(N)(s, sep[, 2])[0]` → `x, _, _ := strings.Cut(s, sep)`.
+fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diagnostic>) {
+    if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return;
+    }
+    let Some(lhs_name) = ident_name(&assign.lhs[0]) else {
+        return;
+    };
+    if lhs_name == "_" {
+        return;
+    }
+    let Expr::IndexExpr(ix) = &assign.rhs[0] else {
+        return;
+    };
+    if !code::is_integer_literal(pass, &ix.index, 0) {
+        return;
+    }
+    let Expr::CallExpr(call) = ix.x.as_ref() else {
+        return;
+    };
+    let (split_name, need_n) = if code::is_call_to(pass, call, "strings.Split") {
+        ("Split", false)
+    } else if code::is_call_to(pass, call, "strings.SplitN") {
+        ("SplitN", true)
+    } else {
+        return;
+    };
+    if need_n {
+        if call.args.len() != 3 || !code::is_integer_literal(pass, &call.args[2], 2) {
+            return;
+        }
+    } else if call.args.len() != 2 {
+        return;
+    }
+    let Some(sep) = code::expr_to_string(pass, &call.args[1]) else {
+        return;
+    };
+    if sep.is_empty() {
+        return;
+    }
+    let pos = call.fun.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.18") {
+        return;
+    }
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return; // e.g. dot-import
+    };
+    let mut text_edits = vec![
+        TextEdit {
+            pos: assign.lhs[0].end().0 as u32,
+            end: assign.lhs[0].end().0 as u32,
+            new_text: ", _, _".into(),
+        },
+        TextEdit {
+            pos: sel.sel.pos().0 as u32,
+            end: sel.sel.end().0 as u32,
+            new_text: "Cut".into(),
+        },
+        TextEdit {
+            pos: ix.lbrack.0 as u32,
+            end: ix.rbrack.0 as u32 + 1,
+            new_text: String::new(),
+        },
+    ];
+    if need_n {
+        text_edits.push(TextEdit {
+            pos: call.args[1].end().0 as u32,
+            end: call.rparen.0 as u32,
+            new_text: String::new(),
+        });
+    }
+    pending.push(Diagnostic {
+        pos,
+        end: call.fun.end().0 as u32,
+        category: "stringscut".into(),
+        message: format!("strings.{split_name} call can be simplified using strings.Cut"),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace strings.{split_name} with strings.Cut"),
+            text_edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -1927,12 +2213,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
 
     let mut pending = Vec::new();
-    for file in pass.files() {
+    for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
             check_plusbuild(file, &mut pending);
         }
         if enabled(&options, "testingcontext") {
             check_testingcontext(pass, file, &mut pending);
+        }
+        if enabled(&options, "importcomment") {
+            check_importcomment(pass, file_idx, file, &mut pending);
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
@@ -1977,6 +2266,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_waitgroupgo(pass, b, &mut pending);
                     }
                 }
+                NodeRef::AssignStmt(a) if enabled(&options, "stringscut") => {
+                    check_stringscut(pass, a, &mut pending);
+                }
                 NodeRef::CallExpr(c) => {
                     if enabled(&options, "fmtappendf") {
                         check_fmtappendf(pass, c, &mut pending);
@@ -1989,6 +2281,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         // this call is not itself the X of a `.Elem()` selector.
                         check_reflecttypefor_elem(pass, c, &mut pending);
                         check_reflecttypefor(pass, c, &mut pending);
+                    }
+                    if enabled(&options, "unsafefuncs") {
+                        check_unsafefuncs(pass, c, &mut pending);
                     }
                 }
                 NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {
