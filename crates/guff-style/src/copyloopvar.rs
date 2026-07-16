@@ -1,6 +1,6 @@
 //! Port of [`github.com/karamaru-alpha/copyloopvar`](https://github.com/karamaru-alpha/copyloopvar).
 //!
-//! DEFERRED: `check-alias` flag (report ` _i := i` alias copies too).
+//! `linters.settings.copyloopvar.check-alias` is wired (default false).
 
 use std::sync::OnceLock;
 
@@ -11,6 +11,8 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+
+use crate::options::CopyloopvarOptions;
 
 fn ident_name(expr: &Expr) -> Option<&str> {
     match expr {
@@ -56,6 +58,7 @@ fn report_pending(
 fn check_assign_copies(
     assign: &AssignStmt,
     loop_vars: &[String],
+    check_alias: bool,
     pending: &mut Vec<(u32, u32, String, bool)>,
 ) {
     if assign.tok != Some(Token::DEFINE) {
@@ -68,18 +71,24 @@ fn check_assign_copies(
         if !loop_vars.iter().any(|v| v == right) {
             continue;
         }
-        // Default (check-alias=false): require lhs name == rhs name.
-        let Some(left) = assign.lhs.get(i).and_then(ident_name) else {
-            continue;
-        };
-        if left != right {
-            continue;
+        if !check_alias {
+            // Default: require lhs name == rhs name.
+            let Some(left) = assign.lhs.get(i).and_then(ident_name) else {
+                continue;
+            };
+            if left != right {
+                continue;
+            }
         }
         report_pending(pending, assign, right, i);
     }
 }
 
-fn check_range_stmt(range_stmt: &RangeStmt, pending: &mut Vec<(u32, u32, String, bool)>) {
+fn check_range_stmt(
+    range_stmt: &RangeStmt,
+    check_alias: bool,
+    pending: &mut Vec<(u32, u32, String, bool)>,
+) {
     let mut loop_vars = Vec::new();
     if let Some(key) = range_stmt.key.as_ref().and_then(ident_name) {
         loop_vars.push(key.to_string());
@@ -94,12 +103,16 @@ fn check_range_stmt(range_stmt: &RangeStmt, pending: &mut Vec<(u32, u32, String,
     }
     for stmt in &range_stmt.body.list {
         if let Stmt::AssignStmt(assign) = stmt {
-            check_assign_copies(assign, &loop_vars, pending);
+            check_assign_copies(assign, &loop_vars, check_alias, pending);
         }
     }
 }
 
-fn check_for_stmt(for_stmt: &ForStmt, pending: &mut Vec<(u32, u32, String, bool)>) {
+fn check_for_stmt(
+    for_stmt: &ForStmt,
+    check_alias: bool,
+    pending: &mut Vec<(u32, u32, String, bool)>,
+) {
     let Some(init) = for_stmt.init.as_deref() else {
         return;
     };
@@ -117,7 +130,7 @@ fn check_for_stmt(for_stmt: &ForStmt, pending: &mut Vec<(u32, u32, String, bool)
     }
     for stmt in &for_stmt.body.list {
         if let Stmt::AssignStmt(assign) = stmt {
-            check_assign_copies(assign, &loop_vars, pending);
+            check_assign_copies(assign, &loop_vars, check_alias, pending);
         }
     }
 }
@@ -127,6 +140,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "copyloopvar requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<CopyloopvarOptions>("copyloopvar")
+        .copied()
+        .unwrap_or_default();
+
     let mut pending = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -135,11 +153,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             };
             match n {
                 NodeRef::RangeStmt(s) => {
-                    check_range_stmt(s, &mut pending);
+                    check_range_stmt(s, options.check_alias, &mut pending);
                     true
                 }
                 NodeRef::ForStmt(s) => {
-                    check_for_stmt(s, &mut pending);
+                    check_for_stmt(s, options.check_alias, &mut pending);
                     true
                 }
                 _ => true,

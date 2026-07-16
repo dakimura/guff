@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint（`concat-loop` / `loop-other-ops` 含む）/ goconst（`match-constant` / `numbers` / `min` / `max` / `find-duplicates` 含む）の主要キー）。ignore ディレクティブ・SuggestedFix・`perfsprint` fiximports・wsl 完全パリティは **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（copyloopvar `check-alias` / usetesting 各フラグ / usestdlibvars `http-method`・`http-status-code` / gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint（`concat-loop` / `loop-other-ops` 含む）/ goconst（`match-constant` / `numbers` / `min` / `max` / `find-duplicates` 含む）の主要キー）。`usestdlibvars` optional テーブル・ignore ディレクティブ・SuggestedFix・`perfsprint` fiximports・wsl 完全パリティは **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
@@ -509,7 +509,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   2. `guff-error`: errname / err113 / durationcheck / **errorlint** / **wrapcheck** / **errchkjson**
      （golangci 既定 `omit-safe`；`report-no-exported` / `check-error-free-encoding` settings は DEFERRED）
   3. `guff-context`: **noctx**（AST call-name; upstream は buildssa）/ **fatcontext**
-  4. `guff-style`（新）: **copyloopvar** / **usetesting** / **usestdlibvars**（HTTP method/status 既定オン）
+  4. `guff-style`（新）: **copyloopvar**（`check-alias` settings 済）/ **usetesting**（per-check flags settings 済）/
+     **usestdlibvars**（HTTP method/status 既定オン + settings 済; optional テーブルは DEFERRED）
      / **perfsprint**（fmt.Sprint/Sprintf/Errorf 既定オン; concat-loop/loop-other-ops 実効化済; fiximports は DEFERRED）
      / **goconst**（golangci 既定 min-len=3 / min-occurrences=3 / exclude call; find-duplicates 実効化済）
      / **dogsled**（golangci 既定 max-blank-identifiers=2）/ **asciicheck** / **goprintffuncname**
@@ -523,7 +524,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `nilerr` / `nilnesserr` — SSA（→ R17）
   - `mirror` — 大テーブル
   - `errorlint` の errorf 既定オフ / allowed マップ完全版、`wrapcheck` の package-glob / interface-regexp 設定
-  - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar` settings 配線
+  - `usestdlibvars` の optional テーブル（`time-weekday` / `crypto-hash` 等）
+  - `copyloopvar` / `usetesting` / `usestdlibvars`（HTTP）settings 配線は **完了**（2026-07-16）
   - `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線は **完了**（2026-07-16）
   - `whitespace` `multi-if` / `multi-func` 実効化は **完了**（2026-07-16）
   - `goconst` `match-constant` / `numbers` / `min` / `max` 実効化は **完了**（2026-07-16）
@@ -545,11 +547,9 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   **whitespace**（multi-if/multi-func 既定オフ）/ **nlreturn**（block-size=1）/ **mnd**（全 checks・0/1 無視）/
   **prealloc**（simple / range-loops 既定）/ **tagalign**（align+sort 既定）/
   **wsl**（v4 既定 cuddle の主要ルール）済。
-  settings・`gocyclo:ignore` / `gocognit:ignore`・PARSE_COMMENTS 前提の funlen コメント除外・
-  cyclop `package-average` / `skip-tests`・nakedret `skip-test-files` / SuggestedFix・predeclared ignore/qualified・
-  whitespace SuggestedFix・nlreturn SuggestedFix・mnd settings・prealloc settings・
-  tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・残 style linter settings は DEFERRED。）
-  `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線済み。
+  `gocyclo:ignore` / `gocognit:ignore`・PARSE_COMMENTS 前提の funlen コメント除外・
+  SuggestedFix・tagalign StrictStyle・wsl 完全パリティ / `wsl_v5`・`usestdlibvars` optional テーブルは DEFERRED。）
+  `copyloopvar` / `usetesting` / `usestdlibvars`（HTTP）/ `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線済み。
   `perfsprint` concat-loop / `loop-other-ops`・`goconst` `find-duplicates` 実効化済み。`perfsprint` fiximports は DEFERRED。
 - `guff-comment`: **godot**（declarations + period 既定）/ **godox**（TODO/BUG/FIXME）/ **dupword**
   （comments + string literals）。settings・SuggestedFix・godot scope/capital・dupword keyword
@@ -668,6 +668,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13/R14 続き**: `copyloopvar` `check-alias`・`usetesting` per-check flags・`usestdlibvars` `http-method`/`http-status-code` を `linters.settings` → `SettingsBag` に配線（upstream / golangci キー準拠）。`usestdlibvars` optional テーブルは DEFERRED。テスト: settings fixtures + `v2_style_settings_extended.yml` |
 | 2026-07-16 | **R13/R14 続き**: `goconst` `find-duplicates` 実効化（同一値の const を検出；upstream jgautheron/goconst / golangci メッセージ準拠）。`linters.settings.goconst.find-duplicates` YAML 配線。テスト: `find_duplicates_*` fixtures + settings integration |
 | 2026-07-16 | **R13/R14 続き**: `perfsprint` concat-loop（ループ内文字列連結 → `strings.Builder` SuggestedFix）+ `loop-other-ops` 実効化（upstream catenacyber/perfsprint 準拠）。`linters.settings.perfsprint` に `concat-loop` / `loop-other-ops` YAML 配線。fiximports は DEFERRED。テスト: `concat_loop_*` fixtures + settings integration |
 | 2026-07-16 | **R13/R14 続き**: `goconst` `match-constant` / `numbers` / `min` / `max` 実効化（upstream jgautheron/goconst 準拠）。`linters.settings.goconst` YAML 配線拡張。テスト: `numbers_*` / `match_constant_*` fixtures + settings integration tests |

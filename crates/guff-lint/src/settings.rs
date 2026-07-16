@@ -36,6 +36,9 @@ pub struct LinterSettings {
     pub wsl: WslSettings,
     pub perfsprint: PerfsprintSettings,
     pub goconst: GoconstSettings,
+    pub copyloopvar: CopyloopvarSettings,
+    pub usetesting: UsetestingSettings,
+    pub usestdlibvars: UsestdlibvarsSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -327,6 +330,43 @@ pub struct GoconstSettings {
     pub max: Option<i64>,
 }
 
+/// `linters.settings.copyloopvar` / `linters-settings.copyloopvar`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct CopyloopvarSettings {
+    #[serde(default, rename = "check-alias")]
+    pub check_alias: Option<bool>,
+}
+
+/// `linters.settings.usetesting` / `linters-settings.usetesting`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UsetestingSettings {
+    #[serde(default, rename = "os-create-temp")]
+    pub os_create_temp: Option<bool>,
+    #[serde(default, rename = "os-mkdir-temp")]
+    pub os_mkdir_temp: Option<bool>,
+    #[serde(default, rename = "os-setenv")]
+    pub os_setenv: Option<bool>,
+    #[serde(default, rename = "os-temp-dir")]
+    pub os_temp_dir: Option<bool>,
+    #[serde(default, rename = "os-chdir")]
+    pub os_chdir: Option<bool>,
+    #[serde(default, rename = "context-background")]
+    pub context_background: Option<bool>,
+    #[serde(default, rename = "context-todo")]
+    pub context_todo: Option<bool>,
+}
+
+/// `linters.settings.usestdlibvars` / `linters-settings.usestdlibvars`.
+///
+/// Optional tables (`time-weekday`, …) remain DEFERRED.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UsestdlibvarsSettings {
+    #[serde(default, rename = "http-method")]
+    pub http_method: Option<bool>,
+    #[serde(default, rename = "http-status-code")]
+    pub http_status_code: Option<bool>,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -449,6 +489,21 @@ impl LinterSettings {
                 out.goconst = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("copyloopvar".into())) {
+            if let Ok(s) = serde_yaml::from_value::<CopyloopvarSettings>(v.clone()) {
+                out.copyloopvar = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("usetesting".into())) {
+            if let Ok(s) = serde_yaml::from_value::<UsetestingSettings>(v.clone()) {
+                out.usetesting = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("usestdlibvars".into())) {
+            if let Ok(s) = serde_yaml::from_value::<UsestdlibvarsSettings>(v.clone()) {
+                out.usestdlibvars = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -484,6 +539,9 @@ impl LinterSettings {
         bag.insert("wsl", self.wsl.to_guff_wsl());
         bag.insert("perfsprint", self.perfsprint.to_guff_perfsprint());
         bag.insert("goconst", self.goconst.to_guff_goconst());
+        bag.insert("copyloopvar", self.copyloopvar.to_guff_copyloopvar());
+        bag.insert("usetesting", self.usetesting.to_guff_usetesting());
+        bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         Arc::new(bag)
     }
 
@@ -851,6 +909,44 @@ impl GoconstSettings {
             numbers: self.numbers.unwrap_or(defaults.numbers),
             number_min: self.min.unwrap_or(defaults.number_min),
             number_max: self.max.unwrap_or(defaults.number_max),
+        }
+    }
+}
+
+impl CopyloopvarSettings {
+    pub fn to_guff_copyloopvar(&self) -> guff_style::CopyloopvarOptions {
+        let defaults = guff_style::CopyloopvarOptions::default();
+        guff_style::CopyloopvarOptions {
+            check_alias: self.check_alias.unwrap_or(defaults.check_alias),
+        }
+    }
+}
+
+impl UsetestingSettings {
+    pub fn to_guff_usetesting(&self) -> guff_style::UsetestingOptions {
+        let defaults = guff_style::UsetestingOptions::default();
+        guff_style::UsetestingOptions {
+            os_create_temp: self.os_create_temp.unwrap_or(defaults.os_create_temp),
+            os_mkdir_temp: self.os_mkdir_temp.unwrap_or(defaults.os_mkdir_temp),
+            os_setenv: self.os_setenv.unwrap_or(defaults.os_setenv),
+            os_temp_dir: self.os_temp_dir.unwrap_or(defaults.os_temp_dir),
+            os_chdir: self.os_chdir.unwrap_or(defaults.os_chdir),
+            context_background: self
+                .context_background
+                .unwrap_or(defaults.context_background),
+            context_todo: self.context_todo.unwrap_or(defaults.context_todo),
+        }
+    }
+}
+
+impl UsestdlibvarsSettings {
+    pub fn to_guff_usestdlibvars(&self) -> guff_style::UsestdlibvarsOptions {
+        let defaults = guff_style::UsestdlibvarsOptions::default();
+        guff_style::UsestdlibvarsOptions {
+            http_method: self.http_method.unwrap_or(defaults.http_method),
+            http_status_code: self
+                .http_status_code
+                .unwrap_or(defaults.http_status_code),
         }
     }
 }

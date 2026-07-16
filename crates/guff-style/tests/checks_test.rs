@@ -95,6 +95,164 @@ fn usestdlibvars_allows_stdlib_constants() {
 }
 
 #[test]
+fn copyloopvar_check_alias_flags_renames() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::CopyloopvarOptions;
+
+    let pkg = support::typecheck_fixture(
+        "copyloopvar",
+        "example.com/copyloopvar/ok",
+        "ok.go",
+    );
+    assert!(
+        support::run_analyzer(copyloopvar(), &pkg).is_empty(),
+        "default check-alias=false should allow alias copies"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "copyloopvar",
+        CopyloopvarOptions {
+            check_alias: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        copyloopvar(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("for") && m.contains("\"i\"")),
+        "check-alias=true should flag alias copies: {messages:?}"
+    );
+}
+
+#[test]
+fn usetesting_respects_os_setenv_and_temp_dir() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UsetestingOptions;
+
+    let pkg = support::typecheck_fixture(
+        "usetesting",
+        "example.com/usetesting/settings",
+        "settings_extra.go",
+    );
+    assert!(
+        support::run_analyzer(usetesting(), &pkg).is_empty(),
+        "defaults should ignore Setenv/TempDir: {:?}",
+        support::run_analyzer(usetesting(), &pkg)
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "usetesting",
+        UsetestingOptions {
+            os_setenv: true,
+            os_temp_dir: true,
+            ..UsetestingOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        usetesting(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("os.Setenv") && m.contains("t.Setenv")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("os.TempDir") && m.contains("t.TempDir")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn usetesting_respects_os_mkdir_temp_off() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UsetestingOptions;
+
+    let pkg = support::typecheck_fixture("usetesting", "example.com/usetesting", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "usetesting",
+        UsetestingOptions {
+            os_mkdir_temp: false,
+            os_create_temp: false,
+            ..UsetestingOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        usetesting(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "os-mkdir-temp/os-create-temp=false should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn usestdlibvars_respects_http_toggles_off() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UsestdlibvarsOptions;
+
+    let pkg = support::typecheck_fixture(
+        "usestdlibvars",
+        "example.com/usestdlibvars",
+        "bad.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "usestdlibvars",
+        UsestdlibvarsOptions {
+            http_method: false,
+            http_status_code: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        usestdlibvars(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "http toggles off should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
 fn perfsprint_flags_fmt_shortcuts() {
     let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint", "bad.go");
     let messages = support::run_analyzer(perfsprint(), &pkg);

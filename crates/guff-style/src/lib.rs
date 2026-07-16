@@ -56,9 +56,10 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    CyclopOptions, DogsledOptions, FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions,
-    LllOptions, MndOptions, NakedretOptions, NestifOptions, NlreturnOptions, PerfsprintOptions,
-    PreallocOptions, PredeclaredOptions, TagalignOptions, WhitespaceOptions, WslOptions,
+    CopyloopvarOptions, CyclopOptions, DogsledOptions, FunlenOptions, GocognitOptions,
+    GoconstOptions, GocycloOptions, LllOptions, MndOptions, NakedretOptions, NestifOptions,
+    NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions, TagalignOptions,
+    UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;

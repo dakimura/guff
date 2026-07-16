@@ -330,4 +330,30 @@ fn parse_v2_style_extended_linter_settings() {
             .unwrap()
             .loop_other_ops
     );
+    assert_eq!(settings.copyloopvar.check_alias, Some(true));
+    assert_eq!(settings.usetesting.os_setenv, Some(true));
+    assert_eq!(settings.usetesting.os_temp_dir, Some(true));
+    assert_eq!(settings.usetesting.os_mkdir_temp, Some(false));
+    assert_eq!(settings.usestdlibvars.http_method, Some(false));
+    assert_eq!(settings.usestdlibvars.http_status_code, Some(false));
+    assert!(
+        bag.get::<guff_style::CopyloopvarOptions>("copyloopvar")
+            .unwrap()
+            .check_alias
+    );
+    assert!(
+        bag.get::<guff_style::UsetestingOptions>("usetesting")
+            .unwrap()
+            .os_setenv
+    );
+    assert!(
+        !bag.get::<guff_style::UsetestingOptions>("usetesting")
+            .unwrap()
+            .os_mkdir_temp
+    );
+    assert!(
+        !bag.get::<guff_style::UsestdlibvarsOptions>("usestdlibvars")
+            .unwrap()
+            .http_method
+    );
 }

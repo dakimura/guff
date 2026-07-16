@@ -10,6 +10,9 @@ linters:
     - prealloc
     - tagalign
     - wsl
+    - copyloopvar
+    - usetesting
+    - usestdlibvars
   settings:
     cyclop:
       package-average: 5.0
@@ -48,3 +51,12 @@ linters:
     wsl:
       strict-append: false
       allow-assign-and-anything: true
+    copyloopvar:
+      check-alias: true
+    usetesting:
+      os-setenv: true
+      os-temp-dir: true
+      os-mkdir-temp: false
+    usestdlibvars:
+      http-method: false
+      http-status-code: false

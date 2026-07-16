@@ -340,3 +340,62 @@ impl Default for NlreturnOptions {
         }
     }
 }
+
+/// `linters.settings.copyloopvar` / `linters-settings.copyloopvar`.
+#[derive(Debug, Clone, Copy)]
+pub struct CopyloopvarOptions {
+    /// golangci `check-alias`: also report ` _i := i` alias copies (default false).
+    pub check_alias: bool,
+}
+
+impl Default for CopyloopvarOptions {
+    fn default() -> Self {
+        Self { check_alias: false }
+    }
+}
+
+/// `linters.settings.usetesting` / `linters-settings.usetesting`.
+///
+/// Defaults match upstream ldez/usetesting (not golangci's overridden defaults).
+#[derive(Debug, Clone, Copy)]
+pub struct UsetestingOptions {
+    pub os_create_temp: bool,
+    pub os_mkdir_temp: bool,
+    pub os_setenv: bool,
+    pub os_temp_dir: bool,
+    pub os_chdir: bool,
+    pub context_background: bool,
+    pub context_todo: bool,
+}
+
+impl Default for UsetestingOptions {
+    fn default() -> Self {
+        Self {
+            os_create_temp: true,
+            os_mkdir_temp: true,
+            os_setenv: false,
+            os_temp_dir: false,
+            os_chdir: true,
+            context_background: false,
+            context_todo: false,
+        }
+    }
+}
+
+/// `linters.settings.usestdlibvars` / `linters-settings.usestdlibvars`.
+///
+/// Optional tables (`time-weekday`, `crypto-hash`, …) remain DEFERRED.
+#[derive(Debug, Clone, Copy)]
+pub struct UsestdlibvarsOptions {
+    pub http_method: bool,
+    pub http_status_code: bool,
+}
+
+impl Default for UsestdlibvarsOptions {
+    fn default() -> Self {
+        Self {
+            http_method: true,
+            http_status_code: true,
+        }
+    }
+}

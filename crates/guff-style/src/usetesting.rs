@@ -4,7 +4,7 @@
 //! (Go ≥ 1.24) on; `context.Background` / `context.TODO` / `os.Setenv` /
 //! `os.TempDir` off.
 //!
-//! DEFERRED: per-check flags via `linters.settings.usetesting`.
+//! `linters.settings.usetesting` per-check flags are wired.
 
 use std::sync::OnceLock;
 
@@ -14,6 +14,8 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+
+use crate::options::UsetestingOptions;
 
 struct FuncInfo {
     name: String,
@@ -96,11 +98,12 @@ fn check_call(
     call: &CallExpr,
     fn_info: &FuncInfo,
     ge_go124: bool,
+    options: &UsetestingOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
     // os.CreateTemp("", …) → t.TempDir()
     if let Some(("os", "CreateTemp")) = sel_pkg_and_name(&call.fun) {
-        if call.args.len() == 2 && is_empty_string_lit(&call.args[0]) {
+        if options.os_create_temp && call.args.len() == 2 && is_empty_string_lit(&call.args[0]) {
             pending.push((
                 call.pos().0 as u32,
                 format!(
@@ -117,12 +120,12 @@ fn check_call(
     };
 
     let replacement = match (pkg, name) {
-        ("os", "MkdirTemp") => Some("TempDir"),
-        // Defaults off — keep disabled until settings wiring (DEFERRED).
-        ("os", "TempDir") | ("os", "Setenv") => None,
-        ("os", "Chdir") if ge_go124 => Some("Chdir"),
-        // Defaults off for context.*
-        ("context", "Background") | ("context", "TODO") => None,
+        ("os", "MkdirTemp") if options.os_mkdir_temp => Some("TempDir"),
+        ("os", "TempDir") if options.os_temp_dir => Some("TempDir"),
+        ("os", "Setenv") if options.os_setenv => Some("Setenv"),
+        ("os", "Chdir") if options.os_chdir && ge_go124 => Some("Chdir"),
+        ("context", "Background") if options.context_background && ge_go124 => Some("Context"),
+        ("context", "TODO") if options.context_todo && ge_go124 => Some("Context"),
         _ => None,
     };
 
@@ -141,6 +144,7 @@ fn check_func_body(
     body: &guff::ast::BlockStmt,
     fn_info: &FuncInfo,
     ge_go124: bool,
+    options: &UsetestingOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
     walk::inspect(NodeRef::BlockStmt(body), |n| {
@@ -151,7 +155,7 @@ fn check_func_body(
             // Nested functions are handled when visited as their own FuncDecl/FuncLit.
             NodeRef::FuncLit(_) | NodeRef::FuncDecl(_) => false,
             NodeRef::CallExpr(call) => {
-                check_call(call, fn_info, ge_go124, pending);
+                check_call(call, fn_info, ge_go124, options, pending);
                 true
             }
             _ => true,
@@ -163,6 +167,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "usetesting requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<UsetestingOptions>("usetesting")
+        .copied()
+        .unwrap_or_default();
+
+    if !options.os_create_temp
+        && !options.os_mkdir_temp
+        && !options.os_setenv
+        && !options.os_temp_dir
+        && !options.os_chdir
+        && !options.context_background
+        && !options.context_todo
+    {
+        return Ok(None);
+    }
 
     let ge_go124 = go_ge_124(pass);
     let mut pending = Vec::new();
@@ -183,7 +203,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let Some(info) = check_test_signature(field, fd.name.name.as_str()) else {
                         return true;
                     };
-                    check_func_body(body, &info, ge_go124, &mut pending);
+                    check_func_body(body, &info, ge_go124, &options, &mut pending);
                     true
                 }
                 NodeRef::FuncLit(fl) => {
@@ -193,7 +213,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let Some(info) = check_test_signature(field, "anonymous function") else {
                         return true;
                     };
-                    check_func_body(&fl.body, &info, ge_go124, &mut pending);
+                    check_func_body(&fl.body, &info, ge_go124, &options, &mut pending);
                     true
                 }
                 _ => true,

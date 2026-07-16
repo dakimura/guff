@@ -1,10 +1,11 @@
 //! Port of [`github.com/sashamelentyev/usestdlibvars`](https://github.com/sashamelentyev/usestdlibvars).
 //!
 //! Implements the default-on HTTP checks (`http-method`, `http-status-code`).
+//! `linters.settings.usestdlibvars` toggles for those checks are wired.
 //!
 //! DEFERRED: optional tables/flags (`time-weekday`, `time-month`, `time-layout`,
-//! `crypto-hash`, `rpc-default-path`, `sql-isolation-level`, `tls-signature-scheme`,
-//! `constant-kind`, `time-date-month`) and per-linter settings wiring.
+//! `crypto-hash`, `default-rpc-path`, `sql-isolation-level`, `tls-signature-scheme`,
+//! `constant-kind`, `time-date-month`).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -16,6 +17,8 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+
+use crate::options::UsestdlibvarsOptions;
 
 fn http_method() -> &'static HashMap<&'static str, &'static str> {
     static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
@@ -165,27 +168,45 @@ fn queue_replace(pending: &mut Vec<(u32, u32, String, String)>, lit: &BasicLit, 
     ));
 }
 
-fn check_http_method(pending: &mut Vec<(u32, u32, String, String)>, lit: &BasicLit) {
+fn check_http_method(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    lit: &BasicLit,
+) {
+    if !options.http_method {
+        return;
+    }
     let key = lit_value(lit).to_uppercase();
     if let Some(replacement) = http_method().get(key.as_str()) {
         queue_replace(pending, lit, replacement);
     }
 }
 
-fn check_http_status(pending: &mut Vec<(u32, u32, String, String)>, lit: &BasicLit) {
+fn check_http_status(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    lit: &BasicLit,
+) {
+    if !options.http_status_code {
+        return;
+    }
     let key = lit_value(lit);
     if let Some(replacement) = http_status_code().get(key.as_str()) {
         queue_replace(pending, lit, replacement);
     }
 }
 
-fn fun_args(pending: &mut Vec<(u32, u32, String, String)>, call: &CallExpr) {
+fn fun_args(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    call: &CallExpr,
+) {
     let Some((pkg, fun)) = sel_pkg_name(&call.fun) else {
         // (*ResponseWriter).WriteHeader(200)
         if let Expr::SelectorExpr(se) = call.fun.as_ref() {
             if se.sel.name == "WriteHeader" {
                 if let Some(lit) = basic_lit_from_args(&call.args, 1, 0, Token::INT) {
-                    check_http_status(pending, lit);
+                    check_http_status(options, pending, lit);
                 }
             }
         }
@@ -195,93 +216,108 @@ fn fun_args(pending: &mut Vec<(u32, u32, String, String)>, call: &CallExpr) {
     match (pkg, fun) {
         ("http", "NewRequest") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 3, 0, Token::STRING) {
-                check_http_method(pending, lit);
+                check_http_method(options, pending, lit);
             }
         }
         ("http", "NewRequestWithContext") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 4, 1, Token::STRING) {
-                check_http_method(pending, lit);
+                check_http_method(options, pending, lit);
             }
         }
         ("httptest", "NewRequest") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 3, 0, Token::STRING) {
-                check_http_method(pending, lit);
+                check_http_method(options, pending, lit);
             }
         }
         ("http", "Error") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 3, 2, Token::INT) {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         ("http", "StatusText") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 1, 0, Token::INT) {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         ("http", "Redirect") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 4, 3, Token::INT) {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         ("http", "RedirectHandler") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 2, 1, Token::INT) {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         _ => {
             if fun == "WriteHeader" {
                 if let Some(lit) = basic_lit_from_args(&call.args, 1, 0, Token::INT) {
-                    check_http_status(pending, lit);
+                    check_http_status(options, pending, lit);
                 }
             }
         }
     }
 }
 
-fn type_elts(pending: &mut Vec<(u32, u32, String, String)>, typ: &Expr, elts: &[Expr]) {
+fn type_elts(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    typ: &Expr,
+    elts: &[Expr],
+) {
     let Some((pkg, name)) = sel_pkg_name(typ) else {
         return;
     };
     match (pkg, name) {
         ("http", "Request") => {
             if let Some(lit) = basic_lit_from_elts(elts, "Method") {
-                check_http_method(pending, lit);
+                check_http_method(options, pending, lit);
             }
         }
         ("http", "Response") => {
             if let Some(lit) = basic_lit_from_elts(elts, "StatusCode") {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         ("httptest", "ResponseRecorder") => {
             if let Some(lit) = basic_lit_from_elts(elts, "Code") {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         _ => {}
     }
 }
 
-fn binary_expr(pending: &mut Vec<(u32, u32, String, String)>, x: &Expr, y: &Expr) {
+fn binary_expr(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    x: &Expr,
+    y: &Expr,
+) {
     let Some((_, sel)) = sel_pkg_name(x) else {
         return;
     };
     match sel {
         "StatusCode" => {
             if let Some(lit) = as_basic_lit(y, Token::INT) {
-                check_http_status(pending, lit);
+                check_http_status(options, pending, lit);
             }
         }
         "Method" => {
             if let Some(lit) = as_basic_lit(y, Token::STRING) {
-                check_http_method(pending, lit);
+                check_http_method(options, pending, lit);
             }
         }
         _ => {}
     }
 }
 
-fn switch_stmt(pending: &mut Vec<(u32, u32, String, String)>, tag: &Expr, body: &[Stmt]) {
+fn switch_stmt(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    tag: &Expr,
+    body: &[Stmt],
+) {
     let Some((_, sel)) = sel_pkg_name(tag) else {
         return;
     };
@@ -297,12 +333,12 @@ fn switch_stmt(pending: &mut Vec<(u32, u32, String, String)>, tag: &Expr, body: 
         for expr in &cc.list {
             if check_method {
                 if let Some(lit) = as_basic_lit(expr, Token::STRING) {
-                    check_http_method(pending, lit);
+                    check_http_method(options, pending, lit);
                 }
             }
             if check_status {
                 if let Some(lit) = as_basic_lit(expr, Token::INT) {
-                    check_http_status(pending, lit);
+                    check_http_status(options, pending, lit);
                 }
             }
         }
@@ -314,6 +350,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "usestdlibvars requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<UsestdlibvarsOptions>("usestdlibvars")
+        .copied()
+        .unwrap_or_default();
+
+    if !options.http_method && !options.http_status_code {
+        // DEFERRED: optional tables would still run here when implemented.
+        return Ok(None);
+    }
+
     let mut pending = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -322,12 +368,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             };
             match n {
                 NodeRef::CallExpr(call) => {
-                    fun_args(&mut pending, call);
+                    fun_args(&options, &mut pending, call);
                     true
                 }
                 NodeRef::CompositeLit(cl) => {
                     if let Some(ty) = cl.ty.as_deref() {
-                        type_elts(&mut pending, ty, &cl.elts);
+                        type_elts(&options, &mut pending, ty, &cl.elts);
                     }
                     true
                 }
@@ -346,12 +392,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     ) {
                         return true;
                     }
-                    binary_expr(&mut pending, &bin.x, &bin.y);
+                    binary_expr(&options, &mut pending, &bin.x, &bin.y);
                     true
                 }
                 NodeRef::SwitchStmt(sw) => {
                     if let Some(tag) = &sw.tag {
-                        switch_stmt(&mut pending, tag, &sw.body.list);
+                        switch_stmt(&options, &mut pending, tag, &sw.body.list);
                     }
                     true
                 }
