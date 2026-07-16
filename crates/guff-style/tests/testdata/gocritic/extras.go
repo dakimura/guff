@@ -1,6 +1,11 @@
 package gocritic
 
-import "fmt"
+import (
+	"fmt"
+	formatting "fmt"
+	"path/filepath"
+	// "os"
+)
 
 func emptyStringExtra(s string) {
 	_ = len(s) == 0
@@ -42,6 +47,7 @@ func yodaStyleExtra(p *int) {
 
 func deferUnlambdaExtra() {
 	defer func() { fmt.Println("hello") }()
+	formatting.Println("alias")
 }
 
 func initClauseExtra() {
@@ -50,3 +56,28 @@ func initClauseExtra() {
 }
 
 func sideEffectExtra() {}
+
+func builtinShadowExtra(len int) {
+	_ = len
+}
+
+func paramCombineExtra(a int, b int) {}
+
+func filepathJoinExtra(name string) {
+	_ = filepath.Join("dir/", name)
+}
+
+func rangeAppendExtra(ns []int) {
+	var rs []int
+	for _, n := range ns {
+		_ = n
+		rs = append(rs, ns...)
+	}
+	_ = rs
+}
+
+func weakCondExtra(xs []int) {
+	_ = xs != nil && xs[0] != 0
+}
+
+func complex64() {}

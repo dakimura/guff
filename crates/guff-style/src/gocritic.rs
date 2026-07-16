@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**42** = 34 default + 8 enable-all extras):
+//! Implemented checkers (**50** = 34 default + 16 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -12,11 +12,15 @@
 //!   `deprecatedComment`, `sloppyTypeAssert`
 //! - batch 4 (enable-all extras): `deferUnlambda`, `emptyDecl`, `emptyFallthrough`,
 //!   `emptyStringTest`, `initClause`, `nilValReturn`, `octalLiteral`, `yodaStyleExpr`
+//! - batch 5 (enable-all extras): `builtinShadow`, `builtinShadowDecl`,
+//!   `commentedOutImport`, `dupImport`, `filepathJoin`, `paramTypeCombine`,
+//!   `rangeAppendAll`, `weakCond`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (opinionated/experimental),
+//! DEFERRED: remaining enable-all extras (badRegexp / dupOption / methodExprCall /
+//! rangeExprCopy / regexpPattern / ruleguard / sortSlice / sqlQuery / typeAssertChain),
 //! per-check `settings` params, SuggestedFix, caseOrder expression-switch
 //! overlap, wrapperFunc/unlambda/typeSwitchVar full type-aware parity.
 
@@ -27,8 +31,9 @@ use std::sync::{Arc, OnceLock};
 
 use guff::ast::{
     AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl,
-    DeferStmt, Expr, FieldList, File, FuncDecl, FuncLit, Ident, IfStmt, IndexExpr, SliceExpr,
-    StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
+    DeferStmt, Expr, Field, FieldList, File, FuncDecl, FuncLit, FuncType, Ident, IfStmt, IndexExpr,
+    RangeStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
+    ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
@@ -89,13 +94,21 @@ const DEFAULT_CHECKS: &[&str] = &[
 /// Experimental / opinionated checkers available via `enable-all` or
 /// `enabled-checks` (prometheus enable-all coverage).
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
+    "builtinShadow",
+    "builtinShadowDecl",
+    "commentedOutImport",
     "deferUnlambda",
+    "dupImport",
     "emptyDecl",
     "emptyFallthrough",
     "emptyStringTest",
+    "filepathJoin",
     "initClause",
     "nilValReturn",
     "octalLiteral",
+    "paramTypeCombine",
+    "rangeAppendAll",
+    "weakCond",
     "yodaStyleExpr",
 ];
 
@@ -1871,7 +1884,8 @@ fn run_comment_checks(
     let need_codegen = enabled(set, "codegenComment");
     let need_fmt = enabled(set, "commentFormatting");
     let need_depr = enabled(set, "deprecatedComment");
-    if !need_codegen && !need_fmt && !need_depr {
+    let need_commented_import = enabled(set, "commentedOutImport");
+    if !need_codegen && !need_fmt && !need_depr && !need_commented_import {
         return;
     }
 
@@ -1914,7 +1928,8 @@ fn run_comment_checks(
         }
 
         if need_depr {
-            for doc in declaration_docs(&parsed) {
+            let docs = declaration_docs(&parsed);
+            for doc in docs {
                 let mut local = Vec::new();
                 check_deprecated_comment(doc, &mut local);
                 for (pos, msg) in local {
@@ -1922,6 +1937,53 @@ fn run_comment_checks(
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
                         report(pending, mapped, msg);
                     }
+                }
+            }
+        }
+
+        if need_commented_import {
+            let mut local = Vec::new();
+            check_commented_out_import(&parsed, &mut local);
+            for (pos, msg) in local {
+                let line = re_fset.position(Pos(pos as i64)).line;
+                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    report(pending, mapped, msg);
+                }
+            }
+        }
+    }
+}
+
+fn check_commented_out_import(file: &File, pending: &mut Vec<(u32, String)>) {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?m)^(?://|/\*)?\s*"([a-zA-Z0-9_/]+)"\s*(?:\*/)?$"#).unwrap()
+    });
+    for decl in &file.decls {
+        let Decl::GenDecl(g) = decl else {
+            break;
+        };
+        if g.tok != Some(Token::IMPORT) {
+            break;
+        }
+        if !g.lparen.is_valid() {
+            continue;
+        }
+        for cg in &file.comments {
+            if cg.pos().0 > g.rparen.0 {
+                break;
+            }
+            if cg.pos().0 < g.lparen.0 {
+                continue;
+            }
+            for comment in &cg.list {
+                for caps in re.captures_iter(&comment.text) {
+                    let path = &caps[1];
+                    report(
+                        pending,
+                        comment.slash.0 as u32,
+                        format!("remove commented-out \"{path}\" import"),
+                    );
                 }
             }
         }
@@ -2224,6 +2286,491 @@ fn check_init_clause(
     );
 }
 
+fn is_builtin_name(name: &str) -> bool {
+    matches!(
+        name,
+        "any"
+            | "bool"
+            | "byte"
+            | "comparable"
+            | "complex64"
+            | "complex128"
+            | "error"
+            | "float32"
+            | "float64"
+            | "int"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "rune"
+            | "string"
+            | "uint"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "uintptr"
+            | "true"
+            | "false"
+            | "iota"
+            | "nil"
+            | "append"
+            | "cap"
+            | "clear"
+            | "close"
+            | "complex"
+            | "copy"
+            | "delete"
+            | "imag"
+            | "len"
+            | "make"
+            | "min"
+            | "max"
+            | "new"
+            | "panic"
+            | "print"
+            | "println"
+            | "real"
+            | "recover"
+    )
+}
+
+fn warn_builtin_shadow(ident: &Ident, pending: &mut Vec<(u32, String)>) {
+    if is_builtin_name(&ident.name) {
+        report(
+            pending,
+            ident.pos().0 as u32,
+            format!("shadowing of predeclared identifier: {}", ident.name),
+        );
+    }
+}
+
+fn check_builtin_shadow_fields(fields: Option<&FieldList>, pending: &mut Vec<(u32, String)>) {
+    let Some(fl) = fields else {
+        return;
+    };
+    for field in &fl.list {
+        for name in &field.names {
+            warn_builtin_shadow(name, pending);
+        }
+    }
+}
+
+fn is_def_ident(pass: &Pass<'_>, id: &Ident) -> bool {
+    let Some(info) = pass.types_info() else {
+        // Without types info, treat DEFINE LHS idents as defs (best-effort).
+        return true;
+    };
+    info.defs.get(&id.id).copied().flatten().is_some()
+}
+
+fn check_builtin_shadow_assign(pass: &Pass<'_>, a: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+    if a.tok != Some(Token::DEFINE) {
+        return;
+    }
+    for lhs in &a.lhs {
+        let Expr::Ident(id) = lhs else {
+            continue;
+        };
+        if is_def_ident(pass, id) {
+            warn_builtin_shadow(id, pending);
+        }
+    }
+}
+
+fn check_builtin_shadow_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
+    for name in &spec.names {
+        warn_builtin_shadow(name, pending);
+    }
+}
+
+fn check_builtin_shadow_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    check_builtin_shadow_fields(f.recv.as_ref(), pending);
+    check_builtin_shadow_fields(f.ty.params.as_ref(), pending);
+    check_builtin_shadow_fields(f.ty.results.as_ref(), pending);
+    let Some(body) = &f.body else {
+        return;
+    };
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(a) => check_builtin_shadow_assign(pass, a, pending),
+            NodeRef::GenDecl(g) => {
+                for spec in &g.specs {
+                    if let Spec::ValueSpec(vs) = spec {
+                        check_builtin_shadow_value_spec(vs, pending);
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+}
+
+fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Vec<(u32, String)>) {
+    match decl {
+        Decl::FuncDecl(f) if f.recv.is_none() => {
+            warn_builtin_shadow(&f.name, pending);
+        }
+        Decl::GenDecl(g) => {
+            for spec in &g.specs {
+                match spec {
+                    Spec::ValueSpec(vs) => {
+                        for name in &vs.names {
+                            warn_builtin_shadow(name, pending);
+                        }
+                    }
+                    Spec::TypeSpec(ts) => warn_builtin_shadow(&ts.name, pending),
+                    Spec::ImportSpec(_) => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String)>) {
+    let mut by_path: HashMap<String, Vec<&guff::ast::ImportSpec>> = HashMap::new();
+    for imp in &file.imports {
+        by_path
+            .entry(imp.path.value.clone())
+            .or_default()
+            .push(imp);
+    }
+    for import_list in by_path.values() {
+        if import_list.len() < 2 {
+            continue;
+        }
+        let mut lines: Vec<i64> = import_list
+            .iter()
+            .map(|imp| pass.fset().position(imp.path.value_pos).line)
+            .collect();
+        lines.sort_unstable();
+        let mut msg = format!(
+            "package is imported {} times under different aliases on lines",
+            import_list.len()
+        );
+        for (idx, line) in lines.iter().enumerate() {
+            if idx == lines.len() - 1 && lines.len() > 1 {
+                msg.push_str(" and");
+            } else if idx > 0 {
+                msg.push(',');
+            }
+            msg.push_str(&format!(" {line}"));
+        }
+        for imp in import_list {
+            report(pending, imp.path.value_pos.0 as u32, msg.clone());
+        }
+    }
+}
+
+fn check_filepath_join(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if !(name == "filepath.Join"
+        || name == "path/filepath.Join"
+        || name.ends_with("/filepath.Join"))
+    {
+        return;
+    }
+    for arg in &call.args {
+        let Expr::BasicLit(lit) = arg else {
+            continue;
+        };
+        if lit.value.contains('/') || lit.value.contains('\\') {
+            let Some(text) = expr_text(arg) else {
+                continue;
+            };
+            report(
+                pending,
+                lit.value_pos.0 as u32,
+                format!("{text} contains a path separator"),
+            );
+        }
+    }
+}
+
+fn field_type_text(field: &Field) -> Option<String> {
+    field.ty.as_ref().and_then(expr_text)
+}
+
+fn format_field_list(fields: &[(Vec<String>, String)]) -> String {
+    fields
+        .iter()
+        .map(|(names, ty)| {
+            if names.is_empty() {
+                ty.clone()
+            } else {
+                format!("{} {ty}", names.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn optimize_named_fields(fields: &[Field]) -> Option<Vec<(Vec<String>, String)>> {
+    if fields.len() < 2 || fields[0].names.is_empty() {
+        return None;
+    }
+    let mut out: Vec<(Vec<String>, String)> = Vec::new();
+    for field in fields {
+        let names: Vec<String> = field.names.iter().map(|n| n.name.clone()).collect();
+        let ty = field_type_text(field)?;
+        if let Some(last) = out.last_mut() {
+            if last.1 == ty {
+                last.0.extend(names);
+                continue;
+            }
+        }
+        out.push((names, ty));
+    }
+    if out.len() == fields.len() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn format_func_type_like(ty: &FuncType, params: Option<&str>, results: Option<&str>) -> String {
+    let mut s = String::from("func");
+    if let Some(tp) = &ty.type_params {
+        let parts: Vec<String> = tp
+            .list
+            .iter()
+            .filter_map(|f| {
+                let names = f
+                    .names
+                    .iter()
+                    .map(|n| n.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let t = field_type_text(f)?;
+                if names.is_empty() {
+                    Some(t)
+                } else {
+                    Some(format!("{names} {t}"))
+                }
+            })
+            .collect();
+        s.push('[');
+        s.push_str(&parts.join(", "));
+        s.push(']');
+    }
+    s.push('(');
+    if let Some(p) = params {
+        s.push_str(p);
+    } else if let Some(p) = &ty.params {
+        let cur: Vec<_> = p
+            .list
+            .iter()
+            .filter_map(|f| {
+                let names: Vec<_> = f.names.iter().map(|n| n.name.clone()).collect();
+                let t = field_type_text(f)?;
+                Some((names, t))
+            })
+            .collect();
+        s.push_str(&format_field_list(&cur));
+    }
+    s.push(')');
+    if let Some(r) = results {
+        if r.contains(',') || r.contains(' ') {
+            s.push_str(&format!(" ({r})"));
+        } else {
+            s.push(' ');
+            s.push_str(r);
+        }
+    } else if let Some(r) = &ty.results {
+        let cur: Vec<_> = r
+            .list
+            .iter()
+            .filter_map(|f| {
+                let names: Vec<_> = f.names.iter().map(|n| n.name.clone()).collect();
+                let t = field_type_text(f)?;
+                Some((names, t))
+            })
+            .collect();
+        let text = format_field_list(&cur);
+        if r.list.len() > 1 || r.list.first().is_some_and(|f| !f.names.is_empty()) {
+            s.push_str(&format!(" ({text})"));
+        } else {
+            s.push(' ');
+            s.push_str(&text);
+        }
+    }
+    s
+}
+
+fn params_are_multi_line(pass: &Pass<'_>, params: &FieldList) -> bool {
+    if !params.opening.is_valid() || !params.closing.is_valid() {
+        return false;
+    }
+    let start = pass.fset().position(params.opening).line;
+    let end = pass.fset().position(params.closing).line;
+    start != end
+}
+
+fn check_param_type_combine(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    let opt_params = f.ty.params.as_ref().and_then(|p| {
+        if params_are_multi_line(pass, p) {
+            None
+        } else {
+            optimize_named_fields(&p.list)
+        }
+    });
+    let opt_results = f.ty.results.as_ref().and_then(|r| {
+        if params_are_multi_line(pass, r) {
+            None
+        } else {
+            optimize_named_fields(&r.list)
+        }
+    });
+    if opt_params.is_none() && opt_results.is_none() {
+        return;
+    }
+    let before = format_func_type_like(&f.ty, None, None);
+    let after_params = opt_params.as_ref().map(|p| format_field_list(p));
+    let after_results = opt_results.as_ref().map(|r| format_field_list(r));
+    let after = if opt_results.is_none() {
+        format_func_type_like(&f.ty, after_params.as_deref(), None)
+    } else if opt_params.is_none() {
+        format_func_type_like(&f.ty, None, after_results.as_deref())
+    } else {
+        format_func_type_like(&f.ty, after_params.as_deref(), after_results.as_deref())
+    };
+    if before == after {
+        return;
+    }
+    report(
+        pending,
+        f.ty.pos().0 as u32,
+        format!("{before} could be replaced with {after}"),
+    );
+}
+
+fn is_slice_literal(expr: &Expr) -> bool {
+    matches!(expr, Expr::CompositeLit(_))
+}
+
+fn check_range_append_all(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+    if rs.body.list.is_empty() {
+        return;
+    }
+    let Expr::Ident(range_id) = &rs.x else {
+        return;
+    };
+    let Some(range_obj) = code::object_of(pass, range_id) else {
+        return;
+    };
+    walk::inspect(NodeRef::BlockStmt(&rs.body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::CallExpr(call) = n else {
+            return true;
+        };
+        if call.args.len() != 2 || !call.ellipsis.is_valid() {
+            return true;
+        }
+        let is_append = match call.fun.as_ref() {
+            Expr::Ident(id) => id.name == "append",
+            _ => false,
+        };
+        if !is_append || is_slice_literal(&call.args[0]) {
+            return true;
+        }
+        let Expr::Ident(from) = &call.args[1] else {
+            return true;
+        };
+        if code::object_of(pass, from) == Some(range_obj) {
+            report(
+                pending,
+                from.pos().0 as u32,
+                format!("append all `{}` data while range it", from.name),
+            );
+        }
+        true
+    });
+}
+
+fn is_slice_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Slice(_))
+}
+
+fn contains_index_of(tree: &Expr, x: &Expr) -> bool {
+    match tree {
+        Expr::IndexExpr(ix) => exprs_equal(x, &ix.x) || contains_index_of(&ix.index, x),
+        Expr::ParenExpr(p) => contains_index_of(&p.x, x),
+        Expr::UnaryExpr(u) => contains_index_of(&u.x, x),
+        Expr::BinaryExpr(b) => contains_index_of(&b.x, x) || contains_index_of(&b.y, x),
+        Expr::CallExpr(c) => {
+            contains_index_of(&c.fun, x) || c.args.iter().any(|a| contains_index_of(a, x))
+        }
+        Expr::SelectorExpr(s) => contains_index_of(&s.x, x),
+        Expr::SliceExpr(s) => {
+            contains_index_of(&s.x, x)
+                || s.low.as_ref().is_some_and(|e| contains_index_of(e, x))
+                || s.high.as_ref().is_some_and(|e| contains_index_of(e, x))
+                || s.max.as_ref().is_some_and(|e| contains_index_of(e, x))
+        }
+        Expr::StarExpr(s) => contains_index_of(&s.x, x),
+        Expr::TypeAssertExpr(a) => contains_index_of(&a.x, x),
+        Expr::IndexListExpr(ix) => {
+            contains_index_of(&ix.x, x) || ix.indices.iter().any(|i| contains_index_of(i, x))
+        }
+        Expr::KeyValueExpr(kv) => {
+            contains_index_of(&kv.key, x) || contains_index_of(&kv.value, x)
+        }
+        Expr::CompositeLit(lit) => lit.elts.iter().any(|e| contains_index_of(e, x)),
+        _ => false,
+    }
+}
+
+fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    let lhs = unparen(&bin.x);
+    let rhs = unparen(&bin.y);
+    let Expr::BinaryExpr(lhs_bin) = lhs else {
+        return;
+    };
+    if !code::is_nil(pass, &lhs_bin.y) {
+        return;
+    }
+    if !is_slice_typed(pass, &lhs_bin.x) {
+        return;
+    }
+    let pat1 = bin.op == Token::LAND && lhs_bin.op == Token::NEQ;
+    let pat2 = bin.op == Token::LOR && lhs_bin.op == Token::EQL;
+    if !pat1 && !pat2 {
+        return;
+    }
+    if !contains_index_of(rhs, &lhs_bin.x) {
+        return;
+    }
+    let Some(x_t) = expr_text(&bin.x) else {
+        return;
+    };
+    let Some(y_t) = expr_text(&bin.y) else {
+        return;
+    };
+    let whole = format!("{x_t} {} {y_t}", bin.op.as_str());
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("suspicious `{whole}`; nil check may not be enough, check for len"),
+    );
+}
+
 fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
@@ -2278,6 +2825,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
             }
+        }
+        if enabled(&set, "builtinShadowDecl") {
+            for decl in &file.decls {
+                check_builtin_shadow_decl(decl, &mut pending);
+            }
+        }
+        if enabled(&set, "dupImport") {
+            check_dup_import(pass, file, &mut pending);
         }
 
         walk::inspect(NodeRef::File(file), |n| {
@@ -2344,6 +2899,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::ForStmt(s) if enabled(&set, "badCond") => {
                     check_bad_cond_for(s, &mut pending);
                 }
+                NodeRef::RangeStmt(s) if enabled(&set, "rangeAppendAll") => {
+                    check_range_append_all(pass, s, &mut pending);
+                }
                 NodeRef::BinaryExpr(b) => {
                     if enabled(&set, "sloppyLen") {
                         check_sloppy_len(b, &mut pending);
@@ -2359,6 +2917,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "yodaStyleExpr") {
                         check_yoda_style(b, &mut pending);
+                    }
+                    if enabled(&set, "weakCond") {
+                        check_weak_cond(pass, b, &mut pending);
                     }
                 }
                 NodeRef::BasicLit(lit) if enabled(&set, "octalLiteral") => {
@@ -2405,6 +2966,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "exitAfterDefer") {
                         check_exit_after_defer(f, &mut pending);
                     }
+                    if enabled(&set, "builtinShadow") {
+                        check_builtin_shadow_func(pass, f, &mut pending);
+                    }
+                    if enabled(&set, "paramTypeCombine") {
+                        check_param_type_combine(pass, f, &mut pending);
+                    }
                 }
                 NodeRef::CallExpr(c) => {
                     if enabled(&set, "badCall") {
@@ -2424,6 +2991,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "wrapperFunc") {
                         check_wrapper_func(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "filepathJoin") {
+                        check_filepath_join(pass, c, &mut pending);
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {

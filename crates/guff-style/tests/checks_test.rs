@@ -3068,6 +3068,14 @@ fn gocritic_enable_all_extras() {
         "consider to change order in expression to *p == 10",
         "can rewrite as `defer fmt.Println",
         "consider to move `sideEffectExtra()` before if",
+        "shadowing of predeclared identifier: len",
+        "shadowing of predeclared identifier: complex64",
+        "package is imported 2 times under different aliases",
+        "remove commented-out \"os\" import",
+        "func(a int, b int) could be replaced with func(a, b int)",
+        "\"dir/\" contains a path separator",
+        "append all `ns` data while range it",
+        "nil check may not be enough, check for len",
     ];
     for needle in expect {
         assert!(
@@ -3089,6 +3097,13 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("always nil")
                 || m.contains("can rewrite as `defer")
                 || m.contains("before if")
+                || m.contains("shadowing of predeclared")
+                || m.contains("imported 2 times")
+                || m.contains("commented-out")
+                || m.contains("could be replaced with func(a, b int)")
+                || m.contains("path separator")
+                || m.contains("append all")
+                || m.contains("nil check may not be enough")
         }),
         "extras should be off by default: {messages:?}"
     );
