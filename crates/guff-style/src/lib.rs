@@ -8,6 +8,7 @@
 //! - [`goconst`]
 //! - [`dogsled`]
 //! - [`asciicheck`]
+//! - [`gochecknoinits`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -55,6 +56,7 @@ mod modernize;
 mod musttag;
 mod sloglint;
 mod testifylint;
+mod gochecknoinits;
 mod gocognit;
 mod goconst;
 mod gocyclo;
@@ -91,6 +93,7 @@ pub use exhaustive::analyzer as exhaustive;
 pub use exhaustruct::analyzer as exhaustruct;
 pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
+pub use gochecknoinits::analyzer as gochecknoinits;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
 pub use gocritic::analyzer as gocritic;
@@ -129,6 +132,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         goconst(),
         dogsled(),
         asciicheck(),
+        gochecknoinits(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

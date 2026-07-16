@@ -1,10 +1,11 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen, gocognit,
-    goconst, gocritic, gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag,
-    nakedret, nestif, nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint,
-    tagalign, testifylint, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen,
+    gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, lll, loggercheck, mnd,
+    modernize, musttag, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint, prealloc,
+    predeclared, sloglint, tagalign, testifylint, unconvert, usestdlibvars, usetesting, whitespace,
+    wsl,
 };
 
 #[test]
@@ -23,6 +24,24 @@ fn copyloopvar_flags_redundant_copies() {
             .any(|m| m.contains("for") && m.contains("\"v\"")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn gochecknoinits_flags_init_functions() {
+    let pkg = support::typecheck_fixture("gochecknoinits", "example.com/gochecknoinits", "bad.go");
+    let messages = support::run_analyzer(gochecknoinits(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages.iter().all(|m| m.contains("`init` function")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn gochecknoinits_allows_methods_and_other_names() {
+    let pkg =
+        support::typecheck_fixture("gochecknoinits", "example.com/gochecknoinits/ok", "ok.go");
+    assert!(support::run_analyzer(gochecknoinits(), &pkg).is_empty());
 }
 
 #[test]
