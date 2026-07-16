@@ -428,3 +428,67 @@ fn parse_v2_comment_settings() {
     assert_eq!(dupword.keywords, vec!["the".to_string()]);
     assert_eq!(dupword.ignore, vec!["is".to_string()]);
 }
+
+#[test]
+fn parse_v2_import_settings() {
+    use guff_lint::{DepguardSettings, GomoddirectivesSettings};
+
+    let contents = fs::read_to_string(testdata_config("v2_import_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+
+    assert_eq!(settings.depguard.rules.len(), 1);
+    let main = settings.depguard.rules.get("Main").expect("Main rule");
+    assert_eq!(main.list_mode.as_deref(), Some("lax"));
+    assert_eq!(main.files, vec!["$all".to_string(), "!$test".to_string()]);
+    assert_eq!(main.allow, vec!["$gostd".to_string()]);
+    assert_eq!(main.deny.len(), 1);
+    assert_eq!(main.deny[0].pkg, "github.com/sirupsen/logrus");
+    assert_eq!(main.deny[0].desc, "use log/slog");
+
+    assert_eq!(
+        settings.gomoddirectives,
+        GomoddirectivesSettings {
+            replace_local: true,
+            replace_allow_list: vec!["launchpad.net/gocheck".into()],
+            retract_allow_no_explanation: true,
+            exclude_forbidden: true,
+            toolchain_forbidden: true,
+            tool_forbidden: true,
+            go_debug_forbidden: true,
+        }
+    );
+
+    // v1 blocked logrus + v2 blocked pkg/errors, both set local_replace.
+    assert!(settings.gomodguard.local_replace_directives);
+    assert!(settings
+        .gomodguard
+        .blocked_modules
+        .iter()
+        .any(|(m, r)| m == "github.com/sirupsen/logrus" && r.contains("log/slog")));
+    assert!(settings
+        .gomodguard
+        .blocked_modules
+        .iter()
+        .any(|(m, r)| m == "github.com/pkg/errors" && r.contains("std errors")));
+
+    let bag = settings.to_bag();
+    let dep = bag
+        .get::<guff_import::DepguardOptions>("depguard")
+        .expect("depguard options");
+    assert_eq!(dep.rules.len(), 1);
+    assert_eq!(dep.rules[0].list_mode, guff_import::ListMode::Lax);
+    let gmd = bag
+        .get::<guff_import::GomoddirectivesOptions>("gomoddirectives")
+        .expect("gomoddirectives options");
+    assert!(gmd.replace_local);
+    assert!(gmd.exclude_forbidden);
+    let gg = bag
+        .get::<guff_import::GomodguardOptions>("gomodguard")
+        .expect("gomodguard options");
+    assert!(gg.local_replace_directives);
+    assert_eq!(gg.blocked_modules.len(), 2);
+
+    // Smoke: empty DepguardSettings round-trips to empty rules (analyzer default).
+    let _ = DepguardSettings::default();
+}

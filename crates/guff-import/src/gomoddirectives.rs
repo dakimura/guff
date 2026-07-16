@@ -5,8 +5,11 @@
 //! local allowed — both off by default); retract requires a rationale comment;
 //! exclude / toolchain / tool / godebug are allowed unless explicitly forbidden.
 //!
-//! DEFERRED: `linters.settings.gomoddirectives` (replace-local, allow-list,
-//! exclude-forbidden, toolchain-pattern, …).
+//! Settings: `linters.settings.gomoddirectives` (`replace-local`,
+//! `replace-allow-list`, `retract-allow-no-explanation`, `exclude-forbidden`,
+//! `toolchain-forbidden`, `tool-forbidden`, `go-debug-forbidden`).
+//! DEFERRED: `ignore-forbidden`, `toolchain-pattern`, `go-version-pattern`,
+//! `check-module-path`.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -15,12 +18,17 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::gomod::{find_gomod, parse_gomod, Replace};
+use crate::options::GomoddirectivesOptions;
 
 const REASON_REPLACE: &str = "replacement are not allowed";
 const REASON_REPLACE_LOCAL: &str = "local replacement are not allowed";
 const REASON_REPLACE_DUPLICATE: &str = "multiple replacement of the same module";
 const REASON_REPLACE_IDENTICAL: &str = "the original module and the replacement are identical";
 const REASON_RETRACT: &str = "a comment is mandatory to explain why the version has been retracted";
+const REASON_EXCLUDE: &str = "exclude directive is not allowed";
+const REASON_TOOLCHAIN: &str = "toolchain directive is not allowed";
+const REASON_TOOL: &str = "tool directive is not allowed";
+const REASON_GODEBUG: &str = "godebug directive is not allowed";
 
 /// Deduplicate analysis across packages that share a module root.
 fn checked_gomods() -> &'static Mutex<HashSet<String>> {
@@ -28,11 +36,17 @@ fn checked_gomods() -> &'static Mutex<HashSet<String>> {
     CHECKED.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn check_replace(r: &Replace) -> Option<String> {
-    // Defaults: ReplaceAllowAll=false, ReplaceAllowLocal=false, empty allow-list.
+fn check_replace(r: &Replace, opts: &GomoddirectivesOptions) -> Option<String> {
+    if opts.replace_allow_list.iter().any(|p| p == &r.old_path) {
+        return None;
+    }
     if r.is_local() {
+        if opts.replace_local {
+            return None;
+        }
         return Some(format!("{REASON_REPLACE_LOCAL}: {}", r.old_path));
     }
+    // Non-local replace: still forbidden unless on allow-list (handled above).
     Some(format!("{REASON_REPLACE}: {}", r.old_path))
 }
 
@@ -40,6 +54,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "gomoddirectives requires inspect analyzer".to_string())?;
+
+    let opts = pass
+        .settings::<GomoddirectivesOptions>("gomoddirectives")
+        .cloned()
+        .unwrap_or_default();
 
     let Some(gomod_path) = find_gomod(&pass.pkg().dir) else {
         return Ok(None);
@@ -66,7 +85,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut uniq = HashSet::new();
     for r in &gomod.replaces {
-        if let Some(reason) = check_replace(r) {
+        if let Some(reason) = check_replace(r, &opts) {
             pending.push(reason);
             continue;
         }
@@ -80,10 +99,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    for retract in &gomod.retracts {
-        if retract.rationale.is_empty() {
-            pending.push(REASON_RETRACT.to_string());
+    if !opts.retract_allow_no_explanation {
+        for retract in &gomod.retracts {
+            if retract.rationale.is_empty() {
+                pending.push(REASON_RETRACT.to_string());
+            }
         }
+    }
+
+    if opts.exclude_forbidden && !gomod.excludes.is_empty() {
+        pending.push(REASON_EXCLUDE.to_string());
+    }
+    if opts.toolchain_forbidden && gomod.toolchain.is_some() {
+        pending.push(REASON_TOOLCHAIN.to_string());
+    }
+    if opts.tool_forbidden && !gomod.tools.is_empty() {
+        pending.push(REASON_TOOL.to_string());
+    }
+    if opts.go_debug_forbidden && !gomod.godebugs.is_empty() {
+        pending.push(REASON_GODEBUG.to_string());
     }
 
     for message in pending {

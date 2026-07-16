@@ -4,11 +4,15 @@
 //! Default (empty allowed/blocked, `local-replace-directives=false`) reports
 //! nothing — matching golangci when settings are unset.
 //!
-//! Test helpers [`analyzer_block_logrus`] / [`analyzer_local_replace`] hard-code
-//! common configs so fixtures work without settings wiring.
+//! Settings: `linters.settings.gomodguard` (v1 `blocked.modules` map list +
+//! `blocked.local_replace_directives`) and `gomodguard_v2` (`blocked` list +
+//! `local-replace-directives`). Both keys populate the same [`GomodguardOptions`].
 //!
-//! DEFERRED: `linters.settings.gomodguard` / `gomodguard_v2` (allowed domains,
-//! version constraints, recommendations, regex match types).
+//! Test helpers [`analyzer_block_logrus`] / [`analyzer_local_replace`] hard-code
+//! common configs so fixtures work without a settings bag.
+//!
+//! DEFERRED: allowed modules/domains, version constraints, `match-type`
+//! (`prefix` / `regex`).
 
 use std::sync::OnceLock;
 
@@ -16,25 +20,18 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::gomod::{find_gomod, is_package_in_module, parse_gomod};
-
-#[derive(Clone, Debug, Default)]
-pub struct Options {
-    /// Blocked module paths (exact / prefix of import module).
-    pub blocked_modules: Vec<(String, String)>, // (module, reason)
-    /// When true, imports of modules with a local `replace` are blocked.
-    pub local_replace_directives: bool,
-}
+use crate::options::GomodguardOptions;
 
 fn unquote_import(path: &str) -> &str {
     path.trim_matches('"').trim_matches('`')
 }
 
-fn options_default() -> Options {
-    Options::default()
+fn options_default() -> GomodguardOptions {
+    GomodguardOptions::default()
 }
 
-fn options_block_logrus() -> Options {
-    Options {
+fn options_block_logrus() -> GomodguardOptions {
+    GomodguardOptions {
         blocked_modules: vec![(
             "github.com/sirupsen/logrus".into(),
             "use log/slog".into(),
@@ -43,21 +40,21 @@ fn options_block_logrus() -> Options {
     }
 }
 
-fn options_local_replace() -> Options {
-    Options {
+fn options_local_replace() -> GomodguardOptions {
+    GomodguardOptions {
         blocked_modules: Vec::new(),
         local_replace_directives: true,
     }
 }
 
-fn run_with(pass: &mut Pass<'_>, opts: &Options) -> Result<Option<AnalysisResult>, RunError> {
+fn run_with(pass: &mut Pass<'_>, opts: &GomodguardOptions) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "gomodguard requires inspect analyzer".to_string())?;
 
     // Prefer settings bag when wired; else use hardcoded options for this run.
     let opts = pass
-        .settings::<Options>("gomodguard")
+        .settings::<GomodguardOptions>("gomodguard")
         .cloned()
         .unwrap_or_else(|| opts.clone());
 

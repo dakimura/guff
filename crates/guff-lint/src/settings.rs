@@ -43,6 +43,9 @@ pub struct LinterSettings {
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
+    pub depguard: DepguardSettings,
+    pub gomoddirectives: GomoddirectivesSettings,
+    pub gomodguard: GomodguardSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -419,6 +422,68 @@ pub struct DupwordSettings {
     pub comments_only: Option<bool>,
 }
 
+/// `linters.settings.depguard` / `linters-settings.depguard`.
+///
+/// Empty `rules` → analyzer default (`Main` / `$gostd` only).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DepguardSettings {
+    #[serde(default)]
+    pub rules: std::collections::BTreeMap<String, DepguardRuleSetting>,
+}
+
+/// One depguard rule entry (YAML value under `rules.<name>`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DepguardRuleSetting {
+    #[serde(default, rename = "list-mode")]
+    pub list_mode: Option<String>,
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<DepguardDenySetting>,
+}
+
+/// One `deny` entry (`pkg` + optional `desc`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DepguardDenySetting {
+    #[serde(default)]
+    pub pkg: String,
+    #[serde(default)]
+    pub desc: String,
+}
+
+/// `linters.settings.gomoddirectives` / `linters-settings.gomoddirectives`.
+///
+/// `ignore-forbidden` / `toolchain-pattern` / `go-version-pattern` /
+/// `check-module-path` remain DEFERRED.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GomoddirectivesSettings {
+    #[serde(default, rename = "replace-local")]
+    pub replace_local: bool,
+    #[serde(default, rename = "replace-allow-list")]
+    pub replace_allow_list: Vec<String>,
+    #[serde(default, rename = "retract-allow-no-explanation")]
+    pub retract_allow_no_explanation: bool,
+    #[serde(default, rename = "exclude-forbidden")]
+    pub exclude_forbidden: bool,
+    #[serde(default, rename = "toolchain-forbidden")]
+    pub toolchain_forbidden: bool,
+    #[serde(default, rename = "tool-forbidden")]
+    pub tool_forbidden: bool,
+    #[serde(default, rename = "go-debug-forbidden")]
+    pub go_debug_forbidden: bool,
+}
+
+/// Combined `gomodguard` + `gomodguard_v2` settings (same Pass bag key).
+///
+/// Allowed modules/domains, version constraints, and `match-type` remain DEFERRED.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GomodguardSettings {
+    pub blocked_modules: Vec<(String, String)>,
+    pub local_replace_directives: bool,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -576,6 +641,23 @@ impl LinterSettings {
                 out.dupword = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("depguard".into())) {
+            if let Ok(s) = serde_yaml::from_value::<DepguardSettings>(v.clone()) {
+                out.depguard = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("gomoddirectives".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GomoddirectivesSettings>(v.clone()) {
+                out.gomoddirectives = s;
+            }
+        }
+        // gomodguard (v1) and gomodguard_v2 both feed GomodguardSettings.
+        if let Some(v) = map.get(serde_yaml::Value::String("gomodguard".into())) {
+            merge_gomodguard_v1(&mut out.gomodguard, v);
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("gomodguard_v2".into())) {
+            merge_gomodguard_v2(&mut out.gomodguard, v);
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -618,6 +700,12 @@ impl LinterSettings {
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
+        bag.insert("depguard", self.depguard.to_guff_depguard());
+        bag.insert(
+            "gomoddirectives",
+            self.gomoddirectives.to_guff_gomoddirectives(),
+        );
+        bag.insert("gomodguard", self.gomodguard.to_guff_gomodguard());
         Arc::new(bag)
     }
 
@@ -1063,6 +1151,150 @@ impl DupwordSettings {
             keywords: self.keywords.clone(),
             ignore: self.ignore.clone(),
             comments_only: self.comments_only.unwrap_or(false),
+        }
+    }
+}
+
+impl DepguardSettings {
+    pub fn to_guff_depguard(&self) -> guff_import::DepguardOptions {
+        let mut rules = Vec::new();
+        for (name, rule) in &self.rules {
+            rules.push(guff_import::DepguardRule {
+                name: name.clone(),
+                list_mode: guff_import::ListMode::parse(
+                    rule.list_mode.as_deref().unwrap_or("original"),
+                ),
+                files: rule.files.clone(),
+                allow: rule.allow.clone(),
+                deny: rule
+                    .deny
+                    .iter()
+                    .map(|d| guff_import::DenyEntry {
+                        pkg: d.pkg.clone(),
+                        desc: d.desc.clone(),
+                    })
+                    .collect(),
+            });
+        }
+        guff_import::DepguardOptions { rules }
+    }
+}
+
+impl GomoddirectivesSettings {
+    pub fn to_guff_gomoddirectives(&self) -> guff_import::GomoddirectivesOptions {
+        guff_import::GomoddirectivesOptions {
+            replace_local: self.replace_local,
+            replace_allow_list: self.replace_allow_list.clone(),
+            retract_allow_no_explanation: self.retract_allow_no_explanation,
+            exclude_forbidden: self.exclude_forbidden,
+            toolchain_forbidden: self.toolchain_forbidden,
+            tool_forbidden: self.tool_forbidden,
+            go_debug_forbidden: self.go_debug_forbidden,
+        }
+    }
+}
+
+impl GomodguardSettings {
+    pub fn to_guff_gomodguard(&self) -> guff_import::GomodguardOptions {
+        guff_import::GomodguardOptions {
+            blocked_modules: self.blocked_modules.clone(),
+            local_replace_directives: self.local_replace_directives,
+        }
+    }
+}
+
+/// Parse golangci v1 `gomodguard` YAML into [`GomodguardSettings`].
+///
+/// Shape:
+/// ```yaml
+/// blocked:
+///   modules:
+///     - github.com/foo:
+///         reason: "..."
+///   local_replace_directives: true
+/// ```
+fn merge_gomodguard_v1(out: &mut GomodguardSettings, value: &serde_yaml::Value) {
+    let Some(map) = value.as_mapping() else {
+        return;
+    };
+    if let Some(blocked) = map
+        .get(serde_yaml::Value::String("blocked".into()))
+        .and_then(|v| v.as_mapping())
+    {
+        if let Some(modules) = blocked
+            .get(serde_yaml::Value::String("modules".into()))
+            .and_then(|v| v.as_sequence())
+        {
+            for entry in modules {
+                if let Some(entry_map) = entry.as_mapping() {
+                    for (k, v) in entry_map {
+                        let Some(name) = k.as_str() else {
+                            continue;
+                        };
+                        let reason = v
+                            .as_mapping()
+                            .and_then(|m| {
+                                m.get(serde_yaml::Value::String("reason".into()))
+                                    .and_then(|r| r.as_str())
+                            })
+                            .unwrap_or("")
+                            .to_string();
+                        out.blocked_modules.push((name.to_string(), reason));
+                    }
+                }
+            }
+        }
+        if let Some(v) = blocked.get(serde_yaml::Value::String(
+            "local_replace_directives".into(),
+        )) {
+            if let Some(b) = v.as_bool() {
+                out.local_replace_directives = b;
+            }
+        }
+    }
+}
+
+/// Parse golangci `gomodguard_v2` YAML into [`GomodguardSettings`].
+///
+/// Shape:
+/// ```yaml
+/// local-replace-directives: true
+/// blocked:
+///   - module: github.com/foo
+///     reason: "..."
+/// ```
+fn merge_gomodguard_v2(out: &mut GomodguardSettings, value: &serde_yaml::Value) {
+    let Some(map) = value.as_mapping() else {
+        return;
+    };
+    if let Some(v) = map.get(serde_yaml::Value::String(
+        "local-replace-directives".into(),
+    )) {
+        if let Some(b) = v.as_bool() {
+            out.local_replace_directives = b;
+        }
+    }
+    if let Some(blocked) = map
+        .get(serde_yaml::Value::String("blocked".into()))
+        .and_then(|v| v.as_sequence())
+    {
+        for entry in blocked {
+            let Some(entry_map) = entry.as_mapping() else {
+                continue;
+            };
+            let Some(module) = entry_map
+                .get(serde_yaml::Value::String("module".into()))
+                .and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            let reason = entry_map
+                .get(serde_yaml::Value::String("reason".into()))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            out.blocked_modules
+                .push((module.to_string(), reason));
         }
     }
 }

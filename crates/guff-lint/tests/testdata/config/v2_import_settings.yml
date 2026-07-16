@@ -1,0 +1,42 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - depguard
+    - gomoddirectives
+    - gomodguard
+  settings:
+    depguard:
+      rules:
+        Main:
+          list-mode: lax
+          files:
+            - $all
+            - "!$test"
+          allow:
+            - $gostd
+          deny:
+            - pkg: github.com/sirupsen/logrus
+              desc: use log/slog
+    gomoddirectives:
+      replace-local: true
+      replace-allow-list:
+        - launchpad.net/gocheck
+      retract-allow-no-explanation: true
+      exclude-forbidden: true
+      toolchain-forbidden: true
+      tool-forbidden: true
+      go-debug-forbidden: true
+    gomodguard:
+      blocked:
+        modules:
+          - github.com/sirupsen/logrus:
+              recommendations:
+                - log/slog
+              reason: "use log/slog"
+        local_replace_directives: true
+    gomodguard_v2:
+      local-replace-directives: true
+      blocked:
+        - module: github.com/pkg/errors
+          reason: "use std errors"

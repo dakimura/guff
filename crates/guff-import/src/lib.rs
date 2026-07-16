@@ -5,20 +5,27 @@
 //! - [`gomoddirectives`]
 //! - [`gomodguard`]
 //!
-//! DEFERRED (see DEVELOPMENT.md R14): `linters.settings` wiring for all three
-//! (depguard rules / list-mode / file globs; gomoddirectives option flags;
-//! gomodguard allowed/blocked/version constraints / gomodguard_v2).
+//! `linters.settings` for all three are wired (depguard rules / list-mode /
+//! files / allow / deny; gomoddirectives option flags; gomodguard /
+//! gomodguard_v2 blocked + local-replace). DEFERRED: depguard path
+//! placeholders; gomoddirectives ignore/toolchain-pattern/go-version-pattern/
+//! check-module-path; gomodguard allowed modules/domains / version constraints /
+//! match-type.
 
 mod depguard;
 mod gomod;
 mod gomoddirectives;
 mod gomodguard;
+mod options;
 
 pub use depguard::analyzer as depguard;
 pub use gomoddirectives::analyzer as gomoddirectives;
 pub use gomodguard::analyzer as gomodguard;
 pub use gomodguard::analyzer_block_logrus;
 pub use gomodguard::analyzer_local_replace;
+pub use options::{
+    DenyEntry, DepguardOptions, DepguardRule, GomoddirectivesOptions, GomodguardOptions, ListMode,
+};
 
 use guff_analysis::Analyzer;
 
