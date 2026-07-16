@@ -55,6 +55,7 @@ pub struct LinterSettings {
     pub gomoddirectives: GomoddirectivesSettings,
     pub gomodguard: GomodguardSettings,
     pub modernize: ModernizeSettings,
+    pub gocritic: GocriticSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -720,6 +721,19 @@ pub struct ModernizeSettings {
     pub disable: Vec<String>,
 }
 
+/// `linters.settings.gocritic` / `linters-settings.gocritic`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GocriticSettings {
+    #[serde(default, rename = "enable-all")]
+    pub enable_all: bool,
+    #[serde(default, rename = "disable-all")]
+    pub disable_all: bool,
+    #[serde(default, rename = "enabled-checks")]
+    pub enabled_checks: Vec<String>,
+    #[serde(default, rename = "disabled-checks")]
+    pub disabled_checks: Vec<String>,
+}
+
 /// `linters.settings.depguard` / `linters-settings.depguard`.
 ///
 /// Empty `rules` → analyzer default (`Main` / `$gostd` only).
@@ -1001,6 +1015,11 @@ impl LinterSettings {
                 out.modernize = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("gocritic".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GocriticSettings>(v.clone()) {
+                out.gocritic = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1058,6 +1077,7 @@ impl LinterSettings {
         );
         bag.insert("gomodguard", self.gomodguard.to_guff_gomodguard());
         bag.insert("modernize", self.modernize.to_guff_modernize());
+        bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         Arc::new(bag)
     }
 
@@ -1742,6 +1762,17 @@ impl ModernizeSettings {
     pub fn to_guff_modernize(&self) -> guff_style::ModernizeOptions {
         guff_style::ModernizeOptions {
             disable: self.disable.clone(),
+        }
+    }
+}
+
+impl GocriticSettings {
+    pub fn to_guff_gocritic(&self) -> guff_style::GocriticOptions {
+        guff_style::GocriticOptions {
+            enable_all: self.enable_all,
+            disable_all: self.disable_all,
+            enabled_checks: self.enabled_checks.clone(),
+            disabled_checks: self.disabled_checks.clone(),
         }
     }
 }

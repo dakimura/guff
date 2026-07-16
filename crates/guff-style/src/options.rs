@@ -699,3 +699,21 @@ pub struct ModernizeOptions {
     pub disable: Vec<String>,
 }
 
+/// `linters.settings.gocritic` / `linters-settings.gocritic`.
+///
+/// Selection mirrors golangci-lint:
+/// - default → implemented stable checks
+/// - `enable-all` → all implemented checks
+/// - `disable-all` → none (then `enabled-checks`)
+/// - `enabled-checks` / `disabled-checks` add/remove names
+///
+/// Unknown / deferred check names are accepted so prometheus-style configs
+/// that disable unimplemented checks still parse.
+#[derive(Debug, Clone, Default)]
+pub struct GocriticOptions {
+    pub enable_all: bool,
+    pub disable_all: bool,
+    pub enabled_checks: Vec<String>,
+    pub disabled_checks: Vec<String>,
+}
+

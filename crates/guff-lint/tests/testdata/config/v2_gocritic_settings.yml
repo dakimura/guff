@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - appendAssign
+        - ifElseChain
+        - underef

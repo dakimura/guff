@@ -33,6 +33,7 @@
 //! - [`testifylint`]
 //! - [`exptostd`]
 //! - [`modernize`]
+//! - [`gocritic`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -48,6 +49,7 @@ mod exhaustive;
 mod exhaustruct;
 mod exptostd;
 mod funlen;
+mod gocritic;
 mod loggercheck;
 mod modernize;
 mod musttag;
@@ -75,10 +77,10 @@ mod wsl;
 
 pub use options::{
     CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions, ExhaustructOptions,
-    FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, LoggercheckOptions,
-    MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions,
-    NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions, SloglintFunc,
-    SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions,
+    FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, LllOptions,
+    LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
+    NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
+    SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions,
     UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
@@ -91,6 +93,7 @@ pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
+pub use gocritic::analyzer as gocritic;
 pub use gocyclo::analyzer as gocyclo;
 pub use goprintffuncname::analyzer as goprintffuncname;
 pub use lll::analyzer as lll;
@@ -151,5 +154,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         testifylint(),
         exptostd(),
         modernize(),
+        gocritic(),
     ]
 }

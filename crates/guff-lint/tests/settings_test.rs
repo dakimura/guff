@@ -796,3 +796,25 @@ fn parse_v2_modernize_settings() {
     assert!(opts.disable.iter().any(|d| d == "omitzero"));
     assert!(opts.disable.iter().any(|d| d == "newexpr"));
 }
+
+#[test]
+fn parse_v2_gocritic_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_gocritic_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.gocritic.enable_all);
+    assert_eq!(
+        settings.gocritic.disabled_checks,
+        vec![
+            "appendAssign".to_string(),
+            "ifElseChain".to_string(),
+            "underef".to_string(),
+        ]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GocriticOptions>("gocritic")
+        .expect("gocritic options");
+    assert!(opts.enable_all);
+    assert!(opts.disabled_checks.iter().any(|d| d == "appendAssign"));
+}

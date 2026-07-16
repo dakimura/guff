@@ -2,9 +2,9 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen, gocognit,
-    goconst, gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
-    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
-    unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    goconst, gocritic, gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag,
+    nakedret, nestif, nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint,
+    tagalign, testifylint, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -2913,6 +2913,102 @@ fn modernize_disable_skips_checkers() {
         !messages
             .iter()
             .any(|m| m.contains("if/else statement can be modernized using min")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn gocritic_flags_common_patterns() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");
+    let messages = support::run_analyzer(gocritic(), &pkg);
+    let expect = [
+        "else if cond",
+        "rewrite switch statement to if",
+        "default` case as first or as last",
+        "switch true",
+        "always true",
+        "always false",
+        "can be len(",
+        "could simplify",
+        "*new(bool)",
+        "append result not assigned",
+        "is duplicated",
+        "should not be capitalized",
+        "will exit",
+        "rewrite if-else to switch",
+        "can re-write as",
+        "flag.BoolVar",
+        "no-op append",
+        "suspicious Join",
+        "probably meant -1",
+        "x++",
+        "x *=",
+        "duplicated args",
+    ];
+    for needle in expect {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing `{needle}` in {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn gocritic_allows_clean_code() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/ok", "ok.go");
+    let messages = support::run_analyzer(gocritic(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "unexpected diagnostics: {messages:?}"
+    );
+}
+
+#[test]
+fn gocritic_disabled_checks_are_skipped() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            enable_all: true,
+            disabled_checks: vec![
+                "appendAssign".into(),
+                "ifElseChain".into(),
+                "underef".into(),
+            ],
+            ..GocriticOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("append result not assigned")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("rewrite if-else to switch")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("else if cond")),
         "{messages:?}"
     );
 }
