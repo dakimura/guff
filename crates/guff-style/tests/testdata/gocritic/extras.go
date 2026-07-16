@@ -1,11 +1,15 @@
 package gocritic
 
 import (
+	"bytes"
 	"fmt"
 	formatting "fmt"
+	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	// "os"
 )
 
@@ -227,3 +231,45 @@ func sloppyReassignExtra() error {
 }
 
 func returnsErrorExtra() error { return nil }
+
+func httpNoBodyExtra() {
+	_, _ = http.NewRequest("GET", "http://example.com", nil)
+	_, _ = http.NewRequestWithContext(nil, "GET", "http://example.com", nil)
+}
+
+func preferDecodeRuneExtra(s string) {
+	_ = []rune(s)[0]
+}
+
+func indexAllocExtra(b []byte, y string) {
+	_ = strings.Index(string(b), y)
+}
+
+func stringXbytesExtra(b []byte, s string, dst []byte) {
+	_ = copy(dst, []byte(s))
+	_ = string(b) == ""
+	_ = len(string(b))
+}
+
+func preferFilepathJoinExtra(x, y string) {
+	_ = x + string(os.PathSeparator) + y
+}
+
+func stringsCompareExtra(a, b string) {
+	_ = strings.Compare(a, b) == 0
+	_ = strings.Compare(a, b) < 0
+}
+
+func zeroByteRepeatExtra(n int) {
+	_ = bytes.Repeat([]byte{0}, n)
+}
+
+func badSortingExtra(xs []string) {
+	xs = sort.StringSlice(xs)
+}
+
+func sliceClearExtra(buf []byte) {
+	for i := 0; i < len(buf); i++ {
+		buf[i] = 0
+	}
+}

@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**67** = 34 default + 33 enable-all extras):
+//! Implemented checkers (**76** = 34 default + 42 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -21,18 +21,24 @@
 //! - batch 8 (enable-all extras): `truncateCmp`, `typeDefFirst`, `deferInLoop`,
 //!   `hexLiteral`, `nestingReduce`, `todoCommentWithoutDetail`, `docStub`,
 //!   `unnecessaryBlock`, `sloppyReassign`
+//! - batch 9 (enable-all extras; prometheus-enabled ruleguard ports):
+//!   `httpNoBody`, `preferDecodeRune`, `indexAlloc`, `stringXbytes`,
+//!   `preferFilepathJoin`, `stringsCompare`, `zeroByteRepeat`, `badSorting`,
+//!   `sliceClear`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`ruleguard` + other missing defaults
-//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / …),
+//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
+//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / `preferFprint` /
+//! `preferWriteByte` / `syncMapLoadAndDelete` / `dynamicFmtString` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
-//! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk.
+//! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
+//! stringXbytes regexp method / bytes.Equal full type parity.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -41,9 +47,9 @@ use std::sync::{Arc, OnceLock};
 
 use guff::ast::{
     AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl,
-    DeferStmt, Expr, Field, FieldList, File, FuncDecl, FuncLit, FuncType, Ident, IfStmt, IndexExpr,
-    RangeStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
-    ValueSpec,
+    DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident, IfStmt,
+    IndexExpr, RangeStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr,
+    TypeSwitchStmt, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos, NO_POS};
@@ -112,6 +118,7 @@ const DEFAULT_CHECKS: &[&str] = &[
 /// `enabled-checks` (prometheus enable-all coverage).
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "badRegexp",
+    "badSorting",
     "builtinShadow",
     "builtinShadowDecl",
     "commentedOutImport",
@@ -125,18 +132,25 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "emptyStringTest",
     "filepathJoin",
     "hexLiteral",
+    "httpNoBody",
+    "indexAlloc",
     "initClause",
     "methodExprCall",
     "nestingReduce",
     "nilValReturn",
     "octalLiteral",
     "paramTypeCombine",
+    "preferDecodeRune",
+    "preferFilepathJoin",
     "rangeAppendAll",
     "rangeExprCopy",
     "regexpPattern",
+    "sliceClear",
     "sloppyReassign",
     "sortSlice",
     "sqlQuery",
+    "stringXbytes",
+    "stringsCompare",
     "todoCommentWithoutDetail",
     "truncateCmp",
     "typeAssertChain",
@@ -144,6 +158,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "unnecessaryBlock",
     "weakCond",
     "yodaStyleExpr",
+    "zeroByteRepeat",
 ];
 
 /// All checkers this port implements (used for `enable-all`).
@@ -4008,6 +4023,478 @@ fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     );
 }
 
+fn is_slice_type_named(expr: &Expr, elt: &str) -> bool {
+    let Expr::ArrayType(at) = expr else {
+        return false;
+    };
+    if at.len.is_some() {
+        return false;
+    }
+    matches!(at.elt.as_ref(), Expr::Ident(id) if id.name == elt)
+}
+
+fn is_string_conv(expr: &Expr) -> Option<&Expr> {
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    if call.args.len() != 1 {
+        return None;
+    }
+    match call.fun.as_ref() {
+        Expr::Ident(id) if id.name == "string" => Some(&call.args[0]),
+        _ => None,
+    }
+}
+
+fn is_byte_slice_conv(expr: &Expr) -> Option<&Expr> {
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    if call.args.len() != 1 {
+        return None;
+    }
+    if is_slice_type_named(&call.fun, "byte") || is_slice_type_named(&call.fun, "uint8") {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn is_rune_slice_conv(expr: &Expr) -> Option<&Expr> {
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    if call.args.len() != 1 {
+        return None;
+    }
+    if is_slice_type_named(&call.fun, "rune") {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn is_nil_ident(expr: &Expr) -> bool {
+    matches!(expr, Expr::Ident(id) if id.name == "nil")
+}
+
+fn is_os_path_separator_string_conv(expr: &Expr) -> bool {
+    let Expr::CallExpr(call) = expr else {
+        return false;
+    };
+    if call.args.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(fun) = call.fun.as_ref() else {
+        return false;
+    };
+    if fun.name != "string" {
+        return false;
+    }
+    matches!(
+        call_qualified_name_of_expr(&call.args[0]).as_deref(),
+        Some("os.PathSeparator")
+    )
+}
+
+fn is_byte_slice_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let TypeData::Slice(slice) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let elem = unalias_readonly(&artifacts.types, slice.elem());
+    match artifacts.types.get(elem) {
+        TypeData::Basic(b) => matches!(b.kind(), BasicKind::Uint8 | BasicKind::UntypedInt),
+        _ => false,
+    }
+}
+
+fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let nil_idx = match name.as_str() {
+        "http.NewRequest" | "net/http.NewRequest" if call.args.len() == 3 => 2,
+        "http.NewRequestWithContext" | "net/http.NewRequestWithContext" if call.args.len() == 4 => {
+            3
+        }
+        "httptest.NewRequest" | "net/http/httptest.NewRequest" if call.args.len() == 3 => 2,
+        _ => return,
+    };
+    if !is_nil_ident(&call.args[nil_idx]) && !code::is_nil(pass, &call.args[nil_idx]) {
+        return;
+    }
+    report(
+        pending,
+        call.args[nil_idx].pos().0 as u32,
+        "http.NoBody should be preferred to the nil request body",
+    );
+}
+
+fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(u32, String)>) {
+    if !is_int_lit(&ix.index, 0) {
+        return;
+    }
+    let Some(s) = is_rune_slice_conv(&ix.x) else {
+        return;
+    };
+    if !is_string_typed(pass, s) {
+        // AST fallback: still report when conversion is clearly []rune(stringish)
+        if !matches!(s, Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_)) {
+            return;
+        }
+    }
+    let Some(s_t) = expr_text(s) else {
+        return;
+    };
+    report(
+        pending,
+        ix.lbrack.0 as u32,
+        format!("consider replacing []rune({s_t})[0] with utf8.DecodeRuneInString({s_t})"),
+    );
+}
+
+fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "strings.Index" && !name.ends_with("/strings.Index") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    let Some(x) = is_string_conv(&call.args[0]) else {
+        return;
+    };
+    let Some(x_t) = expr_text(x) else {
+        return;
+    };
+    let Some(y_t) = expr_text(&call.args[1]) else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("consider replacing $$ with bytes.Index({x_t}, []byte({y_t}))"),
+    );
+}
+
+fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, String)>) {
+    match n {
+        NodeRef::CallExpr(call) => {
+            // copy(_, []byte(s))
+            let is_copy = match call.fun.as_ref() {
+                Expr::Ident(id) => id.name == "copy",
+                _ => false,
+            };
+            if is_copy && call.args.len() == 2 {
+                if let Some(_s) = is_byte_slice_conv(&call.args[1]) {
+                    report(
+                        pending,
+                        call.args[1].pos().0 as u32,
+                        "can simplify `[]byte($s)` to `$s`",
+                    );
+                }
+            }
+            // len(string(b))
+            if matches!(call.fun.as_ref(), Expr::Ident(id) if id.name == "len")
+                && call.args.len() == 1
+            {
+                if let Some(b) = is_string_conv(&call.args[0]) {
+                    if is_byte_slice_typed(pass, b)
+                        || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
+                    {
+                        report(
+                            pending,
+                            call.fun.pos().0 as u32,
+                            "can replace `len(string($b))` with `len($b)`",
+                        );
+                    }
+                }
+            }
+            // $re.Match([]byte($s)) and friends
+            if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+                if matches!(sel.sel.name.as_str(), "Match" | "FindIndex" | "FindAllIndex")
+                    && !call.args.is_empty()
+                {
+                    if let Some(_s) = is_byte_slice_conv(&call.args[0]) {
+                        let suggest = match sel.sel.name.as_str() {
+                            "Match" => "MatchString",
+                            "FindIndex" => "FindStringIndex",
+                            "FindAllIndex" => "FindAllStringIndex",
+                            _ => return,
+                        };
+                        report(
+                            pending,
+                            call.args[0].pos().0 as u32,
+                            format!("can replace `[]byte($s)` arg with `{suggest}`"),
+                        );
+                    }
+                }
+            }
+        }
+        NodeRef::BinaryExpr(bin) => {
+            // string(b) == "" / != ""
+            if matches!(bin.op, Token::EQL | Token::NEQ) {
+                if let (Some(b), true) = (is_string_conv(&bin.x), is_string_lit_empty(&bin.y)) {
+                    if is_byte_slice_typed(pass, b)
+                        || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
+                    {
+                        let op = if bin.op == Token::EQL { "==" } else { "!=" };
+                        report(
+                            pending,
+                            bin.op_pos.0 as u32,
+                            format!("can replace `string($b) {op} \"\"` with `len($b) {op} 0`"),
+                        );
+                    }
+                }
+            }
+            // string(x) == string(y) for []byte
+            if matches!(bin.op, Token::EQL | Token::NEQ) {
+                if let (Some(x), Some(y)) = (is_string_conv(&bin.x), is_string_conv(&bin.y)) {
+                    let both_bytes = (is_byte_slice_typed(pass, x)
+                        || matches!(x, Expr::Ident(_) | Expr::SelectorExpr(_)))
+                        && (is_byte_slice_typed(pass, y)
+                            || matches!(y, Expr::Ident(_) | Expr::SelectorExpr(_)));
+                    if both_bytes {
+                        let suggest = if bin.op == Token::EQL {
+                            "bytes.Equal($x, $y)"
+                        } else {
+                            "!bytes.Equal($x, $y)"
+                        };
+                        report(
+                            pending,
+                            bin.op_pos.0 as u32,
+                            format!("can replace string conversions with `{suggest}`"),
+                        );
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_string_lit_empty(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::BasicLit(lit)
+            if lit.kind == Some(Token::STRING) && (lit.value == "\"\"" || lit.value == "``")
+    )
+}
+
+fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if bin.op != Token::ADD {
+        return;
+    }
+    let Expr::BinaryExpr(left) = bin.x.as_ref() else {
+        return;
+    };
+    if left.op != Token::ADD {
+        return;
+    }
+    if !is_os_path_separator_string_conv(&left.y) {
+        return;
+    }
+    if !is_string_typed(pass, &left.x) && !matches!(left.x.as_ref(), Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_))
+    {
+        return;
+    }
+    if !is_string_typed(pass, &bin.y) && !matches!(bin.y.as_ref(), Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_))
+    {
+        return;
+    }
+    let Some(x_t) = expr_text(&left.x) else {
+        return;
+    };
+    let Some(y_t) = expr_text(&bin.y) else {
+        return;
+    };
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("filepath.Join({x_t}, {y_t}) should be preferred to the $$"),
+    );
+}
+
+fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    let call = match bin.x.as_ref() {
+        Expr::CallExpr(c) => c,
+        _ => return,
+    };
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "strings.Compare" && !name.ends_with("/strings.Compare") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    let Some(s1) = expr_text(&call.args[0]) else {
+        return;
+    };
+    let Some(s2) = expr_text(&call.args[1]) else {
+        return;
+    };
+    let suggest = match bin.op {
+        Token::EQL if is_int_lit(&bin.y, 0) => format!("{s1} == {s2}"),
+        Token::EQL if is_int_lit(&bin.y, -1) => format!("{s1} < {s2}"),
+        Token::EQL if is_int_lit(&bin.y, 1) => format!("{s1} > {s2}"),
+        Token::LSS if is_int_lit(&bin.y, 0) => format!("{s1} < {s2}"),
+        Token::GTR if is_int_lit(&bin.y, 0) => format!("{s1} > {s2}"),
+        _ => return,
+    };
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("can replace `strings.Compare` with `{suggest}`"),
+    );
+}
+
+fn is_zero_byte_composite(expr: &Expr) -> bool {
+    let Expr::CompositeLit(lit) = expr else {
+        return false;
+    };
+    if lit.elts.len() != 1 {
+        return false;
+    }
+    let ty_ok = lit
+        .ty
+        .as_ref()
+        .map(|t| is_slice_type_named(t, "byte") || is_slice_type_named(t, "uint8"))
+        .unwrap_or(true);
+    ty_ok && is_int_lit(&lit.elts[0], 0)
+}
+
+fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "bytes.Repeat" && !name.ends_with("/bytes.Repeat") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    if !is_zero_byte_composite(&call.args[0]) {
+        return;
+    }
+    let Some(n) = expr_text(&call.args[1]) else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("avoid bytes.Repeat([]byte{{0}}, {n}); consider using make([]byte, {n}) instead"),
+    );
+}
+
+fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+    if assign.tok != Some(Token::ASSIGN) {
+        return;
+    }
+    if assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return;
+    }
+    let Expr::CallExpr(call) = &assign.rhs[0] else {
+        return;
+    };
+    if call.args.len() != 1 || !exprs_equal(&assign.lhs[0], &call.args[0]) {
+        return;
+    }
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let (needle, suggest) = if name.ends_with("sort.IntSlice") || name == "sort.IntSlice" {
+        ("sort.IntSlice", "sort.Ints")
+    } else if name.ends_with("sort.Float64Slice") || name == "sort.Float64Slice" {
+        ("sort.Float64Slice", "sort.Float64s")
+    } else if name.ends_with("sort.StringSlice") || name == "sort.StringSlice" {
+        ("sort.StringSlice", "sort.Strings")
+    } else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("suspicious {needle} usage, maybe {suggest} was intended?"),
+    );
+}
+
+fn check_slice_clear(fs: &ForStmt, pending: &mut Vec<(u32, String)>) {
+    // for i := 0; i < len(xs); i++ { xs[i] = 0 }
+    let Some(init) = fs.init.as_deref() else {
+        return;
+    };
+    let Stmt::AssignStmt(init_as) = init else {
+        return;
+    };
+    if init_as.lhs.len() != 1 || init_as.rhs.len() != 1 || !is_int_lit(&init_as.rhs[0], 0) {
+        return;
+    }
+    let Expr::Ident(i_id) = &init_as.lhs[0] else {
+        return;
+    };
+    let Some(cond) = fs.cond.as_ref() else {
+        return;
+    };
+    let Expr::BinaryExpr(cond_bin) = cond else {
+        return;
+    };
+    if cond_bin.op != Token::LSS {
+        return;
+    }
+    if !matches!(cond_bin.x.as_ref(), Expr::Ident(id) if id.name == i_id.name) {
+        return;
+    }
+    let Some(xs) = len_arg(&cond_bin.y) else {
+        return;
+    };
+    let Some(post) = fs.post.as_deref() else {
+        return;
+    };
+    let post_ok = match post {
+        Stmt::IncDecStmt(inc) => {
+            inc.tok == Token::INC && matches!(&inc.x, Expr::Ident(id) if id.name == i_id.name)
+        }
+        _ => false,
+    };
+    if !post_ok {
+        return;
+    }
+    if fs.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::AssignStmt(body_as) = &fs.body.list[0] else {
+        return;
+    };
+    if body_as.lhs.len() != 1 || body_as.rhs.len() != 1 || !is_int_lit(&body_as.rhs[0], 0) {
+        return;
+    }
+    let Expr::IndexExpr(ix) = &body_as.lhs[0] else {
+        return;
+    };
+    if !exprs_equal(&ix.x, xs) {
+        return;
+    }
+    if !matches!(ix.index.as_ref(), Expr::Ident(id) if id.name == i_id.name) {
+        return;
+    }
+    report(
+        pending,
+        fs.for_.0 as u32,
+        "rewrite as for-range so compiler can recognize this pattern",
+    );
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -4129,6 +4616,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "nestingReduce") {
                         check_nesting_reduce_for(&s.body, &mut pending);
                     }
+                    if enabled(&set, "sliceClear") {
+                        check_slice_clear(s, &mut pending);
+                    }
                 }
                 NodeRef::RangeStmt(s) => {
                     if enabled(&set, "rangeAppendAll") {
@@ -4163,6 +4653,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "truncateCmp") {
                         check_truncate_cmp(pass, b, &mut pending);
                     }
+                    if enabled(&set, "preferFilepathJoin") {
+                        check_prefer_filepath_join(pass, b, &mut pending);
+                    }
+                    if enabled(&set, "stringsCompare") {
+                        check_strings_compare(pass, b, &mut pending);
+                    }
+                    if enabled(&set, "stringXbytes") {
+                        check_string_xbytes(pass, NodeRef::BinaryExpr(b), &mut pending);
+                    }
                 }
                 NodeRef::BasicLit(lit) => {
                     if enabled(&set, "octalLiteral") {
@@ -4181,8 +4680,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::SliceExpr(s) if enabled(&set, "unslice") => {
                     check_unslice(s, &mut pending);
                 }
-                NodeRef::IndexExpr(ix) if enabled(&set, "offBy1") => {
-                    check_off_by1(ix, &mut pending);
+                NodeRef::IndexExpr(ix) => {
+                    if enabled(&set, "offBy1") {
+                        check_off_by1(ix, &mut pending);
+                    }
+                    if enabled(&set, "preferDecodeRune") {
+                        check_prefer_decode_rune(pass, ix, &mut pending);
+                    }
                 }
                 NodeRef::CompositeLit(lit) if enabled(&set, "mapKey") => {
                     check_map_key(lit, &mut pending);
@@ -4207,6 +4711,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "sqlQuery") {
                         check_sql_query(pass, a, &mut pending);
+                    }
+                    if enabled(&set, "badSorting") {
+                        check_bad_sorting(pass, a, &mut pending);
                     }
                 }
                 NodeRef::FuncDecl(f) => {
@@ -4259,6 +4766,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "sortSlice") {
                         check_sort_slice(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "httpNoBody") {
+                        check_http_no_body(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "indexAlloc") {
+                        check_index_alloc(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "zeroByteRepeat") {
+                        check_zero_byte_repeat(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "stringXbytes") {
+                        check_string_xbytes(pass, NodeRef::CallExpr(c), &mut pending);
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {

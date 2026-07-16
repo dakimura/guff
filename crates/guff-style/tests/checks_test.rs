@@ -3677,6 +3677,17 @@ fn gocritic_enable_all_extras() {
         "silencing go lint doc-comment warnings is unadvised",
         "block doesn't have definitions, can be simply deleted",
         "re-assignment to `err` can be replaced with",
+        "http.NoBody should be preferred",
+        "utf8.DecodeRuneInString",
+        "bytes.Index(",
+        "can simplify `[]byte($s)` to `$s`",
+        "can replace `string($b) == \"\"`",
+        "can replace `len(string($b))`",
+        "filepath.Join(",
+        "can replace `strings.Compare`",
+        "avoid bytes.Repeat",
+        "suspicious sort.StringSlice usage",
+        "rewrite as for-range so compiler can recognize",
     ];
     for needle in expect {
         assert!(
@@ -3725,6 +3736,15 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("doc-comment warnings")
                 || m.contains("block doesn't have definitions")
                 || m.contains("re-assignment to")
+                || m.contains("http.NoBody")
+                || m.contains("DecodeRuneInString")
+                || m.contains("bytes.Index(")
+                || m.contains("can simplify `[]byte")
+                || m.contains("filepath.Join(")
+                || m.contains("strings.Compare")
+                || m.contains("bytes.Repeat")
+                || m.contains("sort.StringSlice")
+                || m.contains("for-range so compiler")
         }),
         "extras should be off by default: {messages:?}"
     );
