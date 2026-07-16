@@ -2,8 +2,9 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
-    gocyclo, goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
-    prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    gocyclo, goprintffuncname, lll, mnd, musttag, nakedret, nestif, nlreturn, nosprintfhostport,
+    perfsprint, prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace,
+    wsl,
 };
 
 #[test]
@@ -2061,5 +2062,68 @@ fn exhaustive_default_signifies_exhaustive() {
     assert!(
         messages.is_empty(),
         "default-signifies-exhaustive should silence: {messages:?}"
+    );
+}
+
+#[test]
+fn musttag_flags_missing_json_tags() {
+    let pkg = support::typecheck_fixture("musttag", "example.com/musttag", "bad.go");
+    let messages = support::run_analyzer(musttag(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("annotated with the `json` tag"))
+            .count()
+            >= 2,
+        "expected Marshal + Unmarshal diagnostics: {messages:?}"
+    );
+}
+
+#[test]
+fn musttag_allows_tagged_structs() {
+    let pkg = support::typecheck_fixture("musttag", "example.com/musttag/ok", "ok.go");
+    let messages = support::run_analyzer(musttag(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics for tagged structs: {messages:?}"
+    );
+}
+
+#[test]
+fn musttag_custom_functions_from_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::{MusttagFunc, MusttagOptions};
+
+    let pkg = support::typecheck_fixture("musttag", "example.com/musttag", "custom.go");
+    assert!(
+        support::run_analyzer(musttag(), &pkg).is_empty(),
+        "custom DecodeYAML is not a builtin"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "musttag",
+        MusttagOptions {
+            functions: vec![MusttagFunc {
+                name: "example.com/musttag.DecodeYAML".into(),
+                tag: "yaml".into(),
+                arg_pos: 1,
+            }],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        musttag(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("`yaml` tag")),
+        "custom function should require yaml tags: {messages:?}"
     );
 }

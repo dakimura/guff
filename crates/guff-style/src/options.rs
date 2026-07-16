@@ -473,6 +473,24 @@ impl Default for ExhaustiveOptions {
     }
 }
 
+/// One custom function entry for `linters.settings.musttag.functions`.
+#[derive(Debug, Clone)]
+pub struct MusttagFunc {
+    /// Full function name, e.g. `encoding/json.Marshal` or `(*pkg.T).Method`.
+    pub name: String,
+    /// Struct tag key to require (`json`, `yaml`, …).
+    pub tag: String,
+    /// 0-based argument position to check.
+    pub arg_pos: usize,
+}
+
+/// `linters.settings.musttag` / `linters-settings.musttag`.
+#[derive(Debug, Clone, Default)]
+pub struct MusttagOptions {
+    /// Extra functions beyond upstream builtins.
+    pub functions: Vec<MusttagFunc>,
+}
+
 /// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
 #[derive(Debug, Clone)]
 pub struct ExhaustructOptions {

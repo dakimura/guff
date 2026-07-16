@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  settings:
+    musttag:
+      functions:
+        - name: example.com/musttag.DecodeYAML
+          tag: yaml
+          arg-pos: 1

@@ -453,6 +453,26 @@ fn parse_v2_exhaustive_settings() {
 }
 
 #[test]
+fn parse_v2_musttag_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_musttag_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.musttag.functions.len(), 1);
+    assert_eq!(
+        settings.musttag.functions[0].name,
+        "example.com/musttag.DecodeYAML"
+    );
+    assert_eq!(settings.musttag.functions[0].tag, "yaml");
+    assert_eq!(settings.musttag.functions[0].arg_pos, 1);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::MusttagOptions>("musttag")
+        .expect("musttag options");
+    assert_eq!(opts.functions.len(), 1);
+    assert_eq!(opts.functions[0].tag, "yaml");
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

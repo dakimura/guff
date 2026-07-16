@@ -42,6 +42,7 @@ pub struct LinterSettings {
     pub unconvert: UnconvertSettings,
     pub exhaustruct: ExhaustructSettings,
     pub exhaustive: ExhaustiveSettings,
+    pub musttag: MusttagSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -393,6 +394,24 @@ pub struct ExhaustiveSettings {
     // DEFERRED: explicit-exhaustive-switch / explicit-exhaustive-map / check-generated.
 }
 
+/// One entry in `linters.settings.musttag.functions`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MusttagFuncSettings {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub tag: String,
+    #[serde(default, rename = "arg-pos")]
+    pub arg_pos: usize,
+}
+
+/// `linters.settings.musttag` / `linters-settings.musttag`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MusttagSettings {
+    #[serde(default)]
+    pub functions: Vec<MusttagFuncSettings>,
+}
+
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsetestingSettings {
@@ -722,6 +741,11 @@ impl LinterSettings {
                 out.exhaustive = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("musttag".into())) {
+            if let Ok(s) = serde_yaml::from_value::<MusttagSettings>(v.clone()) {
+                out.musttag = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -805,6 +829,7 @@ impl LinterSettings {
         bag.insert("unconvert", self.unconvert.to_guff_unconvert());
         bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
         bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
+        bag.insert("musttag", self.musttag.to_guff_musttag());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1254,6 +1279,23 @@ impl ExhaustiveSettings {
             package_scope_only: self
                 .package_scope_only
                 .unwrap_or(defaults.package_scope_only),
+        }
+    }
+}
+
+impl MusttagSettings {
+    pub fn to_guff_musttag(&self) -> guff_style::MusttagOptions {
+        guff_style::MusttagOptions {
+            functions: self
+                .functions
+                .iter()
+                .filter(|f| !f.name.is_empty() && !f.tag.is_empty())
+                .map(|f| guff_style::MusttagFunc {
+                    name: f.name.clone(),
+                    tag: f.tag.clone(),
+                    arg_pos: f.arg_pos,
+                })
+                .collect(),
         }
     }
 }
