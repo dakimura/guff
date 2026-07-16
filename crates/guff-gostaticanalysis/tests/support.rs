@@ -15,7 +15,38 @@ pub fn testdata(name: &str) -> PathBuf {
         .join(name)
 }
 
-pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
+pub fn collect_stubs(dir: &Path) -> Vec<(String, PathBuf)> {
+    let stub_dir = dir.join("stub");
+    let mut deps = Vec::new();
+    if !stub_dir.exists() {
+        return deps;
+    }
+    let mut stack = vec![stub_dir.clone()];
+    while let Some(cur) = stack.pop() {
+        for entry in fs::read_dir(&cur).expect("read stub dir") {
+            let entry = entry.expect("stub entry");
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|s| s.to_str()) == Some("go") {
+                let rel = path.strip_prefix(&stub_dir).expect("stub path");
+                let import_path = rel
+                    .parent()
+                    .and_then(|p| p.to_str())
+                    .unwrap_or("")
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                deps.push((import_path, path));
+            }
+        }
+    }
+    deps
+}
+
+pub fn typecheck_with_deps(
+    pkg_id: &str,
+    main_path: &Path,
+    deps: &[(&str, &Path)],
+) -> Arc<Package> {
     let fset = FileSet::new();
     let main_src = fs::read(main_path).expect("read main source");
     let main_name = main_path
@@ -25,6 +56,15 @@ pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
     let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
 
     let mut check = Checker::new(Config::default());
+    for (import_path, dep_path) in deps {
+        let src = fs::read(dep_path).expect("read dependency source");
+        let name = dep_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("dep file name");
+        let file = parse_file(&fset, name, &src, Mode::NONE).expect("parse dependency");
+        check.add_dependency_source(*import_path, vec![file]);
+    }
     check.check_files(vec![main_file.clone()]);
 
     let ill_typed = !check.errors.is_empty();
@@ -75,6 +115,21 @@ pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
         types_sizes: Some(default_sizes()),
         ..Package::default()
     })
+}
+
+pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
+    typecheck_with_deps(pkg_id, main_path, &[])
+}
+
+pub fn typecheck_fixture(name: &str, pkg_id: &str, file: &str) -> Arc<Package> {
+    let dir = testdata(name);
+    let main = dir.join(file);
+    let stubs = collect_stubs(&dir);
+    let deps: Vec<(&str, &Path)> = stubs
+        .iter()
+        .map(|(p, path)| (p.as_str(), path.as_path()))
+        .collect();
+    typecheck_with_deps(pkg_id, &main, &deps)
 }
 
 pub fn run_analyzer(

@@ -1,6 +1,6 @@
 [package]
 name = "guff-gostaticanalysis"
-description = "Rust ports of gostaticanalysis-family go/analysis linters (forcetypeassert, nilnil, makezero, …)."
+description = "Rust ports of gostaticanalysis-family go/analysis linters (forcetypeassert, nilnil, makezero, mirror, …)."
 keywords = ["go", "linter", "analysis", "gostaticanalysis"]
 categories = ["development-tools"]
 version.workspace = true

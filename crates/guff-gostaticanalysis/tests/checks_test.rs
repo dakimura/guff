@@ -1,6 +1,6 @@
 mod support;
 
-use guff_gostaticanalysis::{forcetypeassert, makezero, nilnil};
+use guff_gostaticanalysis::{forcetypeassert, makezero, mirror, nilnil};
 
 #[test]
 fn forcetypeassert_flags_unchecked() {
@@ -64,4 +64,53 @@ fn makezero_allows_zero_length_make() {
     let dir = support::testdata("makezero");
     let pkg = support::typecheck_pkg("example.com/makezero/ok", &dir.join("ok.go"));
     assert!(support::run_analyzer(makezero(), &pkg).is_empty());
+}
+
+#[test]
+fn mirror_flags_string_byte_conversions() {
+    let pkg = support::typecheck_fixture("mirror", "example.com/mirror", "bad.go");
+    let messages = support::run_analyzer(mirror(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("avoid allocations with bytes.Compare")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("avoid allocations with utf8.RuneCountInString")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("avoid allocations with bytes.Contains")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn mirror_allows_native_string_apis() {
+    let pkg = support::typecheck_fixture("mirror", "example.com/mirror/ok", "ok.go");
+    let messages = support::run_analyzer(mirror(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn mirror_flags_regexp_methods() {
+    let pkg = support::typecheck_fixture("mirror", "example.com/mirror/re", "regexp_bad.go");
+    let messages = support::run_analyzer(mirror(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("(*regexp.Regexp).MatchString")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("(*regexp.Regexp).Match")),
+        "{messages:?}"
+    );
 }
