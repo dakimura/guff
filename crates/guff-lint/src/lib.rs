@@ -15,8 +15,8 @@ mod settings;
 pub use config::{
     backup_path, discover_config, load_config, migrate_config_file, normalize_linter_name,
     parse_config_str, ConfigError, ConfigFile, ConfigV2, ExcludeRule, IssuesConfig, LinterDefault,
-    LinterSelection, OutputConfig, RunConfig, SeverityConfig, SeverityRule, CONFIG_FILE_NAMES,
-    DEPRECATED_LINTERS, FORMATTER_NAMES,
+    LinterExclusions, LinterSelection, OutputConfig, RunConfig, SeverityConfig, SeverityRule,
+    CONFIG_FILE_NAMES, DEPRECATED_LINTERS, FORMATTER_NAMES,
 };
 
 pub use duration::parse_go_duration;

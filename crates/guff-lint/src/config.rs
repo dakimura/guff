@@ -200,6 +200,10 @@ pub struct IssuesConfig {
     pub new_from_patch: Option<String>,
     #[serde(default)]
     pub include: Vec<String>,
+    /// From v2 `linters.exclusions.paths-except`: when non-empty, only matching
+    /// paths are kept (everything else is excluded).
+    #[serde(default, rename = "paths-except", skip_serializing)]
+    pub paths_except: Vec<String>,
 }
 
 impl Default for IssuesConfig {
@@ -220,6 +224,7 @@ impl Default for IssuesConfig {
             new_from_merge_base: None,
             new_from_patch: None,
             include: Vec::new(),
+            paths_except: Vec::new(),
         }
     }
 }
@@ -241,6 +246,7 @@ impl IssuesConfig {
             && self.new_from_merge_base.is_none()
             && self.new_from_patch.is_none()
             && self.include.is_empty()
+            && self.paths_except.is_empty()
     }
 }
 
@@ -368,8 +374,43 @@ pub struct LintersV2 {
     pub enable: Vec<String>,
     #[serde(default)]
     pub disable: Vec<String>,
+    #[serde(default, skip_serializing_if = "LinterExclusions::is_default")]
+    pub exclusions: LinterExclusions,
     #[serde(default, skip_serializing_if = "serde_yaml::Value::is_null")]
     pub settings: serde_yaml::Value,
+}
+
+/// golangci-lint v2 `linters.exclusions` (replaces v1 `issues.exclude*`).
+///
+/// See https://golangci-lint.run/docs/linters/false-positives/
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LinterExclusions {
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default, rename = "paths-except")]
+    pub paths_except: Vec<String>,
+    #[serde(default)]
+    pub rules: Vec<ExcludeRule>,
+    /// Named exclusion presets (`comments`, `stdErrorHandling`, …).
+    /// Accepted under both `presets` (docs) and `preset` (Go mapstructure).
+    #[serde(default, alias = "preset")]
+    pub presets: Vec<String>,
+    #[serde(default, rename = "warn-unused")]
+    pub warn_unused: bool,
+    /// DEFERRED: generated-file handling (`lax` / `strict` / `disable`).
+    #[serde(default)]
+    pub generated: Option<String>,
+}
+
+impl LinterExclusions {
+    fn is_default(&self) -> bool {
+        self.paths.is_empty()
+            && self.paths_except.is_empty()
+            && self.rules.is_empty()
+            && self.presets.is_empty()
+            && !self.warn_unused
+            && self.generated.is_none()
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -508,6 +549,25 @@ impl ConfigFile {
         }
     }
 
+    /// Issues config with v2 `linters.exclusions` folded in (golangci v2 shape).
+    ///
+    /// V2 has no default exclusions unless `linters.exclusions.presets` is set.
+    /// `linters.exclusions.paths` / `rules` / `paths-except` are merged into the
+    /// filter inputs that [`crate::exclude::IssueFilter`] already understands.
+    pub fn effective_issues(&self) -> IssuesConfig {
+        match self {
+            Self::V1(v1) => v1.issues.clone(),
+            Self::V2(v2) => merge_v2_exclusions(&v2.issues, &v2.linters.exclusions),
+        }
+    }
+
+    pub fn exclusions(&self) -> Option<&LinterExclusions> {
+        match self {
+            Self::V1(_) => None,
+            Self::V2(v2) => Some(&v2.linters.exclusions),
+        }
+    }
+
     pub fn run(&self) -> &RunConfig {
         match self {
             Self::V1(v1) => &v1.run,
@@ -603,6 +663,158 @@ fn is_v2(raw: &serde_yaml::Value) -> bool {
     raw.get("version")
         .and_then(|v| v.as_str())
         .is_some_and(|v| v == "2")
+}
+
+/// Fold v2 `linters.exclusions` into an [`IssuesConfig`] for the post-process filter.
+fn merge_v2_exclusions(issues: &IssuesConfig, excl: &LinterExclusions) -> IssuesConfig {
+    let mut out = issues.clone();
+
+    // golangci-lint v2: no default exclusions. Serde still defaults
+    // `issues.exclude-use-default` to true when the key is absent, so force
+    // false here. Presets expand into the corresponding EXC* patterns.
+    out.exclude_use_default = false;
+    if !excl.presets.is_empty() {
+        apply_exclusion_presets(&mut out, &excl.presets);
+    }
+
+    if out.exclude_dirs_use_default.is_none() {
+        out.exclude_dirs_use_default = Some(false);
+    }
+
+    out.exclude_files.extend(excl.paths.iter().cloned());
+    out.exclude_rules.extend(excl.rules.iter().cloned());
+    out.paths_except.extend(excl.paths_except.iter().cloned());
+
+    // DEFERRED: warn-unused (report unused exclusion rules), generated mode.
+    let _ = (excl.warn_unused, &excl.generated);
+
+    out
+}
+
+/// Expand golangci v2 exclusion presets into default exclude patterns.
+///
+/// Preset names follow golangci (`comments`, `stdErrorHandling`,
+/// `commonFalsePositives`, `legacy`) and also accept kebab-case aliases
+/// (`std-error-handling`, …) used in docs.
+fn apply_exclusion_presets(issues: &mut IssuesConfig, presets: &[String]) {
+    let wanted: std::collections::HashSet<&str> = presets
+        .iter()
+        .map(|p| normalize_exclusion_preset(p.as_str()))
+        .collect();
+
+    for pat in default_exclude_patterns_for_presets() {
+        if !wanted.contains(pat.preset) {
+            continue;
+        }
+        issues.exclude_rules.push(ExcludeRule {
+            linters: vec![pat.linter.to_string()],
+            text: Some(pat.pattern.to_string()),
+            ..ExcludeRule::default()
+        });
+    }
+}
+
+fn normalize_exclusion_preset(name: &str) -> &str {
+    match name {
+        "comments" => "comments",
+        "stdErrorHandling" | "std-error-handling" => "stdErrorHandling",
+        "commonFalsePositives" | "common-false-positives" => "commonFalsePositives",
+        "legacy" => "legacy",
+        other => other,
+    }
+}
+
+struct PresetExcludePattern {
+    preset: &'static str,
+    linter: &'static str,
+    pattern: &'static str,
+}
+
+/// Subset of golangci's exclusion presets → EXC* patterns.
+fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
+    // Mapped from golangci `pkg/result/processors/exclusion_presets.go` (approx).
+    static PATTERNS: &[PresetExcludePattern] = &[
+        // stdErrorHandling
+        PresetExcludePattern {
+            preset: "stdErrorHandling",
+            linter: "errcheck",
+            pattern: r"Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print(f|ln)?|os\.(Un)?Setenv). is not checked",
+        },
+        // comments
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "revive",
+            pattern: r"exported (.+) should have comment( \(or a comment on this block\))? or be unexported",
+        },
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "revive",
+            pattern: r#"package comment should be of the form "(.+)...""#,
+        },
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "revive",
+            pattern: r#"comment on exported (.+) should be of the form "(.+)...""#,
+        },
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "revive",
+            pattern: "should have a package comment",
+        },
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "golint",
+            pattern: r"(comment on exported (method|function|type|const)|should have( a package)? comment|comment should be of the form)",
+        },
+        // commonFalsePositives
+        PresetExcludePattern {
+            preset: "commonFalsePositives",
+            linter: "govet",
+            pattern: r"(possible misuse of unsafe.Pointer|should have signature)",
+        },
+        PresetExcludePattern {
+            preset: "commonFalsePositives",
+            linter: "staticcheck",
+            pattern: "SA4011",
+        },
+        PresetExcludePattern {
+            preset: "commonFalsePositives",
+            linter: "gosec",
+            pattern: "G103: Use of unsafe calls should be audited",
+        },
+        PresetExcludePattern {
+            preset: "commonFalsePositives",
+            linter: "gosec",
+            pattern: "G204: Subprocess launched with variable",
+        },
+        PresetExcludePattern {
+            preset: "commonFalsePositives",
+            linter: "gosec",
+            pattern: "G104",
+        },
+        // legacy (remaining EXC*)
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "golint",
+            pattern: r"func name will be used as test\.Test.* by other packages, and that stutters; consider calling this",
+        },
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "gosec",
+            pattern: r"(G301|G302|G307): Expect (directory permissions to be 0750|file permissions to be 0600) or less",
+        },
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "gosec",
+            pattern: "G304: Potential file inclusion via variable",
+        },
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "stylecheck",
+            pattern: r"(ST1000|ST1020|ST1021|ST1022)",
+        },
+    ];
+    PATTERNS
 }
 
 fn preset_linters(presets: &[String]) -> Vec<String> {
@@ -717,6 +929,7 @@ pub(crate) fn migrate_v1_to_v2(v1: &ConfigV1) -> ConfigV2 {
             default,
             enable,
             disable,
+            exclusions: LinterExclusions::default(),
             settings: linter_settings,
         },
         formatters: FormattersV2 {

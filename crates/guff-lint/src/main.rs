@@ -340,7 +340,7 @@ fn load_run_config(
 
     let (issues, severity, run, output, linter_settings) = match &file {
         Some(c) => (
-            c.issues().clone(),
+            c.effective_issues(),
             c.severity().clone(),
             c.run().clone(),
             c.output().clone(),

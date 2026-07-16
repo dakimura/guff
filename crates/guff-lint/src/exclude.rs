@@ -139,6 +139,9 @@ pub struct Issue {
 pub struct IssueFilter {
     exclude_dir_res: Vec<Regex>,
     exclude_file_res: Vec<Regex>,
+    /// When non-empty (v2 `linters.exclusions.paths-except`), only matching
+    /// paths are kept.
+    paths_except_res: Vec<Regex>,
     exclude_text_res: Vec<Regex>,
     exclude_rules: Vec<CompiledRule>,
     max_issues_per_linter: i32,
@@ -187,6 +190,13 @@ impl IssueFilter {
         }
         for p in &issues.exclude_files {
             push_re(&mut filter.exclude_file_res, &normalize_path_regex(p), "exclude-files");
+        }
+        for p in &issues.paths_except {
+            push_re(
+                &mut filter.paths_except_res,
+                &normalize_path_regex(p),
+                "paths-except",
+            );
         }
         for p in &issues.exclude {
             let pat = format!("{case_prefix}{p}");
@@ -352,6 +362,12 @@ impl IssueFilter {
             if re.is_match(&path) {
                 return true;
             }
+        }
+        // paths-except: if configured, drop anything that does not match.
+        if !self.paths_except_res.is_empty()
+            && !self.paths_except_res.iter().any(|re| re.is_match(&path))
+        {
+            return true;
         }
         false
     }

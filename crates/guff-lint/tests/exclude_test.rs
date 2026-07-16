@@ -53,7 +53,7 @@ fn exclude_rules_drop_errcheck_on_bad_go() {
 
     let analyzers = analyzers_for_linter("errcheck").expect("errcheck");
     let cfg = load_config(&config_path("v2_exclude_errcheck_bad.yml")).unwrap();
-    let filter = IssueFilter::from_config(cfg.issues(), cfg.severity());
+    let filter = IssueFilter::from_config(&cfg.effective_issues(), cfg.severity());
 
     let with_filter = LintResult {
         packages: vec![pkg.clone()],
@@ -156,4 +156,107 @@ fn default_filter_is_noop_for_library_use() {
         cached_issues: Vec::new(),
     };
     assert!(result.diagnostic_count() > 0);
+}
+
+#[test]
+fn v2_linters_exclusions_paths_and_rules() {
+    let cfg = load_config(&config_path("v2_linters_exclusions.yml")).unwrap();
+    let excl = cfg.exclusions().expect("v2 exclusions");
+    assert_eq!(excl.paths.len(), 2);
+    assert_eq!(excl.rules.len(), 2);
+    assert!(excl.warn_unused);
+
+    let issues = cfg.effective_issues();
+    assert!(!issues.exclude_use_default);
+    assert_eq!(issues.exclude_dirs_use_default, Some(false));
+    assert!(issues
+        .exclude_files
+        .iter()
+        .any(|p| p.contains(r"\.(l|pb|y)\.go")));
+    assert!(issues.exclude_rules.iter().any(|r| {
+        r.path.as_deref() == Some("bad\\.go") && r.linters.iter().any(|l| l == "errcheck")
+    }));
+
+    let filter = IssueFilter::from_config(&issues, cfg.severity());
+    let mk = |file: &str, text: &str| guff_lint::Issue {
+        from_linter: "errcheck".into(),
+        analyzer: "errcheck".into(),
+        text: text.into(),
+        severity: String::new(),
+        filename: file.into(),
+        line: 8,
+        column: 2,
+        source_line: None,
+        diagnostic: guff_analysis::Diagnostic {
+            message: text.into(),
+            ..Default::default()
+        },
+    };
+
+    let kept = filter.apply(
+        vec![
+            mk("/proj/pkg/bad.go", "unchecked error"),
+            mk("/proj/pkg/ok.go", "unchecked error"),
+            mk("/proj/pkg/foo.pb.go", "unchecked error"),
+            mk(
+                "/proj/pkg/ok.go",
+                "Error return value of resp.Body.Close is not checked",
+            ),
+        ],
+        &[],
+    );
+    assert_eq!(
+        kept.len(),
+        1,
+        "path rule + path glob + text rule should leave only ok.go unchecked: {kept:?}"
+    );
+    assert!(kept[0].filename.ends_with("ok.go"));
+    assert_eq!(kept[0].text, "unchecked error");
+}
+
+#[test]
+fn v2_linters_exclusions_presets_expand() {
+    let cfg = load_config(&config_path("v2_linters_exclusions_presets.yml")).unwrap();
+    let issues = cfg.effective_issues();
+    assert!(!issues.exclude_use_default);
+    assert!(
+        issues.exclude_rules.len() >= 2,
+        "presets should inject rules, got {}",
+        issues.exclude_rules.len()
+    );
+    assert!(issues.exclude_rules.iter().any(|r| {
+        r.linters.iter().any(|l| l == "errcheck")
+            && r.text
+                .as_deref()
+                .is_some_and(|t| t.contains("Close") || t.contains("std"))
+    }));
+    assert!(issues
+        .exclude_rules
+        .iter()
+        .any(|r| r.linters.iter().any(|l| l == "revive")));
+}
+
+#[test]
+fn cli_honors_v2_linters_exclusions() {
+    let dir = fixture_dir("unchecked_error");
+    let cfg = config_path("v2_linters_exclusions.yml");
+    let bin = env!("CARGO_BIN_EXE_guff");
+
+    let out = Command::new(bin)
+        .args(["run", "-c", cfg.to_str().unwrap(), "--sequential", "."])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn guff");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "linters.exclusions path=bad.go should yield exit 0\nstdout={stdout}\nstderr={stderr}"
+    );
+    assert!(
+        !stdout.contains("bad.go"),
+        "excluded path must not appear on stdout: {stdout}"
+    );
 }

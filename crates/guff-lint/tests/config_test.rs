@@ -109,7 +109,7 @@ fn parse_v2_full_issues_run_severity_output() {
     let cfg = parse_config_str(&contents).unwrap();
     assert!(cfg.is_v2());
 
-    let issues = cfg.issues();
+    let issues = cfg.effective_issues();
     assert!(!issues.exclude_use_default);
     assert_eq!(issues.exclude_rules.len(), 3);
     assert_eq!(issues.exclude_rules[0].path.as_deref(), Some("_test\\.go"));
@@ -139,12 +139,31 @@ fn parse_v2_full_issues_run_severity_output() {
 }
 
 #[test]
+fn parse_v2_linters_exclusions_prometheus_shape() {
+    let contents = fs::read_to_string(testdata("v2_linters_exclusions.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    assert!(cfg.is_v2());
+
+    let excl = cfg.exclusions().unwrap();
+    assert_eq!(excl.paths.len(), 2);
+    assert!(excl.warn_unused);
+    assert_eq!(excl.rules.len(), 2);
+
+    let issues = cfg.effective_issues();
+    assert!(!issues.exclude_use_default);
+    assert_eq!(issues.exclude_dirs_use_default, Some(false));
+    // paths folded into exclude_files; rules appended.
+    assert_eq!(issues.exclude_files.len(), 2);
+    assert_eq!(issues.exclude_rules.len(), 2);
+}
+
+#[test]
 fn exclude_rules_filter_errcheck_on_bad_go() {
     use guff_lint::{IssueFilter, IssuesConfig, SeverityConfig};
 
     let contents = fs::read_to_string(testdata("v2_exclude_errcheck_bad.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();
-    let filter = IssueFilter::from_config(cfg.issues(), cfg.severity());
+    let filter = IssueFilter::from_config(&cfg.effective_issues(), cfg.severity());
 
     let mk = |file: &str, linter: &str| guff_lint::Issue {
         from_linter: linter.into(),
