@@ -544,6 +544,14 @@ pub struct TestifylintSuiteExtraAssertCallSettings {
     pub mode: Option<String>,
 }
 
+/// Nested `require-error` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintRequireErrorSettings {
+    /// Regex matching assertion function names (e.g. `^NoError(f)?$`).
+    #[serde(default, rename = "fn-pattern")]
+    pub fn_pattern: Option<String>,
+}
+
 impl Default for TestifylintFormatterSettings {
     fn default() -> Self {
         Self {
@@ -575,6 +583,8 @@ pub struct TestifylintSettings {
     pub formatter: TestifylintFormatterSettings,
     #[serde(default, rename = "suite-extra-assert-call")]
     pub suite_extra_assert_call: TestifylintSuiteExtraAssertCallSettings,
+    #[serde(default, rename = "require-error")]
+    pub require_error: TestifylintRequireErrorSettings,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -1551,6 +1561,7 @@ impl TestifylintSettings {
             formatter_require_f_funcs: self.formatter.require_f_funcs,
             formatter_require_string_msg: self.formatter.require_string_msg,
             suite_extra_assert_call_mode: suite_mode,
+            require_error_fn_pattern: self.require_error.fn_pattern.clone(),
         }
     }
 }

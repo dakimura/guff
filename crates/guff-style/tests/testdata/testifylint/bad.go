@@ -71,7 +71,17 @@ func TestBad(t *testing.T) {
 	assert.Equal(t, 1, 2, fmt.Sprintf("msg"))
 	assert.Equal(t, 1, 2, 42)
 	assert.Fail(t, "case [%d] failed", 1)
+
+	// require-error: error assertions with subsequent calls must use require.
+	assert.NoError(t, err)
+	nop()
+	assert.Error(t, err)
+	nop()
+	assert.ErrorIs(t, err, errSentinel)
+	nop()
 }
+
+func nop() {}
 
 type SuiteBad struct {
 	suite.Suite

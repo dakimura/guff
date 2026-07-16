@@ -566,6 +566,8 @@ pub struct TestifylintOptions {
     pub formatter_require_string_msg: bool,
     /// `suite-extra-assert-call.mode` (default `remove`).
     pub suite_extra_assert_call_mode: SuiteExtraAssertCallMode,
+    /// `require-error.fn-pattern`. `None` → all error assertion names.
+    pub require_error_fn_pattern: Option<String>,
 }
 
 impl Default for TestifylintOptions {
@@ -582,6 +584,7 @@ impl Default for TestifylintOptions {
             formatter_require_f_funcs: false,
             formatter_require_string_msg: true,
             suite_extra_assert_call_mode: SuiteExtraAssertCallMode::Remove,
+            require_error_fn_pattern: None,
         }
     }
 }

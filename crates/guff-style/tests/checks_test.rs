@@ -2458,6 +2458,10 @@ fn testifylint_flags_common_anti_patterns() {
         "suite-broken-parallel: {messages:?}"
     );
     assert!(
+        messages.iter().any(|m| m.contains("require-error")),
+        "require-error: {messages:?}"
+    );
+    assert!(
         messages.iter().all(|m| !m.contains("suite-thelper")),
         "suite-thelper should be off by default: {messages:?}"
     );
@@ -2564,5 +2568,61 @@ fn testifylint_suite_thelper_when_enabled() {
             .iter()
             .any(|m| m.contains("suite-thelper") && m.contains("s.T().Helper()")),
         "suite-thelper: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_require_error_fn_pattern() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TestifylintOptions;
+
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["require-error".into()],
+            require_error_fn_pattern: Some("^NoError$".into()),
+            ..TestifylintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("require-error")),
+        "fn-pattern NoError should still flag: {messages:?}"
+    );
+
+    let mut bag_all = SettingsBag::new();
+    bag_all.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["require-error".into()],
+            require_error_fn_pattern: Some("^DoesNotMatch$".into()),
+            ..TestifylintOptions::default()
+        },
+    );
+    let none = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag_all),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        none.iter().all(|m| !m.contains("require-error")),
+        "non-matching fn-pattern should suppress: {none:?}"
     );
 }

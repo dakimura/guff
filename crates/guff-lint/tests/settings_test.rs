@@ -568,11 +568,19 @@ fn parse_v2_testifylint_settings() {
         settings.testifylint.suite_extra_assert_call.mode.as_deref(),
         Some("require")
     );
+    assert_eq!(
+        settings.testifylint.require_error.fn_pattern.as_deref(),
+        Some("^NoError$")
+    );
     let bag = settings.to_bag();
     let opts = bag
         .get::<guff_style::TestifylintOptions>("testifylint")
         .expect("testifylint options");
     assert!(opts.disable_all);
+    assert_eq!(
+        opts.require_error_fn_pattern.as_deref(),
+        Some("^NoError$")
+    );
     assert_eq!(
         opts.enable,
         vec![

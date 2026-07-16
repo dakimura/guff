@@ -22,3 +22,5 @@ linters:
         require-string-msg: false
       suite-extra-assert-call:
         mode: require
+      require-error:
+        fn-pattern: ^NoError$

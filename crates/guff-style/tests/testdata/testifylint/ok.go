@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -32,7 +33,7 @@ func TestOk(t *testing.T) {
 	assert.Equal(t, a, b)
 	assert.Empty(t, arr)
 	assert.Empty(t, str)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Nil(t, ptr)
 	assert.Len(t, arr, 3)
 	assert.InEpsilon(t, 1.5, f, 0.0001)
@@ -44,7 +45,7 @@ func TestOk(t *testing.T) {
 	assert.EqualValues(t, 42, anyVal)
 	assert.Regexp(t, `hi`, str)
 
-	assert.ErrorIs(t, err, errSentinel)
+	require.ErrorIs(t, err, errSentinel)
 	assert.JSONEq(t, `{"foo":"bar"}`, body)
 	assert.YAMLEq(t, expectedYML, conf)
 	assert.Equal(t, expected, pos)

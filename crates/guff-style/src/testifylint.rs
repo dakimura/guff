@@ -7,22 +7,24 @@
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
 //! `float-compare`, `formatter`, `len`, `negative-positive`, `nil-compare`, `regexp`,
-//! `suite-broken-parallel`, `suite-dont-use-pkg`, `suite-extra-assert-call`,
-//! `suite-method-signature`, `suite-subtest-run`, `suite-thelper` (off by default),
-//! `time-compare`, `useless-assert`, `zero`.
+//! `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
+//! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
+//! `suite-thelper` (off by default), `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (go-require, mock-expect, require-error),
-//! SuggestedFix / TextEdit, formatter full printf CheckPrintf / require-f-funcs
-//! object lookup parity, bool-compare custom-type casting in messages, compares
-//! time.Time helpers, encoded-compare autofix text edits, error-is-as CollectT
-//! special-case / full ErrorAs pointer diagnostics edge cases.
+//! DEFERRED: remaining checkers (go-require, mock-expect), SuggestedFix / TextEdit,
+//! formatter full printf CheckPrintf / require-f-funcs object lookup parity,
+//! bool-compare custom-type casting in messages, compares time.Time helpers,
+//! encoded-compare autofix text edits, error-is-as CollectT special-case /
+//! full ErrorAs pointer diagnostics edge cases, require-error HTTP-handler /
+//! WaitGroup.Go context detection when `net/http` / `sync.WaitGroup.Go` are
+//! unavailable in the type graph.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    ArrayType, BasicLit, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File, FuncDecl,
-    Ident, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
+    ArrayType, BasicLit, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File,
+    FuncDecl, Ident, IfStmt, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -67,6 +69,7 @@ const IMPLEMENTED: &[&str] = &[
     "negative-positive",
     "nil-compare",
     "regexp",
+    "require-error",
     "suite-broken-parallel",
     "suite-dont-use-pkg",
     "suite-extra-assert-call",
@@ -2851,6 +2854,311 @@ fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<(u32, S
     ));
 }
 
+fn is_suite_after_test_method(name: &str) -> bool {
+    matches!(
+        name,
+        "TearDownSuite" | "TearDownTest" | "AfterTest" | "HandleStats" | "TearDownSubTest"
+    )
+}
+
+fn is_no_error_assertion(fn_name: &str) -> bool {
+    fn_name == "NoError" || fn_name == "NoErrorf"
+}
+
+fn is_require_error_fn(trimmed: &str) -> bool {
+    matches!(
+        trimmed,
+        "Error" | "ErrorIs" | "ErrorAs" | "EqualError" | "ErrorContains" | "NoError" | "NotErrorIs"
+    )
+}
+
+#[derive(Clone, Copy)]
+struct FuncMeta {
+    is_test_cleanup: bool,
+    is_goroutine: bool,
+    /// DEFERRED: full `mimicHTTPHandler` when `net/http.HandlerFunc` is in the type graph.
+    #[allow(dead_code)]
+    is_http_handler: bool,
+}
+
+struct ReqErrCall<'a> {
+    call: &'a CallExpr,
+    /// `(is_assert, fn_name, fn_name_trimmed)` when this is a testify assertion.
+    testify: Option<(bool, String, String)>,
+    root_if_id: Option<u32>,
+    parent_if: Option<&'a IfStmt>,
+    parent_block: Option<&'a BlockStmt>,
+    in_if_cond: bool,
+    in_bool_expr: bool,
+    in_no_error_seq: bool,
+}
+
+fn find_root_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
+    let mut nearest: Option<&IfStmt> = None;
+    let mut nearest_idx = 0usize;
+    for (i, n) in stack.iter().enumerate().rev().skip(1) {
+        if let walk::NodeRef::IfStmt(s) = n {
+            nearest = Some(s);
+            nearest_idx = i;
+            break;
+        }
+    }
+    let mut cur = nearest?;
+    let mut i = nearest_idx;
+    while i > 0 {
+        if let walk::NodeRef::IfStmt(parent) = stack[i - 1] {
+            cur = parent;
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    Some(cur)
+}
+
+fn find_nearest_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
+    for n in stack.iter().rev().skip(1) {
+        if let walk::NodeRef::IfStmt(s) = n {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn find_nearest_block<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a BlockStmt> {
+    for n in stack.iter().rev().skip(1) {
+        if let walk::NodeRef::BlockStmt(b) = n {
+            return Some(b);
+        }
+    }
+    None
+}
+
+fn find_surrounding_func_meta(pass: &Pass<'_>, stack: &[walk::NodeRef<'_>]) -> Option<(u32, FuncMeta)> {
+    for (i, n) in stack.iter().enumerate().rev().skip(1) {
+        match n {
+            walk::NodeRef::FuncDecl(fd) => {
+                let mut meta = FuncMeta {
+                    is_test_cleanup: false,
+                    is_goroutine: false,
+                    is_http_handler: false,
+                };
+                if is_suite_method(pass, fd) && is_suite_after_test_method(&fd.name.name) {
+                    meta.is_test_cleanup = true;
+                }
+                return Some((fd.ty.id, meta));
+            }
+            walk::NodeRef::FuncLit(fl) => {
+                let mut meta = FuncMeta {
+                    is_test_cleanup: false,
+                    is_goroutine: false,
+                    is_http_handler: false,
+                };
+                if i >= 2 {
+                    if let walk::NodeRef::CallExpr(ce) = stack[i - 1] {
+                        if let Expr::SelectorExpr(se) = &*ce.fun {
+                            if se.sel.name == "Cleanup" && implements_testing_t(pass, &se.x) {
+                                meta.is_test_cleanup = true;
+                            }
+                        }
+                        if matches!(stack[i - 2], walk::NodeRef::GoStmt(_)) {
+                            meta.is_goroutine = true;
+                        }
+                    }
+                }
+                return Some((fl.ty.id, meta));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn call_in_stmt_tree(root: &Stmt, target_id: u32) -> bool {
+    let mut found = false;
+    walk::preorder(walk::stmt_ref(root), |n| {
+        if let walk::NodeRef::CallExpr(ce) = n {
+            if ce.id == target_id {
+                found = true;
+                return false;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn mark_calls_in_no_error_sequence(calls_by_block: &HashMap<u32, Vec<usize>>, calls: &mut [ReqErrCall<'_>]) {
+    for idxs in calls_by_block.values() {
+        for (pos, &ci) in idxs.iter().enumerate() {
+            let Some((_, fn_name, _)) = calls[ci].testify.as_ref() else {
+                continue;
+            };
+            let prev_is = pos
+                .checked_sub(1)
+                .and_then(|p| idxs.get(p).copied())
+                .and_then(|pi| calls[pi].testify.as_ref())
+                .is_some_and(|( _, n, _)| is_no_error_assertion(n));
+            let next_is = idxs
+                .get(pos + 1)
+                .copied()
+                .and_then(|ni| calls[ni].testify.as_ref())
+                .is_some_and(|(_, n, _)| is_no_error_assertion(n));
+            if is_no_error_assertion(fn_name) && (prev_is || next_is) {
+                calls[ci].in_no_error_seq = true;
+            }
+        }
+    }
+}
+
+fn need_skip_require_error(
+    calls: &[ReqErrCall<'_>],
+    curr_idx: usize,
+    block_idxs: &HashMap<u32, Vec<usize>>,
+) -> bool {
+    let curr = &calls[curr_idx];
+    if curr.in_if_cond || curr.in_bool_expr || curr.in_no_error_seq {
+        return true;
+    }
+
+    if let Some(root_id) = curr.root_if_id {
+        for c in calls {
+            if c.root_if_id == Some(root_id) && c.in_if_cond {
+                return true;
+            }
+        }
+    }
+
+    let Some(block) = curr.parent_block else {
+        return false;
+    };
+    let Some(block_calls) = block_idxs.get(&block.id) else {
+        return false;
+    };
+    let is_last = block_calls.last().copied() == Some(curr_idx);
+
+    let mut no_calls_after = true;
+    let block_ends_with_return = matches!(block.list.last(), Some(Stmt::ReturnStmt(_)));
+    if !block_ends_with_return {
+        for next in calls.iter().skip(curr_idx + 1) {
+            let mut next_in_else = false;
+            if let Some(p_if) = curr.parent_if {
+                if let Some(else_stmt) = &p_if.else_ {
+                    next_in_else = call_in_stmt_tree(else_stmt, next.call.id);
+                }
+            }
+            if !next_in_else {
+                no_calls_after = false;
+                break;
+            }
+        }
+    }
+
+    is_last && no_calls_after
+}
+
+fn check_require_error(
+    pass: &Pass<'_>,
+    file: &File,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let fn_pat = opts
+        .require_error_fn_pattern
+        .as_deref()
+        .and_then(|p| Regex::new(p).ok());
+
+    let mut calls_by_func: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut func_meta: HashMap<u32, FuncMeta> = HashMap::new();
+    let mut calls: Vec<ReqErrCall<'_>> = Vec::new();
+
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+        let walk::NodeRef::CallExpr(ce) = n else {
+            return true;
+        };
+        let Some((fkey, meta)) = find_surrounding_func_meta(pass, stk) else {
+            return true;
+        };
+        func_meta.entry(fkey).or_insert(meta);
+
+        let prev_is_if = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::IfStmt(_)));
+        let prev_is_assign = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::AssignStmt(_)));
+        let prev_prev_is_if = matches!(stk.iter().rev().nth(2), Some(walk::NodeRef::IfStmt(_)));
+        let in_if_cond = prev_is_if || (prev_prev_is_if && prev_is_assign);
+        let in_bool_expr = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::BinaryExpr(_)));
+
+        let parent_if = find_nearest_if(stk);
+        let root_if = find_root_if(stk);
+        let parent_block = find_nearest_block(stk);
+
+        let testify = new_call_meta(pass, ce).map(|m| {
+            (m.is_assert, m.fn_name.clone(), m.fn_name_trimmed.clone())
+        });
+
+        let idx = calls.len();
+        calls.push(ReqErrCall {
+            call: ce,
+            testify,
+            root_if_id: root_if.map(|i| i.id),
+            parent_if,
+            parent_block,
+            in_if_cond,
+            in_bool_expr,
+            in_no_error_seq: false,
+        });
+        calls_by_func.entry(fkey).or_default().push(idx);
+        // Upstream stops descending into asserts-in-asserts; we still walk but
+        // nested asserts are rare and still classified correctly.
+        true
+    });
+
+    let mut calls_by_block: HashMap<u32, Vec<usize>> = HashMap::new();
+    for (i, c) in calls.iter().enumerate() {
+        if let Some(b) = c.parent_block {
+            calls_by_block.entry(b.id).or_default().push(i);
+        }
+    }
+    mark_calls_in_no_error_sequence(&calls_by_block, &mut calls);
+
+    for (fkey, idxs) in &calls_by_func {
+        let meta = func_meta.get(fkey).copied().unwrap_or(FuncMeta {
+            is_test_cleanup: false,
+            is_goroutine: false,
+            is_http_handler: false,
+        });
+        if meta.is_test_cleanup || meta.is_goroutine || meta.is_http_handler {
+            continue;
+        }
+        for &i in idxs {
+            let c = &calls[i];
+            let Some((is_assert, fn_name, trimmed)) = c.testify.as_ref() else {
+                continue;
+            };
+            if !is_assert {
+                continue;
+            }
+            // Upstream skips CollectT (`Obj.Name() != "Assertions"`). Package
+            // and Assertions methods are accepted; CollectT is not modeled yet.
+            if !is_require_error_fn(trimmed) {
+                continue;
+            }
+            if need_skip_require_error(&calls, i, &calls_by_block) {
+                continue;
+            }
+            if let Some(pat) = &fn_pat {
+                if !pat.is_match(fn_name) {
+                    continue;
+                }
+            }
+            pending.push((
+                c.call.pos().0 as u32,
+                "require-error: for error assertions use require".into(),
+            ));
+        }
+    }
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -3047,6 +3355,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
             true
         });
+        if enabled.contains("require-error") {
+            check_require_error(pass, file, &options, &mut pending);
+        }
     }
 
     for (pos, msg) in pending {

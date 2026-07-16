@@ -101,6 +101,12 @@ func ErrorAs(t TestingT, err error, target interface{}, msgAndArgs ...interface{
 func NotErrorAs(t TestingT, err error, target interface{}, msgAndArgs ...interface{}) bool {
 	return true
 }
+func EqualError(t TestingT, err error, expected string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func ErrorContains(t TestingT, err error, contains string, msgAndArgs ...interface{}) bool {
+	return true
+}
 func JSONEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 func YAMLEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 func Fail(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool     { return true }
@@ -117,6 +123,22 @@ func (a *Assertions) Nil(object interface{}, msgAndArgs ...interface{}) bool {
 	return true
 }
 func (a *Assertions) NoError(err error, msgAndArgs ...interface{}) bool { return true }
+func (a *Assertions) Error(err error, msgAndArgs ...interface{}) bool   { return true }
+func (a *Assertions) ErrorIs(err, target error, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) NotErrorIs(err, target error, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) ErrorAs(err error, target interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) EqualError(err error, expected string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) ErrorContains(err error, contains string, msgAndArgs ...interface{}) bool {
+	return true
+}
 func (a *Assertions) Fail(failureMessage string, msgAndArgs ...interface{}) bool {
 	return true
 }
