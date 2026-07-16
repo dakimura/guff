@@ -1,0 +1,144 @@
+# Snapshot based on basecamp/basecamp-cli `.golangci.yml` (golangci-lint v2).
+# golangci-lint v2 configuration
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/basecamp/basecamp-cli
+
+linters:
+  enable:
+    # Default linters (gosimple is merged into staticcheck in v2)
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # HTTP/Context linters
+    - bodyclose      # Checks whether HTTP response body is closed
+    - noctx          # Find HTTP requests without context.Context
+
+    # Error handling linters
+    - errorlint      # Find code that will cause problems with error wrapping
+    - nilerr         # Find code that returns nil even if it checks error is not nil
+
+    # Code quality linters
+    - misspell       # Check for misspelled English words
+    - prealloc       # Find slice declarations that could use preallocation
+    - unconvert      # Remove unnecessary type conversions
+    - unparam        # Report unused function parameters
+    - wastedassign   # Find wasted assignment statements
+
+    # Security linter
+    - gosec          # Security checker
+
+    # Context and duration linters
+    - contextcheck   # Check function context parameter usage
+    - durationcheck  # Check for two durations multiplied together
+
+    # Naming and completeness linters
+    - errname        # Check error type naming conventions
+    - exhaustive     # Check exhaustiveness of enum switch statements
+    - predeclared    # Find shadowing of Go's predeclared identifiers
+    - revive         # Extensible linting framework
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false  # Don't check explicitly ignored errors with _
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+        - (*bytes.Buffer).Write
+        - (*bytes.Buffer).WriteString
+        - (*strings.Builder).Write
+        - (*strings.Builder).WriteString
+        - io.ReadAll
+        - (*net/http.Server).Serve
+        - (github.com/zalando/go-keyring).Delete
+        - (*github.com/spf13/pflag.FlagSet).MarkHidden
+        - (*github.com/spf13/cobra.Command).MarkFlagRequired
+        - (*github.com/spf13/cobra.Command).RegisterFlagCompletionFunc
+        - (*github.com/spf13/pflag.FlagSet).GetBool
+        - fmt.Sscanf
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # Too noisy for minimal gains
+        - shadow          # Too noisy - variable shadowing is common in Go
+
+    errorlint:
+      asserts: false
+      comparison: false
+
+    gosec:
+      excludes:
+        - G104  # Unhandled errors (covered by errcheck)
+        - G304  # File path provided as taint input (common in CLI tools)
+
+    misspell:
+      locale: US
+
+    staticcheck:
+      checks:
+        - all
+        - -SA1019  # Ignore deprecation warnings (handle separately)
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+  exclusions:
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Test files have relaxed rules
+      - path: _test\.go
+        linters:
+          - gosec
+          - bodyclose
+          - errcheck
+          - unparam
+      - path: _test\.go
+        linters:
+          - revive
+        text: "dot-imports"
+      # Newer gosec rules (G117/G703/G704) that appear with updated analyzers.
+      # These are false positives for a CLI tool: field names match secret
+      # patterns, paths derive from XDG/HOME, and HTTP targets are known APIs.
+      - text: "G117:|G703:|G704:"
+        linters:
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

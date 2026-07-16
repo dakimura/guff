@@ -723,8 +723,9 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   Prometheus / Grafana 由来の golangci-lint v2 設定 snapshot を `parse_config_str` →
   `linter_selection` → `effective_issues` まで通す smoke test を追加。未知キー
   （`run.allow-parallel-runners` / `formatters.exclusions` 等）は serde の既存挙動で許容。
-- **進捗メモ (2026-07-17)**: コーパスを **10** 件に拡張（Gitea / MinIO / NATS Server /
-  Tailscale / Vitess / HashiCorp Consul / Helm / Moby 追加）。各 snapshot は upstream
+- **進捗メモ (2026-07-17)**: コーパスを **14** 件に拡張（Gitea / MinIO / NATS Server /
+  Tailscale / Vitess / HashiCorp Consul / Helm / Moby / golangci-lint / Basecamp CLI /
+  Kargo / Telegraf 追加）。各 snapshot は upstream
   `.golangci.yml` をそのまま取り込み、先頭に出典コメントを付与。`parse_golangci_config_corpus`
   が全件を走査。v1 設定（Traefik 等）は v2 専用コーパスから除外。
   **DEFERRED**: 数十件へのさらなる拡張、CI ゲート化、出典 URL/更新手順の体系化。
@@ -764,6 +765,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-17 | **R22 続き**: config corpus を **14** 件に拡張（golangci-lint / Basecamp CLI / Kargo / Telegraf を追加）。upstream `.golangci.yml` / `.golangci.yaml` snapshot + 出典コメント。`parse_golangci_config_corpus` が全件パース・linter 解決・effective_issues を検証。テスト: `cargo test -p guff-lint --test config_test` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`godoclint`**（godoc-lint/godoc-lint）を `guff-comment` に追加しレジストリ登録。basic 既定 4 rules（`pkg-doc` / `single-pkg-doc` / `start-with-name` / `deprecated`）。`linters.settings.godoclint`（`default` / `enable` / `disable`）YAML 配線。strict/extra rules・`//godoclint:disable`・per-rule options は DEFERRED。`guff-comment` は計 **4** analyzers。テスト: `godoclint/{bad,ok}` + `godoclint/multi` + `checks_test`（4 件）+ ユニット + `v2_godoclint_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`recvcheck`**（raeperd/recvcheck）を `guff-style` に追加しレジストリ登録。同一型のメソッドで pointer/value receiver 混在を検出。既定で Unmarshal*/GobDecode を除外。`linters.settings.recvcheck`（`disable-builtin` / `exclusions`）YAML 配線。`guff-style` は計 **43** analyzers。テスト: `recvcheck/{bad,ok,settings}.go` + `checks_test`（3 件）+ `v2_recvcheck_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`iface`**（uudashr/iface）を `guff-style` に追加しレジストリ登録。既定は `identical`（同一パッケージ内の同一 method set）。`unused` は `linters.settings.iface.enable` で有効化。`settings.unused.exclude` YAML 配線。opaque/unexported/unusedmethod・ignore ディレクティブ・SuggestedFix は DEFERRED。`guff-style` は計 **42** analyzers。テスト: `iface/{bad,ok,settings}.go` + `checks_test`（3 件）+ `v2_iface_settings.yml` |
