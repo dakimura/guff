@@ -3,7 +3,7 @@ mod support;
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
     goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
-    prealloc, predeclared, tagalign, usestdlibvars, usetesting, whitespace, wsl,
+    prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -1836,5 +1836,63 @@ fn wsl_respects_allow_assign_and_anything() {
             .iter()
             .any(|m| m.contains("assignments should only be cuddled")),
         "allow-assign-and-anything should suppress assign cuddling: {messages:?}"
+    );
+}
+
+#[test]
+fn unconvert_flags_identity_conversions() {
+    let pkg = support::typecheck_fixture("unconvert", "example.com/unconvert", "bad.go");
+    let messages = support::run_analyzer(unconvert(), &pkg);
+    assert!(
+        messages.iter().filter(|m| m.contains("unnecessary conversion")).count() >= 2,
+        "expected identity conversions on int and ID: {messages:?}"
+    );
+}
+
+#[test]
+fn unconvert_allows_real_conversions() {
+    let pkg = support::typecheck_fixture("unconvert", "example.com/unconvert/ok", "ok.go");
+    assert!(support::run_analyzer(unconvert(), &pkg).is_empty());
+}
+
+#[test]
+fn unconvert_skips_float_by_default() {
+    let pkg =
+        support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
+    assert!(
+        support::run_analyzer(unconvert(), &pkg).is_empty(),
+        "float/complex identity conversions must stay when fast-math is off"
+    );
+}
+
+#[test]
+fn unconvert_fast_math_flags_float() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UnconvertOptions;
+
+    let pkg =
+        support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "unconvert",
+        UnconvertOptions {
+            fast_math: true,
+            ..UnconvertOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        unconvert(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().filter(|m| m.contains("unnecessary conversion")).count() >= 2,
+        "fast-math should flag float/complex identity conversions: {messages:?}"
     );
 }

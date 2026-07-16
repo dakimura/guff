@@ -386,6 +386,21 @@ fn parse_v2_usestdlibvars_optional_settings() {
 }
 
 #[test]
+fn parse_v2_unconvert_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_unconvert_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.unconvert.fast_math, Some(true));
+    assert_eq!(settings.unconvert.safe, Some(true));
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::UnconvertOptions>("unconvert")
+        .expect("unconvert options");
+    assert!(opts.fast_math);
+    assert!(opts.safe);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

@@ -418,6 +418,26 @@ impl Default for UsestdlibvarsOptions {
     }
 }
 
+/// `linters.settings.unconvert` / `linters-settings.unconvert`.
+#[derive(Debug, Clone, Copy)]
+pub struct UnconvertOptions {
+    /// Report float/complex identity conversions (default off; Go 1.9+ rounding).
+    pub fast_math: bool,
+    /// More conservative reporting (parent-context filtering).
+    ///
+    /// DEFERRED: full `isSafeContext` — currently ignored.
+    pub safe: bool,
+}
+
+impl Default for UnconvertOptions {
+    fn default() -> Self {
+        Self {
+            fast_math: false,
+            safe: false,
+        }
+    }
+}
+
 impl UsestdlibvarsOptions {
     /// True when any check that walks arbitrary string/int literals is enabled.
     pub fn any_literal_table(&self) -> bool {

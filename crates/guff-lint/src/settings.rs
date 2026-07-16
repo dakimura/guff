@@ -39,6 +39,7 @@ pub struct LinterSettings {
     pub copyloopvar: CopyloopvarSettings,
     pub usetesting: UsetestingSettings,
     pub usestdlibvars: UsestdlibvarsSettings,
+    pub unconvert: UnconvertSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -343,6 +344,15 @@ pub struct GoconstSettings {
 pub struct CopyloopvarSettings {
     #[serde(default, rename = "check-alias")]
     pub check_alias: Option<bool>,
+}
+
+/// `linters.settings.unconvert` / `linters-settings.unconvert`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UnconvertSettings {
+    #[serde(default, rename = "fast-math")]
+    pub fast_math: Option<bool>,
+    #[serde(default)]
+    pub safe: Option<bool>,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -659,6 +669,11 @@ impl LinterSettings {
                 out.usestdlibvars = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("unconvert".into())) {
+            if let Ok(s) = serde_yaml::from_value::<UnconvertSettings>(v.clone()) {
+                out.unconvert = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -739,6 +754,7 @@ impl LinterSettings {
         bag.insert("copyloopvar", self.copyloopvar.to_guff_copyloopvar());
         bag.insert("usetesting", self.usetesting.to_guff_usetesting());
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
+        bag.insert("unconvert", self.unconvert.to_guff_unconvert());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1126,6 +1142,16 @@ impl CopyloopvarSettings {
         let defaults = guff_style::CopyloopvarOptions::default();
         guff_style::CopyloopvarOptions {
             check_alias: self.check_alias.unwrap_or(defaults.check_alias),
+        }
+    }
+}
+
+impl UnconvertSettings {
+    pub fn to_guff_unconvert(&self) -> guff_style::UnconvertOptions {
+        let defaults = guff_style::UnconvertOptions::default();
+        guff_style::UnconvertOptions {
+            fast_math: self.fast_math.unwrap_or(defaults.fast_math),
+            safe: self.safe.unwrap_or(defaults.safe),
         }
     }
 }
