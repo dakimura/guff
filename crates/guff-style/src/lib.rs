@@ -11,6 +11,7 @@
 //! - [`gochecknoinits`]
 //! - [`gochecknoglobals`]
 //! - [`gocheckcompilerdirectives`]
+//! - [`forbidigo`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -59,6 +60,7 @@ mod musttag;
 mod sloglint;
 mod testifylint;
 mod gocheckcompilerdirectives;
+mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod gocognit;
@@ -83,11 +85,12 @@ mod wsl;
 
 pub use options::{
     CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions, ExhaustructOptions,
-    FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, LllOptions,
-    LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
-    NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
-    SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions,
-    UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
+    ForbidigoOptions, ForbidigoPattern, FunlenOptions, GocognitOptions, GoconstOptions,
+    GocriticOptions, GocycloOptions, LllOptions, LoggercheckOptions, MndOptions, ModernizeOptions,
+    MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions, PerfsprintOptions,
+    PreallocOptions, PredeclaredOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
+    TagalignOptions, TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
+    WhitespaceOptions, WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
@@ -98,6 +101,7 @@ pub use exhaustruct::analyzer as exhaustruct;
 pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
 pub use gocheckcompilerdirectives::analyzer as gocheckcompilerdirectives;
+pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use gocognit::analyzer as gocognit;
@@ -141,6 +145,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gochecknoinits(),
         gochecknoglobals(),
         gocheckcompilerdirectives(),
+        forbidigo(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

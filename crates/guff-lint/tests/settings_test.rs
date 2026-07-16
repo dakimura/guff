@@ -959,3 +959,22 @@ fn parse_v2_gocritic_settings() {
     assert!(opts.enable_all);
     assert!(opts.disabled_checks.iter().any(|d| d == "appendAssign"));
 }
+
+#[test]
+fn parse_v2_forbidigo_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_forbidigo_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.forbidigo.forbid.len(), 2);
+    assert_eq!(settings.forbidigo.exclude_godoc_examples, Some(true));
+    assert!(!settings.forbidigo.analyze_types);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ForbidigoOptions>("forbidigo")
+        .expect("forbidigo options");
+    assert_eq!(opts.forbid.len(), 2);
+    assert_eq!(opts.forbid[0].pattern, r"^fmt\.Print.*$");
+    assert_eq!(opts.forbid[0].msg, "Do not commit print statements.");
+    assert!(opts.forbid[1].pattern.contains("ioutil"));
+    assert!(opts.exclude_godoc_examples);
+}

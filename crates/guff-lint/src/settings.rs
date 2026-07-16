@@ -56,6 +56,7 @@ pub struct LinterSettings {
     pub gomodguard: GomodguardSettings,
     pub modernize: ModernizeSettings,
     pub gocritic: GocriticSettings,
+    pub forbidigo: ForbidigoSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -775,6 +776,37 @@ pub struct GocriticSettings {
     pub disabled_checks: Vec<String>,
 }
 
+/// One `forbidigo.forbid` entry (string or `{pattern,msg,pkg}`).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ForbidigoForbidEntry {
+    Pattern(String),
+    Struct(ForbidigoPatternSettings),
+}
+
+/// `linters.settings.forbidigo.forbid[]` struct form.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ForbidigoPatternSettings {
+    #[serde(default, alias = "p")]
+    pub pattern: String,
+    #[serde(default, alias = "pkg")]
+    pub pkg: String,
+    #[serde(default)]
+    pub msg: String,
+}
+
+/// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct ForbidigoSettings {
+    #[serde(default)]
+    pub forbid: Vec<ForbidigoForbidEntry>,
+    /// When absent, golangci default is `true`.
+    #[serde(default, rename = "exclude-godoc-examples")]
+    pub exclude_godoc_examples: Option<bool>,
+    #[serde(default, rename = "analyze-types")]
+    pub analyze_types: bool,
+}
+
 /// `linters.settings.depguard` / `linters-settings.depguard`.
 ///
 /// Empty `rules` → analyzer default (`Main` / `$gostd` only).
@@ -1067,6 +1099,11 @@ impl LinterSettings {
                 out.gocritic = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("forbidigo".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ForbidigoSettings>(v.clone()) {
+                out.forbidigo = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1128,6 +1165,7 @@ impl LinterSettings {
         bag.insert("gomodguard", self.gomodguard.to_guff_gomodguard());
         bag.insert("modernize", self.modernize.to_guff_modernize());
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
+        bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         Arc::new(bag)
     }
 
@@ -1823,6 +1861,35 @@ impl GocriticSettings {
             disable_all: self.disable_all,
             enabled_checks: self.enabled_checks.clone(),
             disabled_checks: self.disabled_checks.clone(),
+        }
+    }
+}
+
+impl ForbidigoSettings {
+    pub fn to_guff_forbidigo(&self) -> guff_style::ForbidigoOptions {
+        let defaults = guff_style::ForbidigoOptions::default();
+        let forbid = self
+            .forbid
+            .iter()
+            .map(|e| match e {
+                ForbidigoForbidEntry::Pattern(p) => guff_style::ForbidigoPattern {
+                    pattern: p.clone(),
+                    pkg: String::new(),
+                    msg: String::new(),
+                },
+                ForbidigoForbidEntry::Struct(s) => guff_style::ForbidigoPattern {
+                    pattern: s.pattern.clone(),
+                    pkg: s.pkg.clone(),
+                    msg: s.msg.clone(),
+                },
+            })
+            .collect();
+        guff_style::ForbidigoOptions {
+            forbid,
+            exclude_godoc_examples: self
+                .exclude_godoc_examples
+                .unwrap_or(defaults.exclude_godoc_examples),
+            analyze_types: self.analyze_types,
         }
     }
 }

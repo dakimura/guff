@@ -1,7 +1,7 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen,
+    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
@@ -114,6 +114,87 @@ fn gocheckcompilerdirectives_allows_valid_directives() {
     assert!(
         messages.is_empty(),
         "unexpected diagnostics: {messages:?}"
+    );
+}
+
+#[test]
+fn forbidigo_flags_default_print_patterns() {
+    let pkg = support::typecheck_fixture("forbidigo", "example.com/forbidigo", "bad.go");
+    let messages = support::run_analyzer(forbidigo(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use of `fmt.Println` forbidden")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use of `fmt.Printf` forbidden")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use of `print` forbidden")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use of `println` forbidden")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 4, "{messages:?}");
+}
+
+#[test]
+fn forbidigo_allows_sprintf() {
+    let pkg = support::typecheck_fixture("forbidigo", "example.com/forbidigo/ok", "ok.go");
+    let messages = support::run_analyzer(forbidigo(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn forbidigo_respects_custom_forbid_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::{ForbidigoOptions, ForbidigoPattern};
+
+    let pkg = support::typecheck_fixture("forbidigo", "example.com/forbidigo/custom", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "forbidigo",
+        ForbidigoOptions {
+            forbid: vec![ForbidigoPattern {
+                pattern: r"^fmt\.Print.*$".into(),
+                pkg: String::new(),
+                msg: "Do not commit print statements.".into(),
+            }],
+            exclude_godoc_examples: true,
+            analyze_types: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        forbidigo(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("use of `fmt.Println` forbidden")
+                && m.contains("Do not commit print statements.")
+        }),
+        "{messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("`print`")),
+        "builtin print should not match custom fmt-only pattern: {messages:?}"
     );
 }
 

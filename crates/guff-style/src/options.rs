@@ -717,3 +717,33 @@ pub struct GocriticOptions {
     pub disabled_checks: Vec<String>,
 }
 
+/// One forbidigo pattern (`linters.settings.forbidigo.forbid` entry).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ForbidigoPattern {
+    pub pattern: String,
+    pub pkg: String,
+    pub msg: String,
+}
+
+/// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
+///
+/// Empty `forbid` → upstream default `^(fmt\.Print(|f|ln)|print|println)$`.
+/// `exclude_godoc_examples` defaults to true (golangci-lint).
+/// `analyze_types` is accepted but DEFERRED (literal source matching only).
+#[derive(Debug, Clone)]
+pub struct ForbidigoOptions {
+    pub forbid: Vec<ForbidigoPattern>,
+    pub exclude_godoc_examples: bool,
+    pub analyze_types: bool,
+}
+
+impl Default for ForbidigoOptions {
+    fn default() -> Self {
+        Self {
+            forbid: Vec::new(),
+            exclude_godoc_examples: true,
+            analyze_types: false,
+        }
+    }
+}
+
