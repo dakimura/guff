@@ -54,6 +54,7 @@ pub fn analyzers_for_linter_with_settings(
         "goconst" => Some(vec![guff_style::goconst()]),
         "dogsled" => Some(vec![guff_style::dogsled()]),
         "asciicheck" => Some(vec![guff_style::asciicheck()]),
+        "bidichk" => Some(vec![guff_style::bidichk()]),
         "gochecknoinits" => Some(vec![guff_style::gochecknoinits()]),
         "gochecknoglobals" => Some(vec![guff_style::gochecknoglobals()]),
         "gocheckcompilerdirectives" => Some(vec![guff_style::gocheckcompilerdirectives()]),
@@ -108,6 +109,7 @@ pub fn is_meta_linter(name: &str) -> bool {
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "asciicheck",
+    "bidichk",
     "copyloopvar",
     "cyclop",
     "depguard",
@@ -182,6 +184,7 @@ pub fn known_linter_names() -> &'static [&'static str] {
 pub fn linter_description(name: &str) -> &'static str {
     match name {
         "asciicheck" => "Checks that identifiers do not contain non-ASCII characters.",
+        "bidichk" => "Checks for dangerous unicode character sequences.",
         "copyloopvar" => "Detects unnecessary copies of loop variables (Go 1.22+).",
         "cyclop" => "Checks function and package cyclomatic complexity.",
         "depguard" => "Go linter that checks if package imports are in a list of acceptable packages.",

@@ -1,7 +1,7 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
+    asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
@@ -195,6 +195,63 @@ fn forbidigo_respects_custom_forbid_settings() {
     assert!(
         !messages.iter().any(|m| m.contains("`print`")),
         "builtin print should not match custom fmt-only pattern: {messages:?}"
+    );
+}
+
+#[test]
+fn bidichk_flags_dangerous_unicode_in_source() {
+    let pkg = support::typecheck_fixture("bidichk", "example.com/bidichk", "bad.go");
+    let messages = support::run_analyzer(bidichk(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("RIGHT-TO-LEFT-OVERRIDE")),
+        "{messages:?}"
+    );
+    assert!(!messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn bidichk_allows_clean_source() {
+    let pkg = support::typecheck_fixture("bidichk/ok", "example.com/bidichk/ok", "ok.go");
+    assert!(support::run_analyzer(bidichk(), &pkg).is_empty());
+}
+
+#[test]
+fn bidichk_respects_disallowed_runes_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::BidichkOptions;
+
+    let pkg = support::typecheck_fixture("bidichk/settings", "example.com/bidichk/settings", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "bidichk",
+        BidichkOptions {
+            disallowed_runes: vec!["LEFT-TO-RIGHT-OVERRIDE".into()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        bidichk(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("LEFT-TO-RIGHT-OVERRIDE")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("RIGHT-TO-LEFT-OVERRIDE")),
+        "RLO should be skipped when only LRO is enabled: {messages:?}"
     );
 }
 

@@ -57,6 +57,7 @@ pub struct LinterSettings {
     pub modernize: ModernizeSettings,
     pub gocritic: GocriticSettings,
     pub forbidigo: ForbidigoSettings,
+    pub bidichk: BidichkSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -807,6 +808,33 @@ pub struct ForbidigoSettings {
     pub analyze_types: bool,
 }
 
+/// `linters.settings.bidichk` / `linters-settings.bidichk`.
+///
+/// Each bool enables checking for that rune. When all are false (golangci
+/// default), all nine dangerous runes are checked — matching upstream
+/// `disallowed-runes` empty-string behavior.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct BidichkSettings {
+    #[serde(default, rename = "left-to-right-embedding")]
+    pub left_to_right_embedding: bool,
+    #[serde(default, rename = "right-to-left-embedding")]
+    pub right_to_left_embedding: bool,
+    #[serde(default, rename = "pop-directional-formatting")]
+    pub pop_directional_formatting: bool,
+    #[serde(default, rename = "left-to-right-override")]
+    pub left_to_right_override: bool,
+    #[serde(default, rename = "right-to-left-override")]
+    pub right_to_left_override: bool,
+    #[serde(default, rename = "left-to-right-isolate")]
+    pub left_to_right_isolate: bool,
+    #[serde(default, rename = "right-to-left-isolate")]
+    pub right_to_left_isolate: bool,
+    #[serde(default, rename = "first-strong-isolate")]
+    pub first_strong_isolate: bool,
+    #[serde(default, rename = "pop-directional-isolate")]
+    pub pop_directional_isolate: bool,
+}
+
 /// `linters.settings.depguard` / `linters-settings.depguard`.
 ///
 /// Empty `rules` → analyzer default (`Main` / `$gostd` only).
@@ -1104,6 +1132,11 @@ impl LinterSettings {
                 out.forbidigo = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("bidichk".into())) {
+            if let Ok(s) = serde_yaml::from_value::<BidichkSettings>(v.clone()) {
+                out.bidichk = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1166,6 +1199,7 @@ impl LinterSettings {
         bag.insert("modernize", self.modernize.to_guff_modernize());
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
+        bag.insert("bidichk", self.bidichk.to_guff_bidichk());
         Arc::new(bag)
     }
 
@@ -1890,6 +1924,42 @@ impl ForbidigoSettings {
                 .exclude_godoc_examples
                 .unwrap_or(defaults.exclude_godoc_examples),
             analyze_types: self.analyze_types,
+        }
+    }
+}
+
+impl BidichkSettings {
+    pub fn to_guff_bidichk(&self) -> guff_style::BidichkOptions {
+        let mut names = Vec::new();
+        if self.left_to_right_embedding {
+            names.push("LEFT-TO-RIGHT-EMBEDDING".into());
+        }
+        if self.right_to_left_embedding {
+            names.push("RIGHT-TO-LEFT-EMBEDDING".into());
+        }
+        if self.pop_directional_formatting {
+            names.push("POP-DIRECTIONAL-FORMATTING".into());
+        }
+        if self.left_to_right_override {
+            names.push("LEFT-TO-RIGHT-OVERRIDE".into());
+        }
+        if self.right_to_left_override {
+            names.push("RIGHT-TO-LEFT-OVERRIDE".into());
+        }
+        if self.left_to_right_isolate {
+            names.push("LEFT-TO-RIGHT-ISOLATE".into());
+        }
+        if self.right_to_left_isolate {
+            names.push("RIGHT-TO-LEFT-ISOLATE".into());
+        }
+        if self.first_strong_isolate {
+            names.push("FIRST-STRONG-ISOLATE".into());
+        }
+        if self.pop_directional_isolate {
+            names.push("POP-DIRECTIONAL-ISOLATE".into());
+        }
+        guff_style::BidichkOptions {
+            disallowed_runes: names,
         }
     }
 }

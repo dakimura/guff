@@ -978,3 +978,17 @@ fn parse_v2_forbidigo_settings() {
     assert!(opts.forbid[1].pattern.contains("ioutil"));
     assert!(opts.exclude_godoc_examples);
 }
+
+#[test]
+fn parse_v2_bidichk_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_bidichk_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.bidichk.left_to_right_override);
+    assert!(!settings.bidichk.right_to_left_override);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::BidichkOptions>("bidichk")
+        .expect("bidichk options");
+    assert_eq!(opts.disallowed_runes, vec!["LEFT-TO-RIGHT-OVERRIDE"]);
+}

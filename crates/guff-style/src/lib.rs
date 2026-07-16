@@ -12,6 +12,7 @@
 //! - [`gochecknoglobals`]
 //! - [`gocheckcompilerdirectives`]
 //! - [`forbidigo`]
+//! - [`bidichk`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -60,6 +61,7 @@ mod musttag;
 mod sloglint;
 mod testifylint;
 mod gocheckcompilerdirectives;
+mod bidichk;
 mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
@@ -84,7 +86,8 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions, ExhaustructOptions,
+    BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions,
+    ExhaustructOptions,
     ForbidigoOptions, ForbidigoPattern, FunlenOptions, GocognitOptions, GoconstOptions,
     GocriticOptions, GocycloOptions, LllOptions, LoggercheckOptions, MndOptions, ModernizeOptions,
     MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions, PerfsprintOptions,
@@ -101,6 +104,7 @@ pub use exhaustruct::analyzer as exhaustruct;
 pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
 pub use gocheckcompilerdirectives::analyzer as gocheckcompilerdirectives;
+pub use bidichk::analyzer as bidichk;
 pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
@@ -142,6 +146,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         goconst(),
         dogsled(),
         asciicheck(),
+        bidichk(),
         gochecknoinits(),
         gochecknoglobals(),
         gocheckcompilerdirectives(),

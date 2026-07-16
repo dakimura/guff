@@ -727,6 +727,13 @@ pub struct ForbidigoPattern {
 
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
+/// `linters.settings.bidichk` — full rune names to check.
+/// Empty list → all nine default dangerous runes (golangci-lint compat).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BidichkOptions {
+    pub disallowed_runes: Vec<String>,
+}
+
 /// Empty `forbid` → upstream default `^(fmt\.Print(|f|ln)|print|println)$`.
 /// `exclude_godoc_examples` defaults to true (golangci-lint).
 /// `analyze_types` is accepted but DEFERRED (literal source matching only).
