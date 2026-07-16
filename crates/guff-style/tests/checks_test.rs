@@ -2449,6 +2449,18 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("suite-subtest-run")),
         "suite-subtest-run: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("suite-method-signature")),
+        "suite-method-signature: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("suite-broken-parallel")),
+        "suite-broken-parallel: {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|m| !m.contains("suite-thelper")),
+        "suite-thelper should be off by default: {messages:?}"
+    );
 }
 
 #[test]
@@ -2518,5 +2530,39 @@ fn testifylint_disable_all_then_enable_subset() {
     assert!(
         messages.iter().all(|m| !m.contains("empty:")),
         "empty should be disabled: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_suite_thelper_when_enabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TestifylintOptions;
+
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["suite-thelper".into()],
+            ..TestifylintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("suite-thelper") && m.contains("s.T().Helper()")),
+        "suite-thelper: {messages:?}"
     );
 }

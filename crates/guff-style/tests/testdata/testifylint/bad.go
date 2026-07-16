@@ -88,4 +88,21 @@ func (s *SuiteBad) TestSuiteAntiPatterns() {
 	})
 }
 
+func (s *SuiteBad) TestWithArgs(t *testing.T) {
+	s.True(true)
+}
+
+func (s *SuiteBad) SetupTest(_ int) {}
+
+func (s *SuiteBad) TestParallelBroken() {
+	s.T().Parallel()
+	s.Run("sub", func() {
+		s.T().Parallel()
+	})
+}
+
+func (s *SuiteBad) helperWithoutTHelper() {
+	s.Equal(1, 2)
+}
+
 var a, b int

@@ -60,6 +60,8 @@ type SuiteOk struct {
 	suite.Suite
 }
 
+func (s *SuiteOk) SetupTest() {}
+
 func (s *SuiteOk) TestSuiteIdiomatic() {
 	var result any
 	b := true
@@ -69,6 +71,11 @@ func (s *SuiteOk) TestSuiteIdiomatic() {
 	s.Run("sub", func() {
 		s.Equal(1, 2)
 	})
+}
+
+func (s *SuiteOk) helperWithTHelper() {
+	s.T().Helper()
+	s.Equal(1, 2)
 }
 
 var a, b int

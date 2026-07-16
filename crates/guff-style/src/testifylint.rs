@@ -7,11 +7,11 @@
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
 //! `float-compare`, `formatter`, `len`, `negative-positive`, `nil-compare`, `regexp`,
-//! `suite-dont-use-pkg`, `suite-extra-assert-call`, `suite-subtest-run`,
+//! `suite-broken-parallel`, `suite-dont-use-pkg`, `suite-extra-assert-call`,
+//! `suite-method-signature`, `suite-subtest-run`, `suite-thelper` (off by default),
 //! `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (go-require, mock-expect, require-error,
-//! suite-broken-parallel / suite-method-signature / suite-thelper),
+//! DEFERRED: remaining checkers (go-require, mock-expect, require-error),
 //! SuggestedFix / TextEdit, formatter full printf CheckPrintf / require-f-funcs
 //! object lookup parity, bool-compare custom-type casting in messages, compares
 //! time.Time helpers, encoded-compare autofix text edits, error-is-as CollectT
@@ -21,8 +21,8 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    ArrayType, BasicLit, BinaryExpr, CallExpr, CompositeLit, Expr, File, Ident, ImportSpec,
-    SelectorExpr, StarExpr, UnaryExpr,
+    ArrayType, BasicLit, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File, FuncDecl,
+    Ident, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -67,9 +67,12 @@ const IMPLEMENTED: &[&str] = &[
     "negative-positive",
     "nil-compare",
     "regexp",
+    "suite-broken-parallel",
     "suite-dont-use-pkg",
     "suite-extra-assert-call",
+    "suite-method-signature",
     "suite-subtest-run",
+    "suite-thelper",
     "time-compare",
     "useless-assert",
     "zero",
@@ -82,9 +85,13 @@ const DEFAULT_EXPECTED_ACTUAL_PATTERN: &str =
 /// Upstream `DefaultTimeCompareSuppressCallsPattern`.
 const DEFAULT_TIME_COMPARE_SUPPRESS: &str = r"Add|AddDate|Date|In|Local|Round|Truncate|UTC";
 
-/// Default-on checkers in upstream (suite-thelper is off by default).
+/// Default-on checkers in upstream (`suite-thelper` is off by default).
 fn default_enabled() -> HashSet<String> {
-    IMPLEMENTED.iter().map(|s| (*s).to_string()).collect()
+    IMPLEMENTED
+        .iter()
+        .filter(|s| **s != "suite-thelper")
+        .map(|s| (*s).to_string())
+        .collect()
 }
 
 fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
@@ -2630,6 +2637,220 @@ fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
     }
 }
 
+fn is_suite_method(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    let Some(recv) = &fd.recv else {
+        return false;
+    };
+    if recv.list.len() != 1 {
+        return false;
+    }
+    let Some(ty) = &recv.list[0].ty else {
+        return false;
+    };
+    implements_testify_suite(pass, ty)
+}
+
+fn is_suite_test_method(name: &str) -> bool {
+    name.starts_with("Test")
+}
+
+fn is_suite_service_method(name: &str) -> bool {
+    matches!(
+        name,
+        "T" | "SetT"
+            | "SetS"
+            | "SetupSuite"
+            | "SetupTest"
+            | "TearDownSuite"
+            | "TearDownTest"
+            | "BeforeTest"
+            | "AfterTest"
+            | "HandleStats"
+            | "SetupSubTest"
+            | "TearDownSubTest"
+    )
+}
+
+/// Upstream `suiteMethodToInterface` (testify suite hook names → interface).
+fn suite_method_iface(name: &str) -> Option<&'static str> {
+    match name {
+        "SetupSuite" => Some("SetupAllSuite"),
+        "SetupTest" => Some("SetupTestSuite"),
+        "TearDownSuite" => Some("TearDownAllSuite"),
+        "TearDownTest" => Some("TearDownTestSuite"),
+        "BeforeTest" => Some("BeforeTest"),
+        "AfterTest" => Some("AfterTest"),
+        "HandleStats" => Some("WithStats"),
+        "SetupSubTest" => Some("SetupSubTest"),
+        "TearDownSubTest" => Some("TearDownSubTest"),
+        _ => None,
+    }
+}
+
+fn check_suite_method_signature(
+    pass: &Pass<'_>,
+    fd: &FuncDecl,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !is_suite_method(pass, fd) {
+        return;
+    }
+    let method_name = &fd.name.name;
+    let n_params = fd
+        .ty
+        .params
+        .as_ref()
+        .map(|p| p.num_fields())
+        .unwrap_or(0);
+    let n_results = fd
+        .ty
+        .results
+        .as_ref()
+        .map(|p| p.num_fields())
+        .unwrap_or(0);
+
+    if is_suite_test_method(method_name) {
+        if n_params > 0 || n_results > 0 {
+            pending.push((
+                fd.name.pos().0 as u32,
+                "suite-method-signature: test method should not have any arguments or returning values"
+                    .into(),
+            ));
+        }
+        return;
+    }
+
+    let Some(iface_name) = suite_method_iface(method_name) else {
+        return;
+    };
+    let Some(iface) = lookup_named_type(pass, SUITE_PKG, iface_name) else {
+        return;
+    };
+    let Some(recv_ty) = fd.recv.as_ref().and_then(|r| r.list[0].ty.as_ref()) else {
+        return;
+    };
+    let Some(typ) = type_of(pass, recv_ty) else {
+        return;
+    };
+    if !implements_iface(pass, typ, iface) {
+        pending.push((
+            fd.name.pos().0 as u32,
+            format!("suite-method-signature: method conflicts with suite.{iface_name} interface"),
+        ));
+    }
+}
+
+fn check_suite_broken_parallel(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    stack: &[walk::NodeRef<'_>],
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Expr::SelectorExpr(se) = &*call.fun else {
+        return;
+    };
+    if se.sel.name != "Parallel" {
+        return;
+    }
+    if !implements_testing_t(pass, &se.x) {
+        return;
+    }
+    for node in stack.iter().rev() {
+        if let walk::NodeRef::FuncDecl(fd) = node {
+            if is_suite_method(pass, fd) {
+                pending.push((
+                    call.pos().0 as u32,
+                    "suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests"
+                        .into(),
+                ));
+                return;
+            }
+        }
+    }
+}
+
+fn is_helper_call_stmt(stmt: &Stmt, rcv_name: &str) -> bool {
+    let Stmt::ExprStmt(ExprStmt { x, .. }) = stmt else {
+        return false;
+    };
+    let Expr::CallExpr(ce) = x else {
+        return false;
+    };
+    if !ce.args.is_empty() {
+        return false;
+    }
+    let Expr::SelectorExpr(helper_sel) = &*ce.fun else {
+        return false;
+    };
+    if helper_sel.sel.name != "Helper" {
+        return false;
+    }
+    let Expr::CallExpr(t_call) = &*helper_sel.x else {
+        return false;
+    };
+    if !t_call.args.is_empty() {
+        return false;
+    }
+    let Expr::SelectorExpr(t_sel) = &*t_call.fun else {
+        return false;
+    };
+    if t_sel.sel.name != "T" {
+        return false;
+    }
+    matches!(&*t_sel.x, Expr::Ident(id) if id.name == rcv_name)
+}
+
+fn is_assertion_stmt(pass: &Pass<'_>, stmt: &Stmt) -> bool {
+    let Stmt::ExprStmt(ExprStmt { x, .. }) = stmt else {
+        return false;
+    };
+    let Expr::CallExpr(ce) = x else {
+        return false;
+    };
+    new_call_meta(pass, ce).is_some()
+}
+
+fn fn_contains_assertions(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    let Some(body) = &fd.body else {
+        return false;
+    };
+    body.list.iter().any(|s| is_assertion_stmt(pass, s))
+}
+
+fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    if !is_suite_method(pass, fd) {
+        return;
+    }
+    let name = &fd.name.name;
+    if is_suite_test_method(name) || is_suite_service_method(name) {
+        return;
+    }
+    if !fn_contains_assertions(pass, fd) {
+        return;
+    }
+    let Some(recv) = &fd.recv else {
+        return;
+    };
+    if recv.list[0].names.len() != 1 {
+        return;
+    }
+    let rcv_name = &recv.list[0].names[0].name;
+    let helper_call = format!("{rcv_name}.T().Helper()");
+    let Some(body) = &fd.body else {
+        return;
+    };
+    if body.list.is_empty() {
+        return;
+    }
+    if is_helper_call_stmt(&body.list[0], rcv_name) {
+        return;
+    }
+    pending.push((
+        fd.name.pos().0 as u32,
+        format!("suite-thelper: suite helper method must start with {helper_call}"),
+    ));
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -2800,11 +3021,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if enabled.contains("blank-import") {
             check_blank_import(file, &mut pending);
         }
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
             };
+            if enabled.contains("suite-method-signature") {
+                check_suite_method_signature(pass, fd, &mut pending);
+            }
+            if enabled.contains("suite-thelper") {
+                check_suite_thelper(pass, fd, &mut pending);
+            }
+        }
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
             if let NodeRef::CallExpr(ce) = n {
+                if enabled.contains("suite-broken-parallel") {
+                    check_suite_broken_parallel(pass, ce, stk, &mut pending);
+                }
                 if enabled.contains("suite-subtest-run") {
                     check_suite_subtest_run(pass, ce, &mut pending);
                 }
