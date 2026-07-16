@@ -357,3 +357,25 @@ fn parse_v2_style_extended_linter_settings() {
             .http_method
     );
 }
+
+#[test]
+fn parse_v2_errchkjson_settings() {
+    use guff_lint::ErrchkjsonSettings;
+
+    let contents = fs::read_to_string(testdata_config("v2_errchkjson_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.errchkjson,
+        ErrchkjsonSettings {
+            check_error_free_encoding: true,
+            report_no_exported: true,
+        }
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_error::ErrchkjsonOptions>("errchkjson")
+        .expect("errchkjson options");
+    assert!(!opts.omit_safe);
+    assert!(opts.report_no_exported);
+}

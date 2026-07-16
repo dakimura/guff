@@ -39,6 +39,7 @@ pub struct LinterSettings {
     pub copyloopvar: CopyloopvarSettings,
     pub usetesting: UsetestingSettings,
     pub usestdlibvars: UsestdlibvarsSettings,
+    pub errchkjson: ErrchkjsonSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -367,6 +368,19 @@ pub struct UsestdlibvarsSettings {
     pub http_status_code: Option<bool>,
 }
 
+/// `linters.settings.errchkjson` / `linters-settings.errchkjson`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ErrchkjsonSettings {
+    /// When true, report checked errors on safe encodings (`omit-safe: false`).
+    /// golangci-lint default: false.
+    #[serde(default, rename = "check-error-free-encoding")]
+    pub check_error_free_encoding: bool,
+    /// When true, report structs with no exported JSON fields.
+    /// golangci-lint default: false.
+    #[serde(default, rename = "report-no-exported")]
+    pub report_no_exported: bool,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -504,6 +518,11 @@ impl LinterSettings {
                 out.usestdlibvars = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
+                out.errchkjson = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -542,6 +561,7 @@ impl LinterSettings {
         bag.insert("copyloopvar", self.copyloopvar.to_guff_copyloopvar());
         bag.insert("usetesting", self.usetesting.to_guff_usetesting());
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
+        bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         Arc::new(bag)
     }
 
@@ -947,6 +967,16 @@ impl UsestdlibvarsSettings {
             http_status_code: self
                 .http_status_code
                 .unwrap_or(defaults.http_status_code),
+        }
+    }
+}
+
+impl ErrchkjsonSettings {
+    pub fn to_guff_errchkjson(&self) -> guff_error::ErrchkjsonOptions {
+        // golangci: omit-safe = !check-error-free-encoding
+        guff_error::ErrchkjsonOptions {
+            omit_safe: !self.check_error_free_encoding,
+            report_no_exported: self.report_no_exported,
         }
     }
 }

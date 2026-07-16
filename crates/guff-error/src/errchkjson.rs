@@ -2,8 +2,8 @@
 //!
 //! Defaults match golangci-lint: `omit-safe` (= `!check-error-free-encoding`) is
 //! **true**, so unnecessary checks on safe encodings are not reported.
-//!
-//! DEFERRED: `report-no-exported` / `check-error-free-encoding` settings wiring.
+//! Settings: `linters.settings.errchkjson.check-error-free-encoding` /
+//! `report-no-exported`.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -26,10 +26,25 @@ use guff_types::typestring::type_string;
 
 use crate::util::{type_of, unparen};
 
-/// golangci-lint default: omit reports about safe encodings with checked errors.
-const OMIT_SAFE: bool = true;
-/// golangci-lint default.
-const REPORT_NO_EXPORTED: bool = false;
+/// Pass-time options from `linters.settings.errchkjson`.
+///
+/// golangci maps `check-error-free-encoding` → `omit-safe: !check-error-free-encoding`.
+#[derive(Debug, Clone, Copy)]
+pub struct ErrchkjsonOptions {
+    /// When true, skip "checked but safe" reports (golangci default).
+    pub omit_safe: bool,
+    /// When true, report structs with no exported JSON fields.
+    pub report_no_exported: bool,
+}
+
+impl Default for ErrchkjsonOptions {
+    fn default() -> Self {
+        Self {
+            omit_safe: true,
+            report_no_exported: false,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum ErrorTarget {
@@ -151,6 +166,7 @@ fn json_safe(
     typ: TypeId,
     level: usize,
     seen: &mut HashSet<TypeId>,
+    report_no_exported: bool,
 ) -> Result<(), JsonErr> {
     if !seen.insert(typ) {
         return Ok(());
@@ -197,8 +213,20 @@ fn json_safe(
                 ))),
             }
         }
-        TypeData::Array(_) => json_safe(pass, array_elem(&artifacts.types, ut), level + 1, seen),
-        TypeData::Slice(_) => json_safe(pass, slice_elem(&artifacts.types, ut), level + 1, seen),
+        TypeData::Array(_) => json_safe(
+            pass,
+            array_elem(&artifacts.types, ut),
+            level + 1,
+            seen,
+            report_no_exported,
+        ),
+        TypeData::Slice(_) => json_safe(
+            pass,
+            slice_elem(&artifacts.types, ut),
+            level + 1,
+            seen,
+            report_no_exported,
+        ),
         TypeData::Struct(_) => {
             let n = struct_num_fields(&artifacts.types, ut);
             let mut exported = 0usize;
@@ -214,20 +242,30 @@ fn json_safe(
                 let Some(ft) = field.typ(&artifacts.objects) else {
                     continue;
                 };
-                json_safe(pass, ft, level + 1, seen)?;
+                json_safe(pass, ft, level + 1, seen, report_no_exported)?;
                 exported += 1;
             }
-            if REPORT_NO_EXPORTED && level == 0 && exported == 0 {
+            if report_no_exported && level == 0 && exported == 0 {
                 return Err(JsonErr::NoExported);
             }
             Ok(())
         }
-        TypeData::Pointer(_) => {
-            json_safe(pass, pointer_elem(&artifacts.types, ut), level + 1, seen)
-        }
+        TypeData::Pointer(_) => json_safe(
+            pass,
+            pointer_elem(&artifacts.types, ut),
+            level + 1,
+            seen,
+            report_no_exported,
+        ),
         TypeData::Map(_) => {
             json_safe_map_key(pass, map_key(&artifacts.types, ut))?;
-            json_safe(pass, map_elem(&artifacts.types, ut), level + 1, seen)
+            json_safe(
+                pass,
+                map_elem(&artifacts.types, ut),
+                level + 1,
+                seen,
+                report_no_exported,
+            )
         }
         TypeData::Chan(_) | TypeData::Signature(_) => Err(JsonErr::Unsupported(format!(
             "unsupported type `{}` found",
@@ -276,6 +314,7 @@ fn handle_json_marshal(
     fn_name: &str,
     error_target: ErrorTarget,
     omit_safe: bool,
+    report_no_exported: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
     let Some(arg0) = call.args.first() else {
@@ -298,7 +337,7 @@ fn handle_json_marshal(
     }
 
     let mut seen = HashSet::new();
-    let err = json_safe(pass, typ, 0, &mut seen);
+    let err = json_safe(pass, typ, 0, &mut seen, report_no_exported);
     match &err {
         Err(JsonErr::Unsupported(msg)) => {
             pending.push((pos, format!("`{fn_name}` for {msg}")));
@@ -334,33 +373,40 @@ fn handle_json_marshal(
     }
 }
 
+/// Returns `(fn_name, force_omit_safe)`. Encode always forces omit-safe (upstream).
 fn marshal_fn_name(pass: &Pass<'_>, call: &CallExpr) -> Option<(String, bool)> {
     let name = code::call_name(pass, &call.fun)?;
     match name.as_str() {
-        "encoding/json.Marshal" | "encoding/json.MarshalIndent" => Some((name, OMIT_SAFE)),
+        "encoding/json.Marshal" | "encoding/json.MarshalIndent" => Some((name, false)),
         "(*encoding/json.Encoder).Encode" => Some((name, true)),
         _ => None,
     }
 }
 
-fn inspect_args(pass: &Pass<'_>, args: &[Expr], pending: &mut Vec<(u32, String)>) {
+fn inspect_args(
+    pass: &Pass<'_>,
+    args: &[Expr],
+    options: ErrchkjsonOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     for a in args {
         // Use Inspect (not Preorder): false only prunes this subtree.
         walk::inspect(walk::expr_ref(a), |n| {
             let Some(NodeRef::CallExpr(call)) = n else {
                 return true;
             };
-            if let Some((fn_name, omit_safe)) = marshal_fn_name(pass, call) {
+            if let Some((fn_name, force_omit)) = marshal_fn_name(pass, call) {
                 handle_json_marshal(
                     pass,
                     call,
                     &fn_name,
                     ErrorTarget::FunctionArgument,
-                    omit_safe,
+                    force_omit || options.omit_safe,
+                    options.report_no_exported,
                     pending,
                 );
             } else {
-                inspect_args(pass, &call.args, pending);
+                inspect_args(pass, &call.args, options, pending);
             }
             false
         });
@@ -371,6 +417,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "errchkjson requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<ErrchkjsonOptions>("errchkjson")
+        .copied()
+        .unwrap_or_default();
 
     let mut pending = Vec::new();
     for file in pass.files() {
@@ -383,17 +434,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             match n {
                 NodeRef::ReturnStmt(_) => false,
                 NodeRef::CallExpr(call) => {
-                    if let Some((fn_name, omit_safe)) = marshal_fn_name(pass, call) {
+                    if let Some((fn_name, force_omit)) = marshal_fn_name(pass, call) {
                         handle_json_marshal(
                             pass,
                             call,
                             &fn_name,
                             ErrorTarget::BlankIdentifier,
-                            omit_safe,
+                            force_omit || options.omit_safe,
+                            options.report_no_exported,
                             &mut pending,
                         );
                     } else {
-                        inspect_args(pass, &call.args, &mut pending);
+                        inspect_args(pass, &call.args, options, &mut pending);
                     }
                     false
                 }
@@ -401,7 +453,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let Some(Expr::CallExpr(call)) = rhs.first().map(unparen) else {
                         return true;
                     };
-                    let Some((fn_name, omit_safe)) = marshal_fn_name(pass, call) else {
+                    let Some((fn_name, force_omit)) = marshal_fn_name(pass, call) else {
                         return true;
                     };
                     let target = if fn_name.ends_with(".Encode") {
@@ -413,7 +465,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     } else {
                         ErrorTarget::BlankIdentifier
                     };
-                    handle_json_marshal(pass, call, &fn_name, target, omit_safe, &mut pending);
+                    handle_json_marshal(
+                        pass,
+                        call,
+                        &fn_name,
+                        target,
+                        force_omit || options.omit_safe,
+                        options.report_no_exported,
+                        &mut pending,
+                    );
                     false
                 }
                 _ => true,

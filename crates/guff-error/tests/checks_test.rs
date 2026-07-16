@@ -151,3 +151,89 @@ fn errchkjson_allows_checked_safe_and_unsafe() {
         support::run_analyzer(errchkjson(), &pkg)
     );
 }
+
+#[test]
+fn errchkjson_check_error_free_encoding_flags_checked_safe() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::ErrchkjsonOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("errchkjson");
+    let pkg = support::typecheck_pkg(
+        "example.com/errchkjson/cef",
+        &dir.join("check_error_free.go"),
+    );
+    assert!(
+        support::run_analyzer(errchkjson(), &pkg).is_empty(),
+        "default omit-safe should allow checked safe marshal: {:?}",
+        support::run_analyzer(errchkjson(), &pkg)
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "errchkjson",
+        ErrchkjsonOptions {
+            omit_safe: false,
+            report_no_exported: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        errchkjson(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("is checked but passed argument is safe")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn errchkjson_report_no_exported_flags_empty_struct() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::ErrchkjsonOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("errchkjson");
+    let pkg = support::typecheck_pkg(
+        "example.com/errchkjson/ne",
+        &dir.join("no_exported.go"),
+    );
+    assert!(
+        support::run_analyzer(errchkjson(), &pkg).is_empty(),
+        "default report-no-exported=false should allow: {:?}",
+        support::run_analyzer(errchkjson(), &pkg)
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "errchkjson",
+        ErrchkjsonOptions {
+            omit_safe: true,
+            report_no_exported: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        errchkjson(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("does not contain any exported field")),
+        "{messages:?}"
+    );
+}

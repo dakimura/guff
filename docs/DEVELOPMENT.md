@@ -140,7 +140,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
 | `guff-unused` | ✅（単一パッケージ; 型・定数・メソッド・const グループ） | whole-program 版は未 |
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
-| `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
+| `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）配線済み。rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
 | `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（copyloopvar `check-alias` / usetesting 各フラグ / usestdlibvars `http-method`・`http-status-code` / gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint（`concat-loop` / `loop-other-ops` 含む）/ goconst（`match-constant` / `numbers` / `min` / `max` / `find-duplicates` 含む）の主要キー）。`usestdlibvars` optional テーブル・ignore ディレクティブ・SuggestedFix・`perfsprint` fiximports・wsl 完全パリティは **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
@@ -156,7 +156,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 |------|------|------------------------------------|
 | サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache`, `--fix` | `format:path` 書き出し・errcheck exclude-functions 等は未 |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions、govet enable/disable、staticcheck checks、errchkjson check-error-free-encoding / report-no-exported）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・errcheck exclude-functions 等は未 |
 | プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/errchkjson/noctx/fatcontext/copyloopvar/usetesting/usestdlibvars/perfsprint/goconst/dogsled/asciicheck/goprintffuncname/funlen/gocyclo/lll/gocognit/nestif/cyclop/nakedret/nosprintfhostport/predeclared/whitespace/nlreturn/mnd/prealloc/tagalign/wsl/godot/godox/dupword/depguard/gomoddirectives/gomodguard/misspell） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
@@ -507,7 +507,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - **進捗メモ (2026-07-15)**:
   1. `guff-gostaticanalysis`: forcetypeassert / nilnil / makezero
   2. `guff-error`: errname / err113 / durationcheck / **errorlint** / **wrapcheck** / **errchkjson**
-     （golangci 既定 `omit-safe`；`report-no-exported` / `check-error-free-encoding` settings は DEFERRED）
+     （golangci 既定 `omit-safe`；`check-error-free-encoding` / `report-no-exported` settings 配線済み）
   3. `guff-context`: **noctx**（AST call-name; upstream は buildssa）/ **fatcontext**
   4. `guff-style`（新）: **copyloopvar**（`check-alias` settings 済）/ **usetesting**（per-check flags settings 済）/
      **usestdlibvars**（HTTP method/status 既定オン + settings 済; optional テーブルは DEFERRED）
@@ -532,7 +532,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `perfsprint` concat-loop / `loop-other-ops` 実効化は **完了**（2026-07-16）
   - `goconst` `find-duplicates` 実効化は **完了**（2026-07-16）
   - `perfsprint` の fiximports
-  - `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）
+  - ~~`errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）~~ → **完了**（2026-07-16）
   - `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck — SSA（→ R17）
   - gosec ほか（R13 続きセッションで数個ずつ）
 
@@ -668,6 +668,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13 続き**: `errchkjson` の `check-error-free-encoding` / `report-no-exported` を `linters.settings` → `SettingsBag` → analyzer に配線（golangci: `omit-safe = !check-error-free-encoding`）。テスト: `check_error_free` / `no_exported` fixtures + `v2_errchkjson_settings.yml` |
 | 2026-07-16 | **R13/R14 続き**: `copyloopvar` `check-alias`・`usetesting` per-check flags・`usestdlibvars` `http-method`/`http-status-code` を `linters.settings` → `SettingsBag` に配線（upstream / golangci キー準拠）。`usestdlibvars` optional テーブルは DEFERRED。テスト: settings fixtures + `v2_style_settings_extended.yml` |
 | 2026-07-16 | **R13/R14 続き**: `goconst` `find-duplicates` 実効化（同一値の const を検出；upstream jgautheron/goconst / golangci メッセージ準拠）。`linters.settings.goconst.find-duplicates` YAML 配線。テスト: `find_duplicates_*` fixtures + settings integration |
 | 2026-07-16 | **R13/R14 続き**: `perfsprint` concat-loop（ループ内文字列連結 → `strings.Builder` SuggestedFix）+ `loop-other-ops` 実効化（upstream catenacyber/perfsprint 準拠）。`linters.settings.perfsprint` に `concat-loop` / `loop-other-ops` YAML 配線。fiximports は DEFERRED。テスト: `concat_loop_*` fixtures + settings integration |
