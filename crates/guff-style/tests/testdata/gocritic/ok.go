@@ -3,6 +3,7 @@ package gocritic
 
 import (
 	"flag"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -156,3 +157,46 @@ func okWrapper(s string, wg *sync.WaitGroup) {
 func okArgOrder(s string) {
 	_ = strings.HasPrefix(s, "#")
 }
+
+func okEmptyString(s string) {
+	_ = s == ""
+	_ = s != ""
+}
+
+func okEmptyFallthrough(i int) {
+	switch i {
+	case 0, 1:
+		_ = i
+	}
+}
+
+func okOctal() {
+	_ = 0o755
+}
+
+func okNilReturn(err error) error {
+	if err == nil {
+		return nil
+	}
+	return err
+}
+
+func okYoda(p *int) {
+	if p == nil {
+	}
+	if *p == 10 {
+	}
+}
+
+func okDefer() {
+	defer fmt.Println("hello")
+}
+
+func okInit() {
+	sideEffectOk()
+	if true {
+	}
+}
+
+func sideEffectOk() {}
+

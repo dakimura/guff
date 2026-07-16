@@ -3030,3 +3030,66 @@ fn gocritic_disabled_checks_are_skipped() {
         "{messages:?}"
     );
 }
+
+#[test]
+fn gocritic_enable_all_extras() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/extras", "extras.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            enable_all: true,
+            ..GocriticOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    let expect = [
+        "replace `len(s)",
+        "replace empty case containing only fallthrough",
+        "empty var() block",
+        "empty const() block",
+        "empty type() block",
+        "use new octal literal style, 0o755",
+        "returned expr is always nil",
+        "consider to change order in expression to p == nil",
+        "consider to change order in expression to *p == 10",
+        "can rewrite as `defer fmt.Println",
+        "consider to move `sideEffectExtra()` before if",
+    ];
+    for needle in expect {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing `{needle}` in {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn gocritic_extras_off_by_default() {
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/extras", "extras.go");
+    let messages = support::run_analyzer(gocritic(), &pkg);
+    assert!(
+        !messages.iter().any(|m| {
+            m.contains("empty var() block")
+                || m.contains("octal literal")
+                || m.contains("yoda")
+                || m.contains("always nil")
+                || m.contains("can rewrite as `defer")
+                || m.contains("before if")
+        }),
+        "extras should be off by default: {messages:?}"
+    );
+}

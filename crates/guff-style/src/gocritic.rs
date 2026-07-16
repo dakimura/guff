@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented default/stable checkers (34):
+//! Implemented checkers (**42** = 34 default + 8 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -10,6 +10,8 @@
 //!   `mapKey`, `offBy1`, `regexpMust`, `typeSwitchVar`, `unlambda`, `wrapperFunc`
 //! - batch 3: `caseOrder`, `codegenComment`, `commentFormatting`,
 //!   `deprecatedComment`, `sloppyTypeAssert`
+//! - batch 4 (enable-all extras): `deferUnlambda`, `emptyDecl`, `emptyFallthrough`,
+//!   `emptyStringTest`, `initClause`, `nilValReturn`, `octalLiteral`, `yodaStyleExpr`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
@@ -24,9 +26,9 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl, Expr, FieldList,
-    File, FuncDecl, FuncLit, IfStmt, IndexExpr, SliceExpr, StarExpr, Stmt, SwitchStmt,
-    TypeAssertExpr, TypeSwitchStmt,
+    AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl,
+    DeferStmt, Expr, FieldList, File, FuncDecl, FuncLit, Ident, IfStmt, IndexExpr, SliceExpr,
+    StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
@@ -37,6 +39,8 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
+use guff_types::arena::{ObjectData, TypeData};
+use guff_types::basic::BasicKind;
 use guff_types::predicates::is_interface;
 use guff_types::TypeId;
 use regex::Regex;
@@ -82,12 +86,34 @@ const DEFAULT_CHECKS: &[&str] = &[
     "wrapperFunc",
 ];
 
+/// Experimental / opinionated checkers available via `enable-all` or
+/// `enabled-checks` (prometheus enable-all coverage).
+const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
+    "deferUnlambda",
+    "emptyDecl",
+    "emptyFallthrough",
+    "emptyStringTest",
+    "initClause",
+    "nilValReturn",
+    "octalLiteral",
+    "yodaStyleExpr",
+];
+
 /// All checkers this port implements (used for `enable-all`).
-const IMPLEMENTED_CHECKS: &[&str] = DEFAULT_CHECKS;
+fn implemented_checks() -> impl Iterator<Item = &'static str> {
+    DEFAULT_CHECKS
+        .iter()
+        .copied()
+        .chain(ENABLE_ALL_EXTRA_CHECKS.iter().copied())
+}
+
+fn is_implemented(name: &str) -> bool {
+    DEFAULT_CHECKS.contains(&name) || ENABLE_ALL_EXTRA_CHECKS.contains(&name)
+}
 
 fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
     let mut set: HashSet<String> = if opts.enable_all {
-        IMPLEMENTED_CHECKS.iter().map(|s| (*s).to_string()).collect()
+        implemented_checks().map(|s| s.to_string()).collect()
     } else if opts.disable_all {
         HashSet::new()
     } else {
@@ -100,7 +126,7 @@ fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
         set.remove(name);
     }
     // Only keep implemented names (unknown / deferred names are ignored).
-    set.retain(|n| IMPLEMENTED_CHECKS.contains(&n.as_str()));
+    set.retain(|n| is_implemented(n));
     set
 }
 
@@ -1902,6 +1928,302 @@ fn run_comment_checks(
     }
 }
 
+fn is_string_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Basic(b) => {
+            matches!(b.kind(), BasicKind::String | BasicKind::UntypedString)
+        }
+        _ => false,
+    }
+}
+
+fn len_arg(expr: &Expr) -> Option<&Expr> {
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    let Expr::Ident(id) = call.fun.as_ref() else {
+        return None;
+    };
+    if id.name != "len" || call.args.len() != 1 {
+        return None;
+    }
+    Some(&call.args[0])
+}
+
+fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(arg) = len_arg(&bin.x) else {
+        return;
+    };
+    if !is_string_typed(pass, arg) {
+        return;
+    }
+    let Some(arg_t) = expr_text(arg) else {
+        return;
+    };
+    let Some(x_t) = expr_text(&bin.x) else {
+        return;
+    };
+    let Some(y_t) = expr_text(&bin.y) else {
+        return;
+    };
+    let whole = format!("{x_t} {} {y_t}", bin.op.as_str());
+    let suggest = match bin.op {
+        Token::NEQ | Token::GTR if is_int_lit(&bin.y, 0) => format!("{arg_t} != \"\""),
+        Token::EQL | Token::LEQ if is_int_lit(&bin.y, 0) => format!("{arg_t} == \"\""),
+        _ => return,
+    };
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("replace `{whole}` with `{suggest}`"),
+    );
+}
+
+fn check_empty_fallthrough(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
+    let mut prev_case_default = false;
+    for s in stmt.body.list.iter().rev() {
+        let Stmt::CaseClause(cc) = s else {
+            continue;
+        };
+        let mut warn = false;
+        if cc.body.len() == 1 {
+            if let Stmt::BranchStmt(bs) = &cc.body[0] {
+                if bs.tok == Token::FALLTHROUGH {
+                    warn = true;
+                    if prev_case_default {
+                        report(
+                            pending,
+                            bs.tok_pos.0 as u32,
+                            "remove empty case containing only fallthrough to default case",
+                        );
+                    } else if !cc.list.is_empty() {
+                        report(
+                            pending,
+                            bs.tok_pos.0 as u32,
+                            "replace empty case containing only fallthrough with expression list",
+                        );
+                    }
+                }
+            }
+        }
+        if !warn {
+            prev_case_default = cc.list.is_empty();
+        }
+    }
+}
+
+fn check_empty_decl(g: &guff::ast::GenDecl, pending: &mut Vec<(u32, String)>) {
+    if !g.lparen.is_valid() || !g.specs.is_empty() {
+        return;
+    }
+    let msg = match g.tok {
+        Some(Token::VAR) => "empty var() block",
+        Some(Token::CONST) => "empty const() block",
+        Some(Token::TYPE) => "empty type() block",
+        _ => return,
+    };
+    report(pending, g.tok_pos.0 as u32, msg);
+}
+
+fn check_octal_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
+    if lit.kind != Some(Token::INT) {
+        return;
+    }
+    let v = lit.value.as_str();
+    if !v.starts_with('0') || v.len() == 1 {
+        return;
+    }
+    let second = v.as_bytes()[1];
+    // Old-style octal: 0[0-7]... — skip 0x/0X/0b/0B/0o/0O.
+    if !second.is_ascii_digit() {
+        return;
+    }
+    report(
+        pending,
+        lit.pos().0 as u32,
+        format!("use new octal literal style, 0o{}", &v[1..]),
+    );
+}
+
+fn check_nil_val_return(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+    if stmt.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::ReturnStmt(ret) = &stmt.body.list[0] else {
+        return;
+    };
+    let Expr::BinaryExpr(expr) = &stmt.cond else {
+        return;
+    };
+    if expr.op != Token::EQL {
+        return;
+    }
+    if !code::is_nil(pass, &expr.y) {
+        return;
+    }
+    for res in &ret.results {
+        if exprs_equal(&expr.x, res) {
+            let Some(val) = expr_text(&expr.x) else {
+                continue;
+            };
+            report(
+                pending,
+                ret.return_.0 as u32,
+                format!("returned expr is always nil; replace {val} with nil"),
+            );
+            break;
+        }
+    }
+}
+
+fn check_yoda_style(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if bin.op != Token::EQL && bin.op != Token::NEQ {
+        return;
+    }
+    let lhs_const = matches!(&*bin.x, Expr::BasicLit(_))
+        || matches!(&*bin.x, Expr::Ident(id) if id.name == "nil");
+    let rhs_lit = matches!(&*bin.y, Expr::BasicLit(_));
+    if !lhs_const || rhs_lit {
+        return;
+    }
+    let Some(x_t) = expr_text(&bin.x) else {
+        return;
+    };
+    let Some(y_t) = expr_text(&bin.y) else {
+        return;
+    };
+    let op = if bin.op == Token::EQL { "==" } else { "!=" };
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("consider to change order in expression to {y_t} {op} {x_t}"),
+    );
+}
+
+fn is_const_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if let Some(info) = pass.types_info() {
+        if let Some(tav) = info.types.get(&expr.id()) {
+            if tav.val.is_some() {
+                return true;
+            }
+        }
+    }
+    match expr {
+        Expr::BasicLit(_) => true,
+        Expr::ParenExpr(p) => is_const_expr(pass, &p.x),
+        Expr::UnaryExpr(u)
+            if matches!(
+                u.op,
+                Token::ADD | Token::SUB | Token::XOR | Token::NOT | Token::AND
+            ) =>
+        {
+            is_const_expr(pass, &u.x)
+        }
+        Expr::BinaryExpr(b) => is_const_expr(pass, &b.x) && is_const_expr(pass, &b.y),
+        _ => false,
+    }
+}
+
+fn is_pkg_name(pass: &Pass<'_>, id: &Ident) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(&obj) = info.uses.get(&id.id) else {
+        return false;
+    };
+    matches!(artifacts.objects.get(obj), ObjectData::PkgName(_))
+}
+
+fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Vec<(u32, String)>) {
+    let call = &d.call;
+    if !call.args.is_empty() {
+        return;
+    }
+    let Expr::FuncLit(fl) = call.fun.as_ref() else {
+        return;
+    };
+    if fl.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::ExprStmt(es) = &fl.body.list[0] else {
+        return;
+    };
+    let Expr::CallExpr(inner) = &es.x else {
+        return;
+    };
+    if !inner.args.iter().all(|a| is_const_expr(pass, a)) {
+        return;
+    }
+    let args = inner
+        .args
+        .iter()
+        .filter_map(expr_text)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rewrite = match inner.fun.as_ref() {
+        Expr::Ident(id) if id.name == "panic" || id.name == "recover" => return,
+        Expr::Ident(id) => {
+            if args.is_empty() {
+                format!("defer {}()", id.name)
+            } else {
+                format!("defer {}({args})", id.name)
+            }
+        }
+        Expr::SelectorExpr(sel) => {
+            let Expr::Ident(pkg) = sel.x.as_ref() else {
+                return;
+            };
+            if !is_pkg_name(pass, pkg) {
+                return;
+            }
+            if args.is_empty() {
+                format!("defer {}.{}()", pkg.name, sel.sel.name)
+            } else {
+                format!("defer {}.{}({args})", pkg.name, sel.sel.name)
+            }
+        }
+        _ => return,
+    };
+    report(
+        pending,
+        d.defer_.0 as u32,
+        format!("can rewrite as `{rewrite}`"),
+    );
+}
+
+fn check_init_clause(
+    name: &str,
+    init: Option<&Stmt>,
+    pos: u32,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(init) = init else {
+        return;
+    };
+    if matches!(init, Stmt::AssignStmt(_)) {
+        return;
+    }
+    let clause = match init {
+        Stmt::ExprStmt(e) => expr_text(&e.x).unwrap_or_else(|| "…".into()),
+        _ => "…".into(),
+    };
+    report(
+        pending,
+        pos,
+        format!("consider to move `{clause}` before {name}"),
+    );
+}
+
 fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
@@ -1976,6 +2298,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             check_if_else_chain(s, &mut if_else_visited, &mut pending);
                         }
                     }
+                    if enabled(&set, "nilValReturn") {
+                        check_nil_val_return(pass, s, &mut pending);
+                    }
+                    if enabled(&set, "initClause") {
+                        check_init_clause("if", s.init.as_deref(), s.if_.0 as u32, &mut pending);
+                    }
                 }
                 NodeRef::SwitchStmt(s) => {
                     if enabled(&set, "singleCaseSwitch") {
@@ -1989,6 +2317,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "dupCase") {
                         check_dup_case_switch(s, &mut pending);
+                    }
+                    if enabled(&set, "emptyFallthrough") {
+                        check_empty_fallthrough(s, &mut pending);
+                    }
+                    if enabled(&set, "initClause") {
+                        check_init_clause(
+                            "switch",
+                            s.init.as_deref(),
+                            s.switch.0 as u32,
+                            &mut pending,
+                        );
                     }
                 }
                 NodeRef::TypeSwitchStmt(s) => {
@@ -2015,6 +2354,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "badCond") {
                         check_bad_cond_expr(b, &mut pending);
                     }
+                    if enabled(&set, "emptyStringTest") {
+                        check_empty_string_test(pass, b, &mut pending);
+                    }
+                    if enabled(&set, "yodaStyleExpr") {
+                        check_yoda_style(b, &mut pending);
+                    }
+                }
+                NodeRef::BasicLit(lit) if enabled(&set, "octalLiteral") => {
+                    check_octal_literal(lit, &mut pending);
+                }
+                NodeRef::DeferStmt(d) if enabled(&set, "deferUnlambda") => {
+                    check_defer_unlambda(pass, d, &mut pending);
+                }
+                NodeRef::GenDecl(g) if enabled(&set, "emptyDecl") => {
+                    check_empty_decl(g, &mut pending);
                 }
                 NodeRef::SliceExpr(s) if enabled(&set, "unslice") => {
                     check_unslice(s, &mut pending);
