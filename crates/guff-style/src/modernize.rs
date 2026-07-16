@@ -25,9 +25,11 @@
 //! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN)
 //! - `newexpr` — `func f(x T) *T { return &x }` → `new(x)` wrappers + call sites
 //!   (Go 1.26+; `NewLike` facts)
+//! - `errorsastype` — `var e T; if errors.As(err, &e)` → `errors.AsType[T]`
+//!   (Go 1.26+; if-stmt only; switch/init/`new(E)` forms DEFERRED)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! errorsastype, stditerators, stringsbuilder, stringscut Index/Contains
+//! stditerators, stringsbuilder, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
@@ -35,7 +37,8 @@
 //! SuggestedFix import edits, reflecttypefor complicated/unnamed types &
 //! unused-var deletion, slicesbackward mutation/non-`s[i]` use analysis full
 //! parity, testingcontext sole-use via typeindex, newexpr `new` shadowing /
-//! CheckExpr untyped-constant re-typecheck full parity, and full rangeint/minmax
+//! CheckExpr untyped-constant re-typecheck full parity, errorsastype
+//! switch/`new(E)`/combined-cond forms, and full rangeint/minmax
 //! edge-case parity with upstream.
 
 use std::collections::HashSet;
@@ -43,12 +46,12 @@ use std::fs;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field,
-    File, ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Stmt,
+    AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field, File,
+    ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Spec, Stmt,
     StructType, UnaryExpr,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
-use guff::position::FileSet;
+use guff::position::{FileSet, Pos};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
@@ -58,7 +61,7 @@ use guff_analysis::{
     TextEdit,
 };
 use guff_types::alias::unalias_readonly;
-use guff_types::api_predicates::api_identical;
+use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
@@ -2953,6 +2956,328 @@ fn check_newexpr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
     });
 }
 
+fn type_expr_text(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::SelectorExpr(sel) => {
+            let x = type_expr_text(&sel.x)?;
+            Some(format!("{x}.{}", sel.sel.name))
+        }
+        Expr::StarExpr(s) => {
+            let x = type_expr_text(&s.x)?;
+            Some(format!("*{x}"))
+        }
+        Expr::ParenExpr(p) => type_expr_text(&p.x),
+        _ => None,
+    }
+}
+
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    )
+}
+
+fn if_stmt_end(s: &IfStmt) -> Pos {
+    s.else_
+        .as_ref()
+        .map(|e| e.end())
+        .unwrap_or_else(|| s.body.end())
+}
+
+fn find_simple_var_decl(
+    pass: &Pass<'_>,
+    file: &File,
+    obj: ObjectId,
+) -> Option<(u32, u32, String, String)> {
+    let mut found = None;
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::DeclStmt(ds) = n else {
+            return true;
+        };
+        let Decl::GenDecl(gd) = &ds.decl else {
+            return true;
+        };
+        if gd.tok != Some(Token::VAR) || gd.specs.len() != 1 {
+            return true;
+        }
+        let Spec::ValueSpec(vs) = &gd.specs[0] else {
+            return true;
+        };
+        if vs.names.len() != 1 || !vs.values.is_empty() {
+            return true;
+        }
+        let Some(ty) = vs.ty.as_ref() else {
+            return true;
+        };
+        if ident_obj(pass, &vs.names[0]) != Some(obj) {
+            return true;
+        }
+        let Some(type_text) = type_expr_text(ty) else {
+            return true;
+        };
+        found = Some((
+            ds.decl.pos().0 as u32,
+            ds.decl.end().0 as u32,
+            vs.names[0].name.clone(),
+            type_text,
+        ));
+        true
+    });
+    found
+}
+
+fn has_use_outside_if(pass: &Pass<'_>, file: &File, obj: ObjectId, if_stmt: &IfStmt) -> bool {
+    let start = if_stmt.if_.0 as u32;
+    let end = if_stmt_end(if_stmt).0 as u32;
+    let mut outside = false;
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::Ident(id) = n else {
+            return true;
+        };
+        let Some(info) = pass.types_info() else {
+            return true;
+        };
+        if info.uses.get(&id.id).copied() != Some(obj) {
+            return true;
+        }
+        let p = id.name_pos.0 as u32;
+        if p < start || p >= end {
+            outside = true;
+        }
+        true
+    });
+    outside
+}
+
+fn count_var_uses(pass: &Pass<'_>, file: &File, obj: ObjectId) -> usize {
+    let mut n = 0;
+    walk::inspect(NodeRef::File(file), |node| {
+        let Some(node) = node else {
+            return true;
+        };
+        if let NodeRef::Ident(id) = node {
+            if pass
+                .types_info()
+                .and_then(|info| info.uses.get(&id.id).copied())
+                == Some(obj)
+            {
+                n += 1;
+            }
+        }
+        true
+    });
+    n
+}
+
+fn fresh_ok_name(pass: &Pass<'_>, if_stmt: &IfStmt, call_pos: u32) -> String {
+    let preferred = "ok";
+    let mut conflict = false;
+    walk::inspect(NodeRef::IfStmt(if_stmt), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::Ident(id) = n else {
+            return true;
+        };
+        if id.name != preferred {
+            return true;
+        }
+        let Some(info) = pass.types_info() else {
+            return true;
+        };
+        if info.uses.get(&id.id).is_none() {
+            return true;
+        }
+        if (id.name_pos.0 as u32) >= call_pos {
+            conflict = true;
+        }
+        true
+    });
+    if !conflict {
+        return preferred.to_string();
+    }
+    for i in 1..100 {
+        let candidate = format!("ok{i}");
+        let mut used = false;
+        walk::inspect(NodeRef::IfStmt(if_stmt), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            if let NodeRef::Ident(id) = n {
+                if id.name == candidate {
+                    used = true;
+                }
+            }
+            true
+        });
+        if !used {
+            return candidate;
+        }
+    }
+    "ok99".into()
+}
+
+/// Port of modernize `errorsastype`: `var e T; if errors.As(err, &e)` → AsType.
+fn check_errorsastype(pass: &Pass<'_>, file: &File, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+    if if_stmt.init.is_some() {
+        return;
+    }
+
+    let mut negated = false;
+    let call = match &if_stmt.cond {
+        Expr::CallExpr(c) => c,
+        Expr::UnaryExpr(u) if u.op == Token::NOT => {
+            negated = true;
+            match u.x.as_ref() {
+                Expr::CallExpr(c) => c,
+                _ => return,
+            }
+        }
+        _ => return,
+    };
+
+    if !code::is_call_to(pass, call, "errors.As") || call.args.len() < 2 {
+        return;
+    }
+
+    let pos = call.fun.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.26") {
+        return;
+    }
+
+    let Expr::UnaryExpr(unary) = &call.args[1] else {
+        return;
+    };
+    if unary.op != Token::AND {
+        return;
+    }
+    let Expr::Ident(target_id) = unary.x.as_ref() else {
+        return;
+    };
+    let Some(obj) = ident_obj(pass, target_id) else {
+        return;
+    };
+
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(typ) = obj.typ(&artifacts.objects) else {
+        return;
+    };
+    if !implements_error(pass, typ) {
+        return;
+    }
+
+    if has_use_outside_if(pass, file, obj, if_stmt) {
+        return;
+    }
+
+    let Some((decl_pos, decl_end, var_name, type_text)) = find_simple_var_decl(pass, file, obj)
+    else {
+        return;
+    };
+
+    let as_ident = match call.fun.as_ref() {
+        Expr::Ident(id) => id,
+        Expr::SelectorExpr(sel) => &sel.sel,
+        _ => return,
+    };
+
+    let uses_v = count_var_uses(pass, file, obj) > 1;
+    let lhs_name = if uses_v { var_name.as_str() } else { "_" };
+    let ok_name = fresh_ok_name(pass, if_stmt, call.pos().0 as u32);
+
+    let mut text_edits = vec![
+        TextEdit {
+            pos: decl_pos,
+            end: decl_end,
+            new_text: String::new(),
+        },
+        TextEdit {
+            pos: call.pos().0 as u32,
+            end: call.pos().0 as u32,
+            new_text: format!("{lhs_name}, {ok_name} := "),
+        },
+        TextEdit {
+            pos: as_ident.name_pos.0 as u32,
+            end: as_ident.end().0 as u32,
+            new_text: format!("AsType[{type_text}]"),
+        },
+        TextEdit {
+            pos: call.args[0].end().0 as u32,
+            end: call.args[1].end().0 as u32,
+            new_text: String::new(),
+        },
+        TextEdit {
+            pos: call.end().0 as u32,
+            end: call.end().0 as u32,
+            new_text: format!(
+                "; {}{ok_name}",
+                if negated { "!" } else { "" }
+            ),
+        },
+    ];
+    if negated {
+        if let Expr::UnaryExpr(u) = &if_stmt.cond {
+            text_edits.push(TextEdit {
+                pos: u.op_pos.0 as u32,
+                end: u.x.pos().0 as u32,
+                new_text: String::new(),
+            });
+        }
+    }
+
+    let end = call.fun.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: format!("errors.As can be simplified using AsType[{type_text}]"),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace errors.As with AsType[{type_text}]"),
+            text_edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -3011,6 +3336,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "stringscutprefix") {
                         check_stringscutprefix(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "errorsastype") {
+                        check_errorsastype(pass, file, s, &mut pending);
                     }
                 }
                 NodeRef::BlockStmt(b) => {

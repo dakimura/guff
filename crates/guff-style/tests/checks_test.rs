@@ -3207,6 +3207,41 @@ fn modernize_flags_newexpr() {
 }
 
 #[test]
+fn modernize_flags_errorsastype() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/errorsastype",
+        "errorsastype.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let as_type: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("errors.As can be simplified using AsType"))
+        .collect();
+    assert!(
+        as_type.len() >= 9,
+        "expected >=9 AsType suggestions, got {} {messages:?}",
+        as_type.len()
+    );
+    assert!(
+        as_type
+            .iter()
+            .any(|m| m.contains("AsType[*os.PathError]")),
+        "{messages:?}"
+    );
+    assert!(
+        as_type
+            .iter()
+            .any(|m| m.contains("AsType[*os.LinkError]")),
+        "{messages:?}"
+    );
+    assert!(
+        as_type.iter().any(|m| m.contains("AsType[FooError]")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_slicescontains_variants() {
     let pkg = support::typecheck_fixture(
         "modernize",
