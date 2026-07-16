@@ -3105,10 +3105,7 @@ fn modernize_flags_atomictypes() {
         hits.len()
     );
     assert_eq!(
-        hits
-            .iter()
-            .filter(|m| m.contains("atomic.Int32"))
-            .count(),
+        hits.iter().filter(|m| m.contains("atomic.Int32")).count(),
         3,
         "{messages:?}"
     );
@@ -3725,6 +3722,7 @@ fn gocritic_enable_all_extras() {
         "label label1 is redundant",
         "change `continue outer` to `break`",
         "Possibly return is missed after the http.Error call",
+        "may want to remove commented-out code",
         "don't embed sync.Mutex",
         "don't embed *sync.RWMutex",
     ];

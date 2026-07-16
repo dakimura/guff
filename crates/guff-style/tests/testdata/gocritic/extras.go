@@ -445,6 +445,12 @@ func returnAfterHttpErrorExtra(w http.ResponseWriter, err error) {
 	}
 }
 
+func commentedOutCodeExtra() {
+	// fmt.Println("debugging hard")
+	fmt.Println("live")
+	// e.g. fmt.Println("documentation example")
+}
+
 type ExposedMutexExtra struct {
 	sync.Mutex
 	Port int

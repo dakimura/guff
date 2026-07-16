@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**101** = 34 default + 67 enable-all extras):
+//! Implemented checkers (**102** = 34 default + 68 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -35,12 +35,13 @@
 //!   `whyNoLint`, `hugeParam`, `rangeValCopy`
 //! - batch 14 (enable-all extras): `ptrToRefParam`, `tooManyResultsChecker`,
 //!   `evalOrder`, `unlabelStmt`, `returnAfterHttpError`, `exposedSyncMutex`
+//! - batch 15 (enable-all extra): `commentedOutCode`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `boolExprSimplify` / `commentedOutCode` / `regexpSimplify` /
+//! such as `boolExprSimplify` / `regexpSimplify` /
 //! `badLock` / `externalErrorReassign` / `uncheckedInlineErr` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
@@ -140,6 +141,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "badSyncOnceFunc",
     "builtinShadow",
     "builtinShadowDecl",
+    "commentedOutCode",
     "commentedOutImport",
     "deferInLoop",
     "deferUnlambda",
@@ -365,7 +367,10 @@ fn case_has_break(body: &[Stmt]) -> bool {
                         }
                     }
                 }
-                Stmt::ForStmt(_) | Stmt::RangeStmt(_) | Stmt::SelectStmt(_) | Stmt::SwitchStmt(_)
+                Stmt::ForStmt(_)
+                | Stmt::RangeStmt(_)
+                | Stmt::SelectStmt(_)
+                | Stmt::SwitchStmt(_)
                 | Stmt::TypeSwitchStmt(_) => {
                     // Nested loops/switches own their breaks.
                 }
@@ -603,7 +608,11 @@ fn check_dup_case_switch(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
                 continue;
             };
             if !seen.insert(text.clone()) {
-                report(pending, x.pos().0 as u32, format!("'case {text}' is duplicated"));
+                report(
+                    pending,
+                    x.pos().0 as u32,
+                    format!("'case {text}' is duplicated"),
+                );
             }
         }
     }
@@ -679,9 +688,13 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
                                 Stmt::BlockStmt(b) => {
                                     walk(&b.list, defer_pos, found, pending, true)
                                 }
-                                Stmt::IfStmt(_) => {
-                                    walk(std::slice::from_ref(e.as_ref()), defer_pos, found, pending, true)
-                                }
+                                Stmt::IfStmt(_) => walk(
+                                    std::slice::from_ref(e.as_ref()),
+                                    defer_pos,
+                                    found,
+                                    pending,
+                                    true,
+                                ),
                                 _ => {}
                             }
                         }
@@ -806,8 +819,12 @@ fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
         {
             continue;
         }
-        if a.lhs.len() != 1 || a.rhs.len() != 1 || b.lhs.len() != 1 || b.rhs.len() != 1
-            || c.lhs.len() != 1 || c.rhs.len() != 1
+        if a.lhs.len() != 1
+            || a.rhs.len() != 1
+            || b.lhs.len() != 1
+            || b.rhs.len() != 1
+            || c.lhs.len() != 1
+            || c.rhs.len() != 1
         {
             continue;
         }
@@ -855,7 +872,9 @@ fn check_flag_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         star.star.0 as u32,
-        format!("immediate deref in *{name}(...) is most likely an error; consider using {suggest}"),
+        format!(
+            "immediate deref in *{name}(...) is most likely an error; consider using {suggest}"
+        ),
     );
 }
 
@@ -871,7 +890,9 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
                 "no-op append call, probably missing arguments",
             );
         }
-        n if (n == "filepath.Join" || n == "path/filepath.Join" || n.ends_with("/filepath.Join"))
+        n if (n == "filepath.Join"
+            || n == "path/filepath.Join"
+            || n.ends_with("/filepath.Join"))
             && call.args.len() == 1 =>
         {
             report(
@@ -1332,9 +1353,7 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
 fn int_lit_value(expr: &Expr) -> Option<i64> {
     match expr {
         Expr::BasicLit(lit) => lit.value.parse().ok(),
-        Expr::UnaryExpr(u) if u.op == Token::SUB => {
-            int_lit_value(&u.x).map(|v| -v)
-        }
+        Expr::UnaryExpr(u) if u.op == Token::SUB => int_lit_value(&u.x).map(|v| -v),
         _ => None,
     }
 }
@@ -1410,8 +1429,22 @@ fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
     // Skip builtins.
     if matches!(
         callable.as_str(),
-        "len" | "cap" | "make" | "new" | "append" | "copy" | "delete" | "panic" | "recover"
-            | "close" | "complex" | "real" | "imag" | "min" | "max" | "clear"
+        "len"
+            | "cap"
+            | "make"
+            | "new"
+            | "append"
+            | "copy"
+            | "delete"
+            | "panic"
+            | "recover"
+            | "close"
+            | "complex"
+            | "real"
+            | "imag"
+            | "min"
+            | "max"
+            | "clear"
     ) {
         return;
     }
@@ -1442,9 +1475,9 @@ fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
             _ => return,
         }
     }
-    let Some(lit_text) = expr_text(&Expr::FuncLit(fl.clone())).or_else(|| {
-        Some(format!("func(...) {{ return {callable}(...) }}"))
-    }) else {
+    let Some(lit_text) = expr_text(&Expr::FuncLit(fl.clone()))
+        .or_else(|| Some(format!("func(...) {{ return {callable}(...) }}")))
+    else {
         return;
     };
     report(
@@ -1636,13 +1669,7 @@ fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
         return false;
     };
     let mut types = artifacts.types.clone();
-    api_identical(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        a,
-        b,
-    )
+    api_identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
 }
 
 fn type_implements(pass: &Pass<'_>, v: TypeId, iface: TypeId) -> bool {
@@ -1979,14 +2006,11 @@ fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     out
 }
 
-fn run_comment_checks(
-    pass: &Pass<'_>,
-    set: &HashSet<String>,
-    pending: &mut Vec<(u32, String)>,
-) {
+fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<(u32, String)>) {
     let need_codegen = enabled(set, "codegenComment");
     let need_fmt = enabled(set, "commentFormatting");
     let need_depr = enabled(set, "deprecatedComment");
+    let need_commented_code = enabled(set, "commentedOutCode");
     let need_commented_import = enabled(set, "commentedOutImport");
     let need_todo = enabled(set, "todoCommentWithoutDetail");
     let need_doc_stub = enabled(set, "docStub");
@@ -1994,6 +2018,7 @@ fn run_comment_checks(
     if !need_codegen
         && !need_fmt
         && !need_depr
+        && !need_commented_code
         && !need_commented_import
         && !need_todo
         && !need_doc_stub
@@ -2050,6 +2075,17 @@ fn run_comment_checks(
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
                         report(pending, mapped, msg);
                     }
+                }
+            }
+        }
+
+        if need_commented_code {
+            let mut local = Vec::new();
+            check_commented_out_code(&parsed, &mut local);
+            for (pos, msg) in local {
+                let line = re_fset.position(Pos(pos as i64)).line;
+                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    report(pending, mapped, msg);
                 }
             }
         }
@@ -2137,6 +2173,102 @@ fn check_commented_out_import(file: &File, pending: &mut Vec<(u32, String)>) {
                 }
             }
         }
+    }
+}
+
+fn function_for_local_comment<'a>(file: &'a File, cg: &CommentGroup) -> Option<&'a FuncDecl> {
+    file.decls.iter().find_map(|decl| {
+        let Decl::FuncDecl(f) = decl else {
+            return None;
+        };
+        let body = f.body.as_ref()?;
+        if body.lbrace.0 < cg.pos().0 && cg.end().0 < body.rbrace.0 {
+            Some(f)
+        } else {
+            None
+        }
+    })
+}
+
+fn is_commented_out_code_permitted_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(_) => false,
+        Expr::UnaryExpr(u) => u.op != Token::ARROW,
+        _ => true,
+    }
+}
+
+fn is_commented_out_code_permitted_stmt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::ExprStmt(s) => is_commented_out_code_permitted_expr(&s.x),
+        Stmt::LabeledStmt(s) => is_commented_out_code_permitted_stmt(&s.stmt),
+        Stmt::DeclStmt(s) => match &s.decl {
+            Decl::GenDecl(g) => g.tok == Some(Token::TYPE),
+            _ => false,
+        },
+        Stmt::EmptyStmt(_) => true,
+        _ => false,
+    }
+}
+
+fn parsed_commented_out_code_stmts(text: &str) -> Option<Vec<Stmt>> {
+    let src = format!("package p\nfunc _() {{\n{text}\n}}\n");
+    let fset = FileSet::new();
+    let parsed = parse_file(
+        &fset,
+        "commented_out_code.go",
+        src.as_bytes(),
+        guff::parser::Mode::NONE,
+    )
+    .ok()?;
+    let decl = parsed.decls.into_iter().find_map(|decl| match decl {
+        Decl::FuncDecl(f) => Some(f),
+        _ => None,
+    })?;
+    decl.body
+        .map(|body| body.list)
+        .filter(|stmts| !stmts.is_empty())
+}
+
+fn check_commented_out_code(file: &File, pending: &mut Vec<(u32, String)>) {
+    static NOT_QUITE_FUNC_CALL_RE: OnceLock<Regex> = OnceLock::new();
+    let not_quite_func_call = NOT_QUITE_FUNC_CALL_RE
+        .get_or_init(|| Regex::new(r"\w+\s+\([^)]*\)\s*$").expect("commentedOutCode call RE"));
+
+    for cg in &file.comments {
+        let Some(func) = function_for_local_comment(file, cg) else {
+            continue;
+        };
+        let text = cg.text();
+        if text.contains("TODO")
+            || text.contains("http://")
+            || text.contains("https://")
+            || text.contains("e.g. ")
+            || (func.name.name.starts_with("Example") && text.contains("Output:"))
+        {
+            continue;
+        }
+        if text.chars().count() < 15
+            && !text.contains("print")
+            && !text.contains("fmt.")
+            && !text.contains("log.")
+        {
+            continue;
+        }
+        if not_quite_func_call.is_match(&text) {
+            continue;
+        }
+        let Some(stmts) = parsed_commented_out_code_stmts(&text) else {
+            continue;
+        };
+        if stmts.iter().all(is_commented_out_code_permitted_stmt) {
+            continue;
+        }
+        report(
+            pending,
+            cg.pos().0 as u32,
+            "may want to remove commented-out code",
+        );
     }
 }
 
@@ -2413,12 +2545,7 @@ fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Vec<(u32, 
     );
 }
 
-fn check_init_clause(
-    name: &str,
-    init: Option<&Stmt>,
-    pos: u32,
-    pending: &mut Vec<(u32, String)>,
-) {
+fn check_init_clause(name: &str, init: Option<&Stmt>, pos: u32, pending: &mut Vec<(u32, String)>) {
     let Some(init) = init else {
         return;
     };
@@ -2586,10 +2713,7 @@ fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Vec<(u32, String)>) {
 fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String)>) {
     let mut by_path: HashMap<String, Vec<&guff::ast::ImportSpec>> = HashMap::new();
     for imp in &file.imports {
-        by_path
-            .entry(imp.path.value.clone())
-            .or_default()
-            .push(imp);
+        by_path.entry(imp.path.value.clone()).or_default().push(imp);
     }
     for import_list in by_path.values() {
         if import_list.len() < 2 {
@@ -2879,9 +3003,7 @@ fn contains_index_of(tree: &Expr, x: &Expr) -> bool {
         Expr::IndexListExpr(ix) => {
             contains_index_of(&ix.x, x) || ix.indices.iter().any(|i| contains_index_of(i, x))
         }
-        Expr::KeyValueExpr(kv) => {
-            contains_index_of(&kv.key, x) || contains_index_of(&kv.value, x)
-        }
+        Expr::KeyValueExpr(kv) => contains_index_of(&kv.key, x) || contains_index_of(&kv.value, x),
         Expr::CompositeLit(lit) => lit.elts.iter().any(|e| contains_index_of(e, x)),
         _ => false,
     }
@@ -3033,7 +3155,10 @@ fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     report(
         pending,
         call.fun.pos().0 as u32,
-        format!("consider to change `{fun_t}` to `{recv_t}.{}`", sel.sel.name),
+        format!(
+            "consider to change `{fun_t}` to `{recv_t}.{}`",
+            sel.sel.name
+        ),
     );
 }
 
@@ -3059,10 +3184,7 @@ fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32
     if !matches!(artifacts.types.get(typ), TypeData::Array(_)) {
         return;
     }
-    let sizes = pass
-        .pkg()
-        .types_sizes
-        .unwrap_or_else(default_sizes);
+    let sizes = pass.pkg().types_sizes.unwrap_or_else(default_sizes);
     let size = sizes.sizeof(
         &artifacts.types,
         &artifacts.objects,
@@ -3104,13 +3226,11 @@ fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
     if call.args.is_empty() {
         return;
     }
-    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| {
-        match &call.args[0] {
-            Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
-                Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
-            }
-            _ => None,
+    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| match &call.args[0] {
+        Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
+            Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
         }
+        _ => None,
     }) else {
         return;
     };
@@ -3135,13 +3255,11 @@ fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     if call.args.is_empty() {
         return;
     }
-    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| {
-        match &call.args[0] {
-            Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
-                Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
-            }
-            _ => None,
+    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| match &call.args[0] {
+        Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
+            Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
         }
+        _ => None,
     }) else {
         return;
     };
@@ -3159,9 +3277,7 @@ fn side_effect_free_approx(expr: &Expr) -> bool {
         Expr::UnaryExpr(u) => side_effect_free_approx(&u.x),
         Expr::BinaryExpr(b) => side_effect_free_approx(&b.x) && side_effect_free_approx(&b.y),
         Expr::SelectorExpr(s) => side_effect_free_approx(&s.x),
-        Expr::IndexExpr(ix) => {
-            side_effect_free_approx(&ix.x) && side_effect_free_approx(&ix.index)
-        }
+        Expr::IndexExpr(ix) => side_effect_free_approx(&ix.x) && side_effect_free_approx(&ix.index),
         Expr::SliceExpr(s) => {
             side_effect_free_approx(&s.x)
                 && s.low.as_ref().is_none_or(|e| side_effect_free_approx(e))
@@ -3205,7 +3321,9 @@ fn contains_expr(tree: &Expr, needle: &Expr) -> bool {
         Expr::IndexListExpr(ix) => {
             contains_expr(&ix.x, needle) || ix.indices.iter().any(|i| contains_expr(i, needle))
         }
-        Expr::KeyValueExpr(kv) => contains_expr(&kv.key, needle) || contains_expr(&kv.value, needle),
+        Expr::KeyValueExpr(kv) => {
+            contains_expr(&kv.key, needle) || contains_expr(&kv.value, needle)
+        }
         Expr::CompositeLit(lit) => lit.elts.iter().any(|e| contains_expr(e, needle)),
         _ => false,
     }
@@ -3244,7 +3362,10 @@ fn contains_index_ident(tree: &Expr, index_name: &str) -> bool {
         Expr::TypeAssertExpr(a) => contains_index_ident(&a.x, index_name),
         Expr::IndexListExpr(ix) => {
             contains_index_ident(&ix.x, index_name)
-                || ix.indices.iter().any(|i| contains_index_ident(i, index_name))
+                || ix
+                    .indices
+                    .iter()
+                    .any(|i| contains_index_ident(i, index_name))
         }
         Expr::KeyValueExpr(kv) => {
             contains_index_ident(&kv.key, index_name) || contains_index_ident(&kv.value, index_name)
@@ -3309,10 +3430,7 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     let Expr::BinaryExpr(bin) = cmp else {
         return;
     };
-    if !matches!(
-        bin.op,
-        Token::LSS | Token::LEQ | Token::GTR | Token::GEQ
-    ) {
+    if !matches!(bin.op, Token::LSS | Token::LEQ | Token::GTR | Token::GEQ) {
         return;
     }
     if !side_effect_free_approx(cmp) {
@@ -3332,7 +3450,10 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
         report(
             pending,
             bin.op_pos.0 as u32,
-            format!("unusual order of {{{},{}}} params in comparison", ivar.name, jvar.name),
+            format!(
+                "unusual order of {{{},{}}} params in comparison",
+                ivar.name, jvar.name
+            ),
         );
     }
 }
@@ -4073,9 +4194,10 @@ fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     let Stmt::ReturnStmt(ret) = &ifs.body.list[0] else {
         return;
     };
-    let returns_err = ret.results.iter().any(|r| {
-        matches!(r, Expr::Ident(id) if id.name == re_assigned.name)
-    });
+    let returns_err = ret
+        .results
+        .iter()
+        .any(|r| matches!(r, Expr::Ident(id) if id.name == re_assigned.name));
     if !returns_err {
         return;
     }
@@ -4215,7 +4337,10 @@ fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(
     };
     if !is_string_typed(pass, s) {
         // AST fallback: still report when conversion is clearly []rune(stringish)
-        if !matches!(s, Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_)) {
+        if !matches!(
+            s,
+            Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_)
+        ) {
             return;
         }
     }
@@ -4370,8 +4495,10 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
             }
             // $re.Match([]byte($s)) and friends
             if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
-                if matches!(sel.sel.name.as_str(), "Match" | "FindIndex" | "FindAllIndex")
-                    && !call.args.is_empty()
+                if matches!(
+                    sel.sel.name.as_str(),
+                    "Match" | "FindIndex" | "FindAllIndex"
+                ) && !call.args.is_empty()
                 {
                     if let Some(_s) = is_byte_slice_conv(&call.args[0]) {
                         let suggest = match sel.sel.name.as_str() {
@@ -4452,11 +4579,19 @@ fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut V
     if !is_os_path_separator_string_conv(&left.y) {
         return;
     }
-    if !is_string_typed(pass, &left.x) && !matches!(left.x.as_ref(), Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_))
+    if !is_string_typed(pass, &left.x)
+        && !matches!(
+            left.x.as_ref(),
+            Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_)
+        )
     {
         return;
     }
-    if !is_string_typed(pass, &bin.y) && !matches!(bin.y.as_ref(), Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_))
+    if !is_string_typed(pass, &bin.y)
+        && !matches!(
+            bin.y.as_ref(),
+            Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_)
+        )
     {
         return;
     }
@@ -4921,9 +5056,7 @@ fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<
         report(
             pending,
             call.fun.pos().0 as u32,
-            format!(
-                "use errors.New({f_t}(...)) or fmt.Errorf(\"%s\", {f_t}(...)) instead"
-            ),
+            format!("use errors.New({f_t}(...)) or fmt.Errorf(\"%s\", {f_t}(...)) instead"),
         );
         return;
     }
@@ -4955,7 +5088,11 @@ fn is_string_slice_composite(expr: &Expr) -> Option<&[Expr]> {
     Some(&lit.elts)
 }
 
-fn check_string_concat_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_string_concat_simplify(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, String)>,
+) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -4985,8 +5122,7 @@ fn check_string_concat_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut 
             format!("{x_t} + {y_t} + {z_t}")
         }
         [x, y] => {
-            let (Some(x_t), Some(y_t), Some(g_t)) =
-                (expr_text(x), expr_text(y), expr_text(glue))
+            let (Some(x_t), Some(y_t), Some(g_t)) = (expr_text(x), expr_text(y), expr_text(glue))
             else {
                 return;
             };
@@ -5008,7 +5144,11 @@ fn is_sync_once_func_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
     (name == "sync.OnceFunc" || name.ends_with("/sync.OnceFunc")) && call.args.len() == 1
 }
 
-fn check_bad_sync_once_func_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+fn check_bad_sync_once_func_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, String)>,
+) {
     // sync.OnceFunc($x)()
     let Expr::CallExpr(inner) = call.fun.as_ref() else {
         return;
@@ -5054,11 +5194,7 @@ fn check_bad_sync_once_func_stmts(
     }
 }
 
-fn case_fold_call_arg<'a>(
-    pass: &Pass<'_>,
-    expr: &'a Expr,
-    want: &str,
-) -> Option<&'a Expr> {
+fn case_fold_call_arg<'a>(pass: &Pass<'_>, expr: &'a Expr, want: &str) -> Option<&'a Expr> {
     let Expr::CallExpr(call) = unparen(expr) else {
         return None;
     };
@@ -5148,10 +5284,7 @@ fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
             if a_is_lower != b_is_lower {
                 return;
             }
-            (
-                a_lower.or(a_upper).unwrap(),
-                b_lower.or(b_upper).unwrap(),
-            )
+            (a_lower.or(a_upper).unwrap(), b_lower.or(b_upper).unwrap())
         }
         (true, false) => (a_lower.or(a_upper).unwrap(), unparen(b)),
         (false, true) => (unparen(a), b_lower.or(b_upper).unwrap()),
@@ -5230,11 +5363,7 @@ fn type_is_time(pass: &Pass<'_>, expr: &Expr) -> bool {
     s == "time.Time" || s.ends_with("/time.Time")
 }
 
-fn method_recv_named<'a>(
-    pass: &Pass<'_>,
-    expr: &'a Expr,
-    method: &str,
-) -> Option<&'a Expr> {
+fn method_recv_named<'a>(pass: &Pass<'_>, expr: &'a Expr, method: &str) -> Option<&'a Expr> {
     let Expr::CallExpr(call) = unparen(expr) else {
         return None;
     };
@@ -5622,7 +5751,11 @@ fn collect_import_names(file: &File) -> HashMap<String, String> {
     out
 }
 
-fn warn_import_shadow(id: &Ident, imports: &HashMap<String, String>, pending: &mut Vec<(u32, String)>) {
+fn warn_import_shadow(
+    id: &Ident,
+    imports: &HashMap<String, String>,
+    pending: &mut Vec<(u32, String)>,
+) {
     if id.name == "_" {
         return;
     }
@@ -5639,10 +5772,7 @@ fn warn_import_shadow(id: &Ident, imports: &HashMap<String, String>, pending: &m
         report(
             pending,
             id.pos().0 as u32,
-            format!(
-                "shadow of imported from '{}' package '{}'",
-                path, id.name
-            ),
+            format!("shadow of imported from '{}' package '{}'", path, id.name),
         );
     }
 }
@@ -6048,11 +6178,7 @@ fn check_unnamed_result(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
         return; // named results
     }
 
-    let fields: Vec<&Expr> = results
-        .list
-        .iter()
-        .filter_map(|f| f.ty.as_ref())
-        .collect();
+    let fields: Vec<&Expr> = results.list.iter().filter_map(|f| f.ty.as_ref()).collect();
     if fields.is_empty() {
         return;
     }
@@ -6098,9 +6224,8 @@ fn check_unnamed_result(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
 
 fn check_why_no_lint(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
     static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"^// *nolint(?::[^ ]+)? *(.*)$").expect("whyNoLint regex")
-    });
+    let re =
+        RE.get_or_init(|| Regex::new(r"^// *nolint(?::[^ ]+)? *(.*)$").expect("whyNoLint regex"));
     if cg.list.first().is_some_and(|c| c.text.starts_with("/*")) {
         return;
     }
@@ -6207,26 +6332,28 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32,
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return;
     };
-    let typ = type_of(pass, value).or_else(|| {
-        let info = pass.types_info()?;
-        let Expr::Ident(id) = value else {
-            return None;
-        };
-        let oid = info.defs.get(&id.id).copied().flatten()?;
-        match artifacts.objects.get(oid) {
-            ObjectData::Var(v) => Some(v.typ()),
-            _ => None,
-        }
-    }).or_else(|| {
-        // Infer from range expression: []T / [N]T → T
-        let x_typ = type_of(pass, &rs.x)?;
-        let x_typ = unalias_readonly(&artifacts.types, x_typ);
-        match artifacts.types.get(x_typ) {
-            TypeData::Slice(s) => Some(s.elem()),
-            TypeData::Array(a) => Some(a.elem()),
-            _ => None,
-        }
-    });
+    let typ = type_of(pass, value)
+        .or_else(|| {
+            let info = pass.types_info()?;
+            let Expr::Ident(id) = value else {
+                return None;
+            };
+            let oid = info.defs.get(&id.id).copied().flatten()?;
+            match artifacts.objects.get(oid) {
+                ObjectData::Var(v) => Some(v.typ()),
+                _ => None,
+            }
+        })
+        .or_else(|| {
+            // Infer from range expression: []T / [N]T → T
+            let x_typ = type_of(pass, &rs.x)?;
+            let x_typ = unalias_readonly(&artifacts.types, x_typ);
+            match artifacts.types.get(x_typ) {
+                TypeData::Slice(s) => Some(s.elem()),
+                TypeData::Array(a) => Some(a.elem()),
+                _ => None,
+            }
+        });
     let Some(typ) = typ else {
         return;
     };
@@ -6553,11 +6680,7 @@ fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
         return;
     };
     if let Some(pos) = find_labeled_continue(inner_body, name) {
-        report(
-            pending,
-            pos,
-            format!("change `continue {name}` to `break`"),
-        );
+        report(pending, pos, format!("change `continue {name}` to `break`"));
     }
 }
 
@@ -6648,11 +6771,7 @@ fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
                     continue;
                 };
                 if let Some(text) = sync_mutex_embed_text(ty) {
-                    report(
-                        pending,
-                        field.pos().0 as u32,
-                        format!("don't embed {text}"),
-                    );
+                    report(pending, field.pos().0 as u32, format!("don't embed {text}"));
                 }
             }
         }
