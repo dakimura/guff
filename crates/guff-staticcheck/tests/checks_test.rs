@@ -1,6 +1,6 @@
 mod support;
 
-use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1006, st1011, st1012, st1013, st1015, st1017, st1018, st1019, st1020, st1021};
+use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1000, st1001, st1003, st1006, st1011, st1012, st1013, st1015, st1017, st1018, st1019, st1020, st1021, st1022, st1023};
 use guff_types::sizes_for;
 
 #[test]
@@ -2381,4 +2381,93 @@ fn st1021_allows_well_formed_exported_type_docs() {
     let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1021/ok");
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(st1021::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1003_flags_poor_identifiers() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1003");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(messages.len() >= 5, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("abc_def")));
+    assert!(messages.iter().any(|m| m.contains("ALL_CAPS")));
+    assert!(messages.iter().any(|m| m.contains("fn_1")));
+    assert!(messages.iter().any(|m| m.contains("fnId") && m.contains("fnID")));
+    assert!(messages.iter().any(|m| m.contains("a_b")));
+    assert!(messages.iter().any(|m| m.contains("e_f")));
+    assert!(messages.iter().any(|m| m.contains("bad_field")));
+}
+
+#[test]
+fn st1003_allows_good_identifiers() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1003/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1003::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1003_flags_package_name_underscore() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "pkg_underscore.go", "example.com/staticcheck/st1003/u");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("underscores in package names")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1003_flags_package_name_mixed_caps() {
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "pkg_mixed.go", "example.com/staticcheck/st1003/m");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("MixedCaps")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1022_flags_badly_formed_exported_var_docs() {
+    let dir = support::testdata("st1022");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1022");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1022::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("exported var B")));
+    assert!(messages.iter().any(|m| m.contains("exported const D")));
+    assert!(messages.iter().any(|m| m.contains("exported var I")));
+}
+
+#[test]
+fn st1022_allows_well_formed_exported_var_docs() {
+    let dir = support::testdata("st1022");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1022/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1022::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1023_flags_redundant_types() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1023");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1023::analyzer(), &pkg);
+    assert!(messages.len() >= 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("omit type int") && m.contains("inferred")));
+    assert!(messages.iter().any(|m| m.contains("omit type bool")));
+    assert!(messages.iter().any(|m| m.contains("omit type string")));
+    assert!(messages.iter().any(|m| m.contains("omit type MyInt")));
+}
+
+#[test]
+fn st1023_allows_necessary_types() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1023/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1023::analyzer(), &pkg).is_empty());
 }
