@@ -29,6 +29,7 @@
 //! - [`exhaustive`]
 //! - [`musttag`]
 //! - [`loggercheck`]
+//! - [`sloglint`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -45,6 +46,7 @@ mod exhaustruct;
 mod funlen;
 mod loggercheck;
 mod musttag;
+mod sloglint;
 mod gocognit;
 mod goconst;
 mod gocyclo;
@@ -69,8 +71,9 @@ pub use options::{
     CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions, ExhaustructOptions,
     FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, LoggercheckOptions,
     MndOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
-    PerfsprintOptions, PreallocOptions, PredeclaredOptions, TagalignOptions, UnconvertOptions,
-    UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
+    PerfsprintOptions, PreallocOptions, PredeclaredOptions, SloglintFunc, SloglintOptions,
+    TagalignOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions,
+    WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
@@ -87,6 +90,7 @@ pub use lll::analyzer as lll;
 pub use loggercheck::analyzer as loggercheck;
 pub use mnd::analyzer as mnd;
 pub use musttag::analyzer as musttag;
+pub use sloglint::analyzer as sloglint;
 pub use nakedret::analyzer as nakedret;
 pub use nestif::analyzer as nestif;
 pub use nlreturn::analyzer as nlreturn;
@@ -134,5 +138,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         exhaustive(),
         musttag(),
         loggercheck(),
+        sloglint(),
     ]
 }

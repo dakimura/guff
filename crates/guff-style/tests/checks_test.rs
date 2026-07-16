@@ -3,8 +3,8 @@ mod support;
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
-    nosprintfhostport, perfsprint, prealloc, predeclared, tagalign, unconvert, usestdlibvars,
-    usetesting, whitespace, wsl,
+    nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, unconvert,
+    usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -2265,5 +2265,98 @@ fn loggercheck_require_string_key_and_noprintflike() {
             .iter()
             .any(|m| m.contains("format specifier")),
         "no-printf-like: {messages:?}"
+    );
+}
+
+#[test]
+fn sloglint_flags_mixed_args_by_default() {
+    let pkg = support::typecheck_fixture("sloglint", "example.com/sloglint", "bad.go");
+    let messages = support::run_analyzer(sloglint(), &pkg);
+    let mixed = messages
+        .iter()
+        .filter(|m| m.contains("should not be mixed"))
+        .count();
+    assert!(
+        mixed >= 3,
+        "expected mixed-args diagnostics, got {mixed}: {messages:?}"
+    );
+}
+
+#[test]
+fn sloglint_allows_pure_kv_or_attrs() {
+    let pkg = support::typecheck_fixture("sloglint", "example.com/sloglint/ok", "ok.go");
+    let messages = support::run_analyzer(sloglint(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics for clean slog usage: {messages:?}"
+    );
+}
+
+#[test]
+fn sloglint_settings_static_msg_forbidden_keys_and_attr_only() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::SloglintOptions;
+
+    let pkg = support::typecheck_fixture("sloglint", "example.com/sloglint", "settings.go");
+    assert!(
+        support::run_analyzer(sloglint(), &pkg).is_empty(),
+        "defaults should only enforce no-mixed-args"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "sloglint",
+        SloglintOptions {
+            no_mixed_args: false,
+            attr_only: true,
+            static_msg: true,
+            msg_style: Some("lowercased".into()),
+            no_global: Some("default".into()),
+            forbidden_keys: vec!["time".into(), "level".into()],
+            no_raw_keys: true,
+            allowed_keys: vec!["user_id".into()],
+            ..SloglintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        sloglint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("default logger should not be used")),
+        "no-global: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("string literal or a constant")),
+        "static-msg: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("message should be lowercased")),
+        "msg-style: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("forbidden") && m.contains("time")),
+        "forbidden-keys: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("key-value pairs should not be used")),
+        "attr-only: {messages:?}"
     );
 }

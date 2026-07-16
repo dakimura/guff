@@ -523,6 +523,58 @@ impl Default for LoggercheckOptions {
     }
 }
 
+/// Custom slog-like function entry for `linters.settings.sloglint.custom-funcs`.
+#[derive(Debug, Clone)]
+pub struct SloglintFunc {
+    pub name: String,
+    pub msg_pos: i32,
+    pub args_pos: i32,
+}
+
+/// `linters.settings.sloglint` / `linters-settings.sloglint`.
+///
+/// Defaults match golangci-lint (`no-mixed-args: true`; other checks off).
+#[derive(Debug, Clone)]
+pub struct SloglintOptions {
+    pub no_mixed_args: bool,
+    pub kv_only: bool,
+    pub attr_only: bool,
+    /// `"all"` or `"default"`; empty = disabled.
+    pub no_global: Option<String>,
+    /// `"all"` or `"scope"`; empty = disabled.
+    pub context: Option<String>,
+    pub static_msg: bool,
+    /// `"lowercased"` or `"capitalized"`; empty = disabled.
+    pub msg_style: Option<String>,
+    pub no_raw_keys: bool,
+    /// `"snake"`, `"kebab"`, `"camel"`, or `"pascal"`; empty = disabled.
+    pub key_naming_case: Option<String>,
+    pub allowed_keys: Vec<String>,
+    pub forbidden_keys: Vec<String>,
+    pub args_on_sep_lines: bool,
+    pub custom_funcs: Vec<SloglintFunc>,
+}
+
+impl Default for SloglintOptions {
+    fn default() -> Self {
+        Self {
+            no_mixed_args: true,
+            kv_only: false,
+            attr_only: false,
+            no_global: None,
+            context: None,
+            static_msg: false,
+            msg_style: None,
+            no_raw_keys: false,
+            key_naming_case: None,
+            allowed_keys: Vec::new(),
+            forbidden_keys: Vec::new(),
+            args_on_sep_lines: false,
+            custom_funcs: Vec::new(),
+        }
+    }
+}
+
 /// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
 #[derive(Debug, Clone)]
 pub struct ExhaustructOptions {

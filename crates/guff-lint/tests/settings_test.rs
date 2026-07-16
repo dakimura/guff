@@ -497,6 +497,40 @@ fn parse_v2_loggercheck_settings() {
 }
 
 #[test]
+fn parse_v2_sloglint_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_sloglint_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.sloglint.no_mixed_args);
+    assert!(settings.sloglint.attr_only);
+    assert_eq!(settings.sloglint.no_global.as_deref(), Some("all"));
+    assert_eq!(settings.sloglint.context.as_deref(), Some("scope"));
+    assert!(settings.sloglint.static_msg);
+    assert_eq!(settings.sloglint.msg_style.as_deref(), Some("lowercased"));
+    assert!(settings.sloglint.no_raw_keys);
+    assert_eq!(settings.sloglint.key_naming_case.as_deref(), Some("snake"));
+    assert_eq!(settings.sloglint.allowed_keys, vec!["user_id".to_string()]);
+    assert_eq!(
+        settings.sloglint.forbidden_keys,
+        vec!["time".to_string(), "level".to_string()]
+    );
+    assert!(settings.sloglint.args_on_sep_lines);
+    assert_eq!(settings.sloglint.custom_funcs.len(), 1);
+    assert_eq!(
+        settings.sloglint.custom_funcs[0].name,
+        "example.com/sloglint.MyLog"
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::SloglintOptions>("sloglint")
+        .expect("sloglint options");
+    assert!(opts.attr_only);
+    assert_eq!(opts.no_global.as_deref(), Some("all"));
+    assert_eq!(opts.custom_funcs.len(), 1);
+    assert_eq!(opts.custom_funcs[0].msg_pos, 0);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

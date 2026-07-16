@@ -44,6 +44,7 @@ pub struct LinterSettings {
     pub exhaustive: ExhaustiveSettings,
     pub musttag: MusttagSettings,
     pub loggercheck: LoggercheckSettings,
+    pub sloglint: SloglintSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -436,6 +437,72 @@ pub struct LoggercheckSettings {
     pub rules: Vec<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Custom function entry for `linters.settings.sloglint.custom-funcs`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct SloglintFuncSettings {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default, rename = "msg-pos")]
+    pub msg_pos: i32,
+    #[serde(default, rename = "args-pos")]
+    pub args_pos: i32,
+}
+
+/// `linters.settings.sloglint` / `linters-settings.sloglint`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SloglintSettings {
+    #[serde(default = "default_true", rename = "no-mixed-args")]
+    pub no_mixed_args: bool,
+    #[serde(default, rename = "kv-only")]
+    pub kv_only: bool,
+    #[serde(default, rename = "attr-only")]
+    pub attr_only: bool,
+    #[serde(default, rename = "no-global")]
+    pub no_global: Option<String>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default, rename = "static-msg")]
+    pub static_msg: bool,
+    #[serde(default, rename = "msg-style")]
+    pub msg_style: Option<String>,
+    #[serde(default, rename = "no-raw-keys")]
+    pub no_raw_keys: bool,
+    #[serde(default, rename = "key-naming-case")]
+    pub key_naming_case: Option<String>,
+    #[serde(default, rename = "allowed-keys")]
+    pub allowed_keys: Vec<String>,
+    #[serde(default, rename = "forbidden-keys")]
+    pub forbidden_keys: Vec<String>,
+    #[serde(default, rename = "args-on-sep-lines")]
+    pub args_on_sep_lines: bool,
+    #[serde(default, rename = "custom-funcs")]
+    pub custom_funcs: Vec<SloglintFuncSettings>,
+}
+
+impl Default for SloglintSettings {
+    fn default() -> Self {
+        Self {
+            no_mixed_args: true,
+            kv_only: false,
+            attr_only: false,
+            no_global: None,
+            context: None,
+            static_msg: false,
+            msg_style: None,
+            no_raw_keys: false,
+            key_naming_case: None,
+            allowed_keys: Vec::new(),
+            forbidden_keys: Vec::new(),
+            args_on_sep_lines: false,
+            custom_funcs: Vec::new(),
+        }
+    }
+}
+
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsetestingSettings {
@@ -775,6 +842,11 @@ impl LinterSettings {
                 out.loggercheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("sloglint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<SloglintSettings>(v.clone()) {
+                out.sloglint = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -860,6 +932,7 @@ impl LinterSettings {
         bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
         bag.insert("musttag", self.musttag.to_guff_musttag());
         bag.insert("loggercheck", self.loggercheck.to_guff_loggercheck());
+        bag.insert("sloglint", self.sloglint.to_guff_sloglint());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1342,6 +1415,34 @@ impl LoggercheckSettings {
             require_string_key: self.require_string_key,
             no_printf_like: self.no_printf_like,
             rules: self.rules.clone(),
+        }
+    }
+}
+
+impl SloglintSettings {
+    pub fn to_guff_sloglint(&self) -> guff_style::SloglintOptions {
+        guff_style::SloglintOptions {
+            no_mixed_args: self.no_mixed_args,
+            kv_only: self.kv_only,
+            attr_only: self.attr_only,
+            no_global: self.no_global.clone().filter(|s| !s.is_empty()),
+            context: self.context.clone().filter(|s| !s.is_empty()),
+            static_msg: self.static_msg,
+            msg_style: self.msg_style.clone().filter(|s| !s.is_empty()),
+            no_raw_keys: self.no_raw_keys,
+            key_naming_case: self.key_naming_case.clone().filter(|s| !s.is_empty()),
+            allowed_keys: self.allowed_keys.clone(),
+            forbidden_keys: self.forbidden_keys.clone(),
+            args_on_sep_lines: self.args_on_sep_lines,
+            custom_funcs: self
+                .custom_funcs
+                .iter()
+                .map(|f| guff_style::SloglintFunc {
+                    name: f.name.clone(),
+                    msg_pos: f.msg_pos,
+                    args_pos: f.args_pos,
+                })
+                .collect(),
         }
     }
 }
