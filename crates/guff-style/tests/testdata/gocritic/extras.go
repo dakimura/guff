@@ -378,3 +378,34 @@ func redundantSprintExtra(s string, w withStringerExtra) {
 	_ = fmt.Sprintf("%s", w)
 	_ = fmt.Sprint(w)
 }
+
+type typeUnparenExtra [](func())
+
+func importShadowExtra() {
+	filepath := "x.txt"
+	_ = filepath
+}
+
+func unnamedResultExtra() (float64, float64) {
+	return 0, 0
+}
+
+func unnamedResultOkExtra() (float64, error) {
+	return 0, nil
+}
+
+//nolint
+func whyNoLintExtra() {}
+
+//nolint:gocritic // has explanation
+func whyNoLintOkExtra() {}
+
+func hugeParamExtra(x [100]int) {
+	_ = x
+}
+
+func rangeValCopyExtra(xs [][200]byte) {
+	for _, x := range xs {
+		_ = x
+	}
+}

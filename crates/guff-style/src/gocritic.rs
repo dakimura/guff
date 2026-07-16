@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**89** = 34 default + 55 enable-all extras):
+//! Implemented checkers (**95** = 34 default + 61 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -31,22 +31,25 @@
 //!   `badSyncOnceFunc`
 //! - batch 12 (enable-all extras): `equalFold`, `sprintfQuotedString`,
 //!   `timeExprSimplify`, `appendCombine`, `unnecessaryDefer`, `redundantSprint`
+//! - batch 13 (enable-all extras): `typeUnparen`, `importShadow`, `unnamedResult`,
+//!   `whyNoLint`, `hugeParam`, `rangeValCopy`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `typeUnparen` / `boolExprSimplify` / `hugeParam` / `importShadow` /
-//! `whyNoLint` / …),
+//! such as `boolExprSimplify` / `unlabelStmt` / `tooManyResultsChecker` /
+//! `ptrToRefParam` / `evalOrder` / `commentedOutCode` / `regexpSimplify` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
-//! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
-//! nestingReduce bodyWidth, truncateCmp skipArchDependent),
+//! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
+//! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
 //! stringXbytes regexp method / bytes.Equal full type parity,
 //! preferFprint true `types.Implements(io.Writer)` (arity heuristic like QF1012),
-//! redundantSprint true `fmt.Stringer` Implements (method-name heuristic).
+//! redundantSprint true `fmt.Stringer` Implements (method-name heuristic),
+//! typeUnparen full astcopy/astequal pretty-print parity.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -54,10 +57,10 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use guff::ast::{
-    AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl,
-    DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident, IfStmt,
-    IndexExpr, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr,
-    TypeSwitchStmt, ValueSpec,
+    AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, ChanDir, CommentGroup, CompositeLit,
+    Decl, DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident,
+    IfStmt, ImportSpec, IndexExpr, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr, Stmt,
+    SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos, NO_POS};
@@ -148,6 +151,8 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "filepathJoin",
     "hexLiteral",
     "httpNoBody",
+    "hugeParam",
+    "importShadow",
     "indexAlloc",
     "initClause",
     "methodExprCall",
@@ -162,6 +167,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "preferWriteByte",
     "rangeAppendAll",
     "rangeExprCopy",
+    "rangeValCopy",
     "redundantSprint",
     "regexpPattern",
     "sliceClear",
@@ -178,9 +184,12 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "truncateCmp",
     "typeAssertChain",
     "typeDefFirst",
+    "typeUnparen",
     "unnecessaryBlock",
     "unnecessaryDefer",
+    "unnamedResult",
     "weakCond",
+    "whyNoLint",
     "yodaStyleExpr",
     "zeroByteRepeat",
 ];
@@ -1960,12 +1969,14 @@ fn run_comment_checks(
     let need_commented_import = enabled(set, "commentedOutImport");
     let need_todo = enabled(set, "todoCommentWithoutDetail");
     let need_doc_stub = enabled(set, "docStub");
+    let need_why_nolint = enabled(set, "whyNoLint");
     if !need_codegen
         && !need_fmt
         && !need_depr
         && !need_commented_import
         && !need_todo
         && !need_doc_stub
+        && !need_why_nolint
     {
         return;
     }
@@ -2053,6 +2064,19 @@ fn run_comment_checks(
                 let line = re_fset.position(Pos(pos as i64)).line;
                 if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
                     report(pending, mapped, msg);
+                }
+            }
+        }
+
+        if need_why_nolint {
+            for cg in &parsed.comments {
+                let mut local = Vec::new();
+                check_why_no_lint(cg, &mut local);
+                for (pos, msg) in local {
+                    let line = re_fset.position(Pos(pos as i64)).line;
+                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                        report(pending, mapped, msg);
+                    }
                 }
             }
         }
@@ -5543,6 +5567,664 @@ fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     }
 }
 
+// --- batch 13: typeUnparen / importShadow / unnamedResult / whyNoLint /
+// hugeParam / rangeValCopy -------------------------------------------------
+
+fn is_stdlib_import_path(path: &str) -> bool {
+    let elem = path.split('/').next().unwrap_or(path);
+    !elem.contains('.')
+}
+
+fn import_local_name(imp: &ImportSpec) -> Option<(String, String)> {
+    let path = imp.path.value.trim_matches('"').to_string();
+    if path == "C" {
+        return None;
+    }
+    let name = if let Some(n) = &imp.name {
+        if n.name == "." || n.name == "_" {
+            return None;
+        }
+        n.name.clone()
+    } else {
+        path.rsplit('/').next().unwrap_or(&path).to_string()
+    };
+    Some((name, path))
+}
+
+fn collect_import_names(file: &File) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for imp in &file.imports {
+        if let Some((name, path)) = import_local_name(imp) {
+            out.insert(name, path);
+        }
+    }
+    out
+}
+
+fn warn_import_shadow(id: &Ident, imports: &HashMap<String, String>, pending: &mut Vec<(u32, String)>) {
+    if id.name == "_" {
+        return;
+    }
+    let Some(path) = imports.get(&id.name) else {
+        return;
+    };
+    if is_stdlib_import_path(path) {
+        report(
+            pending,
+            id.pos().0 as u32,
+            format!("shadow of imported package '{}'", id.name),
+        );
+    } else {
+        report(
+            pending,
+            id.pos().0 as u32,
+            format!(
+                "shadow of imported from '{}' package '{}'",
+                path, id.name
+            ),
+        );
+    }
+}
+
+fn check_import_shadow_fields(
+    fields: Option<&FieldList>,
+    imports: &HashMap<String, String>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(fl) = fields else {
+        return;
+    };
+    for f in &fl.list {
+        for name in &f.names {
+            warn_import_shadow(name, imports, pending);
+        }
+    }
+}
+
+fn check_import_shadow_func(
+    pass: &Pass<'_>,
+    f: &FuncDecl,
+    imports: &HashMap<String, String>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    check_import_shadow_fields(f.recv.as_ref(), imports, pending);
+    check_import_shadow_fields(f.ty.params.as_ref(), imports, pending);
+    let Some(body) = &f.body else {
+        return;
+    };
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(a) if a.tok == Some(Token::DEFINE) => {
+                for lhs in &a.lhs {
+                    if let Expr::Ident(id) = lhs {
+                        if is_def_ident(pass, id) {
+                            warn_import_shadow(id, imports, pending);
+                        }
+                    }
+                }
+            }
+            NodeRef::ValueSpec(vs) => {
+                for name in &vs.names {
+                    warn_import_shadow(name, imports, pending);
+                }
+            }
+            NodeRef::RangeStmt(rs) => {
+                for opt in [&rs.key, &rs.value] {
+                    if let Some(Expr::Ident(id)) = opt.as_ref() {
+                        if rs.tok == Some(Token::DEFINE) {
+                            warn_import_shadow(id, imports, pending);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+}
+
+fn type_expr_text(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::SelectorExpr(sel) => {
+            let x = type_expr_text(&sel.x)?;
+            Some(format!("{x}.{}", sel.sel.name))
+        }
+        Expr::StarExpr(s) => {
+            let x = type_expr_text(&s.x)?;
+            Some(format!("*{x}"))
+        }
+        Expr::ParenExpr(p) => type_expr_text(&p.x).map(|inner| format!("({inner})")),
+        Expr::ArrayType(a) => {
+            let elt = type_expr_text(&a.elt)?;
+            match &a.len {
+                None => Some(format!("[]{elt}")),
+                Some(len) => {
+                    let n = expr_text(len)?;
+                    Some(format!("[{n}]{elt}"))
+                }
+            }
+        }
+        Expr::MapType(m) => {
+            let k = type_expr_text(&m.key)?;
+            let v = type_expr_text(&m.value)?;
+            Some(format!("map[{k}]{v}"))
+        }
+        Expr::ChanType(c) => {
+            let v = type_expr_text(&c.value)?;
+            let prefix = match c.dir.0 {
+                d if d == ChanDir::SEND.0 => "chan<- ",
+                d if d == ChanDir::RECV.0 => "<-chan ",
+                _ => "chan ",
+            };
+            Some(format!("{prefix}{v}"))
+        }
+        Expr::FuncType(f) => {
+            let params = field_list_type_text(f.params.as_ref())?;
+            let results = match &f.results {
+                None => String::new(),
+                Some(r) if r.list.len() == 1 && r.list[0].names.is_empty() => {
+                    let t = type_expr_text(r.list[0].ty.as_ref()?)?;
+                    format!(" {t}")
+                }
+                Some(r) => format!(" ({})", field_list_type_text(Some(r))?),
+            };
+            Some(format!("func({params}){results}"))
+        }
+        Expr::StructType(_) => Some("struct{...}".to_string()),
+        Expr::InterfaceType(_) => Some("interface{...}".to_string()),
+        Expr::Ellipsis(e) => {
+            let elt = e.elt.as_ref().and_then(|x| type_expr_text(x))?;
+            Some(format!("...{elt}"))
+        }
+        _ => expr_text(expr),
+    }
+}
+
+fn field_list_type_text(fl: Option<&FieldList>) -> Option<String> {
+    let Some(fl) = fl else {
+        return Some(String::new());
+    };
+    let mut parts = Vec::new();
+    for f in &fl.list {
+        let ty = type_expr_text(f.ty.as_ref()?)?;
+        if f.names.is_empty() {
+            parts.push(ty);
+        } else {
+            let names: Vec<_> = f.names.iter().map(|n| n.name.as_str()).collect();
+            parts.push(format!("{} {ty}", names.join(", ")));
+        }
+    }
+    Some(parts.join(", "))
+}
+
+fn type_expr_text_stripped(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::ParenExpr(p) => type_expr_text_stripped(&p.x),
+        Expr::StarExpr(s) => {
+            let x = type_expr_text_stripped(&s.x)?;
+            Some(format!("*{x}"))
+        }
+        Expr::ArrayType(a) => {
+            let elt = type_expr_text_stripped(&a.elt)?;
+            match &a.len {
+                None => Some(format!("[]{elt}")),
+                Some(len) => {
+                    let n = expr_text(len)?;
+                    Some(format!("[{n}]{elt}"))
+                }
+            }
+        }
+        Expr::MapType(m) => {
+            let k = type_expr_text_stripped(&m.key)?;
+            let v = type_expr_text_stripped(&m.value)?;
+            Some(format!("map[{k}]{v}"))
+        }
+        Expr::ChanType(c) => {
+            let any = ChanDir::SEND.0 | ChanDir::RECV.0;
+            if let Expr::ParenExpr(inner) = c.value.as_ref() {
+                if let Expr::ChanType(nested) = inner.x.as_ref() {
+                    if nested.dir.0 != any || c.dir.0 != any {
+                        let v = type_expr_text_stripped(&inner.x)?;
+                        let prefix = match c.dir.0 {
+                            d if d == ChanDir::SEND.0 => "chan<- ",
+                            d if d == ChanDir::RECV.0 => "<-chan ",
+                            _ => "chan ",
+                        };
+                        return Some(format!("{prefix}({v})"));
+                    }
+                }
+            }
+            let v = type_expr_text_stripped(&c.value)?;
+            let prefix = match c.dir.0 {
+                d if d == ChanDir::SEND.0 => "chan<- ",
+                d if d == ChanDir::RECV.0 => "<-chan ",
+                _ => "chan ",
+            };
+            Some(format!("{prefix}{v}"))
+        }
+        Expr::FuncType(f) => {
+            let params = field_list_type_text_stripped(f.params.as_ref())?;
+            let results = match &f.results {
+                None => String::new(),
+                Some(r) if r.list.len() == 1 && r.list[0].names.is_empty() => {
+                    let t = type_expr_text_stripped(r.list[0].ty.as_ref()?)?;
+                    format!(" {t}")
+                }
+                Some(r) => format!(" ({})", field_list_type_text_stripped(Some(r))?),
+            };
+            Some(format!("func({params}){results}"))
+        }
+        Expr::StructType(s) => {
+            // Keep display token; nested field types checked separately when
+            // VisitTypeExpr would only walk nested fields for struct/interface.
+            let _ = s;
+            Some("struct{...}".to_string())
+        }
+        Expr::InterfaceType(i) => {
+            let _ = i;
+            Some("interface{...}".to_string())
+        }
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::SelectorExpr(sel) => {
+            let x = type_expr_text_stripped(&sel.x)?;
+            Some(format!("{x}.{}", sel.sel.name))
+        }
+        Expr::Ellipsis(e) => {
+            let elt = e.elt.as_ref().and_then(|x| type_expr_text_stripped(x))?;
+            Some(format!("...{elt}"))
+        }
+        _ => type_expr_text(expr),
+    }
+}
+
+fn field_list_type_text_stripped(fl: Option<&FieldList>) -> Option<String> {
+    let Some(fl) = fl else {
+        return Some(String::new());
+    };
+    let mut parts = Vec::new();
+    for f in &fl.list {
+        let ty = type_expr_text_stripped(f.ty.as_ref()?)?;
+        if f.names.is_empty() {
+            parts.push(ty);
+        } else {
+            let names: Vec<_> = f.names.iter().map(|n| n.name.as_str()).collect();
+            parts.push(format!("{} {ty}", names.join(", ")));
+        }
+    }
+    Some(parts.join(", "))
+}
+
+fn check_type_unparen_compare(e: &Expr, pending: &mut Vec<(u32, String)>) {
+    let (Some(before), Some(after)) = (type_expr_text(e), type_expr_text_stripped(e)) else {
+        return;
+    };
+    if before != after {
+        report(
+            pending,
+            e.pos().0 as u32,
+            format!("could simplify {before} to {after}"),
+        );
+    }
+}
+
+fn check_type_unparen_root(e: &Expr, pending: &mut Vec<(u32, String)>) {
+    match e {
+        Expr::ParenExpr(p) => match p.x.as_ref() {
+            Expr::StructType(_) => {
+                report(
+                    pending,
+                    p.lparen.0 as u32,
+                    "could simplify (struct{...}) to struct{...}",
+                );
+            }
+            Expr::InterfaceType(_) => {
+                report(
+                    pending,
+                    p.lparen.0 as u32,
+                    "could simplify (interface{...}) to interface{...}",
+                );
+            }
+            _ => check_type_unparen_compare(e, pending),
+        },
+        Expr::StructType(s) => {
+            for field in &s.fields.list {
+                if let Some(ty) = &field.ty {
+                    check_type_unparen_root(ty, pending);
+                }
+            }
+        }
+        Expr::InterfaceType(i) => {
+            for field in &i.methods.list {
+                if let Some(ty) = &field.ty {
+                    check_type_unparen_root(ty, pending);
+                }
+            }
+        }
+        _ => check_type_unparen_compare(e, pending),
+    }
+}
+
+fn check_type_unparen_file(file: &File, pending: &mut Vec<(u32, String)>) {
+    for decl in &file.decls {
+        match decl {
+            Decl::GenDecl(g) => {
+                for spec in &g.specs {
+                    if let Spec::TypeSpec(ts) = spec {
+                        check_type_unparen_root(&ts.ty, pending);
+                    }
+                    if let Spec::ValueSpec(vs) = spec {
+                        if let Some(ty) = &vs.ty {
+                            check_type_unparen_root(ty, pending);
+                        }
+                    }
+                }
+            }
+            Decl::FuncDecl(f) => {
+                check_import_shadow_fields_types(&f.ty, pending);
+                if let Some(recv) = &f.recv {
+                    for field in &recv.list {
+                        if let Some(ty) = &field.ty {
+                            check_type_unparen_root(ty, pending);
+                        }
+                    }
+                }
+                if let Some(body) = &f.body {
+                    walk::inspect(NodeRef::BlockStmt(body), |n| {
+                        let Some(n) = n else {
+                            return true;
+                        };
+                        if let NodeRef::ValueSpec(vs) = n {
+                            if let Some(ty) = &vs.ty {
+                                check_type_unparen_root(ty, pending);
+                            }
+                        }
+                        if let NodeRef::FuncLit(fl) = n {
+                            check_import_shadow_fields_types(&fl.ty, pending);
+                        }
+                        true
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_import_shadow_fields_types(ty: &FuncType, pending: &mut Vec<(u32, String)>) {
+    for fl in [&ty.type_params, &ty.params, &ty.results] {
+        if let Some(list) = fl {
+            for field in &list.list {
+                if let Some(t) = &field.ty {
+                    check_type_unparen_root(t, pending);
+                }
+            }
+        }
+    }
+}
+
+fn ast_type_name(ty: &Expr) -> String {
+    match ty {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => sel.sel.name.clone(),
+        Expr::StarExpr(s) => ast_type_name(&s.x),
+        Expr::ArrayType(a) => ast_type_name(&a.elt),
+        Expr::ParenExpr(p) => ast_type_name(&p.x),
+        _ => String::new(),
+    }
+}
+
+fn ast_qualified_name(ty: &Expr) -> String {
+    match ty {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => {
+            format!("{}.{}", expr_text(&sel.x).unwrap_or_default(), sel.sel.name)
+        }
+        Expr::ParenExpr(p) => ast_qualified_name(&p.x),
+        _ => String::new(),
+    }
+}
+
+fn is_error_type_expr(ty: &Expr) -> bool {
+    ast_qualified_name(ty) == "error"
+}
+
+fn is_bool_type_expr(ty: &Expr) -> bool {
+    ast_qualified_name(ty) == "bool"
+}
+
+fn result_num_fields(results: &FieldList) -> usize {
+    let mut n = 0;
+    for f in &results.list {
+        if f.names.is_empty() {
+            n += 1;
+        } else {
+            n += f.names.len();
+        }
+    }
+    n
+}
+
+fn check_unnamed_result(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    // checkExported default false → only exported funcs (upstream inverted naming:
+    // checkExported=false means skip unexported... wait:
+    // `if c.checkExported && !ast.IsExported` → return
+    // So when checkExported is false (default), it does NOT return for unexported —
+    // it checks ALL functions. When checkExported is true, it only checks exported.
+    // Actually: `if c.checkExported && !ast.IsExported(decl.Name.Name) { return }`
+    // Default checkExported=false → never returns early → checks all. OK.
+
+    let Some(results) = &f.ty.results else {
+        return;
+    };
+    if results.list.is_empty() {
+        return;
+    }
+    if results.list[0].names.first().is_some() {
+        return; // named results
+    }
+
+    let fields: Vec<&Expr> = results
+        .list
+        .iter()
+        .filter_map(|f| f.ty.as_ref())
+        .collect();
+    if fields.is_empty() {
+        return;
+    }
+
+    if result_num_fields(results) == 2 {
+        if fields.len() < 2 {
+            return;
+        }
+        let typ1 = fields[0];
+        let typ2 = fields[1];
+        let name1 = ast_type_name(typ1);
+        let name2 = ast_type_name(typ2);
+        let cond = (name1 != name2 && !name2.is_empty())
+            || (!is_error_type_expr(typ1) && is_error_type_expr(typ2))
+            || (!is_bool_type_expr(typ1) && is_bool_type_expr(typ2));
+        if !cond {
+            report(
+                pending,
+                f.name.pos().0 as u32,
+                "consider giving a name to these results",
+            );
+        }
+        return;
+    }
+
+    let mut seen: HashMap<String, bool> = HashMap::new();
+    for (i, typ) in fields.iter().enumerate() {
+        let name = ast_type_name(typ);
+        let is_last = i + 1 == fields.len();
+        let cond = !seen.get(&name).copied().unwrap_or(false)
+            || (is_last && (is_error_type_expr(typ) || is_bool_type_expr(typ)));
+        if !cond {
+            report(
+                pending,
+                f.name.pos().0 as u32,
+                "consider giving a name to these results",
+            );
+            return;
+        }
+        seen.insert(name, true);
+    }
+}
+
+fn check_why_no_lint(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"^// *nolint(?::[^ ]+)? *(.*)$").expect("whyNoLint regex")
+    });
+    if cg.list.first().is_some_and(|c| c.text.starts_with("/*")) {
+        return;
+    }
+    for comment in &cg.list {
+        let Some(caps) = re.captures(&comment.text) else {
+            continue;
+        };
+        let rest = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        if !rest.starts_with("//") || rest.trim_start_matches("//").is_empty() {
+            report(
+                pending,
+                cg.pos().0 as u32,
+                "include an explanation for nolint directive",
+            );
+            return;
+        }
+    }
+}
+
+const HUGE_PARAM_SIZE_THRESHOLD: i64 = 80;
+const RANGE_VAL_COPY_SIZE_THRESHOLD: i64 = 128;
+
+fn is_stringer_method(decl: &FuncDecl) -> bool {
+    if decl.recv.is_none() || decl.name.name != "String" {
+        return false;
+    }
+    if decl.ty.params.as_ref().is_some_and(|p| !p.list.is_empty()) {
+        return false;
+    }
+    let Some(results) = &decl.ty.results else {
+        return false;
+    };
+    if results.list.len() != 1 {
+        return false;
+    }
+    matches!(
+        results.list[0].ty.as_ref(),
+        Some(Expr::Ident(id)) if id.name == "string"
+    )
+}
+
+fn check_huge_param_fields(
+    pass: &Pass<'_>,
+    fields: Option<&FieldList>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(fl) = fields else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let sizes = pass.pkg().types_sizes.unwrap_or_else(default_sizes);
+    for f in &fl.list {
+        for id in &f.names {
+            let typ = info
+                .defs
+                .get(&id.id)
+                .copied()
+                .flatten()
+                .and_then(|oid| match artifacts.objects.get(oid) {
+                    ObjectData::Var(v) => Some(v.typ()),
+                    _ => None,
+                })
+                .or_else(|| f.ty.as_ref().and_then(|ty| type_of(pass, ty)));
+            let Some(typ) = typ else {
+                continue;
+            };
+            let size = sizes.sizeof(
+                &artifacts.types,
+                &artifacts.objects,
+                &artifacts.packages,
+                typ,
+            );
+            if size >= HUGE_PARAM_SIZE_THRESHOLD {
+                report(
+                    pending,
+                    id.pos().0 as u32,
+                    format!(
+                        "{} is heavy ({size} bytes); consider passing it by pointer",
+                        id.name
+                    ),
+                );
+            }
+        }
+    }
+}
+
+fn check_huge_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    if is_stringer_method(f) {
+        return;
+    }
+    check_huge_param_fields(pass, f.recv.as_ref(), pending);
+    check_huge_param_fields(pass, f.ty.params.as_ref(), pending);
+}
+
+fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+    let Some(value) = &rs.value else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let typ = type_of(pass, value).or_else(|| {
+        let info = pass.types_info()?;
+        let Expr::Ident(id) = value else {
+            return None;
+        };
+        let oid = info.defs.get(&id.id).copied().flatten()?;
+        match artifacts.objects.get(oid) {
+            ObjectData::Var(v) => Some(v.typ()),
+            _ => None,
+        }
+    }).or_else(|| {
+        // Infer from range expression: []T / [N]T → T
+        let x_typ = type_of(pass, &rs.x)?;
+        let x_typ = unalias_readonly(&artifacts.types, x_typ);
+        match artifacts.types.get(x_typ) {
+            TypeData::Slice(s) => Some(s.elem()),
+            TypeData::Array(a) => Some(a.elem()),
+            _ => None,
+        }
+    });
+    let Some(typ) = typ else {
+        return;
+    };
+    let sizes = pass.pkg().types_sizes.unwrap_or_else(default_sizes);
+    let size = sizes.sizeof(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+    );
+    if size >= RANGE_VAL_COPY_SIZE_THRESHOLD {
+        report(
+            pending,
+            rs.for_.0 as u32,
+            format!("each iteration copies {size} bytes (consider pointers or indexing)"),
+        );
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -5577,6 +6259,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         if enabled(&set, "dupImport") {
             check_dup_import(pass, file, &mut pending);
+        }
+        if enabled(&set, "typeUnparen") {
+            check_type_unparen_file(file, &mut pending);
+        }
+        if enabled(&set, "importShadow") {
+            let imports = collect_import_names(file);
+            for decl in &file.decls {
+                if let Decl::FuncDecl(f) = decl {
+                    check_import_shadow_func(pass, f, &imports, &mut pending);
+                }
+            }
         }
 
         if enabled(&set, "typeDefFirst") {
@@ -5681,6 +6374,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "rangeExprCopy") {
                         check_range_expr_copy(pass, s, &mut pending);
+                    }
+                    if enabled(&set, "rangeValCopy") {
+                        check_range_val_copy(pass, s, &mut pending);
                     }
                     if enabled(&set, "nestingReduce") {
                         check_nesting_reduce_for(&s.body, &mut pending);
@@ -5789,6 +6485,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "paramTypeCombine") {
                         check_param_type_combine(pass, f, &mut pending);
+                    }
+                    if enabled(&set, "unnamedResult") {
+                        check_unnamed_result(f, &mut pending);
+                    }
+                    if enabled(&set, "hugeParam") {
+                        check_huge_param(pass, f, &mut pending);
                     }
                 }
                 NodeRef::CallExpr(c) => {

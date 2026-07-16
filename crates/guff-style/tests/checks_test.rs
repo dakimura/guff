@@ -3712,6 +3712,12 @@ fn gocritic_enable_all_extras() {
         "defer appendCombineExtra() is placed just before return",
         "s is already string",
         "use w.String() instead",
+        "could simplify [](func()) to []func()",
+        "shadow of imported package 'filepath'",
+        "consider giving a name to these results",
+        "include an explanation for nolint directive",
+        "is heavy (",
+        "each iteration copies",
     ];
     for needle in expect {
         assert!(
@@ -3792,6 +3798,12 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("just before return")
                 || m.contains("already string")
                 || m.contains(".String() instead")
+                || m.contains("could simplify [](func())")
+                || m.contains("shadow of imported")
+                || m.contains("giving a name to these results")
+                || m.contains("explanation for nolint")
+                || m.contains("is heavy (")
+                || m.contains("each iteration copies")
         }),
         "extras should be off by default: {messages:?}"
     );
