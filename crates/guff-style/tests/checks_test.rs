@@ -3086,6 +3086,48 @@ fn modernize_flags_reflecttypeassert() {
 }
 
 #[test]
+fn modernize_flags_atomictypes() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/atomictypes",
+        "atomictypes.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("may be simplified using atomic."))
+        .collect();
+    // goodLocal (x Int32), goodShadowAlias (x Int32), goodField (X.x Int32 + Z.y Int64)
+    assert_eq!(
+        hits.len(),
+        4,
+        "expected exactly 4 atomictypes hits, got {} {messages:?}",
+        hits.len()
+    );
+    assert_eq!(
+        hits
+            .iter()
+            .filter(|m| m.contains("atomic.Int32"))
+            .count(),
+        3,
+        "{messages:?}"
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("atomic.Int64")),
+        "{messages:?}"
+    );
+    // Negatives must not be reported.
+    assert!(
+        !messages.iter().any(|m| m.contains("var x2 ")),
+        "init-assigned var must be skipped: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("var z ")),
+        "unsynchronized load must be skipped: {messages:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_testingcontext() {
     let pkg = support::typecheck_fixture(
         "modernize",

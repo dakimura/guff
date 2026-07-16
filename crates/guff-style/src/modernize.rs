@@ -39,9 +39,13 @@
 //!   `for elem := range x.All()` for well-known `go/types`/`reflect` types
 //!   (Go 1.24+/1.26+; both C-style and `for i := range x.Len()` forms;
 //!   elem-name collision → candidate skipped, DEFERRED fresh-name)
+//! - `atomictypes` — `var x int32` + `atomic.AddInt32(&x, …)` → `atomic.Int32`
+//!   (Go 1.19+; And/Or need Go 1.23+; Pointer variants / multi-file AddImport
+//!   / IgnoredFiles gating DEFERRED)
 //!
-//! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
+//! DEFERRED (recognized in `disable` / documented): embedlit,
 //! appendclipped (unsafe-by-default upstream),
+//! atomictypes Pointer variants / multi-file import shift / IgnoredFiles,
 //! stditerators fresh-name generation on elem collisions / Seq2 dual-component
 //! patterns, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
@@ -57,7 +61,7 @@
 //! full parity, errorsastype switch/`new(E)`/combined-cond forms, bloop keyed
 //! `for i := range b.N`, and full rangeint/minmax edge-case parity with upstream.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::sync::OnceLock;
 
@@ -4886,6 +4890,428 @@ fn check_stditerators_range(
     });
 }
 
+/// sync/atomic funcs rewritten by `atomictypes` (Go 1.19+, And/Or Go 1.23+).
+const SYNC_ATOMIC_FUNCS: &[&str] = &[
+    "AddInt32",
+    "AddInt64",
+    "AddUint32",
+    "AddUint64",
+    "AddUintptr",
+    "CompareAndSwapInt32",
+    "CompareAndSwapInt64",
+    "CompareAndSwapUint32",
+    "CompareAndSwapUint64",
+    "CompareAndSwapUintptr",
+    "LoadInt32",
+    "LoadInt64",
+    "LoadUint32",
+    "LoadUint64",
+    "LoadUintptr",
+    "StoreInt32",
+    "StoreInt64",
+    "StoreUint32",
+    "StoreUint64",
+    "StoreUintptr",
+    "SwapInt32",
+    "SwapInt64",
+    "SwapUint32",
+    "SwapUint64",
+    "SwapUintptr",
+    "AndInt32",
+    "AndInt64",
+    "AndUint32",
+    "AndUint64",
+    "AndUintptr",
+    "OrInt32",
+    "OrInt64",
+    "OrUint32",
+    "OrUint64",
+    "OrUintptr",
+];
+
+fn atomic_type_name(under: &str) -> Option<&'static str> {
+    match under {
+        "int32" => Some("Int32"),
+        "int64" => Some("Int64"),
+        "uint32" => Some("Uint32"),
+        "uint64" => Some("Uint64"),
+        "uintptr" => Some("Uintptr"),
+        _ => None,
+    }
+}
+
+fn sync_atomic_func_name(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    let name = code::call_name(pass, &call.fun)?;
+    let short = name.strip_prefix("sync/atomic.")?;
+    if SYNC_ATOMIC_FUNCS.contains(&short) {
+        Some(short.to_string())
+    } else {
+        None
+    }
+}
+
+fn atomic_import_prefix(call: &CallExpr) -> String {
+    match call.fun.as_ref() {
+        Expr::SelectorExpr(sel) => match sel.x.as_ref() {
+            Expr::Ident(id) => format!("{}.", id.name),
+            _ => "atomic.".into(),
+        },
+        _ => "atomic.".into(),
+    }
+}
+
+/// Resolve `atomic.F(&v)` / `atomic.F(&recv.field)` to the addressed var and
+/// the l-value expression (`v` or `recv.field`).
+fn var_from_atomic_addr<'a>(
+    pass: &Pass<'_>,
+    arg: &'a Expr,
+) -> Option<(ObjectId, &'a Expr)> {
+    let Expr::UnaryExpr(u) = unparen_expr(arg) else {
+        return None;
+    };
+    if u.op != Token::AND {
+        return None;
+    }
+    match u.x.as_ref() {
+        Expr::Ident(id) => {
+            let obj = ident_obj(pass, id)?;
+            Some((obj, u.x.as_ref()))
+        }
+        Expr::SelectorExpr(sel) => {
+            let info = pass.types_info()?;
+            let obj = if let Some(seln) = info.selections.get(&sel.id) {
+                seln.obj()
+            } else {
+                ident_obj(pass, &sel.sel)?
+            };
+            let artifacts = pass.pkg().type_artifacts.as_ref()?;
+            if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+                return None;
+            }
+            Some((obj, u.x.as_ref()))
+        }
+        _ => None,
+    }
+}
+
+fn atomictypes_skip_kind(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    if obj.exported(&artifacts.objects) {
+        return true;
+    }
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return true;
+    };
+    matches!(
+        v.kind(),
+        VarKind::Recv | VarKind::Param | VarKind::Result
+    )
+}
+
+struct AtomicCand<'a> {
+    func_name: String,
+    import_prefix: String,
+    sites: Vec<(&'a CallExpr, &'a Expr)>,
+}
+
+enum AtomicDecl<'a> {
+    Var {
+        name: &'a guff::ast::Ident,
+        ty: &'a Expr,
+    },
+    Field {
+        name: &'a guff::ast::Ident,
+        ty: &'a Expr,
+    },
+}
+
+fn find_atomictypes_decl<'a>(
+    pass: &'a Pass<'_>,
+    obj: ObjectId,
+) -> Option<AtomicDecl<'a>> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return None;
+    };
+    let is_field = v.is_field();
+    let field_name = v.name().to_string();
+
+    let mut found = None;
+    for file in pass.files() {
+        if is_field {
+            walk::inspect(NodeRef::File(file), |n| {
+                let Some(n) = n else {
+                    return true;
+                };
+                let NodeRef::TypeSpec(ts) = n else {
+                    return true;
+                };
+                let Expr::StructType(st) = &ts.ty else {
+                    return true;
+                };
+                let Some(type_obj) = ident_obj(pass, &ts.name) else {
+                    return true;
+                };
+                let Some(typ) = type_obj.typ(&artifacts.objects) else {
+                    return true;
+                };
+                let typ = unalias_readonly(&artifacts.types, typ);
+                let under = typ.underlying(&artifacts.types);
+                let nfields = guff_types::r#struct::struct_num_fields(&artifacts.types, under);
+                let mut matched = false;
+                for i in 0..nfields {
+                    if guff_types::r#struct::struct_field(&artifacts.types, under, i) == obj {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    return true;
+                }
+                for field in &st.fields.list {
+                    if field.names.len() == 1
+                        && field.names[0].name == field_name
+                        && field.ty.is_some()
+                    {
+                        found = Some(AtomicDecl::Field {
+                            name: &field.names[0],
+                            ty: field.ty.as_ref().unwrap(),
+                        });
+                        return false;
+                    }
+                }
+                true
+            });
+        } else {
+            walk::inspect(NodeRef::File(file), |n| {
+                let Some(n) = n else {
+                    return true;
+                };
+                if let NodeRef::ValueSpec(spec) = n {
+                    if spec.names.len() == 1
+                        && spec.values.is_empty()
+                        && spec.ty.is_some()
+                        && ident_obj(pass, &spec.names[0]) == Some(obj)
+                    {
+                        found = Some(AtomicDecl::Var {
+                            name: &spec.names[0],
+                            ty: spec.ty.as_ref().unwrap(),
+                        });
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+        if found.is_some() {
+            break;
+        }
+    }
+    found
+}
+
+fn atomictypes_has_kv_key_use(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    if !v.is_field() {
+        return false;
+    }
+    let field_name = v.name().to_string();
+    let mut hit = false;
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            let NodeRef::CompositeLit(lit) = n else {
+                return true;
+            };
+            let Some(info) = pass.types_info() else {
+                return true;
+            };
+            let Some(tav) = info.types.get(&lit.id) else {
+                return true;
+            };
+            let typ = unalias_readonly(&artifacts.types, tav.typ);
+            let under = typ.underlying(&artifacts.types);
+            if !matches!(artifacts.types.get(under), TypeData::Struct(_)) {
+                return true;
+            }
+            let nfields = guff_types::r#struct::struct_num_fields(&artifacts.types, under);
+            let mut owns = false;
+            for i in 0..nfields {
+                if guff_types::r#struct::struct_field(&artifacts.types, under, i) == obj {
+                    owns = true;
+                    break;
+                }
+            }
+            if !owns {
+                return true;
+            }
+            for elt in &lit.elts {
+                if let Expr::KeyValueExpr(kv) = elt {
+                    if let Expr::Ident(id) = kv.key.as_ref() {
+                        if id.name == field_name {
+                            hit = true;
+                        }
+                    }
+                }
+            }
+            true
+        });
+        if hit {
+            break;
+        }
+    }
+    hit
+}
+
+fn atomictypes_use_count(pass: &Pass<'_>, obj: ObjectId) -> usize {
+    let Some(info) = pass.types_info() else {
+        return 0;
+    };
+    info.uses.values().filter(|&&o| o == obj).count()
+}
+
+fn underlying_basic_name(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Basic(b) => Some(b.name().to_string()),
+        _ => None,
+    }
+}
+
+/// Port of modernize `atomictypes`: rewrite `sync/atomic` funcs + basic vars
+/// into typed `atomic.Int32` (etc.) wrappers.
+fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
+    let mut cands: HashMap<ObjectId, AtomicCand<'_>> = HashMap::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            let NodeRef::CallExpr(call) = n else {
+                return true;
+            };
+            let Some(func_name) = sync_atomic_func_name(pass, call) else {
+                return true;
+            };
+            if call.args.is_empty() {
+                return true;
+            }
+            let Some((obj, vexpr)) = var_from_atomic_addr(pass, &call.args[0]) else {
+                return true;
+            };
+            if atomictypes_skip_kind(pass, obj) {
+                return true;
+            }
+            let prefix = atomic_import_prefix(call);
+            let entry = cands.entry(obj).or_insert_with(|| AtomicCand {
+                func_name: func_name.clone(),
+                import_prefix: prefix,
+                sites: Vec::new(),
+            });
+            entry.sites.push((call, vexpr));
+            true
+        });
+    }
+
+    for (obj, cand) in cands {
+        if atomictypes_has_kv_key_use(pass, obj) {
+            continue;
+        }
+        let use_count = atomictypes_use_count(pass, obj);
+        if use_count != cand.sites.len() {
+            continue;
+        }
+        let Some(decl) = find_atomictypes_decl(pass, obj) else {
+            continue;
+        };
+        let (name_ident, ty_expr) = match &decl {
+            AtomicDecl::Var { name, ty } | AtomicDecl::Field { name, ty } => (*name, *ty),
+        };
+        let Some(old_ty) = type_of(pass, ty_expr) else {
+            continue;
+        };
+        let Some(under_name) = underlying_basic_name(pass, old_ty) else {
+            continue;
+        };
+        let Some(new_type) = atomic_type_name(&under_name) else {
+            continue;
+        };
+
+        let needs_123 = cand.func_name.starts_with("And") || cand.func_name.starts_with("Or");
+        let pos = name_ident.pos().0 as u32;
+        if needs_123 {
+            if !go_at_least(pass, pos, "go1.23") {
+                continue;
+            }
+        } else if !go_at_least(pass, pos, "go1.19") {
+            continue;
+        }
+
+        let mut edits = vec![TextEdit {
+            pos: ty_expr.pos().0 as u32,
+            end: ty_expr.end().0 as u32,
+            new_text: format!("{}{new_type}", cand.import_prefix),
+        }];
+
+        for (call, vexpr) in &cand.sites {
+            let Some(fn_name) = sync_atomic_func_name(pass, call) else {
+                continue;
+            };
+            let Some(verb) = fn_name.strip_suffix(new_type) else {
+                // Mismatched atomic width vs declared type — skip whole var.
+                edits.clear();
+                break;
+            };
+            let after = if call.args.len() > 1 {
+                call.args[1].pos().0 as u32
+            } else {
+                vexpr.end().0 as u32
+            };
+            edits.push(TextEdit {
+                pos: call.pos().0 as u32,
+                end: vexpr.pos().0 as u32,
+                new_text: String::new(),
+            });
+            edits.push(TextEdit {
+                pos: vexpr.end().0 as u32,
+                end: after,
+                new_text: format!(".{verb}("),
+            });
+        }
+        if edits.len() <= 1 {
+            continue;
+        }
+
+        let var_name = name_ident.name.as_str();
+        pending.push(Diagnostic {
+            pos,
+            end: ty_expr.end().0 as u32,
+            category: String::new(),
+            message: format!(
+                "var {var_name} {under_name} may be simplified using atomic.{new_type}"
+            ),
+            suggested_fixes: vec![SuggestedFix {
+                message: format!("Replace {under_name} by atomic.{new_type}"),
+                text_edits: edits,
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -4900,6 +5326,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     if enabled(&options, "newexpr") {
         let cands = collect_newexpr_decls(pass);
         export_newexpr_decls(pass, cands, &mut pending);
+    }
+    if enabled(&options, "atomictypes") {
+        check_atomictypes(pass, &mut pending);
     }
     for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
