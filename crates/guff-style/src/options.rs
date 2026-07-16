@@ -773,6 +773,19 @@ pub struct RecvcheckOptions {
     pub exclusions: Vec<String>,
 }
 
+/// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterfacebloatOptions {
+    /// Maximum number of methods allowed inside an interface (upstream `max`).
+    pub max: usize,
+}
+
+impl Default for InterfacebloatOptions {
+    fn default() -> Self {
+        Self { max: 10 }
+    }
+}
+
 /// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
 ///
 /// Defaults match kulti/thelper / golangci-lint (all checks on).

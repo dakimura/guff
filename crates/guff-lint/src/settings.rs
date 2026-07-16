@@ -65,6 +65,7 @@ pub struct LinterSettings {
     pub recvcheck: RecvcheckSettings,
     pub thelper: ThelperSettings,
     pub iface: IfaceSettings,
+    pub interfacebloat: InterfacebloatSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -890,6 +891,34 @@ pub struct RecvcheckSettings {
     pub exclusions: Vec<String>,
 }
 
+/// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
+///
+/// `max` is the maximum number of methods allowed inside an interface
+/// (upstream default 10).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct InterfacebloatSettings {
+    #[serde(default = "default_interfacebloat_max")]
+    pub max: usize,
+}
+
+fn default_interfacebloat_max() -> usize {
+    10
+}
+
+impl Default for InterfacebloatSettings {
+    fn default() -> Self {
+        Self {
+            max: default_interfacebloat_max(),
+        }
+    }
+}
+
+impl InterfacebloatSettings {
+    pub fn to_guff_interfacebloat(&self) -> guff_style::InterfacebloatOptions {
+        guff_style::InterfacebloatOptions { max: self.max }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1306,6 +1335,11 @@ impl LinterSettings {
                 out.importas = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("interfacebloat".into())) {
+            if let Ok(s) = serde_yaml::from_value::<InterfacebloatSettings>(v.clone()) {
+                out.interfacebloat = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1376,6 +1410,10 @@ impl LinterSettings {
         bag.insert("thelper", self.thelper.to_guff_thelper());
         bag.insert("iface", self.iface.to_guff_iface());
         bag.insert("importas", self.importas.to_guff_importas());
+        bag.insert(
+            "interfacebloat",
+            self.interfacebloat.to_guff_interfacebloat(),
+        );
         Arc::new(bag)
     }
 

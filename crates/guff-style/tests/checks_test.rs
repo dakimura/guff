@@ -7,7 +7,8 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
-    gocyclo, goprintffuncname, iface, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
+    gocyclo, goprintffuncname, iface, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
+    nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     testifylint, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
@@ -489,6 +490,57 @@ fn reassign_respects_patterns_settings() {
         "{messages:?}"
     );
     assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+#[test]
+fn interfacebloat_flags_large_interface() {
+    let pkg =
+        support::typecheck_fixture("interfacebloat", "example.com/interfacebloat", "bad.go");
+    let messages = support::run_analyzer(interfacebloat(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("the interface has more than 10 methods: 11"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn interfacebloat_allows_interfaces_within_limit() {
+    let pkg =
+        support::typecheck_fixture("interfacebloat", "example.com/interfacebloat/ok", "ok.go");
+    let messages = support::run_analyzer(interfacebloat(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn interfacebloat_respects_custom_max() {
+    use guff_style::InterfacebloatOptions;
+
+    let pkg = support::typecheck_fixture(
+        "interfacebloat",
+        "example.com/interfacebloat/settings",
+        "settings.go",
+    );
+
+    // Default max (10): three-method interface is fine.
+    assert!(support::run_analyzer(interfacebloat(), &pkg).is_empty());
+
+    // max = 2: the three-method interface is now flagged.
+    let mut bag = SettingsBag::new();
+    bag.insert("interfacebloat", InterfacebloatOptions { max: 2 });
+    let flagged = support::run_analyzer_with_settings(
+        interfacebloat(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(flagged.len(), 1, "{flagged:?}");
+    assert!(
+        flagged[0].contains("the interface has more than 2 methods: 3"),
+        "{flagged:?}"
+    );
 }
 
 #[test]
