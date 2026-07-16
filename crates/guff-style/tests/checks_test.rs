@@ -3725,6 +3725,17 @@ fn gocritic_enable_all_extras() {
         "may want to remove commented-out code",
         "don't embed sync.Mutex",
         "don't embed *sync.RWMutex",
+        "defer is missing, mutex is unlocked immediately",
+        "suspicious unlock, maybe Unlock was intended?",
+        "suspicious unlock, maybe RUnlock was intended?",
+        "maybe defer rw.Unlock() was intended?",
+        "maybe defer rw.RUnlock() was intended?",
+        "suspicious reassignment of error from another package",
+        "err error is unchecked, maybe intended to check it instead of err2",
+        "can simplify `!!x` to `x`",
+        "can simplify `!(a >= b)` to `a < b`",
+        "can simplify `!x == !y` to `x == y`",
+        "can simplify `a > b || a == b` to `a >= b`",
     ];
     for needle in expect {
         assert!(

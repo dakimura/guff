@@ -459,3 +459,47 @@ type ExposedMutexExtra struct {
 type ExposedRWMutexExtra struct {
 	*sync.RWMutex
 }
+
+func badLockExtra(mu *sync.Mutex, rw *sync.RWMutex, op func()) {
+	mu.Lock()
+	mu.Unlock()
+	op()
+
+	rw.RLock()
+	rw.RUnlock()
+	op()
+
+	rw.Lock()
+	defer rw.RUnlock()
+	op()
+
+	rw.RLock()
+	defer rw.Unlock()
+	op()
+
+	rw.Lock()
+	defer rw.Lock()
+	op()
+
+	rw.RLock()
+	defer rw.RLock()
+	op()
+}
+
+func externalErrorReassignExtra() {
+	io.EOF = nil
+}
+
+func uncheckedInlineErrExtra() {
+	var err2 error
+	if err := returnsErrorExtra(); err2 != nil {
+		_ = err
+	}
+}
+
+func boolExprSimplifyExtra(x, y bool, a, b int) {
+	_ = !!x
+	_ = !(a >= b)
+	_ = !x == !y
+	_ = a > b || a == b
+}

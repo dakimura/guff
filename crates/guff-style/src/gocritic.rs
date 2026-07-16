@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**102** = 34 default + 68 enable-all extras):
+//! Implemented checkers (**106** = 34 default + 72 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -36,13 +36,15 @@
 //! - batch 14 (enable-all extras): `ptrToRefParam`, `tooManyResultsChecker`,
 //!   `evalOrder`, `unlabelStmt`, `returnAfterHttpError`, `exposedSyncMutex`
 //! - batch 15 (enable-all extra): `commentedOutCode`
+//! - batch 16 (enable-all extras): `badLock`, `externalErrorReassign`,
+//!   `uncheckedInlineErr`, `boolExprSimplify` (doubleNegation / invertComparison /
+//!   negatedEquals / combineChecks; removeIncDec / foldRanges DEFERRED)
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `boolExprSimplify` / `regexpSimplify` /
-//! `badLock` / `externalErrorReassign` / `uncheckedInlineErr` / …),
+//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + `regexpSimplify`
+//! + boolExprSimplify removeIncDec/foldRanges full parity / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported,
@@ -77,7 +79,7 @@ use guff_constant::{int64_val, make_from_literal};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{basic_kind, BasicKind, IS_INTEGER};
+use guff_types::basic::{basic_kind, BasicKind, IS_BOOLEAN, IS_FLOAT, IS_INTEGER};
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
@@ -136,9 +138,11 @@ const DEFAULT_CHECKS: &[&str] = &[
 /// `enabled-checks` (prometheus enable-all coverage).
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "appendCombine",
+    "badLock",
     "badRegexp",
     "badSorting",
     "badSyncOnceFunc",
+    "boolExprSimplify",
     "builtinShadow",
     "builtinShadowDecl",
     "commentedOutCode",
@@ -155,6 +159,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "equalFold",
     "evalOrder",
     "exposedSyncMutex",
+    "externalErrorReassign",
     "filepathJoin",
     "hexLiteral",
     "httpNoBody",
@@ -195,6 +200,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "typeAssertChain",
     "typeDefFirst",
     "typeUnparen",
+    "uncheckedInlineErr",
     "unlabelStmt",
     "unnecessaryBlock",
     "unnecessaryDefer",
@@ -6778,6 +6784,403 @@ fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
     }
 }
 
+// badLock / externalErrorReassign / uncheckedInlineErr / boolExprSimplify ------
+
+fn unparen_expr(e: &Expr) -> &Expr {
+    let mut cur = e;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
+fn mutex_method_call(call: &CallExpr) -> Option<(&Expr, &str)> {
+    if !call.args.is_empty() {
+        return None;
+    }
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return None;
+    };
+    match sel.sel.name.as_str() {
+        "Lock" | "Unlock" | "RLock" | "RUnlock" => Some((&sel.x, sel.sel.name.as_str())),
+        _ => None,
+    }
+}
+
+fn stmt_mutex_call(stmt: &Stmt) -> Option<(&Expr, &str, bool /* deferred */, u32)> {
+    match stmt {
+        Stmt::ExprStmt(es) => {
+            let Expr::CallExpr(call) = &es.x else {
+                return None;
+            };
+            let (recv, method) = mutex_method_call(call)?;
+            Some((recv, method, false, es.x.pos().0 as u32))
+        }
+        Stmt::DeferStmt(d) => {
+            let (recv, method) = mutex_method_call(&d.call)?;
+            Some((recv, method, true, d.call.pos().0 as u32))
+        }
+        _ => None,
+    }
+}
+
+fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+    for window in stmts.windows(2) {
+        let Some((mu1, m1, deferred1, _)) = stmt_mutex_call(&window[0]) else {
+            continue;
+        };
+        if deferred1 {
+            continue;
+        }
+        let Some((mu2, m2, deferred2, pos2)) = stmt_mutex_call(&window[1]) else {
+            continue;
+        };
+        if !exprs_equal(mu1, mu2) {
+            continue;
+        }
+        let mu_t = expr_text(mu1).unwrap_or_else(|| "mu".into());
+        match (m1, m2, deferred2) {
+            ("Lock", "Unlock", false) | ("RLock", "RUnlock", false) => {
+                report(
+                    pending,
+                    pos2,
+                    "defer is missing, mutex is unlocked immediately",
+                );
+            }
+            ("Lock", "RUnlock", true) => {
+                report(
+                    pending,
+                    pos2,
+                    "suspicious unlock, maybe Unlock was intended?",
+                );
+            }
+            ("RLock", "Unlock", true) => {
+                report(
+                    pending,
+                    pos2,
+                    "suspicious unlock, maybe RUnlock was intended?",
+                );
+            }
+            ("Lock", "Lock", true) => {
+                report(
+                    pending,
+                    pos2,
+                    format!("maybe defer {mu_t}.Unlock() was intended?"),
+                );
+            }
+            ("RLock", "RLock", true) => {
+                report(
+                    pending,
+                    pos2,
+                    format!("maybe defer {mu_t}.RUnlock() was intended?"),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn type_is_boolean(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ).underlying(&artifacts.types);
+    let TypeData::Basic(b) = artifacts.types.get(typ) else {
+        return false;
+    };
+    b.info().contains(IS_BOOLEAN)
+}
+
+fn type_has_float(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ).underlying(&artifacts.types);
+    let TypeData::Basic(b) = artifacts.types.get(typ) else {
+        return false;
+    };
+    b.info().contains(IS_FLOAT)
+}
+
+fn universe_error_type(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(err) = universe_error_type(pass) else {
+        return false;
+    };
+    type_implements(pass, typ, err)
+}
+
+fn check_external_error_reassign(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if assign.tok != Some(Token::ASSIGN) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return;
+    }
+    let Expr::SelectorExpr(sel) = &assign.lhs[0] else {
+        return;
+    };
+    let Expr::Ident(pkg) = sel.x.as_ref() else {
+        return;
+    };
+    if !is_pkg_name(pass, pkg) {
+        return;
+    }
+    let Some(typ) = type_of(pass, &assign.lhs[0]) else {
+        return;
+    };
+    if !implements_error(pass, typ) {
+        return;
+    }
+    report(
+        pending,
+        assign.tok_pos.0 as u32,
+        "suspicious reassignment of error from another package",
+    );
+}
+
+fn ident_type(pass: &Pass<'_>, id: &Ident) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if let Some(Some(oid)) = info.defs.get(&id.id).copied() {
+        if let ObjectData::Var(v) = artifacts.objects.get(oid) {
+            return Some(v.typ());
+        }
+    }
+    if let Some(oid) = info.uses.get(&id.id).copied() {
+        if let ObjectData::Var(v) = artifacts.objects.get(oid) {
+            return Some(v.typ());
+        }
+    }
+    info.types.get(&id.id).map(|tav| tav.typ)
+}
+
+fn check_unchecked_inline_err(
+    pass: &Pass<'_>,
+    ifs: &IfStmt,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(Stmt::AssignStmt(init)) = ifs.init.as_deref() else {
+        return;
+    };
+    if !matches!(init.tok, Some(Token::DEFINE) | Some(Token::ASSIGN)) {
+        return;
+    }
+    if init.rhs.len() != 1 || !matches!(init.rhs[0], Expr::CallExpr(_)) {
+        return;
+    }
+    // Last LHS is the returned error (`err` / `_, err`).
+    let Some(err_lhs) = init.lhs.last() else {
+        return;
+    };
+    let Expr::Ident(err_id) = err_lhs else {
+        return;
+    };
+    let Some(err_typ) = ident_type(pass, err_id) else {
+        return;
+    };
+    if !implements_error(pass, err_typ) {
+        return;
+    }
+
+    let Expr::BinaryExpr(cond) = &ifs.cond else {
+        return;
+    };
+    if cond.op != Token::NEQ {
+        return;
+    }
+    let err2 = if is_nil_ident(&cond.y) {
+        cond.x.as_ref()
+    } else if is_nil_ident(&cond.x) {
+        cond.y.as_ref()
+    } else {
+        return;
+    };
+    let Expr::Ident(err2_id) = err2 else {
+        return;
+    };
+    if err_id.name == err2_id.name {
+        return;
+    }
+    let Some(err2_typ) = ident_type(pass, err2_id) else {
+        return;
+    };
+    if !implements_error(pass, err2_typ) {
+        return;
+    }
+    report(
+        pending,
+        err_id.pos().0 as u32,
+        format!(
+            "{} error is unchecked, maybe intended to check it instead of {}",
+            err_id.name, err2_id.name
+        ),
+    );
+}
+
+fn negate_cmp_op(op: Token) -> Option<&'static str> {
+    match op {
+        Token::EQL => Some("!="),
+        Token::NEQ => Some("=="),
+        Token::LSS => Some(">="),
+        Token::GTR => Some("<="),
+        Token::LEQ => Some(">"),
+        Token::GEQ => Some("<"),
+        _ => None,
+    }
+}
+
+fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::ParenExpr(p) => expr_contains_float_cmp(pass, &p.x),
+        Expr::UnaryExpr(u) => expr_contains_float_cmp(pass, &u.x),
+        Expr::BinaryExpr(b) => {
+            if matches!(
+                b.op,
+                Token::EQL
+                    | Token::NEQ
+                    | Token::LSS
+                    | Token::GTR
+                    | Token::LEQ
+                    | Token::GEQ
+            ) {
+                if type_of(pass, &b.x).is_some_and(|t| type_has_float(pass, t))
+                    || type_of(pass, &b.y).is_some_and(|t| type_has_float(pass, t))
+                {
+                    return true;
+                }
+            }
+            expr_contains_float_cmp(pass, &b.x) || expr_contains_float_cmp(pass, &b.y)
+        }
+        _ => false,
+    }
+}
+
+fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
+    let expr = unparen_expr(expr);
+    match expr {
+        Expr::UnaryExpr(u) if u.op == Token::NOT => {
+            let x = unparen_expr(&u.x);
+            // doubleNegation: !!x → x
+            if let Expr::UnaryExpr(u2) = x {
+                if u2.op == Token::NOT {
+                    let inner = unparen_expr(&u2.x);
+                    return simplify_bool_expr(inner, has_floats).or_else(|| expr_text(inner));
+                }
+            }
+            // invertComparison: !(a op b) → a negated_op b
+            if !has_floats {
+                if let Expr::BinaryExpr(cmp) = x {
+                    if let Some(neg) = negate_cmp_op(cmp.op) {
+                        let lx = simplify_bool_expr(&cmp.x, has_floats)
+                            .or_else(|| expr_text(&cmp.x))?;
+                        let ly = simplify_bool_expr(&cmp.y, has_floats)
+                            .or_else(|| expr_text(&cmp.y))?;
+                        return Some(format!("{lx} {neg} {ly}"));
+                    }
+                }
+            }
+            // nested: !{simplified}
+            if let Some(sx) = simplify_bool_expr(&u.x, has_floats) {
+                let orig_x = expr_text(&u.x)?;
+                if sx != orig_x {
+                    return Some(format!("!{sx}"));
+                }
+            }
+            None
+        }
+        Expr::BinaryExpr(b) => {
+            // negatedEquals: !x == !y → x == y
+            if b.op == Token::EQL {
+                let lx = unparen_expr(&b.x);
+                let ry = unparen_expr(&b.y);
+                if let (Expr::UnaryExpr(nx), Expr::UnaryExpr(ny)) = (lx, ry) {
+                    if nx.op == Token::NOT && ny.op == Token::NOT {
+                        let x = simplify_bool_expr(&nx.x, has_floats)
+                            .or_else(|| expr_text(&nx.x))?;
+                        let y = simplify_bool_expr(&ny.x, has_floats)
+                            .or_else(|| expr_text(&ny.x))?;
+                        return Some(format!("{x} == {y}"));
+                    }
+                }
+            }
+            // combineChecks: x > y || x == y → x >= y (and permutations)
+            if b.op == Token::LOR {
+                let lhs = unparen_expr(&b.x);
+                let rhs = unparen_expr(&b.y);
+                if let (Expr::BinaryExpr(l), Expr::BinaryExpr(r)) = (lhs, rhs) {
+                    if exprs_equal(&l.x, &r.x) && exprs_equal(&l.y, &r.y) {
+                        let comb = match (l.op, r.op) {
+                            (Token::GTR, Token::EQL) | (Token::EQL, Token::GTR) => Some(">="),
+                            (Token::LSS, Token::EQL) | (Token::EQL, Token::LSS) => Some("<="),
+                            _ => None,
+                        };
+                        if let Some(op) = comb {
+                            let x = expr_text(&l.x)?;
+                            let y = expr_text(&l.y)?;
+                            return Some(format!("{x} {op} {y}"));
+                        }
+                    }
+                }
+            }
+            // Recurse into sides then rebuild if either side simplified.
+            let sx = simplify_bool_expr(&b.x, has_floats);
+            let sy = simplify_bool_expr(&b.y, has_floats);
+            if sx.is_some() || sy.is_some() {
+                let lx = sx.or_else(|| expr_text(&b.x))?;
+                let ly = sy.or_else(|| expr_text(&b.y))?;
+                return Some(format!("{lx} {} {ly}", b.op.as_str()));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn check_bool_expr_simplify(pass: &Pass<'_>, expr: &Expr, pending: &mut Vec<(u32, String)>) {
+    if !matches!(expr, Expr::UnaryExpr(_) | Expr::BinaryExpr(_)) {
+        return;
+    }
+    let Some(typ) = type_of(pass, expr) else {
+        return;
+    };
+    if !type_is_boolean(pass, typ) {
+        return;
+    }
+    let has_floats = expr_contains_float_cmp(pass, expr);
+    let Some(orig) = expr_text(expr) else {
+        return;
+    };
+    let Some(simplified) = simplify_bool_expr(expr, has_floats) else {
+        return;
+    };
+    if simplified == orig {
+        return;
+    }
+    report(
+        pending,
+        expr.pos().0 as u32,
+        format!("can simplify `{orig}` to `{simplified}`"),
+    );
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -6886,6 +7289,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "returnAfterHttpError") {
                         check_return_after_http_error(pass, s, &mut pending);
                     }
+                    if enabled(&set, "uncheckedInlineErr") {
+                        check_unchecked_inline_err(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::SwitchStmt(s) => {
                     if enabled(&set, "singleCaseSwitch") {
@@ -6985,6 +7391,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "timeExprSimplify") {
                         check_time_expr_simplify(pass, b, &mut pending);
                     }
+                    if enabled(&set, "boolExprSimplify") {
+                        check_bool_expr_simplify(pass, &Expr::BinaryExpr(b.clone()), &mut pending);
+                    }
+                }
+                NodeRef::UnaryExpr(u) if enabled(&set, "boolExprSimplify") => {
+                    check_bool_expr_simplify(pass, &Expr::UnaryExpr(u.clone()), &mut pending);
                 }
                 NodeRef::BasicLit(lit) => {
                     if enabled(&set, "octalLiteral") {
@@ -7037,6 +7449,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "badSorting") {
                         check_bad_sorting(pass, a, &mut pending);
+                    }
+                    if enabled(&set, "externalErrorReassign") {
+                        check_external_error_reassign(pass, a, &mut pending);
                     }
                 }
                 NodeRef::FuncDecl(f) => {
@@ -7177,6 +7592,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "appendCombine") {
                         check_append_combine(&b.list, &mut pending);
                     }
+                    if enabled(&set, "badLock") {
+                        check_bad_lock(&b.list, &mut pending);
+                    }
                 }
                 NodeRef::CaseClause(c) => {
                     if enabled(&set, "unnecessaryBlock") {
@@ -7185,6 +7603,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "appendCombine") {
                         check_append_combine(&c.body, &mut pending);
                     }
+                    if enabled(&set, "badLock") {
+                        check_bad_lock(&c.body, &mut pending);
+                    }
                 }
                 NodeRef::CommClause(c) => {
                     if enabled(&set, "unnecessaryBlock") {
@@ -7192,6 +7613,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "appendCombine") {
                         check_append_combine(&c.body, &mut pending);
+                    }
+                    if enabled(&set, "badLock") {
+                        check_bad_lock(&c.body, &mut pending);
                     }
                 }
                 _ => {}

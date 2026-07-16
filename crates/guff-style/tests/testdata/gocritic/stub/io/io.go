@@ -17,4 +17,6 @@ type ReadCloser interface {
 	Close() error
 }
 
+var EOF error
+
 func WriteString(w Writer, s string) (n int, err error) { return 0, nil }
