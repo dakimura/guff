@@ -2,17 +2,15 @@
 //! (golangci-lint wrapper in `pkg/golinters/godox`).
 //!
 //! Defaults match golangci-lint: keywords `TODO`, `BUG`, `FIXME`.
-//!
-//! DEFERRED: `linters.settings.godox` keyword list wiring.
+//! Settings: `linters.settings.godox.keywords`.
 
 use std::sync::OnceLock;
 
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
+use crate::options::GodoxOptions;
 use crate::util::{line_pos, reparse_with_comments};
-
-const DEFAULT_KEYWORDS: &[&str] = &["TODO", "BUG", "FIXME"];
 
 fn extract_comment_body(text: &str) -> Option<&str> {
     let bytes = text.as_bytes();
@@ -54,6 +52,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "godox requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<GodoxOptions>("godox")
+        .cloned()
+        .unwrap_or_default();
+    let keywords = options.effective_keywords();
+    let joined = keywords.join("/");
+
     let mut pending = Vec::new();
     let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
     let fset = pass.fset().clone();
@@ -78,7 +83,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if trimmed.len() < 4 {
                         continue;
                     }
-                    for &kw in DEFAULT_KEYWORDS {
+                    for kw in &keywords {
                         if !keyword_match(trimmed, kw) {
                             continue;
                         }
@@ -87,7 +92,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         } else {
                             trimmed.to_string()
                         };
-                        let joined = DEFAULT_KEYWORDS.join("/");
                         let line_no = start_line + offset as i64;
                         if let Some(pos) = line_pos(&fset, file.pos(), line_no) {
                             pending.push((

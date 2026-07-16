@@ -5,18 +5,20 @@
 //! - [`godox`]
 //! - [`dupword`]
 //!
-//! DEFERRED (see DEVELOPMENT.md R14): settings wiring, SuggestedFix,
-//! godot scope/capital/exclude, dupword keyword filters / cross-line
-//! comment checks.
+//! `linters.settings` for all three are wired. DEFERRED (see DEVELOPMENT.md
+//! R14): SuggestedFix, godot `toplevel`/`noinline` scopes, dupword cross-line
+//! checks / `skip-raw-strings`.
 
 mod dupword;
 mod godot;
 mod godox;
+mod options;
 mod util;
 
 pub use dupword::analyzer as dupword;
 pub use godot::analyzer as godot;
 pub use godox::analyzer as godox;
+pub use options::{DupwordOptions, GodotOptions, GodoxOptions};
 
 use guff_analysis::Analyzer;
 

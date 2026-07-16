@@ -379,3 +379,52 @@ fn parse_v2_errchkjson_settings() {
     assert!(!opts.omit_safe);
     assert!(opts.report_no_exported);
 }
+
+#[test]
+fn parse_v2_comment_settings() {
+    use guff_lint::{DupwordSettings, GodotSettings, GodoxSettings};
+
+    let contents = fs::read_to_string(testdata_config("v2_comment_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.godot,
+        GodotSettings {
+            scope: Some("declarations".into()),
+            exclude: vec!["^FIXME:".into(), "^TODO:".into()],
+            period: Some(false),
+            capital: Some(true),
+        }
+    );
+    assert_eq!(
+        settings.godox,
+        GodoxSettings {
+            keywords: vec!["NOTE".into(), "HACK".into()],
+        }
+    );
+    assert_eq!(
+        settings.dupword,
+        DupwordSettings {
+            keywords: vec!["the".into()],
+            ignore: vec!["is".into()],
+            comments_only: Some(true),
+        }
+    );
+    let bag = settings.to_bag();
+    let godot = bag
+        .get::<guff_comment::GodotOptions>("godot")
+        .expect("godot options");
+    assert!(!godot.period);
+    assert!(godot.capital);
+    assert_eq!(godot.exclude.len(), 2);
+    let godox = bag
+        .get::<guff_comment::GodoxOptions>("godox")
+        .expect("godox options");
+    assert_eq!(godox.keywords, vec!["NOTE".to_string(), "HACK".to_string()]);
+    let dupword = bag
+        .get::<guff_comment::DupwordOptions>("dupword")
+        .expect("dupword options");
+    assert!(dupword.comments_only);
+    assert_eq!(dupword.keywords, vec!["the".to_string()]);
+    assert_eq!(dupword.ignore, vec!["is".to_string()]);
+}

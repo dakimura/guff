@@ -40,6 +40,9 @@ pub struct LinterSettings {
     pub usetesting: UsetestingSettings,
     pub usestdlibvars: UsestdlibvarsSettings,
     pub errchkjson: ErrchkjsonSettings,
+    pub godot: GodotSettings,
+    pub godox: GodoxSettings,
+    pub dupword: DupwordSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -381,6 +384,41 @@ pub struct ErrchkjsonSettings {
     pub report_no_exported: bool,
 }
 
+/// `linters.settings.godot` / `linters-settings.godot`.
+///
+/// `toplevel` / `noinline` scopes remain DEFERRED (fall back to declarations).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodotSettings {
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub period: Option<bool>,
+    #[serde(default)]
+    pub capital: Option<bool>,
+}
+
+/// `linters.settings.godox` / `linters-settings.godox`.
+///
+/// Empty `keywords` → golangci defaults (`TODO` / `BUG` / `FIXME`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoxSettings {
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
+/// `linters.settings.dupword` / `linters-settings.dupword`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct DupwordSettings {
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub ignore: Vec<String>,
+    #[serde(default, rename = "comments-only")]
+    pub comments_only: Option<bool>,
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -523,6 +561,21 @@ impl LinterSettings {
                 out.errchkjson = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("godot".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GodotSettings>(v.clone()) {
+                out.godot = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("godox".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GodoxSettings>(v.clone()) {
+                out.godox = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("dupword".into())) {
+            if let Ok(s) = serde_yaml::from_value::<DupwordSettings>(v.clone()) {
+                out.dupword = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -562,6 +615,9 @@ impl LinterSettings {
         bag.insert("usetesting", self.usetesting.to_guff_usetesting());
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
+        bag.insert("godot", self.godot.to_guff_godot());
+        bag.insert("godox", self.godox.to_guff_godox());
+        bag.insert("dupword", self.dupword.to_guff_dupword());
         Arc::new(bag)
     }
 
@@ -977,6 +1033,36 @@ impl ErrchkjsonSettings {
         guff_error::ErrchkjsonOptions {
             omit_safe: !self.check_error_free_encoding,
             report_no_exported: self.report_no_exported,
+        }
+    }
+}
+
+impl GodotSettings {
+    pub fn to_guff_godot(&self) -> guff_comment::GodotOptions {
+        let defaults = guff_comment::GodotOptions::default();
+        guff_comment::GodotOptions {
+            scope: self.scope.clone().unwrap_or(defaults.scope),
+            exclude: self.exclude.clone(),
+            period: self.period.unwrap_or(defaults.period),
+            capital: self.capital.unwrap_or(defaults.capital),
+        }
+    }
+}
+
+impl GodoxSettings {
+    pub fn to_guff_godox(&self) -> guff_comment::GodoxOptions {
+        guff_comment::GodoxOptions {
+            keywords: self.keywords.clone(),
+        }
+    }
+}
+
+impl DupwordSettings {
+    pub fn to_guff_dupword(&self) -> guff_comment::DupwordOptions {
+        guff_comment::DupwordOptions {
+            keywords: self.keywords.clone(),
+            ignore: self.ignore.clone(),
+            comments_only: self.comments_only.unwrap_or(false),
         }
     }
 }

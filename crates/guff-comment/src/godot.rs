@@ -7,25 +7,33 @@
 //! Comments are re-parsed with [`PARSE_COMMENTS`] because production package
 //! load uses `Mode::NONE`, which drops lead comments after the package clause.
 //!
-//! DEFERRED: `linters.settings.godot` (scope / exclude / period / capital);
-//! SuggestedFix; block comments inside `const (` / `var (` groups;
-//! full `toplevel` / `noinline` / `all` scopes.
+//! Settings: `linters.settings.godot` (`scope` / `exclude` / `period` / `capital`).
+//! DEFERRED: SuggestedFix; block comments inside `const (` / `var (` groups;
+//! full `toplevel` / `noinline` scopes (unknown → `declarations`).
 
 use std::sync::OnceLock;
 
 use guff::ast::CommentGroup;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use regex::Regex;
 
+use crate::options::GodotOptions;
 use crate::util::{
     comment_group_raw_text, declaration_docs, line_pos, reparse_with_comments,
 };
 
 const NO_PERIOD: &str = "Comment should end in a period";
+const NO_CAPITAL: &str = "Sentence should start with a capital letter";
 
 const LAST_CHARS: &[&str] = &[
     ".", "?", "!", ".)", "?)", "!)", "。", "？", "！", "。）", "？）", "！）",
     "<godotSpecialReplacer>",
+];
+
+const ABBREVIATIONS: &[&str] = &[
+    "i.e.", "i. e.", "e.g.", "e. g.", "etc.", "I.e.", "I. e.", "E.g.", "E. g.",
+    "Etc.", "I.E.", "I. E.", "E.G.", "E. G.", "ETC.",
 ];
 
 fn has_suffix(s: &str, suffixes: &[&str]) -> bool {
@@ -92,12 +100,24 @@ fn is_special_line(line: &str) -> bool {
     trimmed.starts_with("+build")
 }
 
-fn check_period(cg: &CommentGroup) -> bool {
+fn compile_excludes(patterns: &[String]) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+}
+
+fn match_any(s: &str, excludes: &[Regex]) -> bool {
+    excludes.iter().any(|re| re.is_match(s))
+}
+
+/// Build checkable comment text (special / excluded lines → replacer).
+fn comment_check_text(cg: &CommentGroup, excludes: &[Regex]) -> String {
     if cg.list.is_empty() {
-        return false;
+        return String::new();
     }
     if is_special_block(&cg.list[0].text) {
-        return false;
+        return String::new();
     }
 
     let mut text_lines = Vec::new();
@@ -119,18 +139,20 @@ fn check_period(cg: &CommentGroup) -> bool {
             } else {
                 format!("//{line}")
             };
-            if is_special_line(&check_line) {
+            if is_special_line(&check_line) || match_any(line, excludes) {
                 text_lines.push("<godotSpecialReplacer>".to_string());
             } else {
                 text_lines.push(line.to_string());
             }
         }
     }
-    let text = text_lines.join("\n");
+    text_lines.join("\n")
+}
+
+fn check_period(text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-
     let has_letters = text.chars().any(|c| c.is_alphabetic());
     if !has_letters {
         return false;
@@ -151,10 +173,63 @@ fn check_period(cg: &CommentGroup) -> bool {
     !has_suffix(last, LAST_CHARS)
 }
 
+/// Returns true if any sentence after the first should start with a capital
+/// and currently starts with lowercase (declaration docs skip the first word).
+fn check_capital(text: &str, is_decl: bool) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    let mut cleaned = text.to_string();
+    for abbr in ABBREVIATIONS {
+        let repl = abbr.replace('.', "_");
+        cleaned = cleaned.replace(abbr, &repl);
+    }
+
+    // empty=1, endChar=2, endOfSentence=3
+    let mut state = if is_decl { 1 } else { 3 };
+    for r in cleaned.chars() {
+        match r {
+            '\n' => {
+                if state == 2 {
+                    state = 3;
+                }
+            }
+            '.' | '!' | '?' => state = 2,
+            ')' if state == 2 => {}
+            ' ' => {
+                if state == 2 {
+                    state = 3;
+                }
+            }
+            c if state == 3 && c.is_lowercase() => return true,
+            _ => state = 1,
+        }
+    }
+    false
+}
+
+fn collect_comment_groups<'a>(
+    parsed: &'a guff::ast::File,
+    scope: &str,
+) -> Vec<&'a CommentGroup> {
+    match scope {
+        "all" => parsed.comments.iter().collect(),
+        // DEFERRED: toplevel / noinline — fall back to declarations.
+        _ => declaration_docs(parsed),
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "godot requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<GodotOptions>("godot")
+        .cloned()
+        .unwrap_or_default();
+    let excludes = compile_excludes(&options.exclude);
+    let is_decl_scope = options.scope != "all";
 
     let mut pending = Vec::new();
     let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
@@ -169,16 +244,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some((re_fset, parsed)) = reparse_with_comments(path) else {
             continue;
         };
-        for doc in declaration_docs(&parsed) {
+        for doc in collect_comment_groups(&parsed, &options.scope) {
             if comment_group_raw_text(doc).trim().is_empty() {
                 continue;
             }
-            if !check_period(doc) {
+            let text = comment_check_text(doc, &excludes);
+            let mut messages = Vec::new();
+            if options.period && check_period(&text) {
+                messages.push(NO_PERIOD.to_string());
+            }
+            if options.capital && check_capital(&text, is_decl_scope) {
+                messages.push(NO_CAPITAL.to_string());
+            }
+            if messages.is_empty() {
                 continue;
             }
             let line = re_fset.position(doc.pos()).line;
             if let Some(pos) = line_pos(&fset, file.pos(), line) {
-                pending.push((pos, NO_PERIOD.to_string()));
+                for message in messages {
+                    pending.push((pos, message));
+                }
             }
         }
     }
