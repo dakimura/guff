@@ -9,11 +9,7 @@ use guff_style::{
 
 #[test]
 fn copyloopvar_flags_redundant_copies() {
-    let pkg = support::typecheck_fixture(
-        "copyloopvar",
-        "example.com/copyloopvar",
-        "bad.go",
-    );
+    let pkg = support::typecheck_fixture("copyloopvar", "example.com/copyloopvar", "bad.go");
     let messages = support::run_analyzer(copyloopvar(), &pkg);
     assert!(
         messages
@@ -31,11 +27,7 @@ fn copyloopvar_flags_redundant_copies() {
 
 #[test]
 fn copyloopvar_allows_alias_copies() {
-    let pkg = support::typecheck_fixture(
-        "copyloopvar",
-        "example.com/copyloopvar/ok",
-        "ok.go",
-    );
+    let pkg = support::typecheck_fixture("copyloopvar", "example.com/copyloopvar/ok", "ok.go");
     assert!(support::run_analyzer(copyloopvar(), &pkg).is_empty());
 }
 
@@ -65,33 +57,21 @@ fn usetesting_allows_testing_helpers() {
 
 #[test]
 fn usestdlibvars_flags_http_literals() {
-    let pkg = support::typecheck_fixture(
-        "usestdlibvars",
-        "example.com/usestdlibvars",
-        "bad.go",
-    );
+    let pkg = support::typecheck_fixture("usestdlibvars", "example.com/usestdlibvars", "bad.go");
     let messages = support::run_analyzer(usestdlibvars(), &pkg);
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("http.MethodGet")),
+        messages.iter().any(|m| m.contains("http.MethodGet")),
         "{messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("http.StatusNotFound")),
+        messages.iter().any(|m| m.contains("http.StatusNotFound")),
         "{messages:?}"
     );
 }
 
 #[test]
 fn usestdlibvars_allows_stdlib_constants() {
-    let pkg = support::typecheck_fixture(
-        "usestdlibvars",
-        "example.com/usestdlibvars/ok",
-        "ok.go",
-    );
+    let pkg = support::typecheck_fixture("usestdlibvars", "example.com/usestdlibvars/ok", "ok.go");
     assert!(support::run_analyzer(usestdlibvars(), &pkg).is_empty());
 }
 
@@ -103,23 +83,14 @@ fn copyloopvar_check_alias_flags_renames() {
     use guff_runner::RunnerOptions;
     use guff_style::CopyloopvarOptions;
 
-    let pkg = support::typecheck_fixture(
-        "copyloopvar",
-        "example.com/copyloopvar/ok",
-        "ok.go",
-    );
+    let pkg = support::typecheck_fixture("copyloopvar", "example.com/copyloopvar/ok", "ok.go");
     assert!(
         support::run_analyzer(copyloopvar(), &pkg).is_empty(),
         "default check-alias=false should allow alias copies"
     );
 
     let mut bag = SettingsBag::new();
-    bag.insert(
-        "copyloopvar",
-        CopyloopvarOptions {
-            check_alias: true,
-        },
-    );
+    bag.insert("copyloopvar", CopyloopvarOptions { check_alias: true });
     let messages = support::run_analyzer_with_settings(
         copyloopvar(),
         &pkg,
@@ -226,11 +197,7 @@ fn usestdlibvars_respects_http_toggles_off() {
     use guff_runner::RunnerOptions;
     use guff_style::UsestdlibvarsOptions;
 
-    let pkg = support::typecheck_fixture(
-        "usestdlibvars",
-        "example.com/usestdlibvars",
-        "bad.go",
-    );
+    let pkg = support::typecheck_fixture("usestdlibvars", "example.com/usestdlibvars", "bad.go");
     let mut bag = SettingsBag::new();
     bag.insert(
         "usestdlibvars",
@@ -537,11 +504,8 @@ fn goconst_flags_repeated_numbers() {
     use guff_runner::RunnerOptions;
     use guff_style::GoconstOptions;
 
-    let pkg = support::typecheck_fixture(
-        "goconst",
-        "example.com/goconst/numbers",
-        "numbers_bad.go",
-    );
+    let pkg =
+        support::typecheck_fixture("goconst", "example.com/goconst/numbers", "numbers_bad.go");
     let mut bag = SettingsBag::new();
     bag.insert(
         "goconst",
@@ -576,11 +540,8 @@ fn goconst_numbers_respect_range_and_threshold() {
     use guff_runner::RunnerOptions;
     use guff_style::GoconstOptions;
 
-    let pkg = support::typecheck_fixture(
-        "goconst",
-        "example.com/goconst/numbers_ok",
-        "numbers_ok.go",
-    );
+    let pkg =
+        support::typecheck_fixture("goconst", "example.com/goconst/numbers_ok", "numbers_ok.go");
     let mut bag = SettingsBag::new();
     bag.insert(
         "goconst",
@@ -671,15 +632,15 @@ fn goconst_find_duplicates_reports_duplicate_consts() {
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| {
-            m.contains("This constant is a duplicate of `GroupedDuplicateConst1`")
-        }),
+        messages
+            .iter()
+            .any(|m| { m.contains("This constant is a duplicate of `GroupedDuplicateConst1`") }),
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| {
-            m.contains("This constant is a duplicate of `ScopedDuplicateConst1`")
-        }),
+        messages
+            .iter()
+            .any(|m| { m.contains("This constant is a duplicate of `ScopedDuplicateConst1`") }),
         "{messages:?}"
     );
 }
@@ -765,15 +726,21 @@ fn asciicheck_flags_non_ascii_idents() {
     let pkg = support::typecheck_fixture("asciicheck", "example.com/asciicheck", "bad.go");
     let messages = support::run_analyzer(asciicheck(), &pkg);
     assert!(
-        messages.iter().any(|m| m.contains("TéstFunc") && m.contains("non-ASCII")),
+        messages
+            .iter()
+            .any(|m| m.contains("TéstFunc") && m.contains("non-ASCII")),
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("téstConst") && m.contains("non-ASCII")),
+        messages
+            .iter()
+            .any(|m| m.contains("téstConst") && m.contains("non-ASCII")),
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("téstParam") && m.contains("non-ASCII")),
+        messages
+            .iter()
+            .any(|m| m.contains("téstParam") && m.contains("non-ASCII")),
         "{messages:?}"
     );
 }
@@ -786,11 +753,8 @@ fn asciicheck_allows_ascii_idents() {
 
 #[test]
 fn goprintffuncname_flags_missing_f_suffix() {
-    let pkg = support::typecheck_fixture(
-        "goprintffuncname",
-        "example.com/goprintffuncname",
-        "bad.go",
-    );
+    let pkg =
+        support::typecheck_fixture("goprintffuncname", "example.com/goprintffuncname", "bad.go");
     let messages = support::run_analyzer(goprintffuncname(), &pkg);
     assert!(
         messages
@@ -1013,7 +977,9 @@ fn whitespace_flags_leading_and_trailing() {
     let pkg = support::typecheck_fixture("whitespace", "example.com/whitespace", "bad.go");
     let messages = support::run_analyzer(whitespace(), &pkg);
     assert!(
-        messages.iter().any(|m| m.contains("unnecessary leading newline")),
+        messages
+            .iter()
+            .any(|m| m.contains("unnecessary leading newline")),
         "{messages:?}"
     );
     assert!(
@@ -1306,12 +1272,7 @@ fn gocyclo_respects_min_complexity_setting() {
     );
 
     let mut bag = SettingsBag::new();
-    bag.insert(
-        "gocyclo",
-        GocycloOptions {
-            min_complexity: 50,
-        },
-    );
+    bag.insert("gocyclo", GocycloOptions { min_complexity: 50 });
     let messages = support::run_analyzer_with_settings(
         gocyclo(),
         &pkg,
@@ -1520,10 +1481,7 @@ fn nlreturn_respects_block_size_setting() {
     );
 
     let mut bag = SettingsBag::new();
-    bag.insert(
-        "nlreturn",
-        NlreturnOptions { block_size: 10 },
-    );
+    bag.insert("nlreturn", NlreturnOptions { block_size: 10 });
     let messages = support::run_analyzer_with_settings(
         nlreturn(),
         &pkg,
@@ -1697,10 +1655,7 @@ fn perfsprint_err_error_when_enabled() {
         "err-error=true should suggest err.Error(): {messages:?}"
     );
     assert_eq!(
-        messages
-            .iter()
-            .filter(|m| m.contains(".Error()"))
-            .count(),
+        messages.iter().filter(|m| m.contains(".Error()")).count(),
         3,
         "expected Sprint/Sprintf %s/%v: {messages:?}"
     );
@@ -1979,7 +1934,11 @@ fn unconvert_flags_identity_conversions() {
     let pkg = support::typecheck_fixture("unconvert", "example.com/unconvert", "bad.go");
     let messages = support::run_analyzer(unconvert(), &pkg);
     assert!(
-        messages.iter().filter(|m| m.contains("unnecessary conversion")).count() >= 2,
+        messages
+            .iter()
+            .filter(|m| m.contains("unnecessary conversion"))
+            .count()
+            >= 2,
         "expected identity conversions on int and ID: {messages:?}"
     );
 }
@@ -1992,8 +1951,7 @@ fn unconvert_allows_real_conversions() {
 
 #[test]
 fn unconvert_skips_float_by_default() {
-    let pkg =
-        support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
+    let pkg = support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
     assert!(
         support::run_analyzer(unconvert(), &pkg).is_empty(),
         "float/complex identity conversions must stay when fast-math is off"
@@ -2008,8 +1966,7 @@ fn unconvert_fast_math_flags_float() {
     use guff_runner::RunnerOptions;
     use guff_style::UnconvertOptions;
 
-    let pkg =
-        support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
+    let pkg = support::typecheck_fixture("unconvert", "example.com/unconvert/fast", "fast_math.go");
     let mut bag = SettingsBag::new();
     bag.insert(
         "unconvert",
@@ -2027,7 +1984,11 @@ fn unconvert_fast_math_flags_float() {
         },
     );
     assert!(
-        messages.iter().filter(|m| m.contains("unnecessary conversion")).count() >= 2,
+        messages
+            .iter()
+            .filter(|m| m.contains("unnecessary conversion"))
+            .count()
+            >= 2,
         "fast-math should flag float/complex identity conversions: {messages:?}"
     );
 }
@@ -2047,7 +2008,9 @@ fn exhaustruct_flags_missing_fields() {
         "expected missing X, Y on empty lit: {messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("<anonymous>") && m.contains("missing field B")),
+        messages
+            .iter()
+            .any(|m| m.contains("<anonymous>") && m.contains("missing field B")),
         "expected anonymous missing B: {messages:?}"
     );
 }
@@ -2070,8 +2033,11 @@ fn exhaustruct_include_filters_types() {
     use guff_runner::RunnerOptions;
     use guff_style::ExhaustructOptions;
 
-    let pkg =
-        support::typecheck_fixture("exhaustruct", "example.com/exhaustruct/include", "include.go");
+    let pkg = support::typecheck_fixture(
+        "exhaustruct",
+        "example.com/exhaustruct/include",
+        "include.go",
+    );
     let mut bag = SettingsBag::new();
     bag.insert(
         "exhaustruct",
@@ -2089,7 +2055,9 @@ fn exhaustruct_include_filters_types() {
         },
     );
     assert!(
-        messages.iter().any(|m| m.contains("Included") && m.contains("missing")),
+        messages
+            .iter()
+            .any(|m| m.contains("Included") && m.contains("missing")),
         "include should flag Included: {messages:?}"
     );
     assert!(
@@ -2395,9 +2363,7 @@ fn loggercheck_require_string_key_and_noprintflike() {
         "require-string-key: {messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("format specifier")),
+        messages.iter().any(|m| m.contains("format specifier")),
         "no-printf-like: {messages:?}"
     );
 }
@@ -2572,7 +2538,9 @@ fn testifylint_flags_common_anti_patterns() {
         "formatter: {messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("suite-extra-assert-call")),
+        messages
+            .iter()
+            .any(|m| m.contains("suite-extra-assert-call")),
         "suite-extra-assert-call: {messages:?}"
     );
     assert!(
@@ -2584,7 +2552,9 @@ fn testifylint_flags_common_anti_patterns() {
         "suite-subtest-run: {messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("suite-method-signature")),
+        messages
+            .iter()
+            .any(|m| m.contains("suite-method-signature")),
         "suite-method-signature: {messages:?}"
     );
     assert!(
@@ -2596,7 +2566,9 @@ fn testifylint_flags_common_anti_patterns() {
         "require-error: {messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains("go-require") && m.contains("require must only")),
+        messages
+            .iter()
+            .any(|m| m.contains("go-require") && m.contains("require must only")),
         "go-require goroutine: {messages:?}"
     );
     assert!(
@@ -2635,7 +2607,8 @@ fn testifylint_allows_idiomatic_assertions() {
 
 #[test]
 fn testifylint_flags_blank_imports() {
-    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint/blank", "blank.go");
+    let pkg =
+        support::typecheck_fixture("testifylint", "example.com/testifylint/blank", "blank.go");
     let messages = support::run_analyzer(testifylint(), &pkg);
     assert!(
         messages
@@ -2660,7 +2633,9 @@ fn testifylint_flags_mock_expect() {
         .filter(|m| m.contains("mock-expect"))
         .collect();
     assert!(
-        mock_msgs.iter().any(|m| m.contains("u.EXPECT().CreateUser")),
+        mock_msgs
+            .iter()
+            .any(|m| m.contains("u.EXPECT().CreateUser")),
         "CreateUser: {mock_msgs:?}"
     );
     assert!(
@@ -2668,7 +2643,9 @@ fn testifylint_flags_mock_expect() {
         "Void: {mock_msgs:?}"
     );
     assert!(
-        mock_msgs.iter().any(|m| m.contains("u.EXPECT().CountUsers")),
+        mock_msgs
+            .iter()
+            .any(|m| m.contains("u.EXPECT().CountUsers")),
         "CountUsers: {mock_msgs:?}"
     );
     assert!(
@@ -2893,9 +2870,10 @@ fn exptostd_flags_exp_maps() {
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains(
-            "Import statement 'golang.org/x/exp/maps' may be replaced by 'maps'"
-        )),
+        messages
+            .iter()
+            .any(|m| m
+                .contains("Import statement 'golang.org/x/exp/maps' may be replaced by 'maps'")),
         "{messages:?}"
     );
 }
@@ -2905,9 +2883,8 @@ fn exptostd_flags_exp_slices_import_only_when_fully_replaceable() {
     let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_slices.go");
     let messages = support::run_analyzer(exptostd(), &pkg);
     assert!(
-        messages.iter().any(|m| m.contains(
-            "Import statement 'golang.org/x/exp/slices' may be replaced by 'slices'"
-        )),
+        messages.iter().any(|m| m
+            .contains("Import statement 'golang.org/x/exp/slices' may be replaced by 'slices'")),
         "{messages:?}"
     );
     // Upstream reports only the import when every slices call is 1:1 replaceable.
@@ -2921,19 +2898,18 @@ fn exptostd_flags_exp_slices_import_only_when_fully_replaceable() {
 
 #[test]
 fn exptostd_flags_exp_constraints() {
-    let pkg =
-        support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_constraints.go");
+    let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_constraints.go");
     let messages = support::run_analyzer(exptostd(), &pkg);
     assert!(
-        messages.iter().any(|m| m.contains(
-            "golang.org/x/exp/constraints.Ordered can be replaced by cmp.Ordered"
-        )),
+        messages
+            .iter()
+            .any(|m| m
+                .contains("golang.org/x/exp/constraints.Ordered can be replaced by cmp.Ordered")),
         "{messages:?}"
     );
     assert!(
-        messages.iter().any(|m| m.contains(
-            "Import statement 'golang.org/x/exp/constraints' may be replaced by 'cmp'"
-        )),
+        messages.iter().any(|m| m
+            .contains("Import statement 'golang.org/x/exp/constraints' may be replaced by 'cmp'")),
         "{messages:?}"
     );
 }
@@ -2949,7 +2925,9 @@ fn modernize_flags_common_patterns() {
     let pkg = support::typecheck_fixture("modernize", "example.com/modernize", "bad.go");
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages.iter().any(|m| m.contains("interface{} can be replaced by any")),
+        messages
+            .iter()
+            .any(|m| m.contains("interface{} can be replaced by any")),
         "{messages:?}"
     );
     assert!(
@@ -2998,8 +2976,11 @@ fn modernize_flags_common_patterns() {
 
 #[test]
 fn modernize_flags_stringsseq() {
-    let pkg =
-        support::typecheck_fixture("modernize", "example.com/modernize/stringsseq", "stringsseq.go");
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringsseq",
+        "stringsseq.go",
+    );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
         messages
@@ -3011,13 +2992,14 @@ fn modernize_flags_stringsseq() {
 
 #[test]
 fn modernize_flags_waitgroupgo() {
-    let pkg =
-        support::typecheck_fixture("modernize", "example.com/modernize/waitgroupgo", "waitgroupgo.go");
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/waitgroupgo",
+        "waitgroupgo.go",
+    );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("WaitGroup.Go")),
+        messages.iter().any(|m| m.contains("WaitGroup.Go")),
         "{messages:?}"
     );
 }
@@ -3044,9 +3026,7 @@ fn modernize_flags_slicesbackward() {
     );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("slices.Backward")),
+        messages.iter().any(|m| m.contains("slices.Backward")),
         "{messages:?}"
     );
 }
@@ -3060,11 +3040,7 @@ fn modernize_flags_reflecttypefor() {
     );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .filter(|m| m.contains("TypeFor"))
-            .count()
-            >= 2,
+        messages.iter().filter(|m| m.contains("TypeFor")).count() >= 2,
         "{messages:?}"
     );
 }
@@ -3078,9 +3054,7 @@ fn modernize_flags_testingcontext() {
     );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("t.Context")),
+        messages.iter().any(|m| m.contains("t.Context")),
         "{messages:?}"
     );
 }
@@ -3094,11 +3068,7 @@ fn modernize_flags_unsafefuncs() {
     );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
-        messages
-            .iter()
-            .filter(|m| m.contains("unsafe.Add"))
-            .count()
-            >= 2,
+        messages.iter().filter(|m| m.contains("unsafe.Add")).count() >= 2,
         "{messages:?}"
     );
     assert!(
@@ -3140,11 +3110,7 @@ fn modernize_flags_stringscut() {
         "{messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .filter(|m| m.contains("bytes.Cut"))
-            .count()
-            >= 2,
+        messages.iter().filter(|m| m.contains("bytes.Cut")).count() >= 2,
         "{messages:?}"
     );
 }
@@ -3224,15 +3190,11 @@ fn modernize_flags_errorsastype() {
         as_type.len()
     );
     assert!(
-        as_type
-            .iter()
-            .any(|m| m.contains("AsType[*os.PathError]")),
+        as_type.iter().any(|m| m.contains("AsType[*os.PathError]")),
         "{messages:?}"
     );
     assert!(
-        as_type
-            .iter()
-            .any(|m| m.contains("AsType[*os.LinkError]")),
+        as_type.iter().any(|m| m.contains("AsType[*os.LinkError]")),
         "{messages:?}"
     );
     assert!(
@@ -3283,8 +3245,7 @@ fn modernize_flags_slicesdelete() {
 
 #[test]
 fn modernize_flags_bloop() {
-    let pkg =
-        support::typecheck_fixture("modernize", "example.com/modernize/bloop", "bloop.go");
+    let pkg = support::typecheck_fixture("modernize", "example.com/modernize/bloop", "bloop.go");
     let messages = support::run_analyzer(modernize(), &pkg);
     let hits: Vec<_> = messages
         .iter()
@@ -3295,6 +3256,39 @@ fn modernize_flags_bloop() {
         4,
         "expected exactly 4 bloop hits (A/C/D/E), got {} {messages:?}",
         hits.len()
+    );
+}
+
+#[test]
+fn modernize_flags_stditerators() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stditerators",
+        "stditerators.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let struct_hits = messages
+        .iter()
+        .filter(|m| m.contains("NumFields/Field loop can simplified using Struct.Fields iteration"))
+        .count();
+    assert_eq!(
+        struct_hits, 2,
+        "expected 2 Struct hits (C-style + range), got {struct_hits}: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Len/At loop can simplified using Tuple.Variables iteration")),
+        "expected a Tuple hit, got {messages:?}"
+    );
+    // extraUse / plainSlice must not be flagged.
+    let total = messages
+        .iter()
+        .filter(|m| m.contains("loop can simplified using"))
+        .count();
+    assert_eq!(
+        total, 3,
+        "expected exactly 3 stditerators hits, got {total}: {messages:?}"
     );
 }
 
@@ -3315,9 +3309,7 @@ fn modernize_flags_slicescontains_variants() {
         "expected Contains variants, got {messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("slices.ContainsFunc")),
+        messages.iter().any(|m| m.contains("slices.ContainsFunc")),
         "expected ContainsFunc, got {messages:?}"
     );
 }
@@ -3370,8 +3362,11 @@ fn modernize_allows_modern_code() {
 
 #[test]
 fn modernize_flags_obsolete_plusbuild() {
-    let pkg =
-        support::typecheck_fixture("modernize", "example.com/modernize/plusbuild", "plusbuild.go");
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/plusbuild",
+        "plusbuild.go",
+    );
     let messages = support::run_analyzer(modernize(), &pkg);
     assert!(
         messages
@@ -3483,10 +3478,7 @@ fn gocritic_flags_common_patterns() {
 fn gocritic_allows_clean_code() {
     let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/ok", "ok.go");
     let messages = support::run_analyzer(gocritic(), &pkg);
-    assert!(
-        messages.is_empty(),
-        "unexpected diagnostics: {messages:?}"
-    );
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]
@@ -3532,9 +3524,7 @@ fn gocritic_disabled_checks_are_skipped() {
         "{messages:?}"
     );
     assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("else if cond")),
+        messages.iter().any(|m| m.contains("else if cond")),
         "{messages:?}"
     );
 }

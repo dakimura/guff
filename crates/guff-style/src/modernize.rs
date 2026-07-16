@@ -33,9 +33,15 @@
 //!   AddImport / `int()` wrap / int-shadow skip DEFERRED)
 //! - `bloop` — `for … b.N …` → `for b.Loop()` (Go 1.24+; deletes preceding
 //!   `b.{Start,Stop,Reset}Timer`; keyed `for i := range b.N` DEFERRED)
+//! - `stditerators` — `for i := 0; i < x.Len(); i++ { use(x.At(i)) }` →
+//!   `for elem := range x.All()` for well-known `go/types`/`reflect` types
+//!   (Go 1.24+/1.26+; both C-style and `for i := range x.Len()` forms;
+//!   elem-name collision → candidate skipped, DEFERRED fresh-name)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! stditerators, reflecttypeassert, stringscut Index/Contains
+//! reflecttypeassert, appendclipped (unsafe-by-default upstream),
+//! stditerators fresh-name generation on elem collisions / Seq2 dual-component
+//! patterns, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
@@ -54,8 +60,8 @@ use std::sync::OnceLock;
 
 use guff::ast::{
     AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field, File,
-    ForStmt, FuncDecl, FuncLit, GenDecl, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Spec,
-    Stmt, StructType, UnaryExpr, ValueSpec,
+    ForStmt, FuncDecl, FuncLit, GenDecl, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt,
+    Spec, Stmt, StructType, UnaryExpr, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
@@ -383,13 +389,7 @@ fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
         return false;
     };
     let mut types = artifacts.types.clone();
-    api_identical(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        a,
-        b,
-    )
+    api_identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
 }
 
 fn underlying_map(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -531,11 +531,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         message: format!("for loop can be modernized using range over {range_expr}"),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace 3-clause for with range-over-int".into(),
-            text_edits: vec![TextEdit {
-                pos,
-                end,
-                new_text,
-            }],
+            text_edits: vec![TextEdit { pos, end, new_text }],
         }],
         related: Vec::new(),
         url: String::new(),
@@ -718,9 +714,10 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         pos,
         end,
         category: String::new(),
-        message: format!("[]byte(fmt.{}) can be modernized using fmt.{append_name}", {
-            name.strip_prefix("fmt.").unwrap_or(&name)
-        }),
+        message: format!(
+            "[]byte(fmt.{}) can be modernized using fmt.{append_name}",
+            { name.strip_prefix("fmt.").unwrap_or(&name) }
+        ),
         suggested_fixes: vec![SuggestedFix {
             message: format!("Replace with fmt.{append_name}"),
             text_edits: vec![TextEdit {
@@ -960,11 +957,7 @@ fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
     });
 }
 
-fn find_first_call_named<'a>(
-    pass: &Pass<'_>,
-    stmt: &'a Stmt,
-    name: &str,
-) -> Option<&'a CallExpr> {
+fn find_first_call_named<'a>(pass: &Pass<'_>, stmt: &'a Stmt, name: &str) -> Option<&'a CallExpr> {
     let mut found = None;
     walk::inspect(walk::stmt_ref(stmt), |n| {
         let Some(n) = n else {
@@ -1033,10 +1026,9 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
                             && code::same_non_dynamic(pass, &has_call.args[0], &trim_call.args[0])
                             && code::same_non_dynamic(pass, &has_call.args[1], &trim_call.args[1])
                         {
-                            if let (Some(s_text), Some(affix_text)) = (
-                                expr_text(&has_call.args[0]),
-                                expr_text(&has_call.args[1]),
-                            ) {
+                            if let (Some(s_text), Some(affix_text)) =
+                                (expr_text(&has_call.args[0]), expr_text(&has_call.args[1]))
+                            {
                                 let var_name = if is_prefix { "after" } else { "before" };
                                 let (message, fix_message) = if is_prefix {
                                     (
@@ -1357,11 +1349,7 @@ fn body_has_free_branch(stmts: &[Stmt], skip_last: bool) -> bool {
     false
 }
 
-fn check_slicescontains(
-    pass: &Pass<'_>,
-    block: &BlockStmt,
-    pending: &mut Vec<Diagnostic>,
-) {
+fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
     if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
         return;
     }
@@ -1734,8 +1722,7 @@ fn check_stringsseq(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<D
         category: String::new(),
         message: format!(
             "Ranging over {} allocates a slice; consider using {}",
-            fun_text,
-            new_fun
+            fun_text, new_fun
         ),
         suggested_fixes: vec![SuggestedFix {
             message: format!("Replace with {new_fun}"),
@@ -2101,9 +2088,9 @@ fn format_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
             }
         }
     });
-    let qf_ref = qf
-        .as_ref()
-        .map(|f| f as &dyn Fn(guff_types::arena::PackageId, &guff_types::arena::PackageArena) -> String);
+    let qf_ref = qf.as_ref().map(|f| {
+        f as &dyn Fn(guff_types::arena::PackageId, &guff_types::arena::PackageArena) -> String
+    });
     Some(type_string(
         &artifacts.types,
         &artifacts.objects,
@@ -2146,9 +2133,7 @@ fn expr_has_effects(pass: &Pass<'_>, expr: &Expr) -> bool {
             expr_has_effects(pass, &u.x)
         }
         Expr::StarExpr(s) => expr_has_effects(pass, &s.x),
-        Expr::IndexExpr(ix) => {
-            expr_has_effects(pass, &ix.x) || expr_has_effects(pass, &ix.index)
-        }
+        Expr::IndexExpr(ix) => expr_has_effects(pass, &ix.x) || expr_has_effects(pass, &ix.index),
         Expr::CallExpr(call) => {
             // Type conversion T(x) is effect-free if x is.
             let info = pass.types_info();
@@ -2881,7 +2866,12 @@ fn is_import_comment(text: &str) -> bool {
 ///
 /// Package-line trailing comments are dropped unless `PARSE_COMMENTS` is set,
 /// so we re-parse like gocritic's comment checkers.
-fn check_importcomment(pass: &Pass<'_>, file_idx: usize, file: &File, pending: &mut Vec<Diagnostic>) {
+fn check_importcomment(
+    pass: &Pass<'_>,
+    file_idx: usize,
+    file: &File,
+    pending: &mut Vec<Diagnostic>,
+) {
     // DEFERRED: skip when Package.module is None (GOPATH mode), matching upstream.
     let Some(path) = pass.pkg().compiled_go_files.get(file_idx) else {
         return;
@@ -3547,7 +3537,12 @@ fn fresh_ok_name(pass: &Pass<'_>, if_stmt: &IfStmt, call_pos: u32) -> String {
 }
 
 /// Port of modernize `errorsastype`: `var e T; if errors.As(err, &e)` → AsType.
-fn check_errorsastype(pass: &Pass<'_>, file: &File, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+fn check_errorsastype(
+    pass: &Pass<'_>,
+    file: &File,
+    if_stmt: &IfStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     if if_stmt.init.is_some() {
         return;
     }
@@ -3640,10 +3635,7 @@ fn check_errorsastype(pass: &Pass<'_>, file: &File, if_stmt: &IfStmt, pending: &
         TextEdit {
             pos: call.end().0 as u32,
             end: call.end().0 as u32,
-            new_text: format!(
-                "; {}{ok_name}",
-                if negated { "!" } else { "" }
-            ),
+            new_text: format!("; {}{ok_name}", if negated { "!" } else { "" }),
         },
     ];
     if negated {
@@ -3807,10 +3799,7 @@ fn find_stringsbuilder_decl<'a>(
                         }
                     }
                 }
-                found = Some(StringsBuilderDecl::Var {
-                    decl: gd,
-                    spec,
-                });
+                found = Some(StringsBuilderDecl::Var { decl: gd, spec });
             }
             _ => {}
         }
@@ -4138,7 +4127,9 @@ fn build_stringsbuilder_decl_edits(
                     TextEdit {
                         pos: assign_pos,
                         end: assign.rhs[0].pos().0 as u32,
-                        new_text: format!("var {var_name} {prefix}Builder; {var_name}.WriteString("),
+                        new_text: format!(
+                            "var {var_name} {prefix}Builder; {var_name}.WriteString("
+                        ),
                     },
                     TextEdit {
                         pos: assign_end,
@@ -4148,10 +4139,7 @@ fn build_stringsbuilder_decl_edits(
                 ]
             }
         }
-        StringsBuilderDecl::Var {
-            decl: gd,
-            spec,
-        } => {
+        StringsBuilderDecl::Var { decl: gd, spec } => {
             let mut edits = Vec::new();
             let init = if let Some(ty) = &spec.ty {
                 ty.end().0 as u32
@@ -4206,7 +4194,10 @@ fn build_stringsbuilder_decl_edits(
 
 fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
     let pkg = pass.pkg().pkg_path.as_str();
-    if pkg == "strings" || pkg.starts_with("strings/") || pkg == "runtime" || pkg.starts_with("runtime/")
+    if pkg == "strings"
+        || pkg.starts_with("strings/")
+        || pkg == "runtime"
+        || pkg.starts_with("runtime/")
     {
         return;
     }
@@ -4320,6 +4311,487 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
     }
 }
 
+/// A std type with legacy `T.{Len,At}` iteration methods plus a newer `T.All`
+/// iterator method. Port of upstream `stditeratorsTable`.
+struct StdIterRow {
+    pkgpath: &'static str,
+    typename: &'static str,
+    lenmethod: &'static str,
+    atmethod: &'static str,
+    itermethod: &'static str,
+    elemname: &'static str,
+    /// 1 => `for x`, 2 => `for _, x`.
+    seqn: u8,
+    /// Go version at which `itermethod` appeared in the stdlib.
+    since: &'static str,
+}
+
+const STDITERATORS_TABLE: &[StdIterRow] = &[
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Interface",
+        lenmethod: "NumEmbeddeds",
+        atmethod: "EmbeddedType",
+        itermethod: "EmbeddedTypes",
+        elemname: "etyp",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Interface",
+        lenmethod: "NumExplicitMethods",
+        atmethod: "ExplicitMethod",
+        itermethod: "ExplicitMethods",
+        elemname: "method",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Interface",
+        lenmethod: "NumMethods",
+        atmethod: "Method",
+        itermethod: "Methods",
+        elemname: "method",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "MethodSet",
+        lenmethod: "Len",
+        atmethod: "At",
+        itermethod: "Methods",
+        elemname: "method",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Named",
+        lenmethod: "NumMethods",
+        atmethod: "Method",
+        itermethod: "Methods",
+        elemname: "method",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Scope",
+        lenmethod: "NumChildren",
+        atmethod: "Child",
+        itermethod: "Children",
+        elemname: "child",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Struct",
+        lenmethod: "NumFields",
+        atmethod: "Field",
+        itermethod: "Fields",
+        elemname: "field",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Tuple",
+        lenmethod: "Len",
+        atmethod: "At",
+        itermethod: "Variables",
+        elemname: "v",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "TypeList",
+        lenmethod: "Len",
+        atmethod: "At",
+        itermethod: "Types",
+        elemname: "t",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "TypeParamList",
+        lenmethod: "Len",
+        atmethod: "At",
+        itermethod: "TypeParams",
+        elemname: "tparam",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "go/types",
+        typename: "Union",
+        lenmethod: "Len",
+        atmethod: "Term",
+        itermethod: "Terms",
+        elemname: "term",
+        seqn: 1,
+        since: "go1.24",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Type",
+        lenmethod: "NumField",
+        atmethod: "Field",
+        itermethod: "Fields",
+        elemname: "field",
+        seqn: 1,
+        since: "go1.26",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Type",
+        lenmethod: "NumMethod",
+        atmethod: "Method",
+        itermethod: "Methods",
+        elemname: "method",
+        seqn: 1,
+        since: "go1.26",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Type",
+        lenmethod: "NumIn",
+        atmethod: "In",
+        itermethod: "Ins",
+        elemname: "in",
+        seqn: 1,
+        since: "go1.26",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Type",
+        lenmethod: "NumOut",
+        atmethod: "Out",
+        itermethod: "Outs",
+        elemname: "out",
+        seqn: 1,
+        since: "go1.26",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Value",
+        lenmethod: "NumField",
+        atmethod: "Field",
+        itermethod: "Fields",
+        elemname: "field",
+        seqn: 2,
+        since: "go1.26",
+    },
+    StdIterRow {
+        pkgpath: "reflect",
+        typename: "Value",
+        lenmethod: "NumMethod",
+        atmethod: "Method",
+        itermethod: "Methods",
+        elemname: "method",
+        seqn: 2,
+        since: "go1.26",
+    },
+];
+
+/// Resolves the package path and type name of a (possibly pointer-to) named type.
+fn named_type_pkg_and_name(pass: &Pass<'_>, typ: TypeId) -> Option<(String, String)> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let typ = if matches!(artifacts.types.get(typ), TypeData::Pointer(_)) {
+        unalias_readonly(&artifacts.types, pointer_elem(&artifacts.types, typ))
+    } else {
+        typ
+    };
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
+        return None;
+    };
+    let obj = named_obj(&artifacts.types, typ);
+    let name = obj.name(&artifacts.objects).to_string();
+    let pkg_id = obj.pkg(&artifacts.objects)?;
+    let path = artifacts.packages.get(pkg_id).path().to_string();
+    Some((path, name))
+}
+
+/// Finds the table row whose type matches `recv` and whose `lenmethod` matches
+/// the selector name of the `x.Len()` call.
+fn stditerators_row_for(
+    pass: &Pass<'_>,
+    recv: &Expr,
+    method_name: &str,
+) -> Option<&'static StdIterRow> {
+    let typ = type_of(pass, recv)?;
+    let (path, name) = named_type_pkg_and_name(pass, typ)?;
+    STDITERATORS_TABLE
+        .iter()
+        .find(|r| r.pkgpath == path && r.typename == name && r.lenmethod == method_name)
+}
+
+fn obj_name_is(pass: &Pass<'_>, obj: ObjectId, name: &str) -> bool {
+    pass.pkg()
+        .type_artifacts
+        .as_ref()
+        .is_some_and(|a| obj.name(&a.objects) == name)
+}
+
+/// Verifies that every use of `loop_var` inside `body` is the sole argument of
+/// an `recv.At(loop_var)` call, and returns the edits replacing each such call
+/// with `elem`. Returns `None` when a use escapes that pattern, or when `elem`
+/// would collide with an existing name referenced in the body (upstream renames;
+/// we conservatively decline — DEFERRED).
+fn stditerators_at_edits(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    recv: &Expr,
+    loop_var: ObjectId,
+    atmethod: &str,
+    elem: &str,
+) -> Option<Vec<TextEdit>> {
+    let mut at_edits: Vec<TextEdit> = Vec::new();
+    let mut allowed: HashSet<u32> = HashSet::new();
+    let mut uses: Vec<u32> = Vec::new();
+    let mut collision = false;
+
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::CallExpr(call) => {
+                if let Expr::SelectorExpr(sel) = unparen_expr(&call.fun) {
+                    if sel.sel.name == atmethod && call.args.len() == 1 && exprs_equal(&sel.x, recv)
+                    {
+                        if let Expr::Ident(arg) = &call.args[0] {
+                            if ident_obj(pass, arg) == Some(loop_var) {
+                                allowed.insert(arg.id);
+                                at_edits.push(TextEdit {
+                                    pos: call.fun.pos().0 as u32,
+                                    end: call.rparen.0 as u32 + 1,
+                                    new_text: elem.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            NodeRef::Ident(id) => {
+                if let Some(obj) = ident_obj(pass, id) {
+                    if obj == loop_var {
+                        uses.push(id.id);
+                    } else if obj_name_is(pass, obj, elem) {
+                        collision = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+
+    if collision {
+        return None;
+    }
+    if uses.iter().any(|u| !allowed.contains(u)) {
+        return None;
+    }
+    Some(at_edits)
+}
+
+fn stditerators_message(row: &StdIterRow) -> String {
+    // Upstream message text (note: "can simplified", preserved for parity).
+    format!(
+        "{}/{} loop can simplified using {}.{} iteration",
+        row.lenmethod, row.atmethod, row.typename, row.itermethod
+    )
+}
+
+fn stditerators_fix_message(row: &StdIterRow) -> String {
+    format!(
+        "Replace {}/{} loop with {}.{} iteration",
+        row.lenmethod, row.atmethod, row.typename, row.itermethod
+    )
+}
+
+/// Pattern 1: `for i := 0; i < x.Len(); i++ { use(x.At(i)) }`.
+fn check_stditerators_for(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
+    let Some(Stmt::AssignStmt(init)) = for_stmt.init.as_deref() else {
+        return;
+    };
+    if init.tok != Some(Token::DEFINE) || init.lhs.len() != 1 || init.rhs.len() != 1 {
+        return;
+    }
+    let Some(index_name) = ident_name(&init.lhs[0]) else {
+        return;
+    };
+    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+        return;
+    }
+    let Some(Expr::BinaryExpr(cmp)) = for_stmt.cond.as_ref() else {
+        return;
+    };
+    if cmp.op != Token::LSS || ident_name(&cmp.x) != Some(index_name) {
+        return;
+    }
+    let Expr::Ident(cmp_x) = cmp.x.as_ref() else {
+        return;
+    };
+    let Expr::CallExpr(len_call) = cmp.y.as_ref() else {
+        return;
+    };
+    if !len_call.args.is_empty() {
+        return;
+    }
+    let Expr::SelectorExpr(len_sel) = unparen_expr(&len_call.fun) else {
+        return;
+    };
+    let Some(post) = for_stmt.post.as_deref() else {
+        return;
+    };
+    if !is_simple_inc(post, index_name) {
+        return;
+    }
+
+    let recv = &len_sel.x;
+    let Some(row) = stditerators_row_for(pass, recv, &len_sel.sel.name) else {
+        return;
+    };
+    if pass.pkg().pkg_path == row.pkgpath {
+        return; // don't rewrite within the defining package
+    }
+    let pos = for_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, row.since) {
+        return;
+    }
+    let Some(loop_var) = ident_obj(pass, cmp_x) else {
+        return;
+    };
+    let elem = row.elemname;
+    let Some(mut at_edits) =
+        stditerators_at_edits(pass, &for_stmt.body, recv, loop_var, row.atmethod, elem)
+    else {
+        return;
+    };
+
+    let elem_prefix = if row.seqn == 2 { "_, " } else { "" };
+    let mut edits = vec![
+        TextEdit {
+            pos: init.lhs[0].pos().0 as u32,
+            end: init.lhs[0].end().0 as u32,
+            new_text: format!("{elem_prefix}{elem}"),
+        },
+        TextEdit {
+            pos: init.rhs[0].pos().0 as u32,
+            end: cmp.y.pos().0 as u32,
+            new_text: "range ".into(),
+        },
+        TextEdit {
+            pos: len_sel.sel.pos().0 as u32,
+            end: len_sel.sel.end().0 as u32,
+            new_text: row.itermethod.into(),
+        },
+        TextEdit {
+            pos: len_call.rparen.0 as u32 + 1,
+            end: post.end().0 as u32,
+            new_text: String::new(),
+        },
+    ];
+    edits.append(&mut at_edits);
+
+    pending.push(Diagnostic {
+        pos,
+        end: post.end().0 as u32,
+        category: "stditerators".into(),
+        message: stditerators_message(row),
+        suggested_fixes: vec![SuggestedFix {
+            message: stditerators_fix_message(row),
+            text_edits: edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+/// Pattern 2: `for i := range x.Len() { use(x.At(i)) }`.
+fn check_stditerators_range(
+    pass: &Pass<'_>,
+    range_stmt: &RangeStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
+    if range_stmt.tok != Some(Token::DEFINE) || range_stmt.value.is_some() {
+        return;
+    }
+    let Some(key) = range_stmt.key.as_ref() else {
+        return;
+    };
+    let Expr::Ident(key_id) = key else {
+        return;
+    };
+    let Expr::CallExpr(len_call) = &range_stmt.x else {
+        return;
+    };
+    if !len_call.args.is_empty() {
+        return;
+    }
+    let Expr::SelectorExpr(len_sel) = unparen_expr(&len_call.fun) else {
+        return;
+    };
+
+    let recv = &len_sel.x;
+    let Some(row) = stditerators_row_for(pass, recv, &len_sel.sel.name) else {
+        return;
+    };
+    if pass.pkg().pkg_path == row.pkgpath {
+        return;
+    }
+    if !go_at_least(pass, range_stmt.for_.0 as u32, row.since) {
+        return;
+    }
+    let Some(loop_var) = ident_obj(pass, key_id) else {
+        return;
+    };
+    let elem = row.elemname;
+    let Some(mut at_edits) =
+        stditerators_at_edits(pass, &range_stmt.body, recv, loop_var, row.atmethod, elem)
+    else {
+        return;
+    };
+
+    let elem_prefix = if row.seqn == 2 { "_, " } else { "" };
+    let mut edits = vec![
+        TextEdit {
+            pos: key.pos().0 as u32,
+            end: key.end().0 as u32,
+            new_text: format!("{elem_prefix}{elem}"),
+        },
+        TextEdit {
+            pos: len_sel.sel.pos().0 as u32,
+            end: len_sel.sel.end().0 as u32,
+            new_text: row.itermethod.into(),
+        },
+    ];
+    edits.append(&mut at_edits);
+
+    pending.push(Diagnostic {
+        pos: range_stmt.range_.0 as u32,
+        end: range_stmt.x.end().0 as u32,
+        category: "stditerators".into(),
+        message: stditerators_message(row),
+        suggested_fixes: vec![SuggestedFix {
+            message: stditerators_fix_message(row),
+            text_edits: edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -4369,6 +4841,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&options, "mapsloop") {
                         check_mapsloop(pass, s, &mut pending);
                     }
+                    if enabled(&options, "stditerators") {
+                        check_stditerators_range(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::ForStmt(s) => {
                     if enabled(&options, "rangeint") {
@@ -4376,6 +4851,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicesbackward") {
                         check_slicesbackward(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "stditerators") {
+                        check_stditerators_for(pass, s, &mut pending);
                     }
                 }
                 NodeRef::IfStmt(s) => {
