@@ -10,7 +10,7 @@ use guff_style::{
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
     nlreturn, nonamedreturns, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
-    testifylint, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    testifylint, testpackage, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -772,6 +772,92 @@ fn nonamedreturns_allow_unused_named_returns() {
         )),
         "{messages:?}"
     );
+}
+
+#[test]
+fn testpackage_flags_same_package_tests() {
+    let pkg = support::typecheck_fixture(
+        "testpackage",
+        "example.com/testpackage",
+        "bad_test.go",
+    );
+    let messages = support::run_analyzer(testpackage(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("package should be `testpackage_test` instead of `testpackage`"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn testpackage_allows_external_test_package() {
+    let pkg = support::typecheck_fixture(
+        "testpackage",
+        "example.com/testpackage_test",
+        "ok_test.go",
+    );
+    let messages = support::run_analyzer(testpackage(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn testpackage_skips_internal_test_by_default() {
+    let pkg = support::typecheck_fixture(
+        "testpackage",
+        "example.com/testpackage/internal",
+        "internal_test.go",
+    );
+    let messages = support::run_analyzer(testpackage(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn testpackage_allows_main_by_default() {
+    let pkg = support::typecheck_fixture(
+        "testpackage",
+        "example.com/testpackage/main",
+        "main_test.go",
+    );
+    let messages = support::run_analyzer(testpackage(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn testpackage_respects_allow_packages_settings() {
+    use guff_style::TestpackageOptions;
+
+    let pkg = support::typecheck_fixture(
+        "testpackage",
+        "example.com/testpackage/settings",
+        "settings_test.go",
+    );
+
+    // Default allow-packages is only `main` → flagged.
+    let flagged = support::run_analyzer(testpackage(), &pkg);
+    assert_eq!(flagged.len(), 1, "{flagged:?}");
+    assert!(
+        flagged[0].contains("package should be `allowed_test` instead of `allowed`"),
+        "{flagged:?}"
+    );
+
+    // Custom allow-packages includes `allowed` → clean.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testpackage",
+        TestpackageOptions {
+            skip_regexp: r"(export|internal)_test\.go".into(),
+            allow_packages: vec!["allowed".into()],
+        },
+    );
+    let allowed = support::run_analyzer_with_settings(
+        testpackage(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(allowed.is_empty(), "unexpected diagnostics: {allowed:?}");
 }
 
 #[test]

@@ -803,6 +803,26 @@ pub struct NonamedreturnsOptions {
     pub allow_unused_named_returns: bool,
 }
 
+/// `linters.settings.testpackage` / `linters-settings.testpackage`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TestpackageOptions {
+    /// Regexp matched against the test file path; matches are skipped.
+    /// Upstream / golangci default: `(export|internal)_test\.go`.
+    pub skip_regexp: String,
+    /// Package names that may appear in `*_test.go` without a `_test` suffix.
+    /// Upstream / golangci default: `["main"]`.
+    pub allow_packages: Vec<String>,
+}
+
+impl Default for TestpackageOptions {
+    fn default() -> Self {
+        Self {
+            skip_regexp: r"(export|internal)_test\.go".into(),
+            allow_packages: vec!["main".into()],
+        }
+    }
+}
+
 /// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
 ///
 /// Defaults match kulti/thelper / golangci-lint (all checks on).

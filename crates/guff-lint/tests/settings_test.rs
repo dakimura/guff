@@ -1073,6 +1073,25 @@ fn parse_v2_nonamedreturns_settings() {
 }
 
 #[test]
+fn parse_v2_testpackage_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_testpackage_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.testpackage.skip_regexp, "^$");
+    assert_eq!(
+        settings.testpackage.allow_packages,
+        vec!["allowed".to_string(), "tools".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::TestpackageOptions>("testpackage")
+        .expect("testpackage options");
+    assert_eq!(opts.skip_regexp, "^$");
+    assert_eq!(opts.allow_packages, vec!["allowed", "tools"]);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

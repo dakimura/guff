@@ -68,6 +68,7 @@ pub struct LinterSettings {
     pub interfacebloat: InterfacebloatSettings,
     pub inamedparam: InamedparamSettings,
     pub nonamedreturns: NonamedreturnsSettings,
+    pub testpackage: TestpackageSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -959,6 +960,43 @@ impl NonamedreturnsSettings {
     }
 }
 
+/// `linters.settings.testpackage` / `linters-settings.testpackage`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TestpackageSettings {
+    /// Regexp matched against the test file path; matches are skipped.
+    #[serde(default = "default_testpackage_skip_regexp", rename = "skip-regexp")]
+    pub skip_regexp: String,
+    /// Package names that may appear in `*_test.go` without a `_test` suffix.
+    #[serde(default = "default_testpackage_allow_packages", rename = "allow-packages")]
+    pub allow_packages: Vec<String>,
+}
+
+fn default_testpackage_skip_regexp() -> String {
+    r"(export|internal)_test\.go".into()
+}
+
+fn default_testpackage_allow_packages() -> Vec<String> {
+    vec!["main".into()]
+}
+
+impl Default for TestpackageSettings {
+    fn default() -> Self {
+        Self {
+            skip_regexp: default_testpackage_skip_regexp(),
+            allow_packages: default_testpackage_allow_packages(),
+        }
+    }
+}
+
+impl TestpackageSettings {
+    pub fn to_guff_testpackage(&self) -> guff_style::TestpackageOptions {
+        guff_style::TestpackageOptions {
+            skip_regexp: self.skip_regexp.clone(),
+            allow_packages: self.allow_packages.clone(),
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1390,6 +1428,11 @@ impl LinterSettings {
                 out.nonamedreturns = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("testpackage".into())) {
+            if let Ok(s) = serde_yaml::from_value::<TestpackageSettings>(v.clone()) {
+                out.testpackage = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1469,6 +1512,7 @@ impl LinterSettings {
             "nonamedreturns",
             self.nonamedreturns.to_guff_nonamedreturns(),
         );
+        bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         Arc::new(bag)
     }
 

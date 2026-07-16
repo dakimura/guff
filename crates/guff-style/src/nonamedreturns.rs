@@ -1175,7 +1175,7 @@ pub fn analyzer() -> &'static Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use guff_analysis::validate::validate;
+    use guff_analysis::validate;
 
     #[test]
     fn analyzer_graph_is_valid() {
