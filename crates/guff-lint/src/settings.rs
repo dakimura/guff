@@ -518,6 +518,34 @@ pub struct TestifylintExpectedActualSettings {
     pub pattern: Option<String>,
 }
 
+/// Nested `time-compare` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintTimeCompareSettings {
+    #[serde(default, rename = "suppress-calls-pattern")]
+    pub suppress_calls_pattern: Option<String>,
+}
+
+/// Nested `formatter` settings for testifylint.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct TestifylintFormatterSettings {
+    #[serde(default = "default_true", rename = "check-format-string")]
+    pub check_format_string: bool,
+    #[serde(default, rename = "require-f-funcs")]
+    pub require_f_funcs: bool,
+    #[serde(default = "default_true", rename = "require-string-msg")]
+    pub require_string_msg: bool,
+}
+
+impl Default for TestifylintFormatterSettings {
+    fn default() -> Self {
+        Self {
+            check_format_string: true,
+            require_f_funcs: false,
+            require_string_msg: true,
+        }
+    }
+}
+
 /// `linters.settings.testifylint` / `linters-settings.testifylint`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct TestifylintSettings {
@@ -533,6 +561,10 @@ pub struct TestifylintSettings {
     pub bool_compare: TestifylintBoolCompareSettings,
     #[serde(default, rename = "expected-actual")]
     pub expected_actual: TestifylintExpectedActualSettings,
+    #[serde(default, rename = "time-compare")]
+    pub time_compare: TestifylintTimeCompareSettings,
+    #[serde(default)]
+    pub formatter: TestifylintFormatterSettings,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -1494,6 +1526,10 @@ impl TestifylintSettings {
             disable: self.disable.clone(),
             bool_compare_ignore_custom_types: self.bool_compare.ignore_custom_types,
             expected_actual_pattern: self.expected_actual.pattern.clone(),
+            time_compare_suppress_calls_pattern: self.time_compare.suppress_calls_pattern.clone(),
+            formatter_check_format_string: self.formatter.check_format_string,
+            formatter_require_f_funcs: self.formatter.require_f_funcs,
+            formatter_require_string_msg: self.formatter.require_string_msg,
         }
     }
 }

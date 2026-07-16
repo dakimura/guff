@@ -2,6 +2,7 @@ package testifylint
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -18,6 +19,8 @@ func TestBad(t *testing.T) {
 	str := "hi"
 	f := 1.5
 	ts := time.Time{}
+	t1 := time.Time{}
+	t2 := time.Time{}
 	signed := -1
 	pos := 1
 	errSentinel := errors.New("sentinel")
@@ -41,6 +44,7 @@ func TestBad(t *testing.T) {
 
 	assert.Equal(t, time.Time{}, ts)
 	assert.True(t, ts.IsZero())
+	assert.Equal(t, t1, t2)
 	assert.Less(t, signed, 0)
 	assert.Greater(t, pos, 0)
 	assert.Equal(t, signed, signed)
@@ -62,6 +66,10 @@ func TestBad(t *testing.T) {
 
 	assert.Equal(t, pos, expected)
 	assert.Equal(t, pos, 42)
+
+	assert.Equal(t, 1, 2, fmt.Sprintf("msg"))
+	assert.Equal(t, 1, 2, 42)
+	assert.Fail(t, "case [%d] failed", 1)
 }
 
 var a, b int

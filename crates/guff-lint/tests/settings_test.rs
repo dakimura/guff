@@ -542,7 +542,9 @@ fn parse_v2_testifylint_settings() {
         vec![
             "bool-compare".to_string(),
             "empty".to_string(),
-            "expected-actual".to_string()
+            "expected-actual".to_string(),
+            "time-compare".to_string(),
+            "formatter".to_string(),
         ]
     );
     assert!(settings.testifylint.bool_compare.ignore_custom_types);
@@ -550,6 +552,17 @@ fn parse_v2_testifylint_settings() {
         settings.testifylint.expected_actual.pattern.as_deref(),
         Some("^wanted$")
     );
+    assert_eq!(
+        settings
+            .testifylint
+            .time_compare
+            .suppress_calls_pattern
+            .as_deref(),
+        Some("UTC|Round")
+    );
+    assert!(!settings.testifylint.formatter.check_format_string);
+    assert!(settings.testifylint.formatter.require_f_funcs);
+    assert!(!settings.testifylint.formatter.require_string_msg);
     let bag = settings.to_bag();
     let opts = bag
         .get::<guff_style::TestifylintOptions>("testifylint")
@@ -560,11 +573,20 @@ fn parse_v2_testifylint_settings() {
         vec![
             "bool-compare".to_string(),
             "empty".to_string(),
-            "expected-actual".to_string()
+            "expected-actual".to_string(),
+            "time-compare".to_string(),
+            "formatter".to_string(),
         ]
     );
     assert!(opts.bool_compare_ignore_custom_types);
     assert_eq!(opts.expected_actual_pattern.as_deref(), Some("^wanted$"));
+    assert_eq!(
+        opts.time_compare_suppress_calls_pattern.as_deref(),
+        Some("UTC|Round")
+    );
+    assert!(!opts.formatter_check_format_string);
+    assert!(opts.formatter_require_f_funcs);
+    assert!(!opts.formatter_require_string_msg);
 }
 
 #[test]

@@ -7,7 +7,15 @@ linters:
         - bool-compare
         - empty
         - expected-actual
+        - time-compare
+        - formatter
       bool-compare:
         ignore-custom-types: true
       expected-actual:
         pattern: "^wanted$"
+      time-compare:
+        suppress-calls-pattern: "UTC|Round"
+      formatter:
+        check-format-string: false
+        require-f-funcs: true
+        require-string-msg: false

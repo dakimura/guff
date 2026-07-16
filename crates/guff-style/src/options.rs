@@ -546,6 +546,14 @@ pub struct TestifylintOptions {
     pub bool_compare_ignore_custom_types: bool,
     /// `expected-actual.pattern`. `None` → upstream default pattern.
     pub expected_actual_pattern: Option<String>,
+    /// `time-compare.suppress-calls-pattern`. `None` → upstream default.
+    pub time_compare_suppress_calls_pattern: Option<String>,
+    /// `formatter.check-format-string` (default true). Full printf parity DEFERRED.
+    pub formatter_check_format_string: bool,
+    /// `formatter.require-f-funcs` (default false).
+    pub formatter_require_f_funcs: bool,
+    /// `formatter.require-string-msg` (default true).
+    pub formatter_require_string_msg: bool,
 }
 
 impl Default for TestifylintOptions {
@@ -557,6 +565,10 @@ impl Default for TestifylintOptions {
             disable: Vec::new(),
             bool_compare_ignore_custom_types: false,
             expected_actual_pattern: None,
+            time_compare_suppress_calls_pattern: None,
+            formatter_check_format_string: true,
+            formatter_require_f_funcs: false,
+            formatter_require_string_msg: true,
         }
     }
 }

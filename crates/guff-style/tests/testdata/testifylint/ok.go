@@ -16,6 +16,7 @@ func TestOk(t *testing.T) {
 	str := "hi"
 	f := 1.5
 	var ts time.Time
+	var t1, t2 time.Time
 	signed := -1
 	pos := 1
 	var anyVal any = 42
@@ -46,6 +47,12 @@ func TestOk(t *testing.T) {
 	assert.JSONEq(t, `{"foo":"bar"}`, body)
 	assert.YAMLEq(t, expectedYML, conf)
 	assert.Equal(t, expected, pos)
+
+	assert.True(t, t1.Equal(t2))
+	assert.Equal(t, t1.UTC(), t2.UTC())
+	assert.Equal(t, 1, 2, "msg")
+	assert.Equalf(t, 1, 2, "msg %d", 42)
+	assert.Fail(t, "boom!", "case [%d] failed", 1)
 }
 
 var a, b int

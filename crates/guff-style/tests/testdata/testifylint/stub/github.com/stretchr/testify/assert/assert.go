@@ -101,8 +101,13 @@ func NotErrorAs(t TestingT, err error, target interface{}, msgAndArgs ...interfa
 }
 func JSONEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 func YAMLEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
+func Fail(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool     { return true }
+func FailNow(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool  { return true }
 
 func (a *Assertions) Equal(expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) Equalf(expected, actual interface{}, msg string, args ...interface{}) bool {
 	return true
 }
 func (a *Assertions) True(value bool, msgAndArgs ...interface{}) bool { return true }
@@ -110,3 +115,9 @@ func (a *Assertions) Nil(object interface{}, msgAndArgs ...interface{}) bool {
 	return true
 }
 func (a *Assertions) NoError(err error, msgAndArgs ...interface{}) bool { return true }
+func (a *Assertions) Fail(failureMessage string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) FailNow(failureMessage string, msgAndArgs ...interface{}) bool {
+	return true
+}

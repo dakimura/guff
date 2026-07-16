@@ -6,13 +6,14 @@
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
-//! `float-compare`, `len`, `negative-positive`, `nil-compare`, `regexp`,
-//! `useless-assert`, `zero`.
+//! `float-compare`, `formatter`, `len`, `negative-positive`, `nil-compare`, `regexp`,
+//! `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (formatter, go-require, mock-expect, require-error,
-//! suite-*, time-compare), SuggestedFix / TextEdit, bool-compare custom-type casting
-//! in messages, compares time.Time helpers, encoded-compare autofix text edits,
-//! error-is-as CollectT special-case / full ErrorAs pointer diagnostics edge cases.
+//! DEFERRED: remaining checkers (go-require, mock-expect, require-error, suite-*),
+//! SuggestedFix / TextEdit, formatter full printf CheckPrintf / require-f-funcs
+//! object lookup parity, bool-compare custom-type casting in messages, compares
+//! time.Time helpers, encoded-compare autofix text edits, error-is-as CollectT
+//! special-case / full ErrorAs pointer diagnostics edge cases.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -32,6 +33,8 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
 use guff_types::named::named_obj;
 use guff_types::predicates::identical;
+use guff_types::signature::{signature_params, signature_variadic};
+use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::TypeId;
 use regex::Regex;
 
@@ -56,10 +59,12 @@ const IMPLEMENTED: &[&str] = &[
     "error-nil",
     "expected-actual",
     "float-compare",
+    "formatter",
     "len",
     "negative-positive",
     "nil-compare",
     "regexp",
+    "time-compare",
     "useless-assert",
     "zero",
 ];
@@ -67,6 +72,9 @@ const IMPLEMENTED: &[&str] = &[
 /// Upstream `DefaultExpectedVarPattern`.
 const DEFAULT_EXPECTED_ACTUAL_PATTERN: &str =
     r"(^(exp(ected)?|want(ed)?)([A-Z]\w*)?$)|(^(\w*[a-z])?(Exp(ected)?|Want(ed)?)$)";
+
+/// Upstream `DefaultTimeCompareSuppressCallsPattern`.
+const DEFAULT_TIME_COMPARE_SUPPRESS: &str = r"Add|AddDate|Date|In|Local|Round|Truncate|UTC";
 
 /// Default-on checkers in upstream (suite-thelper is off by default).
 fn default_enabled() -> HashSet<String> {
@@ -96,6 +104,8 @@ struct CallMeta<'a> {
     call: &'a CallExpr,
     #[allow(dead_code)]
     is_assert: bool,
+    #[allow(dead_code)]
+    is_pkg: bool,
     selector_x: String,
     #[allow(dead_code)]
     fn_name: String,
@@ -152,6 +162,7 @@ fn new_call_meta<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<CallMeta<'a>
     Some(CallMeta {
         call,
         is_assert,
+        is_pkg,
         selector_x: selector_x_str(&sel.x),
         fn_name,
         fn_name_trimmed: trimmed,
@@ -552,6 +563,45 @@ fn expected_actual_pattern(opts: &TestifylintOptions) -> Regex {
     Regex::new(pat).unwrap_or_else(|_| {
         Regex::new(DEFAULT_EXPECTED_ACTUAL_PATTERN).expect("default expected-actual pattern")
     })
+}
+
+fn time_compare_suppress_pattern(opts: &TestifylintOptions) -> Regex {
+    let pat = opts
+        .time_compare_suppress_calls_pattern
+        .as_deref()
+        .unwrap_or(DEFAULT_TIME_COMPARE_SUPPRESS);
+    Regex::new(pat).unwrap_or_else(|_| {
+        Regex::new(DEFAULT_TIME_COMPARE_SUPPRESS).expect("default time-compare suppress")
+    })
+}
+
+fn expr_source_approx(expr: &Expr) -> String {
+    match unparen(expr) {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => {
+            format!("{}.{}", expr_source_approx(&sel.x), sel.sel.name)
+        }
+        Expr::CallExpr(ce) => format!("{}(...)", expr_source_approx(&ce.fun)),
+        Expr::ParenExpr(p) => expr_source_approx(&p.x),
+        Expr::StarExpr(s) => format!("*{}", expr_source_approx(&s.x)),
+        Expr::UnaryExpr(u) => format!("{:?}{}", u.op, expr_source_approx(&u.x)),
+        Expr::IndexExpr(ix) => {
+            format!("{}[{}]", expr_source_approx(&ix.x), expr_source_approx(&ix.index))
+        }
+        Expr::CompositeLit(cl) => {
+            if let Some(ty) = &cl.ty {
+                format!("{}{{...}}", expr_source_approx(ty))
+            } else {
+                "{...}".into()
+            }
+        }
+        Expr::BasicLit(lit) => lit.value.clone(),
+        _ => "?".into(),
+    }
+}
+
+fn need_suppress_time_call(expr: &Expr, pattern: &Regex) -> bool {
+    pattern.is_match(&expr_source_approx(expr))
 }
 
 fn is_expected_value_candidate(pass: &Pass<'_>, expr: &Expr, pattern: &Regex) -> bool {
@@ -2089,6 +2139,269 @@ fn check_useless_assert(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<
     }
 }
 
+fn check_time_compare(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" | "NotEqual" | "NotEqualValues" => {}
+        _ => return,
+    }
+    if call.args.len() < 2 {
+        return;
+    }
+    let lhs = &call.args[0];
+    let rhs = &call.args[1];
+    if !is_time_instance(pass, lhs) && !is_time_instance(pass, rhs) {
+        return;
+    }
+    let pattern = time_compare_suppress_pattern(opts);
+    if need_suppress_time_call(lhs, &pattern) || need_suppress_time_call(rhs, &pattern) {
+        return;
+    }
+    report_msg(
+        "time-compare",
+        call,
+        "equality-based assertion on time.Time can be flaky",
+        pending,
+    );
+}
+
+fn callee_func_obj(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<guff_types::arena::ObjectId> {
+    let info = pass.types_info()?;
+    match &*call.call.fun {
+        Expr::Ident(id) => info.uses.get(&id.id).copied(),
+        Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
+        _ => None,
+    }
+}
+
+fn signature_of_call(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<TypeId> {
+    let obj = callee_func_obj(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = obj.typ(&artifacts.objects)?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Signature(_) => Some(typ),
+        _ => None,
+    }
+}
+
+fn get_msg_and_args_position(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    let sig = signature_of_call(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !signature_variadic(&artifacts.types, sig) {
+        return None;
+    }
+    let params = signature_params(&artifacts.types, sig)?;
+    let n = tuple_len(&artifacts.types, Some(params));
+    if n == 0 {
+        return None;
+    }
+    let last = tuple_at(&artifacts.types, params, n - 1);
+    if last.name(&artifacts.objects) != "msgAndArgs" {
+        return None;
+    }
+    let Some(last_ty) = last.typ(&artifacts.objects) else {
+        return None;
+    };
+    let last_ty = unalias_readonly(&artifacts.types, last_ty);
+    if !matches!(artifacts.types.get(last_ty), TypeData::Slice(_)) {
+        return None;
+    }
+    Some(n - 1)
+}
+
+fn get_msg_position(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    let sig = signature_of_call(pass, call)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let params = signature_params(&artifacts.types, sig)?;
+    let n = tuple_len(&artifacts.types, Some(params));
+    for i in 0..n {
+        let p = tuple_at(&artifacts.types, params, i);
+        let name = p.name(&artifacts.objects);
+        if name != "msg" && name != "format" {
+            continue;
+        }
+        let Some(ty) = p.typ(&artifacts.objects) else {
+            continue;
+        };
+        let ty = unalias_readonly(&artifacts.types, ty);
+        let under = ty.underlying(&artifacts.types);
+        if matches!(
+            artifacts.types.get(under),
+            TypeData::Basic(b) if b.info().contains(IS_STRING)
+        ) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+fn assert_has_formatted_analogue(call: &CallMeta<'_>) -> bool {
+    // DEFERRED: look up `Fn+"f"` in assert/require packages / receiver methods.
+    // Stubs and real testify expose f-analogues for the assertions we care about.
+    !call.fn_name.ends_with('f')
+}
+
+fn is_printf_like_call(pass: &Pass<'_>, call: &CallMeta<'_>) -> Option<usize> {
+    if call.call.ellipsis.is_valid() {
+        return None;
+    }
+    let msg_and_args_pos = get_msg_and_args_position(pass, call)?;
+    if msg_and_args_pos >= call.call.args.len() {
+        return None;
+    }
+    if !assert_has_formatted_analogue(call) {
+        return None;
+    }
+    Some(msg_and_args_pos)
+}
+
+fn string_lit_value(expr: &Expr) -> Option<String> {
+    let Expr::BasicLit(BasicLit {
+        kind: Some(Token::STRING),
+        value,
+        ..
+    }) = unparen(expr)
+    else {
+        return None;
+    };
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        serde_json::from_str(value).ok()
+    } else if value.len() >= 2 && value.starts_with('`') && value.ends_with('`') {
+        Some(value[1..value.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn check_formatter(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if call.is_fmt {
+        check_formatter_fmt(pass, call, pending);
+    } else {
+        check_formatter_not_fmt(pass, call, opts, pending);
+    }
+}
+
+fn check_formatter_not_fmt(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(msg_and_args_pos) = is_printf_like_call(pass, call) else {
+        return;
+    };
+    let last_arg_pos = call.call.args.len() - 1;
+    let is_single = msg_and_args_pos == last_arg_pos;
+    let msg_and_args = &call.call.args[msg_and_args_pos];
+
+    if matches!(call.fn_name_trimmed.as_str(), "Fail" | "FailNow") {
+        if let Some(failure_msg) = string_lit_value(&call.args[0]) {
+            if failure_msg.contains('%') {
+                report_msg(
+                    "formatter",
+                    call,
+                    "failure message is not a format string, use msgAndArgs instead",
+                    pending,
+                );
+                return;
+            }
+        }
+    }
+
+    if is_fmt_sprintf_call(pass, msg_and_args).is_some() && is_single {
+        if opts.formatter_require_f_funcs {
+            report_msg(
+                "formatter",
+                call,
+                &format!("use {}.{}f", call.selector_x, call.fn_name),
+                pending,
+            );
+        } else {
+            report_msg(
+                "formatter",
+                call,
+                "remove unnecessary fmt.Sprintf",
+                pending,
+            );
+        }
+        return;
+    }
+
+    if has_string_type(pass, msg_and_args) {
+        if let Some(format) = string_lit_value(msg_and_args) {
+            if format.is_empty() {
+                report_msg("formatter", call, "empty message", pending);
+                return;
+            }
+        }
+        if opts.formatter_require_f_funcs {
+            report_msg(
+                "formatter",
+                call,
+                &format!("use {}.{}f", call.selector_x, call.fn_name),
+                pending,
+            );
+        }
+    } else if is_single {
+        if opts.formatter_require_string_msg {
+            report_msg(
+                "formatter",
+                call,
+                "do not use non-string value as first element (msg) of msgAndArgs",
+                pending,
+            );
+        }
+    } else {
+        report_msg(
+            "formatter",
+            call,
+            "using msgAndArgs with non-string first element (msg) causes panic",
+            pending,
+        );
+    }
+}
+
+fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    let Some(format_pos) = get_msg_position(pass, call) else {
+        return;
+    };
+    if format_pos >= call.call.args.len() {
+        return;
+    }
+    let last_arg_pos = call.call.args.len() - 1;
+    let msg = &call.call.args[format_pos];
+    let no_format_args = format_pos == last_arg_pos;
+
+    if no_format_args {
+        if is_fmt_sprintf_call(pass, msg).is_some() {
+            report_msg(
+                "formatter",
+                call,
+                "remove unnecessary fmt.Sprintf",
+                pending,
+            );
+            return;
+        }
+    }
+
+    if let Some(format) = string_lit_value(msg) {
+        if format.is_empty() {
+            report_msg("formatter", call, "empty message", pending);
+        }
+        // DEFERRED: check-format-string via full printf.CheckPrintf.
+    }
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -2126,6 +2439,12 @@ fn check_call(
     let before = pending.len();
     if enabled.contains("zero") {
         check_zero(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("time-compare") {
+        check_time_compare(pass, call, opts, pending);
         if pending.len() > before {
             return;
         }
@@ -2216,6 +2535,12 @@ fn check_call(
     }
     if enabled.contains("useless-assert") {
         check_useless_assert(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("formatter") {
+        check_formatter(pass, call, opts, pending);
     }
 }
 

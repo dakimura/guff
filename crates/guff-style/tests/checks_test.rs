@@ -2429,6 +2429,14 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("expected-actual")),
         "expected-actual: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("time-compare")),
+        "time-compare: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("formatter")),
+        "formatter: {messages:?}"
+    );
 }
 
 #[test]
