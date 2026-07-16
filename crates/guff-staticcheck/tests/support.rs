@@ -198,14 +198,32 @@ pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,
 ) -> Vec<String> {
-    use guff_runner::{run_on_packages, RunnerOptions};
+    use guff_runner::RunnerOptions;
+
+    run_analyzer_with_settings(
+        analyzer,
+        pkg,
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+}
+
+/// Like [`run_analyzer`] but with custom [`guff_runner::RunnerOptions`] (settings bag).
+pub fn run_analyzer_with_settings(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    options: &guff_runner::RunnerOptions,
+) -> Vec<String> {
+    use guff_runner::run_on_packages;
 
     let result = run_on_packages(
         &[analyzer],
         std::slice::from_ref(pkg),
-        &RunnerOptions {
+        &guff_runner::RunnerOptions {
             sequential: true,
-            ..RunnerOptions::default()
+            ..options.clone()
         },
     )
     .expect("run analyzer");

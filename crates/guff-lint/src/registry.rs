@@ -402,6 +402,7 @@ mod tests {
         let settings = LinterSettings {
             staticcheck: StaticcheckSettings {
                 checks: Some(vec!["all".into(), "-SA1004".into()]),
+                ..StaticcheckSettings::default()
             },
             ..LinterSettings::default()
         };

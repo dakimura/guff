@@ -8,6 +8,11 @@ mod fakejson;
 mod render;
 mod structtag;
 mod stdlib_deprecations;
+mod stylecheck_settings;
+
+pub use stylecheck_settings::{
+    StylecheckOptions, DEFAULT_HTTP_STATUS_CODE_WHITELIST, DEFAULT_INITIALISMS,
+};
 pub mod s1000;
 pub mod s1001;
 pub mod s1002;

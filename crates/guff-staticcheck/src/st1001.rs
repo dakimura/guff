@@ -1,8 +1,7 @@
 //! ST1001 — dot imports are discouraged.
 //!
 //! Port of `honnef.co/go/tools/stylecheck/st1001`.
-//!
-//! DEFERRED: `dot_import_whitelist` config option.
+//! Whitelist comes from [`StylecheckOptions`] (`dot-import-whitelist`).
 
 use std::sync::OnceLock;
 
@@ -11,11 +10,23 @@ use guff_analysis::code::is_in_test_at;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
+use crate::stylecheck_settings::StylecheckOptions;
+
+fn import_path(spec: &guff::ast::ImportSpec) -> String {
+    spec.path.value.trim_matches('"').to_string()
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "ST1001 requires inspect analyzer".to_string())?
         .clone();
+
+    let opts = pass
+        .settings::<StylecheckOptions>("staticcheck")
+        .cloned()
+        .unwrap_or_default();
+    let whitelist = opts.effective_dot_import_whitelist();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder(pass.files(), |node| {
@@ -32,7 +43,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if is_in_test_at(pass, pos) {
             return;
         }
-        // DEFERRED: dot_import_whitelist
+        let path = import_path(imp);
+        if whitelist.contains(&path) {
+            return;
+        }
         pending.push((pos, "should not use dot imports".into()));
     });
 

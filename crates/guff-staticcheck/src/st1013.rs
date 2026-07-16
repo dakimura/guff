@@ -1,8 +1,7 @@
 //! ST1013 — should use constants for HTTP error codes, not magic numbers.
 //!
 //! Port of `honnef.co/go/tools/stylecheck/st1013`.
-//! Default whitelist matches staticcheck: 200, 400, 404, 500.
-//! `http_status_code_whitelist` settings wiring is DEFERRED (R16).
+//! Whitelist comes from [`StylecheckOptions`] (`http-status-code-whitelist`).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -15,6 +14,8 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+
+use crate::stylecheck_settings::StylecheckOptions;
 
 fn http_status_codes() -> &'static HashMap<i64, &'static str> {
     static M: OnceLock<HashMap<i64, &'static str>> = OnceLock::new();
@@ -83,10 +84,6 @@ fn http_status_codes() -> &'static HashMap<i64, &'static str> {
     })
 }
 
-fn default_whitelist(code: i64) -> bool {
-    matches!(code, 200 | 400 | 404 | 500)
-}
-
 fn arg_index_for(name: &str) -> Option<usize> {
     match name {
         "net/http.Error" => Some(2),
@@ -102,6 +99,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "ST1013 requires inspect analyzer".to_string())?
         .clone();
+
+    let opts = pass
+        .settings::<StylecheckOptions>("staticcheck")
+        .cloned()
+        .unwrap_or_default();
 
     let mut pending: Vec<(u32, u32, String, String)> = Vec::new();
     {
@@ -128,7 +130,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(n) = expr_to_int(pass, arg) else {
                 return;
             };
-            if default_whitelist(n) {
+            if opts.http_status_whitelisted(n) {
                 return;
             }
             let Some(status) = http_status_codes().get(&n) else {
@@ -192,8 +194,19 @@ mod tests {
 
     #[test]
     fn whitelist_defaults() {
-        assert!(default_whitelist(200));
-        assert!(default_whitelist(404));
-        assert!(!default_whitelist(506));
+        let opts = StylecheckOptions::default();
+        assert!(opts.http_status_whitelisted(200));
+        assert!(opts.http_status_whitelisted(404));
+        assert!(!opts.http_status_whitelisted(506));
+    }
+
+    #[test]
+    fn whitelist_custom() {
+        let opts = StylecheckOptions {
+            http_status_code_whitelist: Some(vec!["506".into()]),
+            ..StylecheckOptions::default()
+        };
+        assert!(opts.http_status_whitelisted(506));
+        assert!(!opts.http_status_whitelisted(200));
     }
 }

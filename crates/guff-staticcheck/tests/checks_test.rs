@@ -2471,3 +2471,136 @@ fn st1023_allows_necessary_types() {
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(st1023::analyzer(), &pkg).is_empty());
 }
+
+#[test]
+fn st1001_dot_import_whitelist_allows_listed_packages() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001/whitelist",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            dot_import_whitelist: Some(vec!["fmt".into()]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1001::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "dot-import-whitelist: fmt should allow import . \"fmt\": {messages:?}"
+    );
+}
+
+#[test]
+fn st1003_custom_initialisms_skip_id() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1003");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1003/init");
+    support::assert_well_typed(&pkg);
+
+    let default_msgs = support::run_analyzer(st1003::analyzer(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("fnId") && m.contains("fnID")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            // Without ID, fnId should not be rewritten.
+            initialisms: Some(vec!["HTTP".into(), "API".into()]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1003::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("fnId") && m.contains("fnID")),
+        "custom initialisms without ID should not flag fnId: {messages:?}"
+    );
+    // Underscore names are still flagged.
+    assert!(
+        messages.iter().any(|m| m.contains("abc_def")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn st1013_custom_http_status_whitelist() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_staticcheck::StylecheckOptions;
+
+    let dir = support::testdata("st1013");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1013/whitelist",
+        &dir.join("bad.go"),
+        &[("net/http", &dir.join("stub/net/http/http.go"))],
+    );
+    support::assert_well_typed(&pkg);
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "staticcheck",
+        StylecheckOptions {
+            http_status_code_whitelist: Some(vec![
+                "200".into(),
+                "400".into(),
+                "404".into(),
+                "500".into(),
+                "506".into(),
+            ]),
+            ..StylecheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        st1013::analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "http-status-code-whitelist including 506 should silence ST1013: {messages:?}"
+    );
+}

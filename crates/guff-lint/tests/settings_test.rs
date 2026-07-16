@@ -129,8 +129,41 @@ fn parse_v2_govet_and_staticcheck_settings() {
         s.staticcheck,
         StaticcheckSettings {
             checks: Some(vec!["all".into(), "-SA1004".into()]),
+            ..StaticcheckSettings::default()
         }
     );
+}
+
+#[test]
+fn parse_v2_staticcheck_stylecheck_settings() {
+    let yaml = fs::read_to_string(testdata_config("v2_staticcheck_stylecheck_settings.yml")).unwrap();
+    let s = LinterSettings::from_yaml(parse_config_str(&yaml).unwrap().linter_settings_raw());
+    assert_eq!(
+        s.staticcheck.checks,
+        Some(vec!["ST1001".into(), "ST1003".into(), "ST1013".into()])
+    );
+    // stylecheck overlay wins for initialisms (adds CUSTOM).
+    assert_eq!(
+        s.staticcheck.initialisms,
+        Some(vec!["HTTP".into(), "API".into(), "CUSTOM".into()])
+    );
+    assert_eq!(
+        s.staticcheck.dot_import_whitelist,
+        Some(vec!["fmt".into()])
+    );
+    assert_eq!(
+        s.staticcheck.http_status_code_whitelist,
+        Some(vec!["200".into(), "404".into(), "506".into()])
+    );
+
+    let bag = s.to_bag();
+    let opts = bag
+        .get::<guff_staticcheck::StylecheckOptions>("staticcheck")
+        .expect("staticcheck settings in bag");
+    assert!(opts.effective_initialisms().contains("CUSTOM"));
+    assert!(opts.effective_dot_import_whitelist().contains("fmt"));
+    assert!(opts.http_status_whitelisted(506));
+    assert!(!opts.http_status_whitelisted(400));
 }
 
 #[test]

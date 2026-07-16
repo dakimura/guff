@@ -1,7 +1,7 @@
 //! ST1003 — poorly chosen identifier (underscores, ALL_CAPS, initialisms).
 //!
 //! Port of `honnef.co/go/tools/stylecheck/st1003`. Non-default in upstream.
-//! Uses the upstream default initialisms list; `initialisms` settings are DEFERRED.
+//! Initialisms come from [`StylecheckOptions`] (`linters.settings.*.initialisms`).
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -13,13 +13,7 @@ use guff_analysis::code::is_in_test_at;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// Upstream default initialisms (`honnef.co/go/tools/config.DefaultConfig`).
-const DEFAULT_INITIALISMS: &[&str] = &[
-    "ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID",
-    "IP", "JSON", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP",
-    "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS", "SIP",
-    "RTP", "AMQP", "DB", "TS",
-];
+use crate::stylecheck_settings::StylecheckOptions;
 
 fn known_name_exception(name: &str) -> bool {
     matches!(name, "LastInsertId" | "kWh")
@@ -38,7 +32,7 @@ fn all_caps(s: &str) -> bool {
 }
 
 /// Returns a differently-cased name if `name` should be rewritten (golint `lintName`).
-fn lint_name(name: &str, initialisms: &HashSet<&str>) -> String {
+fn lint_name(name: &str, initialisms: &HashSet<String>) -> String {
     if name == "_" {
         return name.to_string();
     }
@@ -76,7 +70,7 @@ fn lint_name(name: &str, initialisms: &HashSet<&str>) -> String {
 
         let word: String = runes[w..i].iter().collect();
         let upper = word.to_ascii_uppercase();
-        if initialisms.contains(upper.as_str()) {
+        if initialisms.contains(&upper) {
             let mut u = upper;
             if w == 0 && runes[w].is_lowercase() {
                 u = u.to_ascii_lowercase();
@@ -97,7 +91,7 @@ fn check(
     id_name: &str,
     id_pos: u32,
     thing: &str,
-    initialisms: &HashSet<&str>,
+    initialisms: &HashSet<String>,
 ) {
     if id_name == "_" || known_name_exception(id_name) {
         return;
@@ -127,7 +121,7 @@ fn check_list(
     pending: &mut Vec<(u32, String)>,
     fl: Option<&FieldList>,
     thing: &str,
-    initialisms: &HashSet<&str>,
+    initialisms: &HashSet<String>,
 ) {
     let Some(fl) = fl else {
         return;
@@ -169,8 +163,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "ST1003 requires inspect analyzer".to_string())?
         .clone();
 
-    let initialisms: HashSet<&str> = DEFAULT_INITIALISMS.iter().copied().collect();
-    // DEFERRED: linters.settings.staticcheck / stylecheck initialisms override.
+    let opts = pass
+        .settings::<StylecheckOptions>("staticcheck")
+        .cloned()
+        .unwrap_or_default();
+    let initialisms = opts.effective_initialisms();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
 
@@ -368,6 +365,7 @@ pub fn analyzer() -> &'static Analyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stylecheck_settings::DEFAULT_INITIALISMS;
     use guff_analysis::validate;
 
     #[test]
@@ -377,7 +375,7 @@ mod tests {
 
     #[test]
     fn lint_name_initialisms() {
-        let init: HashSet<&str> = DEFAULT_INITIALISMS.iter().copied().collect();
+        let init: HashSet<String> = DEFAULT_INITIALISMS.iter().map(|s| (*s).to_string()).collect();
         assert_eq!(lint_name("fnId", &init), "fnID");
         assert_eq!(lint_name("fn_Id", &init), "fnID");
         assert_eq!(lint_name("abc_def", &init), "abcDef");

@@ -89,13 +89,48 @@ pub struct GovetSettings {
     pub disable: Vec<String>,
 }
 
-/// `linters.settings.staticcheck` / `linters-settings.staticcheck`.
+/// `linters.settings.staticcheck` / `stylecheck` / `linters-settings.*`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct StaticcheckSettings {
     /// Check selectors (`all`, `SA1000`, `-SA1000`, …). `None` = keep registry default.
     #[serde(default)]
     pub checks: Option<Vec<String>>,
-    // DEFERRED: initialisms, dot-import-whitelist, http-status-code-whitelist.
+    /// ST1003 known initialisms (`initialisms`). Empty/`None` → upstream defaults.
+    #[serde(default)]
+    pub initialisms: Option<Vec<String>>,
+    /// ST1001 packages allowed as dot imports (`dot-import-whitelist`).
+    #[serde(default, rename = "dot-import-whitelist")]
+    pub dot_import_whitelist: Option<Vec<String>>,
+    /// ST1013 numeric codes that are not reported (`http-status-code-whitelist`).
+    #[serde(default, rename = "http-status-code-whitelist")]
+    pub http_status_code_whitelist: Option<Vec<String>>,
+}
+
+impl StaticcheckSettings {
+    /// Merge another block (typically `stylecheck`) over this one.
+    /// Non-`None` fields in `other` win.
+    pub fn merge_stylecheck(&mut self, other: StaticcheckSettings) {
+        if other.checks.is_some() {
+            self.checks = other.checks;
+        }
+        if other.initialisms.is_some() {
+            self.initialisms = other.initialisms;
+        }
+        if other.dot_import_whitelist.is_some() {
+            self.dot_import_whitelist = other.dot_import_whitelist;
+        }
+        if other.http_status_code_whitelist.is_some() {
+            self.http_status_code_whitelist = other.http_status_code_whitelist;
+        }
+    }
+
+    pub fn to_guff_stylecheck(&self) -> guff_staticcheck::StylecheckOptions {
+        guff_staticcheck::StylecheckOptions {
+            initialisms: self.initialisms.clone(),
+            dot_import_whitelist: self.dot_import_whitelist.clone(),
+            http_status_code_whitelist: self.http_status_code_whitelist.clone(),
+        }
+    }
 }
 
 /// `linters.settings.revive` / `linters-settings.revive`.
@@ -824,6 +859,12 @@ impl LinterSettings {
                 out.staticcheck = s;
             }
         }
+        // golangci v1 / many OSS configs put ST* keys under `stylecheck`.
+        if let Some(v) = map.get(serde_yaml::Value::String("stylecheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<StaticcheckSettings>(v.clone()) {
+                out.staticcheck.merge_stylecheck(s);
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("revive".into())) {
             if let Ok(s) = serde_yaml::from_value::<ReviveSettings>(v.clone()) {
                 out.revive = s;
@@ -1043,6 +1084,7 @@ impl LinterSettings {
                 exclude_functions: self.errcheck.exclude_functions.clone(),
             },
         );
+        bag.insert("staticcheck", self.staticcheck.to_guff_stylecheck());
         bag.insert("revive", self.revive.to_guff_revive());
         bag.insert("dupl", self.dupl.to_guff_dupl());
         bag.insert("misspell", self.misspell.to_guff_misspell());
@@ -1947,6 +1989,7 @@ errcheck:
     fn staticcheck_checks_disable_one() {
         let settings = StaticcheckSettings {
             checks: Some(vec!["all".into(), "-SA1004".into()]),
+            ..StaticcheckSettings::default()
         };
         let names = ["SA1004", "SA1000", "S1000"];
         let analyzers: Vec<&'static Analyzer> = names

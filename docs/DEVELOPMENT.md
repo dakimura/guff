@@ -134,7 +134,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 ### 3.3 実装済み linter
 | linter | 状態 | 規模 |
 |--------|------|------|
-| `guff-staticcheck` | ✅ **152 analyzers**（simple S* 37 + staticcheck SA* 100 + stylecheck ST* **15**） | ST* 残り IR 依存 / QF* は **未着手**（→ R16） |
+| `guff-staticcheck` | ✅ **152 analyzers**（simple S* 37 + staticcheck SA* 100 + stylecheck ST* **15**） | ST* 残り IR 依存 / QF* は **未着手**（→ R16）。`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist` settings 配線済み |
 | `guff-govet` | ✅ **29/29** passes（printf は引数個数・型照合まで, `go vet` 一致） | — |
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
@@ -156,7 +156,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 |------|------|------------------------------------|
 | サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`, `--no-cache`, `--fix` | `format:path` 書き出し等は未 |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。**v2 `linters.exclusions`**（`paths` / `paths-except` / `rules` / `presets` / `warn-unused`）を `IssueFilter` に折り込み（v2 は既定除外なし；presets で EXC* 相当を展開）。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions / **exclude-functions** / **disable-default-exclusions**、govet enable/disable、staticcheck checks、errchkjson check-error-free-encoding / report-no-exported、**wrapcheck** ignore-sigs / extra-ignore-sigs / ignore-sig-regexps / ignore-package-globs / ignore-interface-regexps / report-internal-errors、style/comment/revive/dupl/misspell、**usestdlibvars** HTTP + optional tables、**unconvert** fast-math / safe、**exhaustruct** include / exclude / allow-empty*、**exhaustive** check / default-signifies-exhaustive / default-case-required / ignore-enum-* / package-scope-only、**musttag** functions、**loggercheck** / **sloglint** / **testifylint** enable-all/disable-all/enable/disable / bool-compare.ignore-custom-types / expected-actual.pattern / time-compare.suppress-calls-pattern / formatter.check-format-string/require-f-funcs/require-string-msg / suite-extra-assert-call.mode / require-error.fn-pattern / **go-require.ignore-http-handlers**、**modernize** disable、**gocritic** enable-all/disable-all/enabled-checks/disabled-checks、**depguard / gomoddirectives / gomodguard(+_v2)**）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・exclusions `warn-unused` 実効化・`generated` モードは未 |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。**v2 `linters.exclusions`**（`paths` / `paths-except` / `rules` / `presets` / `warn-unused`）を `IssueFilter` に折り込み（v2 は既定除外なし；presets で EXC* 相当を展開）。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions / **exclude-functions** / **disable-default-exclusions**、govet enable/disable、staticcheck checks / **initialisms** / **dot-import-whitelist** / **http-status-code-whitelist**（`stylecheck` キーも merge）、errchkjson check-error-free-encoding / report-no-exported、**wrapcheck** ignore-sigs / extra-ignore-sigs / ignore-sig-regexps / ignore-package-globs / ignore-interface-regexps / report-internal-errors、style/comment/revive/dupl/misspell、**usestdlibvars** HTTP + optional tables、**unconvert** fast-math / safe、**exhaustruct** include / exclude / allow-empty*、**exhaustive** check / default-signifies-exhaustive / default-case-required / ignore-enum-* / package-scope-only、**musttag** functions、**loggercheck** / **sloglint** / **testifylint** enable-all/disable-all/enable/disable / bool-compare.ignore-custom-types / expected-actual.pattern / time-compare.suppress-calls-pattern / formatter.check-format-string/require-f-funcs/require-string-msg / suite-extra-assert-call.mode / require-error.fn-pattern / **go-require.ignore-http-handlers**、**modernize** disable、**gocritic** enable-all/disable-all/enabled-checks/disabled-checks、**depguard / gomoddirectives / gomodguard(+_v2)**）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions） | `issues.new`/`new-from-rev`（diff 除外）・`format:path` 書き出し・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/errname/err113/durationcheck/errorlint/wrapcheck/errchkjson/noctx/fatcontext/copyloopvar/usetesting/usestdlibvars/perfsprint/goconst/dogsled/asciicheck/goprintffuncname/funlen/gocyclo/lll/gocognit/nestif/cyclop/nakedret/nosprintfhostport/predeclared/whitespace/nlreturn/mnd/prealloc/tagalign/wsl/unconvert/exhaustruct/exhaustive/musttag/loggercheck/sloglint/testifylint/exptostd/modernize/gocritic/godot/godox/dupword/depguard/gomoddirectives/gomodguard/misspell/dupl/revive） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + `--out-format text`（`line-number` 別名）/ `colored-line-number` / `json` / `checkstyle` / `sarif` / `tab` / `colored-tab` / `github-actions`。stdout | `format:path` へのファイル書き出しは DEFERRED |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint`（未使用報告）は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
@@ -337,10 +337,14 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   errcheck は Pass-time（`check-blank` / `check-type-assertions` / **`exclude-functions`** /
   **`disable-default-exclusions`**）、govet は
   `enable`/`disable`/`disable-all`/`enable-all`、staticcheck は `checks`（`all`/`-SAxxxx`）で
-  選択時フィルタ。~~DEFERRED: errcheck `exclude-functions` / `disable-default-exclusions`~~ →
-  **完了**（2026-07-16）。DEFERRED（残）: errcheck `verbose`、staticcheck initialisms 等。
+  選択時フィルタ + Pass-time `initialisms` / `dot-import-whitelist` /
+  `http-status-code-whitelist`（`stylecheck` YAML キーも merge）。~~DEFERRED: errcheck `exclude-functions` / `disable-default-exclusions`~~ →
+  **完了**（2026-07-16）。DEFERRED（残）: errcheck `verbose`。
+  ~~staticcheck initialisms 等~~ → **完了**（2026-07-16；`initialisms` /
+  `dot-import-whitelist` / `http-status-code-whitelist` + `stylecheck` キー merge）。
   テスト: `tests/settings_test.rs` + `v2_errcheck_check_blank.yml` /
-  `v2_errcheck_exclude_functions.yml` + `guff-errcheck` exclude fixtures。
+  `v2_errcheck_exclude_functions.yml` / `v2_staticcheck_stylecheck_settings.yml` +
+  `guff-errcheck` exclude fixtures。
 
 #### R5. 補助サブコマンドと run フラグ ✅ 完了 (2026-07-14)
 - **目的/なぜ**: `guff linters`（利用可能/有効な linter 一覧）, `guff version`, `--timeout`,
@@ -601,10 +605,10 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
 - 現在 `guff-staticcheck` は S* + SA* + **ST* 15**（ST1000 / ST1001 / ST1003 / ST1006 / ST1011 / ST1012 / ST1013 / ST1015 / ST1017 / ST1018 / ST1019 / ST1020 / ST1021 / ST1022 / ST1023）。
-- **進捗**: ST1000（package comment）/ ST1001（dot imports; whitelist DEFERRED）/ ST1003（識別子命名・既定 initialisms; `initialisms` settings は DEFERRED; `//export`/`//go:linkname` は `FuncDecl.doc` があるときのみ）/
+- **進捗**: ST1000（package comment）/ ST1001（dot imports; `dot-import-whitelist` settings 済）/ ST1003（識別子命名・既定 initialisms; `initialisms` settings 済; `//export`/`//go:linkname` は `FuncDecl.doc` があるときのみ）/
   ST1006（receiver `self`/`this`/`_`; AST 版）/
   ST1011（`time.Duration` 単位 suffix; struct field は Defs 欠落時 AST フォールバック）/ ST1012（error var 命名）/
-  ST1013（HTTP status magic numbers → `http.Status*`; 既定 whitelist 200/400/404/500; `http_status_code_whitelist` settings は DEFERRED）/
+  ST1013（HTTP status magic numbers → `http.Status*`; 既定 whitelist 200/400/404/500; `http-status-code-whitelist` settings 済）/
   ST1015（switch default 位置）/ ST1017（Yoda conditions + SuggestedFix; `TrulyConstantExpression` `_` + `match_token_node` Or/Binding 修正）/
   ST1018（string literal の Cf/Cc; emoji ZWJ/variation selector 許容 + SuggestedFix）/
   ST1019（重複 import）/
@@ -612,8 +616,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   ST1021（exported type doc が名前で始まる; 冠詞 A/An/The 許容; `PARSE_COMMENTS` 再パース）/
   ST1022（exported var/const doc が名前で始まる; `PARSE_COMMENTS` 再パース; 括弧グループ・複数名はスキップ）/
   ST1023（冗長な var 型; `CheckExpr` 無し近似・BasicLit 既定型 / 名前付き const 除外; SuggestedFix で型削除; syscall/unsafe import 時スキップ）。
-- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）/ QF* 全体。`initialisms` / `http_status_code_whitelist` settings。ST1023 の真の `types.CheckExpr` パリティ。
-- テスト: `st1000` / `st1001` / `st1003` / `st1006` / `st1011` / `st1012` / `st1013` / `st1015` / `st1017` / `st1018` / `st1019` / `st1020` / `st1021` / `st1022` / `st1023` fixtures + `checks_test`。
+- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）/ QF* 全体。ST1023 の真の `types.CheckExpr` パリティ。
+- テスト: `st1000` / `st1001` / `st1003` / `st1006` / `st1011` / `st1012` / `st1013` / `st1015` / `st1017` / `st1018` / `st1019` / `st1020` / `st1021` / `st1022` / `st1023` fixtures + `checks_test`（settings: whitelist / custom initialisms）+ `v2_staticcheck_stylecheck_settings.yml`。
 
 ---
 
@@ -713,6 +717,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R16 続き**: stylecheck settings 配線（`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist`）。`linters.settings.staticcheck` + レガシー `stylecheck` キーを merge → `StylecheckOptions` → ST1001/ST1003/ST1013。空リストは upstream 既定（golangci 互換）。残 ST1005/ST1008/ST1016（IR）/ QF* / ST1023 CheckExpr は DEFERRED。テスト: settings fixtures + `v2_staticcheck_stylecheck_settings.yml` |
 | 2026-07-16 | **R16 続き**: stylecheck ST* **3** 件追加（`ST1003` / `ST1022` / `ST1023`）。計 **152** analyzers（S* 37 + SA* 100 + ST* 15）。ST1003 は既定 initialisms（settings DEFERRED）。ST1022 は `PARSE_COMMENTS` 再パース。ST1023 は `CheckExpr` 無し近似 + SuggestedFix。残 ST1005/ST1008/ST1016（IR）/ QF* は DEFERRED。テスト: `st1003` / `st1022` / `st1023` |
 | 2026-07-16 | **R16 続き**: stylecheck ST* **4** 件追加（`ST1013` / `ST1018` / `ST1020` / `ST1021`）。計 **149** analyzers（S* 37 + SA* 100 + ST* 12）。ST1013 は既定 whitelist・SuggestedFix 済（`http_status_code_whitelist` settings は DEFERRED）。ST1020/ST1021 は `Mode::NONE` 対策で `PARSE_COMMENTS` 再パース。残 ST1003/ST1005/ST1008/ST1016/ST1022/ST1023 / QF* は DEFERRED。テスト: `st1013` / `st1018` / `st1020` / `st1021` |
 | 2026-07-16 | **R16 続き**: stylecheck ST* **4** 件追加（`ST1000` / `ST1011` / `ST1017` / `ST1019`）。計 **145** analyzers（S* 37 + SA* 100 + ST* 8）。`TrulyConstantExpression` の `_` ワイルドカード + `match_token_node` の Or/Binding 対応を修正（ST1017 前提）。ST1011 struct field は Defs 欠落時 AST フォールバック。残 ST1003/ST1005/ST1008/ST1013/ST1016/ST1018/ST1020–23 / QF* は DEFERRED。テスト: `st1000` / `st1011` / `st1017` / `st1019` |
