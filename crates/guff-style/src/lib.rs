@@ -28,6 +28,7 @@
 //! - [`exhaustruct`]
 //! - [`exhaustive`]
 //! - [`musttag`]
+//! - [`loggercheck`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -42,6 +43,7 @@ mod dogsled;
 mod exhaustive;
 mod exhaustruct;
 mod funlen;
+mod loggercheck;
 mod musttag;
 mod gocognit;
 mod goconst;
@@ -65,8 +67,8 @@ mod wsl;
 
 pub use options::{
     CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions, ExhaustructOptions,
-    FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, MndOptions,
-    MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
+    FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, LoggercheckOptions,
+    MndOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
     PerfsprintOptions, PreallocOptions, PredeclaredOptions, TagalignOptions, UnconvertOptions,
     UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
 };
@@ -82,6 +84,7 @@ pub use goconst::analyzer as goconst;
 pub use gocyclo::analyzer as gocyclo;
 pub use goprintffuncname::analyzer as goprintffuncname;
 pub use lll::analyzer as lll;
+pub use loggercheck::analyzer as loggercheck;
 pub use mnd::analyzer as mnd;
 pub use musttag::analyzer as musttag;
 pub use nakedret::analyzer as nakedret;
@@ -130,5 +133,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         exhaustruct(),
         exhaustive(),
         musttag(),
+        loggercheck(),
     ]
 }

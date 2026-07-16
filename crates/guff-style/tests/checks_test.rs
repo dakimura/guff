@@ -2,9 +2,9 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
-    gocyclo, goprintffuncname, lll, mnd, musttag, nakedret, nestif, nlreturn, nosprintfhostport,
-    perfsprint, prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace,
-    wsl,
+    gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
+    nosprintfhostport, perfsprint, prealloc, predeclared, tagalign, unconvert, usestdlibvars,
+    usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -2125,5 +2125,145 @@ fn musttag_custom_functions_from_settings() {
     assert!(
         messages.iter().any(|m| m.contains("`yaml` tag")),
         "custom function should require yaml tags: {messages:?}"
+    );
+}
+
+#[test]
+fn loggercheck_flags_odd_kv_pairs() {
+    let pkg = support::typecheck_fixture("loggercheck", "example.com/loggercheck", "bad.go");
+    let messages = support::run_analyzer(loggercheck(), &pkg);
+    let odd = messages
+        .iter()
+        .filter(|m| m.contains("odd number of arguments"))
+        .count();
+    assert!(
+        odd >= 5,
+        "expected multiple odd-kv diagnostics, got {odd}: {messages:?}"
+    );
+}
+
+#[test]
+fn loggercheck_allows_even_kv_pairs() {
+    let pkg = support::typecheck_fixture("loggercheck", "example.com/loggercheck/ok", "ok.go");
+    let messages = support::run_analyzer(loggercheck(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics for even kv pairs: {messages:?}"
+    );
+}
+
+#[test]
+fn loggercheck_custom_rules_from_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::LoggercheckOptions;
+
+    let pkg = support::typecheck_fixture("loggercheck", "example.com/loggercheck", "custom.go");
+    assert!(
+        support::run_analyzer(loggercheck(), &pkg).is_empty(),
+        "MyLog is not a builtin logger"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "loggercheck",
+        LoggercheckOptions {
+            rules: vec!["example.com/loggercheck.MyLog".into()],
+            ..LoggercheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        loggercheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("odd number of arguments"))
+            .count()
+            >= 2,
+        "custom rule should flag odd kv: {messages:?}"
+    );
+}
+
+#[test]
+fn loggercheck_disable_slog_skips_diagnostics() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::LoggercheckOptions;
+
+    let pkg = support::typecheck_fixture("loggercheck", "example.com/loggercheck", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "loggercheck",
+        LoggercheckOptions {
+            slog: false,
+            ..LoggercheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        loggercheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "slog=false should skip slog calls: {messages:?}"
+    );
+}
+
+#[test]
+fn loggercheck_require_string_key_and_noprintflike() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::LoggercheckOptions;
+
+    let pkg = support::typecheck_fixture("loggercheck", "example.com/loggercheck", "settings.go");
+    assert!(
+        support::run_analyzer(loggercheck(), &pkg).is_empty(),
+        "defaults should not flag requirestringkey/noprintflike"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "loggercheck",
+        LoggercheckOptions {
+            require_string_key: true,
+            no_printf_like: true,
+            ..LoggercheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        loggercheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("inlined constant strings")),
+        "require-string-key: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("format specifier")),
+        "no-printf-like: {messages:?}"
     );
 }

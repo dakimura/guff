@@ -473,6 +473,30 @@ fn parse_v2_musttag_settings() {
 }
 
 #[test]
+fn parse_v2_loggercheck_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_loggercheck_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.loggercheck.slog, Some(true));
+    assert_eq!(settings.loggercheck.kitlog, Some(false));
+    assert!(settings.loggercheck.require_string_key);
+    assert!(settings.loggercheck.no_printf_like);
+    assert_eq!(
+        settings.loggercheck.rules,
+        vec!["example.com/loggercheck.MyLog".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::LoggercheckOptions>("loggercheck")
+        .expect("loggercheck options");
+    assert!(opts.slog);
+    assert!(!opts.kitlog);
+    assert!(opts.require_string_key);
+    assert!(opts.no_printf_like);
+    assert_eq!(opts.rules, vec!["example.com/loggercheck.MyLog".to_string()]);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

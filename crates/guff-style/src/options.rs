@@ -491,6 +491,38 @@ pub struct MusttagOptions {
     pub functions: Vec<MusttagFunc>,
 }
 
+/// `linters.settings.loggercheck` / `linters-settings.loggercheck`.
+///
+/// Checker bools match golangci-lint (`true` = enabled). Defaults enable all
+/// five libraries (unlike standalone loggercheck which disables kitlog).
+#[derive(Debug, Clone)]
+pub struct LoggercheckOptions {
+    pub kitlog: bool,
+    pub klog: bool,
+    pub logr: bool,
+    pub slog: bool,
+    pub zap: bool,
+    pub require_string_key: bool,
+    pub no_printf_like: bool,
+    /// Extra fully-qualified function rules (upstream `-rules` / YAML `rules`).
+    pub rules: Vec<String>,
+}
+
+impl Default for LoggercheckOptions {
+    fn default() -> Self {
+        Self {
+            kitlog: true,
+            klog: true,
+            logr: true,
+            slog: true,
+            zap: true,
+            require_string_key: false,
+            no_printf_like: false,
+            rules: Vec::new(),
+        }
+    }
+}
+
 /// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
 #[derive(Debug, Clone)]
 pub struct ExhaustructOptions {

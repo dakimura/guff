@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  settings:
+    loggercheck:
+      slog: true
+      kitlog: false
+      klog: false
+      logr: false
+      zap: false
+      require-string-key: true
+      no-printf-like: true
+      rules:
+        - example.com/loggercheck.MyLog

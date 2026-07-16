@@ -43,6 +43,7 @@ pub struct LinterSettings {
     pub exhaustruct: ExhaustructSettings,
     pub exhaustive: ExhaustiveSettings,
     pub musttag: MusttagSettings,
+    pub loggercheck: LoggercheckSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -412,6 +413,29 @@ pub struct MusttagSettings {
     pub functions: Vec<MusttagFuncSettings>,
 }
 
+/// `linters.settings.loggercheck` / `linters-settings.loggercheck`.
+///
+/// Checker keys default to enabled when omitted (golangci-lint defaults).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct LoggercheckSettings {
+    #[serde(default)]
+    pub kitlog: Option<bool>,
+    #[serde(default)]
+    pub klog: Option<bool>,
+    #[serde(default)]
+    pub logr: Option<bool>,
+    #[serde(default)]
+    pub slog: Option<bool>,
+    #[serde(default)]
+    pub zap: Option<bool>,
+    #[serde(default, rename = "require-string-key")]
+    pub require_string_key: bool,
+    #[serde(default, rename = "no-printf-like")]
+    pub no_printf_like: bool,
+    #[serde(default)]
+    pub rules: Vec<String>,
+}
+
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsetestingSettings {
@@ -746,6 +770,11 @@ impl LinterSettings {
                 out.musttag = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("loggercheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<LoggercheckSettings>(v.clone()) {
+                out.loggercheck = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -830,6 +859,7 @@ impl LinterSettings {
         bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
         bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
         bag.insert("musttag", self.musttag.to_guff_musttag());
+        bag.insert("loggercheck", self.loggercheck.to_guff_loggercheck());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1296,6 +1326,22 @@ impl MusttagSettings {
                     arg_pos: f.arg_pos,
                 })
                 .collect(),
+        }
+    }
+}
+
+impl LoggercheckSettings {
+    pub fn to_guff_loggercheck(&self) -> guff_style::LoggercheckOptions {
+        let defaults = guff_style::LoggercheckOptions::default();
+        guff_style::LoggercheckOptions {
+            kitlog: self.kitlog.unwrap_or(defaults.kitlog),
+            klog: self.klog.unwrap_or(defaults.klog),
+            logr: self.logr.unwrap_or(defaults.logr),
+            slog: self.slog.unwrap_or(defaults.slog),
+            zap: self.zap.unwrap_or(defaults.zap),
+            require_string_key: self.require_string_key,
+            no_printf_like: self.no_printf_like,
+            rules: self.rules.clone(),
         }
     }
 }
