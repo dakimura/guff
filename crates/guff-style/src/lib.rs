@@ -25,6 +25,7 @@
 //! - [`tagalign`]
 //! - [`wsl`]
 //! - [`unconvert`]
+//! - [`exhaustruct`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -36,6 +37,7 @@ mod asciicheck;
 mod copyloopvar;
 mod cyclop;
 mod dogsled;
+mod exhaustruct;
 mod funlen;
 mod gocognit;
 mod goconst;
@@ -58,15 +60,17 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    CopyloopvarOptions, CyclopOptions, DogsledOptions, FunlenOptions, GocognitOptions,
-    GoconstOptions, GocycloOptions, LllOptions, MndOptions, NakedretOptions, NestifOptions,
-    NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions, TagalignOptions,
-    UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
+    CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustructOptions, FunlenOptions,
+    GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, MndOptions, NakedretOptions,
+    NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
+    TagalignOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions,
+    WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
 pub use cyclop::analyzer as cyclop;
 pub use dogsled::analyzer as dogsled;
+pub use exhaustruct::analyzer as exhaustruct;
 pub use funlen::analyzer as funlen;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
@@ -117,5 +121,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         tagalign(),
         wsl(),
         unconvert(),
+        exhaustruct(),
     ]
 }

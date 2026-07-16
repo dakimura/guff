@@ -40,6 +40,7 @@ pub struct LinterSettings {
     pub usetesting: UsetestingSettings,
     pub usestdlibvars: UsestdlibvarsSettings,
     pub unconvert: UnconvertSettings,
+    pub exhaustruct: ExhaustructSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -353,6 +354,23 @@ pub struct UnconvertSettings {
     pub fast_math: Option<bool>,
     #[serde(default)]
     pub safe: Option<bool>,
+}
+
+/// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ExhaustructSettings {
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default, rename = "allow-empty")]
+    pub allow_empty: Option<bool>,
+    #[serde(default, rename = "allow-empty-rx")]
+    pub allow_empty_rx: Vec<String>,
+    #[serde(default, rename = "allow-empty-returns")]
+    pub allow_empty_returns: Option<bool>,
+    #[serde(default, rename = "allow-empty-declarations")]
+    pub allow_empty_declarations: Option<bool>,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -674,6 +692,11 @@ impl LinterSettings {
                 out.unconvert = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("exhaustruct".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ExhaustructSettings>(v.clone()) {
+                out.exhaustruct = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -755,6 +778,7 @@ impl LinterSettings {
         bag.insert("usetesting", self.usetesting.to_guff_usetesting());
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("unconvert", self.unconvert.to_guff_unconvert());
+        bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1152,6 +1176,24 @@ impl UnconvertSettings {
         guff_style::UnconvertOptions {
             fast_math: self.fast_math.unwrap_or(defaults.fast_math),
             safe: self.safe.unwrap_or(defaults.safe),
+        }
+    }
+}
+
+impl ExhaustructSettings {
+    pub fn to_guff_exhaustruct(&self) -> guff_style::ExhaustructOptions {
+        let defaults = guff_style::ExhaustructOptions::default();
+        guff_style::ExhaustructOptions {
+            include: self.include.clone(),
+            exclude: self.exclude.clone(),
+            allow_empty: self.allow_empty.unwrap_or(defaults.allow_empty),
+            allow_empty_rx: self.allow_empty_rx.clone(),
+            allow_empty_returns: self
+                .allow_empty_returns
+                .unwrap_or(defaults.allow_empty_returns),
+            allow_empty_declarations: self
+                .allow_empty_declarations
+                .unwrap_or(defaults.allow_empty_declarations),
         }
     }
 }

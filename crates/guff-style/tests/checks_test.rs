@@ -1,7 +1,7 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, funlen, gocognit, goconst, gocyclo,
+    asciicheck, copyloopvar, cyclop, dogsled, exhaustruct, funlen, gocognit, goconst, gocyclo,
     goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
     prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
@@ -1894,5 +1894,111 @@ fn unconvert_fast_math_flags_float() {
     assert!(
         messages.iter().filter(|m| m.contains("unnecessary conversion")).count() >= 2,
         "fast-math should flag float/complex identity conversions: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustruct_flags_missing_fields() {
+    let pkg = support::typecheck_fixture("exhaustruct", "example.com/exhaustruct", "bad.go");
+    let messages = support::run_analyzer(exhaustruct(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("missing field Y")),
+        "expected missing Y: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("missing fields") && m.contains("X") && m.contains("Y")),
+        "expected missing X, Y on empty lit: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("<anonymous>") && m.contains("missing field B")),
+        "expected anonymous missing B: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustruct_allows_complete_and_optional() {
+    let pkg = support::typecheck_fixture("exhaustruct", "example.com/exhaustruct/ok", "ok.go");
+    let messages = support::run_analyzer(exhaustruct(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics (optional Z + error return): {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustruct_include_filters_types() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::ExhaustructOptions;
+
+    let pkg =
+        support::typecheck_fixture("exhaustruct", "example.com/exhaustruct/include", "include.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "exhaustruct",
+        ExhaustructOptions {
+            include: vec![r".*\.Included$".into()],
+            ..ExhaustructOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        exhaustruct(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("Included") && m.contains("missing")),
+        "include should flag Included: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("Other")),
+        "Other must be skipped by include filter: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustruct_allow_empty_declarations() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::ExhaustructOptions;
+
+    let pkg = support::typecheck_fixture(
+        "exhaustruct",
+        "example.com/exhaustruct/emptydecl",
+        "empty_decl.go",
+    );
+    assert!(
+        !support::run_analyzer(exhaustruct(), &pkg).is_empty(),
+        "empty decls must be flagged by default"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "exhaustruct",
+        ExhaustructOptions {
+            allow_empty_declarations: true,
+            ..ExhaustructOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        exhaustruct(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "allow-empty-declarations should silence var/:= empties: {messages:?}"
     );
 }

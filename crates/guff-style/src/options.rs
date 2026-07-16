@@ -438,6 +438,37 @@ impl Default for UnconvertOptions {
     }
 }
 
+/// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
+#[derive(Debug, Clone)]
+pub struct ExhaustructOptions {
+    /// Regexes matching full type names (`path.Name`) that should be checked.
+    /// Empty = check all (subject to `exclude`).
+    pub include: Vec<String>,
+    /// Regexes matching types to skip (precedence over `include`).
+    pub exclude: Vec<String>,
+    /// Allow empty struct literals globally.
+    pub allow_empty: bool,
+    /// Regexes for types allowed to be empty.
+    pub allow_empty_rx: Vec<String>,
+    /// Allow empty structs in return statements.
+    pub allow_empty_returns: bool,
+    /// Allow empty structs in `var` / `:=` declarations.
+    pub allow_empty_declarations: bool,
+}
+
+impl Default for ExhaustructOptions {
+    fn default() -> Self {
+        Self {
+            include: Vec::new(),
+            exclude: Vec::new(),
+            allow_empty: false,
+            allow_empty_rx: Vec::new(),
+            allow_empty_returns: false,
+            allow_empty_declarations: false,
+        }
+    }
+}
+
 impl UsestdlibvarsOptions {
     /// True when any check that walks arbitrary string/int literals is enabled.
     pub fn any_literal_table(&self) -> bool {

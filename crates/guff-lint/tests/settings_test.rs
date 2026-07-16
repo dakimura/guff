@@ -401,6 +401,30 @@ fn parse_v2_unconvert_settings() {
 }
 
 #[test]
+fn parse_v2_exhaustruct_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_exhaustruct_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.exhaustruct.include, vec![r".*\.Included$"]);
+    assert_eq!(settings.exhaustruct.exclude, vec![r".*\.SkipMe$"]);
+    assert_eq!(settings.exhaustruct.allow_empty, Some(true));
+    assert_eq!(
+        settings.exhaustruct.allow_empty_rx,
+        vec![r".*\.OptEmpty$"]
+    );
+    assert_eq!(settings.exhaustruct.allow_empty_returns, Some(true));
+    assert_eq!(settings.exhaustruct.allow_empty_declarations, Some(true));
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ExhaustructOptions>("exhaustruct")
+        .expect("exhaustruct options");
+    assert!(opts.allow_empty);
+    assert!(opts.allow_empty_returns);
+    assert!(opts.allow_empty_declarations);
+    assert_eq!(opts.include.len(), 1);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 
