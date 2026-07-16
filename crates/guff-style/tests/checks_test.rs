@@ -3150,6 +3150,63 @@ fn modernize_flags_stringscut() {
 }
 
 #[test]
+fn modernize_flags_newexpr() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/newexpr", "newexpr.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("intVar can be an inlinable wrapper around new(expr)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("varOf can be an inlinable wrapper around new(expr)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("alreadyAnnotated can be an inlinable wrapper around new(expr)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("call of intVar(x) can be simplified to new(x)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("call of stringVar(x) can be simplified to new(x)")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("call of varOf(x) can be simplified to new(x)")),
+        "{messages:?}"
+    );
+    // Untyped int → int64 parameter must not rewrite.
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("call of int64Var(x) can be simplified to new(x)")),
+        "{messages:?}"
+    );
+    // Variadic must not be flagged as a new-like wrapper.
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("variadic can be an inlinable wrapper")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_slicescontains_variants() {
     let pkg = support::typecheck_fixture(
         "modernize",

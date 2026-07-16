@@ -23,16 +23,19 @@
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
 //! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN)
+//! - `newexpr` — `func f(x T) *T { return &x }` → `new(x)` wrappers + call sites
+//!   (Go 1.26+; `NewLike` facts)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! errorsastype, newexpr, stditerators, stringsbuilder, stringscut Index/Contains
+//! errorsastype, stditerators, stringsbuilder, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
 //! waitgroupgo trailing-Done /
 //! SuggestedFix import edits, reflecttypefor complicated/unnamed types &
 //! unused-var deletion, slicesbackward mutation/non-`s[i]` use analysis full
-//! parity, testingcontext sole-use via typeindex, and full rangeint/minmax
+//! parity, testingcontext sole-use via typeindex, newexpr `new` shadowing /
+//! CheckExpr untyped-constant re-typecheck full parity, and full rangeint/minmax
 //! edge-case parity with upstream.
 
 use std::collections::HashSet;
@@ -40,9 +43,9 @@ use std::fs;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Expr, Field, File,
-    ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Stmt,
-    StructType,
+    AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field,
+    File, ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Stmt,
+    StructType, UnaryExpr,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
@@ -51,7 +54,8 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
-    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+    AnalysisResult, Analyzer, Diagnostic, Fact, FactTypeId, Pass, RunError, RunFn, SuggestedFix,
+    TextEdit,
 };
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::api_identical;
@@ -59,9 +63,13 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
 use guff_types::named::named_obj;
+use guff_types::pointer::pointer_elem;
 use guff_types::predicates::{is_float, is_integer, is_interface, is_string};
+use guff_types::signature::{
+    signature_params, signature_recv, signature_results, signature_variadic,
+};
+use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::typestring::type_string;
-use guff_types::signature::signature_recv;
 use guff_types::{ObjectId, OperandMode, TypeId};
 
 use crate::options::ModernizeOptions;
@@ -2638,6 +2646,313 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
     });
 }
 
+/// Fact marking a function as "new-like": `func f(x T) *T { return &x }`.
+#[derive(Clone, Debug, Default)]
+struct NewLikeFact;
+
+impl Fact for NewLikeFact {
+    fn fact_type_id(&self) -> FactTypeId {
+        FactTypeId::of::<Self>()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn clone_fact(&self) -> Box<dyn Fact> {
+        Box::new(self.clone())
+    }
+}
+
+fn is_pointer_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    matches!(artifacts.types.get(typ), TypeData::Pointer(_))
+}
+
+fn type_name_of(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ))
+}
+
+fn has_go_fix_inline(doc: &Option<CommentGroup>) -> bool {
+    let Some(doc) = doc else {
+        return false;
+    };
+    for c in &doc.list {
+        let text = c.text.trim();
+        // Match `//go:fix inline` (and block-comment equivalents).
+        let stripped = text
+            .trim_start_matches("//")
+            .trim_start_matches("/*")
+            .trim_end_matches("*/")
+            .trim();
+        if stripped.starts_with("go:fix") && stripped.contains("inline") {
+            return true;
+        }
+    }
+    false
+}
+
+fn newlike_unary<'a>(body: &'a BlockStmt) -> Option<&'a UnaryExpr> {
+    if body.list.len() != 1 {
+        return None;
+    }
+    let Stmt::ReturnStmt(ret) = &body.list[0] else {
+        return None;
+    };
+    if ret.results.len() != 1 {
+        return None;
+    }
+    let Expr::UnaryExpr(u) = &ret.results[0] else {
+        return None;
+    };
+    if u.op != Token::AND {
+        return None;
+    }
+    Some(u)
+}
+
+fn call_callee_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
+    match fun {
+        Expr::Ident(id) => code::object_of(pass, id),
+        Expr::SelectorExpr(sel) => code::object_of(pass, &sel.sel),
+        Expr::IndexExpr(ix) => call_callee_object(pass, &ix.x),
+        Expr::IndexListExpr(ix) => call_callee_object(pass, &ix.x),
+        Expr::ParenExpr(p) => call_callee_object(pass, &p.x),
+        _ => None,
+    }
+}
+
+/// Conservative stand-in for upstream's `types.CheckExpr` on untyped constants:
+/// BasicLit defaults must match the pointer element type name, otherwise skip
+/// (avoids false positives like `int64Var(123)` where TypesInfo already shows
+/// the converted type).
+fn untyped_lit_matches_elem(pass: &Pass<'_>, arg: &Expr, elem: TypeId) -> bool {
+    let Expr::BasicLit(lit) = arg else {
+        // DEFERRED: re-typecheck complex constant expressions via CheckExpr.
+        return false;
+    };
+    let Some(elem_name) = type_name_of(pass, elem) else {
+        return false;
+    };
+    match lit.kind {
+        Some(Token::INT) => elem_name == "int",
+        Some(Token::STRING) => elem_name == "string",
+        Some(Token::FLOAT) => elem_name == "float64",
+        Some(Token::CHAR) => elem_name == "rune" || elem_name == "int32",
+        _ => false,
+    }
+}
+
+fn newexpr_arg_ok(pass: &Pass<'_>, arg: &Expr, call_typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let call_typ = unalias_readonly(&artifacts.types, call_typ);
+    if !matches!(artifacts.types.get(call_typ), TypeData::Pointer(_)) {
+        return false;
+    }
+    let elem = pointer_elem(&artifacts.types, call_typ);
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&arg.id()) else {
+        return false;
+    };
+    if tav.val.is_some() {
+        return untyped_lit_matches_elem(pass, arg, elem);
+    }
+    types_identical(pass, tav.typ, elem)
+}
+
+struct NewExprDeclCand {
+    obj: ObjectId,
+    name: String,
+    name_pos: u32,
+    name_end: u32,
+    decl_pos: u32,
+    amp_pos: u32,
+    x_end: u32,
+    need_inline_comment: bool,
+    go126: bool,
+}
+
+fn collect_newexpr_decls(pass: &Pass<'_>) -> Vec<NewExprDeclCand> {
+    let mut out = Vec::new();
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return out;
+    };
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let Some(body) = fd.body.as_ref() else {
+                continue;
+            };
+            let Some(unary) = newlike_unary(body) else {
+                continue;
+            };
+            let Expr::Ident(x_id) = unary.x.as_ref() else {
+                continue;
+            };
+            let Some(fn_obj) = code::object_of(pass, &fd.name) else {
+                continue;
+            };
+            if !matches!(artifacts.objects.get(fn_obj), ObjectData::Func(_)) {
+                continue;
+            }
+            let Some(sig) = fn_obj.typ(&artifacts.objects) else {
+                continue;
+            };
+            if signature_variadic(&artifacts.types, sig) {
+                continue;
+            }
+            // Methods are fine; Params excludes the receiver.
+            let Some(params) = signature_params(&artifacts.types, sig) else {
+                continue;
+            };
+            let Some(results) = signature_results(&artifacts.types, sig) else {
+                continue;
+            };
+            if tuple_len(&artifacts.types, Some(params)) != 1 {
+                continue;
+            }
+            if tuple_len(&artifacts.types, Some(results)) != 1 {
+                continue;
+            }
+            let param = tuple_at(&artifacts.types, params, 0);
+            let result = tuple_at(&artifacts.types, results, 0);
+            let Some(result_typ) = result.typ(&artifacts.objects) else {
+                continue;
+            };
+            if !is_pointer_type(pass, result_typ) {
+                continue;
+            }
+            let Some(x_obj) = ident_obj(pass, x_id) else {
+                continue;
+            };
+            if x_obj != param {
+                continue;
+            }
+            let pos = fd.name.pos().0 as u32;
+            out.push(NewExprDeclCand {
+                obj: fn_obj,
+                name: fd.name.name.clone(),
+                name_pos: pos,
+                name_end: fd.name.end().0 as u32,
+                decl_pos: fd.ty.func.0 as u32,
+                amp_pos: unary.op_pos.0 as u32,
+                x_end: unary.x.end().0 as u32,
+                need_inline_comment: !has_go_fix_inline(&fd.doc),
+                go126: go_at_least(pass, pos, "go1.26"),
+            });
+        }
+    }
+    out
+}
+
+fn export_newexpr_decls(
+    pass: &mut Pass<'_>,
+    cands: Vec<NewExprDeclCand>,
+    pending: &mut Vec<Diagnostic>,
+) {
+    for c in cands {
+        pass.export_object_fact(c.obj, Box::new(NewLikeFact));
+        if !c.go126 {
+            continue;
+        }
+        let mut text_edits = vec![
+            TextEdit {
+                pos: c.amp_pos,
+                end: c.amp_pos + 1,
+                new_text: "new(".into(),
+            },
+            TextEdit {
+                pos: c.x_end,
+                end: c.x_end,
+                new_text: ")".into(),
+            },
+        ];
+        if c.need_inline_comment {
+            text_edits.push(TextEdit {
+                pos: c.decl_pos,
+                end: c.decl_pos,
+                new_text: "//go:fix inline\n".into(),
+            });
+        }
+        pending.push(Diagnostic {
+            pos: c.name_pos,
+            end: c.name_end,
+            category: "newexpr".into(),
+            message: format!("{} can be an inlinable wrapper around new(expr)", c.name),
+            suggested_fixes: vec![SuggestedFix {
+                message: format!("Make {} an inlinable wrapper around new(expr)", c.name),
+                text_edits,
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
+fn check_newexpr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    if call.args.len() != 1 {
+        return;
+    }
+    let pos = call.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.26") {
+        return;
+    }
+    let Some(fn_obj) = call_callee_object(pass, &call.fun) else {
+        return;
+    };
+    let mut fact = NewLikeFact;
+    if !pass.import_object_fact(fn_obj, &mut fact) {
+        return;
+    }
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(tav) = info.types.get(&call.id) else {
+        return;
+    };
+    if !newexpr_arg_ok(pass, &call.args[0], tav.typ) {
+        return;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let fname = fn_obj.name(&artifacts.objects).to_string();
+    pending.push(Diagnostic {
+        pos,
+        end: call.end().0 as u32,
+        category: "newexpr".into(),
+        message: format!("call of {fname}(x) can be simplified to new(x)"),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Simplify {fname}(x) to new(x)"),
+            text_edits: vec![TextEdit {
+                pos: call.fun.pos().0 as u32,
+                end: call.fun.end().0 as u32,
+                new_text: "new".into(),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -2649,6 +2964,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
 
     let mut pending = Vec::new();
+    if enabled(&options, "newexpr") {
+        let cands = collect_newexpr_decls(pass);
+        export_newexpr_decls(pass, cands, &mut pending);
+    }
     for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
             check_plusbuild(file, &mut pending);
@@ -2721,6 +3040,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&options, "unsafefuncs") {
                         check_unsafefuncs(pass, c, &mut pending);
                     }
+                    if enabled(&options, "newexpr") {
+                        check_newexpr_call(pass, c, &mut pending);
+                    }
                 }
                 NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {
                     for field in &fields.list {
@@ -2748,6 +3070,6 @@ pub fn analyzer() -> &'static Analyzer {
         run: run as RunFn,
         run_despite_errors: false,
         requires: vec![inspect::analyzer()],
-        fact_types: vec![],
+        fact_types: vec![FactTypeId::of::<NewLikeFact>()],
     })
 }
