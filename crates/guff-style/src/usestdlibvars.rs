@@ -1,11 +1,11 @@
 //! Port of [`github.com/sashamelentyev/usestdlibvars`](https://github.com/sashamelentyev/usestdlibvars).
 //!
-//! Implements the default-on HTTP checks (`http-method`, `http-status-code`).
-//! `linters.settings.usestdlibvars` toggles for those checks are wired.
+//! Default-on: `http-method`, `http-status-code`.
+//! Optional (default off): `time-weekday`, `time-month`, `time-layout`, `crypto-hash`,
+//! `default-rpc-path`, `sql-isolation-level`, `tls-signature-scheme`, `constant-kind`,
+//! `time-date-month`.
 //!
-//! DEFERRED: optional tables/flags (`time-weekday`, `time-month`, `time-layout`,
-//! `crypto-hash`, `default-rpc-path`, `sql-isolation-level`, `tls-signature-scheme`,
-//! `constant-kind`, `time-date-month`).
+//! Deprecated / noop upstream flags (`os-dev-null`, `syslog-priority`) are not exposed.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -107,6 +107,170 @@ fn http_status_code() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
+fn time_weekday() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("Sunday", "time.Sunday.String()"),
+            ("Monday", "time.Monday.String()"),
+            ("Tuesday", "time.Tuesday.String()"),
+            ("Wednesday", "time.Wednesday.String()"),
+            ("Thursday", "time.Thursday.String()"),
+            ("Friday", "time.Friday.String()"),
+            ("Saturday", "time.Saturday.String()"),
+        ])
+    })
+}
+
+fn time_month() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("January", "time.January.String()"),
+            ("February", "time.February.String()"),
+            ("March", "time.March.String()"),
+            ("April", "time.April.String()"),
+            ("May", "time.May.String()"),
+            ("June", "time.June.String()"),
+            ("July", "time.July.String()"),
+            ("August", "time.August.String()"),
+            ("September", "time.September.String()"),
+            ("October", "time.October.String()"),
+            ("November", "time.November.String()"),
+            ("December", "time.December.String()"),
+        ])
+    })
+}
+
+fn time_layout() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("01/02 03:04:05PM '06 -0700", "time.Layout"),
+            ("Mon Jan _2 15:04:05 2006", "time.ANSIC"),
+            ("Mon Jan _2 15:04:05 MST 2006", "time.UnixDate"),
+            ("Mon Jan 02 15:04:05 -0700 2006", "time.RubyDate"),
+            ("02 Jan 06 15:04 MST", "time.RFC822"),
+            ("02 Jan 06 15:04 -0700", "time.RFC822Z"),
+            ("Monday, 02-Jan-06 15:04:05 MST", "time.RFC850"),
+            ("Mon, 02 Jan 2006 15:04:05 MST", "time.RFC1123"),
+            ("Mon, 02 Jan 2006 15:04:05 -0700", "time.RFC1123Z"),
+            ("2006-01-02T15:04:05Z07:00", "time.RFC3339"),
+            ("2006-01-02T15:04:05.999999999Z07:00", "time.RFC3339Nano"),
+            ("3:04PM", "time.Kitchen"),
+            ("Jan _2 15:04:05", "time.Stamp"),
+            ("Jan _2 15:04:05.000", "time.StampMilli"),
+            ("Jan _2 15:04:05.000000", "time.StampMicro"),
+            ("Jan _2 15:04:05.000000000", "time.StampNano"),
+            ("2006-01-02 15:04:05", "time.DateTime"),
+            ("2006-01-02", "time.DateOnly"),
+            ("15:04:05", "time.TimeOnly"),
+        ])
+    })
+}
+
+fn crypto_hash() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("MD4", "crypto.MD4.String()"),
+            ("MD5", "crypto.MD5.String()"),
+            ("SHA-1", "crypto.SHA1.String()"),
+            ("SHA-224", "crypto.SHA224.String()"),
+            ("SHA-256", "crypto.SHA256.String()"),
+            ("SHA-384", "crypto.SHA384.String()"),
+            ("SHA-512", "crypto.SHA512.String()"),
+            ("MD5+SHA1", "crypto.MD5SHA1.String()"),
+            ("RIPEMD-160", "crypto.RIPEMD160.String()"),
+            ("SHA3-224", "crypto.SHA3_224.String()"),
+            ("SHA3-256", "crypto.SHA3_256.String()"),
+            ("SHA3-384", "crypto.SHA3_384.String()"),
+            ("SHA3-512", "crypto.SHA3_512.String()"),
+            ("SHA-512/224", "crypto.SHA512_224.String()"),
+            ("SHA-512/256", "crypto.SHA512_256.String()"),
+            ("BLAKE2s-256", "crypto.BLAKE2s_256.String()"),
+            ("BLAKE2b-256", "crypto.BLAKE2b_256.String()"),
+            ("BLAKE2b-384", "crypto.BLAKE2b_384.String()"),
+            ("BLAKE2b-512", "crypto.BLAKE2b_512.String()"),
+        ])
+    })
+}
+
+fn rpc_default_path() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("/_goRPC_", "rpc.DefaultRPCPath"),
+            ("/debug/rpc", "rpc.DefaultDebugPath"),
+        ])
+    })
+}
+
+fn sql_isolation_level() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("Read Uncommitted", "sql.LevelReadUncommitted.String()"),
+            ("Read Committed", "sql.LevelReadCommitted.String()"),
+            ("Write Committed", "sql.LevelWriteCommitted.String()"),
+            ("Repeatable Read", "sql.LevelRepeatableRead.String()"),
+        ])
+    })
+}
+
+fn tls_signature_scheme() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("PSSWithSHA256", "tls.PSSWithSHA256.String()"),
+            ("ECDSAWithP256AndSHA256", "tls.ECDSAWithP256AndSHA256.String()"),
+            ("Ed25519", "tls.Ed25519.String()"),
+            ("PSSWithSHA384", "tls.PSSWithSHA384.String()"),
+            ("PSSWithSHA512", "tls.PSSWithSHA512.String()"),
+            ("PKCS1WithSHA256", "tls.PKCS1WithSHA256.String()"),
+            ("PKCS1WithSHA384", "tls.PKCS1WithSHA384.String()"),
+            ("PKCS1WithSHA512", "tls.PKCS1WithSHA512.String()"),
+            ("ECDSAWithP384AndSHA384", "tls.ECDSAWithP384AndSHA384.String()"),
+            ("ECDSAWithP521AndSHA512", "tls.ECDSAWithP521AndSHA512.String()"),
+            ("PKCS1WithSHA1", "tls.PKCS1WithSHA1.String()"),
+            ("ECDSAWithSHA1", "tls.ECDSAWithSHA1.String()"),
+        ])
+    })
+}
+
+fn constant_kind() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("Bool", "constant.Bool.String()"),
+            ("String", "constant.String.String()"),
+            ("Int", "constant.Int.String()"),
+            ("Float", "constant.Float.String()"),
+            ("Complex", "constant.Complex.String()"),
+        ])
+    })
+}
+
+fn time_date_month() -> &'static HashMap<&'static str, &'static str> {
+    static M: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    M.get_or_init(|| {
+        HashMap::from([
+            ("1", "time.January"),
+            ("2", "time.February"),
+            ("3", "time.March"),
+            ("4", "time.April"),
+            ("5", "time.May"),
+            ("6", "time.June"),
+            ("7", "time.July"),
+            ("8", "time.August"),
+            ("9", "time.September"),
+            ("10", "time.October"),
+            ("11", "time.November"),
+            ("12", "time.December"),
+        ])
+    })
+}
+
 fn lit_value(lit: &BasicLit) -> String {
     lit.value.trim_matches('"').to_string()
 }
@@ -196,6 +360,62 @@ fn check_http_status(
     }
 }
 
+fn check_map(
+    pending: &mut Vec<(u32, u32, String, String)>,
+    lit: &BasicLit,
+    map: &HashMap<&'static str, &'static str>,
+) {
+    let key = lit_value(lit);
+    if let Some(replacement) = map.get(key.as_str()) {
+        queue_replace(pending, lit, replacement);
+    }
+}
+
+fn check_optional_literal(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    lit: &BasicLit,
+) {
+    if lit.kind != Some(Token::STRING) {
+        return;
+    }
+    if options.time_weekday {
+        check_map(pending, lit, time_weekday());
+    }
+    if options.time_month {
+        check_map(pending, lit, time_month());
+    }
+    if options.time_layout {
+        check_map(pending, lit, time_layout());
+    }
+    if options.crypto_hash {
+        check_map(pending, lit, crypto_hash());
+    }
+    if options.default_rpc_path {
+        check_map(pending, lit, rpc_default_path());
+    }
+    if options.sql_isolation_level {
+        check_map(pending, lit, sql_isolation_level());
+    }
+    if options.tls_signature_scheme {
+        check_map(pending, lit, tls_signature_scheme());
+    }
+    if options.constant_kind {
+        check_map(pending, lit, constant_kind());
+    }
+}
+
+fn check_time_date_month(
+    options: &UsestdlibvarsOptions,
+    pending: &mut Vec<(u32, u32, String, String)>,
+    lit: &BasicLit,
+) {
+    if !options.time_date_month {
+        return;
+    }
+    check_map(pending, lit, time_date_month());
+}
+
 fn fun_args(
     options: &UsestdlibvarsOptions,
     pending: &mut Vec<(u32, u32, String, String)>,
@@ -247,6 +467,11 @@ fn fun_args(
         ("http", "RedirectHandler") => {
             if let Some(lit) = basic_lit_from_args(&call.args, 2, 1, Token::INT) {
                 check_http_status(options, pending, lit);
+            }
+        }
+        ("time", "Date") => {
+            if let Some(lit) = basic_lit_from_args(&call.args, 8, 1, Token::INT) {
+                check_time_date_month(options, pending, lit);
             }
         }
         _ => {
@@ -355,8 +580,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .copied()
         .unwrap_or_default();
 
-    if !options.http_method && !options.http_status_code {
-        // DEFERRED: optional tables would still run here when implemented.
+    if !options.any_enabled() {
         return Ok(None);
     }
 
@@ -369,6 +593,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             match n {
                 NodeRef::CallExpr(call) => {
                     fun_args(&options, &mut pending, call);
+                    true
+                }
+                NodeRef::BasicLit(lit) => {
+                    if options.any_literal_table() {
+                        check_optional_literal(&options, &mut pending, lit);
+                    }
                     true
                 }
                 NodeRef::CompositeLit(cl) => {

@@ -383,12 +383,21 @@ impl Default for UsetestingOptions {
 }
 
 /// `linters.settings.usestdlibvars` / `linters-settings.usestdlibvars`.
-///
-/// Optional tables (`time-weekday`, `crypto-hash`, …) remain DEFERRED.
 #[derive(Debug, Clone, Copy)]
 pub struct UsestdlibvarsOptions {
     pub http_method: bool,
     pub http_status_code: bool,
+    /// Optional (golangci / upstream default: false).
+    pub time_weekday: bool,
+    pub time_month: bool,
+    pub time_layout: bool,
+    pub crypto_hash: bool,
+    /// YAML key: `default-rpc-path` (upstream flag: `rpc-default-path`).
+    pub default_rpc_path: bool,
+    pub sql_isolation_level: bool,
+    pub tls_signature_scheme: bool,
+    pub constant_kind: bool,
+    pub time_date_month: bool,
 }
 
 impl Default for UsestdlibvarsOptions {
@@ -396,6 +405,37 @@ impl Default for UsestdlibvarsOptions {
         Self {
             http_method: true,
             http_status_code: true,
+            time_weekday: false,
+            time_month: false,
+            time_layout: false,
+            crypto_hash: false,
+            default_rpc_path: false,
+            sql_isolation_level: false,
+            tls_signature_scheme: false,
+            constant_kind: false,
+            time_date_month: false,
         }
+    }
+}
+
+impl UsestdlibvarsOptions {
+    /// True when any check that walks arbitrary string/int literals is enabled.
+    pub fn any_literal_table(&self) -> bool {
+        self.time_weekday
+            || self.time_month
+            || self.time_layout
+            || self.crypto_hash
+            || self.default_rpc_path
+            || self.sql_isolation_level
+            || self.tls_signature_scheme
+            || self.constant_kind
+    }
+
+    /// True when any check is enabled.
+    pub fn any_enabled(&self) -> bool {
+        self.http_method
+            || self.http_status_code
+            || self.any_literal_table()
+            || self.time_date_month
     }
 }

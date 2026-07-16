@@ -359,6 +359,33 @@ fn parse_v2_style_extended_linter_settings() {
 }
 
 #[test]
+fn parse_v2_usestdlibvars_optional_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_usestdlibvars_optional.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.usestdlibvars.http_method, Some(false));
+    assert_eq!(settings.usestdlibvars.http_status_code, Some(false));
+    assert_eq!(settings.usestdlibvars.time_weekday, Some(true));
+    assert_eq!(settings.usestdlibvars.time_month, Some(true));
+    assert_eq!(settings.usestdlibvars.time_layout, Some(true));
+    assert_eq!(settings.usestdlibvars.crypto_hash, Some(true));
+    assert_eq!(settings.usestdlibvars.default_rpc_path, Some(true));
+    assert_eq!(settings.usestdlibvars.sql_isolation_level, Some(true));
+    assert_eq!(settings.usestdlibvars.tls_signature_scheme, Some(true));
+    assert_eq!(settings.usestdlibvars.constant_kind, Some(true));
+    assert_eq!(settings.usestdlibvars.time_date_month, Some(true));
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::UsestdlibvarsOptions>("usestdlibvars")
+        .unwrap();
+    assert!(!opts.http_method);
+    assert!(opts.time_weekday);
+    assert!(opts.crypto_hash);
+    assert!(opts.time_date_month);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

@@ -366,13 +366,31 @@ pub struct UsetestingSettings {
 
 /// `linters.settings.usestdlibvars` / `linters-settings.usestdlibvars`.
 ///
-/// Optional tables (`time-weekday`, …) remain DEFERRED.
+/// HTTP checks default on; optional tables default off (golangci / upstream).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsestdlibvarsSettings {
     #[serde(default, rename = "http-method")]
     pub http_method: Option<bool>,
     #[serde(default, rename = "http-status-code")]
     pub http_status_code: Option<bool>,
+    #[serde(default, rename = "time-weekday")]
+    pub time_weekday: Option<bool>,
+    #[serde(default, rename = "time-month")]
+    pub time_month: Option<bool>,
+    #[serde(default, rename = "time-layout")]
+    pub time_layout: Option<bool>,
+    #[serde(default, rename = "crypto-hash")]
+    pub crypto_hash: Option<bool>,
+    #[serde(default, rename = "default-rpc-path")]
+    pub default_rpc_path: Option<bool>,
+    #[serde(default, rename = "sql-isolation-level")]
+    pub sql_isolation_level: Option<bool>,
+    #[serde(default, rename = "tls-signature-scheme")]
+    pub tls_signature_scheme: Option<bool>,
+    #[serde(default, rename = "constant-kind")]
+    pub constant_kind: Option<bool>,
+    #[serde(default, rename = "time-date-month")]
+    pub time_date_month: Option<bool>,
 }
 
 /// `linters.settings.errchkjson` / `linters-settings.errchkjson`.
@@ -1137,6 +1155,23 @@ impl UsestdlibvarsSettings {
             http_status_code: self
                 .http_status_code
                 .unwrap_or(defaults.http_status_code),
+            time_weekday: self.time_weekday.unwrap_or(defaults.time_weekday),
+            time_month: self.time_month.unwrap_or(defaults.time_month),
+            time_layout: self.time_layout.unwrap_or(defaults.time_layout),
+            crypto_hash: self.crypto_hash.unwrap_or(defaults.crypto_hash),
+            default_rpc_path: self
+                .default_rpc_path
+                .unwrap_or(defaults.default_rpc_path),
+            sql_isolation_level: self
+                .sql_isolation_level
+                .unwrap_or(defaults.sql_isolation_level),
+            tls_signature_scheme: self
+                .tls_signature_scheme
+                .unwrap_or(defaults.tls_signature_scheme),
+            constant_kind: self.constant_kind.unwrap_or(defaults.constant_kind),
+            time_date_month: self
+                .time_date_month
+                .unwrap_or(defaults.time_date_month),
         }
     }
 }

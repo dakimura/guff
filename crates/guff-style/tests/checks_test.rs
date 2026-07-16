@@ -236,6 +236,7 @@ fn usestdlibvars_respects_http_toggles_off() {
         UsestdlibvarsOptions {
             http_method: false,
             http_status_code: false,
+            ..UsestdlibvarsOptions::default()
         },
     );
     let messages = support::run_analyzer_with_settings(
@@ -249,6 +250,120 @@ fn usestdlibvars_respects_http_toggles_off() {
     assert!(
         messages.is_empty(),
         "http toggles off should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn usestdlibvars_optional_tables_default_off() {
+    let pkg = support::typecheck_fixture(
+        "usestdlibvars",
+        "example.com/usestdlibvars/optional",
+        "optional_bad.go",
+    );
+    let messages = support::run_analyzer(usestdlibvars(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "optional tables default off: {messages:?}"
+    );
+}
+
+#[test]
+fn usestdlibvars_optional_tables_when_enabled() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UsestdlibvarsOptions;
+
+    let pkg = support::typecheck_fixture(
+        "usestdlibvars",
+        "example.com/usestdlibvars/optional",
+        "optional_bad.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "usestdlibvars",
+        UsestdlibvarsOptions {
+            http_method: false,
+            http_status_code: false,
+            time_weekday: true,
+            time_month: true,
+            time_layout: true,
+            crypto_hash: true,
+            default_rpc_path: true,
+            sql_isolation_level: true,
+            tls_signature_scheme: true,
+            constant_kind: true,
+            time_date_month: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        usestdlibvars(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    for needle in [
+        "\"Monday\" can be replaced by time.Monday.String()",
+        "\"January\" can be replaced by time.January.String()",
+        "\"2006-01-02\" can be replaced by time.DateOnly",
+        "\"SHA-256\" can be replaced by crypto.SHA256.String()",
+        "\"/_goRPC_\" can be replaced by rpc.DefaultRPCPath",
+        "\"Read Committed\" can be replaced by sql.LevelReadCommitted.String()",
+        "\"PSSWithSHA256\" can be replaced by tls.PSSWithSHA256.String()",
+        "\"Bool\" can be replaced by constant.Bool.String()",
+        "\"1\" can be replaced by time.January",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle} in {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn usestdlibvars_optional_ok_clean() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::UsestdlibvarsOptions;
+
+    let pkg = support::typecheck_fixture(
+        "usestdlibvars",
+        "example.com/usestdlibvars/optional_ok",
+        "optional_ok.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "usestdlibvars",
+        UsestdlibvarsOptions {
+            http_method: false,
+            http_status_code: false,
+            time_weekday: true,
+            time_month: true,
+            time_layout: true,
+            crypto_hash: true,
+            default_rpc_path: true,
+            sql_isolation_level: true,
+            tls_signature_scheme: true,
+            constant_kind: true,
+            time_date_month: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        usestdlibvars(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "stdlib constants should be clean: {messages:?}"
     );
 }
 
