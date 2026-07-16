@@ -5,8 +5,19 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
+use crate::config;
 use crate::failure::Failure;
 use crate::util::unparen;
+
+/// Arguments shared by early-return / indent-error-flow / superfluous-else
+/// (mirrors revive `internal/ifelse.Args`).
+#[derive(Debug, Clone, Copy, Default)]
+struct Args {
+    /// Do not suggest refactorings that would enlarge variable scope.
+    preserve_scope: bool,
+    /// early-return only: allow introducing a new jump to reduce nesting.
+    allow_jump: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BranchKind {
@@ -88,21 +99,34 @@ struct Chain {
 }
 
 pub fn apply_indent_error_flow(pass: &Pass<'_>) -> Vec<Failure> {
-    apply(pass, "indent-error-flow", check_indent_error_flow)
+    let args = Args {
+        preserve_scope: config::rule_has_string_option(pass, "indent-error-flow", "preserveScope"),
+        allow_jump: false,
+    };
+    apply(pass, "indent-error-flow", args, check_indent_error_flow)
 }
 
 pub fn apply_superfluous_else(pass: &Pass<'_>) -> Vec<Failure> {
-    apply(pass, "superfluous-else", check_superfluous_else)
+    let args = Args {
+        preserve_scope: config::rule_has_string_option(pass, "superfluous-else", "preserveScope"),
+        allow_jump: false,
+    };
+    apply(pass, "superfluous-else", args, check_superfluous_else)
 }
 
 pub fn apply_early_return(pass: &Pass<'_>) -> Vec<Failure> {
-    apply(pass, "early-return", check_early_return)
+    let args = Args {
+        preserve_scope: config::rule_has_string_option(pass, "early-return", "preserveScope"),
+        allow_jump: config::rule_has_string_option(pass, "early-return", "allowJump"),
+    };
+    apply(pass, "early-return", args, check_early_return)
 }
 
 fn apply(
     pass: &Pass<'_>,
     rule: &'static str,
-    check: fn(&Chain) -> Option<String>,
+    args: Args,
+    check: fn(&Chain, Args) -> Option<String>,
 ) -> Vec<Failure> {
     let mut failures = Vec::new();
     for file in pass.files() {
@@ -113,7 +137,15 @@ fn apply(
             match n {
                 NodeRef::FuncDecl(f) => {
                     if let Some(body) = &f.body {
-                        visit_block(&body.list, true, BranchKind::Return, rule, &mut failures, check);
+                        visit_block(
+                            &body.list,
+                            true,
+                            BranchKind::Return,
+                            rule,
+                            args,
+                            &mut failures,
+                            check,
+                        );
                     }
                     return false;
                 }
@@ -123,6 +155,7 @@ fn apply(
                         true,
                         BranchKind::Return,
                         rule,
+                        args,
                         &mut failures,
                         check,
                     );
@@ -141,15 +174,16 @@ fn visit_block(
     at_block_end: bool,
     end_kind: BranchKind,
     rule: &'static str,
+    args: Args,
     failures: &mut Vec<Failure>,
-    check: fn(&Chain) -> Option<String>,
+    check: fn(&Chain, Args) -> Option<String>,
 ) {
     for (i, stmt) in stmts.iter().enumerate() {
         let Stmt::IfStmt(if_stmt) = stmt else {
             continue;
         };
         let chain_at_end = at_block_end && i + 1 == stmts.len();
-        visit_if(if_stmt, chain_at_end, end_kind, rule, failures, check);
+        visit_if(if_stmt, chain_at_end, end_kind, rule, args, failures, check);
     }
 }
 
@@ -158,10 +192,19 @@ fn visit_if(
     at_block_end: bool,
     end_kind: BranchKind,
     rule: &'static str,
+    args: Args,
     failures: &mut Vec<Failure>,
-    check: fn(&Chain) -> Option<String>,
+    check: fn(&Chain, Args) -> Option<String>,
 ) {
-    visit_block(&if_stmt.body.list, false, end_kind, rule, failures, check);
+    visit_block(
+        &if_stmt.body.list,
+        false,
+        end_kind,
+        rule,
+        args,
+        failures,
+        check,
+    );
 
     let mut chain = Chain {
         if_branch: block_branch(&if_stmt.body),
@@ -183,6 +226,21 @@ fn visit_if(
     };
 
     let Some(else_stmt) = &if_stmt.else_ else {
+        // early-return can fire on if-without-else when allowJump is set.
+        if rule == "early-return" {
+            if let Some(mut message) = check(&chain, args) {
+                if chain.has_initializer {
+                    message.push_str(
+                        " (move short variable declaration to its own line if necessary)",
+                    );
+                }
+                failures.push(Failure {
+                    rule,
+                    pos: if_stmt.if_.0 as u32,
+                    message,
+                });
+            }
+        }
         return;
     };
 
@@ -191,13 +249,21 @@ fn visit_if(
             if !chain.if_branch.kind.deviates() {
                 chain.has_prior_non_deviating = true;
             }
-            visit_if(else_if, at_block_end, end_kind, rule, failures, check);
+            visit_if(else_if, at_block_end, end_kind, rule, args, failures, check);
         }
         Stmt::BlockStmt(else_block) => {
-            visit_block(&else_block.list, false, end_kind, rule, failures, check);
+            visit_block(
+                &else_block.list,
+                false,
+                end_kind,
+                rule,
+                args,
+                failures,
+                check,
+            );
             chain.has_else = true;
             chain.else_branch = block_branch(else_block);
-            if let Some(mut message) = check(&chain) {
+            if let Some(mut message) = check(&chain, args) {
                 if chain.has_initializer {
                     message.push_str(
                         " (move short variable declaration to its own line if necessary)",
@@ -302,27 +368,33 @@ fn deviating_call(expr: &Expr) -> Option<BranchKind> {
     }
 }
 
-fn check_indent_error_flow(chain: &Chain) -> Option<String> {
+fn check_indent_error_flow(chain: &Chain, args: Args) -> Option<String> {
     if !chain.has_else || !chain.if_branch.kind.deviates() || chain.has_prior_non_deviating {
         return None;
     }
     if !chain.if_branch.kind.returns() {
         return None;
     }
-    if !chain.at_block_end && (chain.has_initializer || chain.else_branch.has_decls) {
+    if args.preserve_scope
+        && !chain.at_block_end
+        && (chain.has_initializer || chain.else_branch.has_decls)
+    {
         return None;
     }
     Some("if block ends with a return statement, so drop this else and outdent its block".into())
 }
 
-fn check_superfluous_else(chain: &Chain) -> Option<String> {
+fn check_superfluous_else(chain: &Chain, args: Args) -> Option<String> {
     if !chain.has_else || !chain.if_branch.kind.deviates() || chain.has_prior_non_deviating {
         return None;
     }
     if chain.if_branch.kind.returns() {
         return None;
     }
-    if !chain.at_block_end && (chain.has_initializer || chain.else_branch.has_decls) {
+    if args.preserve_scope
+        && !chain.at_block_end
+        && (chain.has_initializer || chain.else_branch.has_decls)
+    {
         return None;
     }
     Some(format!(
@@ -331,12 +403,13 @@ fn check_superfluous_else(chain: &Chain) -> Option<String> {
     ))
 }
 
-fn check_early_return(chain: &Chain) -> Option<String> {
+fn check_early_return(chain: &Chain, args: Args) -> Option<String> {
     if chain.has_else {
         if !chain.else_branch.kind.deviates() {
             return None;
         }
-    } else if !chain.at_block_end
+    } else if !args.allow_jump
+        || !chain.at_block_end
         || !chain.block_end_kind.deviates()
         || chain.if_branch.is_short()
     {
@@ -351,7 +424,10 @@ fn check_early_return(chain: &Chain) -> Option<String> {
         return None;
     }
 
-    if !chain.at_block_end && (chain.has_initializer || chain.if_branch.has_decls) {
+    if args.preserve_scope
+        && !chain.at_block_end
+        && (chain.has_initializer || chain.if_branch.has_decls)
+    {
         return None;
     }
 

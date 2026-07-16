@@ -353,3 +353,104 @@ fn revive_skips_generated_files_when_configured() {
         );
     });
 }
+
+#[test]
+fn revive_context_as_argument_respects_allow_types_before() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "context-as-argument".into(),
+            arguments: vec![RuleArgument::Map({
+                let mut map = HashMap::new();
+                map.insert(
+                    "allowTypesBefore".into(),
+                    RuleArgument::String("*testing.T,testing.TB".into()),
+                );
+                map
+            })],
+            disabled: false,
+            severity: None,
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/ctxallow",
+            "context_allow.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("withTestingT") || m.contains("*testing.T")),
+            "allowTypesBefore should permit *testing.T before context: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("context-as-argument:")),
+            "plain int before context must still be flagged: {messages:?}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("context-as-argument:"))
+                .count(),
+            1,
+            "only stillBad should be flagged: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/preservescope",
+        "preserve_scope.go",
+    );
+
+    // Default (no preserveScope): mid-block if-init + else decls is still reported.
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("indent-error-flow:")),
+        "without preserveScope, mid-block else should be flagged: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![
+            RuleSetting {
+                name: "indent-error-flow".into(),
+                arguments: vec![RuleArgument::String("preserveScope".into())],
+                disabled: false,
+                severity: None,
+            },
+            RuleSetting {
+                name: "superfluous-else".into(),
+                arguments: vec![RuleArgument::String("preserveScope".into())],
+                disabled: false,
+                severity: None,
+            },
+        ]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        // Mid-block keepScopeMidBlock suppressed; dropElseAtEnd at block end still fires.
+        assert!(
+            messages.iter().any(|m| m.contains("indent-error-flow:")),
+            "block-end else should still be flagged with preserveScope: {messages:?}"
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("indent-error-flow:"))
+                .count(),
+            1,
+            "only dropElseAtEnd should remain: {messages:?}"
+        );
+    });
+}

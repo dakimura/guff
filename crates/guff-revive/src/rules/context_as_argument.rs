@@ -1,25 +1,64 @@
 //! `context-as-argument` — `context.Context` should be the first parameter.
+//!
+//! Arguments (golangci / revive):
+//! ```yaml
+//! - name: context-as-argument
+//!   arguments:
+//!     - allowTypesBefore: '*testing.T,testing.TB'
+//! ```
+
+use std::collections::HashSet;
 
 use guff::ast::{Decl, FuncDecl};
 use guff_analysis::Pass;
 
+use crate::config;
 use crate::failure::Failure;
-use crate::util::is_pkg_dot_type;
+use crate::settings::RuleArgument;
+use crate::util::{expr_string, is_pkg_dot_type};
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let allow_types = allow_types_before(pass);
     let mut failures = Vec::new();
     for file in pass.files() {
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;
             };
-            check_func(f, &mut failures);
+            check_func(f, &allow_types, &mut failures);
         }
     }
     failures
 }
 
-fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
+fn allow_types_before(pass: &Pass<'_>) -> HashSet<String> {
+    let mut allow = HashSet::new();
+    // context.Context is always allowed before another context.Context.
+    allow.insert("context.Context".into());
+
+    for arg in config::rule_arguments(pass, "context-as-argument") {
+        let RuleArgument::Map(map) = arg else {
+            continue;
+        };
+        for (key, value) in map {
+            if !config::rule_option_matches(&key, "allowTypesBefore") {
+                continue;
+            }
+            let RuleArgument::String(types) = value else {
+                continue;
+            };
+            for ty in types.split(',') {
+                let ty = ty.trim();
+                if !ty.is_empty() {
+                    allow.insert(ty.to_string());
+                }
+            }
+        }
+    }
+    allow
+}
+
+fn check_func(f: &FuncDecl, allow_types: &HashSet<String>, failures: &mut Vec<Failure>) {
     let Some(params) = &f.ty.params else {
         return;
     };
@@ -42,10 +81,8 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
             break;
         }
         if let Some(ty) = &field.ty {
-            let rendered = crate::util::expr_string(ty);
-            if rendered != "context.Context" {
-                ctx_allowed = false;
-            }
+            let rendered = expr_string(ty);
+            ctx_allowed = allow_types.contains(&rendered);
         } else {
             ctx_allowed = false;
         }

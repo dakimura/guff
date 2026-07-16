@@ -209,6 +209,42 @@ fn parse_v2_revive_confidence_and_generated_header() {
 }
 
 #[test]
+fn parse_v2_revive_prometheus_style_rule_arguments() {
+    let contents = fs::read_to_string(testdata_config("v2_revive_prometheus_args.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    let bag = settings.to_bag();
+    let revive = bag
+        .get::<guff_revive::Settings>("revive")
+        .expect("revive settings");
+
+    let ctx = revive.rule("context-as-argument").expect("context-as-argument");
+    match ctx.arguments.first() {
+        Some(guff_revive::RuleArgument::Map(map)) => {
+            match map.get("allowTypesBefore") {
+                Some(guff_revive::RuleArgument::String(s)) => {
+                    assert_eq!(s, "*testing.T,testing.TB");
+                }
+                other => panic!("expected allowTypesBefore string, got {other:?}"),
+            }
+        }
+        other => panic!("expected map argument, got {other:?}"),
+    }
+
+    for name in ["early-return", "indent-error-flow", "superfluous-else"] {
+        let rule = revive.rule(name).unwrap_or_else(|| panic!("missing {name}"));
+        assert!(
+            rule.arguments.iter().any(|a| matches!(
+                a,
+                guff_revive::RuleArgument::String(s) if s == "preserveScope"
+            )),
+            "{name} should carry preserveScope: {:?}",
+            rule.arguments
+        );
+    }
+}
+
+#[test]
 fn parse_v2_dupl_threshold_settings() {
     let contents = fs::read_to_string(testdata_config("v2_dupl_threshold.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

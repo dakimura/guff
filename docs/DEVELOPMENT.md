@@ -147,7 +147,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | `linters.settings` 配線済み（depguard rules / list-mode / files / allow / deny、gomoddirectives replace-local・allow-list・retract/exclude/toolchain/tool/godebug flags、gomodguard + gomodguard_v2 blocked・local-replace）。allowed modules/domains・version constraints・match-type・depguard path placeholders・gomoddirectives ignore/toolchain-pattern 等は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
 | `guff-dupl` | ✅ **1**（dupl） | `linters.settings.dupl.threshold` YAML 配線済み |
-| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **77 rules**（計 100）；`linters.settings.revive` YAML 配線済み（rules・arguments・global/per-rule severity・confidence・ignore-generated-header） |
+| `guff-revive` | ✅ **1**（revive） | golint-default **23 rules** + extended **77 rules**（計 100）；`linters.settings.revive` YAML 配線済み（rules・arguments・global/per-rule severity・confidence・ignore-generated-header）。prometheus 互換: `context-as-argument` `allowTypesBefore`、`early-return`/`indent-error-flow`/`superfluous-else` の `preserveScope`（+ `allowJump`）実効化済み |
 
 ### 3.4 CLI / 設定 / 出力 / 実行（`guff-lint`, `guff-runner`）
 現状は「薄いドライバ」。golangci-lint 互換にはほど遠い。**ここが §8 ロードマップの主戦場。**
@@ -593,6 +593,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   `linters.settings.dupl.threshold` YAML 配線済み。
 - `guff-revive`: **revive**（golint-default **23 rules** + extended **77 rules**: … prior 69 … / comments-density / datarace / enforce-map-style / enforce-slice-style / enforce-switch-style / enforce-repeated-arg-type-style / package-directory-mismatch / forbidden-call-in-wg-go）。
   `linters.settings.revive` YAML 配線済み（rules リスト・arguments・global/per-rule severity・confidence・ignore-generated-header）。
+  prometheus 互換 rule 引数: `context-as-argument` `allowTypesBefore`、`early-return`/`indent-error-flow`/`superfluous-else` の `preserveScope`（`allowJump` も配線）。`var-naming` skip-package-name-checks 等は DEFERRED。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
@@ -699,6 +700,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R14 続き**: revive の prometheus 互換 rule 引数を実効化。`context-as-argument` の `allowTypesBefore`（`*testing.T,testing.TB`）、`early-return` / `indent-error-flow` / `superfluous-else` の `preserveScope`（+ early-return `allowJump`）。upstream 同様 `preserveScope` 未指定時はスコープ拡大候補も報告。テスト: `context_allow.go` / `preserve_scope.go` + `v2_revive_prometheus_args.yml` |
 | 2026-07-16 | **R13/R14 続き**: `perfsprint` の `err-error`（`error` 実装型 → `err.Error()`；既定オフ）と `int-conversion`（int8/uint 等のキャスト付き最適化；既定オン、親 `integer-format` オフ時は連動オフ）を実効化。prometheus `.golangci.yml` の `err-error: true` / `int-conversion: true` 互換。fiximports は DEFERRED。テスト: `err_error.go` / `int_conversion.go` + `v2_style_settings_extended.yml` |
 | 2026-07-16 | **R13 続き**: `gocritic` に enable-all extra **`badRegexp`** を追加（`regex-syntax` AST で char-class dup/交差・suspicious range・alt anchor/dup・nested quantifier・flag 冗長/clear・dangling `^`）。計 **58** checker（default 34 + extras 24）。prometheus `enable-all` 向け残りは `ruleguard`。dangling-anchor/flag 完全パリティは DEFERRED。テスト: `gocritic_bad_regexp` + `extras.go` |
 | 2026-07-16 | **R13 続き**: `gocritic` に enable-all extras **7** 件追加（dupOption / methodExprCall / rangeExprCopy / regexpPattern / sortSlice / sqlQuery / typeAssertChain）。計 **57** checker（default 34 + extras 23）。prometheus `enable-all` 向け残りは `badRegexp` / `ruleguard`。テスト: `gocritic/extras.go` + `gocritic_enable_all_extras` |

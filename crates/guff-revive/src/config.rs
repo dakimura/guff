@@ -148,6 +148,27 @@ pub fn rule_arguments(pass: &Pass<'_>, name: &str) -> Vec<RuleArgument> {
         .unwrap_or_default()
 }
 
+/// Normalize revive rule option names (`preserveScope` / `preserve-scope` → `preservescopes`).
+pub fn normalize_rule_option(s: &str) -> String {
+    s.chars()
+        .filter(|c| *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Whether `actual` matches `expected` under revive's option spelling rules.
+pub fn rule_option_matches(actual: &str, expected: &str) -> bool {
+    normalize_rule_option(actual) == normalize_rule_option(expected)
+}
+
+/// True when `rule` has a string argument matching `option` (e.g. `preserveScope`).
+pub fn rule_has_string_option(pass: &Pass<'_>, rule: &str, option: &str) -> bool {
+    rule_arguments(pass, rule).iter().any(|arg| match arg {
+        RuleArgument::String(s) => rule_option_matches(s, option),
+        _ => false,
+    })
+}
+
 pub fn rule_arg_string(pass: &Pass<'_>, name: &str, index: usize) -> Option<String> {
     let args = rule_arguments(pass, name);
     match args.get(index)? {

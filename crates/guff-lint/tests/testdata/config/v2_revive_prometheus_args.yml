@@ -1,0 +1,19 @@
+version: "2"
+linters:
+  enable:
+    - revive
+  settings:
+    revive:
+      rules:
+        - name: context-as-argument
+          arguments:
+            - allowTypesBefore: "*testing.T,testing.TB"
+        - name: early-return
+          arguments:
+            - "preserveScope"
+        - name: indent-error-flow
+          arguments:
+            - "preserveScope"
+        - name: superfluous-else
+          arguments:
+            - "preserveScope"
