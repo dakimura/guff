@@ -725,6 +725,25 @@ pub struct ForbidigoPattern {
     pub msg: String,
 }
 
+/// `linters.settings.asasalint` / `linters-settings.asasalint`.
+///
+/// `use_builtin_exclusions` defaults to true (golangci-lint). Extra `exclude`
+/// regexes are merged with the builtin print/log pattern set.
+#[derive(Debug, Clone)]
+pub struct AsasalintOptions {
+    pub exclude: Vec<String>,
+    pub use_builtin_exclusions: bool,
+}
+
+impl Default for AsasalintOptions {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            use_builtin_exclusions: true,
+        }
+    }
+}
+
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
 /// `linters.settings.bidichk` — full rune names to check.

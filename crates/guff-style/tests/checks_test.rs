@@ -1,7 +1,7 @@
 mod support;
 
 use guff_style::{
-    asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
+    asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
@@ -24,6 +24,87 @@ fn copyloopvar_flags_redundant_copies() {
             .any(|m| m.contains("for") && m.contains("\"v\"")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn asasalint_flags_slice_any_as_variadic_any() {
+    let pkg = support::typecheck_fixture("asasalint", "example.com/asasalint", "bad.go");
+    let messages = support::run_analyzer(asasalint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("pass []any as any to func A")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("pass []any as any to func errMsg")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("pass []any as any to func B")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("pass []any as any to func Err")),
+        "{messages:?}"
+    );
+    assert!(messages.len() >= 4, "{messages:?}");
+}
+
+#[test]
+fn asasalint_allows_spread_and_builtin_exclusions() {
+    let pkg = support::typecheck_fixture("asasalint", "example.com/asasalint/ok", "ok.go");
+    let messages = support::run_analyzer(asasalint(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn asasalint_respects_exclude_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::AsasalintOptions;
+
+    let pkg = support::typecheck_fixture(
+        "asasalint",
+        "example.com/asasalint/settings",
+        "settings.go",
+    );
+
+    // Default: Append is reported.
+    let flagged = support::run_analyzer(asasalint(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("pass []any as any to func Append")),
+        "{flagged:?}"
+    );
+
+    // With exclude: Append is silenced.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "asasalint",
+        AsasalintOptions {
+            exclude: vec!["Append".into()],
+            use_builtin_exclusions: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        asasalint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]

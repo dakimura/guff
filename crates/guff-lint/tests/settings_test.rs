@@ -980,6 +980,21 @@ fn parse_v2_forbidigo_settings() {
 }
 
 #[test]
+fn parse_v2_asasalint_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_asasalint_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.asasalint.exclude, vec!["Append".to_string()]);
+    assert!(!settings.asasalint.use_builtin_exclusions);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::AsasalintOptions>("asasalint")
+        .expect("asasalint options");
+    assert_eq!(opts.exclude, vec!["Append".to_string()]);
+    assert!(!opts.use_builtin_exclusions);
+}
+
+#[test]
 fn parse_v2_bidichk_settings() {
     let contents = fs::read_to_string(testdata_config("v2_bidichk_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

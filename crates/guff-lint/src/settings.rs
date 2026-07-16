@@ -58,6 +58,7 @@ pub struct LinterSettings {
     pub gocritic: GocriticSettings,
     pub forbidigo: ForbidigoSettings,
     pub bidichk: BidichkSettings,
+    pub asasalint: AsasalintSettings,
     pub importas: ImportasSettings,
 }
 
@@ -829,6 +830,25 @@ pub struct ImportasAliasSetting {
     pub alias: String,
 }
 
+/// `linters.settings.asasalint` / `linters-settings.asasalint`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AsasalintSettings {
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// golangci default `true`. When false, only `exclude` patterns apply.
+    #[serde(default = "default_true", rename = "use-builtin-exclusions")]
+    pub use_builtin_exclusions: bool,
+}
+
+impl Default for AsasalintSettings {
+    fn default() -> Self {
+        Self {
+            exclude: Vec::new(),
+            use_builtin_exclusions: true,
+        }
+    }
+}
+
 /// `linters.settings.bidichk` / `linters-settings.bidichk`.
 ///
 /// Each bool enables checking for that rune. When all are false (golangci
@@ -1158,6 +1178,11 @@ impl LinterSettings {
                 out.bidichk = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("asasalint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<AsasalintSettings>(v.clone()) {
+                out.asasalint = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
             if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
                 out.importas = s;
@@ -1226,6 +1251,7 @@ impl LinterSettings {
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
+        bag.insert("asasalint", self.asasalint.to_guff_asasalint());
         bag.insert("importas", self.importas.to_guff_importas());
         Arc::new(bag)
     }
@@ -1968,6 +1994,15 @@ impl ImportasSettings {
                 .collect(),
             no_unaliased: self.no_unaliased,
             no_extra_aliases: self.no_extra_aliases,
+        }
+    }
+}
+
+impl AsasalintSettings {
+    pub fn to_guff_asasalint(&self) -> guff_style::AsasalintOptions {
+        guff_style::AsasalintOptions {
+            exclude: self.exclude.clone(),
+            use_builtin_exclusions: self.use_builtin_exclusions,
         }
     }
 }

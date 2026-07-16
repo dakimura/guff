@@ -8,6 +8,7 @@
 //! - [`goconst`]
 //! - [`dogsled`]
 //! - [`asciicheck`]
+//! - [`asasalint`]
 //! - [`gochecknoinits`]
 //! - [`gochecknoglobals`]
 //! - [`gocheckcompilerdirectives`]
@@ -46,6 +47,7 @@
 
 mod options;
 
+mod asasalint;
 mod asciicheck;
 mod copyloopvar;
 mod cyclop;
@@ -86,15 +88,15 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions, ExhaustiveOptions,
-    ExhaustructOptions,
-    ForbidigoOptions, ForbidigoPattern, FunlenOptions, GocognitOptions, GoconstOptions,
-    GocriticOptions, GocycloOptions, LllOptions, LoggercheckOptions, MndOptions, ModernizeOptions,
-    MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions, PerfsprintOptions,
-    PreallocOptions, PredeclaredOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
-    TagalignOptions, TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
-    WhitespaceOptions, WslOptions,
+    AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions,
+    ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern, FunlenOptions,
+    GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, LllOptions,
+    LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
+    NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
+    SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions,
+    UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
 };
+pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
 pub use cyclop::analyzer as cyclop;
@@ -146,6 +148,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         goconst(),
         dogsled(),
         asciicheck(),
+        asasalint(),
         bidichk(),
         gochecknoinits(),
         gochecknoglobals(),

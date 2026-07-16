@@ -54,6 +54,7 @@ pub fn analyzers_for_linter_with_settings(
         "goconst" => Some(vec![guff_style::goconst()]),
         "dogsled" => Some(vec![guff_style::dogsled()]),
         "asciicheck" => Some(vec![guff_style::asciicheck()]),
+        "asasalint" => Some(vec![guff_style::asasalint()]),
         "bidichk" => Some(vec![guff_style::bidichk()]),
         "gochecknoinits" => Some(vec![guff_style::gochecknoinits()]),
         "gochecknoglobals" => Some(vec![guff_style::gochecknoglobals()]),
@@ -109,6 +110,7 @@ pub fn is_meta_linter(name: &str) -> bool {
 
 /// All linter names known to the registry (including meta / post-processor ones).
 pub const KNOWN_LINTER_NAMES: &[&str] = &[
+    "asasalint",
     "asciicheck",
     "bidichk",
     "copyloopvar",
@@ -185,6 +187,7 @@ pub fn known_linter_names() -> &'static [&'static str] {
 /// One-line description for `guff linters` (golangci-style).
 pub fn linter_description(name: &str) -> &'static str {
     match name {
+        "asasalint" => "Checks for pass []any as any in variadic func(...any).",
         "asciicheck" => "Checks that identifiers do not contain non-ASCII characters.",
         "bidichk" => "Checks for dangerous unicode character sequences.",
         "copyloopvar" => "Detects unnecessary copies of loop variables (Go 1.22+).",
