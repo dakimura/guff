@@ -545,6 +545,7 @@ fn parse_v2_testifylint_settings() {
             "expected-actual".to_string(),
             "time-compare".to_string(),
             "formatter".to_string(),
+            "suite-extra-assert-call".to_string(),
         ]
     );
     assert!(settings.testifylint.bool_compare.ignore_custom_types);
@@ -563,6 +564,10 @@ fn parse_v2_testifylint_settings() {
     assert!(!settings.testifylint.formatter.check_format_string);
     assert!(settings.testifylint.formatter.require_f_funcs);
     assert!(!settings.testifylint.formatter.require_string_msg);
+    assert_eq!(
+        settings.testifylint.suite_extra_assert_call.mode.as_deref(),
+        Some("require")
+    );
     let bag = settings.to_bag();
     let opts = bag
         .get::<guff_style::TestifylintOptions>("testifylint")
@@ -576,6 +581,7 @@ fn parse_v2_testifylint_settings() {
             "expected-actual".to_string(),
             "time-compare".to_string(),
             "formatter".to_string(),
+            "suite-extra-assert-call".to_string(),
         ]
     );
     assert!(opts.bool_compare_ignore_custom_types);
@@ -587,6 +593,10 @@ fn parse_v2_testifylint_settings() {
     assert!(!opts.formatter_check_format_string);
     assert!(opts.formatter_require_f_funcs);
     assert!(!opts.formatter_require_string_msg);
+    assert_eq!(
+        opts.suite_extra_assert_call_mode,
+        guff_style::SuiteExtraAssertCallMode::Require
+    );
 }
 
 #[test]

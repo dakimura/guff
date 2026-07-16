@@ -531,6 +531,16 @@ pub struct SloglintFunc {
     pub args_pos: i32,
 }
 
+/// `suite-extra-assert-call.mode` (golangci / upstream).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SuiteExtraAssertCallMode {
+    /// Flag `s.Assert().Equal` → prefer `s.Equal` (upstream default).
+    #[default]
+    Remove,
+    /// Flag `s.Equal` → prefer `s.Assert().Equal`.
+    Require,
+}
+
 /// `linters.settings.testifylint` / `linters-settings.testifylint`.
 ///
 /// Checker selection matches golangci-lint (`enable-all` / `disable-all` /
@@ -554,6 +564,8 @@ pub struct TestifylintOptions {
     pub formatter_require_f_funcs: bool,
     /// `formatter.require-string-msg` (default true).
     pub formatter_require_string_msg: bool,
+    /// `suite-extra-assert-call.mode` (default `remove`).
+    pub suite_extra_assert_call_mode: SuiteExtraAssertCallMode,
 }
 
 impl Default for TestifylintOptions {
@@ -569,6 +581,7 @@ impl Default for TestifylintOptions {
             formatter_check_format_string: true,
             formatter_require_f_funcs: false,
             formatter_require_string_msg: true,
+            suite_extra_assert_call_mode: SuiteExtraAssertCallMode::Remove,
         }
     }
 }

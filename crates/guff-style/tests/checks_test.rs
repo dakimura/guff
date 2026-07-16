@@ -2437,6 +2437,18 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("formatter")),
         "formatter: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("suite-extra-assert-call")),
+        "suite-extra-assert-call: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("suite-dont-use-pkg")),
+        "suite-dont-use-pkg: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("suite-subtest-run")),
+        "suite-subtest-run: {messages:?}"
+    );
 }
 
 #[test]

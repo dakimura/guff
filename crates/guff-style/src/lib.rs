@@ -74,8 +74,8 @@ pub use options::{
     FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, LoggercheckOptions,
     MndOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
     PerfsprintOptions, PreallocOptions, PredeclaredOptions, SloglintFunc, SloglintOptions,
-    TagalignOptions, TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
-    WhitespaceOptions, WslOptions,
+    SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions, UnconvertOptions,
+    UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;

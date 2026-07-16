@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestOk(t *testing.T) {
@@ -53,6 +54,21 @@ func TestOk(t *testing.T) {
 	assert.Equal(t, 1, 2, "msg")
 	assert.Equalf(t, 1, 2, "msg %d", 42)
 	assert.Fail(t, "boom!", "case [%d] failed", 1)
+}
+
+type SuiteOk struct {
+	suite.Suite
+}
+
+func (s *SuiteOk) TestSuiteIdiomatic() {
+	var result any
+	b := true
+
+	s.True(b)
+	s.Equal(42, result)
+	s.Run("sub", func() {
+		s.Equal(1, 2)
+	})
 }
 
 var a, b int

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
 func TestBad(t *testing.T) {
@@ -70,6 +71,21 @@ func TestBad(t *testing.T) {
 	assert.Equal(t, 1, 2, fmt.Sprintf("msg"))
 	assert.Equal(t, 1, 2, 42)
 	assert.Fail(t, "case [%d] failed", 1)
+}
+
+type SuiteBad struct {
+	suite.Suite
+}
+
+func (s *SuiteBad) TestSuiteAntiPatterns() {
+	var result any
+	b := true
+
+	s.Assert().True(b)
+	assert.Equal(s.T(), 42, result)
+	s.T().Run("sub", func(t *testing.T) {
+		assert.Equal(t, 1, 2)
+	})
 }
 
 var a, b int

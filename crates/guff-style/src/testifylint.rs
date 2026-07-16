@@ -7,9 +7,11 @@
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
 //! `float-compare`, `formatter`, `len`, `negative-positive`, `nil-compare`, `regexp`,
+//! `suite-dont-use-pkg`, `suite-extra-assert-call`, `suite-subtest-run`,
 //! `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (go-require, mock-expect, require-error, suite-*),
+//! DEFERRED: remaining checkers (go-require, mock-expect, require-error,
+//! suite-broken-parallel / suite-method-signature / suite-thelper),
 //! SuggestedFix / TextEdit, formatter full printf CheckPrintf / require-f-funcs
 //! object lookup parity, bool-compare custom-type casting in messages, compares
 //! time.Time helpers, encoded-compare autofix text edits, error-is-as CollectT
@@ -33,12 +35,13 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
 use guff_types::named::named_obj;
 use guff_types::predicates::identical;
+use guff_types::scope::lookup as scope_lookup;
 use guff_types::signature::{signature_params, signature_variadic};
 use guff_types::tuple::{tuple_at, tuple_len};
-use guff_types::TypeId;
+use guff_types::{new_pointer, TypeId};
 use regex::Regex;
 
-use crate::options::TestifylintOptions;
+use crate::options::{SuiteExtraAssertCallMode, TestifylintOptions};
 
 const ASSERT_PKG: &str = "github.com/stretchr/testify/assert";
 const REQUIRE_PKG: &str = "github.com/stretchr/testify/require";
@@ -64,6 +67,9 @@ const IMPLEMENTED: &[&str] = &[
     "negative-positive",
     "nil-compare",
     "regexp",
+    "suite-dont-use-pkg",
+    "suite-extra-assert-call",
+    "suite-subtest-run",
     "time-compare",
     "useless-assert",
     "zero",
@@ -102,9 +108,9 @@ fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
 
 struct CallMeta<'a> {
     call: &'a CallExpr,
+    selector: &'a SelectorExpr,
     #[allow(dead_code)]
     is_assert: bool,
-    #[allow(dead_code)]
     is_pkg: bool,
     selector_x: String,
     #[allow(dead_code)]
@@ -118,12 +124,33 @@ fn unquote_import(path: &str) -> &str {
     path.trim_matches('"').trim_matches('`')
 }
 
+fn cut_vendor(path: &str) -> &str {
+    if let Some(idx) = path.rfind("/vendor/") {
+        &path[idx + "/vendor/".len()..]
+    } else if let Some(rest) = path.strip_prefix("vendor/") {
+        rest
+    } else {
+        path
+    }
+}
+
 fn selector_x_str(expr: &Expr) -> String {
     match expr {
         Expr::Ident(id) => id.name.clone(),
         Expr::SelectorExpr(sel) => format!("{}.{}", selector_x_str(&sel.x), sel.sel.name),
-        Expr::CallExpr(c) => format!("{}(...)", selector_x_str(&c.fun)),
+        Expr::CallExpr(c) => format!("{}()", selector_x_str(&c.fun)),
         Expr::ParenExpr(p) => selector_x_str(&p.x),
+        _ => "?".into(),
+    }
+}
+
+fn expr_string(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
+        Expr::CallExpr(c) => format!("{}()", expr_string(&c.fun)),
+        Expr::ParenExpr(p) => expr_string(&p.x),
+        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
         _ => "?".into(),
     }
 }
@@ -147,11 +174,24 @@ fn parse_testify_callee(name: &str) -> Option<(bool, bool, String)> {
 }
 
 fn new_call_meta<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<CallMeta<'a>> {
-    let name = code::call_name(pass, &call.fun)?;
-    let (is_assert, is_pkg, fn_name) = parse_testify_callee(&name)?;
+    let info = pass.types_info()?;
     let Expr::SelectorExpr(sel) = &*call.fun else {
         return None;
     };
+    let obj_id = info.uses.get(&sel.sel.id).copied()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return None;
+    }
+    // Prefer type_func_name so methods become `(*pkg.Assertions).Fn`
+    // (call_name collapses them to `pkg.Fn` and mis-classifies as package calls).
+    let name = code::type_func_name(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        obj_id,
+    );
+    let (is_assert, is_pkg, fn_name) = parse_testify_callee(&name)?;
     let is_fmt = fn_name.ends_with('f');
     let trimmed = fn_name.trim_end_matches('f').to_string();
     let args = if is_pkg && !call.args.is_empty() {
@@ -161,6 +201,7 @@ fn new_call_meta<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<CallMeta<'a>
     };
     Some(CallMeta {
         call,
+        selector: sel,
         is_assert,
         is_pkg,
         selector_x: selector_x_str(&sel.x),
@@ -2402,6 +2443,193 @@ fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(
     }
 }
 
+fn lookup_named_type(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for i in 0..artifacts.packages.len() {
+        let pid = artifacts.packages.id_at(i);
+        let pkg = artifacts.packages.get(pid);
+        if cut_vendor(pkg.path()) != pkg_path {
+            continue;
+        }
+        let oid = scope_lookup(&artifacts.scopes, pkg.scope(), name)?;
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_iface(pass: &Pass<'_>, typ: TypeId, iface: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    if api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        iface,
+    ) {
+        return true;
+    }
+    let ptr = new_pointer(&mut types, typ);
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        ptr,
+        iface,
+    )
+}
+
+fn implements_testify_suite(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(iface) = lookup_named_type(pass, SUITE_PKG, "TestingSuite") else {
+        return false;
+    };
+    implements_iface(pass, typ, iface)
+}
+
+fn implements_testing_t(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    if let Some(iface) = lookup_named_type(pass, ASSERT_PKG, "TestingT") {
+        if implements_iface(pass, typ, iface) {
+            return true;
+        }
+    }
+    if let Some(iface) = lookup_named_type(pass, REQUIRE_PKG, "TestingT") {
+        if implements_iface(pass, typ, iface) {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_suite_dont_use_pkg(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !call.is_pkg {
+        return;
+    }
+    // Raw first arg is `t` for package-level assertions.
+    if call.call.args.len() < 2 {
+        return;
+    }
+    let t = &call.call.args[0];
+    let Expr::CallExpr(ce) = t else {
+        return;
+    };
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return;
+    };
+    if !implements_testify_suite(pass, &se.x) {
+        return;
+    }
+    if se.sel.name != "T" {
+        return;
+    }
+    // Prefer Ident receiver (`s.T()`), matching upstream.
+    let Expr::Ident(rcv) = &*se.x else {
+        return;
+    };
+    let mut new_selector = rcv.name.clone();
+    if !call.is_assert {
+        new_selector.push_str(".Require()");
+    }
+    report_msg(
+        "suite-dont-use-pkg",
+        call,
+        &format!("use {new_selector}.{}", call.fn_name),
+        pending,
+    );
+}
+
+fn check_suite_extra_assert_call(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if call.is_pkg {
+        return;
+    }
+    match opts.suite_extra_assert_call_mode {
+        SuiteExtraAssertCallMode::Require => {
+            let Expr::Ident(x) = &*call.selector.x else {
+                return;
+            };
+            if !implements_testify_suite(pass, &call.selector.x) {
+                return;
+            }
+            report_msg(
+                "suite-extra-assert-call",
+                call,
+                &format!("use an explicit {}.Assert().{}", x.name, call.fn_name),
+                pending,
+            );
+        }
+        SuiteExtraAssertCallMode::Remove => {
+            let Expr::CallExpr(x) = &*call.selector.x else {
+                return;
+            };
+            let Expr::SelectorExpr(se) = &*x.fun else {
+                return;
+            };
+            if !implements_testify_suite(pass, &se.x) {
+                return;
+            }
+            if se.sel.name != "Assert" {
+                return;
+            }
+            report_msg(
+                "suite-extra-assert-call",
+                call,
+                &format!(
+                    "need to simplify the assertion to {}.{}",
+                    expr_string(&se.x),
+                    call.fn_name
+                ),
+                pending,
+            );
+        }
+    }
+}
+
+fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Expr::SelectorExpr(se) = &*call.fun else {
+        return;
+    };
+    if se.sel.name != "Run" {
+        return;
+    }
+    let Expr::CallExpr(t_call) = &*se.x else {
+        return;
+    };
+    let Expr::SelectorExpr(t_sel) = &*t_call.fun else {
+        return;
+    };
+    if t_sel.sel.name != "T" {
+        return;
+    }
+    if implements_testify_suite(pass, &t_sel.x) && implements_testing_t(pass, &se.x) {
+        pending.push((
+            call.pos().0 as u32,
+            format!(
+                "suite-subtest-run: use {}.Run to run subtest",
+                expr_string(&t_sel.x)
+            ),
+        ));
+    }
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -2533,6 +2761,18 @@ fn check_call(
             return;
         }
     }
+    if enabled.contains("suite-extra-assert-call") {
+        check_suite_extra_assert_call(pass, call, opts, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("suite-dont-use-pkg") {
+        check_suite_dont_use_pkg(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
     if enabled.contains("useless-assert") {
         check_useless_assert(pass, call, pending);
         if pending.len() > before {
@@ -2565,6 +2805,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             if let NodeRef::CallExpr(ce) = n {
+                if enabled.contains("suite-subtest-run") {
+                    check_suite_subtest_run(pass, ce, &mut pending);
+                }
                 if let Some(meta) = new_call_meta(pass, ce) {
                     check_call(pass, &meta, &enabled, &options, &mut pending);
                 }

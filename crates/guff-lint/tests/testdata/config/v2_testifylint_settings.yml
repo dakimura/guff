@@ -9,6 +9,7 @@ linters:
         - expected-actual
         - time-compare
         - formatter
+        - suite-extra-assert-call
       bool-compare:
         ignore-custom-types: true
       expected-actual:
@@ -19,3 +20,5 @@ linters:
         check-format-string: false
         require-f-funcs: true
         require-string-msg: false
+      suite-extra-assert-call:
+        mode: require

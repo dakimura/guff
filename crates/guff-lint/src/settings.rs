@@ -536,6 +536,14 @@ pub struct TestifylintFormatterSettings {
     pub require_string_msg: bool,
 }
 
+/// Nested `suite-extra-assert-call` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintSuiteExtraAssertCallSettings {
+    /// `"remove"` (default) or `"require"`.
+    #[serde(default)]
+    pub mode: Option<String>,
+}
+
 impl Default for TestifylintFormatterSettings {
     fn default() -> Self {
         Self {
@@ -565,6 +573,8 @@ pub struct TestifylintSettings {
     pub time_compare: TestifylintTimeCompareSettings,
     #[serde(default)]
     pub formatter: TestifylintFormatterSettings,
+    #[serde(default, rename = "suite-extra-assert-call")]
+    pub suite_extra_assert_call: TestifylintSuiteExtraAssertCallSettings,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -1519,6 +1529,16 @@ impl SloglintSettings {
 
 impl TestifylintSettings {
     pub fn to_guff_testifylint(&self) -> guff_style::TestifylintOptions {
+        let suite_mode = match self
+            .suite_extra_assert_call
+            .mode
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("require") => guff_style::SuiteExtraAssertCallMode::Require,
+            _ => guff_style::SuiteExtraAssertCallMode::Remove,
+        };
         guff_style::TestifylintOptions {
             enable_all: self.enable_all,
             disable_all: self.disable_all,
@@ -1530,6 +1550,7 @@ impl TestifylintSettings {
             formatter_check_format_string: self.formatter.check_format_string,
             formatter_require_f_funcs: self.formatter.require_f_funcs,
             formatter_require_string_msg: self.formatter.require_string_msg,
+            suite_extra_assert_call_mode: suite_mode,
         }
     }
 }

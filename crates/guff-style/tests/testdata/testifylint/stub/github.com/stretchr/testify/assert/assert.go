@@ -6,6 +6,8 @@ type TestingT interface {
 
 type Assertions struct{}
 
+func New(t TestingT) *Assertions { return &Assertions{} }
+
 func Equal(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool { return true }
 func Equalf(t TestingT, expected, actual interface{}, msg string, args ...interface{}) bool {
 	return true
