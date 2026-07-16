@@ -320,6 +320,8 @@ pub struct GoconstSettings {
     pub ignore_tests: Option<bool>,
     #[serde(default, rename = "match-constant")]
     pub match_constant: Option<bool>,
+    #[serde(default, rename = "find-duplicates")]
+    pub find_duplicates: Option<bool>,
     pub numbers: Option<bool>,
     pub min: Option<i64>,
     pub max: Option<i64>,
@@ -845,6 +847,7 @@ impl GoconstSettings {
             ignore_calls: self.ignore_calls.unwrap_or(defaults.ignore_calls),
             ignore_tests: self.ignore_tests.unwrap_or(defaults.ignore_tests),
             match_constant: self.match_constant.unwrap_or(defaults.match_constant),
+            find_duplicates: self.find_duplicates.unwrap_or(defaults.find_duplicates),
             numbers: self.numbers.unwrap_or(defaults.numbers),
             number_min: self.min.unwrap_or(defaults.number_min),
             number_max: self.max.unwrap_or(defaults.number_max),

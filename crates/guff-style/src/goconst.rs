@@ -2,16 +2,17 @@
 //! (golangci-lint defaults).
 //!
 //! Defaults match golangci-lint: `min-len=3`, `min-occurrences=3`,
-//! `match-constant=true`, `ignore-calls=true`, `numbers=false`,
-//! `min=3`, `max=3`.
+//! `match-constant=true`, `find-duplicates=false`, `ignore-calls=true`,
+//! `numbers=false`, `min=3`, `max=3`.
 //!
-//! DEFERRED: `find-duplicates`, `ignore-strings` / `ignore-functions`,
-//! `eval-const-expressions`, and remaining settings keys.
+//! DEFERRED: `ignore-strings` / `ignore-functions`, `eval-const-expressions`,
+//! and remaining settings keys.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{BasicLit, Expr, GenDecl, Spec};
+use guff::position::Pos;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
@@ -213,6 +214,7 @@ fn collect(
 ) {
     let pkg = pass.pkg();
     let fset = pass.fset();
+    let collect_consts = options.match_constant || options.find_duplicates;
     for (i, file) in pass.files().iter().enumerate() {
         let fallback = fset.position(file.pos()).filename;
         let filename = pkg
@@ -225,22 +227,17 @@ fn collect(
             continue;
         }
 
-        if options.match_constant {
-            for decl in &file.decls {
-                if let guff::ast::Decl::GenDecl(g) = decl {
-                    if g.tok == Some(Token::CONST) {
-                        collect_constants_from_gendecl(g, filename, options, constants);
-                    }
-                }
-            }
-        }
-
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
             };
             match n {
-                NodeRef::GenDecl(g) if g.tok == Some(Token::CONST) => false,
+                NodeRef::GenDecl(g) if g.tok == Some(Token::CONST) => {
+                    if collect_consts {
+                        collect_constants_from_gendecl(g, filename, options, constants);
+                    }
+                    false
+                }
                 NodeRef::CallExpr(_) if options.ignore_calls => false,
                 NodeRef::AssignStmt(a) => {
                     for rhs in &a.rhs {
@@ -300,6 +297,50 @@ fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> Stri
     }
 }
 
+fn format_duplicate_message(name: &str, first_pos: &guff::position::Position) -> String {
+    format!("This constant is a duplicate of `{name}` at {first_pos}")
+}
+
+fn report_duplicate_consts(
+    pass: &mut Pass<'_>,
+    constants: &HashMap<String, Vec<ConstEntry>>,
+) {
+    let mut keys: Vec<_> = constants.keys().cloned().collect();
+    keys.sort();
+    for key in keys {
+        let entries = constants.get(&key).expect("key present");
+        if entries.len() < 2 {
+            continue;
+        }
+
+        let mut non_test: Vec<_> = entries
+            .iter()
+            .filter(|e| !e.filename.ends_with("_test.go"))
+            .cloned()
+            .collect();
+        let mut test: Vec<_> = entries
+            .iter()
+            .filter(|e| e.filename.ends_with("_test.go"))
+            .cloned()
+            .collect();
+
+        for scope in [&mut non_test, &mut test] {
+            scope.sort_by(|a, b| (a.filename.as_str(), a.pos).cmp(&(b.filename.as_str(), b.pos)));
+            if scope.len() < 2 {
+                continue;
+            }
+            let first = &scope[0];
+            let first_pos = pass.fset().position(Pos(first.pos as i64));
+            for dup in &scope[1..] {
+                pass.reportf(
+                    dup.pos,
+                    &format_duplicate_message(&first.name, &first_pos),
+                );
+            }
+        }
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -323,7 +364,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         }
         let pos = *positions.iter().min().unwrap_or(&0);
-        let filename = pass.fset().position(guff::position::Pos(pos as i64)).filename;
+        let filename = pass.fset().position(Pos(pos as i64)).filename;
         let matching = if options.match_constant {
             find_matching_const(&key, &filename, &constants)
         } else {
@@ -331,6 +372,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         };
         pass.reportf(pos, &format_message(&key, count, matching.as_deref()));
     }
+
+    if options.find_duplicates {
+        report_duplicate_consts(pass, &constants);
+    }
+
     Ok(None)
 }
 

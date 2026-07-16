@@ -301,6 +301,8 @@ pub struct GoconstOptions {
     pub ignore_tests: bool,
     /// golangci `match-constant`: match repeated literals against existing `const` values.
     pub match_constant: bool,
+    /// golangci `find-duplicates`: report constants that share the same value.
+    pub find_duplicates: bool,
     /// golangci `numbers`: also report duplicated numeric literals.
     pub numbers: bool,
     /// golangci `min` (only when `numbers` is true).
@@ -317,6 +319,7 @@ impl Default for GoconstOptions {
             ignore_calls: true,
             ignore_tests: false,
             match_constant: true,
+            find_duplicates: false,
             numbers: false,
             number_min: 3,
             number_max: 3,

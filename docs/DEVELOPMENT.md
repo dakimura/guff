@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint（`concat-loop` / `loop-other-ops` 含む）/ goconst（`match-constant` / `numbers` / `min` / `max` 含む）の主要キー）。ignore ディレクティブ・SuggestedFix・`perfsprint` fiximports・`goconst` find-duplicates・wsl 完全パリティは **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint（`concat-loop` / `loop-other-ops` 含む）/ goconst（`match-constant` / `numbers` / `min` / `max` / `find-duplicates` 含む）の主要キー）。ignore ディレクティブ・SuggestedFix・`perfsprint` fiximports・wsl 完全パリティは **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
@@ -510,8 +510,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
      （golangci 既定 `omit-safe`；`report-no-exported` / `check-error-free-encoding` settings は DEFERRED）
   3. `guff-context`: **noctx**（AST call-name; upstream は buildssa）/ **fatcontext**
   4. `guff-style`（新）: **copyloopvar** / **usetesting** / **usestdlibvars**（HTTP method/status 既定オン）
-     / **perfsprint**（fmt.Sprint/Sprintf/Errorf 既定オン; concat-loop/fiximports は DEFERRED）
-     / **goconst**（golangci 既定 min-len=3 / min-occurrences=3 / exclude call）
+     / **perfsprint**（fmt.Sprint/Sprintf/Errorf 既定オン; concat-loop/loop-other-ops 実効化済; fiximports は DEFERRED）
+     / **goconst**（golangci 既定 min-len=3 / min-occurrences=3 / exclude call; find-duplicates 実効化済）
      / **dogsled**（golangci 既定 max-blank-identifiers=2）/ **asciicheck** / **goprintffuncname**
      / **funlen** / **gocyclo** / **lll** / **gocognit** / **nestif** / **cyclop**
      / **nakedret** / **nosprintfhostport** / **predeclared** / **whitespace** / **nlreturn** / **mnd**
@@ -528,7 +528,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `whitespace` `multi-if` / `multi-func` 実効化は **完了**（2026-07-16）
   - `goconst` `match-constant` / `numbers` / `min` / `max` 実効化は **完了**（2026-07-16）
   - `perfsprint` concat-loop / `loop-other-ops` 実効化は **完了**（2026-07-16）
-  - `perfsprint` の fiximports、`goconst` の find-duplicates
+  - `goconst` `find-duplicates` 実効化は **完了**（2026-07-16）
+  - `perfsprint` の fiximports
   - `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）
   - `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck — SSA（→ R17）
   - gosec ほか（R13 続きセッションで数個ずつ）
@@ -549,7 +550,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   whitespace SuggestedFix・nlreturn SuggestedFix・mnd settings・prealloc settings・
   tagalign StrictStyle / SuggestedFix・wsl 完全パリティ / `wsl_v5`・残 style linter settings は DEFERRED。）
   `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線済み。
-  `perfsprint` concat-loop（`strings.Builder` SuggestedFix）/ `loop-other-ops` 実効化済み。fiximports は DEFERRED。
+  `perfsprint` concat-loop / `loop-other-ops`・`goconst` `find-duplicates` 実効化済み。`perfsprint` fiximports は DEFERRED。
 - `guff-comment`: **godot**（declarations + period 既定）/ **godox**（TODO/BUG/FIXME）/ **dupword**
   （comments + string literals）。settings・SuggestedFix・godot scope/capital・dupword keyword
   フィルタは DEFERRED。
@@ -667,6 +668,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13/R14 続き**: `goconst` `find-duplicates` 実効化（同一値の const を検出；upstream jgautheron/goconst / golangci メッセージ準拠）。`linters.settings.goconst.find-duplicates` YAML 配線。テスト: `find_duplicates_*` fixtures + settings integration |
 | 2026-07-16 | **R13/R14 続き**: `perfsprint` concat-loop（ループ内文字列連結 → `strings.Builder` SuggestedFix）+ `loop-other-ops` 実効化（upstream catenacyber/perfsprint 準拠）。`linters.settings.perfsprint` に `concat-loop` / `loop-other-ops` YAML 配線。fiximports は DEFERRED。テスト: `concat_loop_*` fixtures + settings integration |
 | 2026-07-16 | **R13/R14 続き**: `goconst` `match-constant` / `numbers` / `min` / `max` 実効化（upstream jgautheron/goconst 準拠）。`linters.settings.goconst` YAML 配線拡張。テスト: `numbers_*` / `match_constant_*` fixtures + settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `whitespace` `multi-if` / `multi-func` 実効化（upstream ultraware/whitespace 準拠）。テスト: `multi_if_*` / `multi_func_*` fixtures + settings integration tests |

@@ -32,6 +32,7 @@ linters:
       min: 2
       max: 5
       match-constant: false
+      find-duplicates: true
     mnd:
       checks:
         - case

@@ -278,6 +278,7 @@ fn parse_v2_style_extended_linter_settings() {
     assert_eq!(settings.goconst.min, Some(2));
     assert_eq!(settings.goconst.max, Some(5));
     assert_eq!(settings.goconst.match_constant, Some(false));
+    assert_eq!(settings.goconst.find_duplicates, Some(true));
     assert_eq!(settings.mnd.checks.as_ref().map(|c| c.len()), Some(1));
     assert_eq!(settings.prealloc.range_loops, Some(false));
     assert_eq!(settings.tagalign.align, Some(false));
@@ -313,6 +314,11 @@ fn parse_v2_style_extended_linter_settings() {
         !bag.get::<guff_style::GoconstOptions>("goconst")
             .unwrap()
             .match_constant
+    );
+    assert!(
+        bag.get::<guff_style::GoconstOptions>("goconst")
+            .unwrap()
+            .find_duplicates
     );
     assert!(
         !bag.get::<guff_style::PerfsprintOptions>("perfsprint")

@@ -360,6 +360,109 @@ fn goconst_match_constant_allows_below_threshold() {
 }
 
 #[test]
+fn goconst_find_duplicates_reports_duplicate_consts() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GoconstOptions;
+
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/find_dup",
+        "find_duplicates_bad.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "goconst",
+        GoconstOptions {
+            find_duplicates: true,
+            match_constant: false,
+            ..GoconstOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goconst(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("This constant is a duplicate of `DuplicateConst1`")
+                && m.contains("find_duplicates_bad.go")
+        }),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("This constant is a duplicate of `GroupedDuplicateConst1`")
+        }),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("This constant is a duplicate of `ScopedDuplicateConst1`")
+        }),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goconst_find_duplicates_default_off() {
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/find_dup_default",
+        "find_duplicates_bad.go",
+    );
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("This constant is a duplicate")),
+        "find-duplicates defaults to false: {messages:?}"
+    );
+}
+
+#[test]
+fn goconst_find_duplicates_allows_unique_consts() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GoconstOptions;
+
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/find_dup_ok",
+        "find_duplicates_ok.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "goconst",
+        GoconstOptions {
+            find_duplicates: true,
+            match_constant: false,
+            ..GoconstOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goconst(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "find_duplicates_ok.go should stay clean: {messages:?}"
+    );
+}
+
+#[test]
 fn dogsled_flags_too_many_blanks() {
     let pkg = support::typecheck_fixture("dogsled", "example.com/dogsled", "bad.go");
     let messages = support::run_analyzer(dogsled(), &pkg);
