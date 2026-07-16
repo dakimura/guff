@@ -137,6 +137,107 @@ fn perfsprint_allows_complex_fmt() {
 }
 
 #[test]
+fn perfsprint_flags_concat_loop() {
+    let pkg = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/concat",
+        "concat_loop_bad.go",
+    );
+    let messages = support::run_analyzer(perfsprint(), &pkg);
+    let concat: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("concat-loop"))
+        .collect();
+    assert!(
+        concat.len() >= 8,
+        "expected several concat-loop diagnostics, got {}: {messages:?}",
+        concat.len()
+    );
+    assert!(
+        concat
+            .iter()
+            .all(|m| m.contains("string concatenation in a loop")),
+        "{concat:?}"
+    );
+}
+
+#[test]
+fn perfsprint_concat_loop_allows_local_and_other_ops() {
+    let pkg = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/concat_ok",
+        "concat_loop_ok.go",
+    );
+    let messages = support::run_analyzer(perfsprint(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains("concat-loop")),
+        "default loop-other-ops=false should skip otherOps cases; locals should be ignored: {messages:?}"
+    );
+}
+
+#[test]
+fn perfsprint_concat_loop_respects_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PerfsprintOptions;
+
+    let bad = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/concat_settings",
+        "concat_loop_bad.go",
+    );
+    let ok = support::typecheck_fixture(
+        "perfsprint",
+        "example.com/perfsprint/concat_ok_settings",
+        "concat_loop_ok.go",
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            concat_loop: false,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let disabled = support::run_analyzer_with_settings(
+        perfsprint(),
+        &bad,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !disabled.iter().any(|m| m.contains("concat-loop")),
+        "concat-loop=false should suppress: {disabled:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            loop_other_ops: true,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let with_other = support::run_analyzer_with_settings(
+        perfsprint(),
+        &ok,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        with_other.iter().any(|m| m.contains("concat-loop")),
+        "loop-other-ops=true should report otherOps concat loops: {with_other:?}"
+    );
+}
+
+#[test]
 fn goconst_flags_repeated_strings() {
     let pkg = support::typecheck_fixture("goconst", "example.com/goconst", "bad.go");
     let messages = support::run_analyzer(goconst(), &pkg);

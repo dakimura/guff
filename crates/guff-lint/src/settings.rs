@@ -301,6 +301,10 @@ pub struct PerfsprintSettings {
     pub bool_format: Option<bool>,
     #[serde(default, rename = "hex-format")]
     pub hex_format: Option<bool>,
+    #[serde(default, rename = "concat-loop")]
+    pub concat_loop: Option<bool>,
+    #[serde(default, rename = "loop-other-ops")]
+    pub loop_other_ops: Option<bool>,
 }
 
 /// `linters.settings.goconst` / `linters-settings.goconst`.
@@ -826,6 +830,8 @@ impl PerfsprintSettings {
             strconcat: self.strconcat.unwrap_or(defaults.strconcat),
             bool_format: self.bool_format.unwrap_or(defaults.bool_format),
             hex_format: self.hex_format.unwrap_or(defaults.hex_format),
+            concat_loop: self.concat_loop.unwrap_or(defaults.concat_loop),
+            loop_other_ops: self.loop_other_ops.unwrap_or(defaults.loop_other_ops),
         }
     }
 }

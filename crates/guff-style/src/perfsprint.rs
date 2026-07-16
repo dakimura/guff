@@ -1,13 +1,15 @@
 //! Port of [`github.com/catenacyber/perfsprint`](https://github.com/catenacyber/perfsprint).
 //!
 //! Implements the default-on fmt.Sprint / fmt.Sprintf / fmt.Errorf rewrites
-//! (string / bool / integer / hex / errors.New).
+//! (string / bool / integer / hex / errors.New) and concat-loop
+//! (string concatenation in loops → `strings.Builder`).
 //!
-//! DEFERRED: concat-loop, fiximports, `err-error` / remaining settings flags.
+//! DEFERRED: fiximports, `err-error` / remaining settings flags.
 
+use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{BasicLit, CallExpr, Expr};
+use guff::ast::{AssignStmt, BasicLit, CallExpr, Decl, Expr, Spec, Stmt};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
@@ -434,6 +436,315 @@ fn check_call(
     }
 }
 
+/// One string-concatenation assign inside a loop (`s += x` or `s = s + x`).
+struct ConcatAssign {
+    /// AssignStmt.tok_pos — unique id for nested-loop dedup.
+    tok_pos: u32,
+    stmt_pos: u32,
+    stmt_end: u32,
+    added_pos: u32,
+    added_end: u32,
+}
+
+/// If `st` is `idname = idname + Y`, return `Y`.
+fn is_string_add<'a>(st: &'a AssignStmt, idname: &str) -> Option<&'a Expr> {
+    if st.rhs.len() != 1 {
+        return None;
+    }
+    let Expr::BinaryExpr(add) = &st.rhs[0] else {
+        return None;
+    };
+    if add.op != Token::ADD {
+        return None;
+    }
+    let Expr::Ident(x) = &*add.x else {
+        return None;
+    };
+    if x.name != idname {
+        return None;
+    }
+    Some(&add.y)
+}
+
+fn assign_stmt_pos(st: &AssignStmt) -> u32 {
+    st.lhs
+        .first()
+        .map(|e| e.pos().0 as u32)
+        .unwrap_or(st.tok_pos.0 as u32)
+}
+
+fn assign_stmt_end(st: &AssignStmt) -> u32 {
+    st.rhs
+        .last()
+        .map(|e| e.end().0 as u32)
+        .unwrap_or(st.tok_pos.0 as u32)
+}
+
+/// Collect loop-external string concatenations (BFS into nested blocks).
+fn process_loop(
+    pass: &Pass<'_>,
+    body: &[Stmt],
+    already: &HashSet<u32>,
+) -> BTreeMap<String, Vec<ConcatAssign>> {
+    let mut decl_in_loop: HashSet<String> = HashSet::new();
+    let mut adds: BTreeMap<String, Vec<ConcatAssign>> = BTreeMap::new();
+    let mut queue: Vec<&Stmt> = body.iter().collect();
+    let mut i = 0;
+    while i < queue.len() {
+        let st = queue[i];
+        i += 1;
+        match st {
+            Stmt::RangeStmt(r) => queue.extend(r.body.list.iter()),
+            Stmt::ForStmt(f) => queue.extend(f.body.list.iter()),
+            Stmt::SwitchStmt(sw) => queue.extend(sw.body.list.iter()),
+            Stmt::CaseClause(c) => queue.extend(c.body.iter()),
+            Stmt::IfStmt(ifs) => {
+                queue.extend(ifs.body.list.iter());
+                if let Some(Stmt::BlockStmt(el)) = ifs.else_.as_deref() {
+                    queue.extend(el.list.iter());
+                }
+            }
+            Stmt::DeclStmt(ds) => {
+                let Decl::GenDecl(de) = &ds.decl else {
+                    continue;
+                };
+                if de.specs.len() != 1 {
+                    continue;
+                }
+                let Spec::ValueSpec(vs) = &de.specs[0] else {
+                    continue;
+                };
+                for n in &vs.names {
+                    decl_in_loop.insert(n.name.clone());
+                }
+            }
+            Stmt::AssignStmt(asgn) => {
+                for (idx, lhs) in asgn.lhs.iter().enumerate() {
+                    let Expr::Ident(id) = lhs else {
+                        break;
+                    };
+                    match asgn.tok {
+                        Some(Token::DEFINE) => {
+                            decl_in_loop.insert(id.name.clone());
+                        }
+                        Some(Token::ASSIGN) | Some(Token::AddAssign) => {
+                            if idx > 0 {
+                                break;
+                            }
+                            if decl_in_loop.contains(&id.name) {
+                                break;
+                            }
+                            let Some(typ) = type_of(pass, lhs) else {
+                                break;
+                            };
+                            if !is_basic(pass, typ, &[BasicKind::String]) {
+                                break;
+                            }
+                            let added = match asgn.tok {
+                                Some(Token::ASSIGN) => {
+                                    let Some(y) = is_string_add(asgn, &id.name) else {
+                                        break;
+                                    };
+                                    y
+                                }
+                                Some(Token::AddAssign) => {
+                                    if asgn.rhs.len() != 1 {
+                                        break;
+                                    }
+                                    &asgn.rhs[0]
+                                }
+                                _ => break,
+                            };
+                            let tok_pos = asgn.tok_pos.0 as u32;
+                            if already.contains(&tok_pos) {
+                                break;
+                            }
+                            adds.entry(id.name.clone()).or_default().push(ConcatAssign {
+                                tok_pos,
+                                stmt_pos: assign_stmt_pos(asgn),
+                                stmt_end: assign_stmt_end(asgn),
+                                added_pos: added.pos().0 as u32,
+                                added_end: added.end().0 as u32,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    adds
+}
+
+/// Detect other uses of concatenated identifiers in the loop (upstream `addTODO`).
+fn other_ops_ident(node: NodeRef<'_>, adds: &BTreeMap<String, Vec<ConcatAssign>>) -> Option<String> {
+    let mut found: Option<String> = None;
+    walk::inspect(node, |n| {
+        if found.is_some() {
+            return false;
+        }
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(x)
+                if matches!(x.tok, Some(Token::ASSIGN) | Some(Token::AddAssign))
+                    && x.lhs.len() == 1 =>
+            {
+                if let Expr::Ident(id) = &x.lhs[0] {
+                    if adds.contains_key(&id.name) {
+                        if x.tok == Some(Token::ASSIGN) && is_string_add(x, &id.name).is_none() {
+                            found = Some(id.name.clone());
+                        }
+                        return false;
+                    }
+                }
+            }
+            NodeRef::Ident(id) if adds.contains_key(&id.name) => {
+                found = Some(id.name.clone());
+                return false;
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
+fn report_concat_loop(
+    pass: &Pass<'_>,
+    loop_pos: u32,
+    loop_end: u32,
+    loop_node: NodeRef<'_>,
+    adds: &BTreeMap<String, Vec<ConcatAssign>>,
+    options: &PerfsprintOptions,
+    already: &mut HashSet<u32>,
+    pending: &mut Vec<Pending>,
+) {
+    let add_todo = other_ops_ident(loop_node, adds);
+    if add_todo.is_some() && !options.loop_other_ops {
+        return;
+    }
+
+    let loop_start_line = pass.fset().position(guff::position::Pos(loop_pos as i64)).line;
+
+    let mut prefix = String::new();
+    if let Some(name) = &add_todo {
+        prefix = format!(
+            "// FIXME check usages of string identifier {name} (and mayber others) in loop\n"
+        );
+    }
+    let mut suffix = String::new();
+    for k in adds.keys() {
+        for st in &adds[k] {
+            already.insert(st.tok_pos);
+        }
+        prefix.push_str(&format!("var {k}Sb{loop_start_line} strings.Builder\n"));
+        suffix.push_str(&format!("\n{k} += {k}Sb{loop_start_line}.String()"));
+    }
+
+    let mut te = vec![TextEdit {
+        pos: loop_pos,
+        end: loop_pos,
+        new_text: prefix,
+    }];
+    for (k, stmts) in adds {
+        for st in stmts {
+            te.push(TextEdit {
+                pos: st.stmt_pos,
+                end: st.added_pos,
+                new_text: format!("{k}Sb{loop_start_line}.WriteString("),
+            });
+            te.push(TextEdit {
+                pos: st.added_end,
+                end: st.added_end,
+                new_text: ")".into(),
+            });
+        }
+    }
+    te.push(TextEdit {
+        pos: loop_end,
+        end: loop_end,
+        new_text: suffix,
+    });
+
+    let first = adds.values().next().and_then(|v| v.first()).unwrap();
+    pending.push(Pending {
+        pos: first.stmt_pos,
+        end: first.stmt_end,
+        message: "concat-loop: string concatenation in a loop".into(),
+        fixes: vec![SuggestedFix {
+            message: "Use a strings.Builder".into(),
+            text_edits: te,
+        }],
+    });
+}
+
+fn check_concat_loops(pass: &Pass<'_>, options: &PerfsprintOptions, pending: &mut Vec<Pending>) {
+    if !options.concat_loop {
+        return;
+    }
+    let mut already: HashSet<u32> = HashSet::new();
+    for file in pass.files() {
+        // Collect (pos, end, body slice pointers via indices) in Preorder so outer
+        // loops are handled before nested ones (matches upstream inspect.Preorder).
+        let mut loops: Vec<(u32, u32)> = Vec::new();
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::RangeStmt(r) => {
+                    loops.push((r.for_.0 as u32, r.body.end().0 as u32));
+                }
+                NodeRef::ForStmt(f) => {
+                    loops.push((f.for_.0 as u32, f.body.end().0 as u32));
+                }
+                _ => {}
+            }
+            true
+        });
+
+        for &(loop_pos, loop_end) in &loops {
+            // Re-resolve the loop node and body for this position.
+            let mut handled = false;
+            walk::inspect(NodeRef::File(file), |n| {
+                if handled {
+                    return false;
+                }
+                let Some(n) = n else {
+                    return true;
+                };
+                let (body, node) = match n {
+                    NodeRef::RangeStmt(r) if r.for_.0 as u32 == loop_pos => {
+                        (&r.body.list[..], n)
+                    }
+                    NodeRef::ForStmt(f) if f.for_.0 as u32 == loop_pos => {
+                        (&f.body.list[..], n)
+                    }
+                    _ => return true,
+                };
+                let adds = process_loop(pass, body, &already);
+                if !adds.is_empty() {
+                    report_concat_loop(
+                        pass,
+                        loop_pos,
+                        loop_end,
+                        node,
+                        &adds,
+                        options,
+                        &mut already,
+                        pending,
+                    );
+                }
+                handled = true;
+                false
+            });
+        }
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -445,6 +756,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
 
     let mut pending = Vec::new();
+    check_concat_loops(pass, &options, &mut pending);
+
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {

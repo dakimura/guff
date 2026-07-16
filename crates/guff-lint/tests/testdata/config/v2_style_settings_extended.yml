@@ -23,6 +23,8 @@ linters:
     perfsprint:
       integer-format: false
       bool-format: false
+      concat-loop: false
+      loop-other-ops: true
     goconst:
       min-occurrences: 10
       ignore-tests: true

@@ -266,6 +266,10 @@ pub struct PerfsprintOptions {
     pub strconcat: bool,
     pub bool_format: bool,
     pub hex_format: bool,
+    /// golangci / upstream `concat-loop` (default true).
+    pub concat_loop: bool,
+    /// golangci / upstream `loop-other-ops` (default false).
+    pub loop_other_ops: bool,
 }
 
 impl Default for PerfsprintOptions {
@@ -281,6 +285,8 @@ impl Default for PerfsprintOptions {
             strconcat: true,
             bool_format: true,
             hex_format: true,
+            concat_loop: true,
+            loop_other_ops: false,
         }
     }
 }
