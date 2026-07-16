@@ -11,10 +11,19 @@ func New(t TestingT) *Assertions { return &Assertions{} }
 
 func Equal(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool { return true }
 func True(t TestingT, value bool, msgAndArgs ...interface{}) bool                    { return true }
+func Truef(t TestingT, value bool, msg string, args ...interface{}) bool             { return true }
 func Nil(t TestingT, object interface{}, msgAndArgs ...interface{}) bool             { return true }
 func NoError(t TestingT, err error, msgAndArgs ...interface{}) bool                  { return true }
 func NoErrorf(t TestingT, err error, msg string, args ...interface{}) bool           { return true }
 func Error(t TestingT, err error, msgAndArgs ...interface{}) bool                    { return true }
+func Fail(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool         { return true }
+func Failf(t TestingT, failureMessage string, msg string, args ...interface{}) bool {
+	return true
+}
+func FailNow(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool { return true }
+func FailNowf(t TestingT, failureMessage string, msg string, args ...interface{}) bool {
+	return true
+}
 func ErrorIs(t TestingT, err, target error, msgAndArgs ...interface{}) bool {
 	return true
 }
@@ -56,5 +65,11 @@ func (a *Assertions) EqualError(err error, expected string, msgAndArgs ...interf
 	return true
 }
 func (a *Assertions) ErrorContains(err error, contains string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) Fail(failureMessage string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) FailNow(failureMessage string, msgAndArgs ...interface{}) bool {
 	return true
 }

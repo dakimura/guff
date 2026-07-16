@@ -2462,6 +2462,28 @@ fn testifylint_flags_common_anti_patterns() {
         "require-error: {messages:?}"
     );
     assert!(
+        messages.iter().any(|m| m.contains("go-require") && m.contains("require must only")),
+        "go-require goroutine: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("go-require") && m.contains("FailNow")),
+        "go-require FailNow: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("go-require") && m.contains("helperWithRequire")),
+        "go-require nested helper: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("go-require") && m.contains("http handlers")),
+        "go-require http handler: {messages:?}"
+    );
+    assert!(
         messages.iter().all(|m| !m.contains("suite-thelper")),
         "suite-thelper should be off by default: {messages:?}"
     );
@@ -2624,5 +2646,46 @@ fn testifylint_require_error_fn_pattern() {
     assert!(
         none.iter().all(|m| !m.contains("require-error")),
         "non-matching fn-pattern should suppress: {none:?}"
+    );
+}
+
+#[test]
+fn testifylint_go_require_ignore_http_handlers() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TestifylintOptions;
+
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["go-require".into()],
+            go_require_ignore_http_handlers: true,
+            ..TestifylintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("go-require") && m.contains("require must only")),
+        "goroutine require still flagged: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|m| !(m.contains("go-require") && m.contains("http handlers"))),
+        "http handlers should be ignored: {messages:?}"
     );
 }

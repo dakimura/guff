@@ -6,25 +6,26 @@
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
-//! `float-compare`, `formatter`, `len`, `negative-positive`, `nil-compare`, `regexp`,
-//! `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
+//! `float-compare`, `formatter`, `go-require`, `len`, `negative-positive`, `nil-compare`,
+//! `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
 //! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
 //! `suite-thelper` (off by default), `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (go-require, mock-expect), SuggestedFix / TextEdit,
+//! DEFERRED: remaining checker (`mock-expect`), SuggestedFix / TextEdit,
 //! formatter full printf CheckPrintf / require-f-funcs object lookup parity,
 //! bool-compare custom-type casting in messages, compares time.Time helpers,
 //! encoded-compare autofix text edits, error-is-as CollectT special-case /
 //! full ErrorAs pointer diagnostics edge cases, require-error HTTP-handler /
 //! WaitGroup.Go context detection when `net/http` / `sync.WaitGroup.Go` are
-//! unavailable in the type graph.
+//! unavailable in the type graph (go-require covers these when stubs/types
+//! are present).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
     ArrayType, BasicLit, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File,
-    FuncDecl, Ident, IfStmt, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
+    FuncDecl, FuncType, Ident, IfStmt, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -33,12 +34,12 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::api_implements;
-use guff_types::arena::{ObjectData, TypeData};
+use guff_types::arena::{ObjectData, ObjectId, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
 use guff_types::named::named_obj;
 use guff_types::predicates::identical;
 use guff_types::scope::lookup as scope_lookup;
-use guff_types::signature::{signature_params, signature_variadic};
+use guff_types::signature::{signature_params, signature_recv, signature_variadic};
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::{new_pointer, TypeId};
 use regex::Regex;
@@ -65,6 +66,7 @@ const IMPLEMENTED: &[&str] = &[
     "expected-actual",
     "float-compare",
     "formatter",
+    "go-require",
     "len",
     "negative-positive",
     "nil-compare",
@@ -2876,8 +2878,6 @@ fn is_require_error_fn(trimmed: &str) -> bool {
 struct FuncMeta {
     is_test_cleanup: bool,
     is_goroutine: bool,
-    /// DEFERRED: full `mimicHTTPHandler` when `net/http.HandlerFunc` is in the type graph.
-    #[allow(dead_code)]
     is_http_handler: bool,
 }
 
@@ -2941,7 +2941,7 @@ fn find_surrounding_func_meta(pass: &Pass<'_>, stack: &[walk::NodeRef<'_>]) -> O
                 let mut meta = FuncMeta {
                     is_test_cleanup: false,
                     is_goroutine: false,
-                    is_http_handler: false,
+                    is_http_handler: mimic_http_handler(pass, &fd.ty),
                 };
                 if is_suite_method(pass, fd) && is_suite_after_test_method(&fd.name.name) {
                     meta.is_test_cleanup = true;
@@ -2952,7 +2952,7 @@ fn find_surrounding_func_meta(pass: &Pass<'_>, stack: &[walk::NodeRef<'_>]) -> O
                 let mut meta = FuncMeta {
                     is_test_cleanup: false,
                     is_goroutine: false,
-                    is_http_handler: false,
+                    is_http_handler: mimic_http_handler(pass, &fl.ty),
                 };
                 if i >= 2 {
                     if let walk::NodeRef::CallExpr(ce) = stack[i - 1] {
@@ -3159,6 +3159,404 @@ fn check_require_error(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GoRequireVerdict {
+    NoExit,
+    Require,
+    AssertFailNow,
+}
+
+fn go_require_verdict(call: &CallMeta<'_>) -> GoRequireVerdict {
+    if !call.is_assert {
+        return GoRequireVerdict::Require;
+    }
+    if call.fn_name_trimmed == "FailNow" {
+        return GoRequireVerdict::AssertFailNow;
+    }
+    GoRequireVerdict::NoExit
+}
+
+fn has_testing_t_param(pass: &Pass<'_>, ft: &FuncType) -> bool {
+    let Some(params) = &ft.params else {
+        return false;
+    };
+    for field in &params.list {
+        let Some(ty) = &field.ty else {
+            continue;
+        };
+        if implements_testing_t(pass, ty) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_testing_func_or_method(pass: &Pass<'_>, fd: &FuncDecl) -> bool {
+    has_testing_t_param(pass, &fd.ty) || is_suite_method(pass, fd)
+}
+
+fn is_subtest_run(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return false;
+    };
+    if se.sel.name != "Run" {
+        return false;
+    }
+    implements_testing_t(pass, &se.x) || implements_testify_suite(pass, &se.x)
+}
+
+fn is_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg_path: &str, name: &str) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let typ = match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => unalias_readonly(&artifacts.types, p.elem()),
+        _ => typ,
+    };
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let obj = named_obj(&artifacts.types, typ);
+    if obj.name(&artifacts.objects) != name {
+        return false;
+    }
+    let Some(pkg_id) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    cut_vendor(artifacts.packages.get(pkg_id).path()) == pkg_path
+}
+
+fn is_waitgroup_go(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    let Expr::SelectorExpr(se) = &*ce.fun else {
+        return false;
+    };
+    if se.sel.name != "Go" {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&se.sel.id).copied() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return false;
+    }
+    let Some(sig_id) = obj_id.typ(&artifacts.objects) else {
+        return false;
+    };
+    let Some(recv) = signature_recv(&artifacts.types, sig_id) else {
+        return false;
+    };
+    let Some(recv_typ) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    is_named_pkg_type(pass, recv_typ, "sync", "WaitGroup")
+}
+
+/// Whether `stack` places us in the goroutine that runs the test function.
+/// `None` = not inside a testing function (insufficient context).
+fn in_goroutine_running_test_func(pass: &Pass<'_>, stack: &[NodeRef<'_>]) -> Option<bool> {
+    let mut status: Option<bool> = None;
+    for n in stack {
+        match n {
+            NodeRef::FuncDecl(fd) if is_testing_func_or_method(pass, fd) => {
+                status = Some(true);
+            }
+            NodeRef::FuncLit(fl) if has_testing_t_param(pass, &fl.ty) => {
+                status = Some(true);
+            }
+            NodeRef::GoStmt(_) => {
+                if status.is_some() {
+                    status = Some(false);
+                }
+            }
+            NodeRef::CallExpr(ce) => {
+                if status.is_some() {
+                    if is_waitgroup_go(pass, ce) {
+                        status = Some(false);
+                    } else if is_subtest_run(pass, ce) {
+                        status = Some(true);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    status
+}
+
+fn func_type_param_exprs(ft: &FuncType) -> Vec<&Expr> {
+    let mut out = Vec::new();
+    let Some(params) = &ft.params else {
+        return out;
+    };
+    for field in &params.list {
+        let Some(ty) = &field.ty else {
+            continue;
+        };
+        if field.names.is_empty() {
+            out.push(ty);
+        } else {
+            for _ in &field.names {
+                out.push(ty);
+            }
+        }
+    }
+    out
+}
+
+fn mimic_http_handler(pass: &Pass<'_>, ft: &FuncType) -> bool {
+    let Some(hf) = lookup_named_type(pass, "net/http", "HandlerFunc") else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let hf = unalias_readonly(&artifacts.types, hf);
+    let under = hf.underlying(&artifacts.types);
+    let TypeData::Signature(_) = artifacts.types.get(under) else {
+        return false;
+    };
+    let Some(params_tup) = signature_params(&artifacts.types, under) else {
+        return false;
+    };
+    let n = tuple_len(&artifacts.types, Some(params_tup));
+    let ast_params = func_type_param_exprs(ft);
+    if ast_params.len() != n {
+        return false;
+    }
+    for (i, ast_ty) in ast_params.iter().enumerate() {
+        let want = tuple_at(&artifacts.types, params_tup, i);
+        let Some(want_ty) = want.typ(&artifacts.objects) else {
+            return false;
+        };
+        let Some(got_ty) = type_of(pass, ast_ty) else {
+            return false;
+        };
+        if !types_identical(pass, got_ty, want_ty) {
+            return false;
+        }
+    }
+    true
+}
+
+fn surrounding_func_is_http_handler(pass: &Pass<'_>, stack: &[NodeRef<'_>]) -> bool {
+    for n in stack.iter().rev() {
+        match n {
+            NodeRef::FuncDecl(fd) => return mimic_http_handler(pass, &fd.ty),
+            NodeRef::FuncLit(fl) => return mimic_http_handler(pass, &fl.ty),
+            _ => {}
+        }
+    }
+    false
+}
+
+fn collect_test_decls<'a>(pass: &Pass<'_>, file: &'a File) -> HashMap<ObjectId, &'a FuncDecl> {
+    let mut map = HashMap::new();
+    let Some(info) = pass.types_info() else {
+        return map;
+    };
+    for decl in &file.decls {
+        let Decl::FuncDecl(fd) = decl else {
+            continue;
+        };
+        if !is_testing_func_or_method(pass, fd) {
+            continue;
+        }
+        if let Some(oid) = info.defs.get(&fd.name.id).copied().flatten() {
+            map.insert(oid, fd);
+        }
+    }
+    map
+}
+
+fn called_func_obj(pass: &Pass<'_>, ce: &CallExpr) -> Option<ObjectId> {
+    let info = pass.types_info()?;
+    match &*ce.fun {
+        Expr::Ident(id) => info
+            .uses
+            .get(&id.id)
+            .copied()
+            .or_else(|| info.defs.get(&id.id).copied().flatten()),
+        Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
+        Expr::IndexExpr(ix) => {
+            let Expr::Ident(id) = &*ix.x else {
+                return None;
+            };
+            info.uses
+                .get(&id.id)
+                .copied()
+                .or_else(|| info.defs.get(&id.id).copied().flatten())
+        }
+        Expr::IndexListExpr(ix) => {
+            let Expr::Ident(id) = &*ix.x else {
+                return None;
+            };
+            info.uses
+                .get(&id.id)
+                .copied()
+                .or_else(|| info.defs.get(&id.id).copied().flatten())
+        }
+        _ => None,
+    }
+}
+
+fn check_go_require_func(
+    pass: &Pass<'_>,
+    fd: &FuncDecl,
+    tests: &HashMap<ObjectId, &FuncDecl>,
+    processed: &mut HashMap<ObjectId, GoRequireVerdict>,
+) -> GoRequireVerdict {
+    let Some(info) = pass.types_info() else {
+        return GoRequireVerdict::NoExit;
+    };
+    let Some(self_oid) = info.defs.get(&fd.name.id).copied().flatten() else {
+        return GoRequireVerdict::NoExit;
+    };
+    if let Some(v) = processed.get(&self_oid).copied() {
+        return v;
+    }
+
+    let mut result = GoRequireVerdict::NoExit;
+    let body = match &fd.body {
+        Some(b) => b,
+        None => {
+            processed.insert(self_oid, result);
+            return result;
+        }
+    };
+
+    walk::preorder(NodeRef::BlockStmt(body), |n| {
+        if result != GoRequireVerdict::NoExit {
+            return false;
+        }
+        match n {
+            NodeRef::GoStmt(_) => return false,
+            NodeRef::CallExpr(ce) => {
+                if is_waitgroup_go(pass, ce) {
+                    return false;
+                }
+                if let Some(meta) = new_call_meta(pass, ce) {
+                    let v = go_require_verdict(&meta);
+                    if v != GoRequireVerdict::NoExit {
+                        result = v;
+                        processed.insert(self_oid, v);
+                    }
+                    return false;
+                }
+                if let Some(oid) = called_func_obj(pass, ce) {
+                    if oid == self_oid {
+                        return true;
+                    }
+                    if let Some(called) = tests.get(&oid).copied() {
+                        let v = check_go_require_func(pass, called, tests, processed);
+                        if v != GoRequireVerdict::NoExit {
+                            result = v;
+                            return false;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+
+    processed.entry(self_oid).or_insert(result);
+    result
+}
+
+fn report_go_require_call(
+    call: &CallMeta<'_>,
+    http_handler: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
+    match go_require_verdict(call) {
+        GoRequireVerdict::Require => {
+            let msg = if http_handler {
+                "go-require: do not use require in http handlers"
+            } else {
+                "go-require: require must only be used in the goroutine running the test function"
+            };
+            pending.push((call.call.pos().0 as u32, msg.into()));
+        }
+        GoRequireVerdict::AssertFailNow => {
+            let target = call_fn_string(call);
+            let msg = if http_handler {
+                format!("go-require: do not use {target} in http handlers")
+            } else {
+                format!(
+                    "go-require: {target} must only be used in the goroutine running the test function"
+                )
+            };
+            pending.push((call.call.pos().0 as u32, msg));
+        }
+        GoRequireVerdict::NoExit => {}
+    }
+}
+
+fn check_go_require(
+    pass: &Pass<'_>,
+    file: &File,
+    opts: &TestifylintOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let tests = collect_test_decls(pass, file);
+    let mut processed: HashMap<ObjectId, GoRequireVerdict> = HashMap::new();
+
+    let mut stack = Vec::new();
+    walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+        let NodeRef::CallExpr(ce) = n else {
+            return true;
+        };
+
+        let in_test_go = in_goroutine_running_test_func(pass, stk);
+        if in_test_go == Some(false) {
+            if let Some(meta) = new_call_meta(pass, ce) {
+                report_go_require_call(&meta, false, pending);
+                return true;
+            }
+            if let Some(oid) = called_func_obj(pass, ce) {
+                if let Some(fd) = tests.get(&oid).copied() {
+                    if check_go_require_func(pass, fd, &tests, &mut processed)
+                        != GoRequireVerdict::NoExit
+                    {
+                        let caller = expr_string(&ce.fun);
+                        pending.push((
+                            ce.pos().0 as u32,
+                            format!(
+                                "go-require: {caller} contains assertions that must only be used in the goroutine running the test function"
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        true
+    });
+
+    if !opts.go_require_ignore_http_handlers {
+        let mut stack = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stk| {
+            let NodeRef::CallExpr(ce) = n else {
+                return true;
+            };
+            if !surrounding_func_is_http_handler(pass, stk) {
+                return true;
+            }
+            if let Some(meta) = new_call_meta(pass, ce) {
+                report_go_require_call(&meta, true, pending);
+            }
+            true
+        });
+    }
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -3357,6 +3755,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
         if enabled.contains("require-error") {
             check_require_error(pass, file, &options, &mut pending);
+        }
+        if enabled.contains("go-require") {
+            check_go_require(pass, file, &options, &mut pending);
         }
     }
 

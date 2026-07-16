@@ -568,6 +568,8 @@ pub struct TestifylintOptions {
     pub suite_extra_assert_call_mode: SuiteExtraAssertCallMode,
     /// `require-error.fn-pattern`. `None` → all error assertion names.
     pub require_error_fn_pattern: Option<String>,
+    /// `go-require.ignore-http-handlers` (default false).
+    pub go_require_ignore_http_handlers: bool,
 }
 
 impl Default for TestifylintOptions {
@@ -585,6 +587,7 @@ impl Default for TestifylintOptions {
             formatter_require_string_msg: true,
             suite_extra_assert_call_mode: SuiteExtraAssertCallMode::Remove,
             require_error_fn_pattern: None,
+            go_require_ignore_http_handlers: false,
         }
     }
 }

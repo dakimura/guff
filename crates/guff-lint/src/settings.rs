@@ -552,6 +552,13 @@ pub struct TestifylintRequireErrorSettings {
     pub fn_pattern: Option<String>,
 }
 
+/// Nested `go-require` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintGoRequireSettings {
+    #[serde(default, rename = "ignore-http-handlers")]
+    pub ignore_http_handlers: bool,
+}
+
 impl Default for TestifylintFormatterSettings {
     fn default() -> Self {
         Self {
@@ -585,6 +592,8 @@ pub struct TestifylintSettings {
     pub suite_extra_assert_call: TestifylintSuiteExtraAssertCallSettings,
     #[serde(default, rename = "require-error")]
     pub require_error: TestifylintRequireErrorSettings,
+    #[serde(default, rename = "go-require")]
+    pub go_require: TestifylintGoRequireSettings,
 }
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
@@ -1562,6 +1571,7 @@ impl TestifylintSettings {
             formatter_require_string_msg: self.formatter.require_string_msg,
             suite_extra_assert_call_mode: suite_mode,
             require_error_fn_pattern: self.require_error.fn_pattern.clone(),
+            go_require_ignore_http_handlers: self.go_require.ignore_http_handlers,
         }
     }
 }

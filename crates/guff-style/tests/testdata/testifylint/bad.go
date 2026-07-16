@@ -3,12 +3,15 @@ package testifylint
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -79,6 +82,25 @@ func TestBad(t *testing.T) {
 	nop()
 	assert.ErrorIs(t, err, errSentinel)
 	nop()
+
+	// go-require: require / FailNow must not run in non-test goroutines.
+	go func() {
+		require.NoError(t, err)
+		assert.FailNow(t, "boom!")
+		helperWithRequire(t)
+	}()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		require.True(t, true)
+	})
+	_ = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, err)
+		assert.FailNow(t, "boom!")
+	})
+}
+
+func helperWithRequire(t *testing.T) {
+	require.Fail(t, "boom!")
 }
 
 func nop() {}

@@ -572,6 +572,7 @@ fn parse_v2_testifylint_settings() {
         settings.testifylint.require_error.fn_pattern.as_deref(),
         Some("^NoError$")
     );
+    assert!(settings.testifylint.go_require.ignore_http_handlers);
     let bag = settings.to_bag();
     let opts = bag
         .get::<guff_style::TestifylintOptions>("testifylint")
@@ -581,6 +582,7 @@ fn parse_v2_testifylint_settings() {
         opts.require_error_fn_pattern.as_deref(),
         Some("^NoError$")
     );
+    assert!(opts.go_require_ignore_http_handlers);
     assert_eq!(
         opts.enable,
         vec![

@@ -24,3 +24,5 @@ linters:
         mode: require
       require-error:
         fn-pattern: ^NoError$
+      go-require:
+        ignore-http-handlers: true

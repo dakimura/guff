@@ -110,7 +110,13 @@ func ErrorContains(t TestingT, err error, contains string, msgAndArgs ...interfa
 func JSONEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 func YAMLEq(t TestingT, expected, actual string, msgAndArgs ...interface{}) bool { return true }
 func Fail(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool     { return true }
-func FailNow(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool  { return true }
+func Failf(t TestingT, failureMessage string, msg string, args ...interface{}) bool {
+	return true
+}
+func FailNow(t TestingT, failureMessage string, msgAndArgs ...interface{}) bool { return true }
+func FailNowf(t TestingT, failureMessage string, msg string, args ...interface{}) bool {
+	return true
+}
 
 func (a *Assertions) Equal(expected, actual interface{}, msgAndArgs ...interface{}) bool {
 	return true
@@ -142,6 +148,12 @@ func (a *Assertions) ErrorContains(err error, contains string, msgAndArgs ...int
 func (a *Assertions) Fail(failureMessage string, msgAndArgs ...interface{}) bool {
 	return true
 }
+func (a *Assertions) Failf(failureMessage string, msg string, args ...interface{}) bool {
+	return true
+}
 func (a *Assertions) FailNow(failureMessage string, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) FailNowf(failureMessage string, msg string, args ...interface{}) bool {
 	return true
 }

@@ -2,6 +2,7 @@ package testifylint
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -55,6 +56,18 @@ func TestOk(t *testing.T) {
 	assert.Equal(t, 1, 2, "msg")
 	assert.Equalf(t, 1, 2, "msg %d", 42)
 	assert.Fail(t, "boom!", "case [%d] failed", 1)
+
+	// go-require: assert (non-FailNow) is fine in goroutines; require is fine in
+	// the test goroutine and in t.Run subtests.
+	go func() {
+		assert.Equal(t, a, b)
+	}()
+	t.Run("sub", func(t *testing.T) {
+		require.NoError(t, err)
+	})
+	_ = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, a, b)
+	})
 }
 
 type SuiteOk struct {
