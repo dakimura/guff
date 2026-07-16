@@ -1,0 +1,118 @@
+# Snapshot based on consul `.golangci.yml` (golangci-lint v2).
+# Copyright IBM Corp. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+version: "2"
+run:
+  concurrency: 4
+linters:
+  default: none
+  enable:
+    - depguard
+    - forbidigo
+    - gomodguard
+    - govet
+    - ineffassign
+    - staticcheck
+    - unconvert
+    - unparam
+  settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: net/rpc
+              desc: only use forked copy in github.com/hashicorp/consul-net-rpc/net/rpc
+            - pkg: github.com/golang/protobuf
+              desc: only use google.golang.org/protobuf
+    forbidigo:
+      forbid:
+        - pattern: \bhtml\/template\b(# Use text/template instead)?
+        - pattern: \bioutil\b(# Use io and os packages instead of ioutil)?
+        - pattern: \brequire\.New\b(# Use package-level functions with explicit TestingT)?
+        - pattern: \bassert\.New\b(# Use package-level functions with explicit TestingT)?
+    gomodguard:
+      blocked:
+        modules:
+          - github.com/hashicorp/net-rpc-msgpackrpc:
+              recommendations:
+                - github.com/hashicorp/consul-net-rpc/net-rpc-msgpackrpc
+          - github.com/hashicorp/go-msgpack:
+              recommendations:
+                - github.com/hashicorp/consul-net-rpc/go-msgpack
+          - github.com/golang/protobuf:
+              recommendations:
+                - google.golang.org/protobuf
+    govet:
+      disable:
+        - fieldalignment
+        - nilness
+        - shadow
+        - unusedwrite
+        - printf
+      enable-all: true
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - staticcheck
+        text: 'SA9004:'
+      - linters:
+          - staticcheck
+        text: 'SA1006:'
+      - linters:
+          - staticcheck
+        text: 'SA1019: "io/ioutil" has been deprecated since Go 1.16'
+      - linters:
+          - staticcheck
+        path: (agent/grpc-external|agent/grpc-internal)
+        text: 'SA1019:'
+      - linters:
+          - unparam
+        text: always receives
+      - linters:
+          - unparam
+        text: result \d+ \(bool\) is always false
+      - linters:
+          - unparam
+        text: result \d+ \(error\) is always nil
+      - linters:
+          - unparam
+        text: '`_[^`]*` is unused'
+      - linters:
+          - unparam
+        text: '`(t|resp|req|entMeta)` is unused'
+      - linters:
+          - unparam
+        path: (_ce.go|_ce_test.go|_ent.go|_ent_test.go)
+      - linters:
+          - staticcheck
+        text: 'SA1019:'
+      - linters:
+          - staticcheck
+        text: 'ST1005: error strings should not end with punctuation or newlines'
+      - linters:
+          - staticcheck
+        text: 'ST1012: error var injectedError should have name of the form errFo'
+      - linters:
+          - staticcheck
+        text: 'ST1005: error strings should not be capitalized'
+      - linters:
+          - staticcheck
+        text: 'ST1012: error var'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
