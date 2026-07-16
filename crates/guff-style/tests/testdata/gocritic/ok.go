@@ -1,5 +1,12 @@
 package gocritic
 
+import (
+	"flag"
+	"regexp"
+	"strings"
+	"sync"
+)
+
 func okElseIf(cond1, cond2 bool) {
 	if cond1 {
 		println("a")
@@ -59,4 +66,65 @@ func okAssign(x int) {
 
 func okUnderef(p *struct{ N int }) {
 	_ = p.N
+}
+
+func okDupBranch(cond bool) {
+	if cond {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+func okDupSub(x, y int) {
+	_ = x < y
+}
+
+func okFlagName() {
+	_ = flag.Bool("ok", false, "docs")
+}
+
+func okMapKey() {
+	_ = map[string]int{
+		"foo": 1,
+		"bar": 2,
+	}
+}
+
+func okOffBy1(xs []int) {
+	if len(xs) > 0 {
+		_ = xs[len(xs)-1]
+	}
+}
+
+func okTypeSwitchVar(v interface{}) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	default:
+		return 0
+	}
+}
+
+func okBadCondFor(n int) {
+	for i := 0; i < n; i++ {
+		_ = i
+	}
+}
+
+func okUnlambda(fn func(int) int) {
+	_ = fn
+}
+
+func okRegexpMust() {
+	_ = regexp.MustCompile("abc")
+}
+
+func okWrapper(s string, wg *sync.WaitGroup) {
+	_ = strings.Split(s, ",")
+	wg.Done()
+}
+
+func okArgOrder(s string) {
+	_ = strings.HasPrefix(s, "#")
 }

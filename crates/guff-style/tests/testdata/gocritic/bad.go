@@ -5,7 +5,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 func elseIf(cond1, cond2 bool) {
@@ -114,4 +116,67 @@ func underef(p *struct{ N int }) {
 
 func dupArg(a string) {
 	_ = strings.Contains(a, a)
+}
+
+func dupBranch(cond bool) {
+	if cond {
+		println("same")
+	} else {
+		println("same")
+	}
+}
+
+func dupSub(x int) {
+	_ = x < x
+}
+
+func flagNameBad() {
+	_ = flag.Bool(" foo ", false, "docs")
+}
+
+func mapKeyBad() {
+	_ = map[string]int{
+		"foo":  1,
+		"bar ": 2,
+	}
+}
+
+func offBy1(xs []int) {
+	_ = xs[len(xs)]
+}
+
+func typeSwitchVar(v interface{}) int {
+	switch v.(type) {
+	case int:
+		return v.(int)
+	default:
+		return 0
+	}
+}
+
+func badCondFor(n int) {
+	for i := 0; i > n; i++ {
+		_ = i
+	}
+}
+
+func badCondExpr(x, a, b int) {
+	_ = x == a && x == b
+}
+
+func unlambda(fn func(int) int) {
+	_ = func(x int) int { return fn(x) }
+}
+
+func regexpMust() {
+	_, _ = regexp.Compile("abc")
+}
+
+func wrapperFunc(s string, wg *sync.WaitGroup) {
+	_ = strings.SplitN(s, ",", -1)
+	wg.Add(-1)
+}
+
+func argOrder(s string) {
+	_ = strings.HasPrefix("#", s)
 }

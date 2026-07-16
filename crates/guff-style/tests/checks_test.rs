@@ -2944,6 +2944,19 @@ fn gocritic_flags_common_patterns() {
         "x++",
         "x *=",
         "duplicated args",
+        "both branches in if statement have same body",
+        "identical LHS and RHS",
+        "contains whitespace",
+        "suspicious whitespace",
+        "always panics",
+        "type switch with assignment",
+        "in loop; probably meant",
+        "condition is suspicious",
+        "replace `",
+        "MustCompile",
+        "WaitGroup.Done",
+        "strings.Split method",
+        "arguments order looks reversed",
     ];
     for needle in expect {
         assert!(

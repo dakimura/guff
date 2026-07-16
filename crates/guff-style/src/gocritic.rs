@@ -1,27 +1,28 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented default/stable checkers:
-//! - `appendAssign`, `assignOp`, `badCall`, `captLocal`, `defaultCaseOrder`,
-//!   `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`, `flagDeref`,
-//!   `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`, `switchTrue`,
-//!   `underef`, `unslice`, `valSwap`
+//! Implemented default/stable checkers (29):
+//! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
+//!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
+//!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
+//!   `switchTrue`, `underef`, `unslice`, `valSwap`
+//! - batch 2: `argOrder`, `badCond`, `dupBranchBody`, `dupSubExpr`, `flagName`,
+//!   `mapKey`, `offBy1`, `regexpMust`, `typeSwitchVar`, `unlambda`, `wrapperFunc`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining default checks (argOrder, badCond, caseOrder,
-//! codegenComment, commentFormatting, deprecatedComment, dupBranchBody,
-//! dupSubExpr, flagName, mapKey, offBy1, regexpMust, sloppyTypeAssert,
-//! typeSwitchVar, unlambda, wrapperFunc, …), enable-all extras, per-check
-//! `settings` params, SuggestedFix.
+//! DEFERRED: remaining default checks (caseOrder, codegenComment,
+//! commentFormatting, deprecatedComment, sloppyTypeAssert, …), enable-all
+//! extras, per-check `settings` params, SuggestedFix, wrapperFunc/unlambda/
+//! typeSwitchVar full type-aware parity.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, Expr, FieldList, FuncDecl, IfStmt, SliceExpr,
-    StarExpr, Stmt, SwitchStmt, TypeSwitchStmt,
+    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Expr, FieldList, FuncDecl, FuncLit,
+    IfStmt, IndexExpr, SliceExpr, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -35,23 +36,34 @@ use crate::options::GocriticOptions;
 /// (golangci-lint stable list ∩ implemented).
 const DEFAULT_CHECKS: &[&str] = &[
     "appendAssign",
+    "argOrder",
     "assignOp",
     "badCall",
+    "badCond",
     "captLocal",
     "defaultCaseOrder",
     "dupArg",
+    "dupBranchBody",
     "dupCase",
+    "dupSubExpr",
     "elseif",
     "exitAfterDefer",
     "flagDeref",
+    "flagName",
     "ifElseChain",
+    "mapKey",
     "newDeref",
+    "offBy1",
+    "regexpMust",
     "singleCaseSwitch",
     "sloppyLen",
     "switchTrue",
+    "typeSwitchVar",
     "underef",
+    "unlambda",
     "unslice",
     "valSwap",
+    "wrapperFunc",
 ];
 
 /// All checkers this port implements (used for `enable-all`).
@@ -108,6 +120,22 @@ fn expr_text(expr: &Expr) -> Option<String> {
             let x = expr_text(&u.x)?;
             Some(format!("!{x}"))
         }
+        Expr::BinaryExpr(b) => {
+            let x = expr_text(&b.x)?;
+            let y = expr_text(&b.y)?;
+            Some(format!("{x} {} {y}", b.op.as_str()))
+        }
+        Expr::TypeAssertExpr(a) => {
+            let x = expr_text(&a.x)?;
+            match &a.ty {
+                Some(t) => {
+                    let ty = expr_text(t)?;
+                    Some(format!("{x}.({ty})"))
+                }
+                None => Some(format!("{x}.(type)")),
+            }
+        }
+        Expr::FuncLit(_) => None,
         _ => None,
     }
 }
@@ -801,6 +829,645 @@ fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
     }
 }
 
+fn stmt_text(stmt: &Stmt) -> Option<String> {
+    match stmt {
+        Stmt::ExprStmt(e) => expr_text(&e.x).map(|x| format!("{x};")),
+        Stmt::ReturnStmt(r) => {
+            let parts: Option<Vec<_>> = r.results.iter().map(expr_text).collect();
+            Some(format!("return {};", parts?.join(", ")))
+        }
+        Stmt::AssignStmt(a) => {
+            let lhs: Option<Vec<_>> = a.lhs.iter().map(expr_text).collect();
+            let rhs: Option<Vec<_>> = a.rhs.iter().map(expr_text).collect();
+            let op = match a.tok {
+                Some(Token::DEFINE) => ":=",
+                Some(Token::ASSIGN) | None => "=",
+                Some(t) => t.as_str(),
+            };
+            Some(format!("{} {} {};", lhs?.join(", "), op, rhs?.join(", ")))
+        }
+        Stmt::IncDecStmt(i) => {
+            let x = expr_text(&i.x)?;
+            let op = if i.tok == Token::INC { "++" } else { "--" };
+            Some(format!("{x}{op};"))
+        }
+        Stmt::BlockStmt(b) => block_text(b),
+        Stmt::IfStmt(i) => {
+            let cond = expr_text(&i.cond)?;
+            let body = block_text(&i.body)?;
+            match &i.else_ {
+                Some(e) => {
+                    let else_t = stmt_text(e)?;
+                    Some(format!("if {cond} {body} else {else_t}"))
+                }
+                None => Some(format!("if {cond} {body}")),
+            }
+        }
+        Stmt::DeferStmt(d) => call_qualified_name(&d.call)
+            .or_else(|| expr_text(&d.call.fun))
+            .map(|n| format!("defer {n}(...);")),
+        Stmt::GoStmt(g) => call_qualified_name(&g.call)
+            .or_else(|| expr_text(&g.call.fun))
+            .map(|n| format!("go {n}(...);")),
+        Stmt::BranchStmt(b) => Some(format!("{};", b.tok.as_str())),
+        Stmt::EmptyStmt(_) => Some(";".into()),
+        _ => None,
+    }
+}
+
+fn block_text(body: &BlockStmt) -> Option<String> {
+    let parts: Option<Vec<_>> = body.list.iter().map(stmt_text).collect();
+    Some(format!("{{{}}}", parts?.join("")))
+}
+
+fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+    let Some(Stmt::BlockStmt(else_body)) = stmt.else_.as_deref() else {
+        return;
+    };
+    let Some(then_t) = block_text(&stmt.body) else {
+        return;
+    };
+    let Some(else_t) = block_text(else_body) else {
+        return;
+    };
+    if then_t == else_t {
+        report(
+            pending,
+            stmt.if_.0 as u32,
+            "both branches in if statement have same body",
+        );
+    }
+}
+
+fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    let watch = matches!(
+        bin.op,
+        Token::LOR
+            | Token::LAND
+            | Token::OR
+            | Token::AND
+            | Token::XOR
+            | Token::LSS
+            | Token::GTR
+            | Token::AndNot
+            | Token::REM
+            | Token::EQL
+            | Token::NEQ
+            | Token::LEQ
+            | Token::GEQ
+            | Token::QUO
+            | Token::SUB
+    );
+    if !watch || !exprs_equal(&bin.x, &bin.y) {
+        return;
+    }
+    // Skip trivial literals like `1 == 1` — still suspicious but less useful;
+    // upstream skips floats with side-effect-free check; we keep AST equality.
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!(
+            "suspicious identical LHS and RHS for `{}` operator",
+            bin.op.as_str()
+        ),
+    );
+}
+
+fn unquote_basic_string(value: &str) -> Option<String> {
+    if value.len() >= 2 && (value.starts_with('"') || value.starts_with('`')) {
+        Some(value[1..value.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+fn check_flag_name(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let (pkg_ok, sym) = if let Some(rest) = name.strip_prefix("flag.") {
+        (true, rest)
+    } else {
+        return;
+    };
+    if !pkg_ok {
+        return;
+    }
+    let arg_idx = match sym {
+        "Bool" | "Duration" | "Float64" | "String" | "Int" | "Int64" | "Uint" | "Uint64" => 0usize,
+        "BoolVar" | "DurationVar" | "Float64Var" | "StringVar" | "IntVar" | "Int64Var"
+        | "UintVar" | "Uint64Var" => 1usize,
+        _ => return,
+    };
+    let Some(arg) = call.args.get(arg_idx) else {
+        return;
+    };
+    let Some(flag) = code::expr_to_string(pass, arg).or_else(|| {
+        if let Expr::BasicLit(lit) = arg {
+            unquote_basic_string(&lit.value)
+        } else {
+            None
+        }
+    }) else {
+        return;
+    };
+    let pos = call.fun.pos().0 as u32;
+    if flag.is_empty() {
+        report(pending, pos, "empty flag name");
+    } else if flag.starts_with('-') {
+        report(
+            pending,
+            pos,
+            format!("flag name {flag:?} should not start with a hyphen"),
+        );
+    } else if flag.contains('=') {
+        report(
+            pending,
+            pos,
+            format!("flag name {flag:?} should not contain '='"),
+        );
+    } else if flag.contains(' ') {
+        report(
+            pending,
+            pos,
+            format!("flag name {flag:?} contains whitespace"),
+        );
+    }
+}
+
+fn check_map_key(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+    if lit.elts.len() < 2 {
+        return;
+    }
+    let is_map = matches!(lit.ty.as_deref(), Some(Expr::MapType(_)));
+    if !is_map {
+        return;
+    }
+    let mut whitespace_key: Option<(u32, String)> = None;
+    let mut seen_non_basic = HashSet::new();
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        if let Expr::BasicLit(lit) = kv.key.as_ref() {
+            let Some(s) = unquote_basic_string(&lit.value) else {
+                continue;
+            };
+            if s.len() < 1 || s == " " || !s.contains(' ') {
+                continue;
+            }
+            let bad = (s.starts_with(' ') && !s.starts_with("  "))
+                || (s.ends_with(' ') && !s.ends_with("  "));
+            if !bad {
+                return;
+            }
+            if whitespace_key.is_some() {
+                return; // more than one → not suspicious
+            }
+            whitespace_key = Some((kv.key.pos().0 as u32, expr_text(&kv.key).unwrap_or(s)));
+        } else if let Some(text) = expr_text(&kv.key) {
+            if !seen_non_basic.insert(text.clone()) {
+                report(
+                    pending,
+                    kv.key.pos().0 as u32,
+                    format!("suspicious duplicate {text} key"),
+                );
+            }
+        }
+    }
+    if let Some((pos, key)) = whitespace_key {
+        report(pending, pos, format!("suspicious whitespace in {key} key"));
+    }
+}
+
+fn check_off_by1(index: &IndexExpr, pending: &mut Vec<(u32, String)>) {
+    let Expr::CallExpr(call) = index.index.as_ref() else {
+        return;
+    };
+    let is_len = match call.fun.as_ref() {
+        Expr::Ident(id) => id.name == "len",
+        _ => false,
+    };
+    if !is_len || call.args.len() != 1 {
+        return;
+    }
+    if !exprs_equal(&index.x, &call.args[0]) {
+        return;
+    }
+    let Some(x) = expr_text(&index.x) else {
+        return;
+    };
+    report(
+        pending,
+        index.lbrack.0 as u32,
+        format!("index expr always panics; maybe you wanted {x}[len({x})-1]?"),
+    );
+}
+
+fn type_assert_matches(assert: &TypeAssertExpr, want_x: &Expr, want_ty: &Expr) -> bool {
+    assert.ty.as_ref().is_some_and(|t| exprs_equal(t, want_ty)) && exprs_equal(&assert.x, want_x)
+}
+
+fn find_matching_assert(stmt: &Stmt, want_x: &Expr, want_ty: &Expr) -> bool {
+    let mut found = false;
+    walk::inspect(walk::stmt_ref(stmt), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if let NodeRef::TypeAssertExpr(a) = n {
+            if type_assert_matches(a, want_x, want_ty) {
+                found = true;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn check_type_switch_var(stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>) {
+    // Already has `v := x.(type)` form.
+    if matches!(stmt.assign.as_ref(), Stmt::AssignStmt(_)) {
+        return;
+    }
+    let Stmt::ExprStmt(es) = stmt.assign.as_ref() else {
+        return;
+    };
+    let Expr::TypeAssertExpr(ta) = &es.x else {
+        return;
+    };
+    if ta.ty.is_some() {
+        return; // not `.(type)`
+    }
+    let x = ta.x.as_ref();
+    let mut count = 0;
+    for s in &stmt.body.list {
+        let Stmt::CaseClause(cc) = s else {
+            continue;
+        };
+        if cc.list.len() != 1 {
+            continue;
+        }
+        if cc
+            .body
+            .iter()
+            .any(|body_stmt| find_matching_assert(body_stmt, x, &cc.list[0]))
+        {
+            count += 1;
+        }
+    }
+    if count > 0 {
+        let msg = if count == 1 { "case" } else { "cases" };
+        report(
+            pending,
+            stmt.switch.0 as u32,
+            format!("{count} {msg} can benefit from type switch with assignment"),
+        );
+    }
+}
+
+fn unparen(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::ParenExpr(p) => unparen(&p.x),
+        other => other,
+    }
+}
+
+fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if bin.op != Token::LAND {
+        return;
+    }
+    let Expr::BinaryExpr(lhs) = unparen(&bin.x) else {
+        return;
+    };
+    let Expr::BinaryExpr(rhs) = unparen(&bin.y) else {
+        return;
+    };
+    // `x == a && x == b`
+    if lhs.op == Token::EQL && rhs.op == Token::EQL && exprs_equal(&lhs.x, &rhs.x) {
+        let text = expr_text(&Expr::BinaryExpr(bin.clone())).unwrap_or_else(|| "cond".into());
+        report(
+            pending,
+            bin.op_pos.0 as u32,
+            format!("`{text}` condition is suspicious"),
+        );
+        return;
+    }
+    // `x < a && x > b` where a < b (int literals)
+    if lhs.op == Token::LSS && rhs.op == Token::GTR && exprs_equal(&lhs.x, &rhs.x) {
+        let Some(a) = int_lit_value(&lhs.y) else {
+            return;
+        };
+        let Some(b) = int_lit_value(&rhs.y) else {
+            return;
+        };
+        if a < b {
+            let text = expr_text(&Expr::BinaryExpr(bin.clone())).unwrap_or_else(|| "cond".into());
+            report(
+                pending,
+                bin.op_pos.0 as u32,
+                format!("`{text}` condition is always false"),
+            );
+        }
+    }
+}
+
+fn int_lit_value(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::BasicLit(lit) => lit.value.parse().ok(),
+        Expr::UnaryExpr(u) if u.op == Token::SUB => {
+            int_lit_value(&u.x).map(|v| -v)
+        }
+        _ => None,
+    }
+}
+
+fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Vec<(u32, String)>) {
+    let Some(Stmt::AssignStmt(init)) = stmt.init.as_deref() else {
+        return;
+    };
+    if init.tok != Some(Token::DEFINE) || init.lhs.len() != 1 || init.rhs.len() != 1 {
+        return;
+    }
+    if !is_int_lit(&init.rhs[0], 0) {
+        return;
+    }
+    let Expr::Ident(iter) = &init.lhs[0] else {
+        return;
+    };
+    let Some(cond) = &stmt.cond else {
+        return;
+    };
+    let Expr::BinaryExpr(bin) = cond else {
+        return;
+    };
+    let (op_suggest, cond_ok) = match bin.op {
+        Token::GTR if matches!(&*bin.x, Expr::Ident(id) if id.name == iter.name) => {
+            (Token::LSS, true)
+        }
+        Token::LSS if matches!(&*bin.y, Expr::Ident(id) if id.name == iter.name) => {
+            (Token::GTR, true)
+        }
+        _ => (Token::LSS, false),
+    };
+    if !cond_ok {
+        return;
+    }
+    let Some(Stmt::IncDecStmt(post)) = stmt.post.as_deref() else {
+        return;
+    };
+    if post.tok != Token::INC || !matches!(&post.x, Expr::Ident(id) if id.name == iter.name) {
+        return;
+    }
+    let Some(cond_t) = expr_text(cond) else {
+        return;
+    };
+    let suggest = match (bin.op, op_suggest) {
+        (Token::GTR, Token::LSS) => cond_t.replacen('>', "<", 1),
+        (Token::LSS, Token::GTR) => cond_t.replacen('<', ">", 1),
+        _ => return,
+    };
+    report(
+        pending,
+        stmt.for_.0 as u32,
+        format!("`{cond_t}` in loop; probably meant `{suggest}`?"),
+    );
+}
+
+fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
+    if fl.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::ReturnStmt(ret) = &fl.body.list[0] else {
+        return;
+    };
+    if ret.results.len() != 1 {
+        return;
+    }
+    let Expr::CallExpr(call) = &ret.results[0] else {
+        return;
+    };
+    let Some(callable) = call_qualified_name(call).or_else(|| expr_text(&call.fun)) else {
+        return;
+    };
+    // Skip builtins.
+    if matches!(
+        callable.as_str(),
+        "len" | "cap" | "make" | "new" | "append" | "copy" | "delete" | "panic" | "recover"
+            | "close" | "complex" | "real" | "imag" | "min" | "max" | "clear"
+    ) {
+        return;
+    }
+    let Some(params) = &fl.ty.params else {
+        return;
+    };
+    let mut expected: Vec<&str> = Vec::new();
+    let mut has_ellipsis = false;
+    for field in &params.list {
+        if matches!(field.ty, Some(Expr::Ellipsis(_))) {
+            has_ellipsis = true;
+        }
+        for name in &field.names {
+            expected.push(name.name.as_str());
+        }
+    }
+    if has_ellipsis {
+        if !call.ellipsis.is_valid() {
+            return;
+        }
+    }
+    if call.args.len() != expected.len() {
+        return;
+    }
+    for (arg, want) in call.args.iter().zip(expected.iter()) {
+        match arg {
+            Expr::Ident(id) if id.name == *want => {}
+            _ => return,
+        }
+    }
+    let Some(lit_text) = expr_text(&Expr::FuncLit(fl.clone())).or_else(|| {
+        Some(format!("func(...) {{ return {callable}(...) }}"))
+    }) else {
+        return;
+    };
+    report(
+        pending,
+        fl.ty.func.0 as u32,
+        format!("replace `{lit_text}` with `{callable}`"),
+    );
+}
+
+fn check_regexp_must(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let suggest = match name.as_str() {
+        "regexp.Compile" => "regexp.MustCompile",
+        "regexp.CompilePOSIX" => "regexp.MustCompilePOSIX",
+        _ => return,
+    };
+    let Some(pat) = call.args.first() else {
+        return;
+    };
+    let Some(pat_s) = code::expr_to_string(pass, pat).or_else(|| {
+        if let Expr::BasicLit(lit) = pat {
+            unquote_basic_string(&lit.value)
+        } else {
+            None
+        }
+    }) else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("for const patterns like {pat_s:?}, use {suggest}"),
+    );
+}
+
+fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    // Method-style: x.Add(-1) / x.Truncate(0)
+    if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+        if sel.sel.name == "Add"
+            && call.args.len() == 1
+            && (code::is_integer_literal(pass, &call.args[0], -1) || is_int_lit(&call.args[0], -1))
+        {
+            report(
+                pending,
+                call.fun.pos().0 as u32,
+                "use WaitGroup.Done method in `Add(-1)`",
+            );
+            return;
+        }
+        if sel.sel.name == "Truncate"
+            && call.args.len() == 1
+            && (code::is_integer_literal(pass, &call.args[0], 0) || is_int_lit(&call.args[0], 0))
+        {
+            report(
+                pending,
+                call.fun.pos().0 as u32,
+                "use Buffer.Reset method in `Truncate(0)`",
+            );
+            return;
+        }
+    }
+    match name.as_str() {
+        "strings.SplitN" | "bytes.SplitN"
+            if call.args.len() >= 3
+                && (code::is_integer_literal(pass, &call.args[2], -1)
+                    || is_int_lit(&call.args[2], -1)) =>
+        {
+            let pkg = if name.starts_with("bytes") {
+                "bytes"
+            } else {
+                "strings"
+            };
+            report(
+                pending,
+                call.fun.pos().0 as u32,
+                format!("use {pkg}.Split method in `{name}(..., -1)`"),
+            );
+        }
+        "strings.Replace" | "bytes.Replace"
+            if call.args.len() >= 4
+                && (code::is_integer_literal(pass, &call.args[3], -1)
+                    || is_int_lit(&call.args[3], -1)) =>
+        {
+            let pkg = if name.starts_with("bytes") {
+                "bytes"
+            } else {
+                "strings"
+            };
+            report(
+                pending,
+                call.fun.pos().0 as u32,
+                format!("use {pkg}.ReplaceAll method in `{name}(..., -1)`"),
+            );
+        }
+        "http.HandlerFunc"
+            if call.args.len() == 1
+                && matches!(
+                    call_qualified_name_of_expr(&call.args[0]).as_deref(),
+                    Some("http.NotFound")
+                ) =>
+        {
+            report(
+                pending,
+                call.fun.pos().0 as u32,
+                "use http.NotFoundHandler method in `http.HandlerFunc(http.NotFound)`",
+            );
+        }
+        _ => {}
+    }
+}
+
+fn call_qualified_name_of_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::SelectorExpr(sel) => {
+            let x = expr_text(&sel.x)?;
+            Some(format!("{x}.{}", sel.sel.name))
+        }
+        Expr::Ident(id) => Some(id.name.clone()),
+        _ => None,
+    }
+}
+
+fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    if call.args.len() < 2 {
+        return;
+    }
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let watch = matches!(
+        name.as_str(),
+        "strings.HasPrefix"
+            | "bytes.HasPrefix"
+            | "strings.HasSuffix"
+            | "bytes.HasSuffix"
+            | "strings.Contains"
+            | "bytes.Contains"
+            | "strings.TrimPrefix"
+            | "bytes.TrimPrefix"
+            | "strings.TrimSuffix"
+            | "bytes.TrimSuffix"
+            | "strings.Split"
+            | "bytes.Split"
+    );
+    if !watch {
+        return;
+    }
+    let lit = &call.args[0];
+    let s = &call.args[1];
+    // First arg is const string/bytes, second is not const, and first is not Ident.
+    if matches!(lit, Expr::Ident(_)) {
+        return;
+    }
+    let lit_const = code::expr_to_string(pass, lit).is_some()
+        || matches!(lit, Expr::BasicLit(b) if b.value.starts_with('"') || b.value.starts_with('`'));
+    if !lit_const {
+        return;
+    }
+    let s_const = code::expr_to_string(pass, s).is_some()
+        || matches!(s, Expr::BasicLit(b) if b.value.starts_with('"') || b.value.starts_with('`'));
+    if s_const {
+        return;
+    }
+    let Some(lit_t) = expr_text(lit) else {
+        return;
+    };
+    let Some(s_t) = expr_text(s) else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("{lit_t} and {s_t} arguments order looks reversed"),
+    );
+}
+
 fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
@@ -866,6 +1533,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "elseif") {
                         check_elseif(s, &mut pending);
                     }
+                    if enabled(&set, "dupBranchBody") {
+                        check_dup_branch_body(s, &mut pending);
+                    }
                     if enabled(&set, "ifElseChain") {
                         let key = s as *const _ as usize;
                         if if_else_ptr.insert(key, ()).is_none() {
@@ -887,14 +1557,39 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_dup_case_switch(s, &mut pending);
                     }
                 }
-                NodeRef::TypeSwitchStmt(s) if enabled(&set, "singleCaseSwitch") => {
-                    check_single_case_type_switch(s, &mut pending);
+                NodeRef::TypeSwitchStmt(s) => {
+                    if enabled(&set, "singleCaseSwitch") {
+                        check_single_case_type_switch(s, &mut pending);
+                    }
+                    if enabled(&set, "typeSwitchVar") {
+                        check_type_switch_var(s, &mut pending);
+                    }
                 }
-                NodeRef::BinaryExpr(b) if enabled(&set, "sloppyLen") => {
-                    check_sloppy_len(b, &mut pending);
+                NodeRef::ForStmt(s) if enabled(&set, "badCond") => {
+                    check_bad_cond_for(s, &mut pending);
+                }
+                NodeRef::BinaryExpr(b) => {
+                    if enabled(&set, "sloppyLen") {
+                        check_sloppy_len(b, &mut pending);
+                    }
+                    if enabled(&set, "dupSubExpr") {
+                        check_dup_sub_expr(b, &mut pending);
+                    }
+                    if enabled(&set, "badCond") {
+                        check_bad_cond_expr(b, &mut pending);
+                    }
                 }
                 NodeRef::SliceExpr(s) if enabled(&set, "unslice") => {
                     check_unslice(s, &mut pending);
+                }
+                NodeRef::IndexExpr(ix) if enabled(&set, "offBy1") => {
+                    check_off_by1(ix, &mut pending);
+                }
+                NodeRef::CompositeLit(lit) if enabled(&set, "mapKey") => {
+                    check_map_key(lit, &mut pending);
+                }
+                NodeRef::FuncLit(fl) if enabled(&set, "unlambda") => {
+                    check_unlambda(fl, &mut pending);
                 }
                 NodeRef::StarExpr(s) => {
                     if enabled(&set, "newDeref") {
@@ -926,6 +1621,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "dupArg") {
                         check_dup_arg(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "flagName") {
+                        check_flag_name(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "argOrder") {
+                        check_arg_order(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "regexpMust") {
+                        check_regexp_must(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "wrapperFunc") {
+                        check_wrapper_func(pass, c, &mut pending);
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {

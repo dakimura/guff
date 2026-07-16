@@ -8,3 +8,4 @@ func HasPrefix(s, prefix string) bool { return false }
 func HasSuffix(s, suffix string) bool { return false }
 func Index(s, substr string) int { return -1 }
 func SplitN(s, sep string, n int) []string { return nil }
+func Split(s, sep string) []string { return nil }
