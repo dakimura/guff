@@ -17,6 +17,7 @@ func TestOk(t *testing.T) {
 	var ts time.Time
 	signed := -1
 	pos := 1
+	var anyVal any = 42
 
 	assert.False(t, result)
 	assert.True(t, result)
@@ -30,6 +31,10 @@ func TestOk(t *testing.T) {
 	assert.Zero(t, ts)
 	assert.Negative(t, signed)
 	assert.Positive(t, pos)
+	assert.Contains(t, str, "hi")
+	assert.Equal(t, 42, pos)
+	assert.EqualValues(t, 42, anyVal)
+	assert.Regexp(t, `hi`, str)
 }
 
 var a, b int

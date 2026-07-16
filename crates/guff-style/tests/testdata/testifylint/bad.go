@@ -1,6 +1,8 @@
 package testifylint
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,11 @@ func TestBad(t *testing.T) {
 	assert.Equal(t, signed, signed)
 	assert.Zero(t, 42)
 	assert.True(t, true)
+
+	assert.True(t, strings.Contains(str, "hi"))
+	assert.Contains(t, arr, 1, 2)
+	assert.EqualValues(t, 42, pos)
+	assert.Regexp(t, regexp.MustCompile(`hi`), str)
 }
 
 var a, b int

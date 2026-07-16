@@ -75,6 +75,24 @@ func InEpsilon(t TestingT, expected, actual interface{}, epsilon float64, msgAnd
 func InDelta(t TestingT, expected, actual interface{}, delta float64, msgAndArgs ...interface{}) bool {
 	return true
 }
+func Contains(t TestingT, s, contains interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotContains(t TestingT, s, contains interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Subset(t TestingT, list, subset interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotSubset(t TestingT, list, subset interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Regexp(t TestingT, rx interface{}, str interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotRegexp(t TestingT, rx interface{}, str interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
 
 func (a *Assertions) Equal(expected, actual interface{}, msgAndArgs ...interface{}) bool {
 	return true

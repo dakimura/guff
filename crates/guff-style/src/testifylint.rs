@@ -4,15 +4,14 @@
 //! Checks usage of `github.com/stretchr/testify` assert/require helpers.
 //!
 //! Implemented checkers (defaults match upstream except noted):
-//! `blank-import`, `bool-compare`, `compares`, `empty`, `error-nil`,
-//! `float-compare`, `len`, `negative-positive`, `nil-compare`, `useless-assert`,
-//! `zero`.
+//! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
+//! `equal-values`, `error-nil`, `float-compare`, `len`, `negative-positive`,
+//! `nil-compare`, `regexp`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checkers (contains, encoded-compare, equal-values,
-//! error-is-as, expected-actual, formatter, go-require, mock-expect,
-//! negative-positive, regexp, require-error, suite-*, useless-assert, zero,
-//! time-compare), SuggestedFix / TextEdit, bool-compare custom-type casting
-//! in messages, compares time.Time helpers.
+//! DEFERRED: remaining checkers (encoded-compare, error-is-as, expected-actual,
+//! formatter, go-require, mock-expect, require-error, suite-*, time-compare),
+//! SuggestedFix / TextEdit, bool-compare custom-type casting in messages,
+//! compares time.Time helpers.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -27,6 +26,7 @@ use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED};
 use guff_types::named::named_obj;
+use guff_types::predicates::identical;
 use guff_types::TypeId;
 
 use crate::options::TestifylintOptions;
@@ -42,12 +42,15 @@ const IMPLEMENTED: &[&str] = &[
     "blank-import",
     "bool-compare",
     "compares",
+    "contains",
     "empty",
+    "equal-values",
     "error-nil",
     "float-compare",
     "len",
     "negative-positive",
     "nil-compare",
+    "regexp",
     "useless-assert",
     "zero",
 ];
@@ -163,21 +166,48 @@ fn is_empty_interface(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(typ) = type_of(pass, expr) else {
         return false;
     };
+    is_empty_interface_type(pass, typ)
+}
+
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    identical(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        a,
+        b,
+    )
+}
+
+fn is_func(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
     let typ = unalias_readonly(&artifacts.types, typ);
-    match artifacts.types.get(typ) {
-        TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
-        TypeData::Named(_) => {
-            let under = typ.underlying(&artifacts.types);
-            match artifacts.types.get(under) {
-                TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
-                _ => false,
-            }
-        }
-        _ => false,
-    }
+    matches!(artifacts.types.get(typ), TypeData::Signature(_))
+}
+
+fn is_pkg_fn_call(pass: &Pass<'_>, ce: &CallExpr, pkg: &str, fn_name: &str) -> bool {
+    code::call_name(pass, &ce.fun).as_deref() == Some(&format!("{pkg}.{fn_name}"))
+}
+
+fn is_strings_contains_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "strings", "Contains")
+}
+
+fn is_regexp_must_compile_call(pass: &Pass<'_>, ce: &CallExpr) -> bool {
+    is_pkg_fn_call(pass, ce, "regexp", "MustCompile")
+}
+
+fn call_fn_string(call: &CallMeta<'_>) -> String {
+    format!("{}.{}", call.selector_x, call.fn_name)
 }
 
 fn has_bool_type(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -511,7 +541,8 @@ fn is_empty_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
         return false;
     };
     let typ = unalias_readonly(&artifacts.types, typ);
-    match artifacts.types.get(typ) {
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
         TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
         _ => false,
     }
@@ -1041,6 +1072,145 @@ fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
     report_use("compares", call, &proposed, pending);
 }
 
+fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    if check_contains_string(pass, call, pending) {
+        return;
+    }
+    check_contains_subset(pass, call, pending);
+}
+
+fn check_contains_string(
+    pass: &Pass<'_>,
+    call: &CallMeta<'_>,
+    pending: &mut Vec<(u32, String)>,
+) -> bool {
+    if call.args.is_empty() {
+        return false;
+    }
+    let mut expr = &call.args[0];
+    let is_neg = is_negation(expr).is_some();
+    if let Some(inner) = is_negation(expr) {
+        expr = inner;
+    }
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return false;
+    };
+    if ce.args.len() != 2 || !is_strings_contains_call(pass, ce) {
+        return false;
+    }
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "True" => {
+            if is_neg {
+                "NotContains"
+            } else {
+                "Contains"
+            }
+        }
+        "False" => {
+            if is_neg {
+                "Contains"
+            } else {
+                "NotContains"
+            }
+        }
+        _ => return false,
+    };
+    report_use("contains", call, proposed, pending);
+    true
+}
+
+fn check_contains_subset(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    if call.call.ellipsis.is_valid() {
+        return;
+    }
+    if call.args.len() < 3 {
+        return;
+    }
+    if has_string_type(pass, &call.args[2]) {
+        // Possible false positives because of format string.
+        return;
+    }
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "Contains" => {
+            if call.is_fmt {
+                "Subsetf"
+            } else {
+                "Subset"
+            }
+        }
+        "NotContains" => {
+            if call.is_fmt {
+                "NotSubsetf"
+            } else {
+                "NotSubset"
+            }
+        }
+        _ => return,
+    };
+    report_msg(
+        "contains",
+        call,
+        &format!(
+            "invalid usage of {}, use {}.{} for multi elements assertion",
+            call_fn_string(call),
+            call.selector_x,
+            proposed
+        ),
+        pending,
+    );
+}
+
+fn check_equal_values(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    let proposed = match call.fn_name_trimmed.as_str() {
+        "EqualValues" => "Equal",
+        "NotEqualValues" => "NotEqual",
+        _ => return,
+    };
+    if call.args.len() < 2 {
+        return;
+    }
+    let (first, second) = (&call.args[0], &call.args[1]);
+    if is_func(pass, first) || is_func(pass, second) {
+        // EqualValues for funcs is ok (testify#1524); Equal is not.
+        return;
+    }
+    let Some(ft) = type_of(pass, first) else {
+        return;
+    };
+    let Some(st) = type_of(pass, second) else {
+        return;
+    };
+    if !types_identical(pass, ft, st) {
+        return;
+    }
+    if is_empty_interface_type(pass, ft) || is_empty_interface_type(pass, st) {
+        // Equal would compare dynamic types and fail; EqualValues is fine.
+        return;
+    }
+    report_use("equal-values", call, proposed, pending);
+}
+
+fn check_regexp(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    match call.fn_name_trimmed.as_str() {
+        "Regexp" | "NotRegexp" => {}
+        _ => return,
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Expr::CallExpr(ce) = unparen(&call.args[0]) else {
+        return;
+    };
+    if ce.args.len() == 1 && is_regexp_must_compile_call(pass, ce) {
+        report_msg(
+            "regexp",
+            call,
+            "remove unnecessary regexp.MustCompile",
+            pending,
+        );
+    }
+}
+
 fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
     match call.fn_name_trimmed.as_str() {
         "Equal" | "EqualValues" | "Exactly" => {
@@ -1445,6 +1615,12 @@ fn check_call(
             return;
         }
     }
+    if enabled.contains("contains") {
+        check_contains(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
     if enabled.contains("error-nil") {
         check_error_nil(pass, call, pending);
         if pending.len() > before {
@@ -1459,6 +1635,18 @@ fn check_call(
     }
     if enabled.contains("len") {
         check_len(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("equal-values") {
+        check_equal_values(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("regexp") {
+        check_regexp(pass, call, pending);
         if pending.len() > before {
             return;
         }

@@ -2405,6 +2405,18 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("useless-assert")),
         "useless-assert: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("contains")),
+        "contains: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("equal-values")),
+        "equal-values: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("regexp")),
+        "regexp: {messages:?}"
+    );
 }
 
 #[test]
