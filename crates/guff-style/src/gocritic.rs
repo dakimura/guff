@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**77** = 34 default + 43 enable-all extras):
+//! Implemented checkers (**83** = 34 default + 49 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -26,20 +26,24 @@
 //!   `preferFilepathJoin`, `stringsCompare`, `zeroByteRepeat`, `badSorting`,
 //!   `sliceClear`
 //! - batch 10 (enable-all extra): `preferWriteByte`
+//! - batch 11 (enable-all extras): `preferFprint`, `preferStringWriter`,
+//!   `syncMapLoadAndDelete`, `dynamicFmtString`, `stringConcatSimplify`,
+//!   `badSyncOnceFunc`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / `preferFprint` /
-//! `syncMapLoadAndDelete` / `dynamicFmtString` / …),
+//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / `equalFold` /
+//! `sprintfQuotedString` / `timeExprSimplify` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
-//! stringXbytes regexp method / bytes.Equal full type parity.
+//! stringXbytes regexp method / bytes.Equal full type parity,
+//! preferFprint true `types.Implements(io.Writer)` (arity heuristic like QF1012).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -68,6 +72,7 @@ use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
 use guff_types::predicates::is_interface;
+use guff_types::signature::signature_results;
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::typestring::type_string;
 use guff_types::{default_sizes, TypeId};
@@ -122,6 +127,7 @@ const DEFAULT_CHECKS: &[&str] = &[
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "badRegexp",
     "badSorting",
+    "badSyncOnceFunc",
     "builtinShadow",
     "builtinShadowDecl",
     "commentedOutImport",
@@ -130,6 +136,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "docStub",
     "dupImport",
     "dupOption",
+    "dynamicFmtString",
     "emptyDecl",
     "emptyFallthrough",
     "emptyStringTest",
@@ -145,6 +152,8 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "paramTypeCombine",
     "preferDecodeRune",
     "preferFilepathJoin",
+    "preferFprint",
+    "preferStringWriter",
     "preferWriteByte",
     "rangeAppendAll",
     "rangeExprCopy",
@@ -153,8 +162,10 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "sloppyReassign",
     "sortSlice",
     "sqlQuery",
+    "stringConcatSimplify",
     "stringXbytes",
     "stringsCompare",
+    "syncMapLoadAndDelete",
     "todoCommentWithoutDetail",
     "truncateCmp",
     "typeAssertChain",
@@ -4579,6 +4590,416 @@ fn check_slice_clear(fs: &ForStmt, pending: &mut Vec<(u32, String)>) {
     );
 }
 
+const SPRINT_FNS: &[&str] = &["fmt.Sprint", "fmt.Sprintf", "fmt.Sprintln"];
+
+fn method_result_count(pass: &Pass<'_>, typ: TypeId, name: &str) -> Option<usize> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let mut types = artifacts.types.clone();
+    let resolved = unalias_readonly(&artifacts.types, typ);
+    match lookup_field_or_method(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        resolved,
+        true,
+        None,
+        name,
+    ) {
+        LookupResult::Found { obj, .. }
+            if matches!(artifacts.objects.get(obj), ObjectData::Func(_)) =>
+        {
+            let sig = obj.typ(&artifacts.objects)?;
+            let results = signature_results(&artifacts.types, sig);
+            Some(tuple_len(&artifacts.types, results))
+        }
+        _ => None,
+    }
+}
+
+fn implements_writer_arity(pass: &Pass<'_>, recv: &Expr) -> bool {
+    let Some(typ) = type_of(pass, recv) else {
+        return false;
+    };
+    method_result_count(pass, typ, "Write") == Some(2)
+}
+
+fn implements_string_writer_arity(pass: &Pass<'_>, recv: &Expr) -> bool {
+    let Some(typ) = type_of(pass, recv) else {
+        return false;
+    };
+    method_result_count(pass, typ, "WriteString") == Some(2)
+}
+
+fn sprint_to_fprint(name: &str) -> Option<&'static str> {
+    match name {
+        "fmt.Sprint" => Some("Fprint"),
+        "fmt.Sprintf" => Some("Fprintf"),
+        "fmt.Sprintln" => Some("Fprintln"),
+        _ => None,
+    }
+}
+
+fn is_fmt_sprint_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<(&'static str, &'a [Expr])> {
+    let Expr::CallExpr(inner) = expr else {
+        return None;
+    };
+    if !code::is_call_to_any(pass, inner, SPRINT_FNS) {
+        return None;
+    }
+    let name = code::call_name(pass, &inner.fun)?;
+    let fprint = sprint_to_fprint(&name)?;
+    Some((fprint, &inner.args))
+}
+
+fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    // $w.Write([]byte(fmt.Sprint*(...)))
+    if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+        if sel.sel.name == "Write"
+            && code::is_method_val(pass, sel, "Write")
+            && call.args.len() == 1
+        {
+            if let Some(inner_s) = is_byte_slice_conv(&call.args[0]) {
+                if let Some((fprint, _)) = is_fmt_sprint_call(pass, inner_s) {
+                    if implements_writer_arity(pass, &sel.x) {
+                        let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
+                        report(
+                            pending,
+                            call.fun.pos().0 as u32,
+                            format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+        // $w.WriteString(fmt.Sprint*(...))
+        if sel.sel.name == "WriteString"
+            && code::is_method_val(pass, sel, "WriteString")
+            && call.args.len() == 1
+        {
+            if let Some((fprint, _)) = is_fmt_sprint_call(pass, &call.args[0]) {
+                if implements_string_writer_arity(pass, &sel.x)
+                    && implements_writer_arity(pass, &sel.x)
+                {
+                    let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
+                    report(
+                        pending,
+                        call.fun.pos().0 as u32,
+                        format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    // io.WriteString($w, fmt.Sprint*(...))
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "io.WriteString" && !name.ends_with("/io.WriteString") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    let Some((fprint, _)) = is_fmt_sprint_call(pass, &call.args[1]) else {
+        return;
+    };
+    let w = expr_text(&call.args[0]).unwrap_or_else(|| "w".into());
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+    );
+}
+
+fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    // $w.Write([]byte($s)) where $w implements StringWriter
+    if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+        if sel.sel.name == "Write"
+            && code::is_method_val(pass, sel, "Write")
+            && call.args.len() == 1
+        {
+            if let Some(s) = is_byte_slice_conv(&call.args[0]) {
+                // PreferFprint already covers Write([]byte(fmt.Sprint*)) — skip those.
+                if is_fmt_sprint_call(pass, s).is_none()
+                    && implements_string_writer_arity(pass, &sel.x)
+                {
+                    let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
+                    let s_t = expr_text(s).unwrap_or_else(|| "s".into());
+                    report(
+                        pending,
+                        call.fun.pos().0 as u32,
+                        format!("{w}.WriteString({s_t}) should be preferred to the $$"),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    // io.WriteString($w, $s) where $w implements StringWriter
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "io.WriteString" && !name.ends_with("/io.WriteString") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    // PreferFprint covers io.WriteString(w, fmt.Sprint*) — skip those.
+    if is_fmt_sprint_call(pass, &call.args[1]).is_some() {
+        return;
+    }
+    if !implements_string_writer_arity(pass, &call.args[0]) {
+        return;
+    }
+    let w = expr_text(&call.args[0]).unwrap_or_else(|| "w".into());
+    let s = expr_text(&call.args[1]).unwrap_or_else(|| "s".into());
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("{w}.WriteString({s}) should be preferred to the $$"),
+    );
+}
+
+fn type_is_sync_map_ptr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let s = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    s == "*sync.Map" || (s.starts_with('*') && s.ends_with("/sync.Map"))
+}
+
+fn is_sync_map_method_call<'a>(
+    pass: &Pass<'_>,
+    call: &'a CallExpr,
+    method: &str,
+) -> Option<&'a Expr> {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return None;
+    };
+    if sel.sel.name != method || call.args.len() != 1 {
+        return None;
+    }
+    if !type_is_sync_map_ptr(pass, &sel.x) {
+        return None;
+    }
+    Some(&sel.x)
+}
+
+fn check_sync_map_load_and_delete(
+    pass: &Pass<'_>,
+    stmts: &[Stmt],
+    pending: &mut Vec<(u32, String)>,
+) {
+    for window in stmts.windows(2) {
+        let (Stmt::AssignStmt(asgn), Stmt::IfStmt(ifs)) = (&window[0], &window[1]) else {
+            continue;
+        };
+        if asgn.tok != Some(Token::DEFINE) || asgn.lhs.len() != 2 || asgn.rhs.len() != 1 {
+            continue;
+        }
+        if ifs.init.is_some() || ifs.else_.is_some() {
+            continue;
+        }
+        let Expr::Ident(_ok_id) = &ifs.cond else {
+            continue;
+        };
+        if !exprs_equal(&asgn.lhs[1], &ifs.cond) {
+            continue;
+        }
+        let Expr::CallExpr(load) = &asgn.rhs[0] else {
+            continue;
+        };
+        let Some(m) = is_sync_map_method_call(pass, load, "Load") else {
+            continue;
+        };
+        if ifs.body.list.is_empty() {
+            continue;
+        }
+        let Stmt::ExprStmt(first) = &ifs.body.list[0] else {
+            continue;
+        };
+        let Expr::CallExpr(del) = &first.x else {
+            continue;
+        };
+        let Some(m2) = is_sync_map_method_call(pass, del, "Delete") else {
+            continue;
+        };
+        if !exprs_equal(m, m2) || !exprs_equal(&load.args[0], &del.args[0]) {
+            continue;
+        }
+        let m_t = expr_text(m).unwrap_or_else(|| "m".into());
+        report(
+            pending,
+            asgn.tok_pos.0 as u32,
+            format!("use {m_t}.LoadAndDelete to perform load+delete operations atomically"),
+        );
+    }
+}
+
+fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "fmt.Errorf" && !name.ends_with("/fmt.Errorf") {
+        return;
+    }
+    if call.args.len() != 1 {
+        return;
+    }
+    let arg = &call.args[0];
+    // fmt.Errorf($f($*args))
+    if let Expr::CallExpr(inner) = arg {
+        let f_t = expr_text(&inner.fun).unwrap_or_else(|| "f".into());
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            format!(
+                "use errors.New({f_t}(...)) or fmt.Errorf(\"%s\", {f_t}(...)) instead"
+            ),
+        );
+        return;
+    }
+    // fmt.Errorf($f) where !$f.Const
+    if is_const_expr(pass, arg) {
+        return;
+    }
+    let f_t = expr_text(arg).unwrap_or_else(|| "f".into());
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("use errors.New({f_t}) or fmt.Errorf(\"%s\", {f_t}) instead"),
+    );
+}
+
+fn is_string_slice_composite(expr: &Expr) -> Option<&[Expr]> {
+    let Expr::CompositeLit(lit) = expr else {
+        return None;
+    };
+    let ty_ok = match lit.ty.as_deref() {
+        Some(Expr::ArrayType(at)) if at.len.is_none() => {
+            matches!(at.elt.as_ref(), Expr::Ident(id) if id.name == "string")
+        }
+        _ => false,
+    };
+    if !ty_ok {
+        return None;
+    }
+    Some(&lit.elts)
+}
+
+fn check_string_concat_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "strings.Join" && !name.ends_with("/strings.Join") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    let Some(elts) = is_string_slice_composite(&call.args[0]) else {
+        return;
+    };
+    let glue = &call.args[1];
+    let empty_glue = matches!(glue, Expr::BasicLit(lit) if lit.value == "\"\"");
+    let suggest = match elts {
+        [x, y] if empty_glue => {
+            let (Some(x_t), Some(y_t)) = (expr_text(x), expr_text(y)) else {
+                return;
+            };
+            format!("{x_t} + {y_t}")
+        }
+        [x, y, z] if empty_glue => {
+            let (Some(x_t), Some(y_t), Some(z_t)) = (expr_text(x), expr_text(y), expr_text(z))
+            else {
+                return;
+            };
+            format!("{x_t} + {y_t} + {z_t}")
+        }
+        [x, y] => {
+            let (Some(x_t), Some(y_t), Some(g_t)) =
+                (expr_text(x), expr_text(y), expr_text(glue))
+            else {
+                return;
+            };
+            format!("{x_t} + {g_t} + {y_t}")
+        }
+        _ => return,
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("can simplify `strings.Join` to `{suggest}`"),
+    );
+}
+
+fn is_sync_once_func_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return false;
+    };
+    (name == "sync.OnceFunc" || name.ends_with("/sync.OnceFunc")) && call.args.len() == 1
+}
+
+fn check_bad_sync_once_func_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    // sync.OnceFunc($x)()
+    let Expr::CallExpr(inner) = call.fun.as_ref() else {
+        return;
+    };
+    if !is_sync_once_func_call(pass, inner) {
+        return;
+    }
+    let x_t = expr_text(&inner.args[0]).unwrap_or_else(|| "f".into());
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!(
+            "possible sync.OnceFunc misuse, consider to assign sync.OnceFunc({x_t}) to a variable"
+        ),
+    );
+}
+
+fn check_bad_sync_once_func_stmts(
+    pass: &Pass<'_>,
+    stmts: &[Stmt],
+    pending: &mut Vec<(u32, String)>,
+) {
+    for s in stmts {
+        let Stmt::ExprStmt(e) = s else {
+            continue;
+        };
+        let Expr::CallExpr(call) = &e.x else {
+            continue;
+        };
+        // Immediate call is handled separately; skip here.
+        if matches!(call.fun.as_ref(), Expr::CallExpr(_)) {
+            continue;
+        }
+        if !is_sync_once_func_call(pass, call) {
+            continue;
+        }
+        let x_t = expr_text(&call.args[0]).unwrap_or_else(|| "f".into());
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            format!("possible sync.OnceFunc misuse, sync.OnceFunc({x_t}) result is not used"),
+        );
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -4860,6 +5281,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "preferWriteByte") {
                         check_prefer_write_byte(pass, c, &mut pending);
                     }
+                    if enabled(&set, "preferFprint") {
+                        check_prefer_fprint(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "preferStringWriter") {
+                        check_prefer_string_writer(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "dynamicFmtString") {
+                        check_dynamic_fmt_string(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "stringConcatSimplify") {
+                        check_string_concat_simplify(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "badSyncOnceFunc") {
+                        check_bad_sync_once_func_call(pass, c, &mut pending);
+                    }
                     if enabled(&set, "zeroByteRepeat") {
                         check_zero_byte_repeat(pass, c, &mut pending);
                     }
@@ -4886,8 +5322,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::TypeAssertExpr(a) if enabled(&set, "sloppyTypeAssert") => {
                     check_sloppy_type_assert(pass, a, &mut pending);
                 }
-                NodeRef::BlockStmt(b) if enabled(&set, "unnecessaryBlock") => {
-                    check_unnecessary_block_in_list(&b.list, &mut pending);
+                NodeRef::BlockStmt(b) => {
+                    if enabled(&set, "unnecessaryBlock") {
+                        check_unnecessary_block_in_list(&b.list, &mut pending);
+                    }
+                    if enabled(&set, "syncMapLoadAndDelete") {
+                        check_sync_map_load_and_delete(pass, &b.list, &mut pending);
+                    }
+                    if enabled(&set, "badSyncOnceFunc") {
+                        check_bad_sync_once_func_stmts(pass, &b.list, &mut pending);
+                    }
                 }
                 NodeRef::CaseClause(c) if enabled(&set, "unnecessaryBlock") => {
                     check_unnecessary_block_case(&c.body, &mut pending);

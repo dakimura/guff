@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	formatting "fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	// "os"
 )
 
@@ -293,4 +295,45 @@ func sliceClearExtra(buf []byte) {
 	for i := 0; i < len(buf); i++ {
 		buf[i] = 0
 	}
+}
+
+type preferWriterExtra struct{}
+
+func (*preferWriterExtra) Write(p []byte) (int, error)         { return 0, nil }
+func (*preferWriterExtra) WriteString(s string) (int, error) { return 0, nil }
+
+func preferFprintExtra(w *preferWriterExtra, x int) {
+	_, _ = w.Write([]byte(fmt.Sprint(x)))
+	_, _ = w.WriteString(fmt.Sprintf("%d", x))
+	_, _ = io.WriteString(w, fmt.Sprintln(x))
+}
+
+func preferStringWriterExtra(w *preferWriterExtra, s string) {
+	_, _ = w.Write([]byte(s))
+	_, _ = io.WriteString(w, s)
+}
+
+func syncMapLoadAndDeleteExtra(m *sync.Map, k string) {
+	_, ok := m.Load(k)
+	if ok {
+		m.Delete(k)
+	}
+}
+
+func dynamicFmtStringExtra(msg string, f func() string) error {
+	_ = fmt.Errorf(msg)
+	_ = fmt.Errorf(f())
+	_ = fmt.Errorf("ok")
+	return nil
+}
+
+func stringConcatSimplifyExtra(x, y, z, glue string) {
+	_ = strings.Join([]string{x, y}, "")
+	_ = strings.Join([]string{x, y, z}, "")
+	_ = strings.Join([]string{x, y}, glue)
+}
+
+func badSyncOnceFuncExtra(f func()) {
+	sync.OnceFunc(f)
+	sync.OnceFunc(f)()
 }

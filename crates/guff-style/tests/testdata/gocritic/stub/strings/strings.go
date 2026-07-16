@@ -9,3 +9,6 @@ func HasSuffix(s, suffix string) bool { return false }
 func Index(s, substr string) int { return -1 }
 func SplitN(s, sep string, n int) []string { return nil }
 func Split(s, sep string) []string { return nil }
+func Join(elems []string, sep string) string { return "" }
+func ToLower(s string) string                { return s }
+func ToUpper(s string) string                { return s }

@@ -3689,6 +3689,18 @@ fn gocritic_enable_all_extras() {
         "avoid bytes.Repeat",
         "suspicious sort.StringSlice usage",
         "rewrite as for-range so compiler can recognize",
+        "fmt.Fprint(w, ...) should be preferred",
+        "fmt.Fprintf(w, ...) should be preferred",
+        "fmt.Fprintln(w, ...) should be preferred",
+        "w.WriteString(s) should be preferred",
+        "use m.LoadAndDelete to perform load+delete",
+        "use errors.New(msg) or fmt.Errorf",
+        "use errors.New(f(...)) or fmt.Errorf",
+        "can simplify `strings.Join` to `x + y`",
+        "can simplify `strings.Join` to `x + y + z`",
+        "can simplify `strings.Join` to `x + glue + y`",
+        "sync.OnceFunc(f) result is not used",
+        "consider to assign sync.OnceFunc(f) to a variable",
     ];
     for needle in expect {
         assert!(
@@ -3754,6 +3766,11 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("bytes.Repeat")
                 || m.contains("sort.StringSlice")
                 || m.contains("for-range so compiler")
+                || m.contains("should be preferred")
+                || m.contains("LoadAndDelete")
+                || m.contains("errors.New")
+                || m.contains("strings.Join")
+                || m.contains("sync.OnceFunc")
         }),
         "extras should be off by default: {messages:?}"
     );
