@@ -19,6 +19,8 @@
 //! - `mapsloop` — `for k, v := range x { m[k] = v }` → `maps.Copy` (Go 1.23+; map→map)
 //! - `slicesbackward` — reverse index loop → `slices.Backward` (Go 1.23+; simplified)
 //! - `reflecttypefor` — `reflect.TypeOf` → `TypeFor` (Go 1.22+; `(*T)(nil).Elem` + simple vars)
+//! - `reflecttypeassert` — `v.Interface().(T)` (comma-ok) → `reflect.TypeAssert[T](v)`
+//!   (Go 1.25+; renamed-import AddImport DEFERRED)
 //! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
@@ -39,14 +41,15 @@
 //!   elem-name collision → candidate skipped, DEFERRED fresh-name)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! reflecttypeassert, appendclipped (unsafe-by-default upstream),
+//! appendclipped (unsafe-by-default upstream),
 //! stditerators fresh-name generation on elem collisions / Seq2 dual-component
 //! patterns, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
 //! waitgroupgo trailing-Done /
-//! SuggestedFix import edits (stringsbuilder / slicesdelete AddImport),
+//! SuggestedFix import edits (stringsbuilder / slicesdelete / reflecttypeassert
+//! AddImport),
 //! slicesdelete `int()` conversion / int-shadowing skip, reflecttypefor
 //! complicated/unnamed types & unused-var deletion, slicesbackward
 //! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
@@ -2159,6 +2162,97 @@ fn is_nil_typed_conversion(pass: &Pass<'_>, expr: &Expr) -> bool {
     pass.types_info()
         .and_then(|i| i.types.get(&call.fun.id()))
         .is_some_and(|tav| tav.mode == OperandMode::TypeExpr)
+}
+
+/// Like [`is_named_pkg_type`] but does **not** unwrap pointers — needed so
+/// `*reflect.Value` is not treated as `reflect.Value` (upstream leaves those alone).
+fn is_exact_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg: &str, name: &str) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
+        return false;
+    };
+    let obj = named_obj(&artifacts.types, typ);
+    if obj.name(&artifacts.objects) != name {
+        return false;
+    }
+    obj.pkg(&artifacts.objects)
+        .is_some_and(|p| artifacts.packages.get(p).path() == pkg)
+}
+
+/// `x, ok := v.Interface().(T)` → `reflect.TypeAssert[T](v)` (Go 1.25+).
+fn check_reflecttypeassert(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
+    if assign.lhs.len() != 2 || assign.rhs.len() != 1 {
+        return;
+    }
+    if assign.tok != Some(Token::ASSIGN) && assign.tok != Some(Token::DEFINE) {
+        return;
+    }
+    let Expr::TypeAssertExpr(assert) = unparen_expr(&assign.rhs[0]) else {
+        return;
+    };
+    let Some(ty) = assert.ty.as_ref() else {
+        return; // type switch
+    };
+    let Expr::CallExpr(call) = unparen_expr(&assert.x) else {
+        return;
+    };
+    let Expr::SelectorExpr(sel) = unparen_expr(&call.fun) else {
+        return; // method expression reflect.Value.Interface(v)
+    };
+    if sel.sel.name != "Interface" || !call.args.is_empty() {
+        return;
+    }
+    let Some(recv_ty) = type_of(pass, &sel.x) else {
+        return;
+    };
+    // Pointer receiver would need an explicit dereference in the rewrite.
+    if !is_exact_named_pkg_type(pass, recv_ty, "reflect", "Value") {
+        return;
+    }
+    let pos = assert.x.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.25") {
+        return;
+    }
+    let Some(tstr) = expr_text(ty) else {
+        return;
+    };
+    let end = (assert.rparen.0 + 1) as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: format!(
+            "Interface().({tstr}) can be simplified using reflect.TypeAssert"
+        ),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!(
+                "Replace Interface().({tstr}) by reflect.TypeAssert[{tstr}]"
+            ),
+            text_edits: vec![
+                TextEdit {
+                    pos,
+                    end: sel.x.pos().0 as u32,
+                    // DEFERRED: AddImport / renamed-import prefix
+                    new_text: format!("reflect.TypeAssert[{tstr}]("),
+                },
+                TextEdit {
+                    pos: sel.x.end().0 as u32,
+                    end,
+                    new_text: ")".into(),
+                },
+            ],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
 }
 
 fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
@@ -4875,8 +4969,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_waitgroupgo(pass, b, &mut pending);
                     }
                 }
-                NodeRef::AssignStmt(a) if enabled(&options, "stringscut") => {
-                    check_stringscut(pass, a, &mut pending);
+                NodeRef::AssignStmt(a) => {
+                    if enabled(&options, "stringscut") {
+                        check_stringscut(pass, a, &mut pending);
+                    }
+                    if enabled(&options, "reflecttypeassert") {
+                        check_reflecttypeassert(pass, a, &mut pending);
+                    }
                 }
                 NodeRef::CallExpr(c) => {
                     if enabled(&options, "fmtappendf") {

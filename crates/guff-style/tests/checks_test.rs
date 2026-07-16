@@ -3046,6 +3046,46 @@ fn modernize_flags_reflecttypefor() {
 }
 
 #[test]
+fn modernize_flags_reflecttypeassert() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/reflecttypeassert",
+        "reflecttypeassert.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("can be simplified using reflect.TypeAssert"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        6,
+        "expected exactly 6 reflecttypeassert hits (6 positive / negatives skipped), got {} {messages:?}",
+        hits.len()
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("Interface().(string)")),
+        "{messages:?}"
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("Interface().(payload)")),
+        "{messages:?}"
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("Interface().(io.Reader)")),
+        "{messages:?}"
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("Interface().(int)")),
+        "{messages:?}"
+    );
+    assert!(
+        hits.iter().any(|m| m.contains("Interface().(error)")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_testingcontext() {
     let pkg = support::typecheck_fixture(
         "modernize",
