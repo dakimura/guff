@@ -1,8 +1,8 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
-    gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
+    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen, gocognit,
+    goconst, gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
     nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
     unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
@@ -2740,4 +2740,72 @@ fn testifylint_go_require_ignore_http_handlers() {
             .all(|m| !(m.contains("go-require") && m.contains("http handlers"))),
         "http handlers should be ignored: {messages:?}"
     );
+}
+
+#[test]
+fn exptostd_flags_exp_maps() {
+    let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_maps.go");
+    let messages = support::run_analyzer(exptostd(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("golang.org/x/exp/maps.Clone()") && m.contains("maps.Clone()")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("golang.org/x/exp/maps.Clear()") && m.contains("clear()")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Import statement 'golang.org/x/exp/maps' may be replaced by 'maps'"
+        )),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn exptostd_flags_exp_slices_import_only_when_fully_replaceable() {
+    let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_slices.go");
+    let messages = support::run_analyzer(exptostd(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Import statement 'golang.org/x/exp/slices' may be replaced by 'slices'"
+        )),
+        "{messages:?}"
+    );
+    // Upstream reports only the import when every slices call is 1:1 replaceable.
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("golang.org/x/exp/slices.Equal()")),
+        "per-call slices diagnostics should be omitted: {messages:?}"
+    );
+}
+
+#[test]
+fn exptostd_flags_exp_constraints() {
+    let pkg =
+        support::typecheck_fixture("exptostd", "example.com/exptostd", "bad_constraints.go");
+    let messages = support::run_analyzer(exptostd(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "golang.org/x/exp/constraints.Ordered can be replaced by cmp.Ordered"
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Import statement 'golang.org/x/exp/constraints' may be replaced by 'cmp'"
+        )),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn exptostd_allows_non_exp_maps() {
+    let pkg = support::typecheck_fixture("exptostd", "example.com/exptostd/ok", "ok.go");
+    assert!(support::run_analyzer(exptostd(), &pkg).is_empty());
 }

@@ -31,6 +31,7 @@
 //! - [`loggercheck`]
 //! - [`sloglint`]
 //! - [`testifylint`]
+//! - [`exptostd`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -44,6 +45,7 @@ mod cyclop;
 mod dogsled;
 mod exhaustive;
 mod exhaustruct;
+mod exptostd;
 mod funlen;
 mod loggercheck;
 mod musttag;
@@ -83,6 +85,7 @@ pub use cyclop::analyzer as cyclop;
 pub use dogsled::analyzer as dogsled;
 pub use exhaustive::analyzer as exhaustive;
 pub use exhaustruct::analyzer as exhaustruct;
+pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
@@ -143,5 +146,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         loggercheck(),
         sloglint(),
         testifylint(),
+        exptostd(),
     ]
 }
