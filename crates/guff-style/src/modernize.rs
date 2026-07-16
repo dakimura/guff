@@ -31,9 +31,11 @@
 //!   `_test.go` skipped; AddImport DEFERRED)
 //! - `slicesdelete` — `append(s[:i], s[j:]...)` → `slices.Delete` (Go 1.21+;
 //!   AddImport / `int()` wrap / int-shadow skip DEFERRED)
+//! - `bloop` — `for … b.N …` → `for b.Loop()` (Go 1.24+; deletes preceding
+//!   `b.{Start,Stop,Reset}Timer`; keyed `for i := range b.N` DEFERRED)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! stditerators, bloop, reflecttypeassert, stringscut Index/Contains
+//! stditerators, reflecttypeassert, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
@@ -43,8 +45,8 @@
 //! complicated/unnamed types & unused-var deletion, slicesbackward
 //! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
 //! typeindex, newexpr `new` shadowing / CheckExpr untyped-constant re-typecheck
-//! full parity, errorsastype switch/`new(E)`/combined-cond forms, and full
-//! rangeint/minmax edge-case parity with upstream.
+//! full parity, errorsastype switch/`new(E)`/combined-cond forms, bloop keyed
+//! `for i := range b.N`, and full rangeint/minmax edge-case parity with upstream.
 
 use std::collections::HashSet;
 use std::fs;
@@ -2512,6 +2514,249 @@ fn check_testingcontext(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
     }
 }
 
+/// Port of modernize `bloop`: `for … b.N …` → `for b.Loop()` (Go 1.24+).
+///
+/// Only modernizes the sole `b.N` loop directly in a `Benchmark*` function
+/// (not inside a FuncLit). Preceding `b.{Start,Stop,Reset}Timer` calls in the
+/// same function (outside FuncLits) are deleted in the SuggestedFix.
+fn check_bloop(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
+    for decl in &file.decls {
+        let Decl::FuncDecl(fd) = decl else {
+            continue;
+        };
+        if !is_benchmark_func(fd) {
+            continue;
+        }
+        let Some(body) = fd.body.as_ref() else {
+            continue;
+        };
+        if count_benchmark_n_refs(pass, body) != 1 {
+            continue;
+        }
+        walk::inspect(NodeRef::BlockStmt(body), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::FuncLit(_) => false, // don't descend: b.Loop must be in Benchmark goroutine
+                NodeRef::ForStmt(for_stmt) => {
+                    check_bloop_for(pass, body, for_stmt, pending);
+                    true
+                }
+                NodeRef::RangeStmt(range_stmt) => {
+                    check_bloop_range(pass, body, range_stmt, pending);
+                    true
+                }
+                _ => true,
+            }
+        });
+    }
+}
+
+fn is_benchmark_func(fd: &FuncDecl) -> bool {
+    fd.recv.is_none()
+        && test_kind_prefix(&fd.name.name) == Some("Benchmark")
+        && fd.ty.params.as_ref().is_some_and(|p| p.list.len() == 1)
+}
+
+fn is_testing_b(pass: &Pass<'_>, expr: &Expr) -> bool {
+    type_of(pass, expr).is_some_and(|typ| is_named_pkg_type(pass, typ, "testing", "B"))
+}
+
+fn benchmark_n_recv<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::SelectorExpr(sel) = expr else {
+        return None;
+    };
+    if sel.sel.name != "N" || !is_testing_b(pass, &sel.x) {
+        return None;
+    }
+    Some(&sel.x)
+}
+
+fn count_benchmark_n_refs(pass: &Pass<'_>, body: &BlockStmt) -> usize {
+    let mut n = 0;
+    walk::inspect(NodeRef::BlockStmt(body), |node| {
+        let Some(node) = node else {
+            return true;
+        };
+        if let NodeRef::SelectorExpr(sel) = node {
+            if sel.sel.name == "N" && is_testing_b(pass, &sel.x) {
+                n += 1;
+            }
+        }
+        true
+    });
+    n
+}
+
+fn is_testing_b_timer_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    if !matches!(
+        sel.sel.name.as_str(),
+        "StartTimer" | "StopTimer" | "ResetTimer"
+    ) {
+        return false;
+    }
+    is_testing_b(pass, &sel.x)
+}
+
+fn bloop_timer_edits(pass: &Pass<'_>, body: &BlockStmt, before: u32) -> Vec<TextEdit> {
+    let mut edits = Vec::new();
+    walk::inspect(NodeRef::BlockStmt(body), |node| {
+        let Some(node) = node else {
+            return true;
+        };
+        match node {
+            NodeRef::FuncLit(_) => false,
+            NodeRef::ExprStmt(es) => {
+                if let Expr::CallExpr(call) = &es.x {
+                    let pos = es.x.pos().0 as u32;
+                    if pos < before && is_testing_b_timer_call(pass, call) {
+                        edits.push(TextEdit {
+                            pos,
+                            end: es.x.end().0 as u32,
+                            new_text: String::new(),
+                        });
+                    }
+                }
+                true
+            }
+            _ => true,
+        }
+    });
+    edits
+}
+
+fn increment_loop_index(pass: &Pass<'_>, for_stmt: &ForStmt) -> Option<ObjectId> {
+    let Stmt::AssignStmt(init) = for_stmt.init.as_deref()? else {
+        return None;
+    };
+    if init.tok != Some(Token::DEFINE) || init.lhs.len() != 1 || init.rhs.len() != 1 {
+        return None;
+    }
+    if !code::is_integer_literal(pass, &init.rhs[0], 0) {
+        return None;
+    }
+    let Expr::Ident(lhs) = &init.lhs[0] else {
+        return None;
+    };
+    let post = for_stmt.post.as_deref()?;
+    if !is_simple_inc(post, lhs.name.as_str()) {
+        return None;
+    }
+    ident_obj(pass, lhs)
+}
+
+fn check_bloop_for(
+    pass: &Pass<'_>,
+    fn_body: &BlockStmt,
+    for_stmt: &ForStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
+    let pos = for_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.24") {
+        return;
+    }
+    let Some(cond) = for_stmt.cond.as_ref() else {
+        return;
+    };
+    let Expr::BinaryExpr(cmp) = cond else {
+        return;
+    };
+    if cmp.op != Token::LSS {
+        return;
+    }
+    let Some(b_recv) = benchmark_n_recv(pass, &cmp.y) else {
+        return;
+    };
+    let Some(b_text) = expr_text(b_recv) else {
+        return;
+    };
+
+    let cond_pos = cond.pos().0 as u32;
+    let cond_end = cond.end().0 as u32;
+    let mut del_pos = cond_pos;
+    let mut del_end = cond_end;
+
+    // Eliminate `i := 0; …; i++` when `i` is unused in the body.
+    if let Some(idx) = increment_loop_index(pass, for_stmt) {
+        if count_ident_uses(pass, &for_stmt.body, idx) == 0 {
+            if let (Some(init), Some(post)) = (for_stmt.init.as_ref(), for_stmt.post.as_ref()) {
+                del_pos = init.pos().0 as u32;
+                del_end = post.end().0 as u32;
+            }
+        }
+    }
+
+    let mut edits = bloop_timer_edits(pass, fn_body, del_pos);
+    edits.push(TextEdit {
+        pos: del_pos,
+        end: del_end,
+        new_text: format!("{b_text}.Loop()"),
+    });
+
+    pending.push(Diagnostic {
+        pos: cond_pos,
+        end: cond_end,
+        category: String::new(),
+        message: "b.N can be modernized using b.Loop()".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace b.N with b.Loop()".into(),
+            text_edits: edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn check_bloop_range(
+    pass: &Pass<'_>,
+    fn_body: &BlockStmt,
+    range_stmt: &RangeStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
+    // DEFERRED: `for i := range b.N` (keyed form).
+    if range_stmt.key.is_some() || range_stmt.value.is_some() {
+        return;
+    }
+    let pos = range_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.24") {
+        return;
+    }
+    let Some(b_recv) = benchmark_n_recv(pass, &range_stmt.x) else {
+        return;
+    };
+    let Some(b_text) = expr_text(b_recv) else {
+        return;
+    };
+
+    let del_pos = range_stmt.range_.0 as u32;
+    let del_end = range_stmt.x.end().0 as u32;
+    let mut edits = bloop_timer_edits(pass, fn_body, del_pos);
+    edits.push(TextEdit {
+        pos: del_pos,
+        end: del_end,
+        new_text: format!("{b_text}.Loop()"),
+    });
+
+    pending.push(Diagnostic {
+        pos: del_pos,
+        end: del_end,
+        category: String::new(),
+        message: "b.N can be modernized using b.Loop()".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace b.N with b.Loop()".into(),
+            text_edits: edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn is_basic_kind(pass: &Pass<'_>, typ: TypeId, kind: BasicKind) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
@@ -4096,6 +4341,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         if enabled(&options, "testingcontext") {
             check_testingcontext(pass, file, &mut pending);
+        }
+        if enabled(&options, "bloop") {
+            check_bloop(pass, file, &mut pending);
         }
         if enabled(&options, "importcomment") {
             check_importcomment(pass, file_idx, file, &mut pending);

@@ -3282,6 +3282,23 @@ fn modernize_flags_slicesdelete() {
 }
 
 #[test]
+fn modernize_flags_bloop() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/bloop", "bloop.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("b.N can be modernized using b.Loop()"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        4,
+        "expected exactly 4 bloop hits (A/C/D/E), got {} {messages:?}",
+        hits.len()
+    );
+}
+
+#[test]
 fn modernize_flags_slicescontains_variants() {
     let pkg = support::typecheck_fixture(
         "modernize",
