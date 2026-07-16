@@ -2,6 +2,7 @@ package modernize
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -42,6 +43,10 @@ func cutPrefix(s, pre string) string {
 
 func containsNeedle(s []int, needle int) bool {
 	return slices.Contains(s, needle)
+}
+
+func copyMap(dst, src map[int]string) {
+	maps.Copy(dst, src)
 }
 
 func rangeSplit(s string) {

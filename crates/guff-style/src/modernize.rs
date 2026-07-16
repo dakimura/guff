@@ -14,13 +14,15 @@
 //! - `slicescontains` — search loop → `slices.Contains` (Go 1.21+; return true/false)
 //! - `stringsseq` — `range strings.Split/Fields` → `SplitSeq`/`FieldsSeq` (Go 1.24+)
 //! - `waitgroupgo` — `Add(1)`+`go`+`Done` → `WaitGroup.Go` (Go 1.25+)
+//! - `mapsloop` — `for k, v := range x { m[k] = v }` → `maps.Copy` (Go 1.23+; map→map)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! errorsastype, mapsloop, newexpr, reflecttypefor, slicesbackward,
-//! stditerators, stringscut, stringsbuilder, testingcontext, unsafefuncs,
-//! HasPrefix/TrimPrefix pattern 2 / bytes variants, slicescontains ContainsFunc /
-//! break variants, waitgroupgo trailing-Done / SuggestedFix import edits, and full
-//! rangeint/minmax edge-case parity with upstream.
+//! errorsastype, newexpr, reflecttypefor, slicesbackward, stditerators,
+//! stringscut, stringsbuilder, testingcontext, unsafefuncs, mapsloop Insert/
+//! Collect (iter.Seq2) / Clone (nil-preserving), HasPrefix/TrimPrefix pattern 2 /
+//! bytes variants, slicescontains ContainsFunc / break variants, waitgroupgo
+//! trailing-Done / SuggestedFix import edits, and full rangeint/minmax edge-case
+//! parity with upstream.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -37,12 +39,14 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::api_identical;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
+use guff_types::map::{map_elem, map_key};
 use guff_types::named::named_obj;
 use guff_types::predicates::{is_float, is_string};
 use guff_types::signature::signature_recv;
-use guff_types::{OperandMode, TypeId};
+use guff_types::{ObjectId, OperandMode, TypeId};
 
 use crate::options::ModernizeOptions;
 
@@ -267,6 +271,7 @@ enum TypeKind {
     Array,
     String,
     Struct,
+    Map,
     Other,
 }
 
@@ -280,9 +285,89 @@ fn type_kind(pass: &Pass<'_>, expr: &Expr) -> Option<TypeKind> {
         TypeData::Slice(_) => TypeKind::Slice,
         TypeData::Array(_) => TypeKind::Array,
         TypeData::Struct(_) => TypeKind::Struct,
+        TypeData::Map(_) => TypeKind::Map,
         _ if is_string(&artifacts.types, under) => TypeKind::String,
         _ => TypeKind::Other,
     })
+}
+
+fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    if let Some(tav) = info.types.get(&expr.id()) {
+        return Some(tav.typ);
+    }
+    // Range variables (and other defs) may only appear in defs/uses.
+    let Expr::Ident(id) = expr else {
+        return None;
+    };
+    let obj = ident_obj(pass, id)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    obj.typ(&artifacts.objects)
+}
+
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_identical(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        a,
+        b,
+    )
+}
+
+fn underlying_map(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = type_of(pass, expr)?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Map(_) => Some(under),
+        _ => None,
+    }
+}
+
+fn ident_obj(pass: &Pass<'_>, id: &guff::ast::Ident) -> Option<ObjectId> {
+    let info = pass.types_info()?;
+    info.defs
+        .get(&id.id)
+        .copied()
+        .flatten()
+        .or_else(|| info.uses.get(&id.id).copied())
+}
+
+fn expr_uses_loop_vars(pass: &Pass<'_>, expr: &Expr, key: &Expr, value: &Expr) -> bool {
+    let Some(k_obj) = (match key {
+        Expr::Ident(id) => ident_obj(pass, id),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let Some(v_obj) = (match value {
+        Expr::Ident(id) => ident_obj(pass, id),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let mut used = false;
+    walk::inspect(walk::expr_ref(expr), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if let NodeRef::Ident(id) = n {
+            if let Some(obj) = ident_obj(pass, id) {
+                if obj == k_obj || obj == v_obj {
+                    used = true;
+                    return false;
+                }
+            }
+        }
+        true
+    });
+    used
 }
 
 fn is_float_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -904,6 +989,111 @@ fn check_slicescontains(
     }
 }
 
+fn check_mapsloop(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Diagnostic>) {
+    // Skip stdlib packages where a maps import would cycle (maps itself).
+    if pass.pkg().pkg_path == "maps" || pass.pkg().pkg_path.starts_with("maps/") {
+        return;
+    }
+    let pos = range_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.23") {
+        return;
+    }
+    if range_stmt.tok != Some(Token::DEFINE) {
+        return;
+    }
+    let Some(key) = range_stmt.key.as_ref() else {
+        return;
+    };
+    let Some(value) = range_stmt.value.as_ref() else {
+        return;
+    };
+    // Body must be a single `m[k] = v` (or `:=`) assignment.
+    if range_stmt.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::AssignStmt(assign) = &range_stmt.body.list[0] else {
+        return;
+    };
+    if assign.tok != Some(Token::ASSIGN) && assign.tok != Some(Token::DEFINE) {
+        return;
+    }
+    if assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return;
+    }
+    let Expr::IndexExpr(index) = &assign.lhs[0] else {
+        return;
+    };
+    if !code::same_non_dynamic(pass, key, &index.index) {
+        return;
+    }
+    if !code::same_non_dynamic(pass, value, &assign.rhs[0]) {
+        return;
+    }
+    // Reject e.g. f(k, v)[k] = v
+    if expr_uses_loop_vars(pass, &index.x, key, value) {
+        return;
+    }
+    // Source x must be a map (iter.Seq2 → Insert/Collect is DEFERRED).
+    let Some(src_map) = underlying_map(pass, &range_stmt.x) else {
+        return;
+    };
+    let Some(dst_map) = underlying_map(pass, &index.x) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(index_ty) = type_of(pass, &assign.lhs[0]) else {
+        return;
+    };
+    let Some(value_ty) = type_of(pass, value) else {
+        return;
+    };
+    let Some(key_ty) = type_of(pass, key) else {
+        return;
+    };
+    // No implicit conversion of key or value.
+    if !types_identical(pass, index_ty, value_ty) {
+        return;
+    }
+    if !types_identical(pass, map_key(&artifacts.types, dst_map), key_ty) {
+        return;
+    }
+    // Also require source map key/elem match (defensive; usually follows from assignability).
+    if !types_identical(pass, map_key(&artifacts.types, src_map), key_ty)
+        || !types_identical(pass, map_elem(&artifacts.types, src_map), value_ty)
+    {
+        return;
+    }
+
+    let Some(m_text) = expr_text(&index.x) else {
+        return;
+    };
+    let Some(x_text) = expr_text(&range_stmt.x) else {
+        return;
+    };
+    let end = range_stmt.body.end().0 as u32;
+    let report_pos = assign.lhs[0].pos().0 as u32;
+    let report_end = assign.lhs[0].end().0 as u32;
+    pending.push(Diagnostic {
+        pos: report_pos,
+        end: report_end,
+        category: String::new(),
+        message: "Replace m[k]=v loop with maps.Copy".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace m[k]=v loop with maps.Copy".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("maps.Copy({m_text}, {x_text})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
 fn split_or_fields_seq_name(pass: &Pass<'_>, call: &CallExpr) -> Option<&'static str> {
     if code::is_call_to(pass, call, "strings.Split") {
         Some("SplitSeq")
@@ -1134,6 +1324,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "stringsseq") {
                         check_stringsseq(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "mapsloop") {
+                        check_mapsloop(pass, s, &mut pending);
                     }
                 }
                 NodeRef::ForStmt(s) if enabled(&options, "rangeint") => {

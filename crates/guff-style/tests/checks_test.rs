@@ -3023,6 +3023,19 @@ fn modernize_flags_waitgroupgo() {
 }
 
 #[test]
+fn modernize_flags_mapsloop() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/mapsloop", "mapsloop.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Replace m[k]=v loop with maps.Copy")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_allows_modern_code() {
     let pkg = support::typecheck_fixture("modernize", "example.com/modernize/ok", "ok.go");
     assert!(
