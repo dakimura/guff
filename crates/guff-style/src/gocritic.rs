@@ -38,13 +38,13 @@
 //! - batch 15 (enable-all extra): `commentedOutCode`
 //! - batch 16 (enable-all extras): `badLock`, `externalErrorReassign`,
 //!   `uncheckedInlineErr`, `boolExprSimplify` (doubleNegation / invertComparison /
-//!   negatedEquals / combineChecks; removeIncDec / foldRanges DEFERRED)
+//!   negatedEquals / combineChecks / removeIncDec / foldRanges)
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + `regexpSimplify`
-//! + boolExprSimplify removeIncDec/foldRanges full parity / …),
+//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + `regexpSimplify`),
+//! boolExprSimplify SkipChilds (nested dual-report) / SideEffectFree full parity,
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported,
@@ -7047,6 +7047,18 @@ fn negate_cmp_op(op: Token) -> Option<&'static str> {
     }
 }
 
+fn negate_op_str(op: &str) -> Option<&'static str> {
+    match op {
+        "==" => Some("!="),
+        "!=" => Some("=="),
+        "<" => Some(">="),
+        ">" => Some("<="),
+        "<=" => Some(">"),
+        ">=" => Some("<"),
+        _ => None,
+    }
+}
+
 fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
     match expr {
         Expr::ParenExpr(p) => expr_contains_float_cmp(pass, &p.x),
@@ -7073,6 +7085,156 @@ fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
     }
 }
 
+/// Approximate `typep.SideEffectFree` for combineChecks / foldRanges.
+fn expr_is_safe(expr: &Expr) -> bool {
+    match unparen_expr(expr) {
+        Expr::Ident(_) | Expr::BasicLit(_) => true,
+        Expr::SelectorExpr(s) => expr_is_safe(&s.x),
+        Expr::IndexExpr(i) => expr_is_safe(&i.x) && expr_is_safe(&i.index),
+        Expr::StarExpr(s) => expr_is_safe(&s.x),
+        Expr::UnaryExpr(u)
+            if matches!(
+                u.op,
+                Token::ADD | Token::SUB | Token::NOT | Token::XOR | Token::AND | Token::MUL
+            ) =>
+        {
+            expr_is_safe(&u.x)
+        }
+        Expr::BinaryExpr(b) => expr_is_safe(&b.x) && expr_is_safe(&b.y),
+        Expr::ParenExpr(p) => expr_is_safe(&p.x),
+        _ => false,
+    }
+}
+
+fn basic_lit_is_one(expr: &Expr) -> bool {
+    matches!(unparen_expr(expr), Expr::BasicLit(lit) if lit.value == "1")
+}
+
+fn int64_lit(expr: &Expr) -> Option<i64> {
+    let Expr::BasicLit(lit) = unparen_expr(expr) else {
+        return None;
+    };
+    lit.value.parse().ok()
+}
+
+/// `removeIncDec`: `x > y-1` → `x >= y`, `x+1 > y` → `x >= y`, etc.
+fn try_remove_inc_dec(cmp: &BinaryExpr) -> Option<(String, &'static str, String)> {
+    let match_one_way = |op: Token, x: &Expr, y: &Expr| -> bool {
+        let Expr::BinaryExpr(xb) = unparen_expr(x) else {
+            return false;
+        };
+        if xb.op != op || !basic_lit_is_one(&xb.y) {
+            return false;
+        }
+        // Balanced ±1 on both sides is intentional — skip.
+        if let Expr::BinaryExpr(yb) = unparen_expr(y) {
+            if yb.op == op && basic_lit_is_one(&yb.y) {
+                return false;
+            }
+        }
+        true
+    };
+
+    let replace = |lhs_op: Token,
+                   rhs_op: Token,
+                   replacement: &'static str|
+     -> Option<(String, &'static str, String)> {
+        // `matchOneWay(lhsOp, lhs, rhs)` → strip ±1 from left
+        if match_one_way(lhs_op, &cmp.x, &cmp.y) {
+            let Expr::BinaryExpr(lhs) = unparen_expr(&cmp.x) else {
+                return None;
+            };
+            return Some((expr_text(&lhs.x)?, replacement, expr_text(&cmp.y)?));
+        }
+        // `matchOneWay(rhsOp, rhs, lhs)` → strip ±1 from right
+        if match_one_way(rhs_op, &cmp.y, &cmp.x) {
+            let Expr::BinaryExpr(rhs) = unparen_expr(&cmp.y) else {
+                return None;
+            };
+            return Some((expr_text(&cmp.x)?, replacement, expr_text(&rhs.x)?));
+        }
+        None
+    };
+
+    match cmp.op {
+        // `x > y-1` / `x+1 > y` → `x >= y`
+        Token::GTR => replace(Token::ADD, Token::SUB, ">="),
+        // `x >= y+1` / `x-1 >= y` → `x > y`
+        Token::GEQ => replace(Token::SUB, Token::ADD, ">"),
+        // `x < y+1` / `x-1 < y` → `x <= y`
+        Token::LSS => replace(Token::SUB, Token::ADD, "<="),
+        // `x <= y-1` / `x+1 <= y` → `x < y`
+        Token::LEQ => replace(Token::ADD, Token::SUB, "<"),
+        _ => None,
+    }
+}
+
+/// `foldRanges`: `x > 10 && x < 12` → `x == 11`, `x < 11 || x > 11` → `x != 11`.
+fn try_fold_ranges(e: &BinaryExpr, has_floats: bool) -> Option<String> {
+    if has_floats {
+        return None;
+    }
+    let lhs = match unparen_expr(&e.x) {
+        Expr::BinaryExpr(b) => b,
+        _ => return None,
+    };
+    let rhs = match unparen_expr(&e.y) {
+        Expr::BinaryExpr(b) => b,
+        _ => return None,
+    };
+    if !expr_is_safe(&lhs.x) || !expr_is_safe(&rhs.x) {
+        return None;
+    }
+    if !exprs_equal(&lhs.x, &rhs.x) {
+        return None;
+    }
+    let c1 = int64_lit(&lhs.y)?;
+    let c2 = int64_lit(&rhs.y)?;
+
+    // (lhsOp, rhsOp, rhsDiff=c2-c1, resDelta)
+    let match_comb =
+        |lhs_op: Token, rhs_op: Token, rhs_diff: i64, res_delta: i64| -> Option<String> {
+            if lhs.op != lhs_op || rhs.op != rhs_op {
+                return None;
+            }
+            if c2 - c1 != rhs_diff {
+                return None;
+            }
+            let x = expr_text(&lhs.x)?;
+            let v = c1 + res_delta;
+            let op = match e.op {
+                Token::LAND => "==",
+                Token::LOR => "!=",
+                _ => return None,
+            };
+            Some(format!("{x} {op} {v}"))
+        };
+
+    match e.op {
+        Token::LAND => {
+            // `x > c && x < c+2` → `x == c+1`
+            match_comb(Token::GTR, Token::LSS, 2, 1)
+                // `x >= c && x < c+1` → `x == c`
+                .or_else(|| match_comb(Token::GEQ, Token::LSS, 1, 0))
+                // `x > c && x <= c+1` → `x == c+1`
+                .or_else(|| match_comb(Token::GTR, Token::LEQ, 1, 1))
+                // `x >= c && x <= c` → `x == c`
+                .or_else(|| match_comb(Token::GEQ, Token::LEQ, 0, 0))
+        }
+        Token::LOR => {
+            // `x < c || x > c` → `x != c`
+            match_comb(Token::LSS, Token::GTR, 0, 0)
+                // `x <= c || x > c+1` → `x != c+1`
+                .or_else(|| match_comb(Token::LEQ, Token::GTR, 1, 1))
+                // `x < c || x >= c+1` → `x != c`
+                .or_else(|| match_comb(Token::LSS, Token::GEQ, 1, 0))
+                // `x <= c || x >= c+2` → `x != c+1`
+                .or_else(|| match_comb(Token::LEQ, Token::GEQ, 2, 1))
+        }
+        _ => None,
+    }
+}
+
 fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
     let expr = unparen_expr(expr);
     match expr {
@@ -7086,9 +7248,14 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
                 }
             }
             // invertComparison: !(a op b) → a negated_op b
+            // Apply removeIncDec on the comparison first (upstream Apply post-order).
             if !has_floats {
                 if let Expr::BinaryExpr(cmp) = x {
-                    if let Some(neg) = negate_cmp_op(cmp.op) {
+                    if let Some((lx, op, ly)) = try_remove_inc_dec(cmp) {
+                        if let Some(neg) = negate_op_str(op) {
+                            return Some(format!("{lx} {neg} {ly}"));
+                        }
+                    } else if let Some(neg) = negate_cmp_op(cmp.op) {
                         let lx = simplify_bool_expr(&cmp.x, has_floats)
                             .or_else(|| expr_text(&cmp.x))?;
                         let ly = simplify_bool_expr(&cmp.y, has_floats)
@@ -7126,7 +7293,11 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
                 let lhs = unparen_expr(&b.x);
                 let rhs = unparen_expr(&b.y);
                 if let (Expr::BinaryExpr(l), Expr::BinaryExpr(r)) = (lhs, rhs) {
-                    if exprs_equal(&l.x, &r.x) && exprs_equal(&l.y, &r.y) {
+                    if exprs_equal(&l.x, &r.x)
+                        && exprs_equal(&l.y, &r.y)
+                        && expr_is_safe(&l.x)
+                        && expr_is_safe(&l.y)
+                    {
                         let comb = match (l.op, r.op) {
                             (Token::GTR, Token::EQL) | (Token::EQL, Token::GTR) => Some(">="),
                             (Token::LSS, Token::EQL) | (Token::EQL, Token::LSS) => Some("<="),
@@ -7139,6 +7310,14 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
                         }
                     }
                 }
+            }
+            // removeIncDec
+            if let Some((lx, op, ly)) = try_remove_inc_dec(b) {
+                return Some(format!("{lx} {op} {ly}"));
+            }
+            // foldRanges
+            if let Some(s) = try_fold_ranges(b, has_floats) {
+                return Some(s);
             }
             // Recurse into sides then rebuild if either side simplified.
             let sx = simplify_bool_expr(&b.x, has_floats);

@@ -3736,6 +3736,12 @@ fn gocritic_enable_all_extras() {
         "can simplify `!(a >= b)` to `a < b`",
         "can simplify `!x == !y` to `x == y`",
         "can simplify `a > b || a == b` to `a >= b`",
+        "can simplify `a < b + 1` to `a <= b`",
+        "can simplify `a + 1 > b` to `a >= b`",
+        "can simplify `a >= b + 1` to `a > b`",
+        "can simplify `!(a >= b + 1)` to `a <= b`",
+        "can simplify `a > 10 && a < 12` to `a == 11`",
+        "can simplify `a < 11 || a > 11` to `a != 11`",
     ];
     for needle in expect {
         assert!(

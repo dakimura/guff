@@ -502,4 +502,12 @@ func boolExprSimplifyExtra(x, y bool, a, b int) {
 	_ = !(a >= b)
 	_ = !x == !y
 	_ = a > b || a == b
+	// removeIncDec
+	_ = a < b+1
+	_ = a+1 > b
+	_ = a >= b+1
+	_ = !(a >= b+1)
+	// foldRanges
+	_ = a > 10 && a < 12
+	_ = a < 11 || a > 11
 }
