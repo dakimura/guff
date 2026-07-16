@@ -67,6 +67,7 @@ pub struct LinterSettings {
     pub iface: IfaceSettings,
     pub interfacebloat: InterfacebloatSettings,
     pub inamedparam: InamedparamSettings,
+    pub nonamedreturns: NonamedreturnsSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -938,6 +939,26 @@ impl InamedparamSettings {
     }
 }
 
+/// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NonamedreturnsSettings {
+    /// Report named `error` returns even when used in defer (upstream default false).
+    #[serde(default, rename = "report-error-in-defer")]
+    pub report_error_in_defer: bool,
+    /// Allow unused named returns; report only if referenced or used by naked return.
+    #[serde(default, rename = "allow-unused-named-returns")]
+    pub allow_unused_named_returns: bool,
+}
+
+impl NonamedreturnsSettings {
+    pub fn to_guff_nonamedreturns(&self) -> guff_style::NonamedreturnsOptions {
+        guff_style::NonamedreturnsOptions {
+            report_error_in_defer: self.report_error_in_defer,
+            allow_unused_named_returns: self.allow_unused_named_returns,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1364,6 +1385,11 @@ impl LinterSettings {
                 out.inamedparam = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("nonamedreturns".into())) {
+            if let Ok(s) = serde_yaml::from_value::<NonamedreturnsSettings>(v.clone()) {
+                out.nonamedreturns = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1439,6 +1465,10 @@ impl LinterSettings {
             self.interfacebloat.to_guff_interfacebloat(),
         );
         bag.insert("inamedparam", self.inamedparam.to_guff_inamedparam());
+        bag.insert(
+            "nonamedreturns",
+            self.nonamedreturns.to_guff_nonamedreturns(),
+        );
         Arc::new(bag)
     }
 

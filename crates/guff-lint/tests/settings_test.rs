@@ -1057,6 +1057,22 @@ fn parse_v2_inamedparam_settings() {
 }
 
 #[test]
+fn parse_v2_nonamedreturns_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_nonamedreturns_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.nonamedreturns.report_error_in_defer);
+    assert!(settings.nonamedreturns.allow_unused_named_returns);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::NonamedreturnsOptions>("nonamedreturns")
+        .expect("nonamedreturns options");
+    assert!(opts.report_error_in_defer);
+    assert!(opts.allow_unused_named_returns);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

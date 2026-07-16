@@ -9,7 +9,7 @@ use guff_style::{
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
-    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    nlreturn, nonamedreturns, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     testifylint, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
@@ -644,6 +644,134 @@ fn containedctx_allows_non_context_fields() {
         support::typecheck_fixture("containedctx", "example.com/containedctx/ok", "ok.go");
     let messages = support::run_analyzer(containedctx(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn nonamedreturns_flags_named_returns() {
+    let pkg = support::typecheck_fixture("nonamedreturns", "example.com/nonamedreturns", "bad.go");
+    let messages = support::run_analyzer(nonamedreturns(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("named return \"i\" with type \"int\" found")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("named return \"err\" with type \"error\" found")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("named return \"a\" with type \"int\" found")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("named return \"b\" with type \"string\" found")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 5, "{messages:?}");
+}
+
+#[test]
+fn nonamedreturns_allows_unnamed_and_error_in_defer() {
+    let pkg =
+        support::typecheck_fixture("nonamedreturns", "example.com/nonamedreturns/ok", "ok.go");
+    let messages = support::run_analyzer(nonamedreturns(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn nonamedreturns_report_error_in_defer() {
+    use guff_style::NonamedreturnsOptions;
+
+    let pkg = support::typecheck_fixture(
+        "nonamedreturns",
+        "example.com/nonamedreturns/report",
+        "report_error.go",
+    );
+
+    // Default: error-in-defer exemption applies → only named int flagged.
+    let flagged = support::run_analyzer(nonamedreturns(), &pkg);
+    assert_eq!(flagged.len(), 1, "{flagged:?}");
+    assert!(
+        flagged[0].contains("named return \"i\" with type \"int\" found"),
+        "{flagged:?}"
+    );
+
+    // report-error-in-defer: true → both flagged.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "nonamedreturns",
+        NonamedreturnsOptions {
+            report_error_in_defer: true,
+            allow_unused_named_returns: false,
+        },
+    );
+    let reported = support::run_analyzer_with_settings(
+        nonamedreturns(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(reported.len(), 2, "{reported:?}");
+    assert!(
+        reported
+            .iter()
+            .any(|m| m.contains("named return \"err\" with type \"error\" found")),
+        "{reported:?}"
+    );
+}
+
+#[test]
+fn nonamedreturns_allow_unused_named_returns() {
+    use guff_style::NonamedreturnsOptions;
+
+    let pkg = support::typecheck_fixture(
+        "nonamedreturns",
+        "example.com/nonamedreturns/allow",
+        "allow_unused.go",
+    );
+
+    // Default: all named returns (except underscore) are flagged.
+    let flagged = support::run_analyzer(nonamedreturns(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("named return \"sum\" with type \"int\" found")),
+        "{flagged:?}"
+    );
+
+    // allow-unused: only referenced / naked-return cases.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "nonamedreturns",
+        NonamedreturnsOptions {
+            report_error_in_defer: false,
+            allow_unused_named_returns: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        nonamedreturns(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "named return \"sum\" with type \"int\" must not be referenced or used by a naked return"
+        )),
+        "{messages:?}"
+    );
 }
 
 #[test]

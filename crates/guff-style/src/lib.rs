@@ -21,6 +21,7 @@
 //! - [`interfacebloat`]
 //! - [`inamedparam`]
 //! - [`containedctx`]
+//! - [`nonamedreturns`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -78,6 +79,7 @@ mod gochecknoinits;
 mod containedctx;
 mod inamedparam;
 mod interfacebloat;
+mod nonamedreturns;
 mod reassign;
 mod recvcheck;
 mod thelper;
@@ -107,6 +109,7 @@ pub use options::{
     GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
     InamedparamOptions, InterfacebloatOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
+    NonamedreturnsOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
     ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
     TagalignOptions, ThelperKindOptions, ThelperOptions,
@@ -131,6 +134,7 @@ pub use gochecknoinits::analyzer as gochecknoinits;
 pub use containedctx::analyzer as containedctx;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
+pub use nonamedreturns::analyzer as nonamedreturns;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
 pub use thelper::analyzer as thelper;
@@ -185,6 +189,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         interfacebloat(),
         inamedparam(),
         containedctx(),
+        nonamedreturns(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

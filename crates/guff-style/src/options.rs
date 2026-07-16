@@ -794,6 +794,15 @@ pub struct InamedparamOptions {
     pub skip_single_param: bool,
 }
 
+/// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NonamedreturnsOptions {
+    /// Report named `error` returns even when used in defer (upstream default false).
+    pub report_error_in_defer: bool,
+    /// Allow unused named returns; report only if referenced or used by naked return.
+    pub allow_unused_named_returns: bool,
+}
+
 /// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
 ///
 /// Defaults match kulti/thelper / golangci-lint (all checks on).
