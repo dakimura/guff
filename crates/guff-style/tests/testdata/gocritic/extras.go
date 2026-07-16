@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	// "os"
 )
 
@@ -336,4 +337,44 @@ func stringConcatSimplifyExtra(x, y, z, glue string) {
 func badSyncOnceFuncExtra(f func()) {
 	sync.OnceFunc(f)
 	sync.OnceFunc(f)()
+}
+
+func equalFoldExtra(x, y string, xb, yb []byte) {
+	_ = strings.ToLower(x) == y
+	_ = strings.ToUpper(x) != y
+	_ = bytes.Equal(bytes.ToLower(xb), yb)
+	_ = strings.ToLower(x) == x
+}
+
+func sprintfQuotedExtra(s string) {
+	_ = fmt.Sprintf(`"%s"`, s)
+	_ = fmt.Sprintf("foo `%s` bar", s)
+	_ = fmt.Sprintf("%s", s)
+}
+
+func timeExprSimplifyExtra(t time.Time, tp *time.Time) {
+	_ = t.Unix() / 1000
+	_ = tp.UnixNano() * 1000
+}
+
+func appendCombineExtra() {
+	var xs []int
+	xs = append(xs, 1)
+	xs = append(xs, 2)
+	_ = xs
+}
+
+func unnecessaryDeferExtra() {
+	defer appendCombineExtra()
+	return
+}
+
+type withStringerExtra struct{}
+
+func (withStringerExtra) String() string { return "" }
+
+func redundantSprintExtra(s string, w withStringerExtra) {
+	_ = fmt.Sprint(s)
+	_ = fmt.Sprintf("%s", w)
+	_ = fmt.Sprint(w)
 }

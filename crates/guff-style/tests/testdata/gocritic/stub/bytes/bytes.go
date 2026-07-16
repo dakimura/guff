@@ -6,6 +6,8 @@ func Contains(b, subslice []byte) bool         { return false }
 func Compare(a, b []byte) int                  { return 0 }
 func Equal(a, b []byte) bool                   { return false }
 func EqualFold(s, t []byte) bool               { return false }
+func ToLower(s []byte) []byte                  { return s }
+func ToUpper(s []byte) []byte                  { return s }
 func HasPrefix(s, prefix []byte) bool          { return false }
 func HasSuffix(s, suffix []byte) bool          { return false }
 func Index(s, sep []byte) int                  { return -1 }

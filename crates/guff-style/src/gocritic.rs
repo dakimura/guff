@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**83** = 34 default + 49 enable-all extras):
+//! Implemented checkers (**89** = 34 default + 55 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -29,13 +29,15 @@
 //! - batch 11 (enable-all extras): `preferFprint`, `preferStringWriter`,
 //!   `syncMapLoadAndDelete`, `dynamicFmtString`, `stringConcatSimplify`,
 //!   `badSyncOnceFunc`
+//! - batch 12 (enable-all extras): `equalFold`, `sprintfQuotedString`,
+//!   `timeExprSimplify`, `appendCombine`, `unnecessaryDefer`, `redundantSprint`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / `equalFold` /
-//! `sprintfQuotedString` / `timeExprSimplify` / …),
+//! such as `typeUnparen` / `boolExprSimplify` / `hugeParam` / `importShadow` /
+//! `whyNoLint` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent),
@@ -43,7 +45,8 @@
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
 //! stringXbytes regexp method / bytes.Equal full type parity,
-//! preferFprint true `types.Implements(io.Writer)` (arity heuristic like QF1012).
+//! preferFprint true `types.Implements(io.Writer)` (arity heuristic like QF1012),
+//! redundantSprint true `fmt.Stringer` Implements (method-name heuristic).
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -53,7 +56,7 @@ use std::sync::{Arc, OnceLock};
 use guff::ast::{
     AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, CommentGroup, CompositeLit, Decl,
     DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident, IfStmt,
-    IndexExpr, RangeStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr,
+    IndexExpr, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr,
     TypeSwitchStmt, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
@@ -125,6 +128,7 @@ const DEFAULT_CHECKS: &[&str] = &[
 /// Experimental / opinionated checkers available via `enable-all` or
 /// `enabled-checks` (prometheus enable-all coverage).
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
+    "appendCombine",
     "badRegexp",
     "badSorting",
     "badSyncOnceFunc",
@@ -140,6 +144,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "emptyDecl",
     "emptyFallthrough",
     "emptyStringTest",
+    "equalFold",
     "filepathJoin",
     "hexLiteral",
     "httpNoBody",
@@ -157,20 +162,24 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "preferWriteByte",
     "rangeAppendAll",
     "rangeExprCopy",
+    "redundantSprint",
     "regexpPattern",
     "sliceClear",
     "sloppyReassign",
     "sortSlice",
+    "sprintfQuotedString",
     "sqlQuery",
     "stringConcatSimplify",
     "stringXbytes",
     "stringsCompare",
     "syncMapLoadAndDelete",
+    "timeExprSimplify",
     "todoCommentWithoutDetail",
     "truncateCmp",
     "typeAssertChain",
     "typeDefFirst",
     "unnecessaryBlock",
+    "unnecessaryDefer",
     "weakCond",
     "yodaStyleExpr",
     "zeroByteRepeat",
@@ -5000,6 +5009,540 @@ fn check_bad_sync_once_func_stmts(
     }
 }
 
+fn case_fold_call_arg<'a>(
+    pass: &Pass<'_>,
+    expr: &'a Expr,
+    want: &str,
+) -> Option<&'a Expr> {
+    let Expr::CallExpr(call) = unparen(expr) else {
+        return None;
+    };
+    let name = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call))?;
+    if (name == want || name.ends_with(&format!("/{want}"))) && call.args.len() == 1 {
+        Some(&call.args[0])
+    } else {
+        None
+    }
+}
+
+fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if bin.op != Token::EQL && bin.op != Token::NEQ {
+        return;
+    }
+    let left_lower = case_fold_call_arg(pass, &bin.x, "strings.ToLower");
+    let left_upper = case_fold_call_arg(pass, &bin.x, "strings.ToUpper");
+    let right_lower = case_fold_call_arg(pass, &bin.y, "strings.ToLower");
+    let right_upper = case_fold_call_arg(pass, &bin.y, "strings.ToUpper");
+
+    let (x, y) = match (
+        left_lower.is_some() || left_upper.is_some(),
+        right_lower.is_some() || right_upper.is_some(),
+    ) {
+        (true, true) => {
+            // Both sides folded: require same case transform (ToLower/ToLower or ToUpper/ToUpper).
+            let left_is_lower = left_lower.is_some();
+            let right_is_lower = right_lower.is_some();
+            if left_is_lower != right_is_lower {
+                return;
+            }
+            (
+                left_lower.or(left_upper).unwrap(),
+                right_lower.or(right_upper).unwrap(),
+            )
+        }
+        (true, false) => (left_lower.or(left_upper).unwrap(), unparen(&bin.y)),
+        (false, true) => (unparen(&bin.x), right_lower.or(right_upper).unwrap()),
+        (false, false) => return,
+    };
+
+    if !side_effect_free_approx(x) || !side_effect_free_approx(y) {
+        return;
+    }
+    let (Some(xt), Some(yt)) = (expr_text(x), expr_text(y)) else {
+        return;
+    };
+    if xt == yt {
+        return;
+    }
+    let suggest = if bin.op == Token::NEQ {
+        format!("!strings.EqualFold({xt}, {yt})")
+    } else {
+        format!("strings.EqualFold({xt}, {yt})")
+    };
+    report(
+        pending,
+        bin.op_pos.0 as u32,
+        format!("consider replacing with {suggest}"),
+    );
+}
+
+fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "bytes.Equal" && !name.ends_with("/bytes.Equal") {
+        return;
+    }
+    if call.args.len() != 2 {
+        return;
+    }
+    let a = &call.args[0];
+    let b = &call.args[1];
+    let a_lower = case_fold_call_arg(pass, a, "bytes.ToLower");
+    let a_upper = case_fold_call_arg(pass, a, "bytes.ToUpper");
+    let b_lower = case_fold_call_arg(pass, b, "bytes.ToLower");
+    let b_upper = case_fold_call_arg(pass, b, "bytes.ToUpper");
+
+    let (x, y) = match (
+        a_lower.is_some() || a_upper.is_some(),
+        b_lower.is_some() || b_upper.is_some(),
+    ) {
+        (true, true) => {
+            let a_is_lower = a_lower.is_some();
+            let b_is_lower = b_lower.is_some();
+            if a_is_lower != b_is_lower {
+                return;
+            }
+            (
+                a_lower.or(a_upper).unwrap(),
+                b_lower.or(b_upper).unwrap(),
+            )
+        }
+        (true, false) => (a_lower.or(a_upper).unwrap(), unparen(b)),
+        (false, true) => (unparen(a), b_lower.or(b_upper).unwrap()),
+        (false, false) => return,
+    };
+
+    if !side_effect_free_approx(x) || !side_effect_free_approx(y) {
+        return;
+    }
+    let (Some(xt), Some(yt)) = (expr_text(x), expr_text(y)) else {
+        return;
+    };
+    if xt == yt {
+        return;
+    }
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("consider replacing with bytes.EqualFold({xt}, {yt})"),
+    );
+}
+
+fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "fmt.Sprintf" && !name.ends_with("/fmt.Sprintf") {
+        return;
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Expr::BasicLit(lit) = &call.args[0] else {
+        return;
+    };
+    let v = lit.value.as_str();
+    if v.len() < 2 {
+        return;
+    }
+    let quoted_pct_s = Regex::new(r#"^`.*"%s".*`$"#).unwrap();
+    let escaped_pct_s = Regex::new(r#"^".*\\"%s\\".*"$"#).unwrap();
+    let backquoted_pct_s = Regex::new(r#"^".*`%s`.*"$"#).unwrap();
+    if quoted_pct_s.is_match(v) || escaped_pct_s.is_match(v) {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            r#"use %q instead of "%s" for quoted strings"#,
+        );
+    } else if backquoted_pct_s.is_match(v) {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            r#"use %#q instead of "`%s`" for backquoted strings"#,
+        );
+    }
+}
+
+fn type_is_time(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut typ = unalias_readonly(&artifacts.types, typ);
+    if let TypeData::Pointer(p) = artifacts.types.get(typ) {
+        typ = unalias_readonly(&artifacts.types, p.elem());
+    }
+    let s = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    s == "time.Time" || s.ends_with("/time.Time")
+}
+
+fn method_recv_named<'a>(
+    pass: &Pass<'_>,
+    expr: &'a Expr,
+    method: &str,
+) -> Option<&'a Expr> {
+    let Expr::CallExpr(call) = unparen(expr) else {
+        return None;
+    };
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return None;
+    };
+    if sel.sel.name != method || !call.args.is_empty() {
+        return None;
+    }
+    // Prefer typed method when available; fall back to selector name.
+    if code::is_method_val(pass, sel, method) || type_of(pass, &sel.x).is_some() {
+        Some(&sel.x)
+    } else {
+        None
+    }
+}
+
+fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if code::version_compare(&code::module_go_version(pass), "go1.17") < 0 {
+        return;
+    }
+    if !is_int_lit(&bin.y, 1000) {
+        return;
+    }
+    let Some(whole) = expr_text(&Expr::BinaryExpr(bin.clone())) else {
+        return;
+    };
+    if bin.op == Token::QUO {
+        if let Some(recv) = method_recv_named(pass, &bin.x, "Unix") {
+            if type_is_time(pass, recv) {
+                let t = expr_text(recv).unwrap_or_else(|| "t".into());
+                report(
+                    pending,
+                    bin.op_pos.0 as u32,
+                    format!("use {t}.UnixMilli() instead of {whole}"),
+                );
+            }
+        }
+    } else if bin.op == Token::MUL {
+        if let Some(recv) = method_recv_named(pass, &bin.x, "UnixNano") {
+            if type_is_time(pass, recv) {
+                let t = expr_text(recv).unwrap_or_else(|| "t".into());
+                report(
+                    pending,
+                    bin.op_pos.0 as u32,
+                    format!("use {t}.UnixMicro() instead of {whole}"),
+                );
+            }
+        }
+    }
+}
+
+fn match_append_assign<'a>(stmt: &'a Stmt, slice: Option<&Expr>) -> Option<&'a CallExpr> {
+    let Stmt::AssignStmt(assign) = stmt else {
+        return None;
+    };
+    if assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return None;
+    }
+    let Expr::CallExpr(call) = &assign.rhs[0] else {
+        return None;
+    };
+    let Expr::Ident(fun) = call.fun.as_ref() else {
+        return None;
+    };
+    if fun.name != "append" || call.ellipsis.is_valid() {
+        return None;
+    }
+    if call.args.is_empty() || !exprs_equal(&assign.lhs[0], &call.args[0]) {
+        return None;
+    }
+    if let Some(prev) = slice {
+        if !exprs_equal(prev, &call.args[0]) {
+            return None;
+        }
+    }
+    Some(call)
+}
+
+fn check_append_combine(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+    let mut cause_pos: Option<u32> = None;
+    let mut slice: Option<&Expr> = None;
+    let mut chain = 0usize;
+
+    let flush = |cause_pos: &mut Option<u32>,
+                 slice: &mut Option<&Expr>,
+                 chain: &mut usize,
+                 pending: &mut Vec<(u32, String)>| {
+        if *chain > 1 {
+            if let Some(pos) = *cause_pos {
+                report(
+                    pending,
+                    pos,
+                    format!("can combine chain of {chain} appends into one"),
+                );
+            }
+        }
+        *chain = 0;
+        *slice = None;
+        *cause_pos = None;
+    };
+
+    for stmt in stmts {
+        match match_append_assign(stmt, slice) {
+            Some(call) => {
+                if chain == 0 {
+                    chain = 1;
+                    slice = Some(&call.args[0]);
+                    cause_pos = Some(stmt.pos().0 as u32);
+                } else {
+                    chain += 1;
+                }
+            }
+            None => flush(&mut cause_pos, &mut slice, &mut chain, pending),
+        }
+    }
+    flush(&mut cause_pos, &mut slice, &mut chain, pending);
+}
+
+fn is_trivial_return(pass: &Pass<'_>, ret: &ReturnStmt) -> bool {
+    ret.results.iter().all(|e| is_const_expr(pass, e))
+}
+
+fn defer_stmt_summary(d: &DeferStmt) -> String {
+    if matches!(d.call.fun.as_ref(), Expr::FuncLit(_)) {
+        "defer func(){...}(...)".into()
+    } else {
+        let call = Expr::CallExpr(d.call.clone());
+        match expr_text(&call) {
+            Some(t) => format!("defer {t}"),
+            None => "defer ...".into(),
+        }
+    }
+}
+
+fn check_defer_before_return(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    is_func: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let mut explicit_return = false;
+    let mut ret_index = body.list.len();
+    for (i, stmt) in body.list.iter().enumerate() {
+        let Stmt::ReturnStmt(ret) = stmt else {
+            continue;
+        };
+        explicit_return = true;
+        if !is_trivial_return(pass, ret) {
+            continue;
+        }
+        ret_index = i;
+        break;
+    }
+    if ret_index == 0 {
+        return;
+    }
+    let Some(Stmt::DeferStmt(d)) = body.list.get(ret_index - 1) else {
+        return;
+    };
+    if is_func || explicit_return {
+        let summary = defer_stmt_summary(d);
+        report(
+            pending,
+            d.defer_.0 as u32,
+            format!("{summary} is placed just before return"),
+        );
+    }
+}
+
+fn walk_unnecessary_defer_stmt(pass: &Pass<'_>, stmt: &Stmt, pending: &mut Vec<(u32, String)>) {
+    match stmt {
+        Stmt::BlockStmt(b) => check_unnecessary_defer_block(pass, b, false, pending),
+        Stmt::IfStmt(i) => {
+            check_unnecessary_defer_block(pass, &i.body, false, pending);
+            if let Some(e) = &i.else_ {
+                walk_unnecessary_defer_stmt(pass, e, pending);
+            }
+        }
+        Stmt::ForStmt(f) => check_unnecessary_defer_block(pass, &f.body, false, pending),
+        Stmt::RangeStmt(r) => check_unnecessary_defer_block(pass, &r.body, false, pending),
+        Stmt::SwitchStmt(s) => {
+            for c in &s.body.list {
+                if let Stmt::CaseClause(cc) = c {
+                    // Case bodies are stmt lists; wrap via synthetic checks.
+                    let mut explicit = false;
+                    let mut ret_index = cc.body.len();
+                    for (i, st) in cc.body.iter().enumerate() {
+                        if let Stmt::ReturnStmt(ret) = st {
+                            explicit = true;
+                            if is_trivial_return(pass, ret) {
+                                ret_index = i;
+                                break;
+                            }
+                        }
+                    }
+                    if ret_index > 0 {
+                        if let Some(Stmt::DeferStmt(d)) = cc.body.get(ret_index - 1) {
+                            if explicit {
+                                let summary = defer_stmt_summary(d);
+                                report(
+                                    pending,
+                                    d.defer_.0 as u32,
+                                    format!("{summary} is placed just before return"),
+                                );
+                            }
+                        }
+                    }
+                    for st in &cc.body {
+                        walk_unnecessary_defer_stmt(pass, st, pending);
+                    }
+                }
+            }
+        }
+        Stmt::TypeSwitchStmt(s) => {
+            for c in &s.body.list {
+                if let Stmt::CaseClause(cc) = c {
+                    for st in &cc.body {
+                        walk_unnecessary_defer_stmt(pass, st, pending);
+                    }
+                }
+            }
+        }
+        Stmt::SelectStmt(s) => {
+            for c in &s.body.list {
+                if let Stmt::CommClause(cc) = c {
+                    for st in &cc.body {
+                        walk_unnecessary_defer_stmt(pass, st, pending);
+                    }
+                }
+            }
+        }
+        Stmt::DeferStmt(d) => {
+            if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
+                check_unnecessary_defer_block(pass, &fl.body, true, pending);
+            }
+        }
+        Stmt::ExprStmt(e) => {
+            if let Expr::CallExpr(call) = &e.x {
+                if let Expr::FuncLit(fl) = call.fun.as_ref() {
+                    check_unnecessary_defer_block(pass, &fl.body, true, pending);
+                }
+            }
+            if let Expr::FuncLit(fl) = &e.x {
+                check_unnecessary_defer_block(pass, &fl.body, true, pending);
+            }
+        }
+        Stmt::GoStmt(g) => {
+            if let Expr::FuncLit(fl) = g.call.fun.as_ref() {
+                check_unnecessary_defer_block(pass, &fl.body, true, pending);
+            }
+        }
+        Stmt::AssignStmt(a) => {
+            for rhs in &a.rhs {
+                if let Expr::FuncLit(fl) = rhs {
+                    check_unnecessary_defer_block(pass, &fl.body, true, pending);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_unnecessary_defer_block(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    is_func: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
+    check_defer_before_return(pass, body, is_func, pending);
+    for stmt in &body.list {
+        walk_unnecessary_defer_stmt(pass, stmt, pending);
+    }
+}
+
+fn check_unnecessary_defer_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    if let Some(body) = &f.body {
+        check_unnecessary_defer_block(pass, body, true, pending);
+    }
+}
+
+fn has_string_method(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    // DEFERRED: true fmt.Stringer Implements; method-name + arity heuristic.
+    method_result_count(pass, typ, "String") == Some(1)
+}
+
+fn type_is_reflect_value(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let s = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        unalias_readonly(&artifacts.types, typ),
+        None,
+    );
+    s == "reflect.Value" || s.ends_with("/reflect.Value")
+}
+
+fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    let arg = if name == "fmt.Sprint" || name.ends_with("/fmt.Sprint") {
+        if call.args.len() != 1 {
+            return;
+        }
+        &call.args[0]
+    } else if name == "fmt.Sprintf" || name.ends_with("/fmt.Sprintf") {
+        if call.args.len() != 2 {
+            return;
+        }
+        let Expr::BasicLit(lit) = &call.args[0] else {
+            return;
+        };
+        if lit.value != "\"%s\"" && lit.value != "\"%v\"" {
+            return;
+        }
+        &call.args[1]
+    } else {
+        return;
+    };
+
+    if type_is_reflect_value(pass, arg) {
+        return;
+    }
+    let Some(arg_t) = expr_text(arg) else {
+        return;
+    };
+    if is_string_typed(pass, arg) {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            format!("{arg_t} is already string"),
+        );
+        return;
+    }
+    if has_string_method(pass, arg) {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            format!("use {arg_t}.String() instead"),
+        );
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -5043,6 +5586,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             for decl in &file.decls {
                 if let Decl::FuncDecl(f) = decl {
                     check_defer_in_loop_func(f, &mut pending);
+                }
+            }
+        }
+        if enabled(&set, "unnecessaryDefer") {
+            for decl in &file.decls {
+                if let Decl::FuncDecl(f) = decl {
+                    check_unnecessary_defer_func(pass, f, &mut pending);
                 }
             }
         }
@@ -5166,6 +5716,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "stringXbytes") {
                         check_string_xbytes(pass, NodeRef::BinaryExpr(b), &mut pending);
+                    }
+                    if enabled(&set, "equalFold") {
+                        check_equal_fold_strings(pass, b, &mut pending);
+                    }
+                    if enabled(&set, "timeExprSimplify") {
+                        check_time_expr_simplify(pass, b, &mut pending);
                     }
                 }
                 NodeRef::BasicLit(lit) => {
@@ -5299,6 +5855,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "zeroByteRepeat") {
                         check_zero_byte_repeat(pass, c, &mut pending);
                     }
+                    if enabled(&set, "equalFold") {
+                        check_equal_fold_bytes(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "sprintfQuotedString") {
+                        check_sprintf_quoted_string(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "redundantSprint") {
+                        check_redundant_sprint(pass, c, &mut pending);
+                    }
                     if enabled(&set, "stringXbytes") {
                         check_string_xbytes(pass, NodeRef::CallExpr(c), &mut pending);
                     }
@@ -5332,12 +5897,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "badSyncOnceFunc") {
                         check_bad_sync_once_func_stmts(pass, &b.list, &mut pending);
                     }
+                    if enabled(&set, "appendCombine") {
+                        check_append_combine(&b.list, &mut pending);
+                    }
                 }
-                NodeRef::CaseClause(c) if enabled(&set, "unnecessaryBlock") => {
-                    check_unnecessary_block_case(&c.body, &mut pending);
+                NodeRef::CaseClause(c) => {
+                    if enabled(&set, "unnecessaryBlock") {
+                        check_unnecessary_block_case(&c.body, &mut pending);
+                    }
+                    if enabled(&set, "appendCombine") {
+                        check_append_combine(&c.body, &mut pending);
+                    }
                 }
-                NodeRef::CommClause(c) if enabled(&set, "unnecessaryBlock") => {
-                    check_unnecessary_block_case(&c.body, &mut pending);
+                NodeRef::CommClause(c) => {
+                    if enabled(&set, "unnecessaryBlock") {
+                        check_unnecessary_block_case(&c.body, &mut pending);
+                    }
+                    if enabled(&set, "appendCombine") {
+                        check_append_combine(&c.body, &mut pending);
+                    }
                 }
                 _ => {}
             }

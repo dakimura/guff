@@ -3701,6 +3701,17 @@ fn gocritic_enable_all_extras() {
         "can simplify `strings.Join` to `x + glue + y`",
         "sync.OnceFunc(f) result is not used",
         "consider to assign sync.OnceFunc(f) to a variable",
+        "consider replacing with strings.EqualFold(x, y)",
+        "consider replacing with !strings.EqualFold(x, y)",
+        "consider replacing with bytes.EqualFold(xb, yb)",
+        "use %q instead of \"%s\" for quoted strings",
+        "use %#q instead of \"`%s`\" for backquoted strings",
+        "use t.UnixMilli() instead of",
+        "use tp.UnixMicro() instead of",
+        "can combine chain of 2 appends into one",
+        "defer appendCombineExtra() is placed just before return",
+        "s is already string",
+        "use w.String() instead",
     ];
     for needle in expect {
         assert!(
@@ -3771,6 +3782,16 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("errors.New")
                 || m.contains("strings.Join")
                 || m.contains("sync.OnceFunc")
+                || m.contains("EqualFold")
+                || m.contains("EqualFold")
+                || m.contains("%q instead")
+                || m.contains("%#q instead")
+                || m.contains("UnixMilli")
+                || m.contains("UnixMicro")
+                || m.contains("combine chain of")
+                || m.contains("just before return")
+                || m.contains("already string")
+                || m.contains(".String() instead")
         }),
         "extras should be off by default: {messages:?}"
     );
