@@ -607,6 +607,7 @@ version = "0.1.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
+ "guff-constant",
  "guff-packages",
  "guff-runner",
  "guff-types",

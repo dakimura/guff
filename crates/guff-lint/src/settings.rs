@@ -41,6 +41,7 @@ pub struct LinterSettings {
     pub usestdlibvars: UsestdlibvarsSettings,
     pub unconvert: UnconvertSettings,
     pub exhaustruct: ExhaustructSettings,
+    pub exhaustive: ExhaustiveSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -373,6 +374,25 @@ pub struct ExhaustructSettings {
     pub allow_empty_declarations: Option<bool>,
 }
 
+/// `linters.settings.exhaustive` / `linters-settings.exhaustive`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ExhaustiveSettings {
+    /// Program elements to check: `switch` and/or `map` (default `[switch]`).
+    #[serde(default)]
+    pub check: Vec<String>,
+    #[serde(default, rename = "default-signifies-exhaustive")]
+    pub default_signifies_exhaustive: Option<bool>,
+    #[serde(default, rename = "default-case-required")]
+    pub default_case_required: Option<bool>,
+    #[serde(default, rename = "ignore-enum-members")]
+    pub ignore_enum_members: Option<String>,
+    #[serde(default, rename = "ignore-enum-types")]
+    pub ignore_enum_types: Option<String>,
+    #[serde(default, rename = "package-scope-only")]
+    pub package_scope_only: Option<bool>,
+    // DEFERRED: explicit-exhaustive-switch / explicit-exhaustive-map / check-generated.
+}
+
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsetestingSettings {
@@ -697,6 +717,11 @@ impl LinterSettings {
                 out.exhaustruct = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("exhaustive".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ExhaustiveSettings>(v.clone()) {
+                out.exhaustive = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -779,6 +804,7 @@ impl LinterSettings {
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("unconvert", self.unconvert.to_guff_unconvert());
         bag.insert("exhaustruct", self.exhaustruct.to_guff_exhaustruct());
+        bag.insert("exhaustive", self.exhaustive.to_guff_exhaustive());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1194,6 +1220,40 @@ impl ExhaustructSettings {
             allow_empty_declarations: self
                 .allow_empty_declarations
                 .unwrap_or(defaults.allow_empty_declarations),
+        }
+    }
+}
+
+impl ExhaustiveSettings {
+    pub fn to_guff_exhaustive(&self) -> guff_style::ExhaustiveOptions {
+        let defaults = guff_style::ExhaustiveOptions::default();
+        let (check_switch, check_map) = if self.check.is_empty() {
+            (defaults.check_switch, defaults.check_map)
+        } else {
+            let switch = self.check.iter().any(|c| c == "switch");
+            let map = self.check.iter().any(|c| c == "map");
+            (switch, map)
+        };
+        guff_style::ExhaustiveOptions {
+            check_switch,
+            check_map,
+            default_signifies_exhaustive: self
+                .default_signifies_exhaustive
+                .unwrap_or(defaults.default_signifies_exhaustive),
+            default_case_required: self
+                .default_case_required
+                .unwrap_or(defaults.default_case_required),
+            ignore_enum_members: self
+                .ignore_enum_members
+                .clone()
+                .unwrap_or(defaults.ignore_enum_members),
+            ignore_enum_types: self
+                .ignore_enum_types
+                .clone()
+                .unwrap_or(defaults.ignore_enum_types),
+            package_scope_only: self
+                .package_scope_only
+                .unwrap_or(defaults.package_scope_only),
         }
     }
 }

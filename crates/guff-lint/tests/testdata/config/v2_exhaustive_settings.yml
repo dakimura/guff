@@ -1,0 +1,12 @@
+version: "2"
+
+linters:
+  settings:
+    exhaustive:
+      check:
+        - switch
+      default-signifies-exhaustive: true
+      default-case-required: false
+      ignore-enum-members: "example\\.com/exhaustive\\.Skip.+"
+      ignore-enum-types: "example\\.com/exhaustive\\.IgnoreMe"
+      package-scope-only: true

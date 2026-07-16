@@ -425,6 +425,34 @@ fn parse_v2_exhaustruct_settings() {
 }
 
 #[test]
+fn parse_v2_exhaustive_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_exhaustive_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.exhaustive.check, vec!["switch"]);
+    assert_eq!(settings.exhaustive.default_signifies_exhaustive, Some(true));
+    assert_eq!(settings.exhaustive.default_case_required, Some(false));
+    assert_eq!(
+        settings.exhaustive.ignore_enum_members.as_deref(),
+        Some(r"example\.com/exhaustive\.Skip.+")
+    );
+    assert_eq!(
+        settings.exhaustive.ignore_enum_types.as_deref(),
+        Some(r"example\.com/exhaustive\.IgnoreMe")
+    );
+    assert_eq!(settings.exhaustive.package_scope_only, Some(true));
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ExhaustiveOptions>("exhaustive")
+        .expect("exhaustive options");
+    assert!(opts.check_switch);
+    assert!(!opts.check_map);
+    assert!(opts.default_signifies_exhaustive);
+    assert!(!opts.default_case_required);
+    assert!(opts.package_scope_only);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 

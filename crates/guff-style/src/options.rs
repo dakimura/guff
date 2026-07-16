@@ -438,6 +438,41 @@ impl Default for UnconvertOptions {
     }
 }
 
+/// `linters.settings.exhaustive` / `linters-settings.exhaustive`.
+#[derive(Debug, Clone)]
+pub struct ExhaustiveOptions {
+    /// Check switch statements (default true).
+    pub check_switch: bool,
+    /// Check map literals keyed by enum types.
+    ///
+    /// DEFERRED: map checking not implemented yet.
+    pub check_map: bool,
+    /// A `default` case makes the switch exhaustive without listing all members.
+    pub default_signifies_exhaustive: bool,
+    /// Require a `default` case even when all members are listed.
+    pub default_case_required: bool,
+    /// Regex of `pkg.Member` names to ignore.
+    pub ignore_enum_members: String,
+    /// Regex of `pkg.Type` names to ignore.
+    pub ignore_enum_types: String,
+    /// Only consider package-scope enums (not nested function scopes).
+    pub package_scope_only: bool,
+}
+
+impl Default for ExhaustiveOptions {
+    fn default() -> Self {
+        Self {
+            check_switch: true,
+            check_map: false,
+            default_signifies_exhaustive: false,
+            default_case_required: false,
+            ignore_enum_members: String::new(),
+            ignore_enum_types: String::new(),
+            package_scope_only: false,
+        }
+    }
+}
+
 /// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
 #[derive(Debug, Clone)]
 pub struct ExhaustructOptions {

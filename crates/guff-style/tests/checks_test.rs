@@ -1,8 +1,8 @@
 mod support;
 
 use guff_style::{
-    asciicheck, copyloopvar, cyclop, dogsled, exhaustruct, funlen, gocognit, goconst, gocyclo,
-    goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
+    asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
+    gocyclo, goprintffuncname, lll, mnd, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
     prealloc, predeclared, tagalign, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
@@ -2000,5 +2000,66 @@ fn exhaustruct_allow_empty_declarations() {
     assert!(
         messages.is_empty(),
         "allow-empty-declarations should silence var/:= empties: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustive_flags_missing_cases() {
+    let pkg = support::typecheck_fixture("exhaustive", "example.com/exhaustive", "bad.go");
+    let messages = support::run_analyzer(exhaustive(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("missing cases") && m.contains("C")),
+        "expected missing C: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustive_allows_complete_switch() {
+    let pkg = support::typecheck_fixture("exhaustive", "example.com/exhaustive/ok", "ok.go");
+    let messages = support::run_analyzer(exhaustive(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics for complete switches: {messages:?}"
+    );
+}
+
+#[test]
+fn exhaustive_default_signifies_exhaustive() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::ExhaustiveOptions;
+
+    let pkg =
+        support::typecheck_fixture("exhaustive", "example.com/exhaustive/def", "default_ok.go");
+    // Default off: missing Green/Blue.
+    let messages = support::run_analyzer(exhaustive(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("missing cases")),
+        "default alone should not satisfy exhaustiveness: {messages:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "exhaustive",
+        ExhaustiveOptions {
+            default_signifies_exhaustive: true,
+            ..ExhaustiveOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        exhaustive(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "default-signifies-exhaustive should silence: {messages:?}"
     );
 }
