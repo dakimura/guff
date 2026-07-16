@@ -3718,6 +3718,15 @@ fn gocritic_enable_all_extras() {
         "include an explanation for nolint directive",
         "is heavy (",
         "each iteration copies",
+        "consider `m' to be of non-pointer type",
+        "consider `ch' to be of non-pointer type",
+        "function has more than 5 results",
+        "may want to evaluate evalOrderMutate(&x) before the return statement",
+        "label label1 is redundant",
+        "change `continue outer` to `break`",
+        "Possibly return is missed after the http.Error call",
+        "don't embed sync.Mutex",
+        "don't embed *sync.RWMutex",
     ];
     for needle in expect {
         assert!(
@@ -3804,6 +3813,14 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("explanation for nolint")
                 || m.contains("is heavy (")
                 || m.contains("each iteration copies")
+                || m.contains("non-pointer type")
+                || m.contains("more than 5 results")
+                || m.contains("before the return statement")
+                || m.contains("label label1 is redundant")
+                || m.contains("continue outer")
+                || m.contains("return is missed after the http.Error")
+                || m.contains("don't embed sync.Mutex")
+                || m.contains("don't embed *sync.RWMutex")
         }),
         "extras should be off by default: {messages:?}"
     );

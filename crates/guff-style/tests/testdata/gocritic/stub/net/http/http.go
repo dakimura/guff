@@ -15,3 +15,5 @@ func NewRequest(method, url string, body io.Reader) (*Request, error) {
 func NewRequestWithContext(ctx interface{}, method, url string, body io.Reader) (*Request, error) {
 	return &Request{}, nil
 }
+
+func Error(w ResponseWriter, error string, code int) {}

@@ -409,3 +409,47 @@ func rangeValCopyExtra(xs [][200]byte) {
 		_ = x
 	}
 }
+
+func ptrToRefParamExtra(m *map[string]int, ch *chan int) {}
+
+func tooManyResultsExtra() (int, int, int, int, int, int) {
+	return 0, 0, 0, 0, 0, 0
+}
+
+func evalOrderMutate(x *int) int {
+	*x++
+	return *x
+}
+
+func evalOrderExtra() (int, int) {
+	var x int
+	return x, evalOrderMutate(&x)
+}
+
+func unlabelStmtExtra(xs []int) {
+label1:
+	for range xs {
+		break label1
+	}
+outer:
+	for range xs {
+		for range xs {
+			continue outer
+		}
+	}
+}
+
+func returnAfterHttpErrorExtra(w http.ResponseWriter, err error) {
+	if err != nil {
+		http.Error(w, "err", 503)
+	}
+}
+
+type ExposedMutexExtra struct {
+	sync.Mutex
+	Port int
+}
+
+type ExposedRWMutexExtra struct {
+	*sync.RWMutex
+}

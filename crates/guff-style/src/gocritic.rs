@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**95** = 34 default + 61 enable-all extras):
+//! Implemented checkers (**101** = 34 default + 67 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -33,16 +33,19 @@
 //!   `timeExprSimplify`, `appendCombine`, `unnecessaryDefer`, `redundantSprint`
 //! - batch 13 (enable-all extras): `typeUnparen`, `importShadow`, `unnamedResult`,
 //!   `whyNoLint`, `hugeParam`, `rangeValCopy`
+//! - batch 14 (enable-all extras): `ptrToRefParam`, `tooManyResultsChecker`,
+//!   `evalOrder`, `unlabelStmt`, `returnAfterHttpError`, `exposedSyncMutex`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
-//! such as `boolExprSimplify` / `unlabelStmt` / `tooManyResultsChecker` /
-//! `ptrToRefParam` / `evalOrder` / `commentedOutCode` / `regexpSimplify` / …),
+//! such as `boolExprSimplify` / `commentedOutCode` / `regexpSimplify` /
+//! `badLock` / `externalErrorReassign` / `uncheckedInlineErr` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
-//! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported),
+//! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported,
+//! tooManyResultsChecker maxResults),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
@@ -59,8 +62,8 @@ use std::sync::{Arc, OnceLock};
 use guff::ast::{
     AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, ChanDir, CommentGroup, CompositeLit,
     Decl, DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident,
-    IfStmt, ImportSpec, IndexExpr, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr, Stmt,
-    SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
+    IfStmt, ImportSpec, IndexExpr, LabeledStmt, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr,
+    Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos, NO_POS};
@@ -148,6 +151,8 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "emptyFallthrough",
     "emptyStringTest",
     "equalFold",
+    "evalOrder",
+    "exposedSyncMutex",
     "filepathJoin",
     "hexLiteral",
     "httpNoBody",
@@ -165,11 +170,13 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "preferFprint",
     "preferStringWriter",
     "preferWriteByte",
+    "ptrToRefParam",
     "rangeAppendAll",
     "rangeExprCopy",
     "rangeValCopy",
     "redundantSprint",
     "regexpPattern",
+    "returnAfterHttpError",
     "sliceClear",
     "sloppyReassign",
     "sortSlice",
@@ -181,10 +188,12 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "syncMapLoadAndDelete",
     "timeExprSimplify",
     "todoCommentWithoutDetail",
+    "tooManyResultsChecker",
     "truncateCmp",
     "typeAssertChain",
     "typeDefFirst",
     "typeUnparen",
+    "unlabelStmt",
     "unnecessaryBlock",
     "unnecessaryDefer",
     "unnamedResult",
@@ -256,6 +265,18 @@ fn expr_text(expr: &Expr) -> Option<String> {
         Expr::UnaryExpr(u) if u.op == Token::NOT => {
             let x = expr_text(&u.x)?;
             Some(format!("!{x}"))
+        }
+        Expr::UnaryExpr(u) if u.op == Token::AND => {
+            let x = expr_text(&u.x)?;
+            Some(format!("&{x}"))
+        }
+        Expr::UnaryExpr(u) if u.op == Token::MUL => {
+            let x = expr_text(&u.x)?;
+            Some(format!("*{x}"))
+        }
+        Expr::UnaryExpr(u) if u.op == Token::SUB => {
+            let x = expr_text(&u.x)?;
+            Some(format!("-{x}"))
         }
         Expr::BinaryExpr(b) => {
             let x = expr_text(&b.x)?;
@@ -6225,6 +6246,419 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32,
     }
 }
 
+// --- batch 14: ptrToRefParam / tooManyResultsChecker / evalOrder /
+// unlabelStmt / returnAfterHttpError / exposedSyncMutex --------------------
+
+const TOO_MANY_RESULTS_MAX: usize = 5;
+
+fn is_ref_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Map(_) | TypeData::Chan(_) | TypeData::Interface(_) => true,
+        TypeData::Named(_) => {
+            let u = typ.underlying(&artifacts.types);
+            matches!(artifacts.types.get(u), TypeData::Interface(_))
+        }
+        _ => false,
+    }
+}
+
+fn check_ptr_to_ref_param_fields(
+    pass: &Pass<'_>,
+    fields: Option<&FieldList>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some(fl) = fields else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    for f in &fl.list {
+        let Some(ty_expr) = &f.ty else {
+            continue;
+        };
+        let Some(typ) = type_of(pass, ty_expr) else {
+            continue;
+        };
+        let typ = unalias_readonly(&artifacts.types, typ);
+        let TypeData::Pointer(p) = artifacts.types.get(typ) else {
+            continue;
+        };
+        if !is_ref_type(pass, p.elem()) {
+            continue;
+        }
+        if f.names.is_empty() {
+            let ty_text = expr_text(ty_expr).unwrap_or_else(|| "?".into());
+            report(
+                pending,
+                f.pos().0 as u32,
+                format!("consider to make non-pointer type for `{ty_text}`"),
+            );
+        } else {
+            for id in &f.names {
+                report(
+                    pending,
+                    id.pos().0 as u32,
+                    format!("consider `{}' to be of non-pointer type", id.name),
+                );
+            }
+        }
+    }
+}
+
+fn check_ptr_to_ref_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    check_ptr_to_ref_param_fields(pass, f.ty.params.as_ref(), pending);
+    check_ptr_to_ref_param_fields(pass, f.ty.results.as_ref(), pending);
+}
+
+fn check_too_many_results(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    let Some(results) = &f.ty.results else {
+        return;
+    };
+    if result_num_fields(results) > TOO_MANY_RESULTS_MAX {
+        report(
+            pending,
+            f.name.pos().0 as u32,
+            format!(
+                "function has more than {TOO_MANY_RESULTS_MAX} results, consider to simplify the function"
+            ),
+        );
+    }
+}
+
+fn call_contains_addr_of(call: &CallExpr, id: &Ident) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::CallExpr(call), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if let NodeRef::UnaryExpr(u) = n {
+            if u.op == Token::AND {
+                if let Expr::Ident(x) = u.x.as_ref() {
+                    if x.name == id.name {
+                        found = true;
+                    }
+                }
+            }
+        }
+        true
+    });
+    found
+}
+
+fn has_ptr_recv(pass: &Pass<'_>, sel: &guff::ast::SelectorExpr) -> bool {
+    let Some(recv_type) = type_of(pass, &sel.x) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    let LookupResult::Found { obj, .. } = lookup_field_or_method(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        recv_type,
+        true,
+        None,
+        &sel.sel.name,
+    ) else {
+        return false;
+    };
+    let ObjectData::Func(method) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    let Some(method_type) = method.typ() else {
+        return false;
+    };
+    let TypeData::Signature(sig) = artifacts.types.get(method_type) else {
+        return false;
+    };
+    let Some(recv) = sig.recv() else {
+        return false;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(recv) else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, v.typ());
+    matches!(artifacts.types.get(typ), TypeData::Pointer(_))
+}
+
+fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, String)>) {
+    if ret.results.len() < 2 {
+        return;
+    }
+    for res in &ret.results {
+        let Expr::Ident(id) = res else {
+            continue;
+        };
+        for other in &ret.results {
+            let Expr::CallExpr(call) = other else {
+                continue;
+            };
+            if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
+                if exprs_equal(&sel.x, res) && has_ptr_recv(pass, sel) {
+                    let call_text = expr_text(other).unwrap_or_else(|| "call".into());
+                    report(
+                        pending,
+                        call.lparen.0 as u32,
+                        format!("may want to evaluate {call_text} before the return statement"),
+                    );
+                }
+            }
+            if call_contains_addr_of(call, id) {
+                let call_text = expr_text(other).unwrap_or_else(|| "call".into());
+                report(
+                    pending,
+                    call.lparen.0 as u32,
+                    format!("may want to evaluate {call_text} before the return statement"),
+                );
+            }
+        }
+    }
+}
+
+fn stmt_contains_goto(body: &BlockStmt) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        if let Some(NodeRef::BranchStmt(br)) = n {
+            if br.tok == Token::GOTO {
+                found = true;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn can_break_from_stmt(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::RangeStmt(_)
+            | Stmt::ForStmt(_)
+            | Stmt::SwitchStmt(_)
+            | Stmt::TypeSwitchStmt(_)
+            | Stmt::SelectStmt(_)
+    )
+}
+
+fn block_stmt_of(stmt: &Stmt) -> Option<&BlockStmt> {
+    match stmt {
+        Stmt::RangeStmt(s) => Some(&s.body),
+        Stmt::ForStmt(s) => Some(&s.body),
+        Stmt::SwitchStmt(s) => Some(&s.body),
+        Stmt::TypeSwitchStmt(s) => Some(&s.body),
+        Stmt::SelectStmt(s) => Some(&s.body),
+        _ => None,
+    }
+}
+
+fn is_loop_stmt(stmt: &Stmt) -> bool {
+    matches!(stmt, Stmt::ForStmt(_) | Stmt::RangeStmt(_))
+}
+
+fn uses_label_in_block(body: &BlockStmt, label: &str) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        if let Some(NodeRef::BranchStmt(br)) = n {
+            if br.label.as_ref().is_some_and(|l| l.name == label)
+                && (br.tok == Token::CONTINUE || br.tok == Token::BREAK)
+            {
+                found = true;
+            }
+        }
+        true
+    });
+    found
+}
+
+fn nested_breakable_uses_label(body: &BlockStmt, label: &str) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let (is_breakable, block) = match n {
+            NodeRef::RangeStmt(s) => (true, Some(&s.body)),
+            NodeRef::ForStmt(s) => (true, Some(&s.body)),
+            NodeRef::SwitchStmt(s) => (true, Some(&s.body)),
+            NodeRef::TypeSwitchStmt(s) => (true, Some(&s.body)),
+            NodeRef::SelectStmt(s) => (true, Some(&s.body)),
+            _ => (false, None),
+        };
+        if is_breakable {
+            if let Some(block) = block {
+                if uses_label_in_block(block, label) {
+                    found = true;
+                }
+            }
+        }
+        true
+    });
+    found
+}
+
+fn find_labeled_continue(body: &BlockStmt, label: &str) -> Option<u32> {
+    let mut found: Option<u32> = None;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if matches!(n, NodeRef::SelectStmt(_)) {
+            return false; // skip select subtrees (upstream FindNode skip)
+        }
+        if let NodeRef::BranchStmt(br) = n {
+            if br.tok == Token::CONTINUE && br.label.as_ref().is_some_and(|l| l.name == label) {
+                found = Some(br.tok_pos.0 as u32);
+            }
+        }
+        true
+    });
+    found
+}
+
+fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
+    if !can_break_from_stmt(&labeled.stmt) {
+        return;
+    }
+    let Some(body) = block_stmt_of(&labeled.stmt) else {
+        return;
+    };
+    let name = &labeled.label.name;
+
+    if !nested_breakable_uses_label(body, name) {
+        report(
+            pending,
+            labeled.label.pos().0 as u32,
+            format!("label {name} is redundant"),
+        );
+        return;
+    }
+
+    if !is_loop_stmt(&labeled.stmt) {
+        return;
+    }
+    if body.list.is_empty() {
+        return;
+    }
+    let last = body.list.last().unwrap();
+    if !is_loop_stmt(last) {
+        return;
+    }
+    let Some(inner_body) = block_stmt_of(last) else {
+        return;
+    };
+    if let Some(pos) = find_labeled_continue(inner_body, name) {
+        report(
+            pending,
+            pos,
+            format!("change `continue {name}` to `break`"),
+        );
+    }
+}
+
+fn check_unlabel_stmt_func(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    let Some(body) = &f.body else {
+        return;
+    };
+    if stmt_contains_goto(body) {
+        return;
+    }
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        if let Some(NodeRef::LabeledStmt(labeled)) = n {
+            check_unlabel_stmt(labeled, pending);
+        }
+        true
+    });
+}
+
+fn check_return_after_http_error(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
+    let last = stmt.body.list.last();
+    let Some(Stmt::ExprStmt(es)) = last else {
+        return;
+    };
+    let Expr::CallExpr(call) = &es.x else {
+        return;
+    };
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "http.Error" && !name.ends_with("/http.Error") {
+        return;
+    }
+    if call.args.len() != 3 {
+        return;
+    }
+    report(
+        pending,
+        call.args[0].pos().0 as u32,
+        "Possibly return is missed after the http.Error call",
+    );
+}
+
+fn sync_mutex_embed_text(ty: &Expr) -> Option<String> {
+    match ty {
+        Expr::SelectorExpr(sel) => {
+            let Expr::Ident(pkg) = sel.x.as_ref() else {
+                return None;
+            };
+            if pkg.name != "sync" {
+                return None;
+            }
+            if sel.sel.name == "Mutex" || sel.sel.name == "RWMutex" {
+                return Some(format!("sync.{}", sel.sel.name));
+            }
+            None
+        }
+        Expr::StarExpr(s) => {
+            let inner = sync_mutex_embed_text(&s.x)?;
+            Some(format!("*{inner}"))
+        }
+        _ => None,
+    }
+}
+
+fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
+    for decl in &file.decls {
+        let Decl::GenDecl(g) = decl else {
+            continue;
+        };
+        if g.tok != Some(Token::TYPE) {
+            continue;
+        }
+        for spec in &g.specs {
+            let Spec::TypeSpec(ts) = spec else {
+                continue;
+            };
+            if !is_exported(&ts.name.name) {
+                continue;
+            }
+            let Expr::StructType(st) = &ts.ty else {
+                continue;
+            };
+            for field in &st.fields.list {
+                if !field.names.is_empty() {
+                    continue; // only embedded fields
+                }
+                let Some(ty) = &field.ty else {
+                    continue;
+                };
+                if let Some(text) = sync_mutex_embed_text(ty) {
+                    report(
+                        pending,
+                        field.pos().0 as u32,
+                        format!("don't embed {text}"),
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -6268,6 +6702,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             for decl in &file.decls {
                 if let Decl::FuncDecl(f) = decl {
                     check_import_shadow_func(pass, f, &imports, &mut pending);
+                }
+            }
+        }
+        if enabled(&set, "exposedSyncMutex") {
+            check_exposed_sync_mutex(file, &mut pending);
+        }
+        if enabled(&set, "unlabelStmt") {
+            for decl in &file.decls {
+                if let Decl::FuncDecl(f) = decl {
+                    check_unlabel_stmt_func(f, &mut pending);
                 }
             }
         }
@@ -6319,6 +6763,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "sloppyReassign") {
                         check_sloppy_reassign(s, &mut pending);
+                    }
+                    if enabled(&set, "returnAfterHttpError") {
+                        check_return_after_http_error(pass, s, &mut pending);
                     }
                 }
                 NodeRef::SwitchStmt(s) => {
@@ -6492,6 +6939,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "hugeParam") {
                         check_huge_param(pass, f, &mut pending);
                     }
+                    if enabled(&set, "ptrToRefParam") {
+                        check_ptr_to_ref_param(pass, f, &mut pending);
+                    }
+                    if enabled(&set, "tooManyResultsChecker") {
+                        check_too_many_results(f, &mut pending);
+                    }
+                }
+                NodeRef::ReturnStmt(r) if enabled(&set, "evalOrder") => {
+                    check_eval_order(pass, r, &mut pending);
                 }
                 NodeRef::CallExpr(c) => {
                     if enabled(&set, "badCall") {
