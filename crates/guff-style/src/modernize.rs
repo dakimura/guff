@@ -29,14 +29,17 @@
 //!   (Go 1.26+; if-stmt only; switch/init/`new(E)` forms DEFERRED)
 //! - `stringsbuilder` — `s += x` in a loop → `strings.Builder` (local string vars;
 //!   `_test.go` skipped; AddImport DEFERRED)
+//! - `slicesdelete` — `append(s[:i], s[j:]...)` → `slices.Delete` (Go 1.21+;
+//!   AddImport / `int()` wrap / int-shadow skip DEFERRED)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! stditerators, stringscut Index/Contains
+//! stditerators, bloop, reflecttypeassert, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
 //! waitgroupgo trailing-Done /
-//! SuggestedFix import edits (stringsbuilder AddImport), reflecttypefor
+//! SuggestedFix import edits (stringsbuilder / slicesdelete AddImport),
+//! slicesdelete `int()` conversion / int-shadowing skip, reflecttypefor
 //! complicated/unnamed types & unused-var deletion, slicesbackward
 //! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
 //! typeindex, newexpr `new` shadowing / CheckExpr untyped-constant re-typecheck
@@ -113,8 +116,46 @@ fn expr_text(expr: &Expr) -> Option<String> {
             let index = expr_text(&ix.index)?;
             Some(format!("{x}[{index}]"))
         }
+        Expr::BinaryExpr(b) => {
+            let x = expr_text(&b.x)?;
+            let y = expr_text(&b.y)?;
+            Some(format!("{x} {} {y}", b.op))
+        }
+        Expr::UnaryExpr(u) => {
+            let x = expr_text(&u.x)?;
+            Some(format!("{}{x}", u.op))
+        }
         Expr::ParenExpr(p) => expr_text(&p.x).map(|inner| format!("({inner})")),
         _ => None,
+    }
+}
+
+fn exprs_equal(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Ident(x), Expr::Ident(y)) => x.name == y.name,
+        (Expr::BasicLit(x), Expr::BasicLit(y)) => x.kind == y.kind && x.value == y.value,
+        (Expr::SelectorExpr(x), Expr::SelectorExpr(y)) => {
+            x.sel.name == y.sel.name && exprs_equal(&x.x, &y.x)
+        }
+        (Expr::ParenExpr(x), Expr::ParenExpr(y)) => exprs_equal(&x.x, &y.x),
+        (Expr::IndexExpr(x), Expr::IndexExpr(y)) => {
+            exprs_equal(&x.x, &y.x) && exprs_equal(&x.index, &y.index)
+        }
+        (Expr::BinaryExpr(x), Expr::BinaryExpr(y)) => {
+            x.op == y.op && exprs_equal(&x.x, &y.x) && exprs_equal(&x.y, &y.y)
+        }
+        (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => x.op == y.op && exprs_equal(&x.x, &y.x),
+        (Expr::StarExpr(x), Expr::StarExpr(y)) => exprs_equal(&x.x, &y.x),
+        (Expr::CallExpr(x), Expr::CallExpr(y)) => {
+            exprs_equal(&x.fun, &y.fun)
+                && x.args.len() == y.args.len()
+                && x.ellipsis.is_valid() == y.ellipsis.is_valid()
+                && x.args
+                    .iter()
+                    .zip(y.args.iter())
+                    .all(|(a, b)| exprs_equal(a, b))
+        }
+        _ => false,
     }
 }
 
@@ -810,6 +851,105 @@ fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
                 pos,
                 end,
                 new_text: format!("slices.Sort({slice_text})"),
+            }],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+/// Split `i±k` into `(i, signed_k)`; otherwise `(e, 0)`.
+fn split_index_offset<'a>(pass: &Pass<'_>, e: &'a Expr) -> (&'a Expr, i64) {
+    if let Expr::BinaryExpr(bin) = e {
+        if bin.op == Token::ADD || bin.op == Token::SUB {
+            if let Some(k) = code::expr_to_int(pass, &bin.y) {
+                let signed = if bin.op == Token::SUB { -k } else { k };
+                return (&bin.x, signed);
+            }
+        }
+    }
+    (e, 0)
+}
+
+/// Reports whether we can verify `a < b` for slice indices (upstream
+/// `increasingSliceIndices`).
+fn increasing_slice_indices(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
+    let ak = code::expr_to_int(pass, a);
+    let bk = code::expr_to_int(pass, b);
+    if ak.is_some() || bk.is_some() {
+        return matches!((ak, bk), (Some(a), Some(b)) if a < b);
+    }
+    let (ai, ak) = split_index_offset(pass, a);
+    let (bi, bk) = split_index_offset(pass, b);
+    exprs_equal(ai, bi) && ak < bk
+}
+
+/// Port of modernize `slicesdelete`: `append(s[:a], s[b:]...)` → `slices.Delete`.
+fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    let path = pass.pkg().pkg_path.as_str();
+    if path == "slices"
+        || path.starts_with("slices/")
+        || path == "runtime"
+        || path.starts_with("runtime/")
+    {
+        return;
+    }
+    if !code::is_call_to(pass, call, "append") || call.args.len() != 2 {
+        return;
+    }
+    if !call.ellipsis.is_valid() {
+        return;
+    }
+    let pos = call.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.21") {
+        return;
+    }
+    let Expr::SliceExpr(slice1) = &call.args[0] else {
+        return;
+    };
+    let Expr::SliceExpr(slice2) = &call.args[1] else {
+        return;
+    };
+    if slice1.low.is_some() || slice1.slice3 || slice1.high.is_none() {
+        return;
+    }
+    if slice2.high.is_some() || slice2.slice3 || slice2.low.is_none() {
+        return;
+    }
+    if !exprs_equal(&slice1.x, &slice2.x) {
+        return;
+    }
+    if expr_has_effects(pass, &slice1.x) {
+        return;
+    }
+    let high = slice1.high.as_ref().expect("checked above");
+    let low = slice2.low.as_ref().expect("checked above");
+    if !increasing_slice_indices(pass, high, low) {
+        return;
+    }
+    let Some(x_text) = expr_text(&slice1.x) else {
+        return;
+    };
+    let Some(high_text) = expr_text(high) else {
+        return;
+    };
+    let Some(low_text) = expr_text(low) else {
+        return;
+    };
+    // DEFERRED: AddImport + int() wrap when indices are non-int / int shadowed.
+    let end = call.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "Replace append with slices.Delete".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace append with slices.Delete".into(),
+            text_edits: vec![TextEdit {
+                pos,
+                end,
+                new_text: format!("slices.Delete({x_text}, {high_text}, {low_text})"),
             }],
         }],
         related: Vec::new(),
@@ -1996,7 +2136,13 @@ fn expr_has_effects(pass: &Pass<'_>, expr: &Expr) -> bool {
     match expr {
         Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_) | Expr::CompositeLit(_) => false,
         Expr::ParenExpr(p) => expr_has_effects(pass, &p.x),
-        Expr::UnaryExpr(u) => expr_has_effects(pass, &u.x),
+        Expr::UnaryExpr(u) => {
+            // Channel receive (`<-ch`) has side effects.
+            if u.op == Token::ARROW {
+                return true;
+            }
+            expr_has_effects(pass, &u.x)
+        }
         Expr::StarExpr(s) => expr_has_effects(pass, &s.x),
         Expr::IndexExpr(ix) => {
             expr_has_effects(pass, &ix.x) || expr_has_effects(pass, &ix.index)
@@ -4012,6 +4158,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicessort") {
                         check_slicessort(pass, c, &mut pending);
+                    }
+                    if enabled(&options, "slicesdelete") {
+                        check_slicesdelete(pass, c, &mut pending);
                     }
                     if enabled(&options, "reflecttypefor") {
                         // Prefer Elem() special-case; plain TypeOf is handled when

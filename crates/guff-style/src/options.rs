@@ -693,7 +693,7 @@ impl UsestdlibvarsOptions {
 ///
 /// By default all implemented checkers are enabled. Names in `disable` are
 /// skipped (golangci-lint compatible). Unknown / deferred checker names are
-/// accepted so configs that disable `atomictypes` etc. still parse.
+/// accepted so configs that disable `atomictypes` / `slicesdelete` etc. still parse.
 #[derive(Debug, Clone, Default)]
 pub struct ModernizeOptions {
     pub disable: Vec<String>,

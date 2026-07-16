@@ -3262,6 +3262,26 @@ fn modernize_flags_stringsbuilder() {
 }
 
 #[test]
+fn modernize_flags_slicesdelete() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/slicesdelete",
+        "slicesdelete.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("Replace append with slices.Delete"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        8,
+        "expected exactly 8 slicesdelete hits, got {} {messages:?}",
+        hits.len()
+    );
+}
+
+#[test]
 fn modernize_flags_slicescontains_variants() {
     let pkg = support::typecheck_fixture(
         "modernize",
