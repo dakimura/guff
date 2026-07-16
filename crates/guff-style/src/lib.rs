@@ -14,6 +14,7 @@
 //! - [`gocheckcompilerdirectives`]
 //! - [`forbidigo`]
 //! - [`bidichk`]
+//! - [`reassign`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -67,6 +68,7 @@ mod bidichk;
 mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
+mod reassign;
 mod gocognit;
 mod goconst;
 mod gocyclo;
@@ -93,8 +95,9 @@ pub use options::{
     GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
-    SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions, TestifylintOptions,
-    UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions, WslOptions,
+    ReassignOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions,
+    TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
+    WhitespaceOptions, WslOptions,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -110,6 +113,7 @@ pub use bidichk::analyzer as bidichk;
 pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
+pub use reassign::analyzer as reassign;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
 pub use gocritic::analyzer as gocritic;
@@ -154,6 +158,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gochecknoglobals(),
         gocheckcompilerdirectives(),
         forbidigo(),
+        reassign(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

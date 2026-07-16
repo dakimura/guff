@@ -744,6 +744,15 @@ impl Default for AsasalintOptions {
     }
 }
 
+/// `linters.settings.reassign` / `linters-settings.reassign`.
+///
+/// Empty `patterns` → upstream default `^(Err.*|EOF)$`.
+/// Non-empty → golangci joins as `^(p1|p2|…)$`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReassignOptions {
+    pub patterns: Vec<String>,
+}
+
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
 /// `linters.settings.bidichk` — full rune names to check.

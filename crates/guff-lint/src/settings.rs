@@ -60,6 +60,7 @@ pub struct LinterSettings {
     pub bidichk: BidichkSettings,
     pub asasalint: AsasalintSettings,
     pub importas: ImportasSettings,
+    pub reassign: ReassignSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -849,6 +850,16 @@ impl Default for AsasalintSettings {
     }
 }
 
+/// `linters.settings.reassign` / `linters-settings.reassign`.
+///
+/// Empty `patterns` → upstream default `^(Err.*|EOF)$`.
+/// Non-empty → joined as `^(p1|p2|…)$` (golangci-lint compat).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ReassignSettings {
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
+
 /// `linters.settings.bidichk` / `linters-settings.bidichk`.
 ///
 /// Each bool enables checking for that rune. When all are false (golangci
@@ -1183,6 +1194,11 @@ impl LinterSettings {
                 out.asasalint = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("reassign".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ReassignSettings>(v.clone()) {
+                out.reassign = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
             if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
                 out.importas = s;
@@ -1252,6 +1268,7 @@ impl LinterSettings {
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
         bag.insert("asasalint", self.asasalint.to_guff_asasalint());
+        bag.insert("reassign", self.reassign.to_guff_reassign());
         bag.insert("importas", self.importas.to_guff_importas());
         Arc::new(bag)
     }
@@ -2003,6 +2020,14 @@ impl AsasalintSettings {
         guff_style::AsasalintOptions {
             exclude: self.exclude.clone(),
             use_builtin_exclusions: self.use_builtin_exclusions,
+        }
+    }
+}
+
+impl ReassignSettings {
+    pub fn to_guff_reassign(&self) -> guff_style::ReassignOptions {
+        guff_style::ReassignOptions {
+            patterns: self.patterns.clone(),
         }
     }
 }

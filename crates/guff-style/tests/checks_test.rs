@@ -1,10 +1,14 @@
 mod support;
 
+use std::sync::Arc;
+
+use guff_analysis::SettingsBag;
+use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
-    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
+    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, sloglint, tagalign, testifylint,
     unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
@@ -105,6 +109,90 @@ fn asasalint_respects_exclude_settings() {
         },
     );
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn reassign_flags_other_package_err_and_eof() {
+    let pkg = support::typecheck_fixture("reassign", "example.com/reassign", "bad.go");
+    let messages = support::run_analyzer(reassign(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("reassigning variable ErrB in other package b")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("reassigning variable EOF in other package io")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("NotErr")),
+        "NotErr should not match default pattern: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("ErrSt")),
+        "struct field should not be reported: {messages:?}"
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+#[test]
+fn reassign_allows_local_and_non_matching() {
+    let pkg = support::typecheck_fixture("reassign", "example.com/reassign/ok", "ok.go");
+    let messages = support::run_analyzer(reassign(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn reassign_respects_patterns_settings() {
+    use guff_style::ReassignOptions;
+
+    let pkg = support::typecheck_fixture("reassign", "example.com/reassign/settings", "settings.go");
+
+    // Default: only ErrB.
+    let flagged = support::run_analyzer(reassign(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("reassigning variable ErrB")),
+        "{flagged:?}"
+    );
+    assert!(
+        !flagged.iter().any(|m| m.contains("NotErr")),
+        "{flagged:?}"
+    );
+
+    // patterns: [".*"] → both.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "reassign",
+        ReassignOptions {
+            patterns: vec![".*".into()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        reassign(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("reassigning variable ErrB")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("reassigning variable NotErr")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
 }
 
 #[test]
