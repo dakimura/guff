@@ -1,6 +1,6 @@
 mod support;
 
-use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040};
+use guff_staticcheck::{sa4000, sa4001, sa4003, sa4004, sa4005, sa4006, sa4008, sa4009, sa4010, sa4011, sa4012, sa4013, sa4014, sa4015, sa4016, sa4017, sa4018, sa4019, sa4020, sa4021, sa4022, sa4023, sa4024, sa4025, sa4026, sa4027, sa4028, sa4029, sa4030, sa4031, sa4032, sa1000, sa1001, sa1002, sa1003, sa1004, sa1005, sa1006, sa1007, sa1008, sa1010, sa1011, sa1012, sa1013, sa1014, sa1015, sa1016, sa1017, sa1018, sa1019, sa1020, sa1021, sa1023, sa1024, sa1025, sa1026, sa1027, sa1028, sa1029, sa1030, sa1031, sa1032, sa2000, sa2001, sa2002, sa2003, sa3000, sa3001, sa5000, sa5001, sa5002, sa5003, sa5004, sa5005, sa5007, sa5008, sa5009, sa5010, sa5011, sa5012, sa6000, sa6001, sa6002, sa6003, sa6005, sa6006, sa9001, sa9002, sa9003, sa9004, sa9005, sa9006, sa9007, sa9008, sa9009, sa9010, s1000, s1001, s1003, s1004, s1005, s1006, s1007, s1008, s1009, s1010, s1011, s1012, s1016, s1017, s1018, s1019, s1020, s1021, s1023, s1024, s1025, s1028, s1029, s1030, s1031, s1032, s1033, s1034, s1035, s1036, s1037, s1038, s1039, s1040, st1001, st1006, st1012, st1015};
 use guff_types::sizes_for;
 
 #[test]
@@ -2076,4 +2076,101 @@ fn sa9008_allows_type_assertion_without_shadowing() {
     let pkg = typecheck_rule("sa9008", "ok.go");
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(sa9008::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1001_flags_dot_imports() {
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001",
+        &dir.join("bad.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1001::analyzer(), &pkg);
+    assert!(!messages.is_empty(), "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("dot imports")));
+}
+
+#[test]
+fn st1001_allows_normal_imports() {
+    let dir = support::testdata("st1001");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1001/ok",
+        &dir.join("ok.go"),
+        &[("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1001::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1006_flags_bad_receiver_names() {
+    let dir = support::testdata("st1006");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1006");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1006::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("underscore")));
+    assert!(messages.iter().any(|m| m.contains("self") || m.contains("this") || m.contains("identity")));
+}
+
+#[test]
+fn st1006_allows_good_receiver_names() {
+    let dir = support::testdata("st1006");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1006/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1006::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1012_flags_badly_named_error_vars() {
+    let dir = support::testdata("st1012");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1012",
+        &dir.join("bad.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1012::analyzer(), &pkg);
+    assert!(messages.len() >= 3, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("error var foo")));
+    assert!(messages.iter().any(|m| m.contains("error var abc")));
+    assert!(messages.iter().any(|m| m.contains("error var wrong")));
+}
+
+#[test]
+fn st1012_allows_well_named_error_vars() {
+    let dir = support::testdata("st1012");
+    let errors_stub = dir.join("stub/errors/errors.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1012/ok",
+        &dir.join("ok.go"),
+        &[("errors", &errors_stub), ("fmt", &fmt_stub)],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1012::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn st1015_flags_middle_default_case() {
+    let dir = support::testdata("st1015");
+    let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1015");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1015::analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("default case should be first or last"));
+}
+
+#[test]
+fn st1015_allows_first_or_last_default() {
+    let dir = support::testdata("st1015");
+    let pkg = support::typecheck_file(&dir, "ok.go", "example.com/staticcheck/st1015/ok");
+    support::assert_well_typed(&pkg);
+    assert!(support::run_analyzer(st1015::analyzer(), &pkg).is_empty());
 }

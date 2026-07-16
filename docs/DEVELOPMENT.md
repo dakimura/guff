@@ -134,7 +134,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 ### 3.3 実装済み linter
 | linter | 状態 | 規模 |
 |--------|------|------|
-| `guff-staticcheck` | ✅ **137 analyzers**（simple S* 37 + staticcheck SA* 100） | ST* / QF* は **未着手** |
+| `guff-staticcheck` | ✅ **141 analyzers**（simple S* 37 + staticcheck SA* 100 + stylecheck ST* **4**） | ST* 残り / QF* は **未着手**（→ R16） |
 | `guff-govet` | ✅ **29/29** passes（printf は引数個数・型照合まで, `go vet` 一致） | — |
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
@@ -599,8 +599,12 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
 - golangci-lint v2 は `formatters` セクションを持つので、config 互換のためにも必要。
 
-#### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）
-- 現在 `guff-staticcheck` は S* + SA* のみ。ST1xxx / QF1xxx を追加すると staticcheck 完全互換に近づく。
+#### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
+- 現在 `guff-staticcheck` は S* + SA* + **ST* 4**（ST1001 / ST1006 / ST1012 / ST1015）。
+- **進捗**: ST1001（dot imports; whitelist DEFERRED）/ ST1006（receiver `self`/`this`/`_`; AST 版）/
+  ST1012（error var 命名）/ ST1015（switch default 位置）。
+- **残**: ST1000 / ST1003 / ST1005（IR）/ ST1008 / ST1011 / ST1013 / ST1016–ST1023 / QF* 全体。
+- テスト: `st1001` / `st1006` / `st1012` / `st1015` fixtures + `checks_test`。
 
 ---
 
@@ -700,6 +704,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R16 開始**: stylecheck ST* の初回バッチ **4** 件（`ST1001` / `ST1006` / `ST1012` / `ST1015`）。計 **141** analyzers（S* 37 + SA* 100 + ST* 4）。`dot_import_whitelist`・ST1005/IR 依存・QF* は DEFERRED。テスト: `st1001` / `st1006` / `st1012` / `st1015` |
 | 2026-07-16 | **R13 続き**: `modernize` に checker **3** 件追加（`unsafefuncs` / `importcomment` / `stringscut` Split/SplitN[0]→Cut）。計 **19** checker。残 atomictypes / newexpr / stringsbuilder / stringscut Index 等は DEFERRED。テスト: `unsafefuncs.go` / `importcomment.go` / `stringscut.go` |
 | 2026-07-16 | **R13 続き**: `modernize` に checker **3** 件追加（`slicesbackward` / `reflecttypefor` / `testingcontext`）。計 **16** checker。prometheus `modernize` disable（`newexpr`/`omitzero`）互換は維持。残 atomictypes / newexpr / stringscut 等は DEFERRED。テスト: `slicesbackward.go` / `reflecttypefor.go` / `testingcontext.go` + reflect/context/testing stubs |
 | 2026-07-16 | **R13 続き**: `modernize` に **`mapsloop`** を追加（`for k, v := range x { m[k] = v }` → `maps.Copy`；Go 1.23+・map→map）。計 **13** checker。Insert/Collect（iter.Seq2）/ Clone は DEFERRED。テスト: `mapsloop.go` + `stub/maps` |
