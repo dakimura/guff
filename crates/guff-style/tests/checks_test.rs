@@ -3242,6 +3242,26 @@ fn modernize_flags_errorsastype() {
 }
 
 #[test]
+fn modernize_flags_stringsbuilder() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringsbuilder",
+        "stringsbuilder.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("using string += string in a loop is inefficient"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        4,
+        "expected exactly 4 stringsbuilder hits (4 positive / 5 negative), got {} {messages:?}",
+        hits.len()
+    );
+}
+
+#[test]
 fn modernize_flags_slicescontains_variants() {
     let pkg = support::typecheck_fixture(
         "modernize",

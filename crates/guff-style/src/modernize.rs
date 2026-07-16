@@ -27,19 +27,21 @@
 //!   (Go 1.26+; `NewLike` facts)
 //! - `errorsastype` — `var e T; if errors.As(err, &e)` → `errors.AsType[T]`
 //!   (Go 1.26+; if-stmt only; switch/init/`new(E)` forms DEFERRED)
+//! - `stringsbuilder` — `s += x` in a loop → `strings.Builder` (local string vars;
+//!   `_test.go` skipped; AddImport DEFERRED)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! stditerators, stringsbuilder, stringscut Index/Contains
+//! stditerators, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
 //! slicescontains nested free break/continue analysis full parity,
 //! waitgroupgo trailing-Done /
-//! SuggestedFix import edits, reflecttypefor complicated/unnamed types &
-//! unused-var deletion, slicesbackward mutation/non-`s[i]` use analysis full
-//! parity, testingcontext sole-use via typeindex, newexpr `new` shadowing /
-//! CheckExpr untyped-constant re-typecheck full parity, errorsastype
-//! switch/`new(E)`/combined-cond forms, and full rangeint/minmax
-//! edge-case parity with upstream.
+//! SuggestedFix import edits (stringsbuilder AddImport), reflecttypefor
+//! complicated/unnamed types & unused-var deletion, slicesbackward
+//! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
+//! typeindex, newexpr `new` shadowing / CheckExpr untyped-constant re-typecheck
+//! full parity, errorsastype switch/`new(E)`/combined-cond forms, and full
+//! rangeint/minmax edge-case parity with upstream.
 
 use std::collections::HashSet;
 use std::fs;
@@ -47,8 +49,8 @@ use std::sync::OnceLock;
 
 use guff::ast::{
     AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Decl, Expr, Field, File,
-    ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Spec, Stmt,
-    StructType, UnaryExpr,
+    ForStmt, FuncDecl, FuncLit, GenDecl, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Spec,
+    Stmt, StructType, UnaryExpr, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
@@ -66,6 +68,7 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
 use guff_types::named::named_obj;
+use guff_types::object::var::VarKind;
 use guff_types::pointer::pointer_elem;
 use guff_types::predicates::{is_float, is_integer, is_interface, is_string};
 use guff_types::signature::{
@@ -3278,6 +3281,654 @@ fn check_errorsastype(pass: &Pass<'_>, file: &File, if_stmt: &IfStmt, pending: &
     });
 }
 
+/// Port of modernize `stringsbuilder`: replace `s += x` in a loop with `strings.Builder`.
+///
+/// SuggestedFix uses a bare `strings.Builder` name (AddImport is DEFERRED).
+fn is_builtin_string_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Basic(b) => b.kind() == BasicKind::String,
+        _ => false,
+    }
+}
+
+fn is_local_string_var(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    if v.kind() != VarKind::Local {
+        return false;
+    }
+    is_builtin_string_type(pass, v.typ())
+}
+
+fn unparen_expr(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::ParenExpr(p) => unparen_expr(&p.x),
+        other => other,
+    }
+}
+
+fn expr_is_obj(pass: &Pass<'_>, expr: &Expr, obj: ObjectId) -> bool {
+    match unparen_expr(expr) {
+        Expr::Ident(id) => ident_obj(pass, id) == Some(obj),
+        _ => false,
+    }
+}
+
+fn is_empty_string_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    code::expr_to_string(pass, expr).is_some_and(|s| s.is_empty())
+}
+
+fn stmt_list_contains_assign<'a>(list: &'a [Stmt], assign: &AssignStmt) -> bool {
+    let want = assign.tok_pos.0;
+    list.iter().any(|s| match s {
+        Stmt::AssignStmt(a) => a.tok_pos.0 == want,
+        _ => false,
+    })
+}
+
+fn short_decl_in_unrestricted_list(file: &File, assign: &AssignStmt) -> bool {
+    let mut ok = false;
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::BlockStmt(b) if stmt_list_contains_assign(&b.list, assign) => {
+                ok = true;
+            }
+            NodeRef::CaseClause(c) if stmt_list_contains_assign(&c.body, assign) => {
+                ok = true;
+            }
+            NodeRef::CommClause(c) if stmt_list_contains_assign(&c.body, assign) => {
+                ok = true;
+            }
+            _ => {}
+        }
+        true
+    });
+    ok
+}
+
+enum StringsBuilderDecl<'a> {
+    Short {
+        assign: &'a AssignStmt,
+        empty_init: bool,
+    },
+    Var {
+        decl: &'a GenDecl,
+        spec: &'a ValueSpec,
+    },
+}
+
+fn find_stringsbuilder_decl<'a>(
+    pass: &Pass<'_>,
+    file: &'a File,
+    obj: ObjectId,
+) -> Option<StringsBuilderDecl<'a>> {
+    let mut found = None;
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(assign)
+                if assign.tok == Some(Token::DEFINE)
+                    && assign.lhs.len() == 1
+                    && assign.rhs.len() == 1
+                    && expr_is_obj(pass, &assign.lhs[0], obj) =>
+            {
+                if short_decl_in_unrestricted_list(file, assign) {
+                    found = Some(StringsBuilderDecl::Short {
+                        assign,
+                        empty_init: is_empty_string_expr(pass, &assign.rhs[0]),
+                    });
+                }
+            }
+            NodeRef::DeclStmt(ds) => {
+                let Decl::GenDecl(gd) = &ds.decl else {
+                    return true;
+                };
+                if gd.tok != Some(Token::VAR) {
+                    return true;
+                }
+                // Spec containing obj must be the last child (paren form constraint).
+                let Some(Spec::ValueSpec(spec)) = gd.specs.last() else {
+                    return true;
+                };
+                if spec.names.len() != 1 || ident_obj(pass, &spec.names[0]) != Some(obj) {
+                    return true;
+                }
+                // Reject multi-name specs earlier in the decl; only last may be ours.
+                if gd.specs.len() > 1 {
+                    for earlier in &gd.specs[..gd.specs.len() - 1] {
+                        if let Spec::ValueSpec(vs) = earlier {
+                            if vs.names.iter().any(|n| ident_obj(pass, n) == Some(obj)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                found = Some(StringsBuilderDecl::Var {
+                    decl: gd,
+                    spec,
+                });
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
+struct StringsBuilderUses {
+    num_loop_assigns: usize,
+    first_loop_assign_pos: u32,
+    first_loop_assign_end: u32,
+    seen_rvalue: bool,
+    reject: bool,
+    edits: Vec<TextEdit>,
+    post_edits: Vec<TextEdit>,
+}
+
+fn record_rvalue_use(expr: &Expr, uses: &mut StringsBuilderUses) {
+    uses.seen_rvalue = true;
+    let end = unparen_expr(expr).end().0 as u32;
+    uses.edits.push(TextEdit {
+        pos: end,
+        end,
+        new_text: ".String()".into(),
+    });
+}
+
+fn walk_expr_for_var_uses(
+    pass: &Pass<'_>,
+    expr: &Expr,
+    obj: ObjectId,
+    var_pos: u32,
+    in_loop: bool,
+    uses: &mut StringsBuilderUses,
+) {
+    match expr {
+        Expr::ParenExpr(p) => walk_expr_for_var_uses(pass, &p.x, obj, var_pos, in_loop, uses),
+        Expr::UnaryExpr(u) if u.op == Token::AND => {
+            if expr_is_obj(pass, &u.x, obj) {
+                uses.reject = true;
+                return;
+            }
+            walk_expr_for_var_uses(pass, &u.x, obj, var_pos, in_loop, uses);
+        }
+        Expr::Ident(id) => {
+            if ident_obj(pass, id) == Some(obj) {
+                record_rvalue_use(expr, uses);
+            }
+        }
+        Expr::CallExpr(c) => {
+            walk_expr_for_var_uses(pass, &c.fun, obj, var_pos, in_loop, uses);
+            for a in &c.args {
+                walk_expr_for_var_uses(pass, a, obj, var_pos, in_loop, uses);
+            }
+        }
+        Expr::SelectorExpr(s) => walk_expr_for_var_uses(pass, &s.x, obj, var_pos, in_loop, uses),
+        Expr::IndexExpr(i) => {
+            walk_expr_for_var_uses(pass, &i.x, obj, var_pos, in_loop, uses);
+            walk_expr_for_var_uses(pass, &i.index, obj, var_pos, in_loop, uses);
+        }
+        Expr::SliceExpr(s) => {
+            walk_expr_for_var_uses(pass, &s.x, obj, var_pos, in_loop, uses);
+            if let Some(e) = &s.low {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+            if let Some(e) = &s.high {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+            if let Some(e) = &s.max {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+        }
+        Expr::BinaryExpr(b) => {
+            walk_expr_for_var_uses(pass, &b.x, obj, var_pos, in_loop, uses);
+            walk_expr_for_var_uses(pass, &b.y, obj, var_pos, in_loop, uses);
+        }
+        Expr::StarExpr(s) => walk_expr_for_var_uses(pass, &s.x, obj, var_pos, in_loop, uses),
+        Expr::UnaryExpr(u) => walk_expr_for_var_uses(pass, &u.x, obj, var_pos, in_loop, uses),
+        Expr::KeyValueExpr(kv) => {
+            walk_expr_for_var_uses(pass, &kv.key, obj, var_pos, in_loop, uses);
+            walk_expr_for_var_uses(pass, &kv.value, obj, var_pos, in_loop, uses);
+        }
+        Expr::CompositeLit(c) => {
+            if let Some(t) = &c.ty {
+                walk_expr_for_var_uses(pass, t, obj, var_pos, in_loop, uses);
+            }
+            for e in &c.elts {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+        }
+        Expr::FuncLit(f) => {
+            for s in &f.body.list {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, in_loop, uses);
+            }
+        }
+        Expr::TypeAssertExpr(t) => {
+            walk_expr_for_var_uses(pass, &t.x, obj, var_pos, in_loop, uses);
+            if let Some(ty) = &t.ty {
+                walk_expr_for_var_uses(pass, ty, obj, var_pos, in_loop, uses);
+            }
+        }
+        Expr::IndexListExpr(i) => {
+            walk_expr_for_var_uses(pass, &i.x, obj, var_pos, in_loop, uses);
+            for idx in &i.indices {
+                walk_expr_for_var_uses(pass, idx, obj, var_pos, in_loop, uses);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_stmt_for_var_uses(
+    pass: &Pass<'_>,
+    stmt: &Stmt,
+    obj: ObjectId,
+    var_pos: u32,
+    in_loop: bool,
+    uses: &mut StringsBuilderUses,
+) {
+    if uses.reject {
+        return;
+    }
+    match stmt {
+        Stmt::AssignStmt(assign) => {
+            let lhs_is_ours = assign.lhs.len() == 1 && expr_is_obj(pass, &assign.lhs[0], obj);
+            if lhs_is_ours {
+                if assign.tok == Some(Token::DEFINE) {
+                    // Declaration site of `obj` — not a later assignment.
+                    return;
+                }
+                if assign.tok == Some(Token::AddAssign) {
+                    if uses.seen_rvalue {
+                        uses.reject = true;
+                        return;
+                    }
+                    if in_loop {
+                        uses.num_loop_assigns += 1;
+                        if uses.first_loop_assign_pos == 0 {
+                            uses.first_loop_assign_pos = assign.lhs[0].pos().0 as u32;
+                            uses.first_loop_assign_end = assign
+                                .rhs
+                                .last()
+                                .map(|e| e.end().0 as u32)
+                                .unwrap_or(assign.tok_pos.0 as u32);
+                        }
+                    }
+                    // s +=          expr  →  s.WriteString(expr)
+                    uses.edits.push(TextEdit {
+                        pos: assign.lhs[0].end().0 as u32,
+                        end: assign.rhs[0].pos().0 as u32,
+                        new_text: ".WriteString(".into(),
+                    });
+                    let assign_end = assign
+                        .rhs
+                        .last()
+                        .map(|e| e.end().0 as u32)
+                        .unwrap_or(assign.tok_pos.0 as u32);
+                    uses.post_edits.push(TextEdit {
+                        pos: assign_end,
+                        end: assign_end,
+                        new_text: ")".into(),
+                    });
+                    if assign.rhs.len() == 1 {
+                        walk_expr_for_var_uses(pass, &assign.rhs[0], obj, var_pos, in_loop, uses);
+                    }
+                } else {
+                    // Direct assignment of s after decl — reject.
+                    uses.reject = true;
+                }
+                return;
+            }
+            for e in assign.lhs.iter().chain(assign.rhs.iter()) {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::DeclStmt(ds) => {
+            // Skip the defining ValueSpec for `obj`; still walk other inits.
+            if let Decl::GenDecl(gd) = &ds.decl {
+                for spec in &gd.specs {
+                    if let Spec::ValueSpec(vs) = spec {
+                        let defines_ours = vs.names.iter().any(|n| ident_obj(pass, n) == Some(obj));
+                        if defines_ours {
+                            continue;
+                        }
+                        for v in &vs.values {
+                            walk_expr_for_var_uses(pass, v, obj, var_pos, in_loop, uses);
+                        }
+                    }
+                }
+            }
+        }
+        Stmt::ExprStmt(e) => walk_expr_for_var_uses(pass, &e.x, obj, var_pos, in_loop, uses),
+        Stmt::ReturnStmt(r) => {
+            for e in &r.results {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::GoStmt(g) => {
+            walk_expr_for_var_uses(pass, &g.call.fun, obj, var_pos, in_loop, uses);
+            for a in &g.call.args {
+                walk_expr_for_var_uses(pass, a, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::DeferStmt(d) => {
+            walk_expr_for_var_uses(pass, &d.call.fun, obj, var_pos, in_loop, uses);
+            for a in &d.call.args {
+                walk_expr_for_var_uses(pass, a, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::SendStmt(s) => {
+            walk_expr_for_var_uses(pass, &s.chan_, obj, var_pos, in_loop, uses);
+            walk_expr_for_var_uses(pass, &s.value, obj, var_pos, in_loop, uses);
+        }
+        Stmt::IncDecStmt(i) => walk_expr_for_var_uses(pass, &i.x, obj, var_pos, in_loop, uses),
+        Stmt::IfStmt(i) => {
+            if let Some(init) = &i.init {
+                walk_stmt_for_var_uses(pass, init, obj, var_pos, in_loop, uses);
+            }
+            walk_expr_for_var_uses(pass, &i.cond, obj, var_pos, in_loop, uses);
+            for s in &i.body.list {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, in_loop, uses);
+            }
+            if let Some(e) = &i.else_ {
+                walk_stmt_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::BlockStmt(b) => {
+            for s in &b.list {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::ForStmt(f) => {
+            let loop_now = in_loop || (f.for_.0 as u32) >= var_pos;
+            if let Some(init) = &f.init {
+                walk_stmt_for_var_uses(pass, init, obj, var_pos, loop_now, uses);
+            }
+            if let Some(cond) = &f.cond {
+                walk_expr_for_var_uses(pass, cond, obj, var_pos, loop_now, uses);
+            }
+            if let Some(post) = &f.post {
+                walk_stmt_for_var_uses(pass, post, obj, var_pos, loop_now, uses);
+            }
+            for s in &f.body.list {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, loop_now, uses);
+            }
+        }
+        Stmt::RangeStmt(r) => {
+            let loop_now = in_loop || (r.for_.0 as u32) >= var_pos;
+            walk_expr_for_var_uses(pass, &r.x, obj, var_pos, loop_now, uses);
+            for s in &r.body.list {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, loop_now, uses);
+            }
+        }
+        Stmt::SwitchStmt(s) => {
+            if let Some(init) = &s.init {
+                walk_stmt_for_var_uses(pass, init, obj, var_pos, in_loop, uses);
+            }
+            if let Some(tag) = &s.tag {
+                walk_expr_for_var_uses(pass, tag, obj, var_pos, in_loop, uses);
+            }
+            for c in &s.body.list {
+                walk_stmt_for_var_uses(pass, c, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::TypeSwitchStmt(s) => {
+            if let Some(init) = &s.init {
+                walk_stmt_for_var_uses(pass, init, obj, var_pos, in_loop, uses);
+            }
+            walk_stmt_for_var_uses(pass, &s.assign, obj, var_pos, in_loop, uses);
+            for c in &s.body.list {
+                walk_stmt_for_var_uses(pass, c, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::CaseClause(c) => {
+            for e in &c.list {
+                walk_expr_for_var_uses(pass, e, obj, var_pos, in_loop, uses);
+            }
+            for s in &c.body {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::SelectStmt(s) => {
+            for c in &s.body.list {
+                walk_stmt_for_var_uses(pass, c, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::CommClause(c) => {
+            if let Some(comm) = &c.comm {
+                walk_stmt_for_var_uses(pass, comm, obj, var_pos, in_loop, uses);
+            }
+            for s in &c.body {
+                walk_stmt_for_var_uses(pass, s, obj, var_pos, in_loop, uses);
+            }
+        }
+        Stmt::LabeledStmt(l) => {
+            walk_stmt_for_var_uses(pass, &l.stmt, obj, var_pos, in_loop, uses);
+        }
+        _ => {}
+    }
+}
+
+fn build_stringsbuilder_decl_edits(
+    pass: &Pass<'_>,
+    decl: &StringsBuilderDecl<'_>,
+    var_name: &str,
+) -> Vec<TextEdit> {
+    let prefix = "strings.";
+    match decl {
+        StringsBuilderDecl::Short { assign, empty_init } => {
+            let assign_pos = assign.lhs[0].pos().0 as u32;
+            let assign_end = assign
+                .rhs
+                .last()
+                .map(|e| e.end().0 as u32)
+                .unwrap_or(assign.tok_pos.0 as u32);
+            if *empty_init {
+                vec![TextEdit {
+                    pos: assign_pos,
+                    end: assign_end,
+                    new_text: format!("var {var_name} {prefix}Builder"),
+                }]
+            } else {
+                vec![
+                    TextEdit {
+                        pos: assign_pos,
+                        end: assign.rhs[0].pos().0 as u32,
+                        new_text: format!("var {var_name} {prefix}Builder; {var_name}.WriteString("),
+                    },
+                    TextEdit {
+                        pos: assign_end,
+                        end: assign_end,
+                        new_text: ")".into(),
+                    },
+                ]
+            }
+        }
+        StringsBuilderDecl::Var {
+            decl: gd,
+            spec,
+        } => {
+            let mut edits = Vec::new();
+            let init = if let Some(ty) = &spec.ty {
+                ty.end().0 as u32
+            } else {
+                spec.names[0].end().0 as u32
+            };
+            edits.push(TextEdit {
+                pos: spec.names[0].end().0 as u32,
+                end: init,
+                new_text: format!(" {prefix}Builder"),
+            });
+            if !spec.values.is_empty() && !is_empty_string_expr(pass, &spec.values[0]) {
+                let gd_end = if gd.rparen.is_valid() {
+                    (gd.rparen.0 + 1) as u32
+                } else {
+                    spec.values[0].end().0 as u32
+                };
+                if gd.rparen.is_valid() {
+                    edits.push(TextEdit {
+                        pos: init,
+                        end: init,
+                        new_text: ")".into(),
+                    });
+                    edits.push(TextEdit {
+                        pos: spec.values[0].end().0 as u32,
+                        end: gd_end,
+                        new_text: String::new(),
+                    });
+                }
+                edits.push(TextEdit {
+                    pos: init,
+                    end: spec.values[0].pos().0 as u32,
+                    new_text: format!("; {var_name}.WriteString("),
+                });
+                edits.push(TextEdit {
+                    pos: spec.values[0].end().0 as u32,
+                    end: spec.values[0].end().0 as u32,
+                    new_text: ")".into(),
+                });
+            } else if !spec.values.is_empty() {
+                // delete "= expr" (empty string)
+                edits.push(TextEdit {
+                    pos: init,
+                    end: spec.values[0].end().0 as u32,
+                    new_text: String::new(),
+                });
+            }
+            edits
+        }
+    }
+}
+
+fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
+    let pkg = pass.pkg().pkg_path.as_str();
+    if pkg == "strings" || pkg.starts_with("strings/") || pkg == "runtime" || pkg.starts_with("runtime/")
+    {
+        return;
+    }
+    let filename = pass.fset().position(file.pos()).filename;
+    if filename.ends_with("_test.go") {
+        return;
+    }
+
+    // Candidates: local string vars on the LHS of some `+=`.
+    let mut candidates: HashSet<ObjectId> = HashSet::new();
+    walk::inspect(NodeRef::File(file), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::AssignStmt(assign) = n else {
+            return true;
+        };
+        if assign.tok != Some(Token::AddAssign) || assign.lhs.len() != 1 {
+            return true;
+        }
+        let Expr::Ident(id) = unparen_expr(&assign.lhs[0]) else {
+            return true;
+        };
+        let Some(obj) = ident_obj(pass, id) else {
+            return true;
+        };
+        if is_local_string_var(pass, obj) {
+            candidates.insert(obj);
+        }
+        true
+    });
+
+    let mut ordered: Vec<ObjectId> = candidates.into_iter().collect();
+    if let Some(artifacts) = pass.pkg().type_artifacts.as_ref() {
+        ordered.sort_by_key(|o| o.pos(&artifacts.objects));
+    }
+
+    let mut last_edit_end: Option<u32> = None;
+    for obj in ordered {
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            continue;
+        };
+        let var_pos = obj.pos(&artifacts.objects);
+        let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+            continue;
+        };
+        let var_name = v.name().to_string();
+
+        if let Some(end) = last_edit_end {
+            if var_pos < end {
+                continue; // overlapping fix span
+            }
+        }
+
+        let Some(decl) = find_stringsbuilder_decl(pass, file, obj) else {
+            continue;
+        };
+
+        let mut uses = StringsBuilderUses {
+            num_loop_assigns: 0,
+            first_loop_assign_pos: 0,
+            first_loop_assign_end: 0,
+            seen_rvalue: false,
+            reject: false,
+            edits: Vec::new(),
+            post_edits: Vec::new(),
+        };
+
+        // Walk the enclosing function body (or file decls) for uses.
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::FuncDecl(fd) => {
+                    if let Some(body) = &fd.body {
+                        for s in &body.list {
+                            walk_stmt_for_var_uses(pass, s, obj, var_pos, false, &mut uses);
+                        }
+                    }
+                    false // don't descend via default; we handled body
+                }
+                NodeRef::FuncLit(_) => true, // handled via stmt walk when nested
+                _ => true,
+            }
+        });
+
+        if uses.reject || !uses.seen_rvalue || uses.num_loop_assigns == 0 {
+            continue;
+        }
+
+        let mut edits = build_stringsbuilder_decl_edits(pass, &decl, &var_name);
+        edits.append(&mut uses.edits);
+        edits.append(&mut uses.post_edits);
+
+        last_edit_end = edits.iter().map(|e| e.end).max();
+
+        pending.push(Diagnostic {
+            pos: uses.first_loop_assign_pos,
+            end: uses.first_loop_assign_end,
+            category: String::new(),
+            message: "using string += string in a loop is inefficient".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Replace string += string with strings.Builder".into(),
+                text_edits: edits,
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -3302,6 +3953,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         if enabled(&options, "importcomment") {
             check_importcomment(pass, file_idx, file, &mut pending);
+        }
+        if enabled(&options, "stringsbuilder") {
+            check_stringsbuilder(pass, file, &mut pending);
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
