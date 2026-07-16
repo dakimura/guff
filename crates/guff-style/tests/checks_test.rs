@@ -2,10 +2,10 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen,
-    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, lll,
-    loggercheck, mnd, modernize, musttag, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
-    prealloc, predeclared, sloglint, tagalign, testifylint, unconvert, usestdlibvars, usetesting,
-    whitespace, wsl,
+    gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
+    gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
+    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
+    unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -68,6 +68,49 @@ fn gochecknoglobals_allows_exceptions() {
         "ok.go",
     );
     let messages = support::run_analyzer(gochecknoglobals(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "unexpected diagnostics: {messages:?}"
+    );
+}
+
+#[test]
+fn gocheckcompilerdirectives_flags_space_and_unknown() {
+    let pkg = support::typecheck_fixture(
+        "gocheckcompilerdirectives",
+        "example.com/gocheckcompilerdirectives",
+        "bad.go",
+    );
+    let messages = support::run_analyzer(gocheckcompilerdirectives(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("compiler directive contains space: // go:embed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("compiler directive contains space: //    go:embed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("compiler directive unrecognized: //go:genrate")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 3, "{messages:?}");
+}
+
+#[test]
+fn gocheckcompilerdirectives_allows_valid_directives() {
+    let pkg = support::typecheck_fixture(
+        "gocheckcompilerdirectives",
+        "example.com/gocheckcompilerdirectives/ok",
+        "ok.go",
+    );
+    let messages = support::run_analyzer(gocheckcompilerdirectives(), &pkg);
     assert!(
         messages.is_empty(),
         "unexpected diagnostics: {messages:?}"

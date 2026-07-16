@@ -10,6 +10,7 @@
 //! - [`asciicheck`]
 //! - [`gochecknoinits`]
 //! - [`gochecknoglobals`]
+//! - [`gocheckcompilerdirectives`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -57,6 +58,7 @@ mod modernize;
 mod musttag;
 mod sloglint;
 mod testifylint;
+mod gocheckcompilerdirectives;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod gocognit;
@@ -95,6 +97,7 @@ pub use exhaustive::analyzer as exhaustive;
 pub use exhaustruct::analyzer as exhaustruct;
 pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
+pub use gocheckcompilerdirectives::analyzer as gocheckcompilerdirectives;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use gocognit::analyzer as gocognit;
@@ -137,6 +140,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         asciicheck(),
         gochecknoinits(),
         gochecknoglobals(),
+        gocheckcompilerdirectives(),
         goprintffuncname(),
         funlen(),
         gocyclo(),
