@@ -67,7 +67,13 @@ pub struct ErrcheckSettings {
     /// Report ignored type assertions `x := y.(T)` (no ok).
     #[serde(default, rename = "check-type-assertions")]
     pub check_type_assertions: bool,
-    // DEFERRED (R4 follow-up): disable-default-exclusions, exclude-functions, verbose.
+    /// Skip the built-in default exclusion list (kisielk `-excludeonly`).
+    #[serde(default, rename = "disable-default-exclusions")]
+    pub disable_default_exclusions: bool,
+    /// Additional function/method symbols to exclude (kisielk exclude file format).
+    #[serde(default, rename = "exclude-functions")]
+    pub exclude_functions: Vec<String>,
+    // DEFERRED (R4 follow-up): verbose.
 }
 
 /// `linters.settings.govet` / `linters-settings.govet`.
@@ -1033,6 +1039,8 @@ impl LinterSettings {
             guff_errcheck::Options {
                 check_blank: self.errcheck.check_blank,
                 check_asserts: self.errcheck.check_type_assertions,
+                disable_default_exclusions: self.errcheck.disable_default_exclusions,
+                exclude_functions: self.errcheck.exclude_functions.clone(),
             },
         );
         bag.insert("revive", self.revive.to_guff_revive());
@@ -1915,12 +1923,24 @@ mod tests {
 errcheck:
   check-blank: true
   check-type-assertions: true
+  disable-default-exclusions: true
+  exclude-functions:
+    - io.Copy
+    - (net/http.ResponseWriter).Write
 "#,
         )
         .unwrap();
         let s = LinterSettings::from_yaml(&yaml);
         assert!(s.errcheck.check_blank);
         assert!(s.errcheck.check_type_assertions);
+        assert!(s.errcheck.disable_default_exclusions);
+        assert_eq!(
+            s.errcheck.exclude_functions,
+            vec![
+                "io.Copy".to_string(),
+                "(net/http.ResponseWriter).Write".to_string(),
+            ]
+        );
     }
 
     #[test]

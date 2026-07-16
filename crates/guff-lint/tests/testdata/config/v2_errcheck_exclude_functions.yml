@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      check-blank: true
+      disable-default-exclusions: false
+      exclude-functions:
+        - io.Copy
+        - io.WriteString
+        - (net/http.ResponseWriter).Write

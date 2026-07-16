@@ -49,3 +49,91 @@ fn errcheck_assert_mode_allows_checked_assertions() {
     let pkg = support::typecheck_pkg("example.com/errcheck/assert/ok", &dir.join("ok.go"));
     assert!(support::run_analyzer(analyzer_check_asserts(), &pkg).is_empty());
 }
+
+#[test]
+fn errcheck_exclude_functions_skips_listed_symbols() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_errcheck::Options;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("exclude");
+    let pkg = support::typecheck_pkg("example.com/errcheck/exclude", &dir.join("bad.go"));
+    assert!(
+        !pkg.ill_typed,
+        "fixture must typecheck: {:?}",
+        pkg.errors
+    );
+
+    let default_msgs = support::run_analyzer(analyzer(), &pkg);
+    assert!(
+        default_msgs.len() >= 2,
+        "default should flag io.Copy and io.WriteString: {default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "errcheck",
+        Options {
+            exclude_functions: vec!["io.Copy".into()],
+            ..Options::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "exclude-functions: io.Copy should leave only WriteString: {messages:?}"
+    );
+}
+
+#[test]
+fn errcheck_disable_default_exclusions_flags_fmt_println() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_errcheck::Options;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("default_exclude");
+    let pkg = support::typecheck_pkg("example.com/errcheck/default_exclude", &dir.join("bad.go"));
+    assert!(
+        !pkg.ill_typed,
+        "fixture must typecheck: {:?}",
+        pkg.errors
+    );
+
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "default exclusions should skip fmt.Println"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "errcheck",
+        Options {
+            disable_default_exclusions: true,
+            ..Options::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages.is_empty(),
+        "disable-default-exclusions must flag fmt.Println: {messages:?}"
+    );
+}

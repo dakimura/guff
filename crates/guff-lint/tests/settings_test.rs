@@ -78,8 +78,36 @@ fn parse_v2_errcheck_check_blank_settings() {
         ErrcheckSettings {
             check_blank: true,
             check_type_assertions: false,
+            ..ErrcheckSettings::default()
         }
     );
+}
+
+#[test]
+fn parse_v2_errcheck_exclude_functions_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_errcheck_exclude_functions.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.errcheck,
+        ErrcheckSettings {
+            check_blank: true,
+            exclude_functions: vec![
+                "io.Copy".into(),
+                "io.WriteString".into(),
+                "(net/http.ResponseWriter).Write".into(),
+            ],
+            ..ErrcheckSettings::default()
+        }
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_errcheck::Options>("errcheck")
+        .expect("errcheck options");
+    assert!(opts.check_blank);
+    assert!(!opts.disable_default_exclusions);
+    assert_eq!(opts.exclude_functions.len(), 3);
 }
 
 #[test]
@@ -139,6 +167,7 @@ fn settings_bag_carries_errcheck_options() {
         errcheck: ErrcheckSettings {
             check_blank: true,
             check_type_assertions: true,
+            ..ErrcheckSettings::default()
         },
         ..LinterSettings::default()
     };
@@ -148,6 +177,8 @@ fn settings_bag_carries_errcheck_options() {
         .expect("errcheck options");
     assert!(opts.check_blank);
     assert!(opts.check_asserts);
+    assert!(!opts.disable_default_exclusions);
+    assert!(opts.exclude_functions.is_empty());
 }
 
 #[test]

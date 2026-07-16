@@ -20,13 +20,19 @@ use guff_types::TypeId;
 
 use expreq::unparen;
 
-/// Options controlling errcheck behaviour (kisielk/errcheck flags).
-#[derive(Clone, Copy, Debug, Default)]
+/// Options controlling errcheck behaviour (kisielk/errcheck / golangci flags).
+#[derive(Clone, Debug, Default)]
 pub struct Options {
     /// When true, flag errors assigned to `_` (`r, _ := fn()`).
     pub check_blank: bool,
     /// When true, flag ignored type assertion results.
     pub check_asserts: bool,
+    /// When true, do not apply [`excludes::DEFAULT_EXCLUDED_SYMBOLS`]
+    /// (`disable-default-exclusions`).
+    pub disable_default_exclusions: bool,
+    /// Extra symbols to skip (`exclude-functions`), kisielk/errcheck format
+    /// (e.g. `io.Copy`, `(*net/http.Server).Shutdown`).
+    pub exclude_functions: Vec<String>,
 }
 
 fn make_analyzer(run: RunFn) -> Analyzer {
@@ -44,7 +50,7 @@ fn make_analyzer(run: RunFn) -> Analyzer {
 fn run_default(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let opts = pass
         .settings::<Options>("errcheck")
-        .copied()
+        .cloned()
         .unwrap_or_default();
     run(pass, opts)
 }
@@ -69,18 +75,36 @@ fn run_asserts(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> 
     )
 }
 
+/// Build the symbol exclusion set from defaults + `exclude-functions`.
+fn build_exclude_set(opts: &Options) -> HashSet<String> {
+    let mut set = HashSet::new();
+    if !opts.disable_default_exclusions {
+        for sym in excludes::DEFAULT_EXCLUDED_SYMBOLS {
+            set.insert((*sym).to_string());
+        }
+    }
+    for raw in &opts.exclude_functions {
+        let sym = raw.trim();
+        if sym.is_empty() || sym.starts_with("//") {
+            continue;
+        }
+        set.insert(sym.to_string());
+    }
+    set
+}
+
 fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "errcheck requires inspect analyzer".to_string())?
         .clone();
 
-    let exclude: HashSet<&str> = excludes::DEFAULT_EXCLUDED_SYMBOLS.iter().copied().collect();
+    let exclude = build_exclude_set(&opts);
     let mut pending: Vec<(u32, String)> = Vec::new();
     let mut visitor = Visitor {
         pass,
         exclude: &exclude,
-        opts,
+        opts: &opts,
         pending: &mut pending,
         skip_assert_positions: HashSet::new(),
     };
@@ -105,8 +129,8 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
 
 struct Visitor<'a, 'b> {
     pass: &'a Pass<'b>,
-    exclude: &'a HashSet<&'static str>,
-    opts: Options,
+    exclude: &'a HashSet<String>,
+    opts: &'a Options,
     pending: &'a mut Vec<(u32, String)>,
     skip_assert_positions: HashSet<u32>,
 }
