@@ -3667,6 +3667,16 @@ fn gocritic_enable_all_extras() {
         "use db.Exec() if returned result is not needed",
         "ignoring Query() rows result may lead to a connection leak",
         "rewrite if-else to type switch statement",
+        "truncation in comparison",
+        "definition of type 'typeDefFirstRecv'",
+        "Possible resource leak, 'defer' is called in the 'for' loop",
+        "prefer 0x over 0X",
+        "don't mix hex literal letter digits casing",
+        "invert if cond, replace body with `continue`",
+        "may want to add detail/assignee to this TODO/FIXME/BUG comment",
+        "silencing go lint doc-comment warnings is unadvised",
+        "block doesn't have definitions, can be simply deleted",
+        "re-assignment to `err` can be replaced with",
     ];
     for needle in expect {
         assert!(
@@ -3705,6 +3715,16 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("use db.Exec()")
                 || m.contains("connection leak")
                 || m.contains("type switch statement")
+                || m.contains("truncation in comparison")
+                || m.contains("definition of type")
+                || m.contains("Possible resource leak")
+                || m.contains("prefer 0x over 0X")
+                || m.contains("don't mix hex literal")
+                || m.contains("invert if cond")
+                || m.contains("detail/assignee")
+                || m.contains("doc-comment warnings")
+                || m.contains("block doesn't have definitions")
+                || m.contains("re-assignment to")
         }),
         "extras should be off by default: {messages:?}"
     );

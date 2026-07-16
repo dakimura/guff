@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**58** = 34 default + 24 enable-all extras):
+//! Implemented checkers (**67** = 34 default + 33 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -18,13 +18,18 @@
 //! - batch 6 (enable-all extras): `dupOption`, `methodExprCall`, `rangeExprCopy`,
 //!   `regexpPattern`, `sortSlice`, `sqlQuery`, `typeAssertChain`
 //! - batch 7 (enable-all extras): `badRegexp`
+//! - batch 8 (enable-all extras): `truncateCmp`, `typeDefFirst`, `deferInLoop`,
+//!   `hexLiteral`, `nestingReduce`, `todoCommentWithoutDetail`, `docStub`,
+//!   `unnecessaryBlock`, `sloppyReassign`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`ruleguard`),
+//! DEFERRED: remaining enable-all extras (`ruleguard` + other missing defaults
+//! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
-//! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs),
+//! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
+//! nestingReduce bodyWidth, truncateCmp skipArchDependent),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk.
@@ -50,11 +55,12 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::BasicKind;
+use guff_types::basic::{basic_kind, BasicKind, IS_INTEGER};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
 use guff_types::predicates::is_interface;
 use guff_types::tuple::{tuple_at, tuple_len};
+use guff_types::typestring::type_string;
 use guff_types::{default_sizes, TypeId};
 use regex::Regex;
 
@@ -109,24 +115,33 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "builtinShadow",
     "builtinShadowDecl",
     "commentedOutImport",
+    "deferInLoop",
     "deferUnlambda",
+    "docStub",
     "dupImport",
     "dupOption",
     "emptyDecl",
     "emptyFallthrough",
     "emptyStringTest",
     "filepathJoin",
+    "hexLiteral",
     "initClause",
     "methodExprCall",
+    "nestingReduce",
     "nilValReturn",
     "octalLiteral",
     "paramTypeCombine",
     "rangeAppendAll",
     "rangeExprCopy",
     "regexpPattern",
+    "sloppyReassign",
     "sortSlice",
     "sqlQuery",
+    "todoCommentWithoutDetail",
+    "truncateCmp",
     "typeAssertChain",
+    "typeDefFirst",
+    "unnecessaryBlock",
     "weakCond",
     "yodaStyleExpr",
 ];
@@ -1904,7 +1919,15 @@ fn run_comment_checks(
     let need_fmt = enabled(set, "commentFormatting");
     let need_depr = enabled(set, "deprecatedComment");
     let need_commented_import = enabled(set, "commentedOutImport");
-    if !need_codegen && !need_fmt && !need_depr && !need_commented_import {
+    let need_todo = enabled(set, "todoCommentWithoutDetail");
+    let need_doc_stub = enabled(set, "docStub");
+    if !need_codegen
+        && !need_fmt
+        && !need_depr
+        && !need_commented_import
+        && !need_todo
+        && !need_doc_stub
+    {
         return;
     }
 
@@ -1963,6 +1986,30 @@ fn run_comment_checks(
         if need_commented_import {
             let mut local = Vec::new();
             check_commented_out_import(&parsed, &mut local);
+            for (pos, msg) in local {
+                let line = re_fset.position(Pos(pos as i64)).line;
+                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    report(pending, mapped, msg);
+                }
+            }
+        }
+
+        if need_todo {
+            for cg in &parsed.comments {
+                let mut local = Vec::new();
+                check_todo_comment_without_detail(cg, &mut local);
+                for (pos, msg) in local {
+                    let line = re_fset.position(Pos(pos as i64)).line;
+                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                        report(pending, mapped, msg);
+                    }
+                }
+            }
+        }
+
+        if need_doc_stub {
+            let mut local = Vec::new();
+            check_doc_stub(&parsed, &mut local);
             for (pos, msg) in local {
                 let line = re_fset.position(Pos(pos as i64)).line;
                 if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
@@ -3491,6 +3538,476 @@ fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
+const NESTING_REDUCE_BODY_WIDTH: usize = 5;
+
+fn trunc_cast_name(expr: &Expr) -> Option<&str> {
+    let Expr::CallExpr(call) = expr else {
+        return None;
+    };
+    let Expr::Ident(id) = call.fun.as_ref() else {
+        return None;
+    };
+    match id.name.as_str() {
+        "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" => Some(id.name.as_str()),
+        _ => None,
+    }
+}
+
+fn check_truncate_cmp(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    match bin.op {
+        Token::LSS | Token::GTR | Token::LEQ | Token::GEQ | Token::EQL | Token::NEQ => {}
+        _ => return,
+    }
+    if matches!(bin.x.as_ref(), Expr::BasicLit(_)) || matches!(bin.y.as_ref(), Expr::BasicLit(_)) {
+        return;
+    }
+    let left = trunc_cast_name(bin.x.as_ref()).is_some();
+    let right = trunc_cast_name(bin.y.as_ref()).is_some();
+    match (left, right) {
+        (true, false) => check_truncate_cmp_side(pass, bin.x.as_ref(), bin.y.as_ref(), pending),
+        (false, true) => check_truncate_cmp_side(pass, bin.y.as_ref(), bin.x.as_ref(), pending),
+        _ => {}
+    }
+}
+
+fn check_truncate_cmp_side(
+    pass: &Pass<'_>,
+    cast_expr: &Expr,
+    other: &Expr,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Expr::CallExpr(xcast) = cast_expr else {
+        return;
+    };
+    if xcast.args.len() != 1 {
+        return;
+    }
+    let x = &xcast.args[0];
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(x_typ) = type_of(pass, x) else {
+        return;
+    };
+    let Some(y_typ) = type_of(pass, other) else {
+        return;
+    };
+    let x_under = unalias_readonly(&artifacts.types, x_typ).underlying(&artifacts.types);
+    let y_under = unalias_readonly(&artifacts.types, y_typ).underlying(&artifacts.types);
+    let TypeData::Basic(xb) = artifacts.types.get(x_under) else {
+        return;
+    };
+    let TypeData::Basic(yb) = artifacts.types.get(y_under) else {
+        return;
+    };
+    if !xb.info().contains(IS_INTEGER) || xb.info().0 != yb.info().0 {
+        return;
+    }
+    let sizes = pass.pkg().types_sizes.unwrap_or_else(default_sizes);
+    let xsize = sizes.sizeof(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        x_under,
+    );
+    let ysize = sizes.sizeof(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        y_under,
+    );
+    if xsize <= ysize {
+        return;
+    }
+    // skipArchDependent=true (golangci / go-critic default)
+    match basic_kind(&artifacts.types, x_under) {
+        BasicKind::Int | BasicKind::Uint | BasicKind::Uintptr => return,
+        _ => {}
+    }
+    let suggest = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        x_under,
+        None,
+    );
+    report(
+        pending,
+        cast_expr.pos().0 as u32,
+        format!(
+            "truncation in comparison {}->{} bit; cast the other operand to {suggest} instead",
+            xsize * 8,
+            ysize * 8
+        ),
+    );
+}
+
+fn receiver_type_name(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::StarExpr(s) => receiver_type_name(&s.x),
+        Expr::Ident(id) => Some(id.name.as_str()),
+        Expr::IndexExpr(ix) => receiver_type_name(&ix.x),
+        Expr::IndexListExpr(ix) => receiver_type_name(&ix.x),
+        _ => None,
+    }
+}
+
+fn check_type_def_first(file: &File, pending: &mut Vec<(u32, String)>) {
+    let mut tracked: HashSet<String> = HashSet::new();
+    for decl in &file.decls {
+        match decl {
+            Decl::FuncDecl(f) => {
+                let Some(recv) = &f.recv else {
+                    continue;
+                };
+                let Some(field) = recv.list.first() else {
+                    continue;
+                };
+                let Some(ty) = &field.ty else {
+                    continue;
+                };
+                if let Some(name) = receiver_type_name(ty) {
+                    tracked.insert(name.to_string());
+                }
+            }
+            Decl::GenDecl(g) if g.tok == Some(Token::TYPE) => {
+                for spec in &g.specs {
+                    let Spec::TypeSpec(ts) = spec else {
+                        continue;
+                    };
+                    if tracked.contains(&ts.name.name) {
+                        report(
+                            pending,
+                            g.tok_pos.0 as u32,
+                            format!(
+                                "definition of type '{}' should appear before its methods",
+                                ts.name.name
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_defer_in_loop_func(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+    let Some(body) = &f.body else {
+        return;
+    };
+    walk_defer_in_loop_stmts(&body.list, false, pending);
+}
+
+fn walk_defer_in_loop_stmts(stmts: &[Stmt], in_for: bool, pending: &mut Vec<(u32, String)>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::DeferStmt(d) if in_for => {
+                report(
+                    pending,
+                    d.defer_.0 as u32,
+                    "Possible resource leak, 'defer' is called in the 'for' loop",
+                );
+            }
+            Stmt::ForStmt(fs) => {
+                walk_defer_in_loop_stmts(&fs.body.list, true, pending);
+            }
+            Stmt::RangeStmt(rs) => {
+                walk_defer_in_loop_stmts(&rs.body.list, true, pending);
+            }
+            Stmt::BlockStmt(b) => walk_defer_in_loop_stmts(&b.list, in_for, pending),
+            Stmt::IfStmt(s) => {
+                walk_defer_in_loop_stmts(&s.body.list, in_for, pending);
+                if let Some(els) = &s.else_ {
+                    walk_defer_in_loop_stmts(std::slice::from_ref(els.as_ref()), in_for, pending);
+                }
+            }
+            Stmt::SwitchStmt(s) => walk_defer_in_loop_stmts(&s.body.list, in_for, pending),
+            Stmt::TypeSwitchStmt(s) => walk_defer_in_loop_stmts(&s.body.list, in_for, pending),
+            Stmt::SelectStmt(s) => walk_defer_in_loop_stmts(&s.body.list, in_for, pending),
+            Stmt::CaseClause(c) => walk_defer_in_loop_stmts(&c.body, in_for, pending),
+            Stmt::CommClause(c) => walk_defer_in_loop_stmts(&c.body, in_for, pending),
+            Stmt::GoStmt(g) => {
+                if let Expr::FuncLit(fl) = g.call.fun.as_ref() {
+                    walk_defer_in_loop_stmts(&fl.body.list, false, pending);
+                }
+            }
+            Stmt::DeferStmt(d) => {
+                if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
+                    walk_defer_in_loop_stmts(&fl.body.list, false, pending);
+                }
+            }
+            Stmt::ExprStmt(es) => {
+                if let Expr::FuncLit(fl) = &es.x {
+                    walk_defer_in_loop_stmts(&fl.body.list, false, pending);
+                }
+            }
+            Stmt::AssignStmt(a) => {
+                for rhs in &a.rhs {
+                    if let Expr::FuncLit(fl) = rhs {
+                        walk_defer_in_loop_stmts(&fl.body.list, false, pending);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn check_hex_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
+    if lit.kind != Some(Token::INT) || lit.value.len() < 3 {
+        return;
+    }
+    if lit.value.starts_with("0X") {
+        let suggest = format!("0x{}", &lit.value[2..]);
+        report(
+            pending,
+            lit.pos().0 as u32,
+            format!("prefer 0x over 0X, s/{}/{suggest}/", lit.value),
+        );
+        return;
+    }
+    if !lit.value.starts_with("0x") {
+        return;
+    }
+    let digits = &lit.value[2..];
+    let lower = digits.to_ascii_lowercase();
+    let upper = digits.to_ascii_uppercase();
+    if digits != lower.as_str() && digits != upper.as_str() {
+        report(
+            pending,
+            lit.pos().0 as u32,
+            "don't mix hex literal letter digits casing",
+        );
+    }
+}
+
+fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+    if body.list.len() != 1 {
+        return;
+    }
+    let Stmt::IfStmt(ifs) = &body.list[0] else {
+        return;
+    };
+    if ifs.else_.is_some() {
+        return;
+    }
+    if ifs.body.list.len() >= NESTING_REDUCE_BODY_WIDTH {
+        report(
+            pending,
+            ifs.if_.0 as u32,
+            "invert if cond, replace body with `continue`, move old body after the statement",
+        );
+    }
+}
+
+fn check_todo_comment_without_detail(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"^(?://|/\*)?\s*(TODO|FIX|FIXME|BUG)\s*(?:\*/)?$").expect("todo regex")
+    });
+    for c in &cg.list {
+        if re.is_match(&c.text) {
+            report(
+                pending,
+                c.pos().0 as u32,
+                "may want to add detail/assignee to this TODO/FIXME/BUG comment",
+            );
+            break;
+        }
+    }
+}
+
+fn check_doc_stub(file: &File, pending: &mut Vec<(u32, String)>) {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)^\.\.\.$|^\.$|^xxx\.?$|^whatever\.?$").expect("doc stub regex")
+    });
+    for decl in &file.decls {
+        match decl {
+            Decl::FuncDecl(f) => {
+                visit_doc_stub(
+                    f.name.pos().0 as u32,
+                    &f.name.name,
+                    f.doc.as_ref(),
+                    false,
+                    re,
+                    pending,
+                );
+            }
+            Decl::GenDecl(g) if g.tok == Some(Token::TYPE) => {
+                if g.specs.len() == 1 {
+                    if let Spec::TypeSpec(ts) = &g.specs[0] {
+                        visit_doc_stub(
+                            ts.name.pos().0 as u32,
+                            &ts.name.name,
+                            g.doc.as_ref().or(ts.doc.as_ref()),
+                            true,
+                            re,
+                            pending,
+                        );
+                    }
+                }
+                for spec in &g.specs {
+                    let Spec::TypeSpec(ts) = spec else {
+                        continue;
+                    };
+                    visit_doc_stub(
+                        ts.name.pos().0 as u32,
+                        &ts.name.name,
+                        ts.doc.as_ref(),
+                        true,
+                        re,
+                        pending,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn visit_doc_stub(
+    pos: u32,
+    sym: &str,
+    doc: Option<&CommentGroup>,
+    article: bool,
+    re: &Regex,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !is_exported(sym) {
+        return;
+    }
+    let Some(doc) = doc else {
+        return;
+    };
+    let Some(first) = doc.list.first() else {
+        return;
+    };
+    let Some(rest) = first.text.strip_prefix("//") else {
+        return;
+    };
+    let mut line = rest.trim();
+    if article {
+        for a in ["The ", "An ", "A "] {
+            if let Some(stripped) = line.strip_prefix(a) {
+                line = stripped;
+                break;
+            }
+        }
+    }
+    let Some(after_name) = line.strip_prefix(sym) else {
+        return;
+    };
+    let after = after_name.trim();
+    if re.is_match(after) {
+        report(
+            pending,
+            pos,
+            "silencing go lint doc-comment warnings is unadvised",
+        );
+    }
+}
+
+fn block_has_definitions(block: &BlockStmt) -> bool {
+    for stmt in &block.list {
+        match stmt {
+            Stmt::AssignStmt(a) if a.tok == Some(Token::DEFINE) => return true,
+            Stmt::DeclStmt(d) => {
+                if let Decl::GenDecl(g) = &d.decl {
+                    if !g.specs.is_empty() {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn check_unnecessary_block_in_list(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+    for stmt in stmts {
+        if let Stmt::BlockStmt(b) = stmt {
+            if !block_has_definitions(b) {
+                report(
+                    pending,
+                    b.lbrace.0 as u32,
+                    "block doesn't have definitions, can be simply deleted",
+                );
+            }
+        }
+    }
+}
+
+fn check_unnecessary_block_case(body: &[Stmt], pending: &mut Vec<(u32, String)>) {
+    if body.len() == 1 {
+        if let Stmt::BlockStmt(b) = &body[0] {
+            report(
+                pending,
+                b.lbrace.0 as u32,
+                "case statement doesn't require a block statement",
+            );
+            return;
+        }
+    }
+    check_unnecessary_block_in_list(body, pending);
+}
+
+fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
+    let Some(init) = &ifs.init else {
+        return;
+    };
+    let Stmt::AssignStmt(assign) = init.as_ref() else {
+        return;
+    };
+    if assign.tok != Some(Token::ASSIGN) {
+        return;
+    }
+    if assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+        return;
+    }
+    if ifs.body.list.len() != 1 {
+        return;
+    }
+    let Expr::Ident(re_assigned) = &assign.lhs[0] else {
+        return;
+    };
+    let cond_ok = match &ifs.cond {
+        Expr::BinaryExpr(b)
+            if b.op == Token::NEQ
+                && matches!(b.x.as_ref(), Expr::Ident(id) if id.name == re_assigned.name)
+                && matches!(b.y.as_ref(), Expr::Ident(id) if id.name == "nil") =>
+        {
+            true
+        }
+        _ => false,
+    };
+    if !cond_ok {
+        return;
+    }
+    let Stmt::ReturnStmt(ret) = &ifs.body.list[0] else {
+        return;
+    };
+    let returns_err = ret.results.iter().any(|r| {
+        matches!(r, Expr::Ident(id) if id.name == re_assigned.name)
+    });
+    if !returns_err {
+        return;
+    }
+    let Some(rhs) = expr_text(&assign.rhs[0]) else {
+        return;
+    };
+    report(
+        pending,
+        assign.tok_pos.0 as u32,
+        format!(
+            "re-assignment to `{}` can be replaced with `{} := {rhs}`",
+            re_assigned.name, re_assigned.name
+        ),
+    );
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -3527,6 +4044,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             check_dup_import(pass, file, &mut pending);
         }
 
+        if enabled(&set, "typeDefFirst") {
+            check_type_def_first(file, &mut pending);
+        }
+        if enabled(&set, "deferInLoop") {
+            for decl in &file.decls {
+                if let Decl::FuncDecl(f) = decl {
+                    check_defer_in_loop_func(f, &mut pending);
+                }
+            }
+        }
+
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
@@ -3553,6 +4081,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "typeAssertChain") {
                         check_type_assert_chain(s, &mut type_assert_visited, &mut pending);
+                    }
+                    if enabled(&set, "sloppyReassign") {
+                        check_sloppy_reassign(s, &mut pending);
                     }
                 }
                 NodeRef::SwitchStmt(s) => {
@@ -3591,8 +4122,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_case_order(pass, s, &mut pending);
                     }
                 }
-                NodeRef::ForStmt(s) if enabled(&set, "badCond") => {
-                    check_bad_cond_for(s, &mut pending);
+                NodeRef::ForStmt(s) => {
+                    if enabled(&set, "badCond") {
+                        check_bad_cond_for(s, &mut pending);
+                    }
+                    if enabled(&set, "nestingReduce") {
+                        check_nesting_reduce_for(&s.body, &mut pending);
+                    }
                 }
                 NodeRef::RangeStmt(s) => {
                     if enabled(&set, "rangeAppendAll") {
@@ -3600,6 +4136,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "rangeExprCopy") {
                         check_range_expr_copy(pass, s, &mut pending);
+                    }
+                    if enabled(&set, "nestingReduce") {
+                        check_nesting_reduce_for(&s.body, &mut pending);
                     }
                 }
                 NodeRef::BinaryExpr(b) => {
@@ -3621,9 +4160,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "weakCond") {
                         check_weak_cond(pass, b, &mut pending);
                     }
+                    if enabled(&set, "truncateCmp") {
+                        check_truncate_cmp(pass, b, &mut pending);
+                    }
                 }
-                NodeRef::BasicLit(lit) if enabled(&set, "octalLiteral") => {
-                    check_octal_literal(lit, &mut pending);
+                NodeRef::BasicLit(lit) => {
+                    if enabled(&set, "octalLiteral") {
+                        check_octal_literal(lit, &mut pending);
+                    }
+                    if enabled(&set, "hexLiteral") {
+                        check_hex_literal(lit, &mut pending);
+                    }
                 }
                 NodeRef::DeferStmt(d) if enabled(&set, "deferUnlambda") => {
                     check_defer_unlambda(pass, d, &mut pending);
@@ -3732,6 +4279,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::TypeAssertExpr(a) if enabled(&set, "sloppyTypeAssert") => {
                     check_sloppy_type_assert(pass, a, &mut pending);
+                }
+                NodeRef::BlockStmt(b) if enabled(&set, "unnecessaryBlock") => {
+                    check_unnecessary_block_in_list(&b.list, &mut pending);
+                }
+                NodeRef::CaseClause(c) if enabled(&set, "unnecessaryBlock") => {
+                    check_unnecessary_block_case(&c.body, &mut pending);
+                }
+                NodeRef::CommClause(c) if enabled(&set, "unnecessaryBlock") => {
+                    check_unnecessary_block_case(&c.body, &mut pending);
                 }
                 _ => {}
             }

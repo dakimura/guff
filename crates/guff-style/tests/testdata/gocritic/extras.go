@@ -170,3 +170,60 @@ func typeAssertChainExtra(x interface{}) {
 		_ = v
 	}
 }
+
+func truncateCmpExtra(x int8, y int16) {
+	_ = int8(y) < x
+}
+
+func (r typeDefFirstRecv) MethodBefore() {}
+
+type typeDefFirstRecv struct{}
+
+func deferInLoopExtra() {
+	for {
+		defer func() {}()
+		break
+	}
+}
+
+func hexLiteralExtra() {
+	_ = 0X12
+	_ = 0xfF
+}
+
+func nestingReduceExtra(a []int) {
+	for _, v := range a {
+		if v == 5 {
+			_ = v
+			_ = v
+			_ = v
+			_ = v
+			_ = v
+		}
+	}
+}
+
+func todoDetailExtra() {
+	// TODO
+	_ = 0
+}
+
+// DocStubExtra ...
+func DocStubExtra() {}
+
+func unnecessaryBlockExtra() {
+	a := 1
+	{
+		_ = a
+	}
+}
+
+func sloppyReassignExtra() error {
+	var err error
+	if err = returnsErrorExtra(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func returnsErrorExtra() error { return nil }
