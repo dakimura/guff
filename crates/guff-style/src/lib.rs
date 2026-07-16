@@ -15,6 +15,7 @@
 //! - [`forbidigo`]
 //! - [`bidichk`]
 //! - [`reassign`]
+//! - [`thelper`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -69,6 +70,7 @@ mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod reassign;
+mod thelper;
 mod gocognit;
 mod goconst;
 mod gocyclo;
@@ -96,6 +98,7 @@ pub use options::{
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
     ReassignOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions,
+    ThelperKindOptions, ThelperOptions,
     TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
     WhitespaceOptions, WslOptions,
 };
@@ -114,6 +117,7 @@ pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use reassign::analyzer as reassign;
+pub use thelper::analyzer as thelper;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
 pub use gocritic::analyzer as gocritic;
@@ -159,6 +163,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gocheckcompilerdirectives(),
         forbidigo(),
         reassign(),
+        thelper(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

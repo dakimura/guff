@@ -9,8 +9,125 @@ use guff_style::{
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, sloglint, tagalign, testifylint,
-    unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn thelper_flags_begin_first_name() {
+    let pkg = support::typecheck_fixture("thelper", "example.com/thelper", "bad.go");
+    let messages = support::run_analyzer(thelper(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("test helper function should start from t.Helper()")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter *testing.T should be the first")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter *testing.T should have name t")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("test helper function should start from b.Helper()")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter *testing.B should have name b")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("test helper function should start from tb.Helper()")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter testing.TB should have name tb")),
+        "{messages:?}"
+    );
+    // anotherCheck is also called from check → not filtered.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("test helper function should start from t.Helper()")),
+        "{messages:?}"
+    );
+    // Anonymous subtest / Test* entry points should not appear alone as false positives.
+    assert!(
+        !messages.iter().any(|m| m.contains("TestSomething")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn thelper_allows_valid_helpers_and_filtered_subtests() {
+    let pkg = support::typecheck_fixture("thelper", "example.com/thelper/ok", "ok.go");
+    let messages = support::run_analyzer(thelper(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn thelper_respects_kind_settings() {
+    use guff_style::{ThelperKindOptions, ThelperOptions};
+
+    let pkg = support::typecheck_fixture("thelper", "example.com/thelper/settings", "settings.go");
+
+    // Default: begin reports helperWithoutHelper.
+    let flagged = support::run_analyzer(thelper(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("test helper function should start from t.Helper()")),
+        "{flagged:?}"
+    );
+
+    // begin off, name on: only wrong name.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "thelper",
+        ThelperOptions {
+            test: ThelperKindOptions {
+                first: false,
+                name: true,
+                begin: false,
+            },
+            ..ThelperOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        thelper(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter *testing.T should have name t")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("test helper function should start from t.Helper()")),
+        "{messages:?}"
+    );
+}
 
 #[test]
 fn copyloopvar_flags_redundant_copies() {

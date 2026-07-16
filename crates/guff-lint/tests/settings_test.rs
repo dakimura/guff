@@ -1008,6 +1008,27 @@ fn parse_v2_reassign_settings() {
 }
 
 #[test]
+fn parse_v2_thelper_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.thelper.test.begin, Some(false));
+    assert_eq!(settings.thelper.test.first, Some(false));
+    assert_eq!(settings.thelper.test.name, Some(true));
+    assert_eq!(settings.thelper.tb.name, Some(false));
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ThelperOptions>("thelper")
+        .expect("thelper options");
+    assert!(!opts.test.begin);
+    assert!(!opts.test.first);
+    assert!(opts.test.name);
+    assert!(!opts.tb.name);
+    // Unspecified fuzz.name → default true.
+    assert!(opts.fuzz.name);
+}
+
+#[test]
 fn parse_v2_bidichk_settings() {
     let contents = fs::read_to_string(testdata_config("v2_bidichk_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

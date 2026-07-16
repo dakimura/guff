@@ -61,6 +61,7 @@ pub struct LinterSettings {
     pub asasalint: AsasalintSettings,
     pub importas: ImportasSettings,
     pub reassign: ReassignSettings,
+    pub thelper: ThelperSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -860,6 +861,32 @@ pub struct ReassignSettings {
     pub patterns: Vec<String>,
 }
 
+/// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
+///
+/// `None` fields keep upstream defaults (all checks enabled).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ThelperKindSettings {
+    #[serde(default)]
+    pub first: Option<bool>,
+    #[serde(default)]
+    pub name: Option<bool>,
+    #[serde(default)]
+    pub begin: Option<bool>,
+}
+
+/// `linters.settings.thelper` / `linters-settings.thelper`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ThelperSettings {
+    #[serde(default)]
+    pub test: ThelperKindSettings,
+    #[serde(default)]
+    pub fuzz: ThelperKindSettings,
+    #[serde(default)]
+    pub benchmark: ThelperKindSettings,
+    #[serde(default)]
+    pub tb: ThelperKindSettings,
+}
+
 /// `linters.settings.bidichk` / `linters-settings.bidichk`.
 ///
 /// Each bool enables checking for that rune. When all are false (golangci
@@ -1199,6 +1226,11 @@ impl LinterSettings {
                 out.reassign = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("thelper".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ThelperSettings>(v.clone()) {
+                out.thelper = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
             if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
                 out.importas = s;
@@ -1269,6 +1301,7 @@ impl LinterSettings {
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
         bag.insert("asasalint", self.asasalint.to_guff_asasalint());
         bag.insert("reassign", self.reassign.to_guff_reassign());
+        bag.insert("thelper", self.thelper.to_guff_thelper());
         bag.insert("importas", self.importas.to_guff_importas());
         Arc::new(bag)
     }
@@ -2028,6 +2061,28 @@ impl ReassignSettings {
     pub fn to_guff_reassign(&self) -> guff_style::ReassignOptions {
         guff_style::ReassignOptions {
             patterns: self.patterns.clone(),
+        }
+    }
+}
+
+impl ThelperKindSettings {
+    fn to_guff(&self) -> guff_style::ThelperKindOptions {
+        let defaults = guff_style::ThelperKindOptions::default();
+        guff_style::ThelperKindOptions {
+            first: self.first.unwrap_or(defaults.first),
+            name: self.name.unwrap_or(defaults.name),
+            begin: self.begin.unwrap_or(defaults.begin),
+        }
+    }
+}
+
+impl ThelperSettings {
+    pub fn to_guff_thelper(&self) -> guff_style::ThelperOptions {
+        guff_style::ThelperOptions {
+            test: self.test.to_guff(),
+            fuzz: self.fuzz.to_guff(),
+            benchmark: self.benchmark.to_guff(),
+            tb: self.tb.to_guff(),
         }
     }
 }

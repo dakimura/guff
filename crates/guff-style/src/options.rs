@@ -753,6 +753,35 @@ pub struct ReassignOptions {
     pub patterns: Vec<String>,
 }
 
+/// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
+///
+/// Defaults match kulti/thelper / golangci-lint (all checks on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThelperKindOptions {
+    pub first: bool,
+    pub name: bool,
+    pub begin: bool,
+}
+
+impl Default for ThelperKindOptions {
+    fn default() -> Self {
+        Self {
+            first: true,
+            name: true,
+            begin: true,
+        }
+    }
+}
+
+/// `linters.settings.thelper` / `linters-settings.thelper`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ThelperOptions {
+    pub test: ThelperKindOptions,
+    pub fuzz: ThelperKindOptions,
+    pub benchmark: ThelperKindOptions,
+    pub tb: ThelperKindOptions,
+}
+
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
 /// `linters.settings.bidichk` — full rune names to check.
