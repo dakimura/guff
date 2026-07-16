@@ -5,7 +5,7 @@ use std::sync::Arc;
 use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
-    asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
+    asasalint, asciicheck, bidichk, containedctx, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
@@ -623,6 +623,27 @@ fn inamedparam_respects_skip_single_param() {
         },
     );
     assert!(skipped.is_empty(), "unexpected diagnostics: {skipped:?}");
+}
+
+#[test]
+fn containedctx_flags_context_fields() {
+    let pkg = support::typecheck_fixture("containedctx", "example.com/containedctx", "bad.go");
+    let messages = support::run_analyzer(containedctx(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("found a struct that contains a context.Context field")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn containedctx_allows_non_context_fields() {
+    let pkg =
+        support::typecheck_fixture("containedctx", "example.com/containedctx/ok", "ok.go");
+    let messages = support::run_analyzer(containedctx(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]

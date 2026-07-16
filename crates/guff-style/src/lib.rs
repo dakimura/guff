@@ -20,6 +20,7 @@
 //! - [`iface`]
 //! - [`interfacebloat`]
 //! - [`inamedparam`]
+//! - [`containedctx`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -74,6 +75,7 @@ mod bidichk;
 mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
+mod containedctx;
 mod inamedparam;
 mod interfacebloat;
 mod reassign;
@@ -126,6 +128,7 @@ pub use bidichk::analyzer as bidichk;
 pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
+pub use containedctx::analyzer as containedctx;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use reassign::analyzer as reassign;
@@ -181,6 +184,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         iface(),
         interfacebloat(),
         inamedparam(),
+        containedctx(),
         goprintffuncname(),
         funlen(),
         gocyclo(),
