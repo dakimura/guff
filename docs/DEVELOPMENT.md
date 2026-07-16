@@ -107,7 +107,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-16。ワークスペース全体 **1900+ tests green**（`guff-revive` extended rules 計 **100 rules** + `linters.settings.revive` / `dupl` / `misspell` / `godot` / `godox` / `dupword` / **`depguard` / `gomoddirectives` / `gomodguard` / `wrapcheck` / `exhaustive` / `musttag` / `loggercheck` / `sloglint` / `testifylint`（28 checkers） / `exptostd` / `modernize` / `gocritic`（58 checkers）** YAML 配線 + stylecheck ST* **15** + quickfix QF* **8**）。
+> 最終更新: 2026-07-16。ワークスペース全体 **1900+ tests green**（`guff-revive` extended rules 計 **100 rules** + `linters.settings.revive` / `dupl` / `misspell` / `godot` / `godox` / `dupword` / **`depguard` / `gomoddirectives` / `gomodguard` / `wrapcheck` / `exhaustive` / `musttag` / `loggercheck` / `sloglint` / `testifylint`（28 checkers） / `exptostd` / `modernize` / `gocritic`（58 checkers）** YAML 配線 + stylecheck ST* **15** + quickfix QF* **12**）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -134,7 +134,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 ### 3.3 実装済み linter
 | linter | 状態 | 規模 |
 |--------|------|------|
-| `guff-staticcheck` | ✅ **160 analyzers**（simple S* 37 + staticcheck SA* 100 + stylecheck ST* **15** + quickfix QF* **8**） | ST* 残り IR 依存 / QF* 残り 4 は **未着手**（→ R16）。`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist` settings 配線済み |
+| `guff-staticcheck` | ✅ **164 analyzers**（simple S* 37 + staticcheck SA* 100 + stylecheck ST* **15** + quickfix QF* **12**） | ST* 残り IR 依存は **未着手**（→ R16）。`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist` settings 配線済み |
 | `guff-govet` | ✅ **29/29** passes（printf は引数個数・型照合まで, `go vet` 一致） | — |
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
@@ -604,7 +604,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - golangci-lint v2 は `formatters` セクションを持つので、config 互換のためにも必要。
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
-- 現在 `guff-staticcheck` は S* + SA* + **ST* 15** + **QF* 8**（ST1000 / ST1001 / ST1003 / ST1006 / ST1011 / ST1012 / ST1013 / ST1015 / ST1017 / ST1018 / ST1019 / ST1020 / ST1021 / ST1022 / ST1023 + **QF1004** / **QF1005** / **QF1006** / **QF1007** / **QF1009** / **QF1010** / **QF1011** / **QF1012**）。
+- 現在 `guff-staticcheck` は S* + SA* + **ST* 15** + **QF* 12**（ST1000 / ST1001 / ST1003 / ST1006 / ST1011 / ST1012 / ST1013 / ST1015 / ST1017 / ST1018 / ST1019 / ST1020 / ST1021 / ST1022 / ST1023 + **QF1001** / **QF1002** / **QF1003** / **QF1004** / **QF1005** / **QF1006** / **QF1007** / **QF1008** / **QF1009** / **QF1010** / **QF1011** / **QF1012**）。
 - **進捗**: ST1000（package comment）/ ST1001（dot imports; `dot-import-whitelist` settings 済）/ ST1003（識別子命名・既定 initialisms; `initialisms` settings 済; `//export`/`//go:linkname` は `FuncDecl.doc` があるときのみ）/
   ST1006（receiver `self`/`this`/`_`; AST 版）/
   ST1011（`time.Duration` 単位 suffix; struct field は Defs 欠落時 AST フォールバック）/ ST1012（error var 命名）/
@@ -616,16 +616,20 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   ST1021（exported type doc が名前で始まる; 冠詞 A/An/The 許容; `PARSE_COMMENTS` 再パース）/
   ST1022（exported var/const doc が名前で始まる; `PARSE_COMMENTS` 再パース; 括弧グループ・複数名はスキップ）/
   ST1023（冗長な var 型; `CheckExpr` 無し近似・BasicLit 既定型 / 名前付き const 除外; SuggestedFix で型削除; syscall/unsafe import 時スキップ）。
+  **QF1001**（De Morgan `!(a && b)` → `!a || !b`; SuggestedFix 非再帰/再帰; float 除外; SimplifyParentheses は DEFERRED）/
+  **QF1002**（untagged switch → tagged; side-effect / 混在変数除外 + SuggestedFix）/
+  **QF1003**（if/else-if → tagged switch; ≥2 if・break 除外 + SuggestedFix）/
   **QF1004**（`Replace`/`SplitN`/`SplitAfterN` + `n==-1` → `ReplaceAll`/`Split`/`SplitAfter`; strings+bytes; SuggestedFix 済; renamed import は DEFERRED）/
   **QF1005**（`math.Pow(x,0..3)` 展開 + SuggestedFix; `CheckExpr` float64 wrap は DEFERRED）/
   **QF1006**（`for { if cond { break } }` → `for !cond`; SuggestedFix 済）/
   **QF1007**（`x := false; if cond { x = true }` → `x := cond` + SuggestedFix）/
+  **QF1008**（embedded field 省略 `a.B.F` → `a.F`; 連続 selector チェーン; 呼び出し割り込みチェーンは DEFERRED）/
   **QF1009**（`time.Time == time.Time` → `.Equal` + SuggestedFix）/
   **QF1010**（print 系へ渡す `[]byte` → `string(...)`; SuggestedFix 済; `fmt.Stringer` skip は DEFERRED）/
   **QF1011**（冗長な var 型; ST1023 相当で `could` + `flagHelpfulTypes`; SuggestedFix 済）/
   **QF1012**（`Write([]byte(fmt.Sprint*))` / `WriteString(fmt.Sprint*)` → `fmt.Fprint*`; Writer 判定は結果 arity 近似; SuggestedFix 済）。
-- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）/ QF1001 / QF1002 / QF1003 / QF1008。ST1023 の真の `types.CheckExpr` パリティ。QF1005 の float64 wrap。QF1004 renamed import。QF1010 Stringer skip。QF1012 の真の `types.Implements`。
-- テスト: `st1000` / `st1001` / `st1003` / `st1006` / `st1011` / `st1012` / `st1013` / `st1015` / `st1017` / `st1018` / `st1019` / `st1020` / `st1021` / `st1022` / `st1023` / `qf1004` / `qf1005` / `qf1006` / `qf1007` / `qf1009` / `qf1010` / `qf1011` / `qf1012` fixtures + `checks_test`（settings: whitelist / custom initialisms）+ `v2_staticcheck_stylecheck_settings.yml`。
+- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）。ST1023 の真の `types.CheckExpr` パリティ。QF1005 の float64 wrap。QF1004 renamed import。QF1010 Stringer skip。QF1012 の真の `types.Implements`。QF1001 SimplifyParentheses。QF1008 呼び出し割り込みチェーン。
+- テスト: `st1000` / `st1001` / `st1003` / `st1006` / `st1011` / `st1012` / `st1013` / `st1015` / `st1017` / `st1018` / `st1019` / `st1020` / `st1021` / `st1022` / `st1023` / `qf1001` / `qf1002` / `qf1003` / `qf1004` / `qf1005` / `qf1006` / `qf1007` / `qf1008` / `qf1009` / `qf1010` / `qf1011` / `qf1012` fixtures + `checks_test`（settings: whitelist / custom initialisms）+ `v2_staticcheck_stylecheck_settings.yml`。
 
 ---
 
@@ -725,6 +729,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R16 続き**: quickfix QF* **4** 件追加（`QF1001` / `QF1002` / `QF1003` / `QF1008`）。計 **164** analyzers（S* 37 + SA* 100 + ST* 15 + QF* 12）。SuggestedFix 付き。QF1001 SimplifyParentheses・QF1008 呼び出し割り込みチェーン・残 IR 依存 ST* は DEFERRED。テスト: `qf1001` / `qf1002` / `qf1003` / `qf1008` |
 | 2026-07-16 | **R16 続き**: quickfix QF* **4** 件追加（`QF1006` / `QF1010` / `QF1011` / `QF1012`）。計 **160** analyzers（S* 37 + SA* 100 + ST* 15 + QF* 8）。SuggestedFix 付き。QF1010 Stringer skip・QF1012 真の Implements・残 QF1001/2/3/8 と IR 依存 ST* は DEFERRED。テスト: `qf1006` / `qf1010` / `qf1011` / `qf1012` |
 | 2026-07-16 | **R16 続き**: quickfix QF* 初回バッチ **4** 件（`QF1004` / `QF1005` / `QF1007` / `QF1009`）。計 **156** analyzers（S* 37 + SA* 100 + ST* 15 + QF* 4）。SuggestedFix 付き。QF1005 の float64 wrap・QF1004 renamed import・残 QF1001/2/3/6/8/10/11/12 と IR 依存 ST* は DEFERRED。テスト: `qf1004` / `qf1005` / `qf1007` / `qf1009` |
 | 2026-07-16 | **R16 続き**: stylecheck settings 配線（`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist`）。`linters.settings.staticcheck` + レガシー `stylecheck` キーを merge → `StylecheckOptions` → ST1001/ST1003/ST1013。空リストは upstream 既定（golangci 互換）。残 ST1005/ST1008/ST1016（IR）/ QF* / ST1023 CheckExpr は DEFERRED。テスト: settings fixtures + `v2_staticcheck_stylecheck_settings.yml` |

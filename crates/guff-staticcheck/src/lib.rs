@@ -63,10 +63,14 @@ pub mod st1020;
 pub mod st1021;
 pub mod st1022;
 pub mod st1023;
+pub mod qf1001;
+pub mod qf1002;
+pub mod qf1003;
 pub mod qf1004;
 pub mod qf1005;
 pub mod qf1006;
 pub mod qf1007;
+pub mod qf1008;
 pub mod qf1009;
 pub mod qf1010;
 pub mod qf1011;
@@ -222,10 +226,14 @@ pub fn analyzers() -> Vec<&'static guff_analysis::Analyzer> {
         st1021::analyzer(),
         st1022::analyzer(),
         st1023::analyzer(),
+        qf1001::analyzer(),
+        qf1002::analyzer(),
+        qf1003::analyzer(),
         qf1004::analyzer(),
         qf1005::analyzer(),
         qf1006::analyzer(),
         qf1007::analyzer(),
+        qf1008::analyzer(),
         qf1009::analyzer(),
         qf1010::analyzer(),
         qf1011::analyzer(),
