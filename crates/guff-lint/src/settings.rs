@@ -66,6 +66,7 @@ pub struct LinterSettings {
     pub thelper: ThelperSettings,
     pub iface: IfaceSettings,
     pub interfacebloat: InterfacebloatSettings,
+    pub inamedparam: InamedparamSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -919,6 +920,24 @@ impl InterfacebloatSettings {
     }
 }
 
+/// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
+///
+/// `skip-single-param` skips methods with exactly one parameter field
+/// (upstream default false).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct InamedparamSettings {
+    #[serde(default, rename = "skip-single-param")]
+    pub skip_single_param: bool,
+}
+
+impl InamedparamSettings {
+    pub fn to_guff_inamedparam(&self) -> guff_style::InamedparamOptions {
+        guff_style::InamedparamOptions {
+            skip_single_param: self.skip_single_param,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1340,6 +1359,11 @@ impl LinterSettings {
                 out.interfacebloat = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("inamedparam".into())) {
+            if let Ok(s) = serde_yaml::from_value::<InamedparamSettings>(v.clone()) {
+                out.inamedparam = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1414,6 +1438,7 @@ impl LinterSettings {
             "interfacebloat",
             self.interfacebloat.to_guff_interfacebloat(),
         );
+        bag.insert("inamedparam", self.inamedparam.to_guff_inamedparam());
         Arc::new(bag)
     }
 

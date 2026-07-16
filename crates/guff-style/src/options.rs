@@ -786,6 +786,14 @@ impl Default for InterfacebloatOptions {
     }
 }
 
+/// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InamedparamOptions {
+    /// Skip interface methods that have exactly one parameter field.
+    /// Upstream flag / golangci key: `skip-single-param` (default false).
+    pub skip_single_param: bool,
+}
+
 /// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
 ///
 /// Defaults match kulti/thelper / golangci-lint (all checks on).

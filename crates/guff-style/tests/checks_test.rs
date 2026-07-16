@@ -7,7 +7,7 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
-    gocyclo, goprintffuncname, iface, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
+    gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     testifylint, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
@@ -541,6 +541,88 @@ fn interfacebloat_respects_custom_max() {
         flagged[0].contains("the interface has more than 2 methods: 3"),
         "{flagged:?}"
     );
+}
+
+#[test]
+fn inamedparam_flags_unnamed_interface_params() {
+    let pkg = support::typecheck_fixture("inamedparam", "example.com/inamedparam", "bad.go");
+    let messages = support::run_analyzer(inamedparam(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface method SingleParam must have named param for type context.Context")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface method WithoutName must have named param for type context.Context")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface method WithoutName must have named param for type int")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface method WithoutName must have named param for type bool")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface method WithoutName must have all named params")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 5, "{messages:?}");
+}
+
+#[test]
+fn inamedparam_allows_named_params() {
+    let pkg =
+        support::typecheck_fixture("inamedparam", "example.com/inamedparam/ok", "ok.go");
+    let messages = support::run_analyzer(inamedparam(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn inamedparam_respects_skip_single_param() {
+    use guff_style::InamedparamOptions;
+
+    let pkg = support::typecheck_fixture(
+        "inamedparam",
+        "example.com/inamedparam/settings",
+        "settings.go",
+    );
+
+    // Default: single unnamed param is flagged.
+    let flagged = support::run_analyzer(inamedparam(), &pkg);
+    assert_eq!(flagged.len(), 1, "{flagged:?}");
+    assert!(
+        flagged[0].contains("interface method Run must have named param for type context.Context"),
+        "{flagged:?}"
+    );
+
+    // skip-single-param: true → no report.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "inamedparam",
+        InamedparamOptions {
+            skip_single_param: true,
+        },
+    );
+    let skipped = support::run_analyzer_with_settings(
+        inamedparam(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(skipped.is_empty(), "unexpected diagnostics: {skipped:?}");
 }
 
 #[test]

@@ -19,6 +19,7 @@
 //! - [`thelper`]
 //! - [`iface`]
 //! - [`interfacebloat`]
+//! - [`inamedparam`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -73,6 +74,7 @@ mod bidichk;
 mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
+mod inamedparam;
 mod interfacebloat;
 mod reassign;
 mod recvcheck;
@@ -101,7 +103,7 @@ pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions,
     ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern, FunlenOptions,
     GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
-    InterfacebloatOptions, LllOptions,
+    InamedparamOptions, InterfacebloatOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
     ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
@@ -124,6 +126,7 @@ pub use bidichk::analyzer as bidichk;
 pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
+pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
@@ -176,6 +179,8 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         recvcheck(),
         thelper(),
         iface(),
+        interfacebloat(),
+        inamedparam(),
         goprintffuncname(),
         funlen(),
         gocyclo(),
