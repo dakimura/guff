@@ -125,6 +125,11 @@ func regexpPatternExtra() {
 	regexp.MustCompile(`google.com`)
 }
 
+func badRegexpExtra() {
+	regexp.MustCompile(`(?:^aa|bb|cc)foo[aba]`)
+	regexp.MustCompile(`[\w_]`)
+}
+
 func sortSliceExtra() {
 	var xs []int
 	var ys []int

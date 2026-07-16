@@ -17,6 +17,7 @@ guff-analysis = { path = "../guff-analysis" }
 guff-types = { path = "../guff-types" }
 guff-constant = { path = "../guff-constant" }
 regex = "1"
+regex-syntax = "0.8"
 serde_json = "1"
 
 [dev-dependencies]

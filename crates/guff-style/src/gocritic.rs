@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**57** = 34 default + 23 enable-all extras):
+//! Implemented checkers (**58** = 34 default + 24 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -17,11 +17,13 @@
 //!   `rangeAppendAll`, `weakCond`
 //! - batch 6 (enable-all extras): `dupOption`, `methodExprCall`, `rangeExprCopy`,
 //!   `regexpPattern`, `sortSlice`, `sqlQuery`, `typeAssertChain`
+//! - batch 7 (enable-all extras): `badRegexp`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`badRegexp` / `ruleguard`),
+//! DEFERRED: remaining enable-all extras (`ruleguard`),
+//! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
@@ -57,6 +59,9 @@ use guff_types::{default_sizes, TypeId};
 use regex::Regex;
 
 use crate::options::GocriticOptions;
+
+#[path = "gocritic_bad_regexp.rs"]
+mod gocritic_bad_regexp;
 
 /// Checks enabled by default when neither `enable-all` nor `disable-all` is set
 /// (golangci-lint stable list ∩ implemented).
@@ -100,6 +105,7 @@ const DEFAULT_CHECKS: &[&str] = &[
 /// Experimental / opinionated checkers available via `enable-all` or
 /// `enabled-checks` (prometheus enable-all coverage).
 const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
+    "badRegexp",
     "builtinShadow",
     "builtinShadowDecl",
     "commentedOutImport",
@@ -2987,6 +2993,33 @@ fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
     }
 }
 
+fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    match name.as_str() {
+        "regexp.Compile" | "regexp.MustCompile" => {}
+        _ => return,
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| {
+        match &call.args[0] {
+            Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
+                Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
+            }
+            _ => None,
+        }
+    }) else {
+        return;
+    };
+    let pos = call.args[0].pos().0 as u32;
+    for msg in gocritic_bad_regexp::check_pattern(&pat) {
+        report(pending, pos, msg);
+    }
+}
+
 fn side_effect_free_approx(expr: &Expr) -> bool {
     match expr {
         Expr::CallExpr(_) => false,
@@ -3673,6 +3706,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "regexpPattern") {
                         check_regexp_pattern(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "badRegexp") {
+                        check_bad_regexp(pass, c, &mut pending);
                     }
                     if enabled(&set, "sortSlice") {
                         check_sort_slice(pass, c, &mut pending);

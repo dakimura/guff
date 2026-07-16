@@ -3080,6 +3080,9 @@ fn gocritic_enable_all_extras() {
         "consider to change `methodFoo.bar` to `f.bar`",
         "copy of xs (512 bytes) can be avoided with &xs",
         "'.com' should probably be '\\.com'",
+        "^ applied only to",
+        "is duplicated",
+        "`\\w` intersects with `_`",
         "cmp func must use xs slice in comparison",
         "use db.Exec() if returned result is not needed",
         "ignoring Query() rows result may lead to a connection leak",
@@ -3116,6 +3119,8 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("consider to change `methodFoo")
                 || m.contains("can be avoided with &")
                 || m.contains("should probably be")
+                || m.contains("applied only to")
+                || m.contains("intersects with")
                 || m.contains("must use xs slice")
                 || m.contains("use db.Exec()")
                 || m.contains("connection leak")
