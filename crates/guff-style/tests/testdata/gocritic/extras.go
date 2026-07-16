@@ -241,6 +241,27 @@ func preferDecodeRuneExtra(s string) {
 	_ = []rune(s)[0]
 }
 
+type byteWriterExtra struct{}
+
+func (*byteWriterExtra) WriteRune(r rune) (int, error) { return 0, nil }
+func (*byteWriterExtra) WriteByte(b byte) error         { return nil }
+
+type runeWriterExtra struct{}
+
+func (*runeWriterExtra) WriteRune(r rune) (int, error) { return 0, nil }
+
+type wrongByteWriterExtra struct{}
+
+func (*wrongByteWriterExtra) WriteRune(r rune) (int, error) { return 0, nil }
+func (*wrongByteWriterExtra) WriteByte(s string) error       { return nil }
+
+func preferWriteByteExtra(w *byteWriterExtra, runeOnly *runeWriterExtra, wrong *wrongByteWriterExtra) {
+	_, _ = w.WriteRune('\n')
+	_, _ = w.WriteRune('é')
+	_, _ = runeOnly.WriteRune('\n')
+	_, _ = wrong.WriteRune('\n')
+}
+
 func indexAllocExtra(b []byte, y string) {
 	_ = strings.Index(string(b), y)
 }

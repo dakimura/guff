@@ -3679,6 +3679,7 @@ fn gocritic_enable_all_extras() {
         "re-assignment to `err` can be replaced with",
         "http.NoBody should be preferred",
         "utf8.DecodeRuneInString",
+        "consider writing single byte rune '\\n' with w.WriteByte('\\n')",
         "bytes.Index(",
         "can simplify `[]byte($s)` to `$s`",
         "can replace `string($b) == \"\"`",
@@ -3695,6 +3696,14 @@ fn gocritic_enable_all_extras() {
             "missing `{needle}` in {messages:?}"
         );
     }
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("consider writing single byte rune"))
+            .count(),
+        1,
+        "{messages:?}"
+    );
 }
 
 #[test]

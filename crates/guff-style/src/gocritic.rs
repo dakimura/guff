@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**76** = 34 default + 42 enable-all extras):
+//! Implemented checkers (**77** = 34 default + 43 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -25,13 +25,14 @@
 //!   `httpNoBody`, `preferDecodeRune`, `indexAlloc`, `stringXbytes`,
 //!   `preferFilepathJoin`, `stringsCompare`, `zeroByteRepeat`, `badSorting`,
 //!   `sliceClear`
+//! - batch 10 (enable-all extra): `preferWriteByte`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + other missing
 //! such as `appendCombine` / `typeUnparen` / `unnecessaryDefer` / `preferFprint` /
-//! `preferWriteByte` / `syncMapLoadAndDelete` / `dynamicFmtString` / …),
+//! `syncMapLoadAndDelete` / `dynamicFmtString` / …),
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs,
 //! nestingReduce bodyWidth, truncateCmp skipArchDependent),
@@ -58,10 +59,12 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_constant::{int64_val, make_from_literal};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::{basic_kind, BasicKind, IS_INTEGER};
+use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
 use guff_types::predicates::is_interface;
@@ -142,6 +145,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "paramTypeCombine",
     "preferDecodeRune",
     "preferFilepathJoin",
+    "preferWriteByte",
     "rangeAppendAll",
     "rangeExprCopy",
     "regexpPattern",
@@ -4160,6 +4164,86 @@ fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(
     );
 }
 
+fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return;
+    };
+    if sel.sel.name != "WriteRune" || call.args.len() != 1 {
+        return;
+    }
+    let Expr::BasicLit(lit) = &call.args[0] else {
+        return;
+    };
+    if lit.kind != Some(Token::CHAR) {
+        return;
+    }
+    let value = make_from_literal(&lit.value, Token::CHAR, 0);
+    let (rune, exact) = int64_val(&value);
+    if !exact || !(0..0x80).contains(&rune) {
+        return;
+    }
+
+    let Some(receiver_type) = type_of(pass, &sel.x) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let mut types = artifacts.types.clone();
+    let LookupResult::Found { obj, .. } = lookup_field_or_method(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        receiver_type,
+        true,
+        None,
+        "WriteByte",
+    ) else {
+        return;
+    };
+    let ObjectData::Func(method) = artifacts.objects.get(obj) else {
+        return;
+    };
+    let Some(method_type) = method.typ() else {
+        return;
+    };
+    let TypeData::Signature(sig) = artifacts.types.get(method_type) else {
+        return;
+    };
+    if tuple_len(&artifacts.types, sig.params()) != 1
+        || tuple_len(&artifacts.types, sig.results()) != 1
+    {
+        return;
+    }
+    let param = tuple_at(&artifacts.types, sig.params().unwrap(), 0);
+    let result = tuple_at(&artifacts.types, sig.results().unwrap(), 0);
+    let Some(param_type) = param.typ(&artifacts.objects) else {
+        return;
+    };
+    let Some(result_type) = result.typ(&artifacts.objects) else {
+        return;
+    };
+    if basic_kind(&artifacts.types, param_type) != BasicKind::Uint8
+        || type_string(
+            &artifacts.types,
+            &artifacts.objects,
+            &artifacts.packages,
+            result_type,
+            None,
+        ) != "error"
+    {
+        return;
+    }
+
+    let receiver = expr_text(&sel.x).unwrap_or_else(|| "writer".to_string());
+    let rune = expr_text(&call.args[0]).unwrap_or_else(|| lit.value.clone());
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("consider writing single byte rune {rune} with {receiver}.WriteByte({rune})"),
+    );
+}
+
 fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
@@ -4772,6 +4856,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "indexAlloc") {
                         check_index_alloc(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "preferWriteByte") {
+                        check_prefer_write_byte(pass, c, &mut pending);
                     }
                     if enabled(&set, "zeroByteRepeat") {
                         check_zero_byte_repeat(pass, c, &mut pending);
