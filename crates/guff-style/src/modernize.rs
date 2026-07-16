@@ -12,7 +12,8 @@
 //! - `slicessort` — `sort.Slice` with natural order → `slices.Sort` (Go 1.21+)
 //! - `stringscutprefix` — `HasPrefix`+`TrimPrefix` → `CutPrefix` (Go 1.20+; pattern 1+2;
 //!   strings+bytes)
-//! - `slicescontains` — search loop → `slices.Contains` (Go 1.21+; return true/false)
+//! - `slicescontains` — search loop → `slices.Contains`/`ContainsFunc` (Go 1.21+;
+//!   return true/false, break body, found=true/false)
 //! - `stringsseq` — `range strings.Split/Fields` → `SplitSeq`/`FieldsSeq` (Go 1.24+)
 //! - `waitgroupgo` — `Add(1)`+`go`+`Done` → `WaitGroup.Go` (Go 1.25+)
 //! - `mapsloop` — `for k, v := range x { m[k] = v }` → `maps.Copy` (Go 1.23+; map→map)
@@ -27,7 +28,8 @@
 //! errorsastype, newexpr, stditerators, stringsbuilder, stringscut Index/Contains
 //! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
-//! slicescontains ContainsFunc / break variants, waitgroupgo trailing-Done /
+//! slicescontains nested free break/continue analysis full parity,
+//! waitgroupgo trailing-Done /
 //! SuggestedFix import edits, reflecttypefor complicated/unnamed types &
 //! unused-var deletion, slicesbackward mutation/non-`s[i]` use analysis full
 //! parity, testingcontext sole-use via typeindex, and full rangeint/minmax
@@ -38,8 +40,9 @@ use std::fs;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, CommentGroup, Expr, Field, File, ForStmt, FuncDecl,
-    FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
+    AssignStmt, BinaryExpr, BlockStmt, BranchStmt, CallExpr, CommentGroup, Expr, Field, File,
+    ForStmt, FuncDecl, FuncLit, GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, Stmt,
+    StructType,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
@@ -1007,14 +1010,195 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
     });
 }
 
-fn is_return_bool(ret: &ReturnStmt, want: bool) -> bool {
-    if ret.results.len() != 1 {
+fn is_true_or_false_lit(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Ident(id) if id.name == "true" => Some(true),
+        Expr::Ident(id) if id.name == "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn is_blank_ident(expr: &Expr) -> bool {
+    matches!(expr, Expr::Ident(id) if id.name == "_")
+}
+
+/// Whether `e` is the range element (`elem`) or `s[i]`.
+fn is_slice_elem(pass: &Pass<'_>, rng: &RangeStmt, e: &Expr) -> bool {
+    if let Some(val) = rng.value.as_ref() {
+        if !is_blank_ident(val) && code::same_non_dynamic(pass, e, val) {
+            return true;
+        }
+    }
+    if let (Some(key), Expr::IndexExpr(ix)) = (rng.key.as_ref(), e) {
+        if !is_blank_ident(key)
+            && code::same_non_dynamic(pass, &ix.x, &rng.x)
+            && code::same_non_dynamic(pass, &ix.index, key)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn range_var_objs(pass: &Pass<'_>, rng: &RangeStmt) -> Vec<ObjectId> {
+    let mut objs = Vec::new();
+    for opt in [&rng.key, &rng.value] {
+        let Some(Expr::Ident(id)) = opt.as_ref() else {
+            continue;
+        };
+        if id.name == "_" {
+            continue;
+        }
+        if let Some(obj) = ident_obj(pass, id) {
+            objs.push(obj);
+        }
+    }
+    objs
+}
+
+fn node_uses_objs(pass: &Pass<'_>, node: NodeRef<'_>, objs: &[ObjectId]) -> bool {
+    if objs.is_empty() {
         return false;
     }
+    let mut used = false;
+    walk::inspect(node, |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if let NodeRef::Ident(id) = n {
+            if let Some(obj) = ident_obj(pass, id) {
+                if objs.contains(&obj) {
+                    used = true;
+                    return false;
+                }
+            }
+        }
+        true
+    });
+    used
+}
+
+fn stmt_uses_range_vars(pass: &Pass<'_>, stmt: &Stmt, rng: &RangeStmt) -> bool {
+    node_uses_objs(pass, walk::stmt_ref(stmt), &range_var_objs(pass, rng))
+}
+
+fn expr_uses_range_vars(pass: &Pass<'_>, expr: &Expr, rng: &RangeStmt) -> bool {
+    node_uses_objs(pass, walk::expr_ref(expr), &range_var_objs(pass, rng))
+}
+
+/// Side-effect heuristic: reject call / unary / composite needles for Contains.
+fn expr_may_have_effects(expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(_) | Expr::UnaryExpr(_) | Expr::CompositeLit(_) | Expr::FuncLit(_) => true,
+        Expr::ParenExpr(p) => expr_may_have_effects(&p.x),
+        Expr::SelectorExpr(sel) => expr_may_have_effects(&sel.x),
+        Expr::IndexExpr(ix) => expr_may_have_effects(&ix.x) || expr_may_have_effects(&ix.index),
+        Expr::BinaryExpr(b) => expr_may_have_effects(&b.x) || expr_may_have_effects(&b.y),
+        _ => false,
+    }
+}
+
+/// Analyze `if cond` for Contains / ContainsFunc. Returns (func_name, arg2_text).
+fn slicescontains_cond(
+    pass: &Pass<'_>,
+    rng: &RangeStmt,
+    cond: &Expr,
+) -> Option<(&'static str, String)> {
+    match cond {
+        Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) if *op == Token::EQL => {
+            let (elem, needle) = if is_slice_elem(pass, rng, x) {
+                (x.as_ref(), y.as_ref())
+            } else if is_slice_elem(pass, rng, y) {
+                (y.as_ref(), x.as_ref())
+            } else {
+                return None;
+            };
+            let Some(elem_ty) = type_of(pass, elem) else {
+                return None;
+            };
+            let Some(needle_ty) = type_of(pass, needle) else {
+                return None;
+            };
+            if !types_identical(pass, elem_ty, needle_ty) {
+                return None;
+            }
+            if expr_may_have_effects(needle) || expr_uses_range_vars(pass, needle, rng) {
+                return None;
+            }
+            let needle_text = expr_text(needle)?;
+            Some(("Contains", needle_text))
+        }
+        Expr::CallExpr(call) if call.args.len() == 1 && !call.ellipsis.is_valid() => {
+            // Skip type conversions: `T(x)`.
+            let is_type = pass.types_info().is_some_and(|info| {
+                info.types
+                    .get(&call.fun.id())
+                    .is_some_and(|tav| tav.mode == OperandMode::TypeExpr)
+            });
+            if is_type {
+                return None;
+            }
+            if !is_slice_elem(pass, rng, &call.args[0]) {
+                return None;
+            }
+            if expr_uses_range_vars(pass, &call.fun, rng) {
+                return None;
+            }
+            let pred_text = expr_text(&call.fun)?;
+            if expr_may_have_effects(&call.fun) {
+                return None;
+            }
+            Some(("ContainsFunc", pred_text))
+        }
+        _ => None,
+    }
+}
+
+fn is_unlabeled_break(stmt: &Stmt) -> bool {
     matches!(
-        &ret.results[0],
-        Expr::Ident(id) if id.name == if want { "true" } else { "false" }
+        stmt,
+        Stmt::BranchStmt(BranchStmt {
+            tok: Token::BREAK,
+            label: None,
+            ..
+        })
     )
+}
+
+fn body_has_free_branch(stmts: &[Stmt], skip_last: bool) -> bool {
+    let end = if skip_last {
+        stmts.len().saturating_sub(1)
+    } else {
+        stmts.len()
+    };
+    for stmt in &stmts[..end] {
+        let mut found = false;
+        walk::inspect(walk::stmt_ref(stmt), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::BranchStmt(b)
+                    if matches!(b.tok, Token::BREAK | Token::CONTINUE) && b.label.is_none() =>
+                {
+                    found = true;
+                    return false;
+                }
+                NodeRef::ReturnStmt(_) => {
+                    found = true;
+                    return false;
+                }
+                // Don't descend into nested function literals.
+                NodeRef::FuncLit(_) => return false,
+                _ => {}
+            }
+            true
+        });
+        if found {
+            return true;
+        }
+    }
+    false
 }
 
 fn check_slicescontains(
@@ -1022,21 +1206,25 @@ fn check_slicescontains(
     block: &BlockStmt,
     pending: &mut Vec<Diagnostic>,
 ) {
-    for i in 0..block.list.len().saturating_sub(1) {
+    if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
+        return;
+    }
+    for i in 0..block.list.len() {
         let Stmt::RangeStmt(rng) = &block.list[i] else {
             continue;
         };
-        let Stmt::ReturnStmt(after) = &block.list[i + 1] else {
-            continue;
-        };
-        if !is_return_bool(after, false) {
-            continue;
-        }
         let pos = rng.for_.0 as u32;
         if !go_at_least(pass, pos, "go1.21") {
             continue;
         }
         if type_kind(pass, &rng.x) != Some(TypeKind::Slice) {
+            continue;
+        }
+        if rng.tok != Some(Token::DEFINE) {
+            continue;
+        }
+        // Need at least a key ident (may be `_`).
+        if !matches!(rng.key.as_ref(), Some(Expr::Ident(_))) {
             continue;
         }
         if rng.body.list.len() != 1 {
@@ -1048,54 +1236,192 @@ fn check_slicescontains(
         if if_stmt.init.is_some() || if_stmt.else_.is_some() {
             continue;
         }
-        if if_stmt.body.list.len() != 1 {
+        let body = &if_stmt.body.list;
+        if body.is_empty() {
             continue;
         }
-        let Stmt::ReturnStmt(ret_true) = &if_stmt.body.list[0] else {
+        let Some((func_name, arg2_text)) = slicescontains_cond(pass, rng, &if_stmt.cond) else {
             continue;
         };
-        if !is_return_bool(ret_true, true) {
+        // Upstream rejects any body use of range vars (including last stmt).
+        if body.iter().any(|s| stmt_uses_range_vars(pass, s, rng)) {
             continue;
         }
-        let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = &if_stmt.cond else {
-            continue;
-        };
-        if *op != Token::EQL {
+        if body_has_free_branch(body, true) {
             continue;
         }
-        let elem = rng.value.as_ref();
-        let needle = if elem.is_some_and(|e| code::same_non_dynamic(pass, e, x)) {
-            y.as_ref()
-        } else if elem.is_some_and(|e| code::same_non_dynamic(pass, e, y)) {
-            x.as_ref()
-        } else {
-            continue;
-        };
         let Some(slice_text) = expr_text(&rng.x) else {
             continue;
         };
-        let Some(needle_text) = expr_text(needle) else {
+        let contains = format!("slices.{func_name}({slice_text}, {arg2_text})");
+        let last = body.last().unwrap();
+        let msg = format!("loop can be modernized using slices.{func_name}");
+
+        // Special case: body={ return true/false } next={ return false/true }
+        if let Stmt::ReturnStmt(ret_last) = last {
+            if body.len() == 1 {
+                if let Some(Stmt::ReturnStmt(after)) = block.list.get(i + 1) {
+                    let tval = if ret_last.results.len() == 1 {
+                        is_true_or_false_lit(&ret_last.results[0])
+                    } else {
+                        None
+                    };
+                    let fval = if after.results.len() == 1 {
+                        is_true_or_false_lit(&after.results[0])
+                    } else {
+                        None
+                    };
+                    if let (Some(t), Some(f)) = (tval, fval) {
+                        if t != f {
+                            let neg = if t { "" } else { "!" };
+                            let end = after
+                                .results
+                                .last()
+                                .map(|e| e.end().0 as u32)
+                                .unwrap_or(after.return_.0 as u32);
+                            pending.push(Diagnostic {
+                                pos,
+                                end,
+                                category: String::new(),
+                                message: msg.clone(),
+                                suggested_fixes: vec![SuggestedFix {
+                                    message: format!("Replace loop with slices.{func_name}"),
+                                    text_edits: vec![TextEdit {
+                                        pos,
+                                        end,
+                                        new_text: format!("return {neg}{contains}"),
+                                    }],
+                                }],
+                                related: Vec::new(),
+                                url: String::new(),
+                                severity: String::new(),
+                            });
+                            continue;
+                        }
+                    }
+                }
+            }
+            // General return: for ... { if cond { stmts; return x } } → if Contains { ... }
+            let end = rng.body.end().0 as u32;
+            pending.push(Diagnostic {
+                pos,
+                end,
+                category: String::new(),
+                message: msg,
+                suggested_fixes: vec![SuggestedFix {
+                    message: format!("Replace loop with if slices.{func_name}"),
+                    text_edits: vec![
+                        TextEdit {
+                            pos,
+                            end: if_stmt.body.pos().0 as u32,
+                            new_text: format!("if {contains} "),
+                        },
+                        TextEdit {
+                            pos: if_stmt.body.end().0 as u32,
+                            end,
+                            new_text: String::new(),
+                        },
+                    ],
+                }],
+                related: Vec::new(),
+                url: String::new(),
+                severity: String::new(),
+            });
             continue;
-        };
-        let end = after.return_.0 as u32;
-        // Prefer end of last result if present.
-        let end = after
-            .results
-            .last()
-            .map(|e| e.end().0 as u32)
-            .unwrap_or(end);
+        }
+
+        // break variants
+        if !is_unlabeled_break(last) {
+            continue;
+        }
+        // Sole break → empty if; skip (upstream #77677).
+        if body.len() == 1 {
+            continue;
+        }
+
+        // Special: prev=`lhs = false`; body=`lhs = true; break`
+        if body.len() == 2 {
+            if let Stmt::AssignStmt(assign) = &body[0] {
+                if assign.tok == Some(Token::ASSIGN)
+                    && assign.lhs.len() == 1
+                    && assign.rhs.len() == 1
+                {
+                    if let Some(assign_bool) = is_true_or_false_lit(&assign.rhs[0]) {
+                        if let Some(j) = i.checked_sub(1) {
+                            if let Stmt::AssignStmt(prev) = &block.list[j] {
+                                if (prev.tok == Some(Token::ASSIGN)
+                                    || prev.tok == Some(Token::DEFINE))
+                                    && prev.lhs.len() == 1
+                                    && prev.rhs.len() == 1
+                                    && code::same_non_dynamic(pass, &prev.lhs[0], &assign.lhs[0])
+                                {
+                                    if let Some(prev_bool) = is_true_or_false_lit(&prev.rhs[0]) {
+                                        if assign_bool != prev_bool {
+                                            let neg = if assign_bool { "" } else { "!" };
+                                            let Some(lhs_text) = expr_text(&assign.lhs[0]) else {
+                                                continue;
+                                            };
+                                            let end = rng.body.end().0 as u32;
+                                            let prev_pos = prev.lhs[0].pos().0 as u32;
+                                            pending.push(Diagnostic {
+                                                pos: prev_pos,
+                                                end,
+                                                category: String::new(),
+                                                message: msg.clone(),
+                                                suggested_fixes: vec![SuggestedFix {
+                                                    message: format!(
+                                                        "Replace loop with slices.{func_name}"
+                                                    ),
+                                                    text_edits: vec![TextEdit {
+                                                        pos: prev_pos,
+                                                        end,
+                                                        new_text: format!(
+                                                            "{lhs_text} = {neg}{contains}"
+                                                        ),
+                                                    }],
+                                                }],
+                                                related: Vec::new(),
+                                                url: String::new(),
+                                                severity: String::new(),
+                                            });
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // General: for ... { if cond { stmts; break } } → if Contains { stmts }
+        let end = rng.body.end().0 as u32;
+        let before_break_end = body[body.len() - 2].end().0 as u32;
         pending.push(Diagnostic {
             pos,
             end,
             category: String::new(),
-            message: "loop can be modernized using slices.Contains".into(),
+            message: msg,
             suggested_fixes: vec![SuggestedFix {
-                message: "Replace loop with slices.Contains".into(),
-                text_edits: vec![TextEdit {
-                    pos,
-                    end,
-                    new_text: format!("return slices.Contains({slice_text}, {needle_text})"),
-                }],
+                message: format!("Replace loop with if slices.{func_name}"),
+                text_edits: vec![
+                    TextEdit {
+                        pos,
+                        end: if_stmt.body.pos().0 as u32,
+                        new_text: format!("if {contains} "),
+                    },
+                    TextEdit {
+                        pos: before_break_end,
+                        end: last.end().0 as u32,
+                        new_text: String::new(),
+                    },
+                    TextEdit {
+                        pos: if_stmt.body.end().0 as u32,
+                        end,
+                        new_text: String::new(),
+                    },
+                ],
             }],
             related: Vec::new(),
             url: String::new(),

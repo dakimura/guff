@@ -3150,6 +3150,30 @@ fn modernize_flags_stringscut() {
 }
 
 #[test]
+fn modernize_flags_slicescontains_variants() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/slicescontains",
+        "slicescontains.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("slices.Contains") && !m.contains("ContainsFunc"))
+            .count()
+            >= 4,
+        "expected Contains variants, got {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("slices.ContainsFunc")),
+        "expected ContainsFunc, got {messages:?}"
+    );
+}
+
+#[test]
 fn modernize_flags_stringscutprefix_pattern2_and_bytes() {
     let pkg = support::typecheck_fixture(
         "modernize",
