@@ -14,6 +14,10 @@ fn testdata(path: &str) -> std::path::PathBuf {
         .join(path)
 }
 
+fn config_corpus_dir() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/config_corpus")
+}
+
 #[test]
 fn parse_v2_golangci_standard() {
     let contents = fs::read_to_string(testdata("v2_standard.yml")).unwrap();
@@ -75,10 +79,7 @@ fn migrate_v1_writes_v2_and_backup() {
 
     let reloaded = load_config(&dest).unwrap();
     assert!(reloaded.is_v2());
-    assert_eq!(
-        reloaded.linter_selection().default,
-        LinterDefault::None
-    );
+    assert_eq!(reloaded.linter_selection().default, LinterDefault::None);
 }
 
 #[test]
@@ -155,6 +156,51 @@ fn parse_v2_linters_exclusions_prometheus_shape() {
     // paths folded into exclude_files; rules appended.
     assert_eq!(issues.exclude_files.len(), 2);
     assert_eq!(issues.exclude_rules.len(), 2);
+}
+
+#[test]
+fn parse_golangci_config_corpus() {
+    let mut entries = fs::read_dir(config_corpus_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("yml" | "yaml")
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    assert!(!entries.is_empty(), "config corpus should not be empty");
+
+    for path in entries {
+        let contents = fs::read_to_string(&path).unwrap();
+        let cfg = parse_config_str(&contents)
+            .unwrap_or_else(|err| panic!("{} should parse: {err}", path.display()));
+        assert!(
+            cfg.is_v2(),
+            "{} should exercise golangci-lint v2 config parsing",
+            path.display()
+        );
+
+        // Exercise the follow-on resolution steps used by the CLI, not just
+        // serde shape compatibility.
+        let names = cfg.linter_selection().resolve_names();
+        assert!(
+            !names.is_empty(),
+            "{} should resolve at least one linter",
+            path.display()
+        );
+        let issues = cfg.effective_issues();
+        assert!(
+            !issues.exclude_use_default,
+            "{} should use v2 exclusion semantics",
+            path.display()
+        );
+        let _ = cfg.run();
+        let _ = cfg.output();
+        let _ = cfg.linter_settings_raw();
+    }
 }
 
 #[test]

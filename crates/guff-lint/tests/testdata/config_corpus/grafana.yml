@@ -1,0 +1,118 @@
+# Snapshot based on grafana/grafana `.golangci.yml` (golangci-lint v2).
+version: "2"
+
+run:
+  timeout: 30m
+  concurrency: 0
+  allow-parallel-runners: true
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bodyclose
+    - depguard
+    - dogsled
+    - errcheck
+    - errorlint
+    - exhaustive
+    - gocyclo
+    - goprintffuncname
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - prealloc
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+  settings:
+    depguard:
+      rules:
+        apimachinery:
+          list-mode: lax
+          files:
+            - '**/pkg/apimachinery/*'
+            - '**/pkg/apimachinery/**/*'
+          allow:
+            - github.com/grafana/grafana/pkg/apimachinery
+          deny:
+            - pkg: github.com/grafana/grafana/pkg
+              desc: apimachinery is not allowed to import grafana core
+        coreplugins:
+          files:
+            - '**/pkg/tsdb/grafana-postgresql-datasource/*'
+            - '**/pkg/tsdb/grafana-postgresql-datasource/**/*'
+          deny:
+            - pkg: github.com/grafana/grafana/pkg/api
+              desc: Core plugins are not allowed to depend on Grafana core packages
+            - pkg: github.com/grafana/grafana/pkg/services
+              desc: Core plugins are not allowed to depend on Grafana core packages
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: Deprecated as of Go 1.16.
+            - pkg: gopkg.in/yaml.v2
+              desc: use go.yaml.in/yaml/v3 instead
+            - pkg: github.com/pkg/errors
+              desc: Deprecated; use errors or fmt.
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-checks:
+        - ruleguard
+      settings:
+        ruleguard:
+          rules: pkg/ruleguard.rules.go
+    misspell:
+      ignore-rules:
+        - Unknwon
+        - Creater
+    nakedret:
+      max-func-lines: 60
+    revive:
+      confidence: 3
+      severity: warning
+  exclusions:
+    generated: lax
+    paths:
+      - devenv
+      - scripts
+      - third_party$
+      - builtin$
+      - examples$
+    rules:
+      - linters:
+          - staticcheck
+        text: ST1003
+      - linters:
+          - staticcheck
+        text: 'SA1019: http.CloseNotifier'
+      - linters:
+          - gosec
+        text: G101
+      - linters:
+          - gosec
+        path: (.+)_test\.go
+        text: G601
+      - linters:
+          - errorlint
+        text: non-wrapping format verb for fmt.Errorf
+
+issues:
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - devenv
+      - scripts
+      - third_party$
+      - builtin$
+      - examples$
