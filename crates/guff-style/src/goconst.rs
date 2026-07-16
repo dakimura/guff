@@ -1,22 +1,30 @@
 //! Port of [`github.com/jgautheron/goconst`](https://github.com/jgautheron/goconst)
 //! (golangci-lint defaults).
 //!
-//! Defaults match golangci-lint: `min-len=3`, `min-occurrences=3`, and
-//! exclude string literals in function call arguments (`ignore-calls: true`).
+//! Defaults match golangci-lint: `min-len=3`, `min-occurrences=3`,
+//! `match-constant=true`, `ignore-calls=true`, `numbers=false`,
+//! `min=3`, `max=3`.
 //!
-//! DEFERRED: `match-constant`, `numbers`, `find-duplicates`, `ignore-strings` /
-//! `ignore-functions`, and remaining settings keys.
+//! DEFERRED: `find-duplicates`, `ignore-strings` / `ignore-functions`,
+//! `eval-const-expressions`, and remaining settings keys.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use guff::ast::{BasicLit, Expr};
+use guff::ast::{BasicLit, Expr, GenDecl, Spec};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::GoconstOptions;
+
+#[derive(Clone)]
+struct ConstEntry {
+    name: String,
+    filename: String,
+    pos: u32,
+}
 
 fn unquote_lit(lit: &BasicLit) -> Option<String> {
     let v = &lit.value;
@@ -52,33 +60,157 @@ fn unquote_lit(lit: &BasicLit) -> Option<String> {
     Some(out)
 }
 
-fn add_string(lit: &BasicLit, min_len: usize, occurrences: &mut HashMap<String, Vec<u32>>) {
-    if lit.kind != Some(Token::STRING) {
+fn literal_key(lit: &BasicLit) -> Option<String> {
+    match lit.kind {
+        Some(Token::STRING) => unquote_lit(lit),
+        Some(Token::INT) | Some(Token::FLOAT) => Some(lit.value.clone()),
+        _ => None,
+    }
+}
+
+fn is_supported_lit(lit: &BasicLit, numbers: bool) -> bool {
+    match lit.kind {
+        Some(Token::STRING) => true,
+        Some(Token::INT) | Some(Token::FLOAT) => numbers,
+        _ => false,
+    }
+}
+
+fn passes_min_len(value: &str, min_len: usize) -> bool {
+    !value.is_empty() && value.chars().count() >= min_len
+}
+
+fn parse_go_int(s: &str) -> Option<i64> {
+    if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return i64::from_str_radix(rest, 16).ok();
+    }
+    if s.starts_with('0') && s.len() > 1 && !s.contains(['.', 'e', 'E']) {
+        return i64::from_str_radix(s, 8).ok();
+    }
+    s.parse::<i64>().ok()
+}
+
+fn passes_number_range(value: &str, options: GoconstOptions) -> bool {
+    if !options.numbers {
+        return true;
+    }
+    if options.number_min == 0 && options.number_max == 0 {
+        return true;
+    }
+    let Some(i) = parse_go_int(value) else {
+        return true;
+    };
+    if options.number_min != 0 && i < options.number_min {
+        return false;
+    }
+    if options.number_max != 0 && i > options.number_max {
+        return false;
+    }
+    true
+}
+
+fn add_literal(
+    lit: &BasicLit,
+    options: GoconstOptions,
+    occurrences: &mut HashMap<String, Vec<u32>>,
+) {
+    if !is_supported_lit(lit, options.numbers) {
         return;
     }
-    let Some(s) = unquote_lit(lit) else {
+    let Some(key) = literal_key(lit) else {
         return;
     };
-    if s.chars().count() < min_len {
+    if !passes_min_len(&key, options.min_len) {
+        return;
+    }
+    if !passes_number_range(&key, options) {
         return;
     }
     occurrences
-        .entry(s)
+        .entry(key)
         .or_default()
         .push(lit.value_pos.0 as u32);
 }
 
 fn add_expr_lit(
     expr: &Expr,
-    min_len: usize,
+    options: GoconstOptions,
     occurrences: &mut HashMap<String, Vec<u32>>,
 ) {
     if let Expr::BasicLit(lit) = expr {
-        add_string(lit, min_len, occurrences);
+        add_literal(lit, options, occurrences);
     }
 }
 
-fn collect(pass: &Pass<'_>, options: GoconstOptions, occurrences: &mut HashMap<String, Vec<u32>>) {
+fn collect_constants_from_gendecl(
+    g: &GenDecl,
+    filename: &str,
+    options: GoconstOptions,
+    constants: &mut HashMap<String, Vec<ConstEntry>>,
+) {
+    for spec in &g.specs {
+        let Spec::ValueSpec(vs) = spec else {
+            continue;
+        };
+        if vs.values.is_empty() {
+            continue;
+        }
+        for (i, name) in vs.names.iter().enumerate() {
+            let value_idx = if vs.values.len() == 1 {
+                0
+            } else if i < vs.values.len() {
+                i
+            } else {
+                continue;
+            };
+            let Expr::BasicLit(lit) = &vs.values[value_idx] else {
+                continue;
+            };
+            if !is_supported_lit(lit, options.numbers) {
+                continue;
+            }
+            let Some(key) = literal_key(lit) else {
+                continue;
+            };
+            if !passes_min_len(&key, options.min_len) {
+                continue;
+            }
+            constants.entry(key).or_default().push(ConstEntry {
+                name: name.name.clone(),
+                filename: filename.to_string(),
+                pos: name.name_pos.0 as u32,
+            });
+        }
+    }
+}
+
+fn find_matching_const(
+    key: &str,
+    filename: &str,
+    constants: &HashMap<String, Vec<ConstEntry>>,
+) -> Option<String> {
+    let entries = constants.get(key)?;
+    let mut sorted = entries.clone();
+    sorted.sort_by(|a, b| (a.filename.as_str(), a.pos).cmp(&(b.filename.as_str(), b.pos)));
+
+    let is_test = filename.ends_with("_test.go");
+    if !is_test {
+        if let Some(entry) = sorted
+            .iter()
+            .find(|entry| !entry.filename.ends_with("_test.go"))
+        {
+            return Some(entry.name.clone());
+        }
+    }
+    sorted.first().map(|entry| entry.name.clone())
+}
+
+fn collect(
+    pass: &Pass<'_>,
+    options: GoconstOptions,
+    occurrences: &mut HashMap<String, Vec<u32>>,
+    constants: &mut HashMap<String, Vec<ConstEntry>>,
+) {
     let pkg = pass.pkg();
     let fset = pass.fset();
     for (i, file) in pass.files().iter().enumerate() {
@@ -93,44 +225,53 @@ fn collect(pass: &Pass<'_>, options: GoconstOptions, occurrences: &mut HashMap<S
             continue;
         }
 
+        if options.match_constant {
+            for decl in &file.decls {
+                if let guff::ast::Decl::GenDecl(g) = decl {
+                    if g.tok == Some(Token::CONST) {
+                        collect_constants_from_gendecl(g, filename, options, constants);
+                    }
+                }
+            }
+        }
+
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
             };
             match n {
-                // Skip const declarations entirely (match-constant is DEFERRED).
                 NodeRef::GenDecl(g) if g.tok == Some(Token::CONST) => false,
                 NodeRef::CallExpr(_) if options.ignore_calls => false,
                 NodeRef::AssignStmt(a) => {
                     for rhs in &a.rhs {
-                        add_expr_lit(rhs, options.min_len, occurrences);
+                        add_expr_lit(rhs, options, occurrences);
                     }
                     true
                 }
                 NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
-                    add_expr_lit(&b.x, options.min_len, occurrences);
-                    add_expr_lit(&b.y, options.min_len, occurrences);
+                    add_expr_lit(&b.x, options, occurrences);
+                    add_expr_lit(&b.y, options, occurrences);
                     true
                 }
                 NodeRef::CaseClause(c) => {
                     for item in &c.list {
-                        add_expr_lit(item, options.min_len, occurrences);
+                        add_expr_lit(item, options, occurrences);
                     }
                     true
                 }
                 NodeRef::ReturnStmt(r) => {
                     for item in &r.results {
-                        add_expr_lit(item, options.min_len, occurrences);
+                        add_expr_lit(item, options, occurrences);
                     }
                     true
                 }
                 NodeRef::CompositeLit(cl) => {
                     for elt in &cl.elts {
                         match elt {
-                            Expr::BasicLit(lit) => add_string(lit, options.min_len, occurrences),
+                            Expr::BasicLit(lit) => add_literal(lit, options, occurrences),
                             Expr::KeyValueExpr(kv) => {
-                                add_expr_lit(&kv.key, options.min_len, occurrences);
-                                add_expr_lit(&kv.value, options.min_len, occurrences);
+                                add_expr_lit(&kv.key, options, occurrences);
+                                add_expr_lit(&kv.value, options, occurrences);
                             }
                             _ => {}
                         }
@@ -139,13 +280,23 @@ fn collect(pass: &Pass<'_>, options: GoconstOptions, occurrences: &mut HashMap<S
                 }
                 NodeRef::ValueSpec(vs) => {
                     for val in &vs.values {
-                        add_expr_lit(val, options.min_len, occurrences);
+                        add_expr_lit(val, options, occurrences);
                     }
                     true
                 }
                 _ => true,
             }
         });
+    }
+}
+
+fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> String {
+    if let Some(name) = matching_const {
+        format!(
+            "string `{key}` has {count} occurrences, but such constant `{name}` already exists"
+        )
+    } else {
+        format!("string `{key}` has {count} occurrences, make it a constant")
     }
 }
 
@@ -160,7 +311,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .unwrap_or_default();
 
     let mut occurrences: HashMap<String, Vec<u32>> = HashMap::new();
-    collect(pass, options, &mut occurrences);
+    let mut constants: HashMap<String, Vec<ConstEntry>> = HashMap::new();
+    collect(pass, options, &mut occurrences, &mut constants);
 
     let mut keys: Vec<_> = occurrences.keys().cloned().collect();
     keys.sort();
@@ -171,11 +323,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         }
         let pos = *positions.iter().min().unwrap_or(&0);
-        // golangci FormatCode wraps identifiers with backticks for display.
-        pass.reportf(
-            pos,
-            &format!("string `{key}` has {count} occurrences, make it a constant"),
-        );
+        let filename = pass.fset().position(guff::position::Pos(pos as i64)).filename;
+        let matching = if options.match_constant {
+            find_matching_const(&key, &filename, &constants)
+        } else {
+            None
+        };
+        pass.reportf(pos, &format_message(&key, count, matching.as_deref()));
     }
     Ok(None)
 }

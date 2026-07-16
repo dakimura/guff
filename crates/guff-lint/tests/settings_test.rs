@@ -272,6 +272,10 @@ fn parse_v2_style_extended_linter_settings() {
     assert_eq!(settings.predeclared.qualified, Some(true));
     assert_eq!(settings.perfsprint.integer_format, Some(false));
     assert_eq!(settings.goconst.min_occurrences, Some(10));
+    assert_eq!(settings.goconst.numbers, Some(true));
+    assert_eq!(settings.goconst.min, Some(2));
+    assert_eq!(settings.goconst.max, Some(5));
+    assert_eq!(settings.goconst.match_constant, Some(false));
     assert_eq!(settings.mnd.checks.as_ref().map(|c| c.len()), Some(1));
     assert_eq!(settings.prealloc.range_loops, Some(false));
     assert_eq!(settings.tagalign.align, Some(false));
@@ -289,5 +293,23 @@ fn parse_v2_style_extended_linter_settings() {
             .unwrap()
             .min_occurrences,
         10
+    );
+    assert!(bag.get::<guff_style::GoconstOptions>("goconst").unwrap().numbers);
+    assert_eq!(
+        bag.get::<guff_style::GoconstOptions>("goconst")
+            .unwrap()
+            .number_min,
+        2
+    );
+    assert_eq!(
+        bag.get::<guff_style::GoconstOptions>("goconst")
+            .unwrap()
+            .number_max,
+        5
+    );
+    assert!(
+        !bag.get::<guff_style::GoconstOptions>("goconst")
+            .unwrap()
+            .match_constant
     );
 }

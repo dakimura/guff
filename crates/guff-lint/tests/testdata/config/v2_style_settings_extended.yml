@@ -26,6 +26,10 @@ linters:
     goconst:
       min-occurrences: 10
       ignore-tests: true
+      numbers: true
+      min: 2
+      max: 5
+      match-constant: false
     mnd:
       checks:
         - case

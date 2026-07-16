@@ -142,7 +142,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-gostaticanalysis` | ✅ **3**（forcetypeassert / nilnil / makezero） | nilerr / nilnesserr / mirror ほかは **DEFERRED（R13 残）** |
 | `guff-error` | ✅ **6**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson） | rowserrcheck 等は **DEFERRED**（SSA） |
 | `guff-context` | ✅ **2**（noctx / fatcontext） | bodyclose / contextcheck / sqlclosecheck 等は **DEFERRED**（SSA → R17） |
-| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint / goconst の主要キー）。ignore ディレクティブ・SuggestedFix・残 style linter settings（goconst numbers 等・wsl 完全パリティ）は **DEFERRED** |
+| `guff-style` | ✅ **23**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / dogsled / asciicheck / goprintffuncname / funlen / gocyclo / lll / gocognit / nestif / cyclop / nakedret / nosprintfhostport / predeclared / whitespace / nlreturn / mnd / prealloc / tagalign / wsl） | `linters.settings` 配線済み（gocyclo / gocognit / nestif / dogsled / funlen / cyclop（`max-complexity` / `package-average` / `skip-tests`）/ lll / nakedret（`max-func-lines` / `skip-test-files`）/ nlreturn / predeclared / whitespace（`multi-if` / `multi-func`）/ mnd / prealloc / tagalign / wsl / perfsprint / goconst（`match-constant` / `numbers` / `min` / `max` 含む）の主要キー）。ignore ディレクティブ・SuggestedFix・`perfsprint` concat-loop / `goconst` find-duplicates・wsl 完全パリティは **DEFERRED** |
 | `guff-comment` | ✅ **3**（godot / godox / dupword） | settings・SuggestedFix は **DEFERRED** |
 | `guff-import` | ✅ **3**（depguard / gomoddirectives / gomodguard） | settings・gomodguard_v2 は **DEFERRED** |
 | `guff-misspell` | ✅ **1**（misspell） | `linters.settings.misspell` 配線済み（locale / ignore-words / extra-words / mode=restricted） |
@@ -526,7 +526,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - `usestdlibvars` の optional テーブル / `usetesting`・`copyloopvar` settings 配線
   - `gocyclo` / `gocognit` / `nestif` / `dogsled` / `funlen` / `cyclop` / `lll` / `nakedret` / `nlreturn` / `predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` 配線は **完了**（2026-07-16）
   - `whitespace` `multi-if` / `multi-func` 実効化は **完了**（2026-07-16）
-  - `perfsprint` の concat-loop / fiximports、`goconst` の match-constant / numbers / find-duplicates
+  - `goconst` `match-constant` / `numbers` / `min` / `max` 実効化は **完了**（2026-07-16）
+  - `perfsprint` の concat-loop / fiximports、`goconst` の find-duplicates
   - `errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）
   - `rowserrcheck` / bodyclose / contextcheck / sqlclosecheck — SSA（→ R17）
   - gosec ほか（R13 続きセッションで数個ずつ）
@@ -664,6 +665,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-16 | **R13/R14 続き**: `goconst` `match-constant` / `numbers` / `min` / `max` 実効化（upstream jgautheron/goconst 準拠）。`linters.settings.goconst` YAML 配線拡張。テスト: `numbers_*` / `match_constant_*` fixtures + settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `whitespace` `multi-if` / `multi-func` 実効化（upstream ultraware/whitespace 準拠）。テスト: `multi_if_*` / `multi_func_*` fixtures + settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `cyclop` `package-average` / `skip-tests`、`nakedret` `skip-test-files`、`predeclared` / `whitespace` / `mnd` / `prealloc` / `tagalign` / `wsl` / `perfsprint` / `goconst` の `linters.settings` YAML → `SettingsBag` 配線。テスト: `v2_style_settings_extended.yml` + `guff-style` settings integration tests |
 | 2026-07-16 | **R13/R14 続き**: `linters.settings` を `cyclop` / `lll` / `nakedret` / `nlreturn` に配線（`max-complexity` / `line-length`・`tab-width` / `max-func-lines` / `block-size`）。テスト: `v2_style_settings.yml` 拡張 + `guff-style` settings integration tests |

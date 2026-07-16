@@ -155,6 +155,110 @@ fn goconst_allows_below_threshold() {
 }
 
 #[test]
+fn goconst_flags_repeated_numbers() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GoconstOptions;
+
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/numbers",
+        "numbers_bad.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "goconst",
+        GoconstOptions {
+            numbers: true,
+            number_min: 0,
+            number_max: 0,
+            ..GoconstOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goconst(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("`100`") && m.contains("3 occurrences")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goconst_numbers_respect_range_and_threshold() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GoconstOptions;
+
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/numbers_ok",
+        "numbers_ok.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "goconst",
+        GoconstOptions {
+            numbers: true,
+            number_min: 0,
+            number_max: 0,
+            ..GoconstOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goconst(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "numbers_ok.go should stay clean: {messages:?}"
+    );
+}
+
+#[test]
+fn goconst_match_constant_reports_existing_const() {
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/match",
+        "match_constant_bad.go",
+    );
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("repeated value")
+                && m.contains("3 occurrences")
+                && m.contains("ExistingConst")
+        }),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goconst_match_constant_allows_below_threshold() {
+    let pkg = support::typecheck_fixture(
+        "goconst",
+        "example.com/goconst/match_ok",
+        "match_constant_ok.go",
+    );
+    assert!(support::run_analyzer(goconst(), &pkg).is_empty());
+}
+
+#[test]
 fn dogsled_flags_too_many_blanks() {
     let pkg = support::typecheck_fixture("dogsled", "example.com/dogsled", "bad.go");
     let messages = support::run_analyzer(dogsled(), &pkg);

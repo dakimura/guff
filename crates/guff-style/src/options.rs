@@ -293,6 +293,14 @@ pub struct GoconstOptions {
     /// golangci `ignore-calls`: when true, skip string literals in call arguments.
     pub ignore_calls: bool,
     pub ignore_tests: bool,
+    /// golangci `match-constant`: match repeated literals against existing `const` values.
+    pub match_constant: bool,
+    /// golangci `numbers`: also report duplicated numeric literals.
+    pub numbers: bool,
+    /// golangci `min` (only when `numbers` is true).
+    pub number_min: i64,
+    /// golangci `max` (only when `numbers` is true).
+    pub number_max: i64,
 }
 
 impl Default for GoconstOptions {
@@ -302,6 +310,10 @@ impl Default for GoconstOptions {
             min_occurrences: 3,
             ignore_calls: true,
             ignore_tests: false,
+            match_constant: true,
+            numbers: false,
+            number_min: 3,
+            number_max: 3,
         }
     }
 }
