@@ -45,6 +45,7 @@ pub struct LinterSettings {
     pub musttag: MusttagSettings,
     pub loggercheck: LoggercheckSettings,
     pub sloglint: SloglintSettings,
+    pub testifylint: TestifylintSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
@@ -503,6 +504,28 @@ impl Default for SloglintSettings {
     }
 }
 
+/// Nested `bool-compare` settings for testifylint.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintBoolCompareSettings {
+    #[serde(default, rename = "ignore-custom-types")]
+    pub ignore_custom_types: bool,
+}
+
+/// `linters.settings.testifylint` / `linters-settings.testifylint`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TestifylintSettings {
+    #[serde(default, rename = "enable-all")]
+    pub enable_all: bool,
+    #[serde(default, rename = "disable-all")]
+    pub disable_all: bool,
+    #[serde(default)]
+    pub enable: Vec<String>,
+    #[serde(default)]
+    pub disable: Vec<String>,
+    #[serde(default, rename = "bool-compare")]
+    pub bool_compare: TestifylintBoolCompareSettings,
+}
+
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct UsetestingSettings {
@@ -847,6 +870,11 @@ impl LinterSettings {
                 out.sloglint = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("testifylint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<TestifylintSettings>(v.clone()) {
+                out.testifylint = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
             if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
                 out.errchkjson = s;
@@ -933,6 +961,7 @@ impl LinterSettings {
         bag.insert("musttag", self.musttag.to_guff_musttag());
         bag.insert("loggercheck", self.loggercheck.to_guff_loggercheck());
         bag.insert("sloglint", self.sloglint.to_guff_sloglint());
+        bag.insert("testifylint", self.testifylint.to_guff_testifylint());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
@@ -1443,6 +1472,18 @@ impl SloglintSettings {
                     args_pos: f.args_pos,
                 })
                 .collect(),
+        }
+    }
+}
+
+impl TestifylintSettings {
+    pub fn to_guff_testifylint(&self) -> guff_style::TestifylintOptions {
+        guff_style::TestifylintOptions {
+            enable_all: self.enable_all,
+            disable_all: self.disable_all,
+            enable: self.enable.clone(),
+            disable: self.disable.clone(),
+            bool_compare_ignore_custom_types: self.bool_compare.ignore_custom_types,
         }
     }
 }

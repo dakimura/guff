@@ -30,6 +30,7 @@
 //! - [`musttag`]
 //! - [`loggercheck`]
 //! - [`sloglint`]
+//! - [`testifylint`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -47,6 +48,7 @@ mod funlen;
 mod loggercheck;
 mod musttag;
 mod sloglint;
+mod testifylint;
 mod gocognit;
 mod goconst;
 mod gocyclo;
@@ -72,8 +74,8 @@ pub use options::{
     FunlenOptions, GocognitOptions, GoconstOptions, GocycloOptions, LllOptions, LoggercheckOptions,
     MndOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
     PerfsprintOptions, PreallocOptions, PredeclaredOptions, SloglintFunc, SloglintOptions,
-    TagalignOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions, WhitespaceOptions,
-    WslOptions,
+    TagalignOptions, TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
+    WhitespaceOptions, WslOptions,
 };
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
@@ -91,6 +93,7 @@ pub use loggercheck::analyzer as loggercheck;
 pub use mnd::analyzer as mnd;
 pub use musttag::analyzer as musttag;
 pub use sloglint::analyzer as sloglint;
+pub use testifylint::analyzer as testifylint;
 pub use nakedret::analyzer as nakedret;
 pub use nestif::analyzer as nestif;
 pub use nlreturn::analyzer as nlreturn;
@@ -139,5 +142,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         musttag(),
         loggercheck(),
         sloglint(),
+        testifylint(),
     ]
 }

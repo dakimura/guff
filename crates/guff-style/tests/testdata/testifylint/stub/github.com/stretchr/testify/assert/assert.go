@@ -1,0 +1,85 @@
+package assert
+
+type TestingT interface {
+	Errorf(format string, args ...interface{})
+}
+
+type Assertions struct{}
+
+func Equal(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool { return true }
+func Equalf(t TestingT, expected, actual interface{}, msg string, args ...interface{}) bool {
+	return true
+}
+func EqualValues(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Exactly(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool { return true }
+func NotEqual(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotEqualValues(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func True(t TestingT, value bool, msgAndArgs ...interface{}) bool  { return true }
+func False(t TestingT, value bool, msgAndArgs ...interface{}) bool { return true }
+func Nil(t TestingT, object interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotNil(t TestingT, object interface{}, msgAndArgs ...interface{}) bool { return true }
+func Empty(t TestingT, object interface{}, msgAndArgs ...interface{}) bool  { return true }
+func NotEmpty(t TestingT, object interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Zero(t TestingT, i interface{}, msgAndArgs ...interface{}) bool    { return true }
+func NotZero(t TestingT, i interface{}, msgAndArgs ...interface{}) bool { return true }
+func Len(t TestingT, object interface{}, length int, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Error(t TestingT, err error, msgAndArgs ...interface{}) bool   { return true }
+func NoError(t TestingT, err error, msgAndArgs ...interface{}) bool { return true }
+func ErrorIs(t TestingT, err, target error, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotErrorIs(t TestingT, err, target error, msgAndArgs ...interface{}) bool {
+	return true
+}
+func IsType(t TestingT, expectedType, object interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func IsNotType(t TestingT, expectedType, object interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Positive(t TestingT, e interface{}, msgAndArgs ...interface{}) bool { return true }
+func Less(t TestingT, e1, e2 interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func LessOrEqual(t TestingT, e1, e2 interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Greater(t TestingT, e1, e2 interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func GreaterOrEqual(t TestingT, e1, e2 interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func Same(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func NotSame(t TestingT, expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func InEpsilon(t TestingT, expected, actual interface{}, epsilon float64, msgAndArgs ...interface{}) bool {
+	return true
+}
+func InDelta(t TestingT, expected, actual interface{}, delta float64, msgAndArgs ...interface{}) bool {
+	return true
+}
+
+func (a *Assertions) Equal(expected, actual interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) True(value bool, msgAndArgs ...interface{}) bool { return true }
+func (a *Assertions) Nil(object interface{}, msgAndArgs ...interface{}) bool {
+	return true
+}
+func (a *Assertions) NoError(err error, msgAndArgs ...interface{}) bool { return true }

@@ -531,6 +531,33 @@ pub struct SloglintFunc {
     pub args_pos: i32,
 }
 
+/// `linters.settings.testifylint` / `linters-settings.testifylint`.
+///
+/// Checker selection matches golangci-lint (`enable-all` / `disable-all` /
+/// `enable` / `disable`). Only implemented checkers are honored; unknown
+/// names are ignored.
+#[derive(Debug, Clone)]
+pub struct TestifylintOptions {
+    pub enable_all: bool,
+    pub disable_all: bool,
+    pub enable: Vec<String>,
+    pub disable: Vec<String>,
+    /// `bool-compare.ignore-custom-types` (default false).
+    pub bool_compare_ignore_custom_types: bool,
+}
+
+impl Default for TestifylintOptions {
+    fn default() -> Self {
+        Self {
+            enable_all: false,
+            disable_all: false,
+            enable: Vec::new(),
+            disable: Vec::new(),
+            bool_compare_ignore_custom_types: false,
+        }
+    }
+}
+
 /// `linters.settings.sloglint` / `linters-settings.sloglint`.
 ///
 /// Defaults match golangci-lint (`no-mixed-args: true`; other checks off).

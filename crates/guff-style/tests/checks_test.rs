@@ -3,8 +3,8 @@ mod support;
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, funlen, gocognit, goconst,
     gocyclo, goprintffuncname, lll, loggercheck, mnd, musttag, nakedret, nestif, nlreturn,
-    nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, unconvert,
-    usestdlibvars, usetesting, whitespace, wsl,
+    nosprintfhostport, perfsprint, prealloc, predeclared, sloglint, tagalign, testifylint,
+    unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -2358,5 +2358,109 @@ fn sloglint_settings_static_msg_forbidden_keys_and_attr_only() {
             .iter()
             .any(|m| m.contains("key-value pairs should not be used")),
         "attr-only: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_flags_common_anti_patterns() {
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint", "bad.go");
+    let messages = support::run_analyzer(testifylint(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("bool-compare")),
+        "bool-compare: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("compares")),
+        "compares: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("empty")),
+        "empty: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("error-nil")),
+        "error-nil: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("nil-compare")),
+        "nil-compare: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("len")),
+        "len: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("float-compare")),
+        "float-compare: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_allows_idiomatic_assertions() {
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint/ok", "ok.go");
+    let messages = support::run_analyzer(testifylint(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no diagnostics for idiomatic testify usage: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_flags_blank_imports() {
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint/blank", "blank.go");
+    let messages = support::run_analyzer(testifylint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("blank-import"))
+            .count()
+            >= 2,
+        "blank-import: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_disable_all_then_enable_subset() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TestifylintOptions;
+
+    let pkg = support::typecheck_fixture("testifylint", "example.com/testifylint", "settings.go");
+    let all = support::run_analyzer(testifylint(), &pkg);
+    assert!(
+        all.iter().any(|m| m.contains("bool-compare")),
+        "defaults should flag bool-compare: {all:?}"
+    );
+    assert!(
+        all.iter().any(|m| m.contains("empty")),
+        "defaults should flag empty: {all:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["bool-compare".into()],
+            ..TestifylintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("bool-compare")),
+        "enabled bool-compare: {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|m| !m.contains("empty:")),
+        "empty should be disabled: {messages:?}"
     );
 }

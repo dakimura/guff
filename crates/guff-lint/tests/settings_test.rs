@@ -531,6 +531,27 @@ fn parse_v2_sloglint_settings() {
 }
 
 #[test]
+fn parse_v2_testifylint_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_testifylint_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.testifylint.disable_all);
+    assert!(!settings.testifylint.enable_all);
+    assert_eq!(
+        settings.testifylint.enable,
+        vec!["bool-compare".to_string(), "empty".to_string()]
+    );
+    assert!(settings.testifylint.bool_compare.ignore_custom_types);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::TestifylintOptions>("testifylint")
+        .expect("testifylint options");
+    assert!(opts.disable_all);
+    assert_eq!(opts.enable, vec!["bool-compare".to_string(), "empty".to_string()]);
+    assert!(opts.bool_compare_ignore_custom_types);
+}
+
+#[test]
 fn parse_v2_errchkjson_settings() {
     use guff_lint::ErrchkjsonSettings;
 
