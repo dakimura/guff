@@ -3036,6 +3036,56 @@ fn modernize_flags_mapsloop() {
 }
 
 #[test]
+fn modernize_flags_slicesbackward() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/slicesbackward",
+        "slicesbackward.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("slices.Backward")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_reflecttypefor() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/reflecttypefor",
+        "reflecttypefor.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("TypeFor"))
+            .count()
+            >= 2,
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_testingcontext() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/testingcontext",
+        "testingcontext.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("t.Context")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn modernize_allows_modern_code() {
     let pkg = support::typecheck_fixture("modernize", "example.com/modernize/ok", "ok.go");
     assert!(

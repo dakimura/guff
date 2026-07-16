@@ -15,21 +15,25 @@
 //! - `stringsseq` — `range strings.Split/Fields` → `SplitSeq`/`FieldsSeq` (Go 1.24+)
 //! - `waitgroupgo` — `Add(1)`+`go`+`Done` → `WaitGroup.Go` (Go 1.25+)
 //! - `mapsloop` — `for k, v := range x { m[k] = v }` → `maps.Copy` (Go 1.23+; map→map)
+//! - `slicesbackward` — reverse index loop → `slices.Backward` (Go 1.23+; simplified)
+//! - `reflecttypefor` — `reflect.TypeOf` → `TypeFor` (Go 1.22+; `(*T)(nil).Elem` + simple vars)
+//! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
-//! errorsastype, newexpr, reflecttypefor, slicesbackward, stditerators,
-//! stringscut, stringsbuilder, testingcontext, unsafefuncs, mapsloop Insert/
-//! Collect (iter.Seq2) / Clone (nil-preserving), HasPrefix/TrimPrefix pattern 2 /
-//! bytes variants, slicescontains ContainsFunc / break variants, waitgroupgo
-//! trailing-Done / SuggestedFix import edits, and full rangeint/minmax edge-case
-//! parity with upstream.
+//! errorsastype, newexpr, stditerators, stringscut, stringsbuilder, unsafefuncs,
+//! mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving), HasPrefix/TrimPrefix
+//! pattern 2 / bytes variants, slicescontains ContainsFunc / break variants,
+//! waitgroupgo trailing-Done / SuggestedFix import edits, reflecttypefor
+//! complicated/unnamed types & unused-var deletion, slicesbackward mutation/
+//! non-`s[i]` use analysis full parity, testingcontext sole-use via typeindex,
+//! and full rangeint/minmax edge-case parity with upstream.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, BlockStmt, CallExpr, Expr, Field, File, ForStmt, FuncLit, GoStmt,
-    IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
+    AssignStmt, BinaryExpr, BlockStmt, CallExpr, Expr, Field, File, ForStmt, FuncDecl, FuncLit,
+    GoStmt, IfStmt, IncDecStmt, InterfaceType, RangeStmt, ReturnStmt, Stmt, StructType,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -44,7 +48,8 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::map::{map_elem, map_key};
 use guff_types::named::named_obj;
-use guff_types::predicates::{is_float, is_string};
+use guff_types::predicates::{is_float, is_interface, is_string};
+use guff_types::typestring::type_string;
 use guff_types::signature::signature_recv;
 use guff_types::{ObjectId, OperandMode, TypeId};
 
@@ -1295,6 +1300,622 @@ fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagn
     }
 }
 
+fn is_simple_dec(post: &Stmt, index_name: &str) -> bool {
+    match post {
+        Stmt::IncDecStmt(IncDecStmt { x, tok, .. }) => {
+            *tok == Token::DEC && ident_name(x) == Some(index_name)
+        }
+        Stmt::AssignStmt(a)
+            if a.tok == Some(Token::SubAssign)
+                && a.lhs.len() == 1
+                && a.rhs.len() == 1
+                && ident_name(&a.lhs[0]) == Some(index_name) =>
+        {
+            matches!(&a.rhs[0], Expr::BasicLit(lit) if lit.value == "1")
+        }
+        _ => false,
+    }
+}
+
+fn index_mutated_in_body(pass: &Pass<'_>, body: &BlockStmt, index_obj: ObjectId) -> bool {
+    let mut mutated = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(a) => {
+                for lhs in &a.lhs {
+                    if let Expr::Ident(id) = lhs {
+                        if ident_obj(pass, id) == Some(index_obj) {
+                            mutated = true;
+                            return false;
+                        }
+                    }
+                }
+            }
+            NodeRef::IncDecStmt(IncDecStmt { x, .. }) => {
+                if let Expr::Ident(id) = x {
+                    if ident_obj(pass, id) == Some(index_obj) {
+                        mutated = true;
+                        return false;
+                    }
+                }
+            }
+            NodeRef::UnaryExpr(u) if u.op == Token::AND => {
+                if let Expr::Ident(id) = u.x.as_ref() {
+                    if ident_obj(pass, id) == Some(index_obj) {
+                        mutated = true;
+                        return false;
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    mutated
+}
+
+fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnostic>) {
+    if pass.pkg().pkg_path == "slices" || pass.pkg().pkg_path.starts_with("slices/") {
+        return;
+    }
+    let pos = for_stmt.for_.0 as u32;
+    if !go_at_least(pass, pos, "go1.23") {
+        return;
+    }
+    let Some(Stmt::AssignStmt(init)) = for_stmt.init.as_deref() else {
+        return;
+    };
+    if init.lhs.len() != 1 || init.rhs.len() != 1 {
+        return;
+    }
+    if init.tok != Some(Token::DEFINE) && init.tok != Some(Token::ASSIGN) {
+        return;
+    }
+    let Some(index_name) = ident_name(&init.lhs[0]) else {
+        return;
+    };
+    let Expr::BinaryExpr(bin) = &init.rhs[0] else {
+        return;
+    };
+    if bin.op != Token::SUB || !code::is_integer_literal(pass, &bin.y, 1) {
+        return;
+    }
+    let Expr::CallExpr(len_call) = bin.x.as_ref() else {
+        return;
+    };
+    if !code::is_call_to(pass, len_call, "len") || len_call.args.len() != 1 {
+        return;
+    }
+    if type_kind(pass, &len_call.args[0]) != Some(TypeKind::Slice) {
+        return;
+    }
+    let Some(Expr::BinaryExpr(cond)) = for_stmt.cond.as_ref() else {
+        return;
+    };
+    if cond.op != Token::GEQ
+        || ident_name(&cond.x) != Some(index_name)
+        || !code::is_integer_literal(pass, &cond.y, 0)
+    {
+        return;
+    }
+    let Some(post) = for_stmt.post.as_deref() else {
+        return;
+    };
+    if !is_simple_dec(post, index_name) {
+        return;
+    }
+    let Expr::Ident(index_id) = &init.lhs[0] else {
+        return;
+    };
+    let Some(index_obj) = ident_obj(pass, index_id) else {
+        return;
+    };
+    if index_mutated_in_body(pass, &for_stmt.body, index_obj) {
+        return;
+    }
+
+    let slice_expr = &len_call.args[0];
+    let Some(slice_text) = expr_text(slice_expr) else {
+        return;
+    };
+
+    // Classify body uses of i: pure s[i] vs other.
+    let mut slice_indexes: Vec<(u32, u32)> = Vec::new();
+    let mut other_uses = 0usize;
+    walk::inspect(NodeRef::BlockStmt(&for_stmt.body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        let NodeRef::Ident(id) = n else {
+            return true;
+        };
+        if ident_obj(pass, id) != Some(index_obj) {
+            return true;
+        }
+        // Walk parent is not available; approximate: collect all idents and
+        // separately find IndexExpr where index is this ident and x is slice.
+        other_uses += 1;
+        true
+    });
+    // Re-scan for s[i] patterns and subtract them from other_uses.
+    walk::inspect(NodeRef::BlockStmt(&for_stmt.body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if let NodeRef::IndexExpr(ix) = n {
+            if code::same_non_dynamic(pass, &ix.x, slice_expr)
+                && code::same_non_dynamic(pass, &ix.index, &init.lhs[0])
+            {
+                slice_indexes.push((ix.x.pos().0 as u32, (ix.rbrack.0 + 1) as u32));
+            }
+        }
+        true
+    });
+    other_uses = other_uses.saturating_sub(slice_indexes.len());
+
+    let end = for_stmt
+        .post
+        .as_ref()
+        .map(|p| p.end().0 as u32)
+        .unwrap_or(pos);
+    let header_pos = init.lhs[0].pos().0 as u32;
+    let elem_name = "v";
+    let header = if other_uses == 0 && !slice_indexes.is_empty() {
+        format!("_, {elem_name} := range slices.Backward({slice_text})")
+    } else {
+        format!("{index_name}, {elem_name} := range slices.Backward({slice_text})")
+    };
+    let mut text_edits = vec![TextEdit {
+        pos: header_pos,
+        end,
+        new_text: header,
+    }];
+    if other_uses == 0 {
+        for (ipos, iend) in &slice_indexes {
+            text_edits.push(TextEdit {
+                pos: *ipos,
+                end: *iend,
+                new_text: elem_name.into(),
+            });
+        }
+    }
+    pending.push(Diagnostic {
+        pos: header_pos,
+        end,
+        category: String::new(),
+        message: "backward loop over slice can be modernized using slices.Backward".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: format!("Replace with range slices.Backward({slice_text})"),
+            text_edits,
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn format_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg = pass.type_pkg();
+    let qf = pkg.map(|p| {
+        move |id: guff_types::arena::PackageId, parena: &guff_types::arena::PackageArena| {
+            if id == p {
+                String::new()
+            } else {
+                parena.get(id).name().to_string()
+            }
+        }
+    });
+    let qf_ref = qf
+        .as_ref()
+        .map(|f| f as &dyn Fn(guff_types::arena::PackageId, &guff_types::arena::PackageArena) -> String);
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        qf_ref,
+    ))
+}
+
+fn is_complicated_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Named(_) | TypeData::Alias(_) | TypeData::Basic(_) | TypeData::TypeParam(_) => {
+            false
+        }
+        TypeData::Pointer(p) => is_complicated_type(pass, p.elem()),
+        TypeData::Slice(s) => is_complicated_type(pass, s.elem()),
+        TypeData::Array(a) => is_complicated_type(pass, a.elem()),
+        TypeData::Chan(c) => is_complicated_type(pass, c.elem()),
+        TypeData::Map(m) => {
+            is_complicated_type(pass, m.key()) || is_complicated_type(pass, m.elem())
+        }
+        TypeData::Struct(_) | TypeData::Interface(_) | TypeData::Signature(_) => true,
+        _ => true,
+    }
+}
+
+fn expr_has_effects(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_) | Expr::CompositeLit(_) => false,
+        Expr::ParenExpr(p) => expr_has_effects(pass, &p.x),
+        Expr::UnaryExpr(u) => expr_has_effects(pass, &u.x),
+        Expr::StarExpr(s) => expr_has_effects(pass, &s.x),
+        Expr::IndexExpr(ix) => {
+            expr_has_effects(pass, &ix.x) || expr_has_effects(pass, &ix.index)
+        }
+        Expr::CallExpr(call) => {
+            // Type conversion T(x) is effect-free if x is.
+            let info = pass.types_info();
+            let is_conv = info
+                .and_then(|i| i.types.get(&call.fun.id()))
+                .is_some_and(|tav| tav.mode == OperandMode::TypeExpr);
+            if is_conv && call.args.len() == 1 {
+                return expr_has_effects(pass, &call.args[0]);
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+fn is_nil_typed_conversion(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::CallExpr(call) = expr else {
+        return false;
+    };
+    if call.args.len() != 1 || !code::is_nil(pass, &call.args[0]) {
+        return false;
+    }
+    pass.types_info()
+        .and_then(|i| i.types.get(&call.fun.id()))
+        .is_some_and(|tav| tav.mode == OperandMode::TypeExpr)
+}
+
+fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    if !code::is_call_to(pass, call, "reflect.TypeOf") || call.args.len() != 1 {
+        return;
+    }
+    // Skip `TypeOf((*T)(nil))` / `TypeOf([]T(nil))` — usually paired with `.Elem()`
+    // (handled by `check_reflecttypefor_elem`). Reporting both would duplicate.
+    if is_nil_typed_conversion(pass, &call.args[0]) {
+        return;
+    }
+    let pos = call.fun.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.22") {
+        return;
+    }
+    if code::is_nil(pass, &call.args[0]) {
+        return;
+    }
+    if expr_has_effects(pass, &call.args[0]) {
+        return;
+    }
+    let Some(arg_ty) = type_of(pass, &call.args[0]) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let under = unalias_readonly(&artifacts.types, arg_ty).underlying(&artifacts.types);
+    if is_interface(&artifacts.types, under) {
+        return;
+    }
+    if is_complicated_type(pass, arg_ty) {
+        return;
+    }
+    let Some(tstr) = format_type(pass, arg_ty) else {
+        return;
+    };
+    if tstr.len() >= 16 {
+        let old_len = (call.args[0].end().0 - call.args[0].pos().0).max(1) as usize;
+        if tstr.len() > 3 * old_len {
+            return;
+        }
+    }
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return; // e.g. dot-import
+    };
+    let end = call.fun.end().0 as u32;
+    pending.push(Diagnostic {
+        pos,
+        end,
+        category: String::new(),
+        message: "reflect.TypeOf call can be simplified using TypeFor".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace TypeOf by TypeFor".into(),
+            text_edits: vec![
+                TextEdit {
+                    pos: sel.sel.pos().0 as u32,
+                    end: sel.sel.end().0 as u32,
+                    new_text: format!("TypeFor[{tstr}]"),
+                },
+                TextEdit {
+                    pos: (call.lparen.0 + 1) as u32,
+                    end: call.rparen.0 as u32,
+                    new_text: String::new(),
+                },
+            ],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn check_reflecttypefor_elem(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+    // Match reflect.TypeOf(expr).Elem()
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return;
+    };
+    if sel.sel.name != "Elem" || !call.args.is_empty() {
+        return;
+    }
+    let Expr::CallExpr(typeof_call) = sel.x.as_ref() else {
+        return;
+    };
+    if !code::is_call_to(pass, typeof_call, "reflect.TypeOf") || typeof_call.args.len() != 1 {
+        return;
+    }
+    let pos = typeof_call.fun.pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.22") {
+        return;
+    }
+    if expr_has_effects(pass, &typeof_call.args[0]) {
+        return;
+    }
+    let Some(arg_ty) = type_of(pass, &typeof_call.args[0]) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let under = unalias_readonly(&artifacts.types, arg_ty).underlying(&artifacts.types);
+    let elem = match artifacts.types.get(under) {
+        TypeData::Pointer(p) => p.elem(),
+        TypeData::Slice(s) => s.elem(),
+        TypeData::Array(a) => a.elem(),
+        TypeData::Chan(c) => c.elem(),
+        TypeData::Map(m) => m.elem(),
+        _ => return,
+    };
+    if is_complicated_type(pass, elem) {
+        return;
+    }
+    let Some(tstr) = format_type(pass, elem) else {
+        return;
+    };
+    let Expr::SelectorExpr(typeof_sel) = typeof_call.fun.as_ref() else {
+        return;
+    };
+    pending.push(Diagnostic {
+        pos,
+        end: call.end().0 as u32,
+        category: String::new(),
+        message: "reflect.TypeOf call can be simplified using TypeFor".into(),
+        suggested_fixes: vec![SuggestedFix {
+            message: "Replace TypeOf by TypeFor".into(),
+            text_edits: vec![
+                TextEdit {
+                    pos: typeof_sel.sel.pos().0 as u32,
+                    end: typeof_sel.sel.end().0 as u32,
+                    new_text: format!("TypeFor[{tstr}]"),
+                },
+                TextEdit {
+                    pos: (typeof_call.lparen.0 + 1) as u32,
+                    end: typeof_call.rparen.0 as u32,
+                    new_text: String::new(),
+                },
+                // delete `.Elem()`
+                TextEdit {
+                    pos: typeof_call.end().0 as u32,
+                    end: call.end().0 as u32,
+                    new_text: String::new(),
+                },
+            ],
+        }],
+        related: Vec::new(),
+        url: String::new(),
+        severity: String::new(),
+    });
+}
+
+fn test_kind_prefix(name: &str) -> Option<&'static str> {
+    for prefix in ["Test", "Benchmark", "Fuzz"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            if rest.is_empty() {
+                return Some(prefix);
+            }
+            let first = rest.chars().next()?;
+            if first.is_uppercase() {
+                return Some(prefix);
+            }
+        }
+    }
+    None
+}
+
+fn testing_param_name(fd: &FuncDecl) -> Option<&str> {
+    test_kind_prefix(&fd.name.name)?;
+    let params = fd.ty.params.as_ref()?;
+    if params.list.len() != 1 {
+        return None;
+    }
+    if fd.ty.results.as_ref().is_some_and(|r| !r.list.is_empty()) {
+        return None;
+    }
+    let field = &params.list[0];
+    if field.names.len() != 1 || field.names[0].name == "_" {
+        return None;
+    }
+    let ty = field.ty.as_ref()?;
+    let Expr::StarExpr(star) = ty else {
+        return None;
+    };
+    let Expr::SelectorExpr(sel) = star.x.as_ref() else {
+        return None;
+    };
+    let Expr::Ident(pkg) = sel.x.as_ref() else {
+        return None;
+    };
+    if pkg.name != "testing" {
+        return None;
+    }
+    let want = match test_kind_prefix(&fd.name.name)? {
+        "Test" => "T",
+        "Benchmark" => "B",
+        "Fuzz" => "F",
+        _ => return None,
+    };
+    if sel.sel.name != want {
+        return None;
+    }
+    Some(field.names[0].name.as_str())
+}
+
+fn count_ident_uses(pass: &Pass<'_>, body: &BlockStmt, obj: ObjectId) -> usize {
+    let mut n = 0;
+    walk::inspect(NodeRef::BlockStmt(body), |node| {
+        let Some(node) = node else {
+            return true;
+        };
+        if let NodeRef::Ident(id) = node {
+            if ident_obj(pass, id) == Some(obj) {
+                n += 1;
+            }
+        }
+        true
+    });
+    n
+}
+
+fn check_testingcontext_block(
+    pass: &Pass<'_>,
+    body: &BlockStmt,
+    test_name: &str,
+    pending: &mut Vec<Diagnostic>,
+) {
+    for i in 0..body.list.len().saturating_sub(1) {
+        let Stmt::AssignStmt(assign) = &body.list[i] else {
+            continue;
+        };
+        let Stmt::DeferStmt(defr) = &body.list[i + 1] else {
+            continue;
+        };
+        if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 2 || assign.rhs.len() != 1 {
+            continue;
+        }
+        let Expr::CallExpr(with_cancel) = &assign.rhs[0] else {
+            continue;
+        };
+        if !code::is_call_to(pass, with_cancel, "context.WithCancel") || with_cancel.args.len() != 1
+        {
+            continue;
+        }
+        let Expr::CallExpr(bg) = &with_cancel.args[0] else {
+            continue;
+        };
+        if !code::is_call_to_any(pass, bg, &["context.Background", "context.TODO"]) {
+            continue;
+        }
+        let pos = with_cancel.fun.pos().0 as u32;
+        if !go_at_least(pass, pos, "go1.24") {
+            continue;
+        }
+        let Some(ctx_name) = ident_name(&assign.lhs[0]) else {
+            continue;
+        };
+        let Expr::Ident(cancel_id) = &assign.lhs[1] else {
+            continue;
+        };
+        if cancel_id.name == "_" {
+            continue;
+        }
+        let Some(cancel_obj) = ident_obj(pass, cancel_id) else {
+            continue;
+        };
+        // defer cancel() — sole use of cancel (assignment lhs + this call = 2).
+        let Expr::Ident(defer_fun) = defr.call.fun.as_ref() else {
+            continue;
+        };
+        if ident_obj(pass, defer_fun) != Some(cancel_obj) || !defr.call.args.is_empty() {
+            continue;
+        }
+        if count_ident_uses(pass, body, cancel_obj) != 2 {
+            continue;
+        }
+        pending.push(Diagnostic {
+            pos,
+            end: with_cancel.fun.end().0 as u32,
+            category: String::new(),
+            message: format!("context.WithCancel can be modernized using {test_name}.Context"),
+            suggested_fixes: vec![SuggestedFix {
+                message: format!("Replace context.WithCancel with {test_name}.Context"),
+                text_edits: vec![TextEdit {
+                    pos: assign.lhs[0].pos().0 as u32,
+                    end: defr.call.end().0 as u32,
+                    new_text: format!("{ctx_name} := {test_name}.Context()"),
+                }],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+        });
+    }
+}
+
+fn check_testingcontext(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnostic>) {
+    for decl in &file.decls {
+        let guff::ast::Decl::FuncDecl(fd) = decl else {
+            continue;
+        };
+        let Some(t_name) = testing_param_name(fd) else {
+            continue;
+        };
+        let Some(body) = fd.body.as_ref() else {
+            continue;
+        };
+        check_testingcontext_block(pass, body, t_name, pending);
+        // Also scan nested t.Run(..., func(t *testing.T) { ... }) bodies.
+        walk::inspect(NodeRef::BlockStmt(body), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            if let NodeRef::FuncLit(fl) = n {
+                if let Some(field) = fl.ty.params.as_ref().and_then(|p| p.list.first()) {
+                    if field.names.len() == 1 && field.names[0].name != "_" {
+                        if let Some(ty) = field.ty.as_ref() {
+                            if let Expr::StarExpr(star) = ty {
+                                if let Expr::SelectorExpr(sel) = star.x.as_ref() {
+                                    if let Expr::Ident(pkg) = sel.x.as_ref() {
+                                        if pkg.name == "testing"
+                                            && matches!(sel.sel.name.as_str(), "T" | "B" | "F")
+                                        {
+                                            check_testingcontext_block(
+                                                pass,
+                                                &fl.body,
+                                                field.names[0].name.as_str(),
+                                                pending,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            true
+        });
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -1309,6 +1930,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for file in pass.files() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
             check_plusbuild(file, &mut pending);
+        }
+        if enabled(&options, "testingcontext") {
+            check_testingcontext(pass, file, &mut pending);
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
@@ -1329,8 +1953,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_mapsloop(pass, s, &mut pending);
                     }
                 }
-                NodeRef::ForStmt(s) if enabled(&options, "rangeint") => {
-                    check_rangeint(pass, s, &mut pending);
+                NodeRef::ForStmt(s) => {
+                    if enabled(&options, "rangeint") {
+                        check_rangeint(pass, s, &mut pending);
+                    }
+                    if enabled(&options, "slicesbackward") {
+                        check_slicesbackward(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::IfStmt(s) => {
                     if enabled(&options, "minmax") {
@@ -1354,6 +1983,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "slicessort") {
                         check_slicessort(pass, c, &mut pending);
+                    }
+                    if enabled(&options, "reflecttypefor") {
+                        // Prefer Elem() special-case; plain TypeOf is handled when
+                        // this call is not itself the X of a `.Elem()` selector.
+                        check_reflecttypefor_elem(pass, c, &mut pending);
+                        check_reflecttypefor(pass, c, &mut pending);
                     }
                 }
                 NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {
