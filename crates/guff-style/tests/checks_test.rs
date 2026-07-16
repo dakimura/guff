@@ -2,10 +2,10 @@ mod support;
 
 use guff_style::{
     asciicheck, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, funlen,
-    gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, lll, loggercheck, mnd,
-    modernize, musttag, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint, prealloc,
-    predeclared, sloglint, tagalign, testifylint, unconvert, usestdlibvars, usetesting, whitespace,
-    wsl,
+    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, lll,
+    loggercheck, mnd, modernize, musttag, nakedret, nestif, nlreturn, nosprintfhostport, perfsprint,
+    prealloc, predeclared, sloglint, tagalign, testifylint, unconvert, usestdlibvars, usetesting,
+    whitespace, wsl,
 };
 
 #[test]
@@ -42,6 +42,36 @@ fn gochecknoinits_allows_methods_and_other_names() {
     let pkg =
         support::typecheck_fixture("gochecknoinits", "example.com/gochecknoinits/ok", "ok.go");
     assert!(support::run_analyzer(gochecknoinits(), &pkg).is_empty());
+}
+
+#[test]
+fn gochecknoglobals_flags_package_level_vars() {
+    let pkg =
+        support::typecheck_fixture("gochecknoglobals", "example.com/gochecknoglobals", "bad.go");
+    let messages = support::run_analyzer(gochecknoglobals(), &pkg);
+    for name in ["myVar", "myVar1", "myVar2", "Version", "version22", "theVar"] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains(&format!("{name} is a global variable"))),
+            "missing {name}: {messages:?}"
+        );
+    }
+    assert_eq!(messages.len(), 6, "{messages:?}");
+}
+
+#[test]
+fn gochecknoglobals_allows_exceptions() {
+    let pkg = support::typecheck_fixture(
+        "gochecknoglobals",
+        "example.com/gochecknoglobals/ok",
+        "ok.go",
+    );
+    let messages = support::run_analyzer(gochecknoglobals(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "unexpected diagnostics: {messages:?}"
+    );
 }
 
 #[test]
