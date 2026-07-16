@@ -16,6 +16,7 @@
 //! - [`bidichk`]
 //! - [`reassign`]
 //! - [`thelper`]
+//! - [`iface`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -52,6 +53,7 @@ mod options;
 mod asasalint;
 mod asciicheck;
 mod copyloopvar;
+mod iface;
 mod cyclop;
 mod dogsled;
 mod exhaustive;
@@ -94,7 +96,7 @@ mod wsl;
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions,
     ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern, FunlenOptions,
-    GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, LllOptions,
+    GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
     ReassignOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions,
@@ -105,6 +107,7 @@ pub use options::{
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
 pub use copyloopvar::analyzer as copyloopvar;
+pub use iface::analyzer as iface;
 pub use cyclop::analyzer as cyclop;
 pub use dogsled::analyzer as dogsled;
 pub use exhaustive::analyzer as exhaustive;
@@ -164,6 +167,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         forbidigo(),
         reassign(),
         thelper(),
+        iface(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

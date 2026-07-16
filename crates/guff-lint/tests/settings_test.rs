@@ -1029,6 +1029,30 @@ fn parse_v2_thelper_settings() {
 }
 
 #[test]
+fn parse_v2_iface_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_iface_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.iface.enable,
+        vec!["identical".to_string(), "unused".to_string()]
+    );
+    assert_eq!(
+        settings.iface.settings.unused.exclude,
+        vec!["example.com/skip".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::IfaceOptions>("iface")
+        .expect("iface options");
+    assert_eq!(
+        opts.enable,
+        vec!["identical".to_string(), "unused".to_string()]
+    );
+    assert_eq!(opts.unused_exclude, vec!["example.com/skip".to_string()]);
+}
+
+#[test]
 fn parse_v2_bidichk_settings() {
     let contents = fs::read_to_string(testdata_config("v2_bidichk_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

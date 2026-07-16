@@ -744,6 +744,16 @@ impl Default for AsasalintOptions {
     }
 }
 
+/// `linters.settings.iface` / `linters-settings.iface`.
+///
+/// Empty `enable` → golangci default (`identical` only).
+/// `unused_exclude` maps to `settings.unused.exclude` (exact package paths).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IfaceOptions {
+    pub enable: Vec<String>,
+    pub unused_exclude: Vec<String>,
+}
+
 /// `linters.settings.reassign` / `linters-settings.reassign`.
 ///
 /// Empty `patterns` → upstream default `^(Err.*|EOF)$`.

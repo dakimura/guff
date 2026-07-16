@@ -62,6 +62,7 @@ pub struct LinterSettings {
     pub importas: ImportasSettings,
     pub reassign: ReassignSettings,
     pub thelper: ThelperSettings,
+    pub iface: IfaceSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -887,6 +888,32 @@ pub struct ThelperSettings {
     pub tb: ThelperKindSettings,
 }
 
+/// Nested `linters.settings.iface.settings.unused`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct IfaceUnusedSettings {
+    /// Exact package paths to skip (golangci `settings.unused.exclude`).
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
+/// Nested `linters.settings.iface.settings`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct IfaceNestedSettings {
+    #[serde(default)]
+    pub unused: IfaceUnusedSettings,
+}
+
+/// `linters.settings.iface` / `linters-settings.iface`.
+///
+/// Empty `enable` → golangci default (`identical` only).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct IfaceSettings {
+    #[serde(default)]
+    pub enable: Vec<String>,
+    #[serde(default)]
+    pub settings: IfaceNestedSettings,
+}
+
 /// `linters.settings.bidichk` / `linters-settings.bidichk`.
 ///
 /// Each bool enables checking for that rune. When all are false (golangci
@@ -1231,6 +1258,11 @@ impl LinterSettings {
                 out.thelper = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("iface".into())) {
+            if let Ok(s) = serde_yaml::from_value::<IfaceSettings>(v.clone()) {
+                out.iface = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
             if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
                 out.importas = s;
@@ -1302,6 +1334,7 @@ impl LinterSettings {
         bag.insert("asasalint", self.asasalint.to_guff_asasalint());
         bag.insert("reassign", self.reassign.to_guff_reassign());
         bag.insert("thelper", self.thelper.to_guff_thelper());
+        bag.insert("iface", self.iface.to_guff_iface());
         bag.insert("importas", self.importas.to_guff_importas());
         Arc::new(bag)
     }
@@ -2083,6 +2116,15 @@ impl ThelperSettings {
             fuzz: self.fuzz.to_guff(),
             benchmark: self.benchmark.to_guff(),
             tb: self.tb.to_guff(),
+        }
+    }
+}
+
+impl IfaceSettings {
+    pub fn to_guff_iface(&self) -> guff_style::IfaceOptions {
+        guff_style::IfaceOptions {
+            enable: self.enable.clone(),
+            unused_exclude: self.settings.unused.exclude.clone(),
         }
     }
 }

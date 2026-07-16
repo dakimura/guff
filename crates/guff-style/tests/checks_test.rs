@@ -7,10 +7,97 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
-    gocyclo, goprintffuncname, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
+    gocyclo, goprintffuncname, iface, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
     nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, sloglint, tagalign, testifylint,
     thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn iface_flags_identical_interfaces_by_default() {
+    let pkg = support::typecheck_fixture("iface", "example.com/iface", "bad.go");
+    let messages = support::run_analyzer(iface(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface 'Pinger'") && m.contains("Healthcheck")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface 'Healthcheck'") && m.contains("Pinger")),
+        "{messages:?}"
+    );
+    // Default enable is identical only — Granter unused must not be reported.
+    assert!(
+        !messages.iter().any(|m| m.contains("Granter")),
+        "unused should be off by default: {messages:?}"
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+#[test]
+fn iface_allows_distinct_and_used_interfaces() {
+    let pkg = support::typecheck_fixture("iface", "example.com/iface/ok", "ok.go");
+    let messages = support::run_analyzer(iface(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn iface_respects_enable_unused_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::IfaceOptions;
+
+    let pkg = support::typecheck_fixture("iface", "example.com/iface/settings", "settings.go");
+
+    // Default: identical only (Alpha/Beta).
+    let flagged = support::run_analyzer(iface(), &pkg);
+    assert!(
+        flagged.iter().any(|m| m.contains("interface 'Alpha'")),
+        "{flagged:?}"
+    );
+    assert!(
+        !flagged.iter().any(|m| m.contains("Orphan")),
+        "{flagged:?}"
+    );
+
+    // enable unused only: Orphan, not Alpha/Beta identical.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "iface",
+        IfaceOptions {
+            enable: vec!["unused".into()],
+            unused_exclude: Vec::new(),
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        iface(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("interface 'Orphan'") && m.contains("not used")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("interface 'Alpha'")),
+        "identical-only interfaces are also unused: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("identical methods") || m.contains("redundancy")),
+        "{messages:?}"
+    );
+}
 
 #[test]
 fn thelper_flags_begin_first_name() {
