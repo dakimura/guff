@@ -40,6 +40,7 @@ pub struct LinterSettings {
     pub usetesting: UsetestingSettings,
     pub usestdlibvars: UsestdlibvarsSettings,
     pub errchkjson: ErrchkjsonSettings,
+    pub wrapcheck: WrapcheckSettings,
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
@@ -387,6 +388,25 @@ pub struct ErrchkjsonSettings {
     pub report_no_exported: bool,
 }
 
+/// `linters.settings.wrapcheck` / `linters-settings.wrapcheck`.
+///
+/// `None` for `ignore-sigs` keeps upstream default ignore substrings.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct WrapcheckSettings {
+    #[serde(default, rename = "ignore-sigs")]
+    pub ignore_sigs: Option<Vec<String>>,
+    #[serde(default, rename = "extra-ignore-sigs")]
+    pub extra_ignore_sigs: Vec<String>,
+    #[serde(default, rename = "ignore-sig-regexps")]
+    pub ignore_sig_regexps: Vec<String>,
+    #[serde(default, rename = "ignore-package-globs")]
+    pub ignore_package_globs: Vec<String>,
+    #[serde(default, rename = "ignore-interface-regexps")]
+    pub ignore_interface_regexps: Vec<String>,
+    #[serde(default, rename = "report-internal-errors")]
+    pub report_internal_errors: bool,
+}
+
 /// `linters.settings.godot` / `linters-settings.godot`.
 ///
 /// `toplevel` / `noinline` scopes remain DEFERRED (fall back to declarations).
@@ -626,6 +646,11 @@ impl LinterSettings {
                 out.errchkjson = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("wrapcheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<WrapcheckSettings>(v.clone()) {
+                out.wrapcheck = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("godot".into())) {
             if let Ok(s) = serde_yaml::from_value::<GodotSettings>(v.clone()) {
                 out.godot = s;
@@ -697,6 +722,7 @@ impl LinterSettings {
         bag.insert("usetesting", self.usetesting.to_guff_usetesting());
         bag.insert("usestdlibvars", self.usestdlibvars.to_guff_usestdlibvars());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
+        bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
@@ -1121,6 +1147,19 @@ impl ErrchkjsonSettings {
         guff_error::ErrchkjsonOptions {
             omit_safe: !self.check_error_free_encoding,
             report_no_exported: self.report_no_exported,
+        }
+    }
+}
+
+impl WrapcheckSettings {
+    pub fn to_guff_wrapcheck(&self) -> guff_error::WrapcheckOptions {
+        guff_error::WrapcheckOptions {
+            ignore_sigs: self.ignore_sigs.clone(),
+            extra_ignore_sigs: self.extra_ignore_sigs.clone(),
+            ignore_sig_regexps: self.ignore_sig_regexps.clone(),
+            ignore_package_globs: self.ignore_package_globs.clone(),
+            ignore_interface_regexps: self.ignore_interface_regexps.clone(),
+            report_internal_errors: self.report_internal_errors,
         }
     }
 }

@@ -23,6 +23,7 @@ pub use errchkjson::ErrchkjsonOptions;
 pub use errname::analyzer as errname;
 pub use errorlint::analyzer as errorlint;
 pub use wrapcheck::analyzer as wrapcheck;
+pub use wrapcheck::WrapcheckOptions;
 
 use guff_analysis::Analyzer;
 

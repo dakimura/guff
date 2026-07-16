@@ -1,0 +1,19 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - wrapcheck
+  settings:
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+      extra-ignore-sigs:
+        - encoding/json.Marshal(
+      ignore-sig-regexps:
+        - \.New.*Error\(
+      ignore-package-globs:
+        - encoding/*
+      ignore-interface-regexps:
+        - Reader$
+      report-internal-errors: true

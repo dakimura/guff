@@ -381,6 +381,37 @@ fn parse_v2_errchkjson_settings() {
 }
 
 #[test]
+fn parse_v2_wrapcheck_settings() {
+    use guff_lint::WrapcheckSettings;
+
+    let contents = fs::read_to_string(testdata_config("v2_wrapcheck_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.wrapcheck,
+        WrapcheckSettings {
+            ignore_sigs: Some(vec![".Errorf(".into(), "errors.New(".into()]),
+            extra_ignore_sigs: vec!["encoding/json.Marshal(".into()],
+            ignore_sig_regexps: vec![r"\.New.*Error\(".into()],
+            ignore_package_globs: vec!["encoding/*".into()],
+            ignore_interface_regexps: vec!["Reader$".into()],
+            report_internal_errors: true,
+        }
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_error::WrapcheckOptions>("wrapcheck")
+        .expect("wrapcheck options");
+    assert_eq!(
+        opts.ignore_sigs.as_ref().map(|v| v.len()),
+        Some(2)
+    );
+    assert_eq!(opts.extra_ignore_sigs.len(), 1);
+    assert_eq!(opts.ignore_package_globs, vec!["encoding/*".to_string()]);
+    assert!(opts.report_internal_errors);
+}
+
+#[test]
 fn parse_v2_comment_settings() {
     use guff_lint::{DupwordSettings, GodotSettings, GodoxSettings};
 

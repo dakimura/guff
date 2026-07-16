@@ -117,6 +117,175 @@ fn wrapcheck_allows_wrapped_error() {
 }
 
 #[test]
+fn wrapcheck_ignore_package_globs_skips_encoding() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::WrapcheckOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/globs", &dir.join("bad.go"));
+    assert!(
+        !support::run_analyzer(wrapcheck(), &pkg).is_empty(),
+        "default should flag encoding/json"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wrapcheck",
+        WrapcheckOptions {
+            ignore_package_globs: vec!["encoding/*".into()],
+            ..WrapcheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wrapcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "ignore-package-globs encoding/* should silence: {messages:?}"
+    );
+}
+
+#[test]
+fn wrapcheck_extra_ignore_sigs_skips_marshal() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::WrapcheckOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/extra", &dir.join("bad.go"));
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wrapcheck",
+        WrapcheckOptions {
+            extra_ignore_sigs: vec!["encoding/json.Marshal(".into()],
+            ..WrapcheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wrapcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "extra-ignore-sigs should silence Marshal: {messages:?}"
+    );
+}
+
+#[test]
+fn wrapcheck_report_internal_errors() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::WrapcheckOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/internal", &dir.join("internal.go"));
+    assert!(
+        support::run_analyzer(wrapcheck(), &pkg).is_empty(),
+        "default should ignore package-internal: {:?}",
+        support::run_analyzer(wrapcheck(), &pkg)
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wrapcheck",
+        WrapcheckOptions {
+            report_internal_errors: true,
+            ..WrapcheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wrapcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("package-internal") && m.contains("wrapped")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn wrapcheck_ignore_interface_regexps() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::WrapcheckOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("wrapcheck");
+    let pkg = support::typecheck_pkg("example.com/wrapcheck/iface", &dir.join("iface.go"));
+    let default_msgs = support::run_analyzer(wrapcheck(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("interface method") || m.contains("external package")),
+        "default should flag interface method: {default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wrapcheck",
+        WrapcheckOptions {
+            ignore_interface_regexps: vec!["Reader$".into()],
+            ..WrapcheckOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wrapcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    // Interface regexp silences the interface-method report; fall-through may
+    // still flag as external package unless package-globs also match.
+    let mut bag2 = SettingsBag::new();
+    bag2.insert(
+        "wrapcheck",
+        WrapcheckOptions {
+            ignore_interface_regexps: vec!["Reader$".into()],
+            ignore_package_globs: vec!["example.com/ifacepkg".into()],
+            ..WrapcheckOptions::default()
+        },
+    );
+    let silenced = support::run_analyzer_with_settings(
+        wrapcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag2),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        silenced.is_empty(),
+        "interface regexp + package glob should silence: {silenced:?}; intermediate={messages:?}"
+    );
+}
+
+#[test]
 fn errchkjson_flags_blank_and_unsupported() {
     let dir = support::testdata("errchkjson");
     let pkg = support::typecheck_pkg("example.com/errchkjson", &dir.join("bad.go"));

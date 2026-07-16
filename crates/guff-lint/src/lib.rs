@@ -41,6 +41,7 @@ pub use settings::{
     DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings, ErrcheckSettings,
     ErrchkjsonSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings, GomodguardSettings,
     GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings, StaticcheckSettings,
+    WrapcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.
