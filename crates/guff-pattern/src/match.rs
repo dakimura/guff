@@ -363,25 +363,35 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_truly_constant(&mut self, t: &TrulyConstantExpression, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
+        // Port of `TrulyConstantExpression.Match`: constant value, no Idents
+        // in the expression tree, then match `Value` against the TypeAndValue
+        // (wildcard `_` / `Any` accepts any constant).
         let id = node_expr_id(node)?;
         let info = self.env.types?;
         let tav = info.types.get(&id)?;
         if tav.val.is_none() {
             return None;
         }
-        let want = match t.value.as_ref() {
-            Node::String(s) => s.clone(),
-            _ => return None,
-        };
-        let val = tav.val.as_ref()?;
-        if val.kind() != Kind::String {
+        if expr_contains_ident(node) {
             return None;
         }
-        let s = guff_constant::string_val(val).to_string();
-        if s != want {
-            return None;
+        match t.value.as_ref() {
+            Node::Any => Some(MatchValue::Node(node)),
+            Node::String(want) => {
+                let val = tav.val.as_ref()?;
+                if val.kind() != Kind::String {
+                    return None;
+                }
+                let s = guff_constant::string_val(val).to_string();
+                if &s != want {
+                    return None;
+                }
+                Some(MatchValue::Node(node))
+            }
+            // DEFERRED: match IntegerLiteral / other Value patterns against TypeAndValue
+            // the way upstream `match(m, texpr.Value, tv)` does. Wildcard covers ST1017.
+            _ => None,
         }
-        Some(MatchValue::Node(node))
     }
 
     fn match_range_stmt(&mut self, p: &PRangeStmt, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
@@ -746,6 +756,29 @@ impl<'a> Matcher<'a> {
                     None
                 }
             }
+            Node::Or(or) => {
+                for n in &or.nodes {
+                    if self.match_token_node(n, tok).is_some() {
+                        return Some(());
+                    }
+                }
+                None
+            }
+            Node::Binding(b) => {
+                let Some(tok_val) = tok else {
+                    return None;
+                };
+                if let Some(v) = self.state.get(&b.name) {
+                    let MatchValue::Token(bound) = v else {
+                        return None;
+                    };
+                    return if *bound == tok_val { Some(()) } else { None };
+                }
+                let inner = b.node.as_deref().unwrap_or(&Node::Any);
+                self.match_token_node(inner, tok)?;
+                self.set_binding(b.idx, &b.name, MatchValue::Token(tok_val));
+                Some(())
+            }
             _ => None,
         }
     }
@@ -871,12 +904,35 @@ fn integer_literal_value(env: &MatchEnv<'_>, node: NodeRef<'_>) -> Option<i64> {
 fn node_expr_id(node: NodeRef<'_>) -> Option<u32> {
     match node {
         NodeRef::BasicLit(l) => Some(l.id),
+        NodeRef::Ident(i) => Some(i.id),
         NodeRef::UnaryExpr(u) => Some(u.id),
         NodeRef::BinaryExpr(b) => Some(b.id),
         NodeRef::CallExpr(c) => Some(c.id),
-        NodeRef::ParenExpr(p) => node_expr_id(expr_node_ref(&p.x)?),
+        NodeRef::ParenExpr(p) => Some(p.id),
+        NodeRef::IndexExpr(e) => Some(e.id),
+        NodeRef::IndexListExpr(e) => Some(e.id),
+        NodeRef::SliceExpr(e) => Some(e.id),
+        NodeRef::CompositeLit(c) => Some(c.id),
+        NodeRef::SelectorExpr(s) => Some(s.id),
+        NodeRef::StarExpr(s) => Some(s.id),
+        NodeRef::KeyValueExpr(k) => Some(k.id),
         _ => None,
     }
+}
+
+/// Reports whether `node`'s expression tree contains any `Ident`
+/// (named constants / variables make an expression not "truly" constant).
+fn expr_contains_ident(node: NodeRef<'_>) -> bool {
+    let mut found = false;
+    guff::walk::preorder(node, |n| {
+        if matches!(n, NodeRef::Ident(_)) {
+            found = true;
+            false
+        } else {
+            true
+        }
+    });
+    found
 }
 
 fn symbol_pattern_matches(pat: &Node, name: &str) -> bool {
