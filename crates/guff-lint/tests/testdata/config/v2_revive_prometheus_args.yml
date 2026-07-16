@@ -17,3 +17,9 @@ linters:
         - name: superfluous-else
           arguments:
             - "preserveScope"
+        # prometheus-style var-naming args (skipPackageNameChecks is ignored upstream).
+        - name: var-naming
+          arguments:
+            - []
+            - []
+            - - skip-package-name-checks: true

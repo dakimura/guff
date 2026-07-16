@@ -454,3 +454,154 @@ fn revive_preserve_scope_suppresses_scope_enlarging_suggestions() {
         );
     });
 }
+
+#[test]
+fn revive_var_naming_skip_initialism_name_checks() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnamingskip",
+        "var_naming_skip_initialism.go",
+    );
+
+    // Default: initialisms enforced.
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without.iter().any(|m| m.contains("var-naming:") && m.contains("HttpRes")),
+        "default should flag HttpRes: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(vec![RuleArgument::Map({
+                    let mut map = HashMap::new();
+                    map.insert(
+                        "skip-initialism-name-checks".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    map
+                })]),
+            ],
+            disabled: false,
+            severity: None,
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("var-naming:")),
+            "skipInitialismNameChecks should silence initialism warnings: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_var_naming_upper_case_const() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnameupper",
+        "var_naming_upper_case_const.go",
+    );
+
+    let without = support::run_analyzer(revive(), &pkg);
+    assert!(
+        without
+            .iter()
+            .any(|m| m.contains("var-naming:") && m.contains("ALL_CAPS")),
+        "default should flag SCREAMING_SNAKE consts: {without:?}"
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(Vec::new()),
+                RuleArgument::List(vec![RuleArgument::Map({
+                    let mut map = HashMap::new();
+                    map.insert(
+                        "upper-case-const".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    // prometheus also sends this ignored key; must not break parsing.
+                    map.insert(
+                        "skip-package-name-checks".into(),
+                        RuleArgument::String("true".into()),
+                    );
+                    map
+                })]),
+            ],
+            disabled: false,
+            severity: None,
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("SOME_CONST") || m.contains("_SOME_PRIVATE")),
+            "upperCaseConst should allow SCREAMING_SNAKE consts: {messages:?}"
+        );
+        // BAD_VAR_NAME is still ALL_CAPS; message text does not embed the ident.
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m.contains("var-naming:") && m.contains("ALL_CAPS"))
+                .count(),
+            1,
+            "non-const ALL_CAPS var should still be flagged once: {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_var_naming_allowlist_blocklist() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/varnamelists",
+        "var_naming_lists.go",
+    );
+
+    let settings = Settings {
+        rules: Some(vec![RuleSetting {
+            name: "var-naming".into(),
+            arguments: vec![
+                RuleArgument::List(vec![RuleArgument::String("ID".into())]),
+                RuleArgument::List(vec![RuleArgument::String("VM".into())]),
+            ],
+            disabled: false,
+            severity: None,
+        }]),
+        ..Settings::default()
+    };
+
+    with_settings(settings, || {
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            !messages.iter().any(|m| m.contains("customId")),
+            "allowlist ID should keep customId: {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("var-naming:") && m.contains("customVm")),
+            "blocklist/common VM should flag customVm: {messages:?}"
+        );
+    });
+}

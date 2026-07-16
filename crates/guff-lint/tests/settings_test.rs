@@ -242,6 +242,29 @@ fn parse_v2_revive_prometheus_style_rule_arguments() {
             rule.arguments
         );
     }
+
+    let var_naming = revive.rule("var-naming").expect("var-naming");
+    assert_eq!(var_naming.arguments.len(), 3, "{:?}", var_naming.arguments);
+    match var_naming.arguments.first() {
+        Some(guff_revive::RuleArgument::List(l)) if l.is_empty() => {}
+        other => panic!("arg0 allowlist: {other:?}"),
+    }
+    match var_naming.arguments.get(1) {
+        Some(guff_revive::RuleArgument::List(l)) if l.is_empty() => {}
+        other => panic!("arg1 blocklist: {other:?}"),
+    }
+    match var_naming.arguments.get(2) {
+        Some(guff_revive::RuleArgument::List(items)) => {
+            let Some(guff_revive::RuleArgument::Map(map)) = items.first() else {
+                panic!("expected options map in list, got {items:?}");
+            };
+            assert!(
+                map.contains_key("skip-package-name-checks"),
+                "prometheus skip-package-name-checks key: {map:?}"
+            );
+        }
+        other => panic!("expected list third arg, got {other:?}"),
+    }
 }
 
 #[test]
