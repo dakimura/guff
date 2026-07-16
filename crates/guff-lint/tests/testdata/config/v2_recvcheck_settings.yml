@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - recvcheck
+  settings:
+    recvcheck:
+      disable-builtin: true
+      exclusions:
+        - "SQL.Value"
+        - "*.Scan"

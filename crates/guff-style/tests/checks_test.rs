@@ -8,9 +8,101 @@ use guff_style::{
     asasalint, asciicheck, bidichk, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, lll, loggercheck, mnd, modernize, musttag, nakedret, nestif,
-    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, sloglint, tagalign, testifylint,
-    thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    nlreturn, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    testifylint, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn recvcheck_flags_mixed_receivers() {
+    let pkg = support::typecheck_fixture("recvcheck", "example.com/recvcheck", "bad.go");
+    let messages = support::run_analyzer(recvcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("the methods of \"RPC\"")
+                && m.contains("pointer receiver and non-pointer receiver")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 1, "{messages:?}");
+}
+
+#[test]
+fn recvcheck_allows_consistent_and_builtin_unmarshal() {
+    let pkg = support::typecheck_fixture("recvcheck", "example.com/recvcheck/ok", "ok.go");
+    let messages = support::run_analyzer(recvcheck(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn recvcheck_respects_disable_builtin_and_exclusions() {
+    use guff_style::RecvcheckOptions;
+
+    let pkg =
+        support::typecheck_fixture("recvcheck", "example.com/recvcheck/settings", "settings.go");
+
+    // Default: UnmarshalJSON excluded → only SQL mixed receivers.
+    let flagged = support::run_analyzer(recvcheck(), &pkg);
+    assert!(
+        flagged.iter().any(|m| m.contains("the methods of \"SQL\"")),
+        "{flagged:?}"
+    );
+    assert!(
+        !flagged.iter().any(|m| m.contains("JSON")),
+        "UnmarshalJSON should be built-in excluded: {flagged:?}"
+    );
+
+    // disable-builtin: JSON also flagged.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "recvcheck",
+        RecvcheckOptions {
+            disable_builtin: true,
+            exclusions: Vec::new(),
+        },
+    );
+    let with_disabled = support::run_analyzer_with_settings(
+        recvcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        with_disabled
+            .iter()
+            .any(|m| m.contains("the methods of \"JSON\"")),
+        "{with_disabled:?}"
+    );
+    assert!(
+        with_disabled
+            .iter()
+            .any(|m| m.contains("the methods of \"SQL\"")),
+        "{with_disabled:?}"
+    );
+
+    // exclusions: SQL.Value → SQL clean; JSON still excluded by builtin.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "recvcheck",
+        RecvcheckOptions {
+            disable_builtin: false,
+            exclusions: vec!["SQL.Value".into()],
+        },
+    );
+    let with_excl = support::run_analyzer_with_settings(
+        recvcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        with_excl.is_empty(),
+        "SQL.Value exclusion + builtin Unmarshal should clear all: {with_excl:?}"
+    );
+}
 
 #[test]
 fn iface_flags_identical_interfaces_by_default() {

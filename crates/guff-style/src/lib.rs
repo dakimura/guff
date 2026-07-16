@@ -15,6 +15,7 @@
 //! - [`forbidigo`]
 //! - [`bidichk`]
 //! - [`reassign`]
+//! - [`recvcheck`]
 //! - [`thelper`]
 //! - [`iface`]
 //! - [`goprintffuncname`]
@@ -72,6 +73,7 @@ mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod reassign;
+mod recvcheck;
 mod thelper;
 mod gocognit;
 mod goconst;
@@ -99,8 +101,8 @@ pub use options::{
     GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
-    ReassignOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode, TagalignOptions,
-    ThelperKindOptions, ThelperOptions,
+    ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
+    TagalignOptions, ThelperKindOptions, ThelperOptions,
     TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
     WhitespaceOptions, WslOptions,
 };
@@ -120,6 +122,7 @@ pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use reassign::analyzer as reassign;
+pub use recvcheck::analyzer as recvcheck;
 pub use thelper::analyzer as thelper;
 pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
@@ -166,6 +169,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gocheckcompilerdirectives(),
         forbidigo(),
         reassign(),
+        recvcheck(),
         thelper(),
         iface(),
         goprintffuncname(),

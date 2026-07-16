@@ -763,6 +763,16 @@ pub struct ReassignOptions {
     pub patterns: Vec<String>,
 }
 
+/// `linters.settings.recvcheck` / `linters-settings.recvcheck`.
+///
+/// `disable_builtin` false (default) keeps Unmarshal*/GobDecode excludes.
+/// `exclusions` format: `Struct.Method` or `*.Method`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecvcheckOptions {
+    pub disable_builtin: bool,
+    pub exclusions: Vec<String>,
+}
+
 /// Per-kind options for `linters.settings.thelper.{test,fuzz,benchmark,tb}`.
 ///
 /// Defaults match kulti/thelper / golangci-lint (all checks on).

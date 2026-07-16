@@ -61,6 +61,7 @@ pub struct LinterSettings {
     pub asasalint: AsasalintSettings,
     pub importas: ImportasSettings,
     pub reassign: ReassignSettings,
+    pub recvcheck: RecvcheckSettings,
     pub thelper: ThelperSettings,
     pub iface: IfaceSettings,
 }
@@ -862,6 +863,18 @@ pub struct ReassignSettings {
     pub patterns: Vec<String>,
 }
 
+/// `linters.settings.recvcheck` / `linters-settings.recvcheck`.
+///
+/// `disable-builtin` false (default) keeps Unmarshal*/GobDecode excludes.
+/// `exclusions` format: `Struct.Method` or `*.Method`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct RecvcheckSettings {
+    #[serde(default, rename = "disable-builtin")]
+    pub disable_builtin: bool,
+    #[serde(default)]
+    pub exclusions: Vec<String>,
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1253,6 +1266,11 @@ impl LinterSettings {
                 out.reassign = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("recvcheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<RecvcheckSettings>(v.clone()) {
+                out.recvcheck = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("thelper".into())) {
             if let Ok(s) = serde_yaml::from_value::<ThelperSettings>(v.clone()) {
                 out.thelper = s;
@@ -1333,6 +1351,7 @@ impl LinterSettings {
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
         bag.insert("asasalint", self.asasalint.to_guff_asasalint());
         bag.insert("reassign", self.reassign.to_guff_reassign());
+        bag.insert("recvcheck", self.recvcheck.to_guff_recvcheck());
         bag.insert("thelper", self.thelper.to_guff_thelper());
         bag.insert("iface", self.iface.to_guff_iface());
         bag.insert("importas", self.importas.to_guff_importas());
@@ -2094,6 +2113,15 @@ impl ReassignSettings {
     pub fn to_guff_reassign(&self) -> guff_style::ReassignOptions {
         guff_style::ReassignOptions {
             patterns: self.patterns.clone(),
+        }
+    }
+}
+
+impl RecvcheckSettings {
+    pub fn to_guff_recvcheck(&self) -> guff_style::RecvcheckOptions {
+        guff_style::RecvcheckOptions {
+            disable_builtin: self.disable_builtin,
+            exclusions: self.exclusions.clone(),
         }
     }
 }

@@ -1008,6 +1008,27 @@ fn parse_v2_reassign_settings() {
 }
 
 #[test]
+fn parse_v2_recvcheck_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_recvcheck_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.recvcheck.disable_builtin);
+    assert_eq!(
+        settings.recvcheck.exclusions,
+        vec!["SQL.Value".to_string(), "*.Scan".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::RecvcheckOptions>("recvcheck")
+        .expect("recvcheck options");
+    assert!(opts.disable_builtin);
+    assert_eq!(
+        opts.exclusions,
+        vec!["SQL.Value".to_string(), "*.Scan".to_string()]
+    );
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();
