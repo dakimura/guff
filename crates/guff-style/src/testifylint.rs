@@ -6,12 +6,12 @@
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
-//! `float-compare`, `formatter`, `go-require`, `len`, `negative-positive`, `nil-compare`,
-//! `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
+//! `float-compare`, `formatter`, `go-require`, `len`, `mock-expect`, `negative-positive`,
+//! `nil-compare`, `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
 //! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
 //! `suite-thelper` (off by default), `time-compare`, `useless-assert`, `zero`.
 //!
-//! DEFERRED: remaining checker (`mock-expect`), SuggestedFix / TextEdit,
+//! DEFERRED: SuggestedFix / TextEdit,
 //! formatter full printf CheckPrintf / require-f-funcs object lookup parity,
 //! bool-compare custom-type casting in messages, compares time.Time helpers,
 //! encoded-compare autofix text edits, error-is-as CollectT special-case /
@@ -27,19 +27,25 @@ use guff::ast::{
     ArrayType, BasicLit, BinaryExpr, BlockStmt, CallExpr, CompositeLit, Decl, Expr, ExprStmt, File,
     FuncDecl, FuncType, Ident, IfStmt, ImportSpec, SelectorExpr, StarExpr, Stmt, UnaryExpr,
 };
+use guff::is_identifier;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
-use guff_types::api_predicates::api_implements;
+use guff_types::api_predicates::{api_assignable_to, api_implements};
 use guff_types::arena::{ObjectData, ObjectId, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
+use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
+use guff_types::operand::OperandMode;
 use guff_types::predicates::identical;
 use guff_types::scope::lookup as scope_lookup;
-use guff_types::signature::{signature_params, signature_recv, signature_variadic};
+use guff_types::signature::{
+    signature_params, signature_recv, signature_results, signature_variadic,
+};
+use guff_types::slice::slice_elem;
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::{new_pointer, TypeId};
 use regex::Regex;
@@ -68,6 +74,7 @@ const IMPLEMENTED: &[&str] = &[
     "formatter",
     "go-require",
     "len",
+    "mock-expect",
     "negative-positive",
     "nil-compare",
     "regexp",
@@ -152,6 +159,30 @@ fn selector_x_str(expr: &Expr) -> String {
         Expr::SelectorExpr(sel) => format!("{}.{}", selector_x_str(&sel.x), sel.sel.name),
         Expr::CallExpr(c) => format!("{}()", selector_x_str(&c.fun)),
         Expr::ParenExpr(p) => selector_x_str(&p.x),
+        _ => "?".into(),
+    }
+}
+
+/// Best-effort source pretty-printer for diagnostic messages (mock-expect).
+fn expr_pretty(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", expr_pretty(&sel.x), sel.sel.name),
+        Expr::CallExpr(c) => {
+            let args: Vec<String> = c.args.iter().map(expr_pretty).collect();
+            format!("{}({})", expr_pretty(&c.fun), args.join(", "))
+        }
+        Expr::ParenExpr(p) => expr_pretty(&p.x),
+        Expr::StarExpr(s) => format!("*{}", expr_pretty(&s.x)),
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::CompositeLit(cl) => {
+            let ty = cl
+                .ty
+                .as_ref()
+                .map(|t| expr_pretty(t))
+                .unwrap_or_else(|| "?".into());
+            format!("{ty}{{}}")
+        }
         _ => "?".into(),
     }
 }
@@ -3557,6 +3588,245 @@ fn check_go_require(
     }
 }
 
+fn is_testify_mock_method(pass: &Pass<'_>, call: &CallExpr, method_name: &str, receiver_name: &str) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&sel.sel.id).copied() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj_id), ObjectData::Func(_)) {
+        return false;
+    }
+    if obj_id.name(&artifacts.objects) != method_name {
+        return false;
+    }
+    let Some(pkg_path) = code::object_pkg_path(pass, obj_id) else {
+        return false;
+    };
+    if cut_vendor(&pkg_path) != MOCK_PKG {
+        return false;
+    }
+    let Some(sig_id) = obj_id.typ(&artifacts.objects) else {
+        return false;
+    };
+    let Some(recv) = signature_recv(&artifacts.types, sig_id) else {
+        return false;
+    };
+    let Some(recv_typ) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    is_named_pkg_type(pass, recv_typ, MOCK_PKG, receiver_name)
+}
+
+fn mock_method_name(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    let first = call.args.first()?;
+    let name = code::expr_to_string(pass, first)?;
+    is_identifier(&name).then_some(name)
+}
+
+fn expr_addressable(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    info.types
+        .get(&expr.id())
+        .is_some_and(|tav| tav.mode == OperandMode::Variable)
+}
+
+fn lookup_method_on_type(
+    pass: &Pass<'_>,
+    typ: TypeId,
+    addressable: bool,
+    name: &str,
+) -> Option<ObjectId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let mut types = artifacts.types.clone();
+    match lookup_field_or_method(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        addressable,
+        None,
+        name,
+    ) {
+        LookupResult::Found { obj, .. } => {
+            matches!(artifacts.objects.get(obj), ObjectData::Func(_)).then_some(obj)
+        }
+        _ => None,
+    }
+}
+
+fn func_signature(pass: &Pass<'_>, obj: ObjectId) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    obj.typ(&artifacts.objects)
+}
+
+fn is_assignable_expr(pass: &Pass<'_>, expr: &Expr, target: TypeId) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    api_assignable_to(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        target,
+    )
+}
+
+fn call_args_match(pass: &Pass<'_>, sig: TypeId, args: &[Expr], ellipsis_call: bool) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let params = signature_params(&artifacts.types, sig);
+    let variadic = signature_variadic(&artifacts.types, sig);
+    let nparams = tuple_len(&artifacts.types, params);
+
+    if ellipsis_call {
+        if !variadic || args.len() != nparams {
+            return false;
+        }
+        // Non-variadic prefix + final slice arg assignable to `...T` param.
+        for (i, arg) in args.iter().enumerate() {
+            let Some(params_id) = params else {
+                return false;
+            };
+            let param = tuple_at(&artifacts.types, params_id, i);
+            let Some(param_ty) = param.typ(&artifacts.objects) else {
+                return false;
+            };
+            if !is_assignable_expr(pass, arg, param_ty) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if variadic {
+        if nparams == 0 || args.len() < nparams - 1 {
+            return false;
+        }
+        let Some(params_id) = params else {
+            return false;
+        };
+        let fixed = nparams - 1;
+        for (i, arg) in args.iter().take(fixed).enumerate() {
+            let param = tuple_at(&artifacts.types, params_id, i);
+            let Some(param_ty) = param.typ(&artifacts.objects) else {
+                return false;
+            };
+            if !is_assignable_expr(pass, arg, param_ty) {
+                return false;
+            }
+        }
+        let variadic_param = tuple_at(&artifacts.types, params_id, fixed);
+        let Some(slice_ty) = variadic_param.typ(&artifacts.objects) else {
+            return false;
+        };
+        let slice_ty = unalias_readonly(&artifacts.types, slice_ty);
+        if !matches!(artifacts.types.get(slice_ty), TypeData::Slice(_)) {
+            return false;
+        }
+        let elem = slice_elem(&artifacts.types, slice_ty);
+        for arg in &args[fixed..] {
+            if !is_assignable_expr(pass, arg, elem) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if args.len() != nparams {
+        return false;
+    }
+    let Some(params_id) = params else {
+        return nparams == 0;
+    };
+    for (i, arg) in args.iter().enumerate() {
+        let param = tuple_at(&artifacts.types, params_id, i);
+        let Some(param_ty) = param.typ(&artifacts.objects) else {
+            return false;
+        };
+        if !is_assignable_expr(pass, arg, param_ty) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_mock_expect(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !is_testify_mock_method(pass, call, "On", "Mock") {
+        return;
+    }
+    let Some(method_name) = mock_method_name(pass, call) else {
+        return;
+    };
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return;
+    };
+    let Some(recv_typ) = type_of(pass, &sel.x) else {
+        return;
+    };
+    let addressable = expr_addressable(pass, &sel.x);
+    let Some(expect_method) = lookup_method_on_type(pass, recv_typ, addressable, "EXPECT") else {
+        return;
+    };
+    let Some(expect_sig) = func_signature(pass, expect_method) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    if tuple_len(&artifacts.types, signature_params(&artifacts.types, expect_sig)) != 0 {
+        return;
+    }
+    if tuple_len(&artifacts.types, signature_results(&artifacts.types, expect_sig)) != 1 {
+        return;
+    }
+    let Some(results) = signature_results(&artifacts.types, expect_sig) else {
+        return;
+    };
+    let result_var = tuple_at(&artifacts.types, results, 0);
+    let Some(result_typ) = result_var.typ(&artifacts.objects) else {
+        return;
+    };
+    let Some(method) = lookup_method_on_type(pass, result_typ, false, &method_name) else {
+        return;
+    };
+    let Some(method_sig) = func_signature(pass, method) else {
+        return;
+    };
+    let on_args = if call.args.len() > 1 {
+        &call.args[1..]
+    } else {
+        &[][..]
+    };
+    if !call_args_match(pass, method_sig, on_args, call.ellipsis.is_valid()) {
+        return;
+    }
+    let receiver = expr_pretty(&sel.x);
+    pending.push((
+        call.pos().0 as u32,
+        format!("mock-expect: use {receiver}.EXPECT().{method_name}(...)"),
+    ));
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -3746,6 +4016,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 if enabled.contains("suite-subtest-run") {
                     check_suite_subtest_run(pass, ce, &mut pending);
+                }
+                if enabled.contains("mock-expect") {
+                    check_mock_expect(pass, ce, &mut pending);
                 }
                 if let Some(meta) = new_call_meta(pass, ce) {
                     check_call(pass, &meta, &enabled, &options, &mut pending);

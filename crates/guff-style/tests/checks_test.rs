@@ -2514,6 +2514,58 @@ fn testifylint_flags_blank_imports() {
 }
 
 #[test]
+fn testifylint_flags_mock_expect() {
+    let pkg = support::typecheck_fixture(
+        "testifylint",
+        "example.com/testifylint/mockexpect",
+        "mock_expect.go",
+    );
+    let messages = support::run_analyzer(testifylint(), &pkg);
+    let mock_msgs: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("mock-expect"))
+        .collect();
+    assert!(
+        mock_msgs.iter().any(|m| m.contains("u.EXPECT().CreateUser")),
+        "CreateUser: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs.iter().any(|m| m.contains("u.EXPECT().Void")),
+        "Void: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs.iter().any(|m| m.contains("u.EXPECT().CountUsers")),
+        "CountUsers: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs.iter().any(|m| m.contains("u.EXPECT().Variadic")),
+        "Variadic: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs
+            .iter()
+            .any(|m| m.contains("holder.user.EXPECT().Void")),
+        "holder.user: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs
+            .iter()
+            .any(|m| m.contains("mockFrom(u).EXPECT().Void")),
+        "mockFrom: {mock_msgs:?}"
+    );
+    // Ignored cases must not report.
+    assert!(
+        mock_msgs.iter().all(|m| !m.contains("DoesNotExist")),
+        "ignored DoesNotExist: {mock_msgs:?}"
+    );
+    assert!(
+        mock_msgs.len() >= 10,
+        "expected many mock-expect hits, got {}: {mock_msgs:?}",
+        mock_msgs.len()
+    );
+}
+
+#[test]
 fn testifylint_disable_all_then_enable_subset() {
     use std::sync::Arc;
 
