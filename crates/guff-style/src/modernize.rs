@@ -10,7 +10,8 @@
 //! - `fmtappendf` — `[]byte(fmt.Sprint*)` → `fmt.Append*` (Go 1.19+)
 //! - `omitzero` — `json:",omitempty"` on struct fields (Go 1.24+)
 //! - `slicessort` — `sort.Slice` with natural order → `slices.Sort` (Go 1.21+)
-//! - `stringscutprefix` — `HasPrefix`+`TrimPrefix` → `CutPrefix` (Go 1.20+; pattern 1)
+//! - `stringscutprefix` — `HasPrefix`+`TrimPrefix` → `CutPrefix` (Go 1.20+; pattern 1+2;
+//!   strings+bytes)
 //! - `slicescontains` — search loop → `slices.Contains` (Go 1.21+; return true/false)
 //! - `stringsseq` — `range strings.Split/Fields` → `SplitSeq`/`FieldsSeq` (Go 1.24+)
 //! - `waitgroupgo` — `Add(1)`+`go`+`Done` → `WaitGroup.Go` (Go 1.25+)
@@ -20,17 +21,17 @@
 //! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
-//! - `stringscut` — `strings.Split(N)(…)[0]` → `strings.Cut` (Go 1.18+; Split/SplitN only)
+//! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN)
 //!
 //! DEFERRED (recognized in `disable` / documented): atomictypes, embedlit,
 //! errorsastype, newexpr, stditerators, stringsbuilder, stringscut Index/Contains
-//! / bytes variants, unsafefuncs Slice/String helpers, importcomment Module==nil
+//! patterns, unsafefuncs Slice/String helpers, importcomment Module==nil
 //! (GOPATH) skip, mapsloop Insert/Collect (iter.Seq2) / Clone (nil-preserving),
-//! HasPrefix/TrimPrefix pattern 2 / bytes variants, slicescontains ContainsFunc /
-//! break variants, waitgroupgo trailing-Done / SuggestedFix import edits,
-//! reflecttypefor complicated/unnamed types & unused-var deletion, slicesbackward
-//! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
-//! typeindex, and full rangeint/minmax edge-case parity with upstream.
+//! slicescontains ContainsFunc / break variants, waitgroupgo trailing-Done /
+//! SuggestedFix import edits, reflecttypefor complicated/unnamed types &
+//! unused-var deletion, slicesbackward mutation/non-`s[i]` use analysis full
+//! parity, testingcontext sole-use via typeindex, and full rangeint/minmax
+//! edge-case parity with upstream.
 
 use std::collections::HashSet;
 use std::fs;
@@ -824,58 +825,157 @@ fn find_first_call_named<'a>(
     found
 }
 
-fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
-    if if_stmt.init.is_some() || if_stmt.body.list.is_empty() {
-        return;
+fn cutprefix_kind(pass: &Pass<'_>, call: &CallExpr) -> Option<(&'static str, &'static str, bool)> {
+    // (pkg, cut_name, is_prefix)
+    if code::is_call_to(pass, call, "strings.HasPrefix") {
+        Some(("strings", "CutPrefix", true))
+    } else if code::is_call_to(pass, call, "strings.HasSuffix") {
+        Some(("strings", "CutSuffix", false))
+    } else if code::is_call_to(pass, call, "bytes.HasPrefix") {
+        Some(("bytes", "CutPrefix", true))
+    } else if code::is_call_to(pass, call, "bytes.HasSuffix") {
+        Some(("bytes", "CutSuffix", false))
+    } else {
+        None
     }
-    let Expr::CallExpr(has_call) = &if_stmt.cond else {
+}
+
+fn trim_kind(pass: &Pass<'_>, call: &CallExpr) -> Option<(&'static str, &'static str, bool)> {
+    // (pkg, cut_name, is_prefix)
+    if code::is_call_to(pass, call, "strings.TrimPrefix") {
+        Some(("strings", "CutPrefix", true))
+    } else if code::is_call_to(pass, call, "strings.TrimSuffix") {
+        Some(("strings", "CutSuffix", false))
+    } else if code::is_call_to(pass, call, "bytes.TrimPrefix") {
+        Some(("bytes", "CutPrefix", true))
+    } else if code::is_call_to(pass, call, "bytes.TrimSuffix") {
+        Some(("bytes", "CutSuffix", false))
+    } else {
+        None
+    }
+}
+
+fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>) {
+    // Pattern 1: if pkg.HasPrefix(s, affix) { use(pkg.TrimPrefix(s, affix)) }
+    if if_stmt.init.is_none() && !if_stmt.body.list.is_empty() {
+        if let Expr::CallExpr(has_call) = &if_stmt.cond {
+            let pos = has_call.pos().0 as u32;
+            if go_at_least(pass, pos, "go1.20") && has_call.args.len() == 2 {
+                if let Some((pkg, cut_name, is_prefix)) = cutprefix_kind(pass, has_call) {
+                    let trim_name = if is_prefix {
+                        format!("{pkg}.TrimPrefix")
+                    } else {
+                        format!("{pkg}.TrimSuffix")
+                    };
+                    if let Some(trim_call) =
+                        find_first_call_named(pass, &if_stmt.body.list[0], &trim_name)
+                    {
+                        if trim_call.args.len() == 2
+                            && code::same_non_dynamic(pass, &has_call.args[0], &trim_call.args[0])
+                            && code::same_non_dynamic(pass, &has_call.args[1], &trim_call.args[1])
+                        {
+                            if let (Some(s_text), Some(affix_text)) = (
+                                expr_text(&has_call.args[0]),
+                                expr_text(&has_call.args[1]),
+                            ) {
+                                let var_name = if is_prefix { "after" } else { "before" };
+                                let (message, fix_message) = if is_prefix {
+                                    (
+                                        "HasPrefix + TrimPrefix can be simplified to CutPrefix",
+                                        "Replace HasPrefix/TrimPrefix with CutPrefix",
+                                    )
+                                } else {
+                                    (
+                                        "HasSuffix + TrimSuffix can be simplified to CutSuffix",
+                                        "Replace HasSuffix/TrimSuffix with CutSuffix",
+                                    )
+                                };
+                                let end = has_call.end().0 as u32;
+                                pending.push(Diagnostic {
+                                    pos,
+                                    end,
+                                    category: String::new(),
+                                    message: message.into(),
+                                    suggested_fixes: vec![SuggestedFix {
+                                        message: fix_message.into(),
+                                        text_edits: vec![
+                                            TextEdit {
+                                                pos,
+                                                end,
+                                                new_text: format!(
+                                                    "{var_name}, ok := {pkg}.{cut_name}({s_text}, {affix_text}); ok"
+                                                ),
+                                            },
+                                            TextEdit {
+                                                pos: trim_call.pos().0 as u32,
+                                                end: trim_call.end().0 as u32,
+                                                new_text: var_name.into(),
+                                            },
+                                        ],
+                                    }],
+                                    related: Vec::new(),
+                                    url: String::new(),
+                                    severity: String::new(),
+                                });
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: if after := pkg.TrimPrefix(s, affix); after != s { use(after) }
+    let Some(Stmt::AssignStmt(init)) = if_stmt.init.as_deref() else {
         return;
     };
-    let pos = has_call.pos().0 as u32;
-    if !go_at_least(pass, pos, "go1.20") {
+    if init.tok != Some(Token::DEFINE) || init.lhs.len() != 1 || init.rhs.len() != 1 {
         return;
     }
-    if has_call.args.len() != 2 {
+    let Expr::CallExpr(trim_call) = &init.rhs[0] else {
         return;
-    }
-    let (trim_name, cut_name, var_name, message, fix_message) =
-        if code::is_call_to(pass, has_call, "strings.HasPrefix") {
-            (
-                "strings.TrimPrefix",
-                "CutPrefix",
-                "after",
-                "HasPrefix + TrimPrefix can be simplified to CutPrefix",
-                "Replace HasPrefix/TrimPrefix with CutPrefix",
-            )
-        } else if code::is_call_to(pass, has_call, "strings.HasSuffix") {
-            (
-                "strings.TrimSuffix",
-                "CutSuffix",
-                "before",
-                "HasSuffix + TrimSuffix can be simplified to CutSuffix",
-                "Replace HasSuffix/TrimSuffix with CutSuffix",
-            )
-        } else {
-            return;
-        };
-    let Some(trim_call) = find_first_call_named(pass, &if_stmt.body.list[0], trim_name) else {
+    };
+    let Some((_pkg, cut_name, is_prefix)) = trim_kind(pass, trim_call) else {
         return;
     };
     if trim_call.args.len() != 2 {
         return;
     }
-    if !code::same_non_dynamic(pass, &has_call.args[0], &trim_call.args[0])
-        || !code::same_non_dynamic(pass, &has_call.args[1], &trim_call.args[1])
-    {
+    let Expr::BinaryExpr(bin) = &if_stmt.cond else {
+        return;
+    };
+    if bin.op != Token::NEQ {
         return;
     }
-    let Some(s_text) = expr_text(&has_call.args[0]) else {
+    let lhs = &init.lhs[0];
+    let s_arg = &trim_call.args[0];
+    let cond_ok = (code::same_non_dynamic(pass, lhs, &bin.x)
+        && code::same_non_dynamic(pass, s_arg, &bin.y))
+        || (code::same_non_dynamic(pass, lhs, &bin.y)
+            && code::same_non_dynamic(pass, s_arg, &bin.x));
+    if !cond_ok {
         return;
-    };
-    let Some(affix_text) = expr_text(&has_call.args[1]) else {
+    }
+    let pos = init.lhs[0].pos().0 as u32;
+    if !go_at_least(pass, pos, "go1.20") {
         return;
+    }
+    let Expr::SelectorExpr(sel) = trim_call.fun.as_ref() else {
+        return; // e.g. dot-import
     };
-    let end = has_call.end().0 as u32;
+    let (message, fix_message) = if is_prefix {
+        (
+            "TrimPrefix can be simplified to CutPrefix",
+            "Replace TrimPrefix with CutPrefix",
+        )
+    } else {
+        (
+            "TrimSuffix can be simplified to CutSuffix",
+            "Replace TrimSuffix with CutSuffix",
+        )
+    };
+    let end = if_stmt.cond.end().0 as u32;
     pending.push(Diagnostic {
         pos,
         end,
@@ -885,16 +985,19 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
             message: fix_message.into(),
             text_edits: vec![
                 TextEdit {
-                    pos,
-                    end,
-                    new_text: format!(
-                        "{var_name}, ok := strings.{cut_name}({s_text}, {affix_text}); ok"
-                    ),
+                    pos: init.lhs[0].end().0 as u32,
+                    end: init.lhs[0].end().0 as u32,
+                    new_text: ", ok".into(),
                 },
                 TextEdit {
-                    pos: trim_call.pos().0 as u32,
-                    end: trim_call.end().0 as u32,
-                    new_text: var_name.into(),
+                    pos: sel.sel.pos().0 as u32,
+                    end: sel.sel.end().0 as u32,
+                    new_text: cut_name.into(),
+                },
+                TextEdit {
+                    pos: if_stmt.cond.pos().0 as u32,
+                    end: if_stmt.cond.end().0 as u32,
+                    new_text: "ok".into(),
                 },
             ],
         }],
@@ -2136,10 +2239,14 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
     let Expr::CallExpr(call) = ix.x.as_ref() else {
         return;
     };
-    let (split_name, need_n) = if code::is_call_to(pass, call, "strings.Split") {
-        ("Split", false)
+    let (pkg, split_name, need_n) = if code::is_call_to(pass, call, "strings.Split") {
+        ("strings", "Split", false)
     } else if code::is_call_to(pass, call, "strings.SplitN") {
-        ("SplitN", true)
+        ("strings", "SplitN", true)
+    } else if code::is_call_to(pass, call, "bytes.Split") {
+        ("bytes", "Split", false)
+    } else if code::is_call_to(pass, call, "bytes.SplitN") {
+        ("bytes", "SplitN", true)
     } else {
         return;
     };
@@ -2150,11 +2257,14 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
     } else if call.args.len() != 2 {
         return;
     }
-    let Some(sep) = code::expr_to_string(pass, &call.args[1]) else {
-        return;
-    };
-    if sep.is_empty() {
-        return;
+    // strings: require non-empty constant separator; bytes: allow any (often []byte lit).
+    if pkg == "strings" {
+        let Some(sep) = code::expr_to_string(pass, &call.args[1]) else {
+            return;
+        };
+        if sep.is_empty() {
+            return;
+        }
     }
     let pos = call.fun.pos().0 as u32;
     if !go_at_least(pass, pos, "go1.18") {
@@ -2191,9 +2301,9 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
         pos,
         end: call.fun.end().0 as u32,
         category: "stringscut".into(),
-        message: format!("strings.{split_name} call can be simplified using strings.Cut"),
+        message: format!("{pkg}.{split_name} call can be simplified using {pkg}.Cut"),
         suggested_fixes: vec![SuggestedFix {
-            message: format!("Replace strings.{split_name} with strings.Cut"),
+            message: format!("Replace {pkg}.{split_name} with {pkg}.Cut"),
             text_edits,
         }],
         related: Vec::new(),

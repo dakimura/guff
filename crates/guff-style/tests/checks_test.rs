@@ -3139,6 +3139,50 @@ fn modernize_flags_stringscut() {
             >= 2,
         "{messages:?}"
     );
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("bytes.Cut"))
+            .count()
+            >= 2,
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn modernize_flags_stringscutprefix_pattern2_and_bytes() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/stringscutprefix",
+        "stringscutprefix.go",
+    );
+    let messages = support::run_analyzer(modernize(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("TrimPrefix can be simplified to CutPrefix")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("TrimSuffix can be simplified to CutSuffix")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("HasPrefix + TrimPrefix can be simplified to CutPrefix"))
+            .count()
+            >= 1,
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("HasSuffix + TrimSuffix can be simplified to CutSuffix")),
+        "{messages:?}"
+    );
 }
 
 #[test]
