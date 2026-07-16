@@ -25,9 +25,10 @@ pub use exclude::{
     IssueFilter, DEFAULT_EXCLUDE_DIRS,
 };
 pub use format::{
-    format_diagnostic_text, format_issue_text, print_issues, resolve_out_formats,
-    CheckstyleFormatter, Formatter, GithubActionsFormatter, JsonFormatter, JsonReport,
-    JsonWarning, OutputFormatKind, SarifFormatter, TabFormatter, TextFormatter,
+    format_diagnostic_text, format_issue_text, formats_from_output_config, print_issues,
+    resolve_out_formats, CheckstyleFormatter, Formatter, GithubActionsFormatter, JsonFormatter,
+    JsonReport, JsonWarning, OutputFormatKind, OutputSpec, SarifFormatter, TabFormatter,
+    TextFormatter,
 };
 pub use nolint::{NolintIndex, NOLINTLINT_NAME};
 pub use registry::{
@@ -97,8 +98,9 @@ pub struct LintOptions {
     /// `Some(1)` forces sequential. Values `> 1` (or `None` with available
     /// parallelism) size the runner's rayon thread pool.
     pub concurrency: Option<usize>,
-    /// Output formats (`--out-format`, default `[Text]`).
-    pub out_formats: Vec<OutputFormatKind>,
+    /// Output formats (`--out-format`, default `[Text]` on stdout).
+    /// Each entry may include a file path (`format:path`).
+    pub out_formats: Vec<OutputSpec>,
     /// Use persistent issues cache (default true). Disable with `--no-cache`.
     pub use_cache: bool,
     /// Override cache directory (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE` otherwise).
@@ -120,7 +122,7 @@ impl LintOptions {
             settings: std::sync::Arc::new(SettingsBag::default()),
             timeout: Some(Duration::from_secs(60)),
             concurrency: None,
-            out_formats: vec![OutputFormatKind::Text],
+            out_formats: vec![OutputSpec::new(OutputFormatKind::Text)],
             use_cache: true,
             cache_dir: None,
             fix: false,
@@ -326,7 +328,7 @@ impl LintResult {
     /// Print filtered diagnostics using `formats` (default: text). Returns the number of issues.
     pub fn print_with(
         &self,
-        formats: &[OutputFormatKind],
+        formats: &[OutputSpec],
         out: &mut dyn Write,
     ) -> io::Result<usize> {
         let issues = self.issues();
@@ -335,7 +337,7 @@ impl LintResult {
 
     /// Print filtered diagnostics in text format to `out`. Returns the number printed.
     pub fn print_text(&self, out: &mut dyn Write) -> io::Result<usize> {
-        self.print_with(&[OutputFormatKind::Text], out)
+        self.print_with(&[OutputSpec::new(OutputFormatKind::Text)], out)
     }
 
     /// Filtered issues, optionally applying suggested fixes to disk.

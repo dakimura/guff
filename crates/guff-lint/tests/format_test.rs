@@ -4,7 +4,8 @@ use std::process::Command;
 
 use guff_lint::{
     print_issues, resolve_out_formats, CheckstyleFormatter, Formatter, GithubActionsFormatter,
-    Issue, JsonFormatter, OutputFormatKind, SarifFormatter, TabFormatter, TextFormatter,
+    Issue, JsonFormatter, OutputFormatKind, OutputSpec, SarifFormatter, TabFormatter,
+    TextFormatter,
 };
 use guff_analysis::Diagnostic;
 use serde_json::Value;
@@ -35,7 +36,12 @@ fn out_format_text_matches_print_text() {
         .unwrap();
 
     let mut via_print_issues = Vec::new();
-    print_issues(&[OutputFormatKind::Text], &issues, &mut via_print_issues).unwrap();
+    print_issues(
+        &[OutputSpec::new(OutputFormatKind::Text)],
+        &issues,
+        &mut via_print_issues,
+    )
+    .unwrap();
 
     assert_eq!(via_trait, via_print_issues);
     let s = String::from_utf8(via_trait).unwrap();
@@ -126,39 +132,43 @@ fn out_format_tab_columns() {
 fn resolve_out_formats_defaults_to_text() {
     assert_eq!(
         resolve_out_formats(&[]).unwrap(),
-        vec![OutputFormatKind::Text]
+        vec![OutputSpec::new(OutputFormatKind::Text)]
     );
     assert_eq!(
         resolve_out_formats(&["text".into()]).unwrap(),
-        vec![OutputFormatKind::Text]
+        vec![OutputSpec::new(OutputFormatKind::Text)]
     );
     assert_eq!(
         resolve_out_formats(&["line-number".into()]).unwrap(),
-        vec![OutputFormatKind::Text]
+        vec![OutputSpec::new(OutputFormatKind::Text)]
     );
     assert_eq!(
         resolve_out_formats(&["colored-line-number".into()]).unwrap(),
-        vec![OutputFormatKind::Colored]
+        vec![OutputSpec::new(OutputFormatKind::Colored)]
     );
     assert_eq!(
         resolve_out_formats(&["json".into()]).unwrap(),
-        vec![OutputFormatKind::Json]
+        vec![OutputSpec::new(OutputFormatKind::Json)]
     );
     assert_eq!(
         resolve_out_formats(&["checkstyle".into()]).unwrap(),
-        vec![OutputFormatKind::Checkstyle]
+        vec![OutputSpec::new(OutputFormatKind::Checkstyle)]
     );
     assert_eq!(
         resolve_out_formats(&["sarif".into()]).unwrap(),
-        vec![OutputFormatKind::Sarif]
+        vec![OutputSpec::new(OutputFormatKind::Sarif)]
     );
     assert_eq!(
         resolve_out_formats(&["tab".into()]).unwrap(),
-        vec![OutputFormatKind::Tab]
+        vec![OutputSpec::new(OutputFormatKind::Tab)]
     );
     assert_eq!(
         resolve_out_formats(&["github-actions".into()]).unwrap(),
-        vec![OutputFormatKind::GithubActions]
+        vec![OutputSpec::new(OutputFormatKind::GithubActions)]
+    );
+    assert_eq!(
+        resolve_out_formats(&["json:/tmp/out.json".into()]).unwrap(),
+        vec![OutputSpec::with_path(OutputFormatKind::Json, "/tmp/out.json")]
     );
 }
 
@@ -391,4 +401,42 @@ fn cli_out_format_unknown_exits_2() {
         err.contains("unknown output format") || err.contains("not-a-format"),
         "stderr={err}"
     );
+}
+
+#[test]
+fn cli_out_format_path_writes_json_file_not_stdout() {
+    let dir = fixture_dir();
+    let tmp = tempfile::tempdir().unwrap();
+    let out_path = tmp.path().join("report.json");
+    let format_arg = format!("json:{}", out_path.display());
+
+    let out = Command::new(bin())
+        .args([
+            "run",
+            "--no-config",
+            "--enable",
+            "errcheck",
+            "--out-format",
+            &format_arg,
+            ".",
+        ])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn --out-format json:path");
+
+    assert!(
+        out.status.success() || out.status.code() == Some(1),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "file destination must leave stdout empty, got {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let contents = std::fs::read_to_string(&out_path).expect("json file written");
+    let v: Value = serde_json::from_str(&contents).unwrap();
+    assert!(v["Issues"].is_array());
+    assert!(!v["Issues"].as_array().unwrap().is_empty());
+    assert_eq!(v["Issues"][0]["FromLinter"], "errcheck");
 }

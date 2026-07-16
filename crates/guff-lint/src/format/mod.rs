@@ -1,7 +1,8 @@
 //! Issue output formatters (golangci `pkg/printers` equivalent).
 //!
 //! R6: [`Formatter`] + text. R7: JSON. R8: colored / checkstyle / sarif / tab /
-//! github-actions.
+//! github-actions. `format:path` / config `path` write to files (golangci
+//! `createWriter`).
 
 mod checkstyle;
 mod color;
@@ -12,7 +13,9 @@ mod severity;
 mod tab;
 mod text;
 
+use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 
 use crate::exclude::Issue;
 
@@ -48,6 +51,49 @@ pub enum OutputFormatKind {
     ColoredTab,
     /// GitHub Actions workflow commands (`::error file=…`).
     GithubActions,
+}
+
+/// One output destination: a format plus optional path.
+///
+/// Path semantics (golangci `createWriter`):
+/// - [`None`] / empty / `"stdout"` → write to the shared writer (usually stdout)
+/// - `"stderr"` → write to stderr
+/// - otherwise → create parent dirs and write to that file (mode `0o644`)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputSpec {
+    pub kind: OutputFormatKind,
+    pub path: Option<String>,
+}
+
+impl OutputSpec {
+    pub fn new(kind: OutputFormatKind) -> Self {
+        Self { kind, path: None }
+    }
+
+    pub fn with_path(kind: OutputFormatKind, path: impl Into<String>) -> Self {
+        let path = path.into();
+        let path = match path.as_str() {
+            "" | "stdout" => None,
+            other => Some(other.to_string()),
+        };
+        Self { kind, path }
+    }
+
+    /// Parse `name` or `name:path` (first `:` separates format from path).
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let (name, path) = match raw.split_once(':') {
+            Some((n, p)) => (n, Some(p.to_string())),
+            None => (raw, None),
+        };
+        let kind = OutputFormatKind::parse(name)?;
+        Ok(Self::with_path(kind, path.unwrap_or_default()))
+    }
+}
+
+impl From<OutputFormatKind> for OutputSpec {
+    fn from(kind: OutputFormatKind) -> Self {
+        Self::new(kind)
+    }
 }
 
 impl OutputFormatKind {
@@ -97,42 +143,174 @@ impl OutputFormatKind {
     }
 }
 
-/// Resolve CLI `--out-format` values (repeatable). Empty → `[Text]`.
+/// Resolve CLI `--out-format` values (repeatable). Empty → `[Text]` on stdout.
 ///
-/// `format:path` suffixes are accepted for golangci compatibility; writing to a
-/// path instead of the shared writer is DEFERRED (still print to `w`).
-pub fn resolve_out_formats(cli: &[String]) -> Result<Vec<OutputFormatKind>, String> {
+/// Accepts `format` or `format:path` (golangci-compatible). Paths other than
+/// `stdout`/`stderr` are written to disk by [`print_issues`].
+pub fn resolve_out_formats(cli: &[String]) -> Result<Vec<OutputSpec>, String> {
     if cli.is_empty() {
-        return Ok(vec![OutputFormatKind::Text]);
+        return Ok(vec![OutputSpec::new(OutputFormatKind::Text)]);
     }
     let mut out = Vec::with_capacity(cli.len());
     for raw in cli {
-        let name = raw.split_once(':').map(|(n, _)| n).unwrap_or(raw.as_str());
-        out.push(OutputFormatKind::parse(name)?);
+        out.push(OutputSpec::parse(raw)?);
     }
     Ok(out)
 }
 
-/// Print `issues` with each selected formatter (same writer for now).
+/// Print `issues` for each selected format.
+///
+/// Specs without a path (or with `stdout`) use `default_out`. File paths create
+/// parent directories as needed (golangci `MkdirAll` + `OpenFile` O_TRUNC).
 pub fn print_issues(
-    formats: &[OutputFormatKind],
+    formats: &[OutputSpec],
     issues: &[Issue],
-    w: &mut dyn Write,
+    default_out: &mut dyn Write,
 ) -> io::Result<usize> {
     if formats.is_empty() {
-        TextFormatter::new().print(issues, w)?;
+        TextFormatter::new().print(issues, default_out)?;
         return Ok(issues.len());
     }
-    for kind in formats {
-        kind.formatter().print(issues, w)?;
+    for spec in formats {
+        write_spec(spec, issues, default_out)?;
     }
     Ok(issues.len())
+}
+
+fn write_spec(spec: &OutputSpec, issues: &[Issue], default_out: &mut dyn Write) -> io::Result<()> {
+    let formatter = spec.kind.formatter();
+    match spec.path.as_deref() {
+        None | Some("stdout") => formatter.print(issues, default_out),
+        Some("stderr") => {
+            let mut err = io::stderr().lock();
+            formatter.print(issues, &mut err)
+        }
+        Some(path) => {
+            let p = Path::new(path);
+            if let Some(parent) = p.parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(parent)?;
+                }
+            }
+            let mut f = fs::File::create(p)?;
+            formatter.print(issues, &mut f)
+        }
+    }
+}
+
+/// Best-effort parse of `output.formats` / deprecated `output.format`.
+///
+/// Unknown formats are skipped (caller may log). Supported shapes:
+/// - string: `json` / `json:path` / comma-separated
+/// - sequence of strings or `{format, path}` maps
+/// - golangci v2 map: `{ json: { path: ... }, text: { path: stdout } }`
+pub fn formats_from_output_config(
+    formats: &serde_yaml::Value,
+    legacy_format: Option<&str>,
+) -> Vec<OutputSpec> {
+    let mut specs: Vec<OutputSpec> = Vec::new();
+
+    let push_raw = |specs: &mut Vec<OutputSpec>, raw: &str| {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return;
+        }
+        match OutputSpec::parse(raw) {
+            Ok(spec) => {
+                if !specs.iter().any(|s| s.kind == spec.kind && s.path == spec.path) {
+                    specs.push(spec);
+                }
+            }
+            Err(e) => {
+                let name = raw.split_once(':').map(|(n, _)| n).unwrap_or(raw);
+                eprintln!("guff: ignoring output format {name:?}: {e}");
+            }
+        }
+    };
+
+    let push_kind_path = |specs: &mut Vec<OutputSpec>, name: &str, path: Option<&str>| {
+        match OutputFormatKind::parse(name) {
+            Ok(kind) => {
+                let spec = match path {
+                    Some(p) => OutputSpec::with_path(kind, p),
+                    None => OutputSpec::new(kind),
+                };
+                if !specs.iter().any(|s| s.kind == spec.kind && s.path == spec.path) {
+                    specs.push(spec);
+                }
+            }
+            Err(e) => {
+                eprintln!("guff: ignoring output format {name:?}: {e}");
+            }
+        }
+    };
+
+    if let Some(legacy) = legacy_format {
+        if !legacy.is_empty() {
+            for part in legacy.split(',') {
+                push_raw(&mut specs, part);
+            }
+        }
+    }
+
+    match formats {
+        serde_yaml::Value::Null => {}
+        serde_yaml::Value::String(s) => {
+            for part in s.split(',') {
+                push_raw(&mut specs, part);
+            }
+        }
+        serde_yaml::Value::Sequence(seq) => {
+            for item in seq {
+                match item {
+                    serde_yaml::Value::String(s) => push_raw(&mut specs, s),
+                    serde_yaml::Value::Mapping(m) => {
+                        let format = m
+                            .get(serde_yaml::Value::String("format".into()))
+                            .and_then(|v| v.as_str());
+                        let path = m
+                            .get(serde_yaml::Value::String("path".into()))
+                            .and_then(|v| v.as_str());
+                        if let Some(f) = format {
+                            push_kind_path(&mut specs, f, path);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        serde_yaml::Value::Mapping(m) => {
+            for (k, v) in m {
+                let Some(name) = k.as_str() else {
+                    continue;
+                };
+                let path = match v {
+                    serde_yaml::Value::Mapping(inner) => inner
+                        .get(serde_yaml::Value::String("path".into()))
+                        .and_then(|p| p.as_str()),
+                    serde_yaml::Value::String(p) => Some(p.as_str()),
+                    serde_yaml::Value::Null => None,
+                    _ => None,
+                };
+                push_kind_path(&mut specs, name, path);
+            }
+        }
+        _ => {}
+    }
+
+    if specs.is_empty() {
+        vec![OutputSpec::new(OutputFormatKind::Text)]
+    } else {
+        specs
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use guff_analysis::Diagnostic;
+    use std::fs;
+    use tempfile::tempdir;
 
     fn sample_issue() -> Issue {
         Issue {
@@ -185,22 +363,32 @@ mod tests {
 
     #[test]
     fn resolve_default_is_text() {
-        assert_eq!(resolve_out_formats(&[]).unwrap(), vec![OutputFormatKind::Text]);
+        assert_eq!(
+            resolve_out_formats(&[]).unwrap(),
+            vec![OutputSpec::new(OutputFormatKind::Text)]
+        );
     }
 
     #[test]
-    fn resolve_strips_path_suffix() {
+    fn resolve_keeps_path_suffix() {
         assert_eq!(
             resolve_out_formats(&["text:/tmp/out.txt".into()]).unwrap(),
-            vec![OutputFormatKind::Text]
+            vec![OutputSpec::with_path(OutputFormatKind::Text, "/tmp/out.txt")]
         );
         assert_eq!(
             resolve_out_formats(&["json:/tmp/out.json".into()]).unwrap(),
-            vec![OutputFormatKind::Json]
+            vec![OutputSpec::with_path(OutputFormatKind::Json, "/tmp/out.json")]
         );
         assert_eq!(
             resolve_out_formats(&["checkstyle:/tmp/cs.xml".into()]).unwrap(),
-            vec![OutputFormatKind::Checkstyle]
+            vec![OutputSpec::with_path(
+                OutputFormatKind::Checkstyle,
+                "/tmp/cs.xml"
+            )]
+        );
+        assert_eq!(
+            resolve_out_formats(&["json:stdout".into()]).unwrap(),
+            vec![OutputSpec::new(OutputFormatKind::Json)]
         );
     }
 
@@ -217,7 +405,12 @@ mod tests {
     #[test]
     fn json_formatter_via_print_issues() {
         let mut buf = Vec::new();
-        print_issues(&[OutputFormatKind::Json], &[sample_issue()], &mut buf).unwrap();
+        print_issues(
+            &[OutputSpec::new(OutputFormatKind::Json)],
+            &[sample_issue()],
+            &mut buf,
+        )
+        .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         assert_eq!(v["Issues"][0]["FromLinter"], "errcheck");
         assert_eq!(v["Issues"][0]["Text"], "unchecked error");
@@ -228,7 +421,7 @@ mod tests {
     fn github_actions_via_print_issues() {
         let mut buf = Vec::new();
         print_issues(
-            &[OutputFormatKind::GithubActions],
+            &[OutputSpec::new(OutputFormatKind::GithubActions)],
             &[sample_issue()],
             &mut buf,
         )
@@ -238,5 +431,88 @@ mod tests {
             s,
             "::error file=bad.go,line=5,col=2::unchecked error (errcheck)\n"
         );
+    }
+
+    #[test]
+    fn print_issues_writes_format_path_to_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested").join("out.json");
+        let path_str = path.to_string_lossy().into_owned();
+        let mut stdout_buf = Vec::new();
+        print_issues(
+            &[OutputSpec::with_path(OutputFormatKind::Json, path_str)],
+            &[sample_issue()],
+            &mut stdout_buf,
+        )
+        .unwrap();
+        assert!(
+            stdout_buf.is_empty(),
+            "file destination must not also write to default writer"
+        );
+        let contents = fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&contents).unwrap();
+        assert_eq!(v["Issues"][0]["FromLinter"], "errcheck");
+    }
+
+    #[test]
+    fn print_issues_can_split_stdout_and_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("issues.json");
+        let mut stdout_buf = Vec::new();
+        print_issues(
+            &[
+                OutputSpec::new(OutputFormatKind::Text),
+                OutputSpec::with_path(
+                    OutputFormatKind::Json,
+                    path.to_string_lossy().into_owned(),
+                ),
+            ],
+            &[sample_issue()],
+            &mut stdout_buf,
+        )
+        .unwrap();
+        let text = String::from_utf8(stdout_buf).unwrap();
+        assert!(text.contains("unchecked error"));
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["Issues"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn formats_from_config_v2_map_keeps_paths() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+json:
+  path: report.json
+text:
+  path: stdout
+"#,
+        )
+        .unwrap();
+        let specs = formats_from_output_config(&yaml, None);
+        assert!(specs.iter().any(|s| {
+            s.kind == OutputFormatKind::Json && s.path.as_deref() == Some("report.json")
+        }));
+        assert!(specs
+            .iter()
+            .any(|s| s.kind == OutputFormatKind::Text && s.path.is_none()));
+    }
+
+    #[test]
+    fn formats_from_config_sequence_with_path() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+- format: checkstyle
+  path: cs.xml
+- json:out.json
+"#,
+        )
+        .unwrap();
+        let specs = formats_from_output_config(&yaml, None);
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].kind, OutputFormatKind::Checkstyle);
+        assert_eq!(specs[0].path.as_deref(), Some("cs.xml"));
+        assert_eq!(specs[1].kind, OutputFormatKind::Json);
+        assert_eq!(specs[1].path.as_deref(), Some("out.json"));
     }
 }

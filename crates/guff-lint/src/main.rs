@@ -6,11 +6,12 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use guff_lint::{
-    discover_config, format_linters_listing, guff_version, is_meta_linter, load_config,
-    migrate_config_file, parse_go_duration, partition_linters, resolve_linters_with_settings,
-    resolve_out_formats, run_and_print, version_banner, ConfigError, ConfigFile, IssueFilter,
-    LinterDefault, LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputFormatKind,
-    RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
+    discover_config, format_linters_listing, formats_from_output_config, guff_version,
+    is_meta_linter, load_config, migrate_config_file, parse_go_duration, partition_linters,
+    resolve_linters_with_settings, resolve_out_formats, run_and_print, version_banner,
+    ConfigError, ConfigFile, IssueFilter, LinterDefault, LinterSelection, LinterSettings,
+    LintOptions, IssuesConfig, OutputSpec, RunError, SeverityConfig, DEFAULT_TIMEOUT,
+    EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
 use guff_runner::{cache_dir_size, clean_cache, default_cache_dir};
 
@@ -301,7 +302,7 @@ struct LoadedRun {
     linter_settings: LinterSettings,
     timeout: Option<String>,
     concurrency: Option<usize>,
-    out_formats: Vec<OutputFormatKind>,
+    out_formats: Vec<OutputSpec>,
 }
 
 fn load_run_config(
@@ -372,8 +373,7 @@ fn load_run_config(
     };
 
     // Config `output.formats` / `output.format` — CLI `--out-format` overrides.
-    // Only `text`/`line-number` are applied today; other names fall back to text with a note.
-    let out_formats = formats_from_output_config(&output);
+    let out_formats = formats_from_output_config(&output.formats, output.format.as_deref());
 
     Ok(LoadedRun {
         selection,
@@ -385,70 +385,6 @@ fn load_run_config(
         concurrency: run.concurrency.map(|n| n.max(0) as usize),
         out_formats,
     })
-}
-
-/// Best-effort parse of `output.formats` / deprecated `output.format`.
-/// Unknown or unimplemented formats are skipped with a stderr note (config must not fail the run).
-fn formats_from_output_config(output: &guff_lint::OutputConfig) -> Vec<OutputFormatKind> {
-    let mut names: Vec<String> = Vec::new();
-
-    if let Some(legacy) = &output.format {
-        if !legacy.is_empty() {
-            names.push(legacy.clone());
-        }
-    }
-
-    match &output.formats {
-        serde_yaml::Value::Null => {}
-        serde_yaml::Value::String(s) => {
-            for part in s.split(',') {
-                let part = part.trim();
-                if !part.is_empty() {
-                    // `text:path` → name only for now.
-                    names.push(part.split(':').next().unwrap_or(part).to_string());
-                }
-            }
-        }
-        serde_yaml::Value::Sequence(seq) => {
-            for item in seq {
-                match item {
-                    serde_yaml::Value::String(s) => names.push(s.clone()),
-                    serde_yaml::Value::Mapping(m) => {
-                        if let Some(serde_yaml::Value::String(f)) =
-                            m.get(serde_yaml::Value::String("format".into()))
-                        {
-                            names.push(f.clone());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        _ => {}
-    }
-
-    if names.is_empty() {
-        return vec![OutputFormatKind::Text];
-    }
-
-    let mut kinds = Vec::new();
-    for name in &names {
-        match OutputFormatKind::parse(name) {
-            Ok(k) => {
-                if !kinds.contains(&k) {
-                    kinds.push(k);
-                }
-            }
-            Err(e) => {
-                eprintln!("guff: ignoring output format {name:?}: {e}");
-            }
-        }
-    }
-    if kinds.is_empty() {
-        vec![OutputFormatKind::Text]
-    } else {
-        kinds
-    }
 }
 
 fn linters_cmd(args: LintersArgs) -> Result<(), ConfigError> {
