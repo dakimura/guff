@@ -698,6 +698,7 @@ fn cyclop_respects_max_complexity_setting() {
         "cyclop",
         CyclopOptions {
             max_complexity: 20,
+            ..CyclopOptions::default()
         },
     );
     let messages = support::run_analyzer_with_settings(
@@ -769,6 +770,7 @@ fn nakedret_respects_max_func_lines_setting() {
         "nakedret",
         NakedretOptions {
             max_func_lines: 50,
+            ..NakedretOptions::default()
         },
     );
     let messages = support::run_analyzer_with_settings(
@@ -815,5 +817,307 @@ fn nlreturn_respects_block_size_setting() {
     assert!(
         messages.is_empty(),
         "block-size=10 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn cyclop_respects_package_average_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::CyclopOptions;
+
+    let pkg = support::typecheck_fixture("cyclop", "example.com/cyclop/pkgavg", "pkgavg_bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "cyclop",
+        CyclopOptions {
+            max_complexity: 20,
+            package_average: 5.0,
+            ..CyclopOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        cyclop(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("average complexity for the package")),
+        "package-average=5 should flag pkgavg_bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn nakedret_skips_test_files_when_configured() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::NakedretOptions;
+
+    let pkg = support::typecheck_with_deps(
+        "example.com/nakedret/test",
+        &support::testdata("nakedret/bad_test.go"),
+        &[],
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "nakedret",
+        NakedretOptions {
+            skip_test_files: true,
+            ..NakedretOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        nakedret(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "skip-test-files should ignore bad_test.go: {messages:?}"
+    );
+}
+
+#[test]
+fn perfsprint_respects_disabled_integer_format() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PerfsprintOptions;
+
+    let pkg = support::typecheck_fixture("perfsprint", "example.com/perfsprint", "bad.go");
+    assert!(
+        support::run_analyzer(perfsprint(), &pkg)
+            .iter()
+            .any(|m| m.contains("integer-format")),
+        "default should flag integer-format"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "perfsprint",
+        PerfsprintOptions {
+            integer_format: false,
+            bool_format: false,
+            hex_format: false,
+            ..PerfsprintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        perfsprint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("integer-format")),
+        "integer-format=false should suppress integer diagnostics: {messages:?}"
+    );
+}
+
+#[test]
+fn goconst_respects_min_occurrences_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GoconstOptions;
+
+    let pkg = support::typecheck_fixture("goconst", "example.com/goconst", "bad.go");
+    assert!(!support::run_analyzer(goconst(), &pkg).is_empty());
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "goconst",
+        GoconstOptions {
+            min_occurrences: 10,
+            ..GoconstOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goconst(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "min-occurrences=10 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn predeclared_respects_ignore_setting() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PredeclaredOptions;
+
+    let pkg = support::typecheck_fixture("predeclared", "example.com/predeclared", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "predeclared",
+        PredeclaredOptions {
+            ignore: vec!["len".into(), "error".into(), "true".into()],
+            ..PredeclaredOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        predeclared(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "ignore list should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn mnd_respects_disabled_argument_check() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::MndOptions;
+
+    let pkg = support::typecheck_fixture("mnd", "example.com/mnd", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "mnd",
+        MndOptions {
+            checks: vec!["case".into(), "condition".into()],
+            ..MndOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        mnd(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("<argument>")),
+        "disabled argument check should suppress call args: {messages:?}"
+    );
+}
+
+#[test]
+fn prealloc_respects_range_loops_off() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PreallocOptions;
+
+    let pkg = support::typecheck_fixture("prealloc", "example.com/prealloc", "bad.go");
+    assert!(!support::run_analyzer(prealloc(), &pkg).is_empty());
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "prealloc",
+        PreallocOptions {
+            range_loops: false,
+            ..PreallocOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        prealloc(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "range-loops=false should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn tagalign_respects_align_off() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TagalignOptions;
+
+    let pkg = support::typecheck_fixture("tagalign", "example.com/tagalign", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "tagalign",
+        TagalignOptions {
+            align: false,
+            sort: false,
+            ..TagalignOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        tagalign(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "align=false sort=false should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn wsl_respects_allow_assign_and_anything() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::WslOptions;
+
+    let pkg = support::typecheck_fixture("wsl", "example.com/wsl", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wsl",
+        WslOptions {
+            allow_assign_and_anything: true,
+            ..WslOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wsl(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("assignments should only be cuddled")),
+        "allow-assign-and-anything should suppress assign cuddling: {messages:?}"
     );
 }

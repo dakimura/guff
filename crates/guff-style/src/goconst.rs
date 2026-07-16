@@ -2,10 +2,10 @@
 //! (golangci-lint defaults).
 //!
 //! Defaults match golangci-lint: `min-len=3`, `min-occurrences=3`, and
-//! exclude string literals in function call arguments (`exclude-types: [call]`).
+//! exclude string literals in function call arguments (`ignore-calls: true`).
 //!
-//! DEFERRED: `match-constant`, `numbers`, `find-duplicates`, `ignore-tests`,
-//! `ignore-strings` / `ignore-functions`, and per-linter settings wiring.
+//! DEFERRED: `match-constant`, `numbers`, `find-duplicates`, `ignore-strings` /
+//! `ignore-functions`, and remaining settings keys.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -16,8 +16,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-const MIN_LEN: usize = 3;
-const MIN_OCCURRENCES: usize = 3;
+use crate::options::GoconstOptions;
 
 fn unquote_lit(lit: &BasicLit) -> Option<String> {
     let v = &lit.value;
@@ -53,14 +52,14 @@ fn unquote_lit(lit: &BasicLit) -> Option<String> {
     Some(out)
 }
 
-fn add_string(lit: &BasicLit, occurrences: &mut HashMap<String, Vec<u32>>) {
+fn add_string(lit: &BasicLit, min_len: usize, occurrences: &mut HashMap<String, Vec<u32>>) {
     if lit.kind != Some(Token::STRING) {
         return;
     }
     let Some(s) = unquote_lit(lit) else {
         return;
     };
-    if s.chars().count() < MIN_LEN {
+    if s.chars().count() < min_len {
         return;
     }
     occurrences
@@ -69,14 +68,31 @@ fn add_string(lit: &BasicLit, occurrences: &mut HashMap<String, Vec<u32>>) {
         .push(lit.value_pos.0 as u32);
 }
 
-fn add_expr_lit(expr: &Expr, occurrences: &mut HashMap<String, Vec<u32>>) {
+fn add_expr_lit(
+    expr: &Expr,
+    min_len: usize,
+    occurrences: &mut HashMap<String, Vec<u32>>,
+) {
     if let Expr::BasicLit(lit) = expr {
-        add_string(lit, occurrences);
+        add_string(lit, min_len, occurrences);
     }
 }
 
-fn collect(pass: &Pass<'_>, occurrences: &mut HashMap<String, Vec<u32>>) {
-    for file in pass.files() {
+fn collect(pass: &Pass<'_>, options: GoconstOptions, occurrences: &mut HashMap<String, Vec<u32>>) {
+    let pkg = pass.pkg();
+    let fset = pass.fset();
+    for (i, file) in pass.files().iter().enumerate() {
+        let fallback = fset.position(file.pos()).filename;
+        let filename = pkg
+            .compiled_go_files
+            .get(i)
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or(fallback.as_str());
+        if options.ignore_tests && filename.ends_with("_test.go") {
+            continue;
+        }
+
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
@@ -84,48 +100,46 @@ fn collect(pass: &Pass<'_>, occurrences: &mut HashMap<String, Vec<u32>>) {
             match n {
                 // Skip const declarations entirely (match-constant is DEFERRED).
                 NodeRef::GenDecl(g) if g.tok == Some(Token::CONST) => false,
-                // golangci default exclude-types: [call] — skip call arguments.
-                NodeRef::CallExpr(_) => false,
+                NodeRef::CallExpr(_) if options.ignore_calls => false,
                 NodeRef::AssignStmt(a) => {
                     for rhs in &a.rhs {
-                        add_expr_lit(rhs, occurrences);
+                        add_expr_lit(rhs, options.min_len, occurrences);
                     }
                     true
                 }
                 NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
-                    add_expr_lit(&b.x, occurrences);
-                    add_expr_lit(&b.y, occurrences);
+                    add_expr_lit(&b.x, options.min_len, occurrences);
+                    add_expr_lit(&b.y, options.min_len, occurrences);
                     true
                 }
                 NodeRef::CaseClause(c) => {
                     for item in &c.list {
-                        add_expr_lit(item, occurrences);
+                        add_expr_lit(item, options.min_len, occurrences);
                     }
                     true
                 }
                 NodeRef::ReturnStmt(r) => {
                     for item in &r.results {
-                        add_expr_lit(item, occurrences);
+                        add_expr_lit(item, options.min_len, occurrences);
                     }
                     true
                 }
                 NodeRef::CompositeLit(cl) => {
                     for elt in &cl.elts {
                         match elt {
-                            Expr::BasicLit(lit) => add_string(lit, occurrences),
+                            Expr::BasicLit(lit) => add_string(lit, options.min_len, occurrences),
                             Expr::KeyValueExpr(kv) => {
-                                add_expr_lit(&kv.key, occurrences);
-                                add_expr_lit(&kv.value, occurrences);
+                                add_expr_lit(&kv.key, options.min_len, occurrences);
+                                add_expr_lit(&kv.value, options.min_len, occurrences);
                             }
                             _ => {}
                         }
                     }
                     true
                 }
-                // VAR specs (CONST GenDecl short-circuits above).
                 NodeRef::ValueSpec(vs) => {
                     for val in &vs.values {
-                        add_expr_lit(val, occurrences);
+                        add_expr_lit(val, options.min_len, occurrences);
                     }
                     true
                 }
@@ -140,15 +154,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "goconst requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<GoconstOptions>("goconst")
+        .copied()
+        .unwrap_or_default();
+
     let mut occurrences: HashMap<String, Vec<u32>> = HashMap::new();
-    collect(pass, &mut occurrences);
+    collect(pass, options, &mut occurrences);
 
     let mut keys: Vec<_> = occurrences.keys().cloned().collect();
     keys.sort();
     for key in keys {
         let positions = occurrences.get(&key).expect("key present");
         let count = positions.len();
-        if count < MIN_OCCURRENCES {
+        if count < options.min_occurrences {
             continue;
         }
         let pos = *positions.iter().min().unwrap_or(&0);

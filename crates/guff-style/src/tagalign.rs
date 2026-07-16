@@ -4,8 +4,7 @@
 //! Defaults match golangci-lint: `align=true`, `sort=true`, `strict=false`, empty `order`
 //! (alphabetical tag keys).
 //!
-//! DEFERRED: `linters.settings.tagalign` wiring (`align`, `sort`, `order`, `strict`);
-//! SuggestedFix; StrictStyle missing-key column padding.
+//! DEFERRED: SuggestedFix; StrictStyle missing-key column padding.
 
 use std::sync::OnceLock;
 
@@ -15,9 +14,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint defaults.
-const ALIGN: bool = true;
-const SORT: bool = true;
+use crate::options::TagalignOptions;
 
 #[derive(Clone, Debug)]
 struct Tag {
@@ -87,8 +84,21 @@ fn parse_struct_tags(content: &str) -> Result<Vec<Tag>, String> {
     Ok(tags)
 }
 
-fn sort_tags(tags: &mut [Tag]) {
-    tags.sort_by(|a, b| a.key.cmp(&b.key));
+fn sort_tags(tags: &mut [Tag], order: &[String]) {
+    if order.is_empty() {
+        tags.sort_by(|a, b| a.key.cmp(&b.key));
+        return;
+    }
+    tags.sort_by(|a, b| {
+        let ai = order.iter().position(|k| k == &a.key);
+        let bi = order.iter().position(|k| k == &b.key);
+        match (ai, bi) {
+            (Some(i), Some(j)) => i.cmp(&j),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.key.cmp(&b.key),
+        }
+    });
 }
 
 fn align_format(width: usize, s: &str) -> String {
@@ -142,7 +152,7 @@ fn find_consecutive_groups<'a>(
     (single, groups)
 }
 
-fn process_group(fields: &[&Field], pending: &mut Vec<(u32, String)>) {
+fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec<(u32, String)>) {
     let mut tags_group: Vec<Vec<Tag>> = Vec::new();
     let mut kept: Vec<&Field> = Vec::new();
 
@@ -157,8 +167,8 @@ fn process_group(fields: &[&Field], pending: &mut Vec<(u32, String)>) {
         };
         match parse_struct_tags(&content) {
             Ok(mut tags) => {
-                if SORT {
-                    sort_tags(&mut tags);
+                if options.sort {
+                    sort_tags(&mut tags, &options.order);
                 }
                 tags_group.push(tags);
                 kept.push(field);
@@ -183,7 +193,7 @@ fn process_group(fields: &[&Field], pending: &mut Vec<(u32, String)>) {
 
     for (i, field) in kept.iter().enumerate() {
         let tags = &tags_group[i];
-        let new_tag = if ALIGN {
+        let new_tag = if options.align {
             let mut parts = Vec::new();
             for (j, tag) in tags.iter().enumerate() {
                 parts.push(align_format(max_lens[j] + 1, &tag.raw));
@@ -207,7 +217,7 @@ fn process_group(fields: &[&Field], pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn process_single(field: &Field, pending: &mut Vec<(u32, String)>) {
+fn process_single(field: &Field, options: &TagalignOptions, pending: &mut Vec<(u32, String)>) {
     let tag_lit = field.tag.as_ref().unwrap();
     let Some(content) = unquote_tag_lit(&tag_lit.value) else {
         pending.push((
@@ -224,8 +234,8 @@ fn process_single(field: &Field, pending: &mut Vec<(u32, String)>) {
         return;
     };
     let original: Vec<_> = tags.iter().map(|t| t.raw.clone()).collect();
-    if SORT {
-        sort_tags(&mut tags);
+    if options.sort {
+        sort_tags(&mut tags, &options.order);
     }
     let joined = tags
         .iter()
@@ -247,16 +257,21 @@ fn process_single(field: &Field, pending: &mut Vec<(u32, String)>) {
     ));
 }
 
-fn check_struct(fset: &FileSet, st: &StructType, pending: &mut Vec<(u32, String)>) {
+fn check_struct(
+    fset: &FileSet,
+    st: &StructType,
+    options: &TagalignOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     if st.fields.list.is_empty() {
         return;
     }
     let (singles, groups) = find_consecutive_groups(fset, &st.fields.list);
     for g in groups {
-        process_group(&g, pending);
+        process_group(&g, options, pending);
     }
     for f in singles {
-        process_single(f, pending);
+        process_single(f, options, pending);
     }
 }
 
@@ -265,7 +280,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "tagalign requires inspect analyzer".to_string())?;
 
-    if !ALIGN && !SORT {
+    let options = pass
+        .settings::<TagalignOptions>("tagalign")
+        .cloned()
+        .unwrap_or_default();
+
+    if !options.align && !options.sort {
         return Ok(None);
     }
 
@@ -277,7 +297,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             if let NodeRef::StructType(st) = n {
-                check_struct(&fset, st, &mut pending);
+                check_struct(&fset, st, &options, &mut pending);
             }
             true
         });

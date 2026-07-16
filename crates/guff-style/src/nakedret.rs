@@ -3,7 +3,7 @@
 //!
 //! Default matches golangci-lint: `max-func-lines=30`.
 //!
-//! DEFERRED: `skip-test-files`; SuggestedFix for explicit named returns.
+//! DEFERRED: SuggestedFix for explicit named returns.
 
 use std::sync::OnceLock;
 
@@ -24,6 +24,8 @@ struct FuncInfo {
 struct ReturnsVisitor<'a> {
     fset: &'a FileSet,
     max_func_lines: usize,
+    skip_test_files: bool,
+    current_file: String,
     functions: Vec<FuncInfo>,
     pending: &'a mut Vec<(u32, String)>,
 }
@@ -71,6 +73,9 @@ impl<'a> Visitor<'a> for ReturnsVisitor<'a> {
     fn enter(&mut self, node: NodeRef<'a>) -> bool {
         match node {
             NodeRef::FuncDecl(f) => {
+                if self.skip_test_files && self.current_file.ends_with("_test.go") {
+                    return false;
+                }
                 let start = f.ty.pos();
                 let end = f
                     .body
@@ -87,6 +92,9 @@ impl<'a> Visitor<'a> for ReturnsVisitor<'a> {
                 );
             }
             NodeRef::FuncLit(lit) => {
+                if self.skip_test_files && self.current_file.ends_with("_test.go") {
+                    return false;
+                }
                 let start = lit.ty.pos();
                 let end = lit.body.end();
                 let line = self.fset.position(start).line;
@@ -136,16 +144,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let options = pass
         .settings::<NakedretOptions>("nakedret")
-        .copied()
+        .cloned()
         .unwrap_or_default();
     let max_func_lines = options.max_func_lines;
+    let skip_test_files = options.skip_test_files;
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
-    for file in pass.files() {
+    let pkg = pass.pkg();
+    for (i, file) in pass.files().iter().enumerate() {
+        let fallback = fset.position(file.pos()).filename;
+        let filename = pkg
+            .compiled_go_files
+            .get(i)
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or(fallback.as_str())
+            .to_string();
         let mut visitor = ReturnsVisitor {
             fset: &fset,
             max_func_lines,
+            skip_test_files,
+            current_file: filename,
             functions: Vec::new(),
             pending: &mut pending,
         };

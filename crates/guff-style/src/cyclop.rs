@@ -4,8 +4,6 @@
 //! Default matches cyclop / golangci-lint: `max-complexity=10` (report when
 //! complexity is strictly greater than this). Package-average check is off
 //! by default (`package-average=0`).
-//!
-//! DEFERRED: `package-average`; `skipTests` flag.
 
 use std::sync::OnceLock;
 
@@ -49,17 +47,33 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let options = pass
         .settings::<CyclopOptions>("cyclop")
-        .copied()
+        .cloned()
         .unwrap_or_default();
     let max_complexity = options.max_complexity;
+    let package_average = options.package_average;
+    let skip_tests = options.skip_tests;
 
     let mut pending = Vec::new();
+    let mut sum = 0f64;
+    let mut count = 0f64;
+    let mut pkg_name = String::new();
+    let mut pkg_pos = 0u32;
+
     for file in pass.files() {
+        if pkg_name.is_empty() {
+            pkg_name = file.name.name.clone();
+            pkg_pos = file.name.name_pos.0 as u32;
+        }
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;
             };
+            if skip_tests && f.name.name.starts_with("Test") {
+                continue;
+            }
             let c = complexity(NodeRef::FuncDecl(f));
+            count += 1.0;
+            sum += c as f64;
             if c > max_complexity {
                 pending.push((
                     f.name.name_pos.0 as u32,
@@ -69,6 +83,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     ),
                 ));
             }
+        }
+    }
+
+    if package_average > 0.0 && count > 0.0 {
+        let avg = sum / count;
+        if avg > package_average {
+            pending.push((
+                pkg_pos,
+                format!(
+                    "the average complexity for the package {pkg_name} is {avg}, max is {package_average}"
+                ),
+            ));
         }
     }
 

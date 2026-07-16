@@ -2,8 +2,6 @@
 //! (golangci-lint wrapper in `pkg/golinters/prealloc`).
 //!
 //! Defaults match golangci-lint: `simple=true`, `range-loops=true`, `for-loops=false`.
-//!
-//! DEFERRED: `linters.settings.prealloc` wiring (`simple`, `range-loops`, `for-loops`).
 
 use std::sync::OnceLock;
 
@@ -13,10 +11,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
-/// golangci-lint defaults.
-const SIMPLE: bool = true;
-const INCLUDE_RANGE_LOOPS: bool = true;
-const INCLUDE_FOR_LOOPS: bool = false;
+use crate::options::PreallocOptions;
 
 struct SliceDecl {
     name: String,
@@ -93,8 +88,13 @@ fn loop_has_early_exit(body: &[Stmt]) -> bool {
     false
 }
 
-fn hints_from_loop(body: &[Stmt], decls: &[SliceDecl], pending: &mut Vec<(u32, String)>) {
-    if SIMPLE && loop_has_early_exit(body) {
+fn hints_from_loop(
+    body: &[Stmt],
+    decls: &[SliceDecl],
+    simple: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if simple && loop_has_early_exit(body) {
         return;
     }
     for stmt in body {
@@ -128,17 +128,22 @@ fn hints_from_loop(body: &[Stmt], decls: &[SliceDecl], pending: &mut Vec<(u32, S
     }
 }
 
-fn check_func_body(body: &[Stmt], array_types: &mut Vec<String>, pending: &mut Vec<(u32, String)>) {
+fn check_func_body(
+    body: &[Stmt],
+    array_types: &mut Vec<String>,
+    options: PreallocOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     let mut slice_decls: Vec<SliceDecl> = Vec::new();
     for stmt in body {
         collect_array_type_aliases(stmt, array_types);
         collect_slice_vars(stmt, array_types, &mut slice_decls);
         match stmt {
-            Stmt::RangeStmt(r) if INCLUDE_RANGE_LOOPS && !slice_decls.is_empty() => {
-                hints_from_loop(&r.body.list, &slice_decls, pending);
+            Stmt::RangeStmt(r) if options.range_loops && !slice_decls.is_empty() => {
+                hints_from_loop(&r.body.list, &slice_decls, options.simple, pending);
             }
-            Stmt::ForStmt(f) if INCLUDE_FOR_LOOPS && !slice_decls.is_empty() => {
-                hints_from_loop(&f.body.list, &slice_decls, pending);
+            Stmt::ForStmt(f) if options.for_loops && !slice_decls.is_empty() => {
+                hints_from_loop(&f.body.list, &slice_decls, options.simple, pending);
             }
             _ => {}
         }
@@ -149,6 +154,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "prealloc requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<PreallocOptions>("prealloc")
+        .copied()
+        .unwrap_or_default();
 
     let mut pending = Vec::new();
     let mut array_types = Vec::new();
@@ -171,7 +181,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             };
             if let NodeRef::FuncDecl(f) = n {
                 if let Some(body) = &f.body {
-                    check_func_body(&body.list, &mut array_types, &mut pending);
+                    check_func_body(&body.list, &mut array_types, options, &mut pending);
                 }
             }
             true

@@ -28,6 +28,14 @@ pub struct LinterSettings {
     pub lll: LllSettings,
     pub nakedret: NakedretSettings,
     pub nlreturn: NlreturnSettings,
+    pub predeclared: PredeclaredSettings,
+    pub whitespace: WhitespaceSettings,
+    pub mnd: MndSettings,
+    pub prealloc: PreallocSettings,
+    pub tagalign: TagalignSettings,
+    pub wsl: WslSettings,
+    pub perfsprint: PerfsprintSettings,
+    pub goconst: GoconstSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -163,11 +171,14 @@ pub struct FunlenSettings {
 }
 
 /// `linters.settings.cyclop` / `linters-settings.cyclop`.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct CyclopSettings {
     #[serde(default, rename = "max-complexity")]
     pub max_complexity: Option<usize>,
-    // DEFERRED: package-average, skipTests.
+    #[serde(default, rename = "package-average")]
+    pub package_average: Option<f64>,
+    #[serde(default, rename = "skip-tests")]
+    pub skip_tests: Option<bool>,
 }
 
 /// `linters.settings.lll` / `linters-settings.lll`.
@@ -184,7 +195,8 @@ pub struct LllSettings {
 pub struct NakedretSettings {
     #[serde(default, rename = "max-func-lines")]
     pub max_func_lines: Option<usize>,
-    // DEFERRED: skip-test-files.
+    #[serde(default, rename = "skip-test-files")]
+    pub skip_test_files: Option<bool>,
 }
 
 /// `linters.settings.nlreturn` / `linters-settings.nlreturn`.
@@ -192,6 +204,116 @@ pub struct NakedretSettings {
 pub struct NlreturnSettings {
     #[serde(default, rename = "block-size")]
     pub block_size: Option<i64>,
+}
+
+/// `linters.settings.predeclared` / `linters-settings.predeclared`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PredeclaredSettings {
+    #[serde(default)]
+    pub ignore: Vec<String>,
+    #[serde(default, rename = "q", alias = "qualified-name")]
+    pub qualified: Option<bool>,
+}
+
+/// `linters.settings.whitespace` / `linters-settings.whitespace`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct WhitespaceSettings {
+    #[serde(default, rename = "multi-if")]
+    pub multi_if: Option<bool>,
+    #[serde(default, rename = "multi-func")]
+    pub multi_func: Option<bool>,
+}
+
+/// `linters.settings.mnd` / `linters-settings.mnd`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MndSettings {
+    #[serde(default)]
+    pub checks: Option<Vec<String>>,
+    #[serde(default, rename = "ignored-numbers")]
+    pub ignored_numbers: Vec<String>,
+    #[serde(default, rename = "ignored-files")]
+    pub ignored_files: Vec<String>,
+    #[serde(default, rename = "ignored-functions")]
+    pub ignored_functions: Vec<String>,
+}
+
+/// `linters.settings.prealloc` / `linters-settings.prealloc`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PreallocSettings {
+    #[serde(default)]
+    pub simple: Option<bool>,
+    #[serde(default, rename = "range-loops")]
+    pub range_loops: Option<bool>,
+    #[serde(default, rename = "for-loops")]
+    pub for_loops: Option<bool>,
+}
+
+/// `linters.settings.tagalign` / `linters-settings.tagalign`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TagalignSettings {
+    #[serde(default)]
+    pub align: Option<bool>,
+    #[serde(default)]
+    pub sort: Option<bool>,
+    #[serde(default)]
+    pub order: Vec<String>,
+    #[serde(default)]
+    pub strict: Option<bool>,
+}
+
+/// `linters.settings.wsl` / `linters-settings.wsl`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct WslSettings {
+    #[serde(default, rename = "strict-append")]
+    pub strict_append: Option<bool>,
+    #[serde(default, rename = "allow-assign-and-call")]
+    pub allow_assign_and_call: Option<bool>,
+    #[serde(default, rename = "allow-assign-and-anything")]
+    pub allow_assign_and_anything: Option<bool>,
+    #[serde(default, rename = "allow-multiline-assign")]
+    pub allow_multiline_assign: Option<bool>,
+    #[serde(default, rename = "allow-cuddle-with-calls")]
+    pub allow_cuddle_with_calls: Vec<String>,
+    #[serde(default, rename = "allow-cuddle-with-rhs")]
+    pub allow_cuddle_with_rhs: Vec<String>,
+}
+
+/// `linters.settings.perfsprint` / `linters-settings.perfsprint`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PerfsprintSettings {
+    #[serde(default, rename = "integer-format")]
+    pub integer_format: Option<bool>,
+    #[serde(default, rename = "int-conversion")]
+    pub int_conversion: Option<bool>,
+    #[serde(default, rename = "error-format")]
+    pub error_format: Option<bool>,
+    #[serde(default, rename = "err-error")]
+    pub err_error: Option<bool>,
+    #[serde(default, rename = "errorf")]
+    pub errorf: Option<bool>,
+    #[serde(default, rename = "string-format")]
+    pub string_format: Option<bool>,
+    #[serde(default, rename = "sprintf1")]
+    pub sprintf1: Option<bool>,
+    #[serde(default, rename = "strconcat")]
+    pub strconcat: Option<bool>,
+    #[serde(default, rename = "bool-format")]
+    pub bool_format: Option<bool>,
+    #[serde(default, rename = "hex-format")]
+    pub hex_format: Option<bool>,
+}
+
+/// `linters.settings.goconst` / `linters-settings.goconst`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GoconstSettings {
+    #[serde(default, rename = "min-len")]
+    pub min_len: Option<usize>,
+    #[serde(default, rename = "min-occurrences")]
+    pub min_occurrences: Option<usize>,
+    #[serde(default, rename = "ignore-calls")]
+    pub ignore_calls: Option<bool>,
+    #[serde(default, rename = "ignore-tests")]
+    pub ignore_tests: Option<bool>,
 }
 
 impl LinterSettings {
@@ -276,6 +398,46 @@ impl LinterSettings {
                 out.nlreturn = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("predeclared".into())) {
+            if let Ok(s) = serde_yaml::from_value::<PredeclaredSettings>(v.clone()) {
+                out.predeclared = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("whitespace".into())) {
+            if let Ok(s) = serde_yaml::from_value::<WhitespaceSettings>(v.clone()) {
+                out.whitespace = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("mnd".into())) {
+            if let Ok(s) = serde_yaml::from_value::<MndSettings>(v.clone()) {
+                out.mnd = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("prealloc".into())) {
+            if let Ok(s) = serde_yaml::from_value::<PreallocSettings>(v.clone()) {
+                out.prealloc = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("tagalign".into())) {
+            if let Ok(s) = serde_yaml::from_value::<TagalignSettings>(v.clone()) {
+                out.tagalign = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("wsl".into())) {
+            if let Ok(s) = serde_yaml::from_value::<WslSettings>(v.clone()) {
+                out.wsl = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("perfsprint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<PerfsprintSettings>(v.clone()) {
+                out.perfsprint = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("goconst".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GoconstSettings>(v.clone()) {
+                out.goconst = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -303,6 +465,14 @@ impl LinterSettings {
         bag.insert("lll", self.lll.to_guff_lll());
         bag.insert("nakedret", self.nakedret.to_guff_nakedret());
         bag.insert("nlreturn", self.nlreturn.to_guff_nlreturn());
+        bag.insert("predeclared", self.predeclared.to_guff_predeclared());
+        bag.insert("whitespace", self.whitespace.to_guff_whitespace());
+        bag.insert("mnd", self.mnd.to_guff_mnd());
+        bag.insert("prealloc", self.prealloc.to_guff_prealloc());
+        bag.insert("tagalign", self.tagalign.to_guff_tagalign());
+        bag.insert("wsl", self.wsl.to_guff_wsl());
+        bag.insert("perfsprint", self.perfsprint.to_guff_perfsprint());
+        bag.insert("goconst", self.goconst.to_guff_goconst());
         Arc::new(bag)
     }
 
@@ -503,6 +673,8 @@ impl CyclopSettings {
         let defaults = guff_style::CyclopOptions::default();
         guff_style::CyclopOptions {
             max_complexity: self.max_complexity.unwrap_or(defaults.max_complexity),
+            package_average: self.package_average.unwrap_or(defaults.package_average),
+            skip_tests: self.skip_tests.unwrap_or(defaults.skip_tests),
         }
     }
 }
@@ -522,6 +694,7 @@ impl NakedretSettings {
         let defaults = guff_style::NakedretOptions::default();
         guff_style::NakedretOptions {
             max_func_lines: self.max_func_lines.unwrap_or(defaults.max_func_lines),
+            skip_test_files: self.skip_test_files.unwrap_or(defaults.skip_test_files),
         }
     }
 }
@@ -531,6 +704,135 @@ impl NlreturnSettings {
         let defaults = guff_style::NlreturnOptions::default();
         guff_style::NlreturnOptions {
             block_size: self.block_size.unwrap_or(defaults.block_size),
+        }
+    }
+}
+
+impl PredeclaredSettings {
+    pub fn to_guff_predeclared(&self) -> guff_style::PredeclaredOptions {
+        let defaults = guff_style::PredeclaredOptions::default();
+        guff_style::PredeclaredOptions {
+            ignore: if self.ignore.is_empty() {
+                defaults.ignore
+            } else {
+                self.ignore.clone()
+            },
+            qualified: self.qualified.unwrap_or(defaults.qualified),
+        }
+    }
+}
+
+impl WhitespaceSettings {
+    pub fn to_guff_whitespace(&self) -> guff_style::WhitespaceOptions {
+        let defaults = guff_style::WhitespaceOptions::default();
+        guff_style::WhitespaceOptions {
+            multi_if: self.multi_if.unwrap_or(defaults.multi_if),
+            multi_func: self.multi_func.unwrap_or(defaults.multi_func),
+        }
+    }
+}
+
+impl MndSettings {
+    pub fn to_guff_mnd(&self) -> guff_style::MndOptions {
+        let defaults = guff_style::MndOptions::default();
+        guff_style::MndOptions {
+            checks: self.checks.clone().unwrap_or(defaults.checks),
+            ignored_numbers: if self.ignored_numbers.is_empty() {
+                defaults.ignored_numbers
+            } else {
+                self.ignored_numbers.clone()
+            },
+            ignored_files: self.ignored_files.clone(),
+            ignored_functions: if self.ignored_functions.is_empty() {
+                defaults.ignored_functions
+            } else {
+                self.ignored_functions.clone()
+            },
+        }
+    }
+}
+
+impl PreallocSettings {
+    pub fn to_guff_prealloc(&self) -> guff_style::PreallocOptions {
+        let defaults = guff_style::PreallocOptions::default();
+        guff_style::PreallocOptions {
+            simple: self.simple.unwrap_or(defaults.simple),
+            range_loops: self.range_loops.unwrap_or(defaults.range_loops),
+            for_loops: self.for_loops.unwrap_or(defaults.for_loops),
+        }
+    }
+}
+
+impl TagalignSettings {
+    pub fn to_guff_tagalign(&self) -> guff_style::TagalignOptions {
+        let defaults = guff_style::TagalignOptions::default();
+        guff_style::TagalignOptions {
+            align: self.align.unwrap_or(defaults.align),
+            sort: self.sort.unwrap_or(defaults.sort),
+            order: if self.order.is_empty() {
+                defaults.order
+            } else {
+                self.order.clone()
+            },
+            strict: self.strict.unwrap_or(defaults.strict),
+        }
+    }
+}
+
+impl WslSettings {
+    pub fn to_guff_wsl(&self) -> guff_style::WslOptions {
+        let defaults = guff_style::WslOptions::default();
+        guff_style::WslOptions {
+            strict_append: self.strict_append.unwrap_or(defaults.strict_append),
+            allow_assign_and_call: self
+                .allow_assign_and_call
+                .unwrap_or(defaults.allow_assign_and_call),
+            allow_assign_and_anything: self
+                .allow_assign_and_anything
+                .unwrap_or(defaults.allow_assign_and_anything),
+            allow_multiline_assign: self
+                .allow_multiline_assign
+                .unwrap_or(defaults.allow_multiline_assign),
+            allow_cuddle_with_calls: if self.allow_cuddle_with_calls.is_empty() {
+                defaults.allow_cuddle_with_calls
+            } else {
+                self.allow_cuddle_with_calls.clone()
+            },
+            allow_cuddle_with_rhs: if self.allow_cuddle_with_rhs.is_empty() {
+                defaults.allow_cuddle_with_rhs
+            } else {
+                self.allow_cuddle_with_rhs.clone()
+            },
+        }
+    }
+}
+
+impl PerfsprintSettings {
+    pub fn to_guff_perfsprint(&self) -> guff_style::PerfsprintOptions {
+        let defaults = guff_style::PerfsprintOptions::default();
+        guff_style::PerfsprintOptions {
+            integer_format: self.integer_format.unwrap_or(defaults.integer_format),
+            int_conversion: self.int_conversion.unwrap_or(defaults.int_conversion),
+            error_format: self.error_format.unwrap_or(defaults.error_format),
+            err_error: self.err_error.unwrap_or(defaults.err_error),
+            errorf: self.errorf.unwrap_or(defaults.errorf),
+            string_format: self.string_format.unwrap_or(defaults.string_format),
+            sprintf1: self.sprintf1.unwrap_or(defaults.sprintf1),
+            strconcat: self.strconcat.unwrap_or(defaults.strconcat),
+            bool_format: self.bool_format.unwrap_or(defaults.bool_format),
+            hex_format: self.hex_format.unwrap_or(defaults.hex_format),
+        }
+    }
+}
+
+impl GoconstSettings {
+    pub fn to_guff_goconst(&self) -> guff_style::GoconstOptions {
+        let defaults = guff_style::GoconstOptions::default();
+        guff_style::GoconstOptions {
+            min_len: self.min_len.unwrap_or(defaults.min_len),
+            min_occurrences: self.min_occurrences.unwrap_or(defaults.min_occurrences),
+            ignore_calls: self.ignore_calls.unwrap_or(defaults.ignore_calls),
+            ignore_tests: self.ignore_tests.unwrap_or(defaults.ignore_tests),
         }
     }
 }

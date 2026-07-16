@@ -4,9 +4,8 @@
 //! Defaults match golangci-lint: `multi-if=false`, `multi-func=false`
 //! (only unnecessary leading/trailing newlines).
 //!
-//! DEFERRED: `linters.settings.whitespace` wiring (`multi-if`, `multi-func`);
-//! SuggestedFix; full comment-first/last accuracy when package load lacks
-//! `PARSE_COMMENTS` for body comments.
+//! DEFERRED: `multi-if` / `multi-func` enforcement when enabled; SuggestedFix;
+//! full comment-first/last accuracy when package load lacks `PARSE_COMMENTS`.
 
 use std::sync::OnceLock;
 
@@ -15,6 +14,8 @@ use guff::position::{FileSet, Pos};
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+
+use crate::options::WhitespaceOptions;
 
 struct WhitespaceVisitor<'a> {
     fset: &'a FileSet,
@@ -144,6 +145,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "whitespace requires inspect analyzer".to_string())?;
+
+    let options = pass
+        .settings::<WhitespaceOptions>("whitespace")
+        .copied()
+        .unwrap_or_default();
+    // DEFERRED: multi-if / multi-func checks when options.multi_if / options.multi_func.
+    let _ = options;
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();

@@ -258,3 +258,36 @@ fn parse_v2_style_linter_settings() {
         10
     );
 }
+
+#[test]
+fn parse_v2_style_extended_linter_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_style_settings_extended.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.cyclop.package_average, Some(5.0));
+    assert_eq!(settings.cyclop.skip_tests, Some(true));
+    assert_eq!(settings.nakedret.skip_test_files, Some(true));
+    assert_eq!(settings.predeclared.ignore, vec!["len".to_string()]);
+    assert_eq!(settings.predeclared.qualified, Some(true));
+    assert_eq!(settings.perfsprint.integer_format, Some(false));
+    assert_eq!(settings.goconst.min_occurrences, Some(10));
+    assert_eq!(settings.mnd.checks.as_ref().map(|c| c.len()), Some(1));
+    assert_eq!(settings.prealloc.range_loops, Some(false));
+    assert_eq!(settings.tagalign.align, Some(false));
+    assert_eq!(settings.wsl.strict_append, Some(false));
+    let bag = settings.to_bag();
+    assert_eq!(
+        bag.get::<guff_style::CyclopOptions>("cyclop")
+            .unwrap()
+            .package_average,
+        5.0
+    );
+    assert!(bag.get::<guff_style::NakedretOptions>("nakedret").unwrap().skip_test_files);
+    assert_eq!(
+        bag.get::<guff_style::GoconstOptions>("goconst")
+            .unwrap()
+            .min_occurrences,
+        10
+    );
+}

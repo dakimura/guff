@@ -3,8 +3,7 @@
 //! Implements the default-on fmt.Sprint / fmt.Sprintf / fmt.Errorf rewrites
 //! (string / bool / integer / hex / errors.New).
 //!
-//! DEFERRED: concat-loop, fiximports, `err-error` / settings flags wiring
-//! (`integer-format`, `string-format`, `sprintf1`, `strconcat`, …).
+//! DEFERRED: concat-loop, fiximports, `err-error` / remaining settings flags.
 
 use std::sync::OnceLock;
 
@@ -20,6 +19,8 @@ use guff_types::alias::unalias_readonly;
 use guff_types::basic::BasicKind;
 use guff_types::arena::TypeData;
 use guff_types::TypeId;
+
+use crate::options::PerfsprintOptions;
 
 fn type_of(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let info = pass.types_info()?;
@@ -168,7 +169,12 @@ fn replace_whole_call(call: &CallExpr, message: &str, new_text: String) -> Sugge
     }
 }
 
-fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
+fn check_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    options: &PerfsprintOptions,
+    pending: &mut Vec<Pending>,
+) {
     let Some(name) = code::call_name(pass, &call.fun) else {
         return;
     };
@@ -203,6 +209,20 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
     };
 
     let mut report = |checker: &str, msg: String, fixes: Vec<SuggestedFix>| {
+        let enabled = match checker {
+            "integer-format" => options.integer_format,
+            "error-format" => options.error_format && options.errorf,
+            "string-format" => {
+                options.string_format
+                    || (options.sprintf1 && fn_name == "fmt.Sprintf" && call.args.len() == 1)
+            }
+            "bool-format" => options.bool_format,
+            "hex-format" => options.hex_format,
+            _ => true,
+        };
+        if !enabled {
+            return;
+        }
         pending.push(Pending {
             pos: call.pos().0 as u32,
             end: call.end().0 as u32,
@@ -391,6 +411,9 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
         && fn_name == "fmt.Sprintf"
         && is_concatable(verb_ref)
     {
+        if !options.strconcat {
+            return;
+        }
         let val = expr_string(value);
         let fix = if let Some(prefix) = verb_ref.strip_suffix("%s") {
             format!("{}+{}", go_quote(&prefix.replace("%%", "%")), val)
@@ -416,6 +439,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "perfsprint requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<PerfsprintOptions>("perfsprint")
+        .copied()
+        .unwrap_or_default();
+
     let mut pending = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -423,7 +451,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             if let NodeRef::CallExpr(call) = n {
-                check_call(pass, call, &mut pending);
+                check_call(pass, call, &options, &mut pending);
             }
             true
         });

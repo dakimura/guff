@@ -6,7 +6,7 @@
 //!
 //! DEFERRED: full v4 parity (comment-map nuance, ForceCuddleErrCheck, force-case
 //! whitespace, AllowSeparatedLeadingComment, nested func-lit edge cases);
-//! SuggestedFix; `linters.settings.wsl` wiring; `wsl_v5` analyzer.
+//! SuggestedFix; remaining `linters.settings.wsl` keys; `wsl_v5` analyzer.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -15,6 +15,8 @@ use guff::ast::{BlockStmt, Decl, Expr, Spec, Stmt};
 use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+
+use crate::options::WslOptions;
 
 const REASON_APPEND: &str = "append only allowed to cuddle with appended value";
 const REASON_ASSIGNS: &str = "assignments should only be cuddled with other assignments";
@@ -215,12 +217,16 @@ fn is_assign_or_inc(stmt: &Stmt) -> bool {
     matches!(stmt, Stmt::AssignStmt(_) | Stmt::IncDecStmt(_))
 }
 
-fn is_allow_cuddle_call(names: &[String]) -> bool {
-    names.iter().any(|n| n == "Lock" || n == "RLock")
+fn is_allow_cuddle_call(names: &[String], options: &WslOptions) -> bool {
+    names
+        .iter()
+        .any(|n| options.allow_cuddle_with_calls.iter().any(|c| c == n))
 }
 
-fn is_allow_cuddle_rhs(names: &[String]) -> bool {
-    names.iter().any(|n| n == "Unlock" || n == "RUnlock")
+fn is_allow_cuddle_rhs(names: &[String], options: &WslOptions) -> bool {
+    names
+        .iter()
+        .any(|n| options.allow_cuddle_with_rhs.iter().any(|c| c == n))
 }
 
 fn check_leading_trailing(fset: &FileSet, block: &BlockStmt, pending: &mut Vec<(u32, String)>) {
@@ -263,28 +269,33 @@ fn short_two_line_return(fset: &FileSet, stmts: &[Stmt], i: usize) -> bool {
     stmt_end(fset, &stmts[1]) - stmt_start(fset, &stmts[0]) <= 2
 }
 
-fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
+fn check_statements(
+    fset: &FileSet,
+    stmts: &[Stmt],
+    options: &WslOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     for (i, stmt) in stmts.iter().enumerate() {
         // Recurse into nested blocks (if/for/range/switch/func lits).
         match stmt {
             Stmt::IfStmt(ifs) => {
-                check_block(fset, &ifs.body, pending);
+                check_block(fset, &ifs.body, options, pending);
                 if let Some(else_) = &ifs.else_ {
                     match else_.as_ref() {
-                        Stmt::BlockStmt(b) => check_block(fset, b, pending),
+                        Stmt::BlockStmt(b) => check_block(fset, b, options, pending),
                         Stmt::IfStmt(e) => {
-                            check_block(fset, &e.body, pending);
+                            check_block(fset, &e.body, options, pending);
                             // Nested else-if chain: walk remaining else arms via recursion
                             // through the statements path when we hit the else if as a Stmt.
                             let mut cur = e.else_.as_deref();
                             while let Some(s) = cur {
                                 match s {
                                     Stmt::BlockStmt(b) => {
-                                        check_block(fset, b, pending);
+                                        check_block(fset, b, options, pending);
                                         break;
                                     }
                                     Stmt::IfStmt(inner) => {
-                                        check_block(fset, &inner.body, pending);
+                                        check_block(fset, &inner.body, options, pending);
                                         cur = inner.else_.as_deref();
                                     }
                                     _ => break,
@@ -295,51 +306,51 @@ fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, Stri
                     }
                 }
             }
-            Stmt::RangeStmt(r) => check_block(fset, &r.body, pending),
-            Stmt::ForStmt(f) => check_block(fset, &f.body, pending),
+            Stmt::RangeStmt(r) => check_block(fset, &r.body, options, pending),
+            Stmt::ForStmt(f) => check_block(fset, &f.body, options, pending),
             Stmt::SwitchStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CaseClause(cc) = c {
-                        check_statements(fset, &cc.body, pending);
+                        check_statements(fset, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::TypeSwitchStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CaseClause(cc) = c {
-                        check_statements(fset, &cc.body, pending);
+                        check_statements(fset, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::SelectStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CommClause(cc) = c {
-                        check_statements(fset, &cc.body, pending);
+                        check_statements(fset, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::AssignStmt(a) => {
                 for r in &a.rhs {
                     if let Expr::FuncLit(fl) = r {
-                        check_block(fset, &fl.body, pending);
+                        check_block(fset, &fl.body, options, pending);
                     }
                 }
             }
             Stmt::ExprStmt(e) => {
                 if let Expr::CallExpr(c) = &e.x {
                     if let Expr::FuncLit(fl) = &*c.fun {
-                        check_block(fset, &fl.body, pending);
+                        check_block(fset, &fl.body, options, pending);
                     }
                 }
             }
             Stmt::DeferStmt(d) => {
                 if let Expr::FuncLit(fl) = &*d.call.fun {
-                    check_block(fset, &fl.body, pending);
+                    check_block(fset, &fl.body, options, pending);
                 }
             }
             Stmt::GoStmt(g) => {
                 if let Expr::FuncLit(fl) = &*g.call.fun {
-                    check_block(fset, &fl.body, pending);
+                    check_block(fset, &fl.body, options, pending);
                 }
             }
             _ => {}
@@ -357,7 +368,9 @@ fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, Stri
         // Multi-line previous stmt: only AssignStmt may contribute LHS
         // (AllowMultiLineAssignCuddle=true, matching bombsimon/wsl v4 defaults).
         let cuddled_with_multiline =
-            cuddled && stmt_start(fset, prev) != stmt_start(fset, stmt) - 1;
+            options.allow_multiline_assign
+                && cuddled
+                && stmt_start(fset, prev) != stmt_start(fset, stmt) - 1;
         let (assigned_above, called_above) = if !cuddled_with_multiline {
             (find_lhs(prev), find_rhs(prev))
         } else if matches!(prev, Stmt::AssignStmt(_)) {
@@ -385,7 +398,7 @@ fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, Stri
             })
             .unwrap_or_default();
 
-        if is_allow_cuddle_call(&called_above) || is_allow_cuddle_rhs(&rhs) {
+        if is_allow_cuddle_call(&called_above, options) || is_allow_cuddle_rhs(&rhs, options) {
             continue;
         }
 
@@ -423,12 +436,18 @@ fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, Stri
                     matches!(e, Expr::CallExpr(c) if matches!(&*c.fun, Expr::Ident(id) if id.name == "append"))
                 });
                 if is_append {
+                    if !options.strict_append {
+                        continue;
+                    }
                     if !lists_overlap(&called_or_assigned_above, &rhs) {
                         pending.push((stmt.pos().0 as u32, REASON_APPEND.into()));
                     }
                     continue;
                 }
                 if is_assign_or_inc(prev) {
+                    continue;
+                }
+                if options.allow_assign_and_anything {
                     continue;
                 }
                 if lists_overlap(&called_or_assigned_above, &both) {
@@ -518,9 +537,14 @@ fn check_statements(fset: &FileSet, stmts: &[Stmt], pending: &mut Vec<(u32, Stri
     }
 }
 
-fn check_block(fset: &FileSet, block: &BlockStmt, pending: &mut Vec<(u32, String)>) {
+fn check_block(
+    fset: &FileSet,
+    block: &BlockStmt,
+    options: &WslOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     check_leading_trailing(fset, block, pending);
-    check_statements(fset, &block.list, pending);
+    check_statements(fset, &block.list, options, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -528,13 +552,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "wsl requires inspect analyzer".to_string())?;
 
+    let options = pass
+        .settings::<WslOptions>("wsl")
+        .cloned()
+        .unwrap_or_default();
+
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
     for file in pass.files() {
         for decl in &file.decls {
             if let Decl::FuncDecl(f) = decl {
                 if let Some(body) = &f.body {
-                    check_block(&fset, body, &mut pending);
+                    check_block(&fset, body, &options, &mut pending);
                 }
             }
         }
