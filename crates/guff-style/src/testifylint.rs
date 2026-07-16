@@ -5,7 +5,8 @@
 //!
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `empty`, `error-nil`,
-//! `float-compare`, `len`, `nil-compare`.
+//! `float-compare`, `len`, `negative-positive`, `nil-compare`, `useless-assert`,
+//! `zero`.
 //!
 //! DEFERRED: remaining checkers (contains, encoded-compare, equal-values,
 //! error-is-as, expected-actual, formatter, go-require, mock-expect,
@@ -16,7 +17,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{BasicLit, BinaryExpr, CallExpr, Expr, File, ImportSpec};
+use guff::ast::{BasicLit, BinaryExpr, CallExpr, CompositeLit, Expr, File, Ident, ImportSpec, SelectorExpr};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
@@ -24,7 +25,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING};
+use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED};
 use guff_types::named::named_obj;
 use guff_types::TypeId;
 
@@ -45,7 +46,10 @@ const IMPLEMENTED: &[&str] = &[
     "error-nil",
     "float-compare",
     "len",
+    "negative-positive",
     "nil-compare",
+    "useless-assert",
+    "zero",
 ];
 
 /// Default-on checkers in upstream (suite-thelper is off by default).
@@ -279,6 +283,248 @@ fn is_pointer(pass: &Pass<'_>, expr: &Expr) -> bool {
     };
     let typ = unalias_readonly(&artifacts.types, typ);
     matches!(artifacts.types.get(typ), TypeData::Pointer(_))
+}
+
+fn unparen<'a>(expr: &'a Expr) -> &'a Expr {
+    match expr {
+        Expr::ParenExpr(p) => unparen(&p.x),
+        other => other,
+    }
+}
+
+fn is_pkg_dot_type(expr: &Expr, pkg: &str, name: &str) -> bool {
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(expr) else {
+        return false;
+    };
+    matches!(unparen(x), Expr::Ident(Ident { name: pkg_name, .. }) if pkg_name == pkg)
+        && sel.name == name
+}
+
+fn type_string(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    Some(guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ))
+}
+
+fn is_time_instance(pass: &Pass<'_>, expr: &Expr) -> bool {
+    type_of(pass, expr).is_some_and(|t| type_string(pass, t).as_deref() == Some("time.Time"))
+}
+
+fn is_ident_named_zero_prefix(expr: &Expr) -> bool {
+    matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if name.starts_with("zero"))
+}
+
+fn is_zero_time_instance(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if is_time_instance(pass, expr) && is_ident_named_zero_prefix(expr) {
+        return true;
+    }
+    let Expr::CompositeLit(CompositeLit { ty: Some(ty), elts, .. }) = unparen(expr) else {
+        return false;
+    };
+    is_pkg_dot_type(ty, "time", "Time") && elts.is_empty()
+}
+
+fn is_time_is_zero_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if !ce.args.is_empty() {
+        return None;
+    }
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&ce.fun) else {
+        return None;
+    };
+    if sel.name == "IsZero" && is_time_instance(pass, x) {
+        Some(x.as_ref())
+    } else {
+        None
+    }
+}
+
+fn is_time_equal_zero_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<&'a Expr> {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return None;
+    };
+    if ce.args.len() != 1 {
+        return None;
+    }
+    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&ce.fun) else {
+        return None;
+    };
+    if sel.name == "Equal"
+        && is_time_instance(pass, x)
+        && is_zero_time_instance(pass, &ce.args[0])
+    {
+        Some(x.as_ref())
+    } else {
+        None
+    }
+}
+
+fn is_unsigned(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    let under = typ.underlying(&artifacts.types);
+    matches!(
+        artifacts.types.get(under),
+        TypeData::Basic(b) if b.info().contains(IS_UNSIGNED)
+    )
+}
+
+fn is_typed_int_number(expr: &Expr, go_types: &[&str]) -> bool {
+    let Expr::CallExpr(ce) = unparen(expr) else {
+        return false;
+    };
+    if ce.args.len() != 1 {
+        return false;
+    }
+    let Expr::Ident(id) = unparen(&ce.fun) else {
+        return false;
+    };
+    go_types.contains(&id.name.as_str()) && is_int_basic_lit(&ce.args[0]).is_some()
+}
+
+const SIGNED_INT_TYPES: &[&str] = &["int", "int8", "int16", "int32", "int64"];
+const UNSIGNED_INT_TYPES: &[&str] = &["uint", "uint8", "uint16", "uint32", "uint64"];
+
+fn is_any_zero(expr: &Expr) -> bool {
+    is_zero(expr)
+        || is_typed_int_number(expr, SIGNED_INT_TYPES)
+        || is_typed_int_number(expr, UNSIGNED_INT_TYPES)
+}
+
+fn is_not_any_zero(expr: &Expr) -> bool {
+    !is_any_zero(expr)
+}
+
+fn is_zero_or_signed_zero(expr: &Expr) -> bool {
+    is_zero(expr) || is_typed_int_number(expr, SIGNED_INT_TYPES)
+}
+
+fn is_signed_not_zero(pass: &Pass<'_>, expr: &Expr) -> bool {
+    !is_unsigned(pass, expr) && !is_zero_or_signed_zero(expr)
+}
+
+fn can_be_negative(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_builtin_len_call(pass, expr).is_none() && is_signed_not_zero(pass, expr)
+}
+
+fn can_not_be_negative(pass: &Pass<'_>, expr: &Expr) -> bool {
+    is_builtin_len_call(pass, expr).is_some() || is_unsigned(pass, expr)
+}
+
+fn is_string_lit(expr: &Expr) -> bool {
+    matches!(
+        unparen(expr),
+        Expr::BasicLit(BasicLit {
+            kind: Some(Token::STRING),
+            ..
+        })
+    )
+}
+
+fn is_strict_comparison_with<'a, FL, FR>(
+    pass: &Pass<'_>,
+    expr: &'a Expr,
+    lhs_pred: FL,
+    op: Token,
+    rhs_pred: FR,
+) -> Option<(&'a Expr, &'a Expr)>
+where
+    FL: Fn(&Pass<'_>, &Expr) -> bool,
+    FR: Fn(&Pass<'_>, &Expr) -> bool,
+{
+    let Expr::BinaryExpr(be) = unparen(expr) else {
+        return None;
+    };
+    if be.op == op && lhs_pred(pass, &be.x) && rhs_pred(pass, &be.y) {
+        Some((&be.x, &be.y))
+    } else {
+        None
+    }
+}
+
+fn expr_equal(a: &Expr, b: &Expr) -> bool {
+    match (unparen(a), unparen(b)) {
+        (Expr::Ident(Ident { name: na, .. }), Expr::Ident(Ident { name: nb, .. })) => na == nb,
+        (
+            Expr::BasicLit(BasicLit {
+                value: va,
+                kind: ka,
+                ..
+            }),
+            Expr::BasicLit(BasicLit {
+                value: vb,
+                kind: kb,
+                ..
+            }),
+        ) => va == vb && ka == kb,
+        (
+            Expr::SelectorExpr(SelectorExpr { x: xa, sel: sa, .. }),
+            Expr::SelectorExpr(SelectorExpr { x: xb, sel: sb, .. }),
+        ) => sa.name == sb.name && expr_equal(xa, xb),
+        (Expr::UnaryExpr(u1), Expr::UnaryExpr(u2)) if u1.op == u2.op => expr_equal(&u1.x, &u2.x),
+        (
+            Expr::BinaryExpr(BinaryExpr {
+                op: oa,
+                x: xa,
+                y: ya,
+                ..
+            }),
+            Expr::BinaryExpr(BinaryExpr {
+                op: ob,
+                x: xb,
+                y: yb,
+                ..
+            }),
+        ) => oa == ob && expr_equal(xa, xb) && expr_equal(ya, yb),
+        (
+            Expr::CallExpr(CallExpr {
+                fun: fa,
+                args: aa,
+                ..
+            }),
+            Expr::CallExpr(CallExpr {
+                fun: fb,
+                args: ab,
+                ..
+            }),
+        ) => aa.len() == ab.len()
+            && expr_equal(fa, fb)
+            && aa.iter().zip(ab).all(|(x, y)| expr_equal(x, y)),
+        _ => false,
+    }
+}
+
+fn is_empty_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Interface(i) => i.num_explicit_methods() == 0 && i.num_embeddeds() == 0,
+        _ => false,
+    }
+}
+
+fn pointer_elem_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let typ = type_of(pass, expr)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => Some(p.elem()),
+        _ => None,
+    }
 }
 
 fn is_int_basic_lit(expr: &Expr) -> Option<i64> {
@@ -795,6 +1041,339 @@ fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
     report_use("compares", call, &proposed, pending);
 }
 
+fn check_zero(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    match call.fn_name_trimmed.as_str() {
+        "Equal" | "EqualValues" | "Exactly" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let f1 = is_zero_time_instance(pass, a);
+            let f2 = is_zero_time_instance(pass, b);
+            if f1 != f2 {
+                report_use("zero", call, "Zero", pending);
+            }
+        }
+        "NotEqual" | "NotEqualValues" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            let f1 = is_zero_time_instance(pass, a);
+            let f2 = is_zero_time_instance(pass, b);
+            if f1 != f2 {
+                report_use("zero", call, "NotZero", pending);
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            if is_time_is_zero_call(pass, &call.args[0]).is_some()
+                || is_time_equal_zero_call(pass, &call.args[0]).is_some()
+            {
+                report_use("zero", call, "Zero", pending);
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            if is_time_is_zero_call(pass, &call.args[0]).is_some()
+                || is_time_equal_zero_call(pass, &call.args[0]).is_some()
+            {
+                report_use("zero", call, "NotZero", pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_negative_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    if check_negative(pass, call, pending) {
+        return;
+    }
+    check_positive(pass, call, pending);
+}
+
+fn check_negative(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) -> bool {
+    match call.fn_name_trimmed.as_str() {
+        "Less" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if can_be_negative(pass, a) && is_zero_or_signed_zero(b) {
+                report_use("negative-positive", call, "Negative", pending);
+                return true;
+            }
+        }
+        "Greater" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_zero_or_signed_zero(a) && can_be_negative(pass, b) {
+                report_use("negative-positive", call, "Negative", pending);
+                return true;
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let expr = &call.args[0];
+            let surviving = is_strict_comparison_with(
+                pass,
+                expr,
+                |p, e| can_be_negative(p, e),
+                Token::LSS,
+                |_, e| is_zero_or_signed_zero(e),
+            )
+            .map(|(a, _)| a)
+            .or_else(|| {
+                is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_zero_or_signed_zero(e),
+                    Token::GTR,
+                    |p, e| can_be_negative(p, e),
+                )
+                .map(|(_, b)| b)
+            });
+            if surviving.is_some() {
+                report_use("negative-positive", call, "Negative", pending);
+                return true;
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let expr = &call.args[0];
+            let has = is_strict_comparison_with(
+                pass,
+                expr,
+                |p, e| can_be_negative(p, e),
+                Token::GEQ,
+                |_, e| is_zero_or_signed_zero(e),
+            )
+            .is_some()
+                || is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_zero_or_signed_zero(e),
+                    Token::LEQ,
+                    |p, e| can_be_negative(p, e),
+                )
+                .is_some();
+            if has {
+                report_use("negative-positive", call, "Negative", pending);
+                return true;
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+fn check_positive(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    match call.fn_name_trimmed.as_str() {
+        "Greater" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_not_any_zero(a) && is_any_zero(b) {
+                report_use("negative-positive", call, "Positive", pending);
+            }
+        }
+        "Less" => {
+            if call.args.len() < 2 {
+                return;
+            }
+            let (a, b) = (&call.args[0], &call.args[1]);
+            if is_any_zero(a) && is_not_any_zero(b) {
+                report_use("negative-positive", call, "Positive", pending);
+            }
+        }
+        "True" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            let has = is_strict_comparison_with(
+                pass,
+                expr,
+                |_, e| is_not_any_zero(e),
+                Token::GTR,
+                |_, e| is_any_zero(e),
+            )
+            .is_some()
+                || is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_any_zero(e),
+                    Token::LSS,
+                    |_, e| is_not_any_zero(e),
+                )
+                .is_some();
+            if has {
+                report_use("negative-positive", call, "Positive", pending);
+            }
+        }
+        "False" => {
+            if call.args.is_empty() {
+                return;
+            }
+            let expr = &call.args[0];
+            let has = is_strict_comparison_with(
+                pass,
+                expr,
+                |_, e| is_not_any_zero(e),
+                Token::LEQ,
+                |_, e| is_any_zero(e),
+            )
+            .is_some()
+                || is_strict_comparison_with(
+                    pass,
+                    expr,
+                    |_, e| is_any_zero(e),
+                    Token::GEQ,
+                    |_, e| is_not_any_zero(e),
+                )
+                .is_some();
+            if has {
+                report_use("negative-positive", call, "Positive", pending);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_useless_assert_same_vars(call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) -> bool {
+    let (first, second) = match call.fn_name_trimmed.as_str() {
+        "Contains"
+        | "ElementsMatch"
+        | "Equal"
+        | "EqualExportedValues"
+        | "EqualValues"
+        | "ErrorAs"
+        | "ErrorIs"
+        | "Exactly"
+        | "Greater"
+        | "GreaterOrEqual"
+        | "Implements"
+        | "InDelta"
+        | "InDeltaMapValues"
+        | "InDeltaSlice"
+        | "InEpsilon"
+        | "InEpsilonSlice"
+        | "IsNotType"
+        | "IsType"
+        | "JSONEq"
+        | "Less"
+        | "LessOrEqual"
+        | "NotElementsMatch"
+        | "NotEqual"
+        | "NotEqualValues"
+        | "NotErrorAs"
+        | "NotErrorIs"
+        | "NotRegexp"
+        | "NotSame"
+        | "NotSubset"
+        | "Regexp"
+        | "Same"
+        | "Subset"
+        | "WithinDuration"
+        | "YAMLEq" => {
+            if call.args.len() < 2 {
+                return false;
+            }
+            (&call.args[0], &call.args[1])
+        }
+        "True" | "False" => {
+            if call.args.is_empty() {
+                return false;
+            }
+            let Expr::BinaryExpr(be) = unparen(&call.args[0]) else {
+                return false;
+            };
+            (be.x.as_ref(), be.y.as_ref())
+        }
+        _ => return false,
+    };
+    if expr_equal(first, second) {
+        report_msg(
+            "useless-assert",
+            call,
+            "asserting of the same variable",
+            pending,
+        );
+        true
+    } else {
+        false
+    }
+}
+
+fn check_useless_assert(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
+    if check_useless_assert_same_vars(call, pending) {
+        return;
+    }
+
+    let meaningless = match call.fn_name_trimmed.as_str() {
+        "False" | "True" => !call.args.is_empty()
+            && (is_untyped_true(pass, &call.args[0]) || is_untyped_false(pass, &call.args[0])),
+        "GreaterOrEqual" | "Less" => {
+            call.args.len() >= 2
+                && is_any_zero(&call.args[1])
+                && can_not_be_negative(pass, &call.args[0])
+        }
+        "Implements" | "NotImplements" => {
+            if call.args.is_empty() {
+                false
+            } else {
+                pointer_elem_type(pass, &call.args[0])
+                    .is_some_and(|elem| is_empty_interface_type(pass, elem))
+            }
+        }
+        "LessOrEqual" | "Greater" => {
+            call.args.len() >= 2
+                && is_any_zero(&call.args[0])
+                && can_not_be_negative(pass, &call.args[1])
+        }
+        "Positive" => call
+            .args
+            .first()
+            .is_some_and(|a| is_int_basic_lit(a).is_some()),
+        "Negative" => call.args.first().is_some_and(|a| {
+            is_int_basic_lit(a).is_some() || can_not_be_negative(pass, a)
+        }),
+        "Error" | "Nil" | "NoError" | "NotNil" => {
+            !call.args.is_empty() && is_nil(pass, &call.args[0])
+        }
+        "Empty" | "NotEmpty" => !call.args.is_empty() && is_string_lit(&call.args[0]),
+        "NotZero" | "Zero" => {
+            if call.args.is_empty() {
+                false
+            } else {
+                let a = &call.args[0];
+                is_int_basic_lit(a).is_some()
+                    || is_string_lit(a)
+                    || is_nil(pass, a)
+                    || is_untyped_true(pass, a)
+                    || is_untyped_false(pass, a)
+                    || is_zero_time_instance(pass, a)
+            }
+        }
+        _ => false,
+    };
+
+    if meaningless {
+        report_msg("useless-assert", call, "meaningless assertion", pending);
+    }
+}
+
 fn check_blank_import(file: &File, pending: &mut Vec<(u32, String)>) {
     const BAD: &[&str] = &[
         TESTIFY_ROOT,
@@ -830,6 +1409,12 @@ fn check_call(
 ) {
     // Priority mirrors upstream registry order among implemented checkers.
     let before = pending.len();
+    if enabled.contains("zero") {
+        check_zero(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
     if enabled.contains("float-compare") {
         check_float_compare(pass, call, pending);
         if pending.len() > before {
@@ -844,6 +1429,12 @@ fn check_call(
     }
     if enabled.contains("empty") {
         check_empty(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("negative-positive") {
+        check_negative_positive(pass, call, pending);
         if pending.len() > before {
             return;
         }
@@ -868,6 +1459,12 @@ fn check_call(
     }
     if enabled.contains("len") {
         check_len(pass, call, pending);
+        if pending.len() > before {
+            return;
+        }
+    }
+    if enabled.contains("useless-assert") {
+        check_useless_assert(pass, call, pending);
     }
 }
 

@@ -50,6 +50,7 @@ func IsNotType(t TestingT, expectedType, object interface{}, msgAndArgs ...inter
 	return true
 }
 func Positive(t TestingT, e interface{}, msgAndArgs ...interface{}) bool { return true }
+func Negative(t TestingT, e interface{}, msgAndArgs ...interface{}) bool { return true }
 func Less(t TestingT, e1, e2 interface{}, msgAndArgs ...interface{}) bool {
 	return true
 }

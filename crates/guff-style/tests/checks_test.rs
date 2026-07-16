@@ -2393,6 +2393,18 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("float-compare")),
         "float-compare: {messages:?}"
     );
+    assert!(
+        messages.iter().any(|m| m.contains("zero")),
+        "zero: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("negative-positive")),
+        "negative-positive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("useless-assert")),
+        "useless-assert: {messages:?}"
+    );
 }
 
 #[test]

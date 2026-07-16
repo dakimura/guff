@@ -2,6 +2,7 @@ package testifylint
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,6 +14,9 @@ func TestOk(t *testing.T) {
 	arr := []int{1}
 	str := "hi"
 	f := 1.5
+	var ts time.Time
+	signed := -1
+	pos := 1
 
 	assert.False(t, result)
 	assert.True(t, result)
@@ -23,6 +27,9 @@ func TestOk(t *testing.T) {
 	assert.Nil(t, ptr)
 	assert.Len(t, arr, 3)
 	assert.InEpsilon(t, 1.5, f, 0.0001)
+	assert.Zero(t, ts)
+	assert.Negative(t, signed)
+	assert.Positive(t, pos)
 }
 
 var a, b int

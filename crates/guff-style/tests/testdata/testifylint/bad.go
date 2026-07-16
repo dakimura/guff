@@ -2,6 +2,7 @@ package testifylint
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,6 +14,9 @@ func TestBad(t *testing.T) {
 	arr := []int{1}
 	str := "hi"
 	f := 1.5
+	ts := time.Time{}
+	signed := -1
+	pos := 1
 
 	assert.Equal(t, false, result)
 	assert.Equal(t, true, result)
@@ -25,6 +29,14 @@ func TestBad(t *testing.T) {
 	assert.Equal(t, nil, ptr)
 	assert.Equal(t, 3, len(arr))
 	assert.Equal(t, 1.5, f)
+
+	assert.Equal(t, time.Time{}, ts)
+	assert.True(t, ts.IsZero())
+	assert.Less(t, signed, 0)
+	assert.Greater(t, pos, 0)
+	assert.Equal(t, signed, signed)
+	assert.Zero(t, 42)
+	assert.True(t, true)
 }
 
 var a, b int
