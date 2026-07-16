@@ -1108,3 +1108,29 @@ fn parse_v2_importas_settings() {
     assert_eq!(opts.alias.len(), 2);
     assert_eq!(opts.alias[0].pkg, "fmt");
 }
+
+#[test]
+fn parse_v2_godoclint_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_godoclint_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.godoclint.default_set.as_deref(), Some("none"));
+    assert_eq!(
+        settings.godoclint.enable,
+        vec!["pkg-doc".to_string(), "start-with-name".to_string()]
+    );
+    assert_eq!(
+        settings.godoclint.disable,
+        vec!["start-with-name".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_comment::GodoclintOptions>("godoclint")
+        .expect("godoclint options");
+    assert_eq!(opts.default, "none");
+    assert_eq!(opts.enable, vec!["pkg-doc", "start-with-name"]);
+    assert_eq!(opts.disable, vec!["start-with-name"]);
+    let rules = opts.effective_rules();
+    assert!(rules.contains("pkg-doc"));
+    assert!(!rules.contains("start-with-name"));
+}

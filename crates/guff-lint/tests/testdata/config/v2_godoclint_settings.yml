@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - godoclint
+  settings:
+    godoclint:
+      default: none
+      enable:
+        - pkg-doc
+        - start-with-name
+      disable:
+        - start-with-name

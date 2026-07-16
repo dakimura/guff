@@ -1,6 +1,6 @@
 [package]
 name = "guff-comment"
-description = "Rust ports of comment-related go/analysis linters (godot, godox, dupword)."
+description = "Rust ports of comment-related go/analysis linters (godot, godox, dupword, godoclint)."
 keywords = ["go", "linter", "comment", "analysis"]
 categories = ["development-tools"]
 version.workspace = true

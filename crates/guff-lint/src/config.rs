@@ -854,7 +854,7 @@ const BUGS_PRESET: &[&str] = &[
     "rowserrcheck", "spancheck", "sqlclosecheck", "staticcheck", "testifylint",
     "zerologlint",
 ];
-const COMMENT_PRESET: &[&str] = &["dupword", "godot", "godox", "misspell"];
+const COMMENT_PRESET: &[&str] = &["dupword", "godoclint", "godot", "godox", "misspell"];
 const COMPLEXITY_PRESET: &[&str] =
     &["cyclop", "funlen", "gocognit", "gocyclo", "maintidx", "nestif"];
 const ERROR_PRESET: &[&str] = &["err113", "errcheck", "errorlint", "wrapcheck"];
@@ -868,7 +868,7 @@ const STYLE_PRESET: &[&str] = &[
     "asciicheck", "canonicalheader", "containedctx", "copyloopvar", "decorder", "depguard",
     "dogsled", "dupl", "err113", "errname", "exhaustruct", "exptostd", "forbidigo",
     "forcetypeassert", "ginkgolinter", "gochecknoglobals", "gochecknoinits", "goconst",
-    "gocritic", "godot", "godox", "goheader", "gomoddirectives", "gomodguard",
+    "gocritic", "godoclint", "godot", "godox", "goheader", "gomoddirectives", "gomodguard",
     "goprintffuncname", "gosimple", "grouper", "iface", "importas", "inamedparam",
     "interfacebloat", "intrange", "ireturn", "lll", "loggercheck", "makezero", "mirror",
     "misspell", "mnd", "musttag", "nakedret", "nilnil", "nlreturn", "nolintlint",

@@ -51,6 +51,7 @@ pub struct LinterSettings {
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
+    pub godoclint: GodoclintSettings,
     pub depguard: DepguardSettings,
     pub gomoddirectives: GomoddirectivesSettings,
     pub gomodguard: GomodguardSettings,
@@ -762,6 +763,20 @@ pub struct DupwordSettings {
     pub comments_only: Option<bool>,
 }
 
+/// `linters.settings.godoclint` / `linters-settings.godoclint`.
+///
+/// `default` is `basic` | `all` | `none` (golangci default: `basic`).
+/// Per-rule `options` are DEFERRED.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GodoclintSettings {
+    #[serde(default, rename = "default")]
+    pub default_set: Option<String>,
+    #[serde(default)]
+    pub enable: Vec<String>,
+    #[serde(default)]
+    pub disable: Vec<String>,
+}
+
 /// `linters.settings.modernize` / `linters-settings.modernize`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ModernizeSettings {
@@ -1219,6 +1234,11 @@ impl LinterSettings {
                 out.dupword = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("godoclint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GodoclintSettings>(v.clone()) {
+                out.godoclint = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("depguard".into())) {
             if let Ok(s) = serde_yaml::from_value::<DepguardSettings>(v.clone()) {
                 out.depguard = s;
@@ -1339,6 +1359,7 @@ impl LinterSettings {
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
+        bag.insert("godoclint", self.godoclint.to_guff_godoclint());
         bag.insert("depguard", self.depguard.to_guff_depguard());
         bag.insert(
             "gomoddirectives",
@@ -1983,6 +2004,20 @@ impl DupwordSettings {
             keywords: self.keywords.clone(),
             ignore: self.ignore.clone(),
             comments_only: self.comments_only.unwrap_or(false),
+        }
+    }
+}
+
+impl GodoclintSettings {
+    pub fn to_guff_godoclint(&self) -> guff_comment::GodoclintOptions {
+        let defaults = guff_comment::GodoclintOptions::default();
+        guff_comment::GodoclintOptions {
+            default: self
+                .default_set
+                .clone()
+                .unwrap_or(defaults.default),
+            enable: self.enable.clone(),
+            disable: self.disable.clone(),
         }
     }
 }

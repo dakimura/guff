@@ -1,6 +1,6 @@
 mod support;
 
-use guff_comment::{dupword, godot, godox};
+use guff_comment::{dupword, godoclint, godot, godox};
 
 #[test]
 fn godot_flags_missing_periods() {
@@ -214,5 +214,100 @@ fn dupword_keywords_ignore_comments_only_respect_settings() {
             .count(),
         1,
         "comments-only should skip string literal: {messages:?}"
+    );
+}
+
+#[test]
+fn godoclint_flags_pkg_doc_start_with_name_and_deprecated() {
+    let pkg = support::typecheck_fixture("godoclint", "example.com/godoclint", "bad.go");
+    let messages = support::run_analyzer(godoclint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("package godoc should start with")),
+        "pkg-doc: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("godoc should start with symbol name") && m.contains("Foo")),
+        "start-with-name: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("deprecation note should be formatted")),
+        "deprecated: {messages:?}"
+    );
+}
+
+#[test]
+fn godoclint_allows_well_formed_docs() {
+    let pkg = support::typecheck_fixture("godoclint", "example.com/godoclint/ok", "ok.go");
+    assert!(
+        support::run_analyzer(godoclint(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(godoclint(), &pkg)
+    );
+}
+
+#[test]
+fn godoclint_flags_multiple_package_docs() {
+    let pkg = support::typecheck_fixture_dir("godoclint/multi", "example.com/godoclint/multi");
+    let messages = support::run_analyzer(godoclint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("package has more than one godoc"))
+            .count()
+            >= 2,
+        "single-pkg-doc: {messages:?}"
+    );
+}
+
+#[test]
+fn godoclint_respects_enable_disable_settings() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_comment::GodoclintOptions;
+    use guff_runner::RunnerOptions;
+
+    let pkg = support::typecheck_fixture("godoclint", "example.com/godoclint/settings", "bad.go");
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "godoclint",
+        GodoclintOptions {
+            default: "none".into(),
+            enable: vec!["pkg-doc".into()],
+            disable: Vec::new(),
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        godoclint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("package godoc should start with")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|m| !m.contains("godoc should start with symbol name")),
+        "start-with-name disabled: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|m| !m.contains("deprecation note")),
+        "deprecated disabled: {messages:?}"
     );
 }

@@ -16,16 +16,26 @@ pub fn testdata(name: &str) -> PathBuf {
 }
 
 pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
+    typecheck_pkg_files(pkg_id, &[main_path.to_path_buf()])
+}
+
+/// Typecheck a package assembled from multiple Go source files (same package).
+pub fn typecheck_pkg_files(pkg_id: &str, paths: &[PathBuf]) -> Arc<Package> {
+    assert!(!paths.is_empty(), "need at least one Go file");
     let fset = FileSet::new();
-    let main_src = fs::read(main_path).expect("read main source");
-    let main_name = main_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .expect("main file name");
-    let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
+    let mut syntax = Vec::new();
+    for path in paths {
+        let src = fs::read(path).expect("read source");
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("file name");
+        let file = parse_file(&fset, name, &src, Mode::NONE).expect("parse");
+        syntax.push(file);
+    }
 
     let mut check = Checker::new(Config::default());
-    check.check_files(vec![main_file.clone()]);
+    check.check_files(syntax.clone());
 
     let ill_typed = !check.errors.is_empty();
     let errors: Vec<Error> = check
@@ -45,19 +55,22 @@ pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
     if ill_typed {
         eprintln!(
             "warning: typecheck errors in {}: {:?}",
-            main_path.display(),
+            paths[0].display(),
             errors
         );
     }
 
+    let pkg_name = syntax[0].name.name.clone().into();
+    let dir = paths[0].parent().unwrap_or(&paths[0]).to_path_buf();
+
     Arc::new(Package {
         id: pkg_id.into(),
         pkg_path: pkg_id.into(),
-        name: main_file.name.name.clone().into(),
-        dir: main_path.parent().unwrap_or(main_path).to_path_buf(),
-        compiled_go_files: vec![main_path.to_path_buf()],
-        go_files: vec![main_path.to_path_buf()],
-        syntax: vec![main_file],
+        name: pkg_name,
+        dir,
+        compiled_go_files: paths.to_vec(),
+        go_files: paths.to_vec(),
+        syntax,
         fset: Some(fset),
         types: Some(check.pkg),
         types_info: Some(check.info.clone()),
@@ -80,6 +93,18 @@ pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
 pub fn typecheck_fixture(name: &str, pkg_id: &str, file: &str) -> Arc<Package> {
     let dir = testdata(name);
     typecheck_pkg(pkg_id, &dir.join(file))
+}
+
+pub fn typecheck_fixture_dir(name: &str, pkg_id: &str) -> Arc<Package> {
+    let dir = testdata(name);
+    let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
+        .expect("read fixture dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("go"))
+        .collect();
+    paths.sort();
+    typecheck_pkg_files(pkg_id, &paths)
 }
 
 pub fn run_analyzer(

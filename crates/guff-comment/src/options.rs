@@ -73,3 +73,70 @@ pub struct DupwordOptions {
     /// When true, skip string literals.
     pub comments_only: bool,
 }
+
+/// `linters.settings.godoclint` / `linters-settings.godoclint`.
+///
+/// Defaults match golangci-lint: `default=basic` (pkg-doc / single-pkg-doc /
+/// start-with-name / deprecated), empty enable/disable.
+///
+/// DEFERRED: per-rule `options.*`; unimplemented rules (`require-doc`,
+/// `require-pkg-doc`, `max-len`, `no-unused-link`, `require-stdlib-doclink`)
+/// are accepted in enable/disable for config compat but currently no-op.
+#[derive(Debug, Clone)]
+pub struct GodoclintOptions {
+    /// `basic` (default), `all`, or `none`.
+    pub default: String,
+    /// Extra rules to enable on top of the default set.
+    pub enable: Vec<String>,
+    /// Rules to disable.
+    pub disable: Vec<String>,
+}
+
+impl Default for GodoclintOptions {
+    fn default() -> Self {
+        Self {
+            default: "basic".into(),
+            enable: Vec::new(),
+            disable: Vec::new(),
+        }
+    }
+}
+
+impl GodoclintOptions {
+    const BASIC: &'static [&'static str] = &[
+        "pkg-doc",
+        "single-pkg-doc",
+        "start-with-name",
+        "deprecated",
+    ];
+
+    const ALL: &'static [&'static str] = &[
+        "pkg-doc",
+        "single-pkg-doc",
+        "start-with-name",
+        "deprecated",
+        "require-doc",
+        "require-pkg-doc",
+        "max-len",
+        "no-unused-link",
+        "require-stdlib-doclink",
+    ];
+
+    /// Effective rule names after applying `default` / `enable` / `disable`.
+    pub fn effective_rules(&self) -> std::collections::HashSet<String> {
+        use std::collections::HashSet;
+        let mut rules: HashSet<String> = match self.default.as_str() {
+            "all" => Self::ALL.iter().map(|s| (*s).to_string()).collect(),
+            "none" => HashSet::new(),
+            // "basic" and unknown → basic
+            _ => Self::BASIC.iter().map(|s| (*s).to_string()).collect(),
+        };
+        for r in &self.enable {
+            rules.insert(r.clone());
+        }
+        for r in &self.disable {
+            rules.remove(r);
+        }
+        rules
+    }
+}

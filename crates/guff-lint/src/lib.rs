@@ -40,9 +40,9 @@ pub use registry::{
 pub use fix::{apply_fixes, FixError};
 pub use settings::{
     DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings, ErrcheckSettings,
-    ErrchkjsonSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings, GomodguardSettings,
-    GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings, StaticcheckSettings,
-    WrapcheckSettings,
+    ErrchkjsonSettings, GodoclintSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings,
+    GomodguardSettings, GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings,
+    StaticcheckSettings, WrapcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.
