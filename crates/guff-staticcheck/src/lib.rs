@@ -48,9 +48,13 @@ pub mod st1001;
 pub mod st1006;
 pub mod st1011;
 pub mod st1012;
+pub mod st1013;
 pub mod st1015;
 pub mod st1017;
+pub mod st1018;
 pub mod st1019;
+pub mod st1020;
+pub mod st1021;
 pub mod sa1000;
 pub mod sa1001;
 pub mod sa1002;
@@ -192,9 +196,13 @@ pub fn analyzers() -> Vec<&'static guff_analysis::Analyzer> {
         st1006::analyzer(),
         st1011::analyzer(),
         st1012::analyzer(),
+        st1013::analyzer(),
         st1015::analyzer(),
         st1017::analyzer(),
+        st1018::analyzer(),
         st1019::analyzer(),
+        st1020::analyzer(),
+        st1021::analyzer(),
         sa1000::analyzer(),
         sa1001::analyzer(),
         sa1002::analyzer(),
