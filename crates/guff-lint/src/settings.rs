@@ -58,6 +58,7 @@ pub struct LinterSettings {
     pub gocritic: GocriticSettings,
     pub forbidigo: ForbidigoSettings,
     pub bidichk: BidichkSettings,
+    pub importas: ImportasSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -808,6 +809,26 @@ pub struct ForbidigoSettings {
     pub analyze_types: bool,
 }
 
+/// `linters.settings.importas` / `linters-settings.importas`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ImportasSettings {
+    #[serde(default)]
+    pub alias: Vec<ImportasAliasSetting>,
+    #[serde(default, rename = "no-unaliased")]
+    pub no_unaliased: bool,
+    #[serde(default, rename = "no-extra-aliases")]
+    pub no_extra_aliases: bool,
+}
+
+/// One `importas.alias[]` entry (`pkg` + `alias`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ImportasAliasSetting {
+    #[serde(default)]
+    pub pkg: String,
+    #[serde(default)]
+    pub alias: String,
+}
+
 /// `linters.settings.bidichk` / `linters-settings.bidichk`.
 ///
 /// Each bool enables checking for that rune. When all are false (golangci
@@ -1137,6 +1158,11 @@ impl LinterSettings {
                 out.bidichk = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
+                out.importas = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1200,6 +1226,7 @@ impl LinterSettings {
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
+        bag.insert("importas", self.importas.to_guff_importas());
         Arc::new(bag)
     }
 
@@ -1924,6 +1951,23 @@ impl ForbidigoSettings {
                 .exclude_godoc_examples
                 .unwrap_or(defaults.exclude_godoc_examples),
             analyze_types: self.analyze_types,
+        }
+    }
+}
+
+impl ImportasSettings {
+    pub fn to_guff_importas(&self) -> guff_import::ImportasOptions {
+        guff_import::ImportasOptions {
+            alias: self
+                .alias
+                .iter()
+                .map(|a| guff_import::ImportasAlias {
+                    pkg: a.pkg.clone(),
+                    alias: a.alias.clone(),
+                })
+                .collect(),
+            no_unaliased: self.no_unaliased,
+            no_extra_aliases: self.no_extra_aliases,
         }
     }
 }

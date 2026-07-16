@@ -1,6 +1,6 @@
 [package]
 name = "guff-import"
-description = "Rust ports of import/module go/analysis linters (depguard, gomodguard, gomoddirectives)."
+description = "Rust ports of import/module go/analysis linters (depguard, gomodguard, gomoddirectives, importas)."
 keywords = ["go", "linter", "import", "analysis"]
 categories = ["development-tools"]
 version.workspace = true
@@ -14,6 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
+regex = "1"
 
 [dev-dependencies]
 guff-packages = { path = "../guff-packages" }

@@ -1,0 +1,14 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - importas
+  settings:
+    importas:
+      no-unaliased: true
+      no-extra-aliases: true
+      alias:
+        - pkg: fmt
+          alias: fmtpkg
+        - pkg: net/(\w+)
+          alias: $1pkg

@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use guff_analysis::SettingsBag;
 use guff_import::{
-    analyzer_block_logrus, analyzer_local_replace, depguard, gomoddirectives, gomodguard,
-    DenyEntry, DepguardOptions, DepguardRule, GomoddirectivesOptions, GomodguardOptions, ListMode,
+    analyzer_block_logrus, analyzer_local_replace, depguard, gomoddirectives, gomodguard, importas,
+    DenyEntry, DepguardOptions, DepguardRule, GomoddirectivesOptions, GomodguardOptions,
+    ImportasAlias, ImportasOptions, ListMode,
 };
 use guff_runner::RunnerOptions;
 
@@ -222,6 +223,161 @@ fn gomodguard_flags_local_replace_import() {
         messages
             .iter()
             .any(|m| m.contains("local replace") && m.contains("github.com/foo/bar")),
+        "{messages:?}"
+    );
+}
+
+fn importas_alias_bag() -> SettingsBag {
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "importas",
+        ImportasOptions {
+            alias: vec![
+                ImportasAlias {
+                    pkg: "fmt".into(),
+                    alias: "fmtpkg".into(),
+                },
+                ImportasAlias {
+                    pkg: "os".into(),
+                    alias: "ospkg".into(),
+                },
+            ],
+            no_unaliased: false,
+            no_extra_aliases: false,
+        },
+    );
+    bag
+}
+
+#[test]
+fn importas_flags_wrong_aliases() {
+    let pkg = support::typecheck_fixture("importas", "example.com/importas/bad", "bad.go");
+    let messages = support::run_analyzer_with_settings(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(importas_alias_bag()),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("fmt") && m.contains("fmtpkg")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("os") && m.contains("ospkg")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn importas_allows_correct_aliases() {
+    let pkg = support::typecheck_fixture("importas", "example.com/importas/ok", "ok.go");
+    let messages = support::run_analyzer_with_settings(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(importas_alias_bag()),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn importas_no_unaliased_flags_missing_alias() {
+    let pkg = support::typecheck_fixture(
+        "importas",
+        "example.com/importas/nounaliased",
+        "no_unaliased.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "importas",
+        ImportasOptions {
+            alias: vec![ImportasAlias {
+                pkg: "fmt".into(),
+                alias: "fmtpkg".into(),
+            }],
+            no_unaliased: true,
+            no_extra_aliases: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("without alias") && m.contains("fmtpkg")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn importas_no_extra_aliases_flags_unknown() {
+    let pkg = support::typecheck_fixture("importas", "example.com/importas/extra", "extra.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "importas",
+        ImportasOptions {
+            alias: Vec::new(),
+            no_unaliased: false,
+            no_extra_aliases: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("not part of config") && m.contains("fmt")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn importas_regex_capture_alias() {
+    let pkg = support::typecheck_fixture("importas", "example.com/importas/regex", "regex.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "importas",
+        ImportasOptions {
+            alias: vec![ImportasAlias {
+                pkg: r"net/(\w+)".into(),
+                alias: "$1pkg".into(),
+            }],
+            no_unaliased: false,
+            no_extra_aliases: false,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("httppkg") && m.contains("net/http")),
         "{messages:?}"
     );
 }

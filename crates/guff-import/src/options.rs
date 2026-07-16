@@ -92,3 +92,27 @@ pub struct GomodguardOptions {
     /// When true, imports of modules with a local `replace` are blocked.
     pub local_replace_directives: bool,
 }
+
+/// `linters.settings.importas` / `linters-settings.importas`.
+///
+/// Defaults (empty alias, flags false) report nothing until aliases are
+/// configured. Package patterns are compiled as `^pkg$` and may use capture
+/// groups with `$1`-style replacements in `alias`.
+///
+/// DEFERRED: use-site renames in SuggestedFix (`types.Info.Uses`).
+#[derive(Clone, Debug, Default)]
+pub struct ImportasOptions {
+    /// Required `(pkg pattern, alias)` pairs (order matters for first match).
+    pub alias: Vec<ImportasAlias>,
+    /// Report imports that match a rule but have no alias (`no-unaliased`).
+    pub no_unaliased: bool,
+    /// Report aliases that are not covered by any rule (`no-extra-aliases`).
+    pub no_extra_aliases: bool,
+}
+
+/// One `importas.alias[]` entry.
+#[derive(Clone, Debug, Default)]
+pub struct ImportasAlias {
+    pub pkg: String,
+    pub alias: String,
+}

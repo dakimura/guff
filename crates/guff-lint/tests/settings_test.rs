@@ -992,3 +992,25 @@ fn parse_v2_bidichk_settings() {
         .expect("bidichk options");
     assert_eq!(opts.disallowed_runes, vec!["LEFT-TO-RIGHT-OVERRIDE"]);
 }
+
+#[test]
+fn parse_v2_importas_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_importas_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.importas.no_unaliased);
+    assert!(settings.importas.no_extra_aliases);
+    assert_eq!(settings.importas.alias.len(), 2);
+    assert_eq!(settings.importas.alias[0].pkg, "fmt");
+    assert_eq!(settings.importas.alias[0].alias, "fmtpkg");
+    assert_eq!(settings.importas.alias[1].pkg, r"net/(\w+)");
+    assert_eq!(settings.importas.alias[1].alias, "$1pkg");
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_import::ImportasOptions>("importas")
+        .expect("importas options");
+    assert!(opts.no_unaliased);
+    assert!(opts.no_extra_aliases);
+    assert_eq!(opts.alias.len(), 2);
+    assert_eq!(opts.alias[0].pkg, "fmt");
+}

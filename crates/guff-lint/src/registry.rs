@@ -94,6 +94,7 @@ pub fn analyzers_for_linter_with_settings(
         "depguard" => Some(vec![guff_import::depguard()]),
         "gomoddirectives" => Some(vec![guff_import::gomoddirectives()]),
         "gomodguard" => Some(vec![guff_import::gomodguard()]),
+        "importas" => Some(vec![guff_import::importas()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
         _ => None,
@@ -142,6 +143,7 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "gomodguard",
     "goprintffuncname",
     "govet",
+    "importas",
     "ineffassign",
     "lll",
     "loggercheck",
@@ -217,6 +219,7 @@ pub fn linter_description(name: &str) -> &'static str {
         "gomodguard" => "Allow and blocklist linter for direct Go module dependencies.",
         "goprintffuncname" => "Checks that printf-like functions are named with an f suffix.",
         "govet" => "Vet examines Go source code and reports suspicious constructs.",
+        "importas" => "Enforces consistent import aliases.",
         "ineffassign" => "Detects when assignments to existing variables are not used.",
         "lll" => "Reports long lines.",
         "loggercheck" => "Checks key value pairs for common logger libraries (kitlog,klog,logr,slog,zap).",
