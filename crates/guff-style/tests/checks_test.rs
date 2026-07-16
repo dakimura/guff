@@ -3761,6 +3761,10 @@ fn gocritic_enable_all_extras() {
         "can simplify `!(a >= b + 1)` to `a <= b`",
         "can simplify `a > 10 && a < 12` to `a == 11`",
         "can simplify `a < 11 || a > 11` to `a != 11`",
+        "can re-write `[0-9]+` as `\\d+`",
+        "can re-write `(?:a|b|c)` as `[abc]`",
+        "can re-write `foo|fo` as `foo?`",
+        "can re-write `axx*y` as `ax+y`",
     ];
     for needle in expect {
         assert!(

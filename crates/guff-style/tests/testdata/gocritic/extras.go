@@ -137,6 +137,13 @@ func badRegexpExtra() {
 	regexp.MustCompile(`[\w_]`)
 }
 
+func regexpSimplifyExtra() {
+	regexp.MustCompile(`[0-9]+`)
+	regexp.MustCompile(`(?:a|b|c)`)
+	regexp.MustCompile(`foo|fo`)
+	regexp.MustCompile(`axx*y`)
+}
+
 func sortSliceExtra() {
 	var xs []int
 	var ys []int

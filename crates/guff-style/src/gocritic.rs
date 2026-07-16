@@ -39,11 +39,13 @@
 //! - batch 16 (enable-all extras): `badLock`, `externalErrorReassign`,
 //!   `uncheckedInlineErr`, `boolExprSimplify` (doubleNegation / invertComparison /
 //!   negatedEquals / combineChecks / removeIncDec / foldRanges)
+//! - batch 17 (enable-all extra): `regexpSimplify`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host + `regexpSimplify`),
+//! DEFERRED: remaining enable-all extras (`ruleguard` DSL host),
+//! regexpSimplify Go-only spellings (`[][]`) / full quasilyte/regex Value parity,
 //! boolExprSimplify SkipChilds (nested dual-report) / SideEffectFree full parity,
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
 //! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
@@ -94,6 +96,8 @@ use crate::options::GocriticOptions;
 
 #[path = "gocritic_bad_regexp.rs"]
 mod gocritic_bad_regexp;
+#[path = "gocritic_regexp_simplify.rs"]
+mod gocritic_regexp_simplify;
 
 /// Checks enabled by default when neither `enable-all` nor `disable-all` is set
 /// (golangci-lint stable list ∩ implemented).
@@ -183,6 +187,7 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "rangeValCopy",
     "redundantSprint",
     "regexpPattern",
+    "regexpSimplify",
     "returnAfterHttpError",
     "sliceClear",
     "sloppyReassign",
@@ -3272,6 +3277,34 @@ fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     let pos = call.args[0].pos().0 as u32;
     for msg in gocritic_bad_regexp::check_pattern(&pat) {
         report(pending, pos, msg);
+    }
+}
+
+fn check_regexp_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    match name.as_str() {
+        "regexp.Compile" | "regexp.MustCompile" => {}
+        _ => return,
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| match &call.args[0] {
+        Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
+            Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
+        }
+        _ => None,
+    }) else {
+        return;
+    };
+    if let Some(simplified) = gocritic_regexp_simplify::simplify(&pat) {
+        report(
+            pending,
+            call.args[0].pos().0 as u32,
+            format!("can re-write `{pat}` as `{simplified}`"),
+        );
     }
 }
 
@@ -7695,6 +7728,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "badRegexp") {
                         check_bad_regexp(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "regexpSimplify") {
+                        check_regexp_simplify(pass, c, &mut pending);
                     }
                     if enabled(&set, "sortSlice") {
                         check_sort_slice(pass, c, &mut pending);
