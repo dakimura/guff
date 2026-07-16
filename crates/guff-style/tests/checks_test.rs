@@ -3076,6 +3076,14 @@ fn gocritic_enable_all_extras() {
         "\"dir/\" contains a path separator",
         "append all `ns` data while range it",
         "nil check may not be enough, check for len",
+        "function argument `withWidth(w)` is duplicated",
+        "consider to change `methodFoo.bar` to `f.bar`",
+        "copy of xs (512 bytes) can be avoided with &xs",
+        "'.com' should probably be '\\.com'",
+        "cmp func must use xs slice in comparison",
+        "use db.Exec() if returned result is not needed",
+        "ignoring Query() rows result may lead to a connection leak",
+        "rewrite if-else to type switch statement",
     ];
     for needle in expect {
         assert!(
@@ -3104,6 +3112,14 @@ fn gocritic_extras_off_by_default() {
                 || m.contains("path separator")
                 || m.contains("append all")
                 || m.contains("nil check may not be enough")
+                || m.contains("is duplicated")
+                || m.contains("consider to change `methodFoo")
+                || m.contains("can be avoided with &")
+                || m.contains("should probably be")
+                || m.contains("must use xs slice")
+                || m.contains("use db.Exec()")
+                || m.contains("connection leak")
+                || m.contains("type switch statement")
         }),
         "extras should be off by default: {messages:?}"
     );

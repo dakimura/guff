@@ -4,6 +4,8 @@ import (
 	"fmt"
 	formatting "fmt"
 	"path/filepath"
+	"regexp"
+	"sort"
 	// "os"
 )
 
@@ -81,3 +83,85 @@ func weakCondExtra(xs []int) {
 }
 
 func complex64() {}
+
+func withWidth(w int) func(*int) {
+	return func(*int) {}
+}
+
+func withHeight(h int) func(*int) {
+	return func(*int) {}
+}
+
+func doPanel(name string, opts ...func(*int)) {
+	_ = name
+	_ = opts
+}
+
+func dupOptionExtra(w, h int) {
+	doPanel("hello",
+		withWidth(w),
+		withHeight(h),
+		withWidth(w),
+	)
+}
+
+type methodFoo struct{}
+
+func (f methodFoo) bar(i int) {}
+
+func methodExprCallExtra() {
+	f := methodFoo{}
+	methodFoo.bar(f, 20)
+}
+
+func rangeExprCopyExtra() {
+	var xs [512]byte
+	for _, x := range xs {
+		_ = x
+	}
+}
+
+func regexpPatternExtra() {
+	regexp.MustCompile(`google.com`)
+}
+
+func sortSliceExtra() {
+	var xs []int
+	var ys []int
+	sort.Slice(xs, func(i, j int) bool {
+		return ys[i] < ys[j]
+	})
+}
+
+type Rows struct{}
+
+type Result struct{}
+
+type sqlDB struct{}
+
+func (db *sqlDB) Query(query string, args ...interface{}) (*Rows, error) {
+	return nil, nil
+}
+
+func (db *sqlDB) Exec(query string, args ...interface{}) (Result, error) {
+	return Result{}, nil
+}
+
+type sqlQueryer interface {
+	Query(query string, args ...interface{}) (*Rows, error)
+}
+
+func sqlQueryExtra(db *sqlDB, q sqlQueryer) {
+	var err error
+	_, err = db.Query("UPDATE users SET name = 'gopher'")
+	_, err = q.Query("UPDATE users SET name = 'gopher'")
+	_ = err
+}
+
+func typeAssertChainExtra(x interface{}) {
+	if v, ok := x.(int8); ok {
+		_ = v
+	} else if v, ok := x.(int16); ok {
+		_ = v
+	}
+}

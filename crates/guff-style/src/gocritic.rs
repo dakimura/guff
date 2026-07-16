@@ -1,7 +1,7 @@
 //! Port of [`github.com/go-critic/go-critic`](https://github.com/go-critic/go-critic)
 //! (golangci-lint wrapper: `linters.settings.gocritic`).
 //!
-//! Implemented checkers (**50** = 34 default + 16 enable-all extras):
+//! Implemented checkers (**57** = 34 default + 23 enable-all extras):
 //! - original 18: `appendAssign`, `assignOp`, `badCall`, `captLocal`,
 //!   `defaultCaseOrder`, `dupArg`, `dupCase`, `elseif`, `exitAfterDefer`,
 //!   `flagDeref`, `ifElseChain`, `newDeref`, `singleCaseSwitch`, `sloppyLen`,
@@ -15,14 +15,17 @@
 //! - batch 5 (enable-all extras): `builtinShadow`, `builtinShadowDecl`,
 //!   `commentedOutImport`, `dupImport`, `filepathJoin`, `paramTypeCombine`,
 //!   `rangeAppendAll`, `weakCond`
+//! - batch 6 (enable-all extras): `dupOption`, `methodExprCall`, `rangeExprCopy`,
+//!   `regexpPattern`, `sortSlice`, `sqlQuery`, `typeAssertChain`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! (prometheus-style `enable-all` + `disabled-checks` works).
 //!
-//! DEFERRED: remaining enable-all extras (badRegexp / dupOption / methodExprCall /
-//! rangeExprCopy / regexpPattern / ruleguard / sortSlice / sqlQuery / typeAssertChain),
-//! per-check `settings` params, SuggestedFix, caseOrder expression-switch
-//! overlap, wrapperFunc/unlambda/typeSwitchVar full type-aware parity.
+//! DEFERRED: remaining enable-all extras (`badRegexp` / `ruleguard`),
+//! per-check `settings` params (rangeExprCopy sizeThreshold/skipTestFuncs),
+//! SuggestedFix, caseOrder expression-switch overlap,
+//! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
+//! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -36,7 +39,7 @@ use guff::ast::{
     ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
-use guff::position::{FileSet, Pos};
+use guff::position::{FileSet, Pos, NO_POS};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
@@ -46,8 +49,11 @@ use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
+use guff_types::named::named_obj;
+use guff_types::operand::OperandMode;
 use guff_types::predicates::is_interface;
-use guff_types::TypeId;
+use guff_types::tuple::{tuple_at, tuple_len};
+use guff_types::{default_sizes, TypeId};
 use regex::Regex;
 
 use crate::options::GocriticOptions;
@@ -99,15 +105,22 @@ const ENABLE_ALL_EXTRA_CHECKS: &[&str] = &[
     "commentedOutImport",
     "deferUnlambda",
     "dupImport",
+    "dupOption",
     "emptyDecl",
     "emptyFallthrough",
     "emptyStringTest",
     "filepathJoin",
     "initClause",
+    "methodExprCall",
     "nilValReturn",
     "octalLiteral",
     "paramTypeCombine",
     "rangeAppendAll",
+    "rangeExprCopy",
+    "regexpPattern",
+    "sortSlice",
+    "sqlQuery",
+    "typeAssertChain",
     "weakCond",
     "yodaStyleExpr",
 ];
@@ -2771,6 +2784,651 @@ fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, St
     );
 }
 
+fn signature_of(pass: &Pass<'_>, typ: TypeId) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Signature(_) => Some(typ),
+        _ => None,
+    }
+}
+
+fn is_option_func_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(sig) = signature_of(pass, typ) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let TypeData::Signature(s) = artifacts.types.get(sig) else {
+        return false;
+    };
+    tuple_len(&artifacts.types, s.params()) > 0
+}
+
+fn check_dup_option(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    if call.args.is_empty() || call.ellipsis != NO_POS {
+        return;
+    }
+    let Some(fun_ty) = type_of(pass, &call.fun) else {
+        return;
+    };
+    let Some(sig) = signature_of(pass, fun_ty) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let TypeData::Signature(s) = artifacts.types.get(sig) else {
+        return;
+    };
+    if !s.variadic() {
+        return;
+    }
+    let nparams = tuple_len(&artifacts.types, s.params());
+    if nparams == 0 {
+        return;
+    }
+    let last = nparams - 1;
+    if last > call.args.len() {
+        return;
+    }
+    let last_param = tuple_at(&artifacts.types, s.params().unwrap(), last);
+    let Some(last_ty) = last_param.typ(&artifacts.objects) else {
+        return;
+    };
+    let last_ty = unalias_readonly(&artifacts.types, last_ty);
+    let TypeData::Slice(slice) = artifacts.types.get(last_ty) else {
+        return;
+    };
+    if !is_option_func_type(pass, slice.elem()) {
+        return;
+    }
+    let mut seen = HashSet::new();
+    for arg in &call.args[last..] {
+        let Some(code) = expr_text(arg) else {
+            continue;
+        };
+        if !seen.insert(code.clone()) {
+            report(
+                pending,
+                arg.pos().0 as u32,
+                format!("function argument `{code}` is duplicated"),
+            );
+        }
+    }
+}
+
+fn is_type_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    info.types
+        .get(&expr.id())
+        .is_some_and(|tv| tv.mode == OperandMode::TypeExpr)
+}
+
+fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return;
+    };
+    if call.args.is_empty() {
+        return;
+    }
+    if matches!(&call.args[0], Expr::Ident(id) if id.name == "nil") {
+        return;
+    }
+    if !is_type_expr(pass, &sel.x) {
+        return;
+    }
+    let Some(fun_t) = expr_text(&call.fun) else {
+        return;
+    };
+    let mut recv = &call.args[0];
+    if let Expr::UnaryExpr(u) = recv {
+        if u.op == Token::AND {
+            recv = &u.x;
+        }
+    }
+    let Some(recv_t) = expr_text(recv) else {
+        return;
+    };
+    report(
+        pending,
+        call.fun.pos().0 as u32,
+        format!("consider to change `{fun_t}` to `{recv_t}.{}`", sel.sel.name),
+    );
+}
+
+const RANGE_EXPR_COPY_SIZE_THRESHOLD: i64 = 512;
+
+fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32, String)>) {
+    if rs.key.is_none() || rs.value.is_none() {
+        return;
+    }
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(tv) = info.types.get(&rs.x.id()) else {
+        return;
+    };
+    if tv.mode != OperandMode::Variable {
+        return;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let typ = unalias_readonly(&artifacts.types, tv.typ);
+    if !matches!(artifacts.types.get(typ), TypeData::Array(_)) {
+        return;
+    }
+    let sizes = pass
+        .pkg()
+        .types_sizes
+        .unwrap_or_else(default_sizes);
+    let size = sizes.sizeof(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+    );
+    if size < RANGE_EXPR_COPY_SIZE_THRESHOLD {
+        return;
+    }
+    let Some(x_t) = expr_text(&rs.x) else {
+        return;
+    };
+    report(
+        pending,
+        rs.for_.0 as u32,
+        format!("copy of {x_t} ({size} bytes) can be avoided with &{x_t}"),
+    );
+}
+
+fn domain_pattern_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"[^\\]\.(com|org|info|net|ru|de)\b").expect("domain pattern regex")
+    })
+}
+
+fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    match name.as_str() {
+        "regexp.Compile"
+        | "regexp.CompilePOSIX"
+        | "regexp.MustCompile"
+        | "regexp.MustCompilePOSIX"
+        | "regexp.MustCompilePosix" => {}
+        _ => return,
+    }
+    if call.args.is_empty() {
+        return;
+    }
+    let Some(pat) = code::expr_to_string(pass, &call.args[0]).or_else(|| {
+        match &call.args[0] {
+            Expr::BasicLit(b) if b.kind == Some(Token::STRING) => {
+                Some(b.value.trim_matches(|c| c == '"' || c == '`').to_string())
+            }
+            _ => None,
+        }
+    }) else {
+        return;
+    };
+    if let Some(caps) = domain_pattern_re().captures(&pat) {
+        let domain = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        report(
+            pending,
+            call.args[0].pos().0 as u32,
+            format!("'.{domain}' should probably be '\\.{domain}'"),
+        );
+    }
+}
+
+fn side_effect_free_approx(expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(_) => false,
+        Expr::UnaryExpr(u) if u.op == Token::ARROW => false,
+        Expr::ParenExpr(p) => side_effect_free_approx(&p.x),
+        Expr::UnaryExpr(u) => side_effect_free_approx(&u.x),
+        Expr::BinaryExpr(b) => side_effect_free_approx(&b.x) && side_effect_free_approx(&b.y),
+        Expr::SelectorExpr(s) => side_effect_free_approx(&s.x),
+        Expr::IndexExpr(ix) => {
+            side_effect_free_approx(&ix.x) && side_effect_free_approx(&ix.index)
+        }
+        Expr::SliceExpr(s) => {
+            side_effect_free_approx(&s.x)
+                && s.low.as_ref().is_none_or(|e| side_effect_free_approx(e))
+                && s.high.as_ref().is_none_or(|e| side_effect_free_approx(e))
+                && s.max.as_ref().is_none_or(|e| side_effect_free_approx(e))
+        }
+        Expr::StarExpr(s) => side_effect_free_approx(&s.x),
+        Expr::TypeAssertExpr(a) => side_effect_free_approx(&a.x),
+        Expr::IndexListExpr(ix) => {
+            side_effect_free_approx(&ix.x) && ix.indices.iter().all(side_effect_free_approx)
+        }
+        Expr::KeyValueExpr(kv) => {
+            side_effect_free_approx(&kv.key) && side_effect_free_approx(&kv.value)
+        }
+        Expr::CompositeLit(lit) => lit.elts.iter().all(side_effect_free_approx),
+        _ => true,
+    }
+}
+
+fn contains_expr(tree: &Expr, needle: &Expr) -> bool {
+    if exprs_equal(tree, needle) {
+        return true;
+    }
+    match tree {
+        Expr::ParenExpr(p) => contains_expr(&p.x, needle),
+        Expr::UnaryExpr(u) => contains_expr(&u.x, needle),
+        Expr::BinaryExpr(b) => contains_expr(&b.x, needle) || contains_expr(&b.y, needle),
+        Expr::CallExpr(c) => {
+            contains_expr(&c.fun, needle) || c.args.iter().any(|a| contains_expr(a, needle))
+        }
+        Expr::SelectorExpr(s) => contains_expr(&s.x, needle),
+        Expr::IndexExpr(ix) => contains_expr(&ix.x, needle) || contains_expr(&ix.index, needle),
+        Expr::SliceExpr(s) => {
+            contains_expr(&s.x, needle)
+                || s.low.as_ref().is_some_and(|e| contains_expr(e, needle))
+                || s.high.as_ref().is_some_and(|e| contains_expr(e, needle))
+                || s.max.as_ref().is_some_and(|e| contains_expr(e, needle))
+        }
+        Expr::StarExpr(s) => contains_expr(&s.x, needle),
+        Expr::TypeAssertExpr(a) => contains_expr(&a.x, needle),
+        Expr::IndexListExpr(ix) => {
+            contains_expr(&ix.x, needle) || ix.indices.iter().any(|i| contains_expr(i, needle))
+        }
+        Expr::KeyValueExpr(kv) => contains_expr(&kv.key, needle) || contains_expr(&kv.value, needle),
+        Expr::CompositeLit(lit) => lit.elts.iter().any(|e| contains_expr(e, needle)),
+        _ => false,
+    }
+}
+
+fn contains_index_ident(tree: &Expr, index_name: &str) -> bool {
+    match tree {
+        Expr::IndexExpr(ix) => {
+            matches!(ix.index.as_ref(), Expr::Ident(id) if id.name == index_name)
+                || contains_index_ident(&ix.x, index_name)
+                || contains_index_ident(&ix.index, index_name)
+        }
+        Expr::ParenExpr(p) => contains_index_ident(&p.x, index_name),
+        Expr::UnaryExpr(u) => contains_index_ident(&u.x, index_name),
+        Expr::BinaryExpr(b) => {
+            contains_index_ident(&b.x, index_name) || contains_index_ident(&b.y, index_name)
+        }
+        Expr::CallExpr(c) => {
+            contains_index_ident(&c.fun, index_name)
+                || c.args.iter().any(|a| contains_index_ident(a, index_name))
+        }
+        Expr::SelectorExpr(s) => contains_index_ident(&s.x, index_name),
+        Expr::SliceExpr(s) => {
+            contains_index_ident(&s.x, index_name)
+                || s.low
+                    .as_ref()
+                    .is_some_and(|e| contains_index_ident(e, index_name))
+                || s.high
+                    .as_ref()
+                    .is_some_and(|e| contains_index_ident(e, index_name))
+                || s.max
+                    .as_ref()
+                    .is_some_and(|e| contains_index_ident(e, index_name))
+        }
+        Expr::StarExpr(s) => contains_index_ident(&s.x, index_name),
+        Expr::TypeAssertExpr(a) => contains_index_ident(&a.x, index_name),
+        Expr::IndexListExpr(ix) => {
+            contains_index_ident(&ix.x, index_name)
+                || ix.indices.iter().any(|i| contains_index_ident(i, index_name))
+        }
+        Expr::KeyValueExpr(kv) => {
+            contains_index_ident(&kv.key, index_name) || contains_index_ident(&kv.value, index_name)
+        }
+        Expr::CompositeLit(lit) => lit.elts.iter().any(|e| contains_index_ident(e, index_name)),
+        _ => false,
+    }
+}
+
+fn unwrap_slice_arg(expr: &Expr) -> &Expr {
+    match unparen(expr) {
+        Expr::SliceExpr(s) => unwrap_slice_arg(&s.x),
+        other => other,
+    }
+}
+
+fn sort_less_params(ty: &FuncType) -> Option<(&Ident, &Ident)> {
+    let params = ty.params.as_ref()?;
+    let mut idents = Vec::new();
+    for field in &params.list {
+        for name in &field.names {
+            idents.push(name);
+        }
+    }
+    if idents.len() == 2 {
+        Some((idents[0], idents[1]))
+    } else {
+        None
+    }
+}
+
+fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    if call.args.len() != 2 {
+        return;
+    }
+    let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
+        return;
+    };
+    if name != "sort.Slice" && name != "sort.SliceStable" {
+        return;
+    }
+    let slice = unwrap_slice_arg(&call.args[0]);
+    if !side_effect_free_approx(slice) {
+        return;
+    }
+    let Expr::FuncLit(less) = &call.args[1] else {
+        return;
+    };
+    let Some((ivar, jvar)) = sort_less_params(&less.ty) else {
+        return;
+    };
+    if less.body.list.len() != 1 {
+        return;
+    }
+    let Stmt::ReturnStmt(ret) = &less.body.list[0] else {
+        return;
+    };
+    if ret.results.len() != 1 {
+        return;
+    }
+    let cmp = unparen(&ret.results[0]);
+    let Expr::BinaryExpr(bin) = cmp else {
+        return;
+    };
+    if !matches!(
+        bin.op,
+        Token::LSS | Token::LEQ | Token::GTR | Token::GEQ
+    ) {
+        return;
+    }
+    if !side_effect_free_approx(cmp) {
+        return;
+    }
+    if !contains_expr(&bin.x, slice) && !contains_expr(&bin.y, slice) {
+        let Some(slice_t) = expr_text(slice) else {
+            return;
+        };
+        report(
+            pending,
+            bin.op_pos.0 as u32,
+            format!("cmp func must use {slice_t} slice in comparison"),
+        );
+    }
+    if contains_index_ident(&bin.x, &jvar.name) && contains_index_ident(&bin.y, &ivar.name) {
+        report(
+            pending,
+            bin.op_pos.0 as u32,
+            format!("unusual order of {{{},{}}} params in comparison", ivar.name, jvar.name),
+        );
+    }
+}
+
+fn type_is_rows_like(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => type_is_rows_like(pass, p.elem()),
+        TypeData::Named(_) => named_obj(&artifacts.types, typ).name(&artifacts.objects) == "Rows",
+        _ => false,
+    }
+}
+
+fn func_is_exec(pass: &Pass<'_>, func_oid: guff_types::arena::ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let ObjectData::Func(f) = artifacts.objects.get(func_oid) else {
+        return false;
+    };
+    if f.name() != "Exec" {
+        return false;
+    }
+    let Some(sig) = f.typ() else {
+        return false;
+    };
+    let TypeData::Signature(s) = artifacts.types.get(sig) else {
+        return false;
+    };
+    if tuple_len(&artifacts.types, s.results()) != 2 {
+        return false;
+    }
+    let nparams = tuple_len(&artifacts.types, s.params());
+    if nparams == 0 {
+        return false;
+    }
+    let first = tuple_at(&artifacts.types, s.params().unwrap(), 0);
+    let Some(first_ty) = first.typ(&artifacts.objects) else {
+        return false;
+    };
+    let first_ty = unalias_readonly(&artifacts.types, first_ty);
+    matches!(
+        artifacts.types.get(first_ty),
+        TypeData::Basic(b) if b.kind() == BasicKind::String
+    )
+}
+
+fn type_has_exec_method(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    match artifacts.types.get(typ) {
+        TypeData::Pointer(p) => type_has_exec_method(pass, p.elem()),
+        TypeData::Named(n) => {
+            for i in 0..n.num_methods() {
+                if func_is_exec(pass, n.method(i)) {
+                    return true;
+                }
+            }
+            if let Some(under) = n.underlying() {
+                let under = unalias_readonly(&artifacts.types, under);
+                match artifacts.types.get(under) {
+                    TypeData::Interface(iface) => {
+                        for i in 0..iface.num_explicit_methods() {
+                            if func_is_exec(pass, iface.explicit_method(i)) {
+                                return true;
+                            }
+                        }
+                    }
+                    TypeData::Struct(st) => {
+                        for i in 0..st.num_fields() {
+                            let oid = st.field(i);
+                            let ObjectData::Var(v) = artifacts.objects.get(oid) else {
+                                continue;
+                            };
+                            if v.embedded() && type_has_exec_method(pass, v.typ()) {
+                                return true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            false
+        }
+        TypeData::Interface(iface) => {
+            for i in 0..iface.num_explicit_methods() {
+                if func_is_exec(pass, iface.explicit_method(i)) {
+                    return true;
+                }
+            }
+            false
+        }
+        TypeData::Struct(st) => {
+            for i in 0..st.num_fields() {
+                let oid = st.field(i);
+                let ObjectData::Var(v) = artifacts.objects.get(oid) else {
+                    continue;
+                };
+                if v.embedded() && type_has_exec_method(pass, v.typ()) {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+fn query_call_is_rows_query(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return false;
+    };
+    match sel.sel.name.as_str() {
+        "Query" | "QueryContext" | "Queryx" | "QueryxContext" => {}
+        _ => return false,
+    }
+    let Some(fun_ty) = type_of(pass, &call.fun) else {
+        return false;
+    };
+    let Some(sig) = signature_of(pass, fun_ty) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let TypeData::Signature(s) = artifacts.types.get(sig) else {
+        return false;
+    };
+    if tuple_len(&artifacts.types, s.results()) != 2 {
+        return false;
+    }
+    let first = tuple_at(&artifacts.types, s.results().unwrap(), 0);
+    let Some(first_ty) = first.typ(&artifacts.objects) else {
+        return false;
+    };
+    type_is_rows_like(pass, first_ty)
+}
+
+fn check_sql_query(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+    if assign.lhs.len() != 2 || assign.rhs.len() != 1 {
+        return;
+    }
+    let Expr::Ident(first) = &assign.lhs[0] else {
+        return;
+    };
+    if first.name != "_" {
+        return;
+    }
+    let Expr::CallExpr(call) = &assign.rhs[0] else {
+        return;
+    };
+    if !query_call_is_rows_query(pass, call) {
+        return;
+    }
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return;
+    };
+    let Some(recv_ty) = type_of(pass, &sel.x) else {
+        return;
+    };
+    let Some(recv_t) = expr_text(&sel.x) else {
+        return;
+    };
+    if type_has_exec_method(pass, recv_ty) {
+        report(
+            pending,
+            sel.sel.pos().0 as u32,
+            format!("use {recv_t}.Exec() if returned result is not needed"),
+        );
+    } else {
+        report(
+            pending,
+            sel.sel.pos().0 as u32,
+            "ignoring Query() rows result may lead to a connection leak",
+        );
+    }
+}
+
+fn type_assert_from_if(stmt: &IfStmt) -> Option<&TypeAssertExpr> {
+    let init = stmt.init.as_ref()?;
+    let Stmt::AssignStmt(assign) = init.as_ref() else {
+        return None;
+    };
+    if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 2 || assign.rhs.len() != 1 {
+        return None;
+    }
+    if !matches!(&assign.lhs[0], Expr::Ident(_)) {
+        return None;
+    }
+    if !exprs_equal(&assign.lhs[1], &stmt.cond) {
+        return None;
+    }
+    match &assign.rhs[0] {
+        Expr::TypeAssertExpr(a) => Some(a),
+        _ => None,
+    }
+}
+
+fn count_type_assert_chain(stmt: &IfStmt, assertion: &TypeAssertExpr) -> usize {
+    let mut seen_types = HashSet::new();
+    let Some(first_ty) = assertion.ty.as_ref().and_then(|t| expr_text(t)) else {
+        return 0;
+    };
+    seen_types.insert(first_ty);
+    let x = &assertion.x;
+    let mut count = 1;
+    let mut cur = stmt;
+    loop {
+        let Some(Stmt::IfStmt(else_if)) = cur.else_.as_deref() else {
+            return count;
+        };
+        let Some(next) = type_assert_from_if(else_if) else {
+            return count;
+        };
+        let Some(ty_t) = next.ty.as_ref().and_then(|t| expr_text(t)) else {
+            return count;
+        };
+        if !seen_types.insert(ty_t) {
+            return 0;
+        }
+        if !exprs_equal(x, &next.x) {
+            return 0;
+        }
+        count += 1;
+        cur = else_if;
+    }
+}
+
+fn check_type_assert_chain(
+    stmt: &IfStmt,
+    visited: &mut HashSet<usize>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let key = stmt as *const _ as usize;
+    if !visited.insert(key) {
+        return;
+    }
+    let Some(assertion) = type_assert_from_if(stmt) else {
+        return;
+    };
+    if count_type_assert_chain(stmt, assertion) >= 2 {
+        // Mark nested else-ifs visited so we only warn once at the chain head.
+        let mut cur = stmt;
+        while let Some(Stmt::IfStmt(else_if)) = cur.else_.as_deref() {
+            visited.insert(else_if as *const _ as usize);
+            cur = else_if;
+        }
+        report(
+            pending,
+            stmt.if_.0 as u32,
+            "rewrite if-else to type switch statement",
+        );
+    }
+}
+
 fn walk_block_for_val_swap(body: &BlockStmt, pending: &mut Vec<(u32, String)>) {
     check_val_swap(&body.list, pending);
     for s in &body.list {
@@ -2815,6 +3473,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut if_else_visited = HashSet::new();
     // Track pointer identity for if-else via id; also use a map for id==0 cases.
     let mut if_else_ptr: HashMap<usize, ()> = HashMap::new();
+    let mut type_assert_visited: HashSet<usize> = HashSet::new();
 
     for file in pass.files() {
         if enabled(&set, "valSwap") {
@@ -2859,6 +3518,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "initClause") {
                         check_init_clause("if", s.init.as_deref(), s.if_.0 as u32, &mut pending);
                     }
+                    if enabled(&set, "typeAssertChain") {
+                        check_type_assert_chain(s, &mut type_assert_visited, &mut pending);
+                    }
                 }
                 NodeRef::SwitchStmt(s) => {
                     if enabled(&set, "singleCaseSwitch") {
@@ -2899,8 +3561,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::ForStmt(s) if enabled(&set, "badCond") => {
                     check_bad_cond_for(s, &mut pending);
                 }
-                NodeRef::RangeStmt(s) if enabled(&set, "rangeAppendAll") => {
-                    check_range_append_all(pass, s, &mut pending);
+                NodeRef::RangeStmt(s) => {
+                    if enabled(&set, "rangeAppendAll") {
+                        check_range_append_all(pass, s, &mut pending);
+                    }
+                    if enabled(&set, "rangeExprCopy") {
+                        check_range_expr_copy(pass, s, &mut pending);
+                    }
                 }
                 NodeRef::BinaryExpr(b) => {
                     if enabled(&set, "sloppyLen") {
@@ -2958,6 +3625,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "assignOp") {
                         check_assign_op(a, &mut pending);
                     }
+                    if enabled(&set, "sqlQuery") {
+                        check_sql_query(pass, a, &mut pending);
+                    }
                 }
                 NodeRef::FuncDecl(f) => {
                     if enabled(&set, "captLocal") {
@@ -2994,6 +3664,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&set, "filepathJoin") {
                         check_filepath_join(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "dupOption") {
+                        check_dup_option(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "methodExprCall") {
+                        check_method_expr_call(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "regexpPattern") {
+                        check_regexp_pattern(pass, c, &mut pending);
+                    }
+                    if enabled(&set, "sortSlice") {
+                        check_sort_slice(pass, c, &mut pending);
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {
