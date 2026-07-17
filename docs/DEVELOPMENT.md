@@ -57,6 +57,7 @@ go list / モジュールグラフ (guff-packages)
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
 | **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
+| **Formatters** | `guff-fmt` | `guff fmt`（gofmt；他は R15 DEFERRED） |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -156,7 +157,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help`/`fmt` 無し |
+| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は **gofmt** のみ（gofumpt/goimports/gci/golines/swaggo は DEFERRED） |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位ディレクトリまで探索。v1/v2 の linter 選択 + `issues`/`run`/`severity`/`output` をパース。**v2 `linters.exclusions`**（`paths` / `paths-except` / `rules` / `presets` / `warn-unused`）を `IssueFilter` に折り込み（v2 は既定除外なし；presets で EXC* 相当を展開）。`issues.exclude*` / `exclude-rules` / max-* / severity を後処理で適用。`run.build-tags`・`run.tests` を load に渡す。`run.timeout` を全体タイムアウトに適用（既定 `1m`）。`run.concurrency` / `-j` で rayon ワーカー数（`1` → sequential）。`linters.settings`（errcheck check-blank / check-type-assertions / **exclude-functions** / **disable-default-exclusions**、govet enable/disable、staticcheck checks / **initialisms** / **dot-import-whitelist** / **http-status-code-whitelist**（`stylecheck` キーも merge）、errchkjson check-error-free-encoding / report-no-exported、**wrapcheck** ignore-sigs / extra-ignore-sigs / ignore-sig-regexps / ignore-package-globs / ignore-interface-regexps / report-internal-errors、style/comment/revive/dupl/misspell、**usestdlibvars** HTTP + optional tables、**unconvert** fast-math / safe、**exhaustruct** include / exclude / allow-empty*、**exhaustive** check / default-signifies-exhaustive / default-case-required / ignore-enum-* / package-scope-only、**musttag** functions、**loggercheck** / **sloglint** / **testifylint** enable-all/disable-all/enable/disable / bool-compare.ignore-custom-types / expected-actual.pattern / time-compare.suppress-calls-pattern / formatter.check-format-string/require-f-funcs/require-string-msg / suite-extra-assert-call.mode / require-error.fn-pattern / **go-require.ignore-http-handlers**、**modernize** disable、**gocritic** enable-all/disable-all/enabled-checks/disabled-checks、**depguard / gomoddirectives / gomodguard(+_v2)**）を Pass / 選択に配線。`output.formats`/`format` → `--out-format`（text / colored / json / checkstyle / sarif / tab / github-actions）。R22 の config corpus smoke で **10** 件の v2 設定（Prometheus / Grafana / Gitea / MinIO / NATS / Tailscale / Vitess / Consul / Helm / Moby）をパース検証。 | `issues.new`/`new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard`/`fast`/`all`/`none`。ただし `standard`==`all`（5 系統）。追加系は `--enable`（forcetypeassert/nilnil/makezero/mirror/errname/err113/durationcheck/errorlint/wrapcheck/errchkjson/rowserrcheck/noctx/fatcontext/bodyclose/sqlclosecheck/arangolint/clickhouselint/copyloopvar/usetesting/usestdlibvars/perfsprint/goconst/dogsled/asciicheck/asasalint/bidichk/canonicalheader/tagliatelle/decorder/iotamixing/grouper/ireturn/gosec/gochecknoinits/gochecknoglobals/gocheckcompilerdirectives/forbidigo/reassign/recvcheck/thelper/iface/interfacebloat/embeddedstructfieldcheck/gochecksumtype/inamedparam/containedctx/nonamedreturns/noinlineerr/testableexamples/maintidx/testpackage/paralleltest/tparallel/intrange/goprintffuncname/funlen/gocyclo/lll/gocognit/nestif/cyclop/nakedret/nosprintfhostport/predeclared/whitespace/nlreturn/mnd/prealloc/tagalign/wsl/wsl_v5/unconvert/exhaustruct/exhaustive/musttag/loggercheck/sloglint/testifylint/exptostd/modernize/gocritic/varnamelen/unparam/unqueryvet/promlinter/ginkgolinter/godot/godox/dupword/godoclint/depguard/gomoddirectives/gomodguard/importas/misspell/dupl/revive/gosmopolitan/goheader/protogetter） | 100+ linter を跨ぐ本来の `all`/`fast`/カテゴリプリセットに未対応 |
@@ -186,7 +187,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-<upstream名>` | `guff-gostaticanalysis` | 同一 org の小 linter を束ねる |
 | `guff-<カテゴリ>` | `guff-style`, `guff-comment` | 小さなスタンドアロン linter 群 |
 | `guff-lint` | — | CLI + レジストリ + nolint |
-| `guff-fmt` | — | formatter 群（gofmt 等） |
+| `guff-fmt` | ✅ gofmt（`guff fmt`） | gofumpt / goimports / gci / golines / swaggo は DEFERRED |
 
 **ルール**: 1 クレート = `analyzers() -> Vec<&'static Analyzer>` を公開。登録は `guff-lint` が行う。
 
@@ -685,9 +686,19 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   `linters.settings.revive` YAML 配線済み（rules リスト・arguments・global/per-rule severity・confidence・ignore-generated-header）。
   prometheus 互換 rule 引数: `context-as-argument` `allowTypesBefore`、`early-return`/`indent-error-flow`/`superfluous-else` の `preserveScope`（`allowJump` も配線）、`var-naming` allowlist/blocklist / `skipInitialismNameChecks` / `upperCaseConst`（`skipPackageNameChecks` 等は upstream 同様無視・`package-naming` へ）。
 
-#### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）
+#### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド, Milestone L5）🟡 部分完了 (2026-07-17)
 - gofmt, gofumpt, goimports, gci, golines。**別パイプライン**（解析ではなく整形）。
 - golangci-lint v2 は `formatters` セクションを持つので、config 互換のためにも必要。
+- **進捗メモ (2026-07-17)**:
+  - 新クレート `guff-fmt` + CLI `guff fmt` を追加。
+  - **gofmt** をシステム `gofmt` バイナリ経由で実装（stdin → stdout）。
+  - `formatters.enable` / `formatters.settings.gofmt`（`simplify` / `rewrite-rules`）/
+    `formatters.exclusions.paths` を配線。
+  - フラグ: `-E/--enable`, `-d/--diff`, `--stdin`, `-c/--config`, `--no-config`。
+  - enable 空 → golangci 同様に gofmt フォールバック。未実装 formatter は skip 警告（単独ならエラー）。
+  - generated ファイル（`Code generated` … `DO NOT EDIT`）をスキップ。
+  - **DEFERRED**: gofumpt / goimports / gci / golines / swaggo、`guff run` 時の formatter 診断、
+    exclusions `generated` モード厳密化、diff 色付け。
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
 - 現在 `guff-staticcheck` は S* + SA* + **ST* 15** + **QF* 12**（ST1000 / ST1001 / ST1003 / ST1006 / ST1011 / ST1012 / ST1013 / ST1015 / ST1017 / ST1018 / ST1019 / ST1020 / ST1021 / ST1022 / ST1023 + **QF1001** / **QF1002** / **QF1003** / **QF1004** / **QF1005** / **QF1006** / **QF1007** / **QF1008** / **QF1009** / **QF1010** / **QF1011** / **QF1012**）。
@@ -823,6 +834,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 ## 10. セッション記録（新しいものほど上）
 
+| 2026-07-17 | **R15 開始**: 新クレート `guff-fmt` + CLI `guff fmt`。**gofmt** をシステム `gofmt` バイナリ経由で実装（`-s` / `-r`）。`formatters.enable` / `settings.gofmt`（simplify / rewrite-rules）/ `exclusions.paths` 配線。`-d/--diff`・`--stdin`・generated スキップ。enable 空 → gofmt フォールバック。gofumpt/goimports/gci/golines/swaggo と `guff run` 時 formatter 診断は DEFERRED。テスト: `guff-fmt` 8 件 + `cli_test` fmt 3 件 + `parse_gofmt_settings` |
 | 2026-07-17 | **R14/R22 続き**: `gomodguard_v2` を**独立した linter 名**としてレジストリ登録（golangci-lint v2 では `gomodguard` が deprecated → `gomodguard_v2`）。`gomodguard_v2` は既存 `guff_import::gomodguard()` analyzer を共有し（`gomodguard` / `gomodguard_v2` どちらの YAML 設定も同一 `gomodguard` bag に流れるため挙動一致）、`KNOWN_LINTER_NAMES` / description に追加。`linter_name_for_analyzer` を `insert` → `entry().or_insert()` に変更し、共有 analyzer の issue 帰属を canonical な `gomodguard` に固定（alias が上書きしない）。これにより Helm 等の実 `.golangci.yml`（`enable: [gomodguard_v2]`）が unknown-linter 警告なしに解決される。exclude-rules で `gomodguard_v2` 名を直接指定した場合の帰属マッチは DEFERRED。テスト: `registry::tests::{gomodguard_v2_alias_resolves_to_shared_analyzer,gomodguard_v2_is_known}` + 既存 config corpus（helm.yml）|
 | 2026-07-17 | **R13 続き**: 新規 linter **`sqlclosecheck`**（ryanrolds/sqlclosecheck；golangci は defer-only）を `guff-context` に追加しレジストリ登録。AST / intra-procedural 近似で `*sql.Rows` / `*sql.Stmt` / `*sqlx.NamedStmt` / pgx Rows 取得後の `.Close()` 欠落と non-defer `Close`（`Close should use defer`）を検出（再代入 flush・defer 無引数クロージャ・戻りターゲット型関数スキップ・引数渡しは handled）。設定キー無し。SSA Phi / closure capture / FieldAddr 完全パリティは DEFERRED。`guff-context` は計 **4** analyzers。テスト: `sqlclosecheck/{bad,ok}.go` + stub/database/sql + `checks_test`（2 件）+ ユニット（1 件） |
 | 2026-07-17 | **R13 続き**: 新規 linter **`bodyclose`**（timakin/bodyclose）を `guff-context` に追加しレジストリ登録。AST / intra-procedural 近似で `*net/http.Response` 取得後の `.Body.Close()` 欠落を検出（再代入 flush・defer 無引数クロージャ・戻り `*http.Response` 関数スキップ・`httptest.Result` スキップ）。`linters.settings.bodyclose.check-consumption`（既定 false；消費呼び出し `io.Copy`/`ReadAll`/`json.NewDecoder`/`bufio.NewScanner`/`NewReader`）YAML 配線。SSA Phi / closure capture / FieldAddr / `io.Closer` ChangeInterface 完全パリティは DEFERRED。`guff-context` は計 **3** analyzers。テスト: `bodyclose/{bad,ok,settings}.go` + stubs（net/http・httptest・io）+ `checks_test`（3 件）+ ユニット（2 件）+ `v2_bodyclose_settings.yml` |

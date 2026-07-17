@@ -39,6 +39,7 @@ guff-import = { path = "../guff-import" }
 guff-misspell = { path = "../guff-misspell" }
 guff-dupl = { path = "../guff-dupl" }
 guff-revive = { path = "../guff-revive" }
+guff-fmt = { path = "../guff-fmt" }
 
 [dev-dependencies]
 tempfile = "3"

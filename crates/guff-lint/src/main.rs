@@ -1,17 +1,19 @@
 //! `guff` CLI — run bundled Go linters via one analysis pipeline.
 
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
 use guff_lint::{
     discover_config, format_linters_listing, formats_from_output_config, guff_version,
     is_meta_linter, load_config, migrate_config_file, parse_go_duration, partition_linters,
     resolve_linters_with_settings, resolve_out_formats, run_and_print, version_banner,
-    ConfigError, ConfigFile, IssueFilter, LinterDefault, LinterSelection, LinterSettings,
-    LintOptions, IssuesConfig, OutputSpec, RunError, SeverityConfig, DEFAULT_TIMEOUT,
-    EXIT_TIMEOUT, NOLINTLINT_NAME,
+    ConfigError, ConfigFile, FormattersV2, IssueFilter, LinterDefault, LinterSelection,
+    LinterSettings, LintOptions, IssuesConfig, OutputSpec, RunError, SeverityConfig,
+    DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
 use guff_runner::{cache_dir_size, clean_cache, default_cache_dir};
 
@@ -26,6 +28,8 @@ struct Cli {
 enum Commands {
     /// Run enabled linters on packages.
     Run(RunArgs),
+    /// Format Go source files (gofmt; more formatters → R15).
+    Fmt(FmtArgs),
     /// Migrate a golangci-lint v1 config file to v2 format.
     Migrate(MigrateArgs),
     /// Display the guff version.
@@ -34,6 +38,33 @@ enum Commands {
     Linters(LintersArgs),
     /// Cache control and information.
     Cache(CacheArgs),
+}
+
+#[derive(Parser)]
+struct FmtArgs {
+    /// Paths to format (default: `.`).
+    #[arg(default_value = ".")]
+    paths: Vec<String>,
+
+    /// Read config from this path (default: discover `.golangci.yml` / `.guff.yml`).
+    #[arg(short = 'c', long)]
+    config: Option<PathBuf>,
+
+    /// Do not read a configuration file.
+    #[arg(long)]
+    no_config: bool,
+
+    /// Enable a formatter by name (repeatable; default: config `formatters.enable`, else gofmt).
+    #[arg(short = 'E', long = "enable")]
+    enable: Vec<String>,
+
+    /// Display diffs instead of rewriting files.
+    #[arg(short = 'd', long = "diff")]
+    diff: bool,
+
+    /// Read source from stdin; write formatted result to stdout.
+    #[arg(long)]
+    stdin: bool,
 }
 
 #[derive(Parser)]
@@ -162,6 +193,13 @@ fn main() -> ExitCode {
                 eprintln!("guff: {err}");
                 ExitCode::from(EXIT_TIMEOUT as u8)
             }
+            Err(err) => {
+                eprintln!("guff: {err}");
+                ExitCode::from(2)
+            }
+        },
+        Commands::Fmt(args) => match fmt_cmd(args) {
+            Ok(code) => ExitCode::from(code as u8),
             Err(err) => {
                 eprintln!("guff: {err}");
                 ExitCode::from(2)
@@ -401,6 +439,89 @@ fn linters_cmd(args: LintersArgs) -> Result<(), ConfigError> {
     Ok(())
 }
 
+fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
+    let formatters = load_formatters_config(args.no_config, args.config.as_ref())?;
+
+    let enable = if args.enable.is_empty() {
+        formatters.enable.clone()
+    } else {
+        args.enable.clone()
+    };
+
+    // When config enables unimplemented formatters (gofumpt/…), prefer CLI
+    // `--enable gofmt` or fall back to gofmt-only if gofmt is among them.
+    let enable = filter_implemented_formatters(&enable)?;
+
+    let meta = MetaFormatter::new(&enable, formatters.gofmt_options())
+        .map_err(|e| RunError::Message(e.to_string()))?;
+
+    let runner = Runner::new(
+        meta,
+        RunnerOptions {
+            diff: args.diff,
+            stdin: args.stdin,
+            exclude_paths: formatters.exclusion_paths(),
+        },
+    );
+
+    let paths: Vec<PathBuf> = args.paths.iter().map(PathBuf::from).collect();
+    let mut stdout = io::stdout();
+    let stats = runner
+        .run(&paths, &mut stdout)
+        .map_err(|e| RunError::Message(e.to_string()))?;
+    let _ = stdout.flush();
+    Ok(stats.exit_code)
+}
+
+/// Keep only implemented formatters; error if the set is non-empty and none remain.
+fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunError> {
+    if enable.is_empty() {
+        return Ok(Vec::new()); // MetaFormatter defaults to gofmt
+    }
+    const IMPLEMENTED: &[&str] = &["gofmt"];
+    let mut kept = Vec::new();
+    let mut deferred = Vec::new();
+    for name in enable {
+        if IMPLEMENTED.contains(&name.as_str()) {
+            kept.push(name.clone());
+        } else if guff_fmt::is_formatter(name) {
+            deferred.push(name.clone());
+        } else {
+            return Err(RunError::Message(format!("invalid formatter {name:?}")));
+        }
+    }
+    if kept.is_empty() && !deferred.is_empty() {
+        return Err(RunError::Message(format!(
+            "formatter(s) {:?} are not implemented yet (use -E gofmt, or wait for R15 follow-up)",
+            deferred
+        )));
+    }
+    for name in &deferred {
+        eprintln!(
+            "guff fmt: note: formatter {name:?} is not implemented yet; skipping (DEFERRED → R15)"
+        );
+    }
+    Ok(kept)
+}
+
+fn load_formatters_config(
+    no_config: bool,
+    config_path: Option<&PathBuf>,
+) -> Result<FormattersV2, RunError> {
+    if no_config {
+        return Ok(FormattersV2::default());
+    }
+    let path = match config_path {
+        Some(p) => Some(p.clone()),
+        None => discover_config(&std::env::current_dir().unwrap_or_default()),
+    };
+    let Some(path) = path else {
+        return Ok(FormattersV2::default());
+    };
+    let cfg = load_config(&path).map_err(|e| RunError::Message(e.to_string()))?;
+    Ok(cfg.formatters())
+}
+
 fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
     let path = match args.config {
         Some(p) => p,
@@ -416,10 +537,32 @@ fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
         backup.display()
     );
     if !migrated.formatters.enable.is_empty() {
-        eprintln!(
-            "guff: note: formatters ({}) are recorded but not run by guff yet",
-            migrated.formatters.enable.join(", ")
-        );
+        let known: Vec<_> = migrated
+            .formatters
+            .enable
+            .iter()
+            .filter(|n| *n == "gofmt")
+            .cloned()
+            .collect();
+        let deferred: Vec<_> = migrated
+            .formatters
+            .enable
+            .iter()
+            .filter(|n| *n != "gofmt")
+            .cloned()
+            .collect();
+        if !known.is_empty() {
+            eprintln!(
+                "guff: note: formatters ({}) available via `guff fmt`",
+                known.join(", ")
+            );
+        }
+        if !deferred.is_empty() {
+            eprintln!(
+                "guff: note: formatters ({}) are recorded but not implemented yet",
+                deferred.join(", ")
+            );
+        }
     }
     Ok(())
 }

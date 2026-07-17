@@ -1,0 +1,18 @@
+[package]
+name = "guff-fmt"
+description = "Go source formatters for guff (gofmt and friends)."
+keywords = ["go", "formatter", "gofmt", "golangci"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_fmt"
+path = "src/lib.rs"
+
+[dependencies]
+similar = "2"
+
+[dev-dependencies]
+tempfile = "3"

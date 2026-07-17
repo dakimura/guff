@@ -20,7 +20,8 @@ pub const CONFIG_FILE_NAMES: &[&str] = &[
 ];
 
 /// Linter names moved to the `formatters` section in golangci-lint v2.
-pub const FORMATTER_NAMES: &[&str] = &["gci", "gofmt", "gofumpt", "goimports"];
+pub const FORMATTER_NAMES: &[&str] =
+    &["gci", "gofmt", "gofumpt", "goimports", "golines", "swaggo"];
 
 /// Linters removed in golangci-lint v2 (stripped during migration).
 pub const DEPRECATED_LINTERS: &[&str] = &[
@@ -419,12 +420,88 @@ pub struct FormattersV2 {
     pub enable: Vec<String>,
     #[serde(default, skip_serializing_if = "serde_yaml::Value::is_null")]
     pub settings: serde_yaml::Value,
+    #[serde(default, skip_serializing_if = "FormatterExclusions::is_empty")]
+    pub exclusions: FormatterExclusions,
+}
+
+/// `formatters.exclusions` (subset; `generated` mode beyond default skip is DEFERRED).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FormatterExclusions {
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default, rename = "warn-unused")]
+    pub warn_unused: bool,
+    /// golangci: `lax` / `strict` / `disable`. Generated-file skip always uses
+    /// the `Code generated` … `DO NOT EDIT` heuristic for now.
+    #[serde(default)]
+    pub generated: Option<String>,
+}
+
+impl FormatterExclusions {
+    fn is_empty(&self) -> bool {
+        self.paths.is_empty() && !self.warn_unused && self.generated.is_none()
+    }
 }
 
 impl FormattersV2 {
     fn is_empty(&self) -> bool {
-        self.enable.is_empty() && self.settings.is_null()
+        self.enable.is_empty() && self.settings.is_null() && self.exclusions.is_empty()
     }
+
+    /// Parse `formatters.settings.gofmt` into [`guff_fmt::GofmtOptions`].
+    pub fn gofmt_options(&self) -> guff_fmt::GofmtOptions {
+        parse_gofmt_settings(&self.settings)
+    }
+
+    /// Path exclusion patterns from `formatters.exclusions.paths`.
+    pub fn exclusion_paths(&self) -> Vec<String> {
+        self.exclusions.paths.clone()
+    }
+}
+
+/// Parse gofmt settings from `formatters.settings` YAML mapping.
+pub fn parse_gofmt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofmtOptions {
+    let mut opts = guff_fmt::GofmtOptions::default();
+    let Some(map) = settings.as_mapping() else {
+        return opts;
+    };
+    let Some(gofmt) = map.get(serde_yaml::Value::String("gofmt".into())) else {
+        return opts;
+    };
+    let Some(gmap) = gofmt.as_mapping() else {
+        return opts;
+    };
+    if let Some(v) = gmap.get(serde_yaml::Value::String("simplify".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.simplify = b;
+        }
+    }
+    if let Some(rules) = gmap.get(serde_yaml::Value::String("rewrite-rules".into())) {
+        if let Some(seq) = rules.as_sequence() {
+            for item in seq {
+                let Some(rmap) = item.as_mapping() else {
+                    continue;
+                };
+                let pattern = rmap
+                    .get(serde_yaml::Value::String("pattern".into()))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let replacement = rmap
+                    .get(serde_yaml::Value::String("replacement".into()))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !pattern.is_empty() {
+                    opts.rewrite_rules.push(guff_fmt::RewriteRule {
+                        pattern,
+                        replacement,
+                    });
+                }
+            }
+        }
+    }
+    opts
 }
 
 /// golangci-lint v1 configuration (subset supported for migration).
@@ -586,6 +663,14 @@ impl ConfigFile {
         match self {
             Self::V1(v1) => &v1.output,
             Self::V2(v2) => &v2.output,
+        }
+    }
+
+    /// `formatters` section (v2). For v1, migrates linters that moved to formatters.
+    pub fn formatters(&self) -> FormattersV2 {
+        match self {
+            Self::V2(v2) => v2.formatters.clone(),
+            Self::V1(v1) => migrate_v1_to_v2(v1).formatters,
         }
     }
 
@@ -936,6 +1021,7 @@ pub(crate) fn migrate_v1_to_v2(v1: &ConfigV1) -> ConfigV2 {
         formatters: FormattersV2 {
             enable: dedupe_normalized(formatters_enable),
             settings: formatter_settings,
+            exclusions: FormatterExclusions::default(),
         },
         issues: v1.issues.clone(),
         run: v1.run.clone(),
@@ -1140,6 +1226,25 @@ linters:
         let names = sel.resolve_names();
         assert!(!names.contains(&"staticcheck".to_string()));
         assert!(names.contains(&"govet".to_string()));
+    }
+
+    #[test]
+    fn parse_gofmt_simplify_and_rewrite_rules() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+gofmt:
+  simplify: true
+  rewrite-rules:
+    - pattern: 'interface{}'
+      replacement: 'any'
+"#,
+        )
+        .unwrap();
+        let opts = parse_gofmt_settings(&yaml);
+        assert!(opts.simplify);
+        assert_eq!(opts.rewrite_rules.len(), 1);
+        assert_eq!(opts.rewrite_rules[0].pattern, "interface{}");
+        assert_eq!(opts.rewrite_rules[0].replacement, "any");
     }
 
     #[test]

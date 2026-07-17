@@ -219,3 +219,82 @@ fn cli_cache_status_and_clean() {
     );
     assert!(!cache_dir.exists());
 }
+
+#[test]
+fn cli_fmt_rewrites_file() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("main.go");
+    std::fs::write(&path, "package main\nfunc main(  ) {\nx:=1\n}\n").unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "--no-config", "-E", "gofmt"])
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(&path).unwrap();
+    assert!(got.contains("func main() {"), "got:\n{got}");
+    assert!(got.contains("x := 1"), "got:\n{got}");
+}
+
+#[test]
+fn cli_fmt_diff_exits_one() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("main.go");
+    let original = "package main\nfunc main(  ) {}\n";
+    std::fs::write(&path, original).unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "--no-config", "-E", "gofmt", "-d"])
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt -d");
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("func main()"), "diff:\n{stdout}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
+fn cli_fmt_reads_gofmt_simplify_from_config() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        r#"
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+"#,
+    )
+    .unwrap();
+    let path = tmp.path().join("p.go");
+    std::fs::write(
+        &path,
+        "package p\n\nfunc f(s []int) []int {\n\treturn s[1:len(s)]\n}\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "-c"])
+        .arg(&cfg)
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt -c");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(&path).unwrap();
+    assert!(got.contains("s[1:]"), "expected -s rewrite, got:\n{got}");
+}
+
