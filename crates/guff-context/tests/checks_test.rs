@@ -3,7 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use guff_analysis::SettingsBag;
-use guff_context::{bodyclose, fatcontext, noctx, BodycloseOptions};
+use guff_context::{bodyclose, fatcontext, noctx, sqlclosecheck, BodycloseOptions};
 use guff_runner::RunnerOptions;
 
 #[test]
@@ -123,5 +123,41 @@ fn bodyclose_check_consumption_requires_read() {
             .count()
             == 1,
         "only closedOnly should fail: {messages:?}"
+    );
+}
+
+#[test]
+fn sqlclosecheck_flags_missing_and_non_defer() {
+    let dir = support::testdata("sqlclosecheck");
+    let pkg = support::typecheck_pkg("example.com/sqlclosecheck", &dir.join("bad.go"));
+    let messages = support::run_analyzer(sqlclosecheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Rows/Stmt/NamedStmt was not closed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("Close should use defer")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("was not closed"))
+            .count()
+            >= 3,
+        "expected ≥3 not-closed (rows + stmt + reassign): {messages:?}"
+    );
+}
+
+#[test]
+fn sqlclosecheck_allows_defer_return_and_pass() {
+    let dir = support::testdata("sqlclosecheck");
+    let pkg = support::typecheck_pkg("example.com/sqlclosecheck/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(sqlclosecheck(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(sqlclosecheck(), &pkg)
     );
 }
