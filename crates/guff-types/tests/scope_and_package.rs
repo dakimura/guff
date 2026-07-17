@@ -1,9 +1,9 @@
 //! Chunk-7 tests: Scope, Package, objset, ObjectMeta (parent/pkg/order/id).
 
 use guff_types::{
-    init_universe_full, is_exported, lookup_chain, new_package, new_scope, new_var, object_id,
-    scope_insert, scope_lookup, BasicKind, BuiltinId, ObjSet, ObjectArena, PackageArena,
-    ScopeArena,
+    init_universe_full, is_exported, lookup_chain, lookup_ignoring_case, new_package, new_scope,
+    new_var, object_id, scope_insert, scope_lookup, BasicKind, BuiltinId, ObjSet, ObjectArena,
+    PackageArena, ScopeArena,
 };
 
 #[test]
@@ -15,6 +15,26 @@ fn is_exported_basics() {
     assert!(!is_exported(""));
     // Non-ASCII uppercase counts as exported.
     assert!(is_exported("Αlpha"));
+}
+
+#[test]
+fn lookup_ignoring_case_matches_exported_only_when_requested() {
+    let mut o_arena = ObjectArena::new();
+    let mut s_arena = ScopeArena::new();
+    let (_, table) = guff_types::init_universe();
+    let int = table[BasicKind::Int as usize];
+    let scope = new_scope(&mut s_arena, None, None, 0, 0, "pkg");
+
+    let foo = new_var(&mut o_arena, "Foo", int);
+    let bar = new_var(&mut o_arena, "bar", int);
+    assert!(scope_insert(&mut s_arena, &mut o_arena, scope, foo).is_none());
+    assert!(scope_insert(&mut s_arena, &mut o_arena, scope, bar).is_none());
+
+    let exported = lookup_ignoring_case(&s_arena, scope, "foo", true);
+    assert_eq!(exported, vec![foo]);
+
+    let all = lookup_ignoring_case(&s_arena, scope, "BAR", false);
+    assert_eq!(all, vec![bar]);
 }
 
 #[test]

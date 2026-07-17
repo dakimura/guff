@@ -11,17 +11,12 @@
 //! | `&term{true,t}`  | `Some(Term { tilde: true,  typ: Some(t) })` | `{x | under(x) == t}`   |
 //!
 //! Term operations live as free functions on `Option<Term>` (so the `None` ⇒
-//! ∅ shape is first-class) and take `&TypeArena` because [`includes`] and
-//! [`disjoint`] need to compute underlying types.
-//!
-//! **Identical placeholder:** chunk 4 uses `TypeId` equality as a stand-in
-//! for Go's structural `Identical`. This is correct when both sides reference
-//! the same predeclared / Named / declared type, but it does NOT recognise
-//! structurally-equal anonymous types (`[]int == []int` constructed
-//! independently). The real `Identical` lands when `predicates.go` is
-//! ported.
+//! ∅ shape is first-class). Type identity uses
+//! [`predicates::identical`](crate::predicates::identical) (D01), matching Go's
+//! `Identical`.
 
-use crate::arena::{TypeArena, TypeId};
+use crate::arena::{ObjectArena, PackageArena, TypeArena, TypeId};
+use crate::predicates::identical;
 
 /// Internal term (see module docs for the four shapes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,24 +50,25 @@ impl Term {
     }
 }
 
-/// `TypeId`-equality stand-in for Go's `Identical`. See module docs for the
-/// chunk-4 limitation.
-pub(crate) fn identical_stub(a: TypeId, b: TypeId) -> bool {
-    a == b
-}
-
 /// Reports whether `x` and `y` represent the same type set.
 ///
 /// Equivalent to `term.equal`.
-#[allow(dead_code)] // API completeness — used by predicates.go when ported.
-pub(crate) fn equal(x: Option<Term>, y: Option<Term>) -> bool {
+pub(crate) fn equal(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: Option<Term>,
+    y: Option<Term>,
+) -> bool {
     match (x, y) {
         (None, None) => true,
         (None, _) | (_, None) => false,
         (Some(a), Some(b)) => match (a.typ, b.typ) {
             (None, None) => true,           // 𝓤 == 𝓤
             (None, _) | (_, None) => false, // 𝓤 ≠ {T}
-            (Some(at), Some(bt)) => a.tilde == b.tilde && identical_stub(at, bt),
+            (Some(at), Some(bt)) => {
+                a.tilde == b.tilde && identical(arena, oarena, parena, at, bt)
+            }
         },
     }
 }
@@ -82,7 +78,9 @@ pub(crate) fn equal(x: Option<Term>, y: Option<Term>) -> bool {
 /// Equivalent to `term.union`. The result has two slots; the second is
 /// `None` if the union collapses to a single term.
 pub(crate) fn union(
-    arena: &TypeArena,
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
     x: Option<Term>,
     y: Option<Term>,
 ) -> (Option<Term>, Option<Term>) {
@@ -96,7 +94,7 @@ pub(crate) fn union(
         _ => {}
     }
     // Both terms are {T} or {~t}.
-    if disjoint(arena, x, y) {
+    if disjoint(arena, oarena, parena, x, y) {
         return (x, y);
     }
     // Same typ — choose the more permissive (tilde-bearing) form.
@@ -112,14 +110,20 @@ pub(crate) fn union(
 /// Returns `x ∩ y`.
 ///
 /// Equivalent to `term.intersect`.
-pub(crate) fn intersect(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> Option<Term> {
+pub(crate) fn intersect(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: Option<Term>,
+    y: Option<Term>,
+) -> Option<Term> {
     match (x, y) {
         (None, _) | (_, None) => return None, // ∅ ∩ y == ∅, x ∩ ∅ == ∅
         (Some(xt), _) if xt.typ.is_none() => return y, // 𝓤 ∩ y == y
         (_, Some(yt)) if yt.typ.is_none() => return x, // x ∩ 𝓤 == x
         _ => {}
     }
-    if disjoint(arena, x, y) {
+    if disjoint(arena, oarena, parena, x, y) {
         return None;
     }
     let xt = x.unwrap();
@@ -135,15 +139,20 @@ pub(crate) fn intersect(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> 
 /// Reports whether `t ∈ x`.
 ///
 /// Equivalent to `term.includes`.
-#[allow(dead_code)] // used by termlist::includes / predicates.go.
-pub(crate) fn includes(arena: &TypeArena, x: Option<Term>, t: TypeId) -> bool {
+pub(crate) fn includes(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: Option<Term>,
+    t: TypeId,
+) -> bool {
     match x {
         None => false,
         Some(xt) => match xt.typ {
             None => true, // 𝓤 contains everything.
             Some(xt_typ) => {
                 let u = if xt.tilde { t.underlying(arena) } else { t };
-                identical_stub(xt_typ, u)
+                identical(arena, oarena, parena, xt_typ, u)
             }
         },
     }
@@ -152,8 +161,13 @@ pub(crate) fn includes(arena: &TypeArena, x: Option<Term>, t: TypeId) -> bool {
 /// Reports whether `x ⊆ y`.
 ///
 /// Equivalent to `term.subsetOf`.
-#[allow(dead_code)] // used by termlist::superset_of / predicates.go.
-pub(crate) fn subset_of(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> bool {
+pub(crate) fn subset_of(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: Option<Term>,
+    y: Option<Term>,
+) -> bool {
     match (x, y) {
         (None, _) => return true,                          // ∅ ⊆ y == true
         (_, None) => return false, // x ⊆ ∅ == false (x is not ∅ by prev arm)
@@ -161,7 +175,7 @@ pub(crate) fn subset_of(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> 
         (Some(xt), _) if xt.typ.is_none() => return false, // 𝓤 ⊆ y, y ≠ 𝓤
         _ => {}
     }
-    if disjoint(arena, x, y) {
+    if disjoint(arena, oarena, parena, x, y) {
         return false;
     }
     let xt = x.unwrap();
@@ -174,7 +188,13 @@ pub(crate) fn subset_of(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> 
 /// (caller's responsibility — Go's `disjoint` has the same precondition).
 ///
 /// Equivalent to `term.disjoint`.
-pub(crate) fn disjoint(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> bool {
+pub(crate) fn disjoint(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: Option<Term>,
+    y: Option<Term>,
+) -> bool {
     let xt = x.expect("disjoint: x must not be ∅");
     let yt = y.expect("disjoint: y must not be ∅");
     let x_typ = xt.typ.expect("disjoint: x.typ must not be None");
@@ -189,5 +209,5 @@ pub(crate) fn disjoint(arena: &TypeArena, x: Option<Term>, y: Option<Term>) -> b
     } else {
         y_typ
     };
-    !identical_stub(ux, uy)
+    !identical(arena, oarena, parena, ux, uy)
 }

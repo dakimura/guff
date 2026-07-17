@@ -64,20 +64,9 @@
 //!
 //! ## Deferrals
 //!
-//! - **`Implicits`** (`recordImplicit`) and **`Scopes`** (`recordScope`) — their
-//!   maps are not yet present in [`Info`]. Both key on statement/spec/file
-//!   nodes (import specs, type-switch case clauses, function-type scopes, block
-//!   scopes), none of which carry a stamped node id in our `Expr`/`Ident`-only
-//!   AST — so they are blocked on extending the stamping pass to statements.
-//! - **Def sites beyond package level** — short-variable-declaration locals
-//!   (`:=`) and range-clause locals (`for i := range …`) are recorded as `Defs`
-//!   (chunk 65); a `:=` redeclaration records a `Use` of the existing object.
-//!   Function parameters, named results, and named method receivers are recorded
-//!   as `Defs` in `signature_check.rs` (chunk 66), where the defining ident and
-//!   its `Var` are both in hand (Go's `declareParams`/`declare` → `recordDef`).
-//!   Still not recorded: labels (no `Label` object exists — `labels.rs` is
-//!   name-based) and anonymous parameters (Go's `recordImplicit`, which needs the
-//!   `Implicits` map keyed on the field node). Their *uses* are recorded normally.
+//! - **Labels** — no `Label` object exists (`labels.rs` is name-based), so
+//!   label defs are not recorded. Anonymous parameters use
+//!   [`record_implicit`](Checker::record_implicit) (chunk 72).
 //! - **`ParenExpr` inner node / `NoValue` tuple type** — `expr_internal`
 //!   recurses into a parenthesised expression directly (not through
 //!   `raw_expr`), so only the outer `ParenExpr` is recorded. And a `NoValue`

@@ -9,19 +9,17 @@
 //! be Interfaces, Unions, or arbitrary types) and folds them into a single
 //! [`TypeSet`], caching the result on the Interface.
 //!
-//! Chunk-4 simplifications (all marked TODO in code):
-//! - **`Identical`** is stubbed as TypeId equality (see [`typeterm`](crate::typeterm)).
-//! - **`comparableType`** is not yet ported — `intersect_term_lists` treats
-//!   the comparable bit conservatively but doesn't filter terms by
-//!   comparability.
-//! - **`sortMethods`** uses name-based ordering as a placeholder for the
-//!   `Func.cmp` / `Object.Id` ordering.
+//! Notes:
+//! - Term identity uses [`predicates::identical`](crate::predicates::identical)
+//!   (D01). `intersect_term_lists` filters non-comparable terms when the
+//!   comparable bit is set (D02).
 //! - **Version / import-constraint checks**, error reporting, and
-//!   `embedPos`-based duplicate-method errors are skipped (no Checker yet).
+//!   `embedPos`-based duplicate-method errors are Checker-side concerns.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
+use crate::predicates::{comparable_type, identical};
 use crate::termlist::{self, all_termlist, TermList};
 use crate::typeterm::Term;
 
@@ -277,8 +275,15 @@ pub fn compute_interface_type_set(
                 (vec![Some(Term::single(typ))], false)
             }
         };
-        let (next_terms, next_comp) =
-            intersect_term_lists(arena, &all_terms, all_comparable, &terms, comparable);
+        let (next_terms, next_comp) = intersect_term_lists(
+            arena,
+            object_arena,
+            package_arena,
+            &all_terms,
+            all_comparable,
+            &terms,
+            comparable,
+        );
         all_terms = next_terms;
         all_comparable = next_comp;
     }
@@ -348,7 +353,9 @@ pub fn compute_union_type_set(
                 if !is_valid_type(arena, u_typ) {
                     continue;
                 }
-                let slot = if ut.tilde() && !crate::typeterm::identical_stub(t_typ, u_typ) {
+                let slot = if ut.tilde()
+                    && !identical(arena, object_arena, package_arena, t_typ, u_typ)
+                {
                     None // ∅ — no type has this underlying
                 } else if ut.tilde() {
                     Some(Term::tilde(t_typ))
@@ -358,7 +365,7 @@ pub fn compute_union_type_set(
                 vec![slot]
             }
         };
-        all_terms = termlist::union(arena, &all_terms, &term_terms);
+        all_terms = termlist::union(arena, object_arena, package_arena, &all_terms, &term_terms);
         if all_terms.len() > MAX_TERM_COUNT {
             let inv = invalid_typeset();
             union_sets.insert(utyp, inv.clone());
@@ -379,27 +386,42 @@ pub fn compute_union_type_set(
 /// `xcomp` / `ycomp` are only meaningful when their respective lists are
 /// `is_all()`; the function preserves that invariant on its result.
 ///
-/// Chunk-4 simplification: the proper Go code filters non-comparable terms
-/// out when `comp && !terms.is_all()`. Since `comparableType` isn't ported
-/// yet, we instead leave the term list as-is and drop the comparable bit if
-/// the intersection isn't `is_all()` — matching Go's *invariant* (the bit
-/// is only valid for all-terms lists) without the comparability filtering.
+/// When the result is marked comparable but is not the universe set, only
+/// comparable terms are kept (Go's `comparableType` filter — D02).
 ///
 /// Equivalent to `intersectTermLists`.
 pub(crate) fn intersect_term_lists(
-    arena: &TypeArena,
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
     xterms: &TermList,
     xcomp: bool,
     yterms: &TermList,
     ycomp: bool,
 ) -> (TermList, bool) {
-    let terms = termlist::intersect(arena, xterms, yterms);
+    let mut terms = termlist::intersect(arena, oarena, parena, xterms, yterms);
     let mut comp = xcomp || ycomp;
     if comp && !termlist::is_all(&terms) {
-        // TODO(chunk-N): once comparableType lands, filter `terms` here to
-        // keep only comparable entries. For now, drop the comparable bit to
-        // preserve the invariant.
-        comp = false;
+        // Keep only comparable terms (Go: comparableType(t.typ, false, nil)).
+        let mut filtered: TermList = Vec::with_capacity(terms.len());
+        for t in terms.drain(..) {
+            let Some(term) = t else {
+                continue;
+            };
+            let Some(typ) = term.typ else {
+                // Universe term shouldn't appear when !is_all; keep defensively.
+                filtered.push(Some(term));
+                continue;
+            };
+            let mut seen = HashSet::new();
+            if comparable_type(arena, oarena, parena, typ, false, &mut seen).is_ok() {
+                filtered.push(Some(term));
+            }
+        }
+        terms = filtered;
+        if !termlist::is_all(&terms) {
+            comp = false;
+        }
     }
     debug_assert!(!comp || termlist::is_all(&terms));
     (terms, comp)

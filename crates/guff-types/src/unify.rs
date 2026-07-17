@@ -455,7 +455,7 @@ fn nify_inner(
                 return false;
             }
             // For now we require terms to be equal (matches Go's restriction).
-            if !termlist::equal(type_arena, &xterms, &yterms) {
+            if !termlist::equal(type_arena, object_arena, package_arena, &xterms, &yterms) {
                 return false;
             }
             // ifacePair cycle detection: if (xi, yi) was compared before they
@@ -993,7 +993,7 @@ fn unify_interfaces(
     if xcomp != ycomp {
         return false;
     }
-    if !termlist::equal(type_arena, &xterms, &yterms) {
+    if !termlist::equal(type_arena, object_arena, package_arena, &xterms, &yterms) {
         return false;
     }
     if xmethods.len() != ymethods.len() {

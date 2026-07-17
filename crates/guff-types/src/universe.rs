@@ -16,7 +16,9 @@
 //!   (matching `defPredeclaredFuncs`'s skip); a follow-up function can
 //!   register them on demand.
 //! - **`lazyObject`** importer-mode lazy resolution.
-//! - **`Universe.Lookup` hijack for `any`** (gotypesalias legacy).
+//! - **`Universe.Lookup` hijack for `any`** (gotypesalias legacy, D04) —
+//!   intentionally not ported. Go 1.22+ always enables type aliases, so the
+//!   hijack is obsolete for our supported language levels.
 
 use std::collections::HashMap;
 

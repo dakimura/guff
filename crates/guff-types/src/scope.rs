@@ -1,19 +1,18 @@
 //! Port of `cmd/compile/internal/types2/scope.go`.
 //!
-//! Chunk-7 simplifications:
-//! - **`pos`/`end`** are plain `u32`s; `0` means `nopos`. The full
-//!   `syntax.Pos` integration arrives when we cross-wire with
-//!   `guff-ast`'s position types.
+//! Chunk-7 notes:
+//! - **`pos`/`end`** are plain `u32`s; `0` means `nopos`.
 //! - **`lazyObject`** isn't ported — used only by exporter/importer
 //!   infrastructure which we haven't reached.
-//! - **`Universe.Lookup` hijack for `any`** (gotypesalias legacy) isn't
-//!   ported; we always return whatever's stored.
+//! - **`Universe.Lookup` hijack for `any`** (gotypesalias legacy, D04) isn't
+//!   ported; we always return whatever's stored. Go 1.22+ always enables
+//!   aliases, so this hijack is obsolete for our supported language levels.
 //! - **`WriteTo` / `Display`** are deferred.
-//! - **`lookupIgnoringCase`** is deferred.
 
 use std::collections::HashMap;
 
 use crate::arena::{ObjectArena, ObjectId, ScopeArena, ScopeId};
+use crate::object::is_exported;
 
 /// A scope holds a set of named objects and links to its parent and
 /// children. Objects may be inserted and looked up by name.
@@ -130,9 +129,30 @@ pub fn new_scope(
 /// Lookup `name` in `scope`. Does **not** walk to parent — call
 /// [`lookup_chain`] for that.
 ///
-/// Equivalent to `types2.Scope.Lookup` (minus the `any`-hijack).
+/// Equivalent to `types2.Scope.Lookup` (minus the obsolete `any`-hijack, D04).
 pub fn lookup(arena: &ScopeArena, scope: ScopeId, name: &str) -> Option<ObjectId> {
     arena.get(scope).lookup_local(name)
+}
+
+/// Returns objects in `scope` whose names match `name` ignoring case.
+/// If `exported` is set, only exported names are returned.
+///
+/// Equivalent to `types2.Scope.lookupIgnoringCase` (D03).
+pub fn lookup_ignoring_case(
+    arena: &ScopeArena,
+    scope: ScopeId,
+    name: &str,
+    exported: bool,
+) -> Vec<ObjectId> {
+    let mut matches = Vec::new();
+    for n in arena.get(scope).names() {
+        if (!exported || is_exported(&n)) && n.eq_ignore_ascii_case(name) {
+            if let Some(obj) = lookup(arena, scope, &n) {
+                matches.push(obj);
+            }
+        }
+    }
+    matches
 }
 
 /// Walk from `scope` toward the universe, returning the first matching

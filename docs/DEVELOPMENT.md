@@ -116,8 +116,10 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
   operand・conversions・assignments・typestring）**完了**。
 - Checker エンジン本体もほぼ完走（`check_files` 到達、宣言・式・文・呼び出し・組込・ジェネリクス
   end-to-end・importer・unused/dot/blank import・mono・sizes・version）。
-- **残**: `initorder.rs`（パッケージ初期化順, Step 34）, `recording.rs`（AST ノード ID が前提, Step 37）,
-  `util.rs` 一部（Step 39）, および D01/D02/D03/D04/D07/D10/D13/D16 の未了分（→ §8 R19）。
+- **残**: D04（`any`-hijack; gotypesalias legacy・意図的非移植）、D07 の
+  多行 cycle 診断、D13 の `interfacePtrError` 詳細ヒント、D16 の
+  gcexportdata バイナリローダ（→ 必要になったら個別タスク）。initorder /
+  recording / util / D01/D02/D03/D10 は **R19 で完了**。
 
 ### 3.2 解析フレームワーク（PRE-LINTER Phase 0–7）
 - Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
@@ -359,11 +361,19 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   S1028 / SA1001 を配線。runner に `Index` clone パス。
 - **DEFERRED**: 汎用 field/method の `Origin()` 二重記録（`Func`/`Var` に Origin API が無い）。
 
-#### R19. 型チェッカの残り（initorder / recording / util）
-- `initorder.rs`（Step 34）: パッケージ初期化順。init-cycle 検出や一部 linter が依存。
-- `recording.rs`（Step 37）: **AST ノード ID の記録**。nolint の行対応（R3）や正確な位置情報に効く。
-- `util.rs`（Step 39）残、および D01/D02/D03/D04/D07/D10/D13/D16 の未了分（旧 `MIGRATION.md` の
-  deferral 表 = git 履歴参照）。
+#### R19. 型チェッカの残り（initorder / recording / util）✅ 完了 (2026-07-17)
+- **実装**: `initorder` / `recording`（Defs/Uses/Types/Selections/Instances/Scopes/Implicits）は
+  既に揃っていたことを確認。今回の回収:
+  1. **D01** — `typeterm`/`termlist` が `identical` を使用（`identical_stub` 撤去）。Union
+     同一性も `compute_union_type_set` + `termlist::equal`。
+  2. **D02** — `intersect_term_lists` が `comparable_type` で非 comparable 項をフィルタ。
+  3. **D03** — `lookup_ignoring_case` + 修飾セレクタの `(but have X)` ヒント。
+  4. **D10** — `common_under` の `TypeError` 引数が `type_string`。
+  5. **util.rs**（Step 39）— `has_dots` / `is_ddd_array` / `cmp_pos` / `start_pos` /
+     `end_pos`；`[...]T` を複合リテラル外で拒否。
+- **DEFERRED**: D04（`any`-hijack legacy）、D07 多行 cycle 診断、D13
+  `interfacePtrError` 詳細、D16 gcexportdata バイナリローダ。
+- **テスト**: `cargo test -p guff-types` green（777+）。
 
 #### R20. オフライン/`go` 無し driver（PL02）と GOCACHE 管理（PL07）
 - **なぜ**: `go` バイナリに依存しない環境・CI サンドボックスでの実行と、キャッシュ配置の整合。

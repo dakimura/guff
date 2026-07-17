@@ -85,17 +85,26 @@ impl Checker {
                 new_pointer(&mut self.types, base)
             }
 
-            // [N]T (array) or []T (slice).
+            // [N]T (array), []T (slice), or invalid [...]T outside a composite lit.
             Expr::ArrayType(a) => {
                 let elem = self.typ(&a.elt);
-                match &a.len {
-                    None => new_slice(&mut self.types, elem),
-                    Some(len) => match self.array_length(len) {
-                        Some(n) => new_array(&mut self.types, elem, n),
-                        // length was non-constant / not a literal: deferred or
-                        // already reported.
-                        None => self.invalid_type(),
-                    },
+                if crate::util::is_ddd_array(a) {
+                    self.error(
+                        a.lbrack.0 as u32,
+                        Code::InvalidArrayLen,
+                        "invalid use of [...] array (outside a composite literal)",
+                    );
+                    self.invalid_type()
+                } else {
+                    match &a.len {
+                        None => new_slice(&mut self.types, elem),
+                        Some(len) => match self.array_length(len) {
+                            Some(n) => new_array(&mut self.types, elem, n),
+                            // length was non-constant / not a literal: deferred or
+                            // already reported.
+                            None => self.invalid_type(),
+                        },
+                    }
                 }
             }
 

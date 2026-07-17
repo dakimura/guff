@@ -89,6 +89,7 @@ pub mod under;
 pub mod unify;
 pub mod union;
 pub mod universe;
+pub mod util;
 pub mod validtype;
 pub mod version;
 
@@ -169,7 +170,10 @@ pub use predicates::{
 };
 pub use r#struct::{new_struct, struct_field, struct_num_fields, struct_tag, Struct};
 pub use resolver::DeclInfo;
-pub use scope::{insert as scope_insert, lookup as scope_lookup, lookup_chain, new_scope, Scope};
+pub use scope::{
+    insert as scope_insert, lookup as scope_lookup, lookup_chain, lookup_ignoring_case, new_scope,
+    Scope,
+};
 pub use selection::{selection_string, selection_type, Selection, SelectionKind};
 pub use signature::{
     new_signature_type, signature_params, signature_recv, signature_recv_type_params,
@@ -197,6 +201,7 @@ pub use unify::{
 };
 pub use union::{new_term, new_union, union_len, union_term, Term, Union};
 pub use universe::{init_universe_full, Universe};
+pub use util::{cmp_pos, end_pos, has_dots, is_ddd_array, start_pos};
 pub use validtype::{make_obj_list, valid_type, ValidResult};
 pub use version::{
     as_go_version, go1_13, go1_14, go1_17, go1_18, go1_20, go1_21, go1_22, go1_23, go1_26, go1_9,

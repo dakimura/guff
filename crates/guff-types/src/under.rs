@@ -25,6 +25,7 @@ use crate::arena::{ObjectArena, PackageArena, TypeArena, TypeData, TypeId};
 use crate::interface::interface_compute_typeset;
 use crate::predicates::identical;
 use crate::typeparam::type_param_iface;
+use crate::typestring::type_string;
 
 /// If `t` is a type parameter, [`under_is`] returns true iff `f(u)` is true
 /// for every underlying type `u` in `t`'s typeset. Otherwise it returns
@@ -139,9 +140,9 @@ fn type_param_typeset(
 /// arguments so the eventual `Checker.sprintf` (or our fallback) can paste it
 /// into a full error message.
 ///
-/// Equivalent to `typeError`. Until the Checker lands, [`TypeError::format`]
-/// performs a simple `format!`-style substitution by replacing each `%s` (in
-/// order) with the corresponding pre-stringified arg.
+/// Equivalent to `typeError`. [`TypeError::format`] substitutes each `%s`
+/// with the corresponding pre-stringified arg (callers typically pass
+/// [`type_string`](crate::typestring::type_string) results — D10).
 #[derive(Debug, Clone, Default)]
 pub struct TypeError {
     format_: String,
@@ -284,7 +285,10 @@ pub fn common_under(
                     None,
                     Some(type_errorf(
                         "channels %s and %s have different element types",
-                        vec![format!("type#{:?}", ct_id), format!("type#{:?}", this_t)],
+                        vec![
+                            type_string(arena, oarena, parena, ct_id, None),
+                            type_string(arena, oarena, parena, this_t, None),
+                        ],
                     )),
                 );
             }
@@ -304,7 +308,10 @@ pub fn common_under(
                         None,
                         Some(type_errorf(
                             "channels %s and %s have conflicting directions",
-                            vec![format!("type#{:?}", ct_id), format!("type#{:?}", this_t)],
+                            vec![
+                                type_string(arena, oarena, parena, ct_id, None),
+                                type_string(arena, oarena, parena, this_t, None),
+                            ],
                         )),
                     );
                 }
@@ -319,7 +326,10 @@ pub fn common_under(
                 None,
                 Some(type_errorf(
                     "%s and %s have different underlying types",
-                    vec![format!("type#{:?}", ct_id), format!("type#{:?}", this_t)],
+                    vec![
+                        type_string(arena, oarena, parena, ct_id, None),
+                        type_string(arena, oarena, parena, this_t, None),
+                    ],
                 )),
             );
         }

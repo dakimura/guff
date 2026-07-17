@@ -18,10 +18,8 @@
 //!   the chunk-3 "all Nameds are uninstantiated" world.
 //! - `is_generic`: returns `false` until Alias.tparams and Named.inst are
 //!   ported.
-//! - `termlist.equal` inside `Identical`'s Union/Interface cases still
-//!   uses the chunk-4 `TypeId`-equality `identical_stub` for term
-//!   comparison; structurally-equal anonymous union members still won't
-//!   match. Upgrading termlist to take `&mut TypeArena` would fix this.
+//! - Union/Interface term-set identity uses structural
+//!   [`identical`](identical) via upgraded `termlist` (D01).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -418,7 +416,7 @@ fn identical_inner(
         K::Struct => identical_structs(arena, oarena, parena, x, y, stack, cfg, rename),
         K::Tuple => identical_tuples(arena, oarena, parena, x, y, stack, cfg, rename),
         K::Signature => identical_signatures(arena, oarena, parena, x, y, stack, cfg, rename),
-        K::Union => identical_unions(arena, x, y),
+        K::Union => identical_unions(arena, oarena, parena, x, y),
         K::Interface => identical_interfaces(arena, oarena, parena, x, y, stack, cfg, rename),
         K::Named => identical_named(arena, oarena, parena, x, y, stack, cfg, rename),
         K::TypeParam => {
@@ -618,36 +616,18 @@ fn identical_signatures(
     }
 }
 
-fn identical_unions(arena: &TypeArena, x: TypeId, y: TypeId) -> bool {
-    // Compare term lists (Go: computeUnionTypeSet on both, then .terms.equal).
-    // Chunk-5 limitation: `termlist::equal` uses the chunk-4 typeterm
-    // identical_stub, so structurally-equal-but-different-TypeId terms
-    // (e.g. anonymous slices) won't match. Lift this when termlist takes
-    // `&mut TypeArena`.
-    let xterms = match arena.get(x) {
-        TypeData::Union(u) => collect_union_terms(u),
-        _ => unreachable!(),
-    };
-    let yterms = match arena.get(y) {
-        TypeData::Union(u) => collect_union_terms(u),
-        _ => unreachable!(),
-    };
-    if xterms.len() != yterms.len() {
-        return false;
-    }
-    // Order doesn't matter for unions, but in chunk 5 we compare positionally
-    // (matches the simple-case correctness; full term-set equality lands
-    // when termlist::equal is upgraded).
-    for (a, b) in xterms.iter().zip(yterms.iter()) {
-        if a.tilde() != b.tilde() || a.typ() != b.typ() {
-            return false;
-        }
-    }
-    true
-}
-
-fn collect_union_terms(u: &crate::union::Union) -> Vec<crate::union::Term> {
-    (0..u.len()).map(|i| u.term(i).clone()).collect()
+fn identical_unions(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    x: TypeId,
+    y: TypeId,
+) -> bool {
+    // Go: computeUnionTypeSet on both, then .terms.equal (D01).
+    let mut union_sets = HashMap::new();
+    let xset = crate::typeset::compute_union_type_set(arena, oarena, parena, &mut union_sets, x);
+    let yset = crate::typeset::compute_union_type_set(arena, oarena, parena, &mut union_sets, y);
+    termlist::equal(arena, oarena, parena, &xset.terms, &yset.terms)
 }
 
 fn identical_interfaces(
@@ -682,7 +662,7 @@ fn identical_interfaces(
     if xcomp != ycomp {
         return false;
     }
-    if !termlist::equal(arena, &xterms, &yterms) {
+    if !termlist::equal(arena, oarena, parena, &xterms, &yterms) {
         return false;
     }
     if xmethods.len() != ymethods.len() {

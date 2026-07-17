@@ -30,7 +30,7 @@ use crate::object::builtin::{ExprKind, PREDECLARED_FUNCS};
 use crate::object::var::new_param;
 use crate::operand::{Operand, OperandMode};
 use crate::predicates::{is_untyped, is_valid};
-use crate::scope::lookup as scope_lookup;
+use crate::scope::{lookup as scope_lookup, lookup_ignoring_case};
 use crate::selection::SelectionKind;
 use crate::signature::new_signature_type;
 use crate::slice::slice_elem;
@@ -123,7 +123,7 @@ impl Checker {
                 // Conversion `T(x)`.
                 let t = x.typ.unwrap_or_else(|| self.invalid_type());
                 x.mode = OperandMode::Invalid;
-                let has_dots = call.ellipsis.0 != 0;
+                let has_dots = crate::util::has_dots(call);
                 match call.args.len() {
                     0 => {
                         let ts = self.type_str(t);
@@ -678,11 +678,16 @@ impl Checker {
             Some(o) => o,
             None => {
                 let pname = self.packages.get(pkg).name().to_string();
-                self.error(
-                    e.sel.pos().0 as u32,
-                    Code::UndeclaredImportedName,
-                    format!("undefined: {}.{}", pname, sel),
-                );
+                // Prefer a case-insensitive hint when an exported name matches (D03).
+                let hint = lookup_ignoring_case(&self.scopes, pkg_scope, sel, true)
+                    .into_iter()
+                    .next()
+                    .map(|o| o.name(&self.objects).to_string());
+                let msg = match hint {
+                    Some(alt) => format!("undefined: {}.{} (but have {})", pname, sel, alt),
+                    None => format!("undefined: {}.{}", pname, sel),
+                };
+                self.error(e.sel.pos().0 as u32, Code::UndeclaredImportedName, msg);
                 self.set_selector_error(x, e);
                 return;
             }

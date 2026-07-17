@@ -352,7 +352,7 @@ pub fn implements(
 
     if let Some(vts) = &vts {
         // V is an interface: its type set must be a subset of T's.
-        if !termlist::subset_of(types, &vts.terms, &tts.terms) {
+        if !termlist::subset_of(types, oarena, parena, &vts.terms, &tts.terms) {
             return Err(format!(
                 "{} does not {} {}",
                 ts(types, v),
@@ -364,7 +364,7 @@ pub fn implements(
     }
 
     // Otherwise V's type must be included in T's type set.
-    if !termlist::includes(types, &tts.terms, v) {
+    if !termlist::includes(types, oarena, parena, &tts.terms, v) {
         return Err(format!(
             "{} does not {} {}",
             ts(types, v),

@@ -16,11 +16,9 @@
 //! - `Config`: `Importer`, `Sizes`, the `Error func(error)` callback,
 //!   `FakeImportC`, `EnableAlias`, `ErrorURL`, `IgnoreFuncBodies`, etc. are
 //!   omitted until a consumer needs them (D14 in the deferral table).
-//! - `Info`: `types`/`defs`/`uses`/`init_order`/`selections`/`instances` are
-//!   present (chunks 49–53). `Implicits`, `Scopes`, `FileVersions` remain
-//!   omitted — they key on statement/spec/file nodes, which carry no stamped
-//!   id in our `Expr`/`Ident`-only AST. All maps are keyed by a `u32` AST-node
-//!   id (the stamped node id; see [`guff::stamp`](guff::stamp)).
+//! - `Info`: `types`/`defs`/`uses`/`init_order`/`selections`/`instances`/
+//!   `scopes`/`implicits`/`file_versions` are present. Maps are keyed by a
+//!   `u32` AST-node id (the stamped node id; see [`guff::stamp`](guff::stamp)).
 //! - `TypeAndValue`: Go's bit-flag predicate methods (`IsValue`, `IsType`,
 //!   `Addressable`, `HasOk`, …) are DEFERRED — the `mode` field is retained
 //!   so they can be added trivially later.

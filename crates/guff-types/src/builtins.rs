@@ -56,7 +56,7 @@ impl Checker {
     /// Equivalent to `Checker.builtin` (chunk-29a subset).
     pub fn builtin(&mut self, x: &mut Operand, call: &CallExpr, id: BuiltinId) -> bool {
         let bin = builtin_info(id);
-        let has_dots = call.ellipsis.0 != 0;
+        let has_dots = crate::util::has_dots(call);
 
         // `append` is the only built-in that permits `...` for the last arg.
         if has_dots && id != BuiltinId::Append {
