@@ -122,16 +122,18 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 ### 3.2 解析フレームワーク（PRE-LINTER Phase 0–7）
 - Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
 - **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL07（GOCACHE 管理）,
-  PL05（ctrlflow）, PL02（go 無し driver）, SSA `RangeStmt`（→ §8 各タスク）。
+  PL05（ctrlflow）, PL02（go 無し driver）（→ §8 各タスク）。
   PL11（真の並列実行）は **R9 で完了**。
 
 ### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
-- naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150 tests green**。
-- 型機構（subst/canonizer/typeset/instantiate データモデル）と builder コア（emit・alloc/local・
-  param/result spill・selector・assign・複合リテラル各種）まで移植済み。golden 逆アセンブル比較で検証。
-- **残**: `methods.rs` とメソッドラッパ（`createWrapper`/`$thunk`/`$bound`）, FromSyntax インスタンス本体の
-  subst 適用ビルド, `InstantiateGenerics` オーケストレーション, メソッド呼び出し emit（E25+）,
-  そして `RangeStmt`（→ §8 R17）。これらが揃うと IR ベースの linter（SA1015 等）を default で駆動できる。
+- naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150+ tests green**。
+- 型機構（subst/canonizer/typeset/instantiate）と builder コア、**RangeStmt**（slice/array/map/string/chan/int/func）、
+  **methods.rs** / `$thunk`/`$bound` wrappers / `InstantiateGenerics` / メソッド呼び出し emit、
+  **SwitchStmt / TypeSwitchStmt / SelectStmt / SendStmt / IncDecStmt / EmptyStmt** / compound assign / fallthrough
+  まで移植済み。SA1015 は buildir require で green。
+- **残（DEFERRED）**: range over non-array pointer、一部 expr/lvalue 端（`exprN` の未対応形、type-switch
+  guard の一部）、`MakeInterface` 完全モデル、method instantiation wrapper（receiver / 0-result）、
+  package-level n:1 init。IR ベース linter（nilerr / contextcheck 等）の追加配線は → R13。
 
 ### 3.3 実装済み linter
 
@@ -167,7 +169,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュは未（→ R24） |
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
-| ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は SSA 未実装で FAIL しがち（→ R17） |
+| ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | ✅ `--fix`（SuggestedFix / TextEdit 適用、修正済み診断は出力から除外） | golangci の fix 範囲全体には未 |
 
@@ -294,7 +296,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 - **R9** ✅ action DAG を rayon ウェーブフロントで並列実行（`Ident::obj` を `Mutex` 化し `Package: Sync`）。結果は逐次と決定的一致。
 - **R10** ✅ パッケージ単位の永続 issues キャッシュ（SHA-256 content hash + 決定的 salt）。`GUFF_CACHE` > `GOLANGCI_LINT_CACHE` > OS cache dir。`guff cache clean/status` / `--no-cache`。**残**: facts 永続化 → R24。
-- **R11** ✅ ベンチハーネス `benchmarks/`（cold/warm・`run.sh` / `smoke.sh` / `results/RESULTS.md`）。実 OSS は SSA 未実装で FAIL しがち → R17。
+- **R11** ✅ ベンチハーネス `benchmarks/`（cold/warm・`run.sh` / `smoke.sh` / `results/RESULTS.md`）。実 OSS は一部 SSA DEFERRED で FAIL しがち → R17 DEFERRED。
 - **R10.1** ✅ 性能パス（初回計測で warm が golangci の ~5–6x だった問題を解消）: fat LTO + `codegen-units=1`、`typecheck_packages` の rayon 並列化、キャッシュ salt / dep-hash の決定化、遅延型チェック（ミスした root だけ parse + 型チェック）。結果 guff が cold/warm とも golangci-lint より高速（warm `local` 0.54x / `fixture` 0.77x）。原因と対策の詳細はメモリ `guff-perf-cache-architecture` と git 履歴。発展余地 → R24。
 
 ---
@@ -338,13 +340,16 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 ### Milestone F — 土台の穴（breadth/speed を塞ぐ前提）
 
-#### R17. SSA の残作業（`RangeStmt` ＋ メソッド機構 E25+）
-- **なぜ**: `RangeStmt` 未実装のため SA1015 が buildir を default require できず inspect のみ。S1029 も
-  AST 簡易版。さらに `methods.rs`/メソッドラッパ（`$thunk`/`$bound`）/`InstantiateGenerics`/メソッド呼び出し
-  emit が未了（§3.2.1）。今後の IR ベース linter（gosec の一部等）に必要。
-- **どこ**: `crates/guff-ssa`（builder / methods）。
-- **完了条件**: `for k, v := range x` を SSA 化し、メソッド呼び出しを含む IR がビルドできる。
-  SA1015 を buildir require に戻して green。golden 逆アセンブル比較を維持。
+#### R17. SSA の残作業（`RangeStmt` ＋ メソッド機構 E25+ ＋ 文カバレッジ）✅ 完了 (2026-07-17)
+- **なぜ**: IR ベース linter（SA1015 等）と実 OSS 上の buildir を default で駆動するため。
+- **実装**: `RangeStmt`（slice/array/map/string/chan/int/func）、`methods.rs` / `$thunk`/`$bound` /
+  `InstantiateGenerics` / メソッド呼び出し emit、および statement builder の穴埋め
+  （`SwitchStmt` / `TypeSwitchStmt` / `SelectStmt` / `SendStmt` / `IncDecStmt` / `EmptyStmt` +
+  compound assign + fallthrough）。`Select`/`Send` 命令を具現化。
+- **完了条件**: `for k, v := range x` とメソッド呼び出しを含む IR がビルドできる。SA1015 は
+  buildir require で green。golden / `switch_select_test` 逆アセンブル比較を維持。
+- **DEFERRED**: range over non-array pointer、一部 expr/lvalue 端、`MakeInterface` 完全モデル、
+  method instantiation wrapper（receiver / 0-result）。
 
 #### R18. `typeindex` の移植
 - **なぜ**: 呼び出しサイトの高速索引。pattern 系全 linter と errcheck の性能最適化。機能ブロッカーでは

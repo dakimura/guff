@@ -266,6 +266,42 @@ fn instr_body(id: InstrId, block: BlockId, f: &Function, prog: &Program) -> Stri
                 rel_type(prog, t.assert_type)
             )
         }
+        InstrData::Select(sel) => {
+            let mut s = String::from(if sel.blocking {
+                "select blocking ["
+            } else {
+                "select nonblocking ["
+            });
+            for (i, st) in sel.states.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(", ");
+                }
+                match st.dir {
+                    guff_types::ChanDir::RecvOnly => {
+                        s.push_str("<-");
+                        s.push_str(&disassemble_value(st.chan, prog, f));
+                    }
+                    guff_types::ChanDir::SendOnly => {
+                        s.push_str(&disassemble_value(st.chan, prog, f));
+                        s.push_str("<-");
+                        if let Some(v) = st.send {
+                            s.push_str(&disassemble_value(v, prog, f));
+                        }
+                    }
+                    guff_types::ChanDir::SendRecv => {
+                        s.push_str(&disassemble_value(st.chan, prog, f));
+                    }
+                }
+            }
+            s.push(']');
+            s
+        }
+        InstrData::Send(send) => format!(
+            "send {} <- {}",
+            disassemble_value(send.chan, prog, f),
+            disassemble_value(send.x, prog, f)
+        ),
+        InstrData::Panic(p) => format!("panic {}", disassemble_value(p.x, prog, f)),
         InstrData::Phi(p) => {
             let block = f.blocks.get(block);
             let mut s = String::from("phi [");

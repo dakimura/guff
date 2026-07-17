@@ -207,8 +207,28 @@ pub struct Phi {
     pub comment: String,
     pub typ: TypeId,
 }
+/// One communication state of a [`Select`]. (Go: `SelectState`)
+#[derive(Debug, Clone)]
+pub struct SelectState {
+    /// `SendOnly` or `RecvOnly`.
+    pub dir: guff_types::ChanDir,
+    /// Channel to send on / receive from.
+    pub chan: Value,
+    /// Value to send (`None` for receive).
+    pub send: Option<Value>,
+}
+
+/// Select tests whether (or blocks until) one of the specified send/receive
+/// states is entered. Returns the tuple
+/// `(index int, recvOk bool, r0 T0, …, rn-1 Tn-1)`.
+/// (Go: `Select`)
 #[derive(Debug)]
-pub struct Select {}
+pub struct Select {
+    pub states: Vec<SelectState>,
+    pub blocking: bool,
+    /// Result tuple type. (Go: `Select.Type()`.)
+    pub typ: TypeId,
+}
 /// Slice yields a slice of the sequence `x` (a slice, string, or `*array`)
 /// bounded by the optional `low`/`high`/`max` indices, as in `x[low:high:max]`.
 /// Composite slice literals use it to reslice a freshly built backing array
@@ -310,8 +330,12 @@ pub struct Return {
 }
 #[derive(Debug)]
 pub struct RunDefers {}
+/// Send sends `x` on channel `chan`. (Go: `Send`)
 #[derive(Debug)]
-pub struct Send {}
+pub struct Send {
+    pub chan: Value,
+    pub x: Value,
+}
 #[derive(Debug)]
 pub struct Store {
     pub addr: Value,
@@ -363,6 +387,7 @@ impl InstrData {
             InstrData::Slice(s) => Some(s.typ),
             InstrData::Range(r) => Some(r.typ),
             InstrData::Next(n) => Some(n.typ),
+            InstrData::Select(s) => Some(s.typ),
             _ => None,
         }
     }
@@ -493,6 +518,21 @@ impl InstrData {
             InstrData::ChangeType(i) => {
                 f(&i.x);
             }
+            InstrData::Select(i) => {
+                for st in &i.states {
+                    f(&st.chan);
+                    if let Some(v) = &st.send {
+                        f(v);
+                    }
+                }
+            }
+            InstrData::Send(i) => {
+                f(&i.chan);
+                f(&i.x);
+            }
+            InstrData::Panic(i) => {
+                f(&i.x);
+            }
             _ => {}
         }
     }
@@ -608,6 +648,12 @@ impl InstrData {
             InstrData::Extract(i) => {
                 f(&mut i.tuple);
             }
+            InstrData::Range(i) => {
+                f(&mut i.x);
+            }
+            InstrData::Next(i) => {
+                f(&mut i.iter);
+            }
             InstrData::Field(i) => {
                 f(&mut i.x);
             }
@@ -615,6 +661,21 @@ impl InstrData {
                 f(&mut i.x);
             }
             InstrData::ChangeType(i) => {
+                f(&mut i.x);
+            }
+            InstrData::Select(i) => {
+                for st in &mut i.states {
+                    f(&mut st.chan);
+                    if let Some(v) = &mut st.send {
+                        f(v);
+                    }
+                }
+            }
+            InstrData::Send(i) => {
+                f(&mut i.chan);
+                f(&mut i.x);
+            }
+            InstrData::Panic(i) => {
                 f(&mut i.x);
             }
             _ => {}

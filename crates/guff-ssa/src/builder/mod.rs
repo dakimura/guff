@@ -371,11 +371,13 @@ fn value_type(prog: &Program, fid: FuncId, v: Value) -> TypeId {
     crate::program::value_type_of(prog, prog.functions.get(fid), v)
 }
 
-/// Break/continue targets for the innermost loop.
+/// Break / continue / fallthrough targets for the innermost breakable statement.
+/// (Go: `targets` in `builder.go`.)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LoopTargets {
     pub break_: BlockId,
-    pub continue_: BlockId,
+    pub continue_: Option<BlockId>,
+    pub fallthrough_: Option<BlockId>,
 }
 
 /// Builder is the state used during construction of a single function's SSA IR.
@@ -386,7 +388,7 @@ pub struct Builder<'a> {
     pub func_id: FuncId,
     /// The current basic block to which instructions are being emitted.
     pub block: Option<BlockId>,
-    /// Stack of break/continue targets for nested loops.
+    /// Stack of break/continue/fallthrough targets for nested loops/switches.
     pub(crate) targets: Vec<LoopTargets>,
 }
 
@@ -401,7 +403,24 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn push_targets(&mut self, break_: BlockId, continue_: BlockId) {
-        self.targets.push(LoopTargets { break_, continue_ });
+        self.targets.push(LoopTargets {
+            break_,
+            continue_: Some(continue_),
+            fallthrough_: None,
+        });
+    }
+
+    /// Push break (+ optional fallthrough) targets for a switch / select case.
+    pub(crate) fn push_break_targets(
+        &mut self,
+        break_: BlockId,
+        fallthrough_: Option<BlockId>,
+    ) {
+        self.targets.push(LoopTargets {
+            break_,
+            continue_: None,
+            fallthrough_,
+        });
     }
 
     pub(crate) fn pop_targets(&mut self) {

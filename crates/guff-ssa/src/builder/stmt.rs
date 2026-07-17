@@ -6,11 +6,16 @@ use crate::builder::Builder;
 use crate::value::Value;
 use guff::ast::{
     Stmt, AssignStmt, DeclStmt, ReturnStmt, Decl, ValueSpec, IfStmt, ForStmt, DeferStmt, GoStmt,
-    Expr, Ident, RangeStmt, BranchStmt, LabeledStmt,
+    Expr, Ident, RangeStmt, BranchStmt, LabeledStmt, SwitchStmt, TypeSwitchStmt, SelectStmt,
+    SendStmt, IncDecStmt, CaseClause,
 };
 use guff::token::Token;
-use guff_types::{chan_elem, map_elem, map_key, new_tuple, object::var::new_var, BasicKind, TypeData};
-use crate::instr::{BinOp, Call, CallCommon, Index, InstrData, Next, Range, UnOp};
+use guff_types::{
+    chan_elem, map_elem, map_key, new_tuple, object::var::new_var, BasicKind, ChanDir, TypeData,
+};
+use crate::instr::{
+    BinOp, Call, CallCommon, Index, InstrData, Next, Panic, Range, Select, SelectState, Send, UnOp,
+};
 use guff_types::object::builtin::BuiltinId;
 use guff_types::{array_elem, array_len, basic::IS_INTEGER, basic::IS_STRING, basic::IS_UNSIGNED, pointer_elem, slice_elem, TypeId};
 
@@ -42,8 +47,16 @@ impl<'a> Builder<'a> {
                     self.stmt_with_label(inner, label);
                 }
             }
-            // DEFERRED: SwitchStmt, etc. (S13)
-            _ => todo!("unimplemented stmt: {:?}", s),
+            Stmt::EmptyStmt(_) => {}
+            Stmt::SendStmt(s) => self.send_stmt(s),
+            Stmt::IncDecStmt(s) => self.inc_dec_stmt(s),
+            Stmt::SwitchStmt(s) => self.switch_stmt(s, label),
+            Stmt::TypeSwitchStmt(s) => self.type_switch_stmt(s, label),
+            Stmt::SelectStmt(s) => self.select_stmt(s, label),
+            // CaseClause / CommClause only appear inside switch/select bodies.
+            Stmt::CaseClause(_) | Stmt::CommClause(_) | Stmt::BadStmt(_) => {
+                panic!("unexpected stmt at top level: {:?}", s);
+            }
         }
     }
 
@@ -84,7 +97,7 @@ impl<'a> Builder<'a> {
         } else {
             let block = self
                 .targeted_block(s.tok)
-                .expect("break/continue not in loop");
+                .unwrap_or_else(|| panic!("{:?} not in loop/switch", s.tok));
             (block, None)
         };
         let _ = label_exit;
@@ -666,6 +679,477 @@ impl<'a> Builder<'a> {
         self.set_block(Some(done));
     }
 
+    /// send_stmt emits `ch <- x`. (Go: `*ast.SendStmt` case of `builder.stmt`)
+    fn send_stmt(&mut self, s: &SendStmt) {
+        let ch = self.expr(&s.chan_);
+        let ch_ty = self.type_of_value(ch);
+        let core = ch_ty.underlying(&self.prog.type_arena);
+        let elem = chan_elem(&self.prog.type_arena, core);
+        let x = self.expr(&s.value);
+        let block = self.block.expect("no current block");
+        let x = crate::emit::emit_type_coercion(self.prog, self.func_id, block, x, elem);
+        self.emit_pos(
+            InstrData::Send(Send { chan: ch, x }),
+            s.arrow,
+        );
+    }
+
+    /// inc_dec_stmt emits `x++` / `x--` as `x = x ± 1`. (Go: `*ast.IncDecStmt`)
+    fn inc_dec_stmt(&mut self, s: &IncDecStmt) {
+        let op = if s.tok == Token::DEC {
+            Token::SUB
+        } else {
+            Token::ADD
+        };
+        let loc = self.address(&s.x, false);
+        let one = self.int_const(1);
+        self.assign_op(loc, one, op, s.tok_pos);
+    }
+
+    /// assign_op emits `loc = loc <op> val`. (Go: `builder.assignOp`)
+    fn assign_op(
+        &mut self,
+        loc: Box<dyn crate::lvalue::LValue>,
+        val: Value,
+        op: Token,
+        pos: guff::Pos,
+    ) {
+        let typ = loc.typ();
+        let old = loc.load(self);
+        let block = self.block.expect("no current block");
+        // Coerce `val` (often untyped int `1`) to the location's type.
+        let val = crate::emit::emit_type_coercion(self.prog, self.func_id, block, val, typ);
+        let result = self.emit_binop(op, old, val, typ, pos);
+        loc.store(self, result);
+    }
+
+    /// switch_stmt lowers a value `switch` to an if-else chain.
+    /// Multiway dispatch is recovered later by `ssautil::switches`.
+    /// (Go: `builder.switchStmt`)
+    fn switch_stmt(&mut self, s: &SwitchStmt, label: Option<&str>) {
+        if let Some(init) = &s.init {
+            self.stmt(init);
+        }
+        // No tag ⇒ boolean switch (each case is a bool condition).
+        let tag = s.tag.as_ref().map(|t| self.expr(t));
+        let bool_switch = tag.is_none();
+
+        let done = self.new_basic_block("switch.done".to_string());
+        if let Some(name) = label {
+            self.set_label_break(name, done);
+        }
+
+        let mut dflt_body: Option<&[Stmt]> = None;
+        let mut dflt_fallthrough = None;
+        let mut dflt_block = None;
+        let mut fallthru: Option<crate::ids::BlockId> = None;
+        let ncases = s.body.list.len();
+
+        for (i, clause) in s.body.list.iter().enumerate() {
+            let Stmt::CaseClause(cc) = clause else {
+                panic!("switch body must be CaseClause");
+            };
+
+            let body = match fallthru {
+                Some(b) => b,
+                None => self.new_basic_block("switch.body".to_string()),
+            };
+
+            // Preallocate body block for the next case (fallthrough target).
+            fallthru = if i + 1 < ncases {
+                Some(self.new_basic_block("switch.body".to_string()))
+            } else {
+                Some(done)
+            };
+
+            if cc.list.is_empty() {
+                dflt_body = Some(&cc.body);
+                dflt_fallthrough = fallthru;
+                dflt_block = Some(body);
+                continue;
+            }
+
+            let mut next_cond = None;
+            for cond in &cc.list {
+                let nc = self.new_basic_block("switch.next".to_string());
+                if bool_switch {
+                    let cond_ty = self.type_of(cond.id());
+                    if !guff_types::is_non_type_param_interface(&self.prog.type_arena, cond_ty) {
+                        self.cond(cond, body, nc);
+                    } else {
+                        let bool_ty = self.prog.basic_type(BasicKind::Bool);
+                        let v_true = self
+                            .prog
+                            .emit_const(Some(guff_constant::Value::Bool(true)), bool_ty);
+                        let rhs = self.expr(cond);
+                        let c = self.emit_compare(Token::EQL, rhs, v_true, cond.pos());
+                        self.emit_if(c, body, nc);
+                    }
+                } else {
+                    let tag_v = tag.expect("tag present for value switch");
+                    let rhs = self.expr(cond);
+                    let c = self.emit_compare(Token::EQL, tag_v, rhs, cond.pos());
+                    self.emit_if(c, body, nc);
+                }
+                self.set_block(Some(nc));
+                next_cond = Some(nc);
+            }
+
+            self.set_block(Some(body));
+            self.push_break_targets(done, fallthru);
+            for stmt in &cc.body {
+                self.stmt(stmt);
+            }
+            self.pop_targets();
+            if self.block.is_some() {
+                self.emit_jump(done);
+            }
+            if let Some(nc) = next_cond {
+                self.set_block(Some(nc));
+            }
+        }
+
+        if let Some(db) = dflt_block {
+            if self.block.is_some() {
+                self.emit_jump(db);
+            }
+            self.set_block(Some(db));
+            self.push_break_targets(done, dflt_fallthrough);
+            if let Some(body) = dflt_body {
+                for stmt in body {
+                    self.stmt(stmt);
+                }
+            }
+            self.pop_targets();
+        }
+        if self.block.is_some() {
+            self.emit_jump(done);
+        }
+        self.set_block(Some(done));
+    }
+
+    /// type_switch_stmt lowers `switch x.(type)` to a type-assert if-else chain.
+    /// (Go: `builder.typeSwitchStmt`)
+    fn type_switch_stmt(&mut self, s: &TypeSwitchStmt, label: Option<&str>) {
+        if let Some(init) = &s.init {
+            self.stmt(init);
+        }
+
+        let x = match s.assign.as_ref() {
+            Stmt::ExprStmt(es) => {
+                let ta = type_assert_of(&es.x);
+                self.expr(&ta.x)
+            }
+            Stmt::AssignStmt(as_) => {
+                let ta = type_assert_of(&as_.rhs[0]);
+                self.expr(&ta.x)
+            }
+            other => panic!("type switch assign is ExprStmt or AssignStmt, got {other:?}"),
+        };
+
+        let done = self.new_basic_block("typeswitch.done".to_string());
+        if let Some(name) = label {
+            self.set_label_break(name, done);
+        }
+
+        let mut default_: Option<&CaseClause> = None;
+        for clause in &s.body.list {
+            let Stmt::CaseClause(cc) = clause else {
+                panic!("type switch body must be CaseClause");
+            };
+            if cc.list.is_empty() {
+                default_ = Some(cc);
+                continue;
+            }
+
+            let body = self.new_basic_block("typeswitch.body".to_string());
+            let mut next = None;
+            let mut ti = x;
+            for cond in &cc.list {
+                let nc = self.new_basic_block("typeswitch.next".to_string());
+                let ct = self.type_of(cond.id());
+                let condv = if self.is_untyped_nil(ct) {
+                    let zero = self.prog.emit_const(None, self.type_of_value(x));
+                    ti = x;
+                    self.emit_compare(Token::EQL, x, zero, cond.pos())
+                } else {
+                    let fid = self.func_id;
+                    let block = self.block.expect("no current block");
+                    let yok =
+                        crate::emit::emit_type_test(self.prog, fid, block, x, ct, cc.case);
+                    ti = self.emit_extract(yok, 0);
+                    self.emit_extract(yok, 1)
+                };
+                self.emit_if(condv, body, nc);
+                self.set_block(Some(nc));
+                next = Some(nc);
+            }
+            if cc.list.len() != 1 {
+                ti = x;
+            }
+            self.set_block(Some(body));
+            self.type_case_body(cc, ti, done);
+            if let Some(nc) = next {
+                self.set_block(Some(nc));
+            }
+        }
+        if let Some(cc) = default_ {
+            self.type_case_body(cc, x, done);
+        } else if self.block.is_some() {
+            self.emit_jump(done);
+        }
+        self.set_block(Some(done));
+    }
+
+    fn type_case_body(&mut self, cc: &CaseClause, x: Value, done: crate::ids::BlockId) {
+        if let Some(obj) = self.prog.info.implicits.get(&cc.id).copied() {
+            if matches!(
+                self.prog.object_arena.get(obj),
+                guff_types::ObjectData::Var(_)
+            ) {
+                let block = self.block.expect("no current block");
+                let local = crate::emit::emit_local_var(self.prog, self.func_id, block, obj);
+                let block = self.block.expect("no current block");
+                crate::emit::emit(
+                    self.func_mut(),
+                    block,
+                    InstrData::Store(crate::instr::Store {
+                        addr: local,
+                        val: x,
+                    }),
+                );
+            }
+        }
+        self.push_break_targets(done, None);
+        for stmt in &cc.body {
+            self.stmt(stmt);
+        }
+        self.pop_targets();
+        if self.block.is_some() {
+            self.emit_jump(done);
+        }
+    }
+
+    /// select_stmt lowers `select { … }`. (Go: `builder.selectStmt`)
+    fn select_stmt(&mut self, s: &SelectStmt, label: Option<&str>) {
+        // A blocking select of a single case degenerates to a simple send/recv.
+        if s.body.list.len() == 1 {
+            if let Stmt::CommClause(clause) = &s.body.list[0] {
+                if let Some(comm) = &clause.comm {
+                    self.stmt(comm);
+                    let done = self.new_basic_block("select.done".to_string());
+                    if let Some(name) = label {
+                        self.set_label_break(name, done);
+                    }
+                    self.push_break_targets(done, None);
+                    for stmt in &clause.body {
+                        self.stmt(stmt);
+                    }
+                    self.pop_targets();
+                    if self.block.is_some() {
+                        self.emit_jump(done);
+                    }
+                    self.set_block(Some(done));
+                    return;
+                }
+            }
+        }
+
+        let mut states: Vec<SelectState> = Vec::new();
+        let mut blocking = true;
+        for clause in &s.body.list {
+            let Stmt::CommClause(cc) = clause else {
+                panic!("select body must be CommClause");
+            };
+            match cc.comm.as_deref() {
+                None => {
+                    blocking = false;
+                }
+                Some(Stmt::SendStmt(send)) => {
+                    let ch = self.expr(&send.chan_);
+                    let ch_ty = self.type_of_value(ch);
+                    let core = ch_ty.underlying(&self.prog.type_arena);
+                    let elem = chan_elem(&self.prog.type_arena, core);
+                    let block = self.block.expect("no current block");
+                    let val = self.expr(&send.value);
+                    let val =
+                        crate::emit::emit_type_coercion(self.prog, self.func_id, block, val, elem);
+                    states.push(SelectState {
+                        dir: ChanDir::SendOnly,
+                        chan: ch,
+                        send: Some(val),
+                    });
+                }
+                Some(Stmt::AssignStmt(as_)) => {
+                    let recv = unparen_unary_recv(&as_.rhs[0]);
+                    states.push(SelectState {
+                        dir: ChanDir::RecvOnly,
+                        chan: self.expr(&recv.x),
+                        send: None,
+                    });
+                }
+                Some(Stmt::ExprStmt(es)) => {
+                    let recv = unparen_unary_recv(&es.x);
+                    states.push(SelectState {
+                        dir: ChanDir::RecvOnly,
+                        chan: self.expr(&recv.x),
+                        send: None,
+                    });
+                }
+                Some(other) => panic!("unexpected select comm: {other:?}"),
+            }
+        }
+
+        let int_ty = self.prog.basic_type(BasicKind::Int);
+        let bool_ty = self.prog.basic_type(BasicKind::Bool);
+        let mut vars = vec![
+            new_var(&mut self.prog.object_arena, "index", int_ty),
+            new_var(&mut self.prog.object_arena, "ok", bool_ty),
+        ];
+        for st in &states {
+            if st.dir == ChanDir::RecvOnly {
+                let ch_ty = self.type_of_value(st.chan);
+                let core = ch_ty.underlying(&self.prog.type_arena);
+                let elem = chan_elem(&self.prog.type_arena, core);
+                vars.push(new_var(&mut self.prog.object_arena, "", elem));
+            }
+        }
+        let sel_ty = new_tuple(&mut self.prog.type_arena, &vars).expect("select tuple");
+        let sel_id = self.emit_pos(
+            InstrData::Select(Select {
+                states: states.clone(),
+                blocking,
+                typ: sel_ty,
+            }),
+            s.select_,
+        );
+        let sel = Value::Instr(sel_id);
+        let idx = self.emit_extract(sel, 0);
+
+        let done = self.new_basic_block("select.done".to_string());
+        if let Some(name) = label {
+            self.set_label_break(name, done);
+        }
+
+        let mut default_body: Option<&[Stmt]> = None;
+        let mut state = 0usize;
+        let mut r = 2usize; // index in sel tuple of next recv value
+        for clause in &s.body.list {
+            let Stmt::CommClause(cc) = clause else {
+                continue;
+            };
+            if cc.comm.is_none() {
+                default_body = Some(&cc.body);
+                continue;
+            }
+            let body = self.new_basic_block("select.body".to_string());
+            let next = self.new_basic_block("select.next".to_string());
+            let state_const = self.int_const(state as i64);
+            let cmp = self.emit_compare(Token::EQL, idx, state_const, guff::NO_POS);
+            self.emit_if(cmp, body, next);
+            self.set_block(Some(body));
+            self.push_break_targets(done, None);
+
+            match cc.comm.as_deref() {
+                Some(Stmt::ExprStmt(_)) => {
+                    r += 1;
+                }
+                Some(Stmt::AssignStmt(as_)) => {
+                    if as_.tok == Some(Token::DEFINE) {
+                        if let Expr::Ident(id) = &as_.lhs[0] {
+                            if let Some(Some(obj)) = self.prog.info.defs.get(&id.id).copied() {
+                                if matches!(
+                                    self.prog.object_arena.get(obj),
+                                    guff_types::ObjectData::Var(_)
+                                ) {
+                                    let block = self.block.expect("no current block");
+                                    crate::emit::emit_local_var(
+                                        self.prog, self.func_id, block, obj,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    let x = self.address(&as_.lhs[0], false);
+                    let v = self.emit_extract(sel, r);
+                    x.store(self, v);
+                    if as_.lhs.len() == 2 {
+                        if as_.tok == Some(Token::DEFINE) {
+                            if let Expr::Ident(id) = &as_.lhs[1] {
+                                if let Some(Some(obj)) = self.prog.info.defs.get(&id.id).copied() {
+                                    if matches!(
+                                        self.prog.object_arena.get(obj),
+                                        guff_types::ObjectData::Var(_)
+                                    ) {
+                                        let block = self.block.expect("no current block");
+                                        crate::emit::emit_local_var(
+                                            self.prog, self.func_id, block, obj,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        let ok = self.address(&as_.lhs[1], false);
+                        let ok_val = self.emit_extract(sel, 1);
+                        ok.store(self, ok_val);
+                    }
+                    r += 1;
+                }
+                _ => {}
+            }
+
+            for stmt in &cc.body {
+                self.stmt(stmt);
+            }
+            self.pop_targets();
+            if self.block.is_some() {
+                self.emit_jump(done);
+            }
+            self.set_block(Some(next));
+            state += 1;
+        }
+
+        if let Some(body) = default_body {
+            self.push_break_targets(done, None);
+            for stmt in body {
+                self.stmt(stmt);
+            }
+            self.pop_targets();
+        } else {
+            // A blocking select must match some case.
+            let msg = self.prog.emit_const(
+                Some(guff_constant::make_string(
+                    "blocking select matched no case",
+                )),
+                self.prog.basic_type(BasicKind::String),
+            );
+            self.emit(InstrData::Panic(Panic { x: msg }));
+            let unreachable = self.new_basic_block("unreachable".to_string());
+            self.set_block(Some(unreachable));
+        }
+        if self.block.is_some() {
+            self.emit_jump(done);
+        }
+        self.set_block(Some(done));
+    }
+
+    fn set_label_break(&mut self, name: &str, break_: crate::ids::BlockId) {
+        if let Some(lb) = self.prog.functions.get_mut(self.func_id).lblocks.get_mut(name) {
+            lb.break_ = Some(break_);
+        }
+    }
+
+    fn is_untyped_nil(&self, t: guff_types::TypeId) -> bool {
+        match self.prog.type_arena.get(t) {
+            TypeData::Basic(b) => b.kind() == BasicKind::UntypedNil,
+            _ => false,
+        }
+    }
+
+    fn type_of_value(&self, v: Value) -> guff_types::TypeId {
+        crate::program::value_type_of(self.prog, self.prog.functions.get(self.func_id), v)
+    }
+
     fn for_stmt(&mut self, s: &ForStmt, label: Option<&str>) {
         if let Some(init) = &s.init {
             self.stmt_with_label(init, None);
@@ -710,8 +1194,20 @@ impl<'a> Builder<'a> {
     ///
     /// `:=` (a short variable declaration, `s.tok == DEFINE`) creates a fresh
     /// local cell for each newly defined variable before taking its address.
+    /// Compound assignments (`+=`, etc.) lower to `loc = loc <op> rhs`.
     fn assign_stmt(&mut self, s: &AssignStmt) {
         use guff::token::Token;
+
+        // Compound assignment: x += y → x = x + y
+        if let Some(tok) = s.tok {
+            if let Some(op) = compound_assign_op(tok) {
+                let loc = self.address(&s.lhs[0], false);
+                let val = self.expr(&s.rhs[0]);
+                self.assign_op(loc, val, op, s.tok_pos);
+                return;
+            }
+        }
+
         let is_def = s.tok == Some(Token::DEFINE);
 
         // Phase 1: compute an lvalue for each LHS (left-to-right), creating a
@@ -1250,4 +1746,38 @@ fn is_blank_name(id: &guff::ast::Ident) -> bool {
 /// (Go: `isBlankIdent`.)
 pub(crate) fn is_blank_ident(e: &guff::ast::Expr) -> bool {
     matches!(e, guff::ast::Expr::Ident(id) if is_blank_name(id))
+}
+
+/// Maps a compound-assignment token (`+=`, …) to the corresponding binary op.
+fn compound_assign_op(tok: Token) -> Option<Token> {
+    match tok {
+        Token::AddAssign => Some(Token::ADD),
+        Token::SubAssign => Some(Token::SUB),
+        Token::MulAssign => Some(Token::MUL),
+        Token::QuoAssign => Some(Token::QUO),
+        Token::RemAssign => Some(Token::REM),
+        Token::AndAssign => Some(Token::AND),
+        Token::OrAssign => Some(Token::OR),
+        Token::XorAssign => Some(Token::XOR),
+        Token::ShlAssign => Some(Token::SHL),
+        Token::ShrAssign => Some(Token::SHR),
+        Token::AndNotAssign => Some(Token::AndNot),
+        _ => None,
+    }
+}
+
+/// Extracts the `TypeAssertExpr` from a type-switch assign RHS / ExprStmt.
+fn type_assert_of(e: &Expr) -> &guff::ast::TypeAssertExpr {
+    match crate::builder::unparen(e) {
+        Expr::TypeAssertExpr(ta) => ta,
+        other => panic!("type switch expects x.(type), got {other:?}"),
+    }
+}
+
+/// Extracts `<-ch` from a select receive communication.
+fn unparen_unary_recv(e: &Expr) -> &guff::ast::UnaryExpr {
+    match crate::builder::unparen(e) {
+        Expr::UnaryExpr(u) if u.op == Token::ARROW => u,
+        other => panic!("select receive expects <-ch, got {other:?}"),
+    }
 }

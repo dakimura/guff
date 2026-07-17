@@ -74,13 +74,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Returns the nearest unlabelled `break` / `continue` target.
+    /// Returns the nearest unlabelled `break` / `continue` / `fallthrough` target.
     /// (Go: `targetedBlock`, without yield-function ancestor search.)
     pub(crate) fn targeted_block(&self, tok: Token) -> Option<BlockId> {
         for tgts in self.targets.iter().rev() {
             let block = match tok {
                 Token::BREAK => Some(tgts.break_),
-                Token::CONTINUE => Some(tgts.continue_),
+                Token::CONTINUE => tgts.continue_,
+                Token::FALLTHROUGH => tgts.fallthrough_,
                 _ => None,
             };
             if block.is_some() {
