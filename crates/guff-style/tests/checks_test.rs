@@ -14,7 +14,7 @@ use guff_style::{
     paralleltest, perfsprint, prealloc, predeclared, protogetter, reassign, recvcheck, sloglint,
     tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
-    unparam, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
+    unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -6455,4 +6455,72 @@ fn protogetter_ignores_getters_writes_and_non_proto() {
     let pkg = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
     let messages = support::run_analyzer(protogetter(), &pkg);
     assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn unqueryvet_flags_select_star() {
+    let pkg = support::typecheck_fixture("unqueryvet", "example.com/unqueryvet", "bad.go");
+    let messages = support::run_analyzer(unqueryvet(), &pkg);
+    let select_star: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("avoid SELECT * - explicitly specify needed columns"))
+        .collect();
+    assert!(
+        select_star.len() >= 3,
+        "expected ≥3 SELECT * hits: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("avoid SELECT alias.*")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn unqueryvet_allows_explicit_and_default_patterns() {
+    let pkg = support::typecheck_fixture("unqueryvet", "example.com/unqueryvet/ok", "ok.go");
+    let messages = support::run_analyzer(unqueryvet(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn unqueryvet_respects_settings() {
+    use guff_style::UnqueryvetOptions;
+
+    let pkg = support::typecheck_fixture(
+        "unqueryvet",
+        "example.com/unqueryvet/settings",
+        "settings.go",
+    );
+
+    let default_msgs = support::run_analyzer(unqueryvet(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("avoid SELECT alias.*")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "unqueryvet",
+        UnqueryvetOptions {
+            check_aliased_wildcard: false,
+            check_subqueries: true,
+            allowed_patterns: Vec::new(),
+        },
+    );
+    let flagged = support::run_analyzer_with_settings(
+        unqueryvet(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        flagged.is_empty(),
+        "aliased wildcard should be disabled: {flagged:?}"
+    );
 }

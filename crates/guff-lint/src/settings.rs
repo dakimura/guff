@@ -84,6 +84,7 @@ pub struct LinterSettings {
     pub funcorder: FuncorderSettings,
     pub varnamelen: VarnamelenSettings,
     pub unparam: UnparamSettings,
+    pub unqueryvet: UnqueryvetSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1252,6 +1253,41 @@ impl UnparamSettings {
     }
 }
 
+/// `linters.settings.unqueryvet` / `linters-settings.unqueryvet`.
+///
+/// Core SELECT * keys only. SQL builders / N+1 / injection / tx-leak / custom
+/// DSL are DEFERRED.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct UnqueryvetSettings {
+    #[serde(default = "default_true", rename = "check-aliased-wildcard")]
+    pub check_aliased_wildcard: bool,
+    #[serde(default = "default_true", rename = "check-subqueries")]
+    pub check_subqueries: bool,
+    /// Empty → upstream defaults (`COUNT(*)`, system catalogs, …).
+    #[serde(default, rename = "allowed-patterns")]
+    pub allowed_patterns: Vec<String>,
+}
+
+impl Default for UnqueryvetSettings {
+    fn default() -> Self {
+        Self {
+            check_aliased_wildcard: true,
+            check_subqueries: true,
+            allowed_patterns: Vec::new(),
+        }
+    }
+}
+
+impl UnqueryvetSettings {
+    pub fn to_guff_unqueryvet(&self) -> guff_style::UnqueryvetOptions {
+        guff_style::UnqueryvetOptions {
+            check_aliased_wildcard: self.check_aliased_wildcard,
+            check_subqueries: self.check_subqueries,
+            allowed_patterns: self.allowed_patterns.clone(),
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -1988,6 +2024,11 @@ impl LinterSettings {
                 out.unparam = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("unqueryvet".into())) {
+            if let Ok(s) = serde_yaml::from_value::<UnqueryvetSettings>(v.clone()) {
+                out.unqueryvet = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -2122,6 +2163,7 @@ impl LinterSettings {
         bag.insert("funcorder", self.funcorder.to_guff_funcorder());
         bag.insert("varnamelen", self.varnamelen.to_guff_varnamelen());
         bag.insert("unparam", self.unparam.to_guff_unparam());
+        bag.insert("unqueryvet", self.unqueryvet.to_guff_unqueryvet());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

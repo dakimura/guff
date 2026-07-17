@@ -863,7 +863,7 @@ const IMPORT_PRESET: &[&str] = &["depguard", "gci", "goimports", "gomodguard"];
 const METALINTER_PRESET: &[&str] = &["gocritic", "govet", "revive", "staticcheck"];
 const MODULE_PRESET: &[&str] = &["depguard", "gomoddirectives", "gomodguard"];
 const PERFORMANCE_PRESET: &[&str] = &["bodyclose", "fatcontext", "noctx", "perfsprint", "prealloc"];
-const SQL_PRESET: &[&str] = &["rowserrcheck", "sqlclosecheck"];
+const SQL_PRESET: &[&str] = &["rowserrcheck", "sqlclosecheck", "unqueryvet"];
 const STYLE_PRESET: &[&str] = &[
     "asciicheck", "canonicalheader", "containedctx", "copyloopvar", "decorder", "depguard",
     "dogsled", "dupl", "embeddedstructfieldcheck", "err113", "errname", "exhaustruct", "exptostd",

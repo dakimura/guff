@@ -69,6 +69,7 @@
 //! - [`modernize`]
 //! - [`gocritic`]
 //! - [`unparam`]
+//! - [`unqueryvet`]
 //! - [`varnamelen`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
@@ -140,6 +141,7 @@ mod prealloc;
 mod predeclared;
 mod tagalign;
 mod unparam;
+mod unqueryvet;
 mod unconvert;
 mod usestdlibvars;
 mod usetesting;
@@ -160,7 +162,8 @@ pub use options::{
     PredeclaredOptions, ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions,
     SuiteExtraAssertCallMode, TagalignOptions, TagliatelleOptions, TestifylintOptions,
     TestpackageOptions, ThelperKindOptions, ThelperOptions, UnconvertOptions, UnparamOptions,
-    UsestdlibvarsOptions, UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions,
+    UnqueryvetOptions, UsestdlibvarsOptions, UsetestingOptions, VarnamelenOptions,
+    WhitespaceOptions, WslOptions,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -226,6 +229,7 @@ pub use predeclared::analyzer as predeclared;
 pub use tagalign::analyzer as tagalign;
 pub use unconvert::analyzer as unconvert;
 pub use unparam::analyzer as unparam;
+pub use unqueryvet::analyzer as unqueryvet;
 pub use usestdlibvars::analyzer as usestdlibvars;
 pub use usetesting::analyzer as usetesting;
 pub use varnamelen::analyzer as varnamelen;
@@ -304,6 +308,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         modernize(),
         gocritic(),
         unparam(),
+        unqueryvet(),
         varnamelen(),
     ]
 }

@@ -1205,3 +1205,27 @@ impl Default for UnparamOptions {
     }
 }
 
+/// `linters.settings.unqueryvet` / `linters-settings.unqueryvet`.
+///
+/// Core SELECT * detection only. SQL builders / N+1 / injection / tx-leak /
+/// custom DSL are DEFERRED (see DEVELOPMENT.md R13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnqueryvetOptions {
+    /// Detect `SELECT t.*` patterns (upstream / golangci default: true).
+    pub check_aliased_wildcard: bool,
+    /// Detect `SELECT *` inside subqueries (upstream / golangci default: true).
+    pub check_subqueries: bool,
+    /// Regex allowlist; empty → upstream defaults (`COUNT(*)`, system catalogs, …).
+    pub allowed_patterns: Vec<String>,
+}
+
+impl Default for UnqueryvetOptions {
+    fn default() -> Self {
+        Self {
+            check_aliased_wildcard: true,
+            check_subqueries: true,
+            allowed_patterns: Vec::new(),
+        }
+    }
+}
+
