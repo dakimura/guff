@@ -3,7 +3,8 @@
 //! Registered as individual golangci-lint linter names:
 //! - [`depguard`]
 //! - [`gomoddirectives`]
-//! - [`gomodguard`]
+//! - [`gomodguard`] (also registered under the `gomodguard_v2` name; v1
+//!   `gomodguard` is deprecated in golangci-lint v2)
 //! - [`importas`]
 //!
 //! `linters.settings` are wired (depguard rules / list-mode / files / allow /

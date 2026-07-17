@@ -135,6 +135,10 @@ pub fn analyzers_for_linter_with_settings(
         "depguard" => Some(vec![guff_import::depguard()]),
         "gomoddirectives" => Some(vec![guff_import::gomoddirectives()]),
         "gomodguard" => Some(vec![guff_import::gomodguard()]),
+        // `gomodguard` is deprecated in golangci-lint v2 in favor of the
+        // `gomodguard_v2` name; both drive the same analyzer (settings for
+        // either YAML key populate the shared `gomodguard` bag).
+        "gomodguard_v2" => Some(vec![guff_import::gomodguard()]),
         "importas" => Some(vec![guff_import::importas()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
@@ -196,6 +200,7 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "godox",
     "gomoddirectives",
     "gomodguard",
+    "gomodguard_v2",
     "goprintffuncname",
     "gosec",
     "govet",
@@ -312,6 +317,7 @@ pub fn linter_description(name: &str) -> &'static str {
         "godox" => "Detects FIXME, TODO and other keywords inside comments.",
         "gomoddirectives" => "Manage the use of 'replace', 'retract', and 'excludes' directives in go.mod.",
         "gomodguard" => "Allow and blocklist linter for direct Go module dependencies.",
+        "gomodguard_v2" => "Allow and blocklist linter for direct Go module dependencies.",
         "goprintffuncname" => "Checks that printf-like functions are named with an f suffix.",
         "gosec" => "Inspects source code for security problems.",
         "gosmopolitan" => "Report certain i18n/l10n anti-patterns in your Go codebase.",
@@ -488,7 +494,10 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
             }
             if let Some(analyzers) = analyzers_for_linter(linter) {
                 for a in analyzers {
-                    m.insert(a.name, linter);
+                    // Keep the first (alphabetically earliest) owner so shared
+                    // analyzers — e.g. `gomodguard` vs its `gomodguard_v2`
+                    // alias — attribute issues to the canonical linter name.
+                    m.entry(a.name).or_insert(linter);
                 }
             }
         }
@@ -540,6 +549,23 @@ mod tests {
             analyzers_for_linter_with_settings("govet", &settings).expect("govet");
         assert_eq!(analyzers.len(), 1);
         assert_eq!(analyzers[0].name, "printf");
+    }
+
+    #[test]
+    fn gomodguard_v2_alias_resolves_to_shared_analyzer() {
+        let v1 = analyzers_for_linter("gomodguard").expect("gomodguard");
+        let v2 = analyzers_for_linter("gomodguard_v2").expect("gomodguard_v2");
+        assert_eq!(v1.len(), 1);
+        assert_eq!(v2.len(), 1);
+        assert_eq!(v1[0].name, v2[0].name);
+        // Issues from the shared analyzer stay attributed to the canonical name.
+        assert_eq!(linter_name_for_analyzer(v2[0].name), "gomodguard");
+    }
+
+    #[test]
+    fn gomodguard_v2_is_known() {
+        assert!(known_linter_names().contains(&"gomodguard_v2"));
+        assert!(!linter_description("gomodguard_v2").is_empty());
     }
 
     #[test]
