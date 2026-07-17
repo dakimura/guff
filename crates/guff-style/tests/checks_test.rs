@@ -5,7 +5,8 @@ use std::sync::Arc;
 use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
-    asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
+    arangolint, asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop,
+    decorder,
     dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct, exptostd, forbidigo, funcorder,
     funlen, gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gochecksumtype, gocognit,
     goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
@@ -1330,6 +1331,29 @@ fn inamedparam_respects_skip_single_param() {
         },
     );
     assert!(skipped.is_empty(), "unexpected diagnostics: {skipped:?}");
+}
+
+#[test]
+fn arangolint_flags_missing_allow_implicit_and_query_concatenation() {
+    let pkg = support::typecheck_fixture("arangolint", "example.com/arangolint", "bad.go");
+    let messages = support::run_analyzer(arangolint(), &pkg);
+    let missing = messages
+        .iter()
+        .filter(|m| m.contains("missing AllowImplicit option"))
+        .count();
+    assert_eq!(missing, 2, "{messages:?}");
+    let concat = messages
+        .iter()
+        .filter(|m| m.contains("query string uses concatenation instead of bind variables"))
+        .count();
+    assert_eq!(concat, 3, "{messages:?}");
+}
+
+#[test]
+fn arangolint_allows_explicit_options_and_static_queries() {
+    let pkg = support::typecheck_fixture("arangolint", "example.com/arangolint/ok", "ok.go");
+    let messages = support::run_analyzer(arangolint(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]

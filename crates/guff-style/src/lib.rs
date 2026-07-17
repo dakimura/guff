@@ -25,6 +25,7 @@
 //! - [`embeddedstructfieldcheck`]
 //! - [`gochecksumtype`]
 //! - [`inamedparam`]
+//! - [`arangolint`]
 //! - [`containedctx`]
 //! - [`decorder`]
 //! - [`nonamedreturns`]
@@ -105,6 +106,7 @@ mod gochecknoglobals;
 mod gochecknoinits;
 mod gosmopolitan;
 mod goheader;
+mod arangolint;
 mod containedctx;
 mod decorder;
 mod embeddedstructfieldcheck;
@@ -188,6 +190,7 @@ pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use gosmopolitan::analyzer as gosmopolitan;
 pub use goheader::analyzer as goheader;
+pub use arangolint::analyzer as arangolint;
 pub use containedctx::analyzer as containedctx;
 pub use decorder::analyzer as decorder;
 pub use embeddedstructfieldcheck::analyzer as embeddedstructfieldcheck;
