@@ -24,6 +24,7 @@
 //! - [`containedctx`]
 //! - [`decorder`]
 //! - [`nonamedreturns`]
+//! - [`noinlineerr`]
 //! - [`testpackage`]
 //! - [`paralleltest`]
 //! - [`tparallel`]
@@ -92,6 +93,7 @@ mod containedctx;
 mod decorder;
 mod inamedparam;
 mod interfacebloat;
+mod noinlineerr;
 mod nonamedreturns;
 mod paralleltest;
 mod testpackage;
@@ -160,6 +162,7 @@ pub use containedctx::analyzer as containedctx;
 pub use decorder::analyzer as decorder;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
+pub use noinlineerr::analyzer as noinlineerr;
 pub use nonamedreturns::analyzer as nonamedreturns;
 pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
@@ -227,6 +230,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         containedctx(),
         decorder(),
         nonamedreturns(),
+        noinlineerr(),
         paralleltest(),
         testpackage(),
         tparallel(),

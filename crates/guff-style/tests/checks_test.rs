@@ -9,7 +9,8 @@ use guff_style::{
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
     grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
-    mnd, modernize, musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport,
+    mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
+    nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     tagliatelle, testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting,
     whitespace, wsl,
@@ -5719,4 +5720,28 @@ fn gocritic_extras_off_by_default() {
         }),
         "extras should be off by default: {messages:?}"
     );
+}
+
+#[test]
+fn noinlineerr_flags_inline_error_handling() {
+    let pkg = support::typecheck_fixture("noinlineerr", "example.com/noinlineerr", "bad.go");
+    let messages = support::run_analyzer(noinlineerr(), &pkg);
+    assert_eq!(
+        messages.len(),
+        3,
+        "expected exactly 3 inline-error reports: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("avoid inline error handling")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn noinlineerr_allows_plain_assignment() {
+    let pkg = support::typecheck_fixture("noinlineerr", "example.com/noinlineerr/ok", "ok.go");
+    let messages = support::run_analyzer(noinlineerr(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }
