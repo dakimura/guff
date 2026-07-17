@@ -1087,6 +1087,22 @@ fn parse_v2_interfacebloat_settings() {
 }
 
 #[test]
+fn parse_v2_embeddedstructfieldcheck_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_embeddedstructfieldcheck_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(!settings.embeddedstructfieldcheck.empty_line);
+    assert!(settings.embeddedstructfieldcheck.forbid_mutex);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::EmbeddedstructfieldcheckOptions>("embeddedstructfieldcheck")
+        .expect("embeddedstructfieldcheck options");
+    assert!(!opts.empty_line);
+    assert!(opts.forbid_mutex);
+}
+
+#[test]
 fn parse_v2_maintidx_settings() {
     let contents = fs::read_to_string(testdata_config("v2_maintidx_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

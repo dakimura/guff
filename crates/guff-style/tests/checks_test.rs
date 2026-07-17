@@ -6,13 +6,11 @@ use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
-    dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funcorder, funlen,
-    gocheckcompilerdirectives,
-    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec,
-    gosmopolitan,
-    grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
-    maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
-    nosprintfhostport,
+    dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct, exptostd, forbidigo, funcorder,
+    funlen, gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst,
+    gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
+    inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
+    modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
     unparam, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
@@ -1083,6 +1081,104 @@ fn interfacebloat_respects_custom_max() {
         flagged[0].contains("the interface has more than 2 methods: 3"),
         "{flagged:?}"
     );
+}
+
+#[test]
+fn embeddedstructfieldcheck_flags_order_and_spacing() {
+    let pkg = support::typecheck_fixture(
+        "embeddedstructfieldcheck",
+        "example.com/embeddedstructfieldcheck",
+        "bad.go",
+    );
+    let messages = support::run_analyzer(embeddedstructfieldcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("there must be an empty line separating embedded fields")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("embedded fields should be listed before regular fields")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.len() >= 4,
+        "expected order + spacing reports: {messages:?}"
+    );
+}
+
+#[test]
+fn embeddedstructfieldcheck_allows_sorted_with_blank_line() {
+    let pkg = support::typecheck_fixture(
+        "embeddedstructfieldcheck",
+        "example.com/embeddedstructfieldcheck/ok",
+        "ok.go",
+    );
+    let messages = support::run_analyzer(embeddedstructfieldcheck(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn embeddedstructfieldcheck_respects_settings() {
+    use guff_style::EmbeddedstructfieldcheckOptions;
+
+    let pkg = support::typecheck_fixture(
+        "embeddedstructfieldcheck",
+        "example.com/embeddedstructfieldcheck/settings",
+        "settings.go",
+    );
+
+    // Defaults: empty-line on → missing blank line flagged; forbid-mutex off → mutex OK.
+    let default_msgs = support::run_analyzer(embeddedstructfieldcheck(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("there must be an empty line separating embedded fields")),
+        "{default_msgs:?}"
+    );
+    assert!(
+        !default_msgs.iter().any(|m| m.contains("should not be embedded")),
+        "mutex should be allowed by default: {default_msgs:?}"
+    );
+
+    // empty-line off + forbid-mutex on.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "embeddedstructfieldcheck",
+        EmbeddedstructfieldcheckOptions {
+            empty_line: false,
+            forbid_mutex: true,
+        },
+    );
+    let flagged = support::run_analyzer_with_settings(
+        embeddedstructfieldcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !flagged
+            .iter()
+            .any(|m| m.contains("there must be an empty line")),
+        "empty-line:false should skip spacing: {flagged:?}"
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("sync.Mutex should not be embedded")),
+        "{flagged:?}"
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("sync.RWMutex should not be embedded")),
+        "{flagged:?}"
+    );
+    assert_eq!(flagged.len(), 3, "{flagged:?}"); // Mutex, *Mutex, RWMutex
 }
 
 #[test]

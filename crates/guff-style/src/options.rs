@@ -903,6 +903,27 @@ impl Default for InterfacebloatOptions {
     }
 }
 
+/// `linters.settings.embeddedstructfieldcheck` /
+/// `linters-settings.embeddedstructfieldcheck`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddedstructfieldcheckOptions {
+    /// Require a blank line between embedded and regular fields.
+    /// Upstream / golangci default: true.
+    pub empty_line: bool,
+    /// Forbid embedding `sync.Mutex` / `sync.RWMutex`.
+    /// Upstream / golangci default: false.
+    pub forbid_mutex: bool,
+}
+
+impl Default for EmbeddedstructfieldcheckOptions {
+    fn default() -> Self {
+        Self {
+            empty_line: true,
+            forbid_mutex: false,
+        }
+    }
+}
+
 /// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InamedparamOptions {

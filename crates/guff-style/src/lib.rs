@@ -22,6 +22,7 @@
 //! - [`thelper`]
 //! - [`iface`]
 //! - [`interfacebloat`]
+//! - [`embeddedstructfieldcheck`]
 //! - [`inamedparam`]
 //! - [`containedctx`]
 //! - [`decorder`]
@@ -101,6 +102,7 @@ mod gosmopolitan;
 mod goheader;
 mod containedctx;
 mod decorder;
+mod embeddedstructfieldcheck;
 mod inamedparam;
 mod interfacebloat;
 mod noinlineerr;
@@ -143,20 +145,17 @@ mod wsl;
 
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
-    DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
-    FuncorderOptions, FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions,
-    GocycloOptions, GoheaderOptions, GosmopolitanOptions, IfaceOptions,
-    GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions,
-    IreturnOptions, LllOptions, MaintidxOptions,
-    LoggercheckOptions,
-    MndOptions,
+    DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions,
+    ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GocognitOptions,
+    GoconstOptions, GocriticOptions, GocycloOptions, GoheaderOptions, GosmopolitanOptions,
+    IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions,
+    IotamixingOptions, IreturnOptions, LllOptions, MaintidxOptions, LoggercheckOptions, MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
     NonamedreturnsOptions, ParalleltestOptions, PerfsprintOptions, PreallocOptions,
     PredeclaredOptions, ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions,
     SuiteExtraAssertCallMode, TagalignOptions, TagliatelleOptions, TestifylintOptions,
     TestpackageOptions, ThelperKindOptions, ThelperOptions, UnconvertOptions, UnparamOptions,
-    UsestdlibvarsOptions,
-    UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions,
+    UsestdlibvarsOptions, UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -179,6 +178,7 @@ pub use gosmopolitan::analyzer as gosmopolitan;
 pub use goheader::analyzer as goheader;
 pub use containedctx::analyzer as containedctx;
 pub use decorder::analyzer as decorder;
+pub use embeddedstructfieldcheck::analyzer as embeddedstructfieldcheck;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use noinlineerr::analyzer as noinlineerr;
@@ -251,6 +251,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         thelper(),
         iface(),
         interfacebloat(),
+        embeddedstructfieldcheck(),
         inamedparam(),
         containedctx(),
         decorder(),

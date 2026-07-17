@@ -69,6 +69,7 @@ pub struct LinterSettings {
     pub thelper: ThelperSettings,
     pub iface: IfaceSettings,
     pub interfacebloat: InterfacebloatSettings,
+    pub embeddedstructfieldcheck: EmbeddedstructfieldcheckSettings,
     pub inamedparam: InamedparamSettings,
     pub nonamedreturns: NonamedreturnsSettings,
     pub paralleltest: ParalleltestSettings,
@@ -1017,6 +1018,38 @@ impl InterfacebloatSettings {
     }
 }
 
+/// `linters.settings.embeddedstructfieldcheck` /
+/// `linters-settings.embeddedstructfieldcheck`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct EmbeddedstructfieldcheckSettings {
+    /// Require a blank line between embedded and regular fields (default true).
+    #[serde(default = "default_true", rename = "empty-line")]
+    pub empty_line: bool,
+    /// Forbid embedding `sync.Mutex` / `sync.RWMutex` (default false).
+    #[serde(default, rename = "forbid-mutex")]
+    pub forbid_mutex: bool,
+}
+
+impl Default for EmbeddedstructfieldcheckSettings {
+    fn default() -> Self {
+        Self {
+            empty_line: true,
+            forbid_mutex: false,
+        }
+    }
+}
+
+impl EmbeddedstructfieldcheckSettings {
+    pub fn to_guff_embeddedstructfieldcheck(
+        &self,
+    ) -> guff_style::EmbeddedstructfieldcheckOptions {
+        guff_style::EmbeddedstructfieldcheckOptions {
+            empty_line: self.empty_line,
+            forbid_mutex: self.forbid_mutex,
+        }
+    }
+}
+
 /// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
 ///
 /// `skip-single-param` skips methods with exactly one parameter field
@@ -1888,6 +1921,11 @@ impl LinterSettings {
                 out.interfacebloat = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("embeddedstructfieldcheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<EmbeddedstructfieldcheckSettings>(v.clone()) {
+                out.embeddedstructfieldcheck = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("inamedparam".into())) {
             if let Ok(s) = serde_yaml::from_value::<InamedparamSettings>(v.clone()) {
                 out.inamedparam = s;
@@ -2029,6 +2067,11 @@ impl LinterSettings {
         bag.insert(
             "interfacebloat",
             self.interfacebloat.to_guff_interfacebloat(),
+        );
+        bag.insert(
+            "embeddedstructfieldcheck",
+            self.embeddedstructfieldcheck
+                .to_guff_embeddedstructfieldcheck(),
         );
         bag.insert("inamedparam", self.inamedparam.to_guff_inamedparam());
         bag.insert(

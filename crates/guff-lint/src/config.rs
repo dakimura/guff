@@ -866,7 +866,8 @@ const PERFORMANCE_PRESET: &[&str] = &["bodyclose", "fatcontext", "noctx", "perfs
 const SQL_PRESET: &[&str] = &["rowserrcheck", "sqlclosecheck"];
 const STYLE_PRESET: &[&str] = &[
     "asciicheck", "canonicalheader", "containedctx", "copyloopvar", "decorder", "depguard",
-    "dogsled", "dupl", "err113", "errname", "exhaustruct", "exptostd", "forbidigo",
+    "dogsled", "dupl", "embeddedstructfieldcheck", "err113", "errname", "exhaustruct", "exptostd",
+    "forbidigo",
     "forcetypeassert", "ginkgolinter", "gochecknoglobals", "gochecknoinits", "goconst",
     "gocritic", "godoclint", "godot", "godox", "goheader", "gomoddirectives", "gomodguard",
     "goprintffuncname", "gosimple", "grouper", "iface", "importas", "inamedparam",
