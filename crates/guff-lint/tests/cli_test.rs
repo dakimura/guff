@@ -206,6 +206,7 @@ fn cli_cache_status_and_clean() {
     assert!(stdout.contains("Dir:"));
     assert!(stdout.contains(cache_dir.to_str().unwrap()));
     assert!(stdout.contains("Size:"));
+    assert!(stdout.contains("GOCACHE:"));
 
     let clean = Command::new(bin())
         .args(["cache", "clean"])

@@ -655,6 +655,13 @@ fn cache_cmd(args: CacheArgs) -> Result<(), RunError> {
             let size = cache_dir_size(&dir);
             println!("Dir: {}", dir.display());
             println!("Size: {}", prettify_bytes(size));
+            match guff_runner::default_go_cache_dir() {
+                Ok(gocache) => {
+                    println!("GOCACHE: {}", gocache.display());
+                    println!("GOCACHE size: {}", prettify_bytes(cache_dir_size(&gocache)));
+                }
+                Err(e) => println!("GOCACHE: ({e})"),
+            }
         }
     }
     Ok(())

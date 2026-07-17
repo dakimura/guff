@@ -4,6 +4,11 @@
 //! build tags, Go version). Entries are JSON under `$GUFF_CACHE` /
 //! `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`.
 //!
+//! GOCACHE (Go build cache) is resolved separately via [`default_go_cache_dir`]
+//! and injected into `go list` subprocesses (PL07). Diagnostics whose paths
+//! fall under GOCACHE (cgo preprocessed files) are filtered by the lint
+//! pipeline.
+//!
 //! DEFERRED: facts persistence (`runner_action_cache.go`); load/typecheck skip.
 
 use std::collections::HashMap;
@@ -22,6 +27,8 @@ use sha2::{Digest, Sha256};
 /// Environment variables consulted by [`default_cache_dir`] (first wins).
 pub const ENV_GUFF_CACHE: &str = "GUFF_CACHE";
 pub const ENV_GOLANGCI_LINT_CACHE: &str = "GOLANGCI_LINT_CACHE";
+/// Go build cache (`go env GOCACHE`); used by `go list -export` and cgo.
+pub const ENV_GOCACHE: &str = "GOCACHE";
 
 /// How deeply import hashes fold into a package action id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +118,85 @@ fn user_cache_dir() -> Option<PathBuf> {
     {
         None
     }
+}
+
+/// Resolve the Go build cache directory (`GOCACHE`).
+///
+/// Precedence: `GOCACHE` env → `go env GOCACHE` → `{UserCacheDir}/go-build`.
+/// Returns an error when the value is `"off"` (Go disables the build cache).
+pub fn default_go_cache_dir() -> Result<PathBuf, CacheError> {
+    if let Ok(v) = env::var(ENV_GOCACHE) {
+        if v == "off" {
+            return Err(CacheError::Disabled("GOCACHE=off".into()));
+        }
+        if !v.is_empty() {
+            let p = PathBuf::from(&v);
+            if !p.is_absolute() {
+                return Err(CacheError::Message(format!(
+                    "GOCACHE must be an absolute path, got {v:?}"
+                )));
+            }
+            return Ok(p);
+        }
+    }
+    if let Some(from_go) = detect_go_cache_from_go_env() {
+        return Ok(from_go);
+    }
+    let base = user_cache_dir().ok_or_else(|| {
+        CacheError::Message("could not locate a user cache directory; set GOCACHE".into())
+    })?;
+    Ok(base.join("go-build"))
+}
+
+fn detect_go_cache_from_go_env() -> Option<PathBuf> {
+    let output = std::process::Command::new("go")
+        .args(["env", "GOCACHE"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if s.is_empty() || s == "off" {
+        return None;
+    }
+    let p = PathBuf::from(s);
+    p.is_absolute().then_some(p)
+}
+
+/// Ensure `GOCACHE` is present in a `KEY=value` environment list for `go list`.
+///
+/// When missing, inserts the resolved [`default_go_cache_dir`] so export-data
+/// and cgo artifacts land in a known location (PL07).
+pub fn ensure_go_cache_env(env_vars: &mut Vec<String>) {
+    let has = env_vars.iter().any(|e| e.starts_with("GOCACHE="));
+    if has {
+        return;
+    }
+    if let Ok(dir) = default_go_cache_dir() {
+        env_vars.push(format!("GOCACHE={}", dir.display()));
+    }
+}
+
+/// Reports whether `path` is under the Go build cache (cgo / preprocessed files).
+///
+/// Equivalent to golangci-lint's `Cgo` processor path check.
+pub fn is_under_go_cache(path: &Path, go_cache: Option<&Path>) -> bool {
+    let Some(cache) = go_cache else {
+        return false;
+    };
+    if cache.as_os_str().is_empty() {
+        return false;
+    }
+    let path_str = path.to_string_lossy();
+    let cache_str = cache.to_string_lossy();
+    if path_str.starts_with(cache_str.as_ref()) {
+        return true;
+    }
+    // Also reject the well-known cgo types file by basename.
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n == "_cgo_gotypes.go")
 }
 
 /// Remove the entire cache directory (best-effort recreate of parents is caller's job).
@@ -717,5 +803,36 @@ mod tests {
         fs::write(dir.join("issues/x"), b"1").unwrap();
         clean_cache(&dir).unwrap();
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn is_under_go_cache_prefix_and_cgo_basename() {
+        let cache = PathBuf::from("/tmp/gocache");
+        assert!(is_under_go_cache(
+            Path::new("/tmp/gocache/abc/_cgo_gotypes.go"),
+            Some(&cache)
+        ));
+        assert!(is_under_go_cache(
+            Path::new("/elsewhere/_cgo_gotypes.go"),
+            Some(&cache)
+        ));
+        assert!(!is_under_go_cache(
+            Path::new("/tmp/src/main.go"),
+            Some(&cache)
+        ));
+        assert!(!is_under_go_cache(Path::new("/tmp/gocache/x.go"), None));
+    }
+
+    #[test]
+    fn ensure_go_cache_env_injects_when_missing() {
+        let mut env = vec!["PATH=/bin".into()];
+        ensure_go_cache_env(&mut env);
+        assert!(
+            env.iter().any(|e| e.starts_with("GOCACHE=")),
+            "expected GOCACHE injection, got {env:?}"
+        );
+        let before = env.clone();
+        ensure_go_cache_env(&mut env);
+        assert_eq!(env, before, "second call must be idempotent");
     }
 }

@@ -2,7 +2,8 @@
 //!
 //! Uses `typecheck_package` + `run_on_packages` so CI does not require `go` on
 //! PATH. Full `go list` → `load` → `run` is covered by `guff-packages` integration
-//! tests and documented in `docs/DEVELOPMENT.md` §5 (see deferral PL02).
+//! tests; when `go` is missing, [`guff_packages::OfflineDriver`] (PL02 / R20)
+//! provides the same metadata path without a toolchain.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

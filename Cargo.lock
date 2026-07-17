@@ -542,6 +542,7 @@ name = "guff-packages"
 version = "0.1.0"
 dependencies = [
  "guff-ast",
+ "guff-build",
  "guff-exportdata",
  "guff-types",
  "rayon",

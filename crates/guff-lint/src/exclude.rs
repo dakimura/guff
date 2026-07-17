@@ -1,16 +1,17 @@
 //! Post-processing filters for lint issues (golangci `result/processors`).
 //!
 //! Pipeline order (subset of golangci-lint):
-//! path (dirs/files) → text exclude → exclude-rules (+ default excludes) →
+//! GOCACHE/cgo → path (dirs/files) → text exclude → exclude-rules (+ default excludes) →
 //! nolint → max-per-linter → max-same → severity (+ unused nolintlint).
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use guff::position::FileSet;
 use guff_analysis::Diagnostic;
 use guff_packages::Package;
+use guff_runner::{default_go_cache_dir, is_under_go_cache};
 use regex::Regex;
 
 use crate::config::{ExcludeRule, IssuesConfig, SeverityConfig};
@@ -151,6 +152,8 @@ pub struct IssueFilter {
     severity_rules: Vec<(CompiledRule, String)>,
     /// When true, unused `//nolint` directives are reported as `nolintlint`.
     pub report_unused_nolint: bool,
+    /// Go build cache directory; issues under it are dropped (cgo artifacts).
+    go_cache_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +179,7 @@ impl IssueFilter {
             max_same_issues: issues.max_same_issues,
             uniq_by_line: issues.uniq_by_line.unwrap_or(true),
             default_severity: severity.default_severity.clone(),
+            go_cache_dir: default_go_cache_dir().ok(),
             ..Self::default()
         };
 
@@ -291,6 +295,11 @@ impl IssueFilter {
     ///
     /// `packages` supplies source paths for `//nolint` indexing.
     pub fn apply(&self, mut issues: Vec<Issue>, packages: &[Arc<Package>]) -> Vec<Issue> {
+        // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.
+        let go_cache = self.go_cache_dir.as_deref();
+        issues.retain(|issue| {
+            !is_under_go_cache(Path::new(&issue.filename), go_cache)
+        });
         issues.retain(|issue| !self.is_excluded_by_path(issue));
         issues.retain(|issue| {
             !self
@@ -697,5 +706,21 @@ mod tests {
         issue.severity = "warning".into();
         let kept = filter.apply(vec![issue], &[]);
         assert_eq!(kept[0].severity, "warning");
+    }
+
+    #[test]
+    fn drops_issues_under_go_cache() {
+        let mut filter = IssueFilter::default();
+        filter.go_cache_dir = Some(PathBuf::from("/var/gocache"));
+        let kept = filter.apply(
+            vec![
+                issue("gosec", "/var/gocache/xyz/cgo.go", "G103"),
+                issue("gosec", "/src/main.go", "G103"),
+                issue("gosec", "/tmp/_cgo_gotypes.go", "G103"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].filename, "/src/main.go");
     }
 }

@@ -123,9 +123,10 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ### 3.2 解析フレームワーク（PRE-LINTER Phase 0–7）
 - Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
-- **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL07（GOCACHE 管理）,
-  PL05（ctrlflow）, PL02（go 無し driver）（→ §8 各タスク）。
+- **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL05（ctrlflow）
+  （→ §8 各タスク）。
   PL11（真の並列実行）は **R9 で完了**。typeindex は **R18 で完了**。
+  PL02（go 無し driver）/ PL07（GOCACHE 管理）は **R20 で完了**。
 
 ### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
 - naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150+ tests green**。
@@ -169,7 +170,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + text（`line-number` 別名）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。`format:path` / config `path` でファイル書き出し | — |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
-| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`、`--no-cache` | facts キャッシュは未（→ R24） |
+| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | facts キャッシュは未（→ R24） |
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
@@ -375,9 +376,17 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   `interfacePtrError` 詳細、D16 gcexportdata バイナリローダ。
 - **テスト**: `cargo test -p guff-types` green（777+）。
 
-#### R20. オフライン/`go` 無し driver（PL02）と GOCACHE 管理（PL07）
-- **なぜ**: `go` バイナリに依存しない環境・CI サンドボックスでの実行と、キャッシュ配置の整合。
-- **どこ**: `guff-packages`（driver 抽象）、`guff-runner`（cache パス）。
+#### R20. オフライン/`go` 無し driver（PL02）と GOCACHE 管理（PL07）✅ 完了 (2026-07-17)
+- **実装**:
+  1. **PL02** — `OfflineDriver`（`guff-build` で `go.mod` + ファイルシステム解決）。
+     `AutoDriver` が `go` 不在時にフォールバック。`.` / `./...` / モジュールパス対応。
+     直接 import は GOROOT/モジュール内までロード；`NeedDeps` 時のみ再帰。
+  2. **PL07** — `default_go_cache_dir` / `ensure_go_cache_env` / `is_under_go_cache`。
+     `go list` に `GOCACHE` を明示注入。IssueFilter で GOCACHE 配下・`_cgo_gotypes.go`
+     を除外（golangci Cgo processor 相当）。`guff cache status` に GOCACHE 表示。
+- **DEFERRED**: 外部 module `require` 解決（module cache / `go mod download`）、
+  offline 時の export data 生成。
+- **テスト**: offline 2 + go_source imports 3 + runner go_cache 2 + lint filter/CLI。
 
 #### R24. 性能フォローアップ（R10.1 の発展余地）
 - **なぜ**: R10.1 で cold/warm とも golangci-lint 超えを達成したが、さらに詰められる余地がある。

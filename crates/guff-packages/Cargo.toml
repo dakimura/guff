@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 guff-ast = { path = "../guff-ast" }
+guff-build = { path = "../guff-build" }
 guff-exportdata = { path = "../guff-exportdata" }
 guff-types = { path = "../guff-types" }
 serde = { version = "1", features = ["derive"] }

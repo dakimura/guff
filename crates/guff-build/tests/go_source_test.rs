@@ -13,6 +13,7 @@ func main() {}
     let info = parse_go_file_info(src).unwrap();
     assert_eq!(info.package_name, "main");
     assert!(info.imports_c);
+    assert_eq!(info.imports, vec!["C"]);
 }
 
 #[test]
@@ -21,4 +22,19 @@ fn parse_package_without_cgo() {
     let info = parse_go_file_info(src).unwrap();
     assert_eq!(info.package_name, "foo");
     assert!(!info.imports_c);
+    assert_eq!(info.imports, vec!["fmt"]);
+}
+
+#[test]
+fn parse_named_and_block_imports() {
+    let src = br#"package foo
+
+import (
+	f "fmt"
+	. "strings"
+	"os"
+)
+"#;
+    let info = parse_go_file_info(src).unwrap();
+    assert_eq!(info.imports, vec!["fmt", "strings", "os"]);
 }

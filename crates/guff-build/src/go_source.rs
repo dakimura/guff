@@ -5,9 +5,11 @@
 pub struct GoFileInfo {
     pub package_name: String,
     pub imports_c: bool,
+    /// Import paths in declaration order (including `"C"` when present).
+    pub imports: Vec<String>,
 }
 
-/// Parses `package` name and whether the file imports `"C"`.
+/// Parses `package` name, import paths, and whether the file imports `"C"`.
 ///
 /// Port of the package/import scan in `build.readGoInfo` (simplified).
 pub fn parse_go_file_info(content: &[u8]) -> Result<GoFileInfo, String> {
@@ -29,10 +31,12 @@ pub fn parse_go_file_info(content: &[u8]) -> Result<GoFileInfo, String> {
         return Ok(GoFileInfo {
             package_name,
             imports_c: false,
+            imports: Vec::new(),
         });
     }
 
     let mut imports_c = false;
+    let mut imports = Vec::new();
     loop {
         data = skip_space_and_comments(data);
         if data.is_empty() {
@@ -57,17 +61,19 @@ pub fn parse_go_file_info(content: &[u8]) -> Result<GoFileInfo, String> {
                 if data.is_empty() {
                     break;
                 }
-                if let Some(path) = parse_import_path(data) {
+                if let Some(path) = parse_import_path_spec(data) {
                     if path == "C" {
                         imports_c = true;
                     }
+                    imports.push(path.to_string());
                 }
                 data = skip_import_spec(data);
             }
-        } else if let Some(path) = parse_import_path(data) {
+        } else if let Some(path) = parse_import_path_spec(data) {
             if path == "C" {
                 imports_c = true;
             }
+            imports.push(path.to_string());
             data = skip_import_spec(data);
         } else {
             break;
@@ -77,6 +83,7 @@ pub fn parse_go_file_info(content: &[u8]) -> Result<GoFileInfo, String> {
     Ok(GoFileInfo {
         package_name,
         imports_c,
+        imports,
     })
 }
 
@@ -146,6 +153,23 @@ fn parse_import_path(data: &[u8]) -> Option<&str> {
     std::str::from_utf8(&rest[..end]).ok()
 }
 
+/// Parses an import spec path, allowing an optional identifier alias before the string.
+fn parse_import_path_spec(data: &[u8]) -> Option<&str> {
+    let data = skip_space_and_comments(data);
+    if data.first() == Some(&b'"') {
+        return parse_import_path(data);
+    }
+    // Optional name / `.` / `_` before the path string.
+    let rest = if data.first() == Some(&b'.') {
+        &data[1..]
+    } else if let Some((_, rest)) = parse_word(data) {
+        rest
+    } else {
+        return None;
+    };
+    parse_import_path(rest)
+}
+
 fn skip_import_spec(mut data: &[u8]) -> &[u8] {
     data = skip_space_and_comments(data);
     if data.starts_with(b"import") {
@@ -157,14 +181,20 @@ fn skip_import_spec(mut data: &[u8]) -> &[u8] {
         }
         return &[];
     }
-    // Skip optional name before path.
-    if let Some((_, rest)) = parse_word(data) {
-        let rest = skip_space_and_comments(rest);
-        if rest.first() == Some(&b'"') {
-            if let Some(i) = rest[1..].iter().position(|&b| b == b'"') {
-                return &rest[i + 2..];
-            }
+    // Skip optional name / `.` / `_` before path.
+    let after_name = if data.first() == Some(&b'.') {
+        &data[1..]
+    } else if let Some((_, rest)) = parse_word(data) {
+        rest
+    } else {
+        return data;
+    };
+    let rest = skip_space_and_comments(after_name);
+    if rest.first() == Some(&b'"') {
+        if let Some(i) = rest[1..].iter().position(|&b| b == b'"') {
+            return &rest[i + 2..];
         }
+        return &[];
     }
     data
 }

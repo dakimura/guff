@@ -350,7 +350,9 @@ fn invoke_go(cfg: &Config, args: &[String]) -> Result<String, GoListError> {
         cmd.current_dir(&cfg.dir);
     }
     cmd.args(args);
-    cmd.envs(parse_env(&cfg.resolved_env()));
+    let mut env = parse_env(&cfg.resolved_env());
+    ensure_gocache(&mut env);
+    cmd.envs(env);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -370,6 +372,49 @@ fn invoke_go(cfg: &Config, args: &[String]) -> Result<String, GoListError> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Ensure `GOCACHE` is set for `go list` so export/cgo artifacts land in a
+/// known directory (PL07). Prefer an existing env value; otherwise use the
+/// same default Go would pick (`$XDG_CACHE_HOME/go-build` / platform cache).
+fn ensure_gocache(env: &mut Vec<(String, String)>) {
+    if env.iter().any(|(k, _)| k == "GOCACHE") {
+        return;
+    }
+    if let Ok(v) = std::env::var("GOCACHE") {
+        if !v.is_empty() {
+            env.push(("GOCACHE".into(), v));
+            return;
+        }
+    }
+    if let Some(dir) = default_gocache_path() {
+        env.push(("GOCACHE".into(), dir.to_string_lossy().into_owned()));
+    }
+}
+
+fn default_gocache_path() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("go-build"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Library/Caches/go-build"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return std::env::var_os("LOCALAPPDATA").map(|h| PathBuf::from(h).join("go-build"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/go-build"));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
 }
 
 fn parse_env(env: &[String]) -> Vec<(String, String)> {
