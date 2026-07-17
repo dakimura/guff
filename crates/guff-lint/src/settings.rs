@@ -87,6 +87,7 @@ pub struct LinterSettings {
     pub unqueryvet: UnqueryvetSettings,
     pub promlinter: PromlinterSettings,
     pub ginkgolinter: GinkgolinterSettings,
+    pub wsl_v5: WslV5Settings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1364,6 +1365,53 @@ impl GinkgolinterSettings {
     }
 }
 
+/// `linters.settings.wsl_v5` / `linters-settings.wsl_v5`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct WslV5Settings {
+    #[serde(default, rename = "allow-first-in-block")]
+    pub allow_first_in_block: Option<bool>,
+    #[serde(default, rename = "allow-whole-block")]
+    pub allow_whole_block: Option<bool>,
+    #[serde(default, rename = "branch-max-lines")]
+    pub branch_max_lines: Option<usize>,
+    #[serde(default, rename = "case-max-lines")]
+    pub case_max_lines: Option<usize>,
+    #[serde(default, rename = "cuddle-max-statements")]
+    pub cuddle_max_statements: Option<usize>,
+    /// Preset: `all` / `none` / `default` / empty.
+    #[serde(default)]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub enable: Vec<String>,
+    #[serde(default)]
+    pub disable: Vec<String>,
+}
+
+impl WslV5Settings {
+    pub fn to_guff_wsl_v5(&self) -> guff_style::WslV5Options {
+        let defaults = guff_style::WslV5Options::default();
+        let preset = self.default.as_deref().unwrap_or("");
+        guff_style::WslV5Options {
+            allow_first_in_block: self
+                .allow_first_in_block
+                .unwrap_or(defaults.allow_first_in_block),
+            allow_whole_block: self
+                .allow_whole_block
+                .unwrap_or(defaults.allow_whole_block),
+            branch_max_lines: self.branch_max_lines.unwrap_or(defaults.branch_max_lines),
+            case_max_lines: self.case_max_lines.unwrap_or(defaults.case_max_lines),
+            cuddle_max_statements: self
+                .cuddle_max_statements
+                .unwrap_or(defaults.cuddle_max_statements),
+            checks: guff_style::WslV5Options::resolve_checks(
+                preset,
+                &self.enable,
+                &self.disable,
+            ),
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -2115,6 +2163,11 @@ impl LinterSettings {
                 out.ginkgolinter = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("wsl_v5".into())) {
+            if let Ok(s) = serde_yaml::from_value::<WslV5Settings>(v.clone()) {
+                out.wsl_v5 = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -2252,6 +2305,7 @@ impl LinterSettings {
         bag.insert("unqueryvet", self.unqueryvet.to_guff_unqueryvet());
         bag.insert("promlinter", self.promlinter.to_guff_promlinter());
         bag.insert("ginkgolinter", self.ginkgolinter.to_guff_ginkgolinter());
+        bag.insert("wsl_v5", self.wsl_v5.to_guff_wsl_v5());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

@@ -1,5 +1,7 @@
 //! Per-linter options from `linters.settings` (wired by `guff-lint`).
 
+use std::collections::HashSet;
+
 /// `linters.settings.gocyclo` / `linters-settings.gocyclo`.
 #[derive(Debug, Clone, Copy)]
 pub struct GocycloOptions {
@@ -1238,6 +1240,197 @@ pub struct PromlinterOptions {
     pub strict: bool,
     /// Disable named promlint checks (`Help`, `Counter`, `CamelCase`, …).
     pub disabled_linters: Vec<String>,
+}
+
+/// Individual `wsl_v5` check (bombsimon/wsl/v5 `CheckType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WslV5Check {
+    Assign,
+    Branch,
+    Decl,
+    Defer,
+    Expr,
+    For,
+    Go,
+    If,
+    IncDec,
+    Label,
+    Range,
+    Return,
+    Select,
+    Send,
+    Switch,
+    TypeSwitch,
+    AfterBlock,
+    AfterDecl,
+    AfterDefer,
+    AfterExpr,
+    AfterGo,
+    Append,
+    AssignExclusive,
+    AssignExpr,
+    CuddleGroup,
+    Err,
+    LeadingWhitespace,
+    TrailingWhitespace,
+}
+
+impl WslV5Check {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Assign => "assign",
+            Self::Branch => "branch",
+            Self::Decl => "decl",
+            Self::Defer => "defer",
+            Self::Expr => "expr",
+            Self::For => "for",
+            Self::Go => "go",
+            Self::If => "if",
+            Self::IncDec => "inc-dec",
+            Self::Label => "label",
+            Self::Range => "range",
+            Self::Return => "return",
+            Self::Select => "select",
+            Self::Send => "send",
+            Self::Switch => "switch",
+            Self::TypeSwitch => "type-switch",
+            Self::AfterBlock => "after-block",
+            Self::AfterDecl => "after-decl",
+            Self::AfterDefer => "after-defer",
+            Self::AfterExpr => "after-expr",
+            Self::AfterGo => "after-go",
+            Self::Append => "append",
+            Self::AssignExclusive => "assign-exclusive",
+            Self::AssignExpr => "assign-expr",
+            Self::CuddleGroup => "cuddle-group",
+            Self::Err => "err",
+            Self::LeadingWhitespace => "leading-whitespace",
+            Self::TrailingWhitespace => "trailing-whitespace",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        Some(match s.to_ascii_lowercase().as_str() {
+            "assign" => Self::Assign,
+            "branch" => Self::Branch,
+            "decl" => Self::Decl,
+            "defer" => Self::Defer,
+            "expr" => Self::Expr,
+            "for" => Self::For,
+            "go" => Self::Go,
+            "if" => Self::If,
+            "inc-dec" => Self::IncDec,
+            "label" => Self::Label,
+            "range" => Self::Range,
+            "return" => Self::Return,
+            "select" => Self::Select,
+            "send" => Self::Send,
+            "switch" => Self::Switch,
+            "type-switch" => Self::TypeSwitch,
+            "after-block" => Self::AfterBlock,
+            "after-decl" => Self::AfterDecl,
+            "after-defer" => Self::AfterDefer,
+            "after-expr" => Self::AfterExpr,
+            "after-go" => Self::AfterGo,
+            "append" => Self::Append,
+            "assign-exclusive" => Self::AssignExclusive,
+            "assign-expr" => Self::AssignExpr,
+            "cuddle-group" => Self::CuddleGroup,
+            "err" => Self::Err,
+            "leading-whitespace" => Self::LeadingWhitespace,
+            "trailing-whitespace" => Self::TrailingWhitespace,
+            _ => return None,
+        })
+    }
+}
+
+/// `linters.settings.wsl_v5` / `linters-settings.wsl_v5`.
+///
+/// Defaults match bombsimon/wsl/v5 / golangci-lint (`allow-first-in-block: true`,
+/// `allow-whole-block: false`, `branch-max-lines: 2`, `case-max-lines: 0`,
+/// `cuddle-max-statements: 1`, default check preset).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WslV5Options {
+    pub allow_first_in_block: bool,
+    pub allow_whole_block: bool,
+    pub branch_max_lines: usize,
+    pub case_max_lines: usize,
+    pub cuddle_max_statements: usize,
+    pub checks: HashSet<WslV5Check>,
+}
+
+impl WslV5Options {
+    pub fn default_checks() -> HashSet<WslV5Check> {
+        HashSet::from([
+            WslV5Check::Append,
+            WslV5Check::Assign,
+            WslV5Check::Branch,
+            WslV5Check::Decl,
+            WslV5Check::Defer,
+            WslV5Check::Err,
+            WslV5Check::Expr,
+            WslV5Check::For,
+            WslV5Check::Go,
+            WslV5Check::If,
+            WslV5Check::IncDec,
+            WslV5Check::Label,
+            WslV5Check::LeadingWhitespace,
+            WslV5Check::TrailingWhitespace,
+            WslV5Check::Range,
+            WslV5Check::Return,
+            WslV5Check::Select,
+            WslV5Check::Send,
+            WslV5Check::Switch,
+            WslV5Check::TypeSwitch,
+        ])
+    }
+
+    pub fn all_checks() -> HashSet<WslV5Check> {
+        let mut c = Self::default_checks();
+        c.insert(WslV5Check::AssignExclusive);
+        c.insert(WslV5Check::AssignExpr);
+        c.insert(WslV5Check::AfterBlock);
+        c.insert(WslV5Check::AfterDecl);
+        c.insert(WslV5Check::AfterDefer);
+        c.insert(WslV5Check::AfterExpr);
+        c.insert(WslV5Check::AfterGo);
+        c.insert(WslV5Check::CuddleGroup);
+        c
+    }
+
+    /// Build check set from golangci `default` / `enable` / `disable`.
+    pub fn resolve_checks(default: &str, enable: &[String], disable: &[String]) -> HashSet<WslV5Check> {
+        let mut checks = match default.to_ascii_lowercase().as_str() {
+            "" | "default" => Self::default_checks(),
+            "all" => Self::all_checks(),
+            "none" => HashSet::new(),
+            _ => Self::default_checks(),
+        };
+        for s in enable {
+            if let Some(c) = WslV5Check::from_str(s) {
+                checks.insert(c);
+            }
+        }
+        for s in disable {
+            if let Some(c) = WslV5Check::from_str(s) {
+                checks.remove(&c);
+            }
+        }
+        checks
+    }
+}
+
+impl Default for WslV5Options {
+    fn default() -> Self {
+        Self {
+            allow_first_in_block: true,
+            allow_whole_block: false,
+            branch_max_lines: 2,
+            case_max_lines: 0,
+            cuddle_max_statements: 1,
+            checks: Self::default_checks(),
+        }
+    }
 }
 
 /// `linters.settings.ginkgolinter` / `linters-settings.ginkgolinter`.

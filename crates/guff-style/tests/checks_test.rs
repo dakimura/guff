@@ -14,7 +14,7 @@ use guff_style::{
     nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, ginkgolinter,
     promlinter, protogetter, reassign, recvcheck, sloglint, tagalign, tagliatelle, testableexamples,
     testifylint, testpackage, thelper, tparallel, unconvert, unparam, unqueryvet, usestdlibvars,
-    usetesting, varnamelen, whitespace, wsl,
+    usetesting, varnamelen, whitespace, wsl, wsl_v5,
 };
 
 #[test]
@@ -1385,6 +1385,75 @@ fn clickhouselint_allows_err_defer_close_and_return() {
         support::typecheck_fixture("clickhouselint", "example.com/clickhouselint/ok", "ok.go");
     let messages = support::run_analyzer(clickhouselint(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn wsl_v5_flags_cuddle_and_err_whitespace() {
+    let pkg = support::typecheck_fixture("wsl_v5", "example.com/wsl_v5", "bad.go");
+    let messages = support::run_analyzer(wsl_v5(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("too many statements above if")),
+        "expected too-many-statements if: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("no shared variables above if")),
+        "expected no-shared if: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("never cuddle decl")),
+        "expected never cuddle decl: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("unnecessary whitespace (err)")),
+        "expected err whitespace: {messages:?}"
+    );
+}
+
+#[test]
+fn wsl_v5_allows_proper_spacing() {
+    let pkg = support::typecheck_fixture("wsl_v5", "example.com/wsl_v5/ok", "ok.go");
+    let messages = support::run_analyzer(wsl_v5(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn wsl_v5_respects_cuddle_max_statements() {
+    use guff_style::WslV5Options;
+
+    let pkg = support::typecheck_fixture("wsl_v5", "example.com/wsl_v5/settings", "settings.go");
+    assert!(
+        !support::run_analyzer(wsl_v5(), &pkg).is_empty(),
+        "default cuddle-max=1 should flag settings.go"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "wsl_v5",
+        WslV5Options {
+            cuddle_max_statements: 2,
+            ..WslV5Options::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        wsl_v5(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.is_empty(),
+        "cuddle-max-statements=2 should allow two shared assigns: {messages:?}"
+    );
 }
 
 #[test]

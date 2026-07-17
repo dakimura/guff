@@ -1566,3 +1566,21 @@ fn parse_v2_ginkgolinter_settings() {
     assert!(opts.forbid_focus_container);
     assert!(opts.force_expect_to);
 }
+
+#[test]
+fn parse_v2_wsl_v5_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_wsl_v5_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.wsl_v5.branch_max_lines, Some(4));
+    assert_eq!(settings.wsl_v5.cuddle_max_statements, Some(2));
+    assert_eq!(settings.wsl_v5.disable, vec!["err".to_string()]);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::WslV5Options>("wsl_v5")
+        .expect("wsl_v5 options");
+    assert_eq!(opts.branch_max_lines, 4);
+    assert_eq!(opts.cuddle_max_statements, 2);
+    assert!(!opts.checks.contains(&guff_style::WslV5Check::Err));
+    assert!(opts.checks.contains(&guff_style::WslV5Check::If));
+}

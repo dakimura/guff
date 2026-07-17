@@ -75,6 +75,7 @@
 //! - [`promlinter`]
 //! - [`ginkgolinter`]
 //! - [`varnamelen`]
+//! - [`wsl_v5`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -156,6 +157,7 @@ mod usetesting;
 mod varnamelen;
 mod whitespace;
 mod wsl;
+mod wsl_v5;
 
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
@@ -171,7 +173,7 @@ pub use options::{
     SuiteExtraAssertCallMode, TagalignOptions, TagliatelleOptions, TestifylintOptions,
     TestpackageOptions, ThelperKindOptions, ThelperOptions, UnconvertOptions, UnparamOptions,
     GinkgolinterOptions, PromlinterOptions, UnqueryvetOptions, UsestdlibvarsOptions,
-    UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions,
+    UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions, WslV5Check, WslV5Options,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -247,6 +249,7 @@ pub use usetesting::analyzer as usetesting;
 pub use varnamelen::analyzer as varnamelen;
 pub use whitespace::analyzer as whitespace;
 pub use wsl::analyzer as wsl;
+pub use wsl_v5::analyzer as wsl_v5;
 
 use guff_analysis::Analyzer;
 
@@ -311,6 +314,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         prealloc(),
         tagalign(),
         wsl(),
+        wsl_v5(),
         unconvert(),
         exhaustruct(),
         exhaustive(),

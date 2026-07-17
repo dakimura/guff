@@ -1,0 +1,15 @@
+# Source: guff testdata for wsl_v5 settings
+version: "2"
+
+linters:
+  enable:
+    - wsl_v5
+  settings:
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 4
+      cuddle-max-statements: 2
+      default: default
+      disable:
+        - err

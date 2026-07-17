@@ -111,6 +111,7 @@ pub fn analyzers_for_linter_with_settings(
         "prealloc" => Some(vec![guff_style::prealloc()]),
         "tagalign" => Some(vec![guff_style::tagalign()]),
         "wsl" => Some(vec![guff_style::wsl()]),
+        "wsl_v5" => Some(vec![guff_style::wsl_v5()]),
         "unconvert" => Some(vec![guff_style::unconvert()]),
         "exhaustruct" => Some(vec![guff_style::exhaustruct()]),
         "exhaustive" => Some(vec![guff_style::exhaustive()]),
@@ -250,6 +251,7 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "whitespace",
     "wrapcheck",
     "wsl",
+    "wsl_v5",
 ];
 
 /// All linter names known to the registry.
@@ -363,6 +365,7 @@ pub fn linter_description(name: &str) -> &'static str {
         "whitespace" => "Checks for unnecessary newlines at the start and end of blocks.",
         "wrapcheck" => "Checks that errors returned from external packages are wrapped.",
         "wsl" => "Add or remove empty lines.",
+        "wsl_v5" => "Add or remove empty lines.",
         _ => "",
     }
 }

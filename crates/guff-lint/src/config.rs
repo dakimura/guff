@@ -876,7 +876,7 @@ const STYLE_PRESET: &[&str] = &[
     "nonamedreturns", "nosprintfhostport", "paralleltest", "predeclared", "promlinter",
     "revive", "sloglint", "stylecheck", "tagalign", "tagliatelle", "testpackage",
     "tparallel", "unconvert", "usestdlibvars", "varnamelen", "wastedassign", "whitespace",
-    "wrapcheck", "wsl",
+    "wrapcheck", "wsl", "wsl_v5",
 ];
 const TEST_PRESET: &[&str] = &[
     "exhaustruct", "paralleltest", "testableexamples", "testifylint", "testpackage",

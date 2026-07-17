@@ -6,7 +6,8 @@
 //!
 //! DEFERRED: full v4 parity (comment-map nuance, ForceCuddleErrCheck, force-case
 //! whitespace, AllowSeparatedLeadingComment, nested func-lit edge cases);
-//! SuggestedFix; remaining `linters.settings.wsl` keys; `wsl_v5` analyzer.
+//! SuggestedFix; remaining `linters.settings.wsl` keys.
+//! See [`crate::wsl_v5`] for the v5 analyzer (`wsl_v5`).
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
