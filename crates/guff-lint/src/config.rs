@@ -468,6 +468,11 @@ impl FormattersV2 {
         parse_gci_settings(&self.settings)
     }
 
+    /// Parse `formatters.settings.golines` into [`guff_fmt::GolinesOptions`].
+    pub fn golines_options(&self) -> guff_fmt::GolinesOptions {
+        parse_golines_settings(&self.settings)
+    }
+
     /// Path exclusion patterns from `formatters.exclusions.paths`.
     pub fn exclusion_paths(&self) -> Vec<String> {
         self.exclusions.paths.clone()
@@ -644,6 +649,58 @@ pub fn parse_gci_settings(settings: &serde_yaml::Value) -> guff_fmt::GciOptions 
         }
     }
     opts
+}
+
+/// Parse golines settings from `formatters.settings` YAML mapping.
+pub fn parse_golines_settings(settings: &serde_yaml::Value) -> guff_fmt::GolinesOptions {
+    let mut opts = guff_fmt::GolinesOptions::default();
+    let Some(map) = settings.as_mapping() else {
+        return opts;
+    };
+    let Some(golines) = map.get(serde_yaml::Value::String("golines".into())) else {
+        return opts;
+    };
+    let Some(gmap) = golines.as_mapping() else {
+        return opts;
+    };
+    if let Some(v) = gmap.get(serde_yaml::Value::String("max-len".into())) {
+        if let Some(n) = yaml_u32(v) {
+            opts.max_len = n;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("tab-len".into())) {
+        if let Some(n) = yaml_u32(v) {
+            opts.tab_len = n;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("shorten-comments".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.shorten_comments = b;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("reformat-tags".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.reformat_tags = b;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("chain-split-dots".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.chain_split_dots = b;
+        }
+    }
+    opts
+}
+
+fn yaml_u32(v: &serde_yaml::Value) -> Option<u32> {
+    if let Some(n) = v.as_u64() {
+        return u32::try_from(n).ok();
+    }
+    if let Some(n) = v.as_i64() {
+        if n >= 0 {
+            return u32::try_from(n).ok();
+        }
+    }
+    None
 }
 
 /// golangci-lint v1 configuration (subset supported for migration).
@@ -1484,6 +1541,34 @@ gci:
             vec!["standard".to_string(), "default".to_string()]
         );
         assert!(!opts.custom_order);
+    }
+
+    #[test]
+    fn parse_golines_settings_all_keys() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+golines:
+  max-len: 120
+  tab-len: 8
+  shorten-comments: true
+  reformat-tags: false
+  chain-split-dots: false
+"#,
+        )
+        .unwrap();
+        let opts = parse_golines_settings(&yaml);
+        assert_eq!(opts.max_len, 120);
+        assert_eq!(opts.tab_len, 8);
+        assert!(opts.shorten_comments);
+        assert!(!opts.reformat_tags);
+        assert!(!opts.chain_split_dots);
+    }
+
+    #[test]
+    fn parse_golines_default_when_absent() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str("gofmt:\n  simplify: true\n").unwrap();
+        let opts = parse_golines_settings(&yaml);
+        assert_eq!(opts, guff_fmt::GolinesOptions::default());
     }
 
     #[test]

@@ -462,3 +462,55 @@ formatters:
     );
 }
 
+#[test]
+fn cli_fmt_golines_max_len_from_config() {
+    if Command::new("golines")
+        .arg("--version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skip: golines not on PATH");
+        return;
+    }
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        r#"
+version: "2"
+formatters:
+  enable:
+    - golines
+  settings:
+    golines:
+      max-len: 60
+      reformat-tags: false
+"#,
+    )
+    .unwrap();
+    let path = tmp.path().join("p.go");
+    std::fs::write(
+        &path,
+        "package p\n\nfunc f() {\n\tfoo(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n}\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "-c"])
+        .arg(&cfg)
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt golines");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        got.contains("foo(\n") || got.lines().count() > 5,
+        "expected golines wrap from max-len: 60, got:\n{got}"
+    );
+}
+

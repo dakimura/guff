@@ -28,7 +28,7 @@ struct Cli {
 enum Commands {
     /// Run enabled linters on packages.
     Run(RunArgs),
-    /// Format Go source files (gofmt / gofumpt / goimports / gci; more → R15).
+    /// Format Go source files (gofmt / gofumpt / goimports / gci / golines; swaggo → R15).
     Fmt(FmtArgs),
     /// Migrate a golangci-lint v1 config file to v2 format.
     Migrate(MigrateArgs),
@@ -448,8 +448,8 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         args.enable.clone()
     };
 
-    // When config enables unimplemented formatters (golines/…), prefer CLI
-    // `--enable gofmt`/`gofumpt`/`goimports`/`gci` or fall back if at least one implemented remains.
+    // When config enables unimplemented formatters (swaggo/…), prefer CLI
+    // `--enable gofmt`/`gofumpt`/`goimports`/`gci`/`golines` or fall back if at least one implemented remains.
     let enable = filter_implemented_formatters(&enable)?;
 
     let meta = MetaFormatter::new(
@@ -458,6 +458,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         formatters.gofumpt_options(),
         formatters.goimports_options(),
         formatters.gci_options(),
+        formatters.golines_options(),
     )
     .map_err(|e| RunError::Message(e.to_string()))?;
 
@@ -484,7 +485,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     if enable.is_empty() {
         return Ok(Vec::new()); // MetaFormatter defaults to gofmt
     }
-    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports", "gci"];
+    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports", "gci", "golines"];
     let mut kept = Vec::new();
     let mut deferred = Vec::new();
     for name in enable {
@@ -498,7 +499,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     }
     if kept.is_empty() && !deferred.is_empty() {
         return Err(RunError::Message(format!(
-            "formatter(s) {:?} are not implemented yet (use -E gofmt, -E gofumpt, -E goimports, or -E gci, or wait for R15 follow-up)",
+            "formatter(s) {:?} are not implemented yet (use -E gofmt, -E gofumpt, -E goimports, -E gci, or -E golines, or wait for R15 follow-up)",
             deferred
         )));
     }
@@ -543,18 +544,19 @@ fn migrate_cmd(args: MigrateArgs) -> Result<(), ConfigError> {
         backup.display()
     );
     if !migrated.formatters.enable.is_empty() {
+        const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports", "gci", "golines"];
         let known: Vec<_> = migrated
             .formatters
             .enable
             .iter()
-            .filter(|n| *n == "gofmt")
+            .filter(|n| IMPLEMENTED.contains(&n.as_str()))
             .cloned()
             .collect();
         let deferred: Vec<_> = migrated
             .formatters
             .enable
             .iter()
-            .filter(|n| *n != "gofmt")
+            .filter(|n| !IMPLEMENTED.contains(&n.as_str()))
             .cloned()
             .collect();
         if !known.is_empty() {

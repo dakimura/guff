@@ -283,6 +283,7 @@ mod tests {
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
             crate::gci::GciOptions::default(),
+            crate::golines::GolinesOptions::default(),
         )
         .unwrap()
     }
@@ -373,6 +374,7 @@ mod tests {
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
             crate::gci::GciOptions::default(),
+            crate::golines::GolinesOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());
@@ -406,6 +408,7 @@ mod tests {
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
             crate::gci::GciOptions::default(),
+            crate::golines::GolinesOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());
@@ -450,6 +453,7 @@ mod tests {
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
             crate::gci::GciOptions::default(),
+            crate::golines::GolinesOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());
@@ -462,6 +466,51 @@ mod tests {
         assert!(
             fmt_pos < bar_pos,
             "expected stdlib before third-party, got:\n{got}"
+        );
+    }
+
+    fn golines_available() -> bool {
+        Command::new("golines")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn golines_shortens_in_place() {
+        if !golines_available() {
+            eprintln!("skip: golines not on PATH");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.go");
+        fs::write(
+            &path,
+            "package p\n\nfunc f() {\n\tfoo(aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)\n}\n",
+        )
+        .unwrap();
+
+        let meta = MetaFormatter::new(
+            &["golines".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+            crate::goimports::GoimportsOptions::default(),
+            crate::gci::GciOptions::default(),
+            crate::golines::GolinesOptions {
+                max_len: 60,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let runner = Runner::new(meta, RunnerOptions::default());
+        let mut out = Cursor::new(Vec::new());
+        let stats = runner.run(&[path.clone()], &mut out).unwrap();
+        assert_eq!(stats.rewritten, 1);
+        let got = fs::read_to_string(&path).unwrap();
+        assert!(
+            got.contains("foo(\n") || got.lines().count() > 5,
+            "expected golines wrap, got:\n{got}"
         );
     }
 }
