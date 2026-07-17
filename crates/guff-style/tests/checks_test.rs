@@ -6,7 +6,8 @@ use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
-    dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
+    dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funcorder, funlen,
+    gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
     grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
     maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
@@ -5850,5 +5851,119 @@ fn testableexamples_flags_whole_file_example_without_output() {
     assert!(
         messages[0].contains("missing output for example"),
         "{messages:?}"
+    );
+}
+
+#[test]
+fn funcorder_flags_default_violations() {
+    let pkg = support::typecheck_fixture("funcorder", "example.com/funcorder", "bad.go");
+    let messages = support::run_analyzer(funcorder(), &pkg);
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m
+            == "constructor \"NewOther\" for struct \"Other\" should be placed after the struct declaration"),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            == "unexported method \"lenName\" for struct \"Other\" should be placed after the exported method \"GetName\""),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            == "constructor \"NewThird\" for struct \"Third\" should be placed before struct method \"Do\""),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn funcorder_allows_correct_order() {
+    let pkg = support::typecheck_fixture("funcorder", "example.com/funcorder/ok", "ok.go");
+    assert!(support::run_analyzer(funcorder(), &pkg).is_empty());
+}
+
+#[test]
+fn funcorder_alphabetical_is_opt_in() {
+    use guff_style::FuncorderOptions;
+
+    let pkg = support::typecheck_fixture(
+        "funcorder",
+        "example.com/funcorder/alpha",
+        "alphabetical.go",
+    );
+
+    // Default settings: alphabetical off → no diagnostics.
+    assert!(
+        support::run_analyzer(funcorder(), &pkg).is_empty(),
+        "alphabetical should be off by default"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "funcorder",
+        FuncorderOptions {
+            alphabetical: true,
+            ..FuncorderOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        funcorder(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m
+            == "constructor \"NewAS\" for struct \"S\" should be placed before constructor \"NewBS\""),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            == "method \"GoodAfternoon\" for struct \"S\" should be placed before method \"GoodMorning\""),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            == "method \"bye\" for struct \"S\" should be placed before method \"hello\""),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn funcorder_function_check_is_opt_in() {
+    use guff_style::FuncorderOptions;
+
+    let pkg =
+        support::typecheck_fixture("funcorder", "example.com/funcorder/func", "function.go");
+
+    // Default settings: function off → no diagnostics.
+    assert!(
+        support::run_analyzer(funcorder(), &pkg).is_empty(),
+        "function check should be off by default"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "funcorder",
+        FuncorderOptions {
+            function: true,
+            ..FuncorderOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        funcorder(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(
+        messages[0],
+        "unexported function \"helper\" should be placed after the exported function \"PublicFunc\""
     );
 }

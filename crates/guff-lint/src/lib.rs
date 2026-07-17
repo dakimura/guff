@@ -40,7 +40,8 @@ pub use registry::{
 pub use fix::{apply_fixes, FixError};
 pub use settings::{
     DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings, ErrcheckSettings,
-    ErrchkjsonSettings, GodoclintSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings,
+    ErrchkjsonSettings, FuncorderSettings, GodoclintSettings, GodotSettings, GodoxSettings,
+    GomoddirectivesSettings,
     GomodguardSettings, GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings,
     StaticcheckSettings, WrapcheckSettings,
 };

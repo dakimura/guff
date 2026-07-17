@@ -77,6 +77,7 @@ pub struct LinterSettings {
     pub grouper: GrouperSettings,
     pub ireturn: IreturnSettings,
     pub gosec: GosecSettings,
+    pub funcorder: FuncorderSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -994,6 +995,45 @@ impl NonamedreturnsSettings {
     }
 }
 
+/// `linters.settings.funcorder` / `linters-settings.funcorder`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct FuncorderSettings {
+    /// Check constructors are placed after the struct declaration (default true).
+    #[serde(default = "default_true")]
+    pub constructor: bool,
+    /// Check exported methods precede unexported methods (default true).
+    #[serde(default = "default_true", rename = "struct-method")]
+    pub struct_method: bool,
+    /// Check constructors / methods are sorted alphabetically (default false).
+    #[serde(default)]
+    pub alphabetical: bool,
+    /// Check exported functions precede unexported functions (default false).
+    #[serde(default)]
+    pub function: bool,
+}
+
+impl Default for FuncorderSettings {
+    fn default() -> Self {
+        Self {
+            constructor: true,
+            struct_method: true,
+            alphabetical: false,
+            function: false,
+        }
+    }
+}
+
+impl FuncorderSettings {
+    pub fn to_guff_funcorder(&self) -> guff_style::FuncorderOptions {
+        guff_style::FuncorderOptions {
+            constructor: self.constructor,
+            struct_method: self.struct_method,
+            alphabetical: self.alphabetical,
+            function: self.function,
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -1695,6 +1735,11 @@ impl LinterSettings {
                 out.nonamedreturns = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("funcorder".into())) {
+            if let Ok(s) = serde_yaml::from_value::<FuncorderSettings>(v.clone()) {
+                out.funcorder = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -1815,6 +1860,7 @@ impl LinterSettings {
             "nonamedreturns",
             self.nonamedreturns.to_guff_nonamedreturns(),
         );
+        bag.insert("funcorder", self.funcorder.to_guff_funcorder());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

@@ -34,6 +34,7 @@
 //! - [`grouper`]
 //! - [`ireturn`]
 //! - [`gosec`]
+//! - [`funcorder`]
 //! - [`tagliatelle`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
@@ -78,6 +79,7 @@ mod dogsled;
 mod exhaustive;
 mod exhaustruct;
 mod exptostd;
+mod funcorder;
 mod funlen;
 mod gocritic;
 mod loggercheck;
@@ -134,7 +136,8 @@ mod wsl;
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
-    FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
+    FuncorderOptions, FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions,
+    GocycloOptions, IfaceOptions,
     GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions,
     IreturnOptions, LllOptions, MaintidxOptions,
     LoggercheckOptions,
@@ -155,6 +158,7 @@ pub use dogsled::analyzer as dogsled;
 pub use exhaustive::analyzer as exhaustive;
 pub use exhaustruct::analyzer as exhaustruct;
 pub use exptostd::analyzer as exptostd;
+pub use funcorder::analyzer as funcorder;
 pub use funlen::analyzer as funlen;
 pub use gocheckcompilerdirectives::analyzer as gocheckcompilerdirectives;
 pub use bidichk::analyzer as bidichk;

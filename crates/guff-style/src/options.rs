@@ -946,6 +946,34 @@ pub struct NonamedreturnsOptions {
     pub allow_unused_named_returns: bool,
 }
 
+/// `linters.settings.funcorder` / `linters-settings.funcorder`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FuncorderOptions {
+    /// Check that constructors are placed after the struct declaration and
+    /// before the struct's methods (upstream default true).
+    pub constructor: bool,
+    /// Check that exported methods are placed before unexported methods
+    /// (upstream default true).
+    pub struct_method: bool,
+    /// Check that constructors / methods are sorted alphabetically within
+    /// their group (upstream default false).
+    pub alphabetical: bool,
+    /// Check that exported top-level functions are placed before unexported
+    /// ones (upstream default false).
+    pub function: bool,
+}
+
+impl Default for FuncorderOptions {
+    fn default() -> Self {
+        Self {
+            constructor: true,
+            struct_method: true,
+            alphabetical: false,
+            function: false,
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ParalleltestOptions {

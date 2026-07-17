@@ -1056,6 +1056,33 @@ fn parse_v2_maintidx_settings() {
 }
 
 #[test]
+fn parse_v2_funcorder_settings() {
+    // Defaults: constructor + struct-method on, alphabetical + function off.
+    let default = guff_lint::FuncorderSettings::default();
+    assert!(default.constructor);
+    assert!(default.struct_method);
+    assert!(!default.alphabetical);
+    assert!(!default.function);
+
+    let contents = fs::read_to_string(testdata_config("v2_funcorder_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(!settings.funcorder.constructor);
+    assert!(!settings.funcorder.struct_method);
+    assert!(settings.funcorder.alphabetical);
+    assert!(settings.funcorder.function);
+
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::FuncorderOptions>("funcorder")
+        .expect("funcorder options");
+    assert!(!opts.constructor);
+    assert!(!opts.struct_method);
+    assert!(opts.alphabetical);
+    assert!(opts.function);
+}
+
+#[test]
 fn parse_v2_inamedparam_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_inamedparam_settings.yml")).unwrap();
