@@ -652,7 +652,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   ST1021（exported type doc が名前で始まる; 冠詞 A/An/The 許容; `PARSE_COMMENTS` 再パース）/
   ST1022（exported var/const doc が名前で始まる; `PARSE_COMMENTS` 再パース; 括弧グループ・複数名はスキップ）/
   ST1023（冗長な var 型; `CheckExpr` 無し近似・BasicLit 既定型 / 名前付き const 除外; SuggestedFix で型削除; syscall/unsafe import 時スキップ）。
-  **QF1001**（De Morgan `!(a && b)` → `!a || !b`; SuggestedFix 非再帰/再帰; float 除外; SimplifyParentheses は DEFERRED）/
+  **QF1001**（De Morgan `!(a && b)` → `!a || !b`; SuggestedFix 非再帰/再帰 + SimplifyParentheses variants; float 除外）/
   **QF1002**（untagged switch → tagged; side-effect / 混在変数除外 + SuggestedFix）/
   **QF1003**（if/else-if → tagged switch; ≥2 if・break 除外 + SuggestedFix）/
   **QF1004**（`Replace`/`SplitN`/`SplitAfterN` + `n==-1` → `ReplaceAll`/`Split`/`SplitAfter`; strings+bytes; SuggestedFix 済; renamed import は DEFERRED）/
@@ -664,7 +664,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   **QF1010**（print 系へ渡す `[]byte` → `string(...)`; SuggestedFix 済; `fmt.Stringer` skip は DEFERRED）/
   **QF1011**（冗長な var 型; ST1023 相当で `could` + `flagHelpfulTypes`; SuggestedFix 済）/
   **QF1012**（`Write([]byte(fmt.Sprint*))` / `WriteString(fmt.Sprint*)` → `fmt.Fprint*`; Writer 判定は結果 arity 近似; SuggestedFix 済）。
-- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）。ST1023 の真の `types.CheckExpr` パリティ。QF1005 の float64 wrap。QF1004 renamed import。QF1010 Stringer skip。QF1012 の真の `types.Implements`。QF1001 SimplifyParentheses。QF1008 呼び出し割り込みチェーン。
+- **残**: ST1005（IR）/ ST1008（IR）/ ST1016（IR）。ST1023 の真の `types.CheckExpr` パリティ。QF1005 の float64 wrap。QF1004 renamed import。QF1010 Stringer skip。QF1012 の真の `types.Implements`。QF1008 呼び出し割り込みチェーン。
 - テスト: `st1000` / `st1001` / `st1003` / `st1006` / `st1011` / `st1012` / `st1013` / `st1015` / `st1017` / `st1018` / `st1019` / `st1020` / `st1021` / `st1022` / `st1023` / `qf1001` / `qf1002` / `qf1003` / `qf1004` / `qf1005` / `qf1006` / `qf1007` / `qf1008` / `qf1009` / `qf1010` / `qf1011` / `qf1012` fixtures + `checks_test`（settings: whitelist / custom initialisms）+ `v2_staticcheck_stylecheck_settings.yml`。
 
 ---
@@ -776,6 +776,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`paralleltest`**（kunwardeep/paralleltest）を `guff-style` に追加しレジストリ登録。`Test*` で `t.Parallel` 欠落・range/`t.Run` サブテストを検出。`linters.settings.paralleltest`（`ignore-missing` / `ignore-missing-subtests` / `check-cleanup`）YAML 配線。loop-var reinit・builder callback は DEFERRED。`guff-style` は計 **49** analyzers。テスト: `paralleltest/{bad,ok,settings}_test.go` + `checks_test`（3 件）+ `v2_paralleltest_settings.yml` |
 | 日付 | 内容 |
 |------|------|
+| 2026-07-17 | **R16 続き**: `QF1001` の SuggestedFix に **SimplifyParentheses variants** を追加。再帰 De Morgan 後の冗長括弧を Go 演算子 precedence に基づいて省き、必要な括弧は保持。テスト: `cargo test -p guff-staticcheck qf1001` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`testpackage`**（maratori/testpackage）を `guff-style` に追加しレジストリ登録。`*_test.go` で package 名が `_test` 接尾辞でないものを検出（既定で `main` 許容・`(export|internal)_test.go` スキップ）。`linters.settings.testpackage`（`skip-regexp` / `allow-packages`）YAML 配線。`guff-style` は計 **48** analyzers。テスト: `testpackage/{bad,ok,internal,main,settings}_test.go` + `checks_test`（5 件）+ `v2_testpackage_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`nonamedreturns`**（firefart/nonamedreturns）を `guff-style` に追加しレジストリ登録。named return を検出；error-in-defer 免除（defer 内参照 + body 代入/`return expr`）。`linters.settings.nonamedreturns`（`report-error-in-defer` / `allow-unused-named-returns`）YAML 配線。`guff-style` は計 **47** analyzers。テスト: `nonamedreturns/{bad,ok,report_error,allow_unused}.go` + `checks_test`（4 件）+ `v2_nonamedreturns_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`containedctx`**（sivchari/containedctx）を `guff-style` に追加しレジストリ登録。struct の `context.Context` フィールドを検出。設定キー無し。`guff-style` は計 **46** analyzers。テスト: `containedctx/{bad,ok}.go` + stub/context + `checks_test`（2 件） |

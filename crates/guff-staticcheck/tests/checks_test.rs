@@ -2809,7 +2809,7 @@ fn qf1001_flags_demorgan() {
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/qf1001");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1001::analyzer(), &pkg);
-    assert_eq!(messages.len(), 1);
+    assert_eq!(messages.len(), 2);
     assert!(messages[0].contains("De Morgan"));
 }
 

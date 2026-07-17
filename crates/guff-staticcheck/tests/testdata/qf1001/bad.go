@@ -6,5 +6,6 @@ func fn() {
 	var h, i float64
 
 	_ = !(a && b && (!c || e > f) && g == f)
+	_ = !(a && (b || c))
 	_ = !(a && h > i)
 }
