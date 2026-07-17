@@ -109,7 +109,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。
+> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -409,9 +409,10 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 ---
 
-### Milestone G — 互換性の検証（「互換」を名乗る根拠）
+### Milestone G — 互換性の検証（「互換」を名乗る根拠）✅ 完了 (2026-07-17)
 
 > A〜F を作っても、**実測で一致を示さない限り「互換」とは言えない**。ここが主張の裏付け。
+> R21（差分ハーネス）/ R22（設定コーパス）/ R23（互換性マトリクス）で完了。
 
 #### R21. 差分テストハーネス（guff vs golangci-lint）✅ 完了 (2026-07-17)
 - **目的**: 同一コーパス・同一設定で両者を実行し、指摘集合を diff。linter ごとに一致率（precision/recall）を出す。
@@ -442,9 +443,20 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   別ディレクトリ化。
 - **テスト**: `cargo test -p guff-lint --test config_test parse_golangci_config_corpus`。
 
-#### R23. 互換性マトリクスの公開
-- どの linter・どの設定キー・どの出力フォーマットが「対応済/部分/未対応」かを表にして README/本書に載せる。
-- **これが揃って初めて「golangci-lint 互換の高速 linter」と公に主張できる。**
+#### R23. 互換性マトリクスの公開 ✅ 完了 (2026-07-17)
+- どの linter・どの設定キー・どの出力フォーマットが「対応済/部分/未対応」かを表にして公開。
+- **実装**: [`docs/COMPATIBILITY.md`](COMPATIBILITY.md) に互換性マトリクスを新設。
+  1. **Linter**: golangci-lint v2 の全 **114** linter を ✅/🟡/❌ で分類（**108 実装** = ✅ 91 + 🟡 17、
+     未対応 6 はいずれも SSA / ctrlflow 依存で DEFERRED: contextcheck / nilerr / nilnesserr /
+     spancheck / wastedassign / zerologlint）。formatter 6 種も別表。
+  2. **設定キー**: `run` / `linters` / `linters.exclusions` / `formatters` / `issues` / `severity` /
+     `output` の各キーを対応状況付きで一覧（パースのみ vs 実効を区別）。
+  3. **出力フォーマット**: text / colored / json / checkstyle / sarif / tab / colored-tab /
+     github-actions を一覧。
+  - linter 一覧の出典は <https://golangci-lint.run/docs/linters/>（キャプチャ 2026-07-17）。
+    README からもリンク。差分の実測は R21 の `compat/` で継続。
+- **完了条件**: linter・設定キー・出力フォーマットの対応表を公開 — 満たした。
+- **DEFERRED**: 表の自動生成（レジストリからの照合テスト）、上流 linter 追加の定期同期。
 
 ---
 
@@ -469,7 +481,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 ### 9.3 進捗の更新場所
 - 状況 → §3 の表。
 - 残タスクの消化 → §8 の該当 R 番号の「残」/「DEFERRED」を更新（完了なら該当行を消す）。
-- 新しい linter → §3.3 の表に 1 行。
+- 新しい linter → §3.3 の表に 1 行。あわせて [`COMPATIBILITY.md`](COMPATIBILITY.md) の該当行も更新。
 - そのセッションで何をしたか → [`SESSION-LOG.md`](SESSION-LOG.md) の表の先頭に 1 行。
 - 冗長になりがちな詳細（設定キー全列挙・完了履歴）は本書に書かず、コード内 `// DEFERRED:` と `SESSION-LOG.md` / git に委ねる。
 

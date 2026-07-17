@@ -98,18 +98,35 @@ guff migrate -c .golangci.yml
 
 ## 対応 linter
 
+`standard` プリセット（デフォルト）は golangci-lint v2 と同じ 5 系統です。
+
 | 名前 | 内容 |
 |------|------|
-| `staticcheck` | Staticcheck / simple 系ルール |
-| `govet` | `go vet` 相当の解析 |
+| `staticcheck` | Staticcheck / simple 系ルール（S* / SA* / ST* / QF* = 167 analyzers） |
+| `govet` | `go vet` 相当の解析（29/29 pass） |
 | `errcheck` | 未チェックの error 戻り値 |
 | `ineffassign` | 無効な代入 |
 | `unused` | 未使用のパッケージレベル定義 |
 
+これ以外にも **golangci-lint v2 の全 114 linter のうち 108 を実装済み**です
+（`--enable <name>` で個別有効化。利用可能名は `guff linters`）。
+どの linter・設定キー・出力フォーマットが対応済/部分/未対応かは
+**互換性マトリクス** [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) を参照してください。
+
 プリセット:
 
-- **`standard`** — 上記すべて（デフォルト）
+- **`standard`** — 上記 5 linter（デフォルト）
 - **`fast`** — `standard` から `staticcheck` を除いたもの
+- **`all`** / **`none`** — 全 standard 系統 / 無効
+
+## 対応フォーマッタ（`guff fmt`）
+
+gofmt / gofumpt / goimports / gci / golines / swaggo（golangci-lint v2 の `formatters` 全 6 種）。
+
+## 出力フォーマット（`--out-format`）
+
+text（`line-number`）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。
+`format:path` でファイル書き出し・複数同時出力に対応。
 
 ## アーキテクチャ（ざっくり）
 
@@ -171,8 +188,9 @@ Cargo workspace。バイナリは `guff` のみで、あとはライブラリク
 
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
-| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示 |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused` | 各 linter の Analyzer 群 |
+| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
+| **Formatters** | `guff-fmt` | `guff fmt`（gofmt / gofumpt / goimports / gci / golines / swaggo） |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行（並列） |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis` + Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa` |
