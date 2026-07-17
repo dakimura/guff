@@ -281,6 +281,7 @@ mod tests {
             &["gofmt".into()],
             GofmtOptions::default(),
             GofumptOptions::default(),
+            crate::goimports::GoimportsOptions::default(),
         )
         .unwrap()
     }
@@ -290,6 +291,14 @@ mod tests {
             .arg("-version")
             .output()
             .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn goimports_available() -> bool {
+        Command::new("goimports")
+            .arg("-h")
+            .output()
+            .map(|o| o.status.success() || !o.stderr.is_empty())
             .unwrap_or(false)
     }
 
@@ -361,6 +370,7 @@ mod tests {
             &["gofumpt".into()],
             GofmtOptions::default(),
             GofumptOptions::default(),
+            crate::goimports::GoimportsOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());
@@ -371,6 +381,40 @@ mod tests {
         assert!(
             got.contains("func f() {\n\tx := 1"),
             "expected gofumpt rewrite, got:\n{got}"
+        );
+    }
+
+    #[test]
+    fn goimports_sorts_imports_in_place() {
+        if !goimports_available() {
+            eprintln!("skip: goimports not on PATH");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.go");
+        fs::write(
+            &path,
+            "package p\n\nimport (\n\t\"github.com/foo/bar\"\n\t\"fmt\"\n)\n\nfunc f() {\n\tfmt.Println()\n\t_ = bar.X\n}\n",
+        )
+        .unwrap();
+
+        let meta = MetaFormatter::new(
+            &["goimports".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+            crate::goimports::GoimportsOptions::default(),
+        )
+        .unwrap();
+        let runner = Runner::new(meta, RunnerOptions::default());
+        let mut out = Cursor::new(Vec::new());
+        let stats = runner.run(&[path.clone()], &mut out).unwrap();
+        assert_eq!(stats.rewritten, 1);
+        let got = fs::read_to_string(&path).unwrap();
+        let fmt_pos = got.find("\"fmt\"").expect("fmt");
+        let bar_pos = got.find("\"github.com/foo/bar\"").expect("bar");
+        assert!(
+            fmt_pos < bar_pos,
+            "expected stdlib before third-party, got:\n{got}"
         );
     }
 }

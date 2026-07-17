@@ -458,6 +458,11 @@ impl FormattersV2 {
         parse_gofumpt_settings(&self.settings)
     }
 
+    /// Parse `formatters.settings.goimports` into [`guff_fmt::GoimportsOptions`].
+    pub fn goimports_options(&self) -> guff_fmt::GoimportsOptions {
+        parse_goimports_settings(&self.settings)
+    }
+
     /// Path exclusion patterns from `formatters.exclusions.paths`.
     pub fn exclusion_paths(&self) -> Vec<String> {
         self.exclusions.paths.clone()
@@ -531,6 +536,44 @@ pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::Gofumpt
             if !s.is_empty() {
                 opts.module_path = Some(s.to_string());
             }
+        }
+    }
+    opts
+}
+
+/// Parse goimports settings from `formatters.settings` YAML mapping.
+pub fn parse_goimports_settings(settings: &serde_yaml::Value) -> guff_fmt::GoimportsOptions {
+    let mut opts = guff_fmt::GoimportsOptions::default();
+    let Some(map) = settings.as_mapping() else {
+        return opts;
+    };
+    let Some(goimports) = map.get(serde_yaml::Value::String("goimports".into())) else {
+        return opts;
+    };
+    let Some(gmap) = goimports.as_mapping() else {
+        return opts;
+    };
+    if let Some(v) = gmap.get(serde_yaml::Value::String("local-prefixes".into())) {
+        match v {
+            serde_yaml::Value::Sequence(seq) => {
+                for item in seq {
+                    if let Some(s) = item.as_str() {
+                        if !s.is_empty() {
+                            opts.local_prefixes.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            // golangci also accepts a comma-separated string in some configs.
+            serde_yaml::Value::String(s) => {
+                for part in s.split(',') {
+                    let part = part.trim();
+                    if !part.is_empty() {
+                        opts.local_prefixes.push(part.to_string());
+                    }
+                }
+            }
+            _ => {}
         }
     }
     opts
@@ -1294,6 +1337,43 @@ gofumpt:
         assert_eq!(
             opts.module_path.as_deref(),
             Some("github.com/org/project")
+        );
+    }
+
+    #[test]
+    fn parse_goimports_local_prefixes() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+goimports:
+  local-prefixes:
+    - github.com/org/project
+    - github.com/org/other
+"#,
+        )
+        .unwrap();
+        let opts = parse_goimports_settings(&yaml);
+        assert_eq!(
+            opts.local_prefixes,
+            vec![
+                "github.com/org/project".to_string(),
+                "github.com/org/other".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_goimports_local_prefixes_comma_string() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+goimports:
+  local-prefixes: github.com/a, github.com/b
+"#,
+        )
+        .unwrap();
+        let opts = parse_goimports_settings(&yaml);
+        assert_eq!(
+            opts.local_prefixes,
+            vec!["github.com/a".to_string(), "github.com/b".to_string()]
         );
     }
 

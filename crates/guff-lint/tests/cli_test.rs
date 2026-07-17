@@ -349,3 +349,58 @@ formatters:
     );
 }
 
+#[test]
+fn cli_fmt_goimports_local_prefixes_from_config() {
+    if Command::new("goimports")
+        .arg("-h")
+        .output()
+        .map(|o| !(o.status.success() || !o.stderr.is_empty()))
+        .unwrap_or(true)
+    {
+        eprintln!("skip: goimports not on PATH");
+        return;
+    }
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        r#"
+version: "2"
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/org/project
+"#,
+    )
+    .unwrap();
+    let path = tmp.path().join("p.go");
+    std::fs::write(
+        &path,
+        "package p\n\nimport (\n\t\"github.com/org/project/pkg\"\n\t\"github.com/foo/bar\"\n\t\"fmt\"\n)\n\nfunc f() {\n\tfmt.Println()\n\t_ = bar.X\n\t_ = pkg.Y\n}\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "-c"])
+        .arg(&cfg)
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt goimports");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(&path).unwrap();
+    let fmt_pos = got.find("\"fmt\"").expect("fmt");
+    let bar_pos = got.find("\"github.com/foo/bar\"").expect("bar");
+    let pkg_pos = got.find("\"github.com/org/project/pkg\"").expect("pkg");
+    assert!(
+        fmt_pos < bar_pos && bar_pos < pkg_pos,
+        "expected stdlib < third-party < local, got:\n{got}"
+    );
+}
+

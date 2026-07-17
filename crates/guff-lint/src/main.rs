@@ -448,14 +448,15 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         args.enable.clone()
     };
 
-    // When config enables unimplemented formatters (goimports/…), prefer CLI
-    // `--enable gofmt`/`gofumpt` or fall back if at least one implemented remains.
+    // When config enables unimplemented formatters (gci/…), prefer CLI
+    // `--enable gofmt`/`gofumpt`/`goimports` or fall back if at least one implemented remains.
     let enable = filter_implemented_formatters(&enable)?;
 
     let meta = MetaFormatter::new(
         &enable,
         formatters.gofmt_options(),
         formatters.gofumpt_options(),
+        formatters.goimports_options(),
     )
     .map_err(|e| RunError::Message(e.to_string()))?;
 
@@ -482,7 +483,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     if enable.is_empty() {
         return Ok(Vec::new()); // MetaFormatter defaults to gofmt
     }
-    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt"];
+    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports"];
     let mut kept = Vec::new();
     let mut deferred = Vec::new();
     for name in enable {
@@ -496,7 +497,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     }
     if kept.is_empty() && !deferred.is_empty() {
         return Err(RunError::Message(format!(
-            "formatter(s) {:?} are not implemented yet (use -E gofmt or -E gofumpt, or wait for R15 follow-up)",
+            "formatter(s) {:?} are not implemented yet (use -E gofmt, -E gofumpt, or -E goimports, or wait for R15 follow-up)",
             deferred
         )));
     }
