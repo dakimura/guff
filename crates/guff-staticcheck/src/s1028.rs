@@ -5,8 +5,8 @@
 use std::sync::OnceLock;
 
 use guff_pattern::{must_parse, Pattern};
-use guff_analysis::passes::inspect;
-use guff_analysis::{match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::passes::{inspect, typeindex};
+use guff_analysis::{match_pos, matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
@@ -19,12 +19,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "S1028 requires inspect analyzer".to_string())?
         .clone();
+    let _ = pass
+        .result_of::<typeindex::Index>(typeindex::analyzer())
+        .ok_or_else(|| "S1028 requires typeindex analyzer".to_string())?;
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
-        if match_pattern(pass, pat(), node).is_some() {
-            pending.push((match_pos(node), "should use fmt.Errorf(...) instead of errors.New(fmt.Sprintf(...))".into()));
-        }
+    matches(pass, &inspect, pat(), |node, _| {
+        pending.push((match_pos(node), "should use fmt.Errorf(...) instead of errors.New(fmt.Sprintf(...))".into()));
+        true
     });
     for (pos, message) in pending {
         pass.report_unless_generated(pos, message);
@@ -39,7 +41,7 @@ fn s1028_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#S1028",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), typeindex::analyzer()],
         fact_types: vec![],
     }
 }

@@ -13,6 +13,22 @@ pub struct Pattern {
     /// AST kind names (`"RangeStmt"`, …) that may initiate a match.
     pub entry_kinds: Vec<&'static str>,
     pub bindings: Vec<String>,
+    /// When the pattern root is a [`Node::CallExpr`] whose `Fun` is only
+    /// [`Node::Symbol`](s), the resolved symbols for typeindex fast-path
+    /// matching (port of Go `Pattern.RootCallSymbols`).
+    pub root_call_symbols: Vec<IndexSymbol>,
+}
+
+/// Symbol coordinates for [`typeindex.Index::Object`] / [`Selection`].
+///
+/// Port of `honnef.co/go/tools/pattern.IndexSymbol`.
+/// - `path="fmt"`, `typename=""`, `ident="Println"` → `fmt.Println`
+/// - `path="time"`, `typename="Time"`, `ident="Sub"` → `(time.Time).Sub`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexSymbol {
+    pub path: String,
+    pub typename: String,
+    pub ident: String,
 }
 
 impl Pattern {
@@ -437,6 +453,122 @@ impl Default for Parser {
 
 pub fn must_parse(s: &str) -> Pattern {
     Pattern::must_parse(s)
+}
+
+/// Port of Go `symbolToIndexSymbol`.
+pub fn symbol_to_index_symbol(name: &str) -> IndexSymbol {
+    if name.is_empty() {
+        return IndexSymbol {
+            path: String::new(),
+            typename: String::new(),
+            ident: String::new(),
+        };
+    }
+    if name.starts_with('(') {
+        let Some(end) = name.find(')') else {
+            return IndexSymbol {
+                path: String::new(),
+                typename: String::new(),
+                ident: String::new(),
+            };
+        };
+        // Need at least ")." + one ident char after ')'.
+        if end > name.len().saturating_sub(2) {
+            return IndexSymbol {
+                path: String::new(),
+                typename: String::new(),
+                ident: String::new(),
+            };
+        }
+        let path_and_type = name[1..end].strip_prefix('*').unwrap_or(&name[1..end]);
+        let Some(dot) = path_and_type.rfind('.') else {
+            return IndexSymbol {
+                path: String::new(),
+                typename: String::new(),
+                ident: String::new(),
+            };
+        };
+        let path = path_and_type[..dot].to_string();
+        let typ = path_and_type[dot + 1..].to_string();
+        let ident = name[end + 2..].to_string();
+        return IndexSymbol {
+            path,
+            typename: typ,
+            ident,
+        };
+    }
+    match name.rfind('.') {
+        None => IndexSymbol {
+            path: String::new(),
+            typename: String::new(),
+            ident: name.to_string(),
+        },
+        Some(dot) => IndexSymbol {
+            path: name[..dot].to_string(),
+            typename: String::new(),
+            ident: name[dot + 1..].to_string(),
+        },
+    }
+}
+
+/// Port of Go `collectRootCallSymbols`.
+pub(crate) fn collect_root_call_symbols(node: &Node) -> Vec<IndexSymbol> {
+    let Node::CallExpr(call) = node else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = Vec::new();
+
+    fn handle_sym_name(name: &Node, names: &mut Vec<String>) -> bool {
+        match name {
+            Node::String(s) => {
+                names.push(s.clone());
+                true
+            }
+            Node::Or(or) => {
+                for n in &or.nodes {
+                    if let Node::String(s) = n {
+                        names.push(s.clone());
+                    } else {
+                        return false;
+                    }
+                }
+                true
+            }
+            Node::Binding(b) => b
+                .node
+                .as_ref()
+                .is_some_and(|n| handle_sym_name(n, names)),
+            _ => false,
+        }
+    }
+
+    fn handle_root_fun(fun: &Node, names: &mut Vec<String>) -> bool {
+        match fun {
+            Node::Binding(b) => b
+                .node
+                .as_ref()
+                .is_some_and(|n| handle_root_fun(n, names)),
+            Node::Symbol(s) => handle_sym_name(&s.name, names),
+            Node::Or(or) => {
+                for n in &or.nodes {
+                    let Node::Symbol(s) = n else {
+                        return false;
+                    };
+                    if !handle_sym_name(&s.name, names) {
+                        return false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    if !handle_root_fun(&call.fun, &mut names) {
+        return Vec::new();
+    }
+    names.iter().map(|n| symbol_to_index_symbol(n)).collect()
 }
 
 pub(crate) fn collect_entry_kinds(node: &Node) -> Vec<&'static str> {

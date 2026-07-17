@@ -21,6 +21,7 @@ mod validate;
 
 pub use passes::buildir::BuildIrResult;
 pub use passes::facts::deprecated::{DeprecatedResult, IsDeprecated};
+pub use passes::typeindex::Index as TypeIndex;
 pub use pattern_match::{match_env, match_pattern, match_pos, matches};
 pub use ssa_util::{
     append_modifies_param, block_control, closure_fn_in, dominates_all_returns, each_call,

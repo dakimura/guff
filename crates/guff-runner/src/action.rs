@@ -420,6 +420,9 @@ fn clone_result(result: &AnalysisResult) -> AnalysisResult {
     if let Some(ir) = result.downcast_ref::<guff_analysis::passes::buildir::BuildIrResult>() {
         return Box::new(ir.clone());
     }
+    if let Some(index) = result.downcast_ref::<guff_analysis::passes::typeindex::Index>() {
+        return Box::new(index.clone());
+    }
     if let Some(depr) = result.downcast_ref::<guff_analysis::DeprecatedResult>() {
         return Box::new(depr.clone());
     }

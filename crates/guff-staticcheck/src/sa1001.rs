@@ -8,7 +8,7 @@ use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::code::{expr_to_string, is_call_to_any};
-use guff_analysis::passes::inspect;
+use guff_analysis::passes::{inspect, typeindex};
 use guff_analysis::{matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
@@ -78,6 +78,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA1001 requires inspect analyzer".to_string())?
         .clone();
 
+    let _ = pass
+        .result_of::<typeindex::Index>(typeindex::analyzer())
+        .ok_or_else(|| "SA1001 requires typeindex analyzer".to_string())?;
+
     let mut pending: Vec<(u32, String)> = Vec::new();
     matches(pass, &inspect, pat(), |node, _m| {
         let NodeRef::CallExpr(call) = node else {
@@ -115,7 +119,7 @@ fn sa1001_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA1001",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), typeindex::analyzer()],
         fact_types: vec![],
     }
 }

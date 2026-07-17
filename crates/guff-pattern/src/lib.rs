@@ -7,5 +7,5 @@ mod parser;
 mod pattern;
 pub mod r#match;
 
-pub use pattern::{must_parse, Parser, Pattern};
+pub use pattern::{must_parse, IndexSymbol, Parser, Pattern};
 pub use r#match::{match_node, MatchEnv, Matcher, MatchValue};

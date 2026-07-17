@@ -123,7 +123,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 - Phase 0（types 仕上げ）〜Phase 7（E2E smoke）**完了**。
 - **残**: Phase 8（gofmt / go/doc 等の付帯ユーティリティ）, PL07（GOCACHE 管理）,
   PL05（ctrlflow）, PL02（go 無し driver）（→ §8 各タスク）。
-  PL11（真の並列実行）は **R9 で完了**。
+  PL11（真の並列実行）は **R9 で完了**。typeindex は **R18 で完了**。
 
 ### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
 - naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150+ tests green**。
@@ -351,11 +351,13 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **DEFERRED**: range over non-array pointer、一部 expr/lvalue 端、`MakeInterface` 完全モデル、
   method instantiation wrapper（receiver / 0-result）。
 
-#### R18. `typeindex` の移植
-- **なぜ**: 呼び出しサイトの高速索引。pattern 系全 linter と errcheck の性能最適化。機能ブロッカーでは
-  ないが「高速」に効く。
-- **参考**: staticcheck `go/ir` + `analysis/facts/typeindex`。
-- **どこ**: `guff-analysis` にフレームワーク追加。
+#### R18. `typeindex` の移植 ✅ 完了 (2026-07-17)
+- **なぜ**: 呼び出しサイトの高速索引。pattern 系全 linter と errcheck の性能最適化。
+- **実装**: `guff-analysis` に `passes/typeindex`（`Index` + analyzer）。`Uses`/`Used`/`Def`/
+  `Package`/`Object`/`Selection`/`Calls`（`for_each_call`）。`guff-pattern` に
+  `IndexSymbol` / `root_call_symbols`。`matches()` の typeindex 高速パス。QF1004 / S1024 /
+  S1028 / SA1001 を配線。runner に `Index` clone パス。
+- **DEFERRED**: 汎用 field/method の `Origin()` 二重記録（`Func`/`Var` に Origin API が無い）。
 
 #### R19. 型チェッカの残り（initorder / recording / util）
 - `initorder.rs`（Step 34）: パッケージ初期化順。init-cycle 検出や一部 linter が依存。

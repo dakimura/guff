@@ -1,14 +1,13 @@
 //! QF1004 — use `ReplaceAll` / `Split` instead of `Replace`/`SplitN` with `n == -1`.
 //!
-//! Port of `honnef.co/go/tools/quickfix/qf1004` (without typeindex; uses call-name matching).
+//! Port of `honnef.co/go/tools/quickfix/qf1004` (uses typeindex for call-site lookup).
 
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
 use guff::token::Token;
-use guff::walk::NodeRef;
 use guff_analysis::code::is_call_to;
-use guff_analysis::passes::inspect;
+use guff_analysis::passes::{inspect, typeindex};
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
@@ -47,32 +46,40 @@ fn is_minus_one(expr: &Expr) -> bool {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let inspect = pass
+    let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "QF1004 requires inspect analyzer".to_string())?
+        .ok_or_else(|| "QF1004 requires inspect analyzer".to_string())?;
+    let index = pass
+        .result_of::<typeindex::Index>(typeindex::analyzer())
+        .ok_or_else(|| "QF1004 requires typeindex analyzer".to_string())?
         .clone();
 
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return Ok(None);
+    };
+
     let mut pending: Vec<(u32, u32, u32, u32, String, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
-        let NodeRef::CallExpr(call) = node else {
-            return;
+    for &(from, to) in FNS {
+        let Some((path, name)) = from.rsplit_once('.') else {
+            continue;
         };
-        if call.args.len() < 2 {
-            return;
-        }
-        let last_i = call.args.len() - 1;
-        let last = &call.args[last_i];
-        if !is_minus_one(last) {
-            return;
-        }
-        let prev_end = call.args[last_i - 1].end().0 as u32;
-        for &(from, to) in FNS {
+        let Some(obj) = index.object(&artifacts.packages, &artifacts.scopes, path, name) else {
+            continue;
+        };
+        index.for_each_call(obj, pass.files(), |call| {
+            if call.args.len() < 2 {
+                return true;
+            }
+            let last_i = call.args.len() - 1;
+            let last = &call.args[last_i];
+            if !is_minus_one(last) {
+                return true;
+            }
             if !is_call_to(pass, call, from) {
-                continue;
+                return true;
             }
             let replacement = replacement_func_name(&call.fun, to);
-            // Delete from end of previous arg through `-1` so the comma is removed too
-            // (upstream only deletes the unary node; we avoid a trailing-comma syntax error).
+            let prev_end = call.args[last_i - 1].end().0 as u32;
             pending.push((
                 call.fun.pos().0 as u32,
                 call.fun.end().0 as u32,
@@ -81,9 +88,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 replacement.clone(),
                 format!("could use {replacement} instead"),
             ));
-            break;
-        }
-    });
+            true
+        });
+    }
 
     for (fun_pos, fun_end, del_pos, del_end, replacement, message) in pending {
         pass.report(Diagnostic {
@@ -118,7 +125,7 @@ fn qf1004_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#QF1004",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), typeindex::analyzer()],
         fact_types: vec![],
     }
 }

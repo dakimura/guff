@@ -3,7 +3,7 @@
 use guff::token::Token;
 
 use crate::lexer::{ItemType::*, Lexer};
-use crate::pattern::*;
+use crate::pattern::{collect_entry_kinds, collect_root_call_symbols, *};
 
 impl Parser {
     pub fn parse(&mut self, s: &str) -> Result<Pattern, String> {
@@ -27,11 +27,13 @@ impl Parser {
         }
 
         let entry_kinds = collect_entry_kinds(&root);
+        let root_call_symbols = collect_root_call_symbols(&root);
 
         Ok(Pattern {
             root,
             entry_kinds,
             bindings,
+            root_call_symbols,
         })
     }
 
@@ -522,6 +524,9 @@ mod tests {
             r#"(BinaryExpr (CallExpr (Symbol "bytes.Compare") args) op@(Or "==" "!=") (IntegerLiteral "0"))"#,
         );
         assert!(pat.is_ok(), "{:?}", pat.err());
+        let pat = pat.unwrap();
+        // Root is BinaryExpr, not CallExpr(Symbol…), so no root call symbols.
+        assert!(pat.root_call_symbols.is_empty());
     }
 
     #[test]
@@ -536,5 +541,40 @@ mod tests {
             .parse(r#"(Or (Ident "a") (Ident "b"))"#)
             .unwrap();
         assert!(matches!(pat.root, Node::Or(_)));
+    }
+
+    #[test]
+    fn root_call_symbols_for_symbol_call() {
+        let pat = Parser::new()
+            .parse(r#"(CallExpr (Symbol "errors.New") [x])"#)
+            .unwrap();
+        assert_eq!(pat.root_call_symbols.len(), 1);
+        assert_eq!(pat.root_call_symbols[0].path, "errors");
+        assert_eq!(pat.root_call_symbols[0].typename, "");
+        assert_eq!(pat.root_call_symbols[0].ident, "New");
+    }
+
+    #[test]
+    fn root_call_symbols_for_method() {
+        let pat = Parser::new()
+            .parse(r#"(CallExpr (Symbol "(time.Time).Sub") [x])"#)
+            .unwrap();
+        assert_eq!(pat.root_call_symbols.len(), 1);
+        assert_eq!(pat.root_call_symbols[0].path, "time");
+        assert_eq!(pat.root_call_symbols[0].typename, "Time");
+        assert_eq!(pat.root_call_symbols[0].ident, "Sub");
+    }
+
+    #[test]
+    fn root_call_symbols_for_or() {
+        let pat = Parser::new()
+            .parse(
+                r#"(CallExpr (Symbol (Or "(*text/template.Template).Parse" "(*html/template.Template).Parse")) [s])"#,
+            )
+            .unwrap();
+        assert_eq!(pat.root_call_symbols.len(), 2);
+        assert_eq!(pat.root_call_symbols[0].path, "text/template");
+        assert_eq!(pat.root_call_symbols[0].typename, "Template");
+        assert_eq!(pat.root_call_symbols[1].path, "html/template");
     }
 }

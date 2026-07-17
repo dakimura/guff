@@ -331,9 +331,24 @@ pub fn predeclared_bool_ident(pass: &Pass<'_>, ident: &Ident) -> Option<bool> {
 }
 
 /// Returns the type-checker object for a call expression's function target.
+///
+/// Peels type instantiation (`f[T]`, `f[T1, T2]`) like `typeutil.usedIdent`.
 pub fn call_target_object(pass: &Pass<'_>, fun: &Expr) -> Option<ObjectId> {
     let info = pass.types_info()?;
-    match fun {
+    let mut e = fun;
+    while let Expr::ParenExpr(p) = e {
+        e = &p.x;
+    }
+    match e {
+        Expr::IndexExpr(ix)
+            if info
+                .types
+                .get(&ix.index.id())
+                .is_some_and(|tv| tv.mode == OperandMode::TypeExpr) =>
+        {
+            call_target_object(pass, &ix.x)
+        }
+        Expr::IndexListExpr(ix) => call_target_object(pass, &ix.x),
         Expr::Ident(id) => info.uses.get(&id.id).copied(),
         Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
         _ => None,

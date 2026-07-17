@@ -1,10 +1,13 @@
 //! Pattern matching helpers (`code.Matches` / `code.Match`).
 
+use std::collections::HashSet;
+
 use guff::walk::NodeRef;
-use guff_pattern::{match_node, MatchEnv, Matcher, Pattern};
+use guff_pattern::{match_node, IndexSymbol, MatchEnv, Matcher, Pattern};
 
 use crate::pass::Pass;
 use crate::passes::inspect::InspectResult;
+use crate::passes::typeindex::{self, Index};
 
 /// Build a [`MatchEnv`] from the current pass.
 pub fn match_env<'a>(pass: &'a Pass<'_>) -> MatchEnv<'a> {
@@ -27,11 +30,24 @@ pub fn match_pattern<'a>(
 }
 
 /// Visit AST nodes that may match `pat`, invoking `f` for each successful match.
+///
+/// When `pat.root_call_symbols` is non-empty and the pass has a [`typeindex`]
+/// result, only call sites for those symbols are visited (port of Go
+/// `code.Matches` typeindex fast path). Otherwise falls back to an
+/// `entry_kinds`-filtered preorder walk.
 pub fn matches<F>(pass: &Pass<'_>, inspect: &InspectResult, pat: &Pattern, mut f: F)
 where
     F: FnMut(NodeRef<'_>, Matcher<'_>) -> bool,
 {
-    let kinds: std::collections::HashSet<_> = pat.entry_kinds.iter().copied().collect();
+    if !pat.root_call_symbols.is_empty() {
+        if let Some(index) = pass.result_of::<Index>(typeindex::analyzer()) {
+            if matches_via_typeindex(pass, inspect, index, pat, &mut f) {
+                return;
+            }
+        }
+    }
+
+    let kinds: HashSet<_> = pat.entry_kinds.iter().copied().collect();
     let visit_all = kinds.is_empty();
 
     inspect.preorder(pass.files(), |node| {
@@ -47,6 +63,84 @@ where
             }
         }
     });
+}
+
+/// Returns `true` if the typeindex path handled the pattern (even with zero hits).
+fn matches_via_typeindex<F>(
+    pass: &Pass<'_>,
+    _inspect: &InspectResult,
+    index: &Index,
+    pat: &Pattern,
+    f: &mut F,
+) -> bool
+where
+    F: FnMut(NodeRef<'_>, Matcher<'_>) -> bool,
+{
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+
+    let mut call_ids: HashSet<u32> = HashSet::new();
+    let mut any_resolved = false;
+    for sym in &pat.root_call_symbols {
+        let obj = resolve_index_symbol(index, artifacts, sym);
+        if let Some(obj) = obj {
+            any_resolved = true;
+            for id in index.calls(obj) {
+                call_ids.insert(*id);
+            }
+        }
+    }
+    // Mirror Go CouldMatchAny: if no symbol resolves in this package, skip.
+    if !any_resolved {
+        return true;
+    }
+    if call_ids.is_empty() {
+        return true;
+    }
+
+    for file in pass.files() {
+        guff::walk::preorder(NodeRef::File(file), |node| {
+            let NodeRef::CallExpr(call) = node else {
+                return true;
+            };
+            if !call_ids.contains(&call.id) {
+                return true;
+            }
+            if let Some(m) = match_pattern(pass, pat, node) {
+                if !f(node, m) {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+    true
+}
+
+fn resolve_index_symbol(
+    index: &Index,
+    artifacts: &guff_packages::TypecheckArtifacts,
+    sym: &IndexSymbol,
+) -> Option<guff_types::ObjectId> {
+    if sym.typename.is_empty() {
+        index.object(
+            &artifacts.packages,
+            &artifacts.scopes,
+            &sym.path,
+            &sym.ident,
+        )
+    } else {
+        index.selection(
+            &artifacts.types,
+            &artifacts.objects,
+            &artifacts.packages,
+            &artifacts.scopes,
+            &sym.path,
+            &sym.typename,
+            &sym.ident,
+        )
+    }
 }
 
 /// Returns the diagnostic position for a matched node.
