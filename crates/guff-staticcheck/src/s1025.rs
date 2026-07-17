@@ -17,7 +17,10 @@ fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
 }
 
 fn is_string_type(pass: &Pass<'_>, typ: TypeId) -> bool {
-    let types = &pass.pkg().type_artifacts.as_ref().expect("types").types;
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let types = &artifacts.types;
     matches!(
         types.get(typ),
         TypeData::Basic(b) if b.kind() == BasicKind::String
@@ -25,8 +28,10 @@ fn is_string_type(pass: &Pass<'_>, typ: TypeId) -> bool {
 }
 
 fn underlying_is_string(pass: &Pass<'_>, typ: TypeId) -> bool {
-    let types = &pass.pkg().type_artifacts.as_ref().expect("types").types;
-    is_string_type(pass, typ.underlying(types))
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    is_string_type(pass, typ.underlying(&artifacts.types))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

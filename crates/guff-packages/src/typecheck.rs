@@ -323,7 +323,15 @@ pub fn typecheck_package_with_seed(
 
     if seed.is_none() {
         let mut visiting = Vec::new();
-        preload_exports(&mut check, &pkg.deps, dep_graph, export_paths, &mut visiting);
+        let mut done = std::collections::HashSet::new();
+        preload_exports(
+            &mut check,
+            &pkg.deps,
+            dep_graph,
+            export_paths,
+            &mut visiting,
+            &mut done,
+        );
     }
 
     let files = syntax.clone();
@@ -416,21 +424,37 @@ fn build_export_seed(
     }
     check.set_importer(Box::new(importer));
     let mut visiting = Vec::new();
-    preload_exports(&mut check, &needed, dep_graph, export_paths, &mut visiting);
+    let mut done = std::collections::HashSet::new();
+    preload_exports(
+        &mut check,
+        &needed,
+        dep_graph,
+        export_paths,
+        &mut visiting,
+        &mut done,
+    );
     Some(Arc::new(check.capture_export_seed()))
 }
 
 /// Depth-first preload of dependency export data so nested `read()` calls find
 /// transitive packages in the importer cache (see PL09 deferral).
+///
+/// `done` memoizes packages whose entire subtree has already been preloaded.
+/// Without it, a dependency graph with heavy fan-in (every package importing a
+/// handful of common ones) is walked an exponential number of times — each
+/// distinct root→leaf path re-descends shared subtrees. On large modules
+/// (e.g. Prometheus) that alone pushed a run past its timeout. With the memo,
+/// each node is visited once: O(V+E).
 fn preload_exports(
     check: &mut Checker,
     deps: &[String],
     dep_graph: &HashMap<String, Vec<String>>,
     export_paths: &HashMap<String, PathBuf>,
     visiting: &mut Vec<String>,
+    done: &mut std::collections::HashSet<String>,
 ) {
     for dep in deps {
-        preload_export(check, dep, dep_graph, export_paths, visiting);
+        preload_export(check, dep, dep_graph, export_paths, visiting, done);
     }
 }
 
@@ -440,8 +464,14 @@ fn preload_export(
     dep_graph: &HashMap<String, Vec<String>>,
     export_paths: &HashMap<String, PathBuf>,
     visiting: &mut Vec<String>,
+    done: &mut std::collections::HashSet<String>,
 ) {
     if path == "unsafe" || path == "C" {
+        return;
+    }
+    // Whole subtree already preloaded via another path — skip. This is what
+    // collapses the exponential DAG walk to linear.
+    if done.contains(path) {
         return;
     }
     if visiting.iter().any(|p| p == path) {
@@ -452,10 +482,11 @@ fn preload_export(
     }
     visiting.push(path.to_string());
     if let Some(deps) = dep_graph.get(path) {
-        preload_exports(check, deps, dep_graph, export_paths, visiting);
+        preload_exports(check, deps, dep_graph, export_paths, visiting, done);
     }
     check.preload_import(path);
     visiting.pop();
+    done.insert(path.to_string());
 }
 
 #[cfg(test)]

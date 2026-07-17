@@ -39,8 +39,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         else {
             return;
         };
-        let types = &pass.pkg().type_artifacts.as_ref().expect("types").types;
-        if !is_slice_type(types, typ) {
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            return;
+        };
+        if !is_slice_type(&artifacts.types, typ) {
             return;
         }
         pending.push((

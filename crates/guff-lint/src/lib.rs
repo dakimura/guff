@@ -270,8 +270,20 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         ..Config::default()
     };
 
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t0 = std::time::Instant::now();
+
     let (roots, all_packages) =
         load_graph(&meta_cfg, &opts.patterns).map_err(RunnerError::Load)?;
+    if timing {
+        eprintln!(
+            "guff: phase load_graph (go list) {:.2}s ({} roots, {} total pkgs)",
+            t0.elapsed().as_secs_f64(),
+            roots.len(),
+            all_packages.len(),
+        );
+    }
+    let t1 = std::time::Instant::now();
 
     // Build the cache with a complete dependency-hash registry over *all* loaded
     // packages (roots + transitive deps) so `NeedAllDeps` hashing is
@@ -319,9 +331,27 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         }
     }
 
+    if timing {
+        eprintln!(
+            "guff: phase cache setup+partition {:.2}s ({} hits, {} misses)",
+            t1.elapsed().as_secs_f64(),
+            hits,
+            miss_ids.len(),
+        );
+    }
+    let t2 = std::time::Instant::now();
+
     // Type-check + analyze only the packages that missed the cache.
     let env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
+    if timing {
+        eprintln!(
+            "guff: phase typecheck_roots {:.2}s ({} pkgs)",
+            t2.elapsed().as_secs_f64(),
+            miss_roots.len(),
+        );
+    }
+    let t3 = std::time::Instant::now();
 
     let result = run_on_packages(
         &opts.analyzers,
@@ -335,6 +365,12 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         },
     )
     .map_err(RunnerError::Validate)?;
+    if timing {
+        eprintln!(
+            "guff: phase analyze (run_on_packages) {:.2}s",
+            t3.elapsed().as_secs_f64(),
+        );
+    }
 
     if std::env::var_os("GUFF_DEBUG_CACHE").is_some() {
         eprintln!(

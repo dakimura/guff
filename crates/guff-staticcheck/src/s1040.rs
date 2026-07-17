@@ -31,7 +31,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1040 requires inspect analyzer".to_string())?
         .clone();
 
-    let types = &pass.pkg().type_artifacts.as_ref().expect("types").types;
+    if pass.pkg().type_artifacts.is_none() {
+        return Ok(None);
+    }
+
     let mut pending: Vec<(u32, String)> = Vec::new();
 
     inspect.preorder(pass.files(), |n| {
@@ -47,7 +50,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(t2) = expr_type(pass, &expr.x) else {
             return;
         };
-        if is_interface(types, t1) && render_type(pass, t1) == render_type(pass, t2) {
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            return;
+        };
+        if is_interface(&artifacts.types, t1) && render_type(pass, t1) == render_type(pass, t2) {
             pending.push((
                 expr.lparen.0 as u32,
                 "type assertion to the same type: value already has that interface type".into(),
