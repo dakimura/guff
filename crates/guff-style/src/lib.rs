@@ -27,6 +27,7 @@
 //! - [`paralleltest`]
 //! - [`tparallel`]
 //! - [`intrange`]
+//! - [`tagliatelle`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -90,6 +91,7 @@ mod paralleltest;
 mod testpackage;
 mod tparallel;
 mod intrange;
+mod tagliatelle;
 mod reassign;
 mod recvcheck;
 mod thelper;
@@ -124,7 +126,7 @@ pub use options::{
     PredeclaredOptions,
     TestpackageOptions,
     ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
-    TagalignOptions, ThelperKindOptions, ThelperOptions,
+    TagalignOptions, TagliatelleOptions, ThelperKindOptions, ThelperOptions,
     TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
     WhitespaceOptions, WslOptions,
 };
@@ -152,6 +154,7 @@ pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
 pub use tparallel::analyzer as tparallel;
 pub use intrange::analyzer as intrange;
+pub use tagliatelle::analyzer as tagliatelle;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
 pub use thelper::analyzer as thelper;
@@ -212,6 +215,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         testpackage(),
         tparallel(),
         intrange(),
+        tagliatelle(),
         goprintffuncname(),
         funlen(),
         gocyclo(),

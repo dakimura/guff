@@ -1110,6 +1110,34 @@ fn parse_v2_paralleltest_settings() {
 }
 
 #[test]
+fn parse_v2_tagliatelle_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_tagliatelle_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.tagliatelle.case.rules.get("json").map(String::as_str),
+        Some("snake")
+    );
+    assert_eq!(
+        settings.tagliatelle.case.rules.get("yaml").map(String::as_str),
+        Some("snake")
+    );
+    assert!(settings.tagliatelle.case.use_field_name);
+    assert_eq!(
+        settings.tagliatelle.case.ignored_fields,
+        vec!["SkipMe".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::TagliatelleOptions>("tagliatelle")
+        .expect("tagliatelle options");
+    assert_eq!(opts.rules.get("json").map(String::as_str), Some("snake"));
+    assert!(opts.use_field_name);
+    assert_eq!(opts.ignored_fields, vec!["SkipMe".to_string()]);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

@@ -70,6 +70,7 @@ pub struct LinterSettings {
     pub nonamedreturns: NonamedreturnsSettings,
     pub paralleltest: ParalleltestSettings,
     pub testpackage: TestpackageSettings,
+    pub tagliatelle: TagliatelleSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1019,6 +1020,54 @@ impl TestpackageSettings {
     }
 }
 
+/// `linters.settings.tagliatelle` / `linters-settings.tagliatelle`.
+///
+/// User `case.rules` are merged onto golangci defaults
+/// (`json`/`yaml` → `camel`, `header` → `header`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TagliatelleSettings {
+    #[serde(default)]
+    pub case: TagliatelleCaseSettings,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TagliatelleCaseSettings {
+    #[serde(default)]
+    pub rules: std::collections::HashMap<String, String>,
+    #[serde(default, rename = "extended-rules")]
+    pub extended_rules: std::collections::HashMap<String, TagliatelleExtendedRuleSettings>,
+    #[serde(default, rename = "use-field-name")]
+    pub use_field_name: bool,
+    #[serde(default, rename = "ignored-fields")]
+    pub ignored_fields: Vec<String>,
+    // DEFERRED: overrides (package radix tree).
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TagliatelleExtendedRuleSettings {
+    #[serde(default, rename = "case")]
+    pub case_name: String,
+    // DEFERRED: extra-initialisms / initialism-overrides.
+}
+
+impl TagliatelleSettings {
+    pub fn to_guff_tagliatelle(&self) -> guff_style::TagliatelleOptions {
+        let mut extended = std::collections::HashMap::new();
+        for (k, v) in &self.case.extended_rules {
+            if !v.case_name.is_empty() {
+                extended.insert(k.clone(), v.case_name.clone());
+            }
+        }
+        guff_style::TagliatelleOptions {
+            rules: self.case.rules.clone(),
+            extended_rules: extended,
+            use_field_name: self.case.use_field_name,
+            ignored_fields: self.case.ignored_fields.clone(),
+            ignore: false,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1460,6 +1509,11 @@ impl LinterSettings {
                 out.testpackage = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("tagliatelle".into())) {
+            if let Ok(s) = serde_yaml::from_value::<TagliatelleSettings>(v.clone()) {
+                out.tagliatelle = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1541,6 +1595,7 @@ impl LinterSettings {
         );
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
+        bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());
         Arc::new(bag)
     }
 

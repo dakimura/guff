@@ -9,9 +9,108 @@ use guff_style::{
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
-    nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle,
     testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn tagliatelle_flags_non_camel_json_yaml() {
+    let pkg = support::typecheck_fixture("tagliatelle", "example.com/tagliatelle", "bad.go");
+    let messages = support::run_analyzer(tagliatelle(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("json(camel): got 'ID' want 'id'")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("json(camel): got 'UserID' want 'userId'")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("json(camel): got 'CommonServiceItem' want 'commonServiceItem'")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("yaml(camel): got 'Value' want 'value'")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn tagliatelle_allows_camel_tags() {
+    let pkg =
+        support::typecheck_fixture("tagliatelle", "example.com/tagliatelle/ok", "ok.go");
+    let messages = support::run_analyzer(tagliatelle(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn tagliatelle_respects_rules_and_ignored_fields() {
+    use guff_style::TagliatelleOptions;
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture(
+        "tagliatelle",
+        "example.com/tagliatelle/settings",
+        "settings.go",
+    );
+
+    // Defaults (camel): UserID and Name and SkipMe are wrong.
+    let flagged = support::run_analyzer(tagliatelle(), &pkg);
+    assert!(
+        flagged.iter().any(|m| m.contains("UserID")),
+        "{flagged:?}"
+    );
+    assert!(flagged.iter().any(|m| m.contains("Name")), "{flagged:?}");
+    assert!(
+        flagged.iter().any(|m| m.contains("SkipMe")),
+        "{flagged:?}"
+    );
+
+    // snake + use-field-name + ignore SkipMe.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "tagliatelle",
+        TagliatelleOptions {
+            rules: HashMap::from([("json".into(), "snake".into())]),
+            extended_rules: HashMap::new(),
+            use_field_name: true,
+            ignored_fields: vec!["SkipMe".into()],
+            ignore: false,
+        },
+    );
+    let with_settings = support::run_analyzer_with_settings(
+        tagliatelle(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        with_settings
+            .iter()
+            .any(|m| m.contains("json(snake): got 'UserID' want 'user_id'")),
+        "{with_settings:?}"
+    );
+    assert!(
+        with_settings
+            .iter()
+            .any(|m| m.contains("json(snake): got 'Name' want 'name'")),
+        "{with_settings:?}"
+    );
+    assert!(
+        !with_settings.iter().any(|m| m.contains("SkipMe")),
+        "SkipMe should be ignored: {with_settings:?}"
+    );
+}
 
 #[test]
 fn recvcheck_flags_mixed_receivers() {

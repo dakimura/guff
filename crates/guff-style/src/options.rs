@@ -814,6 +814,24 @@ pub struct ParalleltestOptions {
     pub check_cleanup: bool,
 }
 
+/// `linters.settings.tagliatelle` / `linters-settings.tagliatelle`.
+///
+/// Golangci-lint merges user `case.rules` onto defaults
+/// (`json`/`yaml` → `camel`, `header` → `header`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TagliatelleOptions {
+    /// Tag-key → case-converter name (`camel`, `snake`, `header`, …).
+    pub rules: std::collections::HashMap<String, String>,
+    /// Extended rule key → case name (ExtraInitialisms DEFERRED; treated as simple case).
+    pub extended_rules: std::collections::HashMap<String, String>,
+    /// Compare converter(fieldName) instead of converter(tagValue).
+    pub use_field_name: bool,
+    /// Field names to skip.
+    pub ignored_fields: Vec<String>,
+    /// Skip the whole package (used by package overrides; DEFERRED radix).
+    pub ignore: bool,
+}
+
 /// `linters.settings.testpackage` / `linters-settings.testpackage`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestpackageOptions {
