@@ -5,13 +5,81 @@ use std::sync::Arc;
 use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
-    asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
-    gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
-    gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag,
-    nakedret, nestif,
-    nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle,
-    testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
+    dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
+    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, iface,
+    inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag, nakedret,
+    nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc,
+    predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle, testifylint, testpackage,
+    thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn decorder_flags_multiple_decls_order_and_late_init() {
+    let pkg = support::typecheck_fixture("decorder", "example.com/decorder", "bad.go");
+    let messages = support::run_analyzer(decorder(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("multiple \"type\" declarations are not allowed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("multiple \"const\" declarations are not allowed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("multiple \"var\" declarations are not allowed")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("init func must be the first function in file")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn decorder_allows_grouped_decls_with_init_first() {
+    let pkg = support::typecheck_fixture("decorder", "example.com/decorder/ok", "ok.go");
+    let messages = support::run_analyzer(decorder(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn decorder_respects_disable_flags() {
+    use guff_style::DecorderOptions;
+
+    let pkg =
+        support::typecheck_fixture("decorder", "example.com/decorder/settings", "settings.go");
+
+    // Enabled (upstream defaults via run_analyzer): order violations.
+    let flagged = support::run_analyzer(decorder(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("type must not be placed after func")),
+        "{flagged:?}"
+    );
+
+    // Golangci defaults: all checks off → silent.
+    let mut bag = SettingsBag::new();
+    bag.insert("decorder", DecorderOptions::default());
+    let silent = support::run_analyzer_with_settings(
+        decorder(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(silent.is_empty(), "unexpected diagnostics: {silent:?}");
+}
 
 #[test]
 fn tagliatelle_flags_non_camel_json_yaml() {

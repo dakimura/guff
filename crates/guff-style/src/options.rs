@@ -773,6 +773,63 @@ pub struct RecvcheckOptions {
     pub exclusions: Vec<String>,
 }
 
+/// `linters.settings.decorder` / `linters-settings.decorder`.
+///
+/// Golangci-lint defaults disable all check families (`disable-*-check: true`).
+/// Use [`DecorderOptions::enabled`] for upstream analyzer defaults (all on).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecorderOptions {
+    /// Required order of declaration kinds (golangci `dec-order`).
+    pub dec_order: Vec<String>,
+    /// Ignore `_` vars for order/num checks.
+    pub ignore_underscore_vars: bool,
+    /// Disable all declaration-count checks.
+    pub disable_dec_num_check: bool,
+    /// Disable type declaration-count check only.
+    pub disable_type_dec_num_check: bool,
+    /// Disable const declaration-count check only.
+    pub disable_const_dec_num_check: bool,
+    /// Disable var declaration-count check only.
+    pub disable_var_dec_num_check: bool,
+    /// Disable declaration-order check.
+    pub disable_dec_order_check: bool,
+    /// Disable “init must be first function” check.
+    pub disable_init_func_first_check: bool,
+}
+
+impl Default for DecorderOptions {
+    fn default() -> Self {
+        // Match golangci-lint `DecorderSettings` defaults (all checks off).
+        Self {
+            dec_order: vec![
+                "type".into(),
+                "const".into(),
+                "var".into(),
+                "func".into(),
+            ],
+            ignore_underscore_vars: false,
+            disable_dec_num_check: true,
+            disable_type_dec_num_check: false,
+            disable_const_dec_num_check: false,
+            disable_var_dec_num_check: false,
+            disable_dec_order_check: true,
+            disable_init_func_first_check: true,
+        }
+    }
+}
+
+impl DecorderOptions {
+    /// Upstream analyzer flag defaults (all checks enabled).
+    pub fn enabled() -> Self {
+        Self {
+            disable_dec_num_check: false,
+            disable_dec_order_check: false,
+            disable_init_func_first_check: false,
+            ..Self::default()
+        }
+    }
+}
+
 /// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterfacebloatOptions {

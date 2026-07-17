@@ -22,6 +22,7 @@
 //! - [`interfacebloat`]
 //! - [`inamedparam`]
 //! - [`containedctx`]
+//! - [`decorder`]
 //! - [`nonamedreturns`]
 //! - [`testpackage`]
 //! - [`paralleltest`]
@@ -84,6 +85,7 @@ mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod containedctx;
+mod decorder;
 mod inamedparam;
 mod interfacebloat;
 mod nonamedreturns;
@@ -116,19 +118,16 @@ mod whitespace;
 mod wsl;
 
 pub use options::{
-    AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DogsledOptions,
-    ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern, FunlenOptions,
-    GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
-    InamedparamOptions, InterfacebloatOptions, LllOptions,
-    LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
-    NonamedreturnsOptions,
-    NestifOptions, NlreturnOptions, ParalleltestOptions, PerfsprintOptions, PreallocOptions,
-    PredeclaredOptions,
-    TestpackageOptions,
-    ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
-    TagalignOptions, TagliatelleOptions, ThelperKindOptions, ThelperOptions,
-    TestifylintOptions, UnconvertOptions, UsestdlibvarsOptions, UsetestingOptions,
-    WhitespaceOptions, WslOptions,
+    AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
+    DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
+    FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
+    InamedparamOptions, InterfacebloatOptions, LllOptions, LoggercheckOptions, MndOptions,
+    ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
+    NonamedreturnsOptions, ParalleltestOptions, PerfsprintOptions, PreallocOptions,
+    PredeclaredOptions, ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions,
+    SuiteExtraAssertCallMode, TagalignOptions, TagliatelleOptions, TestifylintOptions,
+    TestpackageOptions, ThelperKindOptions, ThelperOptions, UnconvertOptions, UsestdlibvarsOptions,
+    UsetestingOptions, WhitespaceOptions, WslOptions,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -147,6 +146,7 @@ pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use containedctx::analyzer as containedctx;
+pub use decorder::analyzer as decorder;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use nonamedreturns::analyzer as nonamedreturns;
@@ -210,6 +210,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         interfacebloat(),
         inamedparam(),
         containedctx(),
+        decorder(),
         nonamedreturns(),
         paralleltest(),
         testpackage(),

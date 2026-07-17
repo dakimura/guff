@@ -71,6 +71,7 @@ pub struct LinterSettings {
     pub paralleltest: ParalleltestSettings,
     pub testpackage: TestpackageSettings,
     pub tagliatelle: TagliatelleSettings,
+    pub decorder: DecorderSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1068,6 +1069,72 @@ impl TagliatelleSettings {
     }
 }
 
+/// `linters.settings.decorder` / `linters-settings.decorder`.
+///
+/// Golangci-lint defaults disable the three check families.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct DecorderSettings {
+    #[serde(default = "default_dec_order", rename = "dec-order")]
+    pub dec_order: Vec<String>,
+    #[serde(default, rename = "ignore-underscore-vars")]
+    pub ignore_underscore_vars: bool,
+    #[serde(default = "default_true", rename = "disable-dec-num-check")]
+    pub disable_dec_num_check: bool,
+    #[serde(default, rename = "disable-type-dec-num-check")]
+    pub disable_type_dec_num_check: bool,
+    #[serde(default, rename = "disable-const-dec-num-check")]
+    pub disable_const_dec_num_check: bool,
+    #[serde(default, rename = "disable-var-dec-num-check")]
+    pub disable_var_dec_num_check: bool,
+    #[serde(default = "default_true", rename = "disable-dec-order-check")]
+    pub disable_dec_order_check: bool,
+    #[serde(default = "default_true", rename = "disable-init-func-first-check")]
+    pub disable_init_func_first_check: bool,
+}
+
+fn default_dec_order() -> Vec<String> {
+    vec![
+        "type".into(),
+        "const".into(),
+        "var".into(),
+        "func".into(),
+    ]
+}
+
+impl Default for DecorderSettings {
+    fn default() -> Self {
+        Self {
+            dec_order: default_dec_order(),
+            ignore_underscore_vars: false,
+            disable_dec_num_check: true,
+            disable_type_dec_num_check: false,
+            disable_const_dec_num_check: false,
+            disable_var_dec_num_check: false,
+            disable_dec_order_check: true,
+            disable_init_func_first_check: true,
+        }
+    }
+}
+
+impl DecorderSettings {
+    pub fn to_guff_decorder(&self) -> guff_style::DecorderOptions {
+        guff_style::DecorderOptions {
+            dec_order: if self.dec_order.is_empty() {
+                default_dec_order()
+            } else {
+                self.dec_order.clone()
+            },
+            ignore_underscore_vars: self.ignore_underscore_vars,
+            disable_dec_num_check: self.disable_dec_num_check,
+            disable_type_dec_num_check: self.disable_type_dec_num_check,
+            disable_const_dec_num_check: self.disable_const_dec_num_check,
+            disable_var_dec_num_check: self.disable_var_dec_num_check,
+            disable_dec_order_check: self.disable_dec_order_check,
+            disable_init_func_first_check: self.disable_init_func_first_check,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1514,6 +1581,11 @@ impl LinterSettings {
                 out.tagliatelle = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("decorder".into())) {
+            if let Ok(s) = serde_yaml::from_value::<DecorderSettings>(v.clone()) {
+                out.decorder = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1596,6 +1668,7 @@ impl LinterSettings {
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());
+        bag.insert("decorder", self.decorder.to_guff_decorder());
         Arc::new(bag)
     }
 

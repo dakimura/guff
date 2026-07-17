@@ -1138,6 +1138,32 @@ fn parse_v2_tagliatelle_settings() {
 }
 
 #[test]
+fn parse_v2_decorder_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_decorder_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.decorder.dec_order,
+        vec![
+            "type".to_string(),
+            "const".to_string(),
+            "var".to_string(),
+            "func".to_string()
+        ]
+    );
+    assert!(!settings.decorder.disable_dec_order_check);
+    assert!(!settings.decorder.disable_init_func_first_check);
+    assert!(!settings.decorder.disable_dec_num_check);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::DecorderOptions>("decorder")
+        .expect("decorder options");
+    assert!(!opts.disable_dec_order_check);
+    assert!(!opts.disable_init_func_first_check);
+    assert!(!opts.disable_dec_num_check);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();
