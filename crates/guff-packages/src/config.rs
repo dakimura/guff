@@ -24,6 +24,10 @@ pub struct Config {
     pub tests: bool,
     /// Absolute file path → unsaved contents (editor overlays).
     pub overlay: HashMap<PathBuf, Vec<u8>>,
+    /// Disable the on-disk `go list` metadata cache (R24.4).
+    ///
+    /// Also honored when `GUFF_CACHE=off` / `GOLANGCI_LINT_CACHE=off`.
+    pub disable_cache: bool,
 }
 
 impl Default for Config {
@@ -35,6 +39,7 @@ impl Default for Config {
             build_flags: Vec::new(),
             tests: false,
             overlay: HashMap::new(),
+            disable_cache: false,
         }
     }
 }

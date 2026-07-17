@@ -109,7 +109,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。facts 永続化は R24.1。
+> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -171,7 +171,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + text（`line-number` 別名）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。`format:path` / config `path` でファイル書き出し | — |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
-| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。**facts 永続化**（analyzer×package、objectpath キー、`facts/` 配下；R24.1）。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | サブパッケージ粒度型チェック・export data 共有・`go list` メタデータキャッシュは未（→ R24.2–4） |
+| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。**facts 永続化**（analyzer×package、objectpath キー、`facts/`；R24.1）。**`go list` メタデータキャッシュ**（`golist/`；R24.4）。**export seed clone**（並列型チェックで共通 deps を再デコードしない；R24.3）。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | 真のファイル粒度インクリメンタル型チェックは未（Checker はパッケージ全体；R24.2 DEFERRED）。ignored ファイルは self_hash から除外済み（R24.2 I1） |
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 互換差分 | ✅ `compat/` ハーネス（guff vs golangci JSON → `file:line:linter:message`、P/R、allowlist、`.github/workflows/compat.yml` ゲート） | OSS コーパス拡張・local パリティ改善は継続 |
@@ -390,26 +390,16 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   offline 時の export data 生成。
 - **テスト**: offline 2 + go_source imports 3 + runner go_cache 2 + lint filter/CLI。
 
-#### R24. 性能フォローアップ（R10.1 の発展余地）🟡 部分完了
+#### R24. 性能フォローアップ（R10.1 の発展余地）✅ 完了 (2026-07-17)
 - **なぜ**: R10.1 で cold/warm とも golangci-lint 超えを達成したが、さらに詰められる余地がある。
   いずれも機能ブロッカーではなく、大規模リポジトリでの伸びしろ。
-- **完了（R24.1, 2026-07-17）: facts の永続化**
-  1. **`guff-types::objectpath`** — パッケージスコープ subset（PO / `Scope.Lookup`）。フィールド/メソッド等の完全パスは DEFERRED。
-  2. **`guff-analysis::fact_codec`** — `EncodedFact`（`pkg_path` + `objectpath` + type + JSON payload）と decoder レジストリ。`IsDeprecated` / `EnumMembersFact` / `NewLikeFact` / `StringFact` を登録。
-  3. **クロスアリーナ remap** — 依存 Action からの fact 継承を raw `ObjectId` コピーから objectpath remap に変更（プライベート Checker 設計に整合）。
-  4. **`IssueCache` facts ストア** — `facts/<prefix>/<hash>-<analyzer>.json`。非 root fact producer はキャッシュヒット時に再解析スキップ（golangci `loadCachedFacts`）。
-- **残**:
-  2. **サブパッケージ（ファイル）粒度のインクリメンタル型チェック**: 現状はパッケージ単位でミス→
-     パッケージ丸ごと再型チェック。巨大パッケージで 1 ファイル変更時の再チェック範囲を狭める。
-  3. **export data デコードの共有キャッシュ**: `typecheck_package` はパッケージごとに新規 `Checker`/
-     `ExportImporter` を作り、共通の stdlib 依存（fmt 等）の export data をパッケージ数分デコードする
-     （プロファイル上の `preload_exports` 重複）。並列化で wall-clock は隠せているが総 CPU は無駄。
-     デコード済み型パッケージを共有アリーナで再利用できれば cold の総 CPU をさらに削減。
-  4. **`go list` メタデータのキャッシュ/差分ロード**: 現状 warm でも毎回 `go list` を実行（~0.05s）。
-     大規模ツリーではここも効いてくる。
-- **どこ（残）**: `guff-packages/src/typecheck.rs`（共有 importer・粒度）、
-  `guff-packages/src/golist.rs`（メタデータキャッシュ）。
-- **テスト（R24.1）**: `objectpath` 3 + `fact_codec` 2 + `cache::facts_put_get_roundtrip` + SA1019 / exhaustive 回帰。
+- **完了**:
+  1. **R24.1 facts 永続化** — `objectpath`（PO）+ `EncodedFact` + `IssueCache` `facts/` + クロスアリーナ remap。
+  2. **R24.3 export seed clone** — `ExportSeed` / `Checker::from_seed`。`typecheck_roots` / `typecheck_packages` が依存 `.a` を一度だけデコードし、並列ワーカーはアリーナを clone。
+  3. **R24.4 `go list` メタデータキャッシュ** — `$GUFF_CACHE/golist/`。キー = go.mod/sum + args + 関連 env；Export パス欠落時は miss。`--no-cache` / `GUFF_CACHE=off` で無効。
+  4. **R24.2 I1** — `self_hash` から `ignored_files` を除外（build-tag 変更は salt で無効化）。
+- **DEFERRED（R24.2 本体）**: 真のファイル粒度インクリメンタル型チェック。Checker はパッケージ全体；cross-file defs/methods/inits のため部分 `check_files` は不正。`typecheck_package_with_seed` に `// DEFERRED(R24.2)` コメントあり。
+- **テスト**: objectpath / fact_codec / facts_put_get + `export_seed_roundtrip` + `golist_cache_key_*` / `export_paths_exist_*` + packages/runner 回帰。
 
 ---
 

@@ -259,12 +259,14 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         mode: metadata_mode,
         build_flags: build_flags.clone(),
         tests: opts.tests,
+        disable_cache: !opts.use_cache,
         ..Config::default()
     };
     let full_cfg = Config {
         mode: analysis_mode,
         build_flags,
         tests: opts.tests,
+        disable_cache: !opts.use_cache,
         ..Config::default()
     };
 

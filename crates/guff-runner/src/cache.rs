@@ -365,10 +365,14 @@ impl IssueCache {
         Ok(())
     }
 
-    /// Self-only content hash of a package (its own files, independent of deps).
+    /// Self-only content hash of a package (its own compiled files).
+    ///
+    /// Ignored/build-tag-excluded files are intentionally omitted (R24.2 I1):
+    /// they do not affect typecheck of `compiled_go_files`, and build-tag
+    /// changes already invalidate via the cache salt. Full per-file
+    /// incremental typecheck remains DEFERRED (Checker is whole-package).
     pub fn self_hash(&self, pkg: &Package) -> Result<String, CacheError> {
         let mut files: Vec<PathBuf> = pkg.compiled_go_files.clone();
-        files.extend(pkg.ignored_files.iter().cloned());
         files.sort();
 
         let mut h = Sha256::new();

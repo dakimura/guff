@@ -184,6 +184,35 @@ pub struct Checker {
     pub mono: crate::mono::MonoGraph,
 }
 
+/// Shared, already-decoded export-data graph for parallel type-checks (R24.3).
+///
+/// Built once via [`Checker::capture_export_seed`] after preloading dependency
+/// `.a` files; each parallel worker clones into a fresh [`Checker`] with
+/// [`Checker::from_seed`] so stdlib/common deps are not re-decoded per package.
+#[derive(Clone)]
+pub struct ExportSeed {
+    types: TypeArena,
+    objects: ObjectArena,
+    scopes: ScopeArena,
+    packages: PackageArena,
+    typ: Vec<TypeId>,
+    universe_scope: ScopeId,
+    unsafe_pkg: PackageId,
+    universe_error: TypeId,
+    universe_any: TypeId,
+    universe_comparable: TypeId,
+    universe_nil: ObjectId,
+    builtins: HashMap<BuiltinId, ObjectId>,
+    import_cache: HashMap<String, PackageId>,
+}
+
+impl ExportSeed {
+    /// Number of packages present in the import cache (deps + unsafe if any).
+    pub fn cached_import_count(&self) -> usize {
+        self.import_cache.len()
+    }
+}
+
 impl Checker {
     /// Create a fresh checker. Takes ownership of a freshly-built universe
     /// (arenas + predeclared tables) and allocates an (initially empty)
@@ -261,6 +290,75 @@ impl Checker {
     /// lives on the checker so `Config` stays a plain data struct.)
     pub fn set_importer(&mut self, importer: Box<dyn crate::importer::Importer>) {
         self.importer = Some(importer);
+    }
+
+    /// Snapshot arenas + import cache after preloading export data, for reuse
+    /// across parallel package checks (R24.3).
+    ///
+    /// The captured package under check (`self.pkg`) is intentionally *not*
+    /// reused — each [`Self::from_seed`] allocates a fresh package.
+    pub fn capture_export_seed(&self) -> ExportSeed {
+        ExportSeed {
+            types: self.types.clone(),
+            objects: self.objects.clone(),
+            scopes: self.scopes.clone(),
+            packages: self.packages.clone(),
+            typ: self.typ.clone(),
+            universe_scope: self.universe_scope,
+            unsafe_pkg: self.unsafe_pkg,
+            universe_error: self.universe_error,
+            universe_any: self.universe_any,
+            universe_comparable: self.universe_comparable,
+            universe_nil: self.universe_nil,
+            builtins: self.builtins.clone(),
+            import_cache: self.import_cache.clone(),
+        }
+    }
+
+    /// Build a checker from a shared [`ExportSeed`], skipping re-decode of the
+    /// preloaded dependency graph.
+    pub fn from_seed(seed: &ExportSeed, conf: Config) -> Checker {
+        let mut packages = seed.packages.clone();
+        let mut scopes = seed.scopes.clone();
+        let pkg = new_package(&mut packages, &mut scopes, seed.universe_scope, "", "");
+        Checker {
+            types: seed.types.clone(),
+            objects: seed.objects.clone(),
+            scopes,
+            packages,
+            typ: seed.typ.clone(),
+            universe_scope: seed.universe_scope,
+            unsafe_pkg: seed.unsafe_pkg,
+            universe_error: seed.universe_error,
+            universe_any: seed.universe_any,
+            universe_comparable: seed.universe_comparable,
+            universe_nil: seed.universe_nil,
+            builtins: seed.builtins.clone(),
+            conf,
+            importer: None,
+            import_cache: seed.import_cache.clone(),
+            sources: HashMap::new(),
+            importing: Vec::new(),
+            ctxt: Context::new(),
+            pkg,
+            info: Info::default(),
+            next_id: 1,
+            errors: Vec::new(),
+            first_err: None,
+            files: Vec::new(),
+            used_vars: std::collections::HashSet::new(),
+            imports: Vec::new(),
+            used_pkg_names: std::collections::HashSet::new(),
+            dot_imported: HashMap::new(),
+            untyped: std::collections::HashMap::new(),
+            obj_map: HashMap::new(),
+            obj_list: Vec::new(),
+            methods: HashMap::new(),
+            delayed: Vec::new(),
+            obj_path: Vec::new(),
+            env: Environment::default(),
+            mono: crate::mono::MonoGraph::default(),
+        }
     }
 
     /// Register the source files of a dependency package under its import path.

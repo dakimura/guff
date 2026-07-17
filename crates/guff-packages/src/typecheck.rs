@@ -16,7 +16,7 @@ use guff_exportdata::ExportImporter;
 use guff_types::api::Config as TypeConfig;
 use guff_types::default_sizes;
 use guff_types::sizes_for;
-use guff_types::Checker;
+use guff_types::{Checker, ExportSeed};
 
 use crate::load_mode::LoadMode;
 use crate::package::{Error, ErrorKind, Package, TypecheckArtifacts};
@@ -107,6 +107,10 @@ pub fn typecheck_packages(
         root_ids.to_vec()
     };
 
+    // Build a shared export-data seed once (R24.3) so parallel checkers clone
+    // already-decoded stdlib/common deps instead of re-decoding per package.
+    let seed = build_export_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env);
+
     // Type-check targets in parallel. Each package resolves its dependencies
     // from on-disk export data (`.a` files) via a private `Checker`/importer —
     // it never reads sibling packages out of `by_id` — so the targets are
@@ -118,7 +122,7 @@ pub fn typecheck_packages(
         .par_iter()
         .filter_map(|id| {
             let mut pkg = (**by_id.get(id)?).clone();
-            typecheck_package(
+            typecheck_package_with_seed(
                 &mut pkg,
                 &fset,
                 &export_paths,
@@ -126,6 +130,7 @@ pub fn typecheck_packages(
                 sizes,
                 env,
                 mode,
+                seed.as_deref(),
             );
             Some((id.clone(), pkg))
         })
@@ -165,22 +170,26 @@ pub fn typecheck_roots(
         .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
         .collect();
 
-    let mut checked: HashMap<String, Arc<Package>> = target_ids
-        .par_iter()
-        .filter_map(|id| {
-            let mut pkg = (**by_id.get(id)?).clone();
-            typecheck_package(
-                &mut pkg,
-                &fset,
-                &export_paths,
-                &dep_graph,
-                sizes,
-                env,
-                mode,
-            );
-            Some((id.clone(), Arc::new(pkg)))
-        })
-        .collect();
+    let mut checked: HashMap<String, Arc<Package>> = {
+        let seed = build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+        target_ids
+            .par_iter()
+            .filter_map(|id| {
+                let mut pkg = (**by_id.get(id)?).clone();
+                typecheck_package_with_seed(
+                    &mut pkg,
+                    &fset,
+                    &export_paths,
+                    &dep_graph,
+                    sizes,
+                    env,
+                    mode,
+                    seed.as_deref(),
+                );
+                Some((id.clone(), Arc::new(pkg)))
+            })
+            .collect()
+    };
 
     target_ids
         .iter()
@@ -202,6 +211,8 @@ fn collect_export_paths(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String
 }
 
 /// Type-check a single loaded package from its `compiled_go_files`.
+///
+/// Equivalent to [`typecheck_package_with_seed`] with no shared seed.
 pub fn typecheck_package(
     pkg: &mut Package,
     fset: &Arc<FileSet>,
@@ -210,6 +221,37 @@ pub fn typecheck_package(
     sizes: guff_types::Sizes,
     env: &TypecheckEnv,
     mode: LoadMode,
+) {
+    typecheck_package_with_seed(
+        pkg,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        None,
+    );
+}
+
+/// Type-check a package, optionally cloning dependency arenas from `seed` (R24.3).
+///
+/// When `seed` is provided, dependency export data is cloned from the shared
+/// seed instead of being re-decoded. An [`ExportImporter`] is still attached so
+/// unexpected late imports can fall back to on-disk `.a` files.
+///
+/// DEFERRED(R24.2): per-file incremental typecheck. Checker is whole-package;
+/// cross-file defs/methods/inits make partial `check_files` incorrect without a
+/// dedicated incremental engine.
+pub fn typecheck_package_with_seed(
+    pkg: &mut Package,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
 ) {
     if pkg.pkg_path == "unsafe" {
         return;
@@ -262,12 +304,16 @@ pub fn typecheck_package(
         return;
     }
 
-    let mut conf = TypeConfig {
+    let conf = TypeConfig {
         sizes: Some(sizes),
         go_version: env.go_version.clone(),
         ..TypeConfig::default()
     };
-    let mut check = Checker::new(conf);
+    let mut check = if let Some(seed) = seed {
+        Checker::from_seed(seed, conf)
+    } else {
+        Checker::new(conf)
+    };
 
     let mut importer = ExportImporter::with_fset(fset.clone());
     for (path, file) in export_paths {
@@ -275,8 +321,10 @@ pub fn typecheck_package(
     }
     check.set_importer(Box::new(importer));
 
-    let mut visiting = Vec::new();
-    preload_exports(&mut check, &pkg.deps, dep_graph, export_paths, &mut visiting);
+    if seed.is_none() {
+        let mut visiting = Vec::new();
+        preload_exports(&mut check, &pkg.deps, dep_graph, export_paths, &mut visiting);
+    }
 
     let files = syntax.clone();
     check.check_files(files);
@@ -320,6 +368,56 @@ pub fn typecheck_package(
     if mode.contains(LoadMode::NEED_TYPES_SIZES) {
         pkg.types_sizes = Some(sizes);
     }
+}
+
+/// Build a shared [`ExportSeed`] covering the union of `targets`' dependency
+/// graphs. Returns `None` when there is nothing useful to preload.
+fn build_export_seed(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    let mut needed: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for id in targets {
+        let Some(pkg) = by_id.get(id) else {
+            continue;
+        };
+        for dep in &pkg.deps {
+            if seen.insert(dep.clone()) {
+                needed.push(dep.clone());
+            }
+        }
+        // Direct imports may not always appear in deps (e.g. incomplete list).
+        for path in pkg.imports.keys() {
+            if seen.insert(path.clone()) {
+                needed.push(path.clone());
+            }
+        }
+    }
+    needed.retain(|p| p != "unsafe" && p != "C" && export_paths.contains_key(p));
+    if needed.is_empty() {
+        return None;
+    }
+    needed.sort();
+
+    let conf = TypeConfig {
+        sizes: Some(env.sizes()),
+        go_version: env.go_version.clone(),
+        ..TypeConfig::default()
+    };
+    let mut check = Checker::new(conf);
+    let mut importer = ExportImporter::with_fset(fset.clone());
+    for (path, file) in export_paths {
+        importer.set_path(path.clone(), file.clone());
+    }
+    check.set_importer(Box::new(importer));
+    let mut visiting = Vec::new();
+    preload_exports(&mut check, &needed, dep_graph, export_paths, &mut visiting);
+    Some(Arc::new(check.capture_export_seed()))
 }
 
 /// Depth-first preload of dependency export data so nested `read()` calls find
@@ -496,5 +594,63 @@ mod tests {
             "typecheck with export dep failed: {:?}",
             pkg.errors
         );
+    }
+
+    #[test]
+    fn export_seed_roundtrip_matches_unseeded() {
+        let dep_export = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../guff-exportdata/tests/testdata/export/simple/simple.a");
+        let dir = testdata("withdep");
+        let dep_id = "example.com/simple".to_string();
+
+        let mut export_paths = HashMap::new();
+        export_paths.insert(dep_id.clone(), dep_export);
+        let dep_graph = HashMap::from([(dep_id.clone(), Vec::<String>::new())]);
+
+        let mut by_id = HashMap::new();
+        let mut pkg_a = package_from_dir("example.com/withdep_a", &dir);
+        pkg_a.id = "example.com/withdep_a".into();
+        pkg_a.pkg_path = "example.com/withdep_a".into();
+        pkg_a.deps = vec![dep_id.clone()];
+        by_id.insert(pkg_a.id.clone(), Arc::new(pkg_a));
+
+        let fset = FileSet::new();
+        let env = TypecheckEnv::default();
+        let seed = build_export_seed(
+            &["example.com/withdep_a".into()],
+            &by_id,
+            &export_paths,
+            &dep_graph,
+            &fset,
+            &env,
+        )
+        .expect("seed");
+        assert!(seed.cached_import_count() >= 1);
+
+        let mut seeded = (**by_id.get("example.com/withdep_a").unwrap()).clone();
+        typecheck_package_with_seed(
+            &mut seeded,
+            &fset,
+            &export_paths,
+            &dep_graph,
+            default_sizes(),
+            &env,
+            LoadMode::LOAD_SYNTAX,
+            Some(seed.as_ref()),
+        );
+        assert!(!seeded.ill_typed, "seeded: {:?}", seeded.errors);
+
+        let mut plain = package_from_dir("example.com/withdep_b", &dir);
+        plain.deps = vec![dep_id];
+        typecheck_package(
+            &mut plain,
+            &fset,
+            &export_paths,
+            &dep_graph,
+            default_sizes(),
+            &env,
+            LoadMode::LOAD_SYNTAX,
+        );
+        assert!(!plain.ill_typed, "plain: {:?}", plain.errors);
     }
 }

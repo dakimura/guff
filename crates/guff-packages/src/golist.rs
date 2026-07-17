@@ -47,10 +47,14 @@ impl From<GoListError> for crate::LoadError {
 }
 
 /// Loads packages by invoking `go list -json`.
+///
+/// Warm runs reuse a disk cache of the stdout under `$GUFF_CACHE/golist/`
+/// (R24.4) when the go.mod/sum fingerprint, args, and env are unchanged and
+/// every cached `Export` path still exists on disk.
 pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, GoListError> {
     let mode = cfg.effective_mode();
     let args = golist_args(cfg, patterns, 0);
-    let stdout = invoke_go(cfg, &args)?;
+    let stdout = load_or_invoke_go(cfg, patterns, &args)?;
 
     let mut response = DriverResponse::default();
     let env = cfg.resolved_env();
@@ -110,6 +114,211 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
 
     let _ = mode; // mode informs golist_args; refine clears fields later.
     Ok(response)
+}
+
+fn load_or_invoke_go(
+    cfg: &Config,
+    patterns: &[String],
+    args: &[String],
+) -> Result<String, GoListError> {
+    if let Some(cached) = try_load_golist_cache(cfg, patterns, args) {
+        if export_paths_exist(&cached) {
+            return Ok(cached);
+        }
+    }
+    let stdout = invoke_go(cfg, args)?;
+    store_golist_cache(cfg, patterns, args, &stdout);
+    Ok(stdout)
+}
+
+const GOLIST_CACHE_VERSION: &str = "golist-v1";
+
+fn golist_cache_enabled(cfg: &Config) -> bool {
+    if cfg.disable_cache {
+        return false;
+    }
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        if let Ok(v) = std::env::var(key) {
+            if v == "off" {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn guff_cache_dir() -> Option<PathBuf> {
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        if let Ok(v) = std::env::var(key) {
+            if v.is_empty() || v == "off" {
+                continue;
+            }
+            let p = PathBuf::from(&v);
+            if p.is_absolute() {
+                return Some(p);
+            }
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("guff"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join("Library/Caches/guff"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return std::env::var_os("LOCALAPPDATA").map(|h| PathBuf::from(h).join("guff"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/guff"));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
+}
+
+fn golist_cache_key(cfg: &Config, patterns: &[String], args: &[String]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(GOLIST_CACHE_VERSION.as_bytes());
+    h.update(b"\n");
+    h.update(format!("dir={}\n", cfg.dir.display()).as_bytes());
+    h.update(format!("tests={}\n", cfg.tests).as_bytes());
+    h.update(format!("mode={:?}\n", cfg.effective_mode()).as_bytes());
+
+    let mut flags = cfg.build_flags.clone();
+    flags.sort();
+    for f in &flags {
+        h.update(format!("flag={f}\n").as_bytes());
+    }
+
+    let mut pats = patterns.to_vec();
+    if pats.is_empty() {
+        pats.push(".".into());
+    }
+    pats.sort();
+    for p in &pats {
+        h.update(format!("pat={p}\n").as_bytes());
+    }
+
+    for a in args {
+        h.update(format!("arg={a}\n").as_bytes());
+    }
+
+    // Fingerprint go.mod / go.sum near cfg.dir (walk up a few levels).
+    if let Some(mod_dir) = find_go_mod_dir(&cfg.dir) {
+        for name in ["go.mod", "go.sum"] {
+            let path = mod_dir.join(name);
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    h.update(format!("file={name}\n").as_bytes());
+                    h.update(&bytes);
+                    h.update(b"\n");
+                }
+                Err(_) => {
+                    h.update(format!("file={name}=missing\n").as_bytes());
+                }
+            }
+        }
+    }
+
+    // Env subset that affects `go list` / export paths.
+    let env = cfg.resolved_env();
+    let mut interesting: Vec<(String, String)> = Vec::new();
+    for entry in &env {
+        if let Some((k, v)) = entry.split_once('=') {
+            if matches!(
+                k,
+                "GOOS" | "GOARCH" | "CGO_ENABLED" | "GOTOOLCHAIN" | "GOROOT" | "GOFLAGS" | "GOVERSION"
+            ) {
+                interesting.push((k.to_string(), v.to_string()));
+            }
+        }
+    }
+    interesting.sort();
+    for (k, v) in interesting {
+        h.update(format!("env {k}={v}\n").as_bytes());
+    }
+
+    hex_encode(&h.finalize())
+}
+
+fn find_go_mod_dir(start: &Path) -> Option<PathBuf> {
+    let mut cur = if start.as_os_str().is_empty() {
+        std::env::current_dir().ok()?
+    } else {
+        start.to_path_buf()
+    };
+    for _ in 0..32 {
+        if cur.join("go.mod").is_file() {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn golist_cache_path(key: &str) -> Option<PathBuf> {
+    let dir = guff_cache_dir()?;
+    let prefix = key.get(..2).unwrap_or("00");
+    Some(dir.join("golist").join(prefix).join(format!("{key}.json")))
+}
+
+fn try_load_golist_cache(cfg: &Config, patterns: &[String], args: &[String]) -> Option<String> {
+    if !golist_cache_enabled(cfg) {
+        return None;
+    }
+    let key = golist_cache_key(cfg, patterns, args);
+    let path = golist_cache_path(&key)?;
+    std::fs::read_to_string(path).ok()
+}
+
+fn store_golist_cache(cfg: &Config, patterns: &[String], args: &[String], stdout: &str) {
+    if !golist_cache_enabled(cfg) {
+        return;
+    }
+    let key = golist_cache_key(cfg, patterns, args);
+    let Some(path) = golist_cache_path(&key) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, stdout).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// Returns false when any non-empty Export path in the cached stdout is missing
+/// (GOCACHE may have been cleaned independently of GUFF_CACHE).
+fn export_paths_exist(stdout: &str) -> bool {
+    let stream = serde_json::Deserializer::from_str(stdout).into_iter::<JsonPackage>();
+    for item in stream {
+        let Ok(p) = item else {
+            return false;
+        };
+        if !p.export.is_empty() && !Path::new(&p.export).exists() {
+            return false;
+        }
+    }
+    true
+}
+
+fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn json_package_to_package(p: &JsonPackage, cfg: &Config) -> Result<Package, GoListError> {
@@ -649,5 +858,44 @@ mod tests {
             ..Config::default()
         };
         assert!(uses_export_data(&cfg));
+    }
+
+    #[test]
+    fn golist_cache_key_stable_and_sensitive() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/golist");
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS,
+            dir: dir.clone(),
+            disable_cache: false,
+            ..Config::default()
+        };
+        let pats = vec![".".to_string()];
+        let args = golist_args(&cfg, &pats, 0);
+        let k1 = golist_cache_key(&cfg, &pats, &args);
+        let k2 = golist_cache_key(&cfg, &pats, &args);
+        assert_eq!(k1, k2);
+        assert_eq!(k1.len(), 64);
+
+        let cfg2 = Config {
+            tests: true,
+            ..cfg.clone()
+        };
+        let args2 = golist_args(&cfg2, &pats, 0);
+        let k3 = golist_cache_key(&cfg2, &pats, &args2);
+        assert_ne!(k1, k3);
+
+        let cfg3 = Config {
+            disable_cache: true,
+            ..cfg
+        };
+        assert!(!golist_cache_enabled(&cfg3));
+    }
+
+    #[test]
+    fn export_paths_exist_rejects_missing() {
+        let stdout = r#"{"ImportPath":"x","Export":"/nonexistent/guff-export-missing.a"}"#;
+        assert!(!export_paths_exist(stdout));
+        let stdout_ok = r#"{"ImportPath":"x","Export":""}"#;
+        assert!(export_paths_exist(stdout_ok));
     }
 }

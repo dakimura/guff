@@ -31,5 +31,6 @@ pub use package::{
 };
 pub use preset::load_for_go_analysis;
 pub use typecheck::{
-    needs_typecheck, typecheck_package, typecheck_packages, typecheck_roots, TypecheckEnv,
+    needs_typecheck, typecheck_package, typecheck_package_with_seed, typecheck_packages,
+    typecheck_roots, TypecheckEnv,
 };
