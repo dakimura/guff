@@ -830,6 +830,14 @@ impl DecorderOptions {
     }
 }
 
+/// `linters.settings.iotamixing` / `linters-settings.iotamixing`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct IotamixingOptions {
+    /// Report each valued const instead of the whole `const` block
+    /// (golangci / upstream `report-individual`, default false).
+    pub report_individual: bool,
+}
+
 /// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterfacebloatOptions {

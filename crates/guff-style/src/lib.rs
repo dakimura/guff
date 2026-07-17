@@ -28,6 +28,7 @@
 //! - [`paralleltest`]
 //! - [`tparallel`]
 //! - [`intrange`]
+//! - [`iotamixing`]
 //! - [`tagliatelle`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
@@ -93,6 +94,7 @@ mod paralleltest;
 mod testpackage;
 mod tparallel;
 mod intrange;
+mod iotamixing;
 mod tagliatelle;
 mod reassign;
 mod recvcheck;
@@ -121,7 +123,8 @@ pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
     FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
-    InamedparamOptions, InterfacebloatOptions, LllOptions, LoggercheckOptions, MndOptions,
+    InamedparamOptions, InterfacebloatOptions, IotamixingOptions, LllOptions, LoggercheckOptions,
+    MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
     NonamedreturnsOptions, ParalleltestOptions, PerfsprintOptions, PreallocOptions,
     PredeclaredOptions, ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions,
@@ -154,6 +157,7 @@ pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
 pub use tparallel::analyzer as tparallel;
 pub use intrange::analyzer as intrange;
+pub use iotamixing::analyzer as iotamixing;
 pub use tagliatelle::analyzer as tagliatelle;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
@@ -216,6 +220,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         testpackage(),
         tparallel(),
         intrange(),
+        iotamixing(),
         tagliatelle(),
         goprintffuncname(),
         funlen(),

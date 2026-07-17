@@ -1164,6 +1164,19 @@ fn parse_v2_decorder_settings() {
 }
 
 #[test]
+fn parse_v2_iotamixing_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_iotamixing_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.iotamixing.report_individual);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::IotamixingOptions>("iotamixing")
+        .expect("iotamixing options");
+    assert!(opts.report_individual);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

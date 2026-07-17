@@ -8,11 +8,80 @@ use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, iface,
-    inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag, nakedret,
-    nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc,
-    predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle, testifylint, testpackage,
-    thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    inamedparam, interfacebloat, intrange, iotamixing, lll, loggercheck, mnd, modernize, musttag,
+    nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint,
+    prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle, testifylint,
+    testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn iotamixing_flags_mixed_const_block() {
+    let pkg = support::typecheck_fixture("iotamixing", "example.com/iotamixing", "bad.go");
+    let messages = support::run_analyzer(iotamixing(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("iota mixing. keep iotas in separate blocks to consts with r-val")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn iotamixing_allows_separated_blocks() {
+    let pkg = support::typecheck_fixture("iotamixing", "example.com/iotamixing/ok", "ok.go");
+    let messages = support::run_analyzer(iotamixing(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn iotamixing_report_individual() {
+    use guff_style::IotamixingOptions;
+
+    let pkg =
+        support::typecheck_fixture("iotamixing", "example.com/iotamixing/settings", "settings.go");
+
+    let block = support::run_analyzer(iotamixing(), &pkg);
+    assert_eq!(block.len(), 1, "{block:?}");
+    assert!(
+        block[0].contains("iota mixing. keep iotas in separate blocks to consts with r-val"),
+        "{block:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "iotamixing",
+        IotamixingOptions {
+            report_individual: true,
+        },
+    );
+    let individual = support::run_analyzer_with_settings(
+        iotamixing(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        individual
+            .iter()
+            .any(|m| m.contains("Above is a const with r-val")),
+        "{individual:?}"
+    );
+    assert!(
+        individual
+            .iter()
+            .any(|m| m.contains("Between is a const with r-val")),
+        "{individual:?}"
+    );
+    assert!(
+        individual
+            .iter()
+            .any(|m| m.contains("Below is a const with r-val")),
+        "{individual:?}"
+    );
+    assert_eq!(individual.len(), 3, "{individual:?}");
+}
 
 #[test]
 fn decorder_flags_multiple_decls_order_and_late_init() {

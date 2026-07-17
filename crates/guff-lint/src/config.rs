@@ -870,7 +870,7 @@ const STYLE_PRESET: &[&str] = &[
     "forcetypeassert", "ginkgolinter", "gochecknoglobals", "gochecknoinits", "goconst",
     "gocritic", "godoclint", "godot", "godox", "goheader", "gomoddirectives", "gomodguard",
     "goprintffuncname", "gosimple", "grouper", "iface", "importas", "inamedparam",
-    "interfacebloat", "intrange", "ireturn", "lll", "loggercheck", "makezero", "mirror",
+    "interfacebloat", "intrange", "iotamixing", "ireturn", "lll", "loggercheck", "makezero", "mirror",
     "misspell", "mnd", "musttag", "nakedret", "nilnil", "nlreturn", "nolintlint",
     "nonamedreturns", "nosprintfhostport", "paralleltest", "predeclared", "promlinter",
     "revive", "sloglint", "stylecheck", "tagalign", "tagliatelle", "testpackage",

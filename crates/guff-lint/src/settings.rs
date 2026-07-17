@@ -72,6 +72,7 @@ pub struct LinterSettings {
     pub testpackage: TestpackageSettings,
     pub tagliatelle: TagliatelleSettings,
     pub decorder: DecorderSettings,
+    pub iotamixing: IotamixingSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1135,6 +1136,22 @@ impl DecorderSettings {
     }
 }
 
+/// `linters.settings.iotamixing` / `linters-settings.iotamixing`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct IotamixingSettings {
+    /// Report each valued const instead of the whole block (default false).
+    #[serde(default, rename = "report-individual")]
+    pub report_individual: bool,
+}
+
+impl IotamixingSettings {
+    pub fn to_guff_iotamixing(&self) -> guff_style::IotamixingOptions {
+        guff_style::IotamixingOptions {
+            report_individual: self.report_individual,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1586,6 +1603,11 @@ impl LinterSettings {
                 out.decorder = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("iotamixing".into())) {
+            if let Ok(s) = serde_yaml::from_value::<IotamixingSettings>(v.clone()) {
+                out.iotamixing = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1669,6 +1691,7 @@ impl LinterSettings {
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());
         bag.insert("decorder", self.decorder.to_guff_decorder());
+        bag.insert("iotamixing", self.iotamixing.to_guff_iotamixing());
         Arc::new(bag)
     }
 
