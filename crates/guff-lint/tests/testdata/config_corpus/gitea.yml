@@ -1,4 +1,6 @@
-# Snapshot based on gitea `.golangci.yml` (golangci-lint v2).
+# Snapshot based on go-gitea/gitea (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/go-gitea/gitea/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 output:
   sort-order:

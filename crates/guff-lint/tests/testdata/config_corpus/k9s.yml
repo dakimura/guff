@@ -1,50 +1,37 @@
-# Snapshot based on golangci/golangci-lint (golangci-lint v2).
-# Source: https://raw.githubusercontent.com/golangci/golangci-lint/main/.golangci.yml
+# Snapshot based on derailed/k9s (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/derailed/k9s/master/.golangci.yml
 # Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
-# This configuration file is not a recommendation.
-#
-# We intentionally use a limited set of linters.
-# This configuration file is used with different version of golangci-lint to avoid regressions:
-# the linters can change between version,
-# their configuration may be not compatible or their reports can be different,
-# and this can break some of our tests.
-# Also, some linters are not relevant for the project (e.g. linters related to SQL).
-#
-# We have specific constraints, so we use a specific configuration.
-#
-# See the file `.golangci.reference.yml` to have a list of all available configuration options.
-
 version: "2"
 
+run:
+  allow-parallel-runners: true
+
+  # timeout for analysis, e.g. 30s, 5m, default is 1m
+  timeout: 5m
+
+  # exit code when at least one issue was found, default is 1
+  issues-exit-code: 1
+  tests: true
+
 linters:
-  default: none
-  # This list of linters is not a recommendation (same thing for all this configuration file).
-  # We intentionally use a limited set of linters.
-  # See the comment on top of this file.
+  disable:
+    - staticcheck
   enable:
+    - sloglint
     - bodyclose
     - copyloopvar
     - depguard
-    - dogsled
-    - dupl
     - errcheck
     - errorlint
-    - funlen
     - gocheckcompilerdirectives
-    - gochecknoinits
-    - goconst
     - gocritic
-    - gocyclo
     - godox
-    - mnd
     - goprintffuncname
     - gosec
     - govet
     - intrange
     - ineffassign
-    - lll
     - misspell
-    - nakedret
     - noctx
     - nolintlint
     - revive
@@ -54,8 +41,39 @@ linters:
     - unparam
     - unused
     - whitespace
+    - gocyclo
+    - funlen
+    - goconst
+    - dogsled
+    - lll
 
   settings:
+    dogsled:
+      max-blank-identifiers: 3
+
+    gosec:
+      excludes:
+        - G109
+        - G115
+        - G204
+        - G303
+
+    sloglint:
+      no-mixed-args: true
+      kv-only: true
+      attr-only: false
+      no-global: ""
+      context: ""
+      static-msg: false
+      no-raw-keys: true
+      key-naming-case: camel
+      forbidden-keys:
+        - time
+        - level
+        - msg
+        - source
+      args-on-sep-lines: false
+
     depguard:
       rules:
         logger:
@@ -68,17 +86,24 @@ linters:
             - pkg: "github.com/instana/testify"
               desc: It's a fork of github.com/stretchr/testify.
           files:
-            # logrus is allowed to use only in logutils package.
             - "!**/pkg/logutils/**.go"
+
     dupl:
       threshold: 100
+
     funlen:
-      lines: -1 # the number of lines (code + empty lines) is not a right metric and leads to code without empty line or one-liner.
-      statements: 50
+      lines: -1
+      statements: 60
+
     goconst:
       min-len: 2
       min-occurrences: 3
-      ignore-tests: true
+      ignore-string-values:
+        - blee
+        - duh
+        - cl-1
+        - ct-1-1
+
     gocritic:
       enabled-tags:
         - diagnostic
@@ -91,13 +116,15 @@ linters:
         - ifElseChain
         - octalLiteral
         - whyNoLint
+
     gocyclo:
-      min-complexity: 15
+      min-complexity: 35
+
     godox:
       keywords:
         - FIXME
+
     mnd:
-      # don't include the "operation" and "assign"
       checks:
         - argument
         - case
@@ -110,6 +137,7 @@ linters:
         - '3'
       ignored-functions:
         - strings.SplitN
+
     govet:
       settings:
         printf:
@@ -121,18 +149,23 @@ linters:
       enable:
         - nilness
         - shadow
+
     errorlint:
       asserts: false
+
     lll:
-      line-length: 140
+      line-length: 170
+
     misspell:
       locale: US
       ignore-rules:
-        - "importas" # linter name
+        - "importas"
+
     nolintlint:
-      allow-unused: false # report any unused nolint directives
-      require-explanation: true # require an explanation for nolint directives
-      require-specific: true # require nolint directives to be specific about which linter is being skipped
+      allow-unused: false
+      require-explanation: false
+      require-specific: true
+
     revive:
       rules:
         - name: indent-error-flow
@@ -159,35 +192,6 @@ linters:
           - dupl
           - mnd
           - lll
-          - goconst
-
-      - path: pkg/commands/internal/migrate/.+
-        linters:
-          - goconst
-
-      - path: scripts/website/dump_info/thanks.go
-        linters:
-          - goconst
-
-      - path: pkg/result/processors/.+
-        text: "string `(go\\.mod|errcheck|revive|gosec|error|high)` has \\d+ occurrences, make it a constant"
-        linters:
-          - goconst
-
-      - path: pkg/commands/.+
-        text: "string `(\\(devel\\)|unknown)` has \\d+ occurrences, make it a constant"
-        linters:
-          - goconst
-
-      - path: pkg/printers/.+
-        text: "string `(golangci-lint|warning)` has \\d+ occurrences, make it a constant"
-        linters:
-          - goconst
-
-      - path: pkg/config/output(_test)?.go
-        text: "string `(file|linter|severity)` has \\d+ occurrences, make it a constant"
-        linters:
-          - goconst
 
       # Based on existing code, the modifications should be limited to make maintenance easier.
       - path: pkg/golinters/unused/unused.go
@@ -203,11 +207,6 @@ linters:
       - path: scripts/website/expand_templates/linters_test.go
         linters: [gosec]
         text: "G306: Expect WriteFile permissions to be 0600 or less"
-
-      # For compatibility with previous versions.
-      # Also, those reports are not relevant.
-      - linters: [gosec]
-        text: "(G704: SSRF via taint analysis|G703: Path traversal via taint analysis|G702: Command injection via taint analysis|G115: integer overflow conversion uintptr)"
 
       # Related to migration command.
       - path: pkg/commands/internal/migrate/two/
@@ -225,33 +224,9 @@ linters:
         linters:
           - dupl
 
-      # Deprecated linters
-      - path: pkg/lint/lintersdb/builder_linter.go
-        text: "SA1019: wsl.NewV4 is deprecated: use NewV5 instead."
-        linters:
-          - staticcheck
-      - path: pkg/golinters/wsl/wsl.go
-        text: "SA1019: config.WSLv4Settings is deprecated: use WSLv5Settings instead."
-        linters:
-          - staticcheck
-      - path: pkg/golinters/gomodguard/gomodguard.go
-        text: "SA1019: config.GoModGuardSettings is deprecated: use GoModGuardv2Settings instead."
-        linters:
-          - staticcheck
-      - path: pkg/golinters/exhaustruct/exhaustruct.go
-        text: "SA1019: config.ExhaustructSettings is deprecated: use ExhaustructV5Settings instead."
-        linters:
-          - staticcheck
-      - path: pkg/golinters/gomodguard/
-        linters:
-          - dupl
-      - path: pkg/golinters/goconst/goconst.go
-        text: "SA1019: settings.IgnoreCalls is deprecated: use ExcludeTypes instead."
-        linters:
-          - staticcheck
-
 formatters:
   enable:
+    - gci
     - gofmt
     - goimports
   settings:

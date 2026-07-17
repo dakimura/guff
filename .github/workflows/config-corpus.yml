@@ -1,0 +1,24 @@
+name: Config corpus (R22)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/guff-lint/**"
+      - ".github/workflows/config-corpus.yml"
+  pull_request:
+    paths:
+      - "crates/guff-lint/**"
+      - ".github/workflows/config-corpus.yml"
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Parse OSS .golangci.yml corpus
+        run: cargo test -p guff-lint --test config_test parse_golangci_config_corpus

@@ -1,4 +1,6 @@
-# Snapshot based on tailscale `.golangci.yml` (golangci-lint v2).
+# Snapshot based on tailscale/tailscale (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/tailscale/tailscale/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 # Configuration for how we run golangci-lint
 # Timeout of 5m was the default in v1.

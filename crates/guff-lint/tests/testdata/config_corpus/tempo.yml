@@ -1,0 +1,80 @@
+# Snapshot based on grafana/tempo (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/grafana/tempo/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
+version: "2"
+run:
+  concurrency: 16
+  issues-exit-code: 1
+  tests: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true
+
+linters:
+  enable:
+    - errorlint
+    - forbidigo
+    - gocritic
+    - gosec
+    - goconst
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        - (github.com/go-kit/kit/log.Logger).Log
+        - (github.com/go-kit/log.Logger).Log
+    errorlint:
+      errorf: false
+    gosec:
+      excludes:
+        - G115
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - forbidigo
+        path: cmd
+      - linters:
+          - unused
+        path: integration/e2e
+      - path: (.+)\.go$
+        text: Error return value of .*log\.Logger\)\.Log\x60 is not checked
+      - path: (.+)\.go$
+        text: package github.com/golang/protobuf/proto is deprecated
+      - path: (.+)\.go$
+        text: package github.com/golang/protobuf/jsonpb is deprecated
+      - linters:
+          - goconst
+          - gosec
+          - forbidigo
+        path: (.+)_test\.go
+      - linters:
+          - revive
+        text: 'var-naming: avoid meaningless package names'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

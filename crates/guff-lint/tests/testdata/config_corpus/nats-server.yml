@@ -1,4 +1,6 @@
-# Snapshot based on nats-server `.golangci.yml` (golangci-lint v2).
+# Snapshot based on nats-io/nats-server (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/nats-io/nats-server/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 run:
   concurrency: 4

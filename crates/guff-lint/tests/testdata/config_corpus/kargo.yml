@@ -1,4 +1,6 @@
-# Snapshot based on akuity/kargo `.golangci.yaml` (golangci-lint v2).
+# Snapshot based on akuity/kargo (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/akuity/kargo/main/.golangci.yaml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 run:
   # Go version to use for running golangci-lint

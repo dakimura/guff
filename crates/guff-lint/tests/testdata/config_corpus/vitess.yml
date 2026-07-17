@@ -1,4 +1,6 @@
-# Snapshot based on vitess `.golangci.yml` (golangci-lint v2).
+# Snapshot based on vitessio/vitess (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/vitessio/vitess/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 run:
   go: "1.26"

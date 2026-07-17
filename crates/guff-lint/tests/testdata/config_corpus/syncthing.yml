@@ -1,0 +1,102 @@
+# Snapshot based on syncthing/syncthing (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/syncthing/syncthing/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
+version: "2"
+linters:
+  default: all
+  disable:
+    - cyclop
+    - depguard
+    - err113
+    - exhaustive
+    - exhaustruct
+    - forbidigo
+    - funcorder
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocyclo
+    - godot
+    - godox
+    - gomoddirectives
+    - inamedparam
+    - interfacebloat
+    - ireturn
+    - lll
+    - maintidx
+    - mnd
+    - musttag
+    - nestif
+    - nlreturn
+    - noinlineerr
+    - nonamedreturns
+    - paralleltest
+    - prealloc
+    - predeclared
+    - protogetter
+    - recvcheck
+    - revive
+    - tagalign
+    - tagliatelle
+    - testpackage
+    - usetesting # go 1.24
+    - varnamelen
+    - whitespace
+    - wrapcheck
+    - wsl
+    - wsl_v5
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - internal/gen
+      - internal/db/olddb
+      - cmd/dev
+      - repos
+      - third_party$
+      - builtin$
+      - examples$
+      - _test\.go$
+    rules:
+      # relax the slog rules for debug lines, for now
+      - linters: [sloglint]
+        source: Debug
+      # contexts are irrelevant for SQLite
+      - linters: [noctx]
+        text: database/sql
+      # Rollback errors can be ignored
+      - linters: [errcheck]
+        source: Rollback
+      # Embedded fields named in selectors may add clarity
+      - linters: [staticcheck]
+        text: QF1008
+      # Don't necessarily rewrite !(foo || bar) to !foo && !bar
+      - linters: [staticcheck]
+        text: QF1001
+      # Don't necessarily pass the context just for the sake of the logger
+      - linters: [contextcheck]
+        text: "->log`"
+  settings:
+    sloglint:
+      context: "scope"
+      static-msg: true
+      msg-style: capitalized
+      key-naming-case: camel
+formatters:
+  enable:
+    - gofumpt
+  exclusions:
+    generated: lax
+    paths:
+      - internal/gen
+      - cmd/dev
+      - repos
+      - third_party$
+      - builtin$
+      - examples$

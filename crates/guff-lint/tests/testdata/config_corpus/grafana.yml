@@ -1,4 +1,6 @@
-# Snapshot based on grafana/grafana `.golangci.yml` (golangci-lint v2).
+# Snapshot based on grafana/grafana (golangci-lint v2).
+# Source: https://raw.githubusercontent.com/grafana/grafana/main/.golangci.yml
+# Captured: 2026-07-17. Upstream may diverge; refresh via SOURCES.md.
 version: "2"
 
 run:

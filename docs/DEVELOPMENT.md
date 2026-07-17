@@ -167,7 +167,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 |------|------|------------------------------------|
 | サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines / swaggo（`exclusions.generated` lax/strict/disable）。`run` でも `formatters.enable` があれば整形診断を出す |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **14** 件をパース検証 | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **52** 件をパース検証（CI ゲート） | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + text（`line-number` 別名）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。`format:path` / config `path` でファイル書き出し | — |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
@@ -426,18 +426,21 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **DEFERRED**: `--oss` コーパスの本格拡張、ineffassign 多報告・ST1000 既定差のパリティ。
 - **テスト**: `python3 -m unittest discover -s compat/tests` + `./compat/smoke.sh`。
 
-#### R22. `.golangci.yml` コーパスのパース検証 🟡 部分完了 (2026-07-17)
+#### R22. `.golangci.yml` コーパスのパース検証 ✅ 完了 (2026-07-17)
 - 実在の `.golangci.yml`（有名 OSS のもの）を集めて、**パースエラー 0** を保証するテスト。
-- **進捗メモ (2026-07-16)**: `crates/guff-lint/tests/testdata/config_corpus/` を追加し、
-  Prometheus / Grafana 由来の golangci-lint v2 設定 snapshot を `parse_config_str` →
-  `linter_selection` → `effective_issues` まで通す smoke test を追加。未知キー
-  （`run.allow-parallel-runners` / `formatters.exclusions` 等）は serde の既存挙動で許容。
-- **進捗メモ (2026-07-17)**: コーパスを **14** 件に拡張（Gitea / MinIO / NATS Server /
-  Tailscale / Vitess / HashiCorp Consul / Helm / Moby / golangci-lint / Basecamp CLI /
-  Kargo / Telegraf 追加）。各 snapshot は upstream
-  `.golangci.yml` をそのまま取り込み、先頭に出典コメントを付与。`parse_golangci_config_corpus`
-  が全件を走査。v1 設定（Traefik 等）は v2 専用コーパスから除外。
-  **DEFERRED**: 数十件へのさらなる拡張、CI ゲート化、出典 URL/更新手順の体系化。
+- **実装**: `crates/guff-lint/tests/testdata/config_corpus/` に golangci-lint v2 設定
+  snapshot **52** 件（Prometheus / Grafana / Gitea / MinIO / NATS / Tailscale / Vitess /
+  Consul / Helm / Moby / golangci-lint / Basecamp CLI / Kargo / Telegraf / Caddy /
+  Traefik / Cilium / Argo CD / Vault / Nomad / Loki / Mimir / Tempo / Thanos /
+  containerd / buildkit / compose / Trivy / Cosign / goreleaser ほか）。各ファイル先頭に
+  出典 URL + キャプチャ日。`SOURCES.md` に refresh / 追加手順。
+  `parse_golangci_config_corpus` が全件を `parse_config_str` → `linter_selection` →
+  `effective_issues` まで検証（下限 50 件）。CI ゲート:
+  `.github/workflows/config-corpus.yml`。
+- **完了条件**: パースエラー 0・コーパス拡張・CI ゲート・出典/更新手順 — 満たした。
+- **DEFERRED**: さらに大規模な自動同期（定期 upstream pull）、v1 コーパス（migrate 用）の
+  別ディレクトリ化。
+- **テスト**: `cargo test -p guff-lint --test config_test parse_golangci_config_corpus`。
 
 #### R23. 互換性マトリクスの公開
 - どの linter・どの設定キー・どの出力フォーマットが「対応済/部分/未対応」かを表にして README/本書に載せる。

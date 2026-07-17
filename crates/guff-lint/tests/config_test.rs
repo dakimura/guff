@@ -171,7 +171,13 @@ fn parse_golangci_config_corpus() {
         })
         .collect::<Vec<_>>();
     entries.sort();
-    assert!(!entries.is_empty(), "config corpus should not be empty");
+    // Keep the floor in sync with docs/DEVELOPMENT.md §8 R22 when intentionally
+    // shrinking; growing the corpus does not require a bump here.
+    assert!(
+        entries.len() >= 50,
+        "config corpus too small ({} entries); see testdata/config_corpus/SOURCES.md",
+        entries.len()
+    );
 
     for path in entries {
         let contents = fs::read_to_string(&path).unwrap();
