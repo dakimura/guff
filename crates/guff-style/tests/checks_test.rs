@@ -20,7 +20,12 @@ fn gosec_flags_weak_crypto_rand_unsafe_and_blocklist_imports() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec", "bad.go");
     let messages = support::run_analyzer(gosec(), &pkg);
     for needle in [
+        "G102:",
         "G103:",
+        "G106:",
+        "G108:",
+        "G114:",
+        "G204:",
         "G401:",
         "G404:",
         "G405:",

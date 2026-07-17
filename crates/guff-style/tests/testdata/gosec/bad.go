@@ -5,12 +5,18 @@ import (
 	"crypto/md5"
 	"crypto/rc4"
 	"crypto/sha1"
+	"crypto/tls"
 	"math/rand"
+	"net"
+	"net/http"
 	"net/http/cgi"
+	_ "net/http/pprof"
+	"os/exec"
 	"unsafe"
 
 	"golang.org/x/crypto/md4"
 	"golang.org/x/crypto/ripemd160"
+	"golang.org/x/crypto/ssh"
 )
 
 func bad() {
@@ -24,4 +30,11 @@ func bad() {
 	var x uintptr
 	_ = unsafe.Pointer(x)
 	_ = cgi.RequestFromMap(nil)
+
+	_ = ssh.InsecureIgnoreHostKey()
+	_ = http.ListenAndServe(":8080", nil)
+	_, _ = net.Listen("tcp", "0.0.0.0:8080")
+	_, _ = tls.Listen("tcp", ":8443", nil)
+	cmd := "ls"
+	_ = exec.Command(cmd)
 }
