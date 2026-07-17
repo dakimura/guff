@@ -4,6 +4,7 @@
 //! Remaining (swaggo) is DEFERRED → R15.
 
 mod gci;
+mod generated;
 mod gofmt;
 mod gofumpt;
 mod goimports;
@@ -12,6 +13,7 @@ mod meta;
 mod runner;
 
 pub use gci::{Gci, GciOptions};
+pub use generated::{is_generated, GeneratedMode};
 pub use gofmt::{Gofmt, GofmtOptions, RewriteRule};
 pub use gofumpt::{Gofumpt, GofumptOptions};
 pub use goimports::{Goimports, GoimportsOptions};

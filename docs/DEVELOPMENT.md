@@ -159,7 +159,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines（swaggo は DEFERRED） |
+| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines（`exclusions.generated` lax/strict/disable；swaggo は DEFERRED） |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **14** 件をパース検証 | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
@@ -322,8 +322,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **残**: revive の未実装 rule、`gocyclo:ignore` / `gocognit:ignore` 等のコメント除外、tagalign StrictStyle、wsl(v4) 完全パリティ、各種 SuggestedFix。
 
 #### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド）🟡 部分完了 (2026-07-17)
-- gofmt / gofumpt / goimports / gci / golines をシステムバイナリ経由で実装。enable 順チェーン、generated スキップ、`formatters.enable` / `settings` / `exclusions.paths` 配線。フラグ: `-E/--enable` / `-d/--diff` / `--stdin` / `-c` / `--no-config`。enable 空 → gofmt フォールバック。
-- **DEFERRED**: swaggo、`guff run` 時の formatter 診断、exclusions `generated` 厳密化、diff 色付け、gofumpt `-lang`、gci `no-inline-comments` / `no-prefix-comments`（CLI 未対応）。
+- gofmt / gofumpt / goimports / gci / golines をシステムバイナリ経由で実装。enable 順チェーン、`formatters.enable` / `settings` / `exclusions.paths` / **`exclusions.generated`（`lax` 既定 / `strict` / `disable`）** 配線。フラグ: `-E/--enable` / `-d/--diff` / `--stdin` / `-c` / `--no-config`。enable 空 → gofmt フォールバック。
+- **DEFERRED**: swaggo、`guff run` 時の formatter 診断、diff 色付け、gofumpt `-lang`、gci `no-inline-comments` / `no-prefix-comments`（CLI 未対応）。
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
 - 実装済み: ST* **15**（ST1000/1001/1003/1006/1011/1012/1013/1015/1017/1018/1019/1020/1021/1022/1023）+ QF* **12**（QF1001–QF1012）。設定・SuggestedFix の詳細は §3.3 / `SESSION-LOG.md`。

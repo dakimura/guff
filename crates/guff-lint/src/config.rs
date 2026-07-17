@@ -424,15 +424,14 @@ pub struct FormattersV2 {
     pub exclusions: FormatterExclusions,
 }
 
-/// `formatters.exclusions` (subset; `generated` mode beyond default skip is DEFERRED).
+/// `formatters.exclusions` (paths + generated mode + warn-unused stub).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FormatterExclusions {
     #[serde(default)]
     pub paths: Vec<String>,
     #[serde(default, rename = "warn-unused")]
     pub warn_unused: bool,
-    /// golangci: `lax` / `strict` / `disable`. Generated-file skip always uses
-    /// the `Code generated` … `DO NOT EDIT` heuristic for now.
+    /// golangci: `lax` (default) / `strict` / `disable`.
     #[serde(default)]
     pub generated: Option<String>,
 }
@@ -476,6 +475,11 @@ impl FormattersV2 {
     /// Path exclusion patterns from `formatters.exclusions.paths`.
     pub fn exclusion_paths(&self) -> Vec<String> {
         self.exclusions.paths.clone()
+    }
+
+    /// `formatters.exclusions.generated` (`lax` when unset).
+    pub fn exclusion_generated(&self) -> guff_fmt::GeneratedMode {
+        guff_fmt::GeneratedMode::parse(self.exclusions.generated.as_deref())
     }
 }
 
@@ -1569,6 +1573,45 @@ golines:
         let yaml: serde_yaml::Value = serde_yaml::from_str("gofmt:\n  simplify: true\n").unwrap();
         let opts = parse_golines_settings(&yaml);
         assert_eq!(opts, guff_fmt::GolinesOptions::default());
+    }
+
+    #[test]
+    fn parse_formatters_exclusions_generated_modes() {
+        let yaml = r#"
+version: "2"
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: strict
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let fmt = cfg.formatters();
+        assert_eq!(
+            fmt.exclusion_generated(),
+            guff_fmt::GeneratedMode::Strict
+        );
+
+        let yaml_disable = r#"
+version: "2"
+formatters:
+  exclusions:
+    generated: disable
+"#;
+        let fmt = parse_config_str(yaml_disable).unwrap().formatters();
+        assert_eq!(
+            fmt.exclusion_generated(),
+            guff_fmt::GeneratedMode::Disable
+        );
+
+        let yaml_default = r#"
+version: "2"
+formatters:
+  enable:
+    - gofmt
+"#;
+        let fmt = parse_config_str(yaml_default).unwrap().formatters();
+        assert_eq!(fmt.exclusion_generated(), guff_fmt::GeneratedMode::Lax);
     }
 
     #[test]

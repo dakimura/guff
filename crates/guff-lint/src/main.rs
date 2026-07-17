@@ -468,6 +468,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
             diff: args.diff,
             stdin: args.stdin,
             exclude_paths: formatters.exclusion_paths(),
+            generated: formatters.exclusion_generated(),
         },
     );
 
