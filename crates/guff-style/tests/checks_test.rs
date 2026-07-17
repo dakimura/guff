@@ -7,7 +7,7 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, containedctx, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
-    gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
+    gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
     nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
@@ -1007,6 +1007,51 @@ fn tparallel_allows_consistent_parallel_usage() {
     let pkg =
         support::typecheck_fixture("tparallel", "example.com/tparallel/ok", "ok_test.go");
     let messages = support::run_analyzer(tparallel(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn intrange_flags_classic_for_and_range_len() {
+    let pkg = support::typecheck_fixture("intrange", "example.com/intrange", "bad.go");
+    let messages = support::run_analyzer(intrange(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("for loop can be changed to use an integer range"))
+            .count()
+            >= 8,
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("for loop can be changed to `i := range s`")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("for loop can be changed to `range s`")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("returned by a function or method")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("not part of the loop's scope")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn intrange_allows_already_modern_or_unsafe_loops() {
+    let pkg = support::typecheck_fixture("intrange", "example.com/intrange/ok", "ok.go");
+    let messages = support::run_analyzer(intrange(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 

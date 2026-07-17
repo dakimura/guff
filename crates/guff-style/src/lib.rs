@@ -25,6 +25,7 @@
 //! - [`testpackage`]
 //! - [`paralleltest`]
 //! - [`tparallel`]
+//! - [`intrange`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -86,6 +87,7 @@ mod nonamedreturns;
 mod paralleltest;
 mod testpackage;
 mod tparallel;
+mod intrange;
 mod reassign;
 mod recvcheck;
 mod thelper;
@@ -146,6 +148,7 @@ pub use nonamedreturns::analyzer as nonamedreturns;
 pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
 pub use tparallel::analyzer as tparallel;
+pub use intrange::analyzer as intrange;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
 pub use thelper::analyzer as thelper;
@@ -204,6 +207,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         paralleltest(),
         testpackage(),
         tparallel(),
+        intrange(),
         goprintffuncname(),
         funlen(),
         gocyclo(),
