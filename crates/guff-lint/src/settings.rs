@@ -75,6 +75,7 @@ pub struct LinterSettings {
     pub iotamixing: IotamixingSettings,
     pub grouper: GrouperSettings,
     pub ireturn: IreturnSettings,
+    pub gosec: GosecSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1212,6 +1213,25 @@ impl IreturnSettings {
     }
 }
 
+/// `linters.settings.gosec` / `linters-settings.gosec`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GosecSettings {
+    #[serde(default)]
+    pub includes: Vec<String>,
+    #[serde(default)]
+    pub excludes: Vec<String>,
+    // DEFERRED: severity / confidence / config / concurrency.
+}
+
+impl GosecSettings {
+    pub fn to_guff_gosec(&self) -> guff_style::GosecOptions {
+        guff_style::GosecOptions {
+            includes: self.includes.clone(),
+            excludes: self.excludes.clone(),
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1678,6 +1698,11 @@ impl LinterSettings {
                 out.ireturn = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("gosec".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GosecSettings>(v.clone()) {
+                out.gosec = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1764,6 +1789,7 @@ impl LinterSettings {
         bag.insert("iotamixing", self.iotamixing.to_guff_iotamixing());
         bag.insert("grouper", self.grouper.to_guff_grouper());
         bag.insert("ireturn", self.ireturn.to_guff_ireturn());
+        bag.insert("gosec", self.gosec.to_guff_gosec());
         Arc::new(bag)
     }
 

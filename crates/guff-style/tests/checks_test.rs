@@ -7,13 +7,111 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
-    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, grouper,
-    iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, mnd,
-    modernize, musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest,
-    perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle,
-    testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace,
-    wsl,
+    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
+    grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
+    mnd, modernize, musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport,
+    paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    tagliatelle, testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting,
+    whitespace, wsl,
 };
+
+#[test]
+fn gosec_flags_weak_crypto_rand_unsafe_and_blocklist_imports() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec", "bad.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    for needle in [
+        "G103:",
+        "G401:",
+        "G404:",
+        "G405:",
+        "G406:",
+        "G501:",
+        "G502:",
+        "G503:",
+        "G504:",
+        "G505:",
+        "G506:",
+        "G507:",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle} in {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn gosec_allows_strong_crypto() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn gosec_respects_includes_excludes() {
+    use guff_style::GosecOptions;
+
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/settings", "settings.go");
+    let all = support::run_analyzer(gosec(), &pkg);
+    assert!(
+        all.iter().any(|m| m.contains("G501:")),
+        "default should flag import: {all:?}"
+    );
+    assert!(
+        all.iter().any(|m| m.contains("G401:")),
+        "default should flag md5.New: {all:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gosec",
+        GosecOptions {
+            includes: vec!["G501".into()],
+            excludes: vec![],
+        },
+    );
+    let only_import = support::run_analyzer_with_settings(
+        gosec(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        only_import.iter().any(|m| m.contains("G501:")),
+        "{only_import:?}"
+    );
+    assert!(
+        !only_import.iter().any(|m| m.contains("G401:")),
+        "includes=[G501] should skip call rules: {only_import:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gosec",
+        GosecOptions {
+            includes: vec![],
+            excludes: vec!["G501".into()],
+        },
+    );
+    let no_import = support::run_analyzer_with_settings(
+        gosec(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !no_import.iter().any(|m| m.contains("G501:")),
+        "{no_import:?}"
+    );
+    assert!(
+        no_import.iter().any(|m| m.contains("G401:")),
+        "{no_import:?}"
+    );
+}
 
 #[test]
 fn grouper_flags_ungrouped_and_multiple_decls() {

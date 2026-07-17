@@ -31,6 +31,7 @@
 //! - [`iotamixing`]
 //! - [`grouper`]
 //! - [`ireturn`]
+//! - [`gosec`]
 //! - [`tagliatelle`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
@@ -99,6 +100,7 @@ mod intrange;
 mod iotamixing;
 mod grouper;
 mod ireturn;
+mod gosec;
 mod tagliatelle;
 mod reassign;
 mod recvcheck;
@@ -127,8 +129,8 @@ pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
     FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
-    GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions, IreturnOptions,
-    LllOptions,
+    GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions,
+    IreturnOptions, LllOptions,
     LoggercheckOptions,
     MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
@@ -166,6 +168,7 @@ pub use intrange::analyzer as intrange;
 pub use iotamixing::analyzer as iotamixing;
 pub use grouper::analyzer as grouper;
 pub use ireturn::analyzer as ireturn;
+pub use gosec::analyzer as gosec;
 pub use tagliatelle::analyzer as tagliatelle;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
@@ -231,6 +234,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         iotamixing(),
         grouper(),
         ireturn(),
+        gosec(),
         tagliatelle(),
         goprintffuncname(),
         funlen(),

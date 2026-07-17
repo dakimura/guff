@@ -1213,6 +1213,21 @@ fn parse_v2_ireturn_settings() {
 }
 
 #[test]
+fn parse_v2_gosec_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_gosec_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.gosec.includes, vec!["G501".to_string()]);
+    assert_eq!(settings.gosec.excludes, vec!["G103".to_string()]);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GosecOptions>("gosec")
+        .expect("gosec options");
+    assert_eq!(opts.includes, vec!["G501".to_string()]);
+    assert_eq!(opts.excludes, vec!["G103".to_string()]);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

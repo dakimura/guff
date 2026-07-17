@@ -910,6 +910,19 @@ pub struct IreturnOptions {
     pub reject: Vec<String>,
 }
 
+/// `linters.settings.gosec` / `linters-settings.gosec`.
+///
+/// `includes` / `excludes` filter by rule id (`G101`, `G501`, …). Empty
+/// `includes` means all implemented rules; `excludes` removes from that set.
+/// `severity` / `confidence` / `config` / concurrency are DEFERRED.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GosecOptions {
+    /// Only run these rule ids (golangci `includes`).
+    pub includes: Vec<String>,
+    /// Skip these rule ids (golangci `excludes`).
+    pub excludes: Vec<String>,
+}
+
 /// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NonamedreturnsOptions {
