@@ -42,4 +42,9 @@ func bad() {
 	_ = password
 	awsKey := "AKIAI44QH8DHBEXAMPLE"
 	_ = awsKey
+
+	returnsErr()
+	_ = returnsErr()
 }
+
+func returnsErr() error { return nil }

@@ -23,6 +23,7 @@ fn gosec_flags_weak_crypto_rand_unsafe_and_blocklist_imports() {
         "G101:",
         "G102:",
         "G103:",
+        "G104:",
         "G106:",
         "G108:",
         "G114:",

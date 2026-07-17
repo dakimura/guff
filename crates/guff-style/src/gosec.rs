@@ -6,6 +6,7 @@
 //!   known secret regexes on AssignStmt / ValueSpec / BinaryExpr / CompositeLit)
 //! - **G102** — bind to all interfaces (`net.Listen` / `crypto/tls.Listen` address)
 //! - **G103** — `unsafe` calls (`Pointer` / `String` / `StringData` / `Slice` / `SliceData`)
+//! - **G104** — unchecked errors
 //! - **G106** — `ssh.InsecureIgnoreHostKey`
 //! - **G108** — blank import of `net/http/pprof`
 //! - **G114** — `net/http` serve helpers without timeouts
@@ -18,21 +19,24 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G104, G107, G109–G113, G115–G118, G201–G203,
+//! DEFERRED: remaining rules (G107, G109–G113, G115–G118, G201–G203,
 //! G301–G307, G402–G403, G601, SSA analyzers), G101 zxcvbn entropy / `#nosec` /
-//! `gosec:disable` / per-rule `config` map, full G204 TryResolve / G102 Ident const
-//! resolution, `severity`/`confidence` filters, concurrency.
+//! `gosec:disable` / per-rule `config` map, G104 config allowlist / audit mode,
+//! full G204 TryResolve / G102 Ident const resolution, `severity`/`confidence`
+//! filters, concurrency.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, Spec, ValueSpec};
+use guff::ast::{
+    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, Spec, ValueSpec,
+};
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::arena::ObjectData;
+use guff_types::arena::{ObjectData, TypeData};
 use regex::Regex;
 
 use crate::options::GosecOptions;
@@ -242,12 +246,11 @@ const RULES: &[RuleDef] = &[
 ];
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
-const EXTRA_RULE_IDS: &[&str] = &["G101", "G102", "G204"];
+const EXTRA_RULE_IDS: &[&str] = &["G101", "G102", "G104", "G204"];
 
 const G101_WHAT: &str = "Potential hardcoded credentials";
 /// Upstream default: `(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred`
-const G101_NAME_PATTERN: &str =
-    r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred";
+const G101_NAME_PATTERN: &str = r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred";
 const G101_ENTROPY_THRESHOLD: f64 = 80.0;
 const G101_PER_CHAR_THRESHOLD: f64 = 3.0;
 const G101_TRUNCATE: usize = 16;
@@ -618,11 +621,7 @@ fn check_g101_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
 }
 
 fn check_g101_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
-    let pos = spec
-        .names
-        .first()
-        .map(|n| n.pos().0 as u32)
-        .unwrap_or(0);
+    let pos = spec.names.first().map(|n| n.pos().0 as u32).unwrap_or(0);
     for (index, ident) in spec.names.iter().enumerate() {
         if !cred_name_match(&ident.name) || spec.values.is_empty() {
             continue;
@@ -750,6 +749,127 @@ fn is_resolvable_literal(expr: &Expr) -> bool {
     )
 }
 
+fn result_type_errors(pass: &Pass<'_>, typ: guff_types::TypeId) -> Vec<bool> {
+    let artifacts = match pass.pkg().type_artifacts.as_ref() {
+        Some(a) => a,
+        None => return vec![false],
+    };
+    match artifacts.types.get(typ) {
+        TypeData::Tuple(t) => (0..t.len())
+            .map(|i| {
+                t.at(i)
+                    .typ(&artifacts.objects)
+                    .is_some_and(|rt| code::type_with_name(pass, rt, "error"))
+            })
+            .collect(),
+        _ => vec![code::type_with_name(pass, typ, "error")],
+    }
+}
+
+fn call_returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    errors_by_arg(pass, call).iter().any(|&e| e)
+}
+
+fn errors_by_arg(pass: &Pass<'_>, call: &CallExpr) -> Vec<bool> {
+    let info = match pass.types_info() {
+        Some(i) => i,
+        None => return vec![false],
+    };
+    let Some(tav) = info.types.get(&call.id) else {
+        return vec![false];
+    };
+    result_type_errors(pass, tav.typ)
+}
+
+fn check_g104_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if enabled.contains("G104") && call_returns_error(pass, call) {
+        pending.push((call.lparen.0 as u32, "G104: Errors unhandled.".to_string()));
+    }
+}
+
+fn check_g104_assign(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G104") {
+        return;
+    }
+    if assign.rhs.len() == 1 {
+        let Expr::CallExpr(call) = &assign.rhs[0] else {
+            return;
+        };
+        let error_results = errors_by_arg(pass, call);
+        for (i, lhs) in assign.lhs.iter().enumerate() {
+            let Expr::Ident(id) = lhs else {
+                continue;
+            };
+            if id.name == "_" && error_results.get(i).copied().unwrap_or(false) {
+                pending.push((id.name_pos.0 as u32, "G104: Errors unhandled.".to_string()));
+            }
+        }
+        return;
+    }
+    for (i, lhs) in assign.lhs.iter().enumerate() {
+        let Expr::Ident(id) = lhs else {
+            continue;
+        };
+        if id.name != "_" {
+            continue;
+        }
+        if let Some(Expr::CallExpr(call)) = assign.rhs.get(i) {
+            if call_returns_error(pass, call) {
+                pending.push((id.name_pos.0 as u32, "G104: Errors unhandled.".to_string()));
+            }
+        }
+    }
+}
+
+fn check_g104_value_spec(
+    pass: &Pass<'_>,
+    spec: &ValueSpec,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G104") || spec.values.is_empty() {
+        return;
+    }
+    if spec.values.len() == 1 {
+        let Expr::CallExpr(call) = &spec.values[0] else {
+            return;
+        };
+        let error_results = errors_by_arg(pass, call);
+        for (i, name) in spec.names.iter().enumerate() {
+            if name.name == "_" && error_results.get(i).copied().unwrap_or(false) {
+                pending.push((
+                    name.name_pos.0 as u32,
+                    "G104: Errors unhandled.".to_string(),
+                ));
+            }
+        }
+        return;
+    }
+    for (i, name) in spec.names.iter().enumerate() {
+        if name.name != "_" {
+            continue;
+        }
+        if let Some(Expr::CallExpr(call)) = spec.values.get(i) {
+            if call_returns_error(pass, call) {
+                pending.push((
+                    name.name_pos.0 as u32,
+                    "G104: Errors unhandled.".to_string(),
+                ));
+            }
+        }
+    }
+}
+
 fn check_call(
     pass: &Pass<'_>,
     call: &CallExpr,
@@ -799,7 +919,8 @@ fn check_call(
             if !is_resolvable_literal(arg) {
                 flagged = true;
                 if !matches!(arg, Expr::Ident(_)) {
-                    msg = "G204: Subprocess launched with a potential tainted input or cmd arguments";
+                    msg =
+                        "G204: Subprocess launched with a potential tainted input or cmd arguments";
                 }
                 break;
             }
@@ -811,7 +932,11 @@ fn check_call(
     }
 }
 
-fn check_imports(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+fn check_imports(
+    pass: &Pass<'_>,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
     for file in pass.files() {
         for decl in &file.decls {
             let Decl::GenDecl(gd) = decl else {
@@ -822,11 +947,7 @@ fn check_imports(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut
                     continue;
                 };
                 let path = unquote_import(&imp.path.value);
-                let is_blank = imp
-                    .name
-                    .as_ref()
-                    .map(|n| n.name == "_")
-                    .unwrap_or(false);
+                let is_blank = imp.name.as_ref().map(|n| n.name == "_").unwrap_or(false);
                 for rule in RULES {
                     if !enabled.contains(rule.id) {
                         continue;
@@ -865,8 +986,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
-            if let NodeRef::CallExpr(call) = n {
-                check_call(pass, call, &enabled, &mut pending);
+            match n {
+                NodeRef::CallExpr(call) => check_call(pass, call, &enabled, &mut pending),
+                NodeRef::ExprStmt(stmt) => {
+                    if let Expr::CallExpr(call) = &stmt.x {
+                        check_g104_call(pass, call, &enabled, &mut pending);
+                    }
+                }
+                NodeRef::GoStmt(stmt) => check_g104_call(pass, &stmt.call, &enabled, &mut pending),
+                NodeRef::DeferStmt(stmt) => {
+                    check_g104_call(pass, &stmt.call, &enabled, &mut pending);
+                }
+                NodeRef::AssignStmt(stmt) => check_g104_assign(pass, stmt, &enabled, &mut pending),
+                NodeRef::ValueSpec(spec) => {
+                    check_g104_value_spec(pass, spec, &enabled, &mut pending)
+                }
+                _ => {}
             }
             true
         });
@@ -907,6 +1042,7 @@ mod tests {
         assert!(!e.contains("G404"));
         assert!(!e.contains("G102"));
         assert!(!e.contains("G101"));
+        assert!(!e.contains("G104"));
         assert!(!e.contains("G204"));
     }
 
@@ -914,13 +1050,20 @@ mod tests {
     fn excludes_removes_rules() {
         let opts = GosecOptions {
             includes: vec![],
-            excludes: vec!["G501".into(), "G505".into(), "G102".into(), "G101".into()],
+            excludes: vec![
+                "G501".into(),
+                "G505".into(),
+                "G102".into(),
+                "G101".into(),
+                "G104".into(),
+            ],
         };
         let e = enabled_rules(&opts);
         assert!(!e.contains("G501"));
         assert!(!e.contains("G505"));
         assert!(!e.contains("G102"));
         assert!(!e.contains("G101"));
+        assert!(!e.contains("G104"));
         assert!(e.contains("G103"));
         assert!(e.contains("G204"));
     }
