@@ -234,10 +234,14 @@ pub fn typecheck_package(
                 continue;
             }
         };
-        let name = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file.go");
+        // Prefer a stable path string for diagnostics (compat/R21 diffs on
+        // file:line:linter). Fall back to the basename only when the path is
+        // not valid UTF-8.
+        let name = path.to_str().unwrap_or_else(|| {
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file.go")
+        });
         match parse_file(fset, name, &src, Mode::NONE) {
             Ok(file) => syntax.push(file),
             Err(errs) => {

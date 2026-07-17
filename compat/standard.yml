@@ -1,0 +1,22 @@
+# Fair-comparison config: only the five "standard" preset linters.
+# Shared by guff and golangci-lint so enable sets match (same as benchmarks/).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+    - govet
+    - errcheck
+    - ineffassign
+    - unused
+
+issues:
+  # Unlimited so finding-set diffs are stable (defaults truncate and shuffle:
+  # max-issues-per-linter=50, max-same-issues=3).
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  tests: true

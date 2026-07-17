@@ -16,3 +16,11 @@
 /benchmarks/results/*.tsv
 /benchmarks/results/*.md
 !/benchmarks/results/RESULTS.md
+
+# Compat harness clones and raw run artifacts (keep RESULTS.md)
+/compat/corpus/
+/compat/results/*
+!/compat/results/RESULTS.md
+!/compat/results/.gitkeep
+__pycache__/
+*.pyc

@@ -1,0 +1,35 @@
+name: Compat (R21)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Unit-test normalize harness
+        run: python3 -m unittest discover -s compat/tests -v
+
+      - name: Build guff
+        run: cargo build --release -p guff-lint
+
+      - name: Compat smoke (fixture)
+        run: ./compat/smoke.sh

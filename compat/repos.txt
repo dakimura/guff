@@ -1,0 +1,9 @@
+# Target corpora for optional `./compat/run.sh --oss`.
+# Format: <name> <git-url> <ref>
+#
+# Keep this list small and pinned. Prefer modules that type-check cleanly under
+# the standard five linters. Unexpected finding-set diffs must be allowlisted.
+
+intern https://github.com/josharian/intern.git v1.0.0
+xid https://github.com/rs/xid.git v1.6.0
+toml https://github.com/BurntSushi/toml.git v1.4.0

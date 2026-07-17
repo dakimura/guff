@@ -127,6 +127,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
   （→ §8 各タスク）。
   PL11（真の並列実行）は **R9 で完了**。typeindex は **R18 で完了**。
   PL02（go 無し driver）/ PL07（GOCACHE 管理）は **R20 で完了**。
+  差分テストハーネスは **R21 で完了**。
 
 ### 3.2.1 SSA（`guff-ssa`, `go/ssa` 移植）
 - naive SSA（lift 無し）→ dom/lift/blockopt → Milestone D/E/F 完了。**150+ tests green**。
@@ -173,6 +174,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | facts キャッシュは未（→ R24） |
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
+| 互換差分 | ✅ `compat/` ハーネス（guff vs golangci JSON → `file:line:linter:message`、P/R、allowlist、`.github/workflows/compat.yml` ゲート） | OSS コーパス拡張・local パリティ改善は継続 |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | ✅ `--fix`（SuggestedFix / TextEdit 適用、修正済み診断は出力から除外） | golangci の fix 範囲全体には未 |
 
@@ -411,14 +413,18 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 > A〜F を作っても、**実測で一致を示さない限り「互換」とは言えない**。ここが主張の裏付け。
 
-#### R21. 差分テストハーネス（guff vs golangci-lint）
+#### R21. 差分テストハーネス（guff vs golangci-lint）✅ 完了 (2026-07-17)
 - **目的**: 同一コーパス・同一設定で両者を実行し、指摘集合を diff。linter ごとに一致率（precision/recall）を出す。
-- **どこ**: 新規 `compat/`（対象リポジトリ一覧、両ツール実行、正規化、diff レポート）。
-- **手順**: (1) 数十リポジトリを固定。(2) golangci-lint（参照）と guff を standard プリセットで実行。
-  (3) `file:line:linter:message` に正規化して差分を集計。(4) 既知差分を許容リストに登録し、
-  新規差分が出たら CI で落とす。
-- **完了条件**: 一致率レポートが生成され、CI ゲートになる。
-- **テスト**: ハーネス自体のスモークテスト。
+- **実装**: 新規 `compat/` — `run.sh` / `smoke.sh` / `normalize.py` / `standard.yml` /
+  `allowlist.txt` / `repos.txt`。キーは `relpath:line:linter:message`（errcheck /
+  unused / staticcheck `QF####:` プレフィックスを正規化）。`issues.max-*-issues: 0`
+  で切り捨て・非決定性を排除。golangci は `--path-mode abs`。guff の診断パスは
+  `compiled_go_files` フルパスを FileSet に載せるよう修正。fixture P=80%/R=100%；
+  local R=100%（guff 余剰は ST1000・ineffassign 多報告を allowlist）。
+  CI ゲート: `.github/workflows/compat.yml`（fixture smoke + normalize 単体テスト）。
+- **完了条件**: 一致率レポートが生成され、CI ゲートになる — 満たした。
+- **DEFERRED**: `--oss` コーパスの本格拡張、ineffassign 多報告・ST1000 既定差のパリティ。
+- **テスト**: `python3 -m unittest discover -s compat/tests` + `./compat/smoke.sh`。
 
 #### R22. `.golangci.yml` コーパスのパース検証 🟡 部分完了 (2026-07-17)
 - 実在の `.golangci.yml`（有名 OSS のもの）を集めて、**パースエラー 0** を保証するテスト。
