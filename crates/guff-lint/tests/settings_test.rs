@@ -1014,6 +1014,31 @@ fn parse_v2_gosmopolitan_settings() {
 }
 
 #[test]
+fn parse_v2_goheader_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_goheader_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.goheader.template.contains("Copyright"));
+    assert_eq!(
+        settings.goheader.values.const_values.get("COMPANY").map(String::as_str),
+        Some("Example Corp")
+    );
+    assert_eq!(
+        settings.goheader.values.const_values.get("YEAR").map(String::as_str),
+        Some("2020")
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GoheaderOptions>("goheader")
+        .expect("goheader options");
+    assert!(opts.template.contains("Copyright"));
+    assert_eq!(
+        opts.const_values.get("COMPANY").map(String::as_str),
+        Some("Example Corp")
+    );
+}
+
+#[test]
 fn parse_v2_reassign_settings() {
     let contents = fs::read_to_string(testdata_config("v2_reassign_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

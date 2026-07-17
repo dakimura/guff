@@ -12,6 +12,7 @@
 //! - [`gochecknoinits`]
 //! - [`gochecknoglobals`]
 //! - [`gosmopolitan`]
+//! - [`goheader`]
 //! - [`gocheckcompilerdirectives`]
 //! - [`forbidigo`]
 //! - [`bidichk`]
@@ -97,6 +98,7 @@ mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
 mod gosmopolitan;
+mod goheader;
 mod containedctx;
 mod decorder;
 mod inamedparam;
@@ -143,7 +145,7 @@ pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
     FuncorderOptions, FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions,
-    GocycloOptions, GosmopolitanOptions, IfaceOptions,
+    GocycloOptions, GoheaderOptions, GosmopolitanOptions, IfaceOptions,
     GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions,
     IreturnOptions, LllOptions, MaintidxOptions,
     LoggercheckOptions,
@@ -174,6 +176,7 @@ pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
 pub use gosmopolitan::analyzer as gosmopolitan;
+pub use goheader::analyzer as goheader;
 pub use containedctx::analyzer as containedctx;
 pub use decorder::analyzer as decorder;
 pub use inamedparam::analyzer as inamedparam;
@@ -240,6 +243,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         gochecknoinits(),
         gochecknoglobals(),
         gosmopolitan(),
+        goheader(),
         gocheckcompilerdirectives(),
         forbidigo(),
         reassign(),

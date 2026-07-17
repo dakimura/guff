@@ -1073,6 +1073,17 @@ impl Default for GosmopolitanOptions {
     }
 }
 
+/// `linters.settings.goheader` / `linters-settings.goheader`.
+///
+/// Empty `template` and `template_path` → analyzer is a no-op.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GoheaderOptions {
+    pub template: String,
+    pub template_path: String,
+    pub const_values: std::collections::HashMap<String, String>,
+    pub regexp_values: std::collections::HashMap<String, String>,
+}
+
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
 /// `linters.settings.bidichk` — full rune names to check.

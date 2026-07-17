@@ -1,0 +1,3 @@
+package goheader
+
+func f() {}

@@ -8,7 +8,7 @@ use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funcorder, funlen,
     gocheckcompilerdirectives,
-    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
+    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec,
     gosmopolitan,
     grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
     maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
@@ -6159,4 +6159,104 @@ fn gosmopolitan_respects_allow_time_local_and_escape_hatches() {
         },
     );
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn goheader_flags_missing_header() {
+    use guff_style::GoheaderOptions;
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture("goheader", "example.com/goheader", "bad.go");
+    let mut bag = SettingsBag::new();
+    let mut const_values = HashMap::new();
+    const_values.insert("COMPANY".into(), "Example Corp".into());
+    const_values.insert("YEAR".into(), "2020".into());
+    bag.insert(
+        "goheader",
+        GoheaderOptions {
+            template: "Copyright {{ YEAR }} {{ COMPANY }}\nSPDX-License-Identifier: Apache-2.0"
+                .into(),
+            template_path: String::new(),
+            const_values,
+            regexp_values: HashMap::new(),
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goheader(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m == "missed copyright header"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goheader_allows_matching_header() {
+    use guff_style::GoheaderOptions;
+    use std::collections::HashMap;
+
+    let pkg = support::typecheck_fixture("goheader", "example.com/goheader/ok", "ok.go");
+    let mut bag = SettingsBag::new();
+    let mut const_values = HashMap::new();
+    const_values.insert("COMPANY".into(), "Example Corp".into());
+    const_values.insert("YEAR".into(), "2020".into());
+    bag.insert(
+        "goheader",
+        GoheaderOptions {
+            template: "Copyright {{ YEAR }} {{ COMPANY }}\nSPDX-License-Identifier: Apache-2.0"
+                .into(),
+            template_path: String::new(),
+            const_values,
+            regexp_values: HashMap::new(),
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goheader(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn goheader_flags_mismatching_header() {
+    use guff_style::GoheaderOptions;
+    use std::collections::HashMap;
+
+    let pkg =
+        support::typecheck_fixture("goheader", "example.com/goheader/mismatch", "mismatch.go");
+    let mut bag = SettingsBag::new();
+    let mut const_values = HashMap::new();
+    const_values.insert("COMPANY".into(), "Example Corp".into());
+    const_values.insert("YEAR".into(), "2020".into());
+    bag.insert(
+        "goheader",
+        GoheaderOptions {
+            template: "Copyright {{ YEAR }} {{ COMPANY }}\nSPDX-License-Identifier: Apache-2.0"
+                .into(),
+            template_path: String::new(),
+            const_values,
+            regexp_values: HashMap::new(),
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        goheader(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m == "template doesn't match"),
+        "{messages:?}"
+    );
 }

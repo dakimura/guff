@@ -1,0 +1,14 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - goheader
+  settings:
+    goheader:
+      template: |-
+        Copyright {{ YEAR }} {{ COMPANY }}
+        SPDX-License-Identifier: Apache-2.0
+      values:
+        const:
+          COMPANY: Example Corp
+          YEAR: "2020"
