@@ -11,6 +11,7 @@
 //! - **G107** — HTTP request with variable URL (SSRF; BasicLit/Const safe; full TryResolve DEFERRED)
 //! - **G108** — blank import of `net/http/pprof`
 //! - **G109** — `strconv.Atoi` result converted to `int16`/`int32`
+//! - **G110** — potential decompression bomb (`io.Copy`/`CopyBuffer` from archive reader)
 //! - **G111** — `http.Dir("/")` directory traversal
 //! - **G112** — `http.Server` without `ReadHeaderTimeout`/`ReadTimeout` (Slowloris)
 //! - **G114** — `net/http` serve helpers without timeouts
@@ -30,7 +31,7 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G110, G113, G115–G118, G201–G202, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G115–G118, G201–G202, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
 //! entropy / `#nosec` / `gosec:disable` / per-rule `config` map, G104 config allowlist /
 //! audit mode, G107 local string-lit TryResolve, full G204 TryResolve / G102 Ident const
@@ -259,7 +260,7 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G111", "G112", "G203", "G204", "G301", "G302",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G203", "G204", "G301", "G302",
     "G303", "G306", "G402", "G403",
 ];
 
@@ -296,12 +297,25 @@ const G203_CALLS: &[(&str, &str)] = &[
     ("html/template", "URL"),
 ];
 const G109_ATOI: (&str, &str) = ("strconv", "Atoi");
+const G110_READER_CALLS: &[(&str, &str)] = &[
+    ("compress/gzip", "NewReader"),
+    ("compress/zlib", "NewReader"),
+    ("compress/zlib", "NewReaderDict"),
+    ("compress/bzip2", "NewReader"),
+    ("compress/flate", "NewReader"),
+    ("compress/flate", "NewReaderDict"),
+    ("compress/lzw", "NewReader"),
+    ("archive/tar", "NewReader"),
+    ("archive/zip", "NewReader"),
+];
+const G110_COPY_CALLS: &[(&str, &str)] = &[("io", "Copy"), ("io", "CopyBuffer")];
 /// Upstream: `^(/(usr|var))?/tmp(/.*)?$`
 const G303_TMP_PATTERN: &str = r"^(/(usr|var))?/tmp(/.*)?$";
 const G303_WHAT: &str = "File creation in shared tmp directory without using ioutil.Tempfile";
 const G107_WHAT: &str = "Potential HTTP request made with variable url";
 const G109_WHAT: &str =
     "Potential Integer overflow made by strconv.Atoi result conversion to int16/32";
+const G110_WHAT: &str = "Potential DoS vulnerability via decompression bomb";
 const G112_WHAT: &str =
     "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server";
 const G203_WHAT: &str = "The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.";
@@ -1200,6 +1214,81 @@ fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
     }
 }
 
+fn is_g110_reader_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    if resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
+        G110_READER_CALLS
+            .iter()
+            .any(|(p, n)| *p == pkg && *n == name)
+    }) {
+        return true;
+    }
+
+    // archive/zip.File.Open is a method call rather than a package function.
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return false;
+    };
+    if sel.sel.name != "Open" {
+        return false;
+    }
+    type_name_of(pass, sel.x.as_ref()).is_some_and(|name| {
+        let bare = name.strip_prefix('*').unwrap_or(&name);
+        bare == "archive/zip.File"
+    })
+}
+
+fn check_g110(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+    if !enabled.contains("G110") {
+        return;
+    }
+
+    let mut reader_vars: HashSet<ObjectId> = HashSet::new();
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(assign) => {
+                    for (index, rhs) in assign.rhs.iter().enumerate() {
+                        let Expr::CallExpr(call) = rhs else {
+                            continue;
+                        };
+                        if !is_g110_reader_call(pass, call) {
+                            continue;
+                        }
+                        let Some(Expr::Ident(id)) = assign.lhs.get(index) else {
+                            continue;
+                        };
+                        if id.name != "_" {
+                            if let Some(obj) = object_of(pass, id) {
+                                reader_vars.insert(obj);
+                            }
+                        }
+                    }
+                }
+                NodeRef::CallExpr(call) => {
+                    let is_copy = resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
+                        G110_COPY_CALLS
+                            .iter()
+                            .any(|(p, n)| *p == pkg && *n == name)
+                    });
+                    if is_copy {
+                        if let Some(Expr::Ident(src)) = call.args.get(1) {
+                            if object_of(pass, src)
+                                .is_some_and(|obj| reader_vars.contains(&obj))
+                            {
+                                pending.push((
+                                    call.pos().0 as u32,
+                                    format!("G110: {G110_WHAT}"),
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+}
+
 fn result_type_errors(pass: &Pass<'_>, typ: guff_types::TypeId) -> Vec<bool> {
     let artifacts = match pass.pkg().type_artifacts.as_ref() {
         Some(a) => a,
@@ -1530,6 +1619,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_imports(pass, &enabled, &mut pending);
     check_g101(pass, &enabled, &mut pending);
     check_g109(pass, &enabled, &mut pending);
+    check_g110(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {

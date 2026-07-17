@@ -1,6 +1,7 @@
 package gosec_bad
 
 import (
+	"compress/gzip"
 	"crypto/des"
 	"crypto/md5"
 	"crypto/rc4"
@@ -8,6 +9,7 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"html/template"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
@@ -24,6 +26,12 @@ import (
 )
 
 var taintedURL = "https://example.com"
+
+type sourceReader struct{}
+func (sourceReader) Read([]byte) (int, error) { return 0, nil }
+
+type sinkWriter struct{}
+func (sinkWriter) Write([]byte) (int, error) { return 0, nil }
 
 func bad() {
 	_ = md5.New()
@@ -60,6 +68,9 @@ func bad() {
 	_, _ = rsa.GenerateKey(nil, 1024)
 	_ = tls.Config{InsecureSkipVerify: true}
 	_ = http.Dir("/")
+	compressed, _ := gzip.NewReader(sourceReader{})
+	_, _ = io.Copy(sinkWriter{}, compressed)
+	_, _ = io.CopyBuffer(sinkWriter{}, compressed, nil)
 
 	_, _ = os.Create("/tmp/demo")
 	_ = os.WriteFile("/tmp/demo2", nil, 0o644)

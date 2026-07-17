@@ -1,11 +1,13 @@
 package gosec_ok
 
 import (
+	"compress/gzip"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"hash"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +17,12 @@ import (
 )
 
 const safeURL = "https://example.com"
+
+type sourceReader struct{}
+func (sourceReader) Read([]byte) (int, error) { return 0, nil }
+
+type sinkWriter struct{}
+func (sinkWriter) Write([]byte) (int, error) { return 0, nil }
 
 func ok() hash.Hash {
 	return sha256.New()
@@ -30,6 +38,15 @@ func okListen() error {
 
 func okExec() {
 	_ = exec.Command("ls", "-la")
+}
+
+func okDecompression() error {
+	compressed, err := gzip.NewReader(sourceReader{})
+	if err != nil {
+		return err
+	}
+	_, err = io.CopyN(sinkWriter{}, compressed, 1<<20)
+	return err
 }
 
 func okCreds() {
