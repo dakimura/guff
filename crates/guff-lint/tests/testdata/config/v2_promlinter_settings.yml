@@ -1,0 +1,11 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - promlinter
+  settings:
+    promlinter:
+      strict: true
+      disabled-linters:
+        - Help
+        - Counter

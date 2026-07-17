@@ -1229,3 +1229,14 @@ impl Default for UnqueryvetOptions {
     }
 }
 
+/// `linters.settings.promlinter` / `linters-settings.promlinter`.
+///
+/// `strict` parse-failure diagnostics are DEFERRED (accepted for config compat).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromlinterOptions {
+    /// Upstream `--strict`; parse failures reported only when true (DEFERRED).
+    pub strict: bool,
+    /// Disable named promlint checks (`Help`, `Counter`, `CamelCase`, …).
+    pub disabled_linters: Vec<String>,
+}
+

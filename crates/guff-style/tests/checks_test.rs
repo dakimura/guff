@@ -11,10 +11,9 @@ use guff_style::{
     goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
     inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
     modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
-    paralleltest, perfsprint, prealloc, predeclared, protogetter, reassign, recvcheck, sloglint,
-    tagalign,
-    tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
-    unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
+    paralleltest, perfsprint, prealloc, predeclared, promlinter, protogetter, reassign, recvcheck,
+    sloglint, tagalign, tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel,
+    unconvert, unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -6522,5 +6521,74 @@ fn unqueryvet_respects_settings() {
     assert!(
         flagged.is_empty(),
         "aliased wildcard should be disabled: {flagged:?}"
+    );
+}
+
+#[test]
+fn promlinter_flags_bad_metric_names() {
+    let pkg = support::typecheck_fixture("promlinter", "example.com/promlinter", "bad.go");
+    let messages = support::run_analyzer(promlinter(), &pkg);
+    for needle in [
+        "_total",
+        "no help text",
+        "snake_case",
+        "non-counter metrics should not have",
+        "use base unit",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle:?} in {messages:?}"
+        );
+    }
+    assert!(
+        messages.iter().any(|m| m.starts_with("Metric:")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn promlinter_allows_good_metrics() {
+    let pkg = support::typecheck_fixture("promlinter", "example.com/promlinter/ok", "ok.go");
+    let messages = support::run_analyzer(promlinter(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn promlinter_respects_disabled_linters() {
+    use guff_style::PromlinterOptions;
+
+    let pkg = support::typecheck_fixture(
+        "promlinter",
+        "example.com/promlinter/settings",
+        "settings.go",
+    );
+
+    let default_msgs = support::run_analyzer(promlinter(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("counter metrics should have")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "promlinter",
+        PromlinterOptions {
+            strict: false,
+            disabled_linters: vec!["Counter".to_string()],
+        },
+    );
+    let flagged = support::run_analyzer_with_settings(
+        promlinter(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        flagged.is_empty(),
+        "Counter check should be disabled: {flagged:?}"
     );
 }

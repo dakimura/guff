@@ -85,6 +85,7 @@ pub struct LinterSettings {
     pub varnamelen: VarnamelenSettings,
     pub unparam: UnparamSettings,
     pub unqueryvet: UnqueryvetSettings,
+    pub promlinter: PromlinterSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1288,6 +1289,26 @@ impl UnqueryvetSettings {
     }
 }
 
+/// `linters.settings.promlinter` / `linters-settings.promlinter`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct PromlinterSettings {
+    /// Report parse failures (DEFERRED; accepted for config compat).
+    #[serde(default)]
+    pub strict: bool,
+    /// Disable named promlint checks (`Help`, `Counter`, `CamelCase`, …).
+    #[serde(default, rename = "disabled-linters")]
+    pub disabled_linters: Vec<String>,
+}
+
+impl PromlinterSettings {
+    pub fn to_guff_promlinter(&self) -> guff_style::PromlinterOptions {
+        guff_style::PromlinterOptions {
+            strict: self.strict,
+            disabled_linters: self.disabled_linters.clone(),
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -2029,6 +2050,11 @@ impl LinterSettings {
                 out.unqueryvet = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("promlinter".into())) {
+            if let Ok(s) = serde_yaml::from_value::<PromlinterSettings>(v.clone()) {
+                out.promlinter = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -2164,6 +2190,7 @@ impl LinterSettings {
         bag.insert("varnamelen", self.varnamelen.to_guff_varnamelen());
         bag.insert("unparam", self.unparam.to_guff_unparam());
         bag.insert("unqueryvet", self.unqueryvet.to_guff_unqueryvet());
+        bag.insert("promlinter", self.promlinter.to_guff_promlinter());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

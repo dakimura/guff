@@ -1526,3 +1526,24 @@ fn parse_v2_unqueryvet_settings() {
         vec!["(?i)SELECT \\* FROM temp_.*".to_string()]
     );
 }
+
+#[test]
+fn parse_v2_promlinter_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_promlinter_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.promlinter.strict);
+    assert_eq!(
+        settings.promlinter.disabled_linters,
+        vec!["Help".to_string(), "Counter".to_string()]
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::PromlinterOptions>("promlinter")
+        .expect("promlinter options");
+    assert!(opts.strict);
+    assert_eq!(
+        opts.disabled_linters,
+        vec!["Help".to_string(), "Counter".to_string()]
+    );
+}
