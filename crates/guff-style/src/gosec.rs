@@ -2,6 +2,8 @@
 //! (golangci-lint wrapper in `pkg/golinters/gosec`).
 //!
 //! Implemented rules (AST / types-info only):
+//! - **G101** — potential hardcoded credentials (name pattern + Shannon entropy approx /
+//!   known secret regexes on AssignStmt / ValueSpec / BinaryExpr / CompositeLit)
 //! - **G102** — bind to all interfaces (`net.Listen` / `crypto/tls.Listen` address)
 //! - **G103** — `unsafe` calls (`Pointer` / `String` / `StringData` / `Slice` / `SliceData`)
 //! - **G106** — `ssh.InsecureIgnoreHostKey`
@@ -16,15 +18,15 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G101 credentials, G104, G107, G109–G113, G115–G118,
-//! G201–G203, G301–G307, G402–G403, G601, SSA analyzers), full G204 TryResolve /
-//! G102 Ident const resolution, `severity`/`confidence` filters, `config` map,
-//! concurrency.
+//! DEFERRED: remaining rules (G104, G107, G109–G113, G115–G118, G201–G203,
+//! G301–G307, G402–G403, G601, SSA analyzers), G101 zxcvbn entropy / `#nosec` /
+//! `gosec:disable` / per-rule `config` map, full G204 TryResolve / G102 Ident const
+//! resolution, `severity`/`confidence` filters, concurrency.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Decl, Expr, Ident, Spec};
+use guff::ast::{AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, Spec, ValueSpec};
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
@@ -239,8 +241,150 @@ const RULES: &[RuleDef] = &[
     },
 ];
 
-/// Synthetic rule ids handled outside [`RULES`] (arg-sensitive).
-const EXTRA_RULE_IDS: &[&str] = &["G102", "G204"];
+/// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
+const EXTRA_RULE_IDS: &[&str] = &["G101", "G102", "G204"];
+
+const G101_WHAT: &str = "Potential hardcoded credentials";
+/// Upstream default: `(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred`
+const G101_NAME_PATTERN: &str =
+    r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred";
+const G101_ENTROPY_THRESHOLD: f64 = 80.0;
+const G101_PER_CHAR_THRESHOLD: f64 = 3.0;
+const G101_TRUNCATE: usize = 16;
+const G101_MIN_ENTROPY_LENGTH: usize = 8;
+
+struct SecretPattern {
+    name: &'static str,
+    re: &'static str,
+}
+
+/// Subset of securego/gosec `secretsPatterns` (enough for common tokens / keys).
+const G101_SECRET_PATTERNS: &[SecretPattern] = &[
+    SecretPattern {
+        name: "RSA private key",
+        re: r"-----BEGIN RSA PRIVATE KEY-----",
+    },
+    SecretPattern {
+        name: "SSH (DSA) private key",
+        re: r"-----BEGIN DSA PRIVATE KEY-----",
+    },
+    SecretPattern {
+        name: "SSH (EC) private key",
+        re: r"-----BEGIN EC PRIVATE KEY-----",
+    },
+    SecretPattern {
+        name: "PGP private key block",
+        re: r"-----BEGIN PGP PRIVATE KEY BLOCK-----",
+    },
+    SecretPattern {
+        name: "Slack Token",
+        re: r"xox[pborsa]-[0-9]{12}-[0-9]{12}-[0-9]{12}-[a-z0-9]{32}",
+    },
+    SecretPattern {
+        name: "AWS API Key",
+        re: r"AKIA[0-9A-Z]{16}",
+    },
+    SecretPattern {
+        name: "AWS Temporary Access Key",
+        re: r"ASIA[0-9A-Z]{16}",
+    },
+    SecretPattern {
+        name: "Amazon MWS Auth Token",
+        re: r"amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    },
+    SecretPattern {
+        name: "AWS AppSync GraphQL Key",
+        re: r"da2-[a-z0-9]{26}",
+    },
+    SecretPattern {
+        name: "GitHub personal access token",
+        re: r"ghp_[a-zA-Z0-9]{36}",
+    },
+    SecretPattern {
+        name: "GitHub fine-grained access token",
+        re: r"github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}",
+    },
+    SecretPattern {
+        name: "GitHub action temporary token",
+        re: r"ghs_[a-zA-Z0-9]{36}",
+    },
+    SecretPattern {
+        name: "Google API Key",
+        re: r"AIza[0-9A-Za-z\-_]{35}",
+    },
+    SecretPattern {
+        name: "Google Cloud Platform OAuth",
+        re: r"[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com",
+    },
+    SecretPattern {
+        name: "Google (GCP) Service-account",
+        re: r#""type": "service_account""#,
+    },
+    SecretPattern {
+        name: "Google OAuth Access Token",
+        re: r"ya29\.[0-9A-Za-z\-_]+",
+    },
+    SecretPattern {
+        name: "Generic API Key",
+        re: r#"[aA][pP][iI]_?[kK][eE][yY].*[''|"][0-9a-zA-Z]{32,45}[''|"]"#,
+    },
+    SecretPattern {
+        name: "Generic Secret",
+        re: r#"[sS][eE][cC][rR][eE][tT].*[''|"][0-9a-zA-Z]{32,45}[''|"]"#,
+    },
+    SecretPattern {
+        name: "Heroku API Key",
+        re: r"[hH][eE][rR][oO][kK][uU].*[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}",
+    },
+    SecretPattern {
+        name: "MailChimp API Key",
+        re: r"[0-9a-f]{32}-us[0-9]{1,2}",
+    },
+    SecretPattern {
+        name: "Mailgun API Key",
+        re: r"key-[0-9a-zA-Z]{32}",
+    },
+    SecretPattern {
+        name: "Password in URL",
+        re: r#"[a-zA-Z]{3,10}://[a-zA-Z0-9.\-_+]{1,64}:[a-zA-Z0-9.\-_!$%&*+=^()]{1,128}@[a-zA-Z0-9.\-_]+(:[0-9]+)?(/[^"'\s]*)?(["'\s]|$)"#,
+    },
+    SecretPattern {
+        name: "Slack Webhook",
+        re: r"https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}",
+    },
+    SecretPattern {
+        name: "Stripe API Key",
+        re: r"sk_live_[0-9a-zA-Z]{24}",
+    },
+    SecretPattern {
+        name: "Stripe Restricted API Key",
+        re: r"rk_live_[0-9a-zA-Z]{24}",
+    },
+    SecretPattern {
+        name: "Square Access Token",
+        re: r"sq0atp-[0-9A-Za-z\-_]{22}",
+    },
+    SecretPattern {
+        name: "Square OAuth Secret",
+        re: r"sq0csp-[0-9A-Za-z\-_]{43}",
+    },
+    SecretPattern {
+        name: "Telegram Bot API Key",
+        re: r"[0-9]+:AA[0-9A-Za-z\-_]{33}",
+    },
+    SecretPattern {
+        name: "Twilio API Key",
+        re: r"SK[0-9a-fA-F]{32}",
+    },
+    SecretPattern {
+        name: "Twitter Access Token",
+        re: r"[tT][wW][iI][tT][tT][eE][rR].*[1-9][0-9]+-[0-9a-zA-Z]{40}",
+    },
+    SecretPattern {
+        name: "Twitter OAuth",
+        re: r#"[tT][wW][iI][tT][tT][eE][rR].*[''|"][0-9a-zA-Z]{35,44}[''|"]"#,
+    },
+];
 
 const G204_CALLS: &[(&str, &str)] = &[
     ("os/exec", "Command"),
@@ -347,6 +491,245 @@ fn bind_all_pattern() -> &'static Regex {
     // Match upstream gosec: `^(0.0.0.0|:).*$` (dots are wildcards in Go regexp).
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^(0.0.0.0|:).*$").expect("G102 pattern"))
+}
+
+fn g101_name_pattern() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(G101_NAME_PATTERN).expect("G101 name pattern"))
+}
+
+fn g101_secret_regexes() -> &'static [(String, Regex)] {
+    static RE: OnceLock<Vec<(String, Regex)>> = OnceLock::new();
+    RE.get_or_init(|| {
+        G101_SECRET_PATTERNS
+            .iter()
+            .map(|p| {
+                (
+                    p.name.to_string(),
+                    Regex::new(p.re).unwrap_or_else(|e| panic!("G101 pattern {}: {e}", p.name)),
+                )
+            })
+            .collect()
+    })
+}
+
+/// Shannon entropy × length over a truncated prefix.
+/// Approximates gosec's zxcvbn thresholds (DEFERRED: true zxcvbn parity).
+fn shannon_entropy_total(s: &str) -> (f64, f64) {
+    let truncated = if s.len() > G101_TRUNCATE {
+        &s[..G101_TRUNCATE]
+    } else {
+        s
+    };
+    if truncated.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mut freq = [0u32; 256];
+    for b in truncated.bytes() {
+        freq[b as usize] += 1;
+    }
+    let n = truncated.len() as f64;
+    let mut h = 0.0_f64;
+    for &c in &freq {
+        if c > 0 {
+            let p = f64::from(c) / n;
+            h -= p * p.log2();
+        }
+    }
+    (h * n, h)
+}
+
+fn is_high_entropy_string(s: &str) -> bool {
+    if s.len() < G101_MIN_ENTROPY_LENGTH {
+        return false;
+    }
+    let (total, per_char) = shannon_entropy_total(s);
+    total >= G101_ENTROPY_THRESHOLD
+        || (total >= G101_ENTROPY_THRESHOLD / 2.0 && per_char >= G101_PER_CHAR_THRESHOLD)
+}
+
+fn is_secret_pattern(s: &str) -> Option<&'static str> {
+    if s.len() < G101_MIN_ENTROPY_LENGTH {
+        return None;
+    }
+    for (i, re) in g101_secret_regexes().iter().enumerate() {
+        if re.1.is_match(s) {
+            return Some(G101_SECRET_PATTERNS[i].name);
+        }
+    }
+    None
+}
+
+fn cred_name_match(name: &str) -> bool {
+    g101_name_pattern().is_match(name)
+}
+
+fn report_g101(pending: &mut Vec<(u32, String)>, pos: u32, pattern_name: Option<&str>) {
+    let msg = match pattern_name {
+        Some(p) => format!("G101: {G101_WHAT}: {p}"),
+        None => format!("G101: {G101_WHAT}"),
+    };
+    pending.push((pos, msg));
+}
+
+fn check_cred_value(
+    pending: &mut Vec<(u32, String)>,
+    pos: u32,
+    name_matched: bool,
+    value: &str,
+) -> bool {
+    if name_matched {
+        if is_high_entropy_string(value) {
+            report_g101(pending, pos, None);
+            return true;
+        }
+    } else if is_high_entropy_string(value) {
+        if let Some(pattern) = is_secret_pattern(value) {
+            report_g101(pending, pos, Some(pattern));
+            return true;
+        }
+    }
+    false
+}
+
+fn check_g101_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+    for lhs in &assign.lhs {
+        let Expr::Ident(ident) = lhs else {
+            continue;
+        };
+        let name_matched = cred_name_match(&ident.name);
+        if name_matched {
+            for rhs in &assign.rhs {
+                if let Some(val) = string_lit_from_expr(rhs) {
+                    if check_cred_value(pending, assign.tok_pos.0 as u32, true, &val) {
+                        return;
+                    }
+                }
+            }
+        }
+        for rhs in &assign.rhs {
+            if let Some(val) = string_lit_from_expr(rhs) {
+                if check_cred_value(pending, assign.tok_pos.0 as u32, false, &val) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn check_g101_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
+    let pos = spec
+        .names
+        .first()
+        .map(|n| n.pos().0 as u32)
+        .unwrap_or(0);
+    for (index, ident) in spec.names.iter().enumerate() {
+        if !cred_name_match(&ident.name) || spec.values.is_empty() {
+            continue;
+        }
+        let idx = if index < spec.values.len() {
+            index
+        } else {
+            spec.values.len() - 1
+        };
+        if let Some(val) = string_lit_from_expr(&spec.values[idx]) {
+            if check_cred_value(pending, pos, true, &val) {
+                return;
+            }
+        }
+    }
+    for value in &spec.values {
+        if let Some(val) = string_lit_from_expr(value) {
+            if check_cred_value(pending, pos, false, &val) {
+                return;
+            }
+        }
+    }
+}
+
+fn check_g101_equality(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+    if bin.op != Token::EQL && bin.op != Token::NEQ {
+        return;
+    }
+    let pos = bin.op_pos.0 as u32;
+
+    let (ident, value_node) = match (bin.x.as_ref(), bin.y.as_ref()) {
+        (Expr::Ident(id), other) => (Some(id), other),
+        (other, Expr::Ident(id)) => (Some(id), other),
+        _ => (None, bin.y.as_ref()),
+    };
+    if let Some(ident) = ident {
+        if cred_name_match(&ident.name) {
+            if let Some(val) = string_lit_from_expr(value_node) {
+                if check_cred_value(pending, pos, true, &val) {
+                    return;
+                }
+            }
+        }
+    }
+
+    let lit = match (bin.x.as_ref(), bin.y.as_ref()) {
+        (Expr::BasicLit(lit), _) if lit.kind == Some(Token::STRING) => Some(lit),
+        (_, Expr::BasicLit(lit)) if lit.kind == Some(Token::STRING) => Some(lit),
+        _ => None,
+    };
+    if let Some(lit) = lit {
+        if let Some(val) = unquote_string_lit(&lit.value) {
+            if check_cred_value(pending, pos, false, &val) {
+                return;
+            }
+        }
+    }
+}
+
+fn check_g101_composite(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+    let pos = lit.lbrace.0 as u32;
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        let mut matched_key = false;
+        if let Expr::Ident(id) = kv.key.as_ref() {
+            if cred_name_match(&id.name) {
+                matched_key = true;
+            }
+        }
+        if let Some(key_str) = string_lit_from_expr(kv.key.as_ref()) {
+            if cred_name_match(&key_str) {
+                matched_key = true;
+            }
+        }
+        if matched_key {
+            if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
+                if check_cred_value(pending, pos, true, &val) {
+                    return;
+                }
+            }
+        }
+        if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
+            if check_cred_value(pending, pos, false, &val) {
+                return;
+            }
+        }
+    }
+}
+
+fn check_g101(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+    if !enabled.contains("G101") {
+        return;
+    }
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(a) => check_g101_assign(a, pending),
+                NodeRef::ValueSpec(v) => check_g101_value_spec(v, pending),
+                NodeRef::BinaryExpr(b) => check_g101_equality(b, pending),
+                NodeRef::CompositeLit(c) => check_g101_composite(c, pending),
+                _ => {}
+            }
+            true
+        });
+    }
 }
 
 fn string_lit_from_expr(expr: &Expr) -> Option<String> {
@@ -478,6 +861,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     check_imports(pass, &enabled, &mut pending);
+    check_g101(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
@@ -522,6 +906,7 @@ mod tests {
         assert!(!e.contains("G103"));
         assert!(!e.contains("G404"));
         assert!(!e.contains("G102"));
+        assert!(!e.contains("G101"));
         assert!(!e.contains("G204"));
     }
 
@@ -529,12 +914,13 @@ mod tests {
     fn excludes_removes_rules() {
         let opts = GosecOptions {
             includes: vec![],
-            excludes: vec!["G501".into(), "G505".into(), "G102".into()],
+            excludes: vec!["G501".into(), "G505".into(), "G102".into(), "G101".into()],
         };
         let e = enabled_rules(&opts);
         assert!(!e.contains("G501"));
         assert!(!e.contains("G505"));
         assert!(!e.contains("G102"));
+        assert!(!e.contains("G101"));
         assert!(e.contains("G103"));
         assert!(e.contains("G204"));
     }
@@ -554,5 +940,24 @@ mod tests {
         assert!(re.is_match("0.0.0.0"));
         assert!(!re.is_match("127.0.0.1:8080"));
         assert!(!re.is_match("localhost:8080"));
+    }
+
+    #[test]
+    fn g101_entropy_flags_hex_password_not_secret() {
+        assert!(is_high_entropy_string(
+            "f62e5bcda4fae4f82370da0c6f20697b8f8447ef"
+        ));
+        assert!(!is_high_entropy_string("secret"));
+        assert!(cred_name_match("password"));
+        assert!(cred_name_match("apiKey"));
+        assert!(!cred_name_match("username"));
+        assert_eq!(
+            is_secret_pattern("AKIAI44QH8DHBEXAMPLE"),
+            Some("AWS API Key")
+        );
+        assert_eq!(
+            is_secret_pattern("ghp_iR54dhCYg9Tfmoywi9xLmmKZrrnAw438BYh3"),
+            Some("GitHub personal access token")
+        );
     }
 }

@@ -37,4 +37,9 @@ func bad() {
 	_, _ = tls.Listen("tcp", ":8443", nil)
 	cmd := "ls"
 	_ = exec.Command(cmd)
+
+	password := "f62e5bcda4fae4f82370da0c6f20697b8f8447ef"
+	_ = password
+	awsKey := "AKIAI44QH8DHBEXAMPLE"
+	_ = awsKey
 }
