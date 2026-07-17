@@ -11,7 +11,8 @@ use guff_style::{
     goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
     inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
     modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
-    paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    paralleltest, perfsprint, prealloc, predeclared, protogetter, reassign, recvcheck, sloglint,
+    tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
     unparam, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
@@ -6424,4 +6425,34 @@ fn goheader_flags_mismatching_header() {
         messages.iter().any(|m| m == "template doesn't match"),
         "{messages:?}"
     );
+}
+
+#[test]
+fn protogetter_flags_direct_proto_field_reads() {
+    let pkg = support::typecheck_fixture("protogetter", "example.com/protogetter", "bad.go");
+    let messages = support::run_analyzer(protogetter(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "avoid direct access to proto field u.Name, use u.GetName() instead"),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "avoid direct access to proto field u.Age, use u.GetAge() instead"),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            == "avoid direct access to proto field u.Address.City, use u.GetAddress().GetCity() instead"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn protogetter_ignores_getters_writes_and_non_proto() {
+    let pkg = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
+    let messages = support::run_analyzer(protogetter(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }

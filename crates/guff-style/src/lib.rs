@@ -32,6 +32,7 @@
 //! - [`testableexamples`]
 //! - [`testpackage`]
 //! - [`paralleltest`]
+//! - [`protogetter`]
 //! - [`tparallel`]
 //! - [`intrange`]
 //! - [`iotamixing`]
@@ -110,6 +111,7 @@ mod interfacebloat;
 mod noinlineerr;
 mod nonamedreturns;
 mod paralleltest;
+mod protogetter;
 mod testableexamples;
 mod testpackage;
 mod tparallel;
@@ -188,6 +190,7 @@ pub use interfacebloat::analyzer as interfacebloat;
 pub use noinlineerr::analyzer as noinlineerr;
 pub use nonamedreturns::analyzer as nonamedreturns;
 pub use paralleltest::analyzer as paralleltest;
+pub use protogetter::analyzer as protogetter;
 pub use testableexamples::analyzer as testableexamples;
 pub use testpackage::analyzer as testpackage;
 pub use tparallel::analyzer as tparallel;
@@ -263,6 +266,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         nonamedreturns(),
         noinlineerr(),
         paralleltest(),
+        protogetter(),
         testableexamples(),
         testpackage(),
         tparallel(),
