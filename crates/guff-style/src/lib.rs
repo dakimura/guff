@@ -25,6 +25,7 @@
 //! - [`decorder`]
 //! - [`nonamedreturns`]
 //! - [`noinlineerr`]
+//! - [`testableexamples`]
 //! - [`testpackage`]
 //! - [`paralleltest`]
 //! - [`tparallel`]
@@ -96,6 +97,7 @@ mod interfacebloat;
 mod noinlineerr;
 mod nonamedreturns;
 mod paralleltest;
+mod testableexamples;
 mod testpackage;
 mod tparallel;
 mod intrange;
@@ -165,6 +167,7 @@ pub use interfacebloat::analyzer as interfacebloat;
 pub use noinlineerr::analyzer as noinlineerr;
 pub use nonamedreturns::analyzer as nonamedreturns;
 pub use paralleltest::analyzer as paralleltest;
+pub use testableexamples::analyzer as testableexamples;
 pub use testpackage::analyzer as testpackage;
 pub use tparallel::analyzer as tparallel;
 pub use intrange::analyzer as intrange;
@@ -232,6 +235,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         nonamedreturns(),
         noinlineerr(),
         paralleltest(),
+        testableexamples(),
         testpackage(),
         tparallel(),
         intrange(),

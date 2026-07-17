@@ -12,8 +12,8 @@ use guff_style::{
     mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
     nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
-    tagliatelle, testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting,
-    whitespace, wsl,
+    tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
+    usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -5744,4 +5744,53 @@ fn noinlineerr_allows_plain_assignment() {
     let pkg = support::typecheck_fixture("noinlineerr", "example.com/noinlineerr/ok", "ok.go");
     let messages = support::run_analyzer(noinlineerr(), &pkg);
     assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn testableexamples_flags_missing_output() {
+    let pkg = support::typecheck_fixture(
+        "testableexamples",
+        "example.com/testableexamples",
+        "bad_test.go",
+    );
+    let messages = support::run_analyzer(testableexamples(), &pkg);
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected exactly 1 missing-output report: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("missing output for example"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn testableexamples_allows_examples_with_output() {
+    let pkg = support::typecheck_fixture(
+        "testableexamples",
+        "example.com/testableexamples/ok",
+        "ok_test.go",
+    );
+    let messages = support::run_analyzer(testableexamples(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn testableexamples_flags_whole_file_example_without_output() {
+    let pkg = support::typecheck_fixture(
+        "testableexamples/whole_bad",
+        "example.com/testableexamples/whole_bad",
+        "whole_bad_test.go",
+    );
+    let messages = support::run_analyzer(testableexamples(), &pkg);
+    assert_eq!(
+        messages.len(),
+        1,
+        "expected whole-file missing output: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("missing output for example"),
+        "{messages:?}"
+    );
 }
