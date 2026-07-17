@@ -4,15 +4,15 @@
 //! - `sections` → repeated `-s` / `--section`
 //! - `custom-order` → `--custom-order`
 //! - `no-lex-order` → `--no-lex-order`
+//! - `no-inline-comments` / `no-prefix-comments` → post-processing on the
+//!   formatted import block (the gci 0.14 `print` CLI does not expose these, so
+//!   we strip the comments ourselves to match the gci library behavior).
 //!
 //! Default sections are `standard` / `default` (golangci default).
 //!
 //! `gci print` requires a file path (no stdin), so we stage `src` into a temp
 //! `.go` file. When `filename` is a real path, the temp file is created in the
 //! same directory so `localmodule` can resolve `go.mod`.
-//!
-//! DEFERRED: `no-inline-comments` / `no-prefix-comments` (golangci library API;
-//! not exposed on `gci print` CLI as of gci 0.14).
 
 use std::fs;
 use std::io::Write;
@@ -33,9 +33,9 @@ pub struct GciOptions {
     pub custom_order: bool,
     /// Pass `--no-lex-order`.
     pub no_lex_order: bool,
-    /// Parsed for config compatibility; not passed to CLI (DEFERRED).
+    /// Strip inline comments in the import block (post-processed; CLI gap).
     pub no_inline_comments: bool,
-    /// Parsed for config compatibility; not passed to CLI (DEFERRED).
+    /// Strip standalone prefix comments in the import block (post-processed).
     pub no_prefix_comments: bool,
 }
 
@@ -101,7 +101,8 @@ impl Formatter for Gci {
         if self.options.no_lex_order {
             cmd.arg("--no-lex-order");
         }
-        // DEFERRED: no-inline-comments / no-prefix-comments → R15 (CLI gap).
+        // no-inline-comments / no-prefix-comments are not on the `print` CLI;
+        // post-processed below.
         cmd.arg(&temp);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
@@ -120,8 +121,78 @@ impl Formatter for Gci {
             });
         }
 
-        Ok(output.stdout)
+        if self.options.no_inline_comments || self.options.no_prefix_comments {
+            Ok(strip_import_comments(
+                &output.stdout,
+                self.options.no_inline_comments,
+                self.options.no_prefix_comments,
+            ))
+        } else {
+            Ok(output.stdout)
+        }
     }
+}
+
+/// Remove inline and/or standalone prefix comments inside the `import ( … )`
+/// block, mirroring the gci `NoInlineComments` / `NoPrefixComments` options.
+fn strip_import_comments(src: &[u8], no_inline: bool, no_prefix: bool) -> Vec<u8> {
+    let text = String::from_utf8_lossy(src);
+    let trailing_newline = text.ends_with('\n');
+    let mut out: Vec<String> = Vec::new();
+    let mut in_block = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !in_block {
+            if trimmed.starts_with("import (") {
+                in_block = true;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+
+        // Inside `import ( … )`.
+        if trimmed.starts_with(')') {
+            in_block = false;
+            out.push(line.to_string());
+            continue;
+        }
+
+        let is_comment_only = trimmed.starts_with("//") || trimmed.starts_with("/*");
+        if is_comment_only {
+            if no_prefix {
+                continue; // drop standalone prefix comment line
+            }
+            out.push(line.to_string());
+            continue;
+        }
+
+        if no_inline {
+            if let Some(stripped) = strip_inline_comment(line) {
+                out.push(stripped);
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+
+    let mut joined = out.join("\n");
+    if trailing_newline {
+        joined.push('\n');
+    }
+    joined.into_bytes()
+}
+
+/// Strip a trailing `// …` comment from an import line, keeping the import spec.
+/// Returns `None` when there is no inline comment to remove.
+fn strip_inline_comment(line: &str) -> Option<String> {
+    // Only strip after the closing quote of the import path so `//` inside the
+    // string literal is preserved.
+    let close = line.rfind('"')?;
+    let after = &line[close + 1..];
+    let rel = after.find("//")?;
+    let cut = close + 1 + rel;
+    Some(line[..cut].trim_end().to_string())
 }
 
 /// Write `src` next to `filename` when possible; otherwise system temp.
@@ -192,6 +263,40 @@ impl Drop for TempGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_inline_comments_in_import_block() {
+        let src = b"package p\n\nimport (\n\t\"fmt\" // std\n\t\"os\"\n)\n\nfunc f() {}\n";
+        let out = strip_import_comments(src, true, false);
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\t\"fmt\"\n"), "inline comment kept:\n{s}");
+        assert!(!s.contains("// std"), "inline comment not removed:\n{s}");
+    }
+
+    #[test]
+    fn strip_prefix_comments_in_import_block() {
+        let src =
+            b"package p\n\nimport (\n\t// standard\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc f() {}\n";
+        let out = strip_import_comments(src, false, true);
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("// standard"), "prefix comment not removed:\n{s}");
+        assert!(s.contains("\t\"fmt\"\n"), "import spec lost:\n{s}");
+    }
+
+    #[test]
+    fn keeps_comments_outside_import_block() {
+        let src = b"package p\n\n// keep me\nfunc f() {} // and me\n";
+        let out = strip_import_comments(src, true, true);
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("// keep me"), "doc comment removed:\n{s}");
+        assert!(s.contains("// and me"), "code comment removed:\n{s}");
+    }
+
+    #[test]
+    fn preserves_double_slash_inside_import_path() {
+        let line = "\t\"example.com/a//b\"";
+        assert_eq!(strip_inline_comment(line), None);
+    }
 
     fn gci_available() -> bool {
         Command::new("gci")

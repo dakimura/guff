@@ -109,6 +109,107 @@ pub struct LintOptions {
     pub cache_dir: Option<std::path::PathBuf>,
     /// Apply the first suggested fix for each diagnostic to source files (`--fix`).
     pub fix: bool,
+    /// Optional formatter diagnostics for `guff run` (golangci `formatters`).
+    /// When set, unformatted files are reported as issues (or fixed with `fix`).
+    pub formatters: Option<FormatterRunConfig>,
+}
+
+/// Formatter configuration for `guff run` diagnostics (golangci `formatters`).
+///
+/// Held as plain data (all fields `Clone`) so [`LintOptions`] stays cloneable;
+/// the formatters are built lazily during the run.
+#[derive(Debug, Clone)]
+pub struct FormatterRunConfig {
+    /// Implemented formatter names in `enable` order (gofmt/gofumpt/…/swaggo).
+    pub enable: Vec<String>,
+    pub gofmt: guff_fmt::GofmtOptions,
+    pub gofumpt: guff_fmt::GofumptOptions,
+    pub goimports: guff_fmt::GoimportsOptions,
+    pub gci: guff_fmt::GciOptions,
+    pub golines: guff_fmt::GolinesOptions,
+    pub generated: guff_fmt::GeneratedMode,
+    /// `formatters.exclusions.paths`.
+    pub exclude_paths: Vec<String>,
+    /// Filesystem roots derived from the run patterns.
+    pub paths: Vec<std::path::PathBuf>,
+    /// Rewrite files in place instead of reporting (`--fix`).
+    pub fix: bool,
+}
+
+/// Check (or fix) formatting for `guff run`; returns issues for unformatted files.
+///
+/// Each enabled formatter is checked independently (matching golangci, which
+/// runs one analyzer per formatter), so issues are attributed to the specific
+/// formatter. With `fix`, files are rewritten via the chained formatters and no
+/// issues are produced.
+fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<Vec<Issue>, RunError> {
+    use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
+
+    if cfg.enable.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if cfg.fix {
+        let meta = MetaFormatter::new(
+            &cfg.enable,
+            cfg.gofmt.clone(),
+            cfg.gofumpt.clone(),
+            cfg.goimports.clone(),
+            cfg.gci.clone(),
+            cfg.golines.clone(),
+        )
+        .map_err(|e| RunError::Message(e.to_string()))?;
+        let runner = Runner::new(
+            meta,
+            RunnerOptions {
+                exclude_paths: cfg.exclude_paths.clone(),
+                generated: cfg.generated,
+                ..Default::default()
+            },
+        );
+        let mut sink = io::sink();
+        runner
+            .run(&cfg.paths, &mut sink)
+            .map_err(|e| RunError::Message(e.to_string()))?;
+        return Ok(Vec::new());
+    }
+
+    let mut issues = Vec::new();
+    for name in &cfg.enable {
+        let meta = MetaFormatter::new(
+            std::slice::from_ref(name),
+            cfg.gofmt.clone(),
+            cfg.gofumpt.clone(),
+            cfg.goimports.clone(),
+            cfg.gci.clone(),
+            cfg.golines.clone(),
+        )
+        .map_err(|e| RunError::Message(e.to_string()))?;
+        let runner = Runner::new(
+            meta,
+            RunnerOptions {
+                exclude_paths: cfg.exclude_paths.clone(),
+                generated: cfg.generated,
+                ..Default::default()
+            },
+        );
+        let findings = runner
+            .check(&cfg.paths)
+            .map_err(|e| RunError::Message(e.to_string()))?;
+        for f in findings {
+            issues.push(issue_from_cached(
+                name,
+                &f.file,
+                f.line,
+                1,
+                "File is not properly formatted",
+                "format",
+                "",
+                "error",
+            ));
+        }
+    }
+    Ok(filter.apply(issues, &[]))
 }
 
 impl LintOptions {
@@ -128,6 +229,7 @@ impl LintOptions {
             use_cache: true,
             cache_dir: None,
             fix: false,
+            formatters: None,
         }
     }
 }
@@ -378,9 +480,13 @@ pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, Run
 
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
     let result = run_linters(opts)?;
-    let (issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
+    let (mut issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
     if fixes_applied > 0 {
         eprintln!("guff: fixed {fixes_applied} issue(s)");
+    }
+    if let Some(fmt_cfg) = &opts.formatters {
+        let fmt_issues = run_format_checks(fmt_cfg, &opts.filter)?;
+        issues.extend(fmt_issues);
     }
     print_issues(&opts.out_formats, &issues, out).map_err(RunError::Io)?;
     Ok(if issues.is_empty() {
@@ -471,5 +577,66 @@ impl From<ConfigError> for RunError {
 impl From<FixError> for RunError {
     fn from(value: FixError) -> Self {
         Self::Message(value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod format_check_tests {
+    use super::*;
+
+    fn cfg(paths: Vec<std::path::PathBuf>, fix: bool) -> FormatterRunConfig {
+        FormatterRunConfig {
+            enable: vec!["gofmt".to_string()],
+            gofmt: guff_fmt::GofmtOptions::default(),
+            gofumpt: guff_fmt::GofumptOptions::default(),
+            goimports: guff_fmt::GoimportsOptions::default(),
+            gci: guff_fmt::GciOptions::default(),
+            golines: guff_fmt::GolinesOptions::default(),
+            generated: guff_fmt::GeneratedMode::Lax,
+            exclude_paths: Vec::new(),
+            paths,
+            fix,
+        }
+    }
+
+    #[test]
+    fn reports_unformatted_file_as_issue() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.go");
+        std::fs::write(&path, "package main\nfunc main(  ) {\n}\n").unwrap();
+
+        let issues =
+            run_format_checks(&cfg(vec![path.clone()], false), &IssueFilter::default()).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].from_linter, "gofmt");
+        assert_eq!(issues[0].text, "File is not properly formatted");
+        // File is untouched in check mode.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "package main\nfunc main(  ) {\n}\n"
+        );
+    }
+
+    #[test]
+    fn fix_rewrites_and_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.go");
+        std::fs::write(&path, "package main\nfunc main(  ) {\n}\n").unwrap();
+
+        let issues =
+            run_format_checks(&cfg(vec![path.clone()], true), &IssueFilter::default()).unwrap();
+        assert!(issues.is_empty());
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert!(got.contains("func main() {"), "not fixed:\n{got}");
+    }
+
+    #[test]
+    fn formatted_file_yields_no_issue() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.go");
+        std::fs::write(&path, "package main\n\nfunc main() {}\n").unwrap();
+        let issues =
+            run_format_checks(&cfg(vec![path], false), &IssueFilter::default()).unwrap();
+        assert!(issues.is_empty(), "unexpected: {issues:?}");
     }
 }

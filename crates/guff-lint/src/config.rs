@@ -552,6 +552,14 @@ pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::Gofumpt
             }
         }
     }
+    // Non-standard convenience key; the CLI also injects `-lang` from `run.go`.
+    if let Some(v) = gmap.get(serde_yaml::Value::String("lang".into())) {
+        if let Some(s) = v.as_str() {
+            if !s.is_empty() {
+                opts.lang = Some(s.to_string());
+            }
+        }
+    }
     opts
 }
 
@@ -641,7 +649,7 @@ pub fn parse_gci_settings(settings: &serde_yaml::Value) -> guff_fmt::GciOptions 
             opts.no_lex_order = b;
         }
     }
-    // DEFERRED: no-inline-comments / no-prefix-comments → CLI gap (R15).
+    // Post-processed in guff-fmt (gci `print` CLI does not expose these).
     if let Some(v) = gmap.get(serde_yaml::Value::String("no-inline-comments".into())) {
         if let Some(b) = v.as_bool() {
             opts.no_inline_comments = b;
@@ -1573,6 +1581,15 @@ golines:
         let yaml: serde_yaml::Value = serde_yaml::from_str("gofmt:\n  simplify: true\n").unwrap();
         let opts = parse_golines_settings(&yaml);
         assert_eq!(opts, guff_fmt::GolinesOptions::default());
+    }
+
+    #[test]
+    fn parse_gofumpt_lang_key() {
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str("gofumpt:\n  lang: \"1.22\"\n  extra-rules: true\n").unwrap();
+        let opts = parse_gofumpt_settings(&yaml);
+        assert_eq!(opts.lang.as_deref(), Some("1.22"));
+        assert!(opts.extra_rules);
     }
 
     #[test]

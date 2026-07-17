@@ -515,6 +515,43 @@ formatters:
 }
 
 #[test]
+fn cli_fmt_diff_output_is_plain_without_tty() {
+    // Piped stdout (non-TTY) must not contain ANSI escapes even without --no-color.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("main.go");
+    std::fs::write(&path, "package main\nfunc main(  ) {}\n").unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "--no-config", "-E", "gofmt", "-d"])
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt -d");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains('\x1b'), "unexpected ANSI in:\n{stdout}");
+    assert!(stdout.contains("func main()"), "diff:\n{stdout}");
+}
+
+#[test]
+fn cli_fmt_swaggo_enable_is_accepted() {
+    // swaggo is now a known/implemented formatter; enabling it must not error.
+    // (If `swag` is not installed, the file is left unchanged and exit is 0.)
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("main.go");
+    std::fs::write(&path, "package main\n\nfunc main() {}\n").unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "--no-config", "-E", "swaggo"])
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt -E swaggo");
+    assert!(
+        out.status.success(),
+        "swaggo enable should not error; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn cli_fmt_generated_disable_from_config() {
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = tmp.path().join(".golangci.yml");

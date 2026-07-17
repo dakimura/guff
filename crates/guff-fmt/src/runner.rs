@@ -66,6 +66,17 @@ pub struct RunnerOptions {
     pub exclude_paths: Vec<String>,
     /// `formatters.exclusions.generated` (`lax` default, matching golangci fmt).
     pub generated: GeneratedMode,
+    /// Colorize `--diff` output with ANSI codes (default: off).
+    pub color: bool,
+}
+
+/// A single formatting difference found by [`Runner::check`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatFinding {
+    /// File that is not properly formatted.
+    pub file: String,
+    /// 1-based line number of the change (start of the first differing hunk).
+    pub line: i64,
 }
 
 /// Summary of a format run.
@@ -113,6 +124,87 @@ impl Runner {
         }
 
         Ok(stats)
+    }
+
+    /// Report files that are not properly formatted, without rewriting anything.
+    ///
+    /// Used by `guff run` to surface formatter diagnostics. Honors the same
+    /// generated-file and path exclusions as [`run`](Self::run).
+    pub fn check(&self, paths: &[PathBuf]) -> Result<Vec<FormatFinding>, FormatError> {
+        let roots: Vec<PathBuf> = if paths.is_empty() {
+            vec![PathBuf::from(".")]
+        } else {
+            paths.to_vec()
+        };
+        let mut findings = Vec::new();
+        for root in roots {
+            self.walk_check(&root, &mut findings)?;
+        }
+        Ok(findings)
+    }
+
+    fn walk_check(
+        &self,
+        root: &Path,
+        findings: &mut Vec<FormatFinding>,
+    ) -> Result<(), FormatError> {
+        let meta = fs::metadata(root).map_err(FormatError::Walk)?;
+        if meta.is_file() {
+            if is_go_path(root) {
+                self.check_file(root, findings)?;
+            }
+            return Ok(());
+        }
+        let entries = fs::read_dir(root).map_err(FormatError::Walk)?;
+        for entry in entries {
+            let entry = entry.map_err(FormatError::Walk)?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            let ft = entry.file_type().map_err(FormatError::Walk)?;
+            if ft.is_dir() {
+                if skip_dir(&name) {
+                    continue;
+                }
+                self.walk_check(&path, findings)?;
+            } else if ft.is_file() && is_go_path(&path) {
+                self.check_file(&path, findings)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_file(
+        &self,
+        path: &Path,
+        findings: &mut Vec<FormatFinding>,
+    ) -> Result<(), FormatError> {
+        let path_str = path.to_string_lossy();
+        if self.is_excluded(path) {
+            return Ok(());
+        }
+        let input = fs::read(path).map_err(|e| FormatError::Io {
+            formatter: "guff-fmt".into(),
+            path: path_str.to_string(),
+            source: e,
+        })?;
+        if is_generated(&input, self.opts.generated) {
+            return Ok(());
+        }
+        let output = self.meta.format(&path_str, &input)?;
+        if output == input {
+            return Ok(());
+        }
+        let old = String::from_utf8_lossy(&input);
+        let new = String::from_utf8_lossy(&output);
+        let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
+        for line in first_changed_lines(&diff) {
+            findings.push(FormatFinding {
+                file: path_str.to_string(),
+                line,
+            });
+        }
+        Ok(())
     }
 
     fn walk(
@@ -188,8 +280,13 @@ impl Runner {
                 .context_radius(3)
                 .header(&format!("{display}.orig"), &display)
                 .to_string();
+            let rendered = if self.opts.color {
+                colorize_diff(&unified)
+            } else {
+                unified
+            };
             stdout
-                .write_all(unified.as_bytes())
+                .write_all(rendered.as_bytes())
                 .map_err(FormatError::Walk)?;
             stats.exit_code = 1;
             stats.rewritten += 1;
@@ -226,6 +323,75 @@ fn is_go_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.ends_with(".go") && !n.starts_with('.'))
+}
+
+/// 1-based original-file line numbers where each change group begins.
+fn first_changed_lines<'a>(diff: &TextDiff<'a, 'a, 'a, str>) -> Vec<i64> {
+    use similar::ChangeTag;
+    let mut lines = Vec::new();
+    let mut old_line: i64 = 0;
+    let mut in_change = false;
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Equal => {
+                in_change = false;
+                old_line += 1;
+            }
+            ChangeTag::Delete => {
+                if !in_change {
+                    lines.push(old_line + 1);
+                    in_change = true;
+                }
+                old_line += 1;
+            }
+            ChangeTag::Insert => {
+                if !in_change {
+                    // Insertion between two original lines: attribute to the next
+                    // original line (at least 1).
+                    lines.push((old_line + 1).max(1));
+                    in_change = true;
+                }
+            }
+        }
+    }
+    lines
+}
+
+/// Apply ANSI colors to a unified diff (golangci-style `fmt -d`).
+fn colorize_diff(diff: &str) -> String {
+    const RESET: &str = "\x1b[0m";
+    const RED: &str = "\x1b[31m";
+    const GREEN: &str = "\x1b[32m";
+    const CYAN: &str = "\x1b[36m";
+    const BOLD: &str = "\x1b[1m";
+
+    let mut out = String::with_capacity(diff.len() + 64);
+    for line in diff.split_inclusive('\n') {
+        let (body, nl) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        let color = if body.starts_with("+++") || body.starts_with("---") {
+            BOLD
+        } else if body.starts_with("@@") {
+            CYAN
+        } else if body.starts_with('+') {
+            GREEN
+        } else if body.starts_with('-') {
+            RED
+        } else {
+            ""
+        };
+        if color.is_empty() {
+            out.push_str(body);
+        } else {
+            out.push_str(color);
+            out.push_str(body);
+            out.push_str(RESET);
+        }
+        out.push_str(nl);
+    }
+    out
 }
 
 /// Substring match, or `*` wildcard glob (DEFERRED: full regex like golangci).
@@ -342,6 +508,42 @@ mod tests {
         let stats = runner.run(&[path.clone()], &mut out).unwrap();
         assert_eq!(stats.skipped, 1);
         assert_eq!(stats.rewritten, 0);
+    }
+
+    #[test]
+    fn check_reports_unformatted_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.go");
+        let original = "package main\nfunc main(  ) {\n}\n";
+        fs::write(&path, original).unwrap();
+
+        let runner = Runner::new(meta_gofmt(), RunnerOptions::default());
+        let findings = runner.check(&[path.clone()]).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file, path.to_string_lossy());
+        assert_eq!(findings[0].line, 2);
+        // check() must not rewrite.
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn check_reports_nothing_for_formatted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.go");
+        fs::write(&path, "package main\n\nfunc main() {}\n").unwrap();
+        let runner = Runner::new(meta_gofmt(), RunnerOptions::default());
+        let findings = runner.check(&[path.clone()]).unwrap();
+        assert!(findings.is_empty(), "unexpected findings: {findings:?}");
+    }
+
+    #[test]
+    fn colorize_diff_wraps_added_and_removed() {
+        let diff = "--- a.go.orig\n+++ a.go\n@@ -1,2 +1,2 @@\n-old\n+new\n ctx\n";
+        let colored = colorize_diff(diff);
+        assert!(colored.contains("\x1b[32m+new\x1b[0m"), "green add:\n{colored}");
+        assert!(colored.contains("\x1b[31m-old\x1b[0m"), "red del:\n{colored}");
+        assert!(colored.contains("\x1b[36m@@"), "cyan hunk:\n{colored}");
+        assert!(colored.contains(" ctx\n"), "context unchanged:\n{colored}");
     }
 
     #[test]

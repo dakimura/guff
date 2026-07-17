@@ -58,7 +58,7 @@ go list / モジュールグラフ (guff-packages)
 |----|----------|-----------------|
 | **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
 | **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
-| **Formatters** | `guff-fmt` | `guff fmt`（gofmt / gofumpt / goimports / gci / golines；swaggo は R15 DEFERRED） |
+| **Formatters** | `guff-fmt` | `guff fmt`（gofmt / gofumpt / goimports / gci / golines / swaggo） |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
 | **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis`（Pass/Analyzer/inspect/facts/code/callcheck）+ Staticcheck のパターン DSL |
 | **SSA** | `guff-ssa` | `go/ssa`（buildir） |
@@ -159,7 +159,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines（`exclusions.generated` lax/strict/disable；swaggo は DEFERRED） |
+| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines / swaggo（`exclusions.generated` lax/strict/disable）。`run` でも `formatters.enable` があれば整形診断を出す |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **14** 件をパース検証 | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
@@ -189,7 +189,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-<upstream名>` | `guff-gostaticanalysis` | 同一 org の小 linter を束ねる |
 | `guff-<カテゴリ>` | `guff-style`, `guff-comment` | 小さなスタンドアロン linter 群 |
 | `guff-lint` | — | CLI + レジストリ + nolint |
-| `guff-fmt` | ✅ gofmt / gofumpt / goimports / gci / golines（`guff fmt`） | swaggo は DEFERRED |
+| `guff-fmt` | ✅ gofmt / gofumpt / goimports / gci / golines / swaggo（`guff fmt`） | — |
 
 **ルール**: 1 クレート = `analyzers() -> Vec<&'static Analyzer>` を公開。登録は `guff-lint` が行う。
 
@@ -321,9 +321,12 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **目的**: `guff-revive`（独自ルールエンジン）/ `guff-misspell` / `guff-dupl` / `guff-style` バンドル / `guff-comment` / `guff-import`。実装済みは §3.3。
 - **残**: revive の未実装 rule、`gocyclo:ignore` / `gocognit:ignore` 等のコメント除外、tagalign StrictStyle、wsl(v4) 完全パリティ、各種 SuggestedFix。
 
-#### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド）🟡 部分完了 (2026-07-17)
-- gofmt / gofumpt / goimports / gci / golines をシステムバイナリ経由で実装。enable 順チェーン、`formatters.enable` / `settings` / `exclusions.paths` / **`exclusions.generated`（`lax` 既定 / `strict` / `disable`）** 配線。フラグ: `-E/--enable` / `-d/--diff` / `--stdin` / `-c` / `--no-config`。enable 空 → gofmt フォールバック。
-- **DEFERRED**: swaggo、`guff run` 時の formatter 診断、diff 色付け、gofumpt `-lang`、gci `no-inline-comments` / `no-prefix-comments`（CLI 未対応）。
+#### R15. formatter（`guff-fmt` + `guff fmt` サブコマンド）✅ 完了 (2026-07-17)
+- gofmt / gofumpt / goimports / gci / golines / **swaggo**（`swag fmt` 経由）をシステムバイナリで実装。enable 順チェーン、`formatters.enable` / `settings` / `exclusions.paths` / `exclusions.generated`（`lax` 既定 / `strict` / `disable`）配線。フラグ: `-E/--enable` / `-d/--diff`（TTY で ANSI 色付け・`--no-color`）/ `--stdin` / `-c` / `--no-config`。enable 空 → gofmt フォールバック。
+- **gofumpt `-lang`**: `run.go`（または `settings.gofumpt.lang`）から注入。
+- **gci `no-inline-comments` / `no-prefix-comments`**: gci `print` CLI が未対応のため import ブロックの後処理で実現。
+- **`guff run` 時の formatter 診断**: `formatters.enable` があると各フォーマッタを個別に走査し未整形ファイルを `File is not properly formatted (<formatter>)` として issue 化。`--fix` でチェーン整形して書き換え（issue は出さない）。パターン→パス変換は `./...`→`.` 等。
+- **DEFERRED**: 診断ごとの `SuggestedFix`（JSON への TextEdit 埋め込み）、`guff run` の formatter パターンが実パスでない場合（モジュールパス）のマッピング。
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
 - 実装済み: ST* **15**（ST1000/1001/1003/1006/1011/1012/1013/1015/1017/1018/1019/1020/1021/1022/1023）+ QF* **12**（QF1001–QF1012）。設定・SuggestedFix の詳細は §3.3 / `SESSION-LOG.md`。

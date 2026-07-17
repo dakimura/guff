@@ -3,9 +3,8 @@
 //! Matches golangci-lint `pkg/goformatters/gofumpt` settings:
 //! - `extra-rules` → `-extra`
 //! - `module-path` → `-modpath`
-//!
-//! Lang version (`-lang`) is left unset so gofumpt reads `go.mod` (golangci
-//! injects the toolchain version via the library API; CLI parity is DEFERRED).
+//! - target Go version → `-lang` (golangci sources this from `run.go`; the CLI
+//!   wires it from config `run.go`, else gofumpt reads `go.mod`).
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -22,6 +21,9 @@ pub struct GofumptOptions {
     pub extra_rules: bool,
     /// Pass `-modpath` (module path containing the source).
     pub module_path: Option<String>,
+    /// Pass `-lang` (target Go version, e.g. `go1.22` / `1.22`).
+    /// `None` → gofumpt reads the version from `go.mod`.
+    pub lang: Option<String>,
 }
 
 /// Formatter that invokes the system `gofumpt` binary.
@@ -60,6 +62,11 @@ impl Formatter for Gofumpt {
         if let Some(modpath) = &self.options.module_path {
             if !modpath.is_empty() {
                 cmd.arg("-modpath").arg(modpath);
+            }
+        }
+        if let Some(lang) = &self.options.lang {
+            if !lang.is_empty() {
+                cmd.arg("-lang").arg(normalize_lang(lang));
             }
         }
         // gofumpt reads stdin when no path args are given.
@@ -105,9 +112,26 @@ impl Formatter for Gofumpt {
     }
 }
 
+/// gofumpt expects `-lang go1.X`; accept bare `1.22` / `go1.22` / `1` forms.
+fn normalize_lang(lang: &str) -> String {
+    let t = lang.trim();
+    if t.starts_with("go") {
+        t.to_string()
+    } else {
+        format!("go{t}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_lang_prefixes_go() {
+        assert_eq!(normalize_lang("1.22"), "go1.22");
+        assert_eq!(normalize_lang("go1.21"), "go1.21");
+        assert_eq!(normalize_lang(" 1.20 "), "go1.20");
+    }
 
     fn gofumpt_available() -> bool {
         Command::new("gofumpt")

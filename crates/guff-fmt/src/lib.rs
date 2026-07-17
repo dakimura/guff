@@ -1,7 +1,7 @@
 //! Go source formatters for `guff fmt` (golangci-lint `pkg/goformatters` equivalent).
 //!
-//! Implemented: **gofmt** / **gofumpt** / **goimports** / **gci** / **golines** (system binaries).
-//! Remaining (swaggo) is DEFERRED → R15.
+//! Implemented: **gofmt** / **gofumpt** / **goimports** / **gci** / **golines** /
+//! **swaggo** (system binaries).
 
 mod gci;
 mod generated;
@@ -11,6 +11,7 @@ mod goimports;
 mod golines;
 mod meta;
 mod runner;
+mod swaggo;
 
 pub use gci::{Gci, GciOptions};
 pub use generated::{is_generated, GeneratedMode};
@@ -19,7 +20,8 @@ pub use gofumpt::{Gofumpt, GofumptOptions};
 pub use goimports::{Goimports, GoimportsOptions};
 pub use golines::{Golines, GolinesOptions};
 pub use meta::{is_formatter, MetaFormatter, KNOWN_FORMATTERS};
-pub use runner::{FormatError, Runner, RunnerOptions, RunStats};
+pub use runner::{FormatError, FormatFinding, Runner, RunnerOptions, RunStats};
+pub use swaggo::Swaggo;
 
 /// A source formatter: rewrite Go source bytes.
 pub trait Formatter: Send + Sync {

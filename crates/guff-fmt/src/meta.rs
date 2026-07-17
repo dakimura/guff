@@ -6,6 +6,7 @@ use crate::gofumpt::{Gofumpt, GofumptOptions};
 use crate::goimports::{Goimports, GoimportsOptions};
 use crate::golines::{Golines, GolinesOptions};
 use crate::runner::FormatError;
+use crate::swaggo::Swaggo;
 use crate::Formatter;
 
 /// Known formatter names (golangci-lint v2 `formatters.enable`).
@@ -24,8 +25,7 @@ pub struct MetaFormatter {
 impl MetaFormatter {
     /// Build from `formatters.enable` and per-formatter options.
     ///
-    /// Unknown names return an error (golangci rejects invalid names). Known-but-
-    /// unimplemented formatters (swaggo, …) return a clear DEFERRED message.
+    /// Unknown names return an error (golangci rejects invalid names).
     /// Formatters are chained in `enable` order.
     pub fn new(
         enable: &[String],
@@ -50,9 +50,7 @@ impl MetaFormatter {
                 "goimports" => formatters.push(Box::new(Goimports::new(goimports.clone()))),
                 "gci" => formatters.push(Box::new(Gci::new(gci.clone()))),
                 "golines" => formatters.push(Box::new(Golines::new(golines.clone()))),
-                "swaggo" => {
-                    return Err(FormatError::Deferred(name.clone()));
-                }
+                "swaggo" => formatters.push(Box::new(Swaggo::new())),
                 _ => {}
             }
         }
@@ -152,13 +150,10 @@ mod tests {
     }
 
     #[test]
-    fn deferred_swaggo() {
+    fn enables_swaggo() {
         let (a, b, c, d, e) = opts();
-        let err = match MetaFormatter::new(&["swaggo".into()], a, b, c, d, e) {
-            Ok(_) => panic!("expected error"),
-            Err(e) => e,
-        };
-        assert!(matches!(err, FormatError::Deferred(_)));
+        let m = MetaFormatter::new(&["swaggo".into()], a, b, c, d, e).unwrap();
+        assert_eq!(m.formatter_names(), vec!["swaggo"]);
     }
 
     #[test]
