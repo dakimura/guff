@@ -824,8 +824,29 @@ fn parse_v2_rowserrcheck_settings() {
 }
 
 #[test]
+fn parse_v2_bodyclose_settings() {
+    use guff_lint::BodycloseSettings;
+
+    let contents = fs::read_to_string(testdata_config("v2_bodyclose_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.bodyclose,
+        BodycloseSettings {
+            check_consumption: true,
+        }
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_context::BodycloseOptions>("bodyclose")
+        .expect("bodyclose options");
+    assert!(opts.check_consumption);
+}
+
+#[test]
 fn parse_v2_comment_settings() {
     use guff_lint::{DupwordSettings, GodotSettings, GodoxSettings};
+
 
     let contents = fs::read_to_string(testdata_config("v2_comment_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

@@ -50,6 +50,7 @@ pub struct LinterSettings {
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
     pub rowserrcheck: RowserrcheckSettings,
+    pub bodyclose: BodycloseSettings,
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
@@ -785,6 +786,15 @@ pub struct WrapcheckSettings {
 pub struct RowserrcheckSettings {
     #[serde(default)]
     pub packages: Vec<String>,
+}
+
+/// `linters.settings.bodyclose` / `linters-settings.bodyclose`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct BodycloseSettings {
+    /// Also require a known consumption call on the response body.
+    /// Default: false (golangci-lint parity).
+    #[serde(default, rename = "check-consumption")]
+    pub check_consumption: bool,
 }
 
 /// `linters.settings.godot` / `linters-settings.godot`.
@@ -2026,6 +2036,11 @@ impl LinterSettings {
                 out.rowserrcheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("bodyclose".into())) {
+            if let Ok(s) = serde_yaml::from_value::<BodycloseSettings>(v.clone()) {
+                out.bodyclose = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("godot".into())) {
             if let Ok(s) = serde_yaml::from_value::<GodotSettings>(v.clone()) {
                 out.godot = s;
@@ -2275,6 +2290,7 @@ impl LinterSettings {
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("rowserrcheck", self.rowserrcheck.to_guff_rowserrcheck());
+        bag.insert("bodyclose", self.bodyclose.to_guff_bodyclose());
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
@@ -2936,6 +2952,14 @@ impl RowserrcheckSettings {
     pub fn to_guff_rowserrcheck(&self) -> guff_error::RowserrcheckOptions {
         guff_error::RowserrcheckOptions {
             packages: self.packages.clone(),
+        }
+    }
+}
+
+impl BodycloseSettings {
+    pub fn to_guff_bodyclose(&self) -> guff_context::BodycloseOptions {
+        guff_context::BodycloseOptions {
+            check_consumption: self.check_consumption,
         }
     }
 }

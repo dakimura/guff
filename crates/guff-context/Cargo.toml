@@ -1,6 +1,6 @@
 [package]
 name = "guff-context"
-description = "Rust ports of context-related go/analysis linters (noctx, fatcontext)."
+description = "Rust ports of context-related go/analysis linters (noctx, fatcontext, bodyclose)."
 keywords = ["go", "linter", "context", "analysis"]
 categories = ["development-tools"]
 version.workspace = true

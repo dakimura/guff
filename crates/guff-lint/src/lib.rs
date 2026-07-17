@@ -39,11 +39,11 @@ pub use registry::{
 };
 pub use fix::{apply_fixes, FixError};
 pub use settings::{
-    DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings, ErrcheckSettings,
-    ErrchkjsonSettings, FuncorderSettings, GodoclintSettings, GodotSettings, GodoxSettings,
-    GomoddirectivesSettings,
-    GomodguardSettings, GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings,
-    RowserrcheckSettings, StaticcheckSettings, VarnamelenSettings, WrapcheckSettings,
+    BodycloseSettings, DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings,
+    ErrcheckSettings, ErrchkjsonSettings, FuncorderSettings, GodoclintSettings, GodotSettings,
+    GodoxSettings, GomoddirectivesSettings, GomodguardSettings, GovetSettings, LinterSettings,
+    ReviveRuleSetting, ReviveSettings, RowserrcheckSettings, StaticcheckSettings,
+    VarnamelenSettings, WrapcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.

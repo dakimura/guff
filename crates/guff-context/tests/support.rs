@@ -166,15 +166,20 @@ pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,
 ) -> Vec<String> {
-    let result = run_on_packages(
-        &[analyzer],
-        std::slice::from_ref(pkg),
-        &RunnerOptions {
-            sequential: true,
-            ..RunnerOptions::default()
-        },
-    )
-    .expect("run analyzer");
+    run_analyzer_with_settings(analyzer, pkg, &RunnerOptions {
+        sequential: true,
+        ..RunnerOptions::default()
+    })
+}
+
+pub fn run_analyzer_with_settings(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    opts: &RunnerOptions,
+) -> Vec<String> {
+    let mut opts = opts.clone();
+    opts.sequential = true;
+    let result = run_on_packages(&[analyzer], std::slice::from_ref(pkg), &opts).expect("run analyzer");
     for action in result.graph.all_actions() {
         if let Some(err) = action.error() {
             panic!("analyzer {} failed: {err}", action.string_id());
