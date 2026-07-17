@@ -531,7 +531,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
      / **nakedret** / **nosprintfhostport** / **predeclared** / **whitespace** / **nlreturn** / **mnd**
      / **prealloc** / **tagalign** / **wsl**（R14）/ **unconvert**（`fast-math` settings 済；`safe` 親コンテキストは DEFERRED）
      / **exhaustruct**（`include` / `exclude` / `allow-empty` / `allow-empty-rx` / `allow-empty-returns` / `allow-empty-declarations` settings 済；コメントディレクティブは DEFERRED）
-     / **exhaustive**（switch 既定；`check` / `default-signifies-exhaustive` / `default-case-required` / `ignore-enum-members` / `ignore-enum-types` / `package-scope-only` settings 済；map・コメントディレクティブは DEFERRED）
+     / **exhaustive**（switch 既定；`check` の `switch` / `map`、`default-signifies-exhaustive` / `default-case-required` / `ignore-enum-members` / `ignore-enum-types` / `package-scope-only` settings 済；コメントディレクティブは DEFERRED）
      / **musttag**（go-simpler/musttag；json/xml/yaml/toml/mapstructure/sqlx builtins + `linters.settings.musttag.functions` 済；iface whitelist はメソッド名ヒューリスティック）
      / **loggercheck**（timonwong/loggercheck；kitlog/klog/logr/slog/zap 奇数 KV + Attr/Field フィルタ；`linters.settings.loggercheck` 済）
      / **sloglint**（go-simpler/sloglint；`no-mixed-args` 既定；`linters.settings.sloglint` 済）
@@ -582,7 +582,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
    - ~~`errchkjson` settings（`check-error-free-encoding` / `report-no-exported`）~~ → **完了**（2026-07-16）
    - `unconvert` の `-safe` 親コンテキスト判定（`isSafeContext`）
    - `exhaustruct` の `//exhaustruct:ignore` / `//exhaustruct:enforce` コメントディレクティブ
-   - `exhaustive` の map チェック・`//exhaustive:ignore` / `//exhaustive:enforce`・`check-generated`
+   - ~~`exhaustive` の map チェック~~ → **完了**（2026-07-17；enum key の非空 map literal、同値 alias / ignore settings 対応。composing type-param / union key は DEFERRED）
+   - `exhaustive` の `//exhaustive:ignore` / `//exhaustive:enforce`・`check-generated`
    - `musttag` の真の `types.Implements` iface whitelist・sqlx 全メソッドエントリ
    - ~~`loggercheck`~~ → **完了**（2026-07-16；rulefile・printf 完全パリティは DEFERRED）
    - ~~`sloglint`~~ → **完了**（2026-07-16；SuggestedFix・discard-handler Go 1.24 ゲートは DEFERRED）
@@ -789,6 +790,7 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 
 ## 10. セッション記録（新しいものほど上）
 
+| 2026-07-17 | **R13 続き**: `exhaustive` の opt-in **map literal 検査**（`linters.settings.exhaustive.check: [map]`）を実装。enum key の非空 map で不足キーを診断し、同値 alias・非公開 member・`ignore-enum-members` / `ignore-enum-types` を switch と共通処理。空 map は upstream 同様スキップ。composing type-param / union key・コメントディレクティブは DEFERRED。テスト: `exhaustive/map.go` + `checks_test` + `v2_exhaustive_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`ireturn`**（butuzov/ireturn）を `guff-style` に追加しレジストリ登録。interface 戻り値を検出（既定 allow: anon/error/empty/stdlib）。`linters.settings.ireturn`（`allow`/`reject`）YAML 配線。stdlib は first-path-element ヒューリスティック。allow+reject 衝突エラー・完全 std テーブルは DEFERRED。`guff-style` は計 **57** analyzers。テスト: `ireturn/{bad,ok,settings}.go` + stubs + `checks_test`（3 件）+ ユニット + `v2_ireturn_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`grouper`**（leonklingele/grouper）を `guff-style` に追加しレジストリ登録。import/const/var/type の single 宣言・grouped 宣言を強制。`linters.settings.grouper`（8 bool；全既定 false＝noop）YAML 配線。RelatedInformation は DEFERRED。`guff-style` は計 **56** analyzers。テスト: `grouper/{bad,ok,settings}.go` + `checks_test`（4 件）+ ユニット + `v2_grouper_settings.yml` |
 | 2026-07-17 | **R13/R14 続き**: 新規 standalone linter **`iotamixing`**（AdminBenni/iota-mixing）を `guff-style` に追加しレジストリ登録。iota と r-val 付き const の混在を検出（既定はブロック単位）。`linters.settings.iotamixing.report-individual` YAML 配線。複合式 `1 << iota` 等は upstream 同様未検出。`guff-style` は計 **55** analyzers。テスト: `iotamixing/{bad,ok,settings}.go` + `checks_test`（3 件）+ ユニット + `v2_iotamixing_settings.yml` |

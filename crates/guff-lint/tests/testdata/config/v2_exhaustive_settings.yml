@@ -5,6 +5,7 @@ linters:
     exhaustive:
       check:
         - switch
+        - map
       default-signifies-exhaustive: true
       default-case-required: false
       ignore-enum-members: "example\\.com/exhaustive\\.Skip.+"

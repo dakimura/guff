@@ -444,8 +444,6 @@ pub struct ExhaustiveOptions {
     /// Check switch statements (default true).
     pub check_switch: bool,
     /// Check map literals keyed by enum types.
-    ///
-    /// DEFERRED: map checking not implemented yet.
     pub check_map: bool,
     /// A `default` case makes the switch exhaustive without listing all members.
     pub default_signifies_exhaustive: bool,

@@ -570,7 +570,7 @@ fn parse_v2_exhaustive_settings() {
     let contents = fs::read_to_string(testdata_config("v2_exhaustive_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();
     let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
-    assert_eq!(settings.exhaustive.check, vec!["switch"]);
+    assert_eq!(settings.exhaustive.check, vec!["switch", "map"]);
     assert_eq!(settings.exhaustive.default_signifies_exhaustive, Some(true));
     assert_eq!(settings.exhaustive.default_case_required, Some(false));
     assert_eq!(
@@ -587,7 +587,7 @@ fn parse_v2_exhaustive_settings() {
         .get::<guff_style::ExhaustiveOptions>("exhaustive")
         .expect("exhaustive options");
     assert!(opts.check_switch);
-    assert!(!opts.check_map);
+    assert!(opts.check_map);
     assert!(opts.default_signifies_exhaustive);
     assert!(!opts.default_case_required);
     assert!(opts.package_scope_only);

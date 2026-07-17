@@ -3889,6 +3889,45 @@ fn exhaustive_default_signifies_exhaustive() {
 }
 
 #[test]
+fn exhaustive_checks_map_literals_when_enabled() {
+    use guff_style::ExhaustiveOptions;
+
+    let pkg = support::typecheck_fixture("exhaustive", "example.com/exhaustive/map", "map.go");
+
+    // Map checks are opt-in, matching upstream and golangci-lint defaults.
+    let defaults = support::run_analyzer(exhaustive(), &pkg);
+    assert!(
+        defaults.is_empty(),
+        "default settings should not check maps: {defaults:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "exhaustive",
+        ExhaustiveOptions {
+            check_switch: false,
+            check_map: true,
+            ..ExhaustiveOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        exhaustive(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].contains("missing keys in map of key type exhaustive.Direction")
+            && messages[0].contains("exhaustive.South")
+            && messages[0].contains("exhaustive.West"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn musttag_flags_missing_json_tags() {
     let pkg = support::typecheck_fixture("musttag", "example.com/musttag", "bad.go");
     let messages = support::run_analyzer(musttag(), &pkg);

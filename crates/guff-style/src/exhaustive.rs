@@ -1,21 +1,21 @@
 //! Port of [`github.com/nishanths/exhaustive`](https://github.com/nishanths/exhaustive)
 //! (golangci-lint wrapper in `pkg/golinters/exhaustive`).
 //!
-//! Checks that switch statements on enum-like named types list all members.
+//! Checks that switch statements and (when enabled) map literals on enum-like
+//! named types list all members.
 //! An "enum" here is a named type whose underlying type is integer, float, or
 //! string, with same-scope const members.
 //!
 //! Defaults match golangci / upstream: check switches only;
 //! `default` does **not** satisfy exhaustiveness unless configured.
 //!
-//! DEFERRED: map-literal checks; `//exhaustive:ignore` / `//exhaustive:enforce`
-//! comment directives; `check-generated`; type-parameter / union tags;
-//! SuggestedFix.
+//! DEFERRED: `//exhaustive:ignore` / `//exhaustive:enforce` comment directives;
+//! `check-generated`; composing type-parameter / union keys; SuggestedFix.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{Decl, Expr, Spec, Stmt, SwitchStmt};
+use guff::ast::{CompositeLit, Decl, Expr, Spec, Stmt, SwitchStmt};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
@@ -339,6 +339,44 @@ fn compile_re(pat: &str) -> Option<Regex> {
     Regex::new(pat).ok()
 }
 
+fn missing_members(
+    pass: &Pass<'_>,
+    enum_info: &EnumTypeInfo,
+    found_vals: &HashSet<String>,
+    ignore_members: &Option<Regex>,
+) -> Vec<String> {
+    let same_pkg = enum_info.pkg_path == pass.pkg().pkg_path;
+    let mut remaining_by_val: HashMap<String, Vec<String>> = HashMap::new();
+    for name in &enum_info.members.names {
+        if name == "_" || (!is_exported(name) && !same_pkg) {
+            continue;
+        }
+        if member_ignored(ignore_members, &enum_info.pkg_path, name) {
+            continue;
+        }
+        let Some(val) = enum_info.members.name_to_value.get(name) else {
+            continue;
+        };
+        remaining_by_val
+            .entry(val.clone())
+            .or_default()
+            .push(name.clone());
+    }
+    for val in found_vals {
+        remaining_by_val.remove(val);
+    }
+
+    let mut missing = Vec::new();
+    for names in remaining_by_val.values() {
+        // Report one representative per constant value (first declared).
+        if let Some(name) = names.first() {
+            missing.push(name.clone());
+        }
+    }
+    missing.sort();
+    missing
+}
+
 fn check_switch(
     pass: &Pass<'_>,
     sw: &SwitchStmt,
@@ -363,49 +401,12 @@ fn check_switch(
     let Some(enum_info) = enum_for_tag(pass, local, tag_typ) else {
         return;
     };
-    if type_ignored(
-        ignore_types,
-        &enum_info.pkg_path,
-        &enum_info.type_name_str,
-    ) {
+    if type_ignored(ignore_types, &enum_info.pkg_path, &enum_info.type_name_str) {
         return;
     }
 
-    let same_pkg = enum_info.pkg_path == pass.pkg().pkg_path;
     let (found_vals, has_default) = analyze_clauses(pass, sw);
-
-    // Required members: exported always; unexported only when same package.
-    let mut missing: Vec<String> = Vec::new();
-    // Track values already satisfied so same-valued aliases don't all report.
-    let mut remaining_by_val: HashMap<String, Vec<String>> = HashMap::new();
-    for name in &enum_info.members.names {
-        if name == "_" {
-            continue;
-        }
-        if !is_exported(name) && !same_pkg {
-            continue;
-        }
-        if member_ignored(ignore_members, &enum_info.pkg_path, name) {
-            continue;
-        }
-        let Some(val) = enum_info.members.name_to_value.get(name) else {
-            continue;
-        };
-        remaining_by_val
-            .entry(val.clone())
-            .or_default()
-            .push(name.clone());
-    }
-    for val in &found_vals {
-        remaining_by_val.remove(val);
-    }
-    for names in remaining_by_val.values() {
-        // Report one representative per constant value (first declared).
-        if let Some(n) = names.first() {
-            missing.push(n.clone());
-        }
-    }
-    missing.sort();
+    let missing = missing_members(pass, &enum_info, &found_vals, ignore_members);
 
     let type_label = format!("{}.{}", enum_info.pkg_name, enum_info.type_name_str);
     let pos = sw.switch.0 as u32;
@@ -438,6 +439,68 @@ fn check_switch(
     ));
 }
 
+fn check_map(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    local: &HashMap<ObjectId, EnumTypeInfo>,
+    options: &ExhaustiveOptions,
+    ignore_members: &Option<Regex>,
+    ignore_types: &Option<Regex>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    // Upstream intentionally ignores empty map literals: they are commonly
+    // used as mutable sets or initialized before being populated.
+    if !options.check_map || lit.elts.is_empty() {
+        return;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let Some(tv) = pass.types_info().and_then(|info| info.types.get(&lit.id)) else {
+        return;
+    };
+    let typ = unalias_readonly(&artifacts.types, tv.typ);
+    let under = typ.underlying(&artifacts.types);
+    let TypeData::Map(map) = artifacts.types.get(under) else {
+        return;
+    };
+    let Some(enum_info) = enum_for_tag(pass, local, map.key()) else {
+        return;
+    };
+    if type_ignored(ignore_types, &enum_info.pkg_path, &enum_info.type_name_str) {
+        return;
+    }
+
+    let mut found_vals = HashSet::new();
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        if let Some(val) = expr_const_val(pass, &kv.key) {
+            found_vals.insert(val);
+        }
+    }
+    let missing = missing_members(pass, &enum_info, &found_vals, ignore_members);
+    if missing.is_empty() {
+        return;
+    }
+
+    let type_label = format!("{}.{}", enum_info.pkg_name, enum_info.type_name_str);
+    let missing_labels: Vec<String> = missing
+        .iter()
+        .map(|name| format!("{}.{}", enum_info.pkg_name, name))
+        .collect();
+    pending.push((
+        lit.ty
+            .as_ref()
+            .map_or(lit.lbrace.0 as u32, |ty| ty.pos().0 as u32),
+        format!(
+            "missing keys in map of key type {type_label}: {}",
+            missing_labels.join(", ")
+        ),
+    ));
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -457,8 +520,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            if let Some(NodeRef::SwitchStmt(sw)) = n {
-                check_switch(
+            match n {
+                Some(NodeRef::SwitchStmt(sw)) => check_switch(
                     pass,
                     sw,
                     &enums,
@@ -466,7 +529,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     &ignore_members,
                     &ignore_types,
                     &mut pending,
-                );
+                ),
+                Some(NodeRef::CompositeLit(lit)) => check_map(
+                    pass,
+                    lit,
+                    &enums,
+                    &options,
+                    &ignore_members,
+                    &ignore_types,
+                    &mut pending,
+                ),
+                _ => {}
             }
             true
         });
