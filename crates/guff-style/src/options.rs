@@ -1052,6 +1052,27 @@ pub struct ThelperOptions {
     pub tb: ThelperKindOptions,
 }
 
+/// `linters.settings.gosmopolitan` / `linters-settings.gosmopolitan`.
+///
+/// `watch_for_scripts` defaults to `["Han"]` (golangci-lint). Empty → `Han`.
+/// `allow_time_local` defaults to false (i.e. `time.Local` is reported).
+#[derive(Debug, Clone)]
+pub struct GosmopolitanOptions {
+    pub allow_time_local: bool,
+    pub escape_hatches: Vec<String>,
+    pub watch_for_scripts: Vec<String>,
+}
+
+impl Default for GosmopolitanOptions {
+    fn default() -> Self {
+        Self {
+            allow_time_local: false,
+            escape_hatches: Vec::new(),
+            watch_for_scripts: vec!["Han".to_string()],
+        }
+    }
+}
+
 /// `linters.settings.forbidigo` / `linters-settings.forbidigo`.
 ///
 /// `linters.settings.bidichk` — full rune names to check.

@@ -9,6 +9,7 @@ use guff_style::{
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funcorder, funlen,
     gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
+    gosmopolitan,
     grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
     maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
     nosprintfhostport,
@@ -6092,4 +6093,70 @@ fn unparam_respects_check_exported() {
         messages.iter().any(|m| m.contains("Exported - x is unused")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn gosmopolitan_flags_han_scripts_and_time_local() {
+    let pkg = support::typecheck_fixture("gosmopolitan", "example.com/gosmopolitan", "bad.go");
+    let messages = support::run_analyzer(gosmopolitan(), &pkg);
+    let han = messages
+        .iter()
+        .filter(|m| m.contains("string literal contains rune in Han script"))
+        .count();
+    assert_eq!(han, 2, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m == "usage of time.Local"),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn gosmopolitan_allows_ascii_and_utc() {
+    let pkg = support::typecheck_fixture("gosmopolitan", "example.com/gosmopolitan/ok", "ok.go");
+    let messages = support::run_analyzer(gosmopolitan(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn gosmopolitan_respects_allow_time_local_and_escape_hatches() {
+    use guff_style::GosmopolitanOptions;
+
+    let pkg = support::typecheck_fixture(
+        "gosmopolitan",
+        "example.com/gosmopolitan/settings",
+        "settings.go",
+    );
+
+    // Default: both the Han literal and time.Local are reported.
+    let flagged = support::run_analyzer(gosmopolitan(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("string literal contains rune in Han script")),
+        "{flagged:?}"
+    );
+    assert!(
+        flagged.iter().any(|m| m == "usage of time.Local"),
+        "{flagged:?}"
+    );
+
+    // With allow-time-local + escape-hatch on i18n.T: both silenced.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gosmopolitan",
+        GosmopolitanOptions {
+            allow_time_local: true,
+            escape_hatches: vec!["i18n.T".into()],
+            watch_for_scripts: vec!["Han".into()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gosmopolitan(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }

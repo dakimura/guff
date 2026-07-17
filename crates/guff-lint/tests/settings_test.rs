@@ -995,6 +995,25 @@ fn parse_v2_asasalint_settings() {
 }
 
 #[test]
+fn parse_v2_gosmopolitan_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_gosmopolitan_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.gosmopolitan.allow_time_local);
+    assert_eq!(settings.gosmopolitan.escape_hatches, vec!["i18n.T".to_string()]);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GosmopolitanOptions>("gosmopolitan")
+        .expect("gosmopolitan options");
+    assert!(opts.allow_time_local);
+    assert_eq!(opts.escape_hatches, vec!["i18n.T".to_string()]);
+    assert_eq!(
+        opts.watch_for_scripts,
+        vec!["Han".to_string(), "Arabic".to_string()]
+    );
+}
+
+#[test]
 fn parse_v2_reassign_settings() {
     let contents = fs::read_to_string(testdata_config("v2_reassign_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

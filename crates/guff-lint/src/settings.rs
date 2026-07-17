@@ -60,6 +60,7 @@ pub struct LinterSettings {
     pub gocritic: GocriticSettings,
     pub forbidigo: ForbidigoSettings,
     pub bidichk: BidichkSettings,
+    pub gosmopolitan: GosmopolitanSettings,
     pub asasalint: AsasalintSettings,
     pub importas: ImportasSettings,
     pub reassign: ReassignSettings,
@@ -888,6 +889,32 @@ pub struct ImportasAliasSetting {
     pub pkg: String,
     #[serde(default)]
     pub alias: String,
+}
+
+/// `linters.settings.gosmopolitan` / `linters-settings.gosmopolitan`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GosmopolitanSettings {
+    #[serde(default, rename = "allow-time-local")]
+    pub allow_time_local: bool,
+    #[serde(default, rename = "escape-hatches")]
+    pub escape_hatches: Vec<String>,
+    #[serde(default, rename = "watch-for-scripts")]
+    pub watch_for_scripts: Vec<String>,
+}
+
+impl GosmopolitanSettings {
+    pub fn to_guff_gosmopolitan(&self) -> guff_style::GosmopolitanOptions {
+        let defaults = guff_style::GosmopolitanOptions::default();
+        guff_style::GosmopolitanOptions {
+            allow_time_local: self.allow_time_local,
+            escape_hatches: self.escape_hatches.clone(),
+            watch_for_scripts: if self.watch_for_scripts.is_empty() {
+                defaults.watch_for_scripts
+            } else {
+                self.watch_for_scripts.clone()
+            },
+        }
+    }
 }
 
 /// `linters.settings.asasalint` / `linters-settings.asasalint`.
@@ -1785,6 +1812,11 @@ impl LinterSettings {
                 out.bidichk = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("gosmopolitan".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GosmopolitanSettings>(v.clone()) {
+                out.gosmopolitan = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("asasalint".into())) {
             if let Ok(s) = serde_yaml::from_value::<AsasalintSettings>(v.clone()) {
                 out.asasalint = s;
@@ -1950,6 +1982,7 @@ impl LinterSettings {
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());
+        bag.insert("gosmopolitan", self.gosmopolitan.to_guff_gosmopolitan());
         bag.insert("asasalint", self.asasalint.to_guff_asasalint());
         bag.insert("reassign", self.reassign.to_guff_reassign());
         bag.insert("recvcheck", self.recvcheck.to_guff_recvcheck());
