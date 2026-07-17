@@ -14,6 +14,7 @@
 //! - [`gocheckcompilerdirectives`]
 //! - [`forbidigo`]
 //! - [`bidichk`]
+//! - [`canonicalheader`]
 //! - [`reassign`]
 //! - [`recvcheck`]
 //! - [`thelper`]
@@ -77,6 +78,7 @@ mod sloglint;
 mod testifylint;
 mod gocheckcompilerdirectives;
 mod bidichk;
+mod canonicalheader;
 mod forbidigo;
 mod gochecknoglobals;
 mod gochecknoinits;
@@ -138,6 +140,7 @@ pub use exptostd::analyzer as exptostd;
 pub use funlen::analyzer as funlen;
 pub use gocheckcompilerdirectives::analyzer as gocheckcompilerdirectives;
 pub use bidichk::analyzer as bidichk;
+pub use canonicalheader::analyzer as canonicalheader;
 pub use forbidigo::analyzer as forbidigo;
 pub use gochecknoglobals::analyzer as gochecknoglobals;
 pub use gochecknoinits::analyzer as gochecknoinits;
@@ -192,6 +195,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         asciicheck(),
         asasalint(),
         bidichk(),
+        canonicalheader(),
         gochecknoinits(),
         gochecknoglobals(),
         gocheckcompilerdirectives(),

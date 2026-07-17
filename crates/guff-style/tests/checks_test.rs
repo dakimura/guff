@@ -5,7 +5,7 @@ use std::sync::Arc;
 use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
-    asasalint, asciicheck, bidichk, containedctx, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
+    asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen,
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, intrange, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
@@ -636,6 +636,46 @@ fn containedctx_flags_context_fields() {
             .all(|m| m.contains("found a struct that contains a context.Context field")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn canonicalheader_flags_non_canonical_keys() {
+    let pkg =
+        support::typecheck_fixture("canonicalheader", "example.com/canonicalheader", "bad.go");
+    let messages = support::run_analyzer(canonicalheader(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use \"Test-Header\" instead of \"Test-HEader\"")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use \"Raw-String-Literal\" instead of \"Raw-STRING-Literal\"")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use \"Testheadervalue\" instead of \"testHeaderValue\"")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("use \"ETag\" instead of \"etag\"")),
+        "{messages:?}"
+    );
+    assert!(messages.len() >= 8, "{messages:?}");
+}
+
+#[test]
+fn canonicalheader_allows_canonical_keys() {
+    let pkg =
+        support::typecheck_fixture("canonicalheader", "example.com/canonicalheader/ok", "ok.go");
+    let messages = support::run_analyzer(canonicalheader(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]
