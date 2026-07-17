@@ -5,16 +5,16 @@ use std::sync::Arc;
 use guff_analysis::SettingsBag;
 use guff_runner::RunnerOptions;
 use guff_style::{
-    arangolint, asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop,
-    decorder,
-    dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct, exptostd, forbidigo, funcorder,
-    funlen, gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gochecksumtype, gocognit,
-    goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
-    inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
-    modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
-    paralleltest, perfsprint, prealloc, predeclared, ginkgolinter, promlinter, protogetter, reassign,
-    recvcheck, sloglint, tagalign, tagliatelle, testableexamples, testifylint, testpackage, thelper,
-    tparallel, unconvert, unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
+    arangolint, asasalint, asciicheck, bidichk, canonicalheader, clickhouselint, containedctx,
+    copyloopvar, cyclop, decorder, dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct,
+    exptostd, forbidigo, funcorder, funlen, gocheckcompilerdirectives, gochecknoglobals,
+    gochecknoinits, gochecksumtype, gocognit, goconst, gocritic, gocyclo, goheader, goprintffuncname,
+    gosec, gosmopolitan, grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn,
+    lll, loggercheck, maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr,
+    nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, ginkgolinter,
+    promlinter, protogetter, reassign, recvcheck, sloglint, tagalign, tagliatelle, testableexamples,
+    testifylint, testpackage, thelper, tparallel, unconvert, unparam, unqueryvet, usestdlibvars,
+    usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -1353,6 +1353,37 @@ fn arangolint_flags_missing_allow_implicit_and_query_concatenation() {
 fn arangolint_allows_explicit_options_and_static_queries() {
     let pkg = support::typecheck_fixture("arangolint", "example.com/arangolint/ok", "ok.go");
     let messages = support::run_analyzer(arangolint(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn clickhouselint_flags_missing_err_and_batch_close() {
+    let pkg = support::typecheck_fixture("clickhouselint", "example.com/clickhouselint", "bad.go");
+    let messages = support::run_analyzer(clickhouselint(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Err() must be checked after")),
+        "missing rows.Err diagnostic: {messages:?}"
+    );
+    let batch = messages
+        .iter()
+        .filter(|m| m.contains("must be closed defensively"))
+        .count();
+    assert!(batch >= 2, "expected ≥2 missing Close diagnostics: {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("assigned to blank identifier")),
+        "missing blank Batch diagnostic: {messages:?}"
+    );
+}
+
+#[test]
+fn clickhouselint_allows_err_defer_close_and_return() {
+    let pkg =
+        support::typecheck_fixture("clickhouselint", "example.com/clickhouselint/ok", "ok.go");
+    let messages = support::run_analyzer(clickhouselint(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
