@@ -2,11 +2,9 @@
 //!
 //! Port of `honnef.co/go/tools/quickfix/qf1012`.
 //!
-//! Approximates `io.Writer` / `io.StringWriter` by checking that the selected
-//! `Write` / `WriteString` method has the expected result arity (Writer must
-//! return 2 values). Full `types.Implements` against imported iface types is
-//! DEFERRED when the receiver is a named non-interface type that needs the
-//! pointer method set expansion for edge cases.
+//! Uses `types.Implements` against imported `io.Writer` / `io.StringWriter`.
+//! Named non-interface receivers are checked via `*T` (larger method set),
+//! matching upstream (https://staticcheck.dev/issues/1097).
 
 use std::sync::OnceLock;
 
@@ -18,10 +16,10 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::alias::unalias_readonly;
-use guff_types::arena::ObjectData;
-use guff_types::lookup::{lookup_field_or_method, LookupResult};
-use guff_types::signature::signature_results;
-use guff_types::tuple::tuple_len;
+use guff_types::arena::TypeData;
+use guff_types::check_lookup::implements;
+use guff_types::new_pointer;
+use guff_types::scope::lookup;
 use guff_types::TypeId;
 
 use crate::render::render_expr;
@@ -38,12 +36,28 @@ fn is_byte_slice_conv(fun: &Expr) -> bool {
     matches!(arr.elt.as_ref(), Expr::Ident(id) if id.name == "byte" || id.name == "uint8")
 }
 
+fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    Some(info.types.get(&expr.id())?.typ)
+}
+
+fn imported_type(pass: &Pass<'_>, import_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg_id = artifacts.packages.find_by_path(import_path)?;
+    let scope = artifacts.packages.get(pkg_id).scope();
+    let obj = lookup(&artifacts.scopes, scope, name)?;
+    obj.typ(&artifacts.objects)
+}
+
 fn method_result_count(pass: &Pass<'_>, typ: TypeId, name: &str) -> Option<usize> {
+    use guff_types::arena::ObjectData;
+    use guff_types::lookup::{lookup_field_or_method, LookupResult};
+    use guff_types::signature::signature_results;
+    use guff_types::tuple::tuple_len;
+
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let mut types = artifacts.types.clone();
     let resolved = unalias_readonly(&artifacts.types, typ);
-    // `address=true` includes pointer method set for addressable named values
-    // (e.g. `bytes.Buffer` value receivers that need `*Buffer` methods).
     match lookup_field_or_method(
         &mut types,
         &artifacts.objects,
@@ -64,24 +78,53 @@ fn method_result_count(pass: &Pass<'_>, typ: TypeId, name: &str) -> Option<usize
     }
 }
 
-fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
-    let info = pass.types_info()?;
-    Some(info.types.get(&expr.id())?.typ)
+/// True Implements against `io.Writer` / `io.StringWriter` when the package is
+/// in the type graph; otherwise fall back to method-arity (Write/WriteString
+/// returning 2 values), which covers fixtures that only declare local ifaces.
+fn implements_iface(
+    pass: &Pass<'_>,
+    recv: &Expr,
+    iface_path: &str,
+    iface_name: &str,
+    method: &str,
+) -> bool {
+    let Some(typ) = expr_type(pass, recv) else {
+        return false;
+    };
+    if let Some(iface) = imported_type(pass, iface_path, iface_name) {
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            return false;
+        };
+        let resolved = unalias_readonly(&artifacts.types, typ);
+        let mut types = artifacts.types.clone();
+        let v = if matches!(types.get(resolved), TypeData::Named(_))
+            && !matches!(
+                types.get(resolved.underlying(&types)),
+                TypeData::Interface(_)
+            ) {
+            new_pointer(&mut types, resolved)
+        } else {
+            typ
+        };
+        return implements(
+            &mut types,
+            &artifacts.objects,
+            &artifacts.packages,
+            v,
+            iface,
+            false,
+        )
+        .is_ok();
+    }
+    method_result_count(pass, typ, method) == Some(2)
 }
 
 fn implements_writer(pass: &Pass<'_>, recv: &Expr) -> bool {
-    let Some(typ) = expr_type(pass, recv) else {
-        return false;
-    };
-    // io.Writer.Write returns (int, error) — 2 results. NotAWriter returns 0.
-    method_result_count(pass, typ, "Write") == Some(2)
+    implements_iface(pass, recv, "io", "Writer", "Write")
 }
 
 fn implements_string_writer(pass: &Pass<'_>, recv: &Expr) -> bool {
-    let Some(typ) = expr_type(pass, recv) else {
-        return false;
-    };
-    method_result_count(pass, typ, "WriteString") == Some(2)
+    implements_iface(pass, recv, "io", "StringWriter", "WriteString")
 }
 
 fn sprint_to_fprint(name: &str) -> Option<&'static str> {

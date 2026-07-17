@@ -2,13 +2,14 @@
 //!
 //! Port of `honnef.co/go/tools/quickfix/qf1008`.
 //!
-//! Handles uninterrupted selector chains (`a.b.c`). Chains interrupted by
-//! calls/indexes (e.g. `a.b.c().d.e`) are DEFERRED.
+//! Handles uninterrupted selector chains (`a.b.c`) and chains interrupted by
+//! calls/indexes (`a.b.c().d.e`) by checking each continuous segment whose
+//! root is a `SelectorExpr` whose parent is not another `SelectorExpr`.
 
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident, SelectorExpr};
-use guff::walk::NodeRef;
+use guff::walk::{preorder_stack, NodeRef};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
@@ -192,17 +193,29 @@ fn check_selector(pass: &Pass<'_>, expr: &SelectorExpr, pending: &mut Vec<(u32, 
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let inspect = pass
+    let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "QF1008 requires inspect analyzer".to_string())?
-        .clone();
+        .ok_or_else(|| "QF1008 requires inspect analyzer".to_string())?;
 
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
-        if let NodeRef::SelectorExpr(sel) = node {
-            check_selector(pass, sel, &mut pending);
-        }
-    });
+    // Only process the root of each uninterrupted selector chain (parent is
+    // not a SelectorExpr). That yields separate segments around calls/indexes,
+    // matching upstream `extractSelectors`.
+    for file in pass.files() {
+        let mut stack = Vec::new();
+        preorder_stack(NodeRef::File(file), &mut stack, |node, stack| {
+            let NodeRef::SelectorExpr(sel) = node else {
+                return true;
+            };
+            let parent_is_selector = stack
+                .last()
+                .is_some_and(|n| matches!(n, NodeRef::SelectorExpr(_)));
+            if !parent_is_selector {
+                check_selector(pass, sel, &mut pending);
+            }
+            true
+        });
+    }
 
     for (pos, end, name) in pending {
         pass.report(Diagnostic {

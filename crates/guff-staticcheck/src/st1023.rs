@@ -2,10 +2,12 @@
 //!
 //! Port of `honnef.co/go/tools/stylecheck/st1023` via
 //! `sharedcheck.RedundantTypeInDeclarationChecker("should", false)`.
-//! Approximates upstream `types.CheckExpr` by classifying RHS AST shapes
-//! (BasicLit default kinds / named vs predeclared consts / typed exprs).
-//! Only function-local decls are flagged (`DeclStmt`); package-level vars are
-//! skipped for godoc readability (matches upstream).
+//!
+//! Mirrors upstream `types.CheckExpr` by reconstructing the RHS type in
+//! isolation (BasicLit → untyped kind; Ident const → object type; other
+//! typed exprs → Info type). Untyped RHS is only flagged when its default
+//! type equals the LHS and the AST is a BasicLit or predeclared Ident.
+//! Only function-local decls are flagged (`DeclStmt`).
 
 use std::sync::OnceLock;
 
@@ -18,8 +20,8 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::BasicKind;
-use guff_types::predicates::identical;
+use guff_types::basic::{lookup_basic, BasicKind};
+use guff_types::predicates::{identical, is_untyped};
 use guff_types::typestring::type_string;
 use guff_types::TypeId;
 
@@ -44,48 +46,122 @@ fn is_basic_kind(pass: &Pass<'_>, typ: TypeId, kind: BasicKind) -> bool {
     matches!(artifacts.types.get(typ), TypeData::Basic(b) if b.kind() == kind)
 }
 
-fn lit_default_matches_lhs(pass: &Pass<'_>, lit_kind: Token, tlhs: TypeId) -> bool {
-    match lit_kind {
-        Token::INT => is_basic_kind(pass, tlhs, BasicKind::Int),
-        Token::FLOAT => is_basic_kind(pass, tlhs, BasicKind::Float64),
-        Token::IMAG => is_basic_kind(pass, tlhs, BasicKind::Complex128),
-        Token::CHAR => is_basic_kind(pass, tlhs, BasicKind::Int32),
-        Token::STRING => is_basic_kind(pass, tlhs, BasicKind::String),
-        _ => false,
+fn untyped_from_lit_kind(pass: &Pass<'_>, lit_kind: Token) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let kind = match lit_kind {
+        Token::INT => BasicKind::UntypedInt,
+        Token::FLOAT => BasicKind::UntypedFloat,
+        Token::IMAG => BasicKind::UntypedComplex,
+        Token::CHAR => BasicKind::UntypedRune,
+        Token::STRING => BasicKind::UntypedString,
+        _ => return None,
+    };
+    lookup_basic(&artifacts.types, kind)
+}
+
+/// Default type of an untyped basic kind (Go's `types.Default`).
+fn default_of_untyped(pass: &Pass<'_>, untyped: TypeId) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let TypeData::Basic(b) = artifacts.types.get(untyped) else {
+        return Some(untyped);
+    };
+    let typed = match b.kind() {
+        BasicKind::UntypedBool => BasicKind::Bool,
+        BasicKind::UntypedInt => BasicKind::Int,
+        BasicKind::UntypedRune => BasicKind::Int32,
+        BasicKind::UntypedFloat => BasicKind::Float64,
+        BasicKind::UntypedComplex => BasicKind::Complex128,
+        BasicKind::UntypedString => BasicKind::String,
+        _ => return Some(untyped),
+    };
+    lookup_basic(&artifacts.types, typed)
+}
+
+/// Reconstruct the type `types.CheckExpr` would give for `v` in isolation.
+fn isolated_rhs_type(pass: &Pass<'_>, v: &Expr) -> Option<TypeId> {
+    match v {
+        Expr::BasicLit(lit) => {
+            let kind = lit.kind?;
+            untyped_from_lit_kind(pass, kind)
+        }
+        Expr::Ident(id) => {
+            let obj = object_of(pass, id)?;
+            let artifacts = pass.pkg().type_artifacts.as_ref()?;
+            match artifacts.objects.get(obj) {
+                ObjectData::Const(_) => obj.typ(&artifacts.objects),
+                _ => {
+                    let info = pass.types_info()?;
+                    Some(info.types.get(&v.id())?.typ)
+                }
+            }
+        }
+        Expr::ParenExpr(p) => isolated_rhs_type(pass, &p.x),
+        // Without a full CheckExpr engine, binary/unary stay opaque after
+        // updateExprType — skip (flagHelpfulTypes=false).
+        Expr::BinaryExpr(_) | Expr::UnaryExpr(_) => None,
+        _ => {
+            let info = pass.types_info()?;
+            Some(info.types.get(&v.id())?.typ)
+        }
     }
 }
 
-/// Whether the RHS is safe to treat as "typed enough" that an identical LHS
-/// type is truly redundant (without re-running `CheckExpr`).
+/// CheckExpr-equivalent gate for `flagHelpfulTypes = false`.
 fn rhs_allows_redundant_flag(pass: &Pass<'_>, v: &Expr, tlhs: TypeId) -> bool {
-    match v {
-        Expr::BasicLit(lit) => {
-            let Some(kind) = lit.kind else {
-                return false;
-            };
-            lit_default_matches_lhs(pass, kind, tlhs)
+    let Some(isolated) = isolated_rhs_type(pass, v) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if is_untyped(&artifacts.types, isolated) {
+        let Some(def) = default_of_untyped(pass, isolated) else {
+            return false;
+        };
+        if !types_identical(pass, tlhs, def) {
+            return false;
         }
-        Expr::Ident(id) => {
-            let Some(obj) = object_of(pass, id) else {
-                return true;
-            };
-            let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-                return false;
-            };
-            match artifacts.objects.get(obj) {
-                ObjectData::Const(_) => {
-                    // Named package constants: keep explicit type for readability.
-                    // Predeclared (true/false/…) have no package.
-                    obj.pkg(&artifacts.objects).is_none()
-                }
-                _ => true,
+        match v {
+            Expr::BasicLit(_) => true,
+            Expr::Ident(id) => {
+                let Some(obj) = object_of(pass, id) else {
+                    return false;
+                };
+                // Predeclared true/false/… have no package.
+                obj.pkg(&artifacts.objects).is_none()
             }
+            Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
+            _ => false,
         }
-        Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
-        // Untyped composites (binary/unary/…) — skip unless flagHelpfulTypes.
-        Expr::BinaryExpr(_) | Expr::UnaryExpr(_) => false,
-        // Typed expressions (calls, selectors, …).
-        _ => true,
+    } else {
+        match v {
+            Expr::Ident(id) => {
+                let Some(obj) = object_of(pass, id) else {
+                    return true;
+                };
+                match artifacts.objects.get(obj) {
+                    ObjectData::Const(_) => obj.pkg(&artifacts.objects).is_none(),
+                    _ => true,
+                }
+            }
+            Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
+            Expr::BasicLit(lit) => {
+                // Fallback if lit somehow typed in isolation.
+                let Some(kind) = lit.kind else {
+                    return false;
+                };
+                match kind {
+                    Token::INT => is_basic_kind(pass, tlhs, BasicKind::Int),
+                    Token::FLOAT => is_basic_kind(pass, tlhs, BasicKind::Float64),
+                    Token::IMAG => is_basic_kind(pass, tlhs, BasicKind::Complex128),
+                    Token::CHAR => is_basic_kind(pass, tlhs, BasicKind::Int32),
+                    Token::STRING => is_basic_kind(pass, tlhs, BasicKind::String),
+                    _ => false,
+                }
+            }
+            Expr::BinaryExpr(_) | Expr::UnaryExpr(_) => false,
+            _ => true,
+        }
     }
 }
 
@@ -184,8 +260,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, u32, String)> = Vec::new();
-    // DeclStmt only appears inside function / func-lit bodies — package-level
-    // vars are GenDecl on File.decls and are intentionally not flagged.
     inspect.preorder(pass.files(), |node| {
         let NodeRef::DeclStmt(ds) = node else {
             return;

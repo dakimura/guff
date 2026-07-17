@@ -139,7 +139,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | linter | 状態 | 備考 |
 |--------|------|------|
-| `guff-staticcheck` | ✅ **164 analyzers**（simple S* 37 + SA* 100 + stylecheck ST* **15** + quickfix QF* **12**） | ST* 残り（ST1005/1008/1016）は IR 依存で未着手（→ R16）。`initialisms` / `dot-import-whitelist` / `http-status-code-whitelist` 配線済み |
+| `guff-staticcheck` | ✅ **167 analyzers**（simple S* 37 + SA* 100 + stylecheck ST* **18** + quickfix QF* **12**） | — |
 | `guff-govet` | ✅ **29/29** passes（printf は引数個数・型照合まで、`go vet` 一致） | — |
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
@@ -328,9 +328,10 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **`guff run` 時の formatter 診断**: `formatters.enable` があると各フォーマッタを個別に走査し未整形ファイルを `File is not properly formatted (<formatter>)` として issue 化。`--fix` でチェーン整形して書き換え（issue は出さない）。パターン→パス変換は `./...`→`.` 等。
 - **DEFERRED**: 診断ごとの `SuggestedFix`（JSON への TextEdit 埋め込み）、`guff run` の formatter パターンが実パスでない場合（モジュールパス）のマッピング。
 
-#### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
-- 実装済み: ST* **15**（ST1000/1001/1003/1006/1011/1012/1013/1015/1017/1018/1019/1020/1021/1022/1023）+ QF* **12**（QF1001–QF1012）。設定・SuggestedFix の詳細は §3.3 / `SESSION-LOG.md`。
-- **残**: ST1005 / ST1008 / ST1016（IR 依存 → R17）。ST1023 の真の `types.CheckExpr` パリティ、QF1012 真の `types.Implements`、QF1008 呼び出し割り込みチェーン。
+#### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）✅ 完了 (2026-07-17)
+- 実装済み: ST* **18**（ST1000/1001/1003/**1005**/1006/**1008**/1011/1012/1013/1015/**1016**/1017/1018/1019/1020/1021/1022/1023）+ QF* **12**（QF1001–QF1012）。
+- ST1005/ST1008/ST1016 は upstream が buildir 依存だが、AST/types 近似で実装（ST1006 と同様）。
+- QF1008 割り込みチェーン・QF1012 `types.Implements`（io 未ロード時は arity フォールバック）・ST1023 CheckExpr 相当の孤立型再構築まで消化。
 - テスト: 各 `stNNNN` / `qfNNNN` fixtures + `checks_test` + `v2_staticcheck_stylecheck_settings.yml`。
 
 ---
