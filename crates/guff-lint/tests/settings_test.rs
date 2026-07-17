@@ -1177,6 +1177,28 @@ fn parse_v2_iotamixing_settings() {
 }
 
 #[test]
+fn parse_v2_grouper_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_grouper_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.grouper.const_require_single_const);
+    assert!(settings.grouper.const_require_grouping);
+    assert!(settings.grouper.import_require_single_import);
+    assert!(settings.grouper.import_require_grouping);
+    assert!(settings.grouper.type_require_single_type);
+    assert!(settings.grouper.type_require_grouping);
+    assert!(settings.grouper.var_require_single_var);
+    assert!(settings.grouper.var_require_grouping);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GrouperOptions>("grouper")
+        .expect("grouper options");
+    assert!(opts.const_require_single_const);
+    assert!(opts.import_require_grouping);
+    assert!(opts.var_require_single_var);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

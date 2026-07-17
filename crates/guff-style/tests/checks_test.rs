@@ -7,12 +7,126 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
-    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, iface,
-    inamedparam, interfacebloat, intrange, iotamixing, lll, loggercheck, mnd, modernize, musttag,
-    nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint,
+    gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, grouper,
+    iface, inamedparam, interfacebloat, intrange, iotamixing, lll, loggercheck, mnd, modernize,
+    musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint,
     prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle, testifylint,
     testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
+
+#[test]
+fn grouper_flags_ungrouped_and_multiple_decls() {
+    use guff_style::GrouperOptions;
+
+    let pkg = support::typecheck_fixture("grouper", "example.com/grouper", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert("grouper", GrouperOptions::enabled());
+    let messages = support::run_analyzer_with_settings(
+        grouper(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use a single 'import' declaration")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use grouped 'import' declarations")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use a single global 'const' declaration")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use grouped global 'const' declarations")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use a single global 'var' declaration")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use a single global 'type' declaration")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn grouper_allows_single_grouped_decls() {
+    use guff_style::GrouperOptions;
+
+    let pkg = support::typecheck_fixture("grouper", "example.com/grouper/ok", "ok.go");
+    let mut bag = SettingsBag::new();
+    bag.insert("grouper", GrouperOptions::enabled());
+    let messages = support::run_analyzer_with_settings(
+        grouper(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn grouper_default_is_noop() {
+    let pkg = support::typecheck_fixture("grouper", "example.com/grouper/settings", "settings.go");
+    let messages = support::run_analyzer(grouper(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn grouper_respects_partial_settings() {
+    use guff_style::GrouperOptions;
+
+    let pkg = support::typecheck_fixture("grouper", "example.com/grouper/settings", "settings.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "grouper",
+        GrouperOptions {
+            import_require_grouping: true,
+            const_require_grouping: true,
+            ..GrouperOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        grouper(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use grouped 'import' declarations")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should only use grouped global 'const' declarations")),
+        "{messages:?}"
+    );
+}
 
 #[test]
 fn iotamixing_flags_mixed_const_block() {

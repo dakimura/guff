@@ -73,6 +73,7 @@ pub struct LinterSettings {
     pub tagliatelle: TagliatelleSettings,
     pub decorder: DecorderSettings,
     pub iotamixing: IotamixingSettings,
+    pub grouper: GrouperSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1152,6 +1153,44 @@ impl IotamixingSettings {
     }
 }
 
+/// `linters.settings.grouper` / `linters-settings.grouper`.
+///
+/// All flags default to false (golangci / upstream).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GrouperSettings {
+    #[serde(default, rename = "const-require-single-const")]
+    pub const_require_single_const: bool,
+    #[serde(default, rename = "const-require-grouping")]
+    pub const_require_grouping: bool,
+    #[serde(default, rename = "import-require-single-import")]
+    pub import_require_single_import: bool,
+    #[serde(default, rename = "import-require-grouping")]
+    pub import_require_grouping: bool,
+    #[serde(default, rename = "type-require-single-type")]
+    pub type_require_single_type: bool,
+    #[serde(default, rename = "type-require-grouping")]
+    pub type_require_grouping: bool,
+    #[serde(default, rename = "var-require-single-var")]
+    pub var_require_single_var: bool,
+    #[serde(default, rename = "var-require-grouping")]
+    pub var_require_grouping: bool,
+}
+
+impl GrouperSettings {
+    pub fn to_guff_grouper(&self) -> guff_style::GrouperOptions {
+        guff_style::GrouperOptions {
+            const_require_single_const: self.const_require_single_const,
+            const_require_grouping: self.const_require_grouping,
+            import_require_single_import: self.import_require_single_import,
+            import_require_grouping: self.import_require_grouping,
+            type_require_single_type: self.type_require_single_type,
+            type_require_grouping: self.type_require_grouping,
+            var_require_single_var: self.var_require_single_var,
+            var_require_grouping: self.var_require_grouping,
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1608,6 +1647,11 @@ impl LinterSettings {
                 out.iotamixing = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("grouper".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GrouperSettings>(v.clone()) {
+                out.grouper = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1692,6 +1736,7 @@ impl LinterSettings {
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());
         bag.insert("decorder", self.decorder.to_guff_decorder());
         bag.insert("iotamixing", self.iotamixing.to_guff_iotamixing());
+        bag.insert("grouper", self.grouper.to_guff_grouper());
         Arc::new(bag)
     }
 

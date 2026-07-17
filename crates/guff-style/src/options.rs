@@ -838,6 +838,46 @@ pub struct IotamixingOptions {
     pub report_individual: bool,
 }
 
+/// `linters.settings.grouper` / `linters-settings.grouper`.
+///
+/// All flags default to **false** (golangci / upstream). Use [`GrouperOptions::enabled`]
+/// to turn every check on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GrouperOptions {
+    /// Require a single global `const` declaration only.
+    pub const_require_single_const: bool,
+    /// Require grouped global `const` declarations.
+    pub const_require_grouping: bool,
+    /// Require a single `import` declaration only.
+    pub import_require_single_import: bool,
+    /// Require grouped `import` declarations.
+    pub import_require_grouping: bool,
+    /// Require a single global `type` declaration only.
+    pub type_require_single_type: bool,
+    /// Require grouped global `type` declarations.
+    pub type_require_grouping: bool,
+    /// Require a single global `var` declaration only.
+    pub var_require_single_var: bool,
+    /// Require grouped global `var` declarations.
+    pub var_require_grouping: bool,
+}
+
+impl GrouperOptions {
+    /// All checks enabled (useful for tests / explicit configs).
+    pub fn enabled() -> Self {
+        Self {
+            const_require_single_const: true,
+            const_require_grouping: true,
+            import_require_single_import: true,
+            import_require_grouping: true,
+            type_require_single_type: true,
+            type_require_grouping: true,
+            var_require_single_var: true,
+            var_require_grouping: true,
+        }
+    }
+}
+
 /// `linters.settings.interfacebloat` / `linters-settings.interfacebloat`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterfacebloatOptions {
