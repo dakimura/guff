@@ -13,6 +13,8 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 
+use crate::render::render_expr;
+
 const FNS: &[(&str, &str)] = &[
     ("strings.Replace", "strings.ReplaceAll"),
     ("strings.SplitN", "strings.Split"),
@@ -21,6 +23,18 @@ const FNS: &[(&str, &str)] = &[
     ("bytes.SplitN", "bytes.Split"),
     ("bytes.SplitAfterN", "bytes.SplitAfter"),
 ];
+
+/// Build a replacement like `s.ReplaceAll` when the call uses a renamed import.
+fn replacement_func_name(call_fun: &Expr, canonical_to: &str) -> String {
+    let new_method = canonical_to
+        .rsplit('.')
+        .next()
+        .unwrap_or(canonical_to);
+    match call_fun {
+        Expr::SelectorExpr(sel) => format!("{}.{}", render_expr(&sel.x), new_method),
+        _ => canonical_to.into(),
+    }
+}
 
 fn is_minus_one(expr: &Expr) -> bool {
     match expr {
@@ -56,7 +70,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if !is_call_to(pass, call, from) {
                 continue;
             }
-            // DEFERRED: renamed imports — currently rewrite to canonical package.Name.
+            let replacement = replacement_func_name(&call.fun, to);
             // Delete from end of previous arg through `-1` so the comma is removed too
             // (upstream only deletes the unary node; we avoid a trailing-comma syntax error).
             pending.push((
@@ -64,8 +78,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 call.fun.end().0 as u32,
                 prev_end,
                 last.end().0 as u32,
-                to.into(),
-                format!("could use {to} instead"),
+                replacement.clone(),
+                format!("could use {replacement} instead"),
             ));
             break;
         }

@@ -1,5 +1,9 @@
 package fmt
 
+type Stringer interface {
+	String() string
+}
+
 func Print(a ...any) (n int, err error)     { return 0, nil }
 func Println(a ...any) (n int, err error)   { return 0, nil }
 func Sprint(a ...any) string                { return "" }

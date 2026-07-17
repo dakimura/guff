@@ -2,9 +2,6 @@
 //!
 //! Port of `honnef.co/go/tools/quickfix/qf1010`.
 //!
-//! DEFERRED: skip args that implement `fmt.Stringer` (needs interface lookup
-//! against a `fmt.Stringer` type in the universe / imported package).
-
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr};
@@ -17,6 +14,8 @@ use guff_analysis::{
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
+use guff_types::check_lookup::implements;
+use guff_types::scope::lookup;
 use guff_types::TypeId;
 
 use crate::render::render_expr;
@@ -39,6 +38,10 @@ const FPRINT_FNS: &[&str] = &["fmt.Fprint", "fmt.Fprintln"];
 const LOGGER_METHODS: &[&str] = &[
     "Fatal", "Fatalln", "Panic", "Panicln", "Print", "Println",
 ];
+
+fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    pass.types_info()?.types.get(&expr.id()).map(|tv| tv.typ)
+}
 
 fn is_string_convertible_byte_slice(pass: &Pass<'_>, expr: &Expr) -> bool {
     // AST-level `[]byte(...)` conversion (types may omit a TypeAndValue entry
@@ -67,6 +70,33 @@ fn type_is_byte_slice(pass: &Pass<'_>, expr: &Expr) -> bool {
         return false;
     };
     is_byte_slice_type(pass, tav.typ)
+}
+
+fn imported_type(pass: &Pass<'_>, import_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg_id = artifacts.packages.find_by_path(import_path)?;
+    let scope = artifacts.packages.get(pkg_id).scope();
+    let obj = lookup(&artifacts.scopes, scope, name)?;
+    obj.typ(&artifacts.objects)
+}
+
+fn implements_fmt_stringer(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(iface) = imported_type(pass, "fmt", "Stringer") else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        iface,
+        false,
+    )
+    .is_ok()
 }
 
 fn is_byte_slice_type(pass: &Pass<'_>, typ: TypeId) -> bool {
@@ -123,7 +153,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if !is_string_convertible_byte_slice(pass, arg) {
                 continue;
             }
-            // DEFERRED: skip if arg implements fmt.Stringer.
+            if let Some(typ) = expr_type(pass, arg) {
+                if implements_fmt_stringer(pass, typ) {
+                    continue;
+                }
+            }
             let replacement = format!("string({})", render_expr(arg));
             pending.push((
                 arg.pos().0 as u32,

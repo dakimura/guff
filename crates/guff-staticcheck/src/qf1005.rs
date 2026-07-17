@@ -2,9 +2,6 @@
 //!
 //! Port of `honnef.co/go/tools/quickfix/qf1005`.
 //!
-//! DEFERRED: `types.CheckExpr`-based `float64(...)` wrap when the base is a
-//! non-float64 constant expression (upstream `needConversion`).
-
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
@@ -15,6 +12,9 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_constant::{int64_val, to_int, Kind};
+use guff_types::api_predicates::api_assignable_to;
+use guff_types::basic::{lookup_basic, BasicKind};
+use guff_types::TypeId;
 
 use crate::render::render_expr;
 
@@ -37,23 +37,53 @@ fn may_have_side_effects(expr: &Expr) -> bool {
     }
 }
 
-fn render_factor(expr: &Expr) -> String {
-    match expr {
+fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    pass.types_info()?.types.get(&expr.id()).map(|tv| tv.typ)
+}
+
+fn needs_float64_wrap(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = expr_type(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(float64) = lookup_basic(&artifacts.types, BasicKind::Float64) else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    !api_assignable_to(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        float64,
+    )
+}
+
+fn render_factor(expr: &Expr, wrap: bool) -> String {
+    let rendered = match expr {
         Expr::BinaryExpr(_) | Expr::UnaryExpr(_) => format!("({})", render_expr(expr)),
         _ => render_expr(expr),
+    };
+    if wrap {
+        format!("float64({rendered})")
+    } else {
+        rendered
     }
 }
 
-fn expand_pow(x: &Expr, n: i64) -> Option<String> {
+fn expand_pow(pass: &Pass<'_>, x: &Expr, n: i64) -> Option<String> {
+    let wrap = needs_float64_wrap(pass, x);
     match n {
         0 => Some("1.0".into()),
-        1 => Some(render_expr(x)),
+        1 => Some(render_factor(x, wrap)),
         2 => {
-            let f = render_factor(x);
+            let f = render_factor(x, wrap);
             Some(format!("{f} * {f}"))
         }
         3 => {
-            let f = render_factor(x);
+            let f = render_factor(x, wrap);
             Some(format!("{f} * {f} * {f}"))
         }
         _ => None,
@@ -102,7 +132,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if n >= 2 && may_have_side_effects(x) {
             return;
         }
-        let Some(replacement) = expand_pow(x, n) else {
+        let Some(replacement) = expand_pow(pass, x, n) else {
             return;
         };
         pending.push((
@@ -156,5 +186,11 @@ mod tests {
     #[test]
     fn qf1005_validates() {
         assert!(validate(&[analyzer()]).is_ok());
+    }
+
+    #[test]
+    fn render_factor_respects_float64_wrap() {
+        assert_eq!(render_factor(&Expr::Ident(guff::ast::Ident::new_ident("x")), true), "float64(x)");
+        assert_eq!(render_factor(&Expr::Ident(guff::ast::Ident::new_ident("x")), false), "x");
     }
 }

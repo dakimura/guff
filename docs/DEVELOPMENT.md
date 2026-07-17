@@ -330,7 +330,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 
 #### R16. staticcheck の ST*（stylecheck）/ QF*（quickfix）🟡 部分完了 (2026-07-16)
 - 実装済み: ST* **15**（ST1000/1001/1003/1006/1011/1012/1013/1015/1017/1018/1019/1020/1021/1022/1023）+ QF* **12**（QF1001–QF1012）。設定・SuggestedFix の詳細は §3.3 / `SESSION-LOG.md`。
-- **残**: ST1005 / ST1008 / ST1016（IR 依存 → R17）。ST1023 の真の `types.CheckExpr` パリティ、QF1004 renamed import、QF1005 float64 wrap、QF1010 Stringer skip、QF1012 真の `types.Implements`、QF1008 呼び出し割り込みチェーン。
+- **残**: ST1005 / ST1008 / ST1016（IR 依存 → R17）。ST1023 の真の `types.CheckExpr` パリティ、QF1012 真の `types.Implements`、QF1008 呼び出し割り込みチェーン。
 - テスト: 各 `stNNNN` / `qfNNNN` fixtures + `checks_test` + `v2_staticcheck_stylecheck_settings.yml`。
 
 ---

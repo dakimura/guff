@@ -2641,7 +2641,7 @@ fn qf1005_flags_expandable_pow() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1005::analyzer(), &pkg);
-    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert_eq!(messages.len(), 6, "{messages:?}");
     assert!(messages.iter().all(|m| m.contains("math.Pow")));
 }
 
@@ -2708,6 +2708,24 @@ fn qf1004_allows_replace_all_and_nonzero_n() {
     );
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(qf1004::analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn qf1004_uses_renamed_import_in_suggested_fix() {
+    let dir = support::testdata("qf1004");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1004/renamed",
+        &dir.join("renamed.go"),
+        &[
+            ("strings", &dir.join("stub/strings/strings.go")),
+            ("bytes", &dir.join("stub/bytes/bytes.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1004::analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("s.ReplaceAll")));
+    assert!(messages.iter().any(|m| m.contains("b.ReplaceAll")));
 }
 
 #[test]
