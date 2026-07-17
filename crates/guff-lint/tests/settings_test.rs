@@ -1547,3 +1547,22 @@ fn parse_v2_promlinter_settings() {
         vec!["Help".to_string(), "Counter".to_string()]
     );
 }
+
+#[test]
+fn parse_v2_ginkgolinter_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_ginkgolinter_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.ginkgolinter.suppress_len_assertion);
+    assert!(settings.ginkgolinter.allow_havelen_zero);
+    assert!(settings.ginkgolinter.forbid_focus_container);
+    assert!(settings.ginkgolinter.force_expect_to);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GinkgolinterOptions>("ginkgolinter")
+        .expect("ginkgolinter options");
+    assert!(opts.suppress_len_assertion);
+    assert!(opts.allow_havelen_zero);
+    assert!(opts.forbid_focus_container);
+    assert!(opts.force_expect_to);
+}

@@ -1240,3 +1240,25 @@ pub struct PromlinterOptions {
     pub disabled_linters: Vec<String>,
 }
 
+/// `linters.settings.ginkgolinter` / `linters-settings.ginkgolinter`.
+///
+/// Defaults match upstream nunnatsa/ginkgolinter / golangci-lint (all suppress
+/// flags false; force/forbid flags false; `allow-havelen-zero` false).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GinkgolinterOptions {
+    pub suppress_len_assertion: bool,
+    pub suppress_nil_assertion: bool,
+    pub suppress_err_assertion: bool,
+    pub suppress_compare_assertion: bool,
+    pub suppress_async_assertion: bool,
+    pub suppress_type_compare_assertion: bool,
+    pub forbid_focus_container: bool,
+    pub allow_havelen_zero: bool,
+    pub force_expect_to: bool,
+    pub validate_async_intervals: bool,
+    pub forbid_spec_pollution: bool,
+    pub force_succeed: bool,
+    pub force_assertion_description: bool,
+    pub force_tonot: bool,
+}
+

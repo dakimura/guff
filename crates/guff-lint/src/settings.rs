@@ -86,6 +86,7 @@ pub struct LinterSettings {
     pub unparam: UnparamSettings,
     pub unqueryvet: UnqueryvetSettings,
     pub promlinter: PromlinterSettings,
+    pub ginkgolinter: GinkgolinterSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1309,6 +1310,60 @@ impl PromlinterSettings {
     }
 }
 
+/// `linters.settings.ginkgolinter` / `linters-settings.ginkgolinter`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct GinkgolinterSettings {
+    #[serde(default, rename = "suppress-len-assertion")]
+    pub suppress_len_assertion: bool,
+    #[serde(default, rename = "suppress-nil-assertion")]
+    pub suppress_nil_assertion: bool,
+    #[serde(default, rename = "suppress-err-assertion")]
+    pub suppress_err_assertion: bool,
+    #[serde(default, rename = "suppress-compare-assertion")]
+    pub suppress_compare_assertion: bool,
+    #[serde(default, rename = "suppress-async-assertion")]
+    pub suppress_async_assertion: bool,
+    #[serde(default, rename = "suppress-type-compare-assertion")]
+    pub suppress_type_compare_assertion: bool,
+    #[serde(default, rename = "forbid-focus-container")]
+    pub forbid_focus_container: bool,
+    #[serde(default, rename = "allow-havelen-zero")]
+    pub allow_havelen_zero: bool,
+    #[serde(default, rename = "force-expect-to")]
+    pub force_expect_to: bool,
+    #[serde(default, rename = "validate-async-intervals")]
+    pub validate_async_intervals: bool,
+    #[serde(default, rename = "forbid-spec-pollution")]
+    pub forbid_spec_pollution: bool,
+    #[serde(default, rename = "force-succeed")]
+    pub force_succeed: bool,
+    #[serde(default, rename = "force-assertion-description")]
+    pub force_assertion_description: bool,
+    #[serde(default, rename = "force-tonot")]
+    pub force_tonot: bool,
+}
+
+impl GinkgolinterSettings {
+    pub fn to_guff_ginkgolinter(&self) -> guff_style::GinkgolinterOptions {
+        guff_style::GinkgolinterOptions {
+            suppress_len_assertion: self.suppress_len_assertion,
+            suppress_nil_assertion: self.suppress_nil_assertion,
+            suppress_err_assertion: self.suppress_err_assertion,
+            suppress_compare_assertion: self.suppress_compare_assertion,
+            suppress_async_assertion: self.suppress_async_assertion,
+            suppress_type_compare_assertion: self.suppress_type_compare_assertion,
+            forbid_focus_container: self.forbid_focus_container,
+            allow_havelen_zero: self.allow_havelen_zero,
+            force_expect_to: self.force_expect_to,
+            validate_async_intervals: self.validate_async_intervals,
+            forbid_spec_pollution: self.forbid_spec_pollution,
+            force_succeed: self.force_succeed,
+            force_assertion_description: self.force_assertion_description,
+            force_tonot: self.force_tonot,
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -2055,6 +2110,11 @@ impl LinterSettings {
                 out.promlinter = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("ginkgolinter".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GinkgolinterSettings>(v.clone()) {
+                out.ginkgolinter = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -2191,6 +2251,7 @@ impl LinterSettings {
         bag.insert("unparam", self.unparam.to_guff_unparam());
         bag.insert("unqueryvet", self.unqueryvet.to_guff_unqueryvet());
         bag.insert("promlinter", self.promlinter.to_guff_promlinter());
+        bag.insert("ginkgolinter", self.ginkgolinter.to_guff_ginkgolinter());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

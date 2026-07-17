@@ -11,9 +11,9 @@ use guff_style::{
     goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
     inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
     modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
-    paralleltest, perfsprint, prealloc, predeclared, promlinter, protogetter, reassign, recvcheck,
-    sloglint, tagalign, tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel,
-    unconvert, unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
+    paralleltest, perfsprint, prealloc, predeclared, ginkgolinter, promlinter, protogetter, reassign,
+    recvcheck, sloglint, tagalign, tagliatelle, testableexamples, testifylint, testpackage, thelper,
+    tparallel, unconvert, unparam, unqueryvet, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -6590,5 +6590,97 @@ fn promlinter_respects_disabled_linters() {
     assert!(
         flagged.is_empty(),
         "Counter check should be disabled: {flagged:?}"
+    );
+}
+
+#[test]
+fn ginkgolinter_flags_common_assertion_mistakes() {
+    let pkg = support::typecheck_fixture("ginkgolinter", "example.com/ginkgolinter", "bad.go");
+    let messages = support::run_analyzer(ginkgolinter(), &pkg);
+    for needle in [
+        "wrong length assertion",
+        "wrong nil assertion",
+        "wrong boolean assertion",
+        "missing assertion method",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle:?} in {messages:?}"
+        );
+    }
+    assert!(
+        messages.iter().filter(|m| m.contains("wrong length")).count() >= 4,
+        "expected ≥4 length reports: {messages:?}"
+    );
+    // Focus containers are opt-in.
+    assert!(
+        !messages.iter().any(|m| m.contains("Focus container")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn ginkgolinter_allows_idiomatic_assertions() {
+    let pkg = support::typecheck_fixture("ginkgolinter", "example.com/ginkgolinter/ok", "ok.go");
+    let messages = support::run_analyzer(ginkgolinter(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn ginkgolinter_respects_settings() {
+    use guff_style::GinkgolinterOptions;
+
+    let pkg = support::typecheck_fixture(
+        "ginkgolinter",
+        "example.com/ginkgolinter/settings",
+        "settings.go",
+    );
+
+    let default_msgs = support::run_analyzer(ginkgolinter(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("wrong length assertion")),
+        "{default_msgs:?}"
+    );
+    assert!(
+        !default_msgs
+            .iter()
+            .any(|m| m.contains("Focus container")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "ginkgolinter",
+        GinkgolinterOptions {
+            suppress_len_assertion: true,
+            allow_havelen_zero: true,
+            forbid_focus_container: true,
+            force_expect_to: true,
+            ..GinkgolinterOptions::default()
+        },
+    );
+    let flagged = support::run_analyzer_with_settings(
+        ginkgolinter(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !flagged.iter().any(|m| m.contains("wrong length")),
+        "len checks should be suppressed: {flagged:?}"
+    );
+    assert!(
+        flagged.iter().any(|m| m.contains("Focus container")),
+        "{flagged:?}"
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("must not use Expect with Should")),
+        "{flagged:?}"
     );
 }
