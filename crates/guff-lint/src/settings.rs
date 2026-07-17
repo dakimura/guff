@@ -49,6 +49,7 @@ pub struct LinterSettings {
     pub testifylint: TestifylintSettings,
     pub errchkjson: ErrchkjsonSettings,
     pub wrapcheck: WrapcheckSettings,
+    pub rowserrcheck: RowserrcheckSettings,
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
@@ -775,6 +776,15 @@ pub struct WrapcheckSettings {
     pub ignore_interface_regexps: Vec<String>,
     #[serde(default, rename = "report-internal-errors")]
     pub report_internal_errors: bool,
+}
+
+/// `linters.settings.rowserrcheck` / `linters-settings.rowserrcheck`.
+///
+/// `database/sql` is always checked; `packages` lists additional import paths.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct RowserrcheckSettings {
+    #[serde(default)]
+    pub packages: Vec<String>,
 }
 
 /// `linters.settings.godot` / `linters-settings.godot`.
@@ -2011,6 +2021,11 @@ impl LinterSettings {
                 out.wrapcheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("rowserrcheck".into())) {
+            if let Ok(s) = serde_yaml::from_value::<RowserrcheckSettings>(v.clone()) {
+                out.rowserrcheck = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("godot".into())) {
             if let Ok(s) = serde_yaml::from_value::<GodotSettings>(v.clone()) {
                 out.godot = s;
@@ -2259,6 +2274,7 @@ impl LinterSettings {
         bag.insert("testifylint", self.testifylint.to_guff_testifylint());
         bag.insert("errchkjson", self.errchkjson.to_guff_errchkjson());
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
+        bag.insert("rowserrcheck", self.rowserrcheck.to_guff_rowserrcheck());
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
@@ -2912,6 +2928,14 @@ impl WrapcheckSettings {
             ignore_package_globs: self.ignore_package_globs.clone(),
             ignore_interface_regexps: self.ignore_interface_regexps.clone(),
             report_internal_errors: self.report_internal_errors,
+        }
+    }
+}
+
+impl RowserrcheckSettings {
+    pub fn to_guff_rowserrcheck(&self) -> guff_error::RowserrcheckOptions {
+        guff_error::RowserrcheckOptions {
+            packages: self.packages.clone(),
         }
     }
 }

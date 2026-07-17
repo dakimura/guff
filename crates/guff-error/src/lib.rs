@@ -7,12 +7,14 @@
 //! - [`errorlint`]
 //! - [`wrapcheck`]
 //! - [`errchkjson`]
+//! - [`rowserrcheck`]
 
 mod durationcheck;
 mod err113;
 mod errchkjson;
 mod errname;
 mod errorlint;
+mod rowserrcheck;
 mod util;
 mod wrapcheck;
 
@@ -22,6 +24,8 @@ pub use errchkjson::analyzer as errchkjson;
 pub use errchkjson::ErrchkjsonOptions;
 pub use errname::analyzer as errname;
 pub use errorlint::analyzer as errorlint;
+pub use rowserrcheck::analyzer as rowserrcheck;
+pub use rowserrcheck::RowserrcheckOptions;
 pub use wrapcheck::analyzer as wrapcheck;
 pub use wrapcheck::WrapcheckOptions;
 
@@ -35,5 +39,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         errorlint(),
         wrapcheck(),
         errchkjson(),
+        rowserrcheck(),
     ]
 }

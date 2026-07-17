@@ -804,6 +804,26 @@ fn parse_v2_wrapcheck_settings() {
 }
 
 #[test]
+fn parse_v2_rowserrcheck_settings() {
+    use guff_lint::RowserrcheckSettings;
+
+    let contents = fs::read_to_string(testdata_config("v2_rowserrcheck_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.rowserrcheck,
+        RowserrcheckSettings {
+            packages: vec!["github.com/jmoiron/sqlx".into()],
+        }
+    );
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_error::RowserrcheckOptions>("rowserrcheck")
+        .expect("rowserrcheck options");
+    assert_eq!(opts.packages, vec!["github.com/jmoiron/sqlx"]);
+}
+
+#[test]
 fn parse_v2_comment_settings() {
     use guff_lint::{DupwordSettings, GodotSettings, GodoxSettings};
 

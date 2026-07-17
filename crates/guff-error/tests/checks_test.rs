@@ -1,6 +1,6 @@
 mod support;
 
-use guff_error::{durationcheck, err113, errchkjson, errname, errorlint, wrapcheck};
+use guff_error::{durationcheck, err113, errchkjson, errname, errorlint, rowserrcheck, wrapcheck};
 
 #[test]
 fn errname_flags_bad_type_and_var_names() {
@@ -404,5 +404,77 @@ fn errchkjson_report_no_exported_flags_empty_struct() {
             .iter()
             .any(|m| m.contains("does not contain any exported field")),
         "{messages:?}"
+    );
+}
+
+#[test]
+fn rowserrcheck_flags_missing_err() {
+    let dir = support::testdata("rowserrcheck");
+    let pkg = support::typecheck_pkg("example.com/rowserrcheck", &dir.join("bad.go"));
+    let messages = support::run_analyzer(rowserrcheck(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("rows.Err must be checked")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("rows.Err must be checked"))
+            .count()
+            >= 2,
+        "expected ≥2 diagnostics (missing + reassign): {messages:?}"
+    );
+}
+
+#[test]
+fn rowserrcheck_allows_checked_and_returned() {
+    let dir = support::testdata("rowserrcheck");
+    let pkg = support::typecheck_pkg("example.com/rowserrcheck/ok", &dir.join("ok.go"));
+    let messages = support::run_analyzer(rowserrcheck(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn rowserrcheck_packages_setting_enables_sqlx() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_error::RowserrcheckOptions;
+    use guff_runner::RunnerOptions;
+
+    let dir = support::testdata("rowserrcheck");
+    let pkg = support::typecheck_pkg(
+        "example.com/rowserrcheck/settings",
+        &dir.join("settings.go"),
+    );
+
+    assert!(
+        support::run_analyzer(rowserrcheck(), &pkg).is_empty(),
+        "default packages (database/sql only) should ignore sqlx: {:?}",
+        support::run_analyzer(rowserrcheck(), &pkg)
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "rowserrcheck",
+        RowserrcheckOptions {
+            packages: vec!["github.com/jmoiron/sqlx".into()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        rowserrcheck(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("rows.Err must be checked"))
+            .count(),
+        1,
+        "expected one sqlx missing-Err diagnostic: {messages:?}"
     );
 }
