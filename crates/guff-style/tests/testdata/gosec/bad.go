@@ -4,6 +4,7 @@ import (
 	"crypto/des"
 	"crypto/md5"
 	"crypto/rc4"
+	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
 	"math/rand"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/http/cgi"
 	_ "net/http/pprof"
+	"os"
 	"os/exec"
 	"unsafe"
 
@@ -45,6 +47,15 @@ func bad() {
 
 	returnsErr()
 	_ = returnsErr()
+
+	_ = os.Mkdir("/tmp/x", 0o777)
+	_ = os.MkdirAll("/tmp/y", 0o755)
+	_, _ = os.OpenFile("f", 0, 0o666)
+	_ = os.Chmod("f", 0o777)
+	_ = os.WriteFile("f", nil, 0o644)
+	_, _ = rsa.GenerateKey(nil, 1024)
+	_ = tls.Config{InsecureSkipVerify: true}
+	_ = http.Dir("/")
 }
 
 func returnsErr() error { return nil }

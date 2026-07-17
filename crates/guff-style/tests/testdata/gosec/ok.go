@@ -1,9 +1,13 @@
 package gosec_ok
 
 import (
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"hash"
 	"net"
+	"net/http"
+	"os"
 	"os/exec"
 )
 
@@ -38,5 +42,33 @@ func okCheckedErr() error {
 	if err := okErr(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func okPerms() error {
+	if err := os.Mkdir("/tmp/x", 0o750); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("/tmp/y", 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile("f", 0, 0o600)
+	if err != nil {
+		return err
+	}
+	_ = f
+	if err := os.Chmod("f", 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile("f", nil, 0o600); err != nil {
+		return err
+	}
+	key, err := rsa.GenerateKey(nil, 2048)
+	if err != nil {
+		return err
+	}
+	_ = key
+	_ = tls.Config{InsecureSkipVerify: false}
+	_ = http.Dir("/var/www")
 	return nil
 }

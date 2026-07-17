@@ -1,6 +1,10 @@
 package tls
 
-type Config struct{}
+type Config struct {
+	InsecureSkipVerify bool
+	MinVersion         uint16
+	MaxVersion         uint16
+}
 
 type Listener interface {
 	Close() error

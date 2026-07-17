@@ -9,9 +9,15 @@
 //! - **G104** — unchecked errors
 //! - **G106** — `ssh.InsecureIgnoreHostKey`
 //! - **G108** — blank import of `net/http/pprof`
+//! - **G111** — `http.Dir("/")` directory traversal
 //! - **G114** — `net/http` serve helpers without timeouts
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`)
+//! - **G301** — poor directory permissions (`os.Mkdir` / `MkdirAll`; default ≤ `0o750`)
+//! - **G302** — poor file permissions (`os.OpenFile` / `Chmod`; default ≤ `0o600`)
+//! - **G306** — poor `WriteFile` permissions (default ≤ `0o600`)
 //! - **G401** — weak hash (`crypto/md5` / `crypto/sha1` `New`/`Sum`)
+//! - **G402** — `tls.Config` with `InsecureSkipVerify: true` (MinVersion / CipherSuites DEFERRED)
+//! - **G403** — weak RSA key (`crypto/rsa.GenerateKey` bits < 2048)
 //! - **G404** — weak RNG (`math/rand` / `math/rand/v2`)
 //! - **G405** — weak encryption (`crypto/des` / `crypto/rc4`)
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
@@ -19,11 +25,11 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G107, G109–G113, G115–G118, G201–G203,
-//! G301–G307, G402–G403, G601, SSA analyzers), G101 zxcvbn entropy / `#nosec` /
-//! `gosec:disable` / per-rule `config` map, G104 config allowlist / audit mode,
-//! full G204 TryResolve / G102 Ident const resolution, `severity`/`confidence`
-//! filters, concurrency.
+//! DEFERRED: remaining rules (G107, G109–G110, G112–G113, G115–G118, G201–G203,
+//! G303–G305, G307, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
+//! entropy / `#nosec` / `gosec:disable` / per-rule `config` map, G104 config allowlist /
+//! audit mode, full G204 TryResolve / G102 Ident const resolution,
+//! `severity`/`confidence` filters, concurrency.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -37,6 +43,7 @@ use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, TypeData};
+use guff_types::typestring::type_string;
 use regex::Regex;
 
 use crate::options::GosecOptions;
@@ -246,7 +253,20 @@ const RULES: &[RuleDef] = &[
 ];
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
-const EXTRA_RULE_IDS: &[&str] = &["G101", "G102", "G104", "G204"];
+const EXTRA_RULE_IDS: &[&str] = &[
+    "G101", "G102", "G104", "G111", "G204", "G301", "G302", "G306", "G402", "G403",
+];
+
+const G301_MODE: i64 = 0o750;
+const G302_MODE: i64 = 0o600;
+const G306_MODE: i64 = 0o600;
+const G403_MIN_BITS: i64 = 2048;
+
+const G301_CALLS: &[(&str, &str)] = &[("os", "Mkdir"), ("os", "MkdirAll")];
+const G302_CALLS: &[(&str, &str)] = &[("os", "OpenFile"), ("os", "Chmod")];
+const G306_CALLS: &[(&str, &str)] = &[("os", "WriteFile"), ("io/ioutil", "WriteFile")];
+const G403_CALLS: &[(&str, &str)] = &[("crypto/rsa", "GenerateKey")];
+const G111_CALLS: &[(&str, &str)] = &[("net/http", "Dir")];
 
 const G101_WHAT: &str = "Potential hardcoded credentials";
 /// Upstream default: `(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred`
@@ -749,6 +769,206 @@ fn is_resolvable_literal(expr: &Expr) -> bool {
     )
 }
 
+/// Upstream `gosec.GetInt`: parse `ast.BasicLit` INT with base 0 (`0o755`, `0755`, `493`).
+fn get_int(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::BasicLit(lit) if lit.kind == Some(Token::INT) => parse_go_int_lit(&lit.value),
+        _ => None,
+    }
+}
+
+fn parse_go_int_lit(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Go allows underscores in numeric literals; strip them.
+    let cleaned: String = s.chars().filter(|&c| c != '_').collect();
+    if let Some(hex) = cleaned
+        .strip_prefix("0x")
+        .or_else(|| cleaned.strip_prefix("0X"))
+    {
+        return i64::from_str_radix(hex, 16).ok();
+    }
+    if let Some(bin) = cleaned
+        .strip_prefix("0b")
+        .or_else(|| cleaned.strip_prefix("0B"))
+    {
+        return i64::from_str_radix(bin, 2).ok();
+    }
+    if let Some(oct) = cleaned
+        .strip_prefix("0o")
+        .or_else(|| cleaned.strip_prefix("0O"))
+    {
+        return i64::from_str_radix(oct, 8).ok();
+    }
+    // Legacy octal: leading 0 with only octal digits (not a single "0").
+    if cleaned.len() > 1
+        && cleaned.starts_with('0')
+        && cleaned.chars().all(|c| matches!(c, '0'..='7'))
+    {
+        return i64::from_str_radix(&cleaned, 8).ok();
+    }
+    cleaned.parse::<i64>().ok()
+}
+
+fn mode_is_subset(subset: i64, superset: i64) -> bool {
+    (subset | superset) == superset
+}
+
+/// Upstream `isOsPerm`: `os.ModePerm` always fails the permission check.
+fn is_os_mode_perm(expr: &Expr) -> bool {
+    let Expr::SelectorExpr(sel) = expr else {
+        return false;
+    };
+    let Expr::Ident(x) = sel.x.as_ref() else {
+        return false;
+    };
+    x.name == "os" && sel.sel.name == "ModePerm"
+}
+
+fn format_octal_mode(mode: i64) -> String {
+    // Match Go `%#o` for these masks: leading 0 + octal digits.
+    format!("0{mode:o}")
+}
+
+fn type_name_of(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let tav = info.types.get(&expr.id())?;
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        tav.typ,
+        None,
+    ))
+}
+
+fn is_tls_config_type_name(name: &str) -> bool {
+    let bare = name.strip_prefix('*').unwrap_or(name);
+    bare == "crypto/tls.Config"
+}
+
+fn resolve_bool_const(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Ident(id) if id.name == "true" => Some(true),
+        Expr::Ident(id) if id.name == "false" => Some(false),
+        Expr::UnaryExpr(u) if u.op == Token::NOT => resolve_bool_const(&u.x).map(|v| !v),
+        _ => None,
+    }
+}
+
+fn check_g402_tls_field(
+    field: &str,
+    value: &Expr,
+    report_pos: u32,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if field != "InsecureSkipVerify" {
+        return;
+    }
+    match resolve_bool_const(value) {
+        Some(true) => pending.push((
+            report_pos,
+            "G402: TLS InsecureSkipVerify set to true.".to_string(),
+        )),
+        None => pending.push((
+            report_pos,
+            "G402: TLS InsecureSkipVerify may be set to true.".to_string(),
+        )),
+        Some(false) => {}
+    }
+}
+
+fn check_g402_composite(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G402") {
+        return;
+    }
+    let Some(ty) = lit.ty.as_ref() else {
+        return;
+    };
+    let Some(name) = type_name_of(pass, ty) else {
+        // AST fallback: `tls.Config{…}` when types info is incomplete.
+        let is_tls_config = match ty.as_ref() {
+            Expr::SelectorExpr(sel) => {
+                sel.sel.name == "Config"
+                    && matches!(
+                        sel.x.as_ref(),
+                        Expr::Ident(id) if imported_pkg_path(pass, id).as_deref() == Some("crypto/tls")
+                    )
+            }
+            _ => false,
+        };
+        if !is_tls_config {
+            return;
+        }
+        for elt in &lit.elts {
+            let Expr::KeyValueExpr(kv) = elt else {
+                continue;
+            };
+            let Expr::Ident(key) = kv.key.as_ref() else {
+                continue;
+            };
+            check_g402_tls_field(
+                &key.name,
+                kv.value.as_ref(),
+                kv.value.pos().0 as u32,
+                pending,
+            );
+        }
+        return;
+    };
+    if !is_tls_config_type_name(&name) {
+        return;
+    }
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        let Expr::Ident(key) = kv.key.as_ref() else {
+            continue;
+        };
+        check_g402_tls_field(
+            &key.name,
+            kv.value.as_ref(),
+            kv.value.pos().0 as u32,
+            pending,
+        );
+    }
+}
+
+fn check_g402_assign(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G402") || assign.lhs.is_empty() || assign.rhs.is_empty() {
+        return;
+    }
+    let Expr::SelectorExpr(sel) = &assign.lhs[0] else {
+        return;
+    };
+    let Some(name) = type_name_of(pass, &sel.x) else {
+        return;
+    };
+    if !is_tls_config_type_name(&name) {
+        return;
+    }
+    check_g402_tls_field(
+        &sel.sel.name,
+        &assign.rhs[0],
+        assign.rhs[0].pos().0 as u32,
+        pending,
+    );
+}
+
 fn result_type_errors(pass: &Pass<'_>, typ: guff_types::TypeId) -> Vec<bool> {
     let artifacts = match pass.pkg().type_artifacts.as_ref() {
         Some(a) => a,
@@ -930,6 +1150,82 @@ fn check_call(
         }
         // DEFERRED: full TryResolve / param/field skip parity with upstream.
     }
+
+    if enabled.contains("G111") && G111_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        // Upstream matches `http.Dir("/")` / `http.Dir('/')` via regex on reconstructed call text.
+        if call.args.len() == 1 {
+            if let Some(arg) = string_lit_from_expr(&call.args[0]) {
+                if arg == "/" {
+                    pending.push((
+                        call.pos().0 as u32,
+                        "G111: Potential directory traversal".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+
+    if enabled.contains("G301") && G301_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        if let Some(mode_arg) = call.args.last() {
+            let bad = is_os_mode_perm(mode_arg)
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G301_MODE));
+            if bad {
+                pending.push((
+                    call.pos().0 as u32,
+                    format!(
+                        "G301: Expect directory permissions to be {} or less",
+                        format_octal_mode(G301_MODE)
+                    ),
+                ));
+            }
+        }
+    }
+
+    if enabled.contains("G302") && G302_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        if let Some(mode_arg) = call.args.last() {
+            let bad = is_os_mode_perm(mode_arg)
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G302_MODE));
+            if bad {
+                pending.push((
+                    call.pos().0 as u32,
+                    format!(
+                        "G302: Expect file permissions to be {} or less",
+                        format_octal_mode(G302_MODE)
+                    ),
+                ));
+            }
+        }
+    }
+
+    if enabled.contains("G306") && G306_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        if let Some(mode_arg) = call.args.last() {
+            let bad = is_os_mode_perm(mode_arg)
+                || get_int(mode_arg).is_some_and(|m| !mode_is_subset(m, G306_MODE));
+            if bad {
+                pending.push((
+                    call.pos().0 as u32,
+                    format!(
+                        "G306: Expect WriteFile permissions to be {} or less",
+                        format_octal_mode(G306_MODE)
+                    ),
+                ));
+            }
+        }
+    }
+
+    if enabled.contains("G403") && G403_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        // crypto/rsa.GenerateKey(random, bits)
+        if call.args.len() >= 2 {
+            if let Some(bits) = get_int(&call.args[1]) {
+                if bits < G403_MIN_BITS {
+                    pending.push((
+                        call.pos().0 as u32,
+                        format!("G403: RSA keys should be at least {G403_MIN_BITS} bits"),
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn check_imports(
@@ -988,6 +1284,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::CallExpr(call) => check_call(pass, call, &enabled, &mut pending),
+                NodeRef::CompositeLit(lit) => {
+                    check_g402_composite(pass, lit, &enabled, &mut pending)
+                }
                 NodeRef::ExprStmt(stmt) => {
                     if let Expr::CallExpr(call) = &stmt.x {
                         check_g104_call(pass, call, &enabled, &mut pending);
@@ -997,7 +1296,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::DeferStmt(stmt) => {
                     check_g104_call(pass, &stmt.call, &enabled, &mut pending);
                 }
-                NodeRef::AssignStmt(stmt) => check_g104_assign(pass, stmt, &enabled, &mut pending),
+                NodeRef::AssignStmt(stmt) => {
+                    check_g104_assign(pass, stmt, &enabled, &mut pending);
+                    check_g402_assign(pass, stmt, &enabled, &mut pending);
+                }
                 NodeRef::ValueSpec(spec) => {
                     check_g104_value_spec(pass, spec, &enabled, &mut pending)
                 }
@@ -1102,5 +1404,24 @@ mod tests {
             is_secret_pattern("ghp_iR54dhCYg9Tfmoywi9xLmmKZrrnAw438BYh3"),
             Some("GitHub personal access token")
         );
+    }
+
+    #[test]
+    fn parse_go_int_lit_handles_bases() {
+        assert_eq!(parse_go_int_lit("0o777"), Some(0o777));
+        assert_eq!(parse_go_int_lit("0755"), Some(0o755));
+        assert_eq!(parse_go_int_lit("493"), Some(493));
+        assert_eq!(parse_go_int_lit("0x100"), Some(256));
+        assert_eq!(parse_go_int_lit("0b1010"), Some(10));
+        assert_eq!(parse_go_int_lit("1_024"), Some(1024));
+    }
+
+    #[test]
+    fn mode_subset_matches_upstream() {
+        assert!(mode_is_subset(0o750, 0o750));
+        assert!(mode_is_subset(0o700, 0o750));
+        assert!(!mode_is_subset(0o755, 0o750));
+        assert!(!mode_is_subset(0o644, 0o600));
+        assert!(mode_is_subset(0o600, 0o600));
     }
 }
