@@ -271,8 +271,27 @@ fn path_matches(path: &str, pat: &str) -> bool {
 mod tests {
     use super::*;
     use crate::gofmt::GofmtOptions;
+    use crate::gofumpt::GofumptOptions;
     use crate::meta::MetaFormatter;
     use std::io::Cursor;
+    use std::process::Command;
+
+    fn meta_gofmt() -> MetaFormatter {
+        MetaFormatter::new(
+            &["gofmt".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        )
+        .unwrap()
+    }
+
+    fn gofumpt_available() -> bool {
+        Command::new("gofumpt")
+            .arg("-version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
 
     #[test]
     fn rewrites_file_in_place() {
@@ -280,8 +299,7 @@ mod tests {
         let path = dir.path().join("main.go");
         fs::write(&path, "package main\nfunc main(  ) {\n}\n").unwrap();
 
-        let meta = MetaFormatter::new(&["gofmt".into()], GofmtOptions::default()).unwrap();
-        let runner = Runner::new(meta, RunnerOptions::default());
+        let runner = Runner::new(meta_gofmt(), RunnerOptions::default());
         let mut out = Cursor::new(Vec::new());
         let stats = runner.run(&[path.clone()], &mut out).unwrap();
         assert_eq!(stats.rewritten, 1);
@@ -297,9 +315,8 @@ mod tests {
         let original = "package main\nfunc main(  ) {\n}\n";
         fs::write(&path, original).unwrap();
 
-        let meta = MetaFormatter::new(&["gofmt".into()], GofmtOptions::default()).unwrap();
         let runner = Runner::new(
-            meta,
+            meta_gofmt(),
             RunnerOptions {
                 diff: true,
                 ..Default::default()
@@ -323,11 +340,37 @@ mod tests {
         )
         .unwrap();
 
-        let meta = MetaFormatter::new(&["gofmt".into()], GofmtOptions::default()).unwrap();
-        let runner = Runner::new(meta, RunnerOptions::default());
+        let runner = Runner::new(meta_gofmt(), RunnerOptions::default());
         let mut out = Cursor::new(Vec::new());
         let stats = runner.run(&[path.clone()], &mut out).unwrap();
         assert_eq!(stats.skipped, 1);
         assert_eq!(stats.rewritten, 0);
+    }
+
+    #[test]
+    fn gofumpt_rewrites_empty_line_at_block_start() {
+        if !gofumpt_available() {
+            eprintln!("skip: gofumpt not on PATH");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.go");
+        fs::write(&path, "package p\n\nfunc f() {\n\n\tx := 1\n\tprintln(x)\n}\n").unwrap();
+
+        let meta = MetaFormatter::new(
+            &["gofumpt".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        )
+        .unwrap();
+        let runner = Runner::new(meta, RunnerOptions::default());
+        let mut out = Cursor::new(Vec::new());
+        let stats = runner.run(&[path.clone()], &mut out).unwrap();
+        assert_eq!(stats.rewritten, 1);
+        let got = fs::read_to_string(&path).unwrap();
+        assert!(
+            got.contains("func f() {\n\tx := 1"),
+            "expected gofumpt rewrite, got:\n{got}"
+        );
     }
 }

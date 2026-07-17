@@ -1,7 +1,7 @@
 [package]
 name = "guff-fmt"
-description = "Go source formatters for guff (gofmt and friends)."
-keywords = ["go", "formatter", "gofmt", "golangci"]
+description = "Go source formatters for guff (gofmt, gofumpt, and friends)."
+keywords = ["go", "formatter", "gofmt", "gofumpt", "golangci"]
 categories = ["development-tools"]
 version.workspace = true
 edition.workspace = true

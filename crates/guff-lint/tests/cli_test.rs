@@ -298,3 +298,54 @@ formatters:
     assert!(got.contains("s[1:]"), "expected -s rewrite, got:\n{got}");
 }
 
+#[test]
+fn cli_fmt_gofumpt_extra_rules_from_config() {
+    if Command::new("gofumpt")
+        .arg("-version")
+        .output()
+        .map(|o| !o.status.success())
+        .unwrap_or(true)
+    {
+        eprintln!("skip: gofumpt not on PATH");
+        return;
+    }
+    let tmp = tempfile::TempDir::new().unwrap();
+    let cfg = tmp.path().join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        r#"
+version: "2"
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      extra-rules: true
+"#,
+    )
+    .unwrap();
+    let path = tmp.path().join("p.go");
+    std::fs::write(
+        &path,
+        "package p\n\nfunc f() (x int) {\n\tx = 1\n\treturn\n}\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["fmt", "-c"])
+        .arg(&cfg)
+        .arg(&path)
+        .output()
+        .expect("spawn guff fmt gofumpt");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let got = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        got.contains("return x"),
+        "expected clothed return from -extra, got:\n{got}"
+    );
+}
+

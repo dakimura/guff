@@ -453,6 +453,11 @@ impl FormattersV2 {
         parse_gofmt_settings(&self.settings)
     }
 
+    /// Parse `formatters.settings.gofumpt` into [`guff_fmt::GofumptOptions`].
+    pub fn gofumpt_options(&self) -> guff_fmt::GofumptOptions {
+        parse_gofumpt_settings(&self.settings)
+    }
+
     /// Path exclusion patterns from `formatters.exclusions.paths`.
     pub fn exclusion_paths(&self) -> Vec<String> {
         self.exclusions.paths.clone()
@@ -498,6 +503,33 @@ pub fn parse_gofmt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofmtOpti
                         replacement,
                     });
                 }
+            }
+        }
+    }
+    opts
+}
+
+/// Parse gofumpt settings from `formatters.settings` YAML mapping.
+pub fn parse_gofumpt_settings(settings: &serde_yaml::Value) -> guff_fmt::GofumptOptions {
+    let mut opts = guff_fmt::GofumptOptions::default();
+    let Some(map) = settings.as_mapping() else {
+        return opts;
+    };
+    let Some(gofumpt) = map.get(serde_yaml::Value::String("gofumpt".into())) else {
+        return opts;
+    };
+    let Some(gmap) = gofumpt.as_mapping() else {
+        return opts;
+    };
+    if let Some(v) = gmap.get(serde_yaml::Value::String("extra-rules".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.extra_rules = b;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("module-path".into())) {
+        if let Some(s) = v.as_str() {
+            if !s.is_empty() {
+                opts.module_path = Some(s.to_string());
             }
         }
     }
@@ -1245,6 +1277,24 @@ gofmt:
         assert_eq!(opts.rewrite_rules.len(), 1);
         assert_eq!(opts.rewrite_rules[0].pattern, "interface{}");
         assert_eq!(opts.rewrite_rules[0].replacement, "any");
+    }
+
+    #[test]
+    fn parse_gofumpt_extra_rules_and_module_path() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+gofumpt:
+  extra-rules: true
+  module-path: github.com/org/project
+"#,
+        )
+        .unwrap();
+        let opts = parse_gofumpt_settings(&yaml);
+        assert!(opts.extra_rules);
+        assert_eq!(
+            opts.module_path.as_deref(),
+            Some("github.com/org/project")
+        );
     }
 
     #[test]

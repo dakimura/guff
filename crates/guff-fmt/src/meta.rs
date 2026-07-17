@@ -1,6 +1,7 @@
 //! Meta-formatter that chains enabled formatters (golangci `MetaFormatter`).
 
 use crate::gofmt::{Gofmt, GofmtOptions};
+use crate::gofumpt::{Gofumpt, GofumptOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -18,12 +19,16 @@ pub struct MetaFormatter {
 }
 
 impl MetaFormatter {
-    /// Build from `formatters.enable` and gofmt options.
+    /// Build from `formatters.enable` and per-formatter options.
     ///
-    /// Unknown / not-yet-implemented names return an error (golangci rejects
-    /// invalid names). Known-but-unimplemented formatters (gofumpt, …) return
-    /// a clear DEFERRED message.
-    pub fn new(enable: &[String], gofmt: GofmtOptions) -> Result<Self, FormatError> {
+    /// Unknown names return an error (golangci rejects invalid names). Known-but-
+    /// unimplemented formatters (goimports, …) return a clear DEFERRED message.
+    /// Formatters are chained in `enable` order.
+    pub fn new(
+        enable: &[String],
+        gofmt: GofmtOptions,
+        gofumpt: GofumptOptions,
+    ) -> Result<Self, FormatError> {
         for name in enable {
             if !is_formatter(name) {
                 return Err(FormatError::InvalidFormatter(name.clone()));
@@ -32,15 +37,11 @@ impl MetaFormatter {
 
         let mut formatters: Vec<Box<dyn Formatter>> = Vec::new();
 
-        if enable.iter().any(|n| n == "gofmt") {
-            formatters.push(Box::new(Gofmt::new(gofmt.clone())));
-        }
-
-        // DEFERRED: gofumpt / goimports / swaggo / gci / golines (R15 follow-up).
         for name in enable {
             match name.as_str() {
-                "gofmt" => {}
-                "gofumpt" | "goimports" | "gci" | "golines" | "swaggo" => {
+                "gofmt" => formatters.push(Box::new(Gofmt::new(gofmt.clone()))),
+                "gofumpt" => formatters.push(Box::new(Gofumpt::new(gofumpt.clone()))),
+                "goimports" | "gci" | "golines" | "swaggo" => {
                     return Err(FormatError::Deferred(name.clone()));
                 }
                 _ => {}
@@ -82,13 +83,17 @@ mod tests {
 
     #[test]
     fn empty_enable_defaults_to_gofmt() {
-        let m = MetaFormatter::new(&[], GofmtOptions::default()).unwrap();
+        let m = MetaFormatter::new(&[], GofmtOptions::default(), GofumptOptions::default()).unwrap();
         assert_eq!(m.formatter_names(), vec!["gofmt"]);
     }
 
     #[test]
     fn rejects_unknown() {
-        let err = match MetaFormatter::new(&["not-a-fmt".into()], GofmtOptions::default()) {
+        let err = match MetaFormatter::new(
+            &["not-a-fmt".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        ) {
             Ok(_) => panic!("expected error"),
             Err(e) => e,
         };
@@ -96,11 +101,37 @@ mod tests {
     }
 
     #[test]
-    fn deferred_gofumpt() {
-        let err = match MetaFormatter::new(&["gofumpt".into()], GofmtOptions::default()) {
+    fn enables_gofumpt() {
+        let m = MetaFormatter::new(
+            &["gofumpt".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(m.formatter_names(), vec!["gofumpt"]);
+    }
+
+    #[test]
+    fn deferred_goimports() {
+        let err = match MetaFormatter::new(
+            &["goimports".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        ) {
             Ok(_) => panic!("expected error"),
             Err(e) => e,
         };
         assert!(matches!(err, FormatError::Deferred(_)));
+    }
+
+    #[test]
+    fn chains_in_enable_order() {
+        let m = MetaFormatter::new(
+            &["gofmt".into(), "gofumpt".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(m.formatter_names(), vec!["gofmt", "gofumpt"]);
     }
 }
