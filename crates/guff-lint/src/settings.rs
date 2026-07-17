@@ -78,6 +78,7 @@ pub struct LinterSettings {
     pub ireturn: IreturnSettings,
     pub gosec: GosecSettings,
     pub funcorder: FuncorderSettings,
+    pub varnamelen: VarnamelenSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1034,6 +1035,84 @@ impl FuncorderSettings {
     }
 }
 
+/// `linters.settings.varnamelen` / `linters-settings.varnamelen`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct VarnamelenSettings {
+    #[serde(default = "default_varnamelen_max_distance", rename = "max-distance")]
+    pub max_distance: usize,
+    #[serde(
+        default = "default_varnamelen_min_name_length",
+        rename = "min-name-length"
+    )]
+    pub min_name_length: usize,
+    #[serde(default, rename = "check-receiver")]
+    pub check_receiver: bool,
+    #[serde(default, rename = "check-return")]
+    pub check_return: bool,
+    #[serde(default, rename = "check-type-param")]
+    pub check_type_param: bool,
+    #[serde(default, rename = "ignore-type-assert-ok")]
+    pub ignore_type_assert_ok: bool,
+    #[serde(default, rename = "ignore-map-index-ok")]
+    pub ignore_map_index_ok: bool,
+    #[serde(default, rename = "ignore-chan-recv-ok")]
+    pub ignore_chan_recv_ok: bool,
+    #[serde(default, rename = "ignore-names")]
+    pub ignore_names: Vec<String>,
+    #[serde(default, rename = "ignore-decls")]
+    pub ignore_decls: Vec<String>,
+}
+
+fn default_varnamelen_max_distance() -> usize {
+    5
+}
+
+fn default_varnamelen_min_name_length() -> usize {
+    3
+}
+
+impl Default for VarnamelenSettings {
+    fn default() -> Self {
+        Self {
+            max_distance: default_varnamelen_max_distance(),
+            min_name_length: default_varnamelen_min_name_length(),
+            check_receiver: false,
+            check_return: false,
+            check_type_param: false,
+            ignore_type_assert_ok: false,
+            ignore_map_index_ok: false,
+            ignore_chan_recv_ok: false,
+            ignore_names: Vec::new(),
+            ignore_decls: Vec::new(),
+        }
+    }
+}
+
+impl VarnamelenSettings {
+    pub fn to_guff_varnamelen(&self) -> guff_style::VarnamelenOptions {
+        guff_style::VarnamelenOptions {
+            max_distance: if self.max_distance > 0 {
+                self.max_distance
+            } else {
+                default_varnamelen_max_distance()
+            },
+            min_name_length: if self.min_name_length > 0 {
+                self.min_name_length
+            } else {
+                default_varnamelen_min_name_length()
+            },
+            check_receiver: self.check_receiver,
+            check_return: self.check_return,
+            check_type_param: self.check_type_param,
+            ignore_type_assert_ok: self.ignore_type_assert_ok,
+            ignore_map_index_ok: self.ignore_map_index_ok,
+            ignore_chan_recv_ok: self.ignore_chan_recv_ok,
+            ignore_names: self.ignore_names.clone(),
+            ignore_decls: self.ignore_decls.clone(),
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -1740,6 +1819,11 @@ impl LinterSettings {
                 out.funcorder = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("varnamelen".into())) {
+            if let Ok(s) = serde_yaml::from_value::<VarnamelenSettings>(v.clone()) {
+                out.varnamelen = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -1861,6 +1945,7 @@ impl LinterSettings {
             self.nonamedreturns.to_guff_nonamedreturns(),
         );
         bag.insert("funcorder", self.funcorder.to_guff_funcorder());
+        bag.insert("varnamelen", self.varnamelen.to_guff_varnamelen());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());

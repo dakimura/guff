@@ -63,6 +63,7 @@
 //! - [`exptostd`]
 //! - [`modernize`]
 //! - [`gocritic`]
+//! - [`varnamelen`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -130,6 +131,7 @@ mod tagalign;
 mod unconvert;
 mod usestdlibvars;
 mod usetesting;
+mod varnamelen;
 mod whitespace;
 mod wsl;
 
@@ -147,7 +149,7 @@ pub use options::{
     PredeclaredOptions, ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions,
     SuiteExtraAssertCallMode, TagalignOptions, TagliatelleOptions, TestifylintOptions,
     TestpackageOptions, ThelperKindOptions, ThelperOptions, UnconvertOptions, UsestdlibvarsOptions,
-    UsetestingOptions, WhitespaceOptions, WslOptions,
+    UsetestingOptions, VarnamelenOptions, WhitespaceOptions, WslOptions,
 };
 pub use asasalint::analyzer as asasalint;
 pub use asciicheck::analyzer as asciicheck;
@@ -209,6 +211,7 @@ pub use tagalign::analyzer as tagalign;
 pub use unconvert::analyzer as unconvert;
 pub use usestdlibvars::analyzer as usestdlibvars;
 pub use usetesting::analyzer as usetesting;
+pub use varnamelen::analyzer as varnamelen;
 pub use whitespace::analyzer as whitespace;
 pub use wsl::analyzer as wsl;
 
@@ -278,5 +281,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         exptostd(),
         modernize(),
         gocritic(),
+        varnamelen(),
     ]
 }

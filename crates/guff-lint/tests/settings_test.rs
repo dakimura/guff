@@ -1083,6 +1083,43 @@ fn parse_v2_funcorder_settings() {
 }
 
 #[test]
+fn parse_v2_varnamelen_settings() {
+    let default = guff_lint::VarnamelenSettings::default();
+    assert_eq!(default.max_distance, 5);
+    assert_eq!(default.min_name_length, 3);
+    assert!(!default.check_receiver);
+
+    let contents = fs::read_to_string(testdata_config("v2_varnamelen_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.varnamelen.max_distance, 2);
+    assert_eq!(settings.varnamelen.min_name_length, 2);
+    assert!(settings.varnamelen.check_receiver);
+    assert!(settings.varnamelen.check_return);
+    assert!(settings.varnamelen.check_type_param);
+    assert!(settings.varnamelen.ignore_type_assert_ok);
+    assert!(settings.varnamelen.ignore_map_index_ok);
+    assert!(settings.varnamelen.ignore_chan_recv_ok);
+    assert_eq!(
+        settings.varnamelen.ignore_names,
+        vec!["x".to_string(), "err".to_string()]
+    );
+    assert_eq!(
+        settings.varnamelen.ignore_decls,
+        vec!["i int".to_string(), "const C".to_string()]
+    );
+
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::VarnamelenOptions>("varnamelen")
+        .expect("varnamelen options");
+    assert_eq!(opts.max_distance, 2);
+    assert_eq!(opts.min_name_length, 2);
+    assert!(opts.check_receiver);
+    assert_eq!(opts.ignore_names, vec!["x".to_string(), "err".to_string()]);
+}
+
+#[test]
 fn parse_v2_inamedparam_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_inamedparam_settings.yml")).unwrap();

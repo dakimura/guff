@@ -43,7 +43,7 @@ pub use settings::{
     ErrchkjsonSettings, FuncorderSettings, GodoclintSettings, GodotSettings, GodoxSettings,
     GomoddirectivesSettings,
     GomodguardSettings, GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings,
-    StaticcheckSettings, WrapcheckSettings,
+    StaticcheckSettings, VarnamelenSettings, WrapcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.

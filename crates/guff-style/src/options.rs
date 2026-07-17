@@ -1081,3 +1081,39 @@ impl Default for ForbidigoOptions {
     }
 }
 
+/// `linters.settings.varnamelen` / `linters-settings.varnamelen`.
+///
+/// Defaults match upstream blizzy78/varnamelen / golangci-lint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarnamelenOptions {
+    /// Longest usage distance (in lines) still considered a "small" scope.
+    pub max_distance: usize,
+    /// Minimum name length considered "long" enough to ignore.
+    pub min_name_length: usize,
+    pub check_receiver: bool,
+    pub check_return: bool,
+    pub check_type_param: bool,
+    pub ignore_type_assert_ok: bool,
+    pub ignore_map_index_ok: bool,
+    pub ignore_chan_recv_ok: bool,
+    pub ignore_names: Vec<String>,
+    pub ignore_decls: Vec<String>,
+}
+
+impl Default for VarnamelenOptions {
+    fn default() -> Self {
+        Self {
+            max_distance: 5,
+            min_name_length: 3,
+            check_receiver: false,
+            check_return: false,
+            check_type_param: false,
+            ignore_type_assert_ok: false,
+            ignore_map_index_ok: false,
+            ignore_chan_recv_ok: false,
+            ignore_names: Vec::new(),
+            ignore_decls: Vec::new(),
+        }
+    }
+}
+

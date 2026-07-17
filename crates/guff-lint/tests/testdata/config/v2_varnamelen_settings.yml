@@ -1,0 +1,20 @@
+version: "2"
+linters:
+  enable:
+    - varnamelen
+  settings:
+    varnamelen:
+      max-distance: 2
+      min-name-length: 2
+      check-receiver: true
+      check-return: true
+      check-type-param: true
+      ignore-type-assert-ok: true
+      ignore-map-index-ok: true
+      ignore-chan-recv-ok: true
+      ignore-names:
+        - x
+        - err
+      ignore-decls:
+        - i int
+        - const C

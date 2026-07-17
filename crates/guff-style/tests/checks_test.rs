@@ -14,7 +14,7 @@ use guff_style::{
     nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
-    usestdlibvars, usetesting, whitespace, wsl,
+    usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -5966,4 +5966,69 @@ fn funcorder_function_check_is_opt_in() {
         messages[0],
         "unexported function \"helper\" should be placed after the exported function \"PublicFunc\""
     );
+}
+
+#[test]
+fn varnamelen_flags_short_names_with_long_scope() {
+    let pkg = support::typecheck_fixture("varnamelen", "example.com/varnamelen", "bad.go");
+    let messages = support::run_analyzer(varnamelen(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("variable name 'x' is too short")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("variable name 'y' is too short")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("parameter name 'z' is too short")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn varnamelen_allows_short_distance_and_long_names() {
+    let pkg = support::typecheck_fixture("varnamelen", "example.com/varnamelen/ok", "ok.go");
+    let messages = support::run_analyzer(varnamelen(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn varnamelen_respects_ignore_names() {
+    use guff_style::VarnamelenOptions;
+
+    let pkg =
+        support::typecheck_fixture("varnamelen", "example.com/varnamelen/settings", "settings.go");
+
+    let default_msgs = support::run_analyzer(varnamelen(), &pkg);
+    assert!(
+        default_msgs
+            .iter()
+            .any(|m| m.contains("variable name 'x' is too short")),
+        "{default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "varnamelen",
+        VarnamelenOptions {
+            ignore_names: vec!["x".into()],
+            ..VarnamelenOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        varnamelen(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(messages.is_empty(), "{messages:?}");
 }
