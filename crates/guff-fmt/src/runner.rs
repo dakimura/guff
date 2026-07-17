@@ -282,6 +282,7 @@ mod tests {
             GofmtOptions::default(),
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
+            crate::gci::GciOptions::default(),
         )
         .unwrap()
     }
@@ -371,6 +372,7 @@ mod tests {
             GofmtOptions::default(),
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
+            crate::gci::GciOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());
@@ -403,6 +405,51 @@ mod tests {
             GofmtOptions::default(),
             GofumptOptions::default(),
             crate::goimports::GoimportsOptions::default(),
+            crate::gci::GciOptions::default(),
+        )
+        .unwrap();
+        let runner = Runner::new(meta, RunnerOptions::default());
+        let mut out = Cursor::new(Vec::new());
+        let stats = runner.run(&[path.clone()], &mut out).unwrap();
+        assert_eq!(stats.rewritten, 1);
+        let got = fs::read_to_string(&path).unwrap();
+        let fmt_pos = got.find("\"fmt\"").expect("fmt");
+        let bar_pos = got.find("\"github.com/foo/bar\"").expect("bar");
+        assert!(
+            fmt_pos < bar_pos,
+            "expected stdlib before third-party, got:\n{got}"
+        );
+    }
+
+    fn gci_available() -> bool {
+        Command::new("gci")
+            .arg("print")
+            .arg("--help")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn gci_sorts_imports_in_place() {
+        if !gci_available() {
+            eprintln!("skip: gci not on PATH");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.go");
+        fs::write(
+            &path,
+            "package p\n\nimport (\n\t\"github.com/foo/bar\"\n\t\"fmt\"\n)\n\nfunc f() {\n\tfmt.Println()\n\t_ = bar.X\n}\n",
+        )
+        .unwrap();
+
+        let meta = MetaFormatter::new(
+            &["gci".into()],
+            GofmtOptions::default(),
+            GofumptOptions::default(),
+            crate::goimports::GoimportsOptions::default(),
+            crate::gci::GciOptions::default(),
         )
         .unwrap();
         let runner = Runner::new(meta, RunnerOptions::default());

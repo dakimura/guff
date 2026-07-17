@@ -463,6 +463,11 @@ impl FormattersV2 {
         parse_goimports_settings(&self.settings)
     }
 
+    /// Parse `formatters.settings.gci` into [`guff_fmt::GciOptions`].
+    pub fn gci_options(&self) -> guff_fmt::GciOptions {
+        parse_gci_settings(&self.settings)
+    }
+
     /// Path exclusion patterns from `formatters.exclusions.paths`.
     pub fn exclusion_paths(&self) -> Vec<String> {
         self.exclusions.paths.clone()
@@ -574,6 +579,68 @@ pub fn parse_goimports_settings(settings: &serde_yaml::Value) -> guff_fmt::Goimp
                 }
             }
             _ => {}
+        }
+    }
+    opts
+}
+
+/// Parse gci settings from `formatters.settings` YAML mapping.
+pub fn parse_gci_settings(settings: &serde_yaml::Value) -> guff_fmt::GciOptions {
+    let mut opts = guff_fmt::GciOptions::default();
+    let Some(map) = settings.as_mapping() else {
+        return opts;
+    };
+    let Some(gci) = map.get(serde_yaml::Value::String("gci".into())) else {
+        return opts;
+    };
+    let Some(gmap) = gci.as_mapping() else {
+        return opts;
+    };
+    if let Some(v) = gmap.get(serde_yaml::Value::String("sections".into())) {
+        let mut sections = Vec::new();
+        match v {
+            serde_yaml::Value::Sequence(seq) => {
+                for item in seq {
+                    if let Some(s) = item.as_str() {
+                        if !s.is_empty() {
+                            sections.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            serde_yaml::Value::String(s) => {
+                for part in s.split(',') {
+                    let part = part.trim();
+                    if !part.is_empty() {
+                        sections.push(part.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+        if !sections.is_empty() {
+            opts.sections = sections;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("custom-order".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.custom_order = b;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("no-lex-order".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.no_lex_order = b;
+        }
+    }
+    // DEFERRED: no-inline-comments / no-prefix-comments → CLI gap (R15).
+    if let Some(v) = gmap.get(serde_yaml::Value::String("no-inline-comments".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.no_inline_comments = b;
+        }
+    }
+    if let Some(v) = gmap.get(serde_yaml::Value::String("no-prefix-comments".into())) {
+        if let Some(b) = v.as_bool() {
+            opts.no_prefix_comments = b;
         }
     }
     opts
@@ -1375,6 +1442,48 @@ goimports:
             opts.local_prefixes,
             vec!["github.com/a".to_string(), "github.com/b".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_gci_sections_and_flags() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+gci:
+  sections:
+    - standard
+    - default
+    - prefix(github.com/org/project)
+  custom-order: true
+  no-lex-order: true
+  no-inline-comments: true
+  no-prefix-comments: true
+"#,
+        )
+        .unwrap();
+        let opts = parse_gci_settings(&yaml);
+        assert_eq!(
+            opts.sections,
+            vec![
+                "standard".to_string(),
+                "default".to_string(),
+                "prefix(github.com/org/project)".to_string(),
+            ]
+        );
+        assert!(opts.custom_order);
+        assert!(opts.no_lex_order);
+        assert!(opts.no_inline_comments);
+        assert!(opts.no_prefix_comments);
+    }
+
+    #[test]
+    fn parse_gci_default_when_absent() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str("gofmt:\n  simplify: true\n").unwrap();
+        let opts = parse_gci_settings(&yaml);
+        assert_eq!(
+            opts.sections,
+            vec!["standard".to_string(), "default".to_string()]
+        );
+        assert!(!opts.custom_order);
     }
 
     #[test]

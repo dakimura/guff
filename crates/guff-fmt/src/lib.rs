@@ -1,14 +1,16 @@
 //! Go source formatters for `guff fmt` (golangci-lint `pkg/goformatters` equivalent).
 //!
-//! Implemented: **gofmt** / **gofumpt** / **goimports** (system binaries).
-//! Remaining (gci / golines / swaggo) are DEFERRED → R15.
+//! Implemented: **gofmt** / **gofumpt** / **goimports** / **gci** (system binaries).
+//! Remaining (golines / swaggo) are DEFERRED → R15.
 
+mod gci;
 mod gofmt;
 mod gofumpt;
 mod goimports;
 mod meta;
 mod runner;
 
+pub use gci::{Gci, GciOptions};
 pub use gofmt::{Gofmt, GofmtOptions, RewriteRule};
 pub use gofumpt::{Gofumpt, GofumptOptions};
 pub use goimports::{Goimports, GoimportsOptions};

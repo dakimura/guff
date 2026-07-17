@@ -1,5 +1,6 @@
 //! Meta-formatter that chains enabled formatters (golangci `MetaFormatter`).
 
+use crate::gci::{Gci, GciOptions};
 use crate::gofmt::{Gofmt, GofmtOptions};
 use crate::gofumpt::{Gofumpt, GofumptOptions};
 use crate::goimports::{Goimports, GoimportsOptions};
@@ -23,13 +24,14 @@ impl MetaFormatter {
     /// Build from `formatters.enable` and per-formatter options.
     ///
     /// Unknown names return an error (golangci rejects invalid names). Known-but-
-    /// unimplemented formatters (gci, …) return a clear DEFERRED message.
+    /// unimplemented formatters (golines, …) return a clear DEFERRED message.
     /// Formatters are chained in `enable` order.
     pub fn new(
         enable: &[String],
         gofmt: GofmtOptions,
         gofumpt: GofumptOptions,
         goimports: GoimportsOptions,
+        gci: GciOptions,
     ) -> Result<Self, FormatError> {
         for name in enable {
             if !is_formatter(name) {
@@ -44,7 +46,8 @@ impl MetaFormatter {
                 "gofmt" => formatters.push(Box::new(Gofmt::new(gofmt.clone()))),
                 "gofumpt" => formatters.push(Box::new(Gofumpt::new(gofumpt.clone()))),
                 "goimports" => formatters.push(Box::new(Goimports::new(goimports.clone()))),
-                "gci" | "golines" | "swaggo" => {
+                "gci" => formatters.push(Box::new(Gci::new(gci.clone()))),
+                "golines" | "swaggo" => {
                     return Err(FormatError::Deferred(name.clone()));
                 }
                 _ => {}
@@ -84,25 +87,26 @@ impl MetaFormatter {
 mod tests {
     use super::*;
 
-    fn opts() -> (GofmtOptions, GofumptOptions, GoimportsOptions) {
+    fn opts() -> (GofmtOptions, GofumptOptions, GoimportsOptions, GciOptions) {
         (
             GofmtOptions::default(),
             GofumptOptions::default(),
             GoimportsOptions::default(),
+            GciOptions::default(),
         )
     }
 
     #[test]
     fn empty_enable_defaults_to_gofmt() {
-        let (a, b, c) = opts();
-        let m = MetaFormatter::new(&[], a, b, c).unwrap();
+        let (a, b, c, d) = opts();
+        let m = MetaFormatter::new(&[], a, b, c, d).unwrap();
         assert_eq!(m.formatter_names(), vec!["gofmt"]);
     }
 
     #[test]
     fn rejects_unknown() {
-        let (a, b, c) = opts();
-        let err = match MetaFormatter::new(&["not-a-fmt".into()], a, b, c) {
+        let (a, b, c, d) = opts();
+        let err = match MetaFormatter::new(&["not-a-fmt".into()], a, b, c, d) {
             Ok(_) => panic!("expected error"),
             Err(e) => e,
         };
@@ -111,22 +115,29 @@ mod tests {
 
     #[test]
     fn enables_gofumpt() {
-        let (a, b, c) = opts();
-        let m = MetaFormatter::new(&["gofumpt".into()], a, b, c).unwrap();
+        let (a, b, c, d) = opts();
+        let m = MetaFormatter::new(&["gofumpt".into()], a, b, c, d).unwrap();
         assert_eq!(m.formatter_names(), vec!["gofumpt"]);
     }
 
     #[test]
     fn enables_goimports() {
-        let (a, b, c) = opts();
-        let m = MetaFormatter::new(&["goimports".into()], a, b, c).unwrap();
+        let (a, b, c, d) = opts();
+        let m = MetaFormatter::new(&["goimports".into()], a, b, c, d).unwrap();
         assert_eq!(m.formatter_names(), vec!["goimports"]);
     }
 
     #[test]
-    fn deferred_gci() {
-        let (a, b, c) = opts();
-        let err = match MetaFormatter::new(&["gci".into()], a, b, c) {
+    fn enables_gci() {
+        let (a, b, c, d) = opts();
+        let m = MetaFormatter::new(&["gci".into()], a, b, c, d).unwrap();
+        assert_eq!(m.formatter_names(), vec!["gci"]);
+    }
+
+    #[test]
+    fn deferred_golines() {
+        let (a, b, c, d) = opts();
+        let err = match MetaFormatter::new(&["golines".into()], a, b, c, d) {
             Ok(_) => panic!("expected error"),
             Err(e) => e,
         };
@@ -135,17 +146,23 @@ mod tests {
 
     #[test]
     fn chains_in_enable_order() {
-        let (a, b, c) = opts();
+        let (a, b, c, d) = opts();
         let m = MetaFormatter::new(
-            &["gofmt".into(), "gofumpt".into(), "goimports".into()],
+            &[
+                "gofmt".into(),
+                "gofumpt".into(),
+                "goimports".into(),
+                "gci".into(),
+            ],
             a,
             b,
             c,
+            d,
         )
         .unwrap();
         assert_eq!(
             m.formatter_names(),
-            vec!["gofmt", "gofumpt", "goimports"]
+            vec!["gofmt", "gofumpt", "goimports", "gci"]
         );
     }
 }

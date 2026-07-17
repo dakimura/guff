@@ -28,7 +28,7 @@ struct Cli {
 enum Commands {
     /// Run enabled linters on packages.
     Run(RunArgs),
-    /// Format Go source files (gofmt; more formatters → R15).
+    /// Format Go source files (gofmt / gofumpt / goimports / gci; more → R15).
     Fmt(FmtArgs),
     /// Migrate a golangci-lint v1 config file to v2 format.
     Migrate(MigrateArgs),
@@ -448,8 +448,8 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         args.enable.clone()
     };
 
-    // When config enables unimplemented formatters (gci/…), prefer CLI
-    // `--enable gofmt`/`gofumpt`/`goimports` or fall back if at least one implemented remains.
+    // When config enables unimplemented formatters (golines/…), prefer CLI
+    // `--enable gofmt`/`gofumpt`/`goimports`/`gci` or fall back if at least one implemented remains.
     let enable = filter_implemented_formatters(&enable)?;
 
     let meta = MetaFormatter::new(
@@ -457,6 +457,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
         formatters.gofmt_options(),
         formatters.gofumpt_options(),
         formatters.goimports_options(),
+        formatters.gci_options(),
     )
     .map_err(|e| RunError::Message(e.to_string()))?;
 
@@ -483,7 +484,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     if enable.is_empty() {
         return Ok(Vec::new()); // MetaFormatter defaults to gofmt
     }
-    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports"];
+    const IMPLEMENTED: &[&str] = &["gofmt", "gofumpt", "goimports", "gci"];
     let mut kept = Vec::new();
     let mut deferred = Vec::new();
     for name in enable {
@@ -497,7 +498,7 @@ fn filter_implemented_formatters(enable: &[String]) -> Result<Vec<String>, RunEr
     }
     if kept.is_empty() && !deferred.is_empty() {
         return Err(RunError::Message(format!(
-            "formatter(s) {:?} are not implemented yet (use -E gofmt, -E gofumpt, or -E goimports, or wait for R15 follow-up)",
+            "formatter(s) {:?} are not implemented yet (use -E gofmt, -E gofumpt, -E goimports, or -E gci, or wait for R15 follow-up)",
             deferred
         )));
     }
