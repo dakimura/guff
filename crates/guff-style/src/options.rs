@@ -1117,3 +1117,18 @@ impl Default for VarnamelenOptions {
     }
 }
 
+/// `linters.settings.unparam` / `linters-settings.unparam`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnparamOptions {
+    /// Inspect exported functions (golangci `check-exported`; default false).
+    pub check_exported: bool,
+}
+
+impl Default for UnparamOptions {
+    fn default() -> Self {
+        Self {
+            check_exported: false,
+        }
+    }
+}
+

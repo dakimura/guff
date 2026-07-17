@@ -14,7 +14,7 @@ use guff_style::{
     nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
-    usestdlibvars, usetesting, varnamelen, whitespace, wsl,
+    unparam, usestdlibvars, usetesting, varnamelen, whitespace, wsl,
 };
 
 #[test]
@@ -6031,4 +6031,64 @@ fn varnamelen_respects_ignore_names() {
         },
     );
     assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn unparam_flags_unused_parameters() {
+    let pkg = support::typecheck_fixture("unparam", "example.com/unparam", "bad.go");
+    let messages = support::run_analyzer(unparam(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("example - unused is unused")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("withBlank - _")),
+        "underscore params should be skipped: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("stub")),
+        "stub bodies should be skipped: {messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("ExportedUnused")),
+        "exported funcs skipped by default: {messages:?}"
+    );
+}
+
+#[test]
+fn unparam_allows_used_and_intentional_keep() {
+    let pkg = support::typecheck_fixture("unparam", "example.com/unparam/ok", "ok.go");
+    assert!(support::run_analyzer(unparam(), &pkg).is_empty());
+}
+
+#[test]
+fn unparam_respects_check_exported() {
+    use guff_style::UnparamOptions;
+
+    let pkg =
+        support::typecheck_fixture("unparam", "example.com/unparam/settings", "settings.go");
+    assert!(
+        support::run_analyzer(unparam(), &pkg).is_empty(),
+        "exported func skipped when check-exported is false"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "unparam",
+        UnparamOptions {
+            check_exported: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        unparam(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("Exported - x is unused")),
+        "{messages:?}"
+    );
 }

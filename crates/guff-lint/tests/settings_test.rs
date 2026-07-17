@@ -1120,6 +1120,23 @@ fn parse_v2_varnamelen_settings() {
 }
 
 #[test]
+fn parse_v2_unparam_settings() {
+    let default_settings = LinterSettings::default();
+    assert!(!default_settings.unparam.check_exported);
+
+    let contents = fs::read_to_string(testdata_config("v2_unparam_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.unparam.check_exported);
+
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::UnparamOptions>("unparam")
+        .expect("unparam options");
+    assert!(opts.check_exported);
+}
+
+#[test]
 fn parse_v2_inamedparam_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_inamedparam_settings.yml")).unwrap();

@@ -79,6 +79,7 @@ pub struct LinterSettings {
     pub gosec: GosecSettings,
     pub funcorder: FuncorderSettings,
     pub varnamelen: VarnamelenSettings,
+    pub unparam: UnparamSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1113,6 +1114,21 @@ impl VarnamelenSettings {
     }
 }
 
+/// `linters.settings.unparam` / `linters-settings.unparam`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct UnparamSettings {
+    #[serde(default, rename = "check-exported")]
+    pub check_exported: bool,
+}
+
+impl UnparamSettings {
+    pub fn to_guff_unparam(&self) -> guff_style::UnparamOptions {
+        guff_style::UnparamOptions {
+            check_exported: self.check_exported,
+        }
+    }
+}
+
 /// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ParalleltestSettings {
@@ -1824,6 +1840,11 @@ impl LinterSettings {
                 out.varnamelen = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("unparam".into())) {
+            if let Ok(s) = serde_yaml::from_value::<UnparamSettings>(v.clone()) {
+                out.unparam = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
             if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
                 out.paralleltest = s;
@@ -1946,6 +1967,7 @@ impl LinterSettings {
         );
         bag.insert("funcorder", self.funcorder.to_guff_funcorder());
         bag.insert("varnamelen", self.varnamelen.to_guff_varnamelen());
+        bag.insert("unparam", self.unparam.to_guff_unparam());
         bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         bag.insert("tagliatelle", self.tagliatelle.to_guff_tagliatelle());
