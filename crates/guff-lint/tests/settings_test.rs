@@ -1103,6 +1103,22 @@ fn parse_v2_embeddedstructfieldcheck_settings() {
 }
 
 #[test]
+fn parse_v2_gochecksumtype_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_gochecksumtype_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(!settings.gochecksumtype.default_signifies_exhaustive);
+    assert!(settings.gochecksumtype.include_shared_interfaces);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GochecksumtypeOptions>("gochecksumtype")
+        .expect("gochecksumtype options");
+    assert!(!opts.default_signifies_exhaustive);
+    assert!(opts.include_shared_interfaces);
+}
+
+#[test]
 fn parse_v2_maintidx_settings() {
     let contents = fs::read_to_string(testdata_config("v2_maintidx_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

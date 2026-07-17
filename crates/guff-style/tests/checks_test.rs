@@ -7,8 +7,8 @@ use guff_runner::RunnerOptions;
 use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, embeddedstructfieldcheck, exhaustive, exhaustruct, exptostd, forbidigo, funcorder,
-    funlen, gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst,
-    gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
+    funlen, gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gochecksumtype, gocognit,
+    goconst, gocritic, gocyclo, goheader, goprintffuncname, gosec, gosmopolitan, grouper, iface,
     inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, maintidx, mnd,
     modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns, nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
@@ -1179,6 +1179,75 @@ fn embeddedstructfieldcheck_respects_settings() {
         "{flagged:?}"
     );
     assert_eq!(flagged.len(), 3, "{flagged:?}"); // Mutex, *Mutex, RWMutex
+}
+
+#[test]
+fn gochecksumtype_flags_incomplete_and_bad_decl() {
+    let pkg = support::typecheck_fixture("gochecksumtype", "example.com/gochecksumtype", "bad.go");
+    let messages = support::run_analyzer(gochecksumtype(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("type 'One' is not an interface")),
+        "{messages:?}"
+    );
+    let missing: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("exhaustiveness check failed") && m.contains("missing cases for Two"))
+        .collect();
+    assert!(
+        missing.len() >= 2,
+        "expected ≥2 incomplete switches (no default + panic default): {messages:?}"
+    );
+}
+
+#[test]
+fn gochecksumtype_allows_exhaustive() {
+    let pkg =
+        support::typecheck_fixture("gochecksumtype", "example.com/gochecksumtype/ok", "ok.go");
+    let messages = support::run_analyzer(gochecksumtype(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn gochecksumtype_respects_settings() {
+    use guff_style::GochecksumtypeOptions;
+
+    let pkg = support::typecheck_fixture(
+        "gochecksumtype",
+        "example.com/gochecksumtype/settings",
+        "settings.go",
+    );
+
+    // Default: non-panic default satisfies exhaustiveness.
+    let default_msgs = support::run_analyzer(gochecksumtype(), &pkg);
+    assert!(
+        default_msgs.is_empty(),
+        "default should allow non-panic default: {default_msgs:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gochecksumtype",
+        GochecksumtypeOptions {
+            default_signifies_exhaustive: false,
+            include_shared_interfaces: false,
+        },
+    );
+    let flagged = support::run_analyzer_with_settings(
+        gochecksumtype(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("exhaustiveness check failed") && m.contains("missing cases for Two")),
+        "{flagged:?}"
+    );
 }
 
 #[test]

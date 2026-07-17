@@ -23,6 +23,7 @@
 //! - [`iface`]
 //! - [`interfacebloat`]
 //! - [`embeddedstructfieldcheck`]
+//! - [`gochecksumtype`]
 //! - [`inamedparam`]
 //! - [`containedctx`]
 //! - [`decorder`]
@@ -103,6 +104,7 @@ mod goheader;
 mod containedctx;
 mod decorder;
 mod embeddedstructfieldcheck;
+mod gochecksumtype;
 mod inamedparam;
 mod interfacebloat;
 mod noinlineerr;
@@ -146,8 +148,9 @@ mod wsl;
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
     DogsledOptions, EmbeddedstructfieldcheckOptions, ExhaustiveOptions, ExhaustructOptions,
-    ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GocognitOptions,
-    GoconstOptions, GocriticOptions, GocycloOptions, GoheaderOptions, GosmopolitanOptions,
+    ForbidigoOptions, ForbidigoPattern, FuncorderOptions, FunlenOptions, GochecksumtypeOptions,
+    GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, GoheaderOptions,
+    GosmopolitanOptions,
     IfaceOptions, GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions,
     IotamixingOptions, IreturnOptions, LllOptions, MaintidxOptions, LoggercheckOptions, MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
@@ -179,6 +182,7 @@ pub use goheader::analyzer as goheader;
 pub use containedctx::analyzer as containedctx;
 pub use decorder::analyzer as decorder;
 pub use embeddedstructfieldcheck::analyzer as embeddedstructfieldcheck;
+pub use gochecksumtype::analyzer as gochecksumtype;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use noinlineerr::analyzer as noinlineerr;
@@ -252,6 +256,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         iface(),
         interfacebloat(),
         embeddedstructfieldcheck(),
+        gochecksumtype(),
         inamedparam(),
         containedctx(),
         decorder(),

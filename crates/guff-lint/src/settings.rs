@@ -70,6 +70,7 @@ pub struct LinterSettings {
     pub iface: IfaceSettings,
     pub interfacebloat: InterfacebloatSettings,
     pub embeddedstructfieldcheck: EmbeddedstructfieldcheckSettings,
+    pub gochecksumtype: GochecksumtypeSettings,
     pub inamedparam: InamedparamSettings,
     pub nonamedreturns: NonamedreturnsSettings,
     pub paralleltest: ParalleltestSettings,
@@ -1050,6 +1051,37 @@ impl EmbeddedstructfieldcheckSettings {
     }
 }
 
+/// `linters.settings.gochecksumtype` / `linters-settings.gochecksumtype`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct GochecksumtypeSettings {
+    /// Presence of a non-panicking `default` satisfies exhaustiveness.
+    /// Upstream / golangci default: true.
+    #[serde(default = "default_true", rename = "default-signifies-exhaustive")]
+    pub default_signifies_exhaustive: bool,
+    /// Include shared interfaces in the exhaustiveness check.
+    /// Upstream / golangci default: false.
+    #[serde(default, rename = "include-shared-interfaces")]
+    pub include_shared_interfaces: bool,
+}
+
+impl Default for GochecksumtypeSettings {
+    fn default() -> Self {
+        Self {
+            default_signifies_exhaustive: true,
+            include_shared_interfaces: false,
+        }
+    }
+}
+
+impl GochecksumtypeSettings {
+    pub fn to_guff_gochecksumtype(&self) -> guff_style::GochecksumtypeOptions {
+        guff_style::GochecksumtypeOptions {
+            default_signifies_exhaustive: self.default_signifies_exhaustive,
+            include_shared_interfaces: self.include_shared_interfaces,
+        }
+    }
+}
+
 /// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
 ///
 /// `skip-single-param` skips methods with exactly one parameter field
@@ -1926,6 +1958,11 @@ impl LinterSettings {
                 out.embeddedstructfieldcheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("gochecksumtype".into())) {
+            if let Ok(s) = serde_yaml::from_value::<GochecksumtypeSettings>(v.clone()) {
+                out.gochecksumtype = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("inamedparam".into())) {
             if let Ok(s) = serde_yaml::from_value::<InamedparamSettings>(v.clone()) {
                 out.inamedparam = s;
@@ -2072,6 +2109,10 @@ impl LinterSettings {
             "embeddedstructfieldcheck",
             self.embeddedstructfieldcheck
                 .to_guff_embeddedstructfieldcheck(),
+        );
+        bag.insert(
+            "gochecksumtype",
+            self.gochecksumtype.to_guff_gochecksumtype(),
         );
         bag.insert("inamedparam", self.inamedparam.to_guff_inamedparam());
         bag.insert(

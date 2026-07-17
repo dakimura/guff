@@ -924,6 +924,26 @@ impl Default for EmbeddedstructfieldcheckOptions {
     }
 }
 
+/// `linters.settings.gochecksumtype` / `linters-settings.gochecksumtype`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GochecksumtypeOptions {
+    /// A non-panicking `default` case satisfies exhaustiveness.
+    /// Upstream / golangci default: true.
+    pub default_signifies_exhaustive: bool,
+    /// Treat covering shared interfaces as exhaustive (skip listing all structs).
+    /// Upstream / golangci default: false.
+    pub include_shared_interfaces: bool,
+}
+
+impl Default for GochecksumtypeOptions {
+    fn default() -> Self {
+        Self {
+            default_signifies_exhaustive: true,
+            include_shared_interfaces: false,
+        }
+    }
+}
+
 /// `linters.settings.inamedparam` / `linters-settings.inamedparam`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InamedparamOptions {
