@@ -9,7 +9,7 @@ use guff_style::{
     gocheckcompilerdirectives, gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic,
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
-    nlreturn, nonamedreturns, nosprintfhostport, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
+    nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     testifylint, testpackage, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
@@ -858,6 +858,100 @@ fn testpackage_respects_allow_packages_settings() {
         },
     );
     assert!(allowed.is_empty(), "unexpected diagnostics: {allowed:?}");
+}
+
+#[test]
+fn paralleltest_flags_missing_parallel() {
+    let pkg = support::typecheck_fixture(
+        "paralleltest",
+        "example.com/paralleltest",
+        "bad_test.go",
+    );
+    let messages = support::run_analyzer(paralleltest(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Function TestMissingParallel missing the call to method parallel")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Range statement for test TestRangeMissingParallel missing the call to method parallel in test Run"
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Function TestSubtestsMissingParallel missing the call to method parallel in the test run"
+        )),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn paralleltest_allows_valid_parallel_usage() {
+    let pkg = support::typecheck_fixture(
+        "paralleltest",
+        "example.com/paralleltest/ok",
+        "ok_test.go",
+    );
+    let messages = support::run_analyzer(paralleltest(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn paralleltest_respects_settings() {
+    use guff_style::ParalleltestOptions;
+
+    let pkg = support::typecheck_fixture(
+        "paralleltest",
+        "example.com/paralleltest/settings",
+        "settings_test.go",
+    );
+
+    // Default: missing parallel is flagged; cleanup not checked.
+    let flagged = support::run_analyzer(paralleltest(), &pkg);
+    assert!(
+        flagged
+            .iter()
+            .any(|m| m.contains("Function TestMissingButIgnored missing the call to method parallel")),
+        "{flagged:?}"
+    );
+    assert!(
+        !flagged.iter().any(|m| m.contains("uses defer with t.Parallel")),
+        "{flagged:?}"
+    );
+
+    // ignore-missing + check-cleanup.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "paralleltest",
+        ParalleltestOptions {
+            ignore_missing: true,
+            ignore_missing_subtests: false,
+            check_cleanup: true,
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        paralleltest(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("Function TestMissingButIgnored missing the call to method parallel")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Function TestCleanupDefer uses defer with t.Parallel")),
+        "{messages:?}"
+    );
 }
 
 #[test]

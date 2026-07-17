@@ -803,6 +803,17 @@ pub struct NonamedreturnsOptions {
     pub allow_unused_named_returns: bool,
 }
 
+/// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParalleltestOptions {
+    /// Ignore missing top-level `t.Parallel()` calls (upstream `-i`).
+    pub ignore_missing: bool,
+    /// Ignore missing `t.Parallel()` in subtests / range runs.
+    pub ignore_missing_subtests: bool,
+    /// Report `defer` used together with `t.Parallel` (prefer `t.Cleanup`).
+    pub check_cleanup: bool,
+}
+
 /// `linters.settings.testpackage` / `linters-settings.testpackage`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestpackageOptions {

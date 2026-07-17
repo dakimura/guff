@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - paralleltest
+  settings:
+    paralleltest:
+      ignore-missing: true
+      ignore-missing-subtests: true
+      check-cleanup: true

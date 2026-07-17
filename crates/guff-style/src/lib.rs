@@ -23,6 +23,7 @@
 //! - [`containedctx`]
 //! - [`nonamedreturns`]
 //! - [`testpackage`]
+//! - [`paralleltest`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -81,6 +82,7 @@ mod containedctx;
 mod inamedparam;
 mod interfacebloat;
 mod nonamedreturns;
+mod paralleltest;
 mod testpackage;
 mod reassign;
 mod recvcheck;
@@ -112,7 +114,8 @@ pub use options::{
     InamedparamOptions, InterfacebloatOptions, LllOptions,
     LoggercheckOptions, MndOptions, ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions,
     NonamedreturnsOptions,
-    NestifOptions, NlreturnOptions, PerfsprintOptions, PreallocOptions, PredeclaredOptions,
+    NestifOptions, NlreturnOptions, ParalleltestOptions, PerfsprintOptions, PreallocOptions,
+    PredeclaredOptions,
     TestpackageOptions,
     ReassignOptions, RecvcheckOptions, SloglintFunc, SloglintOptions, SuiteExtraAssertCallMode,
     TagalignOptions, ThelperKindOptions, ThelperOptions,
@@ -138,6 +141,7 @@ pub use containedctx::analyzer as containedctx;
 pub use inamedparam::analyzer as inamedparam;
 pub use interfacebloat::analyzer as interfacebloat;
 pub use nonamedreturns::analyzer as nonamedreturns;
+pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
@@ -194,6 +198,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         inamedparam(),
         containedctx(),
         nonamedreturns(),
+        paralleltest(),
         testpackage(),
         goprintffuncname(),
         funlen(),

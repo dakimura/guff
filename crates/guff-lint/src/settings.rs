@@ -68,6 +68,7 @@ pub struct LinterSettings {
     pub interfacebloat: InterfacebloatSettings,
     pub inamedparam: InamedparamSettings,
     pub nonamedreturns: NonamedreturnsSettings,
+    pub paralleltest: ParalleltestSettings,
     pub testpackage: TestpackageSettings,
 }
 
@@ -960,6 +961,27 @@ impl NonamedreturnsSettings {
     }
 }
 
+/// `linters.settings.paralleltest` / `linters-settings.paralleltest`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct ParalleltestSettings {
+    #[serde(default, rename = "ignore-missing")]
+    pub ignore_missing: bool,
+    #[serde(default, rename = "ignore-missing-subtests")]
+    pub ignore_missing_subtests: bool,
+    #[serde(default, rename = "check-cleanup")]
+    pub check_cleanup: bool,
+}
+
+impl ParalleltestSettings {
+    pub fn to_guff_paralleltest(&self) -> guff_style::ParalleltestOptions {
+        guff_style::ParalleltestOptions {
+            ignore_missing: self.ignore_missing,
+            ignore_missing_subtests: self.ignore_missing_subtests,
+            check_cleanup: self.check_cleanup,
+        }
+    }
+}
+
 /// `linters.settings.testpackage` / `linters-settings.testpackage`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct TestpackageSettings {
@@ -1428,6 +1450,11 @@ impl LinterSettings {
                 out.nonamedreturns = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
+            if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
+                out.paralleltest = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("testpackage".into())) {
             if let Ok(s) = serde_yaml::from_value::<TestpackageSettings>(v.clone()) {
                 out.testpackage = s;
@@ -1512,6 +1539,7 @@ impl LinterSettings {
             "nonamedreturns",
             self.nonamedreturns.to_guff_nonamedreturns(),
         );
+        bag.insert("paralleltest", self.paralleltest.to_guff_paralleltest());
         bag.insert("testpackage", self.testpackage.to_guff_testpackage());
         Arc::new(bag)
     }

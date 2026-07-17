@@ -1092,6 +1092,24 @@ fn parse_v2_testpackage_settings() {
 }
 
 #[test]
+fn parse_v2_paralleltest_settings() {
+    let contents =
+        fs::read_to_string(testdata_config("v2_paralleltest_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.paralleltest.ignore_missing);
+    assert!(settings.paralleltest.ignore_missing_subtests);
+    assert!(settings.paralleltest.check_cleanup);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::ParalleltestOptions>("paralleltest")
+        .expect("paralleltest options");
+    assert!(opts.ignore_missing);
+    assert!(opts.ignore_missing_subtests);
+    assert!(opts.check_cleanup);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();
