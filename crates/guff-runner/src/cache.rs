@@ -1,4 +1,5 @@
-//! Persistent per-package issues cache (golangci-lint `internal/cache` + issues store).
+//! Persistent per-package issues + facts cache (golangci-lint `internal/cache`
+//! + issues store + `runner_action_cache.go`).
 //!
 //! Cache key = package source/deps hash + salt (guff version, analyzers, settings,
 //! build tags, Go version). Entries are JSON under `$GUFF_CACHE` /
@@ -9,7 +10,9 @@
 //! fall under GOCACHE (cgo preprocessed files) are filtered by the lint
 //! pipeline.
 //!
-//! DEFERRED: facts persistence (`runner_action_cache.go`); load/typecheck skip.
+//! Facts are stored per analyzer under `facts/` (R24). Sub-package incremental
+//! typecheck / export-data sharing / `go list` metadata cache remain DEFERRED
+//! (R24 items 2–4).
 
 use std::collections::HashMap;
 use std::env;
@@ -19,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use guff::position::FileSet;
-use guff_analysis::Diagnostic;
+use guff_analysis::{Diagnostic, EncodedFact};
 use guff_packages::Package;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -294,6 +297,11 @@ struct CachedEntry {
     diagnostics: Vec<CachedDiagnostic>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct CachedFactsEntry {
+    facts: Vec<EncodedFact>,
+}
+
 /// Hit/miss counters for one runner invocation.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CacheStats {
@@ -502,6 +510,64 @@ impl IssueCache {
         fs::write(&tmp, bytes)?;
         fs::rename(&tmp, &path)?;
         Ok(())
+    }
+
+    /// Load persisted analyzer facts for `pkg` (golangci `loadPersistedFacts`).
+    pub fn get_facts(
+        &self,
+        pkg: &Package,
+        mode: HashMode,
+        analyzer: &str,
+    ) -> Result<Vec<EncodedFact>, CacheError> {
+        let key = self.action_id(pkg, mode)?;
+        let path = self.facts_entry_path(&key, analyzer);
+        let bytes = match fs::read(&path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(CacheError::Message("missing".into()));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let entry: CachedFactsEntry =
+            serde_json::from_slice(&bytes).map_err(|e| CacheError::Message(e.to_string()))?;
+        Ok(entry.facts)
+    }
+
+    /// Persist analyzer facts for `pkg` (golangci `persistFactsToCache`).
+    pub fn put_facts(
+        &self,
+        pkg: &Package,
+        mode: HashMode,
+        analyzer: &str,
+        facts: &[EncodedFact],
+    ) -> Result<(), CacheError> {
+        let key = self.action_id(pkg, mode)?;
+        let entry = CachedFactsEntry {
+            facts: facts.to_vec(),
+        };
+        let bytes =
+            serde_json::to_vec(&entry).map_err(|e| CacheError::Message(e.to_string()))?;
+        let path = self.facts_entry_path(&key, analyzer);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension("tmp");
+        fs::write(&tmp, bytes)?;
+        fs::rename(&tmp, &path)?;
+        Ok(())
+    }
+
+    fn facts_entry_path(&self, action_id_hex: &str, analyzer: &str) -> PathBuf {
+        let prefix = action_id_hex.get(..2).unwrap_or("00");
+        // Sanitize analyzer name for the filesystem (should already be a Go ident).
+        let safe: String = analyzer
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+            .collect();
+        self.dir
+            .join("facts")
+            .join(prefix)
+            .join(format!("{action_id_hex}-{safe}.json"))
     }
 
     fn entry_path(&self, action_id_hex: &str) -> PathBuf {
@@ -734,6 +800,33 @@ mod tests {
             fset: Some(fset),
             ..Package::default()
         })
+    }
+
+    #[test]
+    fn facts_put_get_roundtrip() {
+        use guff_analysis::{ensure_builtin_fact_decoders, EncodedFact};
+        ensure_builtin_fact_decoders();
+        let tmp = TempDir::new().unwrap();
+        let cache = IssueCache::open(tmp.path().to_path_buf(), "salt-v1").unwrap();
+        let pkg_dir = tmp.path().join("src");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        let pkg = pkg_with_file(&pkg_dir, "a.go", "package p\n");
+        let facts = vec![EncodedFact {
+            pkg_path: String::new(),
+            object_path: "V".into(),
+            fact_type: "StringFact".into(),
+            payload: serde_json::json!({ "s": "hi" }),
+        }];
+        cache
+            .put_facts(&pkg, HashMode::NeedAllDeps, "deprecated", &facts)
+            .unwrap();
+        let loaded = cache
+            .get_facts(&pkg, HashMode::NeedAllDeps, "deprecated")
+            .unwrap();
+        assert_eq!(loaded, facts);
+        assert!(cache
+            .get_facts(&pkg, HashMode::NeedAllDeps, "other")
+            .is_err());
     }
 
     #[test]

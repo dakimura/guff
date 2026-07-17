@@ -51,6 +51,42 @@ impl Fact for EnumMembersFact {
     fn clone_fact(&self) -> Box<dyn Fact> {
         Box::new(self.clone())
     }
+
+    fn type_name(&self) -> &'static str {
+        "EnumMembersFact"
+    }
+
+    fn encode_payload(&self) -> serde_json::Value {
+        serde_json::json!({
+            "names": self.names,
+            "name_to_value": self.name_to_value,
+        })
+    }
+}
+
+fn decode_enum_members_fact(payload: serde_json::Value) -> Option<Box<dyn Fact>> {
+    let names = payload
+        .get("names")?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let mut name_to_value = HashMap::new();
+    for (k, v) in payload.get("name_to_value")?.as_object()? {
+        name_to_value.insert(k.clone(), v.as_str()?.to_string());
+    }
+    Some(Box::new(EnumMembersFact {
+        names,
+        name_to_value,
+    }))
+}
+
+fn ensure_enum_members_decoder() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        guff_analysis::register_fact_decoder("EnumMembersFact", decode_enum_members_fact);
+    });
 }
 
 #[derive(Clone)]
@@ -553,14 +589,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
 pub fn analyzer() -> &'static Analyzer {
     static A: OnceLock<Analyzer> = OnceLock::new();
-    A.get_or_init(|| Analyzer {
-        name: "exhaustive",
-        doc: "Check exhaustiveness of enum switch statements",
-        url: "https://github.com/nishanths/exhaustive",
-        run: run as RunFn,
-        run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
-        fact_types: vec![FactTypeId::of::<EnumMembersFact>()],
+    A.get_or_init(|| {
+        ensure_enum_members_decoder();
+        Analyzer {
+            name: "exhaustive",
+            doc: "Check exhaustiveness of enum switch statements",
+            url: "https://github.com/nishanths/exhaustive",
+            run: run as RunFn,
+            run_despite_errors: false,
+            requires: vec![inspect::analyzer()],
+            fact_types: vec![FactTypeId::of::<EnumMembersFact>()],
+        }
     })
 }
 

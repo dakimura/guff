@@ -58,6 +58,7 @@ pub mod map;
 pub mod mono;
 pub mod named;
 pub mod object;
+pub mod objectpath;
 pub mod objset;
 pub mod operand;
 pub mod package;
@@ -157,6 +158,9 @@ pub use object::pkgname::{new_pkg_name, PkgName};
 pub use object::type_name::{new_type_name, type_name_set_typ, TypeName};
 pub use object::var::{new_field, new_param, new_var, Var, VarKind};
 pub use object::{cmp as object_cmp, id as object_id, is_exported, ObjectMeta};
+pub use objectpath::{
+    for_object as objectpath_for, object as objectpath_object, Path as ObjectPath,
+};
 pub use objset::ObjSet;
 pub use operand::{composite_kind, operand_string, Operand, OperandMode};
 pub use package::{new_package, Package};

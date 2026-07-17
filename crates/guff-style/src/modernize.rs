@@ -3147,6 +3147,26 @@ impl Fact for NewLikeFact {
     fn clone_fact(&self) -> Box<dyn Fact> {
         Box::new(self.clone())
     }
+
+    fn type_name(&self) -> &'static str {
+        "NewLikeFact"
+    }
+
+    fn encode_payload(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+}
+
+fn decode_new_like_fact(_payload: serde_json::Value) -> Option<Box<dyn Fact>> {
+    Some(Box::new(NewLikeFact))
+}
+
+fn ensure_new_like_decoder() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        guff_analysis::register_fact_decoder("NewLikeFact", decode_new_like_fact);
+    });
 }
 
 fn is_pointer_type(pass: &Pass<'_>, typ: TypeId) -> bool {
@@ -5448,13 +5468,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
 pub fn analyzer() -> &'static Analyzer {
     static A: OnceLock<Analyzer> = OnceLock::new();
-    A.get_or_init(|| Analyzer {
-        name: "modernize",
-        doc: "suggests simplifications to Go code using modern language and library features",
-        url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize",
-        run: run as RunFn,
-        run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
-        fact_types: vec![FactTypeId::of::<NewLikeFact>()],
+    A.get_or_init(|| {
+        ensure_new_like_decoder();
+        Analyzer {
+            name: "modernize",
+            doc: "suggests simplifications to Go code using modern language and library features",
+            url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize",
+            run: run as RunFn,
+            run_despite_errors: false,
+            requires: vec![inspect::analyzer()],
+            fact_types: vec![FactTypeId::of::<NewLikeFact>()],
+        }
     })
 }

@@ -339,6 +339,8 @@ dependencies = [
  "guff-pattern",
  "guff-ssa",
  "guff-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

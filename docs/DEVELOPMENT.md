@@ -109,7 +109,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。
+> 最終更新: 2026-07-17。ワークスペース全体 **2300+ tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。facts 永続化は R24.1。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -171,7 +171,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + text（`line-number` 別名）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。`format:path` / config `path` でファイル書き出し | — |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
-| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | facts キャッシュは未（→ R24） |
+| キャッシュ | ✅ パッケージ単位の issues 永続キャッシュ（`$GUFF_CACHE` / `$GOLANGCI_LINT_CACHE` / `{UserCacheDir}/guff`）。未変更 pkg は再解析スキップ。**facts 永続化**（analyzer×package、objectpath キー、`facts/` 配下；R24.1）。`guff cache clean`/`status`（GOCACHE も表示）、`--no-cache`。`go list` に `GOCACHE` を明示注入；診断の GOCACHE 配下パスは除外（cgo） | サブパッケージ粒度型チェック・export data 共有・`go list` メタデータキャッシュは未（→ R24.2–4） |
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 互換差分 | ✅ `compat/` ハーネス（guff vs golangci JSON → `file:line:linter:message`、P/R、allowlist、`.github/workflows/compat.yml` ゲート） | OSS コーパス拡張・local パリティ改善は継続 |
@@ -300,7 +300,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 > ゴール: 「fast」を数字で主張できる。
 
 - **R9** ✅ action DAG を rayon ウェーブフロントで並列実行（`Ident::obj` を `Mutex` 化し `Package: Sync`）。結果は逐次と決定的一致。
-- **R10** ✅ パッケージ単位の永続 issues キャッシュ（SHA-256 content hash + 決定的 salt）。`GUFF_CACHE` > `GOLANGCI_LINT_CACHE` > OS cache dir。`guff cache clean/status` / `--no-cache`。**残**: facts 永続化 → R24。
+- **R10** ✅ パッケージ単位の永続 issues キャッシュ（SHA-256 content hash + 決定的 salt）。`GUFF_CACHE` > `GOLANGCI_LINT_CACHE` > OS cache dir。`guff cache clean/status` / `--no-cache`。facts 永続化は **R24.1 で完了**。
 - **R11** ✅ ベンチハーネス `benchmarks/`（cold/warm・`run.sh` / `smoke.sh` / `results/RESULTS.md`）。実 OSS は一部 SSA DEFERRED で FAIL しがち → R17 DEFERRED。
 - **R10.1** ✅ 性能パス（初回計測で warm が golangci の ~5–6x だった問題を解消）: fat LTO + `codegen-units=1`、`typecheck_packages` の rayon 並列化、キャッシュ salt / dep-hash の決定化、遅延型チェック（ミスした root だけ parse + 型チェック）。結果 guff が cold/warm とも golangci-lint より高速（warm `local` 0.54x / `fixture` 0.77x）。原因と対策の詳細はメモリ `guff-perf-cache-architecture` と git 履歴。発展余地 → R24。
 
@@ -390,12 +390,15 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   offline 時の export data 生成。
 - **テスト**: offline 2 + go_source imports 3 + runner go_cache 2 + lint filter/CLI。
 
-#### R24. 性能フォローアップ（R10.1 の発展余地）
+#### R24. 性能フォローアップ（R10.1 の発展余地）🟡 部分完了
 - **なぜ**: R10.1 で cold/warm とも golangci-lint 超えを達成したが、さらに詰められる余地がある。
   いずれも機能ブロッカーではなく、大規模リポジトリでの伸びしろ。
-- **項目**:
-  1. **facts の永続化**: analyzer 間 facts（`analysis.Fact`）をキャッシュに保存し、ミス pkg の
-     再解析でも依存の facts 再計算を避ける（golangci `runner_action_cache.go` 相当）。R10 からの継続 DEFERRED。
+- **完了（R24.1, 2026-07-17）: facts の永続化**
+  1. **`guff-types::objectpath`** — パッケージスコープ subset（PO / `Scope.Lookup`）。フィールド/メソッド等の完全パスは DEFERRED。
+  2. **`guff-analysis::fact_codec`** — `EncodedFact`（`pkg_path` + `objectpath` + type + JSON payload）と decoder レジストリ。`IsDeprecated` / `EnumMembersFact` / `NewLikeFact` / `StringFact` を登録。
+  3. **クロスアリーナ remap** — 依存 Action からの fact 継承を raw `ObjectId` コピーから objectpath remap に変更（プライベート Checker 設計に整合）。
+  4. **`IssueCache` facts ストア** — `facts/<prefix>/<hash>-<analyzer>.json`。非 root fact producer はキャッシュヒット時に再解析スキップ（golangci `loadCachedFacts`）。
+- **残**:
   2. **サブパッケージ（ファイル）粒度のインクリメンタル型チェック**: 現状はパッケージ単位でミス→
      パッケージ丸ごと再型チェック。巨大パッケージで 1 ファイル変更時の再チェック範囲を狭める。
   3. **export data デコードの共有キャッシュ**: `typecheck_package` はパッケージごとに新規 `Checker`/
@@ -404,8 +407,9 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
      デコード済み型パッケージを共有アリーナで再利用できれば cold の総 CPU をさらに削減。
   4. **`go list` メタデータのキャッシュ/差分ロード**: 現状 warm でも毎回 `go list` を実行（~0.05s）。
      大規模ツリーではここも効いてくる。
-- **どこ**: `guff-runner/src/cache.rs`（facts）、`guff-packages/src/typecheck.rs`（共有 importer・
-  粒度）、`guff-packages/src/golist.rs`（メタデータキャッシュ）。
+- **どこ（残）**: `guff-packages/src/typecheck.rs`（共有 importer・粒度）、
+  `guff-packages/src/golist.rs`（メタデータキャッシュ）。
+- **テスト（R24.1）**: `objectpath` 3 + `fact_codec` 2 + `cache::facts_put_get_roundtrip` + SA1019 / exhaustive 回帰。
 
 ---
 

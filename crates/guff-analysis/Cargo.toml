@@ -18,3 +18,5 @@ guff-packages = { path = "../guff-packages" }
 guff-types = { path = "../guff-types" }
 guff-ssa = { path = "../guff-ssa" }
 guff-pattern = { path = "../guff-pattern" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

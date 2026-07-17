@@ -11,6 +11,7 @@ mod analyzer;
 pub mod callcheck;
 pub mod code;
 mod diagnostic;
+mod fact_codec;
 mod facts;
 mod pass;
 mod pattern_match;
@@ -31,8 +32,12 @@ pub use ssa_util::{
 pub use analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
 pub use diagnostic::{Diagnostic, RelatedInformation, SuggestedFix, TextEdit};
 pub use passes::facts::generated::{GeneratedResult, Generator};
+pub use fact_codec::{
+    decode_fact, decode_facts_into, encode_fact_store, register_fact_decoder, remap_facts,
+    EncodedFact,
+};
 pub use facts::{
-    Fact, FactStore, FactTypeId, ObjectFact, PackageFact, StringFact,
+    ensure_builtin_fact_decoders, Fact, FactStore, FactTypeId, ObjectFact, PackageFact, StringFact,
 };
 pub use pass::{Pass, PassInput};
 pub use settings::SettingsBag;

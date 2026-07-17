@@ -8,11 +8,13 @@ use std::sync::{Arc, Mutex};
 
 use guff::position::FileSet;
 use guff_analysis::{
-    AnalysisResult, Analyzer, Diagnostic, FactStore, PassInput, SettingsBag, validate,
-    ValidateError,
+    decode_facts_into, encode_fact_store, ensure_builtin_fact_decoders, remap_facts, AnalysisResult,
+    Analyzer, Diagnostic, EncodedFact, FactStore, PassInput, SettingsBag, ValidateError, validate,
 };
 use guff_packages::Package;
 use guff_types::default_sizes;
+
+use crate::cache::{HashMode, IssueCache};
 
 /// One unit of analysis work: one analyzer applied to one package.
 ///
@@ -23,6 +25,8 @@ pub struct Action {
     pub is_root: std::sync::atomic::AtomicBool,
     pub deps: Vec<Arc<Action>>,
     settings: Arc<SettingsBag>,
+    /// Optional persistent issues/facts cache (R24).
+    cache: Option<Arc<IssueCache>>,
     state: Mutex<ActionState>,
 }
 
@@ -32,6 +36,8 @@ struct ActionState {
     error: Option<String>,
     diagnostics: Vec<Diagnostic>,
     facts: FactStore,
+    /// Stable encoding for cross-arena inheritance and disk persistence.
+    encoded_facts: Vec<EncodedFact>,
 }
 
 impl std::fmt::Debug for Action {
@@ -79,6 +85,17 @@ impl Action {
             }
         }
 
+        // Non-root fact producers: prefer loading persisted facts instead of
+        // re-analyzing (golangci `loadCachedFacts` for non-initial packages).
+        // This is the warm-path win when a dependency's issues hit the cache
+        // and the package itself is not type-checked this run.
+        if !self.is_root.load(Ordering::Relaxed)
+            && !self.analyzer.fact_types.is_empty()
+            && self.try_load_cached_facts()
+        {
+            return;
+        }
+
         let mut result_of = HashMap::new();
         let mut facts = FactStore::default();
 
@@ -89,7 +106,7 @@ impl Action {
                     result_of.insert(dep.analyzer.name, Arc::new(clone_result(result)));
                 }
             } else if std::ptr::eq(dep.analyzer, self.analyzer) {
-                merge_facts(&mut facts, &dep_state.facts);
+                inherit_facts(self, dep, &dep_state, &mut facts);
             }
         }
 
@@ -125,31 +142,98 @@ impl Action {
         .build();
 
         let run_result = (self.analyzer.run)(&mut pass);
+        let encoded = encode_action_facts(&facts, &self.package);
+        if let Some(cache) = &self.cache {
+            if !self.analyzer.fact_types.is_empty() {
+                let _ = cache.put_facts(
+                    &self.package,
+                    HashMode::NeedAllDeps,
+                    self.analyzer.name,
+                    &encoded,
+                );
+            }
+        }
         let mut state = self.state.lock().unwrap();
         match run_result {
             Ok(Some(result)) => {
                 state.result = Some(result);
                 state.diagnostics = diagnostics;
                 state.facts = facts;
+                state.encoded_facts = encoded;
             }
             Ok(None) => {
                 state.diagnostics = diagnostics;
                 state.facts = facts;
+                state.encoded_facts = encoded;
             }
             Err(err) => {
                 state.error = Some(err);
             }
         }
     }
+
+    /// Load persisted facts for this non-root action. Returns true on hit.
+    fn try_load_cached_facts(&self) -> bool {
+        let Some(cache) = &self.cache else {
+            return false;
+        };
+        ensure_builtin_fact_decoders();
+        let Ok(encoded) =
+            cache.get_facts(&self.package, HashMode::NeedAllDeps, self.analyzer.name)
+        else {
+            return false;
+        };
+        let mut state = self.state.lock().unwrap();
+        state.encoded_facts = encoded;
+        // FactStore stays empty here — consumers inherit via encoded_facts remapping.
+        true
+    }
 }
 
-fn merge_facts(dst: &mut FactStore, src: &FactStore) {
-    for fact in src.all_object_facts() {
-        dst.export_object_fact(fact.object, fact.fact);
+/// Inherit facts from a same-analyzer dependency action into `dst`.
+///
+/// Prefer objectpath remapping when both packages have type artifacts; otherwise
+/// fall back to the dependency's encoded facts (from this run or the cache).
+fn inherit_facts(
+    self_act: &Action,
+    dep: &Action,
+    dep_state: &ActionState,
+    dst: &mut FactStore,
+) {
+    ensure_builtin_fact_decoders();
+    let Some(dst_arts) = self_act.package.type_artifacts.as_ref() else {
+        return;
+    };
+
+    if let (Some(src_arts), true) = (
+        dep.package.type_artifacts.as_ref(),
+        !dep_state.facts.is_empty(),
+    ) {
+        remap_facts(
+            &dep_state.facts,
+            src_arts,
+            &dep.package.pkg_path,
+            dst_arts,
+            dst,
+        );
+        return;
     }
-    for fact in src.all_package_facts() {
-        dst.export_package_fact(fact.package, fact.fact);
+
+    if !dep_state.encoded_facts.is_empty() {
+        decode_facts_into(
+            &dep_state.encoded_facts,
+            dst_arts,
+            &dep.package.pkg_path,
+            dst,
+        );
     }
+}
+
+fn encode_action_facts(store: &FactStore, pkg: &Package) -> Vec<EncodedFact> {
+    let Some(arts) = pkg.type_artifacts.as_ref() else {
+        return Vec::new();
+    };
+    encode_fact_store(store, arts, &pkg.pkg_path)
 }
 
 /// Result graph from a round of analysis.
@@ -193,6 +277,7 @@ pub fn analyze(
         sequential,
         None,
         Arc::new(SettingsBag::default()),
+        None,
     )
 }
 
@@ -203,8 +288,10 @@ pub fn analyze_with_settings(
     sequential: bool,
     concurrency: Option<usize>,
     settings: Arc<SettingsBag>,
+    cache: Option<Arc<IssueCache>>,
 ) -> Result<Graph, ValidateError> {
     validate(analyzers)?;
+    ensure_builtin_fact_decoders();
 
     let mut actions: HashMap<(*const Analyzer, String), Arc<Action>> = HashMap::new();
     let mut all: Vec<Arc<Action>> = Vec::new();
@@ -213,6 +300,7 @@ pub fn analyze_with_settings(
         analyzer: &'static Analyzer,
         package: Arc<Package>,
         settings: &Arc<SettingsBag>,
+        cache: &Option<Arc<IssueCache>>,
         actions: &mut HashMap<(*const Analyzer, String), Arc<Action>>,
         all: &mut Vec<Arc<Action>>,
     ) -> Arc<Action> {
@@ -227,6 +315,7 @@ pub fn analyze_with_settings(
                 req,
                 Arc::clone(&package),
                 settings,
+                cache,
                 actions,
                 all,
             ));
@@ -239,6 +328,7 @@ pub fn analyze_with_settings(
                             req,
                             Arc::clone(dep_pkg),
                             settings,
+                            cache,
                             actions,
                             all,
                         ));
@@ -256,6 +346,7 @@ pub fn analyze_with_settings(
                         analyzer,
                         Arc::clone(dep_pkg),
                         settings,
+                        cache,
                         actions,
                         all,
                     ));
@@ -269,6 +360,7 @@ pub fn analyze_with_settings(
             is_root: std::sync::atomic::AtomicBool::new(false),
             deps,
             settings: Arc::clone(settings),
+            cache: cache.clone(),
             state: Mutex::new(ActionState::default()),
         });
         actions.insert(key, Arc::clone(&act));
@@ -283,6 +375,7 @@ pub fn analyze_with_settings(
                 analyzer,
                 Arc::clone(pkg),
                 &settings,
+                &cache,
                 &mut actions,
                 &mut all,
             );

@@ -1,11 +1,15 @@
 //! Analysis facts — serializable predicates attached to objects or packages.
 //!
 //! Port of `go/analysis/analysis.go` (`Fact`, `ObjectFact`, `PackageFact`).
+//! On-disk encoding lives in [`crate::fact_codec`].
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 use guff_types::arena::{ObjectId, PackageId};
+use serde_json::{json, Value};
+
+use crate::fact_codec::register_fact_decoder;
 
 /// Identifies a concrete fact type (Go's `reflect.TypeOf(fact)`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -28,6 +32,12 @@ pub trait Fact: Any + Send + Sync {
     fn fact_type_id(&self) -> FactTypeId;
     fn as_any(&self) -> &dyn Any;
     fn clone_fact(&self) -> Box<dyn Fact>;
+
+    /// Stable name used in the persistent facts cache (golangci gob type key).
+    fn type_name(&self) -> &'static str;
+
+    /// JSON payload for [`crate::fact_codec::EncodedFact`].
+    fn encode_payload(&self) -> Value;
 }
 
 /// A package together with an associated fact.
@@ -111,6 +121,10 @@ impl FactStore {
             })
             .collect()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.object_facts.is_empty() && self.package_facts.is_empty()
+    }
 }
 
 /// Trivial fact type for unit tests.
@@ -129,6 +143,28 @@ impl Fact for StringFact {
     fn clone_fact(&self) -> Box<dyn Fact> {
         Box::new(self.clone())
     }
+
+    fn type_name(&self) -> &'static str {
+        "StringFact"
+    }
+
+    fn encode_payload(&self) -> Value {
+        json!({ "s": self.0 })
+    }
+}
+
+fn decode_string_fact(payload: Value) -> Option<Box<dyn Fact>> {
+    let s = payload.get("s")?.as_str()?.to_string();
+    Some(Box::new(StringFact(s)))
+}
+
+/// Register decoders for facts defined in this crate. Idempotent.
+pub fn ensure_builtin_fact_decoders() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        register_fact_decoder("StringFact", decode_string_fact);
+        crate::passes::facts::deprecated::register_deprecated_fact_decoder();
+    });
 }
 
 #[cfg(test)]

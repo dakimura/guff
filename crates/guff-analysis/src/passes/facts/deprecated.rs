@@ -33,6 +33,24 @@ impl Fact for IsDeprecated {
     fn clone_fact(&self) -> Box<dyn Fact> {
         Box::new(self.clone())
     }
+
+    fn type_name(&self) -> &'static str {
+        "IsDeprecated"
+    }
+
+    fn encode_payload(&self) -> serde_json::Value {
+        serde_json::json!({ "msg": self.msg })
+    }
+}
+
+fn decode_is_deprecated(payload: serde_json::Value) -> Option<Box<dyn Fact>> {
+    let msg = payload.get("msg")?.as_str()?.to_string();
+    Some(Box::new(IsDeprecated { msg }))
+}
+
+/// Register the [`IsDeprecated`] fact decoder (called from builtin init).
+pub(crate) fn register_deprecated_fact_decoder() {
+    crate::fact_codec::register_fact_decoder("IsDeprecated", decode_is_deprecated);
 }
 
 /// Aggregated deprecated facts for the package and its dependencies.
@@ -180,6 +198,7 @@ fn walk_gen_decl(pass: &mut Pass<'_>, decl: &GenDecl) -> bool {
 }
 
 fn deprecated_analyzer_impl() -> Analyzer {
+    register_deprecated_fact_decoder();
     Analyzer {
         name: "fact_deprecated",
         doc: "mark deprecated objects and packages from doc comments",

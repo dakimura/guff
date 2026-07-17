@@ -129,6 +129,7 @@ pub fn run_on_packages(
             sequential,
             concurrency,
             Arc::clone(&opts.settings),
+            opts.cache.clone(),
         )?
     };
 
