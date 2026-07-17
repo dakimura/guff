@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
+	"html/template"
 	"math/rand"
 	"net"
 	"net/http"
@@ -14,12 +15,15 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"strconv"
 	"unsafe"
 
 	"golang.org/x/crypto/md4"
 	"golang.org/x/crypto/ripemd160"
 	"golang.org/x/crypto/ssh"
 )
+
+var taintedURL = "https://example.com"
 
 func bad() {
 	_ = md5.New()
@@ -56,6 +60,19 @@ func bad() {
 	_, _ = rsa.GenerateKey(nil, 1024)
 	_ = tls.Config{InsecureSkipVerify: true}
 	_ = http.Dir("/")
+
+	_, _ = os.Create("/tmp/demo")
+	_ = os.WriteFile("/tmp/demo2", nil, 0o644)
+	_ = os.WriteFile(os.TempDir()+"/demo3", nil, 0o600)
+
+	_, _ = http.Get(taintedURL)
+	_ = (&http.Server{Addr: ":8080"}).ListenAndServe()
+
+	bigValue, _ := strconv.Atoi("2147483648")
+	_ = int32(bigValue)
+
+	a := "attacker"
+	_ = template.HTML(a)
 }
 
 func returnsErr() error { return nil }

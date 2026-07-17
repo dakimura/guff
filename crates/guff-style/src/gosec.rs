@@ -8,12 +8,17 @@
 //! - **G103** — `unsafe` calls (`Pointer` / `String` / `StringData` / `Slice` / `SliceData`)
 //! - **G104** — unchecked errors
 //! - **G106** — `ssh.InsecureIgnoreHostKey`
+//! - **G107** — HTTP request with variable URL (SSRF; BasicLit/Const safe; full TryResolve DEFERRED)
 //! - **G108** — blank import of `net/http/pprof`
+//! - **G109** — `strconv.Atoi` result converted to `int16`/`int32`
 //! - **G111** — `http.Dir("/")` directory traversal
+//! - **G112** — `http.Server` without `ReadHeaderTimeout`/`ReadTimeout` (Slowloris)
 //! - **G114** — `net/http` serve helpers without timeouts
+//! - **G203** — `html/template` non-escaping helpers with non-literal args
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`)
 //! - **G301** — poor directory permissions (`os.Mkdir` / `MkdirAll`; default ≤ `0o750`)
 //! - **G302** — poor file permissions (`os.OpenFile` / `Chmod`; default ≤ `0o600`)
+//! - **G303** — tempfile creation under predictable shared `/tmp` paths
 //! - **G306** — poor `WriteFile` permissions (default ≤ `0o600`)
 //! - **G401** — weak hash (`crypto/md5` / `crypto/sha1` `New`/`Sum`)
 //! - **G402** — `tls.Config` with `InsecureSkipVerify: true` (MinVersion / CipherSuites DEFERRED)
@@ -25,11 +30,11 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G107, G109–G110, G112–G113, G115–G118, G201–G203,
-//! G303–G305, G307, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
+//! DEFERRED: remaining rules (G110, G113, G115–G118, G201–G202, G304–G305, G307
+//! config-gated, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
 //! entropy / `#nosec` / `gosec:disable` / per-rule `config` map, G104 config allowlist /
-//! audit mode, full G204 TryResolve / G102 Ident const resolution,
-//! `severity`/`confidence` filters, concurrency.
+//! audit mode, G107 local string-lit TryResolve, full G204 TryResolve / G102 Ident const
+//! resolution, `severity`/`confidence` filters, concurrency.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -42,7 +47,7 @@ use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::arena::{ObjectData, TypeData};
+use guff_types::arena::{ObjectData, ObjectId, TypeData};
 use guff_types::typestring::type_string;
 use regex::Regex;
 
@@ -254,7 +259,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G111", "G204", "G301", "G302", "G306", "G402", "G403",
+    "G101", "G102", "G104", "G107", "G109", "G111", "G112", "G203", "G204", "G301", "G302",
+    "G303", "G306", "G402", "G403",
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -265,8 +271,40 @@ const G403_MIN_BITS: i64 = 2048;
 const G301_CALLS: &[(&str, &str)] = &[("os", "Mkdir"), ("os", "MkdirAll")];
 const G302_CALLS: &[(&str, &str)] = &[("os", "OpenFile"), ("os", "Chmod")];
 const G306_CALLS: &[(&str, &str)] = &[("os", "WriteFile"), ("io/ioutil", "WriteFile")];
+const G303_CALLS: &[(&str, &str)] = &[
+    ("os", "Create"),
+    ("os", "WriteFile"),
+    ("io/ioutil", "WriteFile"),
+];
 const G403_CALLS: &[(&str, &str)] = &[("crypto/rsa", "GenerateKey")];
 const G111_CALLS: &[(&str, &str)] = &[("net/http", "Dir")];
+const G107_CALLS: &[(&str, &str)] = &[
+    ("net/http", "Do"),
+    ("net/http", "Get"),
+    ("net/http", "Head"),
+    ("net/http", "Post"),
+    ("net/http", "PostForm"),
+    ("net/http", "RoundTrip"),
+];
+const G203_CALLS: &[(&str, &str)] = &[
+    ("html/template", "CSS"),
+    ("html/template", "HTML"),
+    ("html/template", "HTMLAttr"),
+    ("html/template", "JS"),
+    ("html/template", "JSStr"),
+    ("html/template", "Srcset"),
+    ("html/template", "URL"),
+];
+const G109_ATOI: (&str, &str) = ("strconv", "Atoi");
+/// Upstream: `^(/(usr|var))?/tmp(/.*)?$`
+const G303_TMP_PATTERN: &str = r"^(/(usr|var))?/tmp(/.*)?$";
+const G303_WHAT: &str = "File creation in shared tmp directory without using ioutil.Tempfile";
+const G107_WHAT: &str = "Potential HTTP request made with variable url";
+const G109_WHAT: &str =
+    "Potential Integer overflow made by strconv.Atoi result conversion to int16/32";
+const G112_WHAT: &str =
+    "Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server";
+const G203_WHAT: &str = "The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.";
 
 const G101_WHAT: &str = "Potential hardcoded credentials";
 /// Upstream default: `(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred`
@@ -514,6 +552,19 @@ fn bind_all_pattern() -> &'static Regex {
     // Match upstream gosec: `^(0.0.0.0|:).*$` (dots are wildcards in Go regexp).
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^(0.0.0.0|:).*$").expect("G102 pattern"))
+}
+
+fn g303_tmp_pattern() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(G303_TMP_PATTERN).expect("G303 tmp pattern"))
+}
+
+fn object_of(pass: &Pass<'_>, ident: &Ident) -> Option<ObjectId> {
+    let info = pass.types_info()?;
+    if let Some(obj) = info.defs.get(&ident.id).copied().flatten() {
+        return Some(obj);
+    }
+    info.uses.get(&ident.id).copied()
 }
 
 fn g101_name_pattern() -> &'static Regex {
@@ -850,6 +901,11 @@ fn is_tls_config_type_name(name: &str) -> bool {
     bare == "crypto/tls.Config"
 }
 
+fn is_http_server_type_name(name: &str) -> bool {
+    let bare = name.strip_prefix('*').unwrap_or(name);
+    bare == "net/http.Server"
+}
+
 fn resolve_bool_const(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::Ident(id) if id.name == "true" => Some(true),
@@ -967,6 +1023,181 @@ fn check_g402_assign(
         assign.rhs[0].pos().0 as u32,
         pending,
     );
+}
+
+fn composite_has_timeout_field(lit: &CompositeLit) -> bool {
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        let Expr::Ident(key) = kv.key.as_ref() else {
+            continue;
+        };
+        if key.name == "ReadHeaderTimeout" || key.name == "ReadTimeout" {
+            return true;
+        }
+    }
+    false
+}
+
+fn check_g112_composite(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G112") {
+        return;
+    }
+    let Some(ty) = lit.ty.as_ref() else {
+        return;
+    };
+    let is_server = match type_name_of(pass, ty) {
+        Some(name) => is_http_server_type_name(&name),
+        None => match ty.as_ref() {
+            Expr::SelectorExpr(sel) => {
+                sel.sel.name == "Server"
+                    && matches!(
+                        sel.x.as_ref(),
+                        Expr::Ident(id) if imported_pkg_path(pass, id).as_deref() == Some("net/http")
+                    )
+            }
+            _ => false,
+        },
+    };
+    if !is_server {
+        return;
+    }
+    if !composite_has_timeout_field(lit) {
+        pending.push((lit.lbrace.0 as u32, format!("G112: {G112_WHAT}")));
+    }
+}
+
+/// Upstream `findTempDirArgs`: string `/tmp` path, `os.TempDir()`, or nested Join/concat.
+fn find_temp_dir_args(pass: &Pass<'_>, suspect: &Expr) -> bool {
+    if let Some(s) = string_lit_from_expr(suspect) {
+        return g303_tmp_pattern().is_match(&s);
+    }
+    if let Expr::CallExpr(call) = suspect {
+        if let Some((pkg, name)) = resolve_pkg_call(pass, call) {
+            if pkg == "os" && name == "TempDir" {
+                return true;
+            }
+            if (pkg == "path" || pkg == "path/filepath") && name == "Join" && !call.args.is_empty()
+            {
+                return find_temp_dir_args(pass, &call.args[0]);
+            }
+        }
+    }
+    if let Expr::BinaryExpr(be) = suspect {
+        if be.op == Token::ADD {
+            return find_temp_dir_args(pass, be.x.as_ref());
+        }
+    }
+    false
+}
+
+fn g107_url_tainted(pass: &Pass<'_>, arg: &Expr) -> bool {
+    // Literal URL is safe.
+    if string_lit_from_expr(arg).is_some() {
+        return false;
+    }
+    let Expr::Ident(ident) = arg else {
+        // Non-ident expressions (calls, selectors, …) are treated as tainted.
+        return true;
+    };
+    let Some(obj) = object_of(pass, ident) else {
+        return true;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    match artifacts.objects.get(obj) {
+        // const url = "…" is safe.
+        ObjectData::Const(_) => false,
+        // Vars (package-level, params, locals): treat as tainted.
+        // DEFERRED: local string-lit init TryResolve (upstream marks those safe).
+        ObjectData::Var(_) => true,
+        _ => true,
+    }
+}
+
+fn check_g109_assign(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    atoi_vars: &mut HashSet<ObjectId>,
+) {
+    for expr in &assign.rhs {
+        let Expr::CallExpr(call) = expr else {
+            continue;
+        };
+        let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+            continue;
+        };
+        if pkg != G109_ATOI.0 || name != G109_ATOI.1 {
+            continue;
+        }
+        if let Some(Expr::Ident(id)) = assign.lhs.first() {
+            if id.name != "_" {
+                if let Some(obj) = object_of(pass, id) {
+                    atoi_vars.insert(obj);
+                }
+            }
+        }
+    }
+}
+
+fn check_g109_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    atoi_vars: &HashSet<ObjectId>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    // int16(x) / int32(x) conversions.
+    let Expr::Ident(fun) = call.fun.as_ref() else {
+        return;
+    };
+    if fun.name != "int16" && fun.name != "int32" {
+        return;
+    }
+    let Some(arg) = call.args.first() else {
+        return;
+    };
+    let Expr::Ident(id) = arg else {
+        return;
+    };
+    let Some(obj) = object_of(pass, id) else {
+        return;
+    };
+    if atoi_vars.contains(&obj) {
+        pending.push((call.pos().0 as u32, format!("G109: {G109_WHAT}")));
+    }
+}
+
+fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+    if !enabled.contains("G109") {
+        return;
+    }
+    let mut atoi_vars: HashSet<ObjectId> = HashSet::new();
+    // First pass: collect Atoi results; second: flag conversions.
+    // Upstream walks in source order with stateful PassedValues; a two-pass
+    // scan is equivalent for the common same-function pattern.
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::AssignStmt(a) = n {
+                check_g109_assign(pass, a, &mut atoi_vars);
+            }
+            true
+        });
+    }
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CallExpr(c) = n {
+                check_g109_call(pass, c, &atoi_vars, pending);
+            }
+            true
+        });
+    }
 }
 
 fn result_type_errors(pass: &Pass<'_>, typ: guff_types::TypeId) -> Vec<bool> {
@@ -1226,6 +1457,25 @@ fn check_call(
             }
         }
     }
+
+    if enabled.contains("G303") && G303_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        if !call.args.is_empty() && find_temp_dir_args(pass, &call.args[0]) {
+            pending.push((call.pos().0 as u32, format!("G303: {G303_WHAT}")));
+        }
+    }
+
+    if enabled.contains("G107") && G107_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        if !call.args.is_empty() && g107_url_tainted(pass, &call.args[0]) {
+            pending.push((call.pos().0 as u32, format!("G107: {G107_WHAT}")));
+        }
+    }
+
+    if enabled.contains("G203") && G203_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        let has_non_lit = call.args.iter().any(|a| !matches!(a, Expr::BasicLit(_)));
+        if has_non_lit {
+            pending.push((call.pos().0 as u32, format!("G203: {G203_WHAT}")));
+        }
+    }
 }
 
 fn check_imports(
@@ -1279,13 +1529,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     check_imports(pass, &enabled, &mut pending);
     check_g101(pass, &enabled, &mut pending);
+    check_g109(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::CallExpr(call) => check_call(pass, call, &enabled, &mut pending),
                 NodeRef::CompositeLit(lit) => {
-                    check_g402_composite(pass, lit, &enabled, &mut pending)
+                    check_g402_composite(pass, lit, &enabled, &mut pending);
+                    check_g112_composite(pass, lit, &enabled, &mut pending);
                 }
                 NodeRef::ExprStmt(stmt) => {
                     if let Expr::CallExpr(call) = &stmt.x {
@@ -1423,5 +1675,16 @@ mod tests {
         assert!(!mode_is_subset(0o755, 0o750));
         assert!(!mode_is_subset(0o644, 0o600));
         assert!(mode_is_subset(0o600, 0o600));
+    }
+
+    #[test]
+    fn g303_tmp_pattern_matches_upstream() {
+        let re = g303_tmp_pattern();
+        assert!(re.is_match("/tmp"));
+        assert!(re.is_match("/tmp/demo"));
+        assert!(re.is_match("/var/tmp/x"));
+        assert!(re.is_match("/usr/tmp/x"));
+        assert!(!re.is_match("/var/lib/demo"));
+        assert!(!re.is_match("/home/tmp"));
     }
 }

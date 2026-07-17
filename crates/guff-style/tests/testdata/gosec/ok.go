@@ -5,11 +5,16 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"hash"
+	"html/template"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
+	"time"
 )
+
+const safeURL = "https://example.com"
 
 func ok() hash.Hash {
 	return sha256.New()
@@ -46,10 +51,10 @@ func okCheckedErr() error {
 }
 
 func okPerms() error {
-	if err := os.Mkdir("/tmp/x", 0o750); err != nil {
+	if err := os.Mkdir("/var/lib/x", 0o750); err != nil {
 		return err
 	}
-	if err := os.MkdirAll("/tmp/y", 0o700); err != nil {
+	if err := os.MkdirAll("/var/lib/y", 0o700); err != nil {
 		return err
 	}
 	f, err := os.OpenFile("f", 0, 0o600)
@@ -70,5 +75,30 @@ func okPerms() error {
 	_ = key
 	_ = tls.Config{InsecureSkipVerify: false}
 	_ = http.Dir("/var/www")
+	created, err := os.Create("/var/lib/demo")
+	if err != nil {
+		return err
+	}
+	_ = created
+	resp, err := http.Get(safeURL)
+	if err != nil {
+		return err
+	}
+	_ = resp
+	resp2, err := http.Get("https://example.com")
+	if err != nil {
+		return err
+	}
+	_ = resp2
+	_ = &http.Server{
+		Addr:              ":8080",
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+	bigValue, err := strconv.Atoi("30")
+	if err != nil {
+		return err
+	}
+	_ = int64(bigValue)
+	_ = template.HTML("<b>ok</b>")
 	return nil
 }

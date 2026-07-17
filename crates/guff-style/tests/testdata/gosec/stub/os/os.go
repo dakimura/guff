@@ -12,3 +12,4 @@ func OpenFile(name string, flag int, perm FileMode) (*File, error)   { return ni
 func Chmod(name string, mode FileMode) error                         { return nil }
 func WriteFile(name string, data []byte, perm FileMode) error        { return nil }
 func Create(name string) (*File, error)                              { return nil, nil }
+func TempDir() string                                                { return "/tmp" }
