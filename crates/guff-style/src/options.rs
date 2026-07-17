@@ -14,6 +14,20 @@ impl Default for GocycloOptions {
     }
 }
 
+/// `linters.settings.maintidx` / `linters-settings.maintidx`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaintidxOptions {
+    /// Report functions with maintainability index strictly below this value.
+    /// Upstream / golangci default: 20.
+    pub under: usize,
+}
+
+impl Default for MaintidxOptions {
+    fn default() -> Self {
+        Self { under: 20 }
+    }
+}
+
 /// `linters.settings.gocognit` / `linters-settings.gocognit`.
 #[derive(Debug, Clone, Copy)]
 pub struct GocognitOptions {

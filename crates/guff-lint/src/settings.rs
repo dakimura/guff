@@ -20,6 +20,7 @@ pub struct LinterSettings {
     pub dupl: DuplSettings,
     pub misspell: MisspellSettings,
     pub gocyclo: GocycloSettings,
+    pub maintidx: MaintidxSettings,
     pub gocognit: GocognitSettings,
     pub nestif: NestifSettings,
     pub dogsled: DogsledSettings,
@@ -217,6 +218,32 @@ pub struct MisspellExtraWordSetting {
 pub struct GocycloSettings {
     #[serde(default, rename = "min-complexity")]
     pub min_complexity: Option<usize>,
+}
+
+/// `linters.settings.maintidx` / `linters-settings.maintidx`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct MaintidxSettings {
+    /// Report functions with maintainability index < N (upstream default 20).
+    #[serde(default = "default_maintidx_under")]
+    pub under: usize,
+}
+
+fn default_maintidx_under() -> usize {
+    20
+}
+
+impl Default for MaintidxSettings {
+    fn default() -> Self {
+        Self {
+            under: default_maintidx_under(),
+        }
+    }
+}
+
+impl MaintidxSettings {
+    pub fn to_guff_maintidx(&self) -> guff_style::MaintidxOptions {
+        guff_style::MaintidxOptions { under: self.under }
+    }
 }
 
 /// `linters.settings.gocognit` / `linters-settings.gocognit`.
@@ -1421,6 +1448,11 @@ impl LinterSettings {
                 out.gocyclo = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("maintidx".into())) {
+            if let Ok(s) = serde_yaml::from_value::<MaintidxSettings>(v.clone()) {
+                out.maintidx = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("gocognit".into())) {
             if let Ok(s) = serde_yaml::from_value::<GocognitSettings>(v.clone()) {
                 out.gocognit = s;
@@ -1725,6 +1757,7 @@ impl LinterSettings {
         bag.insert("dupl", self.dupl.to_guff_dupl());
         bag.insert("misspell", self.misspell.to_guff_misspell());
         bag.insert("gocyclo", self.gocyclo.to_guff_gocyclo());
+        bag.insert("maintidx", self.maintidx.to_guff_maintidx());
         bag.insert("gocognit", self.gocognit.to_guff_gocognit());
         bag.insert("nestif", self.nestif.to_guff_nestif());
         bag.insert("dogsled", self.dogsled.to_guff_dogsled());

@@ -9,7 +9,7 @@ use guff_style::{
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, gosec,
     grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck,
-    mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
+    maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr, nonamedreturns,
     nosprintfhostport,
     paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
     tagliatelle, testableexamples, testifylint, testpackage, thelper, tparallel, unconvert,
@@ -2650,6 +2650,64 @@ fn gocyclo_flags_high_complexity() {
         messages
             .iter()
             .any(|m| m.contains("HighComplexity") && m.contains("cyclomatic complexity")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn maintidx_flags_low_maintainability() {
+    let pkg = support::typecheck_fixture("maintidx", "example.com/maintidx", "bad.go");
+    let messages = support::run_analyzer(maintidx(), &pkg);
+    assert!(
+        messages.iter().any(|m| {
+            m.contains("Function name: under20")
+                && m.contains("Maintainability Index:")
+                && m.contains("Cyclomatic Complexity:")
+        }),
+        "{messages:?}"
+    );
+    let mi_msg = messages
+        .iter()
+        .find(|m| m.contains("under20"))
+        .expect("under20 diagnostic");
+    let mi: i32 = mi_msg
+        .rsplit("Maintainability Index: ")
+        .next()
+        .and_then(|s| s.trim().parse().ok())
+        .expect("parse MI");
+    assert!(mi < 20, "expected MI < 20, got {mi} from {mi_msg}");
+}
+
+#[test]
+fn maintidx_allows_simple_functions() {
+    let pkg = support::typecheck_fixture("maintidx", "example.com/maintidx/ok", "ok.go");
+    assert!(support::run_analyzer(maintidx(), &pkg).is_empty());
+}
+
+#[test]
+fn maintidx_respects_under_setting() {
+    use guff_style::MaintidxOptions;
+
+    let pkg = support::typecheck_fixture("maintidx", "example.com/maintidx/settings", "settings.go");
+    assert!(
+        support::run_analyzer(maintidx(), &pkg).is_empty(),
+        "default under=20 should allow medium()"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert("maintidx", MaintidxOptions { under: 100 });
+    let messages = support::run_analyzer_with_settings(
+        maintidx(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Function name: medium") && m.contains("Maintainability Index:")),
         "{messages:?}"
     );
 }

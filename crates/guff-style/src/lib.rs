@@ -38,6 +38,7 @@
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
+//! - [`maintidx`]
 //! - [`lll`]
 //! - [`gocognit`]
 //! - [`nestif`]
@@ -112,6 +113,7 @@ mod thelper;
 mod gocognit;
 mod goconst;
 mod gocyclo;
+mod maintidx;
 mod goprintffuncname;
 mod lll;
 mod mnd;
@@ -134,7 +136,7 @@ pub use options::{
     DogsledOptions, ExhaustiveOptions, ExhaustructOptions, ForbidigoOptions, ForbidigoPattern,
     FunlenOptions, GocognitOptions, GoconstOptions, GocriticOptions, GocycloOptions, IfaceOptions,
     GosecOptions, GrouperOptions, InamedparamOptions, InterfacebloatOptions, IotamixingOptions,
-    IreturnOptions, LllOptions,
+    IreturnOptions, LllOptions, MaintidxOptions,
     LoggercheckOptions,
     MndOptions,
     ModernizeOptions, MusttagFunc, MusttagOptions, NakedretOptions, NestifOptions, NlreturnOptions,
@@ -183,6 +185,7 @@ pub use gocognit::analyzer as gocognit;
 pub use goconst::analyzer as goconst;
 pub use gocritic::analyzer as gocritic;
 pub use gocyclo::analyzer as gocyclo;
+pub use maintidx::analyzer as maintidx;
 pub use goprintffuncname::analyzer as goprintffuncname;
 pub use lll::analyzer as lll;
 pub use loggercheck::analyzer as loggercheck;
@@ -247,6 +250,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         goprintffuncname(),
         funlen(),
         gocyclo(),
+        maintidx(),
         lll(),
         gocognit(),
         nestif(),

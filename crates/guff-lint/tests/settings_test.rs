@@ -1043,6 +1043,19 @@ fn parse_v2_interfacebloat_settings() {
 }
 
 #[test]
+fn parse_v2_maintidx_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_maintidx_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.maintidx.under, 100);
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::MaintidxOptions>("maintidx")
+        .expect("maintidx options");
+    assert_eq!(opts.under, 100);
+}
+
+#[test]
 fn parse_v2_inamedparam_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_inamedparam_settings.yml")).unwrap();
