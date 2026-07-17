@@ -1199,6 +1199,20 @@ fn parse_v2_grouper_settings() {
 }
 
 #[test]
+fn parse_v2_ireturn_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_ireturn_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.ireturn.reject, vec!["empty".to_string()]);
+    assert!(settings.ireturn.allow.is_empty());
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::IreturnOptions>("ireturn")
+        .expect("ireturn options");
+    assert_eq!(opts.reject, vec!["empty".to_string()]);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

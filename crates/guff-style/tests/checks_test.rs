@@ -8,10 +8,11 @@ use guff_style::{
     asasalint, asciicheck, bidichk, canonicalheader, containedctx, copyloopvar, cyclop, decorder,
     dogsled, exhaustive, exhaustruct, exptostd, forbidigo, funlen, gocheckcompilerdirectives,
     gochecknoglobals, gochecknoinits, gocognit, goconst, gocritic, gocyclo, goprintffuncname, grouper,
-    iface, inamedparam, interfacebloat, intrange, iotamixing, lll, loggercheck, mnd, modernize,
-    musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint,
-    prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle, testifylint,
-    testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn, lll, loggercheck, mnd,
+    modernize, musttag, nakedret, nestif, nlreturn, nonamedreturns, nosprintfhostport, paralleltest,
+    perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign, tagliatelle,
+    testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace,
+    wsl,
 };
 
 #[test]
@@ -124,6 +125,77 @@ fn grouper_respects_partial_settings() {
         messages
             .iter()
             .any(|m| m.contains("should only use grouped global 'const' declarations")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn ireturn_flags_named_interfaces() {
+    let pkg = support::typecheck_fixture("ireturn", "example.com/ireturn", "bad.go");
+    let messages = support::run_analyzer(ireturn(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("NewDoer returns interface") && m.contains("Doer")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("NewFooer returns interface") && m.contains("Fooer")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn ireturn_allows_defaults() {
+    let pkg = support::typecheck_fixture("ireturn", "example.com/ireturn/ok", "ok.go");
+    let messages = support::run_analyzer(ireturn(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn ireturn_respects_reject_empty() {
+    use guff_style::IreturnOptions;
+
+    let pkg =
+        support::typecheck_fixture("ireturn", "example.com/ireturn/settings", "settings.go");
+
+    // Defaults allow empty → no diagnostic for interface{}.
+    let defaults = support::run_analyzer(ireturn(), &pkg);
+    assert!(
+        defaults.iter().any(|m| m.contains("ReturnsLocal returns interface")),
+        "{defaults:?}"
+    );
+    assert!(
+        !defaults.iter().any(|m| m.contains("ReturnsEmpty")),
+        "{defaults:?}"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "ireturn",
+        IreturnOptions {
+            allow: vec![],
+            reject: vec!["empty".to_string()],
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        ireturn(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("ReturnsEmpty returns interface (interface{})")),
+        "{messages:?}"
+    );
+    assert!(
+        !messages.iter().any(|m| m.contains("ReturnsLocal")),
         "{messages:?}"
     );
 }

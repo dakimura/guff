@@ -74,6 +74,7 @@ pub struct LinterSettings {
     pub decorder: DecorderSettings,
     pub iotamixing: IotamixingSettings,
     pub grouper: GrouperSettings,
+    pub ireturn: IreturnSettings,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -1191,6 +1192,26 @@ impl GrouperSettings {
     }
 }
 
+/// `linters.settings.ireturn` / `linters-settings.ireturn`.
+///
+/// Default (both empty): allow `anon` / `error` / `empty` / `stdlib`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct IreturnSettings {
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub reject: Vec<String>,
+}
+
+impl IreturnSettings {
+    pub fn to_guff_ireturn(&self) -> guff_style::IreturnOptions {
+        guff_style::IreturnOptions {
+            allow: self.allow.clone(),
+            reject: self.reject.clone(),
+        }
+    }
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -1652,6 +1673,11 @@ impl LinterSettings {
                 out.grouper = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("ireturn".into())) {
+            if let Ok(s) = serde_yaml::from_value::<IreturnSettings>(v.clone()) {
+                out.ireturn = s;
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -1737,6 +1763,7 @@ impl LinterSettings {
         bag.insert("decorder", self.decorder.to_guff_decorder());
         bag.insert("iotamixing", self.iotamixing.to_guff_iotamixing());
         bag.insert("grouper", self.grouper.to_guff_grouper());
+        bag.insert("ireturn", self.ireturn.to_guff_ireturn());
         Arc::new(bag)
     }
 

@@ -899,6 +899,19 @@ pub struct InamedparamOptions {
     pub skip_single_param: bool,
 }
 
+/// `linters.settings.ireturn` / `linters-settings.ireturn`.
+///
+/// Default (both empty): allow `anon` / `error` / `empty` / `stdlib`.
+/// `allow` and `reject` are mutually exclusive upstream; if both are set we
+/// prefer `reject` (DEFERRED: hard error).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IreturnOptions {
+    /// Allow-list of keywords / regexes (golangci `allow`).
+    pub allow: Vec<String>,
+    /// Reject-list of keywords / regexes (golangci `reject`).
+    pub reject: Vec<String>,
+}
+
 /// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NonamedreturnsOptions {
