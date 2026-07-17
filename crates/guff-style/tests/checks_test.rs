@@ -10,7 +10,7 @@ use guff_style::{
     gocyclo, goprintffuncname, iface, inamedparam, interfacebloat, lll, loggercheck, mnd, modernize, musttag,
     nakedret, nestif,
     nlreturn, nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, reassign, recvcheck, sloglint, tagalign,
-    testifylint, testpackage, thelper, unconvert, usestdlibvars, usetesting, whitespace, wsl,
+    testifylint, testpackage, thelper, tparallel, unconvert, usestdlibvars, usetesting, whitespace, wsl,
 };
 
 #[test]
@@ -952,6 +952,62 @@ fn paralleltest_respects_settings() {
             .any(|m| m.contains("Function TestCleanupDefer uses defer with t.Parallel")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn tparallel_flags_mismatched_parallel_and_defer() {
+    let pkg = support::typecheck_fixture("tparallel", "example.com/tparallel", "bad_test.go");
+    let messages = support::run_analyzer(tparallel(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Test_Func1 should call t.Parallel on the top level as well as its subtests"
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Test_Func2's subtests should call t.Parallel")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Test_Cleanup1 should use t.Cleanup instead of defer")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Test_Table1 should call t.Parallel on the top level as well as its subtests"
+        )),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Test_Table1 should use t.Cleanup instead of defer")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Test_Table2's subtests should call t.Parallel")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains(
+            "Test_NamedSub should call t.Parallel on the top level as well as its subtests"
+        )),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn tparallel_allows_consistent_parallel_usage() {
+    let pkg =
+        support::typecheck_fixture("tparallel", "example.com/tparallel/ok", "ok_test.go");
+    let messages = support::run_analyzer(tparallel(), &pkg);
+    assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
 }
 
 #[test]

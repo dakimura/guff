@@ -24,6 +24,7 @@
 //! - [`nonamedreturns`]
 //! - [`testpackage`]
 //! - [`paralleltest`]
+//! - [`tparallel`]
 //! - [`goprintffuncname`]
 //! - [`funlen`]
 //! - [`gocyclo`]
@@ -84,6 +85,7 @@ mod interfacebloat;
 mod nonamedreturns;
 mod paralleltest;
 mod testpackage;
+mod tparallel;
 mod reassign;
 mod recvcheck;
 mod thelper;
@@ -143,6 +145,7 @@ pub use interfacebloat::analyzer as interfacebloat;
 pub use nonamedreturns::analyzer as nonamedreturns;
 pub use paralleltest::analyzer as paralleltest;
 pub use testpackage::analyzer as testpackage;
+pub use tparallel::analyzer as tparallel;
 pub use reassign::analyzer as reassign;
 pub use recvcheck::analyzer as recvcheck;
 pub use thelper::analyzer as thelper;
@@ -200,6 +203,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         nonamedreturns(),
         paralleltest(),
         testpackage(),
+        tparallel(),
         goprintffuncname(),
         funlen(),
         gocyclo(),
