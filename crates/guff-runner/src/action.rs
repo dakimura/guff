@@ -3,7 +3,7 @@
 //! Port of `golang.org/x/tools/go/analysis/checker` (`Action`, `Analyze`).
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use guff::position::FileSet;
@@ -501,9 +501,22 @@ fn topo_postorder(roots: &[Arc<Action>]) -> Vec<Arc<Action>> {
 
 pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Option<usize>) {
     let order = topo_postorder(roots);
+
+    // Reverse-dependency counts, keyed by action pointer: how many not-yet-run
+    // actions still consume each action's result. Intermediate results are only
+    // read by an action's direct dependents (see `execute`), so once the last
+    // dependent has run we drop the result immediately instead of holding every
+    // result until the whole run finishes. This matters a lot for `buildir`,
+    // whose result (an SSA `Program`) owns a *clone of the full type arena* —
+    // on a large multi-package run (e.g. Prometheus) retaining all of them at
+    // once dominated peak memory. Roots are never freed here (their diagnostics
+    // are collected after the run); the post-run sweep still clears them.
+    let remaining = reverse_dep_counts(&order);
+
     if sequential {
         for act in &order {
             act.execute();
+            release_finished_deps(act, &remaining);
         }
         return;
     }
@@ -516,6 +529,7 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
     if workers <= 1 {
         for act in &order {
             act.execute();
+            release_finished_deps(act, &remaining);
         }
         return;
     }
@@ -528,16 +542,53 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
         .num_threads(workers)
         .build()
         .expect("rayon thread pool");
+    let remaining = &remaining;
     pool.install(|| {
         for wave in dependency_waves(&order) {
             rayon::scope(|s| {
                 for act in &wave {
                     let act = Arc::clone(act);
-                    s.spawn(move |_| act.execute());
+                    s.spawn(move |_| {
+                        act.execute();
+                        release_finished_deps(&act, remaining);
+                    });
                 }
             });
         }
     });
+}
+
+/// Counts, per action (keyed by `Arc` pointer), how many actions list it as a
+/// dependency — i.e. how many consumers will read its result.
+fn reverse_dep_counts(order: &[Arc<Action>]) -> HashMap<usize, AtomicUsize> {
+    let mut counts: HashMap<usize, AtomicUsize> = HashMap::with_capacity(order.len());
+    for act in order {
+        counts
+            .entry(Arc::as_ptr(act) as usize)
+            .or_insert_with(|| AtomicUsize::new(0));
+        for dep in &act.deps {
+            counts
+                .entry(Arc::as_ptr(dep) as usize)
+                .or_insert_with(|| AtomicUsize::new(0))
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    counts
+}
+
+/// After `act` has run, decrement each dependency's outstanding-consumer count;
+/// when a non-root dependency reaches zero, drop its now-unneeded result.
+fn release_finished_deps(act: &Arc<Action>, remaining: &HashMap<usize, AtomicUsize>) {
+    for dep in &act.deps {
+        let Some(count) = remaining.get(&(Arc::as_ptr(dep) as usize)) else {
+            continue;
+        };
+        // `AcqRel` so the thread that observes the transition to zero has seen
+        // every other consumer's decrement (and their reads of the result).
+        if count.fetch_sub(1, Ordering::AcqRel) == 1 && !dep.is_root.load(Ordering::Relaxed) {
+            dep.state.lock().unwrap().result = None;
+        }
+    }
 }
 
 /// Groups actions into waves where every action in a wave has all dependencies

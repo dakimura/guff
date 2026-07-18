@@ -298,11 +298,23 @@ impl Checker {
     /// The captured package under check (`self.pkg`) is intentionally *not*
     /// reused — each [`Self::from_seed`] allocates a fresh package.
     pub fn capture_export_seed(&self) -> ExportSeed {
+        // Freeze the arenas so every per-package checker built from this seed
+        // shares one read-only base (an `Arc` bump) instead of deep-cloning all
+        // decoded dependencies (R25.1 arena-footprint fix). Freezing happens once
+        // here, when the seed is built.
+        let mut types = self.types.clone();
+        types.freeze();
+        let mut objects = self.objects.clone();
+        objects.freeze();
+        let mut scopes = self.scopes.clone();
+        scopes.freeze();
+        let mut packages = self.packages.clone();
+        packages.freeze();
         ExportSeed {
-            types: self.types.clone(),
-            objects: self.objects.clone(),
-            scopes: self.scopes.clone(),
-            packages: self.packages.clone(),
+            types,
+            objects,
+            scopes,
+            packages,
             typ: self.typ.clone(),
             universe_scope: self.universe_scope,
             unsafe_pkg: self.unsafe_pkg,
@@ -318,12 +330,14 @@ impl Checker {
     /// Build a checker from a shared [`ExportSeed`], skipping re-decode of the
     /// preloaded dependency graph.
     pub fn from_seed(seed: &ExportSeed, conf: Config) -> Checker {
-        let mut packages = seed.packages.clone();
-        let mut scopes = seed.scopes.clone();
+        // Share the seed's frozen bases (Arc bumps); the checker appends this
+        // package's own types/objects/scopes/packages into private overlays.
+        let mut packages = seed.packages.shared_clone();
+        let mut scopes = seed.scopes.shared_clone();
         let pkg = new_package(&mut packages, &mut scopes, seed.universe_scope, "", "");
         Checker {
-            types: seed.types.clone(),
-            objects: seed.objects.clone(),
+            types: seed.types.shared_clone(),
+            objects: seed.objects.shared_clone(),
             scopes,
             packages,
             typ: seed.typ.clone(),
@@ -585,6 +599,24 @@ impl Checker {
         if self.first_err.is_none() {
             self.monomorph();
         }
+
+        // Record the package's directly imported packages (Go:
+        // `Package.Imports()`). Decoded (export-data) packages get this from
+        // `ureader`; a source-checked package sets it here from its import
+        // PkgNames. SSA uses it to walk the transitive import closure instead of
+        // scanning the whole (seed-inflated) object arena.
+        let mut import_ids: Vec<PackageId> = Vec::new();
+        let mut seen_imports: std::collections::HashSet<PackageId> =
+            std::collections::HashSet::new();
+        for &obj in &self.imports {
+            if let crate::arena::ObjectData::PkgName(p) = self.objects.get(obj) {
+                let imported = p.imported();
+                if seen_imports.insert(imported) {
+                    import_ids.push(imported);
+                }
+            }
+        }
+        self.packages.get_mut(self.pkg).set_imports(import_ids);
 
         let go_version = self.conf.go_version.clone();
         let pkg = self.packages.get_mut(self.pkg);

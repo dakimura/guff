@@ -109,7 +109,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）一部完了 — フル `guff run ./...` が完走（>15分→86.6s）。残: §8 R25 の DEFERRED（R25.1 per-package アリーナコスト・R25.2 correctness panic・R25.3 go list cold）。
+> 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）— R25.1（アリーナフットプリント）完了。layered CoW アリーナで export seed を全 pkg 共有し、フル `guff run --no-cache ./...` が **83s→11.9s / peak 56GB→5.8GB**。残: §8 R25 の DEFERRED（R25.2 correctness panic・並列時 position 破損、R25.3 go list cold）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -401,19 +401,24 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **DEFERRED（R24.2 本体）**: 真のファイル粒度インクリメンタル型チェック。Checker はパッケージ全体；cross-file defs/methods/inits のため部分 `check_files` は不正。`typecheck_package_with_seed` に `// DEFERRED(R24.2)` コメントあり。
 - **テスト**: objectpath / fact_codec / facts_put_get + `export_seed_roundtrip` + `golist_cache_key_*` / `export_paths_exist_*` + packages/runner 回帰。
 
-#### R25. Prometheus スケール修正と残り性能（大規模リポジトリ）🟡 一部完了 (2026-07-18)
+#### R25. Prometheus スケール修正と残り性能（大規模リポジトリ）🟡 R25.1 完了・R25.2/3 残 (2026-07-18)
 - **なぜ**: フル `guff run ./...`（Prometheus 113 pkg）が >15分で未完 / OOM。実態は OOM だけでなく ①linter panic 非隔離で run 全滅 ②解析フェーズの二次コスト。128GB マシンでは OOM せず peak ~49GB。
 - **完了**:
   1. **linter panic 隔離** — `guff-runner::action::execute` の `(analyzer.run)()` を `catch_unwind` で包み panic を action エラー化。1 linter の panic が rayon ワーカーごと巻き戻り「lint worker exited without a result」で run 全滅していたのを解消（`Cargo.toml` の `panic = "unwind"` 注記が謳う挙動を実装で復元）。
   2. **copylocks アリーナクローン除去** — `guff-govet::lockpath` に `LockChecker`（pkg あたり 1 回だけ `TypeArena` を scratch clone + lock-path をメモ化 + `*T` を作らず addressable method set で判定）。旧 `is_lock_by_value` は再帰走査の**各ノード**でアリーナ全体を clone していた。tsdb pkg **42s→0.02s**。
   3. **buildir O(pkg×objects) 除去** — `guff-ssa::create::imported_type_packages` はオブジェクトアリーナ全走査で「引数によらず全 pkg」を返す。これを pkg ごとに呼ぶ `create_import_packages`（旧 `create_imports_rec`）と `populate_imported_package_members` が共有型アリーナ巨大時に二次（~184s/buildir）。オブジェクトを 1 パスで pkg 別グループ化して線形に。tsdb/... buildir **550s→0.84s**。
   - 結果: フル run >15分（未完）→ **86.6s**、解析フェーズ 51.5s、peak RSS ~49GB、panic 35 件捕捉・abort 0。ワークスペース **2663 tests green**。
+- **完了（R25.1、2026-07-18 続き）— アリーナフットプリント削減が本丸だった**:
+  4. **layered CoW アリーナ（本命の修正）** — `guff-types::arena` の 4 アリーナ（Type/Object/Scope/Package）を `Layered<T> { base: Arc<Vec<T>>, overlay: Vec<T> }` 化。`alloc` は overlay に積むだけ（base 不変）、`get_mut(base_idx)` のみ `Arc::make_mut` で CoW。`Checker::from_seed` は `shared_clone`（Arc bump）で seed を共有し、`capture_export_seed` で `freeze`（overlay→base）。**これで R24.3 export seed（全 deps）が全 pkg で 1 個共有**になり、113 pkg 分の deep clone / buildir snapshot / analyzer clone が消滅。安全性は実測プローブで確認：SSA build は base 型を **0 回**変更、typecheck-after-seed も 113 pkg 中 base 変更は 4 pkg のみ（CoW で個別化）。共有は既に `&Arc<ExportSeed>` を par_iter で跨いでおり `Sync` 要件は充足済み。
+  5. **buildir import-closure 限定** — `create_import_packages` / `populate_imported_package_members` を対象 pkg の推移的 import closure に限定（旧: export seed の全 pkg superset を SSA 化）。`Package.imports()` を source-checked pkg にも設定（`check.rs`、Go 準拠）して closure walk を可能に。1 ファイル pkg の buildir が 7.46s→即時に。
+  6. **copylocks 読み取り専用プローブ** — `lockpath::find_method_ro`（`&TypeArena` のみ）で一般的な lock 形状（named 型・埋め込み struct）はクローン無しで method-set 判定。埋め込み interface / generic instance のみ従来の clone にフォールバック。
+  7. **action result の即時解放** — `guff-runner::exec_all` で各 non-root action の result を最後の依存者完了時点で drop（旧: run 完了まで全 result 保持）。逆依存カウントで管理。
+  - **結果（フル `guff run --no-cache ./...`、Prometheus 113 pkg、apples-to-apples）**: **83s→11.9s（7×）**、peak RSS **56GB→5.8GB（9.6×）**。typecheck 8.3s→1.8s、analyze 52s→4.2s、buildir(summed) 251s→0.9s、copylocks 179s→0.05s。ワークスペース **2663 tests green**、`-j 1` 逐次実行で HEAD と**バイト一致**（tsdb subtree 771 診断）。
 - **DEFERRED（次セッションへの引き継ぎ）**:
-  - **R25.1 残 per-package アリーナコスト** — フル run で buildir ~252s/30 actions（1 ファイル pkg でも最大 8s）・copylocks ~185s/113 actions（~1.6s/pkg = 型アリーナ 1 clone）・peak ~49GB。根本は各 pkg の type arena が R24.3 export seed で全 deps を含み巨大なこと。案: copylocks の clone 回避（`lookup_field_or_method` を `&TypeArena` 化 or analyzer 間で scratch 共有）、buildir は参照された imported object のみ member 化（全 object 走査でなく）、arena フットプリント削減。
-  - **R25.2 correctness panic 本体** — Prometheus コードで `guff-types/src/signature.rs:164`（`expected Signature, got Discriminant(11)/(0)`）と `guff-ssa/src/builder/expr.rs:304`（ident resolution failed）が発火。現在は隔離され非致命だが該当 pkg（~35）でその解析が落ちる。要 minimal 再現 → 型/SSA の欠落補完。
+  - **R25.2 correctness / 位置破損 本体** — ① Prometheus コードで `guff-types/src/signature.rs:164`（`expected Signature, got Discriminant(11)/(0)`）と `guff-ssa/src/builder/expr.rs:304`（ident resolution failed）が発火（隔離され非致命）。② **並列 `./...` 実行で診断の file:line:col が破損**（prometheus source の診断が GOROOT / go mod cache のファイルに誤マップ、列番号が巨大なグローバル offset に化ける）。`-j 1` 逐次実行では正常（HEAD/新実装ともバイト一致）→ **並列時の共有 FileSet / position offset 競合**が疑われる。HEAD でも再現する既存バグ。要 minimal 再現。
   - **R25.3 `go list` cold 23s** — warm は 1.3s（OS キャッシュ）。golist ディスクキャッシュ（R24.4）は cold 初回には効かない。優先度低。
-- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。
-- **テスト**: `cargo test -p guff-govet -p guff-ssa -p guff-runner` + workspace 2663 green。
+- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。RSS は `/usr/bin/time -l`。
+- **テスト**: `cargo test --workspace`（2663 green）+ `-j 1` diff で HEAD 診断パリティ。
 
 ---
 

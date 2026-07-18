@@ -10,6 +10,7 @@
 //! - IDs are 1-indexed internally; index 0 is reserved as the niche.
 
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use crate::alias::Alias;
 use crate::array::Array;
@@ -70,25 +71,120 @@ pub struct PackageId(NonZeroU32);
 /// supported (matching `go/types`' single-threaded `Checker`).
 #[derive(Debug, Default, Clone)]
 pub struct TypeArena {
-    types: Vec<TypeData>,
+    types: Layered<TypeData>,
 }
 
 /// Storage for all Go objects (variables, functions, type names, etc.).
 #[derive(Debug, Default, Clone)]
 pub struct ObjectArena {
-    objects: Vec<ObjectData>,
+    objects: Layered<ObjectData>,
 }
 
 /// Storage for all [`Scope`]s in a type-checking session.
 #[derive(Debug, Default, Clone)]
 pub struct ScopeArena {
-    scopes: Vec<Scope>,
+    scopes: Layered<Scope>,
 }
 
 /// Storage for all [`Package`]s in a type-checking session.
 #[derive(Debug, Default, Clone)]
 pub struct PackageArena {
-    packages: Vec<Package>,
+    packages: Layered<Package>,
+}
+
+/// A copy-on-write, append-friendly backing store shared across arena clones.
+///
+/// The `base` prefix is an `Arc`-shared, effectively read-only run of elements;
+/// `overlay` holds elements appended after the base was frozen. Cloning shares
+/// the base (an `Arc` refcount bump) and deep-copies only the usually-small
+/// overlay, so the large decoded-dependency prefix (the R24.3 export seed) is
+/// shared across all packages instead of duplicated per package. Element ids are
+/// stable positions into `base` then `overlay`, so existing ids keep working as
+/// the overlay grows.
+///
+/// Mutating a base element first promotes the base to a private copy
+/// (`Arc::make_mut`); this is rare in practice — measured on Prometheus, only a
+/// handful of packages mutate a base type during type-checking and none during
+/// SSA construction — so the shared prefix survives for almost every clone.
+#[derive(Debug, Clone)]
+struct Layered<T> {
+    base: Arc<Vec<T>>,
+    overlay: Vec<T>,
+}
+
+impl<T> Default for Layered<T> {
+    fn default() -> Self {
+        Self {
+            base: Arc::new(Vec::new()),
+            overlay: Vec::new(),
+        }
+    }
+}
+
+impl<T: Clone> Layered<T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.base.len() + self.overlay.len()
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.base.is_empty() && self.overlay.is_empty()
+    }
+
+    #[inline]
+    fn get(&self, idx: usize) -> &T {
+        let b = self.base.len();
+        if idx < b {
+            &self.base[idx]
+        } else {
+            &self.overlay[idx - b]
+        }
+    }
+
+    #[inline]
+    fn get_mut(&mut self, idx: usize) -> &mut T {
+        let b = self.base.len();
+        if idx < b {
+            // Copy-on-write: promote the shared base to a private copy so we can
+            // mutate element `idx`. Cheap and one-shot per arena (subsequent base
+            // mutations reuse the now-owned copy).
+            &mut Arc::make_mut(&mut self.base)[idx]
+        } else {
+            &mut self.overlay[idx - b]
+        }
+    }
+
+    /// Append `data`, returning its 0-based index. Appends always land in the
+    /// owned overlay, so they never disturb the shared base.
+    #[inline]
+    fn push(&mut self, data: T) -> usize {
+        let idx = self.len();
+        self.overlay.push(data);
+        idx
+    }
+
+    /// Fold the overlay into the base so the whole store can subsequently be
+    /// shared read-only via [`Layered::shared_clone`].
+    fn freeze(&mut self) {
+        if !self.overlay.is_empty() {
+            let base = Arc::make_mut(&mut self.base);
+            base.append(&mut self.overlay);
+        }
+    }
+
+    /// Share the (frozen) base with a fresh empty overlay — an `Arc` refcount
+    /// bump, no element copies. Requires [`Layered::freeze`] to have run.
+    fn shared_clone(&self) -> Self {
+        debug_assert!(
+            self.overlay.is_empty(),
+            "shared_clone requires a frozen arena (empty overlay)"
+        );
+        Self {
+            base: Arc::clone(&self.base),
+            overlay: Vec::new(),
+        }
+    }
 }
 
 /// Backing data for each [`TypeId`]. One variant per Go type kind.
@@ -138,20 +234,17 @@ impl TypeArena {
 
     /// Insert `data` and return a stable [`TypeId`] pointing to it.
     pub fn alloc(&mut self, data: TypeData) -> TypeId {
-        self.types.push(data);
         // Index is 1-based so Option<TypeId> can use 0 as the niche.
-        let raw = self.types.len() as u32;
+        let raw = (self.types.push(data) + 1) as u32;
         TypeId(NonZeroU32::new(raw).expect("arena index never 0"))
     }
 
     pub fn get(&self, id: TypeId) -> &TypeData {
-        let idx = (id.0.get() - 1) as usize;
-        &self.types[idx]
+        self.types.get((id.0.get() - 1) as usize)
     }
 
     pub fn get_mut(&mut self, id: TypeId) -> &mut TypeData {
-        let idx = (id.0.get() - 1) as usize;
-        &mut self.types[idx]
+        self.types.get_mut((id.0.get() - 1) as usize)
     }
 
     pub fn len(&self) -> usize {
@@ -161,6 +254,19 @@ impl TypeArena {
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
     }
+
+    /// Fold appended types into the shared base so this arena can be shared
+    /// read-only across packages (see [`TypeArena::shared_clone`]).
+    pub fn freeze(&mut self) {
+        self.types.freeze();
+    }
+
+    /// Clone sharing the frozen base (an `Arc` bump, no element copies).
+    pub fn shared_clone(&self) -> Self {
+        Self {
+            types: self.types.shared_clone(),
+        }
+    }
 }
 
 impl ObjectArena {
@@ -169,19 +275,16 @@ impl ObjectArena {
     }
 
     pub fn alloc(&mut self, data: ObjectData) -> ObjectId {
-        self.objects.push(data);
-        let raw = self.objects.len() as u32;
+        let raw = (self.objects.push(data) + 1) as u32;
         ObjectId(NonZeroU32::new(raw).expect("arena index never 0"))
     }
 
     pub fn get(&self, id: ObjectId) -> &ObjectData {
-        let idx = (id.0.get() - 1) as usize;
-        &self.objects[idx]
+        self.objects.get((id.0.get() - 1) as usize)
     }
 
     pub fn get_mut(&mut self, id: ObjectId) -> &mut ObjectData {
-        let idx = (id.0.get() - 1) as usize;
-        &mut self.objects[idx]
+        self.objects.get_mut((id.0.get() - 1) as usize)
     }
 
     pub fn len(&self) -> usize {
@@ -196,6 +299,18 @@ impl ObjectArena {
     pub fn ids(&self) -> impl Iterator<Item = ObjectId> + '_ {
         (0..self.len()).map(|i| ObjectId(NonZeroU32::new((i + 1) as u32).expect("object id")))
     }
+
+    /// Fold appended objects into the shared base (see [`ObjectArena::shared_clone`]).
+    pub fn freeze(&mut self) {
+        self.objects.freeze();
+    }
+
+    /// Clone sharing the frozen base (an `Arc` bump, no element copies).
+    pub fn shared_clone(&self) -> Self {
+        Self {
+            objects: self.objects.shared_clone(),
+        }
+    }
 }
 
 impl ScopeArena {
@@ -204,17 +319,16 @@ impl ScopeArena {
     }
 
     pub fn alloc(&mut self, data: Scope) -> ScopeId {
-        self.scopes.push(data);
-        let raw = self.scopes.len() as u32;
+        let raw = (self.scopes.push(data) + 1) as u32;
         ScopeId(NonZeroU32::new(raw).expect("arena index never 0"))
     }
 
     pub fn get(&self, id: ScopeId) -> &Scope {
-        &self.scopes[(id.0.get() - 1) as usize]
+        self.scopes.get((id.0.get() - 1) as usize)
     }
 
     pub fn get_mut(&mut self, id: ScopeId) -> &mut Scope {
-        &mut self.scopes[(id.0.get() - 1) as usize]
+        self.scopes.get_mut((id.0.get() - 1) as usize)
     }
 
     pub fn len(&self) -> usize {
@@ -224,6 +338,18 @@ impl ScopeArena {
     pub fn is_empty(&self) -> bool {
         self.scopes.is_empty()
     }
+
+    /// Fold appended scopes into the shared base (see [`ScopeArena::shared_clone`]).
+    pub fn freeze(&mut self) {
+        self.scopes.freeze();
+    }
+
+    /// Clone sharing the frozen base (an `Arc` bump, no element copies).
+    pub fn shared_clone(&self) -> Self {
+        Self {
+            scopes: self.scopes.shared_clone(),
+        }
+    }
 }
 
 impl PackageArena {
@@ -232,17 +358,16 @@ impl PackageArena {
     }
 
     pub fn alloc(&mut self, data: Package) -> PackageId {
-        self.packages.push(data);
-        let raw = self.packages.len() as u32;
+        let raw = (self.packages.push(data) + 1) as u32;
         PackageId(NonZeroU32::new(raw).expect("arena index never 0"))
     }
 
     pub fn get(&self, id: PackageId) -> &Package {
-        &self.packages[(id.0.get() - 1) as usize]
+        self.packages.get((id.0.get() - 1) as usize)
     }
 
     pub fn get_mut(&mut self, id: PackageId) -> &mut Package {
-        &mut self.packages[(id.0.get() - 1) as usize]
+        self.packages.get_mut((id.0.get() - 1) as usize)
     }
 
     pub fn len(&self) -> usize {
@@ -251,6 +376,18 @@ impl PackageArena {
 
     pub fn is_empty(&self) -> bool {
         self.packages.is_empty()
+    }
+
+    /// Fold appended packages into the shared base (see [`PackageArena::shared_clone`]).
+    pub fn freeze(&mut self) {
+        self.packages.freeze();
+    }
+
+    /// Clone sharing the frozen base (an `Arc` bump, no element copies).
+    pub fn shared_clone(&self) -> Self {
+        Self {
+            packages: self.packages.shared_clone(),
+        }
     }
 
     /// Return the package id at `index` (0-based arena position).

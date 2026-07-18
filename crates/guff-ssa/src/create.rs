@@ -495,22 +495,39 @@ pub fn ensure_package_member(prog: &mut Program, obj: ObjectId) -> Option<Value>
     prog.packages.get(ssa_pkg).objects.get(&obj).copied()
 }
 
-/// Type packages referenced by objects in the arena (excluding `main`).
-pub fn imported_type_packages(
+/// Transitive import closure of `main_type_pkg` (excluding itself), via the
+/// package arena's recorded import edges (`Package.Imports()`).
+///
+/// This is O(reachable packages + edges), not O(all objects). With R24.3's
+/// shared export seed, the object arena holds the *union* of every root
+/// package's dependencies, so a naive full-arena scan returns hundreds of
+/// packages the target never imports — and eagerly creating shells + members
+/// for all of them dominated `buildir` (e.g. a 1-file Prometheus package took
+/// >7s). Walking only the actual import closure restricts the work to what the
+/// package can reference. Any stray reference outside the closure still resolves
+/// lazily via [`ensure_package_member`] / `object_method`.
+pub fn imported_type_packages_closure(
     prog: &Program,
     main_type_pkg: TypePackageId,
 ) -> Vec<TypePackageId> {
     use std::collections::HashSet;
 
-    let mut seen = HashSet::new();
-    for obj in prog.object_arena.ids() {
-        if let Some(pkg) = obj.pkg(&prog.object_arena) {
-            if pkg != main_type_pkg {
-                seen.insert(pkg);
+    let mut seen: HashSet<TypePackageId> = HashSet::new();
+    let mut out: Vec<TypePackageId> = Vec::new();
+    let mut stack: Vec<TypePackageId> =
+        prog.package_arena.get(main_type_pkg).imports().to_vec();
+    while let Some(p) = stack.pop() {
+        if p == main_type_pkg || !seen.insert(p) {
+            continue;
+        }
+        out.push(p);
+        for &imp in prog.package_arena.get(p).imports() {
+            if !seen.contains(&imp) {
+                stack.push(imp);
             }
         }
     }
-    seen.into_iter().collect()
+    out
 }
 
 /// Populates SSA members for imported packages (e.g. test stubs registered via
@@ -518,20 +535,30 @@ pub fn imported_type_packages(
 pub fn populate_imported_package_members(prog: &mut Program, main_type_pkg: TypePackageId) {
     use std::collections::{HashMap, HashSet};
 
-    // Group every arena object by its owning package in a single pass. The old
-    // code rescanned the entire object arena once per imported package *and*
+    // Restrict population to the target's *transitive import closure*. With the
+    // R24.3 shared export seed the object arena holds every root package's deps
+    // merged together, so materializing members for all of them made even a
+    // 1-file package's `buildir` take seconds (Prometheus full run: ~250s across
+    // 30 actions). Only packages the target actually imports can be referenced,
+    // and stray references still resolve lazily via `ensure_package_member`.
+    let closure: HashSet<TypePackageId> =
+        imported_type_packages_closure(prog, main_type_pkg)
+            .into_iter()
+            .collect();
+
+    // Group the relevant objects by owning package in a single arena pass. The
+    // old code rescanned the entire object arena once per imported package *and*
     // re-derived the package list per package (`imported_type_packages` itself
-    // scans all objects), making this O(packages × objects). On multi-package
-    // runs with a large shared type arena that dominated `buildir` (~80s on
-    // Prometheus `tsdb/...`). Grouping once is O(objects); `order` keeps the
-    // deterministic arena-id ordering the previous HashSet walk did not.
+    // scans all objects), making this O(packages × objects). Grouping once is
+    // O(objects); `order` keeps the deterministic arena-id ordering the previous
+    // HashSet walk did not.
     let mut order: Vec<TypePackageId> = Vec::new();
     let mut by_pkg: HashMap<TypePackageId, Vec<ObjectId>> = HashMap::new();
     for obj in prog.object_arena.ids() {
         let Some(pkg) = obj.pkg(&prog.object_arena) else {
             continue;
         };
-        if pkg == main_type_pkg {
+        if pkg == main_type_pkg || !closure.contains(&pkg) {
             continue;
         }
         by_pkg

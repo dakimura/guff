@@ -14,7 +14,7 @@ use guff_packages::TypecheckArtifacts;
 use guff_types::{Checker, Config, PackageId as TypePackageId, TypeCheckError};
 
 use crate::builder::build_package;
-use crate::create::{create_package, imported_type_packages, populate_imported_package_members, populate_package_members};
+use crate::create::{create_package, imported_type_packages_closure, populate_imported_package_members, populate_package_members};
 use crate::ids::PackageId;
 use crate::mode::BuilderMode;
 use crate::program::Program;
@@ -289,17 +289,17 @@ fn visit_packages<'a>(
     }
 }
 
-/// Creates SSA package shells for every package imported by `type_pkg`
-/// (transitively), without syntax or member population.
+/// Creates SSA package shells for every package `type_pkg` imports transitively,
+/// without syntax or member population.
 ///
-/// `imported_type_packages` returns every package that appears in the object
-/// arena (i.e. `type_pkg`'s transitive imports) regardless of which package is
-/// passed in. The previous recursive walk therefore rescanned the entire object
-/// arena once per package — O(packages × objects), which on a multi-package run
-/// with a large shared type arena (e.g. Prometheus `tsdb/...`) took ~80s per
-/// `buildir`. Scanning once and creating each shell directly is O(objects).
+/// Uses `imported_type_packages_closure`, which walks the recorded import edges
+/// (`Package.Imports()`) — O(reachable packages), not O(all objects). With
+/// R24.3's shared export seed the object arena holds the union of every root's
+/// dependencies, so the old `imported_type_packages` scan created shells for
+/// hundreds of unrelated packages; combined with member population that took
+/// seconds per `buildir` even for 1-file packages (Prometheus full run: ~250s).
 fn create_import_packages(prog: &mut Program, type_pkg: TypePackageId) {
-    for imp in imported_type_packages(prog, type_pkg) {
+    for imp in imported_type_packages_closure(prog, type_pkg) {
         if !prog.package_map.contains_key(&imp) {
             create_package(prog, imp);
         }
