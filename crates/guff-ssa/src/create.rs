@@ -516,28 +516,48 @@ pub fn imported_type_packages(
 /// Populates SSA members for imported packages (e.g. test stubs registered via
 /// `add_dependency_source`) so cross-package calls resolve during `buildir`.
 pub fn populate_imported_package_members(prog: &mut Program, main_type_pkg: TypePackageId) {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
-    let mut seen = HashSet::new();
-    let mut stack = imported_type_packages(prog, main_type_pkg);
-    while let Some(imp) = stack.pop() {
-        if !seen.insert(imp) {
+    // Group every arena object by its owning package in a single pass. The old
+    // code rescanned the entire object arena once per imported package *and*
+    // re-derived the package list per package (`imported_type_packages` itself
+    // scans all objects), making this O(packages × objects). On multi-package
+    // runs with a large shared type arena that dominated `buildir` (~80s on
+    // Prometheus `tsdb/...`). Grouping once is O(objects); `order` keeps the
+    // deterministic arena-id ordering the previous HashSet walk did not.
+    let mut order: Vec<TypePackageId> = Vec::new();
+    let mut by_pkg: HashMap<TypePackageId, Vec<ObjectId>> = HashMap::new();
+    for obj in prog.object_arena.ids() {
+        let Some(pkg) = obj.pkg(&prog.object_arena) else {
+            continue;
+        };
+        if pkg == main_type_pkg {
             continue;
         }
-        if let Some(&ssa_pkg) = prog.package_map.get(&imp) {
-            let existing: HashSet<ObjectId> =
-                prog.packages.get(ssa_pkg).objects.keys().copied().collect();
-            let objects: Vec<ObjectId> = prog
-                .object_arena
-                .ids()
-                .filter(|obj| obj.pkg(&prog.object_arena) == Some(imp))
-                .filter(|obj| !existing.contains(obj))
-                .filter(|obj| is_package_level_object(prog, *obj))
-                .collect();
-            for obj in objects {
-                member_from_object(prog, ssa_pkg, obj);
-            }
+        by_pkg
+            .entry(pkg)
+            .or_insert_with(|| {
+                order.push(pkg);
+                Vec::new()
+            })
+            .push(obj);
+    }
+
+    for imp in order {
+        let Some(&ssa_pkg) = prog.package_map.get(&imp) else {
+            continue;
+        };
+        let existing: HashSet<ObjectId> =
+            prog.packages.get(ssa_pkg).objects.keys().copied().collect();
+        let objects: Vec<ObjectId> = by_pkg
+            .remove(&imp)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|obj| !existing.contains(obj))
+            .filter(|obj| is_package_level_object(prog, *obj))
+            .collect();
+        for obj in objects {
+            member_from_object(prog, ssa_pkg, obj);
         }
-        stack.extend(imported_type_packages(prog, imp));
     }
 }

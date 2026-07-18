@@ -65,6 +65,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "buildir requires type artifacts (load with types mode)".to_string())?
         .snapshot();
     let fset = pass.fset().clone();
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t0 = timing.then(std::time::Instant::now);
     let built = build_package_for_analysis(
         artifacts,
         pass.files(),
@@ -72,6 +74,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         BuilderMode::SANITY_CHECK_FUNCTIONS,
     )
     .map_err(|e| format!("buildir: {e}"))?;
+    if let Some(t0) = t0 {
+        let el = t0.elapsed().as_secs_f64();
+        if el > 1.0 {
+            eprintln!(
+                "guff: buildir {} {:.2}s ({} files)",
+                pass.pkg().pkg_path,
+                el,
+                pass.files().len(),
+            );
+        }
+    }
 
     let src_funcs = collect_src_funcs(&built.prog, built.pkg);
     Ok(Some(Box::new(BuildIrResult {

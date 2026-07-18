@@ -40,6 +40,48 @@ struct ActionState {
     encoded_facts: Vec<EncodedFact>,
 }
 
+/// Debug-only per-analyzer wall-time + action-count accumulator, printed when
+/// `GUFF_DEBUG_CACHE` is set. Times sum across worker threads so the total can
+/// exceed wall-clock; the point is the *relative* cost and the action count
+/// (which reveals fact-producing analyzers fanning out over dependencies).
+static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, usize)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn timing_enabled() -> bool {
+    std::env::var_os("GUFF_DEBUG_CACHE").is_some()
+}
+
+fn record_analyzer_time(name: &'static str, nanos: u128) {
+    let mut m = ANALYZER_TIMING.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = m.entry(name).or_insert((0, 0));
+    entry.0 += nanos;
+    entry.1 += 1;
+}
+
+/// Print and reset the per-analyzer timing table (top entries by total time).
+pub(crate) fn report_analyzer_timing() {
+    if !timing_enabled() {
+        return;
+    }
+    let mut m = ANALYZER_TIMING.lock().unwrap_or_else(|e| e.into_inner());
+    if m.is_empty() {
+        return;
+    }
+    let mut rows: Vec<(&'static str, u128, usize)> =
+        m.iter().map(|(k, (t, c))| (*k, *t, *c)).collect();
+    rows.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
+    eprintln!("guff: per-analyzer analyze time (summed across workers, top 20):");
+    for (name, nanos, count) in rows.iter().take(20) {
+        eprintln!(
+            "  {:>30} {:>9.2}s  {:>6} actions",
+            name,
+            *nanos as f64 / 1e9,
+            count,
+        );
+    }
+    m.clear();
+}
+
 impl std::fmt::Debug for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Action")
@@ -127,21 +169,48 @@ impl Action {
         let types_sizes = self.package.types_sizes.unwrap_or_else(default_sizes);
         let mut diagnostics = Vec::new();
 
-        let mut pass = PassInput {
-            analyzer: self.analyzer,
-            fset: &fset,
-            files: &self.package.syntax,
-            pkg: &self.package,
-            types_info: self.package.types_info.as_ref(),
-            types_sizes,
-            diagnostics: &mut diagnostics,
-            result_of,
-            facts: &mut facts,
-            settings: Arc::clone(&self.settings),
-        }
-        .build();
+        // Isolate linter panics: a bug in one analyzer on one package must not
+        // unwind the rayon worker and abort the whole run (which surfaces as
+        // "lint worker exited without a result"). Catch the panic here and turn
+        // it into an ordinary action error, exactly as `Cargo.toml`'s
+        // `panic = "unwind"` note promises. Dependents see the error and skip.
+        let run_result = {
+            let mut pass = PassInput {
+                analyzer: self.analyzer,
+                fset: &fset,
+                files: &self.package.syntax,
+                pkg: &self.package,
+                types_info: self.package.types_info.as_ref(),
+                types_sizes,
+                diagnostics: &mut diagnostics,
+                result_of,
+                facts: &mut facts,
+                settings: Arc::clone(&self.settings),
+            }
+            .build();
 
-        let run_result = (self.analyzer.run)(&mut pass);
+            let start = timing_enabled().then(std::time::Instant::now);
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (self.analyzer.run)(&mut pass)
+            }));
+            if let Some(start) = start {
+                record_analyzer_time(self.analyzer.name, start.elapsed().as_nanos());
+            }
+            r
+        };
+        let run_result = match run_result {
+            Ok(result) => result,
+            Err(payload) => {
+                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                state.error = Some(format!(
+                    "analyzer {} panicked on {}: {}",
+                    self.analyzer.name,
+                    self.package.pkg_path,
+                    panic_message(&payload),
+                ));
+                return;
+            }
+        };
         let encoded = encode_action_facts(&facts, &self.package);
         if let Some(cache) = &self.cache {
             if !self.analyzer.fact_types.is_empty() {
@@ -226,6 +295,17 @@ fn inherit_facts(
             &dep.package.pkg_path,
             dst,
         );
+    }
+}
+
+/// Extract a human-readable message from a caught panic payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 
@@ -385,6 +465,7 @@ pub fn analyze_with_settings(
     }
 
     exec_all(&roots, sequential, concurrency);
+    report_analyzer_timing();
 
     for act in &all {
         if !act.is_root.load(Ordering::Relaxed) {

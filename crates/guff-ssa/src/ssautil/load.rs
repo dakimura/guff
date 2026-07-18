@@ -291,20 +291,17 @@ fn visit_packages<'a>(
 
 /// Creates SSA package shells for every package imported by `type_pkg`
 /// (transitively), without syntax or member population.
+///
+/// `imported_type_packages` returns every package that appears in the object
+/// arena (i.e. `type_pkg`'s transitive imports) regardless of which package is
+/// passed in. The previous recursive walk therefore rescanned the entire object
+/// arena once per package — O(packages × objects), which on a multi-package run
+/// with a large shared type arena (e.g. Prometheus `tsdb/...`) took ~80s per
+/// `buildir`. Scanning once and creating each shell directly is O(objects).
 fn create_import_packages(prog: &mut Program, type_pkg: TypePackageId) {
-    let mut seen = HashSet::new();
-    create_imports_rec(prog, type_pkg, &mut seen);
-}
-
-fn create_imports_rec(prog: &mut Program, type_pkg: TypePackageId, seen: &mut HashSet<TypePackageId>) {
-    if !seen.insert(type_pkg) {
-        return;
-    }
-    let imports = imported_type_packages(prog, type_pkg);
-    for imp in imports {
+    for imp in imported_type_packages(prog, type_pkg) {
         if !prog.package_map.contains_key(&imp) {
             create_package(prog, imp);
         }
-        create_imports_rec(prog, imp, seen);
     }
 }
