@@ -77,6 +77,25 @@ struct PkgState<'a, 'imp, 'u, 'ctx> {
     typs: Vec<Option<TypeId>>,
     later: Vec<Deferred>,
     ifaces: Vec<TypeId>,
+    /// Objects assigned a provisional [`FakeFileSet`] position during this
+    /// import. Their `pos` fields are rewritten to real `FileSet` offsets in
+    /// the finalize step (see `set_obj_pos` and the end of
+    /// `read_unified_package`). Recorded explicitly rather than by arena index
+    /// range because `do_pkg` can recursively import other packages mid-decode,
+    /// interleaving their (already-finalized) objects into this arena.
+    prov_objs: Vec<ObjectId>,
+}
+
+impl PkgState<'_, '_, '_, '_> {
+    /// Set an object's declaration position to a provisional [`FakeFileSet`]
+    /// handle and remember it so the finalize step can rewrite it to the real
+    /// `FileSet` offset once every file's size is known.
+    fn set_obj_pos(&mut self, obj: ObjectId, p: u32) {
+        obj.set_pos(self.ctx.objects, p);
+        if p != 0 {
+            self.prov_objs.push(obj);
+        }
+    }
 }
 
 struct Reader<'dec> {
@@ -111,6 +130,7 @@ pub fn read_unified_package<'a, 'imp, 'u, 'ctx>(
         typs: vec![None; n_typ],
         later: Vec::new(),
         ifaces: Vec::new(),
+        prov_objs: Vec::new(),
     };
 
     if lookup_basic(state.ctx.types, BasicKind::Int).is_none() {
@@ -183,7 +203,15 @@ pub fn read_unified_package<'a, 'imp, 'u, 'ctx>(
         interface_compute_typeset(state.ctx.types, state.ctx.objects, state.ctx.packages, iface);
     }
 
-    state.fake.set_lines();
+    // Register the fake files (sized to their actual line counts) in the shared
+    // FileSet, then rewrite every provisional object position to the real
+    // offset now that the per-file bases are known.
+    let bases = state.fake.finalize();
+    for obj in std::mem::take(&mut state.prov_objs) {
+        let prov = obj.pos(state.ctx.objects);
+        let real = state.fake.translate(&bases, prov);
+        obj.set_pos(state.ctx.objects, real);
+    }
 
     let root_id = *state
         .imports
@@ -335,7 +363,7 @@ fn read_object(
             }
             let typ = r.read_typ(decoder, state);
             let tn = new_type_name(state.ctx.objects, obj_name, None);
-            tn.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(tn, p);
             if let Some(pkg) = obj_pkg {
                 tn.set_pkg(state.ctx.objects, pkg);
             }
@@ -350,7 +378,7 @@ fn read_object(
             let typ = r.read_typ(decoder, state);
             let val = r.dec.value();
             let c = new_const(state.ctx.objects, obj_name, typ, val);
-            c.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(c, p);
             if let Some(pkg) = obj_pkg {
                 c.set_pkg(state.ctx.objects, pkg);
             }
@@ -361,7 +389,7 @@ fn read_object(
             let tparams = r.type_param_names(decoder, state);
             let sig = r.signature(decoder, state, None, &[], &tparams);
             let f = new_func(state.ctx.objects, obj_name, Some(sig));
-            f.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(f, p);
             if let Some(pkg) = obj_pkg {
                 f.set_pkg(state.ctx.objects, pkg);
             }
@@ -371,7 +399,7 @@ fn read_object(
             let scope = pkg_scope(state.ctx, obj_pkg);
             let p = r.pos(decoder, state);
             let tn = new_type_name(state.ctx.objects, obj_name, None);
-            tn.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(tn, p);
             if let Some(pkg) = obj_pkg {
                 tn.set_pkg(state.ctx.objects, pkg);
             }
@@ -409,7 +437,7 @@ fn read_object(
             let typ = r.read_typ(decoder, state);
             let v = new_var(state.ctx.objects, obj_name, typ);
             set_var_kind(state.ctx.objects, v, VarKind::Package);
-            v.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(v, p);
             if let Some(pkg) = obj_pkg {
                 v.set_pkg(state.ctx.objects, pkg);
             }
@@ -629,7 +657,7 @@ impl<'dec> Reader<'dec> {
             let tag = self.dec.string();
             let embedded = self.dec.bool();
             let f = new_field(state.ctx.objects, name, ftyp, embedded);
-            f.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(f, p);
             if let Some(pkg) = pkg {
                 f.set_pkg(state.ctx.objects, pkg);
             }
@@ -665,7 +693,7 @@ impl<'dec> Reader<'dec> {
             let (pkg, name) = self.selector(state);
             let sig = self.signature(decoder, state, None, &[], &[]);
             let f = new_func(state.ctx.objects, name, Some(sig));
-            f.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(f, p);
             if let Some(pkg) = pkg {
                 f.set_pkg(state.ctx.objects, pkg);
             }
@@ -736,7 +764,7 @@ impl<'dec> Reader<'dec> {
         let (pkg, name) = self.local_ident(state);
         let typ = self.read_typ(decoder, state);
         let par = new_param(state.ctx.objects, name, typ);
-        par.set_pos(state.ctx.objects, p);
+        state.set_obj_pos(par, p);
         if let Some(pkg) = pkg {
             par.set_pkg(state.ctx.objects, pkg);
         }
@@ -773,7 +801,7 @@ impl<'dec> Reader<'dec> {
             let p = self.pos(decoder, state);
             let (pkg, name) = self.local_ident(state);
             let tn = new_type_name(state.ctx.objects, name, None);
-            tn.set_pos(state.ctx.objects, p);
+            state.set_obj_pos(tn, p);
             if let Some(pkg) = pkg {
                 tn.set_pkg(state.ctx.objects, pkg);
             }
@@ -804,7 +832,7 @@ impl<'dec> Reader<'dec> {
         let recv = self.param(decoder, state);
         let sig = self.signature(decoder, state, Some(recv), &rparams, &[]);
         let f = new_func(state.ctx.objects, name, Some(sig));
-        f.set_pos(state.ctx.objects, p);
+        state.set_obj_pos(f, p);
         if let Some(pkg) = pkg {
             f.set_pkg(state.ctx.objects, pkg);
         }

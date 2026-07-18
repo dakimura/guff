@@ -109,7 +109,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 ## 3. 現在の状況（正直なスナップショット）
 
-> 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）— R25.1（アリーナフットプリント）完了。layered CoW アリーナで export seed を全 pkg 共有し、フル `guff run --no-cache ./...` が **83s→11.9s / peak 56GB→5.8GB**。残: §8 R25 の DEFERRED（R25.2 correctness panic・並列時 position 破損、R25.3 go list cold）。
+> 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）— R25.1（アリーナフットプリント、layered CoW で export seed を全 pkg 共有、**83s→11.9s / peak 56GB→5.8GB**）・R25.2（位置破損 = 決定論的 u32 オーバーフロー。fake export-data ファイルを実サイズ化して共有 fset の Pos 空間を u32 内に収め、依存ファイルへの誤マップ **226→0**・診断 234→2671）完了。残: §8 R25 の DEFERRED（隔離済み非致命 panic・govet unreachable の順序依存・R25.3 go list cold）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -401,7 +401,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **DEFERRED（R24.2 本体）**: 真のファイル粒度インクリメンタル型チェック。Checker はパッケージ全体；cross-file defs/methods/inits のため部分 `check_files` は不正。`typecheck_package_with_seed` に `// DEFERRED(R24.2)` コメントあり。
 - **テスト**: objectpath / fact_codec / facts_put_get + `export_seed_roundtrip` + `golist_cache_key_*` / `export_paths_exist_*` + packages/runner 回帰。
 
-#### R25. Prometheus スケール修正と残り性能（大規模リポジトリ）🟡 R25.1 完了・R25.2/3 残 (2026-07-18)
+#### R25. Prometheus スケール修正と残り性能（大規模リポジトリ）🟢 R25.1/R25.2 完了・R25.3 残 (2026-07-18)
 - **なぜ**: フル `guff run ./...`（Prometheus 113 pkg）が >15分で未完 / OOM。実態は OOM だけでなく ①linter panic 非隔離で run 全滅 ②解析フェーズの二次コスト。128GB マシンでは OOM せず peak ~49GB。
 - **完了**:
   1. **linter panic 隔離** — `guff-runner::action::execute` の `(analyzer.run)()` を `catch_unwind` で包み panic を action エラー化。1 linter の panic が rayon ワーカーごと巻き戻り「lint worker exited without a result」で run 全滅していたのを解消（`Cargo.toml` の `panic = "unwind"` 注記が謳う挙動を実装で復元）。
@@ -414,11 +414,15 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   6. **copylocks 読み取り専用プローブ** — `lockpath::find_method_ro`（`&TypeArena` のみ）で一般的な lock 形状（named 型・埋め込み struct）はクローン無しで method-set 判定。埋め込み interface / generic instance のみ従来の clone にフォールバック。
   7. **action result の即時解放** — `guff-runner::exec_all` で各 non-root action の result を最後の依存者完了時点で drop（旧: run 完了まで全 result 保持）。逆依存カウントで管理。
   - **結果（フル `guff run --no-cache ./...`、Prometheus 113 pkg、apples-to-apples）**: **83s→11.9s（7×）**、peak RSS **56GB→5.8GB（9.6×）**。typecheck 8.3s→1.8s、analyze 52s→4.2s、buildir(summed) 251s→0.9s、copylocks 179s→0.05s。ワークスペース **2663 tests green**、`-j 1` 逐次実行で HEAD と**バイト一致**（tsdb subtree 771 診断）。
+- **完了（R25.2、2026-07-18 続き）— 位置破損は「並列競合」ではなく決定論的 u32 オーバーフローだった**:
+  8. **fake export-data ファイルの実サイズ化（本命の修正）** — フル `./...`（Prometheus）で診断の **226/234 件が go/pkg/mod・GOROOT の依存ファイルへ誤マップ**し列番号が巨大化（例 `:60286`）していた。DEFERRED の「並列時の共有 FileSet / position offset 競合」という仮説は**誤り**。`RAYON_NUM_THREADS=1` の完全逐次でも全件破損して再現する（`-j` は action DAG のみ逐次化し typecheck の `par_iter` は常に並列なので切り分けになっていなかった）。真因は **`guff-types` が位置を `u32`（`ObjectMeta::pos` ほか）で保持する一方、`FakeFileSet`（`guff-exportdata`）が export data の依存ファイル 1 個につき `MAX_LINES=65536` Pos を予約**し、共有 `FileSet` の base が **~19,446 ファイル追加時点で `u32::MAX`(4,294,967,296) を突破**（プローブで実測）。それ以降に parse される prometheus ソース（base 55億）の位置が `u32` へ切り詰められ、低位の依存ファイル範囲に落ちていた。tsdb 単体は base が u32 内に収まり正常だったため「バイト一致」に見えていた。**修正**: `FakeFileSet` を、decode 中は `file_index*STRIDE+line`（`STRIDE=MAX_LINES+1`）の**暫定ハンドル**を返し、`finalize()` で各ファイルを**実際の最大行数ちょうど**のサイズで共有 fset に登録、`translate()` で暫定→実 offset に変換する方式に変更。暫定を付与したオブジェクトは `PkgState::prov_objs` に記録し finalize で書き戻す（`do_pkg` の再帰 import が同 arena にオブジェクトを差し込むため arena インデックス範囲では不可）。共有 fset の Pos 空間が ~5.5G→~50M に縮小し u32 に収まる。
+  - **結果（フル `guff run --no-cache ./...`、Prometheus）**: 依存ファイルへの誤マップ **226→0**、診断総数 **234→2671**（破損で誤ファイルに埋もれていた本来の診断が正しく出るように）。ST1000 等が正しい `file:14:1` を指す。**並列 / `-j 1` / `RAYON_NUM_THREADS=1` の 3 モードで 2671 件一致**（残差 1 件は govet unreachable が別の有効行を選ぶ既存の解析器順序依存で、u32 破損とは無関係）。tsdb subtree は 771 件で修正前とバイト一致（退行なし）。性能/メモリは **10.88s / peak 5.73GB**（R25.1 の 11.9s / 5.8GB から微改善）。ワークスペース **tests green**（exit 0）。
 - **DEFERRED（次セッションへの引き継ぎ）**:
-  - **R25.2 correctness / 位置破損 本体** — ① Prometheus コードで `guff-types/src/signature.rs:164`（`expected Signature, got Discriminant(11)/(0)`）と `guff-ssa/src/builder/expr.rs:304`（ident resolution failed）が発火（隔離され非致命）。② **並列 `./...` 実行で診断の file:line:col が破損**（prometheus source の診断が GOROOT / go mod cache のファイルに誤マップ、列番号が巨大なグローバル offset に化ける）。`-j 1` 逐次実行では正常（HEAD/新実装ともバイト一致）→ **並列時の共有 FileSet / position offset 競合**が疑われる。HEAD でも再現する既存バグ。要 minimal 再現。
+  - **R25.2 残・隔離済み非致命 panic** — Prometheus コードで `guff-types/src/signature.rs:164`（`expected Signature, got Discriminant(11)/(0)`）と `guff-ssa/src/builder/expr.rs:304`（ident resolution failed）が発火（`catch_unwind` で隔離され run は継続、位置破損とは別問題）。要 minimal 再現。
+  - **govet unreachable の順序依存** — `prompb/io/prometheus/client/decoder.go` の unreachable 診断が並列時 `233:4`・逐次時 `334:3` と別の有効行を選ぶ（どちらも正しいソース位置）。解析器の走査順の非決定性。優先度低。
   - **R25.3 `go list` cold 23s** — warm は 1.3s（OS キャッシュ）。golist ディスクキャッシュ（R24.4）は cold 初回には効かない。優先度低。
-- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。RSS は `/usr/bin/time -l`。
-- **テスト**: `cargo test --workspace`（2663 green）+ `-j 1` diff で HEAD 診断パリティ。
+- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。RSS は `/usr/bin/time -l`。base 溢れの切り分けは `position.rs::add_file` に一時プローブ（`next_base > u32::MAX` で eprintln）。
+- **テスト**: `cargo test --workspace`（green）+ `-j 1` / `RAYON_NUM_THREADS=1` diff で 3 モード一致確認。
 
 ---
 
