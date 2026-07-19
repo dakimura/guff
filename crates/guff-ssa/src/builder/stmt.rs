@@ -1342,7 +1342,7 @@ impl<'a> Builder<'a> {
             // A partial literal of a non-zero location: clear it first (the zero
             // value of `typ`, since `addr` holds a `*typ`). (Go: memclear.)
             let zero = self.prog.emit_const(None, typ);
-            let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace });
+            let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
             sb.store(loc, zero);
             is_zero = true;
         }
@@ -1380,6 +1380,7 @@ impl<'a> Builder<'a> {
                 addr: crate::value::Value::Instr(faddr),
                 typ: ftype,
                 pos,
+                expr: None,
             });
             self.assign(loc, value_expr, is_zero, Some(sb));
         }
@@ -1438,7 +1439,7 @@ impl<'a> Builder<'a> {
             if !is_zero && cl.elts.len() as i64 != alen {
                 // A partial literal of a non-zero location: clear it first.
                 let zero = self.prog.emit_const(None, typ);
-                let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace });
+                let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
                 sb.store(loc, zero);
             }
             (addr, elem)
@@ -1464,7 +1465,7 @@ impl<'a> Builder<'a> {
             let iaddr = crate::emit::emit_index_addr(
                 self.prog, self.func_id, block, array, index, ptr_elem, pos,
             );
-            let loc = Box::new(crate::lvalue::Address { addr: iaddr, typ: elem, pos });
+            let loc = Box::new(crate::lvalue::Address { addr: iaddr, typ: elem, pos, expr: None });
             if is_slice {
                 self.assign(loc, value_expr, true, None);
             } else {
@@ -1488,7 +1489,7 @@ impl<'a> Builder<'a> {
                 }),
                 cl.lbrace,
             );
-            let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace });
+            let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
             sb.store(loc, crate::value::Value::Instr(sid));
         }
     }
@@ -1545,7 +1546,7 @@ impl<'a> Builder<'a> {
             self.assign(loc, &kv.value, true, None);
         }
 
-        let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace });
+        let loc = Box::new(crate::lvalue::Address { addr, typ, pos: cl.lbrace, expr: None });
         sb.store(loc, m);
     }
 

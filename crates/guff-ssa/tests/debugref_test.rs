@@ -65,8 +65,8 @@ fn test_debugrefs_emitted_in_debug_mode() {
     let (prog, fn_id, fset) = build(BuilderMode::GLOBAL_DEBUG);
     let f = prog.functions.get(fn_id);
 
-    // Collect DebugRefs. Expect three: `x` (RHS var read), the `x + 1`
-    // BinaryExpr, and `x` again in the return.
+    // Collect DebugRefs. Expect: `x` (RHS var read), BinaryExpr `x + 1`,
+    // store-DebugRef for LHS `x`, and `x` again in the return.
     let mut var_lines = Vec::new();
     let mut binop_seen = false;
     for (id, data) in f.instrs.iter() {
@@ -87,7 +87,11 @@ fn test_debugrefs_emitted_in_debug_mode() {
 
     assert!(binop_seen, "expected a DebugRef for the `x + 1` BinaryExpr");
     var_lines.sort();
-    assert_eq!(var_lines, vec![3, 4], "expected var-`x` DebugRefs on lines 3 and 4");
+    assert_eq!(
+        var_lines,
+        vec![3, 3, 4],
+        "expected var-`x` DebugRefs: RHS read + store on line 3, return on line 4"
+    );
 }
 
 #[test]

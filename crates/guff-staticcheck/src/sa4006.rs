@@ -4,14 +4,14 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, Expr, Ident, IncDecStmt, Stmt};
+use guff::ast::{Expr, Ident};
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{object_of, refers_to};
 use guff_analysis::passes::{buildir, inspect};
-use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Extract, InstrData};
 use guff_ssa::value::Value;
+
 use crate::render::render_expr;
 
 fn has_use(func: &guff_ssa::function::Function, v: Value) -> bool {
@@ -24,7 +24,9 @@ fn has_use(func: &guff_ssa::function::Function, v: Value) -> bool {
                 }
             }
             InstrData::DebugRef(_) => {}
-            InstrData::Store(_) => {}
+            // Match upstream: any non-DebugRef/Phi referrer (including Store) counts.
+            // Local unused assigns still fire because lifting removes the spill Store
+            // when the value stays in registers; heap field stores correctly count as uses.
             _ => return true,
         }
     }
@@ -37,161 +39,108 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4006 requires inspect analyzer".to_string())?
         .clone();
 
+    let Some(ir) = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer()) else {
+        return Ok(None);
+    };
+
     let mut pending = Vec::new();
-    if let Some(ir) = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer()) {
-        inspect.preorder(pass.files(), |node| {
-            let NodeRef::AssignStmt(assign) = node else {
-                return;
-            };
-        let func = ir.src_funcs.iter().find_map(|&fid| {
-            let f = ir.prog.functions.get(fid);
-            assign
-                .rhs
-                .first()
-                .and_then(|e| f.value_for_expr(e))
-                .or_else(|| assign.lhs.first().and_then(|e| f.value_for_expr(e)))
-                .map(|_| f)
-        });
-        let Some(func) = func else {
-            return;
-        };
-        if assign.lhs.len() > 1 && assign.rhs.len() == 1 {
-            if let Some((v, _)) = func.value_for_expr(&assign.rhs[0]) {
-                for rid in filter_debug(referrers(func, v), func) {
-                    if let InstrData::Extract(Extract { index, .. }) = func.instrs.get(rid) {
-                        let lhs = &assign.lhs[*index];
-                        if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
-                            continue;
+    inspect.preorder(pass.files(), |node| {
+        match node {
+            NodeRef::IncDecStmt(inc) => {
+                let func = ir.src_funcs.iter().find_map(|&fid| {
+                    let f = ir.prog.functions.get(fid);
+                    f.value_for_expr(&inc.x).map(|_| f)
+                });
+                let Some(func) = func else {
+                    return;
+                };
+                let Some((v, _)) = func.value_for_expr(&inc.x) else {
+                    return;
+                };
+                if matches!(v, Value::Const(_)) {
+                    return;
+                }
+                if !has_use(func, v) {
+                    pending.push((
+                        inc.tok_pos.0 as u32,
+                        format!("this value of {} is never used", render_expr(&inc.x)),
+                    ));
+                }
+            }
+            NodeRef::AssignStmt(assign) => {
+                let func = ir.src_funcs.iter().find_map(|&fid| {
+                    let f = ir.prog.functions.get(fid);
+                    assign
+                        .rhs
+                        .first()
+                        .and_then(|e| f.value_for_expr(e))
+                        .or_else(|| assign.lhs.first().and_then(|e| f.value_for_expr(e)))
+                        .map(|_| f)
+                });
+                let Some(func) = func else {
+                    return;
+                };
+                if assign.lhs.len() > 1 && assign.rhs.len() == 1 {
+                    if let Some((v, _)) = func.value_for_expr(&assign.rhs[0]) {
+                        for rid in filter_debug(referrers(func, v), func) {
+                            if let InstrData::Extract(Extract { index, .. }) = func.instrs.get(rid)
+                            {
+                                let lhs = &assign.lhs[*index];
+                                if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
+                                    continue;
+                                }
+                                if !has_use(func, Value::Instr(rid)) {
+                                    pending.push((
+                                        assign.tok_pos.0 as u32,
+                                        format!(
+                                            "this value of {} is never used",
+                                            render_expr(lhs)
+                                        ),
+                                    ));
+                                }
+                            }
                         }
-                        if !has_use(func, Value::Instr(rid)) {
-                            pending.push((
-                                assign.tok_pos.0 as u32,
-                                format!("this value of {} is never used", render_expr(lhs)),
-                            ));
-                        }
+                    }
+                    return;
+                }
+                if assign.lhs.len() != assign.rhs.len() {
+                    return;
+                }
+                for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
+                    if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
+                        continue;
+                    }
+                    let val = func
+                        .value_for_expr(rhs)
+                        .map(|(v, _)| v)
+                        .or_else(|| {
+                            if assign.tok != Some(Token::ASSIGN) {
+                                func.value_for_expr(lhs).map(|(v, _)| v)
+                            } else {
+                                None
+                            }
+                        });
+                    let Some(v) = val else {
+                        continue;
+                    };
+                    if matches!(v, Value::Const(_)) {
+                        continue;
+                    }
+                    if !has_use(func, v) {
+                        pending.push((
+                            assign.tok_pos.0 as u32,
+                            format!("this value of {} is never used", render_expr(lhs)),
+                        ));
                     }
                 }
             }
-            return;
-        }
-        if assign.lhs.len() != assign.rhs.len() {
-            return;
-        }
-        for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
-            if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
-                continue;
-            }
-            let val = func
-                .value_for_expr(rhs)
-                .map(|(v, _)| v)
-                .or_else(|| {
-                    if assign.tok != Some(Token::ASSIGN) {
-                        func.value_for_expr(lhs).map(|(v, _)| v)
-                    } else {
-                        None
-                    }
-                });
-            let Some(v) = val else {
-                continue;
-            };
-            if matches!(v, Value::Const(_)) {
-                continue;
-            }
-            if !has_use(func, v) {
-                pending.push((
-                    assign.tok_pos.0 as u32,
-                    format!("this value of {} is never used", render_expr(lhs)),
-                ));
-            }
-        }
-        });
-        for (pos, msg) in &pending {
-            pass.report_unless_generated(*pos, msg.clone());
-        }
-        pending.clear();
-    }
-
-    let mut ast_pending = Vec::new();
-    // Collect ForStmt post IncDec positions so we don't flag loop increments
-    // (`for ; i >= 0; i--`) — the updated value is read by the condition / after break.
-    let mut for_post_incs = std::collections::HashSet::new();
-    inspect.preorder(pass.files(), |node| {
-        let NodeRef::ForStmt(fs) = node else {
-            return;
-        };
-        if let Some(Stmt::IncDecStmt(inc)) = fs.post.as_deref() {
-            for_post_incs.insert(inc.tok_pos.0 as u32);
+            _ => {}
         }
     });
-    inspect.preorder(pass.files(), |node| {
-        let NodeRef::IncDecStmt(inc) = node else {
-            return;
-        };
-        if for_post_incs.contains(&(inc.tok_pos.0 as u32)) {
-            return;
-        }
-        let Expr::Ident(id) = &inc.x else {
-            return;
-        };
-        if object_of(pass, id).is_none() {
-            return;
-        };
-        if ident_used_before(pass, id, inc.tok_pos.0 as u32) {
-            return;
-        }
-        ast_pending.push((
-            inc.tok_pos.0 as u32,
-            format!("this value of {} is never used", render_expr(&inc.x)),
-        ));
-    });
-    for (pos, msg) in ast_pending {
+    for (pos, msg) in pending {
         pass.report_unless_generated(pos, msg);
     }
     Ok(None)
-}
-
-fn ident_used_before(pass: &Pass<'_>, id: &Ident, before: u32) -> bool {
-    let Some(obj) = object_of(pass, id) else {
-        return false;
-    };
-    let Some(inspect) = pass
-        .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .cloned()
-    else {
-        return false;
-    };
-    let mut used = false;
-    inspect.preorder(pass.files(), |node| {
-        if used {
-            return;
-        }
-        let pos = node_pos(node);
-        if pos >= before {
-            return;
-        }
-        if node_reads_obj(pass, node, obj) {
-            used = true;
-        }
-    });
-    used
-}
-
-fn node_pos(node: NodeRef<'_>) -> u32 {
-    match node {
-        NodeRef::AssignStmt(s) => s.tok_pos.0 as u32,
-        NodeRef::IncDecStmt(s) => s.tok_pos.0 as u32,
-        NodeRef::ExprStmt(s) => s.x.id() as u32,
-        _ => 0,
-    }
-}
-
-fn node_reads_obj(pass: &Pass<'_>, node: NodeRef<'_>, obj: guff_types::ObjectId) -> bool {
-    match node {
-        NodeRef::AssignStmt(AssignStmt { rhs, .. }) => rhs.iter().any(|e| refers_to(pass, e, obj)),
-        NodeRef::ExprStmt(es) => refers_to(pass, &es.x, obj),
-        NodeRef::IncDecStmt(IncDecStmt { x, .. }) => refers_to(pass, x, obj),
-        _ => false,
-    }
 }
 
 fn sa4006_analyzer_impl() -> Analyzer {
@@ -201,7 +150,7 @@ fn sa4006_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA4006",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), buildir::analyzer()],
         fact_types: vec![],
     }
 }

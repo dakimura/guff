@@ -4,6 +4,7 @@
 
 use crate::builder::Builder;
 use crate::value::Value;
+use guff::ast::Expr;
 use guff::Pos;
 use guff_types::TypeId;
 
@@ -57,18 +58,29 @@ pub struct Address {
     /// position of the source syntax that denotes this location, used as the
     /// position of stores through it. (Go: `address.pos`)
     pub pos: Pos,
+    /// Source syntax of the value (not address), for DebugRef in debug mode.
+    /// `None` for synthetic locations (e.g. composite-literal element slots).
+    /// (Go: `address.expr`)
+    pub expr: Option<Expr>,
 }
 
 impl LValue for Address {
     fn store(&self, b: &mut Builder, v: Value) {
         b.emit_store(self.addr, v, self.pos);
+        if let Some(expr) = &self.expr {
+            // store.Val is `v` (caller coerces for assignability).
+            b.emit_debug_ref(expr, v, false);
+        }
     }
 
     fn load(&self, b: &mut Builder) -> Value {
         b.emit_load(self.addr, self.typ)
     }
 
-    fn address(&self, _b: &mut Builder) -> Value {
+    fn address(&self, b: &mut Builder) -> Value {
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref(expr, self.addr, true);
+        }
         self.addr
     }
 
@@ -97,6 +109,9 @@ pub struct LazyAddress {
     pub typ: TypeId,
     /// Source position of the field selector, used for the store/load.
     pub pos: Pos,
+    /// Source syntax of the value (typically the field `Ident`), for DebugRef.
+    /// (Go: `lazyAddress.expr`)
+    pub expr: Option<Expr>,
 }
 
 impl LazyAddress {
@@ -114,7 +129,9 @@ impl LValue for LazyAddress {
     fn store(&self, b: &mut Builder, v: Value) {
         let addr = self.emit_addr(b);
         b.emit_store(addr, v, self.pos);
-        // DEFERRED vs go/ssa: the trailing DebugRef on the stored value.
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref(expr, v, false);
+        }
     }
 
     fn load(&self, b: &mut Builder) -> Value {
@@ -124,8 +141,11 @@ impl LValue for LazyAddress {
     }
 
     fn address(&self, b: &mut Builder) -> Value {
-        self.emit_addr(b)
-        // DEFERRED vs go/ssa: the trailing DebugRef on the address.
+        let addr = self.emit_addr(b);
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref(expr, addr, true);
+        }
+        addr
     }
 
     fn typ(&self) -> TypeId {
@@ -209,6 +229,8 @@ pub struct LazyIndexAddr {
     pub typ: TypeId,
     /// source position of the `[` in `x[index]`.
     pub pos: Pos,
+    /// Source syntax of the index expression, for DebugRef. (Go: `lazyAddress.expr`)
+    pub expr: Option<Expr>,
 }
 
 impl LazyIndexAddr {
@@ -222,6 +244,9 @@ impl LValue for LazyIndexAddr {
     fn store(&self, b: &mut Builder, v: Value) {
         let addr = self.emit_addr(b);
         b.emit_store(addr, v, self.pos);
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref(expr, v, false);
+        }
     }
 
     fn load(&self, b: &mut Builder) -> Value {
@@ -230,7 +255,11 @@ impl LValue for LazyIndexAddr {
     }
 
     fn address(&self, b: &mut Builder) -> Value {
-        self.emit_addr(b)
+        let addr = self.emit_addr(b);
+        if let Some(expr) = &self.expr {
+            b.emit_debug_ref(expr, addr, true);
+        }
+        addr
     }
 
     fn typ(&self) -> TypeId {

@@ -102,6 +102,10 @@ pub fn lift(prog: &mut Program, func_id: FuncId) {
             true
         }
     });
+
+    // Referrers still list lifted-away Stores/Loads; rebuild so analyzers
+    // (e.g. SA4006 has_use) see post-lift use-def only.
+    f.compute_referrers();
 }
 
 struct NewPhi {

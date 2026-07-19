@@ -192,18 +192,11 @@ PY
 
 ### Remaining work (next session, in priority order)
 
-Fixed this session (committed): bools `expr_key`; ineffassign `walk_expr`
-traversal (CompositeLit/KeyValueExpr/TypeAssertExpr/IndexListExpr/SliceExpr
-bounds); ineffassign for-loop back-edge (`walk_for`). Hybrid-only **354 → 124**;
-ineffassign 204 → 2. Remaining 124 = 20 generated + 23 ST1000 + 81 "other"
-(staticcheck 75 + errcheck 2 + ineffassign 2 + govet 2).
+Fixed 2026-07-20: SA4006 IncDec → SSA `has_use` (store DebugRefs +
+`buildir` GLOBAL_DEBUG + post-lift referrer rebuild). Loop-increment FPs gone;
+unused `n++` / `n+=1` still flagged. `regress/` finding-set unchanged.
 
-1. **Rework SA4006's `IncDecStmt` arm to use SSA** (`crates/guff-staticcheck/src/sa4006.rs`,
-   ~40 of the 75 staticcheck "other"). The AST heuristic `ident_used_before` +
-   `node_reads_obj` misses uses in conditions/calls/index exprs and only scans
-   *backward*, so it flags loop counters (`for x := 0; x < n; x++`). SA4006's
-   assignment path already does it right via `has_use` on the SSA value; port the
-   IncDec case to the same. Re-run guff-staticcheck's SA4006 fixtures.
+1. ~~**Rework SA4006's `IncDecStmt` arm to use SSA**~~ ✅ done.
 2. **Triage the remaining staticcheck** (SA4009 `argument overwritten before
    first use`, `variable in loop condition never changes`) the same way; keep the
    genuine ones (S1001 `copy()`, ST1003 initialisms).

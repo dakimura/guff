@@ -627,7 +627,12 @@ impl<'a> Builder<'a> {
                 } else {
                     self.type_of(id.id)
                 };
-                Box::new(Address { addr: v, typ, pos: e.pos() })
+                Box::new(Address {
+                    addr: v,
+                    typ,
+                    pos: e.pos(),
+                    expr: Some(e.clone()),
+                })
             }
             Expr::ParenExpr(p) => self.address(&p.x, escaping),
             Expr::SelectorExpr(se) => self.addr_selector(se, escaping),
@@ -642,6 +647,7 @@ impl<'a> Builder<'a> {
                     addr: ptr,
                     typ,
                     pos: star.star,
+                    expr: Some(e.clone()),
                 })
             }
             _ => todo!("address for {:?}", e),
@@ -691,6 +697,8 @@ impl<'a> Builder<'a> {
             field: index,
             typ: fld_ty,
             pos: se.sel.name_pos,
+            // go/ssa uses the field Ident (`e.Sel`), not the whole SelectorExpr.
+            expr: Some(Expr::Ident(se.sel.clone())),
         })
     }
 
@@ -736,14 +744,28 @@ impl<'a> Builder<'a> {
                 let x = self.address(&ie.x, escaping).address(self);
                 let et = guff_types::new_pointer(&mut self.prog.type_arena, elem);
                 let index = self.expr(&ie.index);
-                Box::new(crate::lvalue::LazyIndexAddr { x, index, et, typ: elem, pos })
+                Box::new(crate::lvalue::LazyIndexAddr {
+                    x,
+                    index,
+                    et,
+                    typ: elem,
+                    pos,
+                    expr: Some(Expr::IndexExpr(ie.clone())),
+                })
             }
             IndexMode::Var => {
                 // Slice or `*array`: the container value is already a pointer/slice.
                 let x = self.expr(&ie.x);
                 let et = guff_types::new_pointer(&mut self.prog.type_arena, elem);
                 let index = self.expr(&ie.index);
-                Box::new(crate::lvalue::LazyIndexAddr { x, index, et, typ: elem, pos })
+                Box::new(crate::lvalue::LazyIndexAddr {
+                    x,
+                    index,
+                    et,
+                    typ: elem,
+                    pos,
+                    expr: Some(Expr::IndexExpr(ie.clone())),
+                })
             }
             IndexMode::Value => panic!("string index is not addressable"),
             IndexMode::Invalid => panic!("non-indexable type in IndexExpr address"),
@@ -784,7 +806,12 @@ impl<'a> Builder<'a> {
         let mut sb = crate::lvalue::StoreBuf::new();
         self.comp_lit(v, cl, true, &mut sb);
         sb.emit(self);
-        Box::new(Address { addr: v, typ, pos: cl.lbrace })
+        Box::new(Address {
+            addr: v,
+            typ,
+            pos: cl.lbrace,
+            expr: Some(Expr::CompositeLit(cl.clone())),
+        })
     }
 }
 
