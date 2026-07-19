@@ -449,6 +449,10 @@ impl CfgBuilder {
                     self.escape(id);
                 }
                 self.walk_expr(&s.x);
+                // The index expressions carry real uses (`s[a:b]` reads a, b).
+                for idx in [&s.low, &s.high, &s.max].into_iter().flatten() {
+                    self.walk_expr(idx);
+                }
             }
             Expr::StarExpr(s) => self.walk_expr(&s.x),
             Expr::ParenExpr(p) => self.walk_expr(&p.x),

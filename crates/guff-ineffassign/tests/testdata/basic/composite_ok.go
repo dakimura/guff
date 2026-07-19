@@ -31,3 +31,11 @@ func useInTypeAssert(vals []any) {
 		}
 	}
 }
+
+// useInSliceIndex mirrors openmetricsparse.go: locals used only as slice
+// bounds `s[a:b]`. `a` and `b` are live — not ineffectual.
+func useInSliceIndex(s string, off []int) string {
+	a := off[0]
+	b := off[1]
+	return s[a:b]
+}
