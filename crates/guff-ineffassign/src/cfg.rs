@@ -437,6 +437,13 @@ impl CfgBuilder {
                 self.walk_expr(&i.x);
                 self.walk_expr(&i.index);
             }
+            // `x[A, B]` generic instantiation: `x` is a use (the type args are
+            // types, no local reads).
+            Expr::IndexListExpr(i) => self.walk_expr(&i.x),
+            // `x.(T)` type assertion: `x` is a use of the operand. Without this
+            // arm a variable used only in a type assertion (e.g. a range var
+            // `for _, cfg := range … { cfg.(T) }`) is falsely ineffectual.
+            Expr::TypeAssertExpr(t) => self.walk_expr(&t.x),
             Expr::SliceExpr(s) => {
                 if let Some(id) = ident(&s.x) {
                     self.escape(id);
@@ -446,6 +453,21 @@ impl CfgBuilder {
             Expr::StarExpr(s) => self.walk_expr(&s.x),
             Expr::ParenExpr(p) => self.walk_expr(&p.x),
             Expr::FuncLit(fl) => self.walk_func(None, &fl.ty, &fl.body),
+            // Composite-literal elements carry real value uses (and escapes,
+            // e.g. `&T{F: &x}`). Without this arm those idents are invisible,
+            // so a live variable used only inside a composite literal is
+            // falsely flagged ineffectual. Walk each element; for keyed
+            // elements walk both sides (map keys may reference locals; struct
+            // field-name keys resolve to non-local field objects, harmless).
+            Expr::CompositeLit(cl) => {
+                for elt in &cl.elts {
+                    self.walk_expr(elt);
+                }
+            }
+            Expr::KeyValueExpr(kv) => {
+                self.walk_expr(&kv.key);
+                self.walk_expr(&kv.value);
+            }
             _ => {}
         }
     }

@@ -28,6 +28,24 @@ fn ineffassign_allows_used_assignment() {
 }
 
 #[test]
+fn ineffassign_allows_uses_inside_composite_literals() {
+    // Locals used by-address / as element / as map key inside composite
+    // literals are live; none of these assignments are ineffectual. Regression
+    // for the missing CompositeLit/KeyValueExpr traversal in walk_expr that
+    // caused false positives (e.g. prometheus config.go `retention`).
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/composite",
+        &dir.join("composite_ok.go"),
+    );
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(analyzer(), &pkg)
+    );
+}
+
+#[test]
 fn ineffassign_flags_switch_fallthrough_dead_store() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg("example.com/ineffassign/switch", &dir.join("switch_bad.go"));
