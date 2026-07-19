@@ -150,14 +150,39 @@ PY
 
 ### Remaining work (next session, in priority order)
 
-1. **Close the `Info` fidelity gap (task 2, the blocker)** — start with the
-   `ineffassign`/`config.retention` minimal repro: a package importing a
-   source-checked named type used by address inside a composite literal, asserting
-   `Info.uses` parity with the export path. Then the `signature.rs:164` panic.
+1. **Close the `Info` fidelity gap (the blocker).** Confirmed-reliable e2e repro
+   (baseline clean, hybrid FP):
+   ```bash
+   cat >/tmp/ineff.yml <<'Y'
+   version: "2"
+   linters: {default: none, enable: [ineffassign]}
+   issues: {max-issues-per-linter: 0, max-same-issues: 0}
+   run: {tests: true}
+   Y
+   cd prometheus
+   target/release/guff run -c /tmp/ineff.yml --no-cache ./config/...            # 0 findings
+   GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/ineff.yml --no-cache ./config/...  # FPs: config.go:89/421 "ineffectual assignment to retention"
+   ```
+   Mechanism (verified): the FP fires with **0 panics**, so it is a *silent*
+   `Info.uses` omission for `retention` (used via `&retention` in
+   `&TSDBConfig{Retention: &retention}`), where `retention`'s type is the
+   source-checked dep type `model.Duration`.
+   **Attempted minimal isolation (2026-07-19) — did NOT reproduce yet**: a plain
+   fixture (`d := dep.Duration(0); &Config{D: &d}`) has source==export
+   `Info.uses`. So the trigger is more specific than "dep-typed local by address
+   in a composite literal" — likely tied to `model.Duration`'s definition
+   (`type Duration time.Duration`, methods, YAML unmarshaler) or config's exact
+   construct. NB: comparing source-vs-export via `load()` on a hand-rolled
+   local-`replace` module has harness quirks (funcs/vars from the replace dep can
+   read back `undefined` in export mode) — prefer either (a) reproducing against
+   the **real** `./config` package go-gated, or (b) diffing `Info.uses` on a
+   fixture whose dep ships a committed `.a` like `dep_source_vs_export.rs`. Then
+   also fix the separate `signature.rs:164` `as_signature` panic.
 2. **Then re-adjudicate** and, if hybrid-only shrinks to the known guff-vs-golangci
    allowlist classes, consider making cold-source the default.
 3. **(Independent) analyzer determinism** — govet-unreachable ordering and
-   ineffassign multi-var tie-break; both help the export path too.
+   ineffassign multi-var tie-break (HashMap iteration → which of several vars at
+   one assignment site is reported); both help the export path too.
 4. **Warm**: unchanged (warm keeps the export path; guff's lazy type-check rarely
    type-checks on warm). Optionally cache the 2nd stdlib `go list -export`
    (R24.4-style).
