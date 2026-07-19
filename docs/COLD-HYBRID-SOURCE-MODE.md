@@ -66,8 +66,9 @@ Adjudicated 2026-07-19 against golangci-lint on Prometheus under
 **Verdict: `GUFF_DEP_SOURCE` stays OFF by default** — but the root cause was
 re-diagnosed (see below) as **latent guff analyzer bugs + more analysis
 coverage**, *not* type-info corruption. Three real analyzer bugs were fixed this
-session (1 bools, 2 ineffassign traversal), cutting the hybrid-vs-baseline
-divergence **354 → 207**. The remaining divergence is dominated by hybrid
+session (1 bools, 3 ineffassign: expr traversal + for-loop back-edge), cutting
+the hybrid-vs-baseline divergence **354 → 124** (ineffassign 204 → 2). The
+remaining divergence is dominated by hybrid
 type-checking packages the export path drops as ill-typed (so it runs analyzers
 on more code) plus guff's *pre-existing* guff-vs-golangci divergences (ST1000,
 generated-file lint scope, ineffassign over-report) surfacing on that extra
@@ -119,10 +120,16 @@ than the first adjudication implied.
    - `TypeAssertExpr` — `for _, cfg := range … { cfg.(T) }`
    - `IndexListExpr` — generic instantiation operands
    - `SliceExpr` bounds — `a := off[i]; … s[a:b]` (openmetricsparse.go)
+   Plus a **for-loop CFG back-edge bug** (`walk_for`): the back-edge was added as
+   `cond.children.push(start)` but `start == cond` (walking the condition creates
+   no new block), i.e. a `cond → cond` self-loop, so the post block (`i++`) had no
+   successor and the increment was reported "ineffectual" on ordinary/stepped
+   loops (`for i := 0; i < n; i += 2`). Fixed to push from the current (post)
+   block, matching `walk_range`.
    All are path-independent real bugs (also fix the default/export run).
    Regression fixture `tests/testdata/basic/composite_ok.go` covers each.
-   Combined with the bools fix these cut hybrid-only **354 → 207** (ineffassign
-   hybrid-only 204 → 84).
+   Combined with the bools fix these cut hybrid-only **354 → 124** (ineffassign
+   hybrid-only 204 → **2**).
 
    **Why the "config Info looked corrupt":** the export path marks `config`
    `ill_typed` when loaded in isolation (some dep type didn't resolve from export
@@ -132,15 +139,25 @@ than the first adjudication implied.
    `signature.rs:164` `as_signature` panic (R25.2 DEFERRED) remains and does
    corrupt `Info` where it hits, but it is not what produced the config FPs.
 
-   **Remaining hybrid-only (207)**: 22 generated-file + 23 ST1000 package-comment
-   (both known guff-vs-golangci allowlist classes) + 162 "other" concentrated in
-   `model/textparse/*` (a package baseline drops as ill-typed, hybrid covers).
-   The "other" are guff's *own* pre-existing staticcheck/ineffassign behavior on
-   newly-covered code: a mix of genuine findings (e.g. ST1003 `exemplarTs` →
-   `exemplarTS`) and further candidate FPs (e.g. `variable in loop condition
-   never changes` on a stepped `for i := 2; …; i += 4`) — separate per-check
-   investigations, tracked as the known guff-vs-golangci divergences, **not**
-   hybrid-introduced type-info corruption.
+   **Remaining hybrid-only (124)**: 20 generated-file + 23 ST1000 package-comment
+   (both known guff-vs-golangci allowlist classes) + 81 "other" — now dominated
+   by **staticcheck (75)**, concentrated in packages baseline drops as ill-typed
+   (`storage/remote/otlptranslator/*`, `model/textparse/*`). ineffassign is
+   essentially resolved (2 left). The staticcheck "other" is guff's *own*
+   pre-existing behavior on newly-covered code:
+   - **SA4006 loop-increment FP (~40, `this value of x is never used`)**: the
+     `IncDecStmt` arm of `crates/guff-staticcheck/src/sa4006.rs` is a fragile AST
+     heuristic — `ident_used_before` only scans uses *textually before* the `x++`
+     and `node_reads_obj` only inspects Assign/ExprStmt/IncDec nodes, so it misses
+     the loop **condition** use (`x < n`, a BinaryExpr) and flags loop counters.
+     The correct fix is SSA-based liveness (as SA4006's *assignment* path already
+     does via `has_use`), not the AST hack. **Not fixed this session** (SSA rework,
+     needs its own SA4006 fixture pass).
+   - smaller classes: `argument X overwritten before first use` (SA4009, ~12),
+     `variable in loop condition never changes` (~8), `should use copy()` (S1001,
+     genuine), ST1003 initialisms (`exemplarTs → exemplarTS`, genuine).
+   None are hybrid-introduced type-info corruption; they are guff's existing
+   analyzer behaviors surfacing on the extra packages hybrid type-checks.
 
 ### Determinism (checked)
 
@@ -176,30 +193,34 @@ PY
 ### Remaining work (next session, in priority order)
 
 Fixed this session (committed): bools `expr_key`; ineffassign `walk_expr`
-traversal for CompositeLit/KeyValueExpr/TypeAssertExpr/IndexListExpr and
-SliceExpr bounds. Hybrid-only 354 → 207. Remaining 207 = 22 generated + 23
-ST1000 + 162 "other" (mostly `model/textparse`, a package baseline drops).
+traversal (CompositeLit/KeyValueExpr/TypeAssertExpr/IndexListExpr/SliceExpr
+bounds); ineffassign for-loop back-edge (`walk_for`). Hybrid-only **354 → 124**;
+ineffassign 204 → 2. Remaining 124 = 20 generated + 23 ST1000 + 81 "other"
+(staticcheck 75 + errcheck 2 + ineffassign 2 + govet 2).
 
-1. **Triage the 162 "other" per staticcheck/ineffassign check** on the
-   now-covered packages. Candidate latent bugs seen in `model/textparse`:
-   - `staticcheck: variable in loop condition never changes` firing on a stepped
-     loop `for i := 2; i < len(p.offsets); i += 4` (SA4003/S1006-family) — likely
-     a guff FP on non-unit steps.
-   - `ineffassign: ineffectual assignment to i` on loop post-statements.
-   Others are genuine (e.g. ST1003 `exemplarTs` → `exemplarTS`) or the known
-   allowlisted guff-vs-golangci ineffassign over-report. Adjudicate each vs
-   golangci at `file:line` (message phrasings differ; compare on file:line:linter
-   then inspect source).
-2. **Fix the isolated `signature.rs:164` `as_signature` panic** (R25.2 DEFERRED):
-   it corrupts `Info` on the packages it hits under hybrid. `as_signature` gets a
-   non-Signature `TypeId` — likely a cross-arena / unmaterialized method
-   signature in the source importer.
-3. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes,
-   make cold-source the default.
-4. **(Independent) analyzer determinism** — govet-unreachable ordering and
+1. **Rework SA4006's `IncDecStmt` arm to use SSA** (`crates/guff-staticcheck/src/sa4006.rs`,
+   ~40 of the 75 staticcheck "other"). The AST heuristic `ident_used_before` +
+   `node_reads_obj` misses uses in conditions/calls/index exprs and only scans
+   *backward*, so it flags loop counters (`for x := 0; x < n; x++`). SA4006's
+   assignment path already does it right via `has_use` on the SSA value; port the
+   IncDec case to the same. Re-run guff-staticcheck's SA4006 fixtures.
+2. **Triage the remaining staticcheck** (SA4009 `argument overwritten before
+   first use`, `variable in loop condition never changes`) the same way; keep the
+   genuine ones (S1001 `copy()`, ST1003 initialisms).
+3. **Fix the isolated `signature.rs:164` `as_signature` panic** (R25.2 DEFERRED):
+   a non-Signature `TypeId` reaches `as_signature` (called from `stmt.rs`
+   defer/go handling, `mono.rs`, `typestring.rs`) — likely a cross-arena /
+   unmaterialized method signature in the source importer. It is already isolated
+   (caught) so it doesn't abort; do **not** replace the panic with a silent
+   fallback (that substitutes wrong types — worse than a clean drop). Root-cause
+   the bad TypeId instead.
+4. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes
+   (generated-file scope + ST1000 + ineffassign over-report), make cold-source
+   the default.
+5. **(Independent) analyzer determinism** — govet-unreachable ordering and
    ineffassign multi-var tie-break (HashMap iteration → which of several vars at
    one assignment site is reported); both help the export path too.
-5. **Warm**: unchanged (warm keeps the export path). Optionally cache the 2nd
+6. **Warm**: unchanged (warm keeps the export path). Optionally cache the 2nd
    stdlib `go list -export` (R24.4-style).
 
 Reliable e2e repro harness (baseline drops the package, hybrid covers it):
@@ -211,12 +232,13 @@ issues: {max-issues-per-linter: 0, max-same-issues: 0}
 run: {tests: true}
 Y
 cd prometheus
-target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...              # baseline
-GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...  # hybrid
+target/release/guff run -c /tmp/std.yml --no-cache ./storage/remote/otlptranslator/...              # baseline (drops pkgs)
+GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/std.yml --no-cache ./storage/remote/otlptranslator/...  # hybrid (covers, surfaces SA4006 loop FPs)
 ```
-To confirm `Info` integrity (proven correct for config), a go-gated probe can
-load a package both ways and diff `Info.uses`/`defs` + def/use `ObjectId`
-identity per identifier (see git history for the `config_uses_probe` scaffold).
+`Info` integrity is proven correct (a go-gated probe loaded `config` both ways
+and diffed `Info.uses`/`defs` + def/use `ObjectId` identity per identifier — all
+identical; see git history for the `config_uses_probe` scaffold). So the
+remaining divergence is analyzer behavior, not type-info.
 
 ## Persisted context (for the assistant)
 
