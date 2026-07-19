@@ -134,6 +134,7 @@ fn walk_call(call: &CallExpr, status: &mut FuncStatus, in_go: bool, failures: &m
             rule: "unconditional-recursion",
             pos: call.fun.pos().0 as u32,
             message: "unconditional recursive call".into(),
+            confidence: None,
         });
     }
 }

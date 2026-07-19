@@ -19,7 +19,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "use-slices-sort",
                     pos: call.fun.pos().0 as u32,
                     message: format!("replace sort.{sort_method} by slices.{slices_method}"),
-                });
+            confidence: None,
+        });
             }
             true
         });

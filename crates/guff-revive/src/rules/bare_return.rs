@@ -82,6 +82,7 @@ fn check_return(ret: &ReturnStmt, failures: &mut Vec<Failure>) {
             rule: "bare-return",
             pos: ret.return_.0 as u32,
             message: "avoid using bare returns, please add return expressions".into(),
+            confidence: None,
         });
     }
 }

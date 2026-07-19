@@ -4,7 +4,17 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-const DEFAULT_ALLOW: &[&str] = &["//#nosec"];
+/// Directives / machine comments that intentionally omit the space after `//`.
+/// Matches upstream revive `comment-spacings` (plus our `#nosec` default).
+const DEFAULT_ALLOW: &[&str] = &[
+    "//go:",
+    "//export",
+    "//line ",
+    "//extern ",
+    "//sys ",
+    "//nolint",
+    "//#nosec",
+];
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let mut failures = Vec::new();
@@ -29,7 +39,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "comment-spacings",
                     pos: comment.slash.0 as u32,
                     message: "no space between comment delimiter and comment text".into(),
-                });
+            confidence: None,
+        });
             }
         }
     }

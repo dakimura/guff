@@ -31,7 +31,8 @@ fn check_file(file: &File, failures: &mut Vec<Failure>) {
                     rule: "dot-imports",
                     pos: imp.path.pos().0 as u32,
                     message: "should not use dot imports".into(),
-                });
+            confidence: None,
+        });
             }
         }
     }

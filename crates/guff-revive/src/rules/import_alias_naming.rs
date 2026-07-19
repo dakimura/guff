@@ -39,7 +39,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             alias.name,
                             allow.as_str()
                         ),
-                    });
+            confidence: None,
+        });
                 }
             }
         }

@@ -366,6 +366,16 @@ fn instr_body(id: InstrId, block: BlockId, f: &Function, prog: &Program) -> Stri
                 disassemble_value(c.x, prog, f)
             )
         }
+        InstrData::Convert(c) => {
+            // Go: "convert <resultType> <- <xType> (<x>)".
+            let x_ty = crate::program::value_type_of(prog, f, c.x);
+            format!(
+                "convert {} <- {} ({})",
+                rel_type(prog, c.typ),
+                rel_type(prog, x_ty),
+                disassemble_value(c.x, prog, f)
+            )
+        }
         InstrData::Return(ret) => {
             let mut s = String::from("return");
             for (i, v) in ret.results.iter().enumerate() {

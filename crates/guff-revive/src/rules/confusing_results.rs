@@ -33,7 +33,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         rule: "confusing-results",
                         pos: field.pos().0 as u32,
                         message: "unnamed results of the same type may be confusing, consider using named results".into(),
-                    });
+            confidence: None,
+        });
                     break;
                 }
                 last_type = ty;

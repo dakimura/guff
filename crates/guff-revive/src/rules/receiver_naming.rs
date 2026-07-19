@@ -42,6 +42,7 @@ fn check_method(
             pos,
             message: "receiver name should not be an underscore, omit the name if it is unused"
                 .into(),
+            confidence: None,
         });
         return;
     }
@@ -51,6 +52,7 @@ fn check_method(
             rule: "receiver-naming",
             pos,
             message: "receiver name should be a reflection of its identity; don't use generic names such as \"this\" or \"self\"".into(),
+            confidence: None,
         });
         return;
     }
@@ -68,7 +70,8 @@ fn check_method(
                     "receiver name {} should be consistent with previous receiver name {} for {}",
                     name.name, prev, recv_type
                 ),
-            });
+            confidence: None,
+        });
         }
         return;
     }

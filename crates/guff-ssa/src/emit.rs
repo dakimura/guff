@@ -5,8 +5,8 @@
 use crate::function::Function;
 use crate::ids::{BlockId, FuncId, InstrId};
 use crate::instr::{
-    Alloc, Call, CallCommon, ChangeType, Extract, Field, FieldAddr, IndexAddr, InstrData, Return,
-    Store, TypeAssert, UnOp,
+    Alloc, Call, CallCommon, ChangeType, Convert, Extract, Field, FieldAddr, IndexAddr, InstrData,
+    Return, Store, TypeAssert, UnOp,
 };
 use crate::program::{value_type_of, Program};
 use crate::value::Value;
@@ -176,6 +176,57 @@ pub fn emit_type_coercion(
         prog.functions.get_mut(fid),
         block,
         InstrData::ChangeType(ChangeType { x: v, typ }),
+    );
+    Value::Instr(id)
+}
+
+/// emit_conv emits code to convert `val` to exactly type `typ`.
+///
+/// This is a pragmatic subset of go/ssa's `emitConv`: identical types are a
+/// no-op; same-underlying (named ↔ underlying) uses [`ChangeType`]; everything
+/// else uses [`Convert`]. Full interface / slice-to-array / multi-convert
+/// cases remain DEFERRED — enough to lower explicit `T(x)` conversions during
+/// buildir without panicking.
+/// (Go: `emitConv`)
+pub fn emit_conv(
+    prog: &mut Program,
+    fid: FuncId,
+    block: BlockId,
+    val: Value,
+    typ: TypeId,
+) -> Value {
+    let t_src = value_type_of(prog, prog.functions.get(fid), val);
+    if identical(
+        &mut prog.type_arena,
+        &prog.object_arena,
+        &prog.package_arena,
+        t_src,
+        typ,
+    ) {
+        return val;
+    }
+
+    let ut_src = t_src.underlying(&prog.type_arena);
+    let ut_dst = typ.underlying(&prog.type_arena);
+    if identical(
+        &mut prog.type_arena,
+        &prog.object_arena,
+        &prog.package_arena,
+        ut_src,
+        ut_dst,
+    ) {
+        let id = emit(
+            prog.functions.get_mut(fid),
+            block,
+            InstrData::ChangeType(ChangeType { x: val, typ }),
+        );
+        return Value::Instr(id);
+    }
+
+    let id = emit(
+        prog.functions.get_mut(fid),
+        block,
+        InstrData::Convert(Convert { x: val, typ }),
     );
     Value::Instr(id)
 }

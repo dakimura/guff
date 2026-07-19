@@ -19,7 +19,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 rule: "use-any",
                 pos: it.interface_.0 as u32,
                 message: "since Go 1.18 'interface{}' can be replaced by 'any'".into(),
-            });
+            confidence: None,
+        });
             true
         });
     }

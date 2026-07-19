@@ -109,7 +109,8 @@ fn check_go_stmt(
                 rule: "datarace",
                 pos: name_pos.0 as u32,
                 message: format!("datarace: range value {name} is captured (by-reference) in goroutine"),
-            });
+            confidence: None,
+        });
             return false;
         }
         if return_ids.contains(name) {
@@ -119,7 +120,8 @@ fn check_go_stmt(
                 message: format!(
                     "potential datarace: return value {name} is captured (by-reference) in goroutine"
                 ),
-            });
+            confidence: None,
+        });
             return false;
         }
         true

@@ -87,7 +87,10 @@ pub struct Call {
     pub typ: TypeId,
 }
 #[derive(Debug)]
-pub struct Convert {}
+pub struct Convert {
+    pub x: Value,
+    pub typ: TypeId,
+}
 /// Extract yields the `index`th component of the tuple value `tuple`.
 /// (Go: `Extract`)
 #[derive(Debug)]
@@ -377,6 +380,7 @@ impl InstrData {
             InstrData::Field(fld) => Some(fld.typ),
             InstrData::FieldAddr(fld) => Some(fld.typ),
             InstrData::ChangeType(c) => Some(c.typ),
+            InstrData::Convert(c) => Some(c.typ),
             InstrData::Index(i) => Some(i.typ),
             InstrData::IndexAddr(i) => Some(i.typ),
             InstrData::Lookup(l) => Some(l.typ),
@@ -516,6 +520,9 @@ impl InstrData {
                 f(&i.x);
             }
             InstrData::ChangeType(i) => {
+                f(&i.x);
+            }
+            InstrData::Convert(i) => {
                 f(&i.x);
             }
             InstrData::Select(i) => {
@@ -661,6 +668,9 @@ impl InstrData {
                 f(&mut i.x);
             }
             InstrData::ChangeType(i) => {
+                f(&mut i.x);
+            }
+            InstrData::Convert(i) => {
                 f(&mut i.x);
             }
             InstrData::Select(i) => {

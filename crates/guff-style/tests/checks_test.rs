@@ -3185,6 +3185,20 @@ fn whitespace_allows_tight_blocks() {
 }
 
 #[test]
+fn whitespace_allows_leading_comment_without_blank() {
+    let pkg = support::typecheck_fixture(
+        "whitespace",
+        "example.com/whitespace/commentok",
+        "comment_ok.go",
+    );
+    let messages = support::run_analyzer(whitespace(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "comment after {{ is not a leading blank: {messages:?}"
+    );
+}
+
+#[test]
 fn whitespace_multi_if_requires_leading_newline_when_enabled() {
     use std::sync::Arc;
 
@@ -5199,6 +5213,39 @@ fn modernize_flags_common_patterns() {
             .any(|m| m.contains("loop can be modernized using slices.Contains")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn modernize_rangeint_skips_mutated_limits() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/rangeint", "rangeint.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let hits: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("for loop can be modernized using range"))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        4,
+        "expected 4 rangeint hits (param/const/local/len), got {} {messages:?}",
+        hits.len()
+    );
+    for bad in ["k", "incLimit", "addrLimit", "chks", "outer"] {
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains(&format!("range over {bad}"))),
+            "mutated/addr-taken limit {bad:?} must be skipped: {messages:?}"
+        );
+    }
+    for good in ["n", "c", "limit", "slice"] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains(&format!("range over {good}"))),
+            "safe limit {good:?} must be reported: {messages:?}"
+        );
+    }
 }
 
 #[test]

@@ -112,10 +112,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     let mut ast_pending = Vec::new();
+    // Collect ForStmt post IncDec positions so we don't flag loop increments
+    // (`for ; i >= 0; i--`) — the updated value is read by the condition / after break.
+    let mut for_post_incs = std::collections::HashSet::new();
+    inspect.preorder(pass.files(), |node| {
+        let NodeRef::ForStmt(fs) = node else {
+            return;
+        };
+        if let Some(Stmt::IncDecStmt(inc)) = fs.post.as_deref() {
+            for_post_incs.insert(inc.tok_pos.0 as u32);
+        }
+    });
     inspect.preorder(pass.files(), |node| {
         let NodeRef::IncDecStmt(inc) = node else {
             return;
         };
+        if for_post_incs.contains(&(inc.tok_pos.0 as u32)) {
+            return;
+        }
         let Expr::Ident(id) = &inc.x else {
             return;
         };

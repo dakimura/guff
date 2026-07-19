@@ -55,6 +55,7 @@ fn check_block(
             rule: "empty-lines",
             pos: block.lbrace.0 as u32,
             message: "extra empty line at the start of a block".into(),
+            confidence: None,
         });
     }
 
@@ -68,6 +69,7 @@ fn check_block(
             rule: "empty-lines",
             pos: block.rbrace.0 as u32,
             message: "extra empty line at the end of a block".into(),
+            confidence: None,
         });
     }
 }

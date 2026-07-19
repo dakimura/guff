@@ -121,6 +121,7 @@ impl ImportShadowingWalker<'_> {
             rule: "import-shadowing",
             pos: id.name_pos.0 as u32,
             message: format!("The name '{}' shadows an import name", id.name),
+            confidence: None,
         });
     }
 }

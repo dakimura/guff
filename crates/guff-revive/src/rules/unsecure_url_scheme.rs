@@ -55,7 +55,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     scheme,
                     lit.value
                 ),
-            });
+            confidence: None,
+        });
             true
         });
     }

@@ -19,7 +19,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "call-to-gc",
                     pos: call.fun.pos().0 as u32,
                     message: "explicit call to the garbage collector".into(),
-                });
+            confidence: None,
+        });
             }
             true
         });

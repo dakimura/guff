@@ -15,6 +15,10 @@ pub fn load_for_go_analysis() -> LoadMode {
         | LoadMode::NEED_TYPES_SIZES
         | LoadMode::NEED_SYNTAX
         | LoadMode::NEED_TYPES_INFO
+        // Module.GoVersion is required by modernize / stdlib_version gates
+        // (e.g. slicesbackward needs go1.23+). NEED_TYPES implies NEED_MODULE
+        // via `implied()`, but keep it explicit so metadata-only loads retain it.
+        | LoadMode::NEED_MODULE
 }
 
 #[cfg(test)]
@@ -35,5 +39,6 @@ mod tests {
         assert!(mode.contains(LoadMode::NEED_TYPES_SIZES));
         assert!(mode.contains(LoadMode::NEED_SYNTAX));
         assert!(mode.contains(LoadMode::NEED_TYPES_INFO));
+        assert!(mode.contains(LoadMode::NEED_MODULE));
     }
 }

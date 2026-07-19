@@ -31,6 +31,7 @@ fn check_file(
             rule: "package-comments",
             pos: detached as u32,
             message: "package comment is detached; there should be no blank lines between it and the package statement".into(),
+            confidence: None,
         });
         return;
     }
@@ -41,7 +42,8 @@ fn check_file(
                 rule: "package-comments",
                 pos: file.name.name_pos.0 as u32,
                 message: "should have a package comment".into(),
-            });
+            confidence: None,
+        });
             *warned_missing = true;
         }
         return;
@@ -57,6 +59,7 @@ fn check_file(
             rule: "package-comments",
             pos: file.doc.as_ref().map(|d| d.pos().0).unwrap_or(file.package.0) as u32,
             message: format!(r#"package comment should be of the form "{prefix}...""#),
+            confidence: None,
         });
     }
 }

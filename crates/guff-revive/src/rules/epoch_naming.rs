@@ -75,6 +75,7 @@ fn check_name(pass: &Pass<'_>, name: &Ident, value: &Expr, failures: &mut Vec<Fa
                 name.name,
                 suffixes.join(", ")
             ),
+            confidence: None,
         });
     }
 }

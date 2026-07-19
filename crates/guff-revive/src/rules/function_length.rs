@@ -29,7 +29,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     message: format!(
                         "maximum number of statements per function exceeded; max {MAX_STMTS} but got {stmt_count}"
                     ),
-                });
+            confidence: None,
+        });
             }
             let line_count = count_lines(pass, body);
             if line_count > MAX_LINES {
@@ -39,7 +40,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     message: format!(
                         "maximum number of lines per function exceeded; max {MAX_LINES} but got {line_count}"
                     ),
-                });
+            confidence: None,
+        });
             }
         }
     }

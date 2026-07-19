@@ -100,7 +100,9 @@ fn refine(
         typecheck_packages(&mut by_id, &response.roots, requested_mode, &env);
     }
 
-    clear_unrequested_fields(&mut by_id, requested_mode);
+    // Clear against the *implied* mode so fields fetched because of implication
+    // (e.g. NEED_MODULE via NEED_TYPES) are retained — matching go/packages.
+    clear_unrequested_fields(&mut by_id, requested_mode.implied());
 
     let mut roots = Vec::with_capacity(response.roots.len());
     for root in response.roots {

@@ -93,6 +93,7 @@ fn check_method_name(
                 "Method '{}' differs only by capitalization to {} '{}' in {}",
                 id.name, kind, ref_name, where_
             ),
+            confidence: None,
         });
         return;
     }
@@ -118,7 +119,8 @@ fn check_struct_fields(struct_name: &str, fields: &[guff::ast::Field], failures:
                         "Field '{}' differs only by capitalization to other field in the struct type {}",
                         id.name, struct_name
                     ),
-                });
+            confidence: None,
+        });
             } else {
                 seen.insert(norm, ());
             }

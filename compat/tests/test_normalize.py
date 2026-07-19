@@ -72,6 +72,18 @@ class NormalizeTests(unittest.TestCase):
             normalize_message("staticcheck", "could use tagged switch on k % 3"),
         )
 
+    def test_modernize_strips_check_name_prefix(self):
+        self.assertEqual(
+            normalize_message(
+                "modernize",
+                "slicesbackward: backward loop over slice can be modernized using slices.Backward",
+            ),
+            normalize_message(
+                "modernize",
+                "backward loop over slice can be modernized using slices.Backward",
+            ),
+        )
+
 
 class DiffTests(unittest.TestCase):
     def test_matching_keys(self):

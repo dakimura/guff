@@ -90,6 +90,8 @@ def normalize_path(filename: str, root: str) -> str:
 
 _UNUSED_PREFIX = re.compile(r"^(func|var|const|type|field|method)\s+")
 _STATICCHECK_CODE = re.compile(r"^(?:SA|ST|S|QF)\d{4}:\s*")
+# golangci modernize prefixes the check name (`slicesbackward: …`); guff omits it.
+_MODERNIZE_CHECK = re.compile(r"^[a-z][a-z0-9]*:\s*")
 
 # Known equivalent phrasings across guff and golangci-lint.
 _ERRCHECK_EQUIV = {
@@ -107,6 +109,8 @@ def normalize_message(linter: str, text: str) -> str:
     if linter == "staticcheck":
         # golangci prefixes check codes (`QF1003: …`); guff often omits them.
         t = _STATICCHECK_CODE.sub("", t)
+    if linter == "modernize":
+        t = _MODERNIZE_CHECK.sub("", t)
     return t
 
 

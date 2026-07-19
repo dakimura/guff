@@ -53,7 +53,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             rule: "string-format",
                             pos: lit.value_pos.0 as u32,
                             message: rule.message.clone(),
-                        });
+            confidence: None,
+        });
                     }
                 }
             }

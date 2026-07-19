@@ -58,6 +58,7 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
             rule: "time-date",
             pos: tz.pos().0 as u32,
             message: "time.Date timezone argument cannot be nil, it would panic on runtime".into(),
+            confidence: None,
         });
     }
 
@@ -82,7 +83,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                         rule: "time-date",
                         pos: arg.pos().0 as u32,
                         message: "time.Date month argument should not be zero".into(),
-                    });
+            confidence: None,
+        });
                 } else if !(1..=12).contains(&parsed) {
                     failures.push(Failure {
                         rule: "time-date",
@@ -90,7 +92,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                         message: format!(
                             "time.Date month argument should be between 1 and 12, got {parsed}"
                         ),
-                    });
+            confidence: None,
+        });
                 }
             }
             TimeDateArg::Day => {
@@ -99,7 +102,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                         rule: "time-date",
                         pos: arg.pos().0 as u32,
                         message: "time.Date day argument should not be zero".into(),
-                    });
+            confidence: None,
+        });
                 } else {
                     let max = days_in_month(year, month);
                     if parsed > max {
@@ -109,7 +113,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                             message: format!(
                                 "time.Date day argument {parsed} exceeds days in month ({max})"
                             ),
-                        });
+            confidence: None,
+        });
                     }
                 }
             }
@@ -141,6 +146,7 @@ fn check_bounds(
                 max,
                 parsed
             ),
+            confidence: None,
         });
     }
 }
@@ -183,6 +189,7 @@ fn check_arg_sign<'a>(
                 "time.Date {} argument is negative",
                 field_name(field)
             ),
+            confidence: None,
         }),
         Token::ADD => failures.push(Failure {
             rule: "time-date",
@@ -191,6 +198,7 @@ fn check_arg_sign<'a>(
                 "time.Date {} argument contains a useless plus sign",
                 field_name(field)
             ),
+            confidence: None,
         }),
         _ => {}
     }

@@ -27,7 +27,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         c,
                         MAX_COMPLEXITY
                     ),
-                });
+            confidence: None,
+        });
             }
         }
     }

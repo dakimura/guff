@@ -88,7 +88,8 @@ fn check_fields(
                         rule: "enforce-repeated-arg-type-style",
                         pos: field.pos().0 as u32,
                         message: format!("{kind} types should not be omitted"),
-                    });
+            confidence: None,
+        });
                 }
             }
         }
@@ -102,7 +103,8 @@ fn check_fields(
                             rule: "enforce-repeated-arg-type-style",
                             pos: field.pos().0 as u32,
                             message: format!("repeated {kind} type \"{cur_ty}\" can be omitted"),
-                        });
+            confidence: None,
+        });
                     }
                 }
                 prev = current;

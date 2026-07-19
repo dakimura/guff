@@ -31,7 +31,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             rule: "enforce-map-style",
                             pos: lit.lbrace.0 as u32,
                             message: "use make(map[type]type) instead of map[type]type{}".into(),
-                        });
+            confidence: None,
+        });
                     }
                 }
                 Some(NodeRef::CallExpr(call)) if style == MapStyle::Literal => {
@@ -43,7 +44,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             rule: "enforce-map-style",
                             pos: call.args[0].pos().0 as u32,
                             message: "use map[type]type{} instead of make(map[type]type)".into(),
-                        });
+            confidence: None,
+        });
                     }
                 }
                 _ => {}

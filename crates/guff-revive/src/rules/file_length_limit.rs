@@ -30,7 +30,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 message: format!(
                     "file length is {lines} lines, which exceeds the limit of {max}"
                 ),
-            });
+            confidence: None,
+        });
         }
     }
     failures

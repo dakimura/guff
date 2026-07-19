@@ -42,7 +42,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         "redundant call to {} in TestMain function, the test runner will handle it automatically as of Go 1.15",
                         call_name(call)
                     ),
-                });
+            confidence: None,
+        });
             }
             true
         });

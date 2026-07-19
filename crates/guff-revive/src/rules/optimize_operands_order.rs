@@ -40,7 +40,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     expr_fmt(&Expr::BinaryExpr(bin.clone())),
                     expr_fmt(&swapped)
                 ),
-            });
+            confidence: None,
+        });
             true
         });
     }

@@ -82,6 +82,7 @@ fn lint_func_doc(f: &FuncDecl, failures: &mut Vec<Failure>) {
             rule: "exported",
             pos: f.name.name_pos.0 as u32,
             message: format!("exported {kind} {name} should have comment or be unexported"),
+            confidence: None,
         });
         return;
     }
@@ -94,6 +95,7 @@ fn lint_func_doc(f: &FuncDecl, failures: &mut Vec<Failure>) {
                 r#"comment on exported {kind} {name} should be of the form "{} ...""#,
                 f.name.name
             ),
+            confidence: None,
         });
     }
 }
@@ -116,6 +118,7 @@ fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
                 "exported type {} should have comment or be unexported",
                 ts.name.name
             ),
+            confidence: None,
         });
         return;
     }
@@ -128,6 +131,7 @@ fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
                 r#"comment on exported type {} should be of the form "{} ..." (with optional leading article)"#,
                 ts.name.name, ts.name.name
             ),
+            confidence: None,
         });
     }
 }
@@ -150,7 +154,8 @@ fn lint_value_spec(
                     rule: "exported",
                     pos: name.name_pos.0 as u32,
                     message: format!("exported {kind} {} should have its own declaration", name.name),
-                });
+            confidence: None,
+        });
                 return;
             }
         }
@@ -180,6 +185,7 @@ fn lint_value_spec(
                 "exported {kind} {} should have comment{block} or be unexported",
                 name.name
             ),
+            confidence: None,
         });
         gen_decl_missing.insert(key, true);
         return;
@@ -201,6 +207,7 @@ fn lint_value_spec(
                 r#"comment on exported {kind} {} should be of the form "{} ...""#,
                 name.name, name.name
             ),
+            confidence: None,
         });
     }
 }
@@ -223,6 +230,7 @@ fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut
             message: format!(
                 "{thing} name will be used as {pkg}.{name} by other packages, and that stutters; consider calling this {rem}"
             ),
+            confidence: None,
         });
     }
 }

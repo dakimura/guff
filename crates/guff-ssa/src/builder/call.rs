@@ -34,17 +34,32 @@ impl<'a> Builder<'a> {
             if let Some(selection) = self.selection(sel) {
                 if selection.kind() == SelectionKind::MethodVal {
                     let obj = selection.obj();
-                    let recv_t = recv_type(self.prog, obj);
-                    let want_addr = is_pointer(&self.prog.type_arena, recv_t);
-                    let v = self.receiver(&sel.x, want_addr, true, &selection);
-                    if is_interface(&self.prog.type_arena, recv_t) {
-                        c.value = v;
-                        c.method = Some(obj);
-                    } else {
-                        c.value = Value::Function(self.prog.object_method(obj, &[]));
-                        c.args.push(v);
+                    // Only treat as a method call when the object's type is a
+                    // signature *with* a receiver. Mis-tagged selections (or
+                    // non-Func objects) used to panic in `recv_type`.
+                    let is_method = obj
+                        .typ(&self.prog.object_arena)
+                        .and_then(|sig| {
+                            guff_types::signature::signature_recv(&self.prog.type_arena, sig)
+                        })
+                        .is_some();
+                    if is_method {
+                        let Some(recv_t) = recv_type(self.prog, obj) else {
+                            // Defensive: signature_recv said method but type missing.
+                            c.value = self.expr(&e.fun);
+                            return;
+                        };
+                        let want_addr = is_pointer(&self.prog.type_arena, recv_t);
+                        let v = self.receiver(&sel.x, want_addr, true, &selection);
+                        if is_interface(&self.prog.type_arena, recv_t) {
+                            c.value = v;
+                            c.method = Some(obj);
+                        } else {
+                            c.value = Value::Function(self.prog.object_method(obj, &[]));
+                            c.args.push(v);
+                        }
+                        return;
                     }
-                    return;
                 }
             }
         }
@@ -53,6 +68,27 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn emit_call(&mut self, e: &CallExpr) -> Value {
+        // Explicit type conversion, e.g. `string(x)` or `int64(n)`.
+        // (Go: `fn.info.Types[e.Fun].IsType()` branch in `builder.expr0`.)
+        if self.is_type_expr(&e.fun) {
+            let x = self.expr(
+                e.args
+                    .first()
+                    .expect("type conversion CallExpr has one argument"),
+            );
+            let tv = self.prog.info.types.get(&e.id).expect("no type for conversion");
+            let typ = self.typ_type(tv.typ);
+            let block = self.block.expect("no current block");
+            let fid = self.func_id;
+            let y = crate::emit::emit_conv(self.prog, fid, block, x, typ);
+            // Stamp the conversion instruction with the '(' position when we
+            // actually emitted one (Go updates Convert/ChangeType.pos).
+            if let Value::Instr(iid) = y {
+                self.prog.functions.get_mut(fid).set_pos(iid, e.lparen);
+            }
+            return y;
+        }
+
         let mut c = CallCommon {
             value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),
             method: None,
@@ -79,6 +115,16 @@ impl<'a> Builder<'a> {
             e.lparen,
         );
         Value::Instr(id)
+    }
+
+    /// Reports whether `e` denotes a type (used to distinguish `T(x)` conversions
+    /// from ordinary calls). (Go: `TypeAndValue.IsType()`.)
+    fn is_type_expr(&self, e: &Expr) -> bool {
+        let e = unparen(e);
+        matches!(
+            self.prog.info.types.get(&e.id()).map(|tv| tv.mode),
+            Some(guff_types::OperandMode::TypeExpr)
+        )
     }
 
     fn is_make_builtin(&self, fun: Value) -> bool {

@@ -59,7 +59,8 @@ fn check_lit(lit: &BasicLit, failures: &mut Vec<Failure>, str_counts: &mut HashM
                     "avoid magic numbers like '{}', create a named constant for it",
                     lit.value
                 ),
-            });
+            confidence: None,
+        });
         }
         Some(Token::STRING) => check_str_lit(lit, failures, str_counts),
         _ => {}
@@ -90,6 +91,7 @@ fn check_str_lit(
                 "string literal {value} appears, at least, {count} times, create a named constant for it",
                 count = *count
             ),
+            confidence: None,
         });
         *count = IGNORED;
     }

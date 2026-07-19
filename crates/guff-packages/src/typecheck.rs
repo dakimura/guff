@@ -67,7 +67,26 @@ impl TypecheckEnv {
             arch: lookup("GOARCH")
                 .or_else(|| std::env::var("GOARCH").ok())
                 .unwrap_or_else(|| "amd64".into()),
-            go_version: lookup("GOVERSION").unwrap_or_default(),
+            go_version: lookup("GOVERSION")
+                .or_else(|| std::env::var("GOVERSION").ok())
+                .or_else(|| {
+                    // `GOVERSION` is rarely exported in the process environment;
+                    // fall back to `go env` so language-version gates (modernize,
+                    // …) see the toolchain version when Module metadata is absent.
+                    std::process::Command::new("go")
+                        .args(["env", "GOVERSION"])
+                        .output()
+                        .ok()
+                        .and_then(|o| {
+                            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            if s.is_empty() {
+                                None
+                            } else {
+                                Some(s)
+                            }
+                        })
+                })
+                .unwrap_or_default(),
             from_source: false,
         }
     }

@@ -33,7 +33,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         rule: "forbidden-call-in-wg-go",
                         pos: inner_call.pos().0 as u32,
                         message: format!("do not call {callee} inside wg.Go"),
-                    });
+            confidence: None,
+        });
                     return false;
                 }
                 true

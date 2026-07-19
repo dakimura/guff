@@ -59,7 +59,8 @@
 //! mutation/non-`s[i]` use analysis full parity, testingcontext sole-use via
 //! typeindex, newexpr `new` shadowing / CheckExpr untyped-constant re-typecheck
 //! full parity, errorsastype switch/`new(E)`/combined-cond forms, bloop keyed
-//! `for i := range b.N`, and full rangeint/minmax edge-case parity with upstream.
+//! `for i := range b.N`, and remaining rangeint edge cases (post-loop ASSIGN
+//! use, ResultVar/PackageVar index) with upstream.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -334,24 +335,188 @@ fn is_simple_inc(post: &Stmt, index_name: &str) -> bool {
     }
 }
 
+fn expr_has_constant_value(pass: &Pass<'_>, expr: &Expr) -> bool {
+    pass.types_info()
+        .and_then(|info| info.types.get(&expr.id()))
+        .and_then(|tv| tv.val.as_ref())
+        .is_some()
+}
+
+fn is_package_level_obj(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(parent) = obj.parent(&artifacts.objects) else {
+        return false;
+    };
+    let Some(obj_pkg) = obj.pkg(&artifacts.objects) else {
+        return false;
+    };
+    parent == artifacts.packages.get(obj_pkg).scope()
+}
+
+/// Upstream `isScalarLvalue` over all package uses of `obj`.
+///
+/// Rejects limits that are assigned or address-taken anywhere (not just in the
+/// loop), matching rangeint's typeindex check — e.g. `k := …; for i < k; …;
+/// k = …` must not modernize the first loop.
+fn var_is_scalar_lvalue_anywhere(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let mut found = false;
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::AssignStmt(a) => {
+                    for lhs in &a.lhs {
+                        let Expr::Ident(id) = unparen_expr(lhs) else {
+                            continue;
+                        };
+                        if a.tok == Some(Token::DEFINE) {
+                            // `x, y := …` reassignment of an existing x appears in Uses.
+                            if info.uses.get(&id.id).copied() == Some(obj) {
+                                found = true;
+                            }
+                        } else if ident_obj(pass, id) == Some(obj) {
+                            found = true;
+                        }
+                    }
+                }
+                NodeRef::IncDecStmt(inc) => {
+                    if let Expr::Ident(id) = unparen_expr(&inc.x) {
+                        if ident_obj(pass, id) == Some(obj) {
+                            found = true;
+                        }
+                    }
+                }
+                NodeRef::UnaryExpr(u)
+                    if u.op == Token::AND =>
+                {
+                    if let Expr::Ident(id) = unparen_expr(&u.x) {
+                        if ident_obj(pass, id) == Some(obj) {
+                            found = true;
+                        }
+                    }
+                }
+                NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
+                    for side in rs.key.iter().chain(rs.value.iter()) {
+                        if let Expr::Ident(id) = unparen_expr(side) {
+                            if ident_obj(pass, id) == Some(obj) {
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            !found
+        });
+        if found {
+            return true;
+        }
+    }
+    false
+}
+
+fn limit_ident_is_safe(pass: &Pass<'_>, id: &guff::ast::Ident) -> bool {
+    let Some(info) = pass.types_info() else {
+        // Without types, keep the old permissive Ident allowance so AST-only
+        // runs still suggest safe BasicLit/simple cases; callers already accept
+        // BasicLit separately. Conservatively reject bare Idents.
+        return false;
+    };
+    let Some(obj) = info.uses.get(&id.id).copied() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    // Exported package-level vars may be mutated in other packages.
+    if obj.exported(&artifacts.objects) && is_package_level_obj(pass, obj) {
+        return false;
+    }
+    // PackageVar / Field kinds are still OK if unexported and not mutated here.
+    let _ = v;
+    !var_is_scalar_lvalue_anywhere(pass, obj)
+}
+
 fn limit_is_safe(pass: &Pass<'_>, limit: &Expr) -> bool {
+    // Upstream rangeint: constant, or local/unexported Ident that is not
+    // assigned or address-taken — never field selectors like `s.size`.
     match limit {
-        Expr::Ident(_) | Expr::BasicLit(_) | Expr::SelectorExpr(_) => true,
+        Expr::ParenExpr(p) => limit_is_safe(pass, &p.x),
         Expr::CallExpr(call) => {
-            // Allow len(slice) only.
+            // Allow len(slice) only (not len(map)); then require the slice
+            // operand itself to be a safe limit (so `&chks` / `chks =` skip).
             code::is_call_to(pass, call, "len")
                 && call.args.len() == 1
-                && matches!(
-                    type_kind(pass, &call.args[0]),
-                    Some(TypeKind::Slice | TypeKind::Array | TypeKind::String)
-                )
+                && matches!(type_kind(pass, &call.args[0]), Some(TypeKind::Slice))
+                && limit_is_safe(pass, &call.args[0])
         }
-        Expr::ParenExpr(p) => limit_is_safe(pass, &p.x),
+        Expr::BasicLit(_) => true,
+        other if expr_has_constant_value(pass, other) => true,
+        Expr::Ident(id) => limit_ident_is_safe(pass, id),
         _ => false,
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+fn index_is_scalar_lvalue_in(body: &guff::ast::BlockStmt, index_name: &str) -> bool {
+    let mut found = false;
+    walk::inspect(NodeRef::BlockStmt(body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        match n {
+            NodeRef::AssignStmt(a) if a.tok != Some(Token::DEFINE) => {
+                if a.lhs.iter().any(|e| ident_name(e) == Some(index_name)) {
+                    found = true;
+                }
+            }
+            NodeRef::IncDecStmt(inc) if ident_name(&inc.x) == Some(index_name) => {
+                found = true;
+            }
+            NodeRef::UnaryExpr(u)
+                if u.op == Token::AND && ident_name(&u.x) == Some(index_name) =>
+            {
+                found = true;
+            }
+            NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
+                if rs
+                    .key
+                    .as_ref()
+                    .is_some_and(|k| ident_name(k) == Some(index_name))
+                    || rs
+                        .value
+                        .as_ref()
+                        .is_some_and(|v| ident_name(v) == Some(index_name))
+                {
+                    found = true;
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
+fn index_used_after_loop(
+    _pass: &Pass<'_>,
+    _for_stmt: &ForStmt,
+    _index_name: &str,
+) -> bool {
+    // DEFERRED: full post-loop use analysis (upstream walks ancestor Preorder).
+    false
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum TypeKind {
     Slice,
     Array,
@@ -503,6 +668,15 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         return;
     }
     if !limit_is_safe(pass, y) {
+        return;
+    }
+    // Upstream: reject if the loop index is assigned or address-taken in the body
+    // (`for range int` ignores such assignments).
+    if index_is_scalar_lvalue_in(&for_stmt.body, index_name) {
+        return;
+    }
+    // Upstream: for `for i = 0; …` (ASSIGN), skip if `i` is used after the loop.
+    if init.tok == Some(Token::ASSIGN) && index_used_after_loop(pass, for_stmt, index_name) {
         return;
     }
     let Some(limit_text) = expr_text(y) else {
@@ -5475,7 +5649,9 @@ pub fn analyzer() -> &'static Analyzer {
             doc: "suggests simplifications to Go code using modern language and library features",
             url: "https://pkg.go.dev/golang.org/x/tools/go/analysis/passes/modernize",
             run: run as RunFn,
-            run_despite_errors: false,
+            // Still useful on packages guff typechecks incompletely (e.g. missing
+            // export-data deps): AST/type-local checks like slicesbackward keep working.
+            run_despite_errors: true,
             requires: vec![inspect::analyzer()],
             fact_types: vec![FactTypeId::of::<NewLikeFact>()],
         }

@@ -23,7 +23,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         rule: "duplicated-imports",
                         pos: imp.path.pos().0 as u32,
                         message: format!("Package {path} already imported"),
-                    });
+            confidence: None,
+        });
                 }
             }
         }

@@ -41,7 +41,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 message: format!(
                     "line is {char_count} characters, out of limit {MAX_LINE_LENGTH}"
                 ),
-            });
+            confidence: None,
+        });
         }
     }
     failures

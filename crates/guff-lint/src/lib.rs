@@ -254,7 +254,11 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         | LoadMode::NEED_COMPILED_GO_FILES
         | LoadMode::NEED_IMPORTS
         | LoadMode::NEED_DEPS
-        | LoadMode::NEED_EXPORT_FILE;
+        | LoadMode::NEED_EXPORT_FILE
+        // Retain Module.GoVersion across the metadata→typecheck handoff so
+        // analyzers that gate on the module language version (modernize, …)
+        // do not fall back to the hard-coded go1.22 default.
+        | LoadMode::NEED_MODULE;
     // Hybrid source mode (experimental): type-check third-party dependencies
     // from source and skip the cold `go list -export` build for them (stdlib
     // still comes from export data). See docs/PURE-SOURCE-TYPECHECK.md.

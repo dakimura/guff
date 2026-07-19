@@ -22,7 +22,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     message: format!(
                         "maximum number of arguments per function exceeded; max {MAX_ARGUMENTS} but got {num_params}"
                     ),
-                });
+            confidence: None,
+        });
             }
         }
     }

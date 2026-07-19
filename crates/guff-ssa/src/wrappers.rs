@@ -86,7 +86,7 @@ pub fn create_bound(prog: &mut Program, obj: ObjectId, targs: &[TypeId]) -> Func
     let (name, inst_sig) = maybe_instance(prog, &obj_name, orig_sig, targs);
     let sig = change_recv(prog, inst_sig, None);
 
-    let recv_typ = recv_type(prog, obj);
+    let recv_typ = recv_type(prog, obj).expect("bound method must have receiver");
     let fid = create_function(prog, format!("{}$bound", name), None, None);
     {
         let f = prog.functions.get_mut(fid);
@@ -160,7 +160,7 @@ pub fn build_wrapper(prog: &mut Program, fid: FuncId) {
         v = emit_implicit_selections(prog, fid, entry, v, &indices[..last], NO_POS);
     }
 
-    let rt = recv_type(prog, obj);
+    let rt = recv_type(prog, obj).expect("wrapper method must have receiver");
     let mut call = CallCommon {
         value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),
         method: None,
@@ -203,7 +203,7 @@ pub fn build_bound(prog: &mut Program, fid: FuncId) {
 
     let recv_fv: FreeVarId = prog.functions.get(fid).freevars.iter().next().unwrap().0;
     let recv = Value::FreeVar(recv_fv);
-    let rt = recv_type(prog, obj);
+    let rt = recv_type(prog, obj).expect("bound method must have receiver");
 
     let mut call = CallCommon {
         value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),

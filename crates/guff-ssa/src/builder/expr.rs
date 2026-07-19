@@ -301,7 +301,12 @@ impl<'a> Builder<'a> {
             return crate::builder::lookup(self.prog, self.func_id, obj_id, false);
         }
 
-        todo!("ident resolution failed for object {:?} (id: {})", obj_id, id.id)
+        todo!(
+            "ident resolution failed for {:?} {:?} (ast id: {})",
+            obj_id,
+            std::mem::discriminant(self.prog.object_arena.get(obj_id)),
+            id.id
+        )
     }
 
     fn unary_expr(&mut self, un: &UnaryExpr) -> Value {
@@ -511,7 +516,12 @@ impl<'a> Builder<'a> {
             }
             SelectionKind::MethodVal => {
                 let obj = sel.obj();
-                let rt = crate::methods::recv_type(self.prog, obj);
+                let Some(rt) = crate::methods::recv_type(self.prog, obj) else {
+                    // Selection tagged MethodVal but object has no receiver
+                    // (typechecker quirk / non-method Func). Resolve as a
+                    // package-level or local ident of the same name.
+                    return self.ident_rvalue(&e.sel);
+                };
                 let want_addr = guff_types::is_pointer(&self.prog.type_arena, rt);
                 let v = self.receiver(&e.x, want_addr, true, &sel);
                 let bound = crate::wrappers::create_bound(self.prog, obj, &[]);

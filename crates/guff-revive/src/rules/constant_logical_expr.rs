@@ -63,5 +63,6 @@ fn check_binary(expr: &BinaryExpr, failures: &mut Vec<Failure>) {
         rule: "constant-logical-expr",
         pos: expr.x.pos().0 as u32,
         message: message.into(),
-    });
+            confidence: None,
+        });
 }

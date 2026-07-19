@@ -38,7 +38,8 @@ fn visit_block(
                         rule: "defer",
                         pos: ret.return_.0 as u32,
                         message: "return in a defer function has no effect".into(),
-                    });
+            confidence: None,
+        });
                 }
             }
             Stmt::DeferStmt(d) => {
@@ -87,6 +88,7 @@ fn check_defer(call: &CallExpr, in_loop: bool, failures: &mut Vec<Failure>) {
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "recover must be called inside a deferred function, this is executing recover immediately".into(),
+            confidence: None,
         });
     }
     if in_loop {
@@ -94,6 +96,7 @@ fn check_defer(call: &CallExpr, in_loop: bool, failures: &mut Vec<Failure>) {
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "prefer not to defer inside loops".into(),
+            confidence: None,
         });
     }
     if matches!(unparen(&call.fun), Expr::CallExpr(_)) {
@@ -101,6 +104,7 @@ fn check_defer(call: &CallExpr, in_loop: bool, failures: &mut Vec<Failure>) {
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "prefer not to defer chains of function calls".into(),
+            confidence: None,
         });
     }
 }
@@ -114,12 +118,14 @@ fn check_recover_call(call: &CallExpr, in_defer: bool, func_lit_depth: u8, failu
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "recover must be called inside a deferred function".into(),
+            confidence: None,
         });
     } else if func_lit_depth == 0 {
         failures.push(Failure {
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "recover must be called inside a deferred function, this is executing recover immediately".into(),
+            confidence: None,
         });
     }
 }

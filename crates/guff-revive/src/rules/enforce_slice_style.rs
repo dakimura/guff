@@ -39,7 +39,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             rule: "enforce-slice-style",
                             pos: lit.lbrace.0 as u32,
                             message: message.into(),
-                        });
+            confidence: None,
+        });
                     }
                 }
                 Some(NodeRef::CallExpr(call))
@@ -76,7 +77,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         rule: "enforce-slice-style",
                         pos: call.args[0].pos().0 as u32,
                         message: message.into(),
-                    });
+            confidence: None,
+        });
                 }
                 _ => {}
             }

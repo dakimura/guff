@@ -86,7 +86,8 @@ fn check_loop(last: Option<&Stmt>, vars: Vec<String>, failures: &mut Vec<Failure
                 rule: "range-val-in-closure",
                 pos: name_pos.0 as u32,
                 message: format!("loop variable {name} captured by func literal"),
-            });
+            confidence: None,
+        });
             return false;
         }
         true

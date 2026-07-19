@@ -63,37 +63,47 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
     let Some(s) = basic_lit_string(lit) else {
         return;
     };
-    if s.is_empty() || lint_error_string(s) {
+    if s.is_empty() {
         return;
     }
-    failures.push(Failure {
-        rule: "error-strings",
-        pos: lit.pos().0 as u32,
-        message: MESSAGE.into(),
-    });
+    let (clean, conf) = lint_error_string(s);
+    if clean {
+        return;
+    }
+    failures.push(Failure::with_confidence(
+        "error-strings",
+        lit.pos().0 as u32,
+        MESSAGE,
+        conf,
+    ));
 }
 
-fn lint_error_string(s: &str) -> bool {
+fn lint_error_string(s: &str) -> (bool, f64) {
+    /// Upstream: basicConfidence = 0.8, capConfidence = 0.6.
+    const BASIC: f64 = 0.8;
+    const CAP: f64 = 0.6;
+
     let Some(last) = s.chars().last() else {
-        return true;
+        return (true, 0.0);
     };
     if last == '.' || last == ':' || last == '!' || last == '\n' {
-        return false;
+        return (false, BASIC);
     }
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
-        return true;
+        return (true, 0.0);
     };
     if !first.is_uppercase() {
-        return true;
+        return (true, 0.0);
     }
     for c in chars {
         if c.is_whitespace() {
             break;
         }
         if c.is_uppercase() || c.is_ascii_digit() {
-            return true;
+            return (true, 0.0);
         }
     }
-    false
+    // Capitalization-only: confidence 0.6 is below the default 0.8 threshold.
+    (false, CAP)
 }

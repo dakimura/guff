@@ -74,6 +74,7 @@ fn check_param(id: &Ident, params: &std::collections::HashSet<String>, failures:
             rule: "modifies-parameter",
             pos: id.name_pos.0 as u32,
             message: format!("parameter '{}' seems to be modified", id.name),
+            confidence: None,
         });
     }
 }
@@ -108,6 +109,7 @@ fn check_modifying_call(
                 "parameter '{}' seems to be modified by '{}'",
                 id.name, func_name
             ),
+            confidence: None,
         });
     }
 }

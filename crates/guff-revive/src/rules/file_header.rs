@@ -23,7 +23,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 rule: "file-header",
                 pos: file.package.0 as u32,
                 message: "the file doesn't have an appropriate header".into(),
-            });
+            confidence: None,
+        });
         }
     }
     failures

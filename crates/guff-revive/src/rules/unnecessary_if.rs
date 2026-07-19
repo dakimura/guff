@@ -25,7 +25,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             rule: "unnecessary-if",
                             pos: if_stmt.if_.0 as u32,
                             message: msg,
-                        });
+            confidence: None,
+        });
                     }
                     true
                 });

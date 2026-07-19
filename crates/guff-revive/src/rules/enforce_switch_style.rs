@@ -31,7 +31,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "enforce-switch-style",
                     pos,
                     message: "switch must have a default case clause".into(),
-                });
+            confidence: None,
+        });
                 return true;
             }
             if has_default && !allow_default_not_last && !is_last {
@@ -39,7 +40,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "enforce-switch-style",
                     pos: default_clause.unwrap().case.0 as u32,
                     message: "default case clause must be the last one".into(),
-                });
+            confidence: None,
+        });
             }
             true
         });

@@ -29,7 +29,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "unhandled-error",
                     pos: call.fun.pos().0 as u32,
                     message: format!("Unhandled error in call to function {name}"),
-                });
+            confidence: None,
+        });
             }
             true
         });

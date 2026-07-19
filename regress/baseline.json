@@ -1,0 +1,30 @@
+{
+  "prometheus_git_sha": "66df005b9d8abe8a91a41a9afab022a71b313e7d",
+  "config": ".golangci.yml",
+  "packages": [
+    "./tsdb/..."
+  ],
+  "concurrency": 1,
+  "rayon_threads": 2,
+  "isolate_gocache": false,
+  "guff": {
+    "wall_seconds": 9.68,
+    "peak_rss_bytes": 1877950464
+  },
+  "compat": {
+    "guff_issues": 74,
+    "golangci_issues": 4,
+    "both": 4,
+    "guff_only": 70,
+    "golangci_only": 0,
+    "precision": 0.05405405405405406,
+    "recall": 1.0
+  },
+  "tolerances": {
+    "wall_seconds_ratio": 1.25,
+    "peak_rss_ratio": 1.2,
+    "max_guff_only_delta": 0,
+    "max_golangci_only_delta": 0,
+    "min_both_delta": 0
+  }
+}

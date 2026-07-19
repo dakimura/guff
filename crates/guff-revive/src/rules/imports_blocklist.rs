@@ -38,7 +38,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         message: format!(
                             "should not use the following blocklisted import: {path}"
                         ),
-                    });
+            confidence: None,
+        });
                 }
             }
         }

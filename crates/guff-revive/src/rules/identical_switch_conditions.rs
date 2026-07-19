@@ -39,7 +39,8 @@ fn check_switch(pass: &Pass<'_>, sw: &SwitchStmt, failures: &mut Vec<Failure>) {
                     rule: "identical-switch-conditions",
                     pos: case.case.0 as u32,
                     message: format!("case clause at line {prev} has the same condition"),
-                });
+            confidence: None,
+        });
             } else {
                 hashes.insert(hash, case_line);
             }

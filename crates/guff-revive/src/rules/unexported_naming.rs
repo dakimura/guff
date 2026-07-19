@@ -69,6 +69,7 @@ fn lint_ident(id: &Ident, failures: &mut Vec<Failure>) {
                 "the symbol {} is local, its name should start with a lowercase letter",
                 id.name
             ),
+            confidence: None,
         });
     }
 }

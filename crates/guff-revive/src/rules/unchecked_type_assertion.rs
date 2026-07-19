@@ -60,7 +60,8 @@ fn add_failure(e: &TypeAssertExpr, why: &str, failures: &mut Vec<Failure>) {
         rule: "unchecked-type-assertion",
         pos: e.x.pos().0 as u32,
         message: format!("type cast result is unchecked - {why}"),
-    });
+            confidence: None,
+        });
 }
 
 fn require_no_type_assert(expr: &Expr, failures: &mut Vec<Failure>) {

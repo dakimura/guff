@@ -47,5 +47,6 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
             "should not use basic type {} as key in context.WithValue",
             crate::util::type_string(pass, typ)
         ),
-    });
+            confidence: None,
+        });
 }

@@ -33,6 +33,7 @@ fn check_if(if_stmt: &IfStmt, failures: &mut Vec<Failure>) {
             rule: "identical-branches",
             pos: if_stmt.if_.0 as u32,
             message: "both branches of the if are identical".into(),
+            confidence: None,
         });
     }
 }

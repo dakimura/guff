@@ -131,39 +131,41 @@ pub fn signature_set_recv_type_params(arena: &mut TypeArena, id: TypeId, params:
 // `(*Signature).Recv() / Params() / Results() / Variadic()`.
 
 pub fn signature_recv(arena: &TypeArena, id: TypeId) -> Option<ObjectId> {
-    as_signature(arena, id).recv
+    as_signature_opt(arena, id)?.recv
 }
 
 pub fn signature_params(arena: &TypeArena, id: TypeId) -> Option<TypeId> {
-    as_signature(arena, id).params
+    as_signature_opt(arena, id)?.params
 }
 
 pub fn signature_results(arena: &TypeArena, id: TypeId) -> Option<TypeId> {
-    as_signature(arena, id).results
+    as_signature_opt(arena, id)?.results
 }
 
 pub fn signature_variadic(arena: &TypeArena, id: TypeId) -> bool {
-    as_signature(arena, id).variadic
+    as_signature_opt(arena, id)
+        .map(|s| s.variadic)
+        .unwrap_or(false)
 }
 
 /// The function-level type parameters of the signature, or `None` if it is
-/// non-generic.
+/// non-generic (or `id` is not a signature).
 pub fn signature_type_params(arena: &TypeArena, id: TypeId) -> Option<&TypeParamList> {
-    as_signature(arena, id).tparams.as_ref()
+    as_signature_opt(arena, id)?.tparams.as_ref()
 }
 
 /// The receiver type parameters of the signature (for a generic method like
-/// `func (r T[P]) M()`), or `None` if there are none.
+/// `func (r T[P]) M()`), or `None` if there are none (or `id` is not a signature).
 pub fn signature_recv_type_params(arena: &TypeArena, id: TypeId) -> Option<&TypeParamList> {
-    as_signature(arena, id).rparams.as_ref()
+    as_signature_opt(arena, id)?.rparams.as_ref()
 }
 
-fn as_signature(arena: &TypeArena, id: TypeId) -> &Signature {
+fn as_signature_opt(arena: &TypeArena, id: TypeId) -> Option<&Signature> {
+    // Named / Alias function types (e.g. `type Handler func()`) store a
+    // Signature as their underlying type; callers often pass the Named id.
+    let id = id.underlying(arena);
     match arena.get(id) {
-        TypeData::Signature(s) => s,
-        other => panic!(
-            "expected Signature, got {:?}",
-            std::mem::discriminant(other)
-        ),
+        TypeData::Signature(s) => Some(s),
+        _ => None,
     }
 }

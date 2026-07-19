@@ -32,6 +32,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             rule: "package-naming",
             pos: file.name.name_pos.0 as u32,
             message: format!("don't use package name {pkg_name:?} that contains an underscore"),
+            confidence: None,
         });
         return failures;
     }
@@ -40,6 +41,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             rule: "package-naming",
             pos: file.name.name_pos.0 as u32,
             message: format!("don't use package name {pkg_name:?} that contains MixedCaps"),
+            confidence: None,
         });
         return failures;
     }
@@ -52,6 +54,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             message: format!(
                 "don't use {pkg_name:?} because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names"
             ),
+            confidence: None,
         });
         return failures;
     }
@@ -63,6 +66,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             message: format!(
                 "don't use {pkg_name:?} because it conflicts with common Go standard library package {std_path:?}"
             ),
+            confidence: None,
         });
     }
     failures

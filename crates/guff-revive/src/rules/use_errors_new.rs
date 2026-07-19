@@ -19,7 +19,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     rule: "use-errors-new",
                     pos: call.fun.pos().0 as u32,
                     message: "replace fmt.Errorf by errors.New".into(),
-                });
+            confidence: None,
+        });
             }
             true
         });

@@ -1,6 +1,11 @@
 //! `blank-imports` — blank imports need justification outside main/test.
 
+use std::fs;
+use std::path::Path;
+
 use guff::ast::{Decl, File, Spec};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
 use guff::token::Token;
 use guff_analysis::Pass;
 
@@ -15,10 +20,28 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         return Vec::new();
     }
     let mut failures = Vec::new();
-    for file in pass.files() {
+    let paths = pass.pkg().compiled_go_files.clone();
+    let n = pass.files().len();
+    for i in 0..n {
+        let file = &pass.files()[i];
+        // Load uses Mode::NONE (no PARSE_COMMENTS), so ImportSpec.comment is
+        // usually unset. Re-parse with comments to match upstream revive.
+        if let Some(path) = paths.get(i) {
+            if let Some(with_comments) = reparse_with_comments(path) {
+                check_file(&with_comments, &mut failures);
+                continue;
+            }
+        }
         check_file(file, &mut failures);
     }
     failures
+}
+
+fn reparse_with_comments(path: &Path) -> Option<File> {
+    let src = fs::read(path).ok()?;
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    parse_file(&fset, name, &src, PARSE_COMMENTS).ok()
 }
 
 fn check_file(file: &File, failures: &mut Vec<Failure>) {
@@ -57,11 +80,11 @@ fn check_file(file: &File, failures: &mut Vec<Failure>) {
         }
 
         if imp.doc.is_none() && imp.comment.is_none() {
-            failures.push(Failure {
-                rule: "blank-imports",
-                pos: imp.path.pos().0 as u32,
-                message: MESSAGE.into(),
-            });
+            failures.push(Failure::new(
+                "blank-imports",
+                imp.path.pos().0 as u32,
+                MESSAGE,
+            ));
         }
     }
 }

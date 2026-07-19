@@ -43,7 +43,8 @@ fn check_field(field: &Field, failures: &mut Vec<Failure>) {
                 rule: "struct-tag",
                 pos: tag_lit.value_pos.0 as u32,
                 message: "malformed tag".into(),
-            });
+            confidence: None,
+        });
             return;
         }
     };
@@ -54,14 +55,16 @@ fn check_field(field: &Field, failures: &mut Vec<Failure>) {
                 rule: "struct-tag",
                 pos: tag_lit.value_pos.0 as u32,
                 message: msg,
-            });
+            confidence: None,
+        });
         }
         if let Some(msg) = check_tag(&tag) {
             failures.push(Failure {
                 rule: "struct-tag",
                 pos: tag_lit.value_pos.0 as u32,
                 message: format!("{}: {}", tag.key, msg),
-            });
+            confidence: None,
+        });
         }
     }
 
@@ -75,6 +78,7 @@ fn check_field(field: &Field, failures: &mut Vec<Failure>) {
             rule: "struct-tag",
             pos: field.pos().0 as u32,
             message: format!("tag on not-exported field {name}"),
+            confidence: None,
         });
     }
 }

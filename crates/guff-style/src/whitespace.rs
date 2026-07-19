@@ -4,13 +4,19 @@
 //! Defaults match golangci-lint: `multi-if=false`, `multi-func=false`
 //! (only unnecessary leading/trailing newlines).
 //!
-//! DEFERRED: SuggestedFix; `ignore-leading` / `ignore-trailing` settings;
-//! full comment-first/last accuracy when package load lacks `PARSE_COMMENTS`.
+//! Comments inside blocks are required for leading-newline accuracy. Production
+//! load uses `Mode::NONE` (no `file.comments`), so each file is re-parsed with
+//! [`PARSE_COMMENTS`] and findings are mapped back onto the Pass [`FileSet`] by
+//! line number.
+//!
+//! DEFERRED: SuggestedFix; `ignore-leading` / `ignore-trailing` settings.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::fs;
+use std::sync::{Arc, OnceLock};
 
 use guff::ast::{BlockStmt, CommentGroup, Decl, File, FuncDecl};
+use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
@@ -192,6 +198,22 @@ fn run_file(
     }
 }
 
+fn reparse_with_comments(path: &std::path::Path) -> Option<(Arc<FileSet>, File)> {
+    let src = fs::read(path).ok()?;
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    Some((fset, file))
+}
+
+fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
+    let ft = fset.file(file_pos)?;
+    if line < 1 || line as usize > ft.line_count() {
+        return None;
+    }
+    Some(ft.line_start(line as usize).0 as u32)
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -204,18 +226,49 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
-    for file in pass.files() {
+    let paths = pass.pkg().compiled_go_files.clone();
+    let n = pass.files().len();
+
+    for i in 0..n {
+        let file = &pass.files()[i];
         let name = fset.position(file.pos()).filename;
         if !name.ends_with(".go") {
             continue;
         }
+
+        // Prefer a comment-bearing reparse when the on-disk path is known.
+        // Fall back to the loaded AST (tests / overlays without comments).
+        let (check_fset, check_file, map_lines) = if let Some(path) = paths.get(i) {
+            if let Some((re_fset, parsed)) = reparse_with_comments(path) {
+                (re_fset, parsed, true)
+            } else {
+                (fset.clone(), (*file).clone(), false)
+            }
+        } else if !file.comments.is_empty() {
+            (fset.clone(), (*file).clone(), false)
+        } else {
+            (fset.clone(), (*file).clone(), false)
+        };
+
+        let mut local = Vec::new();
         run_file(
-            file,
-            &fset,
+            &check_file,
+            &check_fset,
             options.multi_if,
             options.multi_func,
-            &mut pending,
+            &mut local,
         );
+
+        if map_lines {
+            for (pos, message) in local {
+                let line = check_fset.position(Pos(pos as i64)).line;
+                if let Some(mapped) = line_pos(&fset, file.pos(), line) {
+                    pending.push((mapped, message));
+                }
+            }
+        } else {
+            pending.extend(local);
+        }
     }
 
     for (pos, message) in pending {

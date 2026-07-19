@@ -65,7 +65,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             "var {} is of type {}; don't use unit-specific suffix {:?}",
                             name.name, type_str, suffix
                         ),
-                    });
+            confidence: None,
+        });
                 }
                 let _ = ty;
             }

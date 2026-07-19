@@ -36,7 +36,8 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
                 rule: "error-return",
                 pos: f.name.name_pos.0 as u32,
                 message: "error should be the last type when returning multiple items".into(),
-            });
+            confidence: None,
+        });
             break;
         }
     }

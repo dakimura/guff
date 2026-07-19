@@ -44,7 +44,8 @@ fn check_switch(pass: &Pass<'_>, sw: &SwitchStmt, failures: &mut Vec<Failure>) {
                 message: format!(
                     "\"switch\" with identical branches (lines {prev} and {line})"
                 ),
-            });
+            confidence: None,
+        });
         } else {
             hashes.insert(hash, line);
         }

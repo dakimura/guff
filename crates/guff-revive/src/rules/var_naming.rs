@@ -247,6 +247,7 @@ fn check(id: &guff::ast::Ident, thing: &str, opts: &Options, failures: &mut Vec<
             rule: "var-naming",
             pos: id.name_pos.0 as u32,
             message: "don't use ALL_CAPS in Go names; use CamelCase".into(),
+            confidence: None,
         });
         return;
     }
@@ -265,6 +266,7 @@ fn check(id: &guff::ast::Ident, thing: &str, opts: &Options, failures: &mut Vec<
                 "don't use underscores in Go names; {thing} {} should be {should}",
                 id.name
             ),
+            confidence: None,
         });
         return;
     }
@@ -272,7 +274,8 @@ fn check(id: &guff::ast::Ident, thing: &str, opts: &Options, failures: &mut Vec<
         rule: "var-naming",
         pos: id.name_pos.0 as u32,
         message: format!("{thing} {} should be {should}", id.name),
-    });
+            confidence: None,
+        });
 }
 
 /// Constant-style names like `SOME_CONST`, `_SOME_PRIVATE_CONST`, `X123_3`.

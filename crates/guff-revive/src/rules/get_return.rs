@@ -29,7 +29,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     "function '{}' seems to be a getter but it does not return any result",
                     f.name.name
                 ),
-            });
+            confidence: None,
+        });
         }
     }
     failures

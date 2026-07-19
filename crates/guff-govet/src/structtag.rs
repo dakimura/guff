@@ -209,11 +209,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let pkg_path = pass.pkg().pkg_path.clone();
     let mut pending = Vec::new();
-    let mut seen = HashMap::new();
     inspect.preorder(pass.files(), |n| {
         let NodeRef::StructType(StructType { fields, .. }) = n else {
             return;
         };
+        // Duplicate json/xml tags are per-struct, not package-wide (go vet).
+        let mut seen = HashMap::new();
         for field in &fields.list {
             check_field(&pkg_path, field, &mut seen, &mut pending);
         }

@@ -101,7 +101,8 @@ impl Canonizer {
         rtargs: &[TypeId],
         ctxt: &mut Context,
     ) -> ObjectId {
-        let recv_typ = crate::methods::recv_type_from_objects(arena, oarena, method);
+        let recv_typ = crate::methods::recv_type_from_objects(arena, oarena, method)
+            .expect("instantiate_method: method must have receiver");
         let mut recv = unalias(arena, recv_typ);
         if let TypeData::Pointer(p) = arena.get(recv) {
             recv = p.elem();

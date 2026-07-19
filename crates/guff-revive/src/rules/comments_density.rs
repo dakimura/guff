@@ -29,7 +29,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 message: format!(
                     "the file has a comment density of {density:.0}% ({comment_lines} comment lines for {code_lines} code lines) but expected a minimum of {minimum}%"
                 ),
-            });
+            confidence: None,
+        });
         }
     }
     failures

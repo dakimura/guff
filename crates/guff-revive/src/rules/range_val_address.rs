@@ -131,12 +131,12 @@ fn is_append(call: &CallExpr) -> bool {
 }
 
 fn make_failure(value: &Ident, node: &Expr) -> Failure {
-    Failure {
-        rule: "range-val-address",
-        pos: node.pos().0 as u32,
-        message: format!(
+    Failure::new(
+        "range-val-address",
+        node.pos().0 as u32,
+        format!(
             "suspicious assignment of '{}'. range-loop variables always have the same address",
             value.name
         ),
-    }
+    )
 }

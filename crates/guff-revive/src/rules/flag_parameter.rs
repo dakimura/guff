@@ -32,7 +32,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         message: format!(
                             "parameter '{name}' seems to be a control flag, avoid control coupling"
                         ),
-                    });
+            confidence: None,
+        });
                 }
                 true
             });

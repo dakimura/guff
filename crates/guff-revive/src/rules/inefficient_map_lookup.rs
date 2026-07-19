@@ -58,7 +58,8 @@ fn analyze_block(pass: &Pass<'_>, block: &BlockStmt, failures: &mut Vec<Failure>
                 rule: "inefficient-map-lookup",
                 pos: range.for_.0 as u32,
                 message: "inefficient lookup of map key".into(),
-            });
+            confidence: None,
+        });
         }
     }
 }

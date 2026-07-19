@@ -32,7 +32,8 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
                 rule: "waitgroup-by-value",
                 pos: ty.pos().0 as u32,
                 message: "sync.WaitGroup passed by value, the function will get a copy of the original one".into(),
-            });
+            confidence: None,
+        });
         }
     }
 }

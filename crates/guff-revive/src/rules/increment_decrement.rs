@@ -54,5 +54,6 @@ fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
         rule: "increment-decrement",
         pos: assign.tok_pos.0 as u32,
         message: format!("should replace {lhs} {suffix} with {lhs}{suffix}"),
-    });
+            confidence: None,
+        });
 }

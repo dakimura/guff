@@ -2400,11 +2400,23 @@ fn filter_staticcheck(
     settings: &StaticcheckSettings,
     analyzers: Vec<&'static Analyzer>,
 ) -> Vec<&'static Analyzer> {
+    // Upstream default (staticcheck.io): all checks except opinionated ST*/SA9003.
+    // When `checks` is unset, apply the same filter so ST1000 etc. stay off.
+    const DEFAULT_DISABLED: &[&str] = &[
+        "SA9003", "ST1000", "ST1003", "ST1016", "ST1020", "ST1021", "ST1022", "ST1023",
+    ];
+
     let Some(checks) = settings.checks.as_ref() else {
-        return analyzers;
+        return analyzers
+            .into_iter()
+            .filter(|a| !DEFAULT_DISABLED.contains(&a.name))
+            .collect();
     };
     if checks.is_empty() {
-        return analyzers;
+        return analyzers
+            .into_iter()
+            .filter(|a| !DEFAULT_DISABLED.contains(&a.name))
+            .collect();
     }
 
     let mut allow_all = false;

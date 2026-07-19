@@ -94,11 +94,16 @@ impl Checker {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let mut checker = Checker::new();
+    // Reset per file: each source file may have its own //go:build line.
+    // Sharing go_build_seen across the package falsely flags later files as
+    // "unexpected extra //go:build line".
+    let mut pending = Vec::new();
     for file in pass.files() {
+        let mut checker = Checker::new();
         checker.check_go_file(file);
+        pending.append(&mut checker.pending);
     }
-    for (pos, message) in checker.pending {
+    for (pos, message) in pending {
         pass.reportf(pos, message);
     }
     Ok(None)

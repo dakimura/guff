@@ -76,7 +76,7 @@ impl Program {
       return Some(fid);
     }
 
-    let rt = recv_type(self, obj);
+    let rt = recv_type(self, obj)?;
     let needs_promotion = sel.index().len() > 1;
     let needs_indirection = !is_pointer(&self.type_arena, rt) && is_pointer(&self.type_arena, t);
 
@@ -229,7 +229,11 @@ impl Program {
 }
 
 /// Returns the receiver type of method object `obj`. (Go: `recvType`.)
-pub(crate) fn recv_type(prog: &Program, obj: ObjectId) -> TypeId {
+///
+/// Returns `None` when `obj` is not a method (no signature, or signature
+/// without a receiver) — callers must fall back instead of panicking during
+/// buildir.
+pub(crate) fn recv_type(prog: &Program, obj: ObjectId) -> Option<TypeId> {
     recv_type_from_objects(&prog.type_arena, &prog.object_arena, obj)
 }
 
@@ -238,22 +242,19 @@ pub(crate) fn recv_type_from_objects(
     arena: &TypeArena,
     oarena: &ObjectArena,
     obj: ObjectId,
-) -> TypeId {
-    let sig = obj
-        .typ(oarena)
-        .expect("method must have signature type");
-    let recv = guff_types::signature::signature_recv(arena, sig)
-        .expect("method must have receiver");
-    recv
-        .typ(oarena)
-        .expect("receiver var must have type")
+) -> Option<TypeId> {
+    let sig = obj.typ(oarena)?;
+    let recv = guff_types::signature::signature_recv(arena, sig)?;
+    recv.typ(oarena)
 }
 
 /// Returns the type arguments to a method's receiver named type, or an empty
 /// slice if the receiver is not an instantiated named type. (Go:
 /// `receiverTypeArgs`.)
 pub fn receiver_type_args(prog: &Program, method: ObjectId) -> Vec<TypeId> {
-    let recv_typ = recv_type(prog, method);
+    let Some(recv_typ) = recv_type(prog, method) else {
+        return Vec::new();
+    };
     let recv_typ = guff_types::alias::unalias_readonly(&prog.type_arena, recv_typ);
     match prog.type_arena.get(recv_typ) {
         TypeData::Pointer(p) => receiver_type_args_on_type(prog, p.elem()),

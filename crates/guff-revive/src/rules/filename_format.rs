@@ -36,6 +36,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                 "Filename {filename} is not of the format {}.{extra}",
                 format.as_str()
             ),
+            confidence: None,
         });
     }
     failures

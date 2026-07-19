@@ -73,9 +73,5 @@ fn is_branching_call(expr: &Expr) -> bool {
 }
 
 fn failure_at(pos: i64) -> Failure {
-    Failure {
-        rule: "unreachable-code",
-        pos: pos as u32,
-        message: MESSAGE.into(),
-    }
+    Failure::new("unreachable-code", pos as u32, MESSAGE)
 }

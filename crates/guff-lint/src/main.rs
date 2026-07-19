@@ -498,7 +498,8 @@ fn load_run_config(
         selection,
         filter,
         build_tags: run.build_tags,
-        tests: run.tests.unwrap_or(false),
+        // golangci-lint default for `run.tests` is true (analyze `*_test.go`).
+        tests: run.tests.unwrap_or(true),
         linter_settings,
         timeout: run.timeout,
         concurrency: run.concurrency.map(|n| n.max(0) as usize),

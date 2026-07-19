@@ -46,7 +46,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                             "error var {} should have name of the form {}Foo",
                             id.name, prefix
                         ),
-                    });
+            confidence: None,
+        });
                 }
             }
         }

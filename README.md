@@ -170,6 +170,20 @@ cargo build --release -p guff-lint
 最新の数値表: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md)。
 詳細は [`benchmarks/README.md`](benchmarks/README.md)。
 
+### Prometheus 回帰ゲート（ローカル・24GB 想定）
+
+メモリ・壁時計・golangci-lint との finding-set 差分が `baseline.json` より悪化しないことを
+ローカルで確認します（CI 未接続。prometheus 本体の `.golangci.yml` を使用）。
+既定は `./tsdb/...`・`-j 1`・暖機済みシステム `GOCACHE`・RSS 上限 12GiB（フル `./...` +
+空 GOCACHE は 40GB 超で OOM するため）:
+
+```bash
+./regress/run.sh --update-baseline   # 初回 / 意図的な基準更新
+./regress/run.sh                     # ゲート
+```
+
+詳細は [`regress/README.md`](regress/README.md)。
+
 > 以前分かれていた `MIGRATION.md` / `PRE-LINTER-PLAN.md` / `docs/LINTER-MIGRATION.md` /
 > `docs/STATICCHECK-MIGRATION.md` / `docs/ADDING-ANALYZER.md` / `projects/guff-ssa-MIGRATION.md`
 > は上記に統合しました（原文は git 履歴に残っています）。
@@ -222,6 +236,8 @@ guff-lint  (bin: guff)
 guff/
 ├── Cargo.toml              # workspace 定義
 ├── benchmarks/             # vs golangci-lint wall-clock harness (R11)
+├── compat/                 # finding-set diff harness vs golangci-lint (R21)
+├── regress/                # prometheus RSS/wall/finding-set regression gate (local)
 ├── crates/
 │   ├── guff-lint/          # CLI エントリ (bin: guff)
 │   ├── guff-runner/        # 解析ドライバ

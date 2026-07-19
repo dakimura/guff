@@ -238,7 +238,8 @@ fn visit_if(
                     rule,
                     pos: if_stmt.if_.0 as u32,
                     message,
-                });
+            confidence: None,
+        });
             }
         }
         return;
@@ -273,7 +274,8 @@ fn visit_if(
                     rule,
                     pos: if_stmt.if_.0 as u32,
                     message,
-                });
+            confidence: None,
+        });
             }
         }
         _ => {}

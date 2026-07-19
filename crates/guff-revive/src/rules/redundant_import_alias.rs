@@ -25,7 +25,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                         rule: "redundant-import-alias",
                         pos: imp.path.pos().0 as u32,
                         message: format!("Import alias {:?} is redundant", alias.name),
-                    });
+            confidence: None,
+        });
                 }
             }
         }

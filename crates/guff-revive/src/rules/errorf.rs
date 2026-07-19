@@ -66,5 +66,6 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
         message: format!(
             "should replace {render_target}(fmt.Sprintf(...)) with {prefix}.Errorf(...)"
         ),
-    });
+            confidence: None,
+        });
 }

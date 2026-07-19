@@ -1,12 +1,12 @@
 //! `unexported-return` — exported functions should not return unexported types.
 
-use guff::ast::{Decl, Expr, FuncDecl};
+use guff::ast::{Decl, FuncDecl};
 use guff_analysis::Pass;
 use guff_types::arena::TypeData;
 use guff_types::ObjectId;
 
 use crate::failure::Failure;
-use crate::util::{is_importable_package, receiver_type_key, type_string, unparen};
+use crate::util::{is_importable_package, receiver_type_key, type_string};
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     if !is_importable_package(&pass.pkg().name) {
@@ -48,19 +48,9 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
         let Some(ty_expr) = &ret.ty else {
             continue;
         };
-        if let Expr::Ident(id) = unparen(ty_expr) {
-            if !id.is_exported() {
-                failures.push(Failure {
-                    rule: "unexported-return",
-                    pos: ty_expr.pos().0 as u32,
-                    message: format!(
-                        "exported {thing} {} returns unexported type {}, which can be annoying to use",
-                        f.name.name, id.name
-                    ),
-                });
-                break;
-            }
-        }
+        // Must use type info — a lowercase Ident may be a predeclared builtin
+        // (`string`, `error`, `int`, …) which is not an "unexported" package type.
+        // The previous AST-only `!id.is_exported()` check false-positived on those.
         let Some(typ) = crate::util::type_of(pass, ty_expr) else {
             continue;
         };
@@ -75,6 +65,7 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
                 f.name.name,
                 type_string(pass, typ)
             ),
+            confidence: None,
         });
         break;
     }
@@ -86,10 +77,10 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     };
     let types = &artifacts.types;
     let objects = &artifacts.objects;
-    let u = typ.underlying(types);
-    match types.get(u) {
-        TypeData::Basic(_) => true,
-        TypeData::Named(n) => named_exported(objects, types, n.obj()),
+    // Check Named/Alias on the type itself before underlying — otherwise
+    // `type unexported struct{}` collapses to Struct and is treated as exported.
+    match types.get(typ) {
+        TypeData::Named(n) => return named_exported(objects, types, n.obj()),
         TypeData::Alias(a) => {
             let obj = a.obj();
             if obj.pkg(objects).is_none() {
@@ -101,8 +92,21 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
             let Some(rhs) = a.rhs() else {
                 return true;
             };
-            matches!(types.get(rhs.underlying(types)), TypeData::Interface(_))
+            return matches!(types.get(rhs.underlying(types)), TypeData::Interface(_));
         }
+        TypeData::Pointer(p) => return exported_type(pass, p.elem()),
+        TypeData::Slice(s) => return exported_type(pass, s.elem()),
+        TypeData::Array(a) => return exported_type(pass, a.elem()),
+        TypeData::Map(m) => {
+            return exported_type(pass, m.key()) && exported_type(pass, m.elem());
+        }
+        TypeData::Chan(c) => return exported_type(pass, c.elem()),
+        _ => {}
+    }
+    let u = typ.underlying(types);
+    match types.get(u) {
+        TypeData::Basic(_) => true,
+        TypeData::Named(n) => named_exported(objects, types, n.obj()),
         TypeData::Pointer(p) => exported_type(pass, p.elem()),
         TypeData::Slice(s) => exported_type(pass, s.elem()),
         TypeData::Array(a) => exported_type(pass, a.elem()),

@@ -76,6 +76,28 @@ impl CfgBuilder {
         let mut b = Self::default();
         b.defs = defs.clone();
         b.uses = uses.clone();
+        // Package-level variables escape across functions (e.g. assigned in
+        // init, read elsewhere). Upstream ineffassign never flags them as
+        // ineffectual from a single function's CFG.
+        for decl in decls {
+            if let Decl::GenDecl(GenDecl {
+                tok: Some(Token::VAR),
+                specs,
+                ..
+            }) = decl
+            {
+                for spec in specs {
+                    let Spec::ValueSpec(ValueSpec { names, .. }) = spec else {
+                        continue;
+                    };
+                    for name in names {
+                        if let Some(obj) = b.resolve_obj(name) {
+                            b.vars.entry(obj).or_default().escapes = true;
+                        }
+                    }
+                }
+            }
+        }
         for decl in decls {
             if let Decl::FuncDecl(f) = decl {
                 if f.body.is_some() {

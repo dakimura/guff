@@ -64,7 +64,8 @@ fn check_range(r: &RangeStmt, failures: &mut Vec<Failure>) {
         rule: "empty-block",
         pos: r.for_.0 as u32,
         message: MESSAGE.into(),
-    });
+            confidence: None,
+        });
 }
 
 fn check_block(b: &BlockStmt, ignore: &[*const BlockStmt], failures: &mut Vec<Failure>) {
@@ -77,6 +78,7 @@ fn check_block(b: &BlockStmt, ignore: &[*const BlockStmt], failures: &mut Vec<Fa
             rule: "empty-block",
             pos: b.lbrace.0 as u32,
             message: MESSAGE.into(),
+            confidence: None,
         });
     }
 }

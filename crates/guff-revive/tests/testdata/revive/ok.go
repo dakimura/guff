@@ -68,6 +68,16 @@ func GoodExported() Exported {
 	return Exported{}
 }
 
+// String returns a builtin string — must not trip unexported-return.
+func (e Exported) String() string {
+	return "ok"
+}
+
+// Err returns the predeclared error interface — must not trip unexported-return.
+func (e Exported) Err() error {
+	return nil
+}
+
 func usedParam(x int) {
 	_ = x
 }

@@ -45,5 +45,6 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
         rule: "string-of-int",
         pos: call.fun.pos().0 as u32,
         message: "dubious conversion of an integer into a string, use strconv.Itoa".into(),
-    });
+            confidence: None,
+        });
 }

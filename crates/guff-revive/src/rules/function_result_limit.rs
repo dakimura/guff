@@ -35,7 +35,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
                     message: format!(
                         "maximum number of return results per function exceeded; max {MAX_RESULTS} but got {num}"
                     ),
-                });
+            confidence: None,
+        });
             }
         }
     }
