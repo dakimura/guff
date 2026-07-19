@@ -206,7 +206,13 @@ impl CfgBuilder {
         if let Some(post) = &s.post {
             self.walk_stmt(post);
         }
-        self.block_mut(cond.unwrap()).children.push(start);
+        // Back-edge from the end of the loop (post block) to the condition, so
+        // the post-statement's store (`i++`) is seen as used by the next
+        // iteration's condition/body. Mirrors `walk_range`; using `cond` here
+        // instead of the current block made it a `cond -> cond` self-loop
+        // (start == cond), leaving `i++` with no successor and thus falsely
+        // "ineffectual" (and staticcheck "value never used") on stepped loops.
+        self.block_mut(self.block.unwrap()).children.push(start);
         let brek_dst = self.new_block_from(&[cond.unwrap()]);
         self.breaks.set_destination(brek_idx, brek_dst, &mut self.blocks);
         self.breaks.pop();

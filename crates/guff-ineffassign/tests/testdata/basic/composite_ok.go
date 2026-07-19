@@ -39,3 +39,15 @@ func useInSliceIndex(s string, off []int) string {
 	b := off[1]
 	return s[a:b]
 }
+
+// steppedLoop: the post-increment `i += 2` feeds the next iteration's condition
+// and body, so it is not ineffectual. Regression for a for-loop CFG back-edge
+// that linked cond->cond (a no-op self loop) instead of post->cond, leaving the
+// increment with no successor use.
+func steppedLoop(xs []int) int {
+	sum := 0
+	for i := 0; i < len(xs); i += 2 {
+		sum += xs[i]
+	}
+	return sum
+}
