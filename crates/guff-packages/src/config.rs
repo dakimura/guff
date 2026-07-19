@@ -28,6 +28,12 @@ pub struct Config {
     ///
     /// Also honored when `GUFF_CACHE=off` / `GOLANGCI_LINT_CACHE=off`.
     pub disable_cache: bool,
+    /// Resolve dependency type information from **source** instead of compiler
+    /// export data. When set, `go list` is invoked without `-export` (skipping
+    /// the expensive dependency compilation) and dependencies are type-checked
+    /// from their `CompiledGoFiles` via the built-in source importer. Feeds
+    /// [`TypecheckEnv::from_source`](crate::TypecheckEnv). Default `false`.
+    pub dep_source: bool,
 }
 
 impl Default for Config {
@@ -40,6 +46,7 @@ impl Default for Config {
             tests: false,
             overlay: HashMap::new(),
             disable_cache: false,
+            dep_source: false,
         }
     }
 }

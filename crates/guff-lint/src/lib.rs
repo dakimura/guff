@@ -255,11 +255,16 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         | LoadMode::NEED_IMPORTS
         | LoadMode::NEED_DEPS
         | LoadMode::NEED_EXPORT_FILE;
+    // Hybrid source mode (experimental): type-check third-party dependencies
+    // from source and skip the cold `go list -export` build for them (stdlib
+    // still comes from export data). See docs/PURE-SOURCE-TYPECHECK.md.
+    let dep_source = std::env::var_os("GUFF_DEP_SOURCE").is_some();
     let meta_cfg = Config {
         mode: metadata_mode,
         build_flags: build_flags.clone(),
         tests: opts.tests,
         disable_cache: !opts.use_cache,
+        dep_source,
         ..Config::default()
     };
     let full_cfg = Config {
@@ -267,6 +272,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         build_flags,
         tests: opts.tests,
         disable_cache: !opts.use_cache,
+        dep_source,
         ..Config::default()
     };
 
@@ -342,7 +348,8 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     let t2 = std::time::Instant::now();
 
     // Type-check + analyze only the packages that missed the cache.
-    let env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
+    let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
+    env.from_source = dep_source;
     let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
     if timing {
         eprintln!(

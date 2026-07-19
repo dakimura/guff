@@ -30,6 +30,12 @@ pub struct TypecheckEnv {
     pub arch: String,
     /// Accepted Go language version for the checker (e.g. `"go1.26"`).
     pub go_version: String,
+    /// Resolve dependency type information by type-checking dependency **source**
+    /// (via the built-in source importer) instead of decoding compiler export
+    /// data (`.a`). Set on the cold path where `go list` runs without `-export`,
+    /// so the expensive dependency compilation is avoided (see the cold-speedup
+    /// work). When `false` (default) the export-data seed is used.
+    pub from_source: bool,
 }
 
 impl Default for TypecheckEnv {
@@ -38,6 +44,7 @@ impl Default for TypecheckEnv {
             compiler: "gc".into(),
             arch: std::env::var("GOARCH").unwrap_or_else(|_| "amd64".into()),
             go_version: String::new(),
+            from_source: false,
         }
     }
 }
@@ -61,6 +68,7 @@ impl TypecheckEnv {
                 .or_else(|| std::env::var("GOARCH").ok())
                 .unwrap_or_else(|| "amd64".into()),
             go_version: lookup("GOVERSION").unwrap_or_default(),
+            from_source: false,
         }
     }
 
@@ -107,9 +115,15 @@ pub fn typecheck_packages(
         root_ids.to_vec()
     };
 
-    // Build a shared export-data seed once (R24.3) so parallel checkers clone
-    // already-decoded stdlib/common deps instead of re-decoding per package.
-    let seed = build_export_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env);
+    // Build a shared dependency seed once (R24.3) so parallel checkers clone the
+    // already-loaded stdlib/common deps instead of reloading per package. In
+    // source mode the deps are type-checked from source; otherwise decoded from
+    // export data.
+    let seed = if env.from_source {
+        build_source_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env)
+    } else {
+        build_export_seed(&targets, by_id, &export_paths, &dep_graph, &fset, env)
+    };
 
     // Type-check targets in parallel. Each package resolves its dependencies
     // from on-disk export data (`.a` files) via a private `Checker`/importer —
@@ -171,7 +185,11 @@ pub fn typecheck_roots(
         .collect();
 
     let mut checked: HashMap<String, Arc<Package>> = {
-        let seed = build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+        let seed = if env.from_source {
+            build_source_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
+        } else {
+            build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
+        };
         target_ids
             .par_iter()
             .filter_map(|id| {
@@ -436,6 +454,146 @@ fn build_export_seed(
     Some(Arc::new(check.capture_export_seed()))
 }
 
+/// Build a shared [`ExportSeed`] by type-checking the targets' dependency
+/// closure **from source** (no export data), for the cold path where `go list`
+/// runs without `-export`. Returns `None` when there is nothing to preload.
+///
+/// The resulting seed is the same type as [`build_export_seed`]'s, so every
+/// downstream consumer ([`typecheck_package_with_seed`], the SSA layer, …) is
+/// unchanged — it simply contains source-checked dependencies instead of
+/// export-decoded ones. Diagnostics produced while checking the dependencies are
+/// intentionally dropped ([`Checker::capture_export_seed`] does not capture
+/// errors); only the target packages report issues.
+fn build_source_seed(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    // Transitive dependency closure of the targets (leaves included).
+    let mut needed: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack: Vec<String> = Vec::new();
+    for id in targets {
+        if let Some(pkg) = by_id.get(id) {
+            stack.extend(pkg.deps.iter().cloned());
+            stack.extend(pkg.imports.keys().cloned());
+        }
+    }
+    while let Some(path) = stack.pop() {
+        if path == "unsafe" || path == "C" {
+            continue;
+        }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        needed.push(path.clone());
+        if let Some(deps) = dep_graph.get(&path) {
+            stack.extend(deps.iter().cloned());
+        }
+    }
+    // Keep dependencies we can load: either from export data (stdlib, hybrid
+    // mode) or from source (third-party, and everything in pure-source mode).
+    needed.retain(|p| {
+        export_paths.contains_key(p)
+            || by_id
+                .get(p)
+                .is_some_and(|pk| !pk.compiled_go_files.is_empty())
+    });
+    if needed.is_empty() {
+        return None;
+    }
+
+    let conf = TypeConfig {
+        sizes: Some(env.sizes()),
+        go_version: env.go_version.clone(),
+        ..TypeConfig::default()
+    };
+    let mut check = Checker::new(conf);
+
+    // Export-data importer for dependencies that keep export data (stdlib in the
+    // hybrid path; empty in pure-source). The built-in source importer takes
+    // precedence for any path also registered via `add_dependency_source`.
+    let mut importer = ExportImporter::with_fset(fset.clone());
+    for (path, file) in export_paths {
+        importer.set_path(path.clone(), file.clone());
+    }
+    check.set_importer(Box::new(importer));
+
+    // Register source for every dependency NOT resolved from export data, so the
+    // built-in source importer (`Checker::check_dependency`) type-checks it.
+    let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
+    for id in &needed {
+        if export_paths.contains_key(id) {
+            continue;
+        }
+        let Some(pkg) = by_id.get(id) else { continue };
+        let files = parse_dep_files(&pkg.compiled_go_files, fset);
+        if !files.is_empty() {
+            check.add_dependency_source(id.clone(), files);
+        }
+    }
+
+    // Load each dependency once, leaves-first, so the shared import cache is
+    // fully populated with shallow recursion (mirrors `preload_exports`; O(V+E)
+    // via the `done` memo). `preload_import` resolves each node source-first,
+    // then falls back to the export-data importer.
+    let mut visiting = Vec::new();
+    let mut done = std::collections::HashSet::new();
+    for id in &needed {
+        source_preload(&mut check, id, dep_graph, &loadable, &mut visiting, &mut done);
+    }
+    Some(Arc::new(check.capture_export_seed()))
+}
+
+/// Parse a dependency's `compiled_go_files` into syntax trees sharing `fset`.
+/// Files that fail to read or parse are skipped (dependency diagnostics are not
+/// reported on the source-seed path).
+fn parse_dep_files(paths: &[PathBuf], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
+    let mut out = Vec::new();
+    for path in paths {
+        let Ok(src) = fs::read(path) else { continue };
+        let name = path.to_str().unwrap_or("file.go");
+        if let Ok(file) = parse_file(fset, name, &src, Mode::NONE) {
+            out.push(file);
+        }
+    }
+    out
+}
+
+/// Leaves-first DFS that type-checks each registered dependency once via the
+/// built-in source importer. Analogous to [`preload_export`] but the load op is
+/// a source type-check rather than an export-data decode.
+fn source_preload(
+    check: &mut Checker,
+    path: &str,
+    dep_graph: &HashMap<String, Vec<String>>,
+    loadable: &std::collections::HashSet<String>,
+    visiting: &mut Vec<String>,
+    done: &mut std::collections::HashSet<String>,
+) {
+    if path == "unsafe" || path == "C" || done.contains(path) {
+        return;
+    }
+    if visiting.iter().any(|p| p == path) {
+        return;
+    }
+    if !loadable.contains(path) {
+        return;
+    }
+    visiting.push(path.to_string());
+    if let Some(deps) = dep_graph.get(path) {
+        for dep in deps {
+            source_preload(check, dep, dep_graph, loadable, visiting, done);
+        }
+    }
+    check.preload_import(path);
+    visiting.pop();
+    done.insert(path.to_string());
+}
+
 /// Depth-first preload of dependency export data so nested `read()` calls find
 /// transitive packages in the importer cache (see PL09 deferral).
 ///
@@ -583,6 +741,7 @@ mod tests {
             compiler: "gc".into(),
             arch: "386".into(),
             go_version: String::new(),
+            from_source: false,
         };
         assert_eq!(env.sizes().word_size, 4);
     }

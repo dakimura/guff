@@ -95,7 +95,8 @@ fn refine(
     }
 
     if crate::typecheck::needs_typecheck(requested_mode) {
-        let env = TypecheckEnv::from_env(&cfg.resolved_env(), &response.compiler);
+        let mut env = TypecheckEnv::from_env(&cfg.resolved_env(), &response.compiler);
+        env.from_source = cfg.dep_source;
         typecheck_packages(&mut by_id, &response.roots, requested_mode, &env);
     }
 

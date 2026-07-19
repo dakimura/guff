@@ -112,8 +112,55 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
         }
     }
 
+    // Hybrid source mode: the main call ran without `-export` (so third-party
+    // deps are not compiled). Type info for those comes from source, but stdlib
+    // is still resolved from export data — build only the stdlib `.a` here (a
+    // small, ~4s-cold subset) via a second, stdlib-restricted `go list -export`.
+    if cfg.dep_source {
+        let stdlib: Vec<String> = seen
+            .values()
+            .filter(|p| p.standard && p.import_path != "unsafe" && p.error.is_none())
+            .map(|p| p.import_path.clone())
+            .collect();
+        if !stdlib.is_empty() {
+            let exports = fetch_stdlib_exports(cfg, &stdlib)?;
+            for pkg in response.packages.iter_mut() {
+                if let Some(export) = exports.get(&pkg.id) {
+                    if !export.is_empty() {
+                        Arc::make_mut(pkg).export_file = PathBuf::from(export);
+                    }
+                }
+            }
+        }
+    }
+
     let _ = mode; // mode informs golist_args; refine clears fields later.
     Ok(response)
+}
+
+/// Second `go list` call for hybrid source mode: build export data for the given
+/// (stdlib) packages only and return `import path → export .a path`.
+fn fetch_stdlib_exports(
+    cfg: &Config,
+    paths: &[String],
+) -> Result<HashMap<String, String>, GoListError> {
+    let mut args = vec![
+        "list".to_string(),
+        "-json=ImportPath,Export".to_string(),
+        "-export".to_string(),
+    ];
+    args.extend(paths.iter().cloned());
+    let stdout = invoke_go(cfg, &args)?;
+
+    let mut map = HashMap::new();
+    let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonExport>();
+    for item in stream {
+        let e = item.map_err(|e| GoListError::Json(e.to_string()))?;
+        if !e.export.is_empty() {
+            map.insert(e.import_path, e.export);
+        }
+    }
+    Ok(map)
 }
 
 fn load_or_invoke_go(
@@ -486,6 +533,11 @@ fn json_flag(cfg: &Config, go_version: u32) -> String {
     };
 
     add(&["Name", "ImportPath", "Error"]);
+    if cfg.dep_source {
+        // Needed to classify stdlib (resolved via export data) vs third-party
+        // (type-checked from source) in the hybrid source mode.
+        add(&["Standard"]);
+    }
     if mode.contains(LoadMode::NEED_FILES)
         || mode.contains(LoadMode::NEED_TYPES)
         || mode.contains(LoadMode::NEED_TYPES_INFO)
@@ -548,6 +600,12 @@ fn json_flag(cfg: &Config, go_version: u32) -> String {
 }
 
 fn uses_export_data(cfg: &Config) -> bool {
+    // Source mode resolves dependency types by type-checking source, so `go list`
+    // must not build export data (`-export`) — that build is the cold-path cost
+    // this mode exists to avoid.
+    if cfg.dep_source {
+        return false;
+    }
     let mode = cfg.effective_mode();
     mode.contains(LoadMode::NEED_EXPORT_FILE)
         || (mode.contains(LoadMode::NEED_TYPES) && !mode.contains(LoadMode::NEED_DEPS))
@@ -755,8 +813,20 @@ struct JsonPackage {
     for_test: String,
     #[serde(default, rename = "DepOnly")]
     dep_only: bool,
+    #[serde(default, rename = "Standard")]
+    standard: bool,
     #[serde(default, rename = "Error")]
     error: Option<JsonPackageError>,
+}
+
+/// Minimal shape for the second, stdlib-only `go list -export` call used by the
+/// hybrid source mode ([`Config::dep_source`]).
+#[derive(Debug, Clone, Deserialize)]
+struct JsonExport {
+    #[serde(rename = "ImportPath")]
+    import_path: String,
+    #[serde(default, rename = "Export")]
+    export: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
