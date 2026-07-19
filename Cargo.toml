@@ -36,7 +36,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "BSD-3-Clause"
+license = "GPL-3.0-only"
 
 # Release profile tuned for a latency-sensitive CLI. `lto = "fat"` and
 # `codegen-units = 1` trade longer build times for a faster binary (measurable

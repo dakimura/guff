@@ -1,28 +1,48 @@
 # guff
 
-Go 向けマルチ linter を **1 本の解析パイプライン**で動かす Rust 実装です。  
-golangci-lint v2 の `standard` プリセット相当（staticcheck / govet / errcheck / ineffassign / unused）を、パッケージロード → 型チェック → `go/analysis` 実行まで一度にこなします。
+**A Rust-native Go multi-linter** — one analysis pipeline, golangci-lint–compatible configs, built for fast local loops and AI agent sandboxes.
 
-CLI バイナリ名は **`guff`** です（クレート名は `guff-lint`）。
+The CLI binary is **`guff`** (crate name: `guff-lint`).
 
-## 必要条件
+---
 
-| ツール | 用途 |
-|--------|------|
-| [Rust](https://rustup.rs/) (edition 2021) | `guff` のビルド |
-| [Go](https://go.dev/dl/) | 解析対象のパッケージ解決（内部で `go list` を利用） |
+## Why guff (vs golangci-lint)
 
-## インストール
+Agents and CI run linters constantly. Wall-clock and peak memory dominate the feedback loop. guff keeps a single Rust process over package load → typecheck → analyzers, instead of orchestrating many Go tools.
 
-次のいずれかで入れます。
+**Warm runs are faster than golangci-lint** on the standard five-linter preset (`staticcheck` / `govet` / `errcheck` / `ineffassign` / `unused`):
 
-### 方法 A: `cargo install --git`（clone 不要）
+| Target | guff warm | golangci-lint warm | guff is |
+|--------|----------:|-------------------:|--------:|
+| `local` (13 packages) | **0.156s** | 0.287s | **1.8× faster** |
+| `fixture` | **0.136s** | 0.177s | **1.3× faster** |
+
+Cold starts are faster too. Numbers are medians of 3 samples (Darwin arm64, Go 1.26, golangci-lint 2.12). Full tables: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
+
+**Memory stays in the single-digit GB range** on large trees after arena / export-seed work (Prometheus full `./...`: ~**5.8 GB** peak RSS, down from ~56 GB). Smaller scopes (e.g. Prometheus `./tsdb/...`) land around **~1.8 GB**. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
+
+Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters are implemented. Matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+
+---
+
+## Getting Started
+
+### Requirements
+
+| Tool | Why |
+|------|-----|
+| [Rust](https://rustup.rs/) (edition 2021) | Build `guff` |
+| [Go](https://go.dev/dl/) | Package resolution (`go list`) |
+
+### Installation
+
+**A. `cargo install --git` (no clone)**
 
 ```bash
 cargo install --git https://github.com/dakimura/guff --locked guff-lint
 ```
 
-### 方法 B: clone してローカルからインストール（推奨）
+**B. Clone and install (recommended)**
 
 ```bash
 git clone https://github.com/dakimura/guff.git
@@ -30,223 +50,237 @@ cd guff
 cargo install --path crates/guff-lint --locked
 ```
 
-いずれも `~/.cargo/bin/guff` が入ります。`PATH` に `~/.cargo/bin` が入っていることを確認してください。
+Either way installs `~/.cargo/bin/guff`. Ensure `~/.cargo/bin` is on your `PATH`.
 
 ```bash
 guff --help
 ```
 
-### 方法 C: リリース用にバイナリだけビルド
+**C. Release binary only**
 
 ```bash
 cargo build --release -p guff-lint
-# 成果物: target/release/guff
-cp target/release/guff /usr/local/bin/   # 好みの場所へ
+# artifact: target/release/guff
 ```
 
-### 方法 D: ソースから都度実行
+**D. Run from source**
 
 ```bash
 cargo run -p guff-lint -- run ./...
 ```
 
-## 使い方
+### Usage
 
-### 基本
-
-Go モジュールのルートで:
+From a Go module root:
 
 ```bash
 guff run .
-# または
+# or
 guff run ./...
 ```
 
-設定ファイルがなければ、golangci-lint v2 の **`standard`** プリセット（上記 5 linter）が有効になります。
-
-### 設定ファイル
-
-カレントから親ディレクトリへ向かって次を探します。
-
-- `.golangci.yml` / `.golangci.yaml`
-- `.guff.yml` / `.guff.yaml`
-
-golangci-lint v1 / v2 の YAML のサブセットを読めます。明示する場合:
+With no config file, the golangci-lint v2 **`standard`** preset is enabled (five linters above).
 
 ```bash
-guff run -c .golangci.yml .
-guff run --no-config .          # 設定を無視
-```
+# List what is on / off for the current config
+guff linters
 
-### CLI で linter を切り替える
-
-```bash
-# プリセット（standard / fast / all / none）
+# Presets: standard | fast | all | none
 guff run --preset standard .
 guff run --preset fast .
 
-# 追加・除外（繰り返し可）
-guff run --enable staticcheck --disable unused .
-```
+# Enable / disable by name (repeatable)
+guff run --enable misspell --enable revive --disable unused .
 
-### 設定の v1 → v2 移行
+# Ignore discovered config
+guff run --no-config .
 
-```bash
+# Migrate golangci-lint v1 YAML → v2
 guff migrate
 guff migrate -c .golangci.yml
 ```
 
-## 対応 linter
+Formatters (same six as golangci-lint v2 `formatters`):
 
-`standard` プリセット（デフォルト）は golangci-lint v2 と同じ 5 系統です。
+```bash
+guff fmt .
+guff fmt --enable gofumpt --enable goimports .
+```
 
-| 名前 | 内容 |
-|------|------|
-| `staticcheck` | Staticcheck / simple 系ルール（S* / SA* / ST* / QF* = 167 analyzers） |
-| `govet` | `go vet` 相当の解析（29/29 pass） |
-| `errcheck` | 未チェックの error 戻り値 |
-| `ineffassign` | 無効な代入 |
-| `unused` | 未使用のパッケージレベル定義 |
+### Configuration
 
-これ以外にも **golangci-lint v2 の全 114 linter のうち 108 を実装済み**です
-（`--enable <name>` で個別有効化。利用可能名は `guff linters`）。
-どの linter・設定キー・出力フォーマットが対応済/部分/未対応かは
-**互換性マトリクス** [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) を参照してください。
+guff walks from the current directory upward looking for:
 
-プリセット:
+- `.golangci.yml` / `.golangci.yaml`
+- `.guff.yml` / `.guff.yaml`
 
-- **`standard`** — 上記 5 linter（デフォルト）
-- **`fast`** — `standard` から `staticcheck` を除いたもの
-- **`all`** / **`none`** — 全 standard 系統 / 無効
+It accepts a subset of golangci-lint v1 / v2 YAML. Point at a file explicitly with `-c`:
 
-## 対応フォーマッタ（`guff fmt`）
+```bash
+guff run -c .golangci.yml .
+```
 
-gofmt / gofumpt / goimports / gci / golines / swaggo（golangci-lint v2 の `formatters` 全 6 種）。
+Minimal v2 example:
 
-## 出力フォーマット（`--out-format`）
+```yaml
+version: "2"
 
-text（`line-number`）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。
-`format:path` でファイル書き出し・複数同時出力に対応。
+linters:
+  default: standard
+  enable:
+    - misspell
+    - revive
+  disable:
+    - unused
+  settings:
+    errcheck:
+      check-blank: true
+    misspell:
+      locale: US
 
-## アーキテクチャ（ざっくり）
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+output:
+  formats:
+    text:
+      path: stdout
+```
+
+`default` presets:
+
+| Preset | Linters |
+|--------|---------|
+| `standard` | `staticcheck`, `govet`, `errcheck`, `ineffassign`, `unused` (default) |
+| `fast` | `standard` without `staticcheck` |
+| `all` | same base set as `standard` (enable extras via `enable` / `--enable`) |
+| `none` | nothing until you `enable` |
+
+Which keys / formats are supported: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+
+### Linter rules
+
+**Default (`standard`)** — same five families as golangci-lint v2:
+
+| Name | What it covers |
+|------|----------------|
+| `staticcheck` | Staticcheck / simple / style / quickfix (S\* / SA\* / ST\* / QF\* — **167** analyzers) |
+| `govet` | `go vet` passes (**29/29**) |
+| `errcheck` | Unchecked `error` returns |
+| `ineffassign` | Ineffectual assignments |
+| `unused` | Unused package-level declarations |
+
+**Beyond the default:** **108 / 114** golangci-lint v2 linters are implemented (enable with `--enable <name>` or config). Examples: `revive`, `gosec`, `misspell`, `gocritic`, `errname`, `bodyclose`, `dupl`, …
+
+```bash
+guff linters --no-config          # standard five on; others listed as disabled
+guff linters --enable revive      # see revive in the enabled list
+```
+
+Full ✅ / 🟡 / ❌ matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+
+### Output formats
+
+`--out-format`: `text` (`line-number`), `colored-line-number`, `json`, `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
+
+Use `format:path` to write files or emit several formats at once.
+
+---
+
+## Architecture (short)
 
 ```
 go list (guff-packages)
-  → typecheck（ソース / export data）
+  → typecheck (source / export data)
   → Pass (guff-analysis)
-  → action graph (guff-runner)   ← 全 linter を 1 DAG で実行
+  → action graph (guff-runner)   ← all linters in one DAG
   → Diagnostic
        ↑
-  guff CLI（設定・有効化・表示）
+  guff CLI (config, enablement, printers)
 ```
 
-クレート構成の詳細は下の「ソース構成」を参照してください。
+---
 
-## 開発
+## Development
 
 ```bash
-# ワークスペース全体
 cargo build
 cargo test
 
-# CLI だけ
 cargo test -p guff-lint
 cargo run -p guff-lint -- run ./path/to/go/module
 ```
 
-開発ガイド・アーキテクチャ・現状・残タスク（golangci-lint 互換の高速 linter へのロードマップ）・
-analyzer 追加手順は、すべて 1 本にまとめてあります:
+Canonical guide (architecture, status, roadmap): [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — **開発の唯一の正典**
-
-### ベンチマーク（対 golangci-lint）
+### Benchmarks (vs golangci-lint)
 
 ```bash
 cargo build --release -p guff-lint
-./benchmarks/smoke.sh          # オフライン smoke
-./benchmarks/run.sh            # fixture + local コーパス
+./benchmarks/smoke.sh          # offline smoke
+./benchmarks/run.sh            # fixture + local corpus
 ```
 
-最新の数値表: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md)。
-詳細は [`benchmarks/README.md`](benchmarks/README.md)。
+Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md). Harness: [`benchmarks/README.md`](benchmarks/README.md).
 
-### Prometheus 回帰ゲート（ローカル・24GB 想定）
+### Prometheus regression gate (local)
 
-メモリ・壁時計・golangci-lint との finding-set 差分が `baseline.json` より悪化しないことを
-ローカルで確認します（CI 未接続。prometheus 本体の `.golangci.yml` を使用）。
-既定は `./tsdb/...`・`-j 1`・暖機済みシステム `GOCACHE`・RSS 上限 12GiB（フル `./...` +
-空 GOCACHE は 40GB 超で OOM するため）:
+Checks wall time, peak RSS, and finding-set delta vs golangci-lint against `baseline.json` (uses prometheus’s own `.golangci.yml`). Default scope targets ~24 GB machines (`./tsdb/...`, `-j 1`, warm `GOCACHE`, 12 GiB RSS cap):
 
 ```bash
-./regress/run.sh --update-baseline   # 初回 / 意図的な基準更新
-./regress/run.sh                     # ゲート
+./regress/run.sh --update-baseline   # first time / intentional baseline bump
+./regress/run.sh                     # gate
 ```
 
-詳細は [`regress/README.md`](regress/README.md)。
-
-> 以前分かれていた `MIGRATION.md` / `PRE-LINTER-PLAN.md` / `docs/LINTER-MIGRATION.md` /
-> `docs/STATICCHECK-MIGRATION.md` / `docs/ADDING-ANALYZER.md` / `projects/guff-ssa-MIGRATION.md`
-> は上記に統合しました（原文は git 履歴に残っています）。
-
-## ライセンス
-
-BSD-3-Clause（各クレートの移植元 Go ツールチェーン / go-tools のライセンス方針に合わせています）。
+Details: [`regress/README.md`](regress/README.md).
 
 ---
 
-## ソース構成
+## License
 
-Cargo workspace。バイナリは `guff` のみで、あとはライブラリクレートです。
+**GPL-3.0** — see [`LICENSE`](LICENSE).
 
-### レイヤ俯瞰
+guff ports analyzers from many upstream Go projects (mostly MIT / Apache-2.0 / BSD-3-Clause) and a few that are **GPL-3.0**. Those GPL-derived analyzers are linked into the single `guff` binary, so the distributed work is GPL-3.0.
 
-| 層 | クレート | 役割（Go 相当） |
-|----|----------|-----------------|
-| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
-| **Formatters** | `guff-fmt` | `guff fmt`（gofmt / gofumpt / goimports / gci / golines / swaggo） |
-| **Driver** | `guff-runner` | Analyzer の DAG 実行（並列） |
-| **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis` + Staticcheck のパターン DSL |
+Upstream attributions and original licenses: [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+
+Go stdlib / `x/tools`–derived crates additionally retain BSD-3-Clause notices (e.g. [`crates/guff-ast/LICENSE`](crates/guff-ast/LICENSE)).
+
+---
+
+## Source layout
+
+Cargo workspace. One binary (`guff`); everything else is library crates.
+
+| Layer | Crates | Role |
+|-------|--------|------|
+| **CLI** | `guff-lint` (`bin: guff`) | Config, linter selection, printers, `migrate` |
+| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | Analyzer bundles |
+| **Formatters** | `guff-fmt` | `guff fmt` |
+| **Driver** | `guff-runner` | Analyzer DAG (parallel) |
+| **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis` + Staticcheck pattern DSL |
 | **SSA** | `guff-ssa` | `go/ssa` |
-| **Load / types** | `guff-packages`, `guff-build`, `guff-exportdata`, `guff-types`, `guff-constant` | パッケージロード・型検査・export data |
-| **AST** | `guff-ast` | `go/token` / `scanner` / `ast` / `parser` |
-| **Version helpers** | `guff-version`, `guff-gover`, `guff-goversion`, `guff-types-errors` | Go バージョン・型エラーコード |
-
-依存の流れ（下から上へ）:
-
-```
-guff-ast / guff-constant / guff-version*
-        ↓
-guff-types ← guff-exportdata
-        ↓
-guff-build → guff-packages
-        ↓
-guff-ssa / guff-pattern / guff-analysis
-        ↓
-guff-runner
-        ↓
-guff-{staticcheck,govet,errcheck,ineffassign,unused}
-        ↓
-guff-lint  (bin: guff)
-```
-
-### ディレクトリ
+| **Load / types** | `guff-packages`, `guff-build`, `guff-exportdata`, `guff-types`, `guff-constant` | Load, typecheck, export data |
+| **AST** | `guff-ast` | `go/token` / scanner / ast / parser |
 
 ```
 guff/
-├── Cargo.toml              # workspace 定義
-├── benchmarks/             # vs golangci-lint wall-clock harness (R11)
-├── compat/                 # finding-set diff harness vs golangci-lint (R21)
-├── regress/                # prometheus RSS/wall/finding-set regression gate (local)
+├── Cargo.toml
+├── LICENSE
+├── THIRD_PARTY_LICENSES.md
+├── benchmarks/             # vs golangci-lint wall-clock harness
+├── compat/                 # finding-set diff harness
+├── regress/                # prometheus RSS / wall / finding-set gate
 ├── crates/
-│   ├── guff-lint/          # CLI エントリ (bin: guff)
-│   ├── guff-runner/        # 解析ドライバ
-│   ├── guff-analysis/      # Analyzer / Pass / Diagnostic
-│   ├── guff-packages/      # go list + ロード
-│   ├── guff-types/         # 型チェッカ
-│   ├── guff-ast/           # 字句・構文・AST
-│   ├── guff-ssa/           # SSA
-│   ├── guff-staticcheck/   # …
+│   ├── guff-lint/          # CLI (bin: guff)
+│   ├── guff-runner/
+│   ├── guff-analysis/
+│   ├── guff-packages/
+│   ├── guff-types/
+│   ├── guff-ast/
+│   ├── guff-ssa/
 │   └── …
-└── docs/                   # 開発ガイド（DEVELOPMENT.md）
+└── docs/                   # DEVELOPMENT.md, COMPATIBILITY.md, …
 ```
