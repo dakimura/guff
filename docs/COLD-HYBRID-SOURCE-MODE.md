@@ -63,11 +63,17 @@ Adjudicated 2026-07-19 against golangci-lint on Prometheus under
 `compat/normalize.py` (`relpath:line:linter:message`), set-diffed in Python
 (**not `comm`** — locale collation gives false zero-overlaps).
 
-**Verdict: the hybrid does NOT meet correctness parity — `GUFF_DEP_SOURCE`
-stays OFF by default.** The +342 (measured here as **+329 after the bools fix
-below**) are **not confirmed by golangci-lint** and spot-checks prove at least
-some are **false positives caused by hybrid's incomplete `types.Info`** for
-packages that import source-checked third-party deps.
+**Verdict: `GUFF_DEP_SOURCE` stays OFF by default** — but the root cause was
+re-diagnosed (see below) as **latent guff analyzer bugs + more analysis
+coverage**, *not* type-info corruption. Three real analyzer bugs were fixed this
+session (1 bools, 2 ineffassign traversal), cutting the hybrid-vs-baseline
+divergence **354 → 207**. The remaining divergence is dominated by hybrid
+type-checking packages the export path drops as ill-typed (so it runs analyzers
+on more code) plus guff's *pre-existing* guff-vs-golangci divergences (ST1000,
+generated-file lint scope, ineffassign over-report) surfacing on that extra
+coverage. Making cold-source the default still needs those settled + the
+`signature.rs:164` panic fixed, but hybrid is now understood to be *sounder*
+than the first adjudication implied.
 
 ### What the adjudication found
 
@@ -100,22 +106,41 @@ packages that import source-checked third-party deps.
    hybrid, adding none. Regression test:
    `crates/guff-govet/tests/checks_test.rs::bools_distinct_selectors_not_redundant`
    (+ `tests/testdata/bools_sel/main.go`).
-2. **guff-types source-importer `Info` fidelity gap (OPEN — the real blocker).**
-   The remaining 329 hybrid-only findings (ineffassign 204, staticcheck 106,
-   govet 17, errcheck 2) trace to hybrid producing a *different* `types.Info`
-   than the export path for dependents of source-checked deps:
-   - `ineffassign` FPs (e.g. config `retention`): the checker fails to record the
-     `use` of a local whose type is a source-checked named type
-     (`model.Duration`) inside a composite literal `&T{F: &retention}` →
-     `Info.uses` is missing the entry → ineffassign flags a live variable. **No
-     panic involved** — silent incompleteness.
-   - a separate isolated **`signature.rs:164` panic** (`as_signature` expected
-     Signature, got other) fires on some packages under hybrid (R25.2 DEFERRED),
-     which *also* corrupts `Info` where it hits.
-   Fixing this means hardening the guff-types built-in source importer so a
-   source-checked dependency yields `Info` (types/defs/uses/const-values)
-   identical to `gcexportdata`. Minimize offenders into
-   `crates/guff-types/tests/*.rs` (see `docs/PURE-SOURCE-TYPECHECK.md` §method).
+2. **Latent `ineffassign` analyzer bugs (FIXED this session) — NOT a type-info
+   gap.** The initial hypothesis was that hybrid produced an incomplete
+   `types.Info`. **This was disproven**: a go-gated probe loaded the *real*
+   `config` package both ways and found `retention`'s `Info.uses`/`Info.defs`
+   and object identity **identical** (def `ObjectId` == use `ObjectId`) in source
+   and export mode. The FPs were instead in ineffassign's hand-rolled
+   `walk_expr` (`crates/guff-ineffassign/src/cfg.rs`), which was **missing arms**
+   for several expression kinds, so identifier uses (and address-of escapes)
+   inside them were invisible → a live variable was falsely "ineffectual":
+   - `CompositeLit` / `KeyValueExpr` — `retention := …; &T{F: &retention}`
+   - `TypeAssertExpr` — `for _, cfg := range … { cfg.(T) }`
+   - `IndexListExpr` — generic instantiation operands
+   - `SliceExpr` bounds — `a := off[i]; … s[a:b]` (openmetricsparse.go)
+   All are path-independent real bugs (also fix the default/export run).
+   Regression fixture `tests/testdata/basic/composite_ok.go` covers each.
+   Combined with the bools fix these cut hybrid-only **354 → 207** (ineffassign
+   hybrid-only 204 → 84).
+
+   **Why the "config Info looked corrupt":** the export path marks `config`
+   `ill_typed` when loaded in isolation (some dep type didn't resolve from export
+   data) and therefore **skips analysis** (0 findings — a silent false negative),
+   whereas hybrid type-checks it and **runs the analyzers**, exposing the latent
+   bugs. So hybrid was *more* complete, not less. A separate isolated
+   `signature.rs:164` `as_signature` panic (R25.2 DEFERRED) remains and does
+   corrupt `Info` where it hits, but it is not what produced the config FPs.
+
+   **Remaining hybrid-only (207)**: 22 generated-file + 23 ST1000 package-comment
+   (both known guff-vs-golangci allowlist classes) + 162 "other" concentrated in
+   `model/textparse/*` (a package baseline drops as ill-typed, hybrid covers).
+   The "other" are guff's *own* pre-existing staticcheck/ineffassign behavior on
+   newly-covered code: a mix of genuine findings (e.g. ST1003 `exemplarTs` →
+   `exemplarTS`) and further candidate FPs (e.g. `variable in loop condition
+   never changes` on a stepped `for i := 2; …; i += 4`) — separate per-check
+   investigations, tracked as the known guff-vs-golangci divergences, **not**
+   hybrid-introduced type-info corruption.
 
 ### Determinism (checked)
 
@@ -150,42 +175,48 @@ PY
 
 ### Remaining work (next session, in priority order)
 
-1. **Close the `Info` fidelity gap (the blocker).** Confirmed-reliable e2e repro
-   (baseline clean, hybrid FP):
-   ```bash
-   cat >/tmp/ineff.yml <<'Y'
-   version: "2"
-   linters: {default: none, enable: [ineffassign]}
-   issues: {max-issues-per-linter: 0, max-same-issues: 0}
-   run: {tests: true}
-   Y
-   cd prometheus
-   target/release/guff run -c /tmp/ineff.yml --no-cache ./config/...            # 0 findings
-   GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/ineff.yml --no-cache ./config/...  # FPs: config.go:89/421 "ineffectual assignment to retention"
-   ```
-   Mechanism (verified): the FP fires with **0 panics**, so it is a *silent*
-   `Info.uses` omission for `retention` (used via `&retention` in
-   `&TSDBConfig{Retention: &retention}`), where `retention`'s type is the
-   source-checked dep type `model.Duration`.
-   **Attempted minimal isolation (2026-07-19) — did NOT reproduce yet**: a plain
-   fixture (`d := dep.Duration(0); &Config{D: &d}`) has source==export
-   `Info.uses`. So the trigger is more specific than "dep-typed local by address
-   in a composite literal" — likely tied to `model.Duration`'s definition
-   (`type Duration time.Duration`, methods, YAML unmarshaler) or config's exact
-   construct. NB: comparing source-vs-export via `load()` on a hand-rolled
-   local-`replace` module has harness quirks (funcs/vars from the replace dep can
-   read back `undefined` in export mode) — prefer either (a) reproducing against
-   the **real** `./config` package go-gated, or (b) diffing `Info.uses` on a
-   fixture whose dep ships a committed `.a` like `dep_source_vs_export.rs`. Then
-   also fix the separate `signature.rs:164` `as_signature` panic.
-2. **Then re-adjudicate** and, if hybrid-only shrinks to the known guff-vs-golangci
-   allowlist classes, consider making cold-source the default.
-3. **(Independent) analyzer determinism** — govet-unreachable ordering and
+Fixed this session (committed): bools `expr_key`; ineffassign `walk_expr`
+traversal for CompositeLit/KeyValueExpr/TypeAssertExpr/IndexListExpr and
+SliceExpr bounds. Hybrid-only 354 → 207. Remaining 207 = 22 generated + 23
+ST1000 + 162 "other" (mostly `model/textparse`, a package baseline drops).
+
+1. **Triage the 162 "other" per staticcheck/ineffassign check** on the
+   now-covered packages. Candidate latent bugs seen in `model/textparse`:
+   - `staticcheck: variable in loop condition never changes` firing on a stepped
+     loop `for i := 2; i < len(p.offsets); i += 4` (SA4003/S1006-family) — likely
+     a guff FP on non-unit steps.
+   - `ineffassign: ineffectual assignment to i` on loop post-statements.
+   Others are genuine (e.g. ST1003 `exemplarTs` → `exemplarTS`) or the known
+   allowlisted guff-vs-golangci ineffassign over-report. Adjudicate each vs
+   golangci at `file:line` (message phrasings differ; compare on file:line:linter
+   then inspect source).
+2. **Fix the isolated `signature.rs:164` `as_signature` panic** (R25.2 DEFERRED):
+   it corrupts `Info` on the packages it hits under hybrid. `as_signature` gets a
+   non-Signature `TypeId` — likely a cross-arena / unmaterialized method
+   signature in the source importer.
+3. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes,
+   make cold-source the default.
+4. **(Independent) analyzer determinism** — govet-unreachable ordering and
    ineffassign multi-var tie-break (HashMap iteration → which of several vars at
    one assignment site is reported); both help the export path too.
-4. **Warm**: unchanged (warm keeps the export path; guff's lazy type-check rarely
-   type-checks on warm). Optionally cache the 2nd stdlib `go list -export`
-   (R24.4-style).
+5. **Warm**: unchanged (warm keeps the export path). Optionally cache the 2nd
+   stdlib `go list -export` (R24.4-style).
+
+Reliable e2e repro harness (baseline drops the package, hybrid covers it):
+```bash
+cat >/tmp/std.yml <<'Y'
+version: "2"
+linters: {default: none, enable: [staticcheck, ineffassign]}
+issues: {max-issues-per-linter: 0, max-same-issues: 0}
+run: {tests: true}
+Y
+cd prometheus
+target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...              # baseline
+GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...  # hybrid
+```
+To confirm `Info` integrity (proven correct for config), a go-gated probe can
+load a package both ways and diff `Info.uses`/`defs` + def/use `ObjectId`
+identity per identifier (see git history for the `config_uses_probe` scaffold).
 
 ## Persisted context (for the assistant)
 
