@@ -264,6 +264,18 @@ fn bools_flags_redundant_or() {
 }
 
 #[test]
+fn bools_distinct_selectors_not_redundant() {
+    // `c.a == 0 && c.b == 0` compares different fields and must not be flagged;
+    // `c.a == 0 && c.a == 0` (same field) still must be. Regression for the
+    // selector-operand `_` collapse that produced spurious "redundant and".
+    let dir = support::testdata("bools_sel");
+    let pkg = support::typecheck_pkg("example.com/govet/boolssel", &dir.join("main.go"));
+    let messages = support::run_analyzer(bools_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "expected only the identical-field case: {messages:?}");
+    assert!(messages[0].contains("redundant"), "{messages:?}");
+}
+
+#[test]
 fn structtag_flags_unexported_json() {
     let dir = support::testdata("structtag");
     let pkg = support::typecheck_pkg("example.com/govet/structtag", &dir.join("bad.go"));

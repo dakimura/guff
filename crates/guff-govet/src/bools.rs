@@ -34,6 +34,18 @@ fn expr_key(e: &Expr) -> String {
         Expr::Ident(Ident { name, .. }) => name.clone(),
         Expr::BasicLit(l) => l.value.clone(),
         Expr::BinaryExpr(b) => format!("({} {:?} {})", expr_key(&b.x), b.op, expr_key(&b.y)),
+        // Structural keys for compound operands so that distinct expressions
+        // produce distinct keys. Collapsing every non-trivial operand to "_"
+        // makes e.g. `a.x == 0 && a.y == 0` look redundant (both key to
+        // `(_ EQL 0)`) — a false positive. Mirror `expreq::expr_equal`.
+        Expr::SelectorExpr(s) => format!("{}.{}", expr_key(&s.x), s.sel.name),
+        Expr::StarExpr(s) => format!("(*{})", expr_key(&s.x)),
+        Expr::UnaryExpr(u) => format!("({:?}{})", u.op, expr_key(&u.x)),
+        Expr::IndexExpr(i) => format!("{}[{}]", expr_key(&i.x), expr_key(&i.index)),
+        Expr::CallExpr(c) => {
+            let args = c.args.iter().map(expr_key).collect::<Vec<_>>().join(", ");
+            format!("{}({args})", expr_key(&c.fun))
+        }
         _ => "_".to_string(),
     }
 }

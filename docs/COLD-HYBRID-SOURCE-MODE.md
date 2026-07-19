@@ -55,44 +55,112 @@ C=$(mktemp -d); GOCACHE=$C GUFF_DEBUG_CACHE=1 /usr/bin/time -p $GUFF run --no-ca
 C=$(mktemp -d); GOCACHE=$C GUFF_DEP_SOURCE=1 GUFF_DEBUG_CACHE=1 /usr/bin/time -p $GUFF run --no-cache ./... >/tmp/hyb.out 2>&1; rm -rf $C
 ```
 
-## ⚠ Stage 3 — the remaining gate (correctness parity)
+## Stage 3 — correctness parity gate: **RESOLVED (verdict: keep opt-in)**
 
-The hybrid currently produces **different diagnostics** from the export path:
-- shared **2663**, **+342 only in hybrid** (cluster in files like
-  `config/config.go`: `bools`, `ineffassign`, `ST1000`), **−2 only in baseline**
-  (`unreachable`; possibly the known flaky govet-unreachable ordering).
+Adjudicated 2026-07-19 against golangci-lint on Prometheus under
+`compat/standard.yml` (5 std linters, `--no-cache`). Method: three JSON dumps
+(golangci-lint / guff-baseline / guff-hybrid), normalized via
+`compat/normalize.py` (`relpath:line:linter:message`), set-diffed in Python
+(**not `comm`** — locale collation gives false zero-overlaps).
 
-Diff them with:
+**Verdict: the hybrid does NOT meet correctness parity — `GUFF_DEP_SOURCE`
+stays OFF by default.** The +342 (measured here as **+329 after the bools fix
+below**) are **not confirmed by golangci-lint** and spot-checks prove at least
+some are **false positives caused by hybrid's incomplete `types.Info`** for
+packages that import source-checked third-party deps.
+
+### What the adjudication found
+
+- Under `standard.yml`: golangci=885, baseline=591, hybrid=918 normalized keys.
+  hybrid−baseline = **354** (later 329); baseline−hybrid = **27**, *all* of which
+  are `govet:unreachable code` in generated `*.pb.go`/`decoder.go` — the known
+  flaky govet-unreachable ordering (R25.2 DEFERRED), not a real loss.
+- **Confounders make golangci a noisy 1:1 adjudicator at std-preset scale**:
+  guff lints generated protobuf (`prompb/`, ~300 findings) that golangci
+  excludes; guff barely fires `errcheck` (0–2 vs golangci's 718); golangci
+  reports 0 `ineffassign`/`unused`. These are *pre-existing* guff-vs-golangci
+  gaps, unrelated to hybrid.
+- **The decisive test is baseline-vs-hybrid on a single package.** On
+  `./config/...` alone: baseline (export, full linters) type-checks config fine
+  (48 revive/whitespace findings, 0 govet/ineffassign) — matching golangci
+  (nothing in `config.go`). Hybrid emits 17 findings in `config.go` including
+  `govet: redundant and: (_ EQL 0) LAND (_ EQL 0)` and
+  `ineffassign: ineffectual assignment to retention`. Both are **false
+  positives** (source: `c.ScrapeInterval == 0 && c.ScrapeTimeout == 0 …` is not
+  redundant; `retention` is used via `&retention`).
+
+### Root causes (two independent)
+
+1. **Latent `bools` analyzer bug (FIXED this session).** `bools::expr_key`
+   (`crates/guff-govet/src/bools.rs`) collapsed every `SelectorExpr` (and
+   call/index/unary/star) to `"_"`, so `a.x == 0 && a.y == 0` keyed identically →
+   spurious "redundant and". Fixed to render operands structurally (mirrors
+   `expreq::expr_equal`). This is a real FP in **both** paths: it removed **5**
+   false positives from the default/export path (`model/*`) and **25** from
+   hybrid, adding none. Regression test:
+   `crates/guff-govet/tests/checks_test.rs::bools_distinct_selectors_not_redundant`
+   (+ `tests/testdata/bools_sel/main.go`).
+2. **guff-types source-importer `Info` fidelity gap (OPEN — the real blocker).**
+   The remaining 329 hybrid-only findings (ineffassign 204, staticcheck 106,
+   govet 17, errcheck 2) trace to hybrid producing a *different* `types.Info`
+   than the export path for dependents of source-checked deps:
+   - `ineffassign` FPs (e.g. config `retention`): the checker fails to record the
+     `use` of a local whose type is a source-checked named type
+     (`model.Duration`) inside a composite literal `&T{F: &retention}` →
+     `Info.uses` is missing the entry → ineffassign flags a live variable. **No
+     panic involved** — silent incompleteness.
+   - a separate isolated **`signature.rs:164` panic** (`as_signature` expected
+     Signature, got other) fires on some packages under hybrid (R25.2 DEFERRED),
+     which *also* corrupts `Info` where it hits.
+   Fixing this means hardening the guff-types built-in source importer so a
+   source-checked dependency yields `Info` (types/defs/uses/const-values)
+   identical to `gcexportdata`. Minimize offenders into
+   `crates/guff-types/tests/*.rs` (see `docs/PURE-SOURCE-TYPECHECK.md` §method).
+
+### Determinism (checked)
+
+Excluding the two **pre-existing** flaky analyzer classes, hybrid is
+**count-stable (781/781/781)** across `-j 1`, `RAYON_NUM_THREADS=1`, and parallel,
+with a 776-key stable core — i.e. the hybrid seed build / `source_preload` is
+deterministic. The instability is entirely:
+- `govet:unreachable code` on generated `*.pb.go` (count swings 76–114) — also
+  flaky in the **export** path (two baseline runs flipped ~34 of these);
+- `ineffassign` **tie-break** on multi-var assignment sites (e.g.
+  `tsdb/record/record.go:605` reports `st` under parallel/-j1, `ref` under
+  RAYON=1) — HashMap iteration order in the analyzer, also path-independent.
+
+Neither is introduced by hybrid; both are separate pre-existing bugs.
+
+### Reproduce the adjudication
 ```bash
-comm -13 <(sort /tmp/base.out) <(sort /tmp/hyb.out)   # only in hybrid
-comm -23 <(sort /tmp/base.out) <(sort /tmp/hyb.out)   # only in baseline
+GUFF=target/release/guff; CFG=$PWD/compat/standard.yml; PROM=$PWD/prometheus
+cargo build --release -p guff-lint
+( cd "$PROM"
+  golangci-lint run -c "$CFG" --output.json.path=stdout --path-mode abs --issues-exit-code 0 ./... >/tmp/gcl.json
+  "$GUFF" run -c "$CFG" --out-format json --issues-exit-code 0 --no-cache ./... >/tmp/base.json 2>/dev/null
+  GUFF_DEP_SOURCE=1 "$GUFF" run -c "$CFG" --out-format json --issues-exit-code 0 --no-cache ./... >/tmp/hyb.json 2>/dev/null )
+python3 - <<'PY'
+import sys; sys.path.insert(0,"compat")
+from normalize import load_issues, issue_keys
+r="prometheus"; K=lambda f: issue_keys(load_issues(f),r)
+g,b,h=K("/tmp/gcl.json"),K("/tmp/base.json"),K("/tmp/hyb.json")
+print("gcl",len(g),"base",len(b),"hyb",len(h),"hyb_only",len(h-b),"confirmed_by_gcl",len((h-b)&g))
+PY
 ```
 
-**Open question**: are the +342 *real findings the export path was missing*
-(more complete dependency type info from source), or *false positives* from
-imperfect third-party source types (generics/protobuf/cgo in deps)?
+### Remaining work (next session, in priority order)
 
-### Stage 3 task list (start here next session)
-
-1. **Adjudicate against golangci-lint** — the source of truth. Run golangci-lint
-   on Prometheus and see whether the +342 are in its output. Use the `compat/`
-   harness (`compat/run.sh`; it keys on `relpath:line:linter:message`,
-   normalizes via `compat/normalize.py`). Prometheus is **not** in
-   `compat/repos.txt` yet — add it or run a one-off. Classify each of the +342 as
-   true-positive-recovered vs false-positive.
-2. **If false positives** → fix guff-types on the offending third-party patterns
-   (minimize into `crates/guff-types/tests/*.rs` regression cases, as in
-   `docs/PURE-SOURCE-TYPECHECK.md` §method). If genuine recoveries → update the
-   compat baseline/allowlist and treat as an improvement.
-3. **Determinism**: confirm byte-identical output across `-j 1`,
-   `RAYON_NUM_THREADS=1`, and parallel (`docs/DEVELOPMENT.md` §8). Watch the
-   R25.2 `u32` Pos ceiling — source-checking many third-party files grows the
-   shared `FileSet` (`position.rs::add_file` probe).
-4. **Warm non-regression**: `benchmarks/run.sh` warm must not regress (warm keeps
-   the export path; guff's lazy type-check means warm rarely type-checks at all).
-   Consider caching the 2nd stdlib `go list -export` call (R24.4-style).
-5. **Only after parity**: decide whether to keep `GUFF_DEP_SOURCE` opt-in or make
-   cold-source the default.
+1. **Close the `Info` fidelity gap (task 2, the blocker)** — start with the
+   `ineffassign`/`config.retention` minimal repro: a package importing a
+   source-checked named type used by address inside a composite literal, asserting
+   `Info.uses` parity with the export path. Then the `signature.rs:164` panic.
+2. **Then re-adjudicate** and, if hybrid-only shrinks to the known guff-vs-golangci
+   allowlist classes, consider making cold-source the default.
+3. **(Independent) analyzer determinism** — govet-unreachable ordering and
+   ineffassign multi-var tie-break; both help the export path too.
+4. **Warm**: unchanged (warm keeps the export path; guff's lazy type-check rarely
+   type-checks on warm). Optionally cache the 2nd stdlib `go list -export`
+   (R24.4-style).
 
 ## Persisted context (for the assistant)
 
