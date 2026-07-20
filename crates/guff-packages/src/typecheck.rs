@@ -204,12 +204,23 @@ pub fn typecheck_roots(
         .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
         .collect();
 
+    let dbg = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let tc_start;
     let mut checked: HashMap<String, Arc<Package>> = {
+        let ts = std::time::Instant::now();
         let seed = if env.from_source {
             build_source_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
         } else {
             build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
         };
+        if dbg {
+            eprintln!(
+                "guff:   typecheck_roots seed build {:.2}s (from_source={})",
+                ts.elapsed().as_secs_f64(),
+                env.from_source,
+            );
+        }
+        tc_start = std::time::Instant::now();
         if env.parallel {
             target_ids
                 .par_iter()
@@ -246,6 +257,13 @@ pub fn typecheck_roots(
                 .collect()
         }
     };
+    if dbg {
+        eprintln!(
+            "guff:   typecheck_roots target check {:.2}s ({} targets)",
+            tc_start.elapsed().as_secs_f64(),
+            target_ids.len(),
+        );
+    }
 
     target_ids
         .iter()
@@ -606,6 +624,11 @@ fn build_source_seed(
         ..TypeConfig::default()
     };
     let mut check = Checker::new(conf);
+    // Dependencies only need their exported API in the seed; importers never see
+    // dep function bodies. Skipping body checks here is a large speedup and does
+    // not change any target package's findings (targets are checked with full
+    // bodies via a fresh `from_seed` checker). Dep diagnostics are dropped anyway.
+    check.set_ignore_func_bodies(true);
 
     // Export-data importer for dependencies that keep export data (stdlib in the
     // hybrid path; empty in pure-source). The built-in source importer takes
@@ -616,26 +639,94 @@ fn build_source_seed(
     }
     check.set_importer(Box::new(importer));
 
-    // Load each dependency once, leaves-first. Source for third-party deps is
-    // parsed lazily inside `source_preload` (one package at a time) so we do
-    // not hold the entire dependency closure's AST in memory upfront.
+    // Load each dependency once, leaves-first. Type-checking a dependency into
+    // the shared arenas is inherently serial, but *parsing* its source is not.
+    // Compute the leaves-first order once, then process it in bounded chunks:
+    // parse the source deps of a chunk in parallel, then type-check/decode the
+    // chunk in order. Peak resident dep-AST is one chunk (SEED_PARSE_CHUNK), so
+    // we never hold the whole closure at once (keeping the hybrid RSS budget)
+    // while still overlapping the serial checker with parallel parsing.
     let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
-    let mut visiting = Vec::new();
-    let mut done = std::collections::HashSet::new();
-    for id in &needed {
-        source_preload(
-            &mut check,
-            id,
-            dep_graph,
-            &loadable,
-            &mut visiting,
-            &mut done,
-            by_id,
-            export_paths,
-            fset,
-        );
+    let order = dep_load_order(&needed, dep_graph, &loadable);
+    const SEED_PARSE_CHUNK: usize = 64;
+    for chunk in order.chunks(SEED_PARSE_CHUNK) {
+        // Parse (in parallel) every source dependency in this chunk. Export-data
+        // deps have no source to parse and are skipped here.
+        let mut parsed: HashMap<String, Vec<guff::ast::File>> = chunk
+            .par_iter()
+            .filter(|path| !export_paths.contains_key(*path))
+            .filter_map(|path| {
+                let pkg = by_id.get(path)?;
+                if pkg.compiled_go_files.is_empty() {
+                    return None;
+                }
+                Some((path.clone(), parse_dep_files(&pkg.compiled_go_files, fset)))
+            })
+            .collect();
+
+        for path in chunk {
+            if let Some(files) = parsed.remove(path) {
+                if !files.is_empty() {
+                    check.add_dependency_source(path.clone(), files);
+                }
+            }
+            check.preload_import(path);
+            // Seed path: dependency diagnostics are intentionally dropped; do not
+            // let them accumulate in the checker while walking the closure.
+            check.errors.clear();
+            check.first_err = None;
+        }
     }
     Some(Arc::new(check.capture_export_seed()))
+}
+
+/// Leaves-first (post-order) topological order over the loadable dependency
+/// closure: a package's deps are always emitted before the package itself, and
+/// `deps` are walked in sorted order for determinism (so the seed is built in a
+/// stable order regardless of `HashMap` iteration). `unsafe`/`C` and
+/// non-loadable paths are skipped. The
+/// graph is a DAG (Go forbids import cycles); a stack guard keeps a malformed
+/// graph from recursing forever.
+fn dep_load_order(
+    needed: &[String],
+    dep_graph: &HashMap<String, Vec<String>>,
+    loadable: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut order = Vec::new();
+    let mut done = std::collections::HashSet::new();
+    let mut visiting: Vec<String> = Vec::new();
+    for id in needed {
+        dep_load_order_visit(id, dep_graph, loadable, &mut done, &mut visiting, &mut order);
+    }
+    order
+}
+
+fn dep_load_order_visit(
+    path: &str,
+    dep_graph: &HashMap<String, Vec<String>>,
+    loadable: &std::collections::HashSet<String>,
+    done: &mut std::collections::HashSet<String>,
+    visiting: &mut Vec<String>,
+    order: &mut Vec<String>,
+) {
+    if path == "unsafe" || path == "C" || done.contains(path) || !loadable.contains(path) {
+        return;
+    }
+    if visiting.iter().any(|p| p == path) {
+        return;
+    }
+    visiting.push(path.to_string());
+    if let Some(deps) = dep_graph.get(path) {
+        let mut deps: Vec<&str> = deps.iter().map(String::as_str).collect();
+        deps.sort_unstable();
+        for dep in deps {
+            dep_load_order_visit(dep, dep_graph, loadable, done, visiting, order);
+        }
+    }
+    visiting.pop();
+    if done.insert(path.to_string()) {
+        order.push(path.to_string());
+    }
 }
 
 /// Parse a dependency's `compiled_go_files` into syntax trees sharing `fset`.
@@ -653,66 +744,6 @@ fn parse_dep_files(paths: &[PathBuf], fset: &Arc<FileSet>) -> Vec<guff::ast::Fil
     out
 }
 
-/// Leaves-first DFS that type-checks each registered dependency once via the
-/// built-in source importer. Analogous to [`preload_export`] but the load op is
-/// a source type-check rather than an export-data decode.
-///
-/// Third-party sources are parsed immediately before `preload_import` so at most
-/// one dependency AST sits in the checker's `sources` map at a time.
-fn source_preload(
-    check: &mut Checker,
-    path: &str,
-    dep_graph: &HashMap<String, Vec<String>>,
-    loadable: &std::collections::HashSet<String>,
-    visiting: &mut Vec<String>,
-    done: &mut std::collections::HashSet<String>,
-    by_id: &HashMap<String, Arc<Package>>,
-    export_paths: &HashMap<String, PathBuf>,
-    fset: &Arc<FileSet>,
-) {
-    if path == "unsafe" || path == "C" || done.contains(path) {
-        return;
-    }
-    if visiting.iter().any(|p| p == path) {
-        return;
-    }
-    if !loadable.contains(path) {
-        return;
-    }
-    visiting.push(path.to_string());
-    if let Some(deps) = dep_graph.get(path) {
-        let mut deps: Vec<_> = deps.iter().map(String::as_str).collect();
-        deps.sort_unstable();
-        for dep in deps {
-            source_preload(
-                check,
-                dep,
-                dep_graph,
-                loadable,
-                visiting,
-                done,
-                by_id,
-                export_paths,
-                fset,
-            );
-        }
-    }
-    if !export_paths.contains_key(path) {
-        if let Some(pkg) = by_id.get(path) {
-            let files = parse_dep_files(&pkg.compiled_go_files, fset);
-            if !files.is_empty() {
-                check.add_dependency_source(path.to_string(), files);
-            }
-        }
-    }
-    check.preload_import(path);
-    // Seed path: dependency diagnostics are intentionally dropped; do not let
-    // them accumulate in the checker while walking the closure.
-    check.errors.clear();
-    check.first_err = None;
-    visiting.pop();
-    done.insert(path.to_string());
-}
 
 /// Depth-first preload of dependency export data so nested `read()` calls find
 /// transitive packages in the importer cache (see PL09 deferral).

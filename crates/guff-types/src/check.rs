@@ -182,6 +182,13 @@ pub struct Checker {
     /// `mono.record_instance`, analyzed by `monomorph()` at the end of
     /// `check_files`. Equivalent to Go's `check.mono`.
     pub mono: crate::mono::MonoGraph,
+    /// When set, function and method bodies are not queued for checking
+    /// (Go's `Config.IgnoreFuncBodies`). Signatures are still resolved, so the
+    /// package's exported API is complete. Used for dependency packages in the
+    /// source-seed path: importers only need exported types, and skipping bodies
+    /// is a large speedup. Never set for target packages (they need full body
+    /// checks to produce findings).
+    pub ignore_func_bodies: bool,
 }
 
 /// Shared, already-decoded export-data graph for parallel type-checks (R24.3).
@@ -282,6 +289,7 @@ impl Checker {
             obj_path: Vec::new(),
             env: Environment::default(),
             mono: crate::mono::MonoGraph::default(),
+            ignore_func_bodies: false,
         }
     }
 
@@ -366,7 +374,15 @@ impl Checker {
             obj_path: Vec::new(),
             env: Environment::default(),
             mono: crate::mono::MonoGraph::default(),
+            // A from_seed checker always checks a *target* package fully.
+            ignore_func_bodies: false,
         }
+    }
+
+    /// Enable/disable skipping of function and method bodies
+    /// (`Config.IgnoreFuncBodies`). See the field docs on [`Checker`].
+    pub fn set_ignore_func_bodies(&mut self, ignore: bool) {
+        self.ignore_func_bodies = ignore;
     }
 
     /// Register the source files of a dependency package under its import path.

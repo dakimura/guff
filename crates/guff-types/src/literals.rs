@@ -108,7 +108,11 @@ impl Checker {
             // identifiers in its body add dependency edges to the right node
             // (Go: `funcLit` captures `check.decl`).
             let decl = self.env.decl;
-            self.later(move |c| c.func_body(decl, sig, ftid, parent, &body));
+            // In IgnoreFuncBodies mode (dependency seed builds) skip queueing the
+            // literal's body; its type is the signature, already set below.
+            if !self.ignore_func_bodies {
+                self.later(move |c| c.func_body(decl, sig, ftid, parent, &body));
+            }
             x.mode = OperandMode::Value;
             x.typ = Some(sig);
         } else {

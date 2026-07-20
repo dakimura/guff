@@ -452,10 +452,12 @@ impl Checker {
         // Check the body later (after all package objects are declared), so it
         // can refer to forward-declared package-level names. The body scope is
         // parented at the declaring file scope captured now.
-        if let Some(body) = fdecl.body.clone() {
-            let parent = self.env.scope;
-            let ftid = fdecl.ty.id;
-            self.later(move |check| check.func_body(Some(obj), sig, ftid, parent, &body));
+        if !self.ignore_func_bodies {
+            if let Some(body) = fdecl.body.clone() {
+                let parent = self.env.scope;
+                let ftid = fdecl.ty.id;
+                self.later(move |check| check.func_body(Some(obj), sig, ftid, parent, &body));
+            }
         }
 
         // DEFERRED: sig.scope extent and the "generic function is missing
