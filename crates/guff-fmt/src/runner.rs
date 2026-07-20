@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
 use similar::TextDiff;
 
 use crate::generated::{is_generated, GeneratedMode};
@@ -130,58 +131,37 @@ impl Runner {
     ///
     /// Used by `guff run` to surface formatter diagnostics. Honors the same
     /// generated-file and path exclusions as [`run`](Self::run).
+    ///
+    /// Each file is formatted independently (gofumpt/goimports/… spawn a
+    /// subprocess per file), so the per-file checks run in parallel across the
+    /// rayon pool — on large trees this dominated wall time when serial. Paths
+    /// are gathered first, then checked concurrently and the findings sorted by
+    /// `(file, line)` for a deterministic result regardless of scheduling.
     pub fn check(&self, paths: &[PathBuf]) -> Result<Vec<FormatFinding>, FormatError> {
         let roots: Vec<PathBuf> = if paths.is_empty() {
             vec![PathBuf::from(".")]
         } else {
             paths.to_vec()
         };
-        let mut findings = Vec::new();
-        for root in roots {
-            self.walk_check(&root, &mut findings)?;
+        let mut files = Vec::new();
+        for root in &roots {
+            collect_go_files(root, &mut files)?;
         }
+        let mut findings: Vec<FormatFinding> = files
+            .par_iter()
+            .map(|path| self.check_file(path))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         Ok(findings)
     }
 
-    fn walk_check(
-        &self,
-        root: &Path,
-        findings: &mut Vec<FormatFinding>,
-    ) -> Result<(), FormatError> {
-        let meta = fs::metadata(root).map_err(FormatError::Walk)?;
-        if meta.is_file() {
-            if is_go_path(root) {
-                self.check_file(root, findings)?;
-            }
-            return Ok(());
-        }
-        let entries = fs::read_dir(root).map_err(FormatError::Walk)?;
-        for entry in entries {
-            let entry = entry.map_err(FormatError::Walk)?;
-            let path = entry.path();
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            let ft = entry.file_type().map_err(FormatError::Walk)?;
-            if ft.is_dir() {
-                if skip_dir(&name) {
-                    continue;
-                }
-                self.walk_check(&path, findings)?;
-            } else if ft.is_file() && is_go_path(&path) {
-                self.check_file(&path, findings)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn check_file(
-        &self,
-        path: &Path,
-        findings: &mut Vec<FormatFinding>,
-    ) -> Result<(), FormatError> {
+    fn check_file(&self, path: &Path) -> Result<Vec<FormatFinding>, FormatError> {
         let path_str = path.to_string_lossy();
         if self.is_excluded(path) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let input = fs::read(path).map_err(|e| FormatError::Io {
             formatter: "guff-fmt".into(),
@@ -189,22 +169,22 @@ impl Runner {
             source: e,
         })?;
         if is_generated(&input, self.opts.generated) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let output = self.meta.format(&path_str, &input)?;
         if output == input {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let old = String::from_utf8_lossy(&input);
         let new = String::from_utf8_lossy(&output);
         let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-        for line in first_changed_lines(&diff) {
-            findings.push(FormatFinding {
+        Ok(first_changed_lines(&diff)
+            .into_iter()
+            .map(|line| FormatFinding {
                 file: path_str.to_string(),
                 line,
-            });
-        }
-        Ok(())
+            })
+            .collect())
     }
 
     fn walk(
@@ -312,6 +292,36 @@ impl Runner {
             .iter()
             .any(|pat| path_matches(&s, pat))
     }
+}
+
+/// Recursively gather formatter-eligible `.go` files under `root`, applying the
+/// same directory skips as the in-place [`walk`](Runner::walk). Per-file
+/// exclusion / generated checks stay in [`Runner::check_file`].
+fn collect_go_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), FormatError> {
+    let meta = fs::metadata(root).map_err(FormatError::Walk)?;
+    if meta.is_file() {
+        if is_go_path(root) {
+            out.push(root.to_path_buf());
+        }
+        return Ok(());
+    }
+    let entries = fs::read_dir(root).map_err(FormatError::Walk)?;
+    for entry in entries {
+        let entry = entry.map_err(FormatError::Walk)?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let ft = entry.file_type().map_err(FormatError::Walk)?;
+        if ft.is_dir() {
+            if skip_dir(&name) {
+                continue;
+            }
+            collect_go_files(&path, out)?;
+        } else if ft.is_file() && is_go_path(&path) {
+            out.push(path);
+        }
+    }
+    Ok(())
 }
 
 fn skip_dir(name: &str) -> bool {

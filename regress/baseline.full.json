@@ -8,16 +8,16 @@
   "rayon_threads": 0,
   "isolate_gocache": false,
   "guff": {
-    "wall_seconds": 54.59,
-    "peak_rss_bytes": 7387332608
+    "wall_seconds": 35.63,
+    "peak_rss_bytes": 7401783296
   },
   "compat": {
-    "guff_issues": 474,
+    "guff_issues": 460,
     "golangci_issues": 20,
     "both": 16,
-    "guff_only": 458,
+    "guff_only": 444,
     "golangci_only": 4,
-    "precision": 0.03375527426160337,
+    "precision": 0.034782608695652174,
     "recall": 0.8
   },
   "tolerances": {

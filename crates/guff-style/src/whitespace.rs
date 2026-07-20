@@ -61,7 +61,24 @@ fn first_and_last(
         (s.pos(), s.end())
     };
 
-    for c in comments {
+    // Only comments whose start lies within the block's byte range
+    // `[stmt.pos(), stmt.end())` can change `first`/`last`/`opening_pos`: every
+    // branch below either requires the comment to be on the opening line
+    // (`c.pos() > opening_pos`, i.e. past `{`) or strictly inside the block, and
+    // the `<` / `>` guards drop everything else. `comments` arrives in source
+    // order (ascending `pos`), so binary-search to the window start and stop at
+    // the block end — turning the former O(blocks × file_comments) scan into
+    // O(log C + comments_in_block). Comments after `stmt.end()` only ever reach
+    // the opening-line branch for single-line blocks, which never yield a
+    // leading/trailing-newline finding, so skipping them is finding-preserving.
+    let lo = stmt.pos().0;
+    let hi = stmt.end().0;
+    let start = comments.partition_point(|c| c.pos().0 < lo);
+
+    for c in &comments[start..] {
+        if c.pos().0 >= hi {
+            break;
+        }
         // Comment on the `{` line after `{` → treat as opening content.
         if pos_line(fset, c.pos()) == pos_line(fset, opening_pos) && c.pos().0 > opening_pos.0 {
             if pos_line(fset, c.end()) != pos_line(fset, opening_pos) {

@@ -543,16 +543,29 @@ pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, Run
 }
 
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
     let result = run_linters(opts)?;
+    let tf = std::time::Instant::now();
     let (mut issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
+    if timing {
+        eprintln!("guff: phase issues+filter {:.2}s", tf.elapsed().as_secs_f64());
+    }
     if fixes_applied > 0 {
         eprintln!("guff: fixed {fixes_applied} issue(s)");
     }
     if let Some(fmt_cfg) = &opts.formatters {
+        let tfmt = std::time::Instant::now();
         let fmt_issues = run_format_checks(fmt_cfg, &opts.filter)?;
+        if timing {
+            eprintln!("guff: phase format_checks {:.2}s", tfmt.elapsed().as_secs_f64());
+        }
         issues.extend(fmt_issues);
     }
+    let tp = std::time::Instant::now();
     print_issues(&opts.out_formats, &issues, out).map_err(RunError::Io)?;
+    if timing {
+        eprintln!("guff: phase print {:.2}s", tp.elapsed().as_secs_f64());
+    }
     Ok(if issues.is_empty() {
         0
     } else {

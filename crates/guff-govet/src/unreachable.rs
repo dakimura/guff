@@ -38,6 +38,12 @@ impl DeadState {
         }
     }
 
+    fn find_labels_block(&mut self, body: &BlockStmt) {
+        for s in &body.list {
+            self.find_labels(s);
+        }
+    }
+
     fn find_labels(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::AssignStmt(_)
@@ -77,7 +83,7 @@ impl DeadState {
             },
 
             Stmt::IfStmt(s) => {
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 if let Some(else_) = &s.else_ {
                     self.find_labels(else_);
                 }
@@ -91,35 +97,35 @@ impl DeadState {
             Stmt::ForStmt(s) => {
                 let outer = self.break_target;
                 self.break_target = Some(stmt_key(stmt));
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 self.break_target = outer;
             }
 
             Stmt::RangeStmt(s) => {
                 let outer = self.break_target;
                 self.break_target = Some(stmt_key(stmt));
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 self.break_target = outer;
             }
 
             Stmt::SelectStmt(s) => {
                 let outer = self.break_target;
                 self.break_target = Some(stmt_key(stmt));
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 self.break_target = outer;
             }
 
             Stmt::SwitchStmt(s) => {
                 let outer = self.break_target;
                 self.break_target = Some(stmt_key(stmt));
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 self.break_target = outer;
             }
 
             Stmt::TypeSwitchStmt(s) => {
                 let outer = self.break_target;
                 self.break_target = Some(stmt_key(stmt));
-                self.find_labels(&Stmt::BlockStmt(s.body.clone()));
+                self.find_labels_block(&s.body);
                 self.break_target = outer;
             }
 
@@ -134,6 +140,17 @@ impl DeadState {
                     self.find_labels(s);
                 }
             }
+        }
+    }
+
+    /// Walk a block's statements in place (no clone). Callers enter block bodies
+    /// with `reachable == true`, so this is equivalent to [`Self::find_dead`] on a
+    /// `Stmt::BlockStmt` wrapper but keeps the original AST node addresses stable —
+    /// which `stmt_key` relies on to match `has_break`/`labels` entries between the
+    /// [`find_labels`](Self::find_labels) and `find_dead` passes.
+    fn find_dead_block(&mut self, body: &BlockStmt) {
+        for s in &body.list {
+            self.find_dead(s);
         }
     }
 
@@ -184,12 +201,12 @@ impl DeadState {
             }
 
             Stmt::ForStmt(s) => {
-                self.find_dead(&Stmt::BlockStmt(s.body.clone()));
+                self.find_dead_block(&s.body);
                 self.reachable = s.cond.is_some() || self.has_break.get(&stmt_key(stmt)).copied().unwrap_or(false);
             }
 
             Stmt::IfStmt(s) => {
-                self.find_dead(&Stmt::BlockStmt(s.body.clone()));
+                self.find_dead_block(&s.body);
                 if let Some(else_) = &s.else_ {
                     let saved = self.reachable;
                     self.reachable = true;
@@ -203,7 +220,7 @@ impl DeadState {
             Stmt::LabeledStmt(s) => self.find_dead(&s.stmt),
 
             Stmt::RangeStmt(s) => {
-                self.find_dead(&Stmt::BlockStmt(s.body.clone()));
+                self.find_dead_block(&s.body);
                 self.reachable = true;
             }
 
@@ -280,11 +297,16 @@ fn is_panic_call(expr: &Expr) -> bool {
 }
 
 fn check_body(body: &BlockStmt) -> Vec<u32> {
+    // Traverse the original AST in place (no clones). Both passes walk the same
+    // `body`, so `stmt_key` (a `*const Stmt` address) is stable and consistent
+    // between them. The former `Stmt::BlockStmt(body.clone())` root plus per-arm
+    // `s.body.clone()` calls handed each pass freshly-allocated statements at
+    // reused addresses, which made `has_break`/`labels` lookups miss or collide
+    // nondeterministically and produced intermittent false "unreachable code".
     let mut state = DeadState::new();
-    let root = Stmt::BlockStmt(body.clone());
-    state.find_labels(&root);
+    state.find_labels_block(body);
     state.reachable = true;
-    state.find_dead(&root);
+    state.find_dead_block(body);
     state.pending
 }
 
