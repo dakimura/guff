@@ -1,9 +1,9 @@
-# Prometheus regression harness (local, 24GB-safe)
+# Prometheus regression harness (local)
 
 Gate **guff** against a checked-in baseline on a local [Prometheus](https://github.com/prometheus/prometheus)
 checkout, using **prometheus’s own** `.golangci.yml` (not `compat/standard.yml`).
 
-Tracks three things and fails only when they get **worse** than `baseline.json`:
+Tracks three things and fails only when they get **worse** than the profile baseline:
 
 1. **Wall clock** (cold guff cache / `--no-cache`)
 2. **Peak RSS** (`/usr/bin/time` + live RSS kill limit)
@@ -20,25 +20,33 @@ prometheus config — the gate still fails if `guff_only` grows or `both` shrink
 | **gofumpt** | guff shells out to system `gofumpt` (often newer than golangci’s embedded `mvdan.cc/gofumpt`). e.g. v0.10.0 flags files that golangci’s v0.9.2 leaves alone. Pin `gofumpt@v0.9.2` for closer parity, or treat formatter noise as expected. |
 | **staticcheck SA5011** | Rare `:0` / empty-path diagnostics from unmapped SSA positions — DEFERRED. |
 
-## 24GB-safe defaults
+## Profiles
 
-Full `./...` with an empty `GOCACHE` and high concurrency previously peaked **>40GB**
-and OOM-killed the host. Defaults therefore target a ~24GB laptop:
+| Profile | Packages | Baseline | RSS kill | Notes |
+|---------|----------|----------|----------|-------|
+| `tsdb` (default) | `./tsdb/...` | `baseline.json` | 12 GiB | Fast local gate on ~24GB laptops |
+| `full` | `./...` | `baseline.full.json` | 18 GiB | Whole-repo gate; needs warm system `GOCACHE` |
+
+```bash
+./regress/run.sh                          # tsdb
+./regress/run.sh --profile full           # full ./...
+./regress/run.sh --profile full --update-baseline
+```
+
+Shared knobs (override profile defaults):
 
 | Knob | Default | Why |
 |------|---------|-----|
-| `REGRESS_PACKAGES` | `./tsdb/...` | R25 scale subtree; fits ~24GB with the other caps |
 | `-j` / `REGRESS_JOBS` | auto (omit) | Use `available_parallelism`; pin `1` if RSS climbs |
 | `RAYON_NUM_THREADS` | auto (omit) | Same; pin `2` on tight hosts |
 | `GOCACHE` | system (warm) | Empty GOCACHE recompiles deps and blows RAM |
-| `REGRESS_RSS_LIMIT_BYTES` | 12 GiB | Live kill before OS jetsams Cursor |
+| `REGRESS_PACKAGES` | profile default | Override package set without changing profile files |
 
-On a large machine you may widen the corpus:
-
-```bash
-REGRESS_PACKAGES='./...' REGRESS_RSS_LIMIT_BYTES=$((40*1024*1024*1024)) ./regress/run.sh --update-baseline
-```
-
+Cold `GOCACHE` + high concurrency historically peaked **>40GB**. With a warm
+system cache and hybrid default, `full` currently gates at **~57s / ~10.7 GiB**
+peak (`baseline.full.json`) after dropping double-held dependency ASTs in the
+hybrid seed. Further memory reduction is still desirable on 24GB laptops; the
+profile exists so we can gate regressions while chasing it.
 `REGRESS_ISOLATE_GOCACHE=1` is available but **not** recommended under 64GB RAM.
 
 ## Prerequisites
@@ -59,9 +67,11 @@ cargo build --release -p guff-lint
 
 # First time (or after intentional corpus / metric changes):
 ./regress/run.sh --update-baseline
+./regress/run.sh --profile full --update-baseline
 
 # Ongoing gate:
 ./regress/run.sh
+./regress/run.sh --profile full
 
 # Offline unit tests (no prometheus needed):
 python3 -m unittest discover -s regress/tests
@@ -71,12 +81,13 @@ python3 -m unittest discover -s regress/tests
 
 | Path | Role |
 |------|------|
-| `run.sh` | Main entry |
+| `run.sh` | Main entry (`--profile tsdb|full`) |
 | `measure.py` | `/usr/bin/time` wrapper + RSS/wall parser + RSS watchdog |
 | `gate.py` | Baseline compare / update |
-| `baseline.json` | Checked-in thresholds |
+| `baseline.json` | Checked-in thresholds (`tsdb` profile) |
+| `baseline.full.json` | Checked-in thresholds (`full` profile) |
 | `tests/` | Offline unit tests |
-| `results/` | Per-run artifacts (`RESULTS.md` snapshot) |
+| `results/` | Per-run artifacts (`RESULTS.md` / `RESULTS.full.md`) |
 
 Reuse: [`compat/normalize.py`](../compat/normalize.py) for JSON → `relpath:line:linter:message` keys.
 
@@ -102,9 +113,10 @@ Improvements always pass. Package-set / SHA drift warns but does not fail — re
 | `GUFF_BIN` | Override guff binary |
 | `GOLANGCI_LINT_BIN` | Override golangci-lint |
 | `PROMETHEUS_DIR` | Override corpus path |
-| `REGRESS_PACKAGES` | Package patterns (default `./tsdb/...`) |
+| `REGRESS_PROFILE` | `tsdb` or `full` (same as `--profile`) |
+| `REGRESS_PACKAGES` | Package patterns (override profile default) |
 | `REGRESS_JOBS` | guff `-j` (default: omit → available_parallelism) |
 | `REGRESS_RAYON_THREADS` | `RAYON_NUM_THREADS` (default: omit → rayon default) |
 | `REGRESS_ISOLATE_GOCACHE` | `1` = fresh empty GOCACHE (memory-heavy) |
-| `REGRESS_RSS_LIMIT_BYTES` | Live RSS kill limit (default 12 GiB) |
+| `REGRESS_RSS_LIMIT_BYTES` | Live RSS kill limit (profile default 12 / 18 GiB) |
 | `REGRESS_TIMEOUT` | CLI timeout (default `15m`) |

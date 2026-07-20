@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
-# regress/run.sh — Prometheus regression gate (local only, 24GB-safe defaults).
+# regress/run.sh — Prometheus regression gate (local only).
 #
 # Measures guff wall-clock + peak RSS on a local prometheus checkout using
 # prometheus's own .golangci.yml, diffs findings vs golangci-lint, and fails
-# when metrics regress relative to regress/baseline.json.
+# when metrics regress relative to a checked-in baseline.
 #
-# Memory-safe defaults (for ~24GB hosts):
-#   - packages: ./tsdb/...   (override: REGRESS_PACKAGES='./...')
-#   - concurrency: auto (omit -j / RAYON_NUM_THREADS → available_parallelism)
-#   - reuse system GOCACHE (set REGRESS_ISOLATE_GOCACHE=1 only on large hosts)
-#   - live RSS kill limit ~12GB (REGRESS_RSS_LIMIT_BYTES)
+# Profiles:
+#   tsdb (default) — ./tsdb/... ; baseline.json ; ~12 GiB RSS kill
+#   full           — ./...      ; baseline.full.json ; ~18 GiB RSS kill
+#                    (warm GOCACHE; historically cold+parallel blew past 40GB)
+#
+# Concurrency defaults to auto (available_parallelism). Reuse system GOCACHE
+# unless REGRESS_ISOLATE_GOCACHE=1 (memory-heavy; large hosts only).
 #
 # Usage:
-#   ./regress/run.sh                    # measure + gate
-#   ./regress/run.sh --update-baseline  # rewrite baseline from this run
-#   ./regress/run.sh --skip-golangci    # guff metrics only
+#   ./regress/run.sh                         # tsdb profile gate
+#   ./regress/run.sh --profile full          # full ./... gate
+#   ./regress/run.sh --profile full --update-baseline
+#   ./regress/run.sh --skip-golangci         # guff metrics only
 #
 # Env:
 #   GUFF_BIN / GOLANGCI_LINT_BIN / PROMETHEUS_DIR
 #   REGRESS_PACKAGES / REGRESS_JOBS / REGRESS_RAYON_THREADS
 #   REGRESS_ISOLATE_GOCACHE / REGRESS_RSS_LIMIT_BYTES / REGRESS_TIMEOUT
+#   REGRESS_PROFILE  (tsdb|full; overridden by --profile)
 #
 # Requires: release guff, golangci-lint, go, python3, /usr/bin/time
 # Does NOT clone prometheus — set PROMETHEUS_DIR or keep repo-root `prometheus/` symlink.
@@ -30,19 +34,30 @@ REGRESS_DIR="$ROOT/regress"
 MEASURE="$REGRESS_DIR/measure.py"
 GATE="$REGRESS_DIR/gate.py"
 NORMALIZE="$ROOT/compat/normalize.py"
-BASELINE="$REGRESS_DIR/baseline.json"
 RESULTS_DIR="$REGRESS_DIR/results"
 mkdir -p "$RESULTS_DIR"
 
 UPDATE_BASELINE=0
 SKIP_GOLANGCI=0
+PROFILE="${REGRESS_PROFILE:-tsdb}"
 
-for arg in "$@"; do
+args=("$@")
+i=0
+while [[ $i -lt $# ]]; do
+  arg="${args[$i]}"
   case "$arg" in
     --update-baseline) UPDATE_BASELINE=1 ;;
     --skip-golangci) SKIP_GOLANGCI=1 ;;
+    --profile)
+      i=$((i + 1))
+      [[ $i -lt $# ]] || { echo "error: --profile needs a value (tsdb|full)" >&2; exit 2; }
+      PROFILE="${args[$i]}"
+      ;;
+    --profile=*)
+      PROFILE="${arg#--profile=}"
+      ;;
     -h|--help)
-      sed -n '2,28p' "$0"
+      sed -n '2,32p' "$0"
       exit 0
       ;;
     *)
@@ -50,7 +65,29 @@ for arg in "$@"; do
       exit 2
       ;;
   esac
+  i=$((i + 1))
 done
+
+case "$PROFILE" in
+  tsdb)
+    DEFAULT_PACKAGES="./tsdb/..."
+    DEFAULT_RSS_LIMIT=$((12 * 1024 * 1024 * 1024))
+    BASELINE="$REGRESS_DIR/baseline.json"
+    RESULTS_SNAPSHOT="$RESULTS_DIR/RESULTS.md"
+    PROFILE_LABEL="tsdb (24GB-safe subtree)"
+    ;;
+  full)
+    DEFAULT_PACKAGES="./..."
+    DEFAULT_RSS_LIMIT=$((18 * 1024 * 1024 * 1024))
+    BASELINE="$REGRESS_DIR/baseline.full.json"
+    RESULTS_SNAPSHOT="$RESULTS_DIR/RESULTS.full.md"
+    PROFILE_LABEL="full ./... (warm GOCACHE)"
+    ;;
+  *)
+    echo "error: unknown profile '$PROFILE' (want tsdb|full)" >&2
+    exit 2
+    ;;
+esac
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -109,19 +146,16 @@ if [[ "$UPDATE_BASELINE" -eq 0 && ! -f "$BASELINE" ]]; then
   die "missing $BASELINE — run once with --update-baseline to capture metrics"
 fi
 
-# --- 24GB-safe defaults -------------------------------------------------------
-# Full ./... + empty GOCACHE + high concurrency blew past 40GB historically.
-# Default to the R25 tsdb subtree with warm system GOCACHE and a hard RSS kill.
+# --- profile defaults (overridable via env) -----------------------------------
 # Concurrency defaults to auto (available_parallelism); pin with REGRESS_JOBS /
 # REGRESS_RAYON_THREADS if RSS climbs (e.g. REGRESS_JOBS=1 REGRESS_RAYON_THREADS=2).
-PACKAGES_RAW="${REGRESS_PACKAGES:-./tsdb/...}"
+PACKAGES_RAW="${REGRESS_PACKAGES:-$DEFAULT_PACKAGES}"
 # shellcheck disable=SC2206
 PACKAGES=($PACKAGES_RAW)
 JOBS="${REGRESS_JOBS:-}"
 RAYON_THREADS="${REGRESS_RAYON_THREADS:-}"
 ISOLATE_GOCACHE="${REGRESS_ISOLATE_GOCACHE:-0}"
-# ~12 GiB default headroom on 24GB hosts (OS + Cursor + golangci later).
-RSS_LIMIT="${REGRESS_RSS_LIMIT_BYTES:-$((12 * 1024 * 1024 * 1024))}"
+RSS_LIMIT="${REGRESS_RSS_LIMIT_BYTES:-$DEFAULT_RSS_LIMIT}"
 TIMEOUT="${REGRESS_TIMEOUT:-15m}"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -138,7 +172,8 @@ fi
 JOBS_LABEL="${JOBS:-auto}"
 RAYON_LABEL="${RAYON_THREADS:-auto}"
 
-echo "guff prometheus regress harness (24GB-safe defaults)"
+echo "guff prometheus regress harness"
+echo "  profile:      $PROFILE — $PROFILE_LABEL"
 echo "  host:         $(uname -srm)"
 echo "  guff:         $GUFF_VER ($GUFF)"
 echo "  golangci:     $GCL_VER"
@@ -149,6 +184,7 @@ echo "  packages:     ${PACKAGES[*]}"
 echo "  concurrency:  -j $JOBS_LABEL / RAYON_NUM_THREADS=$RAYON_LABEL"
 echo "  isolate_gocache: $ISOLATE_GOCACHE"
 echo "  rss_limit:    $RSS_LIMIT bytes"
+echo "  baseline:     $BASELINE"
 echo "  timeout:      $TIMEOUT"
 echo "  results:      $RUN_DIR"
 echo
@@ -352,10 +388,10 @@ REPORT="$RUN_DIR/REPORT.md"
 if [[ "$UPDATE_BASELINE" -eq 1 ]]; then
   python3 "$GATE" update-baseline --baseline "$BASELINE" --measured "$MEASURED"
   python3 "$GATE" check --baseline "$BASELINE" --measured "$MEASURED" --report "$REPORT"
-  cp "$REPORT" "$RESULTS_DIR/RESULTS.md"
+  cp "$REPORT" "$RESULTS_SNAPSHOT"
   echo
   echo "Baseline updated: $BASELINE"
-  echo "Wrote $RESULTS_DIR/RESULTS.md"
+  echo "Wrote $RESULTS_SNAPSHOT"
   exit 0
 fi
 
@@ -363,8 +399,8 @@ set +e
 python3 "$GATE" check --baseline "$BASELINE" --measured "$MEASURED" --report "$REPORT"
 gate_rc=$?
 set -e
-cp "$REPORT" "$RESULTS_DIR/RESULTS.md"
+cp "$REPORT" "$RESULTS_SNAPSHOT"
 echo
 echo "Wrote $REPORT"
-echo "Wrote $RESULTS_DIR/RESULTS.md"
+echo "Wrote $RESULTS_SNAPSHOT"
 exit "$gate_rc"

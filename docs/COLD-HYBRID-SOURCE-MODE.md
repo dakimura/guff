@@ -202,14 +202,18 @@ Fixed 2026-07-20 (later): SA4008 / SA4009 triage.
    over process abort (`type_of`, map accessors, method-instantiation wrappers,
    expr depth / subst depth). Full prometheus `./...` under `.golangci.yml`
    completes (2026-07-20). SA4006 `has_use` is cycle-guarded against Phi loops.
-4. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes
-   (generated-file scope + ST1000 + ineffassign over-report + genuine S1001/ST1003),
-   make cold-source the default.
-5. **(Independent) analyzer determinism** — govet-unreachable ordering and
-   ineffassign multi-var tie-break (HashMap iteration → which of several vars at
-   one assignment site is reported); both help the export path too.
+4. ~~**Re-adjudicate + make cold-source the default**~~ ✅ done (2026-07-20).
+   Hybrid is ON by default; residual hybrid-only findings are mostly allowlist
+   classes + genuine checks on packages the export path drops.
+5. ~~**Analyzer determinism**~~ ✅ done (2026-07-20): govet `unreachable` sorts
+   pending positions before report; ineffassign iterates block ops by
+   `(pos, name)` instead of HashMap order.
 6. **Warm**: unchanged (warm keeps the export path). Optionally cache the 2nd
    stdlib `go list -export` (R24.4-style).
+7. **Peak RSS under hybrid** — dependency AST early-drop in `import_package`
+   (`sources.remove`) cut full `./...` peak ~13.4 GiB → ~10.7 GiB (`regress`
+   `full` profile). Further reduction still open (typecheck parallelism /
+   arena footprint).
 
 Reliable e2e repro harness (baseline drops the package, hybrid covers it):
 ```bash

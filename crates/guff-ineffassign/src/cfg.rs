@@ -639,7 +639,19 @@ impl CfgChecker {
         self.seen.insert(b, ());
 
         let block = &blocks[b.0];
-        for (obj, ops) in &block.ops {
+        // Sort by (pos, name) so multi-var assignment sites report in a stable order
+        // (HashMap iteration order previously flipped names across -j / RAYON modes).
+        let mut ops_by_obj: Vec<_> = block.ops.iter().collect();
+        ops_by_obj.sort_by(|(_, a), (_, b)| {
+            let a_pos = a.first().map(|o| o.pos).unwrap_or(0);
+            let b_pos = b.first().map(|o| o.pos).unwrap_or(0);
+            a_pos.cmp(&b_pos).then_with(|| {
+                let a_name = a.first().map(|o| o.name.as_str()).unwrap_or("");
+                let b_name = b.first().map(|o| o.name.as_str()).unwrap_or("");
+                a_name.cmp(b_name)
+            })
+        });
+        for (obj, ops) in ops_by_obj {
             'ops: for (i, op) in ops.iter().enumerate() {
                 if !op.assign {
                     continue;

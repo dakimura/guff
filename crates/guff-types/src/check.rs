@@ -504,7 +504,10 @@ impl Checker {
         }
         // Built-in source importer: if the path's source is registered, check it
         // recursively (this takes precedence over the pluggable importer).
-        if let Some(files) = self.sources.get(path).cloned() {
+        // Take ownership so the AST is not retained in `sources` after type-check
+        // (hybrid seed otherwise doubles peak RSS by keeping both the map entry
+        // and the in-flight `files` Vec during `check_dependency`).
+        if let Some(files) = self.sources.remove(path) {
             return self.check_dependency(path, files);
         }
         // Take the importer out so its `import` call can borrow the arenas

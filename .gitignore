@@ -23,9 +23,10 @@
 !/compat/results/RESULTS.md
 !/compat/results/.gitkeep
 
-# Prometheus regress harness raw run artifacts (keep RESULTS.md + baseline.json)
+# Prometheus regress harness raw run artifacts (keep RESULTS*.md + baseline*.json)
 /regress/results/*
 !/regress/results/RESULTS.md
+!/regress/results/RESULTS.full.md
 # Local prometheus checkout symlink used by regress/run.sh
 /prometheus
 

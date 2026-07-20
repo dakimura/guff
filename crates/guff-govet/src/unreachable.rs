@@ -305,6 +305,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
+    // Sort + dedupe so report order is stable across parallel/sequential runs
+    // (HashMap-backed walks elsewhere can change visit order of FuncDecl/FuncLit).
+    pending.sort_unstable();
+    pending.dedup();
     for pos in pending {
         pass.reportf(pos, "unreachable code");
     }

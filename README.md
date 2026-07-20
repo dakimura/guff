@@ -22,7 +22,7 @@ Medians of 3 samples (Darwin arm64, Go 1.26, golangci-lint 2.12, auto `-j`).
 With a warm `GOCACHE` the gap shrinks (both skip export compiles). Full tables:
 [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
 
-**Memory stays in the single-digit GB range** on large trees after arena / export-seed work (Prometheus full `./...`: ~**5.8 GB** peak RSS, down from ~56 GB). Smaller scopes (e.g. Prometheus `./tsdb/...`) land around **~1.8 GB**. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
+**Memory:** after arena / export-seed work, the export-data path peaks around **~5.8 GB** on Prometheus full `./...` (down from ~56 GB). With **hybrid cold source** (default), third-party deps are type-checked from source, so peak RSS is higher — currently **~11 GiB** on the local `regress/` `full` profile (warm `GOCACHE`). Smaller scopes (e.g. `./tsdb/...`) land around **~2.5 GiB**. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
 
 Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters are implemented. Matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
@@ -230,11 +230,13 @@ Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md)
 
 ### Prometheus regression gate (local)
 
-Checks wall time, peak RSS, and finding-set delta vs golangci-lint against `baseline.json` (uses prometheus’s own `.golangci.yml`). Default scope targets ~24 GB machines (`./tsdb/...`, auto concurrency, warm `GOCACHE`, 12 GiB RSS cap):
+Checks wall time, peak RSS, and finding-set delta vs golangci-lint against a checked-in baseline (prometheus’s own `.golangci.yml`). Profiles: `tsdb` (default, `./tsdb/...`) and `full` (`./...`):
 
 ```bash
-./regress/run.sh --update-baseline   # first time / intentional baseline bump
-./regress/run.sh                     # gate
+./regress/run.sh --update-baseline              # tsdb baseline
+./regress/run.sh                                # tsdb gate
+./regress/run.sh --profile full --update-baseline
+./regress/run.sh --profile full
 ```
 
 Details: [`regress/README.md`](regress/README.md).

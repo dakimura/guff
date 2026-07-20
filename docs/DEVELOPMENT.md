@@ -175,7 +175,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | 並列 | ✅ action DAG を rayon で並列実行。`-j` / `run.concurrency` でワーカー数。型チェックも並列（R10.1） | — |
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 互換差分 | ✅ `compat/` ハーネス（guff vs golangci JSON → `file:line:linter:message`、P/R、allowlist、`.github/workflows/compat.yml` ゲート） | OSS コーパス拡張・local パリティ改善は継続 |
-| Prometheus 回帰 | ✅ `regress/` ローカルゲート（prometheus 本体 `.golangci.yml`・peak RSS / wall / finding-set を `baseline.json` と比較し悪化のみ FAIL。24GB 向け既定: `./tsdb/...`・`-j 1`・暖機 GOCACHE・RSS kill 12GiB） | CI 未接続。絶対一致は不要（相対ベースライン）。フル `./...` は大メモリ機向け |
+| Prometheus 回帰 | ✅ `regress/` ローカルゲート（prometheus 本体 `.golangci.yml`・peak RSS / wall / finding-set を悪化のみ FAIL）。プロファイル: `tsdb`（`./tsdb/...` / `baseline.json` / RSS kill 12GiB）と `full`（`./...` / `baseline.full.json` / 18GiB）。暖機 GOCACHE・auto concurrency | CI 未接続。絶対一致は不要。hybrid 既定の full peak は ~10.7 GiB（export 経路の ~5.8 GB より高い） |
 | 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
 | autofix | ✅ `--fix`（SuggestedFix / TextEdit 適用、修正済み診断は出力から除外） | golangci の fix 範囲全体には未 |
 
@@ -419,11 +419,13 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   8. **fake export-data ファイルの実サイズ化（本命の修正）** — フル `./...`（Prometheus）で診断の **226/234 件が go/pkg/mod・GOROOT の依存ファイルへ誤マップ**し列番号が巨大化（例 `:60286`）していた。DEFERRED の「並列時の共有 FileSet / position offset 競合」という仮説は**誤り**。`RAYON_NUM_THREADS=1` の完全逐次でも全件破損して再現する（`-j` は action DAG のみ逐次化し typecheck の `par_iter` は常に並列なので切り分けになっていなかった）。真因は **`guff-types` が位置を `u32`（`ObjectMeta::pos` ほか）で保持する一方、`FakeFileSet`（`guff-exportdata`）が export data の依存ファイル 1 個につき `MAX_LINES=65536` Pos を予約**し、共有 `FileSet` の base が **~19,446 ファイル追加時点で `u32::MAX`(4,294,967,296) を突破**（プローブで実測）。それ以降に parse される prometheus ソース（base 55億）の位置が `u32` へ切り詰められ、低位の依存ファイル範囲に落ちていた。tsdb 単体は base が u32 内に収まり正常だったため「バイト一致」に見えていた。**修正**: `FakeFileSet` を、decode 中は `file_index*STRIDE+line`（`STRIDE=MAX_LINES+1`）の**暫定ハンドル**を返し、`finalize()` で各ファイルを**実際の最大行数ちょうど**のサイズで共有 fset に登録、`translate()` で暫定→実 offset に変換する方式に変更。暫定を付与したオブジェクトは `PkgState::prov_objs` に記録し finalize で書き戻す（`do_pkg` の再帰 import が同 arena にオブジェクトを差し込むため arena インデックス範囲では不可）。共有 fset の Pos 空間が ~5.5G→~50M に縮小し u32 に収まる。
   - **結果（フル `guff run --no-cache ./...`、Prometheus）**: 依存ファイルへの誤マップ **226→0**、診断総数 **234→2671**（破損で誤ファイルに埋もれていた本来の診断が正しく出るように）。ST1000 等が正しい `file:14:1` を指す。**並列 / `-j 1` / `RAYON_NUM_THREADS=1` の 3 モードで 2671 件一致**（残差 1 件は govet unreachable が別の有効行を選ぶ既存の解析器順序依存で、u32 破損とは無関係）。tsdb subtree は 771 件で修正前とバイト一致（退行なし）。性能/メモリは **10.88s / peak 5.73GB**（R25.1 の 11.9s / 5.8GB から微改善）。ワークスペース **tests green**（exit 0）。
 - **DEFERRED（次セッションへの引き継ぎ）**:
-  - **govet unreachable の順序依存** — `prompb/io/prometheus/client/decoder.go` の unreachable 診断が並列時 `233:4`・逐次時 `334:3` と別の有効行を選ぶ（どちらも正しいソース位置）。解析器の走査順の非決定性。優先度低。
+  - **govet unreachable の順序依存** — 報告順は pos ソートで安定化（2026-07-20）。残差があれば解析器内部の到達判定ゆらぎ（優先度低）。
   - **R25.3 `go list` cold 23s** — warm は 1.3s（OS キャッシュ）。golist ディスクキャッシュ（R24.4）は cold 初回には効かない。優先度低。
   - ~~**R25.2 残・隔離済み非致命 panic**~~ — `int64(x)` 等の明示型変換未対応（`expr.rs` ident TypeName）と `as_signature` が Named を解けない件、MethodVal 誤タグ時の `recv_type` panic を修正。`./tsdb/...` は prometheus `.golangci.yml` 下で panic 0・完走を確認。
+  - **hybrid peak RSS** — 依存 AST 早期破棄で full ~13.4 GiB→~10.7 GiB。さらなる削減は未着手。
 - **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。RSS は `/usr/bin/time -l`。base 溢れの切り分けは `position.rs::add_file` に一時プローブ（`next_base > u32::MAX` で eprintln）。
-- **回帰ゲート（ローカル）**: `regress/` — prometheus 本体の `.golangci.yml` で guff の wall / peak RSS と golangci-lint との finding-set 差分を `baseline.json` と比較し、悪化時のみ FAIL（絶対一致は不要）。24GB 向け既定は `./tsdb/...`・`-j 1`・システム GOCACHE 再利用・RSS 上限 12GiB。`./regress/run.sh` / `--update-baseline`。詳細は [`regress/README.md`](../regress/README.md)。
+- **回帰ゲート（ローカル）**: `regress/` — prometheus 本体の `.golangci.yml` で guff の wall / peak RSS と golangci-lint との finding-set 差分を比較し、悪化時のみ FAIL（絶対一致は不要）。`tsdb`（既定）と `full`（`./...`）の 2 プロファイル。`./regress/run.sh` / `--profile full` / `--update-baseline`。詳細は [`regress/README.md`](../regress/README.md)。
+- **完了（2026-07-20）— 決定性 + hybrid seed AST 早期破棄**: govet `unreachable` 報告順の pos ソート；ineffassign multi-var の `(pos, name)` ソート；`import_package` の `sources.remove`。`full` peak **~13.4 GiB→~10.7 GiB**。
 - **テスト**: `cargo test --workspace`（green）+ `-j 1` / `RAYON_NUM_THREADS=1` diff で 3 モード一致確認。
 
 ---
