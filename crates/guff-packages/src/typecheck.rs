@@ -440,7 +440,7 @@ pub fn typecheck_package_with_seed(
         );
     }
 
-    let files = syntax.clone();
+    let files = syntax;
     check.check_files(files);
 
     pkg.ill_typed = !check.errors.is_empty();
@@ -457,6 +457,11 @@ pub fn typecheck_package_with_seed(
     }
 
     if mode.contains(LoadMode::NEED_TYPES) {
+        let info = if mode.contains(LoadMode::NEED_TYPES_INFO) {
+            check.info.clone()
+        } else {
+            std::mem::take(&mut check.info)
+        };
         pkg.types = Some(check.pkg);
         pkg.type_artifacts = Some(TypecheckArtifacts {
             type_pkg: check.pkg,
@@ -464,14 +469,14 @@ pub fn typecheck_package_with_seed(
             objects: check.objects,
             scopes: check.scopes,
             packages: check.packages,
-            info: check.info.clone(),
+            info,
         });
     }
     if mode.contains(LoadMode::NEED_TYPES_INFO) {
         pkg.types_info = Some(check.info);
     }
     if mode.contains(LoadMode::NEED_SYNTAX) {
-        pkg.syntax = syntax;
+        pkg.syntax = std::mem::take(&mut check.files);
     }
     if mode.contains(LoadMode::NEED_TYPES)
         || mode.contains(LoadMode::NEED_SYNTAX)
@@ -590,6 +595,7 @@ fn build_source_seed(
                 .get(p)
                 .is_some_and(|pk| !pk.compiled_go_files.is_empty())
     });
+    needed.sort();
     if needed.is_empty() {
         return None;
     }
@@ -610,28 +616,24 @@ fn build_source_seed(
     }
     check.set_importer(Box::new(importer));
 
-    // Register source for every dependency NOT resolved from export data, so the
-    // built-in source importer (`Checker::check_dependency`) type-checks it.
+    // Load each dependency once, leaves-first. Source for third-party deps is
+    // parsed lazily inside `source_preload` (one package at a time) so we do
+    // not hold the entire dependency closure's AST in memory upfront.
     let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
-    for id in &needed {
-        if export_paths.contains_key(id) {
-            continue;
-        }
-        let Some(pkg) = by_id.get(id) else { continue };
-        let files = parse_dep_files(&pkg.compiled_go_files, fset);
-        if !files.is_empty() {
-            check.add_dependency_source(id.clone(), files);
-        }
-    }
-
-    // Load each dependency once, leaves-first, so the shared import cache is
-    // fully populated with shallow recursion (mirrors `preload_exports`; O(V+E)
-    // via the `done` memo). `preload_import` resolves each node source-first,
-    // then falls back to the export-data importer.
     let mut visiting = Vec::new();
     let mut done = std::collections::HashSet::new();
     for id in &needed {
-        source_preload(&mut check, id, dep_graph, &loadable, &mut visiting, &mut done);
+        source_preload(
+            &mut check,
+            id,
+            dep_graph,
+            &loadable,
+            &mut visiting,
+            &mut done,
+            by_id,
+            export_paths,
+            fset,
+        );
     }
     Some(Arc::new(check.capture_export_seed()))
 }
@@ -654,6 +656,9 @@ fn parse_dep_files(paths: &[PathBuf], fset: &Arc<FileSet>) -> Vec<guff::ast::Fil
 /// Leaves-first DFS that type-checks each registered dependency once via the
 /// built-in source importer. Analogous to [`preload_export`] but the load op is
 /// a source type-check rather than an export-data decode.
+///
+/// Third-party sources are parsed immediately before `preload_import` so at most
+/// one dependency AST sits in the checker's `sources` map at a time.
 fn source_preload(
     check: &mut Checker,
     path: &str,
@@ -661,6 +666,9 @@ fn source_preload(
     loadable: &std::collections::HashSet<String>,
     visiting: &mut Vec<String>,
     done: &mut std::collections::HashSet<String>,
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    fset: &Arc<FileSet>,
 ) {
     if path == "unsafe" || path == "C" || done.contains(path) {
         return;
@@ -673,11 +681,35 @@ fn source_preload(
     }
     visiting.push(path.to_string());
     if let Some(deps) = dep_graph.get(path) {
+        let mut deps: Vec<_> = deps.iter().map(String::as_str).collect();
+        deps.sort_unstable();
         for dep in deps {
-            source_preload(check, dep, dep_graph, loadable, visiting, done);
+            source_preload(
+                check,
+                dep,
+                dep_graph,
+                loadable,
+                visiting,
+                done,
+                by_id,
+                export_paths,
+                fset,
+            );
+        }
+    }
+    if !export_paths.contains_key(path) {
+        if let Some(pkg) = by_id.get(path) {
+            let files = parse_dep_files(&pkg.compiled_go_files, fset);
+            if !files.is_empty() {
+                check.add_dependency_source(path.to_string(), files);
+            }
         }
     }
     check.preload_import(path);
+    // Seed path: dependency diagnostics are intentionally dropped; do not let
+    // them accumulate in the checker while walking the closure.
+    check.errors.clear();
+    check.first_err = None;
     visiting.pop();
     done.insert(path.to_string());
 }
@@ -830,6 +862,7 @@ mod tests {
             arch: "386".into(),
             go_version: String::new(),
             from_source: false,
+            parallel: true,
         };
         assert_eq!(env.sizes().word_size, 4);
     }

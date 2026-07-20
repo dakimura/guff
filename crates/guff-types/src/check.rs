@@ -297,33 +297,27 @@ impl Checker {
     ///
     /// The captured package under check (`self.pkg`) is intentionally *not*
     /// reused — each [`Self::from_seed`] allocates a fresh package.
-    pub fn capture_export_seed(&self) -> ExportSeed {
-        // Freeze the arenas so every per-package checker built from this seed
-        // shares one read-only base (an `Arc` bump) instead of deep-cloning all
-        // decoded dependencies (R25.1 arena-footprint fix). Freezing happens once
-        // here, when the seed is built.
-        let mut types = self.types.clone();
-        types.freeze();
-        let mut objects = self.objects.clone();
-        objects.freeze();
-        let mut scopes = self.scopes.clone();
-        scopes.freeze();
-        let mut packages = self.packages.clone();
-        packages.freeze();
+    pub fn capture_export_seed(mut self) -> ExportSeed {
+        // Freeze in place so seed capture does not deep-clone overlay arenas
+        // (which would briefly double peak RSS during hybrid seed build).
+        self.types.freeze();
+        self.objects.freeze();
+        self.scopes.freeze();
+        self.packages.freeze();
         ExportSeed {
-            types,
-            objects,
-            scopes,
-            packages,
-            typ: self.typ.clone(),
+            types: self.types,
+            objects: self.objects,
+            scopes: self.scopes,
+            packages: self.packages,
+            typ: self.typ,
             universe_scope: self.universe_scope,
             unsafe_pkg: self.unsafe_pkg,
             universe_error: self.universe_error,
             universe_any: self.universe_any,
             universe_comparable: self.universe_comparable,
             universe_nil: self.universe_nil,
-            builtins: self.builtins.clone(),
-            import_cache: self.import_cache.clone(),
+            builtins: self.builtins,
+            import_cache: self.import_cache,
         }
     }
 
