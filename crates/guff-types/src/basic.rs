@@ -146,7 +146,17 @@ pub fn basic_name<'a>(arena: &'a TypeArena, id: TypeId) -> &'a str {
 fn as_basic(arena: &TypeArena, id: TypeId) -> &Basic {
     match arena.get(id) {
         TypeData::Basic(b) => b,
-        other => panic!("expected Basic, got {:?}", std::mem::discriminant(other)),
+        _ => {
+            // Callers historically assumed `underlying` was Basic. Hybrid
+            // source-checking can leave non-basic types here; prefer the
+            // Invalid singleton over aborting the whole process.
+            let invalid = lookup_basic(arena, BasicKind::Invalid)
+                .expect("universe must define BasicKind::Invalid");
+            match arena.get(invalid) {
+                TypeData::Basic(b) => b,
+                _ => unreachable!("Invalid basic type is Basic"),
+            }
+        }
     }
 }
 

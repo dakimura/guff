@@ -28,18 +28,20 @@ pub fn new_map(arena: &mut TypeArena, key: TypeId, elem: TypeId) -> TypeId {
     arena.alloc(TypeData::Map(Map { key, elem }))
 }
 
-/// Free-function accessor — panics if `id` is not a Map.
+/// Free-function accessor — returns key/elem for a Map, or the Invalid basic
+/// type when hybrid source-checking left an incomplete type.
 pub fn map_key(arena: &TypeArena, id: TypeId) -> TypeId {
-    as_map(arena, id).key
+    match arena.get(id) {
+        TypeData::Map(m) => m.key,
+        _ => crate::basic::lookup_basic(arena, crate::basic::BasicKind::Invalid)
+            .expect("universe must define BasicKind::Invalid"),
+    }
 }
 
 pub fn map_elem(arena: &TypeArena, id: TypeId) -> TypeId {
-    as_map(arena, id).elem
-}
-
-fn as_map(arena: &TypeArena, id: TypeId) -> &Map {
     match arena.get(id) {
-        TypeData::Map(m) => m,
-        other => panic!("expected Map, got {:?}", std::mem::discriminant(other)),
+        TypeData::Map(m) => m.elem,
+        _ => crate::basic::lookup_basic(arena, crate::basic::BasicKind::Invalid)
+            .expect("universe must define BasicKind::Invalid"),
     }
 }

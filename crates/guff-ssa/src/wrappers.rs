@@ -283,18 +283,23 @@ fn change_recv(prog: &mut Program, sig: TypeId, recv: Option<ObjectId>) -> TypeI
 /// - if the instance has a receiver (method case, deferred);
 /// - if the origin has no results (0-result case, deferred).
 pub fn build_instantiation_wrapper(prog: &mut Program, fid: FuncId) {
-    let orig = prog
-        .functions
-        .get(fid)
-        .top_level_origin
-        .expect("instantiation wrapper has an origin");
-    let sig = prog.functions.get(fid).signature.expect("wrapper has a signature");
-    let orig_sig = prog.functions.get(orig).signature.expect("origin has a signature");
+    let Some(orig) = prog.functions.get(fid).top_level_origin else {
+        return;
+    };
+    let Some(sig) = prog.functions.get(fid).signature else {
+        return;
+    };
+    let Some(orig_sig) = prog.functions.get(orig).signature else {
+        return;
+    };
 
-    assert!(
-        signature_recv(&prog.type_arena, sig).is_none(),
-        "method instantiation wrapper (receiver) is deferred"
-    );
+    // Method instantiation wrappers are deferred; fall back to params-only so
+    // hybrid incomplete types do not abort the whole build.
+    if signature_recv(&prog.type_arena, sig).is_some() {
+        crate::create::create_params(prog, fid);
+        prog.functions.get_mut(fid).subst = None;
+        return;
+    }
 
     // startBody: create the instance's parameters from its signature, open the
     // entry block.

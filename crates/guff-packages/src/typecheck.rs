@@ -34,8 +34,13 @@ pub struct TypecheckEnv {
     /// (via the built-in source importer) instead of decoding compiler export
     /// data (`.a`). Set on the cold path where `go list` runs without `-export`,
     /// so the expensive dependency compilation is avoided (see the cold-speedup
-    /// work). When `false` (default) the export-data seed is used.
+    /// work). Default `true` (hybrid); `false` forces the export-data seed.
     pub from_source: bool,
+    /// Type-check target packages concurrently via rayon. Set `false` when the
+    /// caller runs with `--sequential` / `-j 1` so dependency seeding and
+    /// per-package checking stay on the main thread (avoids small default worker
+    /// stacks overflowing on deep hybrid type-check trees).
+    pub parallel: bool,
 }
 
 impl Default for TypecheckEnv {
@@ -44,7 +49,8 @@ impl Default for TypecheckEnv {
             compiler: "gc".into(),
             arch: std::env::var("GOARCH").unwrap_or_else(|_| "amd64".into()),
             go_version: String::new(),
-            from_source: false,
+            from_source: true,
+            parallel: true,
         }
     }
 }
@@ -88,6 +94,7 @@ impl TypecheckEnv {
                 })
                 .unwrap_or_default(),
             from_source: false,
+            parallel: true,
         }
     }
 
@@ -151,23 +158,17 @@ pub fn typecheck_packages(
     // interior locking, making concurrent parsing safe. Results are cloned out,
     // checked off-map, then written back, so the map is untouched during the
     // parallel phase.
-    let checked: Vec<(String, Package)> = targets
-        .par_iter()
-        .filter_map(|id| {
-            let mut pkg = (**by_id.get(id)?).clone();
-            typecheck_package_with_seed(
-                &mut pkg,
-                &fset,
-                &export_paths,
-                &dep_graph,
-                sizes,
-                env,
-                mode,
-                seed.as_deref(),
-            );
-            Some((id.clone(), pkg))
-        })
-        .collect();
+    let checked: Vec<(String, Package)> = if env.parallel {
+        targets
+            .par_iter()
+            .filter_map(|id| typecheck_one_target(id, by_id, &fset, &export_paths, &dep_graph, sizes, env, mode, seed.as_deref()))
+            .collect()
+    } else {
+        targets
+            .iter()
+            .filter_map(|id| typecheck_one_target(id, by_id, &fset, &export_paths, &dep_graph, sizes, env, mode, seed.as_deref()))
+            .collect()
+    };
 
     for (id, pkg) in checked {
         by_id.insert(id, Arc::new(pkg));
@@ -209,29 +210,97 @@ pub fn typecheck_roots(
         } else {
             build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
         };
-        target_ids
-            .par_iter()
-            .filter_map(|id| {
-                let mut pkg = (**by_id.get(id)?).clone();
-                typecheck_package_with_seed(
-                    &mut pkg,
-                    &fset,
-                    &export_paths,
-                    &dep_graph,
-                    sizes,
-                    env,
-                    mode,
-                    seed.as_deref(),
-                );
-                Some((id.clone(), Arc::new(pkg)))
-            })
-            .collect()
+        if env.parallel {
+            target_ids
+                .par_iter()
+                .filter_map(|id| {
+                    typecheck_one_target_arc(
+                        id,
+                        &by_id,
+                        &fset,
+                        &export_paths,
+                        &dep_graph,
+                        sizes,
+                        env,
+                        mode,
+                        seed.as_deref(),
+                    )
+                })
+                .collect()
+        } else {
+            target_ids
+                .iter()
+                .filter_map(|id| {
+                    typecheck_one_target_arc(
+                        id,
+                        &by_id,
+                        &fset,
+                        &export_paths,
+                        &dep_graph,
+                        sizes,
+                        env,
+                        mode,
+                        seed.as_deref(),
+                    )
+                })
+                .collect()
+        }
     };
 
     target_ids
         .iter()
         .filter_map(|id| checked.remove(id))
         .collect()
+}
+
+fn typecheck_one_target(
+    id: &String,
+    by_id: &HashMap<String, Arc<Package>>,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
+) -> Option<(String, Package)> {
+    let mut pkg = (**by_id.get(id)?).clone();
+    typecheck_package_with_seed(
+        &mut pkg,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        seed,
+    );
+    Some((id.clone(), pkg))
+}
+
+fn typecheck_one_target_arc(
+    id: &String,
+    by_id: &HashMap<String, Arc<Package>>,
+    fset: &Arc<FileSet>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    sizes: guff_types::Sizes,
+    env: &TypecheckEnv,
+    mode: LoadMode,
+    seed: Option<&ExportSeed>,
+) -> Option<(String, Arc<Package>)> {
+    typecheck_one_target(
+        id,
+        by_id,
+        fset,
+        export_paths,
+        dep_graph,
+        sizes,
+        env,
+        mode,
+        seed,
+    )
+    .map(|(id, pkg)| (id, Arc::new(pkg)))
 }
 
 fn collect_export_paths(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {
@@ -795,7 +864,10 @@ mod tests {
             &export_paths,
             &dep_graph,
             default_sizes(),
-            &TypecheckEnv::default(),
+            &TypecheckEnv {
+                from_source: false,
+                ..TypecheckEnv::default()
+            },
             LoadMode::LOAD_SYNTAX,
         );
         assert!(
@@ -824,7 +896,10 @@ mod tests {
         by_id.insert(pkg_a.id.clone(), Arc::new(pkg_a));
 
         let fset = FileSet::new();
-        let env = TypecheckEnv::default();
+        let env = TypecheckEnv {
+            from_source: false,
+            ..TypecheckEnv::default()
+        };
         let seed = build_export_seed(
             &["example.com/withdep_a".into()],
             &by_id,

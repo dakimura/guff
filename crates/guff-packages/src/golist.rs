@@ -925,9 +925,20 @@ mod tests {
     fn uses_export_data_for_types_without_deps() {
         let cfg = Config {
             mode: LoadMode::NEED_TYPES,
+            dep_source: false,
             ..Config::default()
         };
         assert!(uses_export_data(&cfg));
+    }
+
+    #[test]
+    fn dep_source_skips_export_data() {
+        let cfg = Config {
+            mode: LoadMode::NEED_TYPES | LoadMode::NEED_EXPORT_FILE,
+            dep_source: true,
+            ..Config::default()
+        };
+        assert!(!uses_export_data(&cfg));
     }
 
     #[test]

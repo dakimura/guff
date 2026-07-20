@@ -65,7 +65,6 @@ pub const DEFAULT_TIMEOUT: &str = "1m";
 
 use std::io::{self, Write};
 use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 use guff_analysis::{Analyzer, SettingsBag};
@@ -212,6 +211,19 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
     Ok(filter.apply(issues, &[]))
 }
 
+/// Hybrid cold path is on by default. `GUFF_DEP_SOURCE=0` / `false` / `off` opts
+/// out to the legacy export-data dependency seed; any other value (or unset)
+/// keeps hybrid enabled.
+fn dep_source_enabled() -> bool {
+    match std::env::var("GUFF_DEP_SOURCE") {
+        Ok(v) => {
+            let v = v.trim();
+            !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("off"))
+        }
+        Err(_) => true,
+    }
+}
+
 impl LintOptions {
     pub fn standard(patterns: Vec<String>) -> Self {
         Self {
@@ -236,6 +248,7 @@ impl LintOptions {
 
 /// Load packages and run analyzers. Returns diagnostics and non-zero exit hint.
 pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
+    guff_runner::init_rayon_global_stack();
     let mut build_flags = Vec::new();
     if !opts.build_tags.is_empty() {
         build_flags.push(format!("-tags={}", opts.build_tags.join(",")));
@@ -259,10 +272,11 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         // analyzers that gate on the module language version (modernize, …)
         // do not fall back to the hard-coded go1.22 default.
         | LoadMode::NEED_MODULE;
-    // Hybrid source mode (experimental): type-check third-party dependencies
-    // from source and skip the cold `go list -export` build for them (stdlib
-    // still comes from export data). See docs/PURE-SOURCE-TYPECHECK.md.
-    let dep_source = std::env::var_os("GUFF_DEP_SOURCE").is_some();
+    // Hybrid source mode (default): type-check third-party dependencies from
+    // source and skip the cold `go list -export` build for them (stdlib still
+    // comes from export data). Opt out with `GUFF_DEP_SOURCE=0`. See
+    // docs/COLD-HYBRID-SOURCE-MODE.md and docs/PURE-SOURCE-TYPECHECK.md.
+    let dep_source = dep_source_enabled();
     let meta_cfg = Config {
         mode: metadata_mode,
         build_flags: build_flags.clone(),
@@ -354,6 +368,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     // Type-check + analyze only the packages that missed the cache.
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
+    env.parallel = !sequential;
     let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
     if timing {
         eprintln!(
@@ -557,15 +572,19 @@ fn run_and_write_with_timeout(
 ) -> Result<i32, RunError> {
     // Collect into a buffer on the worker so we only print on success.
     let opts = opts.clone();
+    const LINT_WORKER_STACK: usize = 8 * 1024 * 1024;
     let (tx, rx) = mpsc::channel::<Result<(Vec<u8>, i32), String>>();
-    thread::spawn(move || {
-        let mut buf = Vec::new();
-        let result = run_and_write_inner(&opts, &mut buf);
-        let _ = tx.send(match result {
-            Ok(code) => Ok((buf, code)),
-            Err(e) => Err(e.to_string()),
-        });
-    });
+    std::thread::Builder::new()
+        .stack_size(LINT_WORKER_STACK)
+        .spawn(move || {
+            let mut buf = Vec::new();
+            let result = run_and_write_inner(&opts, &mut buf);
+            let _ = tx.send(match result {
+                Ok(code) => Ok((buf, code)),
+                Err(e) => Err(e.to_string()),
+            });
+        })
+        .map_err(|e| RunError::Message(format!("failed to spawn lint worker: {e}")))?;
 
     match rx.recv_timeout(timeout) {
         Ok(Ok((buf, code))) => {

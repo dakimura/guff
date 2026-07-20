@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::File;
-use guff::walk::{NodeRef, preorder};
+use guff::walk::{NodeRef, preorder_stack};
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
 use crate::pass::Pass;
@@ -26,8 +26,9 @@ impl InspectResult {
     where
         F: FnMut(NodeRef<'_>),
     {
+        let mut stack = Vec::new();
         for file in files {
-            preorder(NodeRef::File(file), |n| {
+            preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
                 f(n);
                 true
             });
@@ -37,8 +38,9 @@ impl InspectResult {
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut node_ids = Vec::new();
+    let mut stack = Vec::new();
     for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
+        preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
             if let Some(id) = stamped_id(n) {
                 node_ids.push(id);
             }

@@ -189,6 +189,7 @@ enum CacheCommand {
 }
 
 fn main() -> ExitCode {
+    guff_runner::init_rayon_global_stack();
     let cli = Cli::parse();
     match cli.command {
         Commands::Run(args) => match run_cmd(args) {

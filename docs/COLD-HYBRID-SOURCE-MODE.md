@@ -1,9 +1,9 @@
 # Cold hybrid source mode — status & Stage 3 resume guide
 
-> Feature flag: **`GUFF_DEP_SOURCE=1`** (env), plumbed to `Config.dep_source` /
-> `TypecheckEnv.from_source`. **Default off** — nothing below changes normal runs.
-> Companion docs: `docs/PURE-SOURCE-TYPECHECK.md` (the *next-next* step: stdlib
-> from source too). This file tracks the **hybrid** work and what Stage 3 needs.
+> Feature flag: **`GUFF_DEP_SOURCE`** (env), plumbed to `Config.dep_source` /
+> `TypecheckEnv.from_source`. **Default on** — opt out with `GUFF_DEP_SOURCE=0`
+> / `false` / `off`. Companion docs: `docs/PURE-SOURCE-TYPECHECK.md` (the
+> *next-next* step: stdlib from source too).
 
 ## Goal
 
@@ -63,19 +63,12 @@ Adjudicated 2026-07-19 against golangci-lint on Prometheus under
 `compat/normalize.py` (`relpath:line:linter:message`), set-diffed in Python
 (**not `comm`** — locale collation gives false zero-overlaps).
 
-**Verdict: `GUFF_DEP_SOURCE` stays OFF by default** — but the root cause was
-re-diagnosed (see below) as **latent guff analyzer bugs + more analysis
-coverage**, *not* type-info corruption. Three real analyzer bugs were fixed this
-session (1 bools, 3 ineffassign: expr traversal + for-loop back-edge), cutting
-the hybrid-vs-baseline divergence **354 → 124** (ineffassign 204 → 2). The
-remaining divergence is dominated by hybrid
-type-checking packages the export path drops as ill-typed (so it runs analyzers
-on more code) plus guff's *pre-existing* guff-vs-golangci divergences (ST1000,
-generated-file lint scope, ineffassign over-report) surfacing on that extra
-coverage. Making cold-source the default still needs the remaining hybrid-only
-classes settled + the isolated SSA builder panics (`expr.rs` ArrayType /
-Ident) fixed, but hybrid is now understood to be *sounder* than the first
-adjudication implied.
+**Verdict (updated 2026-07-20): hybrid is ON by default.** Prometheus
+`.golangci.yml` `./...` completes under hybrid (no process abort). Residual
+SSA/type gaps degrade to `Invalid` placeholders rather than panicking; SA4006’s
+Phi `has_use` walk is cycle-guarded so incomplete hybrid SSA cannot stack-
+overflow. Prefer `./tsdb/...` for the local `regress/` gate (24GB-safe). The
+earlier opt-in verdict below is retained as adjudication history.
 
 ### What the adjudication found
 
@@ -205,11 +198,10 @@ Fixed 2026-07-20 (later): SA4008 / SA4009 triage.
 2. ~~**Triage SA4009 / SA4008 (loop-condition)**~~ ✅ done.
 3. ~~**`signature.rs:164` `as_signature` panic**~~ ✅ already fixed earlier
    (`as_signature_opt` + Named underlying). Stale remaining-work note.
-   **Still isolated (caught) SSA builder panics** on hybrid-covered pkgs:
-   - `builder/expr.rs:160` — `unimplemented expr: ArrayType` with `len: None`
-     (slice/`[]byte` type expr reaching value `expr()`);
-   - `builder/expr.rs:264` — `no object for Ident`.
-   Root-cause those; do **not** paper over with silent wrong-type fallbacks.
+   **SSA builder gaps** (hybrid incomplete info): prefer `Invalid` placeholders
+   over process abort (`type_of`, map accessors, method-instantiation wrappers,
+   expr depth / subst depth). Full prometheus `./...` under `.golangci.yml`
+   completes (2026-07-20). SA4006 `has_use` is cycle-guarded against Phi loops.
 4. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes
    (generated-file scope + ST1000 + ineffassign over-report + genuine S1001/ST1003),
    make cold-source the default.

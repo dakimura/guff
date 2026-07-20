@@ -1842,7 +1842,10 @@ fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>)
             continue;
         }
         for p in COMMENT_FMT_PARTS {
-            if text.len() >= p.len() && text[..p.len()].eq_ignore_ascii_case(p) {
+            // Prefixes are ASCII; compare via bytes so a multi-byte char in
+            // `text` cannot panic on a mid-codepoint slice (`text[..p.len()]`).
+            if text.len() >= p.len() && text.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes())
+            {
                 continue 'outer;
             }
         }

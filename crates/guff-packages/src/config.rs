@@ -32,7 +32,8 @@ pub struct Config {
     /// export data. When set, `go list` is invoked without `-export` (skipping
     /// the expensive dependency compilation) and dependencies are type-checked
     /// from their `CompiledGoFiles` via the built-in source importer. Feeds
-    /// [`TypecheckEnv::from_source`](crate::TypecheckEnv). Default `false`.
+    /// [`TypecheckEnv::from_source`](crate::TypecheckEnv). Default `true`
+    /// (hybrid cold path); set `GUFF_DEP_SOURCE=0` to force the export-data path.
     pub dep_source: bool,
 }
 
@@ -46,7 +47,7 @@ impl Default for Config {
             tests: false,
             overlay: HashMap::new(),
             disable_cache: false,
-            dep_source: false,
+            dep_source: true,
         }
     }
 }

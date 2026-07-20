@@ -26,3 +26,17 @@ pub use load_mode::{
 };
 pub use memory::{trim_package_memory, trim_packages};
 pub use runner::{run, run_on_packages, RunResult, RunnerError, RunnerOptions};
+
+/// Configures rayon's global thread pool with a larger per-worker stack. The
+/// default (~512 KiB on macOS) is too small for deep hybrid dependency
+/// type-checking and SSA construction; call once before any `par_iter` use.
+pub fn init_rayon_global_stack() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        const STACK: usize = 8 * 1024 * 1024;
+        let _ = rayon::ThreadPoolBuilder::new()
+            .stack_size(STACK)
+            .build_global();
+    });
+}

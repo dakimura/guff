@@ -538,8 +538,12 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
     // already done, then rayon's pool runs the wave in parallel. Matching the
     // sequential topo order's diagnostic root walk keeps output deterministic
     // after collection (roots still walk in construction order).
+    // Rayon's default worker stack (~512 KiB on macOS) is too small for deep SSA
+    // / type substitution on large modules; match the main thread's headroom.
+    const WORKER_STACK: usize = 8 * 1024 * 1024;
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(workers)
+        .stack_size(WORKER_STACK)
         .build()
         .expect("rayon thread pool");
     let remaining = &remaining;

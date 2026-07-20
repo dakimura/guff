@@ -71,13 +71,26 @@ impl<'a> Builder<'a> {
         // Explicit type conversion, e.g. `string(x)` or `int64(n)`.
         // (Go: `fn.info.Types[e.Fun].IsType()` branch in `builder.expr0`.)
         if self.is_type_expr(&e.fun) {
-            let x = self.expr(
-                e.args
-                    .first()
-                    .expect("type conversion CallExpr has one argument"),
-            );
-            let tv = self.prog.info.types.get(&e.id).expect("no type for conversion");
-            let typ = self.typ_type(tv.typ);
+            let Some(arg) = e.args.first() else {
+                return self.invalid_zero();
+            };
+            let x = self.expr(arg);
+            // Prefer the CallExpr's recorded type; fall back to the Fun type
+            // expression when hybrid source-checking left the call untyped.
+            let type_id = self
+                .prog
+                .info
+                .types
+                .get(&e.id)
+                .or_else(|| self.prog.info.types.get(&unparen(&e.fun).id()))
+                .map(|tv| tv.typ);
+            let Some(type_id) = type_id else {
+                // Incomplete checker info must not abort the SSA builder (and,
+                // near the stack limit, a panic+backtrace can escalate to a
+                // fatal stack overflow). Pass the argument through unconverted.
+                return x;
+            };
+            let typ = self.typ_type(type_id);
             let block = self.block.expect("no current block");
             let fid = self.func_id;
             let y = crate::emit::emit_conv(self.prog, fid, block, x, typ);
@@ -104,8 +117,10 @@ impl<'a> Builder<'a> {
             c.args.push(self.expr(arg));
         }
 
-        let tv = self.prog.info.types.get(&e.id).expect("no type for call");
-        let typ = self.typ_type(tv.typ);
+        let typ = match self.prog.info.types.get(&e.id) {
+            Some(tv) => self.typ_type(tv.typ),
+            None => self.prog.basic_type(BasicKind::Invalid),
+        };
 
         let block = self.block.expect("no current block");
         let id = crate::emit::emit_with_pos(
@@ -121,10 +136,26 @@ impl<'a> Builder<'a> {
     /// from ordinary calls). (Go: `TypeAndValue.IsType()`.)
     fn is_type_expr(&self, e: &Expr) -> bool {
         let e = unparen(e);
-        matches!(
+        if matches!(
             self.prog.info.types.get(&e.id()).map(|tv| tv.mode),
             Some(guff_types::OperandMode::TypeExpr)
-        )
+        ) {
+            return true;
+        }
+        // Syntactic fallback: hybrid source-checking of dependencies can omit
+        // `TypeExpr` mode on nodes that are unambiguously types (notably
+        // `[]byte` as `ArrayType` with nil Len). Without this, `T(x)` falls
+        // through to value `expr()` and panics.
+        match e {
+            Expr::ArrayType(_)
+            | Expr::StructType(_)
+            | Expr::FuncType(_)
+            | Expr::InterfaceType(_)
+            | Expr::MapType(_)
+            | Expr::ChanType(_) => true,
+            Expr::StarExpr(s) => self.is_type_expr(&s.x),
+            _ => false,
+        }
     }
 
     fn is_make_builtin(&self, fun: Value) -> bool {
@@ -137,8 +168,7 @@ impl<'a> Builder<'a> {
     /// Lowers `make(T, …)` to `MakeSlice` / `MakeMap` / `MakeChan`. (Go:
     /// `builder.expr` for `make`.)
     fn emit_make(&mut self, e: &CallExpr) -> Value {
-        let tv = self.prog.info.types.get(&e.id).expect("no type for make");
-        let typ = self.typ_type(tv.typ);
+        let typ = self.type_of(e.id);
         let u = typ.underlying(&self.prog.type_arena);
         let block = self.block.expect("no current block");
 
@@ -164,7 +194,7 @@ impl<'a> Builder<'a> {
                     .or(len);
                 InstrData::MakeSlice(MakeSlice { len, cap, typ })
             }
-            other => panic!("emit_make on non-slice/map/chan type: {other:?}"),
+            _ => return self.invalid_zero(),
         };
 
         let id = crate::emit::emit_with_pos(self.func_mut(), block, data, e.lparen);

@@ -339,17 +339,32 @@ pub fn build_package(prog: &mut Program, pkg_id: PackageId, files: &[File]) {
 /// are not spilled to `Alloc`s, so a captured parameter is bound by value rather
 /// than by reference. Local-variable capture and heap marking arrive with
 /// parameter spilling (and the checker recording local-var `Info.defs`).
-pub(crate) fn lookup(prog: &mut Program, fid: FuncId, obj: ObjectId, _escaping: bool) -> Value {
+pub(crate) fn lookup(prog: &mut Program, fid: FuncId, obj: ObjectId, escaping: bool) -> Value {
+    lookup_depth(prog, fid, obj, escaping, 0)
+}
+
+fn lookup_depth(
+    prog: &mut Program,
+    fid: FuncId,
+    obj: ObjectId,
+    escaping: bool,
+    depth: u32,
+) -> Value {
+    if depth > 64 {
+        let typ = prog.basic_type(BasicKind::Invalid);
+        return prog.emit_const(None, typ);
+    }
     if let Some(&v) = prog.functions.get(fid).objects.get(&obj) {
         return v; // local to fid (or already captured)
     }
     // The definition is in an enclosing function; plumb it through.
-    let parent = prog
-        .functions
-        .get(fid)
-        .parent
-        .expect("no SSA value for captured variable (no enclosing function)");
-    let outer = lookup(prog, parent, obj, true);
+    let Some(parent) = prog.functions.get(fid).parent else {
+        // No enclosing function — incomplete type/object info (seen under
+        // hybrid source mode). Prefer a placeholder over aborting the build.
+        let typ = prog.basic_type(BasicKind::Invalid);
+        return prog.emit_const(None, typ);
+    };
+    let outer = lookup_depth(prog, parent, obj, true, depth + 1);
     let typ = value_type(prog, parent, outer);
     let name = obj.name(&prog.object_arena).to_string();
     let f = prog.functions.get_mut(fid);
@@ -450,15 +465,22 @@ impl<'a> Builder<'a> {
 
     /// Returns the locally instantiated type recorded for AST node `id`.
     /// (Go: `(*Function).typeOf` applied to the node's checker type.)
+    ///
+    /// When hybrid source-checking left the node untyped, returns the Invalid
+    /// basic type instead of panicking — incomplete type info must not abort
+    /// the SSA builder (or the whole lint process via stack-overflow-on-unwind).
     pub(crate) fn type_of(&mut self, id: u32) -> TypeId {
-        let raw = self
-            .prog
-            .info
-            .types
-            .get(&id)
-            .expect("no type for AST node")
-            .typ;
-        self.typ_type(raw)
+        match self.prog.info.types.get(&id) {
+            Some(tv) => self.typ_type(tv.typ),
+            None => self.prog.basic_type(BasicKind::Invalid),
+        }
+    }
+
+    /// A zero value of the Invalid basic type — used when checker info is
+    /// missing and continuing with a placeholder is preferable to panicking.
+    pub(crate) fn invalid_zero(&mut self) -> Value {
+        let typ = self.prog.basic_type(BasicKind::Invalid);
+        self.prog.emit_const(None, typ)
     }
 
     /// set_block sets the current basic block.
@@ -783,13 +805,7 @@ impl<'a> Builder<'a> {
         cl: &guff::ast::CompositeLit,
         escaping: bool,
     ) -> Box<dyn LValue> {
-        let raw = self
-            .prog
-            .info
-            .types
-            .get(&cl.id)
-            .expect("no type for composite literal")
-            .typ;
+        let raw = self.type_of(cl.id);
         let raw = self.typ_type(raw);
         let typ = if guff_types::is_pointer(&self.prog.type_arena, raw) {
             guff_types::pointer_elem(&self.prog.type_arena, raw)
@@ -828,7 +844,7 @@ pub(crate) fn unparen(e: &Expr) -> &Expr {
 /// expr_reflect_name returns the Go `reflect.TypeOf` name of an AST expression
 /// node (e.g. `*ast.CallExpr`), matching what go/ssa's disassembler prints for
 /// a DebugRef whose expression is not an identifier.
-fn expr_reflect_name(e: &Expr) -> &'static str {
+pub(crate) fn expr_reflect_name(e: &Expr) -> &'static str {
     match e {
         Expr::BadExpr(_) => "*ast.BadExpr",
         Expr::Ident(_) => "*ast.Ident",

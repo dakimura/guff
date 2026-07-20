@@ -10,14 +10,17 @@ The CLI binary is **`guff`** (crate name: `guff-lint`).
 
 Agents and CI run linters constantly. Wall-clock and peak memory dominate the feedback loop. guff keeps a single Rust process over package load → typecheck → analyzers, instead of orchestrating many Go tools.
 
-**Warm runs are faster than golangci-lint** on the standard five-linter preset (`staticcheck` / `govet` / `errcheck` / `ineffassign` / `unused`):
+**Cold runs are faster than golangci-lint** on prometheus’s own `.golangci.yml`
+(~20 analyzers + formatters; empty tool caches **and** empty `GOCACHE` — the
+agent / CI sandbox case). Hybrid dependency type-checking is on by default:
 
-| Target | guff warm | golangci-lint warm | guff is |
+| Target | guff cold | golangci-lint cold | guff is |
 |--------|----------:|-------------------:|--------:|
-| `local` (13 packages) | **0.156s** | 0.287s | **1.8× faster** |
-| `fixture` | **0.136s** | 0.177s | **1.3× faster** |
+| prometheus `./tsdb/...` | **38.9s** | 54.6s | **1.4× faster** |
 
-Cold starts are faster too. Numbers are medians of 3 samples (Darwin arm64, Go 1.26, golangci-lint 2.12). Full tables: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
+Medians of 3 samples (Darwin arm64, Go 1.26, golangci-lint 2.12, auto `-j`).
+With a warm `GOCACHE` the gap shrinks (both skip export compiles). Full tables:
+[`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
 
 **Memory stays in the single-digit GB range** on large trees after arena / export-seed work (Prometheus full `./...`: ~**5.8 GB** peak RSS, down from ~56 GB). Smaller scopes (e.g. Prometheus `./tsdb/...`) land around **~1.8 GB**. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
 
@@ -227,7 +230,7 @@ Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md)
 
 ### Prometheus regression gate (local)
 
-Checks wall time, peak RSS, and finding-set delta vs golangci-lint against `baseline.json` (uses prometheus’s own `.golangci.yml`). Default scope targets ~24 GB machines (`./tsdb/...`, `-j 1`, warm `GOCACHE`, 12 GiB RSS cap):
+Checks wall time, peak RSS, and finding-set delta vs golangci-lint against `baseline.json` (uses prometheus’s own `.golangci.yml`). Default scope targets ~24 GB machines (`./tsdb/...`, auto concurrency, warm `GOCACHE`, 12 GiB RSS cap):
 
 ```bash
 ./regress/run.sh --update-baseline   # first time / intentional baseline bump

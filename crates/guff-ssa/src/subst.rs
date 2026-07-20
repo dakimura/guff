@@ -28,10 +28,17 @@
 //! partially-built copy cached before its underlying type is substituted so that
 //! recursive local types (`type X struct{ next *X }`) terminate.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use guff_types::{
     ChanDir, Context, ObjectArena, ObjectData, ObjectId, PackageId, TypeArena, TypeData, TypeId,
 };
+
+thread_local! {
+    static SUBST_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+const SUBST_DEPTH_LIMIT: u32 = 512;
 
 /// A type substitution operation from a fixed set of type parameters to their
 /// replacement types. (Go: `subster`)
@@ -131,7 +138,17 @@ impl Subster {
         if let Some(&r) = self.cache.get(&t) {
             return r;
         }
+        let depth = SUBST_DEPTH.with(|d| {
+            let n = d.get().saturating_add(1);
+            d.set(n);
+            n
+        });
+        if depth > SUBST_DEPTH_LIMIT {
+            SUBST_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+            return t;
+        }
         let res = self.typ_uncached(arena, oarena, t);
+        SUBST_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
         self.cache.insert(t, res);
         res
     }
@@ -471,8 +488,10 @@ impl Subster {
                 .unwrap_or_default(),
             _ => unreachable!("fresh_local_named called on non-Named"),
         };
-        let underlying = guff_types::named_underlying(arena, t)
-            .expect("a declared named type has an underlying type");
+        let underlying = match guff_types::named_underlying(arena, t) {
+            Some(u) => u,
+            None => return t, // incomplete Named — preserve as-is
+        };
         let (name, pos, pkg) = obj_ident(oarena, tname);
 
         // Fresh TypeName + an incomplete Named (underlying set later), so the

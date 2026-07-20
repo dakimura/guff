@@ -62,41 +62,35 @@ impl TypeId {
     ///
     /// Equivalent to `Type.Underlying`.
     pub fn underlying(self, arena: &TypeArena) -> TypeId {
+        self.underlying_depth(arena, 0)
+    }
+
+    fn underlying_depth(self, arena: &TypeArena, depth: u32) -> TypeId {
+        const LIMIT: u32 = 256;
+        if depth > LIMIT {
+            return self;
+        }
+        let next = depth + 1;
         match arena.get(self) {
             TypeData::Named(n) => match n.underlying() {
-                Some(u) => u,
+                Some(u) => u.underlying_depth(arena, next),
                 None => self, // incomplete Named — return self (Go returns nil)
             },
             TypeData::Alias(_) => {
-                // Walk the alias chain until non-alias, then take its
-                // underlying. We use the read-only variant since `underlying`
-                // takes `&TypeArena`; the memoised `actual` cache (filled by
-                // `unalias`) keeps repeated calls cheap as long as someone
-                // ever called `unalias` against this id.
                 let resolved = crate::alias::unalias_readonly(arena, self);
                 if resolved == self {
                     self // incomplete alias chain — return self
                 } else {
-                    resolved.underlying(arena)
+                    resolved.underlying_depth(arena, next)
                 }
             }
             TypeData::TypeParam(tp) => {
-                // TypeParam.Underlying() returns iface(), which is the
-                // constraint as an Interface. Until typeset.go lands we only
-                // resolve correctly if the bound is *already* an Interface or
-                // a Named/Alias whose underlying is an Interface.
                 match tp.constraint() {
                     Some(b) => {
-                        let u = b.underlying(arena);
-                        // If the bound's underlying is an Interface, that's
-                        // already what iface() would produce. Otherwise we'd
-                        // need to wrap it in an implicit interface — that
-                        // wrapping is deferred to chunk 4.
+                        let u = b.underlying_depth(arena, next);
                         if matches!(arena.get(u), TypeData::Interface(_)) {
                             u
                         } else {
-                            // TODO(chunk-4): wrap non-interface bound in an
-                            // implicit Interface (see typeparam.iface()).
                             self
                         }
                     }

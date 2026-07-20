@@ -2,6 +2,7 @@
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa4006` (simplified; defers goyacc/generated filtering).
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident};
@@ -15,11 +16,23 @@ use guff_ssa::value::Value;
 use crate::render::render_expr;
 
 fn has_use(func: &guff_ssa::function::Function, v: Value) -> bool {
+    let mut seen = HashSet::new();
+    has_use_rec(func, v, &mut seen)
+}
+
+fn has_use_rec(
+    func: &guff_ssa::function::Function,
+    v: Value,
+    seen: &mut HashSet<Value>,
+) -> bool {
+    if !seen.insert(v) {
+        return false; // cyclic Phi chain (seen under incomplete hybrid SSA)
+    }
     let refs = filter_debug(guff_analysis::referrers(func, v), func);
     for &rid in &refs {
         match func.instrs.get(rid) {
             InstrData::Phi(_) => {
-                if has_use(func, Value::Instr(rid)) {
+                if has_use_rec(func, Value::Instr(rid), seen) {
                     return true;
                 }
             }

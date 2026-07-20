@@ -140,7 +140,12 @@ pub fn unalias_readonly(arena: &TypeArena, id: TypeId) -> TypeId {
         }
     }
     let mut current = id;
+    let mut depth = 0u32;
     loop {
+        if depth > 256 {
+            return current;
+        }
+        depth += 1;
         match arena.get(current) {
             TypeData::Alias(a) => match a.from_rhs {
                 Some(next) => current = next,

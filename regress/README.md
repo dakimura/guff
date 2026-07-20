@@ -28,8 +28,8 @@ and OOM-killed the host. Defaults therefore target a ~24GB laptop:
 | Knob | Default | Why |
 |------|---------|-----|
 | `REGRESS_PACKAGES` | `./tsdb/...` | R25 scale subtree; fits ~24GB with the other caps |
-| `-j` / `REGRESS_JOBS` | `1` | Serial action DAG |
-| `RAYON_NUM_THREADS` | `2` | Cap typecheck fan-out |
+| `-j` / `REGRESS_JOBS` | auto (omit) | Use `available_parallelism`; pin `1` if RSS climbs |
+| `RAYON_NUM_THREADS` | auto (omit) | Same; pin `2` on tight hosts |
 | `GOCACHE` | system (warm) | Empty GOCACHE recompiles deps and blows RAM |
 | `REGRESS_RSS_LIMIT_BYTES` | 12 GiB | Live kill before OS jetsams Cursor |
 
@@ -103,8 +103,8 @@ Improvements always pass. Package-set / SHA drift warns but does not fail — re
 | `GOLANGCI_LINT_BIN` | Override golangci-lint |
 | `PROMETHEUS_DIR` | Override corpus path |
 | `REGRESS_PACKAGES` | Package patterns (default `./tsdb/...`) |
-| `REGRESS_JOBS` | guff `-j` (default `1`) |
-| `REGRESS_RAYON_THREADS` | `RAYON_NUM_THREADS` (default `2`) |
+| `REGRESS_JOBS` | guff `-j` (default: omit → available_parallelism) |
+| `REGRESS_RAYON_THREADS` | `RAYON_NUM_THREADS` (default: omit → rayon default) |
 | `REGRESS_ISOLATE_GOCACHE` | `1` = fresh empty GOCACHE (memory-heavy) |
 | `REGRESS_RSS_LIMIT_BYTES` | Live RSS kill limit (default 12 GiB) |
 | `REGRESS_TIMEOUT` | CLI timeout (default `15m`) |

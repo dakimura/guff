@@ -6,7 +6,12 @@ use crate::builder::Builder;
 use crate::value::Value;
 use crate::instr::InstrData;
 use guff::ast::{Expr, BasicLit, FuncLit, Ident, UnaryExpr, BinaryExpr, IndexExpr, SliceExpr, TypeAssertExpr, SelectorExpr};
-use guff_types::{OperandMode, SelectionKind};
+use guff_types::{BasicKind, OperandMode, SelectionKind};
+use std::cell::Cell;
+
+thread_local! {
+    static EXPR_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
 
 impl<'a> Builder<'a> {
     /// expr translates an expression to an SSA value. When debug info is
@@ -14,6 +19,21 @@ impl<'a> Builder<'a> {
     /// value (except for constant/builtin results, which go/ssa skips).
     /// (Go: `builder.expr`)
     pub fn expr(&mut self, e: &Expr) -> Value {
+        let depth = EXPR_DEPTH.with(|d| {
+            let n = d.get().saturating_add(1);
+            d.set(n);
+            n
+        });
+        if depth > 512 {
+            EXPR_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+            return self.invalid_zero();
+        }
+        let result = self.expr_inner(e);
+        EXPR_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+        result
+    }
+
+    fn expr_inner(&mut self, e: &Expr) -> Value {
         // Parenthesized expressions carry no value of their own; unwrap them
         // without emitting a second DebugRef (the inner expression emits one).
         if let Expr::ParenExpr(p) = e {
@@ -156,6 +176,15 @@ impl<'a> Builder<'a> {
                 let typ = self.type_of(star.id);
                 self.emit_load(x, typ)
             }
+            // Type expressions must not reach value lowering (they belong in
+            // `T(x)` / `make` paths). Incomplete hybrid type info can still
+            // route them here — prefer a placeholder over aborting the build.
+            Expr::ArrayType(_)
+            | Expr::StructType(_)
+            | Expr::FuncType(_)
+            | Expr::InterfaceType(_)
+            | Expr::MapType(_)
+            | Expr::ChanType(_) => self.invalid_zero(),
             // DEFERRED: other expr forms.
             _ => todo!("unimplemented expr: {:?}", e),
         }
@@ -229,9 +258,14 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn basic_lit(&mut self, lit: &BasicLit) -> Value {
-        let tv = self.prog.info.types.get(&lit.id).expect("no type for BasicLit");
-        let val = tv.val.clone();
-        let typ = self.typ_type(tv.typ);
+        let typ = self.type_of(lit.id);
+        let val = self
+            .prog
+            .info
+            .types
+            .get(&lit.id)
+            .map(|tv| tv.val.clone())
+            .unwrap_or_default();
         self.prog.emit_const(val, typ)
     }
 
@@ -261,7 +295,9 @@ impl<'a> Builder<'a> {
         // Prefer a definition (short var decl `:=` LHS) over a use, matching
         // go's `fn.objectOf`. A freshly defined local has already had its cell
         // created (emit_local_var) and recorded in `objects`.
-        let obj_id = self.object_of(id).expect("no object for Ident");
+        let Some(obj_id) = self.object_of(id) else {
+            return self.invalid_zero();
+        };
         
         // 1. Check local objects (params, freevars, locals)
         if let Some(&v) = self.func().objects.get(&obj_id) {
@@ -301,12 +337,8 @@ impl<'a> Builder<'a> {
             return crate::builder::lookup(self.prog, self.func_id, obj_id, false);
         }
 
-        todo!(
-            "ident resolution failed for {:?} {:?} (ast id: {})",
-            obj_id,
-            std::mem::discriminant(self.prog.object_arena.get(obj_id)),
-            id.id
-        )
+        // Unresolved identifier (incomplete hybrid info) — placeholder value.
+        self.invalid_zero()
     }
 
     fn unary_expr(&mut self, un: &UnaryExpr) -> Value {
@@ -438,13 +470,7 @@ impl<'a> Builder<'a> {
         let high = e.high.as_ref().map(|h| self.expr(h));
         let max = e.max.as_ref().map(|m| self.expr(m));
 
-        let typ = self
-            .prog
-            .info
-            .types
-            .get(&e.id)
-            .expect("no type for slice expression")
-            .typ;
+        let typ = self.type_of(e.id);
         let block = self.block.expect("no current block");
         let id = crate::emit::emit(self.func_mut(), block, InstrData::Slice(crate::instr::Slice {
             x,
@@ -461,7 +487,9 @@ impl<'a> Builder<'a> {
         let assert_type = if let Some(ty_expr) = &e.ty {
             self.type_of(ty_expr.id())
         } else {
-            todo!("type switch x.(type)")
+            // Type-switch `x.(type)` — not modeled yet; use Invalid so hybrid
+            // incomplete info does not abort the SSA build.
+            self.prog.basic_type(BasicKind::Invalid)
         };
 
         let block = self.block.expect("no current block");
@@ -581,13 +609,7 @@ impl<'a> Builder<'a> {
         escaping: bool,
         sel: &guff_types::Selection,
     ) -> Value {
-        let e_ty = self
-            .prog
-            .info
-            .types
-            .get(&e.id())
-            .expect("no type for receiver expr")
-            .typ;
+        let e_ty = self.type_of(e.id());
         let mut v = if want_addr
             && !sel.indirect()
             && !guff_types::is_pointer(&self.prog.type_arena, e_ty)

@@ -7,8 +7,7 @@
 #
 # Memory-safe defaults (for ~24GB hosts):
 #   - packages: ./tsdb/...   (override: REGRESS_PACKAGES='./...')
-#   - concurrency: -j 1
-#   - RAYON_NUM_THREADS=2
+#   - concurrency: auto (omit -j / RAYON_NUM_THREADS → available_parallelism)
 #   - reuse system GOCACHE (set REGRESS_ISOLATE_GOCACHE=1 only on large hosts)
 #   - live RSS kill limit ~12GB (REGRESS_RSS_LIMIT_BYTES)
 #
@@ -111,13 +110,15 @@ if [[ "$UPDATE_BASELINE" -eq 0 && ! -f "$BASELINE" ]]; then
 fi
 
 # --- 24GB-safe defaults -------------------------------------------------------
-# Full ./... + empty GOCACHE + high concurrency blew past 40GB. Default to the
-# R25 tsdb subtree with serial DAG, warm system GOCACHE, and a hard RSS kill.
+# Full ./... + empty GOCACHE + high concurrency blew past 40GB historically.
+# Default to the R25 tsdb subtree with warm system GOCACHE and a hard RSS kill.
+# Concurrency defaults to auto (available_parallelism); pin with REGRESS_JOBS /
+# REGRESS_RAYON_THREADS if RSS climbs (e.g. REGRESS_JOBS=1 REGRESS_RAYON_THREADS=2).
 PACKAGES_RAW="${REGRESS_PACKAGES:-./tsdb/...}"
 # shellcheck disable=SC2206
 PACKAGES=($PACKAGES_RAW)
-JOBS="${REGRESS_JOBS:-1}"
-RAYON_THREADS="${REGRESS_RAYON_THREADS:-2}"
+JOBS="${REGRESS_JOBS:-}"
+RAYON_THREADS="${REGRESS_RAYON_THREADS:-}"
 ISOLATE_GOCACHE="${REGRESS_ISOLATE_GOCACHE:-0}"
 # ~12 GiB default headroom on 24GB hosts (OS + Cursor + golangci later).
 RSS_LIMIT="${REGRESS_RSS_LIMIT_BYTES:-$((12 * 1024 * 1024 * 1024))}"
@@ -134,6 +135,9 @@ if [[ "$SKIP_GOLANGCI" -eq 0 ]]; then
   GCL_VER="$("$GOLANGCI" version --short 2>/dev/null || "$GOLANGCI" version 2>/dev/null | head -1 || echo unknown)"
 fi
 
+JOBS_LABEL="${JOBS:-auto}"
+RAYON_LABEL="${RAYON_THREADS:-auto}"
+
 echo "guff prometheus regress harness (24GB-safe defaults)"
 echo "  host:         $(uname -srm)"
 echo "  guff:         $GUFF_VER ($GUFF)"
@@ -142,7 +146,7 @@ echo "  prometheus:   $PROM"
 echo "  sha:          $PROM_SHA"
 echo "  config:       $CONFIG"
 echo "  packages:     ${PACKAGES[*]}"
-echo "  concurrency:  -j $JOBS / RAYON_NUM_THREADS=$RAYON_THREADS"
+echo "  concurrency:  -j $JOBS_LABEL / RAYON_NUM_THREADS=$RAYON_LABEL"
 echo "  isolate_gocache: $ISOLATE_GOCACHE"
 echo "  rss_limit:    $RSS_LIMIT bytes"
 echo "  timeout:      $TIMEOUT"
@@ -185,6 +189,27 @@ MEASURED="$RUN_DIR/measured.json"
 
 echo "=== guff (cold tool-cache, measured) ==="
 set +e
+guff_env=(
+  env
+  "GUFF_CACHE=$guff_cache"
+  "GOLANGCI_LINT_CACHE=$guff_cache"
+  "GOCACHE=$GOCACHE_VALUE"
+)
+if [[ -n "$RAYON_THREADS" ]]; then
+  guff_env+=("RAYON_NUM_THREADS=$RAYON_THREADS")
+fi
+guff_cmd=(
+  "$GUFF" run
+  -c "$CONFIG"
+  --out-format json
+  --issues-exit-code 0
+  --no-cache
+  --timeout "$TIMEOUT"
+)
+if [[ -n "$JOBS" ]]; then
+  guff_cmd+=(-j "$JOBS")
+fi
+guff_cmd+=("${PACKAGES[@]}")
 python3 "$MEASURE" run \
   --cwd "$PROM" \
   --stdout "$GUFF_JSON" \
@@ -192,25 +217,14 @@ python3 "$MEASURE" run \
   --json-out "$GUFF_MEAS" \
   --rss-limit-bytes "$RSS_LIMIT" \
   -- \
-  env \
-    "GUFF_CACHE=$guff_cache" \
-    "GOLANGCI_LINT_CACHE=$guff_cache" \
-    "RAYON_NUM_THREADS=$RAYON_THREADS" \
-    "GOCACHE=$GOCACHE_VALUE" \
-  "$GUFF" run \
-    -c "$CONFIG" \
-    -j "$JOBS" \
-    --out-format json \
-    --issues-exit-code 0 \
-    --no-cache \
-    --timeout "$TIMEOUT" \
-    "${PACKAGES[@]}"
+  "${guff_env[@]}" \
+  "${guff_cmd[@]}"
 guff_rc=$?
 set -e
 if [[ "$guff_rc" -ne 0 ]]; then
   echo "guff failed (exit $guff_rc); see $GUFF_TIME_ERR" >&2
   if python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get("killed_for_rss") else 1)' "$GUFF_MEAS" 2>/dev/null; then
-    echo "hint: RSS limit hit. Shrink REGRESS_PACKAGES further, lower REGRESS_RAYON_THREADS, or raise REGRESS_RSS_LIMIT_BYTES on a larger machine." >&2
+    echo "hint: RSS limit hit. Shrink REGRESS_PACKAGES further, set REGRESS_JOBS=1 REGRESS_RAYON_THREADS=2, or raise REGRESS_RSS_LIMIT_BYTES on a larger machine." >&2
   fi
   tail -n 40 "$GUFF_TIME_ERR" >&2 || true
   exit 1
@@ -253,8 +267,11 @@ PACKAGES_CSV="$(printf '%s,' "${PACKAGES[@]}")"
 PACKAGES_CSV="${PACKAGES_CSV%,}"
 
 echo "=== normalize + measure pack ==="
+# Record 0 for auto (omit -j / RAYON_NUM_THREADS).
+JOBS_REC="${JOBS:-0}"
+RAYON_REC="${RAYON_THREADS:-0}"
 python3 - "$NORMALIZE" "$PROM" "$GUFF_JSON" "$GCL_JSON" "$GUFF_MEAS" "$MEASURED" \
-  "$PROM_SHA" "$CONFIG" "$SKIP_GOLANGCI" "$PACKAGES_CSV" "$JOBS" "$RAYON_THREADS" \
+  "$PROM_SHA" "$CONFIG" "$SKIP_GOLANGCI" "$PACKAGES_CSV" "$JOBS_REC" "$RAYON_REC" \
   "$ISOLATE_GOCACHE" <<'PY'
 import json, sys
 from pathlib import Path

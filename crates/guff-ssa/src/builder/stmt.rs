@@ -1661,13 +1661,9 @@ impl<'a> Builder<'a> {
     /// local_var creates the stack cell for the local variable defined by `id`
     /// and returns its address. (Go: `emitLocalVar(fn, identVar(fn, id))`.)
     fn local_var(&mut self, id: &Ident) -> crate::value::Value {
-        let obj_id = self
-            .prog
-            .info
-            .defs
-            .get(&id.id)
-            .expect("no object for Var def")
-            .expect("Var def should have object");
+        let Some(obj_id) = self.prog.info.defs.get(&id.id).copied().flatten() else {
+            return self.invalid_zero();
+        };
         let block = self.block.expect("no current block");
         crate::emit::emit_local_var(self.prog, self.func_id, block, obj_id)
     }

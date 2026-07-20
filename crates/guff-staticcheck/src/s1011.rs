@@ -93,7 +93,7 @@ fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<()> {
         let Expr::CallExpr(call) = &rhs[0] else {
             return None;
         };
-        let Expr::IndexExpr(IndexExpr { x: ix, index, .. }) = &call.args[1] else {
+        let Expr::IndexExpr(IndexExpr { x: ix, index, .. }) = call.args.get(1)? else {
             return None;
         };
         if !same_expr(pass, ix, x) {

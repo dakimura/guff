@@ -227,8 +227,9 @@ impl Program {
     /// this loop converges like go/ssa's `(*builder).iterate`. (Go:
     /// `buildFunction` over the enqueue list.)
     pub fn drain_build_queue(&mut self) {
+        const LIMIT: usize = 4096;
         let mut i = 0usize;
-        while i < self.pending_builds.len() {
+        while i < self.pending_builds.len() && i < LIMIT {
             let fid = self.pending_builds[i];
             if self.functions.get(fid).blocks.is_empty() {
                 self.build_instance(fid);

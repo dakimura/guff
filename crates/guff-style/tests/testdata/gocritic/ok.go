@@ -12,6 +12,9 @@ import (
 // Properly spaced comment.
 var _ = 0
 
+// Raw = 2² - 1/4 - 1/8 = 29/8, normalized by 2² = 4.
+var _unicodeComment = 0
+
 // Deprecated: use okNewer.
 func okDeprecated() {}
 
