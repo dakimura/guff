@@ -1,65 +1,76 @@
 //! SA4009 — function argument overwritten before first use.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa4009` (simplified).
+//! Port of `honnef.co/go/tools/staticcheck/sa4009`.
+//!
+//! Uses SSA Parameter referrers (FilterDebug) like upstream: if the parameter
+//! value has any non-DebugRef use after lifting, it was read. The previous AST
+//! walk missed uses in `if`/`for` conditions and false-positived e.g.
+//! `if st == nil { st = ... }` in prometheus `model/textparse`.
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, Expr, Stmt};
+use guff::ast::{Expr, Stmt};
 use guff::walk::NodeRef;
-use guff_analysis::code::{object_of, refers_to};
-use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::code::object_of;
+use guff_analysis::passes::{buildir, inspect};
+use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_ssa::value::Value;
+use guff_types::ObjectId;
 
-fn assigns_to_obj(pass: &Pass<'_>, stmt: &Stmt, obj: guff_types::ObjectId) -> bool {
-    matches!(stmt, Stmt::AssignStmt(AssignStmt { lhs, .. }) if lhs.iter().any(|e| refers_to(pass, e, obj)))
+/// True if `body` contains an assignment whose LHS is `obj` (upstream's
+/// `ast.Inspect` over AssignStmt).
+fn body_assigns_to(pass: &Pass<'_>, body: &[Stmt], obj: ObjectId) -> bool {
+    body.iter().any(|s| stmt_assigns_to(pass, s, obj))
 }
 
-fn reads_obj(pass: &Pass<'_>, stmt: &Stmt, obj: guff_types::ObjectId) -> bool {
+fn stmt_assigns_to(pass: &Pass<'_>, stmt: &Stmt, obj: ObjectId) -> bool {
     match stmt {
-        Stmt::AssignStmt(a) => a.rhs.iter().any(|e| refers_to(pass, e, obj)),
-        Stmt::ExprStmt(es) => refers_to(pass, &es.x, obj),
-        Stmt::ReturnStmt(r) => r.results.iter().any(|e| refers_to(pass, e, obj)),
-        _ => false,
-    }
-}
-
-fn walk_body(pass: &Pass<'_>, body: &[Stmt], obj: guff_types::ObjectId) -> Option<bool> {
-    for stmt in body {
-        if assigns_to_obj(pass, stmt, obj) {
-            return Some(false);
+        Stmt::AssignStmt(a) => a.lhs.iter().any(|e| {
+            matches!(e, Expr::Ident(id) if object_of(pass, id) == Some(obj))
+        }),
+        Stmt::BlockStmt(b) => body_assigns_to(pass, &b.list, obj),
+        Stmt::IfStmt(i) => {
+            i.init
+                .as_ref()
+                .is_some_and(|s| stmt_assigns_to(pass, s, obj))
+                || body_assigns_to(pass, &i.body.list, obj)
+                || i.else_
+                    .as_ref()
+                    .is_some_and(|e| stmt_assigns_to(pass, e, obj))
         }
-        if reads_obj(pass, stmt, obj) {
-            return Some(true);
+        Stmt::ForStmt(f) => {
+            f.init
+                .as_ref()
+                .is_some_and(|s| stmt_assigns_to(pass, s, obj))
+                || f.post
+                    .as_ref()
+                    .is_some_and(|s| stmt_assigns_to(pass, s, obj))
+                || body_assigns_to(pass, &f.body.list, obj)
         }
-        let nested = match stmt {
-            Stmt::BlockStmt(b) => walk_body(pass, &b.list, obj),
-            Stmt::IfStmt(i) => {
-                walk_body(pass, &i.body.list, obj).or_else(|| {
-                    i.else_.as_ref().and_then(|e| match &**e {
-                        Stmt::BlockStmt(b) => walk_body(pass, &b.list, obj),
-                        other => walk_body(pass, std::slice::from_ref(other), obj),
-                    })
+        Stmt::RangeStmt(r) => body_assigns_to(pass, &r.body.list, obj),
+        Stmt::SwitchStmt(s) => s.body.list.iter().any(|c| {
+            matches!(c, Stmt::CaseClause(cc) if body_assigns_to(pass, &cc.body, obj))
+        }),
+        Stmt::TypeSwitchStmt(s) => {
+            s.init
+                .as_ref()
+                .is_some_and(|i| stmt_assigns_to(pass, i, obj))
+                || stmt_assigns_to(pass, &s.assign, obj)
+                || s.body.list.iter().any(|c| {
+                    matches!(c, Stmt::CaseClause(cc) if body_assigns_to(pass, &cc.body, obj))
                 })
-            }
-            Stmt::ForStmt(f) => walk_body(pass, &f.body.list, obj),
-            Stmt::RangeStmt(r) => walk_body(pass, &r.body.list, obj),
-            _ => None,
-        };
-        if let Some(used) = nested {
-            if used {
-                return Some(true);
-            }
-            return Some(false);
         }
-    }
-    None
-}
-
-fn overwritten_before_use(pass: &Pass<'_>, body: &[Stmt], obj: guff_types::ObjectId) -> bool {
-    match walk_body(pass, body, obj) {
-        Some(true) => false,
-        Some(false) => true,
-        None => false,
+        Stmt::SelectStmt(s) => s.body.list.iter().any(|c| match c {
+            Stmt::CommClause(cc) => {
+                cc.comm
+                    .as_ref()
+                    .is_some_and(|comm| stmt_assigns_to(pass, comm, obj))
+                    || body_assigns_to(pass, &cc.body, obj)
+            }
+            _ => false,
+        }),
+        Stmt::LabeledStmt(l) => stmt_assigns_to(pass, &l.stmt, obj),
+        _ => false,
     }
 }
 
@@ -68,6 +79,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4009 requires inspect analyzer".to_string())?
         .clone();
+    let Some(ir) = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer()) else {
+        return Ok(None);
+    };
 
     let mut pending = Vec::new();
     inspect.preorder(pass.files(), |node| {
@@ -93,7 +107,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(obj) = object_of(pass, arg) else {
                     continue;
                 };
-                if overwritten_before_use(pass, body, obj) {
+
+                // Locate the SSA Parameter for this type-checker Var.
+                let Some((func, pid)) = ir.src_funcs.iter().find_map(|&fid| {
+                    let f = ir.prog.functions.get(fid);
+                    f.params
+                        .iter()
+                        .find(|(_, p)| p.object == Some(obj))
+                        .map(|(pid, _)| (f, pid))
+                }) else {
+                    continue;
+                };
+
+                // Upstream: any non-DebugRef referrer means the param value was
+                // used (after lifting removes a dead spill Store).
+                if !filter_debug(referrers(func, Value::Param(pid)), func).is_empty() {
+                    continue;
+                }
+
+                if body_assigns_to(pass, body, obj) {
                     pending.push((
                         arg.name_pos.0 as u32,
                         format!("argument {} is overwritten before first use", arg.name),
@@ -115,7 +147,7 @@ fn sa4009_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA4009",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), buildir::analyzer()],
         fact_types: vec![],
     }
 }

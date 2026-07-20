@@ -1,6 +1,10 @@
 //! SA4008 — variable in loop condition never changes.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa4008` (simplified AST check).
+//! Port of `honnef.co/go/tools/staticcheck/sa4008`.
+//!
+//! Upstream only considers loops whose post is an `IncDecStmt`. Assign-form
+//! posts (`i += 2`, `t = next()`) are skipped — flagging them was a guff FP on
+//! stepped loops in prometheus `model/textparse`.
 
 use std::sync::OnceLock;
 
@@ -38,11 +42,13 @@ fn cond_var_never_incremented(pass: &Pass<'_>, loop_: &ForStmt) -> bool {
     let Some(post) = loop_.post.as_ref() else {
         return false;
     };
+    // Match upstream: only IncDec posts are candidates. `i += n` / `t = f()` are
+    // not flagged here (upstream uses IR Phi/Load for the remaining cases).
     let Stmt::IncDecStmt(inc) = &**post else {
-        return true;
+        return false;
     };
     let Expr::Ident(inc_id) = &inc.x else {
-        return true;
+        return false;
     };
     object_of(pass, inc_id) != Some(init_obj)
 }

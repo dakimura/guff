@@ -72,9 +72,10 @@ remaining divergence is dominated by hybrid
 type-checking packages the export path drops as ill-typed (so it runs analyzers
 on more code) plus guff's *pre-existing* guff-vs-golangci divergences (ST1000,
 generated-file lint scope, ineffassign over-report) surfacing on that extra
-coverage. Making cold-source the default still needs those settled + the
-`signature.rs:164` panic fixed, but hybrid is now understood to be *sounder*
-than the first adjudication implied.
+coverage. Making cold-source the default still needs the remaining hybrid-only
+classes settled + the isolated SSA builder panics (`expr.rs` ArrayType /
+Ident) fixed, but hybrid is now understood to be *sounder* than the first
+adjudication implied.
 
 ### What the adjudication found
 
@@ -145,17 +146,11 @@ than the first adjudication implied.
    (`storage/remote/otlptranslator/*`, `model/textparse/*`). ineffassign is
    essentially resolved (2 left). The staticcheck "other" is guff's *own*
    pre-existing behavior on newly-covered code:
-   - **SA4006 loop-increment FP (~40, `this value of x is never used`)**: the
-     `IncDecStmt` arm of `crates/guff-staticcheck/src/sa4006.rs` is a fragile AST
-     heuristic — `ident_used_before` only scans uses *textually before* the `x++`
-     and `node_reads_obj` only inspects Assign/ExprStmt/IncDec nodes, so it misses
-     the loop **condition** use (`x < n`, a BinaryExpr) and flags loop counters.
-     The correct fix is SSA-based liveness (as SA4006's *assignment* path already
-     does via `has_use`), not the AST hack. **Not fixed this session** (SSA rework,
-     needs its own SA4006 fixture pass).
-   - smaller classes: `argument X overwritten before first use` (SA4009, ~12),
-     `variable in loop condition never changes` (~8), `should use copy()` (S1001,
-     genuine), ST1003 initialisms (`exemplarTs → exemplarTS`, genuine).
+   - ~~**SA4006 loop-increment FP**~~ ✅ fixed (SSA `has_use`, 2026-07-20).
+   - ~~**SA4009 / SA4008**~~ ✅ fixed (SSA FilterDebug / IncDec-only post,
+     2026-07-20). Stepped loops and `if st == nil { st = ... }` no longer FP.
+   - remaining genuine-ish on hybrid-covered pkgs: `should use copy()` (S1001),
+     ST1003 initialisms, unconditional-loop terminates — keep these.
    None are hybrid-introduced type-info corruption; they are guff's existing
    analyzer behaviors surfacing on the extra packages hybrid type-checks.
 
@@ -196,20 +191,28 @@ Fixed 2026-07-20: SA4006 IncDec → SSA `has_use` (store DebugRefs +
 `buildir` GLOBAL_DEBUG + post-lift referrer rebuild). Loop-increment FPs gone;
 unused `n++` / `n+=1` still flagged. `regress/` finding-set unchanged.
 
+Fixed 2026-07-20 (later): SA4008 / SA4009 triage.
+- **SA4008**: match upstream — only `IncDecStmt` posts are candidates. Assign-form
+  posts (`i += 4`, `t = nextToken()`) were incorrectly flagged (prometheus
+  `model/textparse` stepped loops). Fixtures cover `i += 2` / `t = t + 1`.
+- **SA4009**: port to SSA Parameter `FilterDebug` referrers (upstream). Old AST
+  walk missed uses in `if`/`for` conditions → FP on `if st == nil { st = ... }`.
+  `model/textparse` leftover SA4008/SA4009 = **0**; remaining there are genuine
+  S1001 `copy()` + unconditional-loop terminates. `regress/` PASS (74/70/4
+  finding-set unchanged).
+
 1. ~~**Rework SA4006's `IncDecStmt` arm to use SSA**~~ ✅ done.
-2. **Triage the remaining staticcheck** (SA4009 `argument overwritten before
-   first use`, `variable in loop condition never changes`) the same way; keep the
-   genuine ones (S1001 `copy()`, ST1003 initialisms).
-3. **Fix the isolated `signature.rs:164` `as_signature` panic** (R25.2 DEFERRED):
-   a non-Signature `TypeId` reaches `as_signature` (called from `stmt.rs`
-   defer/go handling, `mono.rs`, `typestring.rs`) — likely a cross-arena /
-   unmaterialized method signature in the source importer. It is already isolated
-   (caught) so it doesn't abort; do **not** replace the panic with a silent
-   fallback (that substitutes wrong types — worse than a clean drop). Root-cause
-   the bad TypeId instead.
+2. ~~**Triage SA4009 / SA4008 (loop-condition)**~~ ✅ done.
+3. ~~**`signature.rs:164` `as_signature` panic**~~ ✅ already fixed earlier
+   (`as_signature_opt` + Named underlying). Stale remaining-work note.
+   **Still isolated (caught) SSA builder panics** on hybrid-covered pkgs:
+   - `builder/expr.rs:160` — `unimplemented expr: ArrayType` with `len: None`
+     (slice/`[]byte` type expr reaching value `expr()`);
+   - `builder/expr.rs:264` — `no object for Ident`.
+   Root-cause those; do **not** paper over with silent wrong-type fallbacks.
 4. **Then re-adjudicate**; if hybrid-only reduces to the compat allowlist classes
-   (generated-file scope + ST1000 + ineffassign over-report), make cold-source
-   the default.
+   (generated-file scope + ST1000 + ineffassign over-report + genuine S1001/ST1003),
+   make cold-source the default.
 5. **(Independent) analyzer determinism** — govet-unreachable ordering and
    ineffassign multi-var tie-break (HashMap iteration → which of several vars at
    one assignment site is reported); both help the export path too.
@@ -225,9 +228,11 @@ issues: {max-issues-per-linter: 0, max-same-issues: 0}
 run: {tests: true}
 Y
 cd prometheus
-target/release/guff run -c /tmp/std.yml --no-cache ./storage/remote/otlptranslator/...              # baseline (drops pkgs)
-GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/std.yml --no-cache ./storage/remote/otlptranslator/...  # hybrid (covers, surfaces SA4006 loop FPs)
+target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...              # baseline (may drop)
+GUFF_DEP_SOURCE=1 target/release/guff run -c /tmp/std.yml --no-cache ./model/textparse/...  # hybrid
 ```
+After SA4006/SA4008/SA4009 fixes, hybrid on `model/textparse` should show S1001 /
+unconditional-loop only (no loop-increment / stepped-loop / arg-overwrite FPs).
 `Info` integrity is proven correct (a go-gated probe loaded `config` both ways
 and diffed `Info.uses`/`defs` + def/use `ObjectId` identity per identifier — all
 identical; see git history for the `config_uses_probe` scaffold). So the
