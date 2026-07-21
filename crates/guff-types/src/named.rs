@@ -56,6 +56,25 @@ pub struct Named {
 }
 
 impl Named {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.obj = r.obj(self.obj);
+        self.from_rhs = r.ty_opt(self.from_rhs);
+        self.underlying = r.ty_opt(self.underlying);
+        for m in &mut self.methods {
+            *m = r.obj(*m);
+        }
+        if let Some(l) = self.tparams.as_mut() {
+            l.remap_ids(r);
+        }
+        if let Some(inst) = self.inst.as_mut() {
+            inst.orig = r.ty(inst.orig);
+            inst.targs.remap_ids(r);
+        }
+    }
+}
+
+impl Named {
     pub fn obj(&self) -> ObjectId {
         self.obj
     }

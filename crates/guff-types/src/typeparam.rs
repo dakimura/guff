@@ -24,6 +24,14 @@ pub struct TypeParam {
 }
 
 impl TypeParam {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.obj = r.obj(self.obj);
+        self.bound = r.ty_opt(self.bound);
+    }
+}
+
+impl TypeParam {
     /// The type name for this type parameter.
     pub fn obj(&self) -> ObjectId {
         self.obj

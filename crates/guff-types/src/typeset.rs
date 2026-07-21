@@ -36,6 +36,16 @@ pub struct TypeSet {
 }
 
 impl TypeSet {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for m in &mut self.methods {
+            *m = r.obj(*m);
+        }
+        crate::termlist::remap_ids(&mut self.terms, r);
+    }
+}
+
+impl TypeSet {
     /// Reports whether this is the empty type set.
     pub fn is_empty(&self) -> bool {
         termlist::is_empty(&self.terms)

@@ -34,6 +34,13 @@ impl TypeParamList {
     pub fn list(&self) -> &[TypeId] {
         &self.tparams
     }
+
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for t in &mut self.tparams {
+            *t = r.ty(*t);
+        }
+    }
 }
 
 /// Length helper that treats `None` as empty (matches Go's nil-safe `Len`).
@@ -64,6 +71,13 @@ impl TypeList {
 
     pub fn list(&self) -> &[TypeId] {
         &self.types
+    }
+
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for t in &mut self.types {
+            *t = r.ty(*t);
+        }
     }
 }
 

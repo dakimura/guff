@@ -16,7 +16,7 @@ use guff_exportdata::ExportImporter;
 use guff_types::api::Config as TypeConfig;
 use guff_types::default_sizes;
 use guff_types::sizes_for;
-use guff_types::{Checker, ExportSeed};
+use guff_types::{Checker, ExportSeed, WorkerOverlays};
 
 use crate::load_mode::LoadMode;
 use crate::package::{Error, ErrorKind, Package, TypecheckArtifacts};
@@ -618,97 +618,161 @@ fn build_source_seed(
         return None;
     }
 
-    let conf = TypeConfig {
+    let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t_check_start = std::time::Instant::now();
+
+    let make_conf = || TypeConfig {
         sizes: Some(env.sizes()),
         go_version: env.go_version.clone(),
         ..TypeConfig::default()
     };
-    let mut check = Checker::new(conf);
-    // Dependencies only need their exported API in the seed; importers never see
-    // dep function bodies. Skipping body checks here is a large speedup and does
-    // not change any target package's findings (targets are checked with full
-    // bodies via a fresh `from_seed` checker). Dep diagnostics are dropped anyway.
-    check.set_ignore_func_bodies(true);
-
-    // Export-data importer for dependencies that keep export data (stdlib in the
-    // hybrid path; empty in pure-source). The built-in source importer takes
-    // precedence for any path also registered via `add_dependency_source`.
-    let mut importer = ExportImporter::with_fset(fset.clone());
-    for (path, file) in export_paths {
-        importer.set_path(path.clone(), file.clone());
-    }
-    check.set_importer(Box::new(importer));
-
-    // Load each dependency once, leaves-first. Type-checking a dependency into
-    // the shared arenas is inherently serial, but *parsing* its source is not —
-    // and parsing chunk N+1 does not depend on chunk N being checked. So a
-    // producer thread parses each chunk (its own files in parallel via `par_iter`)
-    // and hands it to the main thread, which type-checks chunks in order. A
-    // `sync_channel(1)` lets the producer run exactly one chunk ahead, so the
-    // parallel parse overlaps the serial check (parse was ~1.5s of wall on the
-    // Prometheus `./...` seed, now hidden behind the 4s serial check) while peak
-    // resident dep-AST stays bounded to ~2 chunks. `check` never leaves the main
-    // thread, so the `Checker` need not be `Send`; only shared `&` refs cross to
-    // the producer, and `FileSet`'s `RwLock` makes concurrent parse-adds safe
-    // against the checker's position reads.
-    let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
-    let order = dep_load_order(&needed, dep_graph, &loadable);
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
-    let t_check_start = std::time::Instant::now();
-    // Halved from the pre-pipeline 64: the producer runs one chunk ahead, so up to
-    // ~2 chunks of dep-AST are resident at once. 32 keeps that ~2-chunk peak at the
-    // old single-chunk-of-64 footprint, staying within the hybrid RSS budget.
-    const SEED_PARSE_CHUNK: usize = 32;
-
-    type ParsedChunk = HashMap<String, Vec<guff::ast::File>>;
-    let (tx, rx) = std::sync::mpsc::sync_channel::<(usize, ParsedChunk)>(1);
-    std::thread::scope(|scope| {
-        let order_ref = &order;
-        scope.spawn(move || {
-            for (ci, chunk) in order_ref.chunks(SEED_PARSE_CHUNK).enumerate() {
-                let parsed: ParsedChunk = chunk
-                    .par_iter()
-                    .filter(|path| !export_paths.contains_key(*path))
-                    .filter_map(|path| {
-                        let pkg = by_id.get(path)?;
-                        if pkg.compiled_go_files.is_empty() {
-                            return None;
-                        }
-                        Some((path.clone(), parse_dep_files(&pkg.compiled_go_files, fset)))
-                    })
-                    .collect();
-                // A closed receiver (main thread bailed) ends the producer early.
-                if tx.send((ci, parsed)).is_err() {
-                    break;
-                }
-            }
-        });
-
-        for (ci, mut parsed) in rx {
-            let start = ci * SEED_PARSE_CHUNK;
-            let chunk = &order[start..(start + SEED_PARSE_CHUNK).min(order.len())];
-            for path in chunk {
-                if let Some(files) = parsed.remove(path) {
-                    if !files.is_empty() {
-                        check.add_dependency_source(path.clone(), files);
-                    }
-                }
-                check.preload_import(path);
-                // Seed path: dependency diagnostics are intentionally dropped; do
-                // not let them accumulate in the checker while walking the closure.
-                check.errors.clear();
-                check.first_err = None;
-            }
+    let make_importer = || {
+        let mut importer = ExportImporter::with_fset(fset.clone());
+        for (path, file) in export_paths {
+            importer.set_path(path.clone(), file.clone());
         }
-    });
-    if timing {
-        eprintln!(
-            "guff:     seed dep check {:.2}s (serial, parse overlapped), {} deps",
-            t_check_start.elapsed().as_secs_f64(),
-            needed.len(),
+        importer
+    };
+
+    // Phase A (serial): decode all export-data dependencies (stdlib in the hybrid
+    // path; the whole closure in export mode) into a base seed `S0`. Source deps
+    // resolve these from the seed's import cache, so no source worker re-decodes
+    // export data (which would duplicate a package's origin objects across
+    // workers and break cross-package type identity).
+    let mut check = Checker::new(make_conf());
+    check.set_importer(Box::new(make_importer()));
+    {
+        let mut visiting = Vec::new();
+        let mut done = std::collections::HashSet::new();
+        preload_exports(
+            &mut check,
+            &needed,
+            dep_graph,
+            export_paths,
+            &mut visiting,
+            &mut done,
         );
     }
-    Some(Arc::new(check.capture_export_seed()))
+    // Export-decode diagnostics are not seed output.
+    check.errors.clear();
+    check.first_err = None;
+    let mut seed = check.capture_export_seed();
+
+    // Group the *source* dependencies into topological waves. Export-data deps
+    // are already in `S0` (treated as level 0). `level(P) = 1 + max(level(source
+    // dep))`; packages sharing a level never import one another (an import would
+    // force a strictly higher level), so a wave's packages are mutually
+    // independent and can be type-checked in parallel and merged with a uniform
+    // id relocation (see `ExportSeed::merge_wave`). `dep_load_order` is
+    // leaves-first, so each package's source deps are already leveled when we
+    // reach it — a single O(V+E) pass.
+    let order = dep_load_order(&needed, dep_graph, &loadable);
+    let source_set: std::collections::HashSet<&str> = order
+        .iter()
+        .map(String::as_str)
+        .filter(|p| {
+            !export_paths.contains_key(*p)
+                && by_id
+                    .get(*p)
+                    .is_some_and(|pk| !pk.compiled_go_files.is_empty())
+        })
+        .collect();
+
+    let mut level: HashMap<String, u32> = HashMap::new();
+    let mut max_level = 0u32;
+    for p in &order {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let mut l = 0u32;
+        if let Some(deps) = dep_graph.get(p) {
+            for d in deps {
+                if source_set.contains(d.as_str()) {
+                    l = l.max(level.get(d).copied().unwrap_or(0) + 1);
+                }
+            }
+        }
+        max_level = max_level.max(l);
+        level.insert(p.clone(), l);
+    }
+
+    let source_count = level.len();
+    if source_count == 0 {
+        if timing {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel), 0 source deps, {} export deps",
+                t_check_start.elapsed().as_secs_f64(),
+                needed.len(),
+            );
+        }
+        return Some(Arc::new(seed));
+    }
+
+    // Bucket by level; sort each wave by path so the merge order — and therefore
+    // the final arena layout and all downstream findings — is deterministic.
+    let mut waves: Vec<Vec<&str>> = vec![Vec::new(); (max_level + 1) as usize];
+    for p in &order {
+        if let Some(&l) = level.get(p) {
+            waves[l as usize].push(p.as_str());
+        }
+    }
+    for w in waves.iter_mut() {
+        w.sort_unstable();
+    }
+
+    // Phase B: check each wave in parallel on top of the accumulated seed, then
+    // fold the wave's overlays back in. Each worker parses its own source, checks
+    // only its own package (deps resolve from the seed cache), and drops its AST
+    // as soon as it captures its overlay — so resident dep-AST is bounded to
+    // ~num_threads regardless of wave width. `ignore_func_bodies` keeps the seed
+    // to exported API only (targets re-check with full bodies).
+    let parallel = env.parallel;
+    let build_one = |path: &str, seed: &ExportSeed| -> Option<WorkerOverlays> {
+        let pkg = by_id.get(path)?;
+        if pkg.compiled_go_files.is_empty() {
+            return None;
+        }
+        let files = parse_dep_files(&pkg.compiled_go_files, fset);
+        if files.is_empty() {
+            return None;
+        }
+        let mut check = Checker::from_seed(seed, make_conf());
+        check.set_ignore_func_bodies(true);
+        // Fallback importer only; every dep should already be in the seed cache.
+        check.set_importer(Box::new(make_importer()));
+        check.add_dependency_source(path.to_string(), files);
+        let pkg_id = check.preload_import(path)?;
+        Some(check.into_worker_overlays(path.to_string(), pkg_id))
+    };
+    let mut merge_secs = 0f64;
+    let mut widest = 0usize;
+    for wave in &waves {
+        widest = widest.max(wave.len());
+        let overlays: Vec<WorkerOverlays> = if parallel {
+            wave.par_iter()
+                .filter_map(|p| build_one(p, &seed))
+                .collect()
+        } else {
+            wave.iter().filter_map(|p| build_one(p, &seed)).collect()
+        };
+        let m = std::time::Instant::now();
+        seed.merge_wave(overlays);
+        merge_secs += m.elapsed().as_secs_f64();
+    }
+
+    if timing {
+        eprintln!(
+            "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps",
+            t_check_start.elapsed().as_secs_f64(),
+            merge_secs,
+            source_count,
+            waves.len(),
+            widest,
+            needed.len() - source_count,
+        );
+    }
+    Some(Arc::new(seed))
 }
 
 /// Leaves-first (post-order) topological order over the loadable dependency

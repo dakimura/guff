@@ -27,11 +27,13 @@ use std::collections::HashMap;
 use guff_constant::Value;
 
 use crate::api::{Config, Info, TypeCheckError};
-use crate::arena::{ObjectArena, PackageArena, ScopeArena, TypeArena};
+use crate::arena::{ObjectArena, ObjectData, PackageArena, ScopeArena, TypeArena, TypeData};
 use crate::basic::BasicKind;
 use crate::context::Context;
+use crate::merge::Remapper;
 use crate::object::builtin::BuiltinId;
-use crate::package::new_package;
+use crate::package::{new_package, Package};
+use crate::scope::Scope;
 use crate::universe::init_universe_full;
 use crate::{ObjectId, PackageId, ScopeId, TypeId};
 
@@ -213,10 +215,102 @@ pub struct ExportSeed {
     import_cache: HashMap<String, PackageId>,
 }
 
+/// One finished worker's own arena allocations (its overlays), extracted via
+/// [`Checker::into_worker_overlays`] for merging into a shared seed (R25).
+pub struct WorkerOverlays {
+    types: Vec<TypeData>,
+    objects: Vec<ObjectData>,
+    scopes: Vec<Scope>,
+    packages: Vec<Package>,
+    /// Import-cache entries this worker added (its own package path → id). The
+    /// `PackageId` is worker-local and relocated during [`ExportSeed::merge_wave`].
+    cache_delta: Vec<(String, PackageId)>,
+}
+
 impl ExportSeed {
     /// Number of packages present in the import cache (deps + unsafe if any).
     pub fn cached_import_count(&self) -> usize {
         self.import_cache.len()
+    }
+
+    /// Fold one topological wave of independently-checked worker packages into
+    /// this seed (R25).
+    ///
+    /// Every worker in `workers` was cloned from *this same* seed (via
+    /// [`Checker::from_seed`]) before the wave ran, so each numbers its own
+    /// allocations starting just past the seed's current length. We append the
+    /// overlays back-to-back and shift each worker's own ids by the total length
+    /// of the overlays merged ahead of it (`delta`); ids that point into the
+    /// shared base (`<= base_len`) are left untouched. Ordering of `workers`
+    /// must be deterministic (callers pass a stable, path-sorted wave) so the
+    /// merged arena layout — and therefore all downstream findings — is
+    /// reproducible.
+    ///
+    /// Correctness rests on wave independence: workers at the same topological
+    /// level never import each other, so a worker's overlay references only the
+    /// shared base and its own overlay, never a sibling's.
+    pub fn merge_wave(&mut self, workers: Vec<WorkerOverlays>) {
+        // Base lengths are fixed for the whole wave (all workers cloned from the
+        // seed as it was on entry); only the deltas accumulate.
+        let ty_base = self.types.len() as u32;
+        let ob_base = self.objects.len() as u32;
+        let sc_base = self.scopes.len() as u32;
+        let pk_base = self.packages.len() as u32;
+        let (mut ty_delta, mut ob_delta, mut sc_delta, mut pk_delta) = (0u32, 0u32, 0u32, 0u32);
+
+        for w in workers {
+            let r = Remapper {
+                ty_base,
+                ty_delta,
+                ob_base,
+                ob_delta,
+                sc_base,
+                sc_delta,
+                pk_base,
+                pk_delta,
+            };
+            let WorkerOverlays {
+                mut types,
+                mut objects,
+                mut scopes,
+                mut packages,
+                cache_delta,
+            } = w;
+
+            for t in &mut types {
+                crate::merge::remap_type(t, &r);
+            }
+            for o in &mut objects {
+                crate::merge::remap_object(o, &r);
+            }
+            for s in &mut scopes {
+                crate::merge::remap_scope(s, &r);
+            }
+            for p in &mut packages {
+                crate::merge::remap_package(p, &r);
+            }
+            for (path, id) in cache_delta {
+                self.import_cache.insert(path, r.pkg(id));
+            }
+
+            ty_delta += types.len() as u32;
+            ob_delta += objects.len() as u32;
+            sc_delta += scopes.len() as u32;
+            pk_delta += packages.len() as u32;
+
+            self.types.extend_base(types);
+            self.objects.extend_base(objects);
+            self.scopes.extend_base(scopes);
+            self.packages.extend_base(packages);
+        }
+
+        // Accounting tripwire (debug/test builds): the seed must have grown by
+        // exactly the merged overlays. A mismatch means the extend/delta math
+        // drifted. Semantic remap completeness is covered by the regress gate.
+        debug_assert_eq!(self.types.len(), (ty_base + ty_delta) as usize);
+        debug_assert_eq!(self.objects.len(), (ob_base + ob_delta) as usize);
+        debug_assert_eq!(self.scopes.len(), (sc_base + sc_delta) as usize);
+        debug_assert_eq!(self.packages.len(), (pk_base + pk_delta) as usize);
     }
 }
 
@@ -326,6 +420,27 @@ impl Checker {
             universe_nil: self.universe_nil,
             builtins: self.builtins,
             import_cache: self.import_cache,
+        }
+    }
+
+    /// Extract a finished worker's own arena allocations for merging into a
+    /// shared seed (R25 wave-parallel seed build).
+    ///
+    /// The worker was cloned from a shared frozen seed via [`Self::from_seed`],
+    /// so its four arenas are `{ shared base, private overlay }`; we keep only
+    /// the overlays (the worker's own contribution) and drop the base — which is
+    /// the seed we cloned from (and may be a diverged copy-on-write copy if the
+    /// worker touched a base element's lazy cache; that mutation is idempotent
+    /// and recomputed later). `own_path`/`own_pkg` are this package's import path
+    /// and the (worker-local) package id it allocated, forming the single new
+    /// import-cache entry the worker added; the id is relocated during merge.
+    pub fn into_worker_overlays(self, own_path: String, own_pkg: PackageId) -> WorkerOverlays {
+        WorkerOverlays {
+            types: self.types.into_overlay(),
+            objects: self.objects.into_overlay(),
+            scopes: self.scopes.into_overlay(),
+            packages: self.packages.into_overlay(),
+            cache_delta: vec![(own_path, own_pkg)],
         }
     }
 

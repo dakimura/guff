@@ -55,6 +55,7 @@ pub mod labels;
 pub mod literals;
 pub mod lookup;
 pub mod map;
+pub(crate) mod merge;
 pub mod mono;
 pub mod named;
 pub mod object;
@@ -115,7 +116,7 @@ pub use basic::{
     IS_NUMERIC, IS_ORDERED, IS_STRING, IS_UNSIGNED, IS_UNTYPED, RUNE,
 };
 pub use chan::{chan_dir, chan_elem, new_chan, Chan, ChanDir};
-pub use check::{Action, Checker, Environment, ExportSeed};
+pub use check::{Action, Checker, Environment, ExportSeed, WorkerOverlays};
 pub use check_expr_const::representable_const;
 pub use check_lookup::MissingMethod;
 pub use context::Context;

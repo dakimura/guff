@@ -23,6 +23,14 @@ pub struct TypeName {
 }
 
 impl TypeName {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.typ = r.ty_opt(self.typ);
+        self.meta.remap_ids(r);
+    }
+}
+
+impl TypeName {
     pub fn name(&self) -> &str {
         &self.name
     }

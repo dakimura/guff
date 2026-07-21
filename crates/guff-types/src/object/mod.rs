@@ -29,6 +29,15 @@ pub struct ObjectMeta {
     pub scope_pos: u32,
 }
 
+impl ObjectMeta {
+    /// Relocate the scope/package back-references when merging into a shared
+    /// seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.parent = r.scope_opt(self.parent);
+        self.pkg = r.pkg_opt(self.pkg);
+    }
+}
+
 /// Internal trait so the `ObjectId` dispatch can grab `&ObjectMeta` /
 /// `&mut ObjectMeta` from any variant without per-variant boilerplate at
 /// every call site.

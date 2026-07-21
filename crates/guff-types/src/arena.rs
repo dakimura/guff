@@ -50,19 +50,67 @@ impl TypeId {
     pub(crate) fn from_index(index: usize) -> Self {
         TypeId(NonZeroU32::new(index as u32).expect("arena index never 0"))
     }
+
+    /// Relocate an id when merging a worker overlay into a shared base (R25).
+    /// Ids `<= base_len` point into the shared frozen base and are unchanged;
+    /// worker-local ids (into the overlay) shift by `delta` elements.
+    #[inline]
+    pub(crate) fn remapped(self, base_len: u32, delta: u32) -> Self {
+        if self.0.get() <= base_len {
+            self
+        } else {
+            TypeId(NonZeroU32::new(self.0.get() + delta).expect("remap never 0"))
+        }
+    }
 }
 
 /// Handle to an object stored in an [`ObjectArena`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ObjectId(NonZeroU32);
 
+impl ObjectId {
+    /// See [`TypeId::remapped`].
+    #[inline]
+    pub(crate) fn remapped(self, base_len: u32, delta: u32) -> Self {
+        if self.0.get() <= base_len {
+            self
+        } else {
+            ObjectId(NonZeroU32::new(self.0.get() + delta).expect("remap never 0"))
+        }
+    }
+}
+
 /// Handle to a [`Scope`] stored in a [`ScopeArena`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ScopeId(NonZeroU32);
 
+impl ScopeId {
+    /// See [`TypeId::remapped`].
+    #[inline]
+    pub(crate) fn remapped(self, base_len: u32, delta: u32) -> Self {
+        if self.0.get() <= base_len {
+            self
+        } else {
+            ScopeId(NonZeroU32::new(self.0.get() + delta).expect("remap never 0"))
+        }
+    }
+}
+
 /// Handle to a [`Package`] stored in a [`PackageArena`].
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct PackageId(NonZeroU32);
+
+impl PackageId {
+    /// See [`TypeId::remapped`].
+    #[inline]
+    pub(crate) fn remapped(self, base_len: u32, delta: u32) -> Self {
+        if self.0.get() <= base_len {
+            self
+        } else {
+            PackageId(NonZeroU32::new(self.0.get() + delta).expect("remap never 0"))
+        }
+    }
+}
 
 /// Storage for all Go types in a type-checking session. Types reference each
 /// other by [`TypeId`]; the arena owns the underlying data.
@@ -173,6 +221,34 @@ impl<T: Clone> Layered<T> {
         }
     }
 
+    /// Number of elements appended after the base was shared (the worker's own
+    /// contribution). Used to size the per-worker relocation delta (R25).
+    #[inline]
+    fn overlay_len(&self) -> usize {
+        self.overlay.len()
+    }
+
+    /// Consume the store and return only the overlay, dropping the (possibly
+    /// copy-on-write-diverged) base. Used to extract a finished worker's own
+    /// allocations for merging into a shared seed (R25); the base is the shared
+    /// frozen seed the worker was cloned from and is discarded.
+    fn into_overlay(self) -> Vec<T> {
+        self.overlay
+    }
+
+    /// Append already-relocated elements directly into the base. The caller must
+    /// hold the only reference to the base (all worker clones dropped) so
+    /// `Arc::make_mut` mutates in place. Keeps the overlay empty so the store
+    /// stays shareable via [`Layered::shared_clone`] (R25).
+    fn extend_base(&mut self, items: Vec<T>) {
+        debug_assert!(
+            self.overlay.is_empty(),
+            "extend_base requires a frozen store (empty overlay)"
+        );
+        let base = Arc::make_mut(&mut self.base);
+        base.extend(items);
+    }
+
     /// Share the (frozen) base with a fresh empty overlay — an `Arc` refcount
     /// bump, no element copies. Requires [`Layered::freeze`] to have run.
     fn shared_clone(&self) -> Self {
@@ -267,6 +343,21 @@ impl TypeArena {
             types: self.types.shared_clone(),
         }
     }
+
+    /// Overlay length — this worker's own allocations (R25).
+    pub(crate) fn overlay_len(&self) -> usize {
+        self.types.overlay_len()
+    }
+
+    /// Consume and return the overlay, discarding the shared base (R25).
+    pub(crate) fn into_overlay(self) -> Vec<TypeData> {
+        self.types.into_overlay()
+    }
+
+    /// Append relocated elements into the base (R25).
+    pub(crate) fn extend_base(&mut self, items: Vec<TypeData>) {
+        self.types.extend_base(items);
+    }
 }
 
 impl ObjectArena {
@@ -311,6 +402,21 @@ impl ObjectArena {
             objects: self.objects.shared_clone(),
         }
     }
+
+    /// Overlay length — this worker's own allocations (R25).
+    pub(crate) fn overlay_len(&self) -> usize {
+        self.objects.overlay_len()
+    }
+
+    /// Consume and return the overlay, discarding the shared base (R25).
+    pub(crate) fn into_overlay(self) -> Vec<ObjectData> {
+        self.objects.into_overlay()
+    }
+
+    /// Append relocated elements into the base (R25).
+    pub(crate) fn extend_base(&mut self, items: Vec<ObjectData>) {
+        self.objects.extend_base(items);
+    }
 }
 
 impl ScopeArena {
@@ -350,6 +456,21 @@ impl ScopeArena {
             scopes: self.scopes.shared_clone(),
         }
     }
+
+    /// Overlay length — this worker's own allocations (R25).
+    pub(crate) fn overlay_len(&self) -> usize {
+        self.scopes.overlay_len()
+    }
+
+    /// Consume and return the overlay, discarding the shared base (R25).
+    pub(crate) fn into_overlay(self) -> Vec<Scope> {
+        self.scopes.into_overlay()
+    }
+
+    /// Append relocated elements into the base (R25).
+    pub(crate) fn extend_base(&mut self, items: Vec<Scope>) {
+        self.scopes.extend_base(items);
+    }
 }
 
 impl PackageArena {
@@ -388,6 +509,21 @@ impl PackageArena {
         Self {
             packages: self.packages.shared_clone(),
         }
+    }
+
+    /// Overlay length — this worker's own allocations (R25).
+    pub(crate) fn overlay_len(&self) -> usize {
+        self.packages.overlay_len()
+    }
+
+    /// Consume and return the overlay, discarding the shared base (R25).
+    pub(crate) fn into_overlay(self) -> Vec<Package> {
+        self.packages.into_overlay()
+    }
+
+    /// Append relocated elements into the base (R25).
+    pub(crate) fn extend_base(&mut self, items: Vec<Package>) {
+        self.packages.extend_base(items);
     }
 
     /// Return the package id at `index` (0-based arena position).

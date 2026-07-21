@@ -11,6 +11,13 @@ pub struct Slice {
 }
 
 impl Slice {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.elem = r.ty(self.elem);
+    }
+}
+
+impl Slice {
     pub fn elem(&self) -> TypeId {
         self.elem
     }

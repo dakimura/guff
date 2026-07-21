@@ -25,6 +25,15 @@ pub struct Struct {
 }
 
 impl Struct {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for f in &mut self.fields {
+            *f = r.obj(*f);
+        }
+    }
+}
+
+impl Struct {
     /// Number of fields, including blank and embedded fields.
     pub fn num_fields(&self) -> usize {
         self.fields.len()

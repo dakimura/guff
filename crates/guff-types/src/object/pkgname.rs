@@ -23,6 +23,15 @@ pub struct PkgName {
 }
 
 impl PkgName {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.typ = r.ty(self.typ);
+        self.imported = r.pkg(self.imported);
+        self.meta.remap_ids(r);
+    }
+}
+
+impl PkgName {
     pub fn name(&self) -> &str {
         &self.name
     }

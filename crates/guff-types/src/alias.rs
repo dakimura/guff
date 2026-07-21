@@ -26,6 +26,22 @@ pub struct Alias {
 }
 
 impl Alias {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.obj = r.obj(self.obj);
+        self.orig = r.ty_opt(self.orig);
+        self.from_rhs = r.ty_opt(self.from_rhs);
+        self.actual = r.ty_opt(self.actual);
+        if let Some(l) = self.tparams.as_mut() {
+            l.remap_ids(r);
+        }
+        if let Some(l) = self.targs.as_mut() {
+            l.remap_ids(r);
+        }
+    }
+}
+
+impl Alias {
     /// The right-hand side of the declaration `type A = R`. May itself be
     /// an alias, in which case follow [`unalias`] (or
     /// [`TypeId::underlying`](crate::TypeId::underlying)) to fully resolve.

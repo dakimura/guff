@@ -27,6 +27,22 @@ pub struct Interface {
 }
 
 impl Interface {
+    /// Relocate ids when merging into a shared seed base (R25). Includes the
+    /// lazily-computed `tset` cache, whose ids must move with everything else.
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for m in &mut self.methods {
+            *m = r.obj(*m);
+        }
+        for e in &mut self.embeddeds {
+            *e = r.ty(*e);
+        }
+        if let Some(ts) = self.tset.as_mut() {
+            ts.remap_ids(r);
+        }
+    }
+}
+
+impl Interface {
     /// Number of explicitly declared methods. Does **not** include methods
     /// gained via embedding — use [`interface_num_methods`] for that.
     pub fn num_explicit_methods(&self) -> usize {

@@ -18,6 +18,15 @@ pub struct Tuple {
 }
 
 impl Tuple {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for v in &mut self.vars {
+            *v = r.obj(*v);
+        }
+    }
+}
+
+impl Tuple {
     pub fn len(&self) -> usize {
         self.vars.len()
     }

@@ -20,6 +20,14 @@ pub struct Const {
 }
 
 impl Const {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.typ = r.ty(self.typ);
+        self.meta.remap_ids(r);
+    }
+}
+
+impl Const {
     pub fn name(&self) -> &str {
         &self.name
     }

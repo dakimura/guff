@@ -32,6 +32,19 @@ pub struct Scope {
 }
 
 impl Scope {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.parent = r.scope_opt(self.parent);
+        for c in &mut self.children {
+            *c = r.scope(*c);
+        }
+        for obj in self.elems.values_mut() {
+            *obj = r.obj(*obj);
+        }
+    }
+}
+
+impl Scope {
     pub fn parent(&self) -> Option<ScopeId> {
         self.parent
     }

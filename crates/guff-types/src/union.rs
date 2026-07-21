@@ -16,6 +16,15 @@ pub struct Union {
 }
 
 impl Union {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        for t in &mut self.terms {
+            t.typ = r.ty(t.typ);
+        }
+    }
+}
+
+impl Union {
     /// Number of terms in the union.
     pub fn len(&self) -> usize {
         self.terms.len()

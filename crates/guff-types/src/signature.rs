@@ -29,6 +29,21 @@ pub struct Signature {
 }
 
 impl Signature {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.recv = r.obj_opt(self.recv);
+        self.params = r.ty_opt(self.params);
+        self.results = r.ty_opt(self.results);
+        if let Some(l) = self.rparams.as_mut() {
+            l.remap_ids(r);
+        }
+        if let Some(l) = self.tparams.as_mut() {
+            l.remap_ids(r);
+        }
+    }
+}
+
+impl Signature {
     /// Returns the receiver of this signature (if a method), or `None` if a
     /// function. Ignored when comparing signatures for identity.
     pub fn recv(&self) -> Option<ObjectId> {

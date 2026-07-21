@@ -21,6 +21,16 @@ pub(crate) fn all_termlist() -> TermList {
     vec![Some(Term::universe())]
 }
 
+/// Relocate the type ids of every term when merging into a shared seed base
+/// (R25). `None` slots (∅) and universe terms (`typ == None`) carry no id.
+pub(crate) fn remap_ids(xl: &mut TermList, r: &crate::merge::Remapper) {
+    for slot in xl.iter_mut() {
+        if let Some(t) = slot {
+            t.typ = r.ty_opt(t.typ);
+        }
+    }
+}
+
 /// Reports whether `xl` is the empty set of types (all slots are ∅).
 pub(crate) fn is_empty(xl: &TermList) -> bool {
     xl.iter().all(|x| x.is_none())

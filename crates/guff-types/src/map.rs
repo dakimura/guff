@@ -12,6 +12,14 @@ pub struct Map {
 }
 
 impl Map {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.key = r.ty(self.key);
+        self.elem = r.ty(self.elem);
+    }
+}
+
+impl Map {
     pub fn key(&self) -> TypeId {
         self.key
     }

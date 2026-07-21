@@ -8,8 +8,8 @@
 
 | Metric | Baseline | Measured |
 |--------|---------:|---------:|
-| wall_seconds | 9.910 | 9.910 |
-| peak_rss_bytes | 8,453,193,728 | 8,453,193,728 |
+| wall_seconds | 8.430 | 8.430 |
+| peak_rss_bytes | 7,603,863,552 | 7,603,863,552 |
 | guff_issues | 460 | 460 |
 | golangci_issues | 20 | 20 |
 | both | 16 | 16 |

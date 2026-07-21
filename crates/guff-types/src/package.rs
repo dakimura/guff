@@ -21,6 +21,16 @@ pub struct Package {
 }
 
 impl Package {
+    /// Relocate ids when merging into a shared seed base (R25).
+    pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
+        self.scope = r.scope(self.scope);
+        for imp in &mut self.imports {
+            *imp = r.pkg(*imp);
+        }
+    }
+}
+
+impl Package {
     pub fn path(&self) -> &str {
         &self.path
     }
