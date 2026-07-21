@@ -4,6 +4,7 @@
 //! - `local-prefixes` → `-local` (comma-separated)
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::runner::FormatError;
@@ -103,6 +104,27 @@ impl Formatter for Goimports {
         }
 
         Ok(output.stdout)
+    }
+
+    fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        let bin = self.binary.as_deref().unwrap_or("goimports");
+        let locals: Vec<&str> = self
+            .options
+            .local_prefixes
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .collect();
+        // Batch `-l` reads each file from disk and infers `-srcdir` from its own
+        // location, matching the per-file `-srcdir <path>` module resolution.
+        crate::runner::batch_list(files, || {
+            let mut c = Command::new(bin);
+            c.arg("-l");
+            if !locals.is_empty() {
+                c.arg("-local").arg(locals.join(","));
+            }
+            c
+        })
     }
 }
 

@@ -131,6 +131,37 @@ impl Formatter for Gci {
             Ok(output.stdout)
         }
     }
+
+    fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        // The `no-inline` / `no-prefix` comment stripping is post-processing on
+        // top of `gci print`, so it can flip the "differs" decision in ways the
+        // `list` subcommand can't see. Fall back to per-file in that case.
+        if self.options.no_inline_comments || self.options.no_prefix_comments {
+            return None;
+        }
+        let bin = self.binary.as_deref().unwrap_or("gci");
+        let sections: Vec<String> = if self.options.sections.is_empty() {
+            vec!["standard".to_string(), "default".to_string()]
+        } else {
+            self.options.sections.clone()
+        };
+        crate::runner::batch_list(files, || {
+            let mut c = Command::new(bin);
+            c.arg("list");
+            for section in &sections {
+                if !section.is_empty() {
+                    c.arg("-s").arg(section);
+                }
+            }
+            if self.options.custom_order {
+                c.arg("--custom-order");
+            }
+            if self.options.no_lex_order {
+                c.arg("--no-lex-order");
+            }
+            c
+        })
+    }
 }
 
 /// Remove inline and/or standalone prefix comments inside the `import ( … )`

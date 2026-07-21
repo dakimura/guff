@@ -82,6 +82,26 @@ impl MetaFormatter {
     pub fn formatter_names(&self) -> Vec<&str> {
         self.formatters.iter().map(|f| f.name()).collect()
     }
+
+    /// Fast check-mode pre-filter. If this meta wraps exactly one formatter with
+    /// a batch list mode, return the files it flags as unformatted (as the
+    /// tool's own echoed paths) in a single invocation. `None` → the caller
+    /// falls back to per-file checks.
+    ///
+    /// Only single-formatter metas qualify: `guff run` builds one meta per
+    /// enabled formatter for check mode, so each formatter's diagnostics stay
+    /// independently attributable. Chained multi-formatter metas (fix mode) do
+    /// not use this path.
+    pub fn batch_list_unformatted(
+        &self,
+        files: &[std::path::PathBuf],
+    ) -> Option<Vec<std::path::PathBuf>> {
+        if self.formatters.len() != 1 {
+            return None;
+        }
+        let refs: Vec<&std::path::Path> = files.iter().map(|p| p.as_path()).collect();
+        self.formatters[0].list_unformatted(&refs)
+    }
 }
 
 #[cfg(test)]

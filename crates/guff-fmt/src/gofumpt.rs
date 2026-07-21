@@ -7,6 +7,7 @@
 //!   wires it from config `run.go`, else gofumpt reads `go.mod`).
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::runner::FormatError;
@@ -109,6 +110,28 @@ impl Formatter for Gofumpt {
         }
 
         Ok(output.stdout)
+    }
+
+    fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        let bin = self.binary.as_deref().unwrap_or("gofumpt");
+        crate::runner::batch_list(files, || {
+            let mut c = Command::new(bin);
+            c.arg("-l");
+            if self.options.extra_rules {
+                c.arg("-extra");
+            }
+            if let Some(modpath) = &self.options.module_path {
+                if !modpath.is_empty() {
+                    c.arg("-modpath").arg(modpath);
+                }
+            }
+            if let Some(lang) = &self.options.lang {
+                if !lang.is_empty() {
+                    c.arg("-lang").arg(normalize_lang(lang));
+                }
+            }
+            c
+        })
     }
 }
 

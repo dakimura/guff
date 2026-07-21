@@ -1,8 +1,10 @@
 //! File-tree walker that applies a [`MetaFormatter`] (golangci `pkg/goformat`).
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use rayon::prelude::*;
 use similar::TextDiff;
@@ -147,7 +149,20 @@ impl Runner {
         for root in &roots {
             collect_go_files(root, &mut files)?;
         }
-        let mut findings: Vec<FormatFinding> = files
+
+        // Fast path: when a single formatter exposes a batch "list unformatted
+        // files" mode (`gofmt -l`, `gci list`, …), one invocation flags the
+        // (usually small) subset of files whose formatting differs, and we run
+        // the per-file diff only on those. Findings are byte-identical: files
+        // the tool does not flag satisfy `format(f) == f`, so `check_file` would
+        // produce nothing for them anyway. Generated / excluded filtering still
+        // happens per-file inside `check_file` on the flagged subset.
+        let targets: Vec<PathBuf> = match self.meta.batch_list_unformatted(&files) {
+            Some(flagged) => map_flagged(&files, &flagged).unwrap_or(files),
+            None => files,
+        };
+
+        let mut findings: Vec<FormatFinding> = targets
             .par_iter()
             .map(|path| self.check_file(path))
             .collect::<Result<Vec<_>, _>>()?
@@ -322,6 +337,84 @@ fn collect_go_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), FormatErr
         }
     }
     Ok(())
+}
+
+/// Run a formatter's batch "list unformatted files" mode over `files`,
+/// returning the union of the paths it lists.
+///
+/// Files are split into roughly one chunk per rayon worker and the per-chunk
+/// tool invocations run concurrently: some list tools (notably `goimports`) are
+/// single-threaded internally, so fanning chunks across processes recovers the
+/// cores (goimports over the prometheus tree: ~1.4s in one process → ~0.35s in
+/// eight). Tools that already parallelize internally (`gofumpt`, `gci`) are
+/// unaffected. The chunk size is also capped so a huge tree stays under ARG_MAX.
+///
+/// Returns `None` if any spawn fails or a chunk exits non-zero (e.g. a file
+/// fails to parse) so the caller falls back to the per-file path, preserving
+/// the per-file error behavior exactly. `configure` builds a fresh command with
+/// the list subcommand/flags set; the file paths are appended per chunk.
+pub(crate) fn batch_list(
+    files: &[&Path],
+    configure: impl Fn() -> Command + Sync,
+) -> Option<Vec<PathBuf>> {
+    if files.is_empty() {
+        return Some(Vec::new());
+    }
+    let nthreads = rayon::current_num_threads().max(1);
+    let chunk_size = files.len().div_ceil(nthreads).clamp(1, 400);
+    let chunks: Vec<&[&Path]> = files.chunks(chunk_size).collect();
+    let per: Option<Vec<Vec<PathBuf>>> = chunks
+        .par_iter()
+        .map(|chunk| run_list_chunk(chunk, &configure))
+        .collect();
+    per.map(|v| v.into_iter().flatten().collect())
+}
+
+/// One chunked invocation for [`batch_list`]. `None` = spawn failed or the tool
+/// exited non-zero (caller falls back to per-file).
+fn run_list_chunk(chunk: &[&Path], configure: &(impl Fn() -> Command + ?Sized)) -> Option<Vec<PathBuf>> {
+    let mut cmd = configure();
+    for f in chunk {
+        cmd.arg(f);
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for line in output.stdout.split(|&b| b == b'\n') {
+        let s = String::from_utf8_lossy(line);
+        let t = s.trim();
+        if !t.is_empty() {
+            out.push(PathBuf::from(t));
+        }
+    }
+    Some(out)
+}
+
+/// Normalize a path for matching a tool's (possibly path-cleaned) echoed output
+/// against the original file list: forward slashes, drop a single leading `./`.
+fn path_match_key(p: &Path) -> String {
+    let s = p.to_string_lossy().replace('\\', "/");
+    s.strip_prefix("./").unwrap_or(&s).to_string()
+}
+
+/// Map each tool-flagged path back to the matching original `PathBuf` so the
+/// reported finding path stays byte-identical to the per-file path. Returns
+/// `None` if any flagged path can't be matched (caller falls back to per-file).
+fn map_flagged(files: &[PathBuf], flagged: &[PathBuf]) -> Option<Vec<PathBuf>> {
+    let mut by_key: HashMap<String, &PathBuf> = HashMap::with_capacity(files.len());
+    for f in files {
+        by_key.insert(path_match_key(f), f);
+    }
+    let mut out = Vec::with_capacity(flagged.len());
+    for f in flagged {
+        out.push((*by_key.get(&path_match_key(f))?).clone());
+    }
+    Some(out)
 }
 
 fn skip_dir(name: &str) -> bool {

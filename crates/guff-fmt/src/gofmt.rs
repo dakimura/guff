@@ -5,6 +5,7 @@
 //! - `rewrite-rules` → repeated `-r 'pattern -> replacement'`
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::runner::FormatError;
@@ -102,6 +103,22 @@ impl Formatter for Gofmt {
         }
 
         Ok(output.stdout)
+    }
+
+    fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        let bin = self.binary.as_deref().unwrap_or("gofmt");
+        crate::runner::batch_list(files, || {
+            let mut c = Command::new(bin);
+            c.arg("-l");
+            if self.options.simplify {
+                c.arg("-s");
+            }
+            for rule in &self.options.rewrite_rules {
+                c.arg("-r")
+                    .arg(format!("{} -> {}", rule.pattern, rule.replacement));
+            }
+            c
+        })
     }
 }
 
