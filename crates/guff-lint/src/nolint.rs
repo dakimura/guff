@@ -67,9 +67,37 @@ pub struct NolintIndex {
 impl NolintIndex {
     /// Build an index by re-parsing each compiled Go file with comments.
     pub fn from_packages(packages: &[Arc<Package>]) -> Self {
+        Self::build(packages, None)
+    }
+
+    /// Like [`from_packages`], but when `report_unused` is false only files
+    /// referenced by `issues` are considered. Unused-directive reporting still
+    /// requires a full scan.
+    pub fn from_packages_for_issues(
+        packages: &[Arc<Package>],
+        issues: &[Issue],
+        report_unused: bool,
+    ) -> Self {
+        if report_unused || issues.is_empty() {
+            // Empty issues + no unused reporting → nothing to suppress.
+            if !report_unused {
+                return Self::default();
+            }
+            return Self::build(packages, None);
+        }
+        let needed = issue_path_keys(issues);
+        Self::build(packages, Some(&needed))
+    }
+
+    fn build(packages: &[Arc<Package>], only: Option<&HashSet<String>>) -> Self {
         let mut index = Self::default();
         for pkg in packages {
             for path in &pkg.compiled_go_files {
+                if let Some(needed) = only {
+                    if !path_is_needed(path, needed) {
+                        continue;
+                    }
+                }
                 index.add_file(path);
             }
         }
@@ -89,6 +117,12 @@ impl NolintIndex {
             Ok(b) => b,
             Err(_) => return,
         };
+        // Cheap reject: real `//nolint` / `/*nolint` directives always contain
+        // this literal. Skipping the full comment-aware parse for the common
+        // no-directive case is the bulk of `issues+filter` time on large trees.
+        if !src.windows(6).any(|w| w == b"nolint") {
+            return;
+        }
         let path_str = path.to_string_lossy().replace('\\', "/");
         let fset = FileSet::new();
         let file = match parse_file(&fset, &path_str, &src, PARSE_COMMENTS) {
@@ -266,6 +300,31 @@ fn unused_issue(
             ..Diagnostic::default()
         },
     }
+}
+
+fn issue_path_keys(issues: &[Issue]) -> HashSet<String> {
+    let mut keys = HashSet::with_capacity(issues.len() * 2);
+    for issue in issues {
+        if issue.filename.is_empty() {
+            continue;
+        }
+        let norm = issue.filename.replace('\\', "/");
+        if let Some(base) = Path::new(&norm).file_name().and_then(|s| s.to_str()) {
+            keys.insert(base.to_string());
+        }
+        keys.insert(norm);
+    }
+    keys
+}
+
+fn path_is_needed(path: &Path, needed: &HashSet<String>) -> bool {
+    let path_str = path.to_string_lossy().replace('\\', "/");
+    if needed.contains(path_str.as_str()) {
+        return true;
+    }
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|base| needed.contains(base))
 }
 
 fn nolint_pattern() -> &'static Regex {

@@ -315,7 +315,11 @@ impl IssueFilter {
         });
 
         if !packages.is_empty() {
-            let mut nolint = NolintIndex::from_packages(packages);
+            let mut nolint = NolintIndex::from_packages_for_issues(
+                packages,
+                &issues,
+                self.report_unused_nolint,
+            );
             issues = nolint.filter_issues(issues, self.report_unused_nolint);
         }
 
