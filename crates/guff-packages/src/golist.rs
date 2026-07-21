@@ -52,9 +52,19 @@ impl From<GoListError> for crate::LoadError {
 /// (R24.4) when the go.mod/sum fingerprint, args, and env are unchanged and
 /// every cached `Export` path still exists on disk.
 pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, GoListError> {
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t_invoke = std::time::Instant::now();
     let mode = cfg.effective_mode();
     let args = golist_args(cfg, patterns, 0);
     let stdout = load_or_invoke_go(cfg, patterns, &args)?;
+    if timing {
+        eprintln!(
+            "guff:   golist invoke(main) {:.2}s ({} bytes)",
+            t_invoke.elapsed().as_secs_f64(),
+            stdout.len(),
+        );
+    }
+    let t_parse = std::time::Instant::now();
 
     let mut response = DriverResponse::default();
     let env = cfg.resolved_env();
@@ -112,6 +122,15 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
         }
     }
 
+    if timing {
+        eprintln!(
+            "guff:   golist parse+build {:.2}s ({} pkgs)",
+            t_parse.elapsed().as_secs_f64(),
+            response.packages.len(),
+        );
+    }
+    let t_stdlib = std::time::Instant::now();
+
     // Hybrid source mode: the main call ran without `-export` (so third-party
     // deps are not compiled). Type info for those comes from source, but stdlib
     // is still resolved from export data — build only the stdlib `.a` here (a
@@ -132,6 +151,13 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
                 }
             }
         }
+    }
+
+    if timing {
+        eprintln!(
+            "guff:   golist stdlib-export {:.2}s",
+            t_stdlib.elapsed().as_secs_f64(),
+        );
     }
 
     let _ = mode; // mode informs golist_args; refine clears fields later.

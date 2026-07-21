@@ -77,6 +77,8 @@ fn refine(
     requested_mode: LoadMode,
     response: DriverResponse,
 ) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t_refine = std::time::Instant::now();
     let mut by_id: HashMap<String, Arc<Package>> = HashMap::new();
     for pkg in response.packages {
         by_id.insert(pkg.id.clone(), pkg);
@@ -88,6 +90,13 @@ fn refine(
         || requested_mode.contains(LoadMode::NEED_TYPES_INFO)
     {
         connect_imports(&mut by_id);
+        if timing {
+            eprintln!(
+                "guff:   refine connect_imports {:.2}s ({} pkgs)",
+                t_refine.elapsed().as_secs_f64(),
+                by_id.len(),
+            );
+        }
     } else {
         for pkg in by_id.values_mut() {
             Arc::make_mut(pkg).imports.clear();

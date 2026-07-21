@@ -32,7 +32,14 @@ pub struct Action {
 
 #[derive(Default)]
 struct ActionState {
-    result: Option<AnalysisResult>,
+    /// Shared behind an `Arc` so dependents read the producer's result by cloning
+    /// the pointer, not deep-cloning the contents. `buildir`'s result owns a clone
+    /// of the full type arena; the old per-dependent `clone_result` deep-copied it
+    /// once per consuming analyzer *under the state lock*, which serialized the
+    /// wave's workers and burned ~23s of extra user CPU on the Prometheus `./...`
+    /// run (parallel was slower than sequential). Sharing the `Arc` removes both
+    /// the copies and the contention, and keeps only one arena copy resident.
+    result: Option<Arc<AnalysisResult>>,
     error: Option<String>,
     diagnostics: Vec<Diagnostic>,
     facts: FactStore,
@@ -98,16 +105,12 @@ impl Action {
     }
 
     pub fn result(&self) -> Option<AnalysisResult> {
-        self.state.lock().unwrap().result.as_ref().map(clone_result)
-    }
-
-    fn result_arc(&self) -> Option<Arc<AnalysisResult>> {
         self.state
             .lock()
             .unwrap()
             .result
             .as_ref()
-            .map(|r| Arc::new(clone_result(r)))
+            .map(|r| clone_result(r))
     }
 
     pub fn error(&self) -> Option<String> {
@@ -145,7 +148,8 @@ impl Action {
             let dep_state = dep.state.lock().unwrap();
             if Arc::ptr_eq(&dep.package, &self.package) {
                 if let Some(result) = dep_state.result.as_ref() {
-                    result_of.insert(dep.analyzer.name, Arc::new(clone_result(result)));
+                    // Share the producer's `Arc` — cheap pointer clone, no arena copy.
+                    result_of.insert(dep.analyzer.name, Arc::clone(result));
                 }
             } else if std::ptr::eq(dep.analyzer, self.analyzer) {
                 inherit_facts(self, dep, &dep_state, &mut facts);
@@ -225,7 +229,7 @@ impl Action {
         let mut state = self.state.lock().unwrap();
         match run_result {
             Ok(Some(result)) => {
-                state.result = Some(result);
+                state.result = Some(Arc::new(result));
                 state.diagnostics = diagnostics;
                 state.facts = facts;
                 state.encoded_facts = encoded;
@@ -597,47 +601,31 @@ fn release_finished_deps(act: &Arc<Action>, remaining: &HashMap<usize, AtomicUsi
 
 /// Groups actions into waves where every action in a wave has all dependencies
 /// in earlier waves (or no deps). Actions within a wave are independent.
+///
+/// `order` is already a topological post-order (every action's deps precede it,
+/// see [`topo_postorder`]), so each action's wave is `1 + max(dep wave)` and can
+/// be computed in a single O(V+E) pass. Pushing in `order` sequence keeps each
+/// wave in topo-appearance order without a sort — the old implementation rescanned
+/// `remaining` per wave (O(waves·n)) and sorted each wave with a linear
+/// `order.iter().position()` key (O(n² log n)), which dominated the analyze phase
+/// on large runs and made parallel execution slower than sequential.
 fn dependency_waves(order: &[Arc<Action>]) -> Vec<Vec<Arc<Action>>> {
-    let mut completed = HashSet::new();
-    let mut remaining: HashSet<usize> = order
-        .iter()
-        .map(|a| Arc::as_ptr(a) as usize)
-        .collect();
-    let by_ptr: HashMap<usize, Arc<Action>> = order
-        .iter()
-        .map(|a| (Arc::as_ptr(a) as usize, Arc::clone(a)))
-        .collect();
-
-    let mut waves = Vec::new();
-    while !remaining.is_empty() {
-        let mut wave = Vec::new();
-        for &ptr in &remaining {
-            let act = &by_ptr[&ptr];
-            if act
-                .deps
-                .iter()
-                .all(|d| completed.contains(&(Arc::as_ptr(d) as usize)))
-            {
-                wave.push(Arc::clone(act));
+    let mut level: HashMap<usize, usize> = HashMap::with_capacity(order.len());
+    let mut waves: Vec<Vec<Arc<Action>>> = Vec::new();
+    for act in order {
+        let mut lvl = 0usize;
+        for dep in &act.deps {
+            // Deps precede `act` in topo order, so their level is already set.
+            // (A missing dep would indicate `order` was not a valid post-order.)
+            if let Some(&dl) = level.get(&(Arc::as_ptr(dep) as usize)) {
+                lvl = lvl.max(dl + 1);
             }
         }
-        assert!(
-            !wave.is_empty(),
-            "action dependency cycle detected in exec_all"
-        );
-        // Stable order within a wave: match topo_postorder appearance.
-        wave.sort_by_key(|a| {
-            order
-                .iter()
-                .position(|o| Arc::ptr_eq(o, a))
-                .unwrap_or(usize::MAX)
-        });
-        for act in &wave {
-            let ptr = Arc::as_ptr(act) as usize;
-            completed.insert(ptr);
-            remaining.remove(&ptr);
+        level.insert(Arc::as_ptr(act) as usize, lvl);
+        if waves.len() <= lvl {
+            waves.resize_with(lvl + 1, Vec::new);
         }
-        waves.push(wave);
+        waves[lvl].push(Arc::clone(act));
     }
     waves
 }

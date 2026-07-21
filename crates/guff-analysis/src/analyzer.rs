@@ -12,7 +12,11 @@ use crate::pass::Pass;
 pub type RunError = String;
 
 /// Optional result produced by an analyzer for its dependents.
-pub type AnalysisResult = Box<dyn Any + Send>;
+///
+/// `Sync` (not just `Send`) so the action runner can share one `Arc<AnalysisResult>`
+/// across the dependents that run concurrently in a wave, instead of deep-cloning
+/// the result once per consumer (see `guff-runner`'s `ActionState::result`).
+pub type AnalysisResult = Box<dyn Any + Send + Sync>;
 
 /// Function that applies an analyzer to a single package.
 pub type RunFn = fn(&mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError>;

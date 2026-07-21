@@ -640,42 +640,73 @@ fn build_source_seed(
     check.set_importer(Box::new(importer));
 
     // Load each dependency once, leaves-first. Type-checking a dependency into
-    // the shared arenas is inherently serial, but *parsing* its source is not.
-    // Compute the leaves-first order once, then process it in bounded chunks:
-    // parse the source deps of a chunk in parallel, then type-check/decode the
-    // chunk in order. Peak resident dep-AST is one chunk (SEED_PARSE_CHUNK), so
-    // we never hold the whole closure at once (keeping the hybrid RSS budget)
-    // while still overlapping the serial checker with parallel parsing.
+    // the shared arenas is inherently serial, but *parsing* its source is not —
+    // and parsing chunk N+1 does not depend on chunk N being checked. So a
+    // producer thread parses each chunk (its own files in parallel via `par_iter`)
+    // and hands it to the main thread, which type-checks chunks in order. A
+    // `sync_channel(1)` lets the producer run exactly one chunk ahead, so the
+    // parallel parse overlaps the serial check (parse was ~1.5s of wall on the
+    // Prometheus `./...` seed, now hidden behind the 4s serial check) while peak
+    // resident dep-AST stays bounded to ~2 chunks. `check` never leaves the main
+    // thread, so the `Checker` need not be `Send`; only shared `&` refs cross to
+    // the producer, and `FileSet`'s `RwLock` makes concurrent parse-adds safe
+    // against the checker's position reads.
     let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
     let order = dep_load_order(&needed, dep_graph, &loadable);
-    const SEED_PARSE_CHUNK: usize = 64;
-    for chunk in order.chunks(SEED_PARSE_CHUNK) {
-        // Parse (in parallel) every source dependency in this chunk. Export-data
-        // deps have no source to parse and are skipped here.
-        let mut parsed: HashMap<String, Vec<guff::ast::File>> = chunk
-            .par_iter()
-            .filter(|path| !export_paths.contains_key(*path))
-            .filter_map(|path| {
-                let pkg = by_id.get(path)?;
-                if pkg.compiled_go_files.is_empty() {
-                    return None;
-                }
-                Some((path.clone(), parse_dep_files(&pkg.compiled_go_files, fset)))
-            })
-            .collect();
+    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let t_check_start = std::time::Instant::now();
+    // Halved from the pre-pipeline 64: the producer runs one chunk ahead, so up to
+    // ~2 chunks of dep-AST are resident at once. 32 keeps that ~2-chunk peak at the
+    // old single-chunk-of-64 footprint, staying within the hybrid RSS budget.
+    const SEED_PARSE_CHUNK: usize = 32;
 
-        for path in chunk {
-            if let Some(files) = parsed.remove(path) {
-                if !files.is_empty() {
-                    check.add_dependency_source(path.clone(), files);
+    type ParsedChunk = HashMap<String, Vec<guff::ast::File>>;
+    let (tx, rx) = std::sync::mpsc::sync_channel::<(usize, ParsedChunk)>(1);
+    std::thread::scope(|scope| {
+        let order_ref = &order;
+        scope.spawn(move || {
+            for (ci, chunk) in order_ref.chunks(SEED_PARSE_CHUNK).enumerate() {
+                let parsed: ParsedChunk = chunk
+                    .par_iter()
+                    .filter(|path| !export_paths.contains_key(*path))
+                    .filter_map(|path| {
+                        let pkg = by_id.get(path)?;
+                        if pkg.compiled_go_files.is_empty() {
+                            return None;
+                        }
+                        Some((path.clone(), parse_dep_files(&pkg.compiled_go_files, fset)))
+                    })
+                    .collect();
+                // A closed receiver (main thread bailed) ends the producer early.
+                if tx.send((ci, parsed)).is_err() {
+                    break;
                 }
             }
-            check.preload_import(path);
-            // Seed path: dependency diagnostics are intentionally dropped; do not
-            // let them accumulate in the checker while walking the closure.
-            check.errors.clear();
-            check.first_err = None;
+        });
+
+        for (ci, mut parsed) in rx {
+            let start = ci * SEED_PARSE_CHUNK;
+            let chunk = &order[start..(start + SEED_PARSE_CHUNK).min(order.len())];
+            for path in chunk {
+                if let Some(files) = parsed.remove(path) {
+                    if !files.is_empty() {
+                        check.add_dependency_source(path.clone(), files);
+                    }
+                }
+                check.preload_import(path);
+                // Seed path: dependency diagnostics are intentionally dropped; do
+                // not let them accumulate in the checker while walking the closure.
+                check.errors.clear();
+                check.first_err = None;
+            }
         }
+    });
+    if timing {
+        eprintln!(
+            "guff:     seed dep check {:.2}s (serial, parse overlapped), {} deps",
+            t_check_start.elapsed().as_secs_f64(),
+            needed.len(),
+        );
     }
     Some(Arc::new(check.capture_export_seed()))
 }

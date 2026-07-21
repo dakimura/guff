@@ -16,6 +16,7 @@ name = "guff_lint"
 path = "src/lib.rs"
 
 [dependencies]
+mimalloc = "0.1"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }

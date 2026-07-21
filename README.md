@@ -10,19 +10,22 @@ The CLI binary is **`guff`** (crate name: `guff-lint`).
 
 Agents and CI run linters constantly. Wall-clock and peak memory dominate the feedback loop. guff keeps a single Rust process over package load → typecheck → analyzers, instead of orchestrating many Go tools.
 
-**Cold runs are faster than golangci-lint** on prometheus’s own `.golangci.yml`
-(~20 analyzers + formatters; empty tool caches **and** empty `GOCACHE` — the
-agent / CI sandbox case). Hybrid dependency type-checking is on by default:
+**~2.3–2.7× faster than golangci-lint** on prometheus’s own `.golangci.yml`
+(~20 analyzers + gci/gofumpt/goimports formatters), with a warm Go build cache
+and cold linter caches — the repeat local-run / warm-CI case. Hybrid dependency
+type-checking is on by default:
 
-| Target | guff cold | golangci-lint cold | guff is |
-|--------|----------:|-------------------:|--------:|
-| prometheus `./tsdb/...` | **38.9s** | 54.6s | **1.4× faster** |
+| Target | guff | golangci-lint | guff is |
+|--------|-----:|--------------:|--------:|
+| prometheus `./tsdb/...` | **3.2s** | 7.3s | **2.3× faster** |
+| prometheus `./...` (full) | **12.3s** | 32.9s | **2.7× faster** |
 
-Medians of 3 samples (Darwin arm64, Go 1.26, golangci-lint 2.12, auto `-j`).
-With a warm `GOCACHE` the gap shrinks (both skip export compiles). Full tables:
-[`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
+Medians of 3 samples (Darwin arm64, 10-core; Go 1.26, golangci-lint 2.12.2;
+auto `-j`; warm `GOCACHE`, cold linter caches). Findings are gated identical
+run-to-run. Reproduce with [`regress/run.sh`](regress/); for the empty-`GOCACHE`
+sandbox case see [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
 
-**Memory:** after arena / export-seed work, the export-data path peaks around **~5.8 GB** on Prometheus full `./...` (down from ~56 GB). With **hybrid cold source** (default), third-party deps are type-checked from source, so peak RSS is higher — currently **~11 GiB** on the local `regress/` `full` profile (warm `GOCACHE`). Smaller scopes (e.g. `./tsdb/...`) land around **~2.5 GiB**. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
+**Memory:** with **hybrid cold source** (default), third-party deps are type-checked from source. Peak RSS is **~7.7 GiB** on prometheus full `./...` and **~1.4 GiB** on `./tsdb/...`. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
 
 Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters are implemented. Matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
