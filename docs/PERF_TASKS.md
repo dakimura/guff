@@ -113,13 +113,18 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 （並列で走るので実 wall はもっと短い）。ここを勘違いして「analyze が 10s」と誤読しないこと。
 
 ### 1.7 現状の基準値（2026-07-22 実測、prometheus `./...`, 10-core）
-| シナリオ | wall | RSS |
-|---|---:|---:|
-| cold | 8.25s | 7.7GB |
-| warm 繰り返し | 2.04s | 0.22GB |
+
+| シナリオ | wall | RSS | 備考 |
+|---|---:|---:|---|
+| cold（改善前） | 8.25s | 7.7GB | |
+| cold（Task 3/2/5 後） | 7.79s | 7.7GB | issues+filter 0.49→0.06s; testifylint skip |
+| warm 繰り返し（改善前） | 2.04s | 0.22GB | |
+| warm 繰り返し（Task 3/2/5 後） | 1.22s | 0.18GB | cache setup 0.60→0.18s (dep-hash hit) |
 
 各タスクの「before/after」はこの表と、自分の環境で測り直した数字で比較する。
 
+**残り大物:** Task 4（seed 永続化, cold seed build ~3.6s）と Task 1（ネイティブ fmt, format_checks ~0.85s）。
+どちらも findings 破壊リスクが高いか工数が特大。着手前に手順書の該当節を再読すること。
 ---
 
 ## 2. findings 同一性の検証（毎タスク必須。これを通さずにコミット禁止）
