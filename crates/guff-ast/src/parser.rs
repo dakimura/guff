@@ -2955,8 +2955,103 @@ fn unparen_ref(e: &Expr) -> &Expr {
 
 /// Shallow equality used to group consecutive params with the same
 /// type. Match Go's pointer comparison: identical references.
+/// Whether two parameter types should share a single [`Field`] during
+/// parameter-list grouping.
+///
+/// Go compares type pointers here: after type distribution, earlier params
+/// receive the *same* `ast.Expr` pointer as the typed parameter that
+/// follows them. Our fill step clones, so pointer identity fails; compare
+/// structurally instead (idents by name+pos; other nodes recursively),
+/// ignoring [`Ident::id`] / resolver state.
 fn expr_eq_shallow(a: &Expr, b: &Expr) -> bool {
-    std::ptr::eq(a as *const _, b as *const _)
+    match (a, b) {
+        (Expr::Ident(x), Expr::Ident(y)) => x.name == y.name && x.name_pos == y.name_pos,
+        (Expr::BasicLit(x), Expr::BasicLit(y)) => {
+            x.kind == y.kind && x.value == y.value && x.value_pos == y.value_pos
+        }
+        (Expr::StarExpr(x), Expr::StarExpr(y)) => expr_eq_shallow(&x.x, &y.x),
+        (Expr::ParenExpr(x), Expr::ParenExpr(y)) => expr_eq_shallow(&x.x, &y.x),
+        (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => {
+            x.op == y.op && expr_eq_shallow(&x.x, &y.x)
+        }
+        (Expr::BinaryExpr(x), Expr::BinaryExpr(y)) => {
+            x.op == y.op && expr_eq_shallow(&x.x, &y.x) && expr_eq_shallow(&x.y, &y.y)
+        }
+        (Expr::SelectorExpr(x), Expr::SelectorExpr(y)) => {
+            x.sel.name == y.sel.name
+                && x.sel.name_pos == y.sel.name_pos
+                && expr_eq_shallow(&x.x, &y.x)
+        }
+        (Expr::IndexExpr(x), Expr::IndexExpr(y)) => {
+            expr_eq_shallow(&x.x, &y.x) && expr_eq_shallow(&x.index, &y.index)
+        }
+        (Expr::IndexListExpr(x), Expr::IndexListExpr(y)) => {
+            expr_eq_shallow(&x.x, &y.x)
+                && x.indices.len() == y.indices.len()
+                && x.indices
+                    .iter()
+                    .zip(y.indices.iter())
+                    .all(|(a, b)| expr_eq_shallow(a, b))
+        }
+        (Expr::ArrayType(x), Expr::ArrayType(y)) => {
+            match (&x.len, &y.len) {
+                (None, None) => {}
+                (Some(a), Some(b)) if expr_eq_shallow(a, b) => {}
+                _ => return false,
+            }
+            expr_eq_shallow(&x.elt, &y.elt)
+        }
+        (Expr::Ellipsis(x), Expr::Ellipsis(y)) => match (&x.elt, &y.elt) {
+            (None, None) => true,
+            (Some(a), Some(b)) => expr_eq_shallow(a, b),
+            _ => false,
+        },
+        (Expr::MapType(x), Expr::MapType(y)) => {
+            expr_eq_shallow(&x.key, &y.key) && expr_eq_shallow(&x.value, &y.value)
+        }
+        (Expr::ChanType(x), Expr::ChanType(y)) => {
+            x.dir == y.dir && expr_eq_shallow(&x.value, &y.value)
+        }
+        (Expr::FuncType(x), Expr::FuncType(y)) => {
+            field_list_eq_shallow(x.type_params.as_ref(), y.type_params.as_ref())
+                && field_list_eq_shallow(x.params.as_ref(), y.params.as_ref())
+                && field_list_eq_shallow(x.results.as_ref(), y.results.as_ref())
+        }
+        (Expr::StructType(x), Expr::StructType(y)) => {
+            x.incomplete == y.incomplete && field_list_eq_owned(&x.fields, &y.fields)
+        }
+        (Expr::InterfaceType(x), Expr::InterfaceType(y)) => {
+            x.incomplete == y.incomplete && field_list_eq_owned(&x.methods, &y.methods)
+        }
+        // Fall back to pointer equality for remaining rare shapes that were
+        // not cloned during type distribution.
+        _ => std::ptr::eq(a as *const _, b as *const _),
+    }
+}
+
+fn field_list_eq_shallow(a: Option<&FieldList>, b: Option<&FieldList>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => field_list_eq_owned(a, b),
+        _ => false,
+    }
+}
+
+fn field_list_eq_owned(a: &FieldList, b: &FieldList) -> bool {
+    a.list.len() == b.list.len()
+        && a.list.iter().zip(b.list.iter()).all(|(fa, fb)| {
+            fa.names.len() == fb.names.len()
+                && fa
+                    .names
+                    .iter()
+                    .zip(fb.names.iter())
+                    .all(|(na, nb)| na.name == nb.name && na.name_pos == nb.name_pos)
+                && match (&fa.ty, &fb.ty) {
+                    (None, None) => true,
+                    (Some(ta), Some(tb)) => expr_eq_shallow(ta, tb),
+                    _ => false,
+                }
+        })
 }
 
 #[derive(Default)]

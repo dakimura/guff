@@ -121,12 +121,27 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 | cold seed-hot（Task 4 後, GUFF_CACHE 永続） | ~5.0s | 7.4GB | seed build 3.3→**0.5s**。空キャッシュ cold は ~8.0s で不変 |
 | warm 繰り返し（改善前） | 2.04s | 0.22GB | |
 | warm 繰り返し（Task 3/2/5 後） | 1.22s | 0.18GB | cache setup 0.60→0.18s (dep-hash hit) |
+| warm 繰り返し（Task 1 fmt_check cache） | **0.44s** | 0.18GB | format_checks 0.85→**0.07s** |
 
 各タスクの「before/after」はこの表と、自分の環境で測り直した数字で比較する。
 
-**残り大物:** Task 1（ネイティブ fmt, format_checks ~0.85s）のみ。工数が特大・findings 破壊リスク最高。
-着手前に手順書の該当節を再読すること。（Task 4 = seed 永続化は **DONE 2026-07-22**、既定 ON。）
----
+**Task 1 状況（2026-07-22）:** 1a/1b/1c/1e バイト一致 ✅。warm は
+`${GUFF_CACHE}/fmt_check/v1` で format_checks **0.85→0.07s**（findings 冷/温同一、
+決定性3回 OK、regress tsdb PASS）。**cold hybrid の前提が更新された:** 以前は
+「in-process 全件 format は遅い」ため cold も `-l` hybrid だったが、`node_size` の
+メモ化バグ（`self.node_sizes.clone()` して破棄＝超二次）を Go 同様の共有マップ方式
+（`fprint_with_sizes` が map を返し `mem::take` で往復）に直した結果、native 全件が
+**1737ms→161ms（~10.8×）**、prometheus 725 で **native 161ms < `gofumpt -l` 180ms**
+と逆転。cold の `-l` を native list に差し替える道が開けた（未実施＝下記「残り」）。
+**併せて parser の param-grouping バグ（`expr_eq_shallow` が clone 済み型を ptr::eq で
+比較 → 常に非グルーピング）を構造比較に修正**し、既存の偽陽性を除去（gocritic
+paramTypeCombine「統合済みを統合せよ」+ 誤出力由来の gofumpt）: **tsdb 76→74、
+full 460→424**（追加0・真の検出/recall 不変）。baseline 更新済み。残り: ネイティブ
+list で `-l` 自体を消す（cold 高速化の本丸）／goimports add-remove。
+（Task 4 = seed 永続化は **DONE 2026-07-22**。）
+
+Task 1b: gofmt both **6333/6333**。1c gofumpt prometheus **725/725**。1e gci **725/725**。
+`GUFF_NATIVE_FMT=0` で format をサブプロセスに、`--no-cache` で fmt_check も無効。
 
 ## 2. findings 同一性の検証（毎タスク必須。これを通さずにコミット禁止）
 
@@ -468,19 +483,26 @@ find /Users/dakimura/projects/src/github.com/dakimura/guff/prometheus -name '*.g
 実装は formatter 単位で分割し、**1つ完成→差分ハーネス全 PASS→findings 検証→コミット**を
 繰り返す。全部を一度に書かない。
 
-- **Task 1a: 差分テストハーネス構築**（コードより先。上記）。
-- **Task 1b: ネイティブ gofmt**（土台。`go/printer` の移植。最難関だがこれが基盤）。
-  - 完成基準: prometheus + GOROOT の全 .go で `gofmt` とバイト一致。
-- **Task 1c: ネイティブ gofumpt**（gofmt + gofumpt 追加規則。prometheus 設定は
-  `extra-rules: true`。この規則差分を移植）。
-  - 完成基準: `gofumpt -extra` とバイト一致。
-- **Task 1d: ネイティブ goimports**（gofmt + import の追加/削除/グルーピング。
-  prometheus 設定は `local-prefixes: github.com/prometheus/prometheus`）。
-  - 完成基準: `goimports -local ...` とバイト一致。**import 解決は難所**。無理なら
-    このサブタスクだけ従来のサブプロセスに残す判断も可（部分適用可）。
-- **Task 1e: ネイティブ gci**（import を standard/default/prefix の3セクションに整列。
-  prometheus 設定の sections を再現）。
-  - 完成基準: `gci` とバイト一致。
+- **Task 1a: 差分テストハーネス構築** ✅**DONE 2026-07-22**
+  （`regress/fmt_diff.py` + `guff-fmt-native` + `regress/tests/test_fmt_diff.py`。
+  `--self-check` で参照ツール idempotence、通常モードで native vs 参照のバイト比較。
+  native 未実装時は exit 3 / `--allow-not-implemented` で soft PASS）。
+- **Task 1b: ネイティブ gofmt** ✅**DONE 2026-07-22**（`go/printer`+`go/format`+`text/tabwriter` 移植。
+  prometheus+GOROOT **6333/6333** バイト一致。`Gofmt` 既定ネイティブ。`-s` は未移植→サブプロセス）。
+- **Task 1c: ネイティブ gofumpt** ✅**DONE 2026-07-22**（gofmt + gofumpt 追加規則。
+  prometheus `extra-rules: true` → `gofumpt --extra` 725/725 PASS。`format()` 既定ネイティブ）。
+- **Task 1d: ネイティブ goimports** 🟡**PARTIAL**（format-only が prometheus 725/725。
+  import add/remove 未実装のため Formatter 既定はサブプロセス。`GUFF_NATIVE_FMT=1` で opt-in）。
+- **Task 1e: ネイティブ gci** ✅**DONE 2026-07-22**（prometheus sections 725/725。
+  `format()` 既定ネイティブ）。
+
+> **Check-mode hybrid + fmt_check cache（2026-07-22）:** `list_unformatted` は現状も
+> システム `-l`/`gci list`（cold prefilter）。加えて `${GUFF_CACHE}/fmt_check/v1` に
+> 結果を永続化し、warm 2回目以降は `-l` をスキップ（format_checks **0.85→0.07s**、
+> findings 冷温同一）。`--no-cache` で無効。
+> **更新（2026-07-22）:** `node_size` 二次バグを解消し native 全件 format が `gofumpt -l`
+> を上回った（161ms < 180ms / 725 files）ため「native が遅いから `-l`」という理由は
+> もう成立しない。cold の `-l` を native list に差し替えれば cold も高速化できる（次の一手）。
 
 ### 対象ファイル
 - 置換対象: `crates/guff-fmt/src/{gofmt,gofumpt,goimports,gci}.rs`（現状すべて
