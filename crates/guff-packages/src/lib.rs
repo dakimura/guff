@@ -17,6 +17,7 @@ mod load_mode;
 mod offline;
 mod package;
 mod preset;
+mod seed_cache;
 mod typecheck;
 
 pub use config::Config;

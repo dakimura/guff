@@ -3,6 +3,8 @@
 //! Chunk-7 deferrals: `cgo` / `fake` flags (internal compiler use) are
 //! omitted until they become load-bearing.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{PackageArena, PackageId, ScopeArena, ScopeId};
 use crate::scope::new_scope;
 
@@ -10,7 +12,7 @@ use crate::scope::new_scope;
 /// list of imported packages.
 ///
 /// Equivalent to `types2.Package`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Package {
     path: String,
     name: String,

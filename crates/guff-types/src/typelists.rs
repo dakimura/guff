@@ -5,13 +5,15 @@
 //! by returning `Option<...>` from constructors, with `None` meaning empty.
 //! Per-method accessors take `Option<&...>` for the same reason.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// A list of type parameters.
 ///
 /// Equivalent to `types2.TypeParamList`. Each entry is the `TypeId` of a
 /// `TypeData::TypeParam`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TypeParamList {
     tparams: Vec<TypeId>,
 }
@@ -51,7 +53,7 @@ pub fn type_param_list_len(list: Option<&TypeParamList>) -> usize {
 /// A list of types.
 ///
 /// Equivalent to `types2.TypeList`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TypeList {
     types: Vec<TypeId>,
 }

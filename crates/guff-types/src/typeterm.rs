@@ -15,11 +15,13 @@
 //! [`predicates::identical`](crate::predicates::identical) (D01), matching Go's
 //! `Identical`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, PackageArena, TypeArena, TypeId};
 use crate::predicates::identical;
 
 /// Internal term (see module docs for the four shapes).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Term {
     pub(crate) tilde: bool,
     /// `None` for the universe term 𝓤; `Some(typ)` for {T} or {~t}.

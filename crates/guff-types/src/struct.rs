@@ -10,13 +10,15 @@
 //! lands. Callers are expected to ensure field-name uniqueness themselves
 //! until then.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 
 /// A struct type.
 ///
 /// Equivalent to `types2.Struct`. Fields are stored as [`ObjectId`]s pointing
 /// to `Var` objects in the [`crate::arena::ObjectArena`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Struct {
     fields: Vec<ObjectId>,
     /// Field tags; may be shorter than `fields` (or empty) if trailing fields

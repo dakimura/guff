@@ -5,6 +5,8 @@
 //! `Typ[Invalid]`. The Checker handles each builtin specially at call sites
 //! based on its [`BuiltinId`].
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
@@ -13,7 +15,7 @@ use crate::object::{HasMeta, ObjectMeta};
 /// Equivalent to `types2.builtinId`. Numeric discriminants match Go's
 /// `iota` ordering — keep variants in the same order if more are added.
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum BuiltinId {
     // Universe scope.
     Append = 0,
@@ -267,7 +269,7 @@ pub fn builtin_info(id: BuiltinId) -> &'static BuiltinInfo {
 /// Equivalent to `types2.Builtin`. The `typ` field always references
 /// `Typ[Invalid]` because built-ins don't have a normal Go function type
 /// (they're called specially by the type checker).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Builtin {
     name: String,
     typ: TypeId, // always Typ[Invalid]

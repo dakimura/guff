@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use guff_constant::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::api::{Config, Info, TypeCheckError};
 use crate::arena::{ObjectArena, ObjectData, PackageArena, ScopeArena, TypeArena, TypeData};
@@ -217,6 +218,11 @@ pub struct ExportSeed {
 
 /// One finished worker's own arena allocations (its overlays), extracted via
 /// [`Checker::into_worker_overlays`] for merging into a shared seed (R25).
+///
+/// Serializable (with [`WorkerOverlays::encode`] / [`WorkerOverlays::decode`])
+/// so a completed worker's contribution can be persisted to disk and reused
+/// across process runs without re-type-checking (seed persistence).
+#[derive(Debug, Serialize, Deserialize)]
 pub struct WorkerOverlays {
     types: Vec<TypeData>,
     objects: Vec<ObjectData>,
@@ -227,10 +233,111 @@ pub struct WorkerOverlays {
     cache_delta: Vec<(String, PackageId)>,
 }
 
+/// On-disk schema version for encoded [`WorkerOverlays`] blobs. Bump this
+/// whenever the shape of `WorkerOverlays` (or any type reachable from it)
+/// changes in a way that would make old bytes misinterpreted rather than
+/// cleanly fail to decode; callers should treat a schema mismatch as a cache
+/// miss and fall back to rebuilding from source.
+pub const SEED_OVERLAY_SCHEMA: u32 = 1;
+
+/// On-disk envelope wrapping a [`WorkerOverlays`] payload with a schema tag,
+/// so [`WorkerOverlays::decode`] can reject stale/foreign blobs up front
+/// instead of failing deep inside bincode with a confusing error.
+///
+/// `Cow`-free: `Encode` borrows the payload (so [`WorkerOverlays::encode`]
+/// doesn't need to clone), while `Decode` owns it.
+#[derive(Serialize)]
+struct EncodeEnvelope<'a> {
+    schema: u32,
+    overlay: &'a WorkerOverlays,
+}
+
+#[derive(Deserialize)]
+struct DecodeEnvelope {
+    schema: u32,
+    overlay: WorkerOverlays,
+}
+
+impl WorkerOverlays {
+    /// Clear FileSet-absolute source positions (`ObjectMeta::{pos,scope_pos}`,
+    /// `Scope::{pos,end}`) to `nopos` (0).
+    ///
+    /// Seed overlays are reused across process runs whose `FileSet` bases
+    /// differ; absolute offsets would resolve to the wrong files (or nowhere).
+    /// Callers should invoke this immediately before [`Self::encode`]. Target
+    /// packages are always type-checked from source with a fresh FileSet, so
+    /// findings positions on roots are unaffected.
+    pub fn clear_source_positions(&mut self) {
+        use crate::arena::ObjectData;
+        use crate::object::HasMeta;
+        for o in &mut self.objects {
+            let meta = match o {
+                ObjectData::Var(v) => v.meta_mut(),
+                ObjectData::Func(f) => f.meta_mut(),
+                ObjectData::TypeName(t) => t.meta_mut(),
+                ObjectData::Const(c) => c.meta_mut(),
+                ObjectData::Nil(n) => n.meta_mut(),
+                ObjectData::Builtin(b) => b.meta_mut(),
+                ObjectData::PkgName(p) => p.meta_mut(),
+            };
+            meta.pos = 0;
+            meta.scope_pos = 0;
+        }
+        for s in &mut self.scopes {
+            s.clear_positions();
+        }
+    }
+
+    /// Serialize this worker's overlay to bytes (bincode of a schema-tagged
+    /// envelope), suitable for writing to disk.
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        let envelope = EncodeEnvelope {
+            schema: SEED_OVERLAY_SCHEMA,
+            overlay: self,
+        };
+        bincode::serialize(&envelope).map_err(|e| format!("encode WorkerOverlays: {e}"))
+    }
+
+    /// Deserialize bytes produced by [`WorkerOverlays::encode`]. Returns an
+    /// `Err` (rather than panicking) on a schema mismatch or corrupt/truncated
+    /// bytes; callers should treat any `Err` as a cache miss and fall back to
+    /// rebuilding the overlay from source.
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        let envelope: DecodeEnvelope =
+            bincode::deserialize(bytes).map_err(|e| format!("decode WorkerOverlays: {e}"))?;
+        if envelope.schema != SEED_OVERLAY_SCHEMA {
+            return Err(format!(
+                "WorkerOverlays schema mismatch: expected {}, got {}",
+                SEED_OVERLAY_SCHEMA, envelope.schema
+            ));
+        }
+        Ok(envelope.overlay)
+    }
+}
+
 impl ExportSeed {
     /// Number of packages present in the import cache (deps + unsafe if any).
     pub fn cached_import_count(&self) -> usize {
         self.import_cache.len()
+    }
+
+    /// Arena lengths after freeze — used as a cheap S0 fingerprint input for
+    /// cross-run seed overlay reuse (Task 4). Identical lengths alone are not
+    /// sufficient; callers must also hash [`Self::sorted_import_paths`].
+    pub fn arena_lens(&self) -> (usize, usize, usize, usize) {
+        (
+            self.types.len(),
+            self.objects.len(),
+            self.scopes.len(),
+            self.packages.len(),
+        )
+    }
+
+    /// Sorted import-cache keys (deterministic; HashMap iteration order is not).
+    pub fn sorted_import_paths(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.import_cache.keys().cloned().collect();
+        keys.sort();
+        keys
     }
 
     /// Fold one topological wave of independently-checked worker packages into
@@ -837,5 +944,75 @@ impl Checker {
         if let Some(d) = self.obj_map.get_mut(&from) {
             d.add_dep(to);
         }
+    }
+}
+
+#[cfg(test)]
+mod seed_persistence_tests {
+    use super::{EncodeEnvelope, WorkerOverlays, SEED_OVERLAY_SCHEMA};
+
+    /// A minimal (empty) overlay — no allocations of any kind, matching what
+    /// a worker that touched nothing new (e.g. a pure re-export) would
+    /// produce.
+    fn empty_overlay() -> WorkerOverlays {
+        WorkerOverlays {
+            types: Vec::new(),
+            objects: Vec::new(),
+            scopes: Vec::new(),
+            packages: Vec::new(),
+            cache_delta: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_empty() {
+        let overlay = empty_overlay();
+        let bytes = overlay.encode().expect("encode should succeed");
+        let decoded = WorkerOverlays::decode(&bytes).expect("decode should succeed");
+        assert_eq!(decoded.types.len(), 0);
+        assert_eq!(decoded.objects.len(), 0);
+        assert_eq!(decoded.scopes.len(), 0);
+        assert_eq!(decoded.packages.len(), 0);
+        assert_eq!(decoded.cache_delta.len(), 0);
+    }
+
+    #[test]
+    fn encode_decode_roundtrip_with_cache_delta() {
+        // `cache_delta` carries a worker-local `PackageId`; round-trip it
+        // through a fresh checker so we exercise the arena-backed types too.
+        let checker = super::Checker::new(crate::api::Config::default());
+        let pkg = checker.pkg;
+        let overlay = checker.into_worker_overlays("example.com/pkg".to_string(), pkg);
+
+        let bytes = overlay.encode().expect("encode should succeed");
+        let decoded = WorkerOverlays::decode(&bytes).expect("decode should succeed");
+
+        assert_eq!(decoded.cache_delta.len(), 1);
+        assert_eq!(decoded.cache_delta[0].0, "example.com/pkg");
+        assert_eq!(decoded.cache_delta[0].1, pkg);
+    }
+
+    #[test]
+    fn decode_rejects_schema_mismatch() {
+        let overlay = empty_overlay();
+        // Hand-encode with a schema tag that doesn't match the current one,
+        // bypassing `WorkerOverlays::encode` (which always writes the current
+        // schema) to simulate an old/foreign blob.
+        let stale_schema = SEED_OVERLAY_SCHEMA + 1;
+        let envelope = EncodeEnvelope {
+            schema: stale_schema,
+            overlay: &overlay,
+        };
+        let bytes = bincode::serialize(&envelope).expect("encode should succeed");
+
+        let err = WorkerOverlays::decode(&bytes).expect_err("schema mismatch must be rejected");
+        assert!(err.contains("schema mismatch"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_corrupt_bytes() {
+        let err = WorkerOverlays::decode(&[0xff, 0x00, 0x01, 0x02])
+            .expect_err("corrupt bytes must be rejected");
+        assert!(!err.is_empty());
     }
 }

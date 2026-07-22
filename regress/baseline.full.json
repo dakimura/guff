@@ -8,8 +8,8 @@
   "rayon_threads": 0,
   "isolate_gocache": false,
   "guff": {
-    "wall_seconds": 8.43,
-    "peak_rss_bytes": 7603863552
+    "wall_seconds": 7.95,
+    "peak_rss_bytes": 7620657152
   },
   "compat": {
     "guff_issues": 460,

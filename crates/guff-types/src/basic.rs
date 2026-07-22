@@ -6,6 +6,8 @@
 //! `comparable` will follow in a later chunk when their backing object kinds
 //! exist.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// Kind of a basic type.
@@ -16,7 +18,7 @@ use crate::arena::{TypeArena, TypeData, TypeId};
 ///
 /// Equivalent to `types2.BasicKind`.
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum BasicKind {
     Invalid = 0,
 
@@ -63,7 +65,7 @@ pub const BASIC_KIND_COUNT: usize = 26;
 /// via `bitflags`, matching Go's `BasicInfo int`.
 ///
 /// Equivalent to `types2.BasicInfo`.
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct BasicInfo(pub u32);
 
 impl BasicInfo {
@@ -105,7 +107,7 @@ pub const IS_CONST_TYPE: BasicInfo = BasicInfo(IS_BOOLEAN.0 | IS_NUMERIC.0 | IS_
 /// A basic Go type — `int`, `string`, `bool`, `untyped int`, etc.
 ///
 /// Equivalent to `types2.Basic`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Basic {
     kind: BasicKind,
     info: BasicInfo,

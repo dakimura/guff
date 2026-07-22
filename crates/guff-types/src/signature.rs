@@ -10,6 +10,8 @@
 //! deferred — `new_signature_type` panics if you pass any, until
 //! `TypeParamList` lands in a later chunk.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 use crate::typelists::TypeParamList;
 
@@ -18,7 +20,7 @@ use crate::typelists::TypeParamList;
 /// Equivalent to `types2.Signature`. The receiver is ignored when comparing
 /// signatures for identity. `params` and `results` follow Go's `*Tuple`
 /// convention where `None` means the empty tuple (matches `nil *Tuple`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signature {
     recv: Option<ObjectId>,
     params: Option<TypeId>,

@@ -4,13 +4,15 @@
 //! constructors and accessors. The `parseUnion`/`parseTilde` validation logic
 //! is Checker-internal and lands with the type-checker proper.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// A union of terms embedded in an interface (e.g. the `int | string` part of
 /// `interface { int | string }`).
 ///
 /// Equivalent to `types2.Union`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Union {
     terms: Vec<Term>,
 }
@@ -46,7 +48,7 @@ impl Union {
 /// type whose underlying type is `typ`").
 ///
 /// Equivalent to `types2.Term`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Term {
     tilde: bool,
     typ: TypeId,

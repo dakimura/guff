@@ -5,6 +5,8 @@
 //! [`new_tuple`] return `None` for the empty case — callers that hold an
 //! `Option<TypeId>` interpret `None` as the empty tuple, matching `nil *Tuple`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 
 /// An ordered list of variables — used as the parameter and result lists of
@@ -12,7 +14,7 @@ use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 /// first-class Go types.
 ///
 /// Equivalent to `types2.Tuple`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Tuple {
     vars: Vec<ObjectId>,
 }

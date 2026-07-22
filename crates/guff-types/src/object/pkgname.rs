@@ -8,13 +8,15 @@
 //! We have no `Importer`, so the only package ever imported is the synthetic
 //! `unsafe` package (created in the universe). `imported` holds that package.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
 /// The local name bound by an `import` declaration.
 ///
 /// Equivalent to `types2.PkgName`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PkgName {
     name: String,        // the local name (import alias, or the package's name)
     typ: TypeId,         // always Typ[Invalid]

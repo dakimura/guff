@@ -17,6 +17,8 @@ guff-constant = { path = "../guff-constant" }
 guff-types-errors = { path = "../guff-types-errors" }
 guff-version = { path = "../guff-version" }
 guff-goversion = { path = "../guff-goversion" }
+serde = { version = "1", features = ["derive"] }
+bincode = "1.3"
 
 [dev-dependencies]
 guff-exportdata = { path = "../guff-exportdata" }

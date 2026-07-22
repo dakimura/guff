@@ -1,5 +1,7 @@
 //! Port of `cmd/compile/internal/types2/pointer.go`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// A pointer type.
@@ -7,7 +9,7 @@ use crate::arena::{TypeArena, TypeData, TypeId};
 /// Equivalent to `types2.Pointer`. The field is named `base` (matching Go) to
 /// emphasise that this is the pointed-to type — the accessor is [`Pointer::elem`]
 /// to match `types2.Pointer.Elem`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pointer {
     base: TypeId,
 }

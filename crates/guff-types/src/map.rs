@@ -1,11 +1,13 @@
 //! Port of `cmd/compile/internal/types2/map.go`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// A map type.
 ///
 /// Equivalent to `types2.Map`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Map {
     key: TypeId,
     elem: TypeId,

@@ -1,11 +1,13 @@
 //! Port of `cmd/compile/internal/types2/slice.go`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// A slice type.
 ///
 /// Equivalent to `types2.Slice`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Slice {
     elem: TypeId,
 }

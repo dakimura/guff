@@ -18,6 +18,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
 use crate::predicates::{comparable_type, identical};
 use crate::termlist::{self, all_termlist, TermList};
@@ -28,7 +30,7 @@ use crate::typeterm::Term;
 /// 2. the `terms ∧ comparable` set (the allowable structural shapes).
 ///
 /// Equivalent to `types2._TypeSet`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeSet {
     methods: Vec<ObjectId>,
     pub(crate) terms: TermList,

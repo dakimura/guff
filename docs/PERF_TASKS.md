@@ -118,13 +118,14 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 |---|---:|---:|---|
 | cold（改善前） | 8.25s | 7.7GB | |
 | cold（Task 3/2/5 後） | 7.79s | 7.7GB | issues+filter 0.49→0.06s; testifylint skip |
+| cold seed-hot（Task 4 後, GUFF_CACHE 永続） | ~5.0s | 7.4GB | seed build 3.3→**0.5s**。空キャッシュ cold は ~8.0s で不変 |
 | warm 繰り返し（改善前） | 2.04s | 0.22GB | |
 | warm 繰り返し（Task 3/2/5 後） | 1.22s | 0.18GB | cache setup 0.60→0.18s (dep-hash hit) |
 
 各タスクの「before/after」はこの表と、自分の環境で測り直した数字で比較する。
 
-**残り大物:** Task 4（seed 永続化, cold seed build ~3.6s）と Task 1（ネイティブ fmt, format_checks ~0.85s）。
-どちらも findings 破壊リスクが高いか工数が特大。着手前に手順書の該当節を再読すること。
+**残り大物:** Task 1（ネイティブ fmt, format_checks ~0.85s）のみ。工数が特大・findings 破壊リスク最高。
+着手前に手順書の該当節を再読すること。（Task 4 = seed 永続化は **DONE 2026-07-22**、既定 ON。）
 ---
 
 ## 2. findings 同一性の検証（毎タスク必須。これを通さずにコミット禁止）
@@ -176,9 +177,9 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 - peak RSS ≤ baseline × **1.20**
 - `guff_only` 増分 = 0 / `golangci_only` 増分 = 0 / `both` 減少なし
 
-現 baseline（`regress/baseline*.json`）:
-- tsdb: wall 2.59s / RSS 1.37GB / guff_issues 76
-- full: wall 8.43s / RSS 7.60GB / guff_issues 460
+現 baseline（`regress/baseline*.json`、2026-07-22 Task 4 後に再ロック）:
+- tsdb: wall 2.54s / RSS 1.42GB / guff_issues 76
+- full: wall 7.95s / RSS 7.62GB / guff_issues 460
 
 **両プロファイルが PASS しなければコミットしない。** 改善が出ても baseline は
 **ユーザー承認まで更新しない**（§0-6）。承認が出たら
@@ -196,7 +197,7 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 | 1 | **Task 3**: issues+filter 調査 | warm/cold | 0〜0.4s | 小 | 低 | 独立 |
 | 2 | **Task 2**: dep-hash キャッシュ | warm | ~0.4s | 中 | 中 | 独立 |
 | 3 | **Task 5**: buildir/testifylint 条件スキップ | cold | ~0.5s | 中 | 中 | 独立 |
-| 4 | **Task 4**: seed 永続化 | cold | ~2.7s | 大 | 高 | 独立 |
+| 4 | **Task 4**: seed 永続化 ✅**DONE** | cold(hot) | ~2.7s | 大 | 高 | 独立 |
 | 5 | **Task 1**: ネイティブフォーマッタ | warm/cold | ~0.7s | 特大 | 最高 | 独立（サブ分割）|
 
 各タスクは互いに独立（別々の phase を触る）。**必ず1つ完了→検証→コミットしてから次へ。**
@@ -341,6 +342,20 @@ buildir は SSA を構築する重い解析で、その主な消費者は testif
 ---
 
 ## Task 4 — guff 自前 export seed のディスク永続化（cold 最大の勝ち・大物）
+
+> ✅ **DONE 2026-07-22 — 既定 ON**（`GUFF_SEED_PERSIST=0` で無効化）。
+> 実装: `crates/guff-packages/src/seed_cache.rs`（`OverlayWriter` / `pkg_self_hash_from_sources` /
+> `load_overlay` / `overlay_path` / `base_fingerprint`）+ `build_source_seed`（`crates/guff-packages/src/typecheck.rs`）
+> + `WorkerOverlays::{encode,decode,clear_source_positions}` / `SEED_OVERLAY_SCHEMA`（`crates/guff-types/src/check.rs`）。
+> 各 source dep の exported-API overlay を `${GUFF_CACHE}/seed/<pathkey>.<self_hash>.<base_fp>.v<schema>.bin` に保存し、
+> 依存が変わっていなければ decode+remap して再利用（型チェックをスキップ）。
+> **結果:** GUFF_CACHE 永続運用で seed build **3.34→0.48s**、wall **8.0→5.0s**。findings は cold(全ミス)↔hot(全ヒス)
+> でバイト同一（§2.1 diff 空、5回決定的、`-j 1` も同一）。破損/欠落/スキーマ不一致は黙って再構築。
+> **miss パスは実質ゼロコスト**: ソースは1回だけ読んで hash とパーサで共用（逐次事前パス廃止）、
+> ディスク書込は `OverlayWriter` バックグラウンドスレッドでクリティカルパス外。空キャッシュ cold の
+> overhead は +0.19s（誤差）で、両 regress プロファイル PASS。
+> ⚠️ 過去の「既定 ON は空キャッシュ cold に ~4s 乗る」報告は **計測汚染（§0-7 の並行 cargo build）による誤り**。
+> 真値は ~0.67s で、上記2点の修正で ~0.19s まで削減済み。
 
 ### 目的
 cold の `typecheck_roots seed build` が 3.11s で全 phase 中最大。これは 1455 個の依存

@@ -11,6 +11,8 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectId, ScopeArena, ScopeId};
 use crate::object::is_exported;
 
@@ -18,7 +20,7 @@ use crate::object::is_exported;
 /// children. Objects may be inserted and looked up by name.
 ///
 /// Equivalent to `types2.Scope`.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Scope {
     parent: Option<ScopeId>,
     children: Vec<ScopeId>,
@@ -84,6 +86,13 @@ impl Scope {
     /// Mark this scope as a function-body scope.
     pub fn set_is_func(&mut self, v: bool) {
         self.is_func = v;
+    }
+
+    /// Clear FileSet-absolute `pos`/`end` to `nopos` (0). Used before
+    /// persisting a seed overlay across process runs.
+    pub fn clear_positions(&mut self) {
+        self.pos = 0;
+        self.end = 0;
     }
 
     /// Sorted list of element names (matches Go's `Scope.Names`).

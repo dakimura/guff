@@ -1,5 +1,7 @@
 //! Port of `cmd/compile/internal/types2/chan.go`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// Channel direction.
@@ -7,7 +9,7 @@ use crate::arena::{TypeArena, TypeData, TypeId};
 /// Equivalent to `types2.ChanDir`. Numeric values match Go's `iota` ordering
 /// for cross-language tooling.
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
 pub enum ChanDir {
     SendRecv = 0,
     SendOnly = 1,
@@ -17,7 +19,7 @@ pub enum ChanDir {
 /// A channel type.
 ///
 /// Equivalent to `types2.Chan`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Chan {
     dir: ChanDir,
     elem: TypeId,

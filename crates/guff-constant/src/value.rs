@@ -24,6 +24,7 @@ use dashu::float::round::mode::HalfEven;
 use dashu::float::FBig;
 use dashu::integer::IBig;
 use dashu::rational::RBig;
+use serde::{Deserialize, Serialize};
 
 use crate::helpers::{
     fbig_signum, ibig_signum, is_zero as fbig_is_zero, make_int as helpers_make_int, rbig_signum,
@@ -44,7 +45,7 @@ pub const PREC: usize = 512;
 /// Kind specifies the kind of value represented by a [`Value`].
 ///
 /// Mirrors `constant.Kind` in Go.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Kind {
     /// Unknown — used when a value is unknown due to an error. Operations on
     /// unknown values produce unknown values unless otherwise specified.
@@ -62,7 +63,7 @@ pub enum Kind {
 /// discriminate. Internal variant choice (e.g. [`Value::Int64`] vs
 /// [`Value::Int`]) is an implementation detail — consumers should treat both
 /// as `Int`-kind.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     Unknown,
     Bool(bool),

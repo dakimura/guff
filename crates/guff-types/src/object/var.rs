@@ -4,6 +4,8 @@
 //! `Var` (with Parent scope, Package, Pos, embedded-field flag, `IsField`,
 //! `IsParam`, `Origin`, etc.) is filled in alongside Scope/Package.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
@@ -12,7 +14,7 @@ use crate::object::{HasMeta, ObjectMeta};
 /// Equivalent to `types2.VarKind`. Discriminant `0` is reserved as
 /// "unset" to match Go's `_ VarKind = iota` placeholder.
 #[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, Serialize, Deserialize)]
 pub enum VarKind {
     #[default]
     Unset = 0,
@@ -33,7 +35,7 @@ pub enum VarKind {
 /// A variable, struct field, function parameter, or function result.
 ///
 /// Equivalent to `types2.Var`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Var {
     name: String,
     typ: TypeId,

@@ -12,6 +12,8 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::alias::Alias;
 use crate::array::Array;
 use crate::basic::Basic;
@@ -37,7 +39,8 @@ use crate::typeparam::TypeParam;
 use crate::union::Union;
 
 /// Handle to a type stored in a [`TypeArena`].
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct TypeId(NonZeroU32);
 
 impl TypeId {
@@ -65,7 +68,8 @@ impl TypeId {
 }
 
 /// Handle to an object stored in an [`ObjectArena`].
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ObjectId(NonZeroU32);
 
 impl ObjectId {
@@ -81,7 +85,8 @@ impl ObjectId {
 }
 
 /// Handle to a [`Scope`] stored in a [`ScopeArena`].
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ScopeId(NonZeroU32);
 
 impl ScopeId {
@@ -97,7 +102,8 @@ impl ScopeId {
 }
 
 /// Handle to a [`Package`] stored in a [`PackageArena`].
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct PackageId(NonZeroU32);
 
 impl PackageId {
@@ -267,7 +273,7 @@ impl<T: Clone> Layered<T> {
 ///
 /// Chunks 1–3 cover every type kind. The Checker proper (which animates them)
 /// is still to come.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeData {
     Basic(Basic),
     Array(Array),
@@ -289,7 +295,7 @@ pub enum TypeData {
 ///
 /// Chunks 1–6 cover `Var`, `Func`, `TypeName`, `Const`, `Nil`, `Builtin`.
 /// `PkgName` arrives with imports (D16). `Label` is still deferred.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ObjectData {
     Var(Var),
     Func(Func),

@@ -8,6 +8,8 @@
 //! non-alias type — set by [`unalias`] on first lookup, never mutated again
 //! after type-checking finishes.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 use crate::typelists::{TypeList, TypeParamList};
 
@@ -15,7 +17,7 @@ use crate::typelists::{TypeList, TypeParamList};
 ///
 /// Equivalent to `types2.Alias`. Created by alias declarations like
 /// `type A = int`; the right-hand side is reachable via [`Alias::rhs`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alias {
     obj: ObjectId,                             // corresponding TypeName
     pub(crate) orig: Option<TypeId>, // None ⇒ self (uninstantiated); Some(Alias) for instances

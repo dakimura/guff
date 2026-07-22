@@ -1,12 +1,14 @@
 //! Port of `cmd/compile/internal/types2/array.go`.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{TypeArena, TypeData, TypeId};
 
 /// An array type.
 ///
 /// Equivalent to `types2.Array`. A negative `len` indicates an unknown length
 /// (matches Go's convention for partially-resolved types).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Array {
     len: i64,
     elem: TypeId,

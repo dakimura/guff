@@ -6,6 +6,8 @@
 //! [`interface_is_method_set`], [`interface_is_comparable`],
 //! [`interface_typeset`]).
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
 use crate::typeset::{compute_interface_type_set, TypeSet};
 
@@ -15,7 +17,7 @@ use crate::typeset::{compute_interface_type_set, TypeSet};
 /// embedded-element positions (`embedPos`), and `check` back-pointer are
 /// omitted until the typeset/Checker logic lands; chunk-2 callers can build
 /// and inspect the explicit-method/embedded structure.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Interface {
     pub(crate) methods: Vec<ObjectId>, // ordered explicitly-declared methods (Func objects)
     pub(crate) embeddeds: Vec<TypeId>, // ordered explicitly-embedded elements

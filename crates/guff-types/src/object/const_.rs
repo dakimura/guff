@@ -3,6 +3,7 @@
 //! Module is named `const_` because `const` is a Rust keyword.
 
 use guff_constant::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
@@ -11,7 +12,7 @@ use crate::object::{HasMeta, ObjectMeta};
 /// value.
 ///
 /// Equivalent to `types2.Const`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Const {
     name: String,
     typ: TypeId,

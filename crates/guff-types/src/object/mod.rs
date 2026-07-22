@@ -12,6 +12,8 @@ pub mod pkgname;
 pub mod type_name;
 pub mod var;
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, PackageId, ScopeId};
 
 /// Common metadata shared by all `Object` kinds — the equivalent of Go's
@@ -20,7 +22,7 @@ use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, PackageId, S
 /// Positions are `u32` for now (chunk 7 keeps it simple); `0` means
 /// `nopos`. Full `syntax.Pos` integration arrives when the Checker is
 /// wired up.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ObjectMeta {
     pub parent: Option<ScopeId>,
     pub pkg: Option<PackageId>,

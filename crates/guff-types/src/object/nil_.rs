@@ -6,13 +6,15 @@
 //! Go has exactly one `Nil` value (the predeclared `nil`), and its type is
 //! always the predeclared `UntypedNil` basic type.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
 /// The predeclared `nil`.
 ///
 /// Equivalent to `types2.Nil`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Nil {
     name: String, // always "nil"
     typ: TypeId,  // always Typ[UntypedNil]

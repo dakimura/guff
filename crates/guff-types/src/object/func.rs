@@ -4,6 +4,8 @@
 //! pointing to a `Signature`). `pkg`, `pos`, `parent` scope, `origin`,
 //! `hasPtrRecv_`, and the FullName/Scope/Pkg helpers land with Scope/Package.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeArena, TypeData, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
@@ -13,7 +15,7 @@ use crate::object::{HasMeta, ObjectMeta};
 /// don't enforce that statically since callers may want to build the Func
 /// before the Signature is wired up (matching Go's `NewFunc(.., nil)` escape
 /// hatch).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Func {
     name: String,
     typ: Option<TypeId>,

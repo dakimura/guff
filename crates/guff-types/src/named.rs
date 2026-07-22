@@ -19,13 +19,15 @@
 //!   `underlying` explicitly via [`new_named`] (eager) or
 //!   [`set_underlying`].
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectId, TypeArena, TypeData, TypeId};
 use crate::typelists::{TypeList, TypeParamList};
 
 /// Information specific to instantiated Named types.
 ///
 /// Equivalent to `types2.instance`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instance {
     pub orig: TypeId,    // original, uninstantiated Named
     pub targs: TypeList, // type arguments
@@ -39,7 +41,7 @@ pub struct Instance {
 ///
 /// The `allow_nil_*` flags mirror Go's escape hatches for the brief window
 /// between `new_named(obj, None, None)` and `set_underlying`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Named {
     obj: ObjectId,
     from_rhs: Option<TypeId>,

@@ -5,6 +5,8 @@
 //! the Named/Alias/TypeParam that references it back-fills the binding.
 //! `pkg`, `pos`, `parent` scope land alongside Scope/Package.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeId};
 use crate::object::{HasMeta, ObjectMeta};
 
@@ -15,7 +17,7 @@ use crate::object::{HasMeta, ObjectMeta};
 /// Equivalent to `types2.TypeName`. The `IsAlias` predicate (true iff the
 /// bound type is an `Alias`) is straightforward to add once needed — it just
 /// asks the arena for the variant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeName {
     name: String,
     typ: Option<TypeId>,

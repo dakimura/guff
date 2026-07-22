@@ -10,13 +10,15 @@
 //! The `id` field (a globally-monotonic counter used by Go for debug output)
 //! is omitted — not load-bearing.
 
+use serde::{Deserialize, Serialize};
+
 use crate::arena::{ObjectArena, ObjectId, TypeArena, TypeData, TypeId};
 
 /// A type parameter in a generic declaration.
 ///
 /// Equivalent to `types2.TypeParam`. `index` is `-1` until the param is
 /// bound to a type via [`crate::typelists::bind_tparams`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeParam {
     obj: ObjectId,         // corresponding TypeName
     index: i32,            // -1 until bound

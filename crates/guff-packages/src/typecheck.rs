@@ -659,6 +659,10 @@ fn build_source_seed(
     check.first_err = None;
     let mut seed = check.capture_export_seed();
 
+    // Snapshot S0 (export-data base) fingerprint inputs before any source merge.
+    let s0_lens = seed.arena_lens();
+    let s0_import_paths = seed.sorted_import_paths();
+
     // Group the *source* dependencies into topological waves. Export-data deps
     // are already in `S0` (treated as level 0). `level(P) = 1 + max(level(source
     // dep))`; packages sharing a level never import one another (an import would
@@ -721,19 +725,38 @@ fn build_source_seed(
         w.sort_unstable();
     }
 
+    // Optional per-package overlay disk cache (PERF Task 4). Enabled by default;
+    // disable with GUFF_SEED_PERSIST=0. Independent of the issues `--no-cache`
+    // flag. Each source dep's exported-API overlay is written under
+    // `${GUFF_CACHE}/seed`, keyed by (import path, content self-hash, seed-prefix
+    // fingerprint); a later run whose deps are unchanged loads the overlay
+    // instead of re-type-checking it.
+    let persist = crate::seed_cache::seed_persist_enabled()
+        .then(crate::seed_cache::seed_cache_dir)
+        .flatten();
+
+    // Background overlay writer: encode is cheap and stays on the wave workers,
+    // but the disk syscalls (create + write + rename, ×N deps) are handed to a
+    // dedicated thread so neither the wave merge nor the target type-check waits
+    // on them. On an all-miss run (e.g. a fresh cache, as the regress harness
+    // uses) this keeps persistence off the critical path entirely; writes drain
+    // while later waves compute, and the handle is joined once before returning.
+    let writer = persist.as_ref().map(|_| crate::seed_cache::OverlayWriter::spawn());
+
     // Phase B: check each wave in parallel on top of the accumulated seed, then
-    // fold the wave's overlays back in. Each worker parses its own source, checks
-    // only its own package (deps resolve from the seed cache), and drops its AST
-    // as soon as it captures its overlay — so resident dep-AST is bounded to
-    // ~num_threads regardless of wave width. `ignore_func_bodies` keeps the seed
-    // to exported API only (targets re-check with full bodies).
+    // fold the wave's overlays back in. Each worker reads+parses its own source,
+    // checks only its own package (deps resolve from the seed cache), and drops
+    // its AST as soon as it captures its overlay — so resident dep-AST is bounded
+    // to ~num_threads regardless of wave width. `ignore_func_bodies` keeps the
+    // seed to exported API only (targets re-check with full bodies).
+    //
+    // When persistence is on, the worker hashes the source it just read and tries
+    // to load a previously saved overlay keyed by (self_hash, base_fp) before
+    // type-checking; base_fp fingerprints the seed prefix at wave start so
+    // Remapper's foreign ids stay valid across runs. The source bytes are read
+    // exactly once and reused for both the hash and (on a miss) the parser.
     let parallel = env.parallel;
-    let build_one = |path: &str, seed: &ExportSeed| -> Option<WorkerOverlays> {
-        let pkg = by_id.get(path)?;
-        if pkg.compiled_go_files.is_empty() {
-            return None;
-        }
-        let files = parse_dep_files(&pkg.compiled_go_files, fset);
+    let check_sources = |path: &str, files: Vec<guff::ast::File>, seed: &ExportSeed| -> Option<WorkerOverlays> {
         if files.is_empty() {
             return None;
         }
@@ -747,30 +770,126 @@ fn build_source_seed(
     };
     let mut merge_secs = 0f64;
     let mut widest = 0usize;
+    let mut seed_hits = 0usize;
+    let mut seed_misses = 0usize;
+    // (path, self_hash) in merge order — feeds the next wave's base_fp.
+    let mut merged: Vec<(String, String)> = Vec::new();
+
     for wave in &waves {
         widest = widest.max(wave.len());
-        let overlays: Vec<WorkerOverlays> = if parallel {
-            wave.par_iter()
-                .filter_map(|p| build_one(p, &seed))
-                .collect()
-        } else {
-            wave.iter().filter_map(|p| build_one(p, &seed)).collect()
+        let base_fp = persist.as_ref().map(|_| {
+            crate::seed_cache::base_fingerprint(&crate::seed_cache::BaseFingerprintInput {
+                go_version: &env.go_version,
+                arch: &env.arch,
+                s0_lens,
+                s0_import_paths: &s0_import_paths,
+                merged: &merged,
+            })
+        });
+
+        // Resolve each path to (path, overlay, from_cache, self_hash). `path` and
+        // `self_hash` are returned so `merged` bookkeeping stays aligned with
+        // merge order after filter_map drops failures.
+        let resolve_one = |path: &str| -> Option<(String, WorkerOverlays, bool, Option<String>)> {
+            let pkg = by_id.get(path)?;
+            if pkg.compiled_go_files.is_empty() {
+                return None;
+            }
+            // Read each source file once; the bytes feed both the self-hash key
+            // and (on a miss) the parser, so a miss never re-reads from disk.
+            let sources = read_dep_sources(&pkg.compiled_go_files);
+            let self_hash = persist
+                .as_ref()
+                .map(|_| crate::seed_cache::pkg_self_hash_from_sources(&pkg.pkg_path, &sources));
+
+            // Cache hit: load the persisted overlay and skip type-checking.
+            if let (Some(dir), Some(fp), Some(h)) =
+                (persist.as_ref(), base_fp.as_ref(), self_hash.as_ref())
+            {
+                if let Some(o) = crate::seed_cache::load_overlay(dir, path, h, fp) {
+                    return Some((path.to_string(), o, true, self_hash));
+                }
+            }
+
+            // Miss: parse the bytes we already read, then type-check.
+            let files = parse_dep_sources(&sources, fset);
+            let mut o = check_sources(path, files, &seed)?;
+            if persist.is_some() {
+                // Match the on-disk form so cold (all miss) and hot (all hit)
+                // seeds are identical: FileSet-absolute positions do not survive
+                // across runs.
+                o.clear_source_positions();
+                if let (Some(w), Some(dir), Some(fp), Some(h)) = (
+                    writer.as_ref(),
+                    persist.as_ref(),
+                    base_fp.as_ref(),
+                    self_hash.as_ref(),
+                ) {
+                    // Encode on the worker (cheap, parallel); the write itself
+                    // runs on the background writer thread.
+                    if let Ok(bytes) = o.encode() {
+                        w.submit(crate::seed_cache::overlay_path(dir, path, h, fp), bytes);
+                    }
+                }
+            }
+            Some((path.to_string(), o, false, self_hash))
         };
+
+        let resolved: Vec<(String, WorkerOverlays, bool, Option<String>)> = if parallel {
+            wave.par_iter().filter_map(|p| resolve_one(p)).collect()
+        } else {
+            wave.iter().filter_map(|p| resolve_one(p)).collect()
+        };
+
+        let mut overlays = Vec::with_capacity(resolved.len());
+        for (path, overlay, from_cache, self_hash) in resolved {
+            if from_cache {
+                seed_hits += 1;
+            } else {
+                seed_misses += 1;
+            }
+            if let Some(h) = self_hash {
+                merged.push((path, h));
+            }
+            overlays.push(overlay);
+        }
+
         let m = std::time::Instant::now();
         seed.merge_wave(overlays);
         merge_secs += m.elapsed().as_secs_f64();
     }
 
+    // Flush any in-flight overlay writes before returning so a persistent cache
+    // is fully populated for the next run. On an all-miss run most writes have
+    // already drained during later waves; this only waits on the tail.
+    if let Some(w) = writer {
+        w.finish();
+    }
+
     if timing {
-        eprintln!(
-            "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps",
-            t_check_start.elapsed().as_secs_f64(),
-            merge_secs,
-            source_count,
-            waves.len(),
-            widest,
-            needed.len() - source_count,
-        );
+        if persist.is_some() {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps; seed cache hits={} misses={}",
+                t_check_start.elapsed().as_secs_f64(),
+                merge_secs,
+                source_count,
+                waves.len(),
+                widest,
+                needed.len() - source_count,
+                seed_hits,
+                seed_misses,
+            );
+        } else {
+            eprintln!(
+                "guff:     seed dep check {:.2}s (wave-parallel; merge {:.2}s serial), {} source deps in {} waves (widest {}), {} export deps",
+                t_check_start.elapsed().as_secs_f64(),
+                merge_secs,
+                source_count,
+                waves.len(),
+                widest,
+                needed.len() - source_count,
+            );
+        }
     }
     Some(Arc::new(seed))
 }
@@ -824,15 +943,28 @@ fn dep_load_order_visit(
     }
 }
 
-/// Parse a dependency's `compiled_go_files` into syntax trees sharing `fset`.
-/// Files that fail to read or parse are skipped (dependency diagnostics are not
-/// reported on the source-seed path).
-fn parse_dep_files(paths: &[PathBuf], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
-    let mut out = Vec::new();
+/// Read a dependency's `compiled_go_files` once, in listed order. Files that
+/// fail to read are skipped (dependency diagnostics are not reported on the
+/// source-seed path). The returned bytes feed both the persisted-overlay
+/// self-hash key and the parser, so a cache miss never reads source twice.
+fn read_dep_sources(paths: &[PathBuf]) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out = Vec::with_capacity(paths.len());
     for path in paths {
-        let Ok(src) = fs::read(path) else { continue };
+        if let Ok(src) = fs::read(path) {
+            out.push((path.clone(), src));
+        }
+    }
+    out
+}
+
+/// Parse pre-read dependency sources into syntax trees sharing `fset`, in the
+/// order given. Files that fail to parse are skipped (dependency diagnostics
+/// are not reported on the source-seed path).
+fn parse_dep_sources(sources: &[(PathBuf, Vec<u8>)], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
+    let mut out = Vec::with_capacity(sources.len());
+    for (path, src) in sources {
         let name = path.to_str().unwrap_or("file.go");
-        if let Ok(file) = parse_file(fset, name, &src, Mode::NONE) {
+        if let Ok(file) = parse_file(fset, name, src, Mode::NONE) {
             out.push(file);
         }
     }
