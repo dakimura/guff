@@ -453,8 +453,19 @@ pub fn analyze_with_settings(
     }
 
     let mut roots = Vec::new();
+    let mut skip_testify = 0usize;
+    let mut keep_testify = 0usize;
     for &analyzer in analyzers {
         for pkg in packages {
+            if !analyzer_applies_to_package(analyzer, pkg) {
+                if analyzer.name == "testifylint" {
+                    skip_testify += 1;
+                }
+                continue;
+            }
+            if analyzer.name == "testifylint" {
+                keep_testify += 1;
+            }
             let act = mk_action(
                 analyzer,
                 Arc::clone(pkg),
@@ -466,6 +477,11 @@ pub fn analyze_with_settings(
             act.is_root.store(true, Ordering::Relaxed);
             roots.push(act);
         }
+    }
+    if timing_enabled() && (skip_testify > 0 || keep_testify > 0) {
+        eprintln!(
+            "guff:   testifylint schedule keep={keep_testify} skip={skip_testify} (no testify import)"
+        );
     }
 
     exec_all(&roots, sequential, concurrency);
@@ -479,6 +495,29 @@ pub fn analyze_with_settings(
     }
 
     Ok(Graph { roots, all })
+}
+
+/// Whether a root analyzer should be scheduled for `package`.
+///
+/// Import-gated skips must preserve findings: only omit analyzers that cannot
+/// produce diagnostics without a given import. `testifylint` is empty without
+/// `github.com/stretchr/testify`. `buildir` is *not* gated here — many
+/// staticcheck SA checks require it regardless of testify.
+fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
+    if analyzer.name == "testifylint" {
+        return package_imports_prefix(package, "github.com/stretchr/testify");
+    }
+    true
+}
+
+/// True when `package.imports` contains `prefix` or a subpath of it.
+fn package_imports_prefix(package: &Package, prefix: &str) -> bool {
+    package.imports.keys().any(|path| {
+        path == prefix
+            || path
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn topo_postorder(roots: &[Arc<Action>]) -> Vec<Arc<Action>> {
@@ -763,5 +802,47 @@ mod tests {
 
         let log = LOG.lock().unwrap().clone();
         assert_eq!(log, vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn package_imports_prefix_matches_module_and_subpath() {
+        let mut pkg = Package {
+            id: "example.com/p".into(),
+            pkg_path: "example.com/p".into(),
+            ..Package::default()
+        };
+        assert!(!package_imports_prefix(&pkg, "github.com/stretchr/testify"));
+        pkg.imports.insert(
+            "github.com/stretchr/testify/require".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(package_imports_prefix(&pkg, "github.com/stretchr/testify"));
+        pkg.imports.clear();
+        pkg.imports.insert(
+            "github.com/stretchr/testifyextra".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(!package_imports_prefix(&pkg, "github.com/stretchr/testify"));
+    }
+
+    #[test]
+    fn testifylint_skipped_without_testify_import() {
+        let analyzer = Analyzer {
+            name: "testifylint",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        let mut with_testify = Package::default();
+        with_testify.imports.insert(
+            "github.com/stretchr/testify/assert".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(analyzer_applies_to_package(&analyzer, &with_testify));
     }
 }
