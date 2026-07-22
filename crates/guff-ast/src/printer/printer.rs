@@ -450,12 +450,15 @@ impl<'a> Printer<'a> {
         // Move the memo map into the sub-printer (Go shares it by reference) and
         // move the enriched map back — nested sizes computed here are retained,
         // and there is no per-call clone of the (potentially large) map.
-        let sizes = self.node_sizes.clone();
+        let sizes = std::mem::take(&mut self.node_sizes);
         let mut counter = SizeCounter {
             size: 0,
             has_newline: false,
         };
-        let _ = cfg.fprint_with_sizes(&mut counter, self.fset, PrintNode::Expr(n), sizes);
+        if let Ok(sizes) = cfg.fprint_with_sizes(&mut counter, self.fset, PrintNode::Expr(n), sizes)
+        {
+            self.node_sizes = sizes;
+        }
         if counter.size as usize <= max_size && !counter.has_newline {
             self.node_sizes.insert(key, counter.size);
             counter.size as usize
@@ -479,12 +482,15 @@ impl<'a> Printer<'a> {
             tabwidth: self.config.tabwidth,
             indent: 0,
         };
-        let sizes = self.node_sizes.clone();
+        let sizes = std::mem::take(&mut self.node_sizes);
         let mut counter = SizeCounter {
             size: 0,
             has_newline: false,
         };
-        let _ = cfg.fprint_with_sizes(&mut counter, self.fset, PrintNode::Stmt(n), sizes);
+        if let Ok(sizes) = cfg.fprint_with_sizes(&mut counter, self.fset, PrintNode::Stmt(n), sizes)
+        {
+            self.node_sizes = sizes;
+        }
         if counter.size as usize <= max_size && !counter.has_newline {
             self.node_sizes.insert(key, counter.size);
             counter.size as usize
@@ -1400,15 +1406,23 @@ impl Config {
         node: PrintNode<'_>,
     ) -> io::Result<()> {
         self.fprint_with_sizes(output, fset, node, HashMap::new())
+            .map(|_| ())
     }
 
+    /// Like [`fprint`](Self::fprint) but threads the `node_sizes` memo map in
+    /// and out. Go's `printer.nodeSize` passes `p.nodeSizes` *by reference* to
+    /// the recursive `cfg.fprint`, so sizes computed while measuring a node are
+    /// shared back into the caller's map (this is what keeps `nodeSize` linear
+    /// on deeply nested literals — issue 1628). Rust can't alias `self`'s map
+    /// through a sub-printer, so we move it in and return the enriched map to be
+    /// moved back — same effect, no clone.
     pub(crate) fn fprint_with_sizes<W: Write>(
         &self,
         output: &mut W,
         fset: &Arc<FileSet>,
         node: PrintNode<'_>,
         node_sizes: HashMap<SizeKey, i32>,
-    ) -> io::Result<()> {
+    ) -> io::Result<HashMap<SizeKey, i32>> {
         let mut p = Printer::new(self.clone(), fset, node_sizes);
         if let Err(e) = p.print_node(node) {
             return Err(io::Error::new(io::ErrorKind::Other, e));
@@ -1453,7 +1467,7 @@ impl Config {
             }
         }
         output.write_all(&buf)?;
-        Ok(())
+        Ok(std::mem::take(&mut p.node_sizes))
     }
 }
 
