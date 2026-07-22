@@ -156,7 +156,14 @@ impl Formatter for Gci {
         if self.options.no_inline_comments || self.options.no_prefix_comments {
             return None;
         }
-        // Same hybrid as gofumpt: `-l`/`list` via system binary; native `format()`.
+        // Native path: format each file in-process and flag those that differ —
+        // no `gci list` subprocess (native now beats it; PERF_TASKS Task 1).
+        // `self.format` applies the same section sorting check_file uses (the
+        // comment-stripping post-pass is a no-op here since those opts are unset).
+        if self.use_native() {
+            return crate::runner::native_list(files, |name, src| self.format(name, src));
+        }
+        // Subprocess prefilter (`GUFF_NATIVE_FMT=0`): system `gci list`.
         let bin = self.binary.as_deref().unwrap_or("gci");
         let sections: Vec<String> = if self.options.sections.is_empty() {
             vec!["standard".to_string(), "default".to_string()]

@@ -521,6 +521,44 @@ pub(crate) fn batch_list(
     per.map(|v| v.into_iter().flatten().collect())
 }
 
+/// Native (in-process) equivalent of a formatter's external `-l` list mode:
+/// read each file, format it via `format`, and flag the ones whose formatting
+/// differs. Used by the default-native formatters (gofmt/gofumpt/gci) so the
+/// cold check path no longer spawns a `-l`/`list` subprocess — native
+/// `format()` now outpaces it (PERF_TASKS Task 1: native gofumpt 161ms <
+/// `gofumpt -l` 180ms on 725 files) and removes the external-tool dependency.
+///
+/// A file that can't be read, or that `format` fails on, is flagged rather than
+/// dropped: the caller runs the per-file [`Runner::check_file`] on the flagged
+/// subset, which re-reads/re-formats it and reproduces the exact I/O or format
+/// error — or, for generated/excluded files, drops it — so behavior matches the
+/// old subprocess path (`-l` also can't see generated/excluded exclusions; that
+/// filtering has always happened per-file in `check_file`). `format` must be the
+/// same formatting `check_file` applies, so the flagged set is exactly the files
+/// that will yield a finding. Runs in parallel; always returns `Some`.
+pub(crate) fn native_list<F>(files: &[&Path], format: F) -> Option<Vec<PathBuf>>
+where
+    F: Fn(&str, &[u8]) -> Result<Vec<u8>, FormatError> + Sync,
+{
+    let flagged: Vec<PathBuf> = files
+        .par_iter()
+        .filter_map(|path| {
+            let src = match fs::read(path) {
+                Ok(b) => b,
+                // Unreadable → flag so check_file reproduces the I/O error.
+                Err(_) => return Some(path.to_path_buf()),
+            };
+            match format(&path.to_string_lossy(), &src) {
+                Ok(out) if out == src => None,
+                // Differs, or format failed → flag (check_file emits the finding
+                // or reproduces the error / drops it if generated).
+                Ok(_) | Err(_) => Some(path.to_path_buf()),
+            }
+        })
+        .collect();
+    Some(flagged)
+}
+
 /// One chunked invocation for [`batch_list`]. `None` = spawn failed or the tool
 /// exited non-zero (caller falls back to per-file).
 fn run_list_chunk(chunk: &[&Path], configure: &(impl Fn() -> Command + ?Sized)) -> Option<Vec<PathBuf>> {

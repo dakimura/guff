@@ -136,8 +136,15 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 **併せて parser の param-grouping バグ（`expr_eq_shallow` が clone 済み型を ptr::eq で
 比較 → 常に非グルーピング）を構造比較に修正**し、既存の偽陽性を除去（gocritic
 paramTypeCombine「統合済みを統合せよ」+ 誤出力由来の gofumpt）: **tsdb 76→74、
-full 460→424**（追加0・真の検出/recall 不変）。baseline 更新済み。残り: ネイティブ
-list で `-l` 自体を消す（cold 高速化の本丸）／goimports add-remove。
+full 460→424**（追加0・真の検出/recall 不変）。baseline 更新済み。
+**ネイティブ list への差し替え DONE 2026-07-23:** cold の `-l`/`gci list`
+サブプロセスを廃止し、`runner::native_list`（各ファイルを in-process で `format()` し
+差分のあるものだけを flag、par_iter）に置換。default-native の gofmt/gofumpt/gci が
+対象（goimports は native が format-only=Task 1d 未了のためサブプロセス `-l` 継続）。
+findings バイト同一（full 424/408/4/16・tsdb 74・決定性3回・`-j 1` も同一）、
+両 regress PASS。gofumpt/gci をダミーに差し替えても findings 不変＝サブプロセス非 spawn を確認。
+効果は控えめ（cold format_checks ~0.78→0.74s、wall はノイズ内）だが gofmt/gofumpt/gci の
+外部ツール依存を除去（残る format サブプロセスは goimports `-l` のみ）。残り: goimports add-remove。
 （Task 4 = seed 永続化は **DONE 2026-07-22**。）
 
 Task 1b: gofmt both **6333/6333**。1c gofumpt prometheus **725/725**。1e gci **725/725**。
@@ -496,13 +503,17 @@ find /Users/dakimura/projects/src/github.com/dakimura/guff/prometheus -name '*.g
 - **Task 1e: ネイティブ gci** ✅**DONE 2026-07-22**（prometheus sections 725/725。
   `format()` 既定ネイティブ）。
 
-> **Check-mode hybrid + fmt_check cache（2026-07-22）:** `list_unformatted` は現状も
-> システム `-l`/`gci list`（cold prefilter）。加えて `${GUFF_CACHE}/fmt_check/v1` に
-> 結果を永続化し、warm 2回目以降は `-l` をスキップ（format_checks **0.85→0.07s**、
+> **Check-mode: native list（2026-07-23、`-l` 廃止）+ fmt_check cache:**
+> `list_unformatted` は default-native の gofmt/gofumpt/gci では
+> `runner::native_list`（in-process `format()` して差分ファイルだけ flag、par_iter）に
+> なり、cold prefilter のサブプロセス `-l`/`gci list` を spawn しない。`GUFF_NATIVE_FMT=0`
+> のときのみ従来のシステム `-l` にフォールバック。goimports は native が format-only
+> （Task 1d 未了）のため既定サブプロセス `-l` のまま。加えて `${GUFF_CACHE}/fmt_check/v1`
+> に結果を永続化し、warm 2回目以降は list 自体をスキップ（format_checks **0.85→0.07s**、
 > findings 冷温同一）。`--no-cache` で無効。
-> **更新（2026-07-22）:** `node_size` 二次バグを解消し native 全件 format が `gofumpt -l`
-> を上回った（161ms < 180ms / 725 files）ため「native が遅いから `-l`」という理由は
-> もう成立しない。cold の `-l` を native list に差し替えれば cold も高速化できる（次の一手）。
+> **経緯（2026-07-22）:** `node_size` 二次バグを解消し native 全件 format が `gofumpt -l`
+> を上回った（161ms < 180ms / 725 files）ため「native が遅いから `-l`」の前提が失効し、
+> 上記の native list 差し替えが可能になった（実施済み）。
 
 ### 対象ファイル
 - 置換対象: `crates/guff-fmt/src/{gofmt,gofumpt,goimports,gci}.rs`（現状すべて
