@@ -352,7 +352,28 @@ impl IssueCache {
     /// and complete. Keyed by both `pkg_path` and `id` because `Package::deps`
     /// and `imports` reference packages by import path while `id` may carry a
     /// test suffix. Call once, before the cache is shared for reads/writes.
+    ///
+    /// When the dependency graph fingerprint (`graph_key`) matches a previous
+    /// run, the registry is loaded from disk instead of re-hashing every
+    /// package's sources (the dominant cost of warm `cache setup+partition`).
     pub fn set_dep_hashes(&mut self, packages: &[Arc<Package>]) -> Result<(), CacheError> {
+        let t0 = std::time::Instant::now();
+        let graph_key = graph_key_for_packages(packages)?;
+        let path = self.dep_hash_registry_path(&graph_key);
+        if let Some(map) = load_dep_hash_registry(&path) {
+            self.dep_self_hashes = map;
+            if std::env::var_os("GUFF_DEBUG_CACHE").is_some() {
+                eprintln!(
+                    "guff:   dep-hash registry hit ({:.2}s, {} entries, key={})",
+                    t0.elapsed().as_secs_f64(),
+                    self.dep_self_hashes.len(),
+                    &graph_key[..graph_key.len().min(12)],
+                );
+            }
+            return Ok(());
+        }
+
+        let t_hash = std::time::Instant::now();
         for pkg in packages {
             let h = self.self_hash(pkg)?;
             if !pkg.pkg_path.is_empty() {
@@ -362,7 +383,25 @@ impl IssueCache {
                 self.dep_self_hashes.insert(pkg.id.clone(), h);
             }
         }
+        let hash_secs = t_hash.elapsed().as_secs_f64();
+        // Best-effort persist; a failed write just means the next run recomputes.
+        let _ = save_dep_hash_registry(&path, &self.dep_self_hashes);
+        if std::env::var_os("GUFF_DEBUG_CACHE").is_some() {
+            eprintln!(
+                "guff:   dep-hash registry miss+store ({:.2}s hash, {:.2}s total, {} entries, key={})",
+                hash_secs,
+                t0.elapsed().as_secs_f64(),
+                self.dep_self_hashes.len(),
+                &graph_key[..graph_key.len().min(12)],
+            );
+        }
         Ok(())
+    }
+
+    fn dep_hash_registry_path(&self, graph_key: &str) -> PathBuf {
+        self.dir.join(format!(
+            "dep_hash_registry.v{DEP_HASH_REGISTRY_SCHEMA}.{graph_key}.bin"
+        ))
     }
 
     /// Self-only content hash of a package (its own compiled files).
@@ -694,6 +733,93 @@ impl IssueCache {
             .insert(path.to_path_buf(), dig);
         Ok(dig)
     }
+}
+
+/// Schema version for the on-disk dep-hash registry. Bump when the fingerprint
+/// inputs or the serialized map format change.
+const DEP_HASH_REGISTRY_SCHEMA: u32 = 1;
+
+/// Deterministic fingerprint of the loaded package graph + source file identity.
+///
+/// Includes package id/path/deps (from `go list`) and each compiled file's
+/// path/len/mtime so a content edit invalidates the cached registry even when
+/// the import graph is unchanged. Uses metadata rather than content hashes so
+/// building the key stays cheap relative to `self_hash`.
+fn graph_key_for_packages(packages: &[Arc<Package>]) -> Result<String, CacheError> {
+    let mut pkgs: Vec<&Package> = packages.iter().map(|p| p.as_ref()).collect();
+    pkgs.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.pkg_path.cmp(&b.pkg_path)));
+
+    let mut h = Sha256::new();
+    h.update(format!("dep-hash-registry v{DEP_HASH_REGISTRY_SCHEMA}\n").as_bytes());
+    for pkg in pkgs {
+        h.update(format!("pkg {} {}\n", pkg.id, pkg.pkg_path).as_bytes());
+        let mut deps = pkg.deps.clone();
+        deps.sort();
+        deps.dedup();
+        for dep in &deps {
+            h.update(format!("dep {dep}\n").as_bytes());
+        }
+        let mut files = pkg.compiled_go_files.clone();
+        files.sort();
+        for f in &files {
+            let meta = fs::metadata(f)?;
+            let mtime_nanos = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            h.update(
+                format!(
+                    "file {} {} {}\n",
+                    f.to_string_lossy(),
+                    meta.len(),
+                    mtime_nanos
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    Ok(hex_encode(&h.finalize()))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DepHashRegistryFile {
+    schema: u32,
+    /// Sorted for stable on-disk representation (load order does not matter).
+    entries: Vec<(String, String)>,
+}
+
+fn load_dep_hash_registry(path: &Path) -> Option<HashMap<String, String>> {
+    let bytes = fs::read(path).ok()?;
+    let parsed: DepHashRegistryFile = serde_json::from_slice(&bytes).ok()?;
+    if parsed.schema != DEP_HASH_REGISTRY_SCHEMA {
+        return None;
+    }
+    Some(parsed.entries.into_iter().collect())
+}
+
+fn save_dep_hash_registry(
+    path: &Path,
+    map: &HashMap<String, String>,
+) -> Result<(), CacheError> {
+    let mut entries: Vec<(String, String)> = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let file = DepHashRegistryFile {
+        schema: DEP_HASH_REGISTRY_SCHEMA,
+        entries,
+    };
+    let bytes =
+        serde_json::to_vec(&file).map_err(|e| CacheError::Message(e.to_string()))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // Atomic-ish: write temp then rename so a crash mid-write cannot leave a
+    // half-parsed registry that we'd treat as authoritative.
+    let tmp = path.with_extension("bin.tmp");
+    fs::write(&tmp, &bytes)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 fn remap_pos(fset: &FileSet, filename: &str, offset: i64) -> Option<u32> {
