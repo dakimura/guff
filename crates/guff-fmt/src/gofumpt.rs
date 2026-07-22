@@ -1,15 +1,19 @@
-//! `gofumpt` formatter — shells out to the `gofumpt` binary (`mvdan.cc/gofumpt`).
+//! `gofumpt` formatter — native Rust port by default (PERF_TASKS Task 1c).
 //!
 //! Matches golangci-lint `pkg/goformatters/gofumpt` settings:
 //! - `extra-rules` → `-extra`
 //! - `module-path` → `-modpath`
 //! - target Go version → `-lang` (golangci sources this from `run.go`; the CLI
 //!   wires it from config `run.go`, else gofumpt reads `go.mod`).
+//!
+//! Native path is default after prometheus `gofumpt --extra` harness PASS.
+//! Set `GUFF_NATIVE_FMT=0` to force the system `gofumpt` binary.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::native::{self, NativeOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -27,11 +31,11 @@ pub struct GofumptOptions {
     pub lang: Option<String>,
 }
 
-/// Formatter that invokes the system `gofumpt` binary.
+/// Formatter: native gofumpt port, with subprocess fallback.
 #[derive(Debug, Clone, Default)]
 pub struct Gofumpt {
     options: GofumptOptions,
-    /// Override binary path (tests / non-standard installs).
+    /// Override binary path (tests / non-standard installs / subprocess path).
     binary: Option<String>,
 }
 
@@ -47,6 +51,20 @@ impl Gofumpt {
         self.binary = Some(path.into());
         self
     }
+
+    fn use_native(&self) -> bool {
+        !std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0")
+    }
+
+    fn native_opts(&self, filename: &str) -> NativeOptions {
+        NativeOptions {
+            extra_rules: self.options.extra_rules,
+            lang: self.options.lang.as_ref().map(|l| normalize_lang(l)),
+            module_path: self.options.module_path.clone(),
+            filename: filename.to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Formatter for Gofumpt {
@@ -54,7 +72,35 @@ impl Formatter for Gofumpt {
         NAME
     }
 
+    fn options_fingerprint(&self) -> String {
+        crate::fingerprint_parts(&[
+            ("extra", if self.options.extra_rules { "1" } else { "0" }),
+            (
+                "lang",
+                self.options
+                    .lang
+                    .as_deref()
+                    .map(normalize_lang)
+                    .as_deref()
+                    .unwrap_or(""),
+            ),
+            (
+                "modpath",
+                self.options.module_path.as_deref().unwrap_or(""),
+            ),
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
+
     fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        if self.use_native() {
+            return native::format(
+                native::NativeKind::Gofumpt,
+                src,
+                &self.native_opts(filename),
+            );
+        }
+
         let bin = self.binary.as_deref().unwrap_or("gofumpt");
         let mut cmd = Command::new(bin);
         if self.options.extra_rules {
@@ -70,7 +116,6 @@ impl Formatter for Gofumpt {
                 cmd.arg("-lang").arg(normalize_lang(lang));
             }
         }
-        // gofumpt reads stdin when no path args are given.
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -113,6 +158,10 @@ impl Formatter for Gofumpt {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        // Check-mode prefilter stays on the system binary's `-l` even when
+        // `format()` is native: in-process format of every file is still much
+        // slower than `gofumpt -l` (see PERF_TASKS Task 1 notes). Fix/`format()`
+        // uses the native path; only the flagged subset is reformatted.
         let bin = self.binary.as_deref().unwrap_or("gofumpt");
         crate::runner::batch_list(files, || {
             let mut c = Command::new(bin);
@@ -156,20 +205,8 @@ mod tests {
         assert_eq!(normalize_lang(" 1.20 "), "go1.20");
     }
 
-    fn gofumpt_available() -> bool {
-        Command::new("gofumpt")
-            .arg("-version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-
     #[test]
-    fn removes_empty_line_at_block_start() {
-        if !gofumpt_available() {
-            eprintln!("skip: gofumpt not on PATH");
-            return;
-        }
+    fn native_removes_empty_line_at_block_start() {
         let fmt = Gofumpt::new(GofumptOptions::default());
         let src = b"package p\n\nfunc f() {\n\n\tx := 1\n\tprintln(x)\n}\n";
         let out = fmt.format("p.go", src).expect("gofumpt");
@@ -181,11 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_rules_clothes_naked_return() {
-        if !gofumpt_available() {
-            eprintln!("skip: gofumpt not on PATH");
-            return;
-        }
+    fn native_extra_rules_clothes_naked_return() {
         let fmt = Gofumpt::new(GofumptOptions {
             extra_rules: true,
             ..Default::default()

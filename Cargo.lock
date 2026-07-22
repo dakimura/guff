@@ -466,7 +466,10 @@ dependencies = [
 name = "guff-fmt"
 version = "0.1.0"
 dependencies = [
+ "guff-ast",
  "rayon",
+ "regex",
+ "sha2",
  "similar",
  "tempfile",
 ]

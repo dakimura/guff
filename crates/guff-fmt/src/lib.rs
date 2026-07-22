@@ -1,8 +1,9 @@
 //! Go source formatters for `guff fmt` (golangci-lint `pkg/goformatters` equivalent).
 //!
 //! Implemented: **gofmt** / **gofumpt** / **goimports** / **gci** / **golines** /
-//! **swaggo** (system binaries).
+//! **swaggo**. Native ports under [`native`] (PERF_TASKS Task 1).
 
+mod fmt_cache;
 mod gci;
 mod generated;
 mod gofmt;
@@ -10,9 +11,14 @@ mod gofumpt;
 mod goimports;
 mod golines;
 mod meta;
+pub mod native;
 mod runner;
 mod swaggo;
 
+pub use fmt_cache::{
+    content_hash, fingerprint_parts, format_cache_dir_from_env, CachedCheck, FormatCheckCache,
+    FMT_CHECK_SCHEMA,
+};
 pub use gci::{Gci, GciOptions};
 pub use generated::{is_generated, GeneratedMode};
 pub use gofmt::{Gofmt, GofmtOptions, RewriteRule};
@@ -27,6 +33,12 @@ pub use swaggo::Swaggo;
 pub trait Formatter: Send + Sync {
     fn name(&self) -> &str;
     fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError>;
+
+    /// Stable fingerprint of options that affect formatting output.
+    /// Used as part of the format-check cache key. Default: empty.
+    fn options_fingerprint(&self) -> String {
+        String::new()
+    }
 
     /// Batch pre-filter for check mode: given real file paths, return the subset
     /// whose formatting differs (equivalent to `format(read(f)) != read(f)` for

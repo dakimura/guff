@@ -71,6 +71,8 @@ pub struct RunnerOptions {
     pub generated: GeneratedMode,
     /// Colorize `--diff` output with ANSI codes (default: off).
     pub color: bool,
+    /// Persistent format-check cache (warm path). `None` → always run `-l`/format.
+    pub format_cache: Option<crate::FormatCheckCache>,
 }
 
 /// A single formatting difference found by [`Runner::check`].
@@ -150,6 +152,14 @@ impl Runner {
             collect_go_files(root, &mut files)?;
         }
 
+        if let Some(cache) = &self.opts.format_cache {
+            if let (Some(name), Some(opts_fp)) =
+                (self.meta.primary_name(), self.meta.options_fingerprint())
+            {
+                return self.check_with_cache(&files, cache, name, &opts_fp);
+            }
+        }
+
         // Fast path: when a single formatter exposes a batch "list unformatted
         // files" mode (`gofmt -l`, `gci list`, …), one invocation flags the
         // (usually small) subset of files whose formatting differs, and we run
@@ -169,6 +179,147 @@ impl Runner {
             .into_iter()
             .flatten()
             .collect();
+        findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+        Ok(findings)
+    }
+
+    /// Warm-path check: hash each file, reuse cached clean/lines; only miss
+    /// subset goes through `-l` + format. Populates the cache for next run.
+    fn check_with_cache(
+        &self,
+        files: &[PathBuf],
+        cache: &crate::FormatCheckCache,
+        formatter: &str,
+        opts_fp: &str,
+    ) -> Result<Vec<FormatFinding>, FormatError> {
+        use crate::{content_hash, CachedCheck};
+
+        enum Probe {
+            Skip,
+            HitClean,
+            HitLines(Vec<i64>),
+            Miss,
+            Io(String, std::io::Error),
+        }
+
+        let probed: Vec<(PathBuf, Probe)> = files
+            .par_iter()
+            .map(|path| {
+                if self.is_excluded(path) {
+                    return (path.clone(), Probe::Skip);
+                }
+                let path_str = path.to_string_lossy().to_string();
+                let src = match fs::read(path) {
+                    Ok(b) => b,
+                    Err(e) => return (path.clone(), Probe::Io(path_str, e)),
+                };
+                if is_generated(&src, self.opts.generated) {
+                    return (path.clone(), Probe::Skip);
+                }
+                let ch = content_hash(&src);
+                match cache.get(formatter, opts_fp, &ch) {
+                    Some(CachedCheck::Clean) => (path.clone(), Probe::HitClean),
+                    Some(CachedCheck::Lines(lines)) => (path.clone(), Probe::HitLines(lines)),
+                    None => (path.clone(), Probe::Miss),
+                }
+            })
+            .collect();
+
+        let mut findings: Vec<FormatFinding> = Vec::new();
+        let mut misses: Vec<PathBuf> = Vec::new();
+        for (path, probe) in probed {
+            match probe {
+                Probe::Skip | Probe::HitClean => {}
+                Probe::HitLines(lines) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    for line in lines {
+                        findings.push(FormatFinding {
+                            file: path_str.clone(),
+                            line,
+                        });
+                    }
+                }
+                Probe::Miss => misses.push(path),
+                Probe::Io(path_str, e) => {
+                    return Err(FormatError::Io {
+                        formatter: "guff-fmt".into(),
+                        path: path_str,
+                        source: e,
+                    });
+                }
+            }
+        }
+
+        if !misses.is_empty() {
+            let targets: Vec<PathBuf> = match self.meta.batch_list_unformatted(&misses) {
+                Some(flagged) => map_flagged(&misses, &flagged).unwrap_or(misses.clone()),
+                None => misses.clone(),
+            };
+            let flagged: std::collections::HashSet<PathBuf> =
+                targets.into_iter().collect();
+
+            let miss_results: Vec<(PathBuf, Result<CachedCheck, FormatError>)> = misses
+                .par_iter()
+                .map(|path| {
+                    let path_str = path.to_string_lossy();
+                    let src = match fs::read(path) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return (
+                                path.clone(),
+                                Err(FormatError::Io {
+                                    formatter: "guff-fmt".into(),
+                                    path: path_str.to_string(),
+                                    source: e,
+                                }),
+                            );
+                        }
+                    };
+                    let ch = content_hash(&src);
+                    if flagged.contains(path) {
+                        match self.meta.format(&path_str, &src) {
+                            Ok(out) if out == src => {
+                                cache.put(formatter, opts_fp, &ch, &CachedCheck::Clean);
+                                (path.clone(), Ok(CachedCheck::Clean))
+                            }
+                            Ok(out) => {
+                                let old = String::from_utf8_lossy(&src);
+                                let new = String::from_utf8_lossy(&out);
+                                let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
+                                let lines = first_changed_lines(&diff);
+                                cache.put(
+                                    formatter,
+                                    opts_fp,
+                                    &ch,
+                                    &CachedCheck::Lines(lines.clone()),
+                                );
+                                (path.clone(), Ok(CachedCheck::Lines(lines)))
+                            }
+                            Err(e) => (path.clone(), Err(e)),
+                        }
+                    } else {
+                        cache.put(formatter, opts_fp, &ch, &CachedCheck::Clean);
+                        (path.clone(), Ok(CachedCheck::Clean))
+                    }
+                })
+                .collect();
+
+            for (path, res) in miss_results {
+                match res? {
+                    CachedCheck::Clean => {}
+                    CachedCheck::Lines(lines) => {
+                        let path_str = path.to_string_lossy().to_string();
+                        for line in lines {
+                            findings.push(FormatFinding {
+                                file: path_str.clone(),
+                                line,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         findings.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         Ok(findings)
     }

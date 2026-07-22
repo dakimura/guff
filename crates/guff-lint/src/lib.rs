@@ -133,6 +133,10 @@ pub struct FormatterRunConfig {
     pub paths: Vec<std::path::PathBuf>,
     /// Rewrite files in place instead of reporting (`--fix`).
     pub fix: bool,
+    /// Enable `${GUFF_CACHE}/fmt_check` warm cache (off with `--no-cache`).
+    pub use_format_cache: bool,
+    /// Explicit cache root (same as issue cache). `None` → env / default.
+    pub cache_dir: Option<std::path::PathBuf>,
 }
 
 /// Check (or fix) formatting for `guff run`; returns issues for unformatted files.
@@ -142,11 +146,22 @@ pub struct FormatterRunConfig {
 /// formatter. With `fix`, files are rewritten via the chained formatters and no
 /// issues are produced.
 fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<Vec<Issue>, RunError> {
-    use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
+    use guff_fmt::{
+        format_cache_dir_from_env, FormatCheckCache, MetaFormatter, Runner, RunnerOptions,
+    };
 
     if cfg.enable.is_empty() {
         return Ok(Vec::new());
     }
+
+    let format_cache = if cfg.use_format_cache {
+        let dir = format_cache_dir_from_env()
+            .or_else(|| cfg.cache_dir.clone())
+            .or_else(|| default_cache_dir().ok());
+        dir.and_then(|d| FormatCheckCache::open(d).ok())
+    } else {
+        None
+    };
 
     if cfg.fix {
         let meta = MetaFormatter::new(
@@ -189,6 +204,7 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
             RunnerOptions {
                 exclude_paths: cfg.exclude_paths.clone(),
                 generated: cfg.generated,
+                format_cache: format_cache.clone(),
                 ..Default::default()
             },
         );
@@ -677,6 +693,8 @@ mod format_check_tests {
             exclude_paths: Vec::new(),
             paths,
             fix,
+            use_format_cache: false,
+            cache_dir: None,
         }
     }
 

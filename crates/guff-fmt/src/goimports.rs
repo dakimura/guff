@@ -1,4 +1,11 @@
-//! `goimports` formatter — shells out to the `goimports` binary (`golang.org/x/tools/cmd/goimports`).
+//! `goimports` formatter — shells out to `goimports` by default.
+//!
+//! Native format-only port (PERF_TASKS Task 1d) matches
+//! `goimports -format-only` / prometheus harness (725/725) but does **not**
+//! add or remove imports. Keep subprocess as default so findings stay aligned
+//! with full `goimports` when imports are missing/unused. Set
+//! `GUFF_NATIVE_FMT=1` to prefer the native path; `GUFF_NATIVE_FMT=0` forces
+//! subprocess.
 //!
 //! Matches golangci-lint `pkg/goformatters/goimports` settings:
 //! - `local-prefixes` → `-local` (comma-separated)
@@ -7,6 +14,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::native::{self, NativeOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -19,11 +27,11 @@ pub struct GoimportsOptions {
     pub local_prefixes: Vec<String>,
 }
 
-/// Formatter that invokes the system `goimports` binary.
+/// Formatter: system `goimports` by default; optional native format-only path.
 #[derive(Debug, Clone, Default)]
 pub struct Goimports {
     options: GoimportsOptions,
-    /// Override binary path (tests / non-standard installs).
+    /// Override binary path (tests / non-standard installs / subprocess path).
     binary: Option<String>,
 }
 
@@ -39,6 +47,20 @@ impl Goimports {
         self.binary = Some(path.into());
         self
     }
+
+    /// Native is opt-in: format-only (no import add/remove) until Task 1d
+    /// resolution lands. `GUFF_NATIVE_FMT=1` enables it; `=0` forces subprocess.
+    fn use_native(&self) -> bool {
+        std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "1")
+    }
+
+    fn native_opts(&self, filename: &str) -> NativeOptions {
+        NativeOptions {
+            local_prefixes: self.options.local_prefixes.clone(),
+            filename: filename.to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Formatter for Goimports {
@@ -46,7 +68,25 @@ impl Formatter for Goimports {
         NAME
     }
 
+    fn options_fingerprint(&self) -> String {
+        let locals = self.options.local_prefixes.join(",");
+        crate::fingerprint_parts(&[
+            ("local", &locals),
+            // Native format-only must not be default while -l is full goimports:
+            // fingerprint still tracks the mode so cache doesn't mix paths.
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
+
     fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        if self.use_native() {
+            return native::format(
+                native::NativeKind::Goimports,
+                src,
+                &self.native_opts(filename),
+            );
+        }
+
         let bin = self.binary.as_deref().unwrap_or("goimports");
         let mut cmd = Command::new(bin);
         let locals: Vec<&str> = self
@@ -107,6 +147,9 @@ impl Formatter for Goimports {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        if self.use_native() {
+            return None;
+        }
         let bin = self.binary.as_deref().unwrap_or("goimports");
         let locals: Vec<&str> = self
             .options

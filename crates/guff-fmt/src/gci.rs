@@ -1,4 +1,4 @@
-//! `gci` formatter — shells out to the `gci` binary (`github.com/daixiang0/gci`).
+//! `gci` formatter — native Rust port by default (PERF_TASKS Task 1e).
 //!
 //! Matches golangci-lint `pkg/goformatters/gci` / `formatters.settings.gci`:
 //! - `sections` → repeated `-s` / `--section`
@@ -10,15 +10,16 @@
 //!
 //! Default sections are `standard` / `default` (golangci default).
 //!
-//! `gci print` requires a file path (no stdin), so we stage `src` into a temp
-//! `.go` file. When `filename` is a real path, the temp file is created in the
-//! same directory so `localmodule` can resolve `go.mod`.
+//! Native path is default after prometheus harness PASS. Set `GUFF_NATIVE_FMT=0`
+//! to force the system `gci` binary. `gci print` requires a file path (no stdin),
+//! so the subprocess path stages `src` into a temp `.go` file.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::native::{self, NativeOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -51,11 +52,11 @@ impl Default for GciOptions {
     }
 }
 
-/// Formatter that invokes the system `gci` binary.
+/// Formatter: native gci port, with subprocess fallback.
 #[derive(Debug, Clone, Default)]
 pub struct Gci {
     options: GciOptions,
-    /// Override binary path (tests / non-standard installs).
+    /// Override binary path (tests / non-standard installs / subprocess path).
     binary: Option<String>,
 }
 
@@ -71,6 +72,24 @@ impl Gci {
         self.binary = Some(path.into());
         self
     }
+
+    fn use_native(&self) -> bool {
+        !std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0")
+    }
+
+    fn native_opts(&self, filename: &str) -> NativeOptions {
+        NativeOptions {
+            gci_sections: if self.options.sections.is_empty() {
+                vec!["standard".into(), "default".into()]
+            } else {
+                self.options.sections.clone()
+            },
+            gci_custom_order: self.options.custom_order,
+            gci_no_lex_order: self.options.no_lex_order,
+            filename: filename.to_string(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Formatter for Gci {
@@ -78,67 +97,66 @@ impl Formatter for Gci {
         NAME
     }
 
-    fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
-        let bin = self.binary.as_deref().unwrap_or("gci");
-        let temp = stage_temp(filename, src)?;
-        let _guard = TempGuard(temp.clone());
-
-        let mut cmd = Command::new(bin);
-        cmd.arg("print");
+    fn options_fingerprint(&self) -> String {
         let sections = if self.options.sections.is_empty() {
-            &["standard".to_string(), "default".to_string()][..]
+            "standard,default".to_string()
         } else {
-            &self.options.sections[..]
+            self.options.sections.join(",")
         };
-        for section in sections {
-            if !section.is_empty() {
-                cmd.arg("-s").arg(section);
-            }
-        }
-        if self.options.custom_order {
-            cmd.arg("--custom-order");
-        }
-        if self.options.no_lex_order {
-            cmd.arg("--no-lex-order");
-        }
-        // no-inline-comments / no-prefix-comments are not on the `print` CLI;
-        // post-processed below.
-        cmd.arg(&temp);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        crate::fingerprint_parts(&[
+            ("sections", &sections),
+            (
+                "custom_order",
+                if self.options.custom_order { "1" } else { "0" },
+            ),
+            (
+                "no_lex_order",
+                if self.options.no_lex_order { "1" } else { "0" },
+            ),
+            (
+                "no_inline",
+                if self.options.no_inline_comments {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+            (
+                "no_prefix",
+                if self.options.no_prefix_comments {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
 
-        let output = cmd.output().map_err(|e| FormatError::Io {
-            formatter: NAME.to_string(),
-            path: filename.to_string(),
-            source: e,
-        })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(FormatError::Message {
-                formatter: NAME.to_string(),
-                path: filename.to_string(),
-                message: format!("gci failed: {}", stderr.trim()),
-            });
-        }
+    fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        let out = if self.use_native() {
+            native::format(native::NativeKind::Gci, src, &self.native_opts(filename))?
+        } else {
+            self.format_subprocess(filename, src)?
+        };
 
         if self.options.no_inline_comments || self.options.no_prefix_comments {
             Ok(strip_import_comments(
-                &output.stdout,
+                &out,
                 self.options.no_inline_comments,
                 self.options.no_prefix_comments,
             ))
         } else {
-            Ok(output.stdout)
+            Ok(out)
         }
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
-        // The `no-inline` / `no-prefix` comment stripping is post-processing on
-        // top of `gci print`, so it can flip the "differs" decision in ways the
-        // `list` subcommand can't see. Fall back to per-file in that case.
+        // Comment-stripping options need per-file format (list mode can't see them).
         if self.options.no_inline_comments || self.options.no_prefix_comments {
             return None;
         }
+        // Same hybrid as gofumpt: `-l`/`list` via system binary; native `format()`.
         let bin = self.binary.as_deref().unwrap_or("gci");
         let sections: Vec<String> = if self.options.sections.is_empty() {
             vec!["standard".to_string(), "default".to_string()]
@@ -161,6 +179,52 @@ impl Formatter for Gci {
             }
             c
         })
+    }
+}
+
+impl Gci {
+    fn format_subprocess(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        let bin = self.binary.as_deref().unwrap_or("gci");
+        let temp = stage_temp(filename, src)?;
+        let _guard = TempGuard(temp.clone());
+
+        let mut cmd = Command::new(bin);
+        cmd.arg("print");
+        let sections = if self.options.sections.is_empty() {
+            &["standard".to_string(), "default".to_string()][..]
+        } else {
+            &self.options.sections[..]
+        };
+        for section in sections {
+            if !section.is_empty() {
+                cmd.arg("-s").arg(section);
+            }
+        }
+        if self.options.custom_order {
+            cmd.arg("--custom-order");
+        }
+        if self.options.no_lex_order {
+            cmd.arg("--no-lex-order");
+        }
+        cmd.arg(&temp);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        let output = cmd.output().map_err(|e| FormatError::Io {
+            formatter: NAME.to_string(),
+            path: filename.to_string(),
+            source: e,
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(FormatError::Message {
+                formatter: NAME.to_string(),
+                path: filename.to_string(),
+                message: format!("gci failed: {}", stderr.trim()),
+            });
+        }
+
+        Ok(output.stdout)
     }
 }
 

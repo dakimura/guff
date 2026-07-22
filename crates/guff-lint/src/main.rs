@@ -318,6 +318,7 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         loaded.go_version.as_deref(),
         &args.patterns,
         args.fix,
+        !args.no_cache,
     );
 
     run_and_print(&LintOptions {
@@ -346,6 +347,7 @@ fn build_formatter_run_config(
     go_version: Option<&str>,
     patterns: &[String],
     fix: bool,
+    use_format_cache: bool,
 ) -> Option<guff_lint::FormatterRunConfig> {
     let enable: Vec<String> = formatters
         .enable
@@ -378,6 +380,8 @@ fn build_formatter_run_config(
         exclude_paths: formatters.exclusion_paths(),
         paths,
         fix,
+        use_format_cache,
+        cache_dir: None,
     })
 }
 
@@ -566,6 +570,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
             exclude_paths: formatters.exclusion_paths(),
             generated: formatters.exclusion_generated(),
             color,
+            format_cache: None,
         },
     );
 

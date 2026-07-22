@@ -83,6 +83,16 @@ impl MetaFormatter {
         self.formatters.iter().map(|f| f.name()).collect()
     }
 
+    /// Primary formatter name when this meta wraps exactly one formatter.
+    pub fn primary_name(&self) -> Option<&str> {
+        (self.formatters.len() == 1).then(|| self.formatters[0].name())
+    }
+
+    /// Options fingerprint for the sole formatter (format-check cache key).
+    pub fn options_fingerprint(&self) -> Option<String> {
+        (self.formatters.len() == 1).then(|| self.formatters[0].options_fingerprint())
+    }
+
     /// Fast check-mode pre-filter. If this meta wraps exactly one formatter with
     /// a batch list mode, return the files it flags as unformatted (as the
     /// tool's own echoed paths) in a single invocation. `None` → the caller

@@ -84,10 +84,22 @@ python3 -m unittest discover -s regress/tests
 | `run.sh` | Main entry (`--profile tsdb|full`) |
 | `measure.py` | `/usr/bin/time` wrapper + RSS/wall parser + RSS watchdog |
 | `gate.py` | Baseline compare / update |
+| `fmt_diff.py` | Task 1a: byte-diff native fmt vs gofmt/gofumpt/goimports/gci |
 | `baseline.json` | Checked-in thresholds (`tsdb` profile) |
 | `baseline.full.json` | Checked-in thresholds (`full` profile) |
 | `tests/` | Offline unit tests |
 | `results/` | Per-run artifacts (`RESULTS.md` / `RESULTS.full.md`) |
+
+### Formatter byte-diff harness (PERF_TASKS Task 1)
+
+```bash
+cargo build --release -p guff-fmt --bin guff-fmt-native
+# Reference tool smoke (no native needed):
+./regress/fmt_diff.py --formatter gofmt --self-check --corpus prometheus --limit 100
+# Native vs reference (exit 3 while Task 1b–1e stubs remain):
+./regress/fmt_diff.py --formatter gofmt --corpus both
+./regress/fmt_diff.py --formatter gofumpt --extra --corpus prometheus
+```
 
 Reuse: [`compat/normalize.py`](../compat/normalize.py) for JSON → `relpath:line:linter:message` keys.
 

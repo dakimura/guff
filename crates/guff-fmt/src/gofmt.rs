@@ -1,13 +1,20 @@
-//! `gofmt` formatter — shells out to the Go toolchain `gofmt` binary.
+//! `gofmt` formatter — native Rust port by default (PERF_TASKS Task 1b).
 //!
 //! Matches golangci-lint `pkg/goformatters/gofmt` settings:
-//! - `simplify` → `-s`
-//! - `rewrite-rules` → repeated `-r 'pattern -> replacement'`
+//! - `simplify` → `-s` (still subprocess / unimplemented natively)
+//! - `rewrite-rules` → repeated `-r 'pattern -> replacement'` (subprocess)
+//!
+//! Native path (no subprocess) is used when there are no rewrite rules and
+//! either simplify is off, or `GUFF_NATIVE_FMT=0` is not forcing subprocess.
+//! Set `GUFF_NATIVE_FMT=0` to force the system `gofmt` binary for all cases.
+//! Set `GUFF_NATIVE_FMT=1` to prefer native even when simplify is on (simplify
+//! is then ignored until Task 1b `-s` lands).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::native::{self, NativeOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -29,11 +36,11 @@ pub struct GofmtOptions {
     pub rewrite_rules: Vec<RewriteRule>,
 }
 
-/// Formatter that invokes the system `gofmt` binary.
+/// Formatter: native `go/format` port, with subprocess fallback.
 #[derive(Debug, Clone, Default)]
 pub struct Gofmt {
     options: GofmtOptions,
-    /// Override binary path (tests / non-standard installs).
+    /// Override binary path (tests / non-standard installs / subprocess path).
     binary: Option<String>,
 }
 
@@ -49,6 +56,24 @@ impl Gofmt {
         self.binary = Some(path.into());
         self
     }
+
+    /// Whether to use the in-process native implementation.
+    fn use_native(&self) -> bool {
+        // Explicit force-off.
+        if std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0") {
+            return false;
+        }
+        // Rewrite rules have no native port yet.
+        if !self.options.rewrite_rules.is_empty() {
+            return false;
+        }
+        // simplify (-s) not ported yet — keep subprocess unless forced on.
+        if self.options.simplify {
+            return std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "1");
+        }
+        // Default: native (harness-proven on prometheus + GOROOT).
+        true
+    }
 }
 
 impl Formatter for Gofmt {
@@ -56,17 +81,55 @@ impl Formatter for Gofmt {
         NAME
     }
 
+    fn options_fingerprint(&self) -> String {
+        let rules: String = self
+            .options
+            .rewrite_rules
+            .iter()
+            .map(|r| format!("{}->{}", r.pattern, r.replacement))
+            .collect::<Vec<_>>()
+            .join(";");
+        crate::fingerprint_parts(&[
+            ("simplify", if self.options.simplify { "1" } else { "0" }),
+            ("rules", &rules),
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
+
     fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        if self.use_native() {
+            let opts = NativeOptions {
+                simplify: self.options.simplify,
+                filename: filename.to_string(),
+                ..Default::default()
+            };
+            return native::gofmt::format(src, &opts).map_err(|e| match e {
+                FormatError::Message {
+                    formatter: _,
+                    path,
+                    message,
+                } => FormatError::Message {
+                    formatter: NAME.to_string(),
+                    path,
+                    message,
+                },
+                other => other,
+            });
+        }
+
         let bin = self.binary.as_deref().unwrap_or("gofmt");
         let mut cmd = Command::new(bin);
         if self.options.simplify {
             cmd.arg("-s");
         }
         for rule in &self.options.rewrite_rules {
-            cmd.arg("-r").arg(format!("{} -> {}", rule.pattern, rule.replacement));
+            cmd.arg("-r")
+                .arg(format!("{} -> {}", rule.pattern, rule.replacement));
         }
         // gofmt reads stdin when no path args are given.
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         let mut child = cmd.spawn().map_err(|e| FormatError::Io {
             formatter: NAME.to_string(),
@@ -106,6 +169,7 @@ impl Formatter for Gofmt {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        // Hybrid: system `gofmt -l` for check prefilter; native `format()` for body.
         let bin = self.binary.as_deref().unwrap_or("gofmt");
         crate::runner::batch_list(files, || {
             let mut c = Command::new(bin);
@@ -138,6 +202,7 @@ mod tests {
 
     #[test]
     fn simplify_collapses_slice() {
+        // -s still uses the system binary (native simplify not ported).
         let fmt = Gofmt::new(GofmtOptions {
             simplify: true,
             ..Default::default()
@@ -150,5 +215,13 @@ mod tests {
             s.contains("s[1:]"),
             "expected simplify rewrite, got:\n{s}"
         );
+    }
+
+    #[test]
+    fn native_is_default_without_simplify() {
+        // Ensure GUFF_NATIVE_FMT=0 is not set for this assertion.
+        std::env::remove_var("GUFF_NATIVE_FMT");
+        let fmt = Gofmt::new(GofmtOptions::default());
+        assert!(fmt.use_native());
     }
 }
