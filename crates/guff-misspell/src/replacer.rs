@@ -1,7 +1,7 @@
 //! Spelling correction engine (port of `misspell/replace.go`).
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
 
@@ -15,6 +15,38 @@ static LINE_COMMENT_RE: LazyLock<Regex> =
 static BLOCK_COMMENT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/\*[\s\S]*?\*/").unwrap());
 
+static DICT_MAIN: LazyLock<HashMap<String, String>> =
+    LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_main.tsv")));
+static DICT_US: LazyLock<HashMap<String, String>> =
+    LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_us.tsv")));
+static DICT_UK: LazyLock<HashMap<String, String>> =
+    LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_uk.tsv")));
+
+/// Default golangci/misspell replacer (DictMain + US locale, no extras/ignores).
+/// Shared across packages — building the ~30k-entry map once instead of once
+/// per package is the main cold-analyze win for this linter.
+static DEFAULT_US: LazyLock<Replacer> = LazyLock::new(|| {
+    let mut corrected = DICT_MAIN.clone();
+    corrected.extend(DICT_US.iter().map(|(k, v)| (k.clone(), v.clone())));
+    Replacer {
+        corrected: Arc::new(corrected),
+    }
+});
+
+/// DictMain only (empty locale, no extras/ignores).
+static DEFAULT_MAIN: LazyLock<Replacer> = LazyLock::new(|| Replacer {
+    corrected: Arc::new(DICT_MAIN.clone()),
+});
+
+/// DictMain + UK locale.
+static DEFAULT_UK: LazyLock<Replacer> = LazyLock::new(|| {
+    let mut corrected = DICT_MAIN.clone();
+    corrected.extend(DICT_UK.iter().map(|(k, v)| (k.clone(), v.clone())));
+    Replacer {
+        corrected: Arc::new(corrected),
+    }
+});
+
 /// A single spelling correction in a line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diff {
@@ -25,26 +57,33 @@ pub struct Diff {
 }
 
 /// Spelling replacer backed by golangci/misspell dictionaries.
+#[derive(Clone)]
 pub struct Replacer {
-    corrected: HashMap<String, String>,
+    corrected: Arc<HashMap<String, String>>,
 }
 
 impl Replacer {
     /// Default replacer using `DictMain` + US locale (golangci/misspell default).
     pub fn new() -> Self {
-        Self::from_options(&Options {
-            locale: "US".into(),
-            ..Options::default()
-        })
+        DEFAULT_US.clone()
     }
 
     /// Build a replacer from golangci-lint `linters.settings.misspell`.
     pub fn from_options(options: &Options) -> Self {
-        let mut corrected = load_main_dict();
+        if options.extra_words.is_empty() && options.ignore_words.is_empty() {
+            match options.locale.to_ascii_uppercase().as_str() {
+                "US" => return DEFAULT_US.clone(),
+                "" => return DEFAULT_MAIN.clone(),
+                "UK" | "GB" => return DEFAULT_UK.clone(),
+                _ => {}
+            }
+        }
+
+        let mut corrected = DICT_MAIN.clone();
         match options.locale.to_ascii_uppercase().as_str() {
             "" => {}
-            "US" => corrected.extend(load_dict_tsv(include_str!("../data/dict_us.tsv"))),
-            "UK" | "GB" => corrected.extend(load_dict_tsv(include_str!("../data/dict_uk.tsv"))),
+            "US" => corrected.extend(DICT_US.iter().map(|(k, v)| (k.clone(), v.clone()))),
+            "UK" | "GB" => corrected.extend(DICT_UK.iter().map(|(k, v)| (k.clone(), v.clone()))),
             _ => {}
         }
         for word in &options.extra_words {
@@ -59,7 +98,9 @@ impl Replacer {
         for ignore in &options.ignore_words {
             corrected.remove(&ignore.to_ascii_lowercase());
         }
-        Self { corrected }
+        Self {
+            corrected: Arc::new(corrected),
+        }
     }
 
     /// Find misspellings in `input` (default golangci mode: full file as plain text).
@@ -125,6 +166,12 @@ impl Replacer {
     }
 }
 
+impl Default for Replacer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn load_dict_tsv(data: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in data.lines() {
@@ -133,10 +180,6 @@ fn load_dict_tsv(data: &str) -> HashMap<String, String> {
         }
     }
     map
-}
-
-fn load_main_dict() -> HashMap<String, String> {
-    load_dict_tsv(include_str!("../data/dict_main.tsv"))
 }
 
 fn offset_to_line_col(input: &str, offset: usize) -> (usize, usize) {
@@ -224,5 +267,29 @@ mod tests {
         let diffs = r.find_diffs_in_comments(input);
         assert!(diffs.iter().any(|d| d.corrected == "broccoli"));
         assert!(!diffs.iter().any(|d| d.original == "Amercia"));
+    }
+
+    #[test]
+    fn default_us_reuses_shared_map() {
+        let a = Replacer::new();
+        let b = Replacer::from_options(&Options {
+            locale: "US".into(),
+            ..Options::default()
+        });
+        assert!(Arc::ptr_eq(&a.corrected, &b.corrected));
+    }
+
+    #[test]
+    fn empty_locale_reuses_main_only_map() {
+        let a = Replacer::from_options(&Options::default());
+        let b = Replacer::from_options(&Options {
+            locale: String::new(),
+            ..Options::default()
+        });
+        assert!(Arc::ptr_eq(&a.corrected, &b.corrected));
+        assert!(!Arc::ptr_eq(
+            &a.corrected,
+            &Replacer::new().corrected
+        ));
     }
 }

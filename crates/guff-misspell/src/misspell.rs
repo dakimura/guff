@@ -12,12 +12,6 @@ use guff_analysis::{
 use crate::options::Options;
 use crate::replacer::{Diff, Replacer};
 
-fn replacer_for(pass: &Pass<'_>) -> Replacer {
-    pass.settings::<Options>("misspell")
-        .map(|opts| Replacer::from_options(opts))
-        .unwrap_or_else(Replacer::new)
-}
-
 fn report_diff(pass: &mut Pass<'_>, file_pos: Pos, diff: &Diff) {
     let fset = pass.fset();
     let Some(ft) = fset.file(file_pos) else {
@@ -56,8 +50,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .settings::<Options>("misspell")
         .cloned()
         .unwrap_or_default();
-    let replacer = replacer_for(pass);
-    let paths: Vec<_> = pass.pkg().compiled_go_files.clone();
+    // Prefer the shared default dictionary when settings are absent (US),
+    // matching the previous `unwrap_or_else(Replacer::new)` path.
+    let replacer = pass
+        .settings::<Options>("misspell")
+        .map(Replacer::from_options)
+        .unwrap_or_else(Replacer::new);
+    let paths = &pass.pkg().compiled_go_files;
     let mut pending: Vec<(Pos, Diff)> = Vec::new();
 
     for (i, file) in pass.files().iter().enumerate() {
