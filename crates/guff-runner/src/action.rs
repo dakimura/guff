@@ -455,16 +455,26 @@ pub fn analyze_with_settings(
     let mut roots = Vec::new();
     let mut skip_testify = 0usize;
     let mut keep_testify = 0usize;
+    let mut skip_exptostd = 0usize;
+    let mut keep_exptostd = 0usize;
+    let mut skip_sloglint = 0usize;
+    let mut keep_sloglint = 0usize;
     for &analyzer in analyzers {
         for pkg in packages {
             if !analyzer_applies_to_package(analyzer, pkg) {
-                if analyzer.name == "testifylint" {
-                    skip_testify += 1;
+                match analyzer.name {
+                    "testifylint" => skip_testify += 1,
+                    "exptostd" => skip_exptostd += 1,
+                    "sloglint" => skip_sloglint += 1,
+                    _ => {}
                 }
                 continue;
             }
-            if analyzer.name == "testifylint" {
-                keep_testify += 1;
+            match analyzer.name {
+                "testifylint" => keep_testify += 1,
+                "exptostd" => keep_exptostd += 1,
+                "sloglint" => keep_sloglint += 1,
+                _ => {}
             }
             let act = mk_action(
                 analyzer,
@@ -481,6 +491,16 @@ pub fn analyze_with_settings(
     if timing_enabled() && (skip_testify > 0 || keep_testify > 0) {
         eprintln!(
             "guff:   testifylint schedule keep={keep_testify} skip={skip_testify} (no testify import)"
+        );
+    }
+    if timing_enabled() && (skip_exptostd > 0 || keep_exptostd > 0) {
+        eprintln!(
+            "guff:   exptostd schedule keep={keep_exptostd} skip={skip_exptostd} (no x/exp/{{maps,slices,constraints}} import)"
+        );
+    }
+    if timing_enabled() && (skip_sloglint > 0 || keep_sloglint > 0) {
+        eprintln!(
+            "guff:   sloglint schedule keep={keep_sloglint} skip={skip_sloglint} (no log/slog import)"
         );
     }
 
@@ -500,14 +520,21 @@ pub fn analyze_with_settings(
 /// Whether a root analyzer should be scheduled for `package`.
 ///
 /// Import-gated skips must preserve findings: only omit analyzers that cannot
-/// produce diagnostics without a given import. `testifylint` is empty without
-/// `github.com/stretchr/testify`. `buildir` is *not* gated here — many
-/// staticcheck SA checks require it regardless of testify.
+/// produce diagnostics without a given import. `buildir` is *not* gated here —
+/// many staticcheck SA checks require it regardless of testify.
 fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
-    if analyzer.name == "testifylint" {
-        return package_imports_prefix(package, "github.com/stretchr/testify");
+    match analyzer.name {
+        "testifylint" => package_imports_prefix(package, "github.com/stretchr/testify"),
+        // exptostd only rewrites `golang.org/x/exp/{maps,slices,constraints}`.
+        "exptostd" => {
+            package_imports_prefix(package, "golang.org/x/exp/maps")
+                || package_imports_prefix(package, "golang.org/x/exp/slices")
+                || package_imports_prefix(package, "golang.org/x/exp/constraints")
+        }
+        // sloglint only inspects `log/slog` APIs.
+        "sloglint" => package_imports_prefix(package, "log/slog"),
+        _ => true,
     }
-    true
 }
 
 /// True when `package.imports` contains `prefix` or a subpath of it.
@@ -844,5 +871,53 @@ mod tests {
             Arc::new(Package::default()),
         );
         assert!(analyzer_applies_to_package(&analyzer, &with_testify));
+    }
+
+    #[test]
+    fn exptostd_skipped_without_x_exp_import() {
+        let analyzer = Analyzer {
+            name: "exptostd",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        // Unrelated x/exp subpackage must not keep the analyzer.
+        let mut with_other = Package::default();
+        with_other.imports.insert(
+            "golang.org/x/exp/slog".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(!analyzer_applies_to_package(&analyzer, &with_other));
+        let mut with_maps = Package::default();
+        with_maps.imports.insert(
+            "golang.org/x/exp/maps".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(analyzer_applies_to_package(&analyzer, &with_maps));
+    }
+
+    #[test]
+    fn sloglint_skipped_without_slog_import() {
+        let analyzer = Analyzer {
+            name: "sloglint",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        let mut with_slog = Package::default();
+        with_slog
+            .imports
+            .insert("log/slog".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&analyzer, &with_slog));
     }
 }

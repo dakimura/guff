@@ -9,16 +9,19 @@ use crate::govet_util::{is_in_test_file, is_main_package};
 
 struct Checker {
     filename: String,
-    file: Option<File>,
+    /// `package main` (formerly read from a cloned `File` solely for this check).
+    is_main_pkg: bool,
+    has_go_file: bool,
     in_header: bool,
     pending: Vec<(u32, String)>,
 }
 
 impl Checker {
-    fn new(filename: String, file: Option<File>) -> Self {
+    fn new(filename: String, is_main_pkg: bool, has_go_file: bool) -> Self {
         Self {
             filename,
-            file,
+            is_main_pkg,
+            has_go_file,
             in_header: true,
             pending: Vec::new(),
         }
@@ -47,16 +50,15 @@ impl Checker {
         match verb {
             "//go:build" => {}
             "//go:debug" => {
-                if self.file.is_none() {
+                if !self.has_go_file {
                     self.pending.push((
                         pos,
                         "//go:debug directive only valid in Go source files".into(),
                     ));
                     return;
                 }
-                let file = self.file.as_ref().unwrap();
                 let is_test = self.filename.ends_with("_test.go");
-                if file.name.name != "main" && !is_test {
+                if !self.is_main_pkg && !is_test {
                     self.pending.push((
                         pos,
                         "//go:debug directive only valid in package main or test".into(),
@@ -82,7 +84,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .get(i)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "file.go".into());
-        let mut checker = Checker::new(filename.clone(), Some(file.clone()));
+        let mut checker = Checker::new(filename, file.name.name == "main", true);
         checker.check_go_file(file);
         pending.extend(checker.pending);
     }
