@@ -269,9 +269,15 @@ def format_one(
             tmpdir.cleanup()
 
 
+def default_fixtures_dir() -> Path | None:
+    """Task 1d fixtures: unused delete / stdlib add / sibling add / sort."""
+    p = REPO_ROOT / "regress" / "fmt_fixtures" / "goimports"
+    return p if p.is_dir() else None
+
+
 def resolve_corpus(name: str) -> list[Path]:
     roots: list[Path] = []
-    if name in {"prometheus", "both"}:
+    if name in {"prometheus", "both", "prometheus+fixtures"}:
         p = default_prometheus_dir()
         if p is None:
             raise SystemExit(
@@ -283,8 +289,15 @@ def resolve_corpus(name: str) -> list[Path]:
         if g is None:
             raise SystemExit("GOROOT/src not found (is `go` on PATH?)")
         roots.append(g)
+    if name in {"fixtures", "prometheus+fixtures"}:
+        f = default_fixtures_dir()
+        if f is None:
+            raise SystemExit("regress/fmt_fixtures/goimports not found")
+        roots.append(f)
     if not roots:
-        raise SystemExit(f"unknown corpus {name!r} (prometheus|goroot|both)")
+        raise SystemExit(
+            f"unknown corpus {name!r} (prometheus|goroot|both|fixtures|prometheus+fixtures)"
+        )
     return roots
 
 
@@ -298,8 +311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument(
         "--corpus",
         default="prometheus",
-        choices=["prometheus", "goroot", "both"],
-        help="which *.go trees to walk (default: prometheus)",
+        choices=["prometheus", "goroot", "both", "fixtures", "prometheus+fixtures"],
+        help="which *.go trees to walk (default: prometheus; fixtures = Task 1d add/remove)",
     )
     ap.add_argument("--limit", type=int, default=None, help="max files (after sort)")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
@@ -452,7 +465,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _rel(path: Path) -> str:
-    for base in (REPO_ROOT, default_prometheus_dir(), default_goroot_src()):
+    for base in (
+        REPO_ROOT,
+        default_prometheus_dir(),
+        default_goroot_src(),
+        default_fixtures_dir(),
+    ):
         if base is None:
             continue
         try:

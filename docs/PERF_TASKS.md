@@ -140,14 +140,32 @@ full 460→424**（追加0・真の検出/recall 不変）。baseline 更新済�
 **ネイティブ list への差し替え DONE 2026-07-23:** cold の `-l`/`gci list`
 サブプロセスを廃止し、`runner::native_list`（各ファイルを in-process で `format()` し
 差分のあるものだけを flag、par_iter）に置換。default-native の gofmt/gofumpt/gci が
-対象（goimports は native が format-only=Task 1d 未了のためサブプロセス `-l` 継続）。
+対象（goimports は当時 format-only のためサブプロセス `-l` 継続）。
 findings バイト同一（full 424/408/4/16・tsdb 74・決定性3回・`-j 1` も同一）、
-両 regress PASS。gofumpt/gci をダミーに差し替えても findings 不変＝サブプロセス非 spawn を確認。
-効果は控えめ（cold format_checks ~0.78→0.74s、wall はノイズ内）だが gofmt/gofumpt/gci の
-外部ツール依存を除去（残る format サブプロセスは goimports `-l` のみ）。残り: goimports add-remove。
+両 regress PASS。
+**Task 1d goimports add/remove DONE 2026-07-23:** native が Delete unused + sibling/
+stdlib Add + group/sort を実装。第三者 module-cache 解決は未移植で、そのファイルだけ
+システム `goimports` にフォールバック。既定 native ON（`GUFF_NATIVE_FMT=0` で OFF）、
+`list_unformatted` → `native_list`。prometheus fixtures+725/725 バイト一致、findings
+冷温同一（subprocess 比較・3回決定・`-j 1`）、`goimports` 非 PATH でも findings 不変、
+両 regress PASS。cold format_checks **~1.47s→0.69s**（`GUFF_NATIVE_FMT=0` 対比）。
+併せて parser の Bailout（エラー10件超で `panic_any`）を rayon 安全に停止記録へ変更。
 （Task 4 = seed 永続化は **DONE 2026-07-22**。）
 
-Task 1b: gofmt both **6333/6333**。1c gofumpt prometheus **725/725**。1e gci **725/725**。
+**Task 1d 追補（run 保存 + cgo + panic hook DONE 2026-07-23）:** goimports の
+`sortImports`/`astutil.Imports`+`addImportSpaces` を正確移植。**ユーザーの空行 run を保存**
+（同一グループ内の手動サブブロックを潰さない）、複数 import decl は `mergeImports` 準拠で
+1 run に畳む、追加 import は `astutil.AddNamedImport`（最長パス接頭辞）で配置、
+run 内でのみ group 空行を挿入、run 間の空行は原文から保持。`import _ "x" // …` の
+末尾コメント二重出力を修正（`tail_start` がコメントを跨ぐように）。**cgo（`import "C"`）は
+per-file でサブプロセスへフォールバック**（cgo preamble レイアウトは未移植のため誤検出回避）。
+検証: prometheus **725/725（-local 有無どちらも）**、fixtures 5/5、GOROOT/src は
+**byte-diff 0**（未解決は resolver フォールバックのみ）。native は「byte 一致 or subprocess 委譲」
+＝サイレントに誤らない。#2: parser 由来 panic を location 文字列で全域抑止していた hook を、
+自分の `catch_unwind` 窓だけ効くスレッドローカル guard に縮小（他所の real panic は通常表示）。
+
+Task 1b: gofmt both **6333/6333**。1c gofumpt prometheus **725/725**。1d goimports
+prometheus+fixtures **725+5/725+5**。1e gci **725/725**。
 `GUFF_NATIVE_FMT=0` で format をサブプロセスに、`--no-cache` で fmt_check も無効。
 
 ## 2. findings 同一性の検証（毎タスク必須。これを通さずにコミット禁止）
@@ -498,22 +516,24 @@ find /Users/dakimura/projects/src/github.com/dakimura/guff/prometheus -name '*.g
   prometheus+GOROOT **6333/6333** バイト一致。`Gofmt` 既定ネイティブ。`-s` は未移植→サブプロセス）。
 - **Task 1c: ネイティブ gofumpt** ✅**DONE 2026-07-22**（gofmt + gofumpt 追加規則。
   prometheus `extra-rules: true` → `gofumpt --extra` 725/725 PASS。`format()` 既定ネイティブ）。
-- **Task 1d: ネイティブ goimports** 🟡**PARTIAL**（format-only が prometheus 725/725。
-  import add/remove 未実装のため Formatter 既定はサブプロセス。`GUFF_NATIVE_FMT=1` で opt-in）。
+- **Task 1d: ネイティブ goimports** ✅**DONE 2026-07-23**（Delete unused + sibling/stdlib
+  Add + group/sort。prometheus+fixtures バイト一致。第三者 module-cache は per-file
+  サブプロセスフォールバック。Formatter 既定 native、`native_list` で `-l` 廃止）。
 - **Task 1e: ネイティブ gci** ✅**DONE 2026-07-22**（prometheus sections 725/725。
   `format()` 既定ネイティブ）。
 
 > **Check-mode: native list（2026-07-23、`-l` 廃止）+ fmt_check cache:**
-> `list_unformatted` は default-native の gofmt/gofumpt/gci では
+> `list_unformatted` は default-native の gofmt/gofumpt/gci/**goimports** では
 > `runner::native_list`（in-process `format()` して差分ファイルだけ flag、par_iter）に
 > なり、cold prefilter のサブプロセス `-l`/`gci list` を spawn しない。`GUFF_NATIVE_FMT=0`
-> のときのみ従来のシステム `-l` にフォールバック。goimports は native が format-only
-> （Task 1d 未了）のため既定サブプロセス `-l` のまま。加えて `${GUFF_CACHE}/fmt_check/v1`
+> のときのみ従来のシステム `-l` にフォールバック。加えて `${GUFF_CACHE}/fmt_check/v1`
 > に結果を永続化し、warm 2回目以降は list 自体をスキップ（format_checks **0.85→0.07s**、
 > findings 冷温同一）。`--no-cache` で無効。
 > **経緯（2026-07-22）:** `node_size` 二次バグを解消し native 全件 format が `gofumpt -l`
 > を上回った（161ms < 180ms / 725 files）ため「native が遅いから `-l`」の前提が失効し、
 > 上記の native list 差し替えが可能になった（実施済み）。
+> **Task 1d（2026-07-23）:** goimports add/remove（Delete + sibling/stdlib Add）で
+> 残っていた `goimports -l` も廃止。cold format_checks **~1.47→0.69s**（対 subprocess）。
 
 ### 対象ファイル
 - 置換対象: `crates/guff-fmt/src/{gofmt,gofumpt,goimports,gci}.rs`（現状すべて

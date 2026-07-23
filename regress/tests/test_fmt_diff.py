@@ -82,6 +82,14 @@ class BuildCmds(unittest.TestCase):
             ],
         )
 
+    def test_fixtures_corpus_resolves(self):
+        fmt_diff = _load()
+        roots = fmt_diff.resolve_corpus("fixtures")
+        self.assertTrue(any(p.name == "goimports" for p in roots))
+        files = fmt_diff.collect_go_files(roots, limit=None)
+        names = sorted({p.name for p in files})
+        self.assertIn("a.go", names)
+
 
 if __name__ == "__main__":
     unittest.main()

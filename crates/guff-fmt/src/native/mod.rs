@@ -7,7 +7,7 @@
 //! Sub-tasks:
 //! - **1b** [`gofmt`] — `go/printer` + format ✅ (default ON)
 //! - **1c** [`gofumpt`] — gofmt + gofumpt rules ✅ (default ON; prometheus `--extra`)
-//! - **1d** [`goimports`] — format-only group/sort (harness green; Formatter stays subprocess)
+//! - **1d** [`goimports`] — delete unused + sibling/stdlib add + group/sort ✅ (default ON; module-cache → subprocess)
 //! - **1e** [`gci`] — import section sorting ✅ (default ON)
 
 use crate::runner::FormatError;

@@ -301,13 +301,16 @@ impl Parser {
             if n > 0 && errs.iter().last().map(|e| e.pos.line) == Some(epos.line) {
                 return;
             }
+            // Go panics with bailout after 10 errors and recovers in ParseFile.
+            // We used to `panic_any(Bailout)` here, but that races under rayon
+            // (format_checks / parallel package parse): the panic hook fires,
+            // and RefCell borrow state during unwind has caused flaky aborts.
+            // Instead, stop recording further errors — ParseFile still returns
+            // Err(ErrorList) when any errors were collected.
             if n > 10 {
-                drop(errs);
-                panic_any(Bailout {
-                    _pos: pos,
-                    _msg: String::new(),
-                });
+                return;
             }
+            drop(errs);
         }
         self.errors.borrow_mut().add(epos, msg);
     }

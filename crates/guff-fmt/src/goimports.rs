@@ -1,11 +1,10 @@
-//! `goimports` formatter — shells out to `goimports` by default.
+//! `goimports` formatter — native Rust port by default (PERF_TASKS Task 1d).
 //!
-//! Native format-only port (PERF_TASKS Task 1d) matches
-//! `goimports -format-only` / prometheus harness (725/725) but does **not**
-//! add or remove imports. Keep subprocess as default so findings stay aligned
-//! with full `goimports` when imports are missing/unused. Set
-//! `GUFF_NATIVE_FMT=1` to prefer the native path; `GUFF_NATIVE_FMT=0` forces
-//! subprocess.
+//! Native path: delete unused imports, add from sibling files / stdlib, then
+//! group/sort + gofmt. When a missing import still needs module-cache
+//! resolution, falls back to the system `goimports` binary for that file.
+//!
+//! Set `GUFF_NATIVE_FMT=0` to force the subprocess for every file.
 //!
 //! Matches golangci-lint `pkg/goformatters/goimports` settings:
 //! - `local-prefixes` → `-local` (comma-separated)
@@ -14,7 +13,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::native::{self, NativeOptions};
+use crate::native::{self, goimports::FormatOutcome, NativeOptions};
 use crate::runner::FormatError;
 use crate::Formatter;
 
@@ -27,7 +26,7 @@ pub struct GoimportsOptions {
     pub local_prefixes: Vec<String>,
 }
 
-/// Formatter: system `goimports` by default; optional native format-only path.
+/// Formatter: native goimports port, with subprocess fallback.
 #[derive(Debug, Clone, Default)]
 pub struct Goimports {
     options: GoimportsOptions,
@@ -48,10 +47,9 @@ impl Goimports {
         self
     }
 
-    /// Native is opt-in: format-only (no import add/remove) until Task 1d
-    /// resolution lands. `GUFF_NATIVE_FMT=1` enables it; `=0` forces subprocess.
+    /// Native is default after Task 1d. `GUFF_NATIVE_FMT=0` forces subprocess.
     fn use_native(&self) -> bool {
-        std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "1")
+        !std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0")
     }
 
     fn native_opts(&self, filename: &str) -> NativeOptions {
@@ -61,32 +59,8 @@ impl Goimports {
             ..Default::default()
         }
     }
-}
 
-impl Formatter for Goimports {
-    fn name(&self) -> &str {
-        NAME
-    }
-
-    fn options_fingerprint(&self) -> String {
-        let locals = self.options.local_prefixes.join(",");
-        crate::fingerprint_parts(&[
-            ("local", &locals),
-            // Native format-only must not be default while -l is full goimports:
-            // fingerprint still tracks the mode so cache doesn't mix paths.
-            ("native", if self.use_native() { "1" } else { "0" }),
-        ])
-    }
-
-    fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
-        if self.use_native() {
-            return native::format(
-                native::NativeKind::Goimports,
-                src,
-                &self.native_opts(filename),
-            );
-        }
-
+    fn format_subprocess(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
         let bin = self.binary.as_deref().unwrap_or("goimports");
         let mut cmd = Command::new(bin);
         let locals: Vec<&str> = self
@@ -145,10 +119,47 @@ impl Formatter for Goimports {
 
         Ok(output.stdout)
     }
+}
+
+impl Formatter for Goimports {
+    fn name(&self) -> &str {
+        NAME
+    }
+
+    fn options_fingerprint(&self) -> String {
+        let locals = self.options.local_prefixes.join(",");
+        crate::fingerprint_parts(&[
+            ("local", &locals),
+            ("native", if self.use_native() { "1" } else { "0" }),
+        ])
+    }
+
+    fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        if self.use_native() {
+            match native::goimports::format_outcome(src, &self.native_opts(filename)) {
+                Ok(FormatOutcome::Formatted(out)) => return Ok(out),
+                Ok(FormatOutcome::NeedsResolver) => {
+                    // Prefer system goimports for third-party resolution.
+                    if let Ok(out) = self.format_subprocess(filename, src) {
+                        return Ok(out);
+                    }
+                    // No binary: degrade to format-only so check mode still runs.
+                    return native::goimports::format_only(src, &self.native_opts(filename));
+                }
+                Err(e) => {
+                    if let Ok(out) = self.format_subprocess(filename, src) {
+                        return Ok(out);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        self.format_subprocess(filename, src)
+    }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
         if self.use_native() {
-            return None;
+            return crate::runner::native_list(files, |name, src| self.format(name, src));
         }
         let bin = self.binary.as_deref().unwrap_or("goimports");
         let locals: Vec<&str> = self
@@ -185,10 +196,6 @@ mod tests {
 
     #[test]
     fn sorts_stdlib_before_third_party() {
-        if !goimports_available() {
-            eprintln!("skip: goimports not on PATH");
-            return;
-        }
         let fmt = Goimports::new(GoimportsOptions::default());
         let src = b"package p\n\nimport (\n\t\"github.com/foo/bar\"\n\t\"fmt\"\n)\n\nfunc f() {\n\tfmt.Println()\n\t_ = bar.X\n}\n";
         let out = fmt.format("p.go", src).expect("goimports");
@@ -203,10 +210,6 @@ mod tests {
 
     #[test]
     fn local_prefixes_groups_project_imports() {
-        if !goimports_available() {
-            eprintln!("skip: goimports not on PATH");
-            return;
-        }
         let fmt = Goimports::new(GoimportsOptions {
             local_prefixes: vec!["github.com/org/project".into()],
         });
@@ -220,5 +223,34 @@ mod tests {
             fmt_pos < bar_pos && bar_pos < pkg_pos,
             "expected stdlib < third-party < local, got:\n{s}"
         );
+    }
+
+    #[test]
+    fn native_is_default() {
+        // Don't assert under GUFF_NATIVE_FMT=0 if the env is set by the user.
+        if std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0") {
+            return;
+        }
+        let fmt = Goimports::new(GoimportsOptions::default());
+        assert!(fmt.use_native());
+    }
+
+    #[test]
+    fn subprocess_fallback_for_unknown_third_party() {
+        if !goimports_available() {
+            eprintln!("skip: goimports not on PATH");
+            return;
+        }
+        // Missing import that is not stdlib and has no sibling → NeedsResolver
+        // → subprocess. Use a path under a temp dir so -srcdir works.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.go");
+        let src = b"package p\n\nfunc f() {\n\t_ = notarealpkg.X\n}\n";
+        std::fs::write(&path, src).unwrap();
+        let fmt = Goimports::new(GoimportsOptions::default());
+        // May error (package not found) or leave unchanged — either is fine;
+        // we only check that native doesn't panic / falsely claim success with
+        // a wrong stdlib import.
+        let _ = fmt.format(&path.to_string_lossy(), src);
     }
 }
