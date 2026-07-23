@@ -1,8 +1,11 @@
 //! SA5011 — possible nil pointer dereference.
 //!
-//! Simplified port of `honnef.co/go/tools/staticcheck/sa5011`.
-//! Upstream disables this check due to false positives; we implement the same
-//! trivial SSA walk (no phi/sigma propagation).
+//! Port of `honnef.co/go/tools/staticcheck/sa5011`.
+//!
+//! Upstream relies on SSA sigma nodes so that `if x != nil { *x }` uses a
+//! different value inside the branch. When the same value is reused (no
+//! sigma), we additionally suppress reports when the deref is dominated by
+//! both the nil-check and its non-nil successor (guarded use after the check).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -10,9 +13,11 @@ use std::sync::OnceLock;
 use guff::token::Token;
 use guff_analysis::callcheck::{flatten_ssa_value, is_pointer_or_interface_type, is_slice_type};
 use guff_analysis::passes::buildir;
-use guff_analysis::{is_nil_const, AnalysisResult, Analyzer, Diagnostic, RelatedInformation, RunError, RunFn, Pass};
+use guff_analysis::{
+    is_nil_const, AnalysisResult, Analyzer, Diagnostic, RelatedInformation, RunError, RunFn, Pass,
+};
 use guff_ssa::function::Function;
-use guff_ssa::ids::InstrId;
+use guff_ssa::ids::{BlockId, InstrId};
 use guff_ssa::instr::{BinOp, FieldAddr, If, IndexAddr, InstrData, Store, UnOp};
 use guff_ssa::program::{value_type_of, Program};
 use guff_ssa::value::Value;
@@ -30,7 +35,9 @@ fn peel_load(func: &Function, v: Value) -> Value {
         return v;
     };
     match func.instrs.get(iid) {
-        InstrData::UnOp(UnOp { op: Token::MUL, x, .. }) => *x,
+        InstrData::UnOp(UnOp {
+            op: Token::MUL, x, ..
+        }) => *x,
         _ => v,
     }
 }
@@ -55,56 +62,65 @@ fn ptr_keys_equal(prog: &Program, func: &Function, a: Value, b: Value) -> bool {
     is_nil_pointer_const(prog, a) && is_nil_pointer_const(prog, b)
 }
 
-fn lookup_maybe_nil<'a>(
-    prog: &Program,
-    func: &Function,
-    maybe_nil: &'a HashMap<Value, InstrId>,
-    ptr: Value,
-) -> Option<&'a InstrId> {
-    let key = peel_load(func, ptr);
-    if let Some(id) = maybe_nil.get(&key) {
-        return Some(id);
-    }
-    maybe_nil
-        .iter()
-        .find(|(&k, _)| ptr_keys_equal(prog, func, k, key))
-        .map(|(_, id)| id)
+struct NilCheck {
+    bin_op: InstrId,
+    check_block: BlockId,
+    non_nil_block: Option<BlockId>,
 }
 
-fn nil_check_partner(
-    func: &Function,
-    cond: Value,
-) -> Option<(InstrId, Value, Value)> {
+fn nil_check_partner(func: &Function, cond: Value) -> Option<(InstrId, Value, Value, bool)> {
     let Value::Instr(iid) = cond else {
         return None;
     };
     let InstrData::BinOp(BinOp { op, x, y, .. }) = func.instrs.get(iid) else {
         return None;
     };
-    if *op != Token::EQL && *op != Token::NEQ {
-        return None;
-    }
-    Some((iid, *x, *y))
+    let eq_nil = match *op {
+        Token::EQL => true,
+        Token::NEQ => false,
+        _ => return None,
+    };
+    Some((iid, *x, *y, eq_nil))
 }
 
-fn collect_maybe_nil(
-    prog: &Program,
-    func: &Function,
-) -> HashMap<Value, InstrId> {
+fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, NilCheck> {
     let mut maybe_nil = HashMap::new();
-    for (_, block) in func.blocks.iter() {
+    for (bid, block) in func.blocks.iter() {
         for &iid in &block.instrs {
             let InstrData::If(If { cond }) = func.instrs.get(iid) else {
                 continue;
             };
-            let Some((bin_id, x, y)) = nil_check_partner(func, *cond) else {
+            let Some((bin_id, x, y, eq_nil)) = nil_check_partner(func, *cond) else {
                 continue;
             };
+            let non_nil_block = if block.succs.len() >= 2 {
+                Some(if eq_nil {
+                    block.succs[1]
+                } else {
+                    block.succs[0]
+                })
+            } else {
+                None
+            };
             if is_nil_const_operand(prog, func, x) {
-                maybe_nil.insert(peel_load(func, y), bin_id);
+                maybe_nil.insert(
+                    peel_load(func, y),
+                    NilCheck {
+                        bin_op: bin_id,
+                        check_block: bid,
+                        non_nil_block,
+                    },
+                );
             }
             if is_nil_const_operand(prog, func, y) {
-                maybe_nil.insert(peel_load(func, x), bin_id);
+                maybe_nil.insert(
+                    peel_load(func, x),
+                    NilCheck {
+                        bin_op: bin_id,
+                        check_block: bid,
+                        non_nil_block,
+                    },
+                );
             }
         }
     }
@@ -131,6 +147,45 @@ fn is_index_addr_on_slice(
     is_slice_type(arena, x_typ)
 }
 
+fn is_guarded_by_non_nil(func: &Function, check: &NilCheck, deref_block: BlockId) -> bool {
+    let Some(non_nil_block) = check.non_nil_block else {
+        return false;
+    };
+    let check_bb = func.blocks.get(check.check_block);
+    let non_nil = func.blocks.get(non_nil_block);
+    let deref = func.blocks.get(deref_block);
+    check_bb.dominates(deref) && (non_nil.dominates(deref) || non_nil_block == deref_block)
+}
+
+fn lookup_maybe_nil<'a>(
+    prog: &Program,
+    func: &Function,
+    maybe_nil: &'a HashMap<Value, NilCheck>,
+    ptr: Value,
+    deref_block: BlockId,
+) -> Option<&'a NilCheck> {
+    let key = peel_load(func, ptr);
+    if let Some(check) = maybe_nil.get(&key) {
+        // Exact key: if guarded, do not fall through to a nil-const alias scan
+        // (that could spuriously report a different check).
+        if is_guarded_by_non_nil(func, check, deref_block) {
+            return None;
+        }
+        return Some(check);
+    }
+    // Nil-pointer-const keys may not be pointer-identical. Only then scan.
+    if !is_nil_pointer_const(prog, key) {
+        return None;
+    }
+    maybe_nil.iter().find_map(|(&k, check)| {
+        if ptr_keys_equal(prog, func, k, key) && !is_guarded_by_non_nil(func, check, deref_block) {
+            Some(check)
+        } else {
+            None
+        }
+    })
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut reports = Vec::new();
     {
@@ -142,11 +197,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         for &fid in &ir.src_funcs {
             let func = ir.prog.functions.get(fid);
             let maybe_nil = collect_maybe_nil(&ir.prog, func);
+            if maybe_nil.is_empty() {
+                continue;
+            }
 
-            for (_, block) in func.blocks.iter() {
+            for (bid, block) in func.blocks.iter() {
                 for &iid in &block.instrs {
                     let ptr = match func.instrs.get(iid) {
-                        InstrData::UnOp(UnOp { op: Token::MUL, x, .. }) => Some(*x),
+                        InstrData::UnOp(UnOp {
+                            op: Token::MUL, x, ..
+                        }) => Some(*x),
                         InstrData::Store(Store { addr, .. }) => Some(*addr),
                         InstrData::IndexAddr(ia) => {
                             if is_index_addr_on_slice(&ir.prog, func, arena, ia) {
@@ -163,13 +223,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if cannot_be_nil_source(func, ptr) {
                         continue;
                     }
-                    let Some(nil_check) = lookup_maybe_nil(&ir.prog, func, &maybe_nil, ptr) else {
+                    let Some(nil_check) = lookup_maybe_nil(&ir.prog, func, &maybe_nil, ptr, bid)
+                    else {
                         continue;
                     };
-                    reports.push((
-                        func.pos(iid).0 as u32,
-                        func.pos(*nil_check).0 as u32,
-                    ));
+                    reports.push((func.pos(iid).0 as u32, func.pos(nil_check.bin_op).0 as u32));
                 }
             }
         }

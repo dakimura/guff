@@ -24,6 +24,14 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let n = pass.files().len();
     for i in 0..n {
         let file = &pass.files()[i];
+        // Upstream revive also allows blank imports in `*_test.go` (internal
+        // tests use `package foo`, not `package foo_test`).
+        if paths
+            .get(i)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
+        {
+            continue;
+        }
         // Load uses Mode::NONE (no PARSE_COMMENTS), so ImportSpec.comment is
         // usually unset. Re-parse with comments to match upstream revive, but
         // always report positions from the package's shared FileSet (`file`) —

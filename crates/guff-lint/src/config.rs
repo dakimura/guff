@@ -1027,8 +1027,9 @@ struct PresetExcludePattern {
 }
 
 /// Subset of golangci's exclusion presets → EXC* patterns.
+///
+/// Mapped from golangci-lint docs / `exclusion_presets.go` (v2 presets).
 fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
-    // Mapped from golangci `pkg/result/processors/exclusion_presets.go` (approx).
     static PATTERNS: &[PresetExcludePattern] = &[
         // stdErrorHandling
         PresetExcludePattern {
@@ -1037,6 +1038,11 @@ fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
             pattern: r"Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print(f|ln)?|os\.(Un)?Setenv). is not checked",
         },
         // comments
+        PresetExcludePattern {
+            preset: "comments",
+            linter: "staticcheck",
+            pattern: r"(ST1000|ST1020|ST1021|ST1022)",
+        },
         PresetExcludePattern {
             preset: "comments",
             linter: "revive",
@@ -1065,16 +1071,6 @@ fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
         // commonFalsePositives
         PresetExcludePattern {
             preset: "commonFalsePositives",
-            linter: "govet",
-            pattern: r"(possible misuse of unsafe.Pointer|should have signature)",
-        },
-        PresetExcludePattern {
-            preset: "commonFalsePositives",
-            linter: "staticcheck",
-            pattern: "SA4011",
-        },
-        PresetExcludePattern {
-            preset: "commonFalsePositives",
             linter: "gosec",
             pattern: "G103: Use of unsafe calls should be audited",
         },
@@ -1086,13 +1082,23 @@ fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
         PresetExcludePattern {
             preset: "commonFalsePositives",
             linter: "gosec",
-            pattern: "G104",
+            pattern: "G304: Potential file inclusion via variable",
         },
-        // legacy (remaining EXC*)
+        // legacy
         PresetExcludePattern {
             preset: "legacy",
-            linter: "golint",
-            pattern: r"func name will be used as test\.Test.* by other packages, and that stutters; consider calling this",
+            linter: "govet",
+            pattern: r"(possible misuse of unsafe.Pointer|should have signature)",
+        },
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "staticcheck",
+            pattern: "SA4011",
+        },
+        PresetExcludePattern {
+            preset: "legacy",
+            linter: "gosec",
+            pattern: "G104",
         },
         PresetExcludePattern {
             preset: "legacy",
@@ -1101,13 +1107,8 @@ fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
         },
         PresetExcludePattern {
             preset: "legacy",
-            linter: "gosec",
-            pattern: "G304: Potential file inclusion via variable",
-        },
-        PresetExcludePattern {
-            preset: "legacy",
-            linter: "stylecheck",
-            pattern: r"(ST1000|ST1020|ST1021|ST1022)",
+            linter: "golint",
+            pattern: r"func name will be used as test\.Test.* by other packages, and that stutters; consider calling this",
         },
     ];
     PATTERNS

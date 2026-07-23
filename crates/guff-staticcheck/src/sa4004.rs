@@ -1,20 +1,19 @@
 //! SA4004 — loop exits unconditionally after one iteration.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa4004` (simplified).
+//! Port of `honnef.co/go/tools/staticcheck/sa4004`.
 
 use std::sync::OnceLock;
 
 use guff::ast::{BranchStmt, ReturnStmt, Stmt};
 use guff::token::Token;
-use guff::walk::NodeRef;
+use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "SA4004 requires inspect analyzer".to_string())?
-        .clone();
+        .ok_or_else(|| "SA4004 requires inspect analyzer".to_string())?;
     let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder(pass.files(), |node| {
         let body = match node {
@@ -36,6 +35,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
             let mut unconditional: Option<u32> = None;
             let mut has_branching = false;
+            let mut give_up = false;
             for s in loop_body {
                 match s {
                     Stmt::BranchStmt(BranchStmt {
@@ -49,22 +49,51 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         label: None,
                         ..
                     }) => {
-                        unconditional = None;
-                        return;
+                        // Top-level continue: loop is not unconditionally terminated.
+                        give_up = true;
+                        break;
                     }
                     Stmt::ReturnStmt(ReturnStmt { return_, .. }) => {
                         unconditional = Some(return_.0 as u32)
                     }
-                    Stmt::IfStmt(_) | Stmt::ForStmt(_) | Stmt::RangeStmt(_) | Stmt::SwitchStmt(_) | Stmt::SelectStmt(_) => {
+                    Stmt::IfStmt(_)
+                    | Stmt::ForStmt(_)
+                    | Stmt::RangeStmt(_)
+                    | Stmt::SwitchStmt(_)
+                    | Stmt::SelectStmt(_) => {
                         has_branching = true;
                     }
                     _ => {}
                 }
             }
+            if give_up || unconditional.is_none() || !has_branching {
+                continue;
+            }
+            // Upstream second pass: nested goto / continue cancels the finding.
+            let mut nested_cancels = false;
+            for s in loop_body {
+                walk::preorder(walk::stmt_ref(s), |n| {
+                    if nested_cancels {
+                        return false;
+                    }
+                    if let NodeRef::BranchStmt(b) = n {
+                        match b.tok {
+                            Token::GOTO => nested_cancels = true,
+                            Token::CONTINUE if b.label.is_none() => nested_cancels = true,
+                            _ => {}
+                        }
+                    }
+                    true
+                });
+            }
+            if nested_cancels {
+                continue;
+            }
             if let Some(pos) = unconditional {
-                if has_branching {
-                    pending.push((pos, "the surrounding loop is unconditionally terminated".into()));
-                }
+                pending.push((
+                    pos,
+                    "the surrounding loop is unconditionally terminated".into(),
+                ));
             }
         }
     });

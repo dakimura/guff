@@ -1,6 +1,7 @@
 //! Enabled revive rules and per-rule arguments.
 
 use std::cell::RefCell;
+use std::sync::OnceLock;
 
 use guff_analysis::Pass;
 
@@ -125,13 +126,21 @@ pub fn effective_settings(pass: &Pass<'_>) -> Settings {
     THREAD_SETTINGS.with(|slot| slot.borrow().clone().unwrap_or_default())
 }
 
+/// DEFAULT ∪ EXTENDED rule names, allocated once.
+pub fn all_rules() -> &'static [&'static str] {
+    static ALL: OnceLock<Vec<&'static str>> = OnceLock::new();
+    ALL.get_or_init(|| {
+        let mut v = Vec::with_capacity(DEFAULT_RULES.len() + EXTENDED_RULES.len());
+        v.extend_from_slice(DEFAULT_RULES);
+        v.extend_from_slice(EXTENDED_RULES);
+        v
+    })
+    .as_slice()
+}
+
 /// Returns whether `name` is enabled under the current configuration.
 pub fn rule_enabled(pass: &Pass<'_>, name: &str) -> bool {
-    let settings = effective_settings(pass);
-    if let Some(rules) = settings.rules.as_ref() {
-        return rules.iter().any(|r| r.name == name && !r.disabled);
-    }
-    DEFAULT_RULES.contains(&name)
+    effective_settings(pass).rule_enabled(name, DEFAULT_RULES, all_rules())
 }
 
 pub fn rule_severity(pass: &Pass<'_>, name: &str) -> String {
@@ -291,6 +300,8 @@ pub fn extended_test_settings() -> Settings {
         rules: Some(rules),
         confidence: None,
         ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
     }
 }
 

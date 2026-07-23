@@ -158,7 +158,10 @@ pub struct IssueFilter {
 
 #[derive(Debug, Clone)]
 struct CompiledRule {
+    /// Original linter names from config (for exact match).
     linters: Vec<String>,
+    /// [`normalize_linter_name`] forms of [`Self::linters`] (computed once).
+    linters_norm: Vec<String>,
     path: Option<Regex>,
     path_except: Option<Regex>,
     text: Option<Regex>,
@@ -307,20 +310,38 @@ impl IssueFilter {
                 .iter()
                 .any(|re| re.is_match(&issue.text))
         });
-        issues.retain(|issue| {
-            !self
-                .exclude_rules
-                .iter()
-                .any(|rule| rule.matches(issue))
-        });
 
-        if !packages.is_empty() {
-            let mut nolint = NolintIndex::from_packages_for_issues(
-                packages,
-                &issues,
-                self.report_unused_nolint,
-            );
-            issues = nolint.filter_issues(issues, self.report_unused_nolint);
+        // When reporting unused `//nolint`, build the index and mark matches
+        // *before* exclude-rules so directives that only cover preset-excluded
+        // findings still count as used (golangci analysis-level parity).
+        // When unused reporting is off (typical; prometheus), exclude first so
+        // we index fewer files and skip the extra mark pass.
+        if self.report_unused_nolint && !packages.is_empty() {
+            let mut idx =
+                NolintIndex::from_packages_for_issues(packages, &issues, true);
+            idx.mark_matches(&issues);
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue))
+            });
+            issues = idx.filter_issues(issues, true);
+        } else {
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue))
+            });
+            if !packages.is_empty() {
+                let mut idx = NolintIndex::from_packages_for_issues(
+                    packages,
+                    &issues,
+                    false,
+                );
+                issues = idx.filter_issues(issues, false);
+            }
         }
 
         if self.uniq_by_line {
@@ -429,9 +450,16 @@ impl CompiledRule {
             }
         }
         if !self.linters.is_empty() {
-            let ok = self.linters.iter().any(|l| {
-                l == &issue.from_linter || l == &issue.analyzer
-            });
+            let from = crate::config::normalize_linter_name(&issue.from_linter);
+            let analyzer = crate::config::normalize_linter_name(&issue.analyzer);
+            let ok = self
+                .linters_norm
+                .iter()
+                .any(|want| want == from || want == analyzer)
+                || self
+                    .linters
+                    .iter()
+                    .any(|l| l == &issue.from_linter || l == &issue.analyzer);
             if !ok {
                 return false;
             }
@@ -462,6 +490,11 @@ fn compile_rule(rule: &ExcludeRule, case_prefix: &str) -> Result<CompiledRule, S
         _ => None,
     };
     Ok(CompiledRule {
+        linters_norm: rule
+            .linters
+            .iter()
+            .map(|l| crate::config::normalize_linter_name(l).to_string())
+            .collect(),
         linters: rule.linters.clone(),
         path,
         path_except,

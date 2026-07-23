@@ -182,6 +182,12 @@ pub struct ReviveSettings {
     /// When true, skip diagnostics in generated files.
     #[serde(default, rename = "ignore-generated-header")]
     pub ignore_generated_header: bool,
+    /// Merge golint-default rules when a `rules:` list is present (golangci).
+    #[serde(default, rename = "enable-default-rules")]
+    pub enable_default_rules: bool,
+    /// Enable every known revive rule (golangci).
+    #[serde(default, rename = "enable-all-rules")]
+    pub enable_all_rules: bool,
 }
 
 /// One revive rule entry from golangci-lint YAML.
@@ -2474,6 +2480,8 @@ impl ReviveSettings {
             rules,
             confidence: self.confidence,
             ignore_generated_header: self.ignore_generated_header,
+            enable_default_rules: self.enable_default_rules,
+            enable_all_rules: self.enable_all_rules,
         }
     }
 }

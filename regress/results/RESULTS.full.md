@@ -8,14 +8,14 @@
 
 | Metric | Baseline | Measured |
 |--------|---------:|---------:|
-| wall_seconds | 7.730 | 7.730 |
-| peak_rss_bytes | 7,649,673,216 | 7,649,673,216 |
-| guff_issues | 424 | 424 |
+| wall_seconds | 7.730 | 8.410 |
+| peak_rss_bytes | 7,649,673,216 | 7,957,741,568 |
+| guff_issues | 411 | 411 |
 | golangci_issues | 20 | 20 |
 | both | 16 | 16 |
-| guff_only | 408 | 408 |
+| guff_only | 395 | 395 |
 | golangci_only | 4 | 4 |
-| precision | 0.0377 | 0.0377 |
+| precision | 0.0389 | 0.0389 |
 | recall | 0.8000 | 0.8000 |
 
 ## PASS

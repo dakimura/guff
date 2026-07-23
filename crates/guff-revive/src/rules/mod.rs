@@ -107,9 +107,11 @@ use crate::config;
 use crate::failure::Failure;
 
 pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
+    let settings = config::effective_settings(pass);
+    let all = config::all_rules();
     let mut out = Vec::new();
     let mut run = |name: &str, f: fn(&Pass<'_>) -> Vec<Failure>| {
-        if config::rule_enabled(pass, name) {
+        if settings.rule_enabled(name, config::DEFAULT_RULES, all) {
             out.extend(f(pass));
         }
     };

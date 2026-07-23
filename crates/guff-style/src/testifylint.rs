@@ -3066,12 +3066,27 @@ fn need_skip_require_error(
     let Some(block_calls) = block_idxs.get(&block.id) else {
         return false;
     };
-    let is_last = block_calls.last().copied() == Some(curr_idx);
+    // Only testify assertions in this block count. Nested CallExprs inside
+    // assertion args (e.g. `assert.NoError(t, f())`) and assertions in later
+    // test functions must not make this assertion look non-final.
+    let is_last = block_calls
+        .iter()
+        .rev()
+        .copied()
+        .find(|&i| calls[i].testify.is_some())
+        == Some(curr_idx);
 
     let mut no_calls_after = true;
     let block_ends_with_return = matches!(block.list.last(), Some(Stmt::ReturnStmt(_)));
     if !block_ends_with_return {
-        for next in calls.iter().skip(curr_idx + 1) {
+        for &next_idx in block_calls {
+            if next_idx <= curr_idx {
+                continue;
+            }
+            let next = &calls[next_idx];
+            if next.testify.is_none() {
+                continue;
+            }
             let mut next_in_else = false;
             if let Some(p_if) = curr.parent_if {
                 if let Some(else_stmt) = &p_if.else_ {

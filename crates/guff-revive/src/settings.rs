@@ -27,12 +27,17 @@ pub struct Settings {
     /// Default severity for failures when a rule does not set one.
     pub severity: Option<String>,
     /// When `None`, only [`super::config::DEFAULT_RULES`] run (golint behaviour).
-    /// When `Some`, only listed rules (minus `disabled`) run.
+    /// When `Some`, listed rules (minus `disabled`) run; combined with
+    /// [`Self::enable_default_rules`] / [`Self::enable_all_rules`] like golangci-lint.
     pub rules: Option<Vec<RuleSetting>>,
     /// Minimum failure confidence to report (revive default: 0.8).
     pub confidence: Option<f64>,
     /// When true, skip diagnostics in generated files.
     pub ignore_generated_header: bool,
+    /// When true, also enable golint-default rules (golangci `enable-default-rules`).
+    pub enable_default_rules: bool,
+    /// When true, enable all known revive rules (golangci `enable-all-rules`).
+    pub enable_all_rules: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +47,8 @@ impl Default for Settings {
             rules: None,
             confidence: None,
             ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
         }
     }
 }
@@ -56,12 +63,19 @@ impl Settings {
         rules.iter().find(|r| r.name == name)
     }
 
-    pub fn rule_enabled(&self, name: &str, default_rules: &[&str]) -> bool {
+    pub fn rule_enabled(&self, name: &str, default_rules: &[&str], all_rules: &[&str]) -> bool {
+        if let Some(rule) = self.rule(name) {
+            return !rule.disabled;
+        }
+        if self.enable_all_rules {
+            return all_rules.contains(&name);
+        }
+        if self.enable_default_rules {
+            return default_rules.contains(&name);
+        }
         match &self.rules {
             None => default_rules.contains(&name),
-            Some(rules) => rules
-                .iter()
-                .any(|r| r.name == name && !r.disabled),
+            Some(_) => false,
         }
     }
 

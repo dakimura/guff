@@ -266,6 +266,8 @@ fn revive_applies_per_rule_and_global_severity() {
         ]),
         confidence: None,
         ignore_generated_header: false,
+        enable_default_rules: false,
+        enable_all_rules: false,
     };
     let mut bag = SettingsBag::new();
     bag.insert("revive", settings);

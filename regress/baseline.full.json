@@ -12,12 +12,12 @@
     "peak_rss_bytes": 7649673216
   },
   "compat": {
-    "guff_issues": 424,
+    "guff_issues": 411,
     "golangci_issues": 20,
     "both": 16,
-    "guff_only": 408,
+    "guff_only": 395,
     "golangci_only": 4,
-    "precision": 0.03773584905660377,
+    "precision": 0.038929440389294405,
     "recall": 0.8
   },
   "tolerances": {

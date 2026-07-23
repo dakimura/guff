@@ -161,6 +161,19 @@ impl NolintIndex {
         out
     }
 
+    /// Record which directives would suppress `issues` without dropping them.
+    ///
+    /// Used so that findings later removed by exclusion presets still count as
+    /// "using" a `//nolint` (golangci analysis-level nolint parity).
+    pub fn mark_matches(&mut self, issues: &[Issue]) {
+        for issue in issues {
+            if issue.from_linter == NOLINTLINT_NAME {
+                continue;
+            }
+            let _ = self.suppress(issue);
+        }
+    }
+
     /// Drop issues covered by a nolint directive. Records matched linters.
     ///
     /// When `report_unused`, unused directives become `nolintlint` issues.
