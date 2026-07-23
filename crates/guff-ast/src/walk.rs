@@ -25,6 +25,9 @@
 // Visitor mirrors Go's "return nil from Visit to skip subtree"
 // pattern using `enter -> bool` (true → descend) plus an optional
 // `leave` hook for the trailing `v.Visit(nil)` call.
+//
+// Children are visited via direct recursion through [`for_each_child`]
+// — no per-node child-list allocation.
 
 use crate::ast::*;
 
@@ -267,15 +270,9 @@ pub fn walk<'a, V: Visitor<'a>>(v: &mut V, node: NodeRef<'a>) {
     if !v.enter(node) {
         return;
     }
-    // Collect children into a small Vec, then walk. Allocating once
-    // per node keeps both `walk` (trait-based) and `preorder_stack`
-    // (closure-based) able to share the same dispatch without the
-    // recursive-closure-mutates-self borrow-checker fight.
-    let mut children: Vec<NodeRef<'a>> = Vec::new();
-    for_each_child(node, |c| children.push(c));
-    for c in children {
-        walk(v, c);
-    }
+    // Descend in place — no child-list allocation. Same pattern as
+    // `parser_resolver` (`for_each_child` → recursive call on `&mut self`).
+    for_each_child(node, |c| walk(v, c));
     v.leave(node);
 }
 
@@ -668,13 +665,7 @@ where
         if !f(Some(node)) {
             return;
         }
-        // Snapshot children so we can recurse without holding a
-        // borrow on `f` across the loop.
-        let mut children: Vec<NodeRef<'a>> = Vec::new();
-        for_each_child(node, |c| children.push(c));
-        for c in children {
-            rec(c, f);
-        }
+        for_each_child(node, |c| rec(c, f));
         f(None);
     }
     rec(node, &mut f);
@@ -687,15 +678,22 @@ pub fn preorder<'a, F>(node: NodeRef<'a>, mut f: F)
 where
     F: FnMut(NodeRef<'a>) -> bool,
 {
-    let mut ok = true;
-    inspect(node, |n| {
-        if let Some(node) = n {
-            if ok {
-                ok = f(node);
-            }
+    fn rec<'a, F>(node: NodeRef<'a>, f: &mut F) -> bool
+    where
+        F: FnMut(NodeRef<'a>) -> bool,
+    {
+        if !f(node) {
+            return false;
         }
+        let mut ok = true;
+        for_each_child(node, |c| {
+            if ok {
+                ok = rec(c, f);
+            }
+        });
         ok
-    });
+    }
+    let _ = rec(node, &mut f);
 }
 
 /// `preorder_stack(root, stack, f)` mirrors Go's `ast.PreorderStack`.
@@ -719,11 +717,7 @@ where
             return;
         }
         stack.push(node);
-        let mut children: Vec<NodeRef<'a>> = Vec::new();
-        for_each_child(node, |c| children.push(c));
-        for c in children {
-            rec(c, stack, f);
-        }
+        for_each_child(node, |c| rec(c, stack, f));
         stack.pop();
     }
     rec(root, stack, &mut f);
