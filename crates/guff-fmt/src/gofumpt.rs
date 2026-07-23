@@ -158,12 +158,11 @@ impl Formatter for Gofumpt {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
-        // Native path: format each file in-process and flag those that differ.
-        // In-process format of the whole tree now outpaces `gofumpt -l` (native
-        // 161ms < `-l` 180ms on 725 files after the node_size memo fix — see
-        // PERF_TASKS Task 1), so the cold check no longer spawns a subprocess.
+        // Native path: return None so the runner formats each file once via
+        // `check_file` (avoids list-then-reformat double work on flagged files).
+        // Subprocess `-l` stays for `GUFF_NATIVE_FMT=0`.
         if self.use_native() {
-            return crate::runner::native_list(files, |name, src| self.format(name, src));
+            return None;
         }
         // Subprocess prefilter (`GUFF_NATIVE_FMT=0`): system `gofumpt -l`.
         let bin = self.binary.as_deref().unwrap_or("gofumpt");

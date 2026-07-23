@@ -169,10 +169,11 @@ impl Formatter for Gofmt {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
-        // Native path: format each file in-process and flag those that differ —
-        // no `gofmt -l` subprocess (native now beats it; PERF_TASKS Task 1).
+        // Native path: return None so the runner's per-file `check_file` path
+        // formats each file once. A prior `native_list` pre-pass would format
+        // the whole tree and then re-format every flagged file in `check_file`.
         if self.use_native() {
-            return crate::runner::native_list(files, |name, src| self.format(name, src));
+            return None;
         }
         // Subprocess prefilter (`GUFF_NATIVE_FMT=0`): system `gofmt -l`.
         let bin = self.binary.as_deref().unwrap_or("gofmt");

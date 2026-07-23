@@ -158,8 +158,9 @@ impl Formatter for Goimports {
     }
 
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
+        // Native: skip list pre-pass — runner `check_file` formats once per file.
         if self.use_native() {
-            return crate::runner::native_list(files, |name, src| self.format(name, src));
+            return None;
         }
         let bin = self.binary.as_deref().unwrap_or("goimports");
         let locals: Vec<&str> = self

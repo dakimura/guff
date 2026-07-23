@@ -160,13 +160,13 @@ impl Runner {
             }
         }
 
-        // Fast path: when a single formatter exposes a batch "list unformatted
-        // files" mode (`gofmt -l`, `gci list`, …), one invocation flags the
-        // (usually small) subset of files whose formatting differs, and we run
-        // the per-file diff only on those. Findings are byte-identical: files
-        // the tool does not flag satisfy `format(f) == f`, so `check_file` would
-        // produce nothing for them anyway. Generated / excluded filtering still
-        // happens per-file inside `check_file` on the flagged subset.
+        // Subprocess fast path: when a single formatter exposes batch "list
+        // unformatted" (`gofmt -l`, `gci list`, …), one invocation flags the
+        // (usually small) subset whose formatting differs, and we run the
+        // per-file diff only on those. Native formatters return `None` here so
+        // we format each file once in `check_file` (a list pre-pass would
+        // re-format every flagged file). Generated / excluded filtering stays
+        // inside `check_file`.
         let targets: Vec<PathBuf> = match self.meta.batch_list_unformatted(&files) {
             Some(flagged) => map_flagged(&files, &flagged).unwrap_or(files),
             None => files,
@@ -519,44 +519,6 @@ pub(crate) fn batch_list(
         .map(|chunk| run_list_chunk(chunk, &configure))
         .collect();
     per.map(|v| v.into_iter().flatten().collect())
-}
-
-/// Native (in-process) equivalent of a formatter's external `-l` list mode:
-/// read each file, format it via `format`, and flag the ones whose formatting
-/// differs. Used by the default-native formatters (gofmt/gofumpt/gci) so the
-/// cold check path no longer spawns a `-l`/`list` subprocess — native
-/// `format()` now outpaces it (PERF_TASKS Task 1: native gofumpt 161ms <
-/// `gofumpt -l` 180ms on 725 files) and removes the external-tool dependency.
-///
-/// A file that can't be read, or that `format` fails on, is flagged rather than
-/// dropped: the caller runs the per-file [`Runner::check_file`] on the flagged
-/// subset, which re-reads/re-formats it and reproduces the exact I/O or format
-/// error — or, for generated/excluded files, drops it — so behavior matches the
-/// old subprocess path (`-l` also can't see generated/excluded exclusions; that
-/// filtering has always happened per-file in `check_file`). `format` must be the
-/// same formatting `check_file` applies, so the flagged set is exactly the files
-/// that will yield a finding. Runs in parallel; always returns `Some`.
-pub(crate) fn native_list<F>(files: &[&Path], format: F) -> Option<Vec<PathBuf>>
-where
-    F: Fn(&str, &[u8]) -> Result<Vec<u8>, FormatError> + Sync,
-{
-    let flagged: Vec<PathBuf> = files
-        .par_iter()
-        .filter_map(|path| {
-            let src = match fs::read(path) {
-                Ok(b) => b,
-                // Unreadable → flag so check_file reproduces the I/O error.
-                Err(_) => return Some(path.to_path_buf()),
-            };
-            match format(&path.to_string_lossy(), &src) {
-                Ok(out) if out == src => None,
-                // Differs, or format failed → flag (check_file emits the finding
-                // or reproduces the error / drops it if generated).
-                Ok(_) | Err(_) => Some(path.to_path_buf()),
-            }
-        })
-        .collect();
-    Some(flagged)
 }
 
 /// One chunked invocation for [`batch_list`]. `None` = spawn failed or the tool
