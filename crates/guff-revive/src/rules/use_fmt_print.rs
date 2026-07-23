@@ -8,36 +8,66 @@ use crate::astfmt::expr_fmt;
 use crate::failure::Failure;
 use crate::util::unparen;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut redefines_print = false;
-    let mut redefines_println = false;
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            if f.recv.is_some() {
-                continue;
+pub struct Checker {
+    redefines_print: bool,
+    redefines_println: bool,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new(pass: &Pass<'_>) -> Self {
+        let mut redefines_print = false;
+        let mut redefines_println = false;
+        for file in pass.files() {
+            for decl in &file.decls {
+                let Decl::FuncDecl(f) = decl else {
+                    continue;
+                };
+                if f.recv.is_some() {
+                    continue;
+                }
+                match f.name.name.as_str() {
+                    "print" => redefines_print = true,
+                    "println" => redefines_println = true,
+                    _ => {}
+                }
             }
-            match f.name.name.as_str() {
-                "print" => redefines_print = true,
-                "println" => redefines_println = true,
-                _ => {}
-            }
+        }
+        Self {
+            redefines_print,
+            redefines_println,
+            failures: Vec::new(),
         }
     }
 
-    let mut failures = Vec::new();
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::CallExpr(call) = n else {
+            return;
+        };
+        check_call(
+            call,
+            self.redefines_print,
+            self.redefines_println,
+            &mut self.failures,
+        );
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
-                return true;
-            };
-            check_call(call, redefines_print, redefines_println, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn check_call(
@@ -66,6 +96,6 @@ fn check_call(
         message: format!(
             "avoid using built-in function \"{builtin}\", replace it by \"fmt.F{builtin}(os.Stderr, {args})\""
         ),
-            confidence: None,
-        });
+        confidence: None,
+    });
 }

@@ -9,46 +9,65 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{is_blank_ident, unparen};
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::RangeStmt(s) => require_no_type_assert(&s.x, &mut self.failures),
+            NodeRef::SwitchStmt(s) => {
+                if let Some(tag) = &s.tag {
+                    require_no_type_assert(tag, &mut self.failures);
+                    require_binary_without_type_assert(tag, &mut self.failures);
+                }
+            }
+            NodeRef::ReturnStmt(r) => {
+                for e in &r.results {
+                    require_no_type_assert(e, &mut self.failures);
+                }
+            }
+            NodeRef::AssignStmt(a) => handle_assign(a, &mut self.failures),
+            NodeRef::IfStmt(i) => {
+                if let Expr::BinaryExpr(b) = unparen(&i.cond) {
+                    require_no_type_assert(&b.x, &mut self.failures);
+                    require_no_type_assert(&b.y, &mut self.failures);
+                }
+            }
+            NodeRef::CaseClause(c) => {
+                for e in &c.list {
+                    require_no_type_assert(e, &mut self.failures);
+                    require_binary_without_type_assert(e, &mut self.failures);
+                }
+            }
+            NodeRef::SendStmt(s) => require_no_type_assert(&s.value, &mut self.failures),
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::RangeStmt(s) => require_no_type_assert(&s.x, &mut failures),
-                NodeRef::SwitchStmt(s) => {
-                    if let Some(tag) = &s.tag {
-                        require_no_type_assert(tag, &mut failures);
-                        require_binary_without_type_assert(tag, &mut failures);
-                    }
-                }
-                NodeRef::ReturnStmt(r) => {
-                    for e in &r.results {
-                        require_no_type_assert(e, &mut failures);
-                    }
-                }
-                NodeRef::AssignStmt(a) => handle_assign(a, &mut failures),
-                NodeRef::IfStmt(i) => {
-                    if let Expr::BinaryExpr(b) = unparen(&i.cond) {
-                        require_no_type_assert(&b.x, &mut failures);
-                        require_no_type_assert(&b.y, &mut failures);
-                    }
-                }
-                NodeRef::CaseClause(c) => {
-                    for e in &c.list {
-                        require_no_type_assert(e, &mut failures);
-                        require_binary_without_type_assert(e, &mut failures);
-                    }
-                }
-                NodeRef::SendStmt(s) => require_no_type_assert(&s.value, &mut failures),
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn is_type_switch(e: &TypeAssertExpr) -> bool {

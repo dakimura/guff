@@ -9,19 +9,42 @@ use guff_types::basic::BasicKind;
 use crate::failure::Failure;
 use crate::util::{is_pkg_dot_name, type_of};
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::CallExpr(call) = n else { return; };
+                    check_call(self.pass, call, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
-                return true;
-            };
-            check_call(pass, call, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     if !is_pkg_dot_name(&call.fun, "context", "WithValue") || call.args.len() != 3 {

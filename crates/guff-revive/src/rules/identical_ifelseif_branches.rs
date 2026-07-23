@@ -8,21 +8,44 @@ use crate::astfmt::{block_fmt, stmt_fmt};
 use crate::failure::Failure;
 use crate::util::line_of;
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::IfStmt(if_stmt) = n else { return; };
+                    if matches!(if_stmt.else_.as_deref(), Some(Stmt::IfStmt(_))) {
+                        check_chain(self.pass, if_stmt, &mut self.failures);
+                    }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::IfStmt(if_stmt)) = n else {
-                return true;
-            };
-            if matches!(if_stmt.else_.as_deref(), Some(Stmt::IfStmt(_))) {
-                check_chain(pass, if_stmt, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_chain(pass: &Pass<'_>, start: &IfStmt, failures: &mut Vec<Failure>) {
     let mut branches: Vec<(String, usize)> = Vec::new();

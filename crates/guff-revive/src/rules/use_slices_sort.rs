@@ -7,26 +7,47 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::unparen;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::CallExpr(call) = n else { return; };
+                    if let Some((sort_method, slices_method)) = sort_replacement(&call.fun) {
+                        self.failures.push(Failure {
+                            rule: "use-slices-sort",
+                            pos: call.fun.pos().0 as u32,
+                            message: format!("replace sort.{sort_method} by slices.{slices_method}"),
+                    confidence: None,
+                });
+                    }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
-                return true;
-            };
-            if let Some((sort_method, slices_method)) = sort_replacement(&call.fun) {
-                failures.push(Failure {
-                    rule: "use-slices-sort",
-                    pos: call.fun.pos().0 as u32,
-                    message: format!("replace sort.{sort_method} by slices.{slices_method}"),
-            confidence: None,
-        });
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn sort_replacement(fun: &Expr) -> Option<(&str, &'static str)> {
     let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(fun) else {

@@ -1,36 +1,57 @@
 //! `unused-parameter` — warn on unused function parameters.
 
-use guff::ast::{Decl, Expr, FuncDecl, FuncLit, Stmt};
+use guff::ast::{Expr, FuncDecl, FuncLit, Stmt};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 use crate::util::is_blank;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            if let Some(body) = &f.body {
-                if let Some(params) = &f.ty.params {
-                    check_func(&params.list, body, &mut failures);
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::FuncDecl(f) => {
+                if let Some(body) = &f.body {
+                    if let Some(params) = &f.ty.params {
+                        check_func(&params.list, body, &mut self.failures);
+                    }
                 }
             }
+            NodeRef::FuncLit(f) => {
+                if let Some(params) = &f.ty.params {
+                    check_func(&params.list, &f.body, &mut self.failures);
+                }
+            }
+            _ => {}
         }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::FuncLit(f)) = n else {
-                return true;
-            };
-            if let Some(params) = &f.ty.params {
-                check_func(&params.list, &f.body, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn check_func(
@@ -68,8 +89,8 @@ fn check_func(
                 message: format!(
                     "parameter '{name}' seems to be unused, consider removing or renaming it as _"
                 ),
-            confidence: None,
-        });
+                confidence: None,
+            });
         }
     }
 }

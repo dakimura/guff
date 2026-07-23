@@ -7,19 +7,40 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::BinaryExpr(expr) = n else { return; };
+                    check_binary(expr, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::BinaryExpr(expr)) = n else {
-                return true;
-            };
-            check_binary(expr, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn is_bool_op(op: Token) -> bool {
     matches!(op, Token::LAND | Token::LOR | Token::EQL | Token::NEQ)

@@ -1,6 +1,6 @@
 //! `unexported-naming` — warn when local symbols use exported (uppercase) names.
 
-use guff::ast::{AssignStmt, Decl, Expr, Ident};
+use guff::ast::{AssignStmt, Decl, Expr, File, Ident};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -8,34 +8,60 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{is_exported_ident, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn on_file(&mut self, file: &File) {
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;
             };
-            lint_fields(&f.ty.params, &mut failures);
-            lint_fields(&f.ty.results, &mut failures);
+            lint_fields(&f.ty.params, &mut self.failures);
+            lint_fields(&f.ty.results, &mut self.failures);
         }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::FuncLit(f) => {
+                lint_fields(&f.ty.params, &mut self.failures);
+                lint_fields(&f.ty.results, &mut self.failures);
+            }
+            NodeRef::AssignStmt(a) => lint_assign(a, &mut self.failures),
+            NodeRef::ValueSpec(vs) => {
+                for id in &vs.names {
+                    lint_ident(id, &mut self.failures);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        c.on_file(file);
         walk::inspect(NodeRef::File(file), |n| {
-            match n {
-                Some(NodeRef::FuncLit(f)) => {
-                    lint_fields(&f.ty.params, &mut failures);
-                    lint_fields(&f.ty.results, &mut failures);
-                }
-                Some(NodeRef::AssignStmt(a)) => lint_assign(a, &mut failures),
-                Some(NodeRef::ValueSpec(vs)) => {
-                    for id in &vs.names {
-                        lint_ident(id, &mut failures);
-                    }
-                }
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn lint_assign(a: &AssignStmt, failures: &mut Vec<Failure>) {

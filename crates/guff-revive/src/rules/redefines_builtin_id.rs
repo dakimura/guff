@@ -7,24 +7,43 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::GenDecl(g) => check_gen_decl(g, &mut self.failures),
+            NodeRef::FuncDecl(f) => check_func_decl(f, &mut self.failures),
+            NodeRef::FuncType(ft) => check_func_type(ft, &mut self.failures),
+            NodeRef::AssignStmt(a) => check_assign(a, &mut self.failures),
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::GenDecl(g) => check_gen_decl(g, &mut failures),
-                NodeRef::FuncDecl(f) => check_func_decl(f, &mut failures),
-                NodeRef::FuncType(ft) => check_func_type(ft, &mut failures),
-                NodeRef::AssignStmt(a) => check_assign(a, &mut failures),
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn builtin_kind(name: &str) -> Option<&'static str> {

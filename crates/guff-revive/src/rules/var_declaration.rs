@@ -11,27 +11,50 @@ use guff_types::predicates::is_untyped;
 use crate::failure::Failure;
 use crate::util::{is_blank, is_ident, is_interface_type_expr, type_of, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            if let NodeRef::GenDecl(g) = n {
-                if g.tok == Some(Token::VAR) {
-                    for spec in &g.specs {
-                        if let Spec::ValueSpec(vs) = spec {
-                            check_value_spec(pass, vs, &mut failures);
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+            
+                    if let NodeRef::GenDecl(g) = n {
+                        if g.tok == Some(Token::VAR) {
+                            for spec in &g.specs {
+                                if let Spec::ValueSpec(vs) = spec {
+                                    check_value_spec(self.pass, vs, &mut self.failures);
+                                }
+                            }
                         }
                     }
-                }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>) {
     if vs.names.len() != 1 || vs.ty.is_none() || vs.values.is_empty() {

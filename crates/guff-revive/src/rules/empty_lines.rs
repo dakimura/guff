@@ -1,5 +1,7 @@
 //! `empty-lines` — warn on leading/trailing blank lines inside blocks.
 
+use std::collections::HashSet;
+
 use guff::ast::{BlockStmt, File};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -7,23 +9,53 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::line_of;
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    comment_lines: HashSet<usize>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            comment_lines: HashSet::new(),
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn on_file(&mut self, file: &File) {
+        self.comment_lines = comment_lines(self.pass, file);
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::BlockStmt(block) = n else {
+            return;
+        };
+        check_block(self.pass, block, &self.comment_lines, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
-        let comment_lines = comment_lines(pass, file);
+        c.on_file(file);
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::BlockStmt(block)) = n else {
-                return true;
-            };
-            check_block(pass, block, &comment_lines, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
-fn comment_lines(pass: &Pass<'_>, file: &File) -> std::collections::HashSet<usize> {
-    let mut lines = std::collections::HashSet::new();
+fn comment_lines(pass: &Pass<'_>, file: &File) -> HashSet<usize> {
+    let mut lines = HashSet::new();
     for group in &file.comments {
         for comment in &group.list {
             let start = line_of(pass, comment.slash.0);
@@ -39,7 +71,7 @@ fn comment_lines(pass: &Pass<'_>, file: &File) -> std::collections::HashSet<usiz
 fn check_block(
     pass: &Pass<'_>,
     block: &BlockStmt,
-    comment_lines: &std::collections::HashSet<usize>,
+    comment_lines: &HashSet<usize>,
     failures: &mut Vec<Failure>,
 ) {
     if block.list.is_empty() {

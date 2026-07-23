@@ -30,60 +30,80 @@ struct Options {
     upper_case_const: bool,
 }
 
+pub struct Checker {
+    opts: Options,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new(pass: &Pass<'_>) -> Self {
+        Self {
+            opts: parse_options(pass),
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::AssignStmt(a) => check_assign(a, &self.opts, &mut self.failures),
+            NodeRef::FuncDecl(f) => check_func(f, &self.opts, &mut self.failures),
+            NodeRef::GenDecl(g) => check_gen(g, &self.opts, &mut self.failures),
+            NodeRef::RangeStmt(r) => check_range(r, &self.opts, &mut self.failures),
+            NodeRef::StructType(s) => {
+                for field in &s.fields.list {
+                    for name in &field.names {
+                        check(name, "struct field", &self.opts, &mut self.failures);
+                    }
+                }
+            }
+            NodeRef::InterfaceType(iface) => {
+                // Do not check interface method names (often constrained by
+                // concrete types); only check their params/results.
+                for field in &iface.methods.list {
+                    let Some(ty) = field.ty.as_ref() else {
+                        continue;
+                    };
+                    let Expr::FuncType(ft) = unparen(ty) else {
+                        continue;
+                    };
+                    if let Some(params) = &ft.params {
+                        check_field_list(
+                            params,
+                            "interface method parameter",
+                            &self.opts,
+                            &mut self.failures,
+                        );
+                    }
+                    if let Some(results) = &ft.results {
+                        check_field_list(
+                            results,
+                            "interface method result",
+                            &self.opts,
+                            &mut self.failures,
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let opts = parse_options(pass);
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            match n {
-                NodeRef::AssignStmt(a) => check_assign(a, &opts, &mut failures),
-                NodeRef::FuncDecl(f) => check_func(f, &opts, &mut failures),
-                NodeRef::GenDecl(g) => check_gen(g, &opts, &mut failures),
-                NodeRef::RangeStmt(r) => check_range(r, &opts, &mut failures),
-                NodeRef::StructType(s) => {
-                    for field in &s.fields.list {
-                        for name in &field.names {
-                            check(name, "struct field", &opts, &mut failures);
-                        }
-                    }
-                }
-                NodeRef::InterfaceType(iface) => {
-                    // Do not check interface method names (often constrained by
-                    // concrete types); only check their params/results.
-                    for field in &iface.methods.list {
-                        let Some(ty) = field.ty.as_ref() else {
-                            continue;
-                        };
-                        let Expr::FuncType(ft) = unparen(ty) else {
-                            continue;
-                        };
-                        if let Some(params) = &ft.params {
-                            check_field_list(
-                                params,
-                                "interface method parameter",
-                                &opts,
-                                &mut failures,
-                            );
-                        }
-                        if let Some(results) = &ft.results {
-                            check_field_list(
-                                results,
-                                "interface method result",
-                                &opts,
-                                &mut failures,
-                            );
-                        }
-                    }
-                }
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn parse_options(pass: &Pass<'_>) -> Options {
@@ -274,8 +294,8 @@ fn check(id: &guff::ast::Ident, thing: &str, opts: &Options, failures: &mut Vec<
         rule: "var-naming",
         pos: id.name_pos.0 as u32,
         message: format!("{thing} {} should be {should}", id.name),
-            confidence: None,
-        });
+        confidence: None,
+    });
 }
 
 /// Constant-style names like `SOME_CONST`, `_SOME_PRIVATE_CONST`, `X123_3`.

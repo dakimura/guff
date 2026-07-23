@@ -10,19 +10,40 @@ use crate::util::unparen;
 
 const MESSAGE: &str = "unreachable code after this statement";
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::BlockStmt(block) = n else { return; };
+                    check_block(block, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::BlockStmt(block)) = n else {
-                return true;
-            };
-            check_block(block, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_block(block: &BlockStmt, failures: &mut Vec<Failure>) {
     if block.list.len() < 2 {

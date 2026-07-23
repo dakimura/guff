@@ -99,30 +99,114 @@ struct Chain {
 }
 
 pub fn apply_indent_error_flow(pass: &Pass<'_>) -> Vec<Failure> {
-    let args = Args {
-        preserve_scope: config::rule_has_string_option(pass, "indent-error-flow", "preserveScope"),
-        allow_jump: false,
-    };
-    apply(pass, "indent-error-flow", args, check_indent_error_flow)
+    apply_one(pass, "indent-error-flow", indent_error_flow_args(pass), check_indent_error_flow)
 }
 
 pub fn apply_superfluous_else(pass: &Pass<'_>) -> Vec<Failure> {
-    let args = Args {
-        preserve_scope: config::rule_has_string_option(pass, "superfluous-else", "preserveScope"),
-        allow_jump: false,
-    };
-    apply(pass, "superfluous-else", args, check_superfluous_else)
+    apply_one(pass, "superfluous-else", superfluous_else_args(pass), check_superfluous_else)
 }
 
 pub fn apply_early_return(pass: &Pass<'_>) -> Vec<Failure> {
-    let args = Args {
-        preserve_scope: config::rule_has_string_option(pass, "early-return", "preserveScope"),
-        allow_jump: config::rule_has_string_option(pass, "early-return", "allowJump"),
-    };
-    apply(pass, "early-return", args, check_early_return)
+    apply_one(pass, "early-return", early_return_args(pass), check_early_return)
 }
 
-fn apply(
+fn indent_error_flow_args(pass: &Pass<'_>) -> Args {
+    Args {
+        preserve_scope: config::rule_has_string_option(pass, "indent-error-flow", "preserveScope"),
+        allow_jump: false,
+    }
+}
+
+fn superfluous_else_args(pass: &Pass<'_>) -> Args {
+    Args {
+        preserve_scope: config::rule_has_string_option(pass, "superfluous-else", "preserveScope"),
+        allow_jump: false,
+    }
+}
+
+fn early_return_args(pass: &Pass<'_>) -> Args {
+    Args {
+        preserve_scope: config::rule_has_string_option(pass, "early-return", "preserveScope"),
+        allow_jump: config::rule_has_string_option(pass, "early-return", "allowJump"),
+    }
+}
+
+/// Run all enabled ifelse-family rules in a single pruned file walk.
+pub fn run_enabled(pass: &Pass<'_>) -> std::collections::HashMap<&'static str, Vec<Failure>> {
+    let settings = config::effective_settings(pass);
+    let all = config::all_rules();
+    let enabled = |name: &str| settings.rule_enabled(name, config::DEFAULT_RULES, all);
+
+    let mut rules: Vec<(&'static str, Args, fn(&Chain, Args) -> Option<String>)> = Vec::new();
+    if enabled("indent-error-flow") {
+        rules.push((
+            "indent-error-flow",
+            indent_error_flow_args(pass),
+            check_indent_error_flow,
+        ));
+    }
+    if enabled("superfluous-else") {
+        rules.push((
+            "superfluous-else",
+            superfluous_else_args(pass),
+            check_superfluous_else,
+        ));
+    }
+    if enabled("early-return") {
+        rules.push(("early-return", early_return_args(pass), check_early_return));
+    }
+    if rules.is_empty() {
+        return std::collections::HashMap::new();
+    }
+
+    let mut by_rule: std::collections::HashMap<&'static str, Vec<Failure>> =
+        rules.iter().map(|(n, _, _)| (*n, Vec::new())).collect();
+
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(n) = n else {
+                return true;
+            };
+            match n {
+                NodeRef::FuncDecl(f) => {
+                    if let Some(body) = &f.body {
+                        for (rule, args, check) in &rules {
+                            visit_block(
+                                &body.list,
+                                true,
+                                BranchKind::Return,
+                                rule,
+                                *args,
+                                by_rule.get_mut(rule).unwrap(),
+                                *check,
+                            );
+                        }
+                    }
+                    return false;
+                }
+                NodeRef::FuncLit(f) => {
+                    for (rule, args, check) in &rules {
+                        visit_block(
+                            &f.body.list,
+                            true,
+                            BranchKind::Return,
+                            rule,
+                            *args,
+                            by_rule.get_mut(rule).unwrap(),
+                            *check,
+                        );
+                    }
+                    return false;
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    by_rule
+}
+
+fn apply_one(
     pass: &Pass<'_>,
     rule: &'static str,
     args: Args,

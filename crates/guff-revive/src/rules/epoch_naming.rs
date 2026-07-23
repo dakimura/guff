@@ -15,39 +15,63 @@ const EPOCH_UNITS: &[(&str, &[&str])] = &[
     ("UnixNano", &["Nano", "Ns"]),
 ];
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::ValueSpec(spec) => {
+                for (i, name) in spec.names.iter().enumerate() {
+                    if let Some(value) = spec.values.get(i) {
+                        check_name(self.pass, name, value, &mut self.failures);
+                    }
+                }
+            }
+            NodeRef::AssignStmt(assign)
+                if matches!(assign.tok, Some(Token::DEFINE) | Some(Token::ASSIGN)) =>
+            {
+                for (i, lhs) in assign.lhs.iter().enumerate() {
+                    let Expr::Ident(name) = unparen(lhs) else {
+                        continue;
+                    };
+                    if name.name == "_" {
+                        continue;
+                    }
+                    if let Some(rhs) = assign.rhs.get(i) {
+                        check_name(self.pass, name, rhs, &mut self.failures);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            match n {
-                Some(NodeRef::ValueSpec(spec)) => {
-                    for (i, name) in spec.names.iter().enumerate() {
-                        if let Some(value) = spec.values.get(i) {
-                            check_name(pass, name, value, &mut failures);
-                        }
-                    }
-                }
-                Some(NodeRef::AssignStmt(assign))
-                    if matches!(assign.tok, Some(Token::DEFINE) | Some(Token::ASSIGN)) =>
-                {
-                    for (i, lhs) in assign.lhs.iter().enumerate() {
-                        let Expr::Ident(name) = unparen(lhs) else {
-                            continue;
-                        };
-                        if name.name == "_" {
-                            continue;
-                        }
-                        if let Some(rhs) = assign.rhs.get(i) {
-                            check_name(pass, name, rhs, &mut failures);
-                        }
-                    }
-                }
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn check_name(pass: &Pass<'_>, name: &Ident, value: &Expr, failures: &mut Vec<Failure>) {

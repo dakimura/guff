@@ -8,33 +8,47 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::unparen;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::IfStmt(if_stmt) = n else {
+            return;
+        };
+        if let Some(msg) = check_if(if_stmt) {
+            self.failures.push(Failure {
+                rule: "unnecessary-if",
+                pos: if_stmt.if_.0 as u32,
+                message: msg,
+                confidence: None,
+            });
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::FuncDecl(f)) = n else {
-                return true;
-            };
-            if let Some(body) = &f.body {
-                walk::inspect(NodeRef::BlockStmt(body), |inner| {
-                    let Some(NodeRef::IfStmt(if_stmt)) = inner else {
-                        return true;
-                    };
-                    if let Some(msg) = check_if(if_stmt) {
-                        failures.push(Failure {
-                            rule: "unnecessary-if",
-                            pos: if_stmt.if_.0 as u32,
-                            message: msg,
-            confidence: None,
-        });
-                    }
-                    true
-                });
+            if let Some(n) = n {
+                c.visit(n);
             }
-            false
+            true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn check_if(if_stmt: &IfStmt) -> Option<String> {

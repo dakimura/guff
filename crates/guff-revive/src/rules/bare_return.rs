@@ -6,19 +6,41 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::FuncDecl(f) => check_func(f, &mut self.failures),
+            NodeRef::FuncLit(f) => check_func_lit(f, &mut self.failures),
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            match n {
-                Some(NodeRef::FuncDecl(f)) => check_func(f, &mut failures),
-                Some(NodeRef::FuncLit(f)) => check_func_lit(f, &mut failures),
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn has_named_results(f: &FuncDecl) -> bool {

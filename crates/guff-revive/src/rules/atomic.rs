@@ -9,21 +9,47 @@ use guff_analysis::code::call_name;
 use crate::failure::Failure;
 use crate::util::{expr_equal, imports_package, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    if !imports_package(pass, "sync/atomic") {
-        return Vec::new();
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
+        if !imports_package(pass, "sync/atomic") {
+            return None;
+        }
+        Some(Self {
+            pass,
+            failures: Vec::new(),
+        })
     }
-    let mut failures = Vec::new();
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::AssignStmt(assign) = n else {
+            return;
+        };
+        check_assign(self.pass, assign, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::AssignStmt(assign)) = n else {
-                return true;
-            };
-            check_assign(pass, assign, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn is_atomic_add(pass: &Pass<'_>, fun: &Expr) -> bool {

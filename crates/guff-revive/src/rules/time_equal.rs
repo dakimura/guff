@@ -8,19 +8,42 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{expr_string, is_named_type, type_of};
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::BinaryExpr(expr) = n else { return; };
+                    check_binary(self.pass, expr, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::BinaryExpr(expr)) = n else {
-                return true;
-            };
-            check_binary(pass, expr, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr, failures: &mut Vec<Failure>) {
     let op = expr.op;

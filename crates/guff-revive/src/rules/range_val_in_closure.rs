@@ -7,22 +7,46 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::unparen;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::RangeStmt(r) => {
+                check_loop(r.body.list.last(), loop_vars_from_range(r), &mut self.failures)
+            }
+            NodeRef::ForStmt(f) => {
+                let vars = loop_vars_from_for(f);
+                check_loop(f.body.list.last(), vars, &mut self.failures);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            match n {
-                Some(NodeRef::RangeStmt(r)) => check_loop(r.body.list.last(), loop_vars_from_range(r), &mut failures),
-                Some(NodeRef::ForStmt(f)) => {
-                    let vars = loop_vars_from_for(f);
-                    check_loop(f.body.list.last(), vars, &mut failures);
-                }
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn loop_vars_from_range(r: &RangeStmt) -> Vec<String> {
@@ -86,8 +110,8 @@ fn check_loop(last: Option<&Stmt>, vars: Vec<String>, failures: &mut Vec<Failure
                 rule: "range-val-in-closure",
                 pos: name_pos.0 as u32,
                 message: format!("loop variable {name} captured by func literal"),
-            confidence: None,
-        });
+                confidence: None,
+            });
             return false;
         }
         true

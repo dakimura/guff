@@ -100,19 +100,29 @@ mod use_fmt_print;
 mod var_declaration;
 mod var_naming;
 mod waitgroup_by_value;
+mod shared_walk;
 
 use guff_analysis::Pass;
 
 use crate::config;
 use crate::failure::Failure;
+use crate::ifelse;
 
 pub fn run_enabled_rules(pass: &Pass<'_>) -> Vec<Failure> {
     let settings = config::effective_settings(pass);
     let all = config::all_rules();
+    let mut shared = shared_walk::run_shared(pass);
+    let mut ifelse_failures = ifelse::run_enabled(pass);
     let mut out = Vec::new();
     let mut run = |name: &str, f: fn(&Pass<'_>) -> Vec<Failure>| {
         if settings.rule_enabled(name, config::DEFAULT_RULES, all) {
-            out.extend(f(pass));
+            if let Some(failures) = shared.remove(name) {
+                out.extend(failures);
+            } else if let Some(failures) = ifelse_failures.remove(name) {
+                out.extend(failures);
+            } else {
+                out.extend(f(pass));
+            }
         }
     };
     run("blank-imports", blank_imports::apply);

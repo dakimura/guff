@@ -7,23 +7,44 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::unparen;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::StructType(st) = n else { return; };
+                    for field in &st.fields.list {
+                        if let Some(ty) = &field.ty {
+                            check_field_type(ty, &mut self.failures);
+                        }
+                    }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::StructType(st)) = n else {
-                return true;
-            };
-            for field in &st.fields.list {
-                if let Some(ty) = &field.ty {
-                    check_field_type(ty, &mut failures);
-                }
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_field_type(ty: &Expr, failures: &mut Vec<Failure>) {
     match unparen(ty) {

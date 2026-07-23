@@ -19,49 +19,74 @@ struct Subrule {
     message: String,
 }
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let raw = config::string_format_rules(pass);
-    if raw.is_empty() {
-        return Vec::new();
-    }
-    let rules: Vec<Subrule> = raw
-        .iter()
-        .filter_map(|(scope, pattern, msg)| parse_subrule(scope, pattern, msg))
-        .collect();
-    if rules.is_empty() {
-        return Vec::new();
+pub struct Checker {
+    rules: Vec<Subrule>,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+        let raw = config::string_format_rules(pass);
+        if raw.is_empty() {
+            return None;
+        }
+        let rules: Vec<Subrule> = raw
+            .iter()
+            .filter_map(|(scope, pattern, msg)| parse_subrule(scope, pattern, msg))
+            .collect();
+        if rules.is_empty() {
+            return None;
+        }
+        Some(Self {
+            rules,
+            failures: Vec::new(),
+        })
     }
 
-    let mut failures = Vec::new();
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::CallExpr(call) = n else {
+            return;
+        };
+        let Some(call_name) = call_name(call) else {
+            return;
+        };
+        for rule in &self.rules {
+            if rule.func_name != call_name {
+                continue;
+            }
+            if let Some(lit) = string_arg(call, rule.argument, rule.field.as_deref()) {
+                let value = basic_lit_string_value(lit).unwrap_or_default();
+                let ok = rule.regex.is_match(value) ^ rule.negated;
+                if !ok {
+                    self.failures.push(Failure {
+                        rule: "string-format",
+                        pos: lit.value_pos.0 as u32,
+                        message: rule.message.clone(),
+                        confidence: None,
+                    });
+                }
+            }
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
-                return true;
-            };
-            let Some(call_name) = call_name(call) else {
-                return true;
-            };
-            for rule in &rules {
-                if rule.func_name != call_name {
-                    continue;
-                }
-                if let Some(lit) = string_arg(call, rule.argument, rule.field.as_deref()) {
-                    let value = basic_lit_string_value(lit).unwrap_or_default();
-                    let ok = rule.regex.is_match(value) ^ rule.negated;
-                    if !ok {
-                        failures.push(Failure {
-                            rule: "string-format",
-                            pos: lit.value_pos.0 as u32,
-                            message: rule.message.clone(),
-            confidence: None,
-        });
-                    }
-                }
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn parse_subrule(scope: &str, pattern: &str, message: &str) -> Option<Subrule> {

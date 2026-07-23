@@ -33,19 +33,40 @@ const TIME_DATE_ARGS: [TimeDateArg; TIME_DATE_ARITY] = [
     TimeDateArg::Timezone,
 ];
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::CallExpr(call) = n else { return; };
+                    check_call(call, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
-                return true;
-            };
-            check_call(call, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
     if call.args.len() != TIME_DATE_ARITY || !is_pkg_dot_name(&call.fun, "time", "Date") {

@@ -7,21 +7,42 @@ use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+            
+                    if let NodeRef::AssignStmt(assign) = n {
+                        check_assign(assign, &mut self.failures);
+                    }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
-            if let NodeRef::AssignStmt(assign) = n {
-                check_assign(assign, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn is_one(expr: &Expr) -> bool {
     matches!(

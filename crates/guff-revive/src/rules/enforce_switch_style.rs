@@ -8,45 +8,68 @@ use guff_analysis::Pass;
 use crate::config;
 use crate::failure::Failure;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let allow_no_default = rule_option(pass, "allowNoDefault");
-    let allow_default_not_last = rule_option(pass, "allowDefaultNotLast");
+pub struct Checker {
+    allow_no_default: bool,
+    allow_default_not_last: bool,
+    failures: Vec<Failure>,
+}
 
-    let mut failures = Vec::new();
+impl Checker {
+    pub fn new(pass: &Pass<'_>) -> Self {
+        Self {
+            allow_no_default: rule_option(pass, "allowNoDefault"),
+            allow_default_not_last: rule_option(pass, "allowDefaultNotLast"),
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let (body, pos) = match n {
+            NodeRef::SwitchStmt(s) => (&s.body, s.switch.0 as u32),
+            NodeRef::TypeSwitchStmt(s) => (&s.body, s.switch.0 as u32),
+            _ => return,
+        };
+        let (default_clause, is_last) = seek_default_case(body);
+        let has_default = default_clause.is_some();
+
+        if !has_default && self.allow_no_default {
+            return;
+        }
+        if !has_default && !self.allow_no_default && !all_branches_end_with_jump(body) {
+            self.failures.push(Failure {
+                rule: "enforce-switch-style",
+                pos,
+                message: "switch must have a default case clause".into(),
+                confidence: None,
+            });
+            return;
+        }
+        if has_default && !self.allow_default_not_last && !is_last {
+            self.failures.push(Failure {
+                rule: "enforce-switch-style",
+                pos: default_clause.unwrap().case.0 as u32,
+                message: "default case clause must be the last one".into(),
+                confidence: None,
+            });
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let (body, pos) = match n {
-                Some(NodeRef::SwitchStmt(s)) => (&s.body, s.switch.0 as u32),
-                Some(NodeRef::TypeSwitchStmt(s)) => (&s.body, s.switch.0 as u32),
-                _ => return true,
-            };
-            let (default_clause, is_last) = seek_default_case(body);
-            let has_default = default_clause.is_some();
-
-            if !has_default && allow_no_default {
-                return true;
-            }
-            if !has_default && !allow_no_default && !all_branches_end_with_jump(body) {
-                failures.push(Failure {
-                    rule: "enforce-switch-style",
-                    pos,
-                    message: "switch must have a default case clause".into(),
-            confidence: None,
-        });
-                return true;
-            }
-            if has_default && !allow_default_not_last && !is_last {
-                failures.push(Failure {
-                    rule: "enforce-switch-style",
-                    pos: default_clause.unwrap().case.0 as u32,
-                    message: "default case clause must be the last one".into(),
-            confidence: None,
-        });
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn rule_option(pass: &Pass<'_>, name: &str) -> bool {

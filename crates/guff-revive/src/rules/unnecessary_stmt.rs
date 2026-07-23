@@ -1,32 +1,58 @@
 //! `unnecessary-stmt` — warn on unnecessary statements (bare return, break, etc.).
 
 use guff::token::Token;
-use guff::ast::{BlockStmt, CaseClause, Decl, FuncDecl, Stmt};
+use guff::ast::{BlockStmt, CaseClause, Decl, File, FuncDecl, Stmt};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn on_file(&mut self, file: &File) {
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;
             };
-            check_func(f, &mut failures);
+            check_func(f, &mut self.failures);
         }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        match n {
+            NodeRef::SwitchStmt(s) => check_switch_body(&s.body, &mut self.failures),
+            NodeRef::TypeSwitchStmt(s) => check_switch_body(&s.body, &mut self.failures),
+            NodeRef::CaseClause(c) => check_case_clause(c, &mut self.failures),
+            _ => {}
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        c.on_file(file);
         walk::inspect(NodeRef::File(file), |n| {
-            match n {
-                Some(NodeRef::SwitchStmt(s)) => check_switch_body(&s.body, &mut failures),
-                Some(NodeRef::TypeSwitchStmt(s)) => check_switch_body(&s.body, &mut failures),
-                Some(NodeRef::CaseClause(c)) => check_case_clause(c, &mut failures),
-                _ => {}
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
@@ -63,8 +89,8 @@ fn check_switch_body(body: &BlockStmt, failures: &mut Vec<Failure>) {
         rule: "unnecessary-stmt",
         pos: body.lbrace.0 as u32,
         message: "switch with only one case can be replaced by an if-then".into(),
-            confidence: None,
-        });
+        confidence: None,
+    });
 }
 
 fn check_case_clause(c: &CaseClause, failures: &mut Vec<Failure>) {

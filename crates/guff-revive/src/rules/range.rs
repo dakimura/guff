@@ -8,19 +8,40 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::is_blank_ident;
 
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::RangeStmt(rs) = n else { return; };
+                    check_range(rs, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::RangeStmt(rs)) = n else {
-                return true;
-            };
-            check_range(rs, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_range(rs: &RangeStmt, failures: &mut Vec<Failure>) {
     if rs.value.is_none() {

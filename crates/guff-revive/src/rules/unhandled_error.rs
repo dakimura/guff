@@ -10,32 +10,58 @@ use guff_types::TypeId;
 use crate::failure::Failure;
 use crate::util::type_of;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    if pass.types_info().is_none() {
-        return Vec::new();
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
+        if pass.types_info().is_none() {
+            return None;
+        }
+        Some(Self {
+            pass,
+            failures: Vec::new(),
+        })
     }
-    let mut failures = Vec::new();
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::ExprStmt(stmt) = n else {
+            return;
+        };
+        let Expr::CallExpr(call) = &stmt.x else {
+            return;
+        };
+        if returns_error(self.pass, call) {
+            let name = call_name(self.pass, &call.fun).unwrap_or_else(|| "<unknown>".into());
+            self.failures.push(Failure {
+                rule: "unhandled-error",
+                pos: call.fun.pos().0 as u32,
+                message: format!("Unhandled error in call to function {name}"),
+                confidence: None,
+            });
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::ExprStmt(stmt)) = n else {
-                return true;
-            };
-            let Expr::CallExpr(call) = &stmt.x else {
-                return true;
-            };
-            if returns_error(pass, call) {
-                let name = call_name(pass, &call.fun).unwrap_or_else(|| "<unknown>".into());
-                failures.push(Failure {
-                    rule: "unhandled-error",
-                    pos: call.fun.pos().0 as u32,
-                    message: format!("Unhandled error in call to function {name}"),
-            confidence: None,
-        });
+            if let Some(n) = n {
+                c.visit(n);
             }
             true
         });
     }
-    failures
+    c.into_failures()
 }
 
 fn returns_error(pass: &Pass<'_>, call: &CallExpr) -> bool {

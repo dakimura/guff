@@ -7,19 +7,42 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::line_of;
 
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+                    let NodeRef::IfStmt(if_stmt) = n else { return; };
+                    check_if_init(self.pass, if_stmt, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::IfStmt(if_stmt)) = n else {
-                return true;
-            };
-            check_if_init(pass, if_stmt, &mut failures);
+            if let Some(n) = n {
+                c.visit(n);
+            }
             true
         });
     }
-    failures
+    c.into_failures()
 }
+
 
 fn check_if_init(pass: &Pass<'_>, if_stmt: &IfStmt, failures: &mut Vec<Failure>) {
     let Some(init) = &if_stmt.init else {
