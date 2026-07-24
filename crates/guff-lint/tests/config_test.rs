@@ -210,6 +210,29 @@ fn parse_golangci_config_corpus() {
 }
 
 #[test]
+fn output_print_flags_parse_into_printer_options() {
+    use guff_lint::PrinterOptions;
+
+    let contents = r#"
+version: "2"
+output:
+  print-issued-lines: false
+  print-linter-name: false
+"#;
+    let cfg = parse_config_str(contents).unwrap();
+    let out = cfg.output();
+    assert_eq!(out.print_issued_lines, Some(false));
+    assert_eq!(out.print_linter_name, Some(false));
+    let opts = PrinterOptions::from_config(out.print_issued_lines, out.print_linter_name);
+    assert!(!opts.print_issued_lines);
+    assert!(!opts.print_linter_name);
+
+    let defaults = PrinterOptions::from_config(None, None);
+    assert!(defaults.print_issued_lines);
+    assert!(defaults.print_linter_name);
+}
+
+#[test]
 fn exclude_rules_filter_errcheck_on_bad_go() {
     use guff_lint::{IssueFilter, IssuesConfig, SeverityConfig};
 

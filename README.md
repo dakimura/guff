@@ -284,6 +284,8 @@ Full ✅ / 🟡 / ❌ matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
 `--out-format`: `text` (`line-number`), `colored-line-number`, `json`, `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
 
+Default (no `--out-format` / no config): `colored-line-number` on a TTY, `text` otherwise. Both print the source line and a `^` caret under the column unless `output.print-issued-lines: false`.
+
 Use `format:path` to write files or emit several formats at once.
 
 ---

@@ -191,8 +191,8 @@
 | `issues.new` / `new-from-rev` / `new-from-merge-base` / `new-from-patch` | ❌ | diff ベースのフィルタは未実装（DEFERRED） |
 | `severity.default-severity` / `rules` / `case-sensitive` | ✅ | |
 | `output.formats` / `format`（deprecated） | ✅ | §3 |
-| `output.print-linter-name` | 🟡 | formatter 側は対応。config キー配線は未 |
-| `output.print-issued-lines` | 🟡 | パースのみ（colored は既定でソース行表示） |
+| `output.print-linter-name` | ✅ | 既定 `true`。text / tab / colored-* に配線 |
+| `output.print-issued-lines` | ✅ | 既定 `true`。text / colored-line-number でソース行 + `^` |
 | `output.sort-results` | 🟡 | パースのみ（診断は決定的順序で出力） |
 | `output.path-prefix` | 🟡 | パースのみ（未実効） |
 | `output.show-stats` | 🟡 | パースのみ（未実効） |
@@ -207,8 +207,8 @@ exhaustivestruct / exportloopref / ifshort / nosnakecase / tenv / execinquery）
 
 | フォーマット | guff | 別名 |
 |--------------|:----:|------|
-| text | ✅ | `line-number` |
-| colored-line-number | ✅ | `colored`（ソース行 + キャレット） |
+| text | ✅ | `line-number`。既定でソース行 + `^`（`print-issued-lines`） |
+| colored-line-number | ✅ | `colored`。TTY 時の暗黙デフォルト（golangci 互換） |
 | json | ✅ | golangci-lint スキーマ準拠（`{"Issues":[...],"Report":...}`） |
 | checkstyle | ✅ | Checkstyle XML |
 | sarif | ✅ | SARIF 2.1.0 |

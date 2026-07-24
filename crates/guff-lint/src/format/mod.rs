@@ -32,6 +32,36 @@ pub trait Formatter {
     fn print(&self, issues: &[Issue], w: &mut dyn Write) -> io::Result<()>;
 }
 
+/// golangci `output.print-issued-lines` / `output.print-linter-name` (and CLI equivalents).
+///
+/// Defaults match golangci: both `true`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrinterOptions {
+    /// Print the source line and a `^` caret under the column (text / colored-line-number).
+    pub print_issued_lines: bool,
+    /// Append ` (linter)` / include the linter column (text / tab formats).
+    pub print_linter_name: bool,
+}
+
+impl Default for PrinterOptions {
+    fn default() -> Self {
+        Self {
+            print_issued_lines: true,
+            print_linter_name: true,
+        }
+    }
+}
+
+impl PrinterOptions {
+    /// Build from optional config keys (`None` → golangci default `true`).
+    pub fn from_config(print_issued_lines: Option<bool>, print_linter_name: Option<bool>) -> Self {
+        Self {
+            print_issued_lines: print_issued_lines.unwrap_or(true),
+            print_linter_name: print_linter_name.unwrap_or(true),
+        }
+    }
+}
+
 /// Supported `--out-format` names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutputFormatKind {
@@ -130,14 +160,19 @@ impl OutputFormatKind {
     }
 
     pub fn formatter(self) -> Box<dyn Formatter> {
+        self.formatter_with(&PrinterOptions::default())
+    }
+
+    /// Build a formatter applying golangci `output.print-*` options.
+    pub fn formatter_with(self, opts: &PrinterOptions) -> Box<dyn Formatter> {
         match self {
-            Self::Text => Box::new(TextFormatter::new()),
-            Self::Colored => Box::new(TextFormatter::colored()),
+            Self::Text => Box::new(TextFormatter::new().with_printer_options(opts)),
+            Self::Colored => Box::new(TextFormatter::colored().with_printer_options(opts)),
             Self::Json => Box::new(JsonFormatter::new()),
             Self::Checkstyle => Box::new(CheckstyleFormatter::new()),
             Self::Sarif => Box::new(SarifFormatter::new()),
-            Self::Tab => Box::new(TabFormatter::new()),
-            Self::ColoredTab => Box::new(TabFormatter::colored()),
+            Self::Tab => Box::new(TabFormatter::new().with_printer_options(opts)),
+            Self::ColoredTab => Box::new(TabFormatter::colored().with_printer_options(opts)),
             Self::GithubActions => Box::new(GithubActionsFormatter::new()),
         }
     }
@@ -147,6 +182,9 @@ impl OutputFormatKind {
 ///
 /// Accepts `format` or `format:path` (golangci-compatible). Paths other than
 /// `stdout`/`stderr` are written to disk by [`print_issues`].
+///
+/// Callers that want golangci's interactive default (`colored-line-number` on a
+/// TTY) should pass [`default_stdout_format`] instead of relying on empty CLI.
 pub fn resolve_out_formats(cli: &[String]) -> Result<Vec<OutputSpec>, String> {
     if cli.is_empty() {
         return Ok(vec![OutputSpec::new(OutputFormatKind::Text)]);
@@ -158,6 +196,18 @@ pub fn resolve_out_formats(cli: &[String]) -> Result<Vec<OutputSpec>, String> {
     Ok(out)
 }
 
+/// Implicit default when neither CLI nor config selects a format.
+///
+/// Matches golangci-lint: `colored-line-number` on a TTY, plain `text` otherwise
+/// (so pipes/CI stay free of ANSI).
+pub fn default_stdout_format(stdout_is_tty: bool) -> OutputSpec {
+    if stdout_is_tty {
+        OutputSpec::new(OutputFormatKind::Colored)
+    } else {
+        OutputSpec::new(OutputFormatKind::Text)
+    }
+}
+
 /// Print `issues` for each selected format.
 ///
 /// Specs without a path (or with `stdout`) use `default_out`. File paths create
@@ -167,18 +217,35 @@ pub fn print_issues(
     issues: &[Issue],
     default_out: &mut dyn Write,
 ) -> io::Result<usize> {
+    print_issues_with(formats, &PrinterOptions::default(), issues, default_out)
+}
+
+/// Like [`print_issues`], applying golangci `output.print-*` options.
+pub fn print_issues_with(
+    formats: &[OutputSpec],
+    opts: &PrinterOptions,
+    issues: &[Issue],
+    default_out: &mut dyn Write,
+) -> io::Result<usize> {
     if formats.is_empty() {
-        TextFormatter::new().print(issues, default_out)?;
+        TextFormatter::new()
+            .with_printer_options(opts)
+            .print(issues, default_out)?;
         return Ok(issues.len());
     }
     for spec in formats {
-        write_spec(spec, issues, default_out)?;
+        write_spec(spec, opts, issues, default_out)?;
     }
     Ok(issues.len())
 }
 
-fn write_spec(spec: &OutputSpec, issues: &[Issue], default_out: &mut dyn Write) -> io::Result<()> {
-    let formatter = spec.kind.formatter();
+fn write_spec(
+    spec: &OutputSpec,
+    opts: &PrinterOptions,
+    issues: &[Issue],
+    default_out: &mut dyn Write,
+) -> io::Result<()> {
+    let formatter = spec.kind.formatter_with(opts);
     match spec.path.as_deref() {
         None | Some("stdout") => formatter.print(issues, default_out),
         Some("stderr") => {
@@ -199,6 +266,9 @@ fn write_spec(spec: &OutputSpec, issues: &[Issue], default_out: &mut dyn Write) 
 }
 
 /// Best-effort parse of `output.formats` / deprecated `output.format`.
+///
+/// Returns an empty list when neither key selects a format; the CLI then applies
+/// [`default_stdout_format`] (TTY → colored-line-number, else text).
 ///
 /// Unknown formats are skipped (caller may log). Supported shapes:
 /// - string: `json` / `json:path` / comma-separated
@@ -299,7 +369,8 @@ pub fn formats_from_output_config(
     }
 
     if specs.is_empty() {
-        vec![OutputSpec::new(OutputFormatKind::Text)]
+        // No formats in config — caller applies [`default_stdout_format`] / Text.
+        Vec::new()
     } else {
         specs
     }
@@ -367,6 +438,60 @@ mod tests {
             resolve_out_formats(&[]).unwrap(),
             vec![OutputSpec::new(OutputFormatKind::Text)]
         );
+    }
+
+    #[test]
+    fn default_stdout_format_matches_golangci_tty_rule() {
+        assert_eq!(
+            default_stdout_format(true),
+            OutputSpec::new(OutputFormatKind::Colored)
+        );
+        assert_eq!(
+            default_stdout_format(false),
+            OutputSpec::new(OutputFormatKind::Text)
+        );
+    }
+
+    #[test]
+    fn formats_from_config_null_is_empty() {
+        assert!(formats_from_output_config(&serde_yaml::Value::Null, None).is_empty());
+    }
+
+    #[test]
+    fn print_issues_with_respects_printer_options() {
+        let mut issue = sample_issue();
+        issue.source_line = Some("ab".into());
+        issue.column = 2;
+        let opts = PrinterOptions {
+            print_issued_lines: true,
+            print_linter_name: true,
+        };
+        let mut buf = Vec::new();
+        print_issues_with(
+            &[OutputSpec::new(OutputFormatKind::Text)],
+            &opts,
+            &[issue.clone()],
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("ab\n"), "{s:?}");
+        assert!(s.contains(" ^\n") || s.ends_with("^\n"), "{s:?}");
+
+        let opts_off = PrinterOptions {
+            print_issued_lines: false,
+            print_linter_name: false,
+        };
+        let mut buf = Vec::new();
+        print_issues_with(
+            &[OutputSpec::new(OutputFormatKind::Text)],
+            &opts_off,
+            &[issue],
+            &mut buf,
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert_eq!(s, "bad.go:5:2: unchecked error\n");
     }
 
     #[test]

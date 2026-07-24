@@ -27,10 +27,10 @@ pub use exclude::{
     IssueFilter, DEFAULT_EXCLUDE_DIRS,
 };
 pub use format::{
-    format_diagnostic_text, format_issue_text, formats_from_output_config, print_issues,
-    resolve_out_formats, CheckstyleFormatter, Formatter, GithubActionsFormatter, JsonFormatter,
-    JsonReport, JsonWarning, OutputFormatKind, OutputSpec, SarifFormatter, TabFormatter,
-    TextFormatter,
+    default_stdout_format, format_diagnostic_text, format_issue_text, formats_from_output_config,
+    print_issues, print_issues_with, resolve_out_formats, CheckstyleFormatter, Formatter,
+    GithubActionsFormatter, JsonFormatter, JsonReport, JsonWarning, OutputFormatKind, OutputSpec,
+    PrinterOptions, SarifFormatter, TabFormatter, TextFormatter,
 };
 pub use nolint::{NolintIndex, NOLINTLINT_NAME};
 pub use pathutil::{format_issue_path, PathMode};
@@ -104,6 +104,8 @@ pub struct LintOptions {
     /// Output formats (`--out-format`, default `[Text]` on stdout).
     /// Each entry may include a file path (`format:path`).
     pub out_formats: Vec<OutputSpec>,
+    /// golangci `output.print-issued-lines` / `output.print-linter-name`.
+    pub printer: PrinterOptions,
     /// Use persistent issues cache (default true). Disable with `--no-cache`.
     pub use_cache: bool,
     /// Override cache directory (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE` otherwise).
@@ -260,6 +262,7 @@ impl LintOptions {
             timeout: Some(Duration::from_secs(60)),
             concurrency: None,
             out_formats: vec![OutputSpec::new(OutputFormatKind::Text)],
+            printer: PrinterOptions::default(),
             use_cache: true,
             cache_dir: None,
             fix: false,
@@ -533,8 +536,18 @@ impl LintResult {
         formats: &[OutputSpec],
         out: &mut dyn Write,
     ) -> io::Result<usize> {
+        self.print_with_options(formats, &PrinterOptions::default(), out)
+    }
+
+    /// Print filtered diagnostics with golangci `output.print-*` options.
+    pub fn print_with_options(
+        &self,
+        formats: &[OutputSpec],
+        opts: &PrinterOptions,
+        out: &mut dyn Write,
+    ) -> io::Result<usize> {
         let issues = self.issues();
-        print_issues(formats, &issues, out)
+        print_issues_with(formats, opts, &issues, out)
     }
 
     /// Print filtered diagnostics in text format to `out`. Returns the number printed.
@@ -596,7 +609,7 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
         issues.extend(fmt_issues);
     }
     let tp = std::time::Instant::now();
-    print_issues(&opts.out_formats, &issues, out).map_err(RunError::Io)?;
+    print_issues_with(&opts.out_formats, &opts.printer, &issues, out).map_err(RunError::Io)?;
     if timing {
         eprintln!("guff: phase print {:.2}s", tp.elapsed().as_secs_f64());
     }

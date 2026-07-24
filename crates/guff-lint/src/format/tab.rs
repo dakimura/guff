@@ -28,6 +28,12 @@ impl TabFormatter {
             colors: true,
         }
     }
+
+    /// Apply golangci `output.print-linter-name` override (already defaulted).
+    pub fn with_printer_options(mut self, opts: &super::PrinterOptions) -> Self {
+        self.print_linter_name = opts.print_linter_name;
+        self
+    }
 }
 
 impl Default for TabFormatter {

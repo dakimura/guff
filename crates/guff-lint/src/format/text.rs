@@ -60,8 +60,9 @@ pub struct TextFormatter {
 impl TextFormatter {
     pub fn new() -> Self {
         Self {
+            // Match golangci: `--print-issued-lines` / `output.print-issued-lines` default true.
             print_linter_name: true,
-            print_issued_line: false,
+            print_issued_line: true,
             colors: false,
         }
     }
@@ -73,6 +74,13 @@ impl TextFormatter {
             print_issued_line: true,
             colors: true,
         }
+    }
+
+    /// Apply golangci `output.print-*` overrides (already defaulted).
+    pub fn with_printer_options(mut self, opts: &super::PrinterOptions) -> Self {
+        self.print_linter_name = opts.print_linter_name;
+        self.print_issued_line = opts.print_issued_lines;
+        self
     }
 }
 
@@ -167,6 +175,37 @@ mod tests {
                 ..Diagnostic::default()
             },
         }
+    }
+
+    #[test]
+    fn plain_text_prints_source_and_caret_by_default() {
+        let mut issue = sample("errcheck", "unchecked error", "bad.go", 5, 2);
+        issue.source_line = Some("\tx".into());
+        let mut buf = Vec::new();
+        TextFormatter::new().print(&[issue], &mut buf).unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "bad.go:5:2: unchecked error (errcheck)\n\tx\n\t^\n"
+        );
+    }
+
+    #[test]
+    fn printer_options_can_disable_issued_line_and_linter_name() {
+        let mut issue = sample("errcheck", "unchecked error", "bad.go", 5, 2);
+        issue.source_line = Some("\tx".into());
+        let opts = crate::format::PrinterOptions {
+            print_issued_lines: false,
+            print_linter_name: false,
+        };
+        let mut buf = Vec::new();
+        TextFormatter::new()
+            .with_printer_options(&opts)
+            .print(&[issue], &mut buf)
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "bad.go:5:2: unchecked error\n"
+        );
     }
 
     #[test]

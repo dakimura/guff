@@ -5,6 +5,7 @@
 
 | 日付 | 内容 |
 |------|------|
+| 2026-07-25 | **output.print-issued-lines / print-linter-name 配線**: golangci 既定（両方 `true`）に合わせ text でもソース行 + `^` を表示。TTY 時の暗黙デフォルトは `colored-line-number`、非 TTY / pipe は `text`。`PrinterOptions` → `print_issues_with`。COMPATIBILITY 🟡→✅。 |
 | 2026-07-24 | **残 5 linter 実装 → 114/114**: `nilerr`（gostaticanalysis）/ `wastedassign`（NaiveForm SSA）/ `zerologlint`（buildir）/ `spancheck`（AST 近似 End チェック、ctrlflow DEFERRED）/ `contextcheck`（SSA + パッケージ内 facts）。COMPATIBILITY 更新。prometheus 設定では未 enable のため regress finding-set 影響なし想定。 |
 | 2026-07-24 | **nilnesserr 実装**: `guff-gostaticanalysis` に [alingse/nilnesserr](https://github.com/alingse/nilnesserr) を SSA 移植（nilness 支配事実 + nilerr 風の誤った nil error return/call）。レジストリ登録・testdata・COMPATIBILITY 109/114。variadic は guff-ssa の flat Call args でメッセージ分類（Alloc+Slice 完全一致は DEFERRED）。残 SSA DEFERRED: nilerr / contextcheck / wastedassign / spancheck / zerologlint。 |
 | 2026-07-24 | **path/Text 表示パリティ + wall 厳格化**: (1) `output.path-mode`/`--path-mode`（既定 `rel`）で issue パスを cwd 相対に（golangci 既定と一致）。(2) Text に pass/check 名プレフィックス（`inline:` / `slicesbackward:` / `SA####:`）。(3) govet `inline` は `go:fix inline` 無しでは再パースせず、ローカルは PackageId 一致時のみ収集。(4) regress `wall_seconds_ratio=1.0` + `wall_seconds_epsilon=0.15s`；tsdb baseline finding-set 4/4/0。prometheus `./...` で **exact Text+path 20/20**、HEAD 比 wall 非悪化。 |

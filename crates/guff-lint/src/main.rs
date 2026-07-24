@@ -16,12 +16,12 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
 use guff_lint::{
-    discover_config, format_linters_listing, formats_from_output_config, guff_version,
-    is_meta_linter, load_config, migrate_config_file, parse_go_duration, partition_linters,
-    resolve_linters_with_settings, resolve_out_formats, run_and_print, version_banner,
-    ConfigError, ConfigFile, FormattersV2, IssueFilter, LinterDefault, LinterSelection,
-    LinterSettings, LintOptions, IssuesConfig, OutputSpec, RunError, SeverityConfig,
-    DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
+    default_stdout_format, discover_config, format_linters_listing, formats_from_output_config,
+    guff_version, is_meta_linter, load_config, migrate_config_file, parse_go_duration,
+    partition_linters, resolve_linters_with_settings, resolve_out_formats, run_and_print,
+    version_banner, ConfigError, ConfigFile, FormattersV2, IssueFilter, LinterDefault,
+    LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputSpec, PrinterOptions,
+    RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
 use guff_runner::{cache_dir_size, clean_cache, default_cache_dir};
 
@@ -126,7 +126,8 @@ struct RunArgs {
     #[arg(short = 'j', long = "concurrency")]
     concurrency: Option<usize>,
 
-    /// Output format (repeatable). Default: `text`.
+    /// Output format (repeatable). Default: `colored-line-number` on a TTY,
+    /// `text` otherwise (golangci-compatible).
     /// Supported: `text`, `line-number`, `colored-line-number`, `json`,
     /// `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
     #[arg(long = "out-format", value_name = "FORMAT")]
@@ -312,7 +313,11 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
     let sequential = args.sequential || concurrency == Some(1);
 
     let out_formats = if args.out_format.is_empty() {
-        loaded.out_formats
+        if loaded.out_formats.is_empty() {
+            vec![default_stdout_format(io::stdout().is_terminal())]
+        } else {
+            loaded.out_formats
+        }
     } else {
         resolve_out_formats(&args.out_format).map_err(RunError::Message)?
     };
@@ -349,6 +354,7 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         timeout,
         concurrency,
         out_formats,
+        printer: loaded.printer,
         use_cache: !args.no_cache,
         cache_dir: None,
         fix: args.fix,
@@ -449,7 +455,9 @@ struct LoadedRun {
     linter_settings: LinterSettings,
     timeout: Option<String>,
     concurrency: Option<usize>,
+    /// Empty means "use CLI/TTY default" ([`default_stdout_format`]).
     out_formats: Vec<OutputSpec>,
+    printer: PrinterOptions,
     formatters: FormattersV2,
     go_version: Option<String>,
     path_mode: guff_lint::PathMode,
@@ -524,7 +532,9 @@ fn load_run_config(
     };
 
     // Config `output.formats` / `output.format` — CLI `--out-format` overrides.
+    // Empty → CLI applies TTY-aware default (golangci colored-line-number on TTY).
     let out_formats = formats_from_output_config(&output.formats, output.format.as_deref());
+    let printer = PrinterOptions::from_config(output.print_issued_lines, output.print_linter_name);
 
     let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
     let go_version = run.go.clone();
@@ -547,6 +557,7 @@ fn load_run_config(
         timeout: run.timeout,
         concurrency: run.concurrency.map(|n| n.max(0) as usize),
         out_formats,
+        printer,
         formatters,
         go_version,
         path_mode,
