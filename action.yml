@@ -31,6 +31,8 @@ runs:
         GUFF_INSTALL_DIR: ${{ inputs.install-dir }}
         INPUT_VERSION: ${{ inputs.version }}
         ACTION_REF: ${{ github.action_ref }}
+        # Needed when this Action's repo (or its Releases) are private.
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         VERSION="${INPUT_VERSION}"

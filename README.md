@@ -84,6 +84,12 @@ curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.
 
 Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
 
+If the guff repository is private, export a token first:
+
+```bash
+export GITHUB_TOKEN=ghp_...   # repo read access
+```
+
 ### GitHub Action
 
 Add a workflow (Go must be available — use `actions/setup-go`):

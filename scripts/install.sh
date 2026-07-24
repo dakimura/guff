@@ -10,6 +10,9 @@
 #
 # Version:
 #   latest (default) or a tag like v0.1.0 / 0.1.0
+#
+# Auth (private repos):
+#   Set GITHUB_TOKEN or GH_TOKEN to a token with repo read access.
 set -e
 
 REPO="dakimura/guff"
@@ -25,11 +28,51 @@ Install guff from GitHub Releases into bindir (default: ~/.local/bin).
   -b <dir>   install directory
   -d         debug (set -x)
   version    release tag (v0.1.0) or "latest" (default)
+
+Set GITHUB_TOKEN or GH_TOKEN when downloading from a private repository.
 EOF
 }
 
 BINDIR="${GUFF_INSTALL_DIR:-${HOME}/.local/bin}"
 VERSION="latest"
+TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+api_curl() {
+  # api_curl <accept> <url> [-o outfile]
+  accept="$1"
+  shift
+  if [ -n "$TOKEN" ]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${TOKEN}" \
+      -H "Accept: ${accept}" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$@"
+  else
+    curl -fsSL \
+      -H "Accept: ${accept}" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$@"
+  fi
+}
+
+asset_id_from_json() {
+  # stdin: release JSON, $1: asset name → prints asset id
+  name="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+name=sys.argv[1]
+data=json.load(sys.stdin)
+for a in data.get("assets",[]):
+  if a.get("name")==name:
+    print(a["id"]); break
+' "$name"
+  elif command -v jq >/dev/null 2>&1; then
+    jq -r --arg n "$name" '.assets[] | select(.name==$n) | .id' | head -n1
+  else
+    echo "need python3 or jq to parse release JSON" >&2
+    return 1
+  fi
+}
 
 while getopts "b:dh" opt; do
   case "$opt" in
@@ -45,7 +88,6 @@ if [ $# -ge 1 ]; then
   VERSION="$1"
 fi
 
-# Normalize: accept 0.1.0 or v0.1.0
 if [ "$VERSION" != "latest" ]; then
   case "$VERSION" in
     v*) ;;
@@ -73,27 +115,53 @@ esac
 
 if [ "$VERSION" = "latest" ]; then
   echo "Resolving latest release…"
-  tag=$(curl -fsSL "${GITHUB_API}/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-  if [ -z "$tag" ]; then
-    echo "failed to resolve latest release tag" >&2
-    exit 1
-  fi
-  VERSION="$tag"
+  release_url="${GITHUB_API}/repos/${REPO}/releases/latest"
+else
+  release_url="${GITHUB_API}/repos/${REPO}/releases/tags/${VERSION}"
 fi
 
-# Strip leading v for the asset filename stem used in release.yml
+release_json=$(api_curl "application/vnd.github+json" "$release_url") || {
+  echo "failed to fetch release metadata (private repo? set GITHUB_TOKEN)" >&2
+  exit 1
+}
+
+if command -v python3 >/dev/null 2>&1; then
+  VERSION=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+else
+  VERSION=$(printf '%s' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+fi
+if [ -z "$VERSION" ]; then
+  echo "failed to parse release tag" >&2
+  exit 1
+fi
+
 ver_num="${VERSION#v}"
 asset="guff_${ver_num}_${os}_${arch}.tar.gz"
-url="${GITHUB_DL}/${REPO}/releases/download/${VERSION}/${asset}"
+asset_id=$(printf '%s' "$release_json" | asset_id_from_json "$asset") || true
 
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
+dest="${tmpdir}/${asset}"
 
-echo "Downloading ${url}"
-curl -fsSL -o "${tmpdir}/${asset}" "$url"
+if [ -n "$asset_id" ]; then
+  echo "Downloading ${asset} (id ${asset_id})"
+  api_curl "application/octet-stream" \
+    "${GITHUB_API}/repos/${REPO}/releases/assets/${asset_id}" \
+    -o "$dest" || {
+      echo "asset download failed" >&2
+      exit 1
+    }
+else
+  url="${GITHUB_DL}/${REPO}/releases/download/${VERSION}/${asset}"
+  echo "Downloading ${url}"
+  curl -fsSL -o "$dest" "$url" || {
+    echo "download failed; if the repo is private set GITHUB_TOKEN / GH_TOKEN" >&2
+    exit 1
+  }
+fi
 
 echo "Extracting…"
-tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
+tar -xzf "$dest" -C "$tmpdir"
 if [ ! -f "${tmpdir}/guff" ]; then
   echo "archive did not contain guff binary" >&2
   exit 1
