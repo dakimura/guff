@@ -62,6 +62,8 @@ pub(crate) struct Options {
     pub lang_version: String,
     pub module_path: String,
     pub extra: Extra,
+    /// When true, skip gofumpt ≥v0.10 multiline call / paren-removal rules.
+    pub omit_v010_rules: bool,
 }
 
 /// Apply gofumpt rules to `file` / `fset` in place.
@@ -993,7 +995,7 @@ fn walk_expr(f: &mut Fumpter, expr: &mut Expr) {
                 }),
             ));
             *p.x = inner;
-            if can_remove_parens(f, p) {
+            if !f.opts.omit_v010_rules && can_remove_parens(f, p) {
                 *expr = std::mem::replace(
                     p.x.as_mut(),
                     Expr::BadExpr(guff::ast::BadExpr {
@@ -1017,7 +1019,9 @@ fn walk_expr(f: &mut Fumpter, expr: &mut Expr) {
         }
         Expr::CallExpr(c) => {
             walk_call(f, c);
-            call_post(f, c);
+            if !f.opts.omit_v010_rules {
+                call_post(f, c);
+            }
         }
         Expr::CompositeLit(c) => {
             if let Some(ty) = &mut c.ty {

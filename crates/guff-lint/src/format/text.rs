@@ -112,8 +112,9 @@ impl TextFormatter {
 
         let message = red(self.colors, issue.text.trim());
         let mut text = message;
-        if self.print_linter_name && !issue.analyzer.is_empty() {
-            text.push_str(&format!(" ({})", issue.analyzer));
+        if self.print_linter_name && !issue.from_linter.is_empty() {
+            // golangci prints the linter name (`govet`), not the pass (`inline`).
+            text.push_str(&format!(" ({})", issue.from_linter));
         }
 
         writeln!(w, "{pos}: {text}")

@@ -29,6 +29,11 @@ fn render_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
 
 fn is_invariant(pass: &Pass<'_>, key: Option<guff_types::ObjectId>, val: Option<guff_types::ObjectId>, expr: &Expr) -> bool {
     fn walk(pass: &Pass<'_>, key: Option<guff_types::ObjectId>, val: Option<guff_types::ObjectId>, expr: &Expr) -> bool {
+        // Side-effecting expressions (calls) must not be treated as loop-invariant
+        // for S1001 — `range h.GetPositiveCount()` cannot become `copy(...)`.
+        if matches!(expr, Expr::CallExpr(_)) {
+            return false;
+        }
         if let Expr::Ident(ident) = expr {
             if let Some(obj) = object_of(pass, ident) {
                 if Some(obj) == key || Some(obj) == val {
@@ -45,8 +50,9 @@ fn is_invariant(pass: &Pass<'_>, key: Option<guff_types::ObjectId>, val: Option<
                     && e.low.as_ref().is_none_or(|l| walk(pass, key, val, l))
                     && e.high.as_ref().is_none_or(|h| walk(pass, key, val, h))
             }
-            Expr::CallExpr(e) => e.args.iter().all(|a| walk(pass, key, val, a)),
             Expr::SelectorExpr(e) => walk(pass, key, val, &e.x),
+            Expr::ParenExpr(e) => walk(pass, key, val, &e.x),
+            Expr::StarExpr(e) => walk(pass, key, val, &e.x),
             _ => true,
         }
     }

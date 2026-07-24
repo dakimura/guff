@@ -80,8 +80,14 @@ class NormalizeTests(unittest.TestCase):
             ),
             normalize_message(
                 "modernize",
-                "backward loop over slice can be modernized using slices.Backward",
+                "backward loop over slice can be modernized using slices. Backward",
             ),
+        )
+
+    def test_govet_strips_pass_name_prefix(self):
+        self.assertEqual(
+            normalize_message("govet", "inline: Constant reflect.Ptr should be inlined"),
+            normalize_message("govet", "Constant reflect.Ptr should be inlined"),
         )
 
 

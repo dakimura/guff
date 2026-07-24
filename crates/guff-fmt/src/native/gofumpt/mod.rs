@@ -63,6 +63,7 @@ fn format_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFormatEr
     let fumpt_opts = FumptOptions {
         lang_version: opts.lang.clone().unwrap_or_default(),
         module_path: opts.module_path.clone().unwrap_or_default(),
+        omit_v010_rules: opts.match_golangci,
         extra: if opts.extra_rules {
             Extra {
                 group_params: true,

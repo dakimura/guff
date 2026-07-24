@@ -4,10 +4,10 @@ use guff_govet::{
     assign_analyzer, atomic_analyzer, bools_analyzer, buildtag_analyzer, cgocall_analyzer,
     composites_analyzer, copylocks_analyzer, defers_analyzer, directive_analyzer,
     errorsas_analyzer, framepointer_analyzer, httpresponse_analyzer, ifaceassert_analyzer,
-    loopclosure_analyzer, lostcancel_analyzer, nilfunc_analyzer, printf_analyzer, shift_analyzer,
-    sigchanyzer_analyzer, slog_analyzer, stdmethods_analyzer, stringintconv_analyzer,
-    structtag_analyzer, tests_analyzer, timeformat_analyzer, unmarshal_analyzer,
-    unreachable_analyzer, unsafeptr_analyzer, unusedresult_analyzer,
+    inline_analyzer, loopclosure_analyzer, lostcancel_analyzer, nilfunc_analyzer, printf_analyzer,
+    shift_analyzer, sigchanyzer_analyzer, slog_analyzer, stdmethods_analyzer,
+    stringintconv_analyzer, structtag_analyzer, tests_analyzer, timeformat_analyzer,
+    unmarshal_analyzer, unreachable_analyzer, unsafeptr_analyzer, unusedresult_analyzer,
 };
 use guff_types::Config;
 
@@ -153,6 +153,48 @@ fn stringintconv_allows_rune_conversion() {
     let dir = support::testdata("stringintconv");
     let pkg = support::typecheck_pkg("example.com/govet/stringintconv/ok", &dir.join("ok.go"));
     assert!(support::run_analyzer(stringintconv_analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn inline_flags_reflect_ptr() {
+    let dir = support::testdata("inline");
+    let stub = dir.join("stub/reflect/reflect.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inline",
+        &dir.join("bad.go"),
+        &[("reflect", &stub)],
+    );
+    let messages = support::run_analyzer(inline_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(messages[0], "Constant reflect.Ptr should be inlined");
+}
+
+#[test]
+fn inline_allows_reflect_pointer() {
+    let dir = support::testdata("inline");
+    let stub = dir.join("stub/reflect/reflect.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inline/ok",
+        &dir.join("ok.go"),
+        &[("reflect", &stub)],
+    );
+    assert!(support::run_analyzer(inline_analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn inline_flags_local_go_fix_const() {
+    let dir = support::testdata("inline_local");
+    let pkg = support::typecheck_pkg("example.com/govet/inline_local", &dir.join("bad.go"));
+    let messages = support::run_analyzer(inline_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(messages[0], "Constant Legacy should be inlined");
+}
+
+#[test]
+fn inline_allows_preferred_const() {
+    let dir = support::testdata("inline_local");
+    let pkg = support::typecheck_pkg("example.com/govet/inline_local/ok", &dir.join("ok.go"));
+    assert!(support::run_analyzer(inline_analyzer(), &pkg).is_empty());
 }
 
 #[test]

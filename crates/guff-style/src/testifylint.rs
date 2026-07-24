@@ -467,6 +467,10 @@ fn is_json_object_or_array(s: &str) -> bool {
         s = s[1..s.len() - 1].to_string();
     }
     let s = s.trim();
+    // Empty `{}` / `[]` alone are not treated as JSON-style (upstream skips).
+    if s == "{}" || s == "[]" {
+        return false;
+    }
     if s.is_empty() || !(s.starts_with('{') || s.starts_with('[')) {
         return false;
     }

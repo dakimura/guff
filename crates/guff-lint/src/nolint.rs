@@ -475,7 +475,11 @@ fn expand_ranges(
         let start = fset.position(npos);
         let end = fset.position(nend);
         for r in inline {
-            if r.to == start.line - 1 && start.column == r.col {
+            // Preceding-line nolint: expand when the next node's start line is
+            // the line after the directive. Column need not match exactly —
+            // mid-expression forms like `!(...)` after `//nolint:staticcheck`
+            // start at the unary op column, not the directive's column.
+            if r.to == start.line - 1 {
                 let mut er = r.clone();
                 er.is_expansion = true;
                 if er.to < end.line {
@@ -566,6 +570,9 @@ fn node_span(n: NodeRef<'_>) -> Option<(Pos, Pos)> {
         }
         NodeRef::BlockStmt(s) => Some((s.lbrace, s.end())),
         NodeRef::CallExpr(s) => Some((s.pos(), s.end())),
+        NodeRef::UnaryExpr(s) => Some((s.op_pos, s.x.end())),
+        NodeRef::BinaryExpr(s) => Some((s.x.pos(), s.y.end())),
+        NodeRef::ParenExpr(s) => Some((s.lparen, Pos(s.rparen.0 + 1))),
         _ => None,
     }
 }

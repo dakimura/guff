@@ -16,7 +16,11 @@ from typing import Any
 
 
 DEFAULT_TOLERANCES: dict[str, float | int] = {
-    "wall_seconds_ratio": 1.25,
+    # Fail on any wall increase vs the checked-in baseline (no proportional slack).
+    "wall_seconds_ratio": 1.0,
+    # Absolute seconds of measurement noise allowed above baseline × ratio.
+    # Cold-cache laptop runs swing ~50–100ms; keep ratio at 1.0 (no % slack).
+    "wall_seconds_epsilon": 0.15,
     "peak_rss_ratio": 1.20,
     "max_guff_only_delta": 0,
     "max_golangci_only_delta": 0,
@@ -46,7 +50,10 @@ def evaluate(
 
     base_guff = baseline["guff"]
     meas_guff = measured["guff"]
-    wall_limit = float(base_guff["wall_seconds"]) * float(tol["wall_seconds_ratio"])
+    wall_limit = (
+        float(base_guff["wall_seconds"]) * float(tol["wall_seconds_ratio"])
+        + float(tol.get("wall_seconds_epsilon", 0.0))
+    )
     rss_limit = int(base_guff["peak_rss_bytes"]) * float(tol["peak_rss_ratio"])
 
     if float(meas_guff["wall_seconds"]) > wall_limit:
@@ -54,7 +61,8 @@ def evaluate(
             GateFailure(
                 "wall_seconds",
                 f"wall {meas_guff['wall_seconds']:.3f}s > limit {wall_limit:.3f}s "
-                f"(baseline {base_guff['wall_seconds']:.3f}s × {tol['wall_seconds_ratio']})",
+                f"(baseline {base_guff['wall_seconds']:.3f}s × {tol['wall_seconds_ratio']}"
+                f" + {float(tol.get('wall_seconds_epsilon', 0.0)):.3f}s)",
             )
         )
     if int(meas_guff["peak_rss_bytes"]) > rss_limit:

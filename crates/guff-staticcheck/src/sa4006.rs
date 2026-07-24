@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{Expr, Ident};
+use guff::ast::{Expr, Ident, Stmt};
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code::object_of;
@@ -113,10 +113,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         return Ok(None);
     };
 
+    // Collect ForStmt post IncDec positions so we don't flag loop increments
+    // (`for ; i >= 0; i--`) — the updated value is read by the condition / after break.
+    let mut for_post_incs = HashSet::new();
+    inspect.preorder(pass.files(), |node| {
+        let NodeRef::ForStmt(fs) = node else {
+            return;
+        };
+        if let Some(Stmt::IncDecStmt(inc)) = fs.post.as_deref() {
+            for_post_incs.insert(inc.tok_pos.0 as u32);
+        }
+    });
+
     let mut pending = Vec::new();
     inspect.preorder(pass.files(), |node| {
         match node {
             NodeRef::IncDecStmt(inc) => {
+                if for_post_incs.contains(&(inc.tok_pos.0 as u32)) {
+                    return;
+                }
                 let func = ir.src_funcs.iter().find_map(|&fid| {
                     let f = ir.prog.functions.get(fid);
                     f.value_for_expr(&inc.x).map(|_| f)

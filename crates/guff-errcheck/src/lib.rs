@@ -136,21 +136,51 @@ struct Visitor<'a, 'b> {
 }
 
 impl Visitor<'_, '_> {
-    fn report(&mut self, pos: u32) {
-        self.pending.push((pos, "unchecked error".into()));
+    fn report_unchecked(&mut self, pos: u32, call: Option<&CallExpr>) {
+        let message = match call {
+            Some(c) => {
+                let name = self.call_display_name(c);
+                if name.is_empty() {
+                    "Error return value is not checked".into()
+                } else {
+                    // Backticks match kisielk/golangci + exclusion presets like
+                    // `Error return value of .((...).|.*Flush|...). is not checked`.
+                    format!("Error return value of `{name}` is not checked")
+                }
+            }
+            None => "Error return value is not checked".into(),
+        };
+        self.pending.push((pos, message));
+    }
+
+    fn call_display_name(&self, call: &CallExpr) -> String {
+        if let Some(obj) = self.call_target_object(call) {
+            if let Some(artifacts) = self.pass.pkg().type_artifacts.as_ref() {
+                let name = code::type_func_name(
+                    &artifacts.types,
+                    &artifacts.objects,
+                    &artifacts.packages,
+                    obj,
+                );
+                if !name.is_empty() {
+                    return name;
+                }
+            }
+        }
+        code::call_name(self.pass, &call.fun).unwrap_or_default()
     }
 
     fn visit_expr_stmt(&mut self, x: &Expr) {
         if let Expr::CallExpr(call) = x {
             if !self.ignore_call(call) && self.call_returns_error(call) {
-                self.report(call.lparen.0 as u32);
+                self.report_unchecked(call.lparen.0 as u32, Some(call));
             }
         }
     }
 
     fn visit_go_defer(&mut self, call: &CallExpr) {
         if !self.ignore_call(call) && self.call_returns_error(call) {
-            self.report(call.lparen.0 as u32);
+            self.report_unchecked(call.lparen.0 as u32, Some(call));
         }
     }
 
@@ -187,7 +217,7 @@ impl Visitor<'_, '_> {
         if self.skip_assert_positions.contains(&pos) {
             return;
         }
-        self.report(pos);
+        self.report_unchecked(pos, None);
     }
 
     fn check_assignment(&mut self, lhs: &[Expr], rhs: &[Expr]) -> bool {
@@ -208,7 +238,7 @@ impl Visitor<'_, '_> {
                         continue;
                     }
                     if self.is_recover(call) || is_error.get(i).copied().unwrap_or(false) {
-                        self.report(id.name_pos.0 as u32);
+                        self.report_unchecked(id.name_pos.0 as u32, Some(call));
                     }
                 }
             } else if let Expr::TypeAssertExpr(assert) = unparen(&rhs[0]) {
@@ -219,10 +249,10 @@ impl Visitor<'_, '_> {
                     return false;
                 }
                 if lhs.len() < 2 {
-                    self.report(rhs[0].pos().0 as u32);
+                    self.report_unchecked(rhs[0].pos().0 as u32, None);
                 } else if let Expr::Ident(id) = unparen(&lhs[1]) {
                     if self.opts.check_blank && id.name == "_" {
-                        self.report(id.name_pos.0 as u32);
+                        self.report_unchecked(id.name_pos.0 as u32, None);
                     }
                 }
                 return false;
@@ -243,13 +273,13 @@ impl Visitor<'_, '_> {
                         continue;
                     }
                     if self.call_returns_error(call) {
-                        self.report(id.name_pos.0 as u32);
+                        self.report_unchecked(id.name_pos.0 as u32, Some(call));
                     }
                 } else if let Some(Expr::TypeAssertExpr(assert)) = rhs.get(i) {
                     if !self.opts.check_asserts || assert.ty.is_none() {
                         continue;
                     }
-                    self.report(id.name_pos.0 as u32);
+                    self.report_unchecked(id.name_pos.0 as u32, None);
                 }
             }
         }

@@ -132,6 +132,10 @@ struct RunArgs {
     #[arg(long = "out-format", value_name = "FORMAT")]
     out_format: Vec<String>,
 
+    /// Path display mode: `rel` (default, like golangci) or `abs`.
+    #[arg(long = "path-mode", value_name = "MODE")]
+    path_mode: Option<String>,
+
     /// Disable the persistent issues cache.
     #[arg(long = "no-cache")]
     no_cache: bool,
@@ -321,6 +325,18 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         !args.no_cache,
     );
 
+    let mut path_mode = loaded.path_mode;
+    if let Some(raw) = args.path_mode.as_deref() {
+        match guff_lint::PathMode::parse(raw) {
+            Some(m) => path_mode = m,
+            None => {
+                return Err(RunError::Message(format!(
+                    "invalid --path-mode {raw:?}; use rel or abs"
+                )));
+            }
+        }
+    }
+
     run_and_print(&LintOptions {
         patterns: args.patterns,
         analyzers,
@@ -337,6 +353,8 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
         cache_dir: None,
         fix: args.fix,
         formatters,
+        path_mode,
+        path_prefix: loaded.path_prefix,
     })
 }
 
@@ -368,6 +386,8 @@ fn build_formatter_run_config(
     if gofumpt.lang.is_none() {
         gofumpt.lang = go_version.filter(|s| !s.is_empty()).map(str::to_string);
     }
+    gofumpt.match_golangci = !std::env::var_os("GUFF_GOFUMPT_MATCH_GOLANGCI")
+        .is_some_and(|v| v == "0");
 
     Some(guff_lint::FormatterRunConfig {
         enable,
@@ -432,6 +452,8 @@ struct LoadedRun {
     out_formats: Vec<OutputSpec>,
     formatters: FormattersV2,
     go_version: Option<String>,
+    path_mode: guff_lint::PathMode,
+    path_prefix: Option<String>,
 }
 
 fn load_run_config(
@@ -507,6 +529,14 @@ fn load_run_config(
     let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
     let go_version = run.go.clone();
 
+    let mut path_mode = guff_lint::PathMode::Rel;
+    if let Some(raw) = output.path_mode.as_deref() {
+        match guff_lint::PathMode::parse(raw) {
+            Some(m) => path_mode = m,
+            None => eprintln!("guff: ignoring unknown output.path-mode {raw:?}"),
+        }
+    }
+
     Ok(LoadedRun {
         selection,
         filter,
@@ -519,6 +549,8 @@ fn load_run_config(
         out_formats,
         formatters,
         go_version,
+        path_mode,
+        path_prefix: output.path_prefix.clone(),
     })
 }
 

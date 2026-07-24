@@ -278,10 +278,13 @@ impl IssueFilter {
                 (String::new(), 0, 0)
             };
             let source_line = read_source_line(&filename, line);
+            // Match golangci: when the pass/check name differs from the linter
+            // name, prefix Text (`inline: …`, `SA1004: …`, category for suites).
+            let text = format_issue_text(&from_linter, &analyzer, &diag.category, &diag.message);
             out.push(Issue {
                 from_linter,
                 analyzer,
-                text: diag.message.clone(),
+                text,
                 severity: diag.severity.clone(),
                 filename,
                 line,
@@ -559,10 +562,12 @@ pub fn issue_from_cached(
     severity: &str,
 ) -> Issue {
     let source_line = read_source_line(filename, line);
+    let from_linter = linter_name_for_analyzer(analyzer).to_string();
+    let text = format_issue_text(&from_linter, analyzer, category, message);
     Issue {
-        from_linter: linter_name_for_analyzer(analyzer).to_string(),
+        from_linter,
         analyzer: analyzer.to_string(),
-        text: message.to_string(),
+        text,
         severity: severity.to_string(),
         filename: filename.to_string(),
         line,
@@ -575,6 +580,20 @@ pub fn issue_from_cached(
             severity: severity.to_string(),
             ..Diagnostic::default()
         },
+    }
+}
+
+/// golangci-style Text: prefix with pass/check name when it differs from the linter.
+fn format_issue_text(from_linter: &str, analyzer: &str, category: &str, message: &str) -> String {
+    let pass_name = if !category.is_empty() {
+        category
+    } else {
+        analyzer
+    };
+    if pass_name != from_linter {
+        format!("{pass_name}: {message}")
+    } else {
+        message.to_string()
     }
 }
 

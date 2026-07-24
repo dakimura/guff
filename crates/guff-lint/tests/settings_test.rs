@@ -65,6 +65,8 @@ fn run_errcheck(pkg: Arc<Package>, settings: &LinterSettings) -> LintResult {
         run,
         filter: IssueFilter::default(),
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     }
 }
 

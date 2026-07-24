@@ -90,6 +90,12 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     if lhs_typ != rhs_typ {
         return;
     }
+    // Cross-pkg untyped consts can appear typed in Types due to assignment
+    // context, while go/types Identical(typed, untyped) is false. If the RHS
+    // names an untyped const (object type) but the Types entry is typed, skip.
+    if rhs_names_untyped_const(pass, rhs) && !types_entry_is_untyped(pass, rhs) {
+        return;
+    }
     // Upstream re-evals the RHS outside assignment context. Untyped consts
     // (e.g. `math.MaxInt64`, `5`) take the LHS type in Types, so Identical
     // succeeds — only warn when the LHS is the const's default type (`int`).
@@ -115,12 +121,14 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
 fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static str> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
 
-    // Prefer Types entry when still recorded as untyped.
+    // Prefer Types entry when still recorded as untyped. If Types has a typed
+    // entry, do not fall through to AST (assignment-context typing).
     if let Some(info) = pass.types_info() {
         if let Some(tv) = info.types.get(&expr.id()) {
             if let Some(name) = untyped_basic_default(&artifacts.types, tv.typ) {
                 return Some(name);
             }
+            return None;
         }
     }
 
@@ -161,6 +169,79 @@ fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static s
         Expr::ParenExpr(p) => untyped_const_default_name(pass, &p.x),
         _ => None,
     }
+}
+
+fn types_entry_is_untyped(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&expr.id()) else {
+        return false;
+    };
+    is_untyped(&artifacts.types, tv.typ)
+}
+
+/// True when RHS is built from untyped const objects / literals (object type
+/// still untyped), ignoring assignment-context Types typing of the expr.
+fn rhs_names_untyped_const(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match unparen(expr) {
+        Expr::BasicLit(lit) => matches!(
+            lit.kind,
+            Some(
+                Token::INT
+                    | Token::FLOAT
+                    | Token::IMAG
+                    | Token::CHAR
+                    | Token::STRING
+            )
+        ),
+        Expr::Ident(id) if id.name == "true" || id.name == "false" => true,
+        Expr::Ident(id) => const_object_is_untyped(pass, id.id()),
+        Expr::SelectorExpr(sel) => const_object_is_untyped(pass, sel.sel.id()),
+        Expr::UnaryExpr(u) if matches!(u.op, Token::ADD | Token::SUB | Token::XOR) => {
+            rhs_names_untyped_const(pass, &u.x)
+        }
+        Expr::BinaryExpr(b)
+            if matches!(
+                b.op,
+                Token::ADD
+                    | Token::SUB
+                    | Token::MUL
+                    | Token::QUO
+                    | Token::REM
+                    | Token::AND
+                    | Token::OR
+                    | Token::XOR
+                    | Token::SHL
+                    | Token::SHR
+            ) =>
+        {
+            rhs_names_untyped_const(pass, &b.x) && rhs_names_untyped_const(pass, &b.y)
+        }
+        Expr::ParenExpr(p) => rhs_names_untyped_const(pass, &p.x),
+        _ => false,
+    }
+}
+
+fn const_object_is_untyped(pass: &Pass<'_>, node_id: u32) -> bool {
+    use guff_types::arena::ObjectData;
+
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(&obj) = info.uses.get(&node_id) else {
+        return false;
+    };
+    let ObjectData::Const(c) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    is_untyped(&artifacts.types, c.typ())
 }
 
 fn untyped_basic_default(

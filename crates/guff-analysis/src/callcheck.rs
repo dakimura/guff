@@ -636,9 +636,13 @@ pub fn builtin_key_type(
     None
 }
 
-/// Reports whether `typ` is an empty struct type.
+/// Reports whether `typ` is an empty *anonymous* struct type.
+///
+/// Upstream SA1029 checks `T.(*types.Struct)` without calling `Underlying()`,
+/// so a named `type pathParam struct{}` is allowed as a context key.
 pub fn is_empty_struct_type(arena: &TypeArena, typ: TypeId) -> bool {
-    match arena.get(typ.underlying(arena)) {
+    let typ = unalias_readonly(arena, typ);
+    match arena.get(typ) {
         TypeData::Struct(s) => s.num_fields() == 0,
         _ => false,
     }

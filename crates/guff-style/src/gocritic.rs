@@ -513,8 +513,20 @@ fn is_int_lit(expr: &Expr, want: i64) -> bool {
     }
 }
 
-fn check_unslice(slice: &SliceExpr, pending: &mut Vec<(u32, String)>) {
+fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, String)>) {
     if slice.low.is_some() || slice.high.is_some() || slice.max.is_some() || slice.slice3 {
+        return;
+    }
+    // Upstream Type.Is(`[]$_`): only unnamed slice types. Arrays, named slices,
+    // and strings must not flag. No AST fallback when type info is missing.
+    let Some(typ) = type_of(pass, &slice.x) else {
+        return;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let typ = unalias_readonly(&artifacts.types, typ);
+    if !matches!(artifacts.types.get(typ), TypeData::Slice(_)) {
         return;
     }
     let Some(x) = expr_text(&slice.x) else {
@@ -1421,7 +1433,7 @@ fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Vec<(u32, String)
     );
 }
 
-fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
+fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
     if fl.body.list.len() != 1 {
         return;
     }
@@ -1457,6 +1469,28 @@ fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
             | "max"
             | "clear"
     ) {
+        return;
+    }
+    // Skip type conversions (Fun is a type name, not a callable).
+    if is_type_expr(pass, &call.fun) {
+        return;
+    }
+    // Skip when Fun captures Vars that aren't non-pointer struct method values
+    // (upstream #888 / #1007 — e.g. `externalURL.String`, local func vars).
+    if unlambda_fun_has_disallowed_vars(pass, &call.fun) {
+        return;
+    }
+    // Require identical types between the func lit and the callable.
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(fn_ty) = info.types.get(&fl.id).map(|tv| tv.typ) else {
+        return;
+    };
+    let Some(callable_ty) = type_of(pass, &call.fun) else {
+        return;
+    };
+    if !types_identical(pass, fn_ty, callable_ty) {
         return;
     }
     let Some(params) = &fl.ty.params else {
@@ -1496,6 +1530,43 @@ fn check_unlambda(fl: &FuncLit, pending: &mut Vec<(u32, String)>) {
         fl.ty.func.0 as u32,
         format!("replace `{lit_text}` with `{callable}`"),
     );
+}
+
+/// Upstream unlambda: skip if `Fun` contains a `Var` whose underlying type is
+/// not a (non-pointer) struct — only those are safe method-value receivers.
+fn unlambda_fun_has_disallowed_vars(pass: &Pass<'_>, fun: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut found = false;
+    walk::inspect(walk::expr_ref(fun), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if found {
+            return false;
+        }
+        let NodeRef::Ident(id) = n else {
+            return true;
+        };
+        let Some(&obj) = info.uses.get(&id.id) else {
+            return true;
+        };
+        let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+            return true;
+        };
+        let under = v.typ().underlying(&artifacts.types);
+        // Permit only non-pointer struct method values (`typep.IsStruct`).
+        if !matches!(artifacts.types.get(under), TypeData::Struct(_)) {
+            found = true;
+            return false;
+        }
+        true
+    });
+    found
 }
 
 fn check_regexp_must(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
@@ -4427,7 +4498,7 @@ fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
         &artifacts.objects,
         &artifacts.packages,
         receiver_type,
-        true,
+        false, // method set of declared type (Implements io.ByteWriter)
         None,
         "WriteByte",
     ) else {
@@ -7628,7 +7699,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_empty_decl(g, &mut pending);
                 }
                 NodeRef::SliceExpr(s) if enabled(&set, "unslice") => {
-                    check_unslice(s, &mut pending);
+                    check_unslice(pass, s, &mut pending);
                 }
                 NodeRef::IndexExpr(ix) => {
                     if enabled(&set, "offBy1") {
@@ -7642,7 +7713,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_map_key(lit, &mut pending);
                 }
                 NodeRef::FuncLit(fl) if enabled(&set, "unlambda") => {
-                    check_unlambda(fl, &mut pending);
+                    check_unlambda(pass, fl, &mut pending);
                 }
                 NodeRef::StarExpr(s) => {
                     if enabled(&set, "newDeref") {

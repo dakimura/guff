@@ -17,7 +17,9 @@ use guff_types::typestring::type_string;
 use crate::expreq::unparen;
 
 fn trim_test_suffix(path: &str) -> &str {
-    path.strip_suffix("_test").unwrap_or(path)
+    path.strip_suffix("_test")
+        .or_else(|| path.strip_suffix(".test"))
+        .unwrap_or(path)
 }
 
 fn is_whitelisted_type(name: &str) -> bool {
@@ -52,26 +54,52 @@ fn is_whitelisted_type(name: &str) -> bool {
         .contains(name)
 }
 
+fn type_name_same_package(type_name: &str, pass_path: &str) -> bool {
+    let name = type_name.strip_prefix('*').unwrap_or(type_name);
+    let name = name.split('[').next().unwrap_or(name);
+    match name.rfind('.') {
+        Some(dot) => trim_test_suffix(&name[..dot]) == pass_path,
+        None => !name.contains('/'),
+    }
+}
+
 fn is_same_package_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     let artifacts = match pass.pkg().type_artifacts.as_ref() {
         Some(a) => a,
         None => return false,
     };
     let types = &artifacts.types;
+    // Prefer go/types package path; fall back to loader pkg_path when the
+    // type-checker package path is missing/empty (common for `.test` mains
+    // and some hybrid imports).
+    let pass_path = {
+        let from_types = pass
+            .type_pkg()
+            .map(|pid| artifacts.packages.get(pid).path().to_string())
+            .filter(|p| !p.is_empty());
+        let raw = from_types.unwrap_or_else(|| pass.pkg().pkg_path.clone());
+        // `promql_test` / `promql.test` → `promql` (upstream composite local-type rule).
+        trim_test_suffix(raw.as_str()).to_string()
+    };
     match types.get(typ) {
         TypeData::Struct(_) => true,
         TypeData::Pointer(p) => is_same_package_type(pass, p.elem()),
         TypeData::Named(_) => {
             let obj = named_obj(types, typ);
-            let Some(obj_pkg) = obj.pkg(&artifacts.objects) else {
-                return false;
-            };
-            let Some(pass_pkg) = pass.type_pkg() else {
-                return false;
-            };
-            let obj_path = trim_test_suffix(artifacts.packages.get(obj_pkg).path());
-            let pass_path = trim_test_suffix(artifacts.packages.get(pass_pkg).path());
-            obj_path == pass_path
+            if let Some(obj_pkg) = obj.pkg(&artifacts.objects) {
+                let obj_path = trim_test_suffix(artifacts.packages.get(obj_pkg).path());
+                if obj_path == pass_path {
+                    return true;
+                }
+            }
+            let type_name = type_string(
+                types,
+                &artifacts.objects,
+                &artifacts.packages,
+                typ,
+                None,
+            );
+            type_name_same_package(&type_name, &pass_path)
         }
         TypeData::TypeParam(_) => true,
         _ => false,

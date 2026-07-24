@@ -3,17 +3,30 @@
 //! Simplified port of [`honnef.co/go/tools/unused`](https://pkg.go.dev/honnef.co/go/tools/unused)
 //! for single-package analysis.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{Decl, GenDecl, Spec, TypeSpec, ValueSpec};
+use guff::ast::{Decl, Expr, GenDecl, Ident, Spec, TypeSpec, ValueSpec};
 use guff::token::Token;
 use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::facts::generated;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::arena::ObjectId;
 
 fn is_exported(name: &str) -> bool {
     name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+}
+
+/// Receiver type name for `T`, `*T`, or indexed `T[...]` / `*T[...]`.
+fn recv_type_ident(ty: &Expr) -> Option<&Ident> {
+    match ty {
+        Expr::Ident(id) => Some(id),
+        Expr::StarExpr(s) => recv_type_ident(&s.x),
+        Expr::IndexExpr(i) => recv_type_ident(&i.x),
+        Expr::IndexListExpr(i) => recv_type_ident(&i.x),
+        Expr::ParenExpr(p) => recv_type_ident(&p.x),
+        _ => None,
+    }
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -29,7 +42,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let pkg_name = pass.pkg().name.as_str();
     let mut candidates = HashSet::new();
     let mut roots = HashSet::new();
-    let mut const_groups: Vec<Vec<guff_types::arena::ObjectId>> = Vec::new();
+    let mut const_groups: Vec<Vec<ObjectId>> = Vec::new();
+    let mut method_recv_type: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut iface_method_names: HashSet<String> = HashSet::new();
 
     for file in pass.files() {
         if is_generated_at(pass, file.file_start.0 as u32) {
@@ -41,7 +56,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let Some(Some(obj)) = info.defs.get(&f.name.id) else {
                         continue;
                     };
-                    if f.recv.is_some() {
+                    if let Some(recv) = &f.recv {
+                        if let Some(field) = recv.list.first() {
+                            if let Some(ty) = field.ty.as_ref() {
+                                if let Some(type_ident) = recv_type_ident(ty) {
+                                    // Receiver type Idents are usually uses, not defs.
+                                    let type_obj = info
+                                        .uses
+                                        .get(&type_ident.id)
+                                        .copied()
+                                        .or_else(|| {
+                                            info.defs.get(&type_ident.id).and_then(|d| *d)
+                                        });
+                                    if let Some(type_obj) = type_obj {
+                                        method_recv_type.insert(*obj, type_obj);
+                                    }
+                                }
+                            }
+                        }
                         if is_exported(&f.name.name) {
                             roots.insert(*obj);
                         } else {
@@ -67,7 +99,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     let mut decl_group = Vec::new();
                     for spec in specs {
                         match spec {
-                            Spec::TypeSpec(TypeSpec { name, .. }) => {
+                            Spec::TypeSpec(TypeSpec { name, ty, .. }) => {
                                 let Some(Some(obj)) = info.defs.get(&name.id) else {
                                     continue;
                                 };
@@ -75,6 +107,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     roots.insert(*obj);
                                 } else {
                                     candidates.insert(*obj);
+                                }
+                                if let Expr::InterfaceType(iface) = ty {
+                                    for field in &iface.methods.list {
+                                        for n in &field.names {
+                                            iface_method_names.insert(n.name.clone());
+                                        }
+                                    }
                                 }
                             }
                             Spec::ValueSpec(ValueSpec { names, .. }) => {
@@ -115,6 +154,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             for obj in group {
                 used.insert(obj);
             }
+        }
+    }
+
+    // Methods that implement a package interface are used when their receiver
+    // type is used (even if never called by name). Compare by type *name* so
+    // hybrid typecheck ObjectId identity mismatches don't miss the link.
+    let used_type_names: HashSet<String> = used
+        .iter()
+        .map(|obj| obj.name(&artifacts.objects).to_string())
+        .collect();
+    for (method, recv_ty) in &method_recv_type {
+        if !candidates.contains(method) {
+            continue;
+        }
+        let recv_name = recv_ty.name(&artifacts.objects);
+        if !used_type_names.contains(recv_name) {
+            continue;
+        }
+        let name = method.name(&artifacts.objects);
+        if iface_method_names.contains(name) {
+            used.insert(*method);
         }
     }
 

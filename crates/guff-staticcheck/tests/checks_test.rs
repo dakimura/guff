@@ -2973,8 +2973,9 @@ fn qf1008_flags_interrupted_call_chain() {
     let pkg = support::typecheck_file(&dir, "call.go", "example.com/staticcheck/qf1008/call");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("FunctionCallInner")));
+    // First segment is CallExpr.Fun (`call.FunctionCallInner.F8`) — skipped.
+    // Second segment (`….FunctionCallContinuedInner.F9`) still flags.
+    assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages
         .iter()
         .any(|m| m.contains("FunctionCallContinuedInner")));

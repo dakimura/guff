@@ -29,6 +29,9 @@ pub struct GofumptOptions {
     /// Pass `-lang` (target Go version, e.g. `go1.22` / `1.22`).
     /// `None` → gofumpt reads the version from `go.mod`.
     pub lang: Option<String>,
+    /// Match golangci-lint's pinned gofumpt (omit post-v0.10 multiline call /
+    /// paren rules that diverge from that pin). Default `false` via [`Default`].
+    pub match_golangci: bool,
 }
 
 /// Formatter: native gofumpt port, with subprocess fallback.
@@ -43,7 +46,9 @@ impl Gofumpt {
     pub fn new(options: GofumptOptions) -> Self {
         Self {
             options,
-            binary: None,
+            binary: std::env::var("GUFF_GOFUMPT_BIN")
+                .ok()
+                .filter(|s| !s.is_empty()),
         }
     }
 
@@ -53,6 +58,9 @@ impl Gofumpt {
     }
 
     fn use_native(&self) -> bool {
+        if self.binary.is_some() {
+            return false;
+        }
         !std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0")
     }
 
@@ -62,6 +70,7 @@ impl Gofumpt {
             lang: self.options.lang.as_ref().map(|l| normalize_lang(l)),
             module_path: self.options.module_path.clone(),
             filename: filename.to_string(),
+            match_golangci: self.options.match_golangci,
             ..Default::default()
         }
     }
@@ -88,6 +97,11 @@ impl Formatter for Gofumpt {
                 "modpath",
                 self.options.module_path.as_deref().unwrap_or(""),
             ),
+            (
+                "match_golangci",
+                if self.options.match_golangci { "1" } else { "0" },
+            ),
+            ("bin", self.binary.as_deref().unwrap_or("")),
             ("native", if self.use_native() { "1" } else { "0" }),
         ])
     }
@@ -232,6 +246,28 @@ mod tests {
         assert!(
             s.contains("return x"),
             "expected clothed return, got:\n{s}"
+        );
+    }
+
+    #[test]
+    fn match_golangci_skips_v010_multiline_call_parens() {
+        let src = b"package p\n\nfunc f() {\n\tfoo(\n\t\ta, b)\n}\n";
+        let latest = Gofumpt::new(GofumptOptions::default());
+        let out = latest.format("p.go", src).expect("gofumpt latest");
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            s.contains("\n\t)") && !s.contains("a, b)"),
+            "latest should put ) on its own line, got:\n{s}"
+        );
+
+        let pinned = Gofumpt::new(GofumptOptions {
+            match_golangci: true,
+            ..Default::default()
+        });
+        let out = pinned.format("p.go", src).expect("gofumpt match_golangci");
+        assert_eq!(
+            out, src,
+            "match_golangci should leave multiline call parens unchanged"
         );
     }
 }

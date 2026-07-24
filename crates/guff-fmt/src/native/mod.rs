@@ -82,6 +82,8 @@ pub struct NativeOptions {
     pub lang: Option<String>,
     /// `gofumpt -modpath`.
     pub module_path: Option<String>,
+    /// Omit gofumpt ≥v0.10 multiline call / paren rules (golangci pin parity).
+    pub match_golangci: bool,
     /// `goimports -local` (comma-joined prefixes).
     pub local_prefixes: Vec<String>,
     /// `gci -s` section list.

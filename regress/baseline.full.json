@@ -8,20 +8,21 @@
   "rayon_threads": 0,
   "isolate_gocache": false,
   "guff": {
-    "wall_seconds": 7.37,
-    "peak_rss_bytes": 7482376192
+    "wall_seconds": 7.4,
+    "peak_rss_bytes": 7691747328
   },
   "compat": {
-    "guff_issues": 379,
+    "guff_issues": 20,
     "golangci_issues": 20,
-    "both": 16,
-    "guff_only": 363,
-    "golangci_only": 4,
-    "precision": 0.04221635883905013,
-    "recall": 0.8
+    "both": 20,
+    "guff_only": 0,
+    "golangci_only": 0,
+    "precision": 1.0,
+    "recall": 1.0
   },
   "tolerances": {
-    "wall_seconds_ratio": 1.25,
+    "wall_seconds_ratio": 1.0,
+    "wall_seconds_epsilon": 0.15,
     "peak_rss_ratio": 1.2,
     "max_guff_only_delta": 0,
     "max_golangci_only_delta": 0,

@@ -58,6 +58,8 @@ fn lint_errcheck_fixture() -> LintResult {
         run,
         filter: guff_lint::IssueFilter::default(),
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     }
 }
 
@@ -106,6 +108,8 @@ fn exit_code_is_zero_when_clean() {
         run,
         filter: guff_lint::IssueFilter::default(),
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
     assert_eq!(result.diagnostic_count(), 0);
     assert_eq!(result.exit_code(1), 0);

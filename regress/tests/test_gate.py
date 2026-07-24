@@ -107,12 +107,20 @@ class GateTests(unittest.TestCase):
         self.assertEqual(evaluate(_baseline(), m), [])
 
     def test_fail_wall(self):
-        # baseline 10s × 1.25 = 12.5; 13 fails
-        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 13.0}))
+        # baseline 10s × 1.0 + 0.15 = 10.15; 10.2 fails
+        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 10.2}))
         self.assertTrue(any(f.metric == "wall_seconds" for f in fails))
 
-    def test_pass_wall_within_tolerance(self):
-        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 12.0}))
+    def test_pass_wall_equal(self):
+        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 10.0}))
+        self.assertFalse(any(f.metric == "wall_seconds" for f in fails))
+
+    def test_pass_wall_within_epsilon(self):
+        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 10.14}))
+        self.assertFalse(any(f.metric == "wall_seconds" for f in fails))
+
+    def test_pass_wall_faster(self):
+        fails = evaluate(_baseline(), _measured(guff={"wall_seconds": 9.0}))
         self.assertFalse(any(f.metric == "wall_seconds" for f in fails))
 
     def test_fail_rss(self):

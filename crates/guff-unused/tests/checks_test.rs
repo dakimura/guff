@@ -43,3 +43,12 @@ fn unused_flags_method_on_used_type() {
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(messages[0].contains("unusedMethod is unused"));
 }
+
+#[test]
+fn unused_keeps_interface_impl_methods() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg("example.com/unused/iface", &dir.join("iface_ok.go"));
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("trulyUnused is unused"));
+}

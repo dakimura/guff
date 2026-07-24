@@ -210,7 +210,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let parent_is_selector = stack
                 .last()
                 .is_some_and(|n| matches!(n, NodeRef::SelectorExpr(_)));
-            if !parent_is_selector {
+            // Upstream extractSelectors + PathEnclosingInterval never flags
+            // method-call selectors like `d.Metric.GetCounter()` — skip when
+            // this SelectorExpr is the Fun of a CallExpr. Field chains
+            // (`x := a.b.c`) and post-call segments (`f().a.b`) still run.
+            let is_call_fun = stack.last().is_some_and(|n| {
+                matches!(
+                    n,
+                    NodeRef::CallExpr(c)
+                        if matches!(
+                            c.fun.as_ref(),
+                            Expr::SelectorExpr(s) if s.id == sel.id
+                        )
+                )
+            });
+            if !parent_is_selector && !is_call_fun {
                 check_selector(pass, sel, &mut pending);
             }
             true

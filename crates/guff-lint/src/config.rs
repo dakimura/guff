@@ -348,6 +348,9 @@ pub struct OutputConfig {
     pub sort_results: Option<bool>,
     #[serde(default, rename = "path-prefix")]
     pub path_prefix: Option<String>,
+    /// golangci `output.path-mode`: empty/`rel` (default) or `abs`.
+    #[serde(default, rename = "path-mode")]
+    pub path_mode: Option<String>,
     #[serde(default, rename = "show-stats")]
     pub show_stats: Option<bool>,
     /// Deprecated single-format string.
@@ -362,6 +365,7 @@ impl OutputConfig {
             && self.print_linter_name.is_none()
             && self.sort_results.is_none()
             && self.path_prefix.is_none()
+            && self.path_mode.is_none()
             && self.show_stats.is_none()
             && self.format.is_none()
     }

@@ -8,8 +8,9 @@ use crate::util::{is_blank, receiver_type_key};
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let mut failures = Vec::new();
-    let mut type_receiver = std::collections::HashMap::new();
     for file in pass.files() {
+        // Consistency is per-file (mirrors revive), not package-wide.
+        let mut type_receiver = std::collections::HashMap::new();
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
                 continue;

@@ -2247,7 +2247,7 @@ fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<D
     pending.push(Diagnostic {
         pos: header_pos,
         end,
-        category: String::new(),
+        category: "slicesbackward".into(),
         message: "backward loop over slice can be modernized using slices.Backward".into(),
         suggested_fixes: vec![SuggestedFix {
             message: format!("Replace with range slices.Backward({slice_text})"),

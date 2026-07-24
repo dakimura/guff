@@ -42,10 +42,29 @@ fn expr_key(e: &Expr) -> String {
         Expr::StarExpr(s) => format!("(*{})", expr_key(&s.x)),
         Expr::UnaryExpr(u) => format!("({:?}{})", u.op, expr_key(&u.x)),
         Expr::IndexExpr(i) => format!("{}[{}]", expr_key(&i.x), expr_key(&i.index)),
+        Expr::SliceExpr(s) => {
+            let low = s
+                .low
+                .as_ref()
+                .map(|e| expr_key(e))
+                .unwrap_or_default();
+            let high = s
+                .high
+                .as_ref()
+                .map(|e| expr_key(e))
+                .unwrap_or_default();
+            let max = s
+                .max
+                .as_ref()
+                .map(|m| format!(":{}", expr_key(m)))
+                .unwrap_or_default();
+            format!("{}[{low}:{high}{max}]", expr_key(&s.x))
+        }
         Expr::CallExpr(c) => {
             let args = c.args.iter().map(expr_key).collect::<Vec<_>>().join(", ");
             format!("{}({args})", expr_key(&c.fun))
         }
+        Expr::ParenExpr(p) => expr_key(&p.x),
         _ => "_".to_string(),
     }
 }

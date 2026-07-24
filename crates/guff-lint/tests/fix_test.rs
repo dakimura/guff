@@ -210,6 +210,8 @@ fn apply_fixes_sa1004_rewrites_sleep_literal() {
         run,
         filter: guff_lint::IssueFilter::default(),
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
 
     let fset = result

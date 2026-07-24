@@ -9,6 +9,7 @@ mod exclude;
 mod fix;
 mod format;
 mod nolint;
+mod pathutil;
 mod registry;
 mod settings;
 
@@ -32,6 +33,7 @@ pub use format::{
     TextFormatter,
 };
 pub use nolint::{NolintIndex, NOLINTLINT_NAME};
+pub use pathutil::{format_issue_path, PathMode};
 pub use registry::{
     analyzers_for_linter, analyzers_for_linter_with_settings, format_linters_listing,
     is_meta_linter, known_linter_names, linter_description, linter_name_for_analyzer,
@@ -111,6 +113,10 @@ pub struct LintOptions {
     /// Optional formatter diagnostics for `guff run` (golangci `formatters`).
     /// When set, unformatted files are reported as issues (or fixed with `fix`).
     pub formatters: Option<FormatterRunConfig>,
+    /// golangci `output.path-mode` (default: relative to cwd).
+    pub path_mode: PathMode,
+    /// golangci `output.path-prefix`.
+    pub path_prefix: Option<String>,
 }
 
 /// Formatter configuration for `guff run` diagnostics (golangci `formatters`).
@@ -258,6 +264,8 @@ impl LintOptions {
             cache_dir: None,
             fix: false,
             formatters: None,
+            path_mode: PathMode::Rel,
+            path_prefix: None,
         }
     }
 }
@@ -434,6 +442,8 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         run: result,
         filter: opts.filter.clone(),
         cached_issues,
+        path_mode: opts.path_mode,
+        path_prefix: opts.path_prefix.clone(),
     })
 }
 
@@ -475,6 +485,8 @@ pub struct LintResult {
     /// Issues restored from the persistent cache for packages that were not
     /// re-analyzed. Positions are already resolved (no `FileSet` needed).
     pub cached_issues: Vec<Issue>,
+    pub path_mode: PathMode,
+    pub path_prefix: Option<String>,
 }
 
 impl LintResult {
@@ -488,7 +500,13 @@ impl LintResult {
         if let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) {
             issues.extend(IssueFilter::collect_issues(fset, &self.run.diagnostics()));
         }
-        self.filter.apply(issues, &self.packages)
+        let mut issues = self.filter.apply(issues, &self.packages);
+        // Path display last — filters need absolute paths for GOCACHE / reads.
+        let prefix = self.path_prefix.as_deref();
+        for issue in &mut issues {
+            issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix);
+        }
+        issues
     }
 
     pub fn diagnostic_count(&self) -> usize {

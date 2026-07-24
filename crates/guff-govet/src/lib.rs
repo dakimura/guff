@@ -16,6 +16,7 @@ mod framepointer;
 mod govet_util;
 mod httpresponse;
 mod ifaceassert;
+mod inline;
 mod lockpath;
 mod loopclosure;
 mod lostcancel;
@@ -47,6 +48,7 @@ pub use errorsas::analyzer as errorsas_analyzer;
 pub use framepointer::analyzer as framepointer_analyzer;
 pub use httpresponse::analyzer as httpresponse_analyzer;
 pub use ifaceassert::analyzer as ifaceassert_analyzer;
+pub use inline::analyzer as inline_analyzer;
 pub use loopclosure::analyzer as loopclosure_analyzer;
 pub use lostcancel::analyzer as lostcancel_analyzer;
 pub use nilfunc::analyzer as nilfunc_analyzer;
@@ -82,6 +84,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         framepointer::analyzer(),
         httpresponse::analyzer(),
         ifaceassert::analyzer(),
+        inline::analyzer(),
         loopclosure::analyzer(),
         lostcancel::analyzer(),
         nilfunc::analyzer(),

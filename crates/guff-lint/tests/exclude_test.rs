@@ -68,6 +68,8 @@ fn exclude_rules_drop_errcheck_on_bad_go() {
         .expect("run"),
         filter,
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
     assert!(
         with_filter.raw_diagnostic_count() > 0,
@@ -154,6 +156,8 @@ fn default_filter_is_noop_for_library_use() {
         .unwrap(),
         filter,
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
     assert!(result.diagnostic_count() > 0);
 }

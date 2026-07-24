@@ -233,6 +233,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
     for (pos, related_pos) in reports {
+        // Hybrid SSA sometimes yields NoPos (0); never emit unlocated diagnostics.
+        if pos == 0 {
+            continue;
+        }
         pass.report(Diagnostic {
             pos,
             message: MSG.into(),

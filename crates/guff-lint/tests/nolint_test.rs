@@ -70,6 +70,8 @@ fn nolint_errcheck_suppresses_finding() {
         .expect("run"),
         filter,
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
 
     assert!(
@@ -115,6 +117,8 @@ fn nolintlint_reports_unused_directive() {
         .expect("run"),
         filter,
         cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
     };
 
     let issues = result.issues();

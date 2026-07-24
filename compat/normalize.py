@@ -92,6 +92,8 @@ _UNUSED_PREFIX = re.compile(r"^(func|var|const|type|field|method)\s+")
 _STATICCHECK_CODE = re.compile(r"^(?:SA|ST|S|QF)\d{4}:\s*")
 # golangci modernize prefixes the check name (`slicesbackward: …`); guff omits it.
 _MODERNIZE_CHECK = re.compile(r"^[a-z][a-z0-9]*:\s*")
+# golangci govet prefixes the pass name (`inline: Constant …`); guff omits it.
+_GOVET_PASS = re.compile(r"^[a-z][a-z0-9]*:\s*")
 
 # Known equivalent phrasings across guff and golangci-lint.
 _ERRCHECK_EQUIV = {
@@ -111,6 +113,8 @@ def normalize_message(linter: str, text: str) -> str:
         t = _STATICCHECK_CODE.sub("", t)
     if linter == "modernize":
         t = _MODERNIZE_CHECK.sub("", t)
+    if linter == "govet":
+        t = _GOVET_PASS.sub("", t)
     return t
 
 
