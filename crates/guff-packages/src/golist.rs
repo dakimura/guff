@@ -135,6 +135,11 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     // deps are not compiled). Type info for those comes from source, but stdlib
     // is still resolved from export data — build only the stdlib `.a` here (a
     // small, ~4s-cold subset) via a second, stdlib-restricted `go list -export`.
+    //
+    // Optional warm-GOCACHE reuse: when the build cache already holds third-party
+    // `.a` files, a further `go list -export` returns those paths cheaply and
+    // `build_source_seed` prefers them over source typecheck (large seed win).
+    // Gated by [`export_reuse_enabled`] so a cold empty GOCACHE stays source-only.
     if cfg.dep_source {
         let stdlib: Vec<String> = seen
             .values()
@@ -142,11 +147,62 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             .map(|p| p.import_path.clone())
             .collect();
         if !stdlib.is_empty() {
-            let exports = fetch_stdlib_exports(cfg, &stdlib)?;
+            let exports = fetch_package_exports(cfg, &stdlib)?;
             for pkg in response.packages.iter_mut() {
                 if let Some(export) = exports.get(&pkg.id) {
                     if !export.is_empty() {
                         Arc::make_mut(pkg).export_file = PathBuf::from(export);
+                    }
+                }
+            }
+        }
+
+        let third_party: Vec<String> = seen
+            .values()
+            .filter(|p| {
+                !p.standard
+                    && p.error.is_none()
+                    && p.import_path != "unsafe"
+                    // Test-variant ids look like `pkg [pkg.test]` — not valid
+                    // `go list` arguments and would abort the whole run.
+                    && !p.import_path.contains(' ')
+                    && !p.import_path.ends_with(".test")
+                    // Only external modules: main-module packages would force
+                    // `go list -export` to recompile local sources (net loss).
+                    && p.module.as_ref().is_some_and(|m| !m.main)
+            })
+            .map(|p| p.import_path.clone())
+            .collect();
+        if export_reuse_enabled(cfg, &third_party) {
+            let t_reuse = std::time::Instant::now();
+            match fetch_package_exports(cfg, &third_party) {
+                Ok(exports) => {
+                    let mut attached = 0usize;
+                    for pkg in response.packages.iter_mut() {
+                        if let Some(export) = exports.get(&pkg.id) {
+                            if !export.is_empty() && Path::new(export).exists() {
+                                Arc::make_mut(pkg).export_file = PathBuf::from(export);
+                                attached += 1;
+                            }
+                        }
+                    }
+                    if timing {
+                        eprintln!(
+                            "guff:   golist dep-export-reuse {:.2}s ({} attached / {} candidates)",
+                            t_reuse.elapsed().as_secs_f64(),
+                            attached,
+                            third_party.len(),
+                        );
+                    }
+                }
+                Err(e) => {
+                    // Best-effort: fall back to source seed. Never fail the load
+                    // because warm-cache reuse is optional.
+                    if timing {
+                        eprintln!(
+                            "guff:   golist dep-export-reuse failed after {:.2}s ({e}); using source seed",
+                            t_reuse.elapsed().as_secs_f64(),
+                        );
                     }
                 }
             }
@@ -164,29 +220,142 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     Ok(response)
 }
 
-/// Second `go list` call for hybrid source mode: build export data for the given
-/// (stdlib) packages only and return `import path → export .a path`.
-fn fetch_stdlib_exports(
+/// Second `go list -export` for hybrid source mode: resolve export `.a` paths
+/// for the given packages (stdlib and/or warm-GOCACHE third-party reuse).
+///
+/// Large candidate sets are batched to stay under `ARG_MAX`.
+fn fetch_package_exports(
     cfg: &Config,
     paths: &[String],
 ) -> Result<HashMap<String, String>, GoListError> {
-    let mut args = vec![
-        "list".to_string(),
-        "-json=ImportPath,Export".to_string(),
-        "-export".to_string(),
-    ];
-    args.extend(paths.iter().cloned());
-    let stdout = invoke_go(cfg, &args)?;
-
+    if paths.is_empty() {
+        return Ok(HashMap::new());
+    }
+    const BATCH: usize = 200;
     let mut map = HashMap::new();
-    let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonExport>();
-    for item in stream {
-        let e = item.map_err(|e| GoListError::Json(e.to_string()))?;
-        if !e.export.is_empty() {
-            map.insert(e.import_path, e.export);
+    for chunk in paths.chunks(BATCH) {
+        let mut args = vec![
+            "list".to_string(),
+            "-json=ImportPath,Export".to_string(),
+            "-export".to_string(),
+        ];
+        args.extend(chunk.iter().cloned());
+        let stdout = invoke_go(cfg, &args)?;
+        let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonExport>();
+        for item in stream {
+            let e = item.map_err(|e| GoListError::Json(e.to_string()))?;
+            if !e.export.is_empty() {
+                map.insert(e.import_path, e.export);
+            }
         }
     }
     Ok(map)
+}
+
+/// Whether hybrid mode should attach warm-GOCACHE third-party export files.
+///
+/// - unset / `0|false|off` → never (default: keep pure hybrid source seed)
+/// - `1|true|on` → always attach when candidates exist
+/// - `auto` → GOCACHE nonempty **and** a single-package probe returns an
+///   existing Export within ~750ms (warm). Empty/cold GOCACHE stays source-only.
+///
+/// Opt-in by default because export-decoded third-party types can diverge from
+/// source typecheck (see hybrid vs export adjudication). Enable once findings
+/// identity is verified for a given codebase.
+fn export_reuse_enabled(cfg: &Config, third_party: &[String]) -> bool {
+    if third_party.is_empty() {
+        return false;
+    }
+    let Ok(v) = std::env::var("GUFF_EXPORT_REUSE") else {
+        return false;
+    };
+    let v = v.to_ascii_lowercase();
+    if matches!(v.as_str(), "0" | "false" | "off" | "no") {
+        return false;
+    }
+    if matches!(v.as_str(), "1" | "true" | "on" | "yes") {
+        return true;
+    }
+    if v == "auto" {
+        return gocache_nonempty(cfg) && probe_export_cached(cfg, &third_party[0]);
+    }
+    false
+}
+
+fn gocache_nonempty(cfg: &Config) -> bool {
+    let mut env = parse_env(&cfg.resolved_env());
+    ensure_gocache(&mut env);
+    let cache = env
+        .iter()
+        .find(|(k, _)| k == "GOCACHE")
+        .map(|(_, v)| v.as_str())
+        .unwrap_or("");
+    if cache.is_empty() || cache == "off" {
+        return false;
+    }
+    let path = Path::new(cache);
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return false;
+    };
+    rd.flatten().next().is_some()
+}
+
+/// Returns true when `go list -export` for one package finishes quickly and
+/// yields an on-disk Export path — evidence the GOCACHE is warm for this dep.
+fn probe_export_cached(cfg: &Config, path: &str) -> bool {
+    let mut cmd = Command::new("go");
+    if !cfg.dir.as_os_str().is_empty() {
+        cmd.current_dir(&cfg.dir);
+    }
+    cmd.args([
+        "list",
+        "-json=ImportPath,Export",
+        "-export",
+        path,
+    ]);
+    let mut env = parse_env(&cfg.resolved_env());
+    ensure_gocache(&mut env);
+    cmd.envs(env);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(750);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return false;
+                }
+                let mut stdout = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    use std::io::Read;
+                    let _ = out.read_to_string(&mut stdout);
+                }
+                return stdout_has_existing_export(&stdout);
+            }
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(_) => return false,
+        }
+    }
+}
+
+fn stdout_has_existing_export(stdout: &str) -> bool {
+    let stream = serde_json::Deserializer::from_str(stdout).into_iter::<JsonExport>();
+    for item in stream.flatten() {
+        if !item.export.is_empty() && Path::new(&item.export).exists() {
+            return true;
+        }
+    }
+    false
 }
 
 fn load_or_invoke_go(
@@ -845,8 +1014,8 @@ struct JsonPackage {
     error: Option<JsonPackageError>,
 }
 
-/// Minimal shape for the second, stdlib-only `go list -export` call used by the
-/// hybrid source mode ([`Config::dep_source`]).
+/// Minimal shape for the second `go list -export` call used by hybrid source
+/// mode ([`Config::dep_source`]) for stdlib and warm-GOCACHE third-party reuse.
 #[derive(Debug, Clone, Deserialize)]
 struct JsonExport {
     #[serde(rename = "ImportPath")]
