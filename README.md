@@ -37,8 +37,10 @@ Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters
 
 | Tool | Why |
 |------|-----|
-| [Rust](https://rustup.rs/) (edition 2021) | Build `guff` |
-| [Go](https://go.dev/dl/) | Package resolution (`go list`) |
+| [Go](https://go.dev/dl/) | Package resolution (`go list`) — always required at runtime |
+| [Rust](https://rustup.rs/) (edition 2021) | Only if you build from source (`cargo install` / `cargo build`) |
+
+Skip Rust when using the [prebuilt binary](#e-prebuilt-binary-github-releases), [Docker](#ci--docker), or the [GitHub Action](#ci-github-actions-recommended).
 
 ### Installation
 
@@ -84,50 +86,9 @@ curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.
 
 Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
 
-### GitHub Action
-
-Add a workflow (Go must be available — use `actions/setup-go`):
-
-```yaml
-name: guff
-on:
-  push:
-  pull_request:
-
-permissions:
-  contents: read
-
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: stable
-      - uses: dakimura/guff@v0.1.0
-        with:
-          args: run --out-format=github-actions ./...
-```
-
-Inputs: `version` (default: Action’s `v*` tag, else `latest`), `args` (default: `run ./...`), `working-directory`, `install-dir`.
-
-### Docker
-
-Images are published to GHCR on each release:
-
-```bash
-docker pull ghcr.io/dakimura/guff:0.1.0
-
-# ENTRYPOINT is `guff` — pass subcommand + args only
-docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.1.0 run ./...
-```
-
-Tags: `0.1.0`, `v0.1.0`, `0.1`, `0`, `latest` (`linux/amd64` + `linux/arm64`). The image includes a Go toolchain (`go list`).
-
 ### Usage
 
-From a Go module root:
+From a Go module root (after installing `guff`, or via Docker / CI below):
 
 ```bash
 guff run .
@@ -161,6 +122,88 @@ Formatters (same six as golangci-lint v2 `formatters`):
 ```bash
 guff fmt .
 guff fmt --enable gofumpt --enable goimports .
+```
+
+### CI & Docker
+
+guff needs a Go toolchain for `go list`. The GitHub Action expects `actions/setup-go`; the Docker image already includes Go.
+
+#### Local: Docker on your module
+
+From the Go module root (mount the repo, set workdir):
+
+```bash
+# Lint current module (reads .golangci.yml / .guff.yml if present)
+docker run --rm \
+  -v "$PWD":/app -w /app \
+  ghcr.io/dakimura/guff:0.1.0 \
+  run ./...
+
+# Explicit config / faster preset
+docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.1.0 \
+  run -c .golangci.yml --preset fast ./...
+```
+
+`ENTRYPOINT` is `guff` — pass only the subcommand and args (`run …`, `linters`, `fmt …`).  
+Tags: `0.1.0`, `v0.1.0`, `0.1`, `0`, `latest` (`linux/amd64` + `linux/arm64`).
+
+Optional: cache Go modules / build cache across runs:
+
+```bash
+docker run --rm \
+  -v "$PWD":/app -w /app \
+  -v "$(go env GOMODCACHE)":/go/pkg/mod \
+  -v "$(go env GOCACHE)":/root/.cache/go-build \
+  -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
+  ghcr.io/dakimura/guff:0.1.0 run ./...
+```
+
+#### CI: GitHub Actions (recommended)
+
+```yaml
+name: guff
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: guff
+        uses: dakimura/guff@v0.1.0
+        with:
+          # github-actions format annotates PR files in the Checks UI
+          args: run --out-format=github-actions ./...
+```
+
+Useful inputs: `args` (default `run ./...`), `version` (default: the Action’s `v*` tag), `working-directory` (monorepo subdirectory).
+
+#### CI: Docker
+
+```yaml
+- uses: actions/checkout@v4
+- uses: actions/setup-go@v5
+  with:
+    go-version: stable
+- name: guff (docker)
+  run: |
+    docker run --rm \
+      -v "$PWD":/app -w /app \
+      -v "$(go env GOMODCACHE)":/go/pkg/mod \
+      -v "$(go env GOCACHE)":/root/.cache/go-build \
+      -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
+      ghcr.io/dakimura/guff:0.1.0 \
+      run --out-format=github-actions ./...
 ```
 
 ### Configuration
