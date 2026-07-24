@@ -24,17 +24,19 @@
 //! - `testingcontext` — `WithCancel(Background/TODO)`+`defer cancel` → `t.Context` (Go 1.24+)
 //! - `unsafefuncs` — `unsafe.Pointer(uintptr(ptr)+…)` → `unsafe.Add` (Go 1.17+)
 //! - `importcomment` — obsolete `package p // import "path"` comments
-//! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN)
+//!   (off by default via Suite parity; see `ModernizeSettings::to_guff_modernize`)
+//! - `stringscut` — `Split(N)(…)[0]` → `Cut` (Go 1.18+; strings+bytes Split/SplitN;
+//!   off by default — Suite's stringscut is Index→Cut only as of x/tools v0.44)
 //! - `newexpr` — `func f(x T) *T { return &x }` → `new(x)` wrappers + call sites
 //!   (Go 1.26+; `NewLike` facts)
 //! - `errorsastype` — `var e T; if errors.As(err, &e)` → `errors.AsType[T]`
-//!   (Go 1.26+; if-stmt only; switch/init/`new(E)` forms DEFERRED)
+//!   (Go 1.26+; if-stmt only; off by default — not in Suite v0.44)
 //! - `stringsbuilder` — `s += x` in a loop → `strings.Builder` (local string vars;
 //!   `_test.go` skipped; AddImport DEFERRED)
 //! - `slicesdelete` — `append(s[:i], s[j:]...)` → `slices.Delete` (Go 1.21+;
-//!   AddImport / `int()` wrap / int-shadow skip DEFERRED)
-//! - `bloop` — `for … b.N …` → `for b.Loop()` (Go 1.24+; deletes preceding
-//!   `b.{Start,Stop,Reset}Timer`; keyed `for i := range b.N` DEFERRED)
+//!   off by default — commented out upstream as not nil-preserving)
+//! - `bloop` — `for … b.N …` → `for b.Loop()` (Go 1.24+; off by default —
+//!   commented out upstream)
 //! - `stditerators` — `for i := 0; i < x.Len(); i++ { use(x.At(i)) }` →
 //!   `for elem := range x.All()` for well-known `go/types`/`reflect` types
 //!   (Go 1.24+/1.26+; both C-style and `for i := range x.Len()` forms;

@@ -185,7 +185,9 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "Checks that functions with naked returns are not longer than a maximum size (can be zero).",
         url: "https://github.com/alexkohler/nakedret",
         run: run as RunFn,
-        run_despite_errors: false,
+        // AST-only (function length + naked `return`); still useful when the
+        // package is ill-typed so `//nolint:nakedret` is marked used.
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })

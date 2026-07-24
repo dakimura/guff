@@ -124,9 +124,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    {
-        let files = pass.files();
-        inspect.preorder(files, |n| {
+    // Upstream `simple/s1002` skips `_test.go` (`code.IsInTest`).
+    let compiled = &pass.pkg().compiled_go_files;
+    for (fi, file) in pass.files().iter().enumerate() {
+        if compiled
+            .get(fi)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
+        {
+            continue;
+        }
+        inspect.preorder(std::slice::from_ref(file), |n| {
             let NodeRef::BinaryExpr(expr) = n else {
                 return;
             };

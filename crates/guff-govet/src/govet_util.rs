@@ -46,8 +46,11 @@ pub fn is_type_named(pass: &Pass<'_>, typ: TypeId, pkg_path: &str, name: &str) -
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    let u = typ.underlying(&artifacts.types);
-    let TypeData::Named(_) = artifacts.types.get(u) else {
+    // Named-ness lives on the type itself (after unalias). `underlying()` is the
+    // struct/interface/etc. and is never `TypeData::Named` for a completed type —
+    // checking it made every `is_type_named` call fail (e.g. slog.Attr FPs).
+    let typ = guff_types::alias::unalias_readonly(&artifacts.types, typ);
+    let TypeData::Named(_) = artifacts.types.get(typ) else {
         return false;
     };
     let obj = named_obj(&artifacts.types, typ);
@@ -67,11 +70,13 @@ pub fn receiver_named_type(
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let u = guff_types::alias::unalias_readonly(&artifacts.types, typ);
     let elem = match artifacts.types.get(u) {
-        TypeData::Pointer(p) => p.elem(),
-        TypeData::Named(_) => typ,
+        TypeData::Pointer(p) => {
+            guff_types::alias::unalias_readonly(&artifacts.types, p.elem())
+        }
+        TypeData::Named(_) => u,
         _ => return None,
     };
-    let TypeData::Named(_) = artifacts.types.get(elem.underlying(&artifacts.types)) else {
+    let TypeData::Named(_) = artifacts.types.get(elem) else {
         return None;
     };
     Some((elem, named_obj(&artifacts.types, elem)))

@@ -92,9 +92,10 @@ fn implements_error(pass: &Pass<'_>, recv: guff_types::TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    let u = recv.underlying(&artifacts.types);
-    if let guff_types::arena::TypeData::Named(_) = artifacts.types.get(u) {
-        let obj = named_obj(&artifacts.types, recv);
+    // Check Named on the (unaliased) type itself — underlying is never Named.
+    let typ = guff_types::alias::unalias_readonly(&artifacts.types, recv);
+    if let guff_types::arena::TypeData::Named(_) = artifacts.types.get(typ) {
+        let obj = named_obj(&artifacts.types, typ);
         return obj.name(&artifacts.objects) == "error";
     }
     false

@@ -9,7 +9,9 @@
 //! `float-compare`, `formatter`, `go-require`, `len`, `mock-expect`, `negative-positive`,
 //! `nil-compare`, `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
 //! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
-//! `suite-thelper` (off by default), `time-compare`, `useless-assert`, `zero`.
+//! `suite-thelper` (off by default), `time-compare`, `useless-assert`.
+//! (`zero` is implemented but omitted from enable-all: golangci 2.12 vendors
+//! testifylint v1.6.4 which does not include that checker.)
 //!
 //! DEFERRED: SuggestedFix / TextEdit,
 //! formatter full printf CheckPrintf / require-f-funcs object lookup parity,
@@ -87,7 +89,8 @@ const IMPLEMENTED: &[&str] = &[
     "suite-thelper",
     "time-compare",
     "useless-assert",
-    "zero",
+    // `zero` exists in newer testifylint; golangci 2.12 vendors v1.6.4 which
+    // does not ship it. Keep it out of enable-all so configs match golangci.
 ];
 
 /// Upstream `DefaultExpectedVarPattern`.

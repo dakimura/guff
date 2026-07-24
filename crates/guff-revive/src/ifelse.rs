@@ -267,46 +267,60 @@ fn visit_block(
             continue;
         };
         let chain_at_end = at_block_end && i + 1 == stmts.len();
-        visit_if(if_stmt, chain_at_end, end_kind, rule, args, failures, check);
+        let chain = Chain {
+            if_branch: Branch {
+                kind: BranchKind::Empty,
+                has_decls: false,
+            },
+            has_else: false,
+            else_branch: Branch {
+                kind: BranchKind::Empty,
+                has_decls: false,
+            },
+            has_initializer: false,
+            has_prior_non_deviating: false,
+            at_block_end: chain_at_end,
+            block_end_kind: end_kind,
+        };
+        visit_if(if_stmt, chain, rule, args, failures, check);
     }
 }
 
 fn visit_if(
     if_stmt: &IfStmt,
-    at_block_end: bool,
-    end_kind: BranchKind,
+    mut chain: Chain,
     rule: &'static str,
     args: Args,
     failures: &mut Vec<Failure>,
     check: fn(&Chain, Args) -> Option<String>,
 ) {
+    // Nested if-else chains inside this then-block.
     visit_block(
         &if_stmt.body.list,
         false,
-        end_kind,
+        chain.block_end_kind,
         rule,
         args,
         failures,
         check,
     );
 
-    let mut chain = Chain {
-        if_branch: block_branch(&if_stmt.body),
-        has_else: false,
-        else_branch: Branch {
-            kind: BranchKind::Empty,
-            has_decls: false,
-        },
-        has_initializer: matches!(
-            if_stmt.init.as_deref(),
-            Some(Stmt::AssignStmt(AssignStmt {
-                tok: Some(Token::DEFINE),
-                ..
-            }))
-        ),
-        has_prior_non_deviating: false,
-        at_block_end,
-        block_end_kind: end_kind,
+    // Propagate initializer / prior-non-deviating across `else if` (upstream
+    // `internal/ifelse.visitor.visitIf` passes the same Chain into the next if).
+    if matches!(
+        if_stmt.init.as_deref(),
+        Some(Stmt::AssignStmt(AssignStmt {
+            tok: Some(Token::DEFINE),
+            ..
+        }))
+    ) {
+        chain.has_initializer = true;
+    }
+    chain.if_branch = block_branch(&if_stmt.body);
+    chain.has_else = false;
+    chain.else_branch = Branch {
+        kind: BranchKind::Empty,
+        has_decls: false,
     };
 
     let Some(else_stmt) = &if_stmt.else_ else {
@@ -322,8 +336,8 @@ fn visit_if(
                     rule,
                     pos: if_stmt.if_.0 as u32,
                     message,
-            confidence: None,
-        });
+                    confidence: None,
+                });
             }
         }
         return;
@@ -334,13 +348,13 @@ fn visit_if(
             if !chain.if_branch.kind.deviates() {
                 chain.has_prior_non_deviating = true;
             }
-            visit_if(else_if, at_block_end, end_kind, rule, args, failures, check);
+            visit_if(else_if, chain, rule, args, failures, check);
         }
         Stmt::BlockStmt(else_block) => {
             visit_block(
                 &else_block.list,
                 false,
-                end_kind,
+                chain.block_end_kind,
                 rule,
                 args,
                 failures,
@@ -358,8 +372,8 @@ fn visit_if(
                     rule,
                     pos: if_stmt.if_.0 as u32,
                     message,
-            confidence: None,
-        });
+                    confidence: None,
+                });
             }
         }
         _ => {}

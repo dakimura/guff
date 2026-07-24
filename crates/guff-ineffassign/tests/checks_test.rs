@@ -65,6 +65,37 @@ fn ineffassign_flags_named_return_dead_store() {
 }
 
 #[test]
+fn ineffassign_allows_naked_named_return() {
+    // `ls = …; return` with named result `ls` is not ineffectual.
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/named_ok",
+        &dir.join("named_return_ok.go"),
+    );
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(analyzer(), &pkg)
+    );
+}
+
+#[test]
+fn ineffassign_allows_named_result_assign_in_defer() {
+    // Assignment to a named result from a deferred closure must not be flagged
+    // (closure capture escapes the outer var).
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/defer_named",
+        &dir.join("defer_named_ok.go"),
+    );
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(analyzer(), &pkg)
+    );
+}
+
+#[test]
 fn ineffassign_skips_generated_files() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg(

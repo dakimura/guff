@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{Decl, Spec};
+use guff::ast::{CallExpr, Decl, Expr, Spec};
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_call_to_any};
 use guff_analysis::passes::inspect;
@@ -16,6 +16,24 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 fn is_test_file(path: &str) -> bool {
     path.ends_with("_test.go")
+}
+
+/// Prefer typed `CallName`; fall back to `errors.New` / `fmt.Errorf` selectors
+/// when the package is ill-typed and uses/`types_info` are incomplete.
+fn is_errors_new_or_fmt_errorf(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    if is_call_to_any(pass, call, &["errors.New", "fmt.Errorf"]) {
+        return true;
+    }
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    let Expr::Ident(pkg) = sel.x.as_ref() else {
+        return false;
+    };
+    matches!(
+        (pkg.name.as_str(), sel.sel.name.as_str()),
+        ("errors", "New") | ("fmt", "Errorf")
+    )
 }
 
 fn collect_obj_names(pass: &Pass<'_>) -> HashSet<String> {
@@ -100,9 +118,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let obj_names = collect_obj_names(pass);
     let mut pending = Vec::new();
 
-    let go_files = &pass.pkg().go_files;
+    // `pass.files()` is aligned with `compiled_go_files`, not `go_files`.
+    let compiled = &pass.pkg().compiled_go_files;
     for (fi, file) in pass.files().iter().enumerate() {
-        if go_files
+        if compiled
             .get(fi)
             .is_some_and(|p| is_test_file(p.to_string_lossy().as_ref()))
         {
@@ -112,7 +131,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let NodeRef::CallExpr(call) = node else {
                 return;
             };
-            if !is_call_to_any(pass, call, &["errors.New", "fmt.Errorf"]) {
+            if !is_errors_new_or_fmt_errorf(pass, call) {
                 return;
             }
             if call.args.is_empty() {
@@ -137,7 +156,10 @@ fn st1005_analyzer_impl() -> Analyzer {
         doc: "incorrectly formatted error string",
         url: "https://staticcheck.dev/docs/checks/#ST1005",
         run: run as RunFn,
-        run_despite_errors: false,
+        // AST + string-lit based; still useful when the package is ill-typed
+        // (e.g. duplicate `time.Time` identities from hybrid import). Matching
+        // golangci requires the diagnostic so `//nolint:staticcheck` is marked used.
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     }

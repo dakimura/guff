@@ -7,11 +7,13 @@ use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident};
 use guff::token::Token;
-use guff::walk::NodeRef;
+use guff::walk::{preorder, NodeRef};
+use guff_analysis::code::object_of;
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Extract, InstrData};
 use guff_ssa::value::Value;
+use guff_types::ObjectId;
 
 use crate::render::render_expr;
 
@@ -44,6 +46,61 @@ fn has_use_rec(
         }
     }
     false
+}
+
+/// Whether `obj` is read after `after_pos` before being redefined.
+///
+/// Hybrid SSA sometimes drops receiver/arg loads (e.g. `renderer.Run(...)`
+/// after `renderer, err := ...`), producing SA4006 false positives. An AST
+/// use of the same object between this assign and the next def means the
+/// value was read — suppress the report. A later use only after an intervening
+/// def still counts as unused (classic overwrite pattern).
+fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let mut next_use: Option<u32> = None;
+    let mut next_def: Option<u32> = None;
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            let NodeRef::Ident(id) = n else {
+                return true;
+            };
+            let pos = id.name_pos.0 as u32;
+            if pos <= after_pos {
+                return true;
+            }
+            if object_of(pass, id) != Some(obj) {
+                return true;
+            }
+            if info.uses.contains_key(&id.id) {
+                next_use = Some(next_use.map_or(pos, |u| u.min(pos)));
+            }
+            if info.defs.get(&id.id).and_then(|d| *d) == Some(obj) {
+                next_def = Some(next_def.map_or(pos, |d| d.min(pos)));
+            }
+            true
+        });
+    }
+    match (next_use, next_def) {
+        (Some(u), Some(d)) => u < d,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn ssa_unused_but_ast_read(
+    pass: &Pass<'_>,
+    lhs: &Expr,
+    assign_pos: u32,
+) -> bool {
+    let Expr::Ident(id) = lhs else {
+        return false;
+    };
+    let Some(obj) = object_of(pass, id) else {
+        return false;
+    };
+    ast_value_is_read_before_redef(pass, obj, assign_pos)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -103,6 +160,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     continue;
                                 }
                                 if !has_use(func, Value::Instr(rid)) {
+                                    if ssa_unused_but_ast_read(
+                                        pass,
+                                        lhs,
+                                        assign.tok_pos.0 as u32,
+                                    ) {
+                                        continue;
+                                    }
                                     pending.push((
                                         assign.tok_pos.0 as u32,
                                         format!(
@@ -140,6 +204,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         continue;
                     }
                     if !has_use(func, v) {
+                        if ssa_unused_but_ast_read(pass, lhs, assign.tok_pos.0 as u32) {
+                            continue;
+                        }
                         pending.push((
                             assign.tok_pos.0 as u32,
                             format!("this value of {} is never used", render_expr(lhs)),

@@ -56,8 +56,10 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return;
     };
-    let u = typ.underlying(&artifacts.types);
-    let TypeData::Basic(b) = artifacts.types.get(u) else {
+    // Upstream checks the key's type itself (`go/types`), not its underlying
+    // type — `type testKey string` is the recommended pattern and must pass.
+    let resolved = guff_types::alias::unalias_readonly(&artifacts.types, typ);
+    let TypeData::Basic(b) = artifacts.types.get(resolved) else {
         return;
     };
     if b.kind() == BasicKind::Invalid {
@@ -70,6 +72,6 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
             "should not use basic type {} as key in context.WithValue",
             crate::util::type_string(pass, typ)
         ),
-            confidence: None,
-        });
+        confidence: None,
+    });
 }

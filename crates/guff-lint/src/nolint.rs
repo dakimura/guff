@@ -213,13 +213,22 @@ impl NolintIndex {
         let Some(ranges) = self.lookup_mut(&issue.filename) else {
             return false;
         };
-        for ir in ranges {
-            if ir.does_match(issue) {
-                ir.matched.insert(issue.from_linter.clone(), true);
-                return true;
+        // Mark *every* matching range (inline + AST expansions). Returning on
+        // the first hit left the inline directive unmarked when only an
+        // expansion matched, so `collect_unused` (which skips expansions)
+        // falsely reported `//nolint:staticcheck` as unused.
+        let mut any = false;
+        for ir in ranges.iter_mut() {
+            if !ir.does_match(issue) {
+                continue;
             }
+            ir.matched.insert(issue.from_linter.clone(), true);
+            if issue.analyzer != issue.from_linter {
+                ir.matched.insert(issue.analyzer.clone(), true);
+            }
+            any = true;
         }
-        false
+        any
     }
 
     fn lookup_mut(&mut self, filename: &str) -> Option<&mut Vec<IgnoredRange>> {
@@ -237,6 +246,32 @@ impl NolintIndex {
     fn collect_unused(&self) -> Vec<Issue> {
         let mut seen = HashSet::new();
         let mut out = Vec::new();
+        // Directive key → whether any range (inline or expansion) matched.
+        let mut used_keys: HashSet<(String, i64, i64, String)> = HashSet::new();
+        for (filename, ranges) in &self.files {
+            if !filename.contains('/') && !filename.contains('\\') {
+                continue;
+            }
+            for ir in ranges {
+                let key = (filename.clone(), ir.from, ir.col, ir.comment_text.clone());
+                if ir.linters.is_empty() {
+                    if !ir.matched.is_empty() {
+                        used_keys.insert(key);
+                    }
+                } else {
+                    for lint in &ir.linters {
+                        if ir.matched.contains_key(lint) {
+                            used_keys.insert((
+                                filename.clone(),
+                                ir.from,
+                                ir.col,
+                                format!("{}\0{lint}", ir.comment_text),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         for (filename, ranges) in &self.files {
             // Prefer absolute keys only once (skip basenames that mirror a longer key).
             if !filename.contains('/') && !filename.contains('\\') {
@@ -256,11 +291,11 @@ impl NolintIndex {
                     continue;
                 }
                 let key = (filename.clone(), ir.from, ir.col, ir.comment_text.clone());
-                if !seen.insert(key) {
+                if !seen.insert(key.clone()) {
                     continue;
                 }
                 if ir.linters.is_empty() {
-                    if ir.matched.is_empty() {
+                    if ir.matched.is_empty() && !used_keys.contains(&key) {
                         out.push(unused_issue(
                             filename,
                             ir.from,
@@ -271,15 +306,27 @@ impl NolintIndex {
                     }
                 } else {
                     for lint in &ir.linters {
-                        if !ir.matched.contains_key(lint) {
-                            out.push(unused_issue(
-                                filename,
-                                ir.from,
-                                ir.col,
-                                &ir.comment_text,
-                                Some(lint),
-                            ));
+                        // Don't report unused for linters we cannot run yet —
+                        // golangci would have consumed these directives.
+                        if KNOWN_UNIMPLEMENTED_LINTERS.contains(&lint.as_str()) {
+                            continue;
                         }
+                        let lint_key = (
+                            filename.clone(),
+                            ir.from,
+                            ir.col,
+                            format!("{}\0{lint}", ir.comment_text),
+                        );
+                        if ir.matched.contains_key(lint) || used_keys.contains(&lint_key) {
+                            continue;
+                        }
+                        out.push(unused_issue(
+                            filename,
+                            ir.from,
+                            ir.col,
+                            &ir.comment_text,
+                            Some(lint),
+                        ));
                     }
                 }
             }
@@ -401,8 +448,16 @@ fn extract_range(
 fn is_known_nolint_target(name: &str) -> bool {
     name == NOLINTLINT_NAME
         || analyzers_for_linter(name).is_some()
+        // Enabled-in-config but not-yet-implemented linters (e.g. contextcheck)
+        // still appear in //nolint; treat them as known so we don't warn.
+        || KNOWN_UNIMPLEMENTED_LINTERS.contains(&name)
         || linter_name_for_analyzer(name) != name
 }
+
+/// Linters documented as not yet implemented in guff. `//nolint:<name>` must
+/// not be reported as unknown; unused-nolintlint also skips them (golangci
+/// would have matched real findings we cannot emit yet).
+const KNOWN_UNIMPLEMENTED_LINTERS: &[&str] = &["contextcheck"];
 
 fn expand_ranges(
     fset: &FileSet,

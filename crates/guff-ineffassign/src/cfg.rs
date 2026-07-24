@@ -26,7 +26,10 @@ pub struct CfgBuilder {
     block: Option<BlockId>,
     blocks: Vec<CfgBlock>,
     vars: HashMap<ObjectId, VarInfo>,
-    results: Vec<bool>,
+    /// Named result idents per enclosing function (empty = no named results).
+    /// Naked `return` uses these; explicit `return …` assigns then uses them
+    /// (gordonklaus/ineffassign parity).
+    results: Vec<Vec<Ident>>,
     defers: Vec<bool>,
     breaks: BranchStack,
     continues: BranchStack,
@@ -117,7 +120,17 @@ impl CfgBuilder {
         for v in self.vars.values_mut() {
             v.fundept += 1;
         }
-        self.results.push(typ.results.is_some());
+        let result_names: Vec<Ident> = typ
+            .results
+            .as_ref()
+            .map(|fl| {
+                fl.list
+                    .iter()
+                    .flat_map(|f| f.names.iter().cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.results.push(result_names);
         self.defers.push(false);
 
         let saved = self.block;
@@ -125,6 +138,12 @@ impl CfgBuilder {
         self.roots.push(self.block.unwrap());
         if let Some(recv) = recv {
             self.walk_field_list(recv);
+        }
+        if let Some(params) = &typ.params {
+            self.walk_field_list(params);
+        }
+        if let Some(results) = &typ.results {
+            self.walk_field_list(results);
         }
         self.walk_block(body);
 
@@ -412,6 +431,18 @@ impl CfgBuilder {
         for r in &s.results {
             self.walk_expr(r);
         }
+        // Named results are always used by a return. Explicit results also
+        // assign (overwrite) them — so a prior `x = …` before `return y` is
+        // ineffectual, while `x = …; return` (naked) is not.
+        if let Some(names) = self.results.last().filter(|n| !n.is_empty()).cloned() {
+            let explicit = !s.results.is_empty();
+            for id in &names {
+                if explicit {
+                    self.assign_ident(id);
+                }
+                self.use_ident(id);
+            }
+        }
         self.new_block();
     }
 
@@ -439,6 +470,7 @@ impl CfgBuilder {
                 self.walk_expr(&b.y);
             }
             Expr::CallExpr(c) => {
+                self.maybe_panic();
                 self.walk_expr(&c.fun);
                 for a in &c.args {
                     self.walk_expr(a);
@@ -459,6 +491,7 @@ impl CfgBuilder {
                 self.walk_expr(&u.x);
             }
             Expr::IndexExpr(i) => {
+                self.maybe_panic();
                 if let Some(id) = ident(&i.x) {
                     self.escape(id);
                 }
@@ -506,6 +539,13 @@ impl CfgBuilder {
 
     fn walk_field_list(&mut self, fl: &guff::ast::FieldList) {
         for f in &fl.list {
+            // Register param/result idents as uses so they exist in `vars`
+            // before nested funcs run. Nested assigns then see fundept > 0 and
+            // mark the outer var as escaping (gordonklaus/ineffassign parity —
+            // `bld.walk(typ)` visits Field names as Idents → use).
+            for id in &f.names {
+                self.use_ident(id);
+            }
             if let Some(ty) = &f.ty {
                 self.walk_expr(ty);
             }
@@ -526,6 +566,20 @@ impl CfgBuilder {
         };
         if let Some(v) = self.vars.get_mut(&obj) {
             v.escapes = true;
+        }
+    }
+
+    /// If a defer is live and an operation might panic+recover, named results
+    /// are considered used (gordonklaus/ineffassign `maybePanic`).
+    fn maybe_panic(&mut self) {
+        if !self.defers.last().copied().unwrap_or(false) {
+            return;
+        }
+        let Some(names) = self.results.last().filter(|n| !n.is_empty()).cloned() else {
+            return;
+        };
+        for id in &names {
+            self.use_ident(id);
         }
     }
 

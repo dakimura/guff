@@ -493,6 +493,23 @@ fn slog_allows_balanced_pairs() {
 }
 
 #[test]
+fn slog_allows_attr_helpers() {
+    // slog.Any / slog.String return slog.Attr; must not be flagged as a missing
+    // key/value (regression for is_type_named checking underlying()).
+    let dir = support::testdata("slog");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/slog/attr_ok",
+        &dir.join("attr_ok.go"),
+        &[("log/slog", &dir.join("stub/log/slog/slog.go"))],
+    );
+    assert!(
+        support::run_analyzer(slog_analyzer(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(slog_analyzer(), &pkg)
+    );
+}
+
+#[test]
 fn stdmethods_flags_bad_unwrap() {
     let dir = support::testdata("stdmethods");
     let pkg = support::typecheck_pkg("example.com/govet/stdmethods", &dir.join("bad.go"));

@@ -18,7 +18,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let pkg = pass.files().first().map(|f| f.name.name.as_str()).unwrap_or("");
     let mut failures = Vec::new();
     let mut gen_decl_missing: HashMap<usize, bool> = HashMap::new();
-    for file in pass.files() {
+    let compiled = &pass.pkg().compiled_go_files;
+    for (fi, file) in pass.files().iter().enumerate() {
+        // revive `File.IsImportable`: `_test.go` is not importable even when the
+        // package name is not `foo_test` (internal tests).
+        if compiled
+            .get(fi)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
+        {
+            continue;
+        }
         let mut last_gen: Option<&GenDecl> = None;
         for decl in &file.decls {
             match decl {

@@ -3078,9 +3078,28 @@ impl GomodguardSettings {
 
 impl ModernizeSettings {
     pub fn to_guff_modernize(&self) -> guff_style::ModernizeOptions {
-        guff_style::ModernizeOptions {
-            disable: self.disable.clone(),
+        // Checkers guff implements that golangci-lint's vendored x/tools Suite
+        // (v0.44 as of golangci-lint 2.12) does not enable. Disable them by
+        // default so finding sets match golangci under the same config.
+        // User `disable:` entries remain additive; there is no Suite-extra
+        // re-enable knob yet (golangci only exposes `disable`).
+        const SUITE_EXTRA_OFF: &[&str] = &[
+            "errorsastype",      // after v0.44
+            "slicesdelete",      // commented out upstream (not nil-preserving)
+            "bloop",             // commented out upstream
+            "importcomment",     // not in Suite
+            "reflecttypeassert", // not in Suite
+            // Guff's path is Split/SplitN→Cut; Suite stringscut is Index→Cut
+            // only (SplitN support landed after v0.44).
+            "stringscut",
+        ];
+        let mut disable = self.disable.clone();
+        for name in SUITE_EXTRA_OFF {
+            if !disable.iter().any(|d| d == *name) {
+                disable.push((*name).to_string());
+            }
         }
+        guff_style::ModernizeOptions { disable }
     }
 }
 

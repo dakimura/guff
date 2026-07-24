@@ -21,6 +21,8 @@ use guff_types::predicates::{is_boolean, is_complex, is_float, is_integer, is_st
 use guff_types::signature::signature_params;
 use guff_types::tuple::tuple_len;
 use guff_types::TypeId;
+use guff_types::api_predicates::api_implements;
+use guff_types::alias::unalias_readonly;
 
 use crate::govet_util::expr_type;
 
@@ -309,6 +311,10 @@ fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u3
     {
         return true;
     }
+    // `%w` requires a type that implements `error` (e.g. `*os.LinkError`).
+    if bits & B_ERROR != 0 && implements_error(pass, typ) {
+        return true;
+    }
     if bits == B_ANY {
         return true;
     }
@@ -374,6 +380,56 @@ fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u3
         }
         _ => true,
     }
+}
+
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if type_has_method(pass, typ, "Error") {
+        return true;
+    }
+    let Some(err) = universe_error(pass) else {
+        // Export data may omit methods; accept named / *named for `%w` rather
+        // than false-positive on concrete error types like `*os.LinkError`.
+        let t = unalias_readonly(&artifacts.types, typ);
+        return match artifacts.types.get(t) {
+            TypeData::Interface(_) => true,
+            TypeData::Named(_) => true,
+            TypeData::Pointer(p) => {
+                matches!(
+                    artifacts.types.get(unalias_readonly(&artifacts.types, p.elem())),
+                    TypeData::Named(_)
+                )
+            }
+            _ => false,
+        };
+    };
+    let mut types = artifacts.types.clone();
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    )
 }
 
 /// Best-effort source rendering of an argument for diagnostics.
