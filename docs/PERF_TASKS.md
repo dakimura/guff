@@ -126,7 +126,13 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 - `run_format_checks` のファイル収集を 1 回に共有（3 formatter × walk 廃止）
 
 履歴（2026-07-22）: cold 8.25→7.79s; seed-hot ~5.0s; warm 2.04→1.22→0.44s。
-**次の主戦場:** cold analyze / format の per-file 共有 read、import-gate 拡張、buildir 条件スキップ。
+**次の主戦場:** cold analyze（buildir は staticcheck/nilnesserr 有効時はほぼ全 pkg 必須で条件スキップ不可）、format のさらなる最適化は shared-read が逆に悪化したので見送り。
+
+### buildir 条件スキップ（Task 5 残り）— 2026-07-25 判定
+
+prometheus 設定では `staticcheck` + `nilnesserr` が有効で、両者とも `buildir` を require する。
+SA4006 等の汎用 SSA チェックは import-gate できないため、**testify 非依存 pkg でも buildir は走る**。
+条件スキップは lighter config（testifylint のみ等）向けの将来余地として保留。
 
 各タスクの「before/after」はこの表と、自分の環境で測り直した数字で比較する。
 
