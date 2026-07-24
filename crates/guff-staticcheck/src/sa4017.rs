@@ -8,7 +8,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff_analysis::passes::buildir;
-use guff_analysis::{has_non_debug_referrer, is_call_to, referrers, short_call_name};
+use guff_analysis::{has_non_debug_referrer, is_call_to_any, referrers, short_call_name};
 use guff_ssa::instr::{Call, InstrData};
 use guff_ssa::value::Value;
 
@@ -31,8 +31,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 if has_non_debug_referrer(referrers(func, val), func) {
                     continue;
                 }
-                let pure = PURE_FUNCS.iter().any(|n| is_call_to(&ir.prog, call, n));
-                if !pure {
+                if !is_call_to_any(&ir.prog, call, PURE_FUNCS) {
                     continue;
                 }
                 let name = short_call_name(&ir.prog, call).unwrap_or_default();

@@ -14,11 +14,11 @@ use crate::pass::Pass;
 ///
 /// Simplified stand-in for Go's `ast/inspector.Inspector`. Dependent analyzers
 /// call [`InspectResult::preorder`] with the same [`File`] slice from the pass.
-#[derive(Clone)]
-pub struct InspectResult {
-    /// Preorder node ids collected when the analyzer ran (for tests / caching).
-    pub node_ids: Vec<u32>,
-}
+///
+/// Empty on purpose: this port rewalks on each [`preorder`] call, so collecting
+/// node ids at analyzer-run time was unused overhead.
+#[derive(Clone, Default)]
+pub struct InspectResult {}
 
 impl InspectResult {
     /// Visit every AST node in each file once, in preorder.
@@ -36,30 +36,8 @@ impl InspectResult {
     }
 }
 
-fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let mut node_ids = Vec::new();
-    let mut stack = Vec::new();
-    for file in pass.files() {
-        preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
-            if let Some(id) = stamped_id(n) {
-                node_ids.push(id);
-            }
-            true
-        });
-    }
-    Ok(Some(Box::new(InspectResult { node_ids })))
-}
-
-fn stamped_id(n: NodeRef<'_>) -> Option<u32> {
-    match n {
-        NodeRef::Ident(i) => Some(i.id),
-        NodeRef::FuncDecl(f) => Some(f.name.id),
-        NodeRef::BinaryExpr(b) => Some(b.id),
-        NodeRef::Field(f) => Some(f.id),
-        NodeRef::BlockStmt(b) => Some(b.id),
-        NodeRef::File(f) => Some(f.id),
-        _ => None,
-    }
+fn run(_pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    Ok(Some(Box::new(InspectResult::default())))
 }
 
 fn inspect_analyzer_impl() -> Analyzer {
@@ -84,6 +62,7 @@ pub fn analyzer() -> &'static Analyzer {
 mod tests {
     use guff::parser::{parse_file, Mode};
     use guff::position::FileSet;
+    use guff::walk::preorder;
 
     use super::*;
 
@@ -100,7 +79,7 @@ mod tests {
             true
         });
 
-        let result = InspectResult { node_ids: vec![] };
+        let result = InspectResult::default();
         let mut second_count = 0usize;
         result.preorder(std::slice::from_ref(&file), |_| {
             second_count += 1;

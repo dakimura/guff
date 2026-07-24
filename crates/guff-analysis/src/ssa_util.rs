@@ -34,23 +34,27 @@ pub fn block_control<'a>(func: &'a Function, block: &BasicBlock) -> Option<&'a I
     None
 }
 
-/// Reports whether `common` is a static call to `name` (e.g. `"time.Tick"`).
-pub fn is_call_to(ctx_prog: &Program, common: &CallCommon, name: &str) -> bool {
-    let Some(target) = callcheck::resolve_call_target(common, ctx_prog) else {
-        return false;
-    };
-    let resolved = code::type_func_name(
+/// Resolves the static callee name of `common` (e.g. `"time.Tick"`), if any.
+fn resolved_call_name(ctx_prog: &Program, common: &CallCommon) -> Option<String> {
+    let target = callcheck::resolve_call_target(common, ctx_prog)?;
+    Some(code::type_func_name(
         &ctx_prog.type_arena,
         &ctx_prog.object_arena,
         &ctx_prog.package_arena,
         target,
-    );
-    resolved == name
+    ))
+}
+
+/// Reports whether `common` is a static call to `name` (e.g. `"time.Tick"`).
+pub fn is_call_to(ctx_prog: &Program, common: &CallCommon, name: &str) -> bool {
+    resolved_call_name(ctx_prog, common).is_some_and(|resolved| resolved == name)
 }
 
 /// Reports whether `common` is a static call to any of `names`.
+///
+/// Resolves the callee name once (unlike calling [`is_call_to`] in a loop).
 pub fn is_call_to_any(ctx_prog: &Program, common: &CallCommon, names: &[&str]) -> bool {
-    names.iter().any(|n| is_call_to(ctx_prog, common, n))
+    resolved_call_name(ctx_prog, common).is_some_and(|resolved| names.iter().any(|n| *n == resolved))
 }
 
 /// Returns referrers of `value` in `func`, or an empty slice.
