@@ -112,16 +112,21 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 `per-analyzer analyze time` 表は **worker 横断の合計** であって wall ではない
 （並列で走るので実 wall はもっと短い）。ここを勘違いして「analyze が 10s」と誤読しないこと。
 
-### 1.7 現状の基準値（2026-07-22 実測、prometheus `./...`, 10-core）
+### 1.7 現状の基準値（2026-07-25 再計測＋改善後、prometheus `./...`, Darwin arm64 10-core）
 
 | シナリオ | wall | RSS | 備考 |
 |---|---:|---:|---|
-| cold（改善前） | 8.25s | 7.7GB | |
-| cold（Task 3/2/5 後） | 7.79s | 7.7GB | issues+filter 0.49→0.06s; testifylint skip |
-| cold seed-hot（Task 4 後, GUFF_CACHE 永続） | ~5.0s | 7.4GB | seed build 3.3→**0.5s**。空キャッシュ cold は ~8.0s で不変 |
-| warm 繰り返し（改善前） | 2.04s | 0.22GB | |
-| warm 繰り返し（Task 3/2/5 後） | 1.22s | 0.18GB | cache setup 0.60→0.18s (dep-hash hit) |
-| warm 繰り返し（Task 1 fmt_check cache） | **0.44s** | 0.18GB | format_checks 0.85→**0.07s** |
+| cold（空 GUFF_CACHE, `--no-cache`） | **~7.7s** | ~7.5GB | load ~1.2 / typecheck ~3.9（seed ~3.4）/ analyze ~1.2 / fmt ~0.55 / filter ~0.05 |
+| cold seed-hot（GUFF_CACHE 永続, `--no-cache`） | **~4.1s** | ~7.6GB | seed ~0.5（1455 hit） |
+| warm 繰り返し（issues+fmt cache hot） | **~0.35s** | ~0.17GB | load 0.14 / cache setup **0.11**（並列 partition）/ 294 hit 0 miss / fmt 0.05 |
+
+**2026-07-25 改善:**
+- 空 `compiled_go_files` パッケージ（`prompb/rwcommon`）を hit 扱い → 恒常 1-miss 解消
+- warm cache partition を rayon 並列化 → setup 0.17→**0.11s**、warm **0.42→0.35s**（≤0.4s 達成）
+- `run_format_checks` のファイル収集を 1 回に共有（3 formatter × walk 廃止）
+
+履歴（2026-07-22）: cold 8.25→7.79s; seed-hot ~5.0s; warm 2.04→1.22→0.44s。
+**次の主戦場:** cold analyze / format の per-file 共有 read、import-gate 拡張、buildir 条件スキップ。
 
 各タスクの「before/after」はこの表と、自分の環境で測り直した数字で比較する。
 

@@ -196,6 +196,9 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
         return Ok(Vec::new());
     }
 
+    // One tree walk for all formatters (prometheus enables gci+gofumpt+goimports;
+    // previously each `check` re-walked). Attribution stays per-formatter.
+    let files = Runner::collect_paths(&cfg.paths).map_err(|e| RunError::Message(e.to_string()))?;
     let mut issues = Vec::new();
     for name in &cfg.enable {
         let meta = MetaFormatter::new(
@@ -217,7 +220,7 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
             },
         );
         let findings = runner
-            .check(&cfg.paths)
+            .check_files(&files)
             .map_err(|e| RunError::Message(e.to_string()))?;
         for f in findings {
             issues.push(issue_from_cached(
@@ -351,17 +354,45 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     };
 
     // Partition roots into cache hits (issues restored from disk — no parsing)
-    // and misses (need type-checking + analysis).
+    // and misses (need type-checking + analysis). Parallelize lookups: each hit
+    // path hashes the package's sources + reads a JSON entry (warm ~0.1s serial).
     let mut cached_issues: Vec<Issue> = Vec::new();
     let mut miss_ids: Vec<String> = Vec::new();
     let mut hit_roots: Vec<std::sync::Arc<guff_packages::Package>> = Vec::new();
     let mut hits = 0usize;
-    for root in &roots {
-        let restored = cache
-            .as_ref()
-            .and_then(|c| c.get_cached(root, HashMode::NeedAllDeps).ok());
-        match restored {
-            Some(diags) => {
+
+    enum Part {
+        Empty,
+        Hit(Vec<guff_runner::CachedDiagnostic>),
+        Miss,
+    }
+
+    let parts: Vec<Part> = {
+        use rayon::prelude::*;
+        roots
+            .par_iter()
+            .map(|root| {
+                if root.compiled_go_files.is_empty() {
+                    return Part::Empty;
+                }
+                match cache
+                    .as_ref()
+                    .and_then(|c| c.get_cached(root, HashMode::NeedAllDeps).ok())
+                {
+                    Some(diags) => Part::Hit(diags),
+                    None => Part::Miss,
+                }
+            })
+            .collect()
+    };
+
+    for (root, part) in roots.iter().zip(parts) {
+        match part {
+            Part::Empty => {
+                hits += 1;
+                hit_roots.push(std::sync::Arc::clone(root));
+            }
+            Part::Hit(diags) => {
                 hits += 1;
                 hit_roots.push(std::sync::Arc::clone(root));
                 for d in diags {
@@ -378,7 +409,15 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
                     ));
                 }
             }
-            None => miss_ids.push(root.id.clone()),
+            Part::Miss => {
+                if timing {
+                    eprintln!(
+                        "guff:   cache miss root id={} path={}",
+                        root.id, root.pkg_path
+                    );
+                }
+                miss_ids.push(root.id.clone());
+            }
         }
     }
 

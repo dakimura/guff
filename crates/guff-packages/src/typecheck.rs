@@ -383,6 +383,11 @@ pub fn typecheck_package_with_seed(
 
     let paths = &pkg.compiled_go_files;
     if paths.is_empty() {
+        // Ensure `save_to_cache` can persist an empty entry (it skips pkgs
+        // without an fset). Empty packages must not perpetual-miss the cache.
+        if pkg.fset.is_none() {
+            pkg.fset = Some(FileSet::new());
+        }
         return;
     }
 

@@ -142,6 +142,12 @@ impl Runner {
     /// are gathered first, then checked concurrently and the findings sorted by
     /// `(file, line)` for a deterministic result regardless of scheduling.
     pub fn check(&self, paths: &[PathBuf]) -> Result<Vec<FormatFinding>, FormatError> {
+        self.check_files(&Self::collect_paths(paths)?)
+    }
+
+    /// Collect `.go` files under `paths` (same discovery as [`Self::check`]).
+    /// Shared by `guff run` format checks so multiple formatters share one walk.
+    pub fn collect_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, FormatError> {
         let roots: Vec<PathBuf> = if paths.is_empty() {
             vec![PathBuf::from(".")]
         } else {
@@ -151,12 +157,16 @@ impl Runner {
         for root in &roots {
             collect_go_files(root, &mut files)?;
         }
+        Ok(files)
+    }
 
+    /// Like [`Self::check`], but with a pre-collected file list (skips the walk).
+    pub fn check_files(&self, files: &[PathBuf]) -> Result<Vec<FormatFinding>, FormatError> {
         if let Some(cache) = &self.opts.format_cache {
             if let (Some(name), Some(opts_fp)) =
                 (self.meta.primary_name(), self.meta.options_fingerprint())
             {
-                return self.check_with_cache(&files, cache, name, &opts_fp);
+                return self.check_with_cache(files, cache, name, &opts_fp);
             }
         }
 
@@ -167,9 +177,9 @@ impl Runner {
         // we format each file once in `check_file` (a list pre-pass would
         // re-format every flagged file). Generated / excluded filtering stays
         // inside `check_file`.
-        let targets: Vec<PathBuf> = match self.meta.batch_list_unformatted(&files) {
-            Some(flagged) => map_flagged(&files, &flagged).unwrap_or(files),
-            None => files,
+        let targets: Vec<PathBuf> = match self.meta.batch_list_unformatted(files) {
+            Some(flagged) => map_flagged(files, &flagged).unwrap_or_else(|| files.to_vec()),
+            None => files.to_vec(),
         };
 
         let mut findings: Vec<FormatFinding> = targets

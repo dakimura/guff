@@ -42,6 +42,7 @@ guff-misspell = { path = "../guff-misspell" }
 guff-dupl = { path = "../guff-dupl" }
 guff-revive = { path = "../guff-revive" }
 guff-fmt = { path = "../guff-fmt" }
+rayon = "1"
 
 [dev-dependencies]
 tempfile = "3"
