@@ -1,0 +1,53 @@
+name: guff
+description: Run guff, a Rust-native Go multi-linter, on your Go module.
+author: dakimura
+
+inputs:
+  version:
+    description: >
+      guff release version (e.g. v0.1.0) or latest.
+      When left as latest and this Action is pinned to a v* tag, that tag is used.
+    required: false
+    default: latest
+  args:
+    description: Arguments passed to guff (default runs the linter)
+    required: false
+    default: run ./...
+  install-dir:
+    description: Directory to install the guff binary into
+    required: false
+    default: ${{ runner.temp }}/guff/bin
+  working-directory:
+    description: Working directory for the guff invocation
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Install guff
+      shell: bash
+      env:
+        GUFF_INSTALL_DIR: ${{ inputs.install-dir }}
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        VERSION="${INPUT_VERSION}"
+        if [ "${VERSION}" = "latest" ]; then
+          case "${ACTION_REF}" in
+            v*) VERSION="${ACTION_REF}" ;;
+          esac
+        fi
+        mkdir -p "${GUFF_INSTALL_DIR}"
+        "${{ github.action_path }}/scripts/install.sh" -b "${GUFF_INSTALL_DIR}" "${VERSION}"
+        echo "${GUFF_INSTALL_DIR}" >> "${GITHUB_PATH}"
+
+    - name: Run guff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        # Intentionally unquoted so callers can pass multiple args.
+        # shellcheck disable=SC2086
+        guff ${{ inputs.args }}

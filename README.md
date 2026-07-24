@@ -75,6 +75,56 @@ cargo build --release -p guff-lint
 cargo run -p guff-lint -- run ./...
 ```
 
+**E. Prebuilt binary (GitHub Releases)**
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh \
+  | sh -s -- -b ~/.local/bin v0.1.0
+```
+
+Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
+
+### GitHub Action
+
+Add a workflow (Go must be available — use `actions/setup-go`):
+
+```yaml
+name: guff
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: dakimura/guff@v0.1.0
+        with:
+          args: run --out-format=github-actions ./...
+```
+
+Inputs: `version` (default: Action’s `v*` tag, else `latest`), `args` (default: `run ./...`), `working-directory`, `install-dir`.
+
+### Docker
+
+Images are published to GHCR on each release:
+
+```bash
+docker pull ghcr.io/dakimura/guff:v0.1.0
+
+# ENTRYPOINT is `guff` — pass subcommand + args only
+docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:v0.1.0 run ./...
+```
+
+Tags: `v0.1.0`, `0.1`, `0`, `latest`. The image includes a Go toolchain (`go list`).
+
 ### Usage
 
 From a Go module root:
@@ -277,6 +327,9 @@ Cargo workspace. One binary (`guff`); everything else is library crates.
 guff/
 ├── Cargo.toml
 ├── LICENSE
+├── action.yml              # GitHub Action (composite)
+├── Dockerfile              # ghcr.io/dakimura/guff
+├── scripts/install.sh      # curl | sh binary install
 ├── THIRD_PARTY_LICENSES.md
 ├── benchmarks/             # vs golangci-lint wall-clock harness
 ├── compat/                 # finding-set diff harness
