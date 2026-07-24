@@ -86,6 +86,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: guff-*
           merge-multiple: true
 
       - name: Create release
@@ -94,6 +95,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release delete "$VERSION" --yes
+          fi
           gh release create "$VERSION" dist/* \
             --title "$VERSION" \
             --generate-notes \
