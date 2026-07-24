@@ -9,11 +9,16 @@ use crate::case::{apply_case, case_style, CaseStyle};
 use crate::notwords::remove_not_words;
 use crate::options::Options;
 
-static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-zA-Z0-9']+").unwrap());
 static LINE_COMMENT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"//[^\n]*").unwrap());
 static BLOCK_COMMENT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/\*[\s\S]*?\*/").unwrap());
+
+/// Word characters matching golangci/misspell's `[a-zA-Z0-9']+`.
+#[inline]
+fn is_word_byte(b: u8) -> bool {
+    matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'\'')
+}
 
 static DICT_MAIN: LazyLock<HashMap<String, String>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_main.tsv")));
@@ -137,18 +142,37 @@ impl Replacer {
 
     fn diffs_in_line(&self, line: &str, line_num: usize) -> Vec<Diff> {
         let redacted = remove_not_words(line);
+        // Scan the redacted view so URL/path/email spans are skipped, but
+        // report substrings from the original line (same byte ranges).
+        let bytes = redacted.as_bytes();
+        debug_assert_eq!(bytes.len(), line.len());
         let mut out = Vec::new();
-        for m in WORD_RE.find_iter(&redacted) {
-            let word = &line[m.start()..m.end()];
-            if word.is_empty() {
+        let mut i = 0;
+        while i < bytes.len() {
+            if !is_word_byte(bytes[i]) {
+                i += 1;
                 continue;
             }
+            let start = i;
+            i += 1;
+            while i < bytes.len() && is_word_byte(bytes[i]) {
+                i += 1;
+            }
+            // Word spans are ASCII `[a-zA-Z0-9']+`; same range is valid UTF-8 in `line`.
+            let word = &line[start..i];
             let style = case_style(word);
             if style == CaseStyle::Unknown {
                 continue;
             }
-            let lower = word.to_ascii_lowercase();
-            let Some(corrected_lower) = self.corrected.get(&lower) else {
+            // Dict keys are lowercase; skip the alloc when the word already is.
+            let lower_owned;
+            let lower: &str = if word.bytes().any(|b| b.is_ascii_uppercase()) {
+                lower_owned = word.to_ascii_lowercase();
+                &lower_owned
+            } else {
+                word
+            };
+            let Some(corrected_lower) = self.corrected.get(lower) else {
                 continue;
             };
             let corrected = apply_case(corrected_lower, style);
@@ -157,7 +181,7 @@ impl Replacer {
             }
             out.push(Diff {
                 line: line_num,
-                column: m.start(),
+                column: start,
                 original: word.to_string(),
                 corrected,
             });

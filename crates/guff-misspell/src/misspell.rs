@@ -3,8 +3,8 @@
 use std::fs;
 use std::sync::OnceLock;
 
-use guff_analysis::passes::inspect;
 use guff::position::Pos;
+use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
@@ -42,20 +42,17 @@ fn report_diff(pass: &mut Pass<'_>, file_pos: Pos, diff: &Diff) {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    // Depend on inspect so misspell stays in wave 1 and does not steal workers
+    // from inspect (wave-0 critical path for nearly every other analyzer).
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "misspell requires inspect analyzer".to_string())?;
 
-    let options = pass
-        .settings::<Options>("misspell")
-        .cloned()
-        .unwrap_or_default();
-    // Prefer the shared default dictionary when settings are absent (US),
-    // matching the previous `unwrap_or_else(Replacer::new)` path.
-    let replacer = pass
-        .settings::<Options>("misspell")
-        .map(Replacer::from_options)
-        .unwrap_or_else(Replacer::new);
+    // Prefer the shared default dictionary when settings are absent (US).
+    let (restricted, replacer) = match pass.settings::<Options>("misspell") {
+        Some(opts) => (opts.restricted(), Replacer::from_options(opts)),
+        None => (false, Replacer::new()),
+    };
     let paths = &pass.pkg().compiled_go_files;
     let mut pending: Vec<(Pos, Diff)> = Vec::new();
 
@@ -70,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         };
         let file_pos = file.pos();
-        let diffs = if options.restricted() {
+        let diffs = if restricted {
             replacer.find_diffs_in_comments(&content)
         } else {
             replacer.find_diffs(&content)

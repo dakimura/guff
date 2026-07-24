@@ -453,36 +453,30 @@ pub fn analyze_with_settings(
     }
 
     let mut roots = Vec::new();
-    let mut skip_testify = 0usize;
-    let mut keep_testify = 0usize;
-    let mut skip_exptostd = 0usize;
-    let mut keep_exptostd = 0usize;
-    let mut skip_sloglint = 0usize;
-    let mut keep_sloglint = 0usize;
-    let mut skip_loggercheck = 0usize;
-    let mut keep_loggercheck = 0usize;
-    let mut skip_fatcontext = 0usize;
-    let mut keep_fatcontext = 0usize;
+    // Import-gate skip/keep counters (debug only). Keys are analyzer names.
+    let mut gate_skip: HashMap<&'static str, usize> = HashMap::new();
+    let mut gate_keep: HashMap<&'static str, usize> = HashMap::new();
     for &analyzer in analyzers {
         for pkg in packages {
             if !analyzer_applies_to_package(analyzer, pkg) {
-                match analyzer.name {
-                    "testifylint" => skip_testify += 1,
-                    "exptostd" => skip_exptostd += 1,
-                    "sloglint" => skip_sloglint += 1,
-                    "loggercheck" => skip_loggercheck += 1,
-                    "fatcontext" => skip_fatcontext += 1,
-                    _ => {}
-                }
+                *gate_skip.entry(analyzer.name).or_default() += 1;
                 continue;
             }
-            match analyzer.name {
-                "testifylint" => keep_testify += 1,
-                "exptostd" => keep_exptostd += 1,
-                "sloglint" => keep_sloglint += 1,
-                "loggercheck" => keep_loggercheck += 1,
-                "fatcontext" => keep_fatcontext += 1,
-                _ => {}
+            if matches!(
+                analyzer.name,
+                "testifylint"
+                    | "exptostd"
+                    | "sloglint"
+                    | "loggercheck"
+                    | "fatcontext"
+                    | "lostcancel"
+                    | "atomic"
+                    | "sigchanyzer"
+                    | "httpresponse"
+                    | "defers"
+                    | "cgocall"
+            ) {
+                *gate_keep.entry(analyzer.name).or_default() += 1;
             }
             let act = mk_action(
                 analyzer,
@@ -496,30 +490,28 @@ pub fn analyze_with_settings(
             roots.push(act);
         }
     }
-    if timing_enabled() && (skip_testify > 0 || keep_testify > 0) {
-        eprintln!(
-            "guff:   testifylint schedule keep={keep_testify} skip={skip_testify} (no testify import)"
+    if timing_enabled() {
+        report_import_gate("testifylint", &gate_keep, &gate_skip, "no testify import");
+        report_import_gate(
+            "exptostd",
+            &gate_keep,
+            &gate_skip,
+            "no x/exp/{maps,slices,constraints} import",
         );
-    }
-    if timing_enabled() && (skip_exptostd > 0 || keep_exptostd > 0) {
-        eprintln!(
-            "guff:   exptostd schedule keep={keep_exptostd} skip={skip_exptostd} (no x/exp/{{maps,slices,constraints}} import)"
+        report_import_gate("sloglint", &gate_keep, &gate_skip, "no log/slog import");
+        report_import_gate(
+            "loggercheck",
+            &gate_keep,
+            &gate_skip,
+            "no known logger import",
         );
-    }
-    if timing_enabled() && (skip_sloglint > 0 || keep_sloglint > 0) {
-        eprintln!(
-            "guff:   sloglint schedule keep={keep_sloglint} skip={skip_sloglint} (no log/slog import)"
-        );
-    }
-    if timing_enabled() && (skip_loggercheck > 0 || keep_loggercheck > 0) {
-        eprintln!(
-            "guff:   loggercheck schedule keep={keep_loggercheck} skip={skip_loggercheck} (no known logger import)"
-        );
-    }
-    if timing_enabled() && (skip_fatcontext > 0 || keep_fatcontext > 0) {
-        eprintln!(
-            "guff:   fatcontext schedule keep={keep_fatcontext} skip={skip_fatcontext} (no context import)"
-        );
+        report_import_gate("fatcontext", &gate_keep, &gate_skip, "no context import");
+        report_import_gate("lostcancel", &gate_keep, &gate_skip, "no context import");
+        report_import_gate("atomic", &gate_keep, &gate_skip, "no sync/atomic import");
+        report_import_gate("sigchanyzer", &gate_keep, &gate_skip, "no os/signal import");
+        report_import_gate("httpresponse", &gate_keep, &gate_skip, "no net/http import");
+        report_import_gate("defers", &gate_keep, &gate_skip, "no time import");
+        report_import_gate("cgocall", &gate_keep, &gate_skip, "no cgo import");
     }
 
     exec_all(&roots, sequential, concurrency);
@@ -553,10 +545,33 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
         "sloglint" => package_imports_prefix(package, "log/slog"),
         // loggercheck only fires on kitlog / klog / logr / slog / zap call sites.
         "loggercheck" => package_has_loggercheck_import(package),
-        // fatcontext only looks at nested `context.Context` values.
-        "fatcontext" => package_imports_prefix(package, "context"),
+        // fatcontext / lostcancel only look at `context` APIs.
+        "fatcontext" | "lostcancel" => package_imports_prefix(package, "context"),
+        // govet analyzers that already early-return without these imports.
+        "atomic" => package_imports_prefix(package, "sync/atomic"),
+        "sigchanyzer" => package_imports_prefix(package, "os/signal"),
+        "httpresponse" => package_imports_prefix(package, "net/http"),
+        "defers" => package_imports_prefix(package, "time"),
+        "cgocall" => {
+            package_imports_prefix(package, "runtime/cgo")
+                || package_imports_prefix(package, "C")
+        }
         _ => true,
     }
+}
+
+fn report_import_gate(
+    name: &str,
+    keep: &HashMap<&'static str, usize>,
+    skip: &HashMap<&'static str, usize>,
+    reason: &str,
+) {
+    let k = keep.get(name).copied().unwrap_or(0);
+    let s = skip.get(name).copied().unwrap_or(0);
+    if k == 0 && s == 0 {
+        return;
+    }
+    eprintln!("guff:   {name} schedule keep={k} skip={s} ({reason})");
 }
 
 fn package_has_loggercheck_import(package: &Package) -> bool {
@@ -996,5 +1011,73 @@ mod tests {
             .imports
             .insert("context".into(), Arc::new(Package::default()));
         assert!(analyzer_applies_to_package(&analyzer, &with_ctx));
+    }
+
+    #[test]
+    fn lostcancel_skipped_without_context_import() {
+        let analyzer = Analyzer {
+            name: "lostcancel",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        let mut with_ctx = Package::default();
+        with_ctx
+            .imports
+            .insert("context".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&analyzer, &with_ctx));
+    }
+
+    #[test]
+    fn govet_import_gates() {
+        let cases: &[(&str, &str)] = &[
+            ("atomic", "sync/atomic"),
+            ("sigchanyzer", "os/signal"),
+            ("httpresponse", "net/http"),
+            ("defers", "time"),
+        ];
+        for &(name, import) in cases {
+            let analyzer = Analyzer {
+                name,
+                doc: "",
+                url: "",
+                run: |_p| Ok(None),
+                run_despite_errors: false,
+                requires: vec![],
+                fact_types: vec![],
+            };
+            let pkg = Package::default();
+            assert!(
+                !analyzer_applies_to_package(&analyzer, &pkg),
+                "{name} should skip without {import}"
+            );
+            let mut with = Package::default();
+            with.imports
+                .insert(import.into(), Arc::new(Package::default()));
+            assert!(
+                analyzer_applies_to_package(&analyzer, &with),
+                "{name} should keep with {import}"
+            );
+        }
+        let cgocall = Analyzer {
+            name: "cgocall",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        assert!(!analyzer_applies_to_package(&cgocall, &Package::default()));
+        let mut with_c = Package::default();
+        with_c
+            .imports
+            .insert("C".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&cgocall, &with_c));
     }
 }
