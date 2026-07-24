@@ -1,0 +1,113 @@
+name: Docker multi-arch
+
+# Rebuild and push linux/amd64 + linux/arm64 images to GHCR.
+# Used to refresh tags (e.g. after making the package public) without a new git tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: Comma-separated image tags (without registry/name)
+        required: true
+        default: "0.1.0,v0.1.0,0.1,0,latest"
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ strategy.job-index }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Create manifest list
+        env:
+          TAGS: ${{ inputs.tags }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          tag_args=()
+          IFS=',' read -r -a raw_tags <<< "$TAGS"
+          for t in "${raw_tags[@]}"; do
+            t="$(echo "$t" | xargs)"
+            [ -n "$t" ] || continue
+            tag_args+=("-t" "${IMAGE}:${t}")
+          done
+          digests=()
+          for f in /tmp/digests/*; do
+            digests+=("${IMAGE}@sha256:$(basename "$f")")
+          done
+          docker buildx imagetools create "${tag_args[@]}" "${digests[@]}"
+          docker buildx imagetools inspect "${IMAGE}:$(echo "$TAGS" | cut -d, -f1 | xargs)"

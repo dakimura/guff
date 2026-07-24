@@ -125,6 +125,8 @@ docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.1.0 run ./...
 
 Tags: `0.1.0`, `0.1`, `0`, `latest` (and `v0.1.0` on newer releases). The image includes a Go toolchain (`go list`).
 
+`v0.1.0` shipped `linux/amd64` only. On Apple Silicon, pull/run with `--platform linux/amd64` until a multi-arch image is published.
+
 ### Usage
 
 From a Go module root:
