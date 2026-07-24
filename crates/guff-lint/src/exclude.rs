@@ -4,6 +4,7 @@
 //! GOCACHE/cgo → path (dirs/files) → text exclude → exclude-rules (+ default excludes) →
 //! nolint → max-per-linter → max-same → severity (+ unused nolintlint).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -384,25 +385,25 @@ impl IssueFilter {
     }
 
     fn is_excluded_by_path(&self, issue: &Issue) -> bool {
-        let path = issue.filename.replace('\\', "/");
-        let parent = Path::new(&path)
-            .parent()
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
+        let path = normalize_slashes(&issue.filename);
+        let parent = dirname_slash(path.as_ref());
 
         for re in &self.exclude_dir_res {
-            if re.is_match(&parent) || re.is_match(&path) {
+            if re.is_match(parent) || re.is_match(path.as_ref()) {
                 return true;
             }
         }
         for re in &self.exclude_file_res {
-            if re.is_match(&path) {
+            if re.is_match(path.as_ref()) {
                 return true;
             }
         }
         // paths-except: if configured, drop anything that does not match.
         if !self.paths_except_res.is_empty()
-            && !self.paths_except_res.iter().any(|re| re.is_match(&path))
+            && !self
+                .paths_except_res
+                .iter()
+                .any(|re| re.is_match(path.as_ref()))
         {
             return true;
         }
@@ -441,15 +442,18 @@ impl CompiledRule {
                 return false;
             }
         }
-        let path = issue.filename.replace('\\', "/");
-        if let Some(re) = &self.path {
-            if !re.is_match(&path) {
-                return false;
+        // Most default exclude rules are text+linter only; skip path work.
+        if self.path.is_some() || self.path_except.is_some() {
+            let path = normalize_slashes(&issue.filename);
+            if let Some(re) = &self.path {
+                if !re.is_match(path.as_ref()) {
+                    return false;
+                }
             }
-        }
-        if let Some(re) = &self.path_except {
-            if re.is_match(&path) {
-                return false;
+            if let Some(re) = &self.path_except {
+                if re.is_match(path.as_ref()) {
+                    return false;
+                }
             }
         }
         if !self.linters.is_empty() {
@@ -529,6 +533,24 @@ fn push_re(out: &mut Vec<Regex>, pat: &str, what: &str) {
 /// `NormalizePathInRegex` subset).
 fn normalize_path_regex(pat: &str) -> String {
     pat.replace('/', r"[/\\]")
+}
+
+/// Normalize `\` → `/` without allocating when the path already uses `/`.
+fn normalize_slashes(path: &str) -> Cow<'_, str> {
+    if path.as_bytes().contains(&b'\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// Parent directory of a slash-normalized path (no allocation).
+fn dirname_slash(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(0) => "/",
+        Some(i) => &path[..i],
+        None => "",
+    }
 }
 
 fn read_source_line(filename: &str, line: i64) -> Option<String> {
@@ -778,5 +800,23 @@ mod tests {
         );
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].filename, "/src/main.go");
+    }
+
+    #[test]
+    fn dirname_slash_matches_path_parent() {
+        assert_eq!(dirname_slash("/tmp/pkg/a.go"), "/tmp/pkg");
+        assert_eq!(dirname_slash("/a.go"), "/");
+        assert_eq!(dirname_slash("a.go"), "");
+        assert_eq!(dirname_slash("pkg/a.go"), "pkg");
+    }
+
+    #[test]
+    fn normalize_slashes_avoids_alloc_without_backslash() {
+        let p = "/tmp/pkg/a.go";
+        match normalize_slashes(p) {
+            Cow::Borrowed(s) => assert_eq!(s, p),
+            Cow::Owned(_) => panic!("expected borrow"),
+        }
+        assert_eq!(normalize_slashes(r"C:\tmp\a.go").as_ref(), "C:/tmp/a.go");
     }
 }

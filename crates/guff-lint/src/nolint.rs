@@ -6,13 +6,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos};
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::Diagnostic;
 use guff_packages::Package;
+use memchr::memmem::Finder;
 use regex::Regex;
 
 use crate::config::normalize_linter_name;
@@ -120,7 +121,10 @@ impl NolintIndex {
         // Cheap reject: real `//nolint` / `/*nolint` directives always contain
         // this literal. Skipping the full comment-aware parse for the common
         // no-directive case is the bulk of `issues+filter` time on large trees.
-        if !src.windows(6).any(|w| w == b"nolint") {
+        // Precomputed `Finder` is SIMD-accelerated vs naive `windows(6)`.
+        static NOLINT_FINDER: OnceLock<Finder<'static>> = OnceLock::new();
+        let finder = NOLINT_FINDER.get_or_init(|| Finder::new(b"nolint"));
+        if finder.find(&src).is_none() {
             return;
         }
         let path_str = path.to_string_lossy().replace('\\', "/");

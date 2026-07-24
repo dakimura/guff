@@ -557,6 +557,7 @@ dependencies = [
  "guff-style",
  "guff-types",
  "guff-unused",
+ "memchr",
  "mimalloc",
  "regex",
  "serde",
