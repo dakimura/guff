@@ -472,12 +472,23 @@ pub fn analyze_with_settings(
                     | "lostcancel"
                     | "SA1012"
                     | "SA1029"
+                    | "SA1032"
+                    | "SA1017"
+                    | "SA1027"
+                    | "SA1020"
+                    | "SA1002"
+                    | "SA1004"
+                    | "SA1015"
+                    | "SA1000"
                     | "atomic"
                     | "sigchanyzer"
                     | "httpresponse"
                     | "defers"
                     | "timeformat"
                     | "cgocall"
+                    | "slog"
+                    | "errorsas"
+                    | "unmarshal"
             ) {
                 *gate_keep.entry(analyzer.name).or_default() += 1;
             }
@@ -513,11 +524,22 @@ pub fn analyze_with_settings(
         report_import_gate("SA1012", &gate_keep, &gate_skip, "no context import");
         report_import_gate("SA1029", &gate_keep, &gate_skip, "no context import");
         report_import_gate("atomic", &gate_keep, &gate_skip, "no sync/atomic import");
+        report_import_gate("SA1027", &gate_keep, &gate_skip, "no sync/atomic import");
         report_import_gate("sigchanyzer", &gate_keep, &gate_skip, "no os/signal import");
+        report_import_gate("SA1017", &gate_keep, &gate_skip, "no os/signal import");
         report_import_gate("httpresponse", &gate_keep, &gate_skip, "no net/http import");
+        report_import_gate("SA1020", &gate_keep, &gate_skip, "no net/http import");
         report_import_gate("defers", &gate_keep, &gate_skip, "no time import");
         report_import_gate("timeformat", &gate_keep, &gate_skip, "no time import");
+        report_import_gate("SA1002", &gate_keep, &gate_skip, "no time import");
+        report_import_gate("SA1004", &gate_keep, &gate_skip, "no time import");
+        report_import_gate("SA1015", &gate_keep, &gate_skip, "no time import");
         report_import_gate("cgocall", &gate_keep, &gate_skip, "no cgo import");
+        report_import_gate("slog", &gate_keep, &gate_skip, "no log/slog import");
+        report_import_gate("errorsas", &gate_keep, &gate_skip, "no errors import");
+        report_import_gate("SA1032", &gate_keep, &gate_skip, "no errors import");
+        report_import_gate("unmarshal", &gate_keep, &gate_skip, "no encoding/* import");
+        report_import_gate("SA1000", &gate_keep, &gate_skip, "no regexp import");
     }
 
     exec_all(&roots, sequential, concurrency);
@@ -547,19 +569,30 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
                 || package_imports_prefix(package, "golang.org/x/exp/slices")
                 || package_imports_prefix(package, "golang.org/x/exp/constraints")
         }
-        // sloglint only inspects `log/slog` APIs.
-        "sloglint" => package_imports_prefix(package, "log/slog"),
+        // sloglint / govet slog only inspect `log/slog` APIs.
+        "sloglint" | "slog" => package_imports_prefix(package, "log/slog"),
         // loggercheck only fires on kitlog / klog / logr / slog / zap call sites.
         "loggercheck" => package_has_loggercheck_import(package),
         // fatcontext / lostcancel / SA1012 / SA1029 only look at `context` APIs.
         "fatcontext" | "lostcancel" | "SA1012" | "SA1029" => {
             package_imports_prefix(package, "context")
         }
-        // govet analyzers that already early-return without these imports.
-        "atomic" => package_imports_prefix(package, "sync/atomic"),
-        "sigchanyzer" => package_imports_prefix(package, "os/signal"),
-        "httpresponse" => package_imports_prefix(package, "net/http"),
-        "defers" | "timeformat" => package_imports_prefix(package, "time"),
+        // errors.As / errors.Is only.
+        "errorsas" | "SA1032" => package_imports_prefix(package, "errors"),
+        // Analyzers that only fire on call sites in these packages.
+        "atomic" | "SA1027" => package_imports_prefix(package, "sync/atomic"),
+        "sigchanyzer" | "SA1017" => package_imports_prefix(package, "os/signal"),
+        "httpresponse" | "SA1020" => package_imports_prefix(package, "net/http"),
+        "defers" | "timeformat" | "SA1002" | "SA1004" | "SA1015" => {
+            package_imports_prefix(package, "time")
+        }
+        "SA1000" => package_imports_prefix(package, "regexp"),
+        "unmarshal" => {
+            package_imports_prefix(package, "encoding/json")
+                || package_imports_prefix(package, "encoding/xml")
+                || package_imports_prefix(package, "encoding/asn1")
+                || package_imports_prefix(package, "encoding/gob")
+        }
         "cgocall" => {
             package_imports_prefix(package, "runtime/cgo")
                 || package_imports_prefix(package, "C")
@@ -1045,12 +1078,22 @@ mod tests {
     fn govet_import_gates() {
         let cases: &[(&str, &str)] = &[
             ("atomic", "sync/atomic"),
+            ("SA1027", "sync/atomic"),
             ("sigchanyzer", "os/signal"),
+            ("SA1017", "os/signal"),
             ("httpresponse", "net/http"),
+            ("SA1020", "net/http"),
             ("defers", "time"),
             ("timeformat", "time"),
+            ("SA1002", "time"),
+            ("SA1004", "time"),
+            ("SA1015", "time"),
             ("SA1012", "context"),
             ("SA1029", "context"),
+            ("slog", "log/slog"),
+            ("errorsas", "errors"),
+            ("SA1032", "errors"),
+            ("SA1000", "regexp"),
         ];
         for &(name, import) in cases {
             let analyzer = Analyzer {
@@ -1075,6 +1118,21 @@ mod tests {
                 "{name} should keep with {import}"
             );
         }
+        let unmarshal = Analyzer {
+            name: "unmarshal",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        assert!(!analyzer_applies_to_package(&unmarshal, &Package::default()));
+        let mut with_json = Package::default();
+        with_json
+            .imports
+            .insert("encoding/json".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&unmarshal, &with_json));
         let cgocall = Analyzer {
             name: "cgocall",
             doc: "",
