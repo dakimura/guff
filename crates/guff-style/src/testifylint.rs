@@ -22,6 +22,7 @@
 //! unavailable in the type graph (go-require covers these when stubs/types
 //! are present).
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -37,7 +38,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_assignable_to, api_implements};
-use guff_types::arena::{ObjectData, ObjectId, TypeData};
+use guff_types::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData};
 use guff_types::basic::{BasicKind, IS_FLOAT, IS_STRING, IS_UNSIGNED, IS_UNTYPED};
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
@@ -51,6 +52,36 @@ use guff_types::slice::slice_elem;
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::{new_pointer, TypeId};
 use regex::Regex;
+
+/// Per-rayon-worker mutable type arena for predicates that intern method sets.
+///
+/// `identical` / `api_implements` / `lookup_field_or_method` / `api_assignable_to`
+/// need `&mut TypeArena`. Cloning the shared package arena on every call (the
+/// previous pattern) dominated testifylint time on large testify packages —
+/// same class of bug that `LockChecker` fixed for `copylocks`. Reset once per
+/// package in [`run`]; lazily clone on first use.
+thread_local! {
+    static TYPE_SCRATCH: RefCell<Option<TypeArena>> = const { RefCell::new(None) };
+}
+
+fn reset_type_scratch() {
+    TYPE_SCRATCH.with(|c| *c.borrow_mut() = None);
+}
+
+fn with_types_mut<R>(
+    pass: &Pass<'_>,
+    f: impl FnOnce(&mut TypeArena, &ObjectArena, &PackageArena) -> R,
+) -> Option<R> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    TYPE_SCRATCH.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(artifacts.types.clone());
+        }
+        let types = slot.as_mut().unwrap();
+        Some(f(types, &artifacts.objects, &artifacts.packages))
+    })
+}
 
 use crate::options::{SuiteExtraAssertCallMode, TestifylintOptions};
 
@@ -281,17 +312,10 @@ fn is_empty_interface(pass: &Pass<'_>, expr: &Expr) -> bool {
 }
 
 fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let mut types = artifacts.types.clone();
-    identical(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        a,
-        b,
-    )
+    with_types_mut(pass, |types, objects, packages| {
+        identical(types, objects, packages, a, b)
+    })
+    .unwrap_or(false)
 }
 
 fn is_func(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -727,17 +751,10 @@ fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(err) = universe_error(pass) else {
         return false;
     };
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let mut types = artifacts.types.clone();
-    api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        err,
-    )
+    with_types_mut(pass, |types, objects, packages| {
+        api_implements(types, objects, packages, typ, err)
+    })
+    .unwrap_or(false)
 }
 
 fn is_interface_type(pass: &Pass<'_>, typ: TypeId) -> bool {
@@ -2511,27 +2528,14 @@ fn lookup_named_type(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<Type
 }
 
 fn implements_iface(pass: &Pass<'_>, typ: TypeId, iface: TypeId) -> bool {
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let mut types = artifacts.types.clone();
-    if api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        iface,
-    ) {
-        return true;
-    }
-    let ptr = new_pointer(&mut types, typ);
-    api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        ptr,
-        iface,
-    )
+    with_types_mut(pass, |types, objects, packages| {
+        if api_implements(types, objects, packages, typ, iface) {
+            return true;
+        }
+        let ptr = new_pointer(types, typ);
+        api_implements(types, objects, packages, ptr, iface)
+    })
+    .unwrap_or(false)
 }
 
 fn implements_testify_suite(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -3668,22 +3672,15 @@ fn lookup_method_on_type(
     addressable: bool,
     name: &str,
 ) -> Option<ObjectId> {
-    let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    let mut types = artifacts.types.clone();
-    match lookup_field_or_method(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        addressable,
-        None,
-        name,
-    ) {
-        LookupResult::Found { obj, .. } => {
-            matches!(artifacts.objects.get(obj), ObjectData::Func(_)).then_some(obj)
+    with_types_mut(pass, |types, objects, packages| {
+        match lookup_field_or_method(types, objects, packages, typ, addressable, None, name) {
+            LookupResult::Found { obj, .. } => {
+                matches!(objects.get(obj), ObjectData::Func(_)).then_some(obj)
+            }
+            _ => None,
         }
-        _ => None,
-    }
+    })
+    .flatten()
 }
 
 fn func_signature(pass: &Pass<'_>, obj: ObjectId) -> Option<TypeId> {
@@ -3695,17 +3692,10 @@ fn is_assignable_expr(pass: &Pass<'_>, expr: &Expr, target: TypeId) -> bool {
     let Some(typ) = type_of(pass, expr) else {
         return false;
     };
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    let mut types = artifacts.types.clone();
-    api_assignable_to(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        target,
-    )
+    with_types_mut(pass, |types, objects, packages| {
+        api_assignable_to(types, objects, packages, typ, target)
+    })
+    .unwrap_or(false)
 }
 
 fn call_args_match(pass: &Pass<'_>, sig: TypeId, args: &[Expr], ellipsis_call: bool) -> bool {
@@ -4007,6 +3997,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "testifylint requires inspect analyzer".to_string())?;
+
+    // Fresh scratch for this package (rayon workers reuse threads across pkgs).
+    reset_type_scratch();
 
     let options = pass
         .settings::<TestifylintOptions>("testifylint")

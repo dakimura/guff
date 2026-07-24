@@ -2307,7 +2307,18 @@ impl LinterSettings {
             self.gomoddirectives.to_guff_gomoddirectives(),
         );
         bag.insert("gomodguard", self.gomodguard.to_guff_gomodguard());
-        bag.insert("modernize", self.modernize.to_guff_modernize());
+        {
+            let modernize = self.modernize.to_guff_modernize();
+            // Runner uses this to skip modernize's import-fact fan-out when `newexpr`
+            // is disabled (the only check that imports/exports NewLikeFact). Without
+            // it, modernize still schedules on every imported package (~1000+ actions
+            // on prometheus) even though those facts are never consumed.
+            bag.insert(
+                "modernize_schedule_facts",
+                !modernize.disable.iter().any(|d| d == "newexpr"),
+            );
+            bag.insert("modernize", modernize);
+        }
         bag.insert("gocritic", self.gocritic.to_guff_gocritic());
         bag.insert("forbidigo", self.forbidigo.to_guff_forbidigo());
         bag.insert("bidichk", self.bidichk.to_guff_bidichk());

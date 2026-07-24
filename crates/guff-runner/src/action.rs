@@ -403,7 +403,7 @@ pub fn analyze_with_settings(
                 actions,
                 all,
             ));
-            if !req.fact_types.is_empty() {
+            if analyzer_schedules_import_facts(req, settings) {
                 let mut paths: Vec<String> = package.imports.keys().cloned().collect();
                 paths.sort();
                 for path in paths {
@@ -421,7 +421,7 @@ pub fn analyze_with_settings(
             }
         }
 
-        if !analyzer.fact_types.is_empty() {
+        if analyzer_schedules_import_facts(analyzer, settings) {
             let mut paths: Vec<String> = package.imports.keys().cloned().collect();
             paths.sort();
             for path in paths {
@@ -557,6 +557,26 @@ pub fn analyze_with_settings(
 
 /// Whether a root analyzer should be scheduled for `package`.
 ///
+/// Whether this analyzer should run on imported packages to produce facts for
+/// importers. Default: any analyzer with non-empty `fact_types`.
+///
+/// `modernize` advertises `NewLikeFact` for the `newexpr` check only. When that
+/// check is disabled (settings flag from guff-lint), skip the import fan-out —
+/// otherwise modernize runs on every transitive import (~1000 extra actions on
+/// prometheus) with no consumer for the facts.
+fn analyzer_schedules_import_facts(analyzer: &Analyzer, settings: &SettingsBag) -> bool {
+    if analyzer.fact_types.is_empty() {
+        return false;
+    }
+    if analyzer.name == "modernize" {
+        return settings
+            .get::<bool>("modernize_schedule_facts")
+            .copied()
+            .unwrap_or(true);
+    }
+    true
+}
+
 /// Import-gated skips must preserve findings: only omit analyzers that cannot
 /// produce diagnostics without a given import. `buildir` is *not* gated here —
 /// many staticcheck SA checks require it regardless of testify.
