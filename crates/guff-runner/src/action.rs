@@ -459,6 +459,10 @@ pub fn analyze_with_settings(
     let mut keep_exptostd = 0usize;
     let mut skip_sloglint = 0usize;
     let mut keep_sloglint = 0usize;
+    let mut skip_loggercheck = 0usize;
+    let mut keep_loggercheck = 0usize;
+    let mut skip_fatcontext = 0usize;
+    let mut keep_fatcontext = 0usize;
     for &analyzer in analyzers {
         for pkg in packages {
             if !analyzer_applies_to_package(analyzer, pkg) {
@@ -466,6 +470,8 @@ pub fn analyze_with_settings(
                     "testifylint" => skip_testify += 1,
                     "exptostd" => skip_exptostd += 1,
                     "sloglint" => skip_sloglint += 1,
+                    "loggercheck" => skip_loggercheck += 1,
+                    "fatcontext" => skip_fatcontext += 1,
                     _ => {}
                 }
                 continue;
@@ -474,6 +480,8 @@ pub fn analyze_with_settings(
                 "testifylint" => keep_testify += 1,
                 "exptostd" => keep_exptostd += 1,
                 "sloglint" => keep_sloglint += 1,
+                "loggercheck" => keep_loggercheck += 1,
+                "fatcontext" => keep_fatcontext += 1,
                 _ => {}
             }
             let act = mk_action(
@@ -501,6 +509,16 @@ pub fn analyze_with_settings(
     if timing_enabled() && (skip_sloglint > 0 || keep_sloglint > 0) {
         eprintln!(
             "guff:   sloglint schedule keep={keep_sloglint} skip={skip_sloglint} (no log/slog import)"
+        );
+    }
+    if timing_enabled() && (skip_loggercheck > 0 || keep_loggercheck > 0) {
+        eprintln!(
+            "guff:   loggercheck schedule keep={keep_loggercheck} skip={skip_loggercheck} (no known logger import)"
+        );
+    }
+    if timing_enabled() && (skip_fatcontext > 0 || keep_fatcontext > 0) {
+        eprintln!(
+            "guff:   fatcontext schedule keep={keep_fatcontext} skip={skip_fatcontext} (no context import)"
         );
     }
 
@@ -533,8 +551,21 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
         }
         // sloglint only inspects `log/slog` APIs.
         "sloglint" => package_imports_prefix(package, "log/slog"),
+        // loggercheck only fires on kitlog / klog / logr / slog / zap call sites.
+        "loggercheck" => package_has_loggercheck_import(package),
+        // fatcontext only looks at nested `context.Context` values.
+        "fatcontext" => package_imports_prefix(package, "context"),
         _ => true,
     }
+}
+
+fn package_has_loggercheck_import(package: &Package) -> bool {
+    package_imports_prefix(package, "github.com/go-kit/log")
+        || package_imports_prefix(package, "github.com/go-kit/kit/log")
+        || package_imports_prefix(package, "k8s.io/klog")
+        || package_imports_prefix(package, "github.com/go-logr/logr")
+        || package_imports_prefix(package, "log/slog")
+        || package_imports_prefix(package, "go.uber.org/zap")
 }
 
 /// True when `package.imports` contains `prefix` or a subpath of it.
@@ -919,5 +950,51 @@ mod tests {
             .imports
             .insert("log/slog".into(), Arc::new(Package::default()));
         assert!(analyzer_applies_to_package(&analyzer, &with_slog));
+    }
+
+    #[test]
+    fn loggercheck_skipped_without_logger_import() {
+        let analyzer = Analyzer {
+            name: "loggercheck",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        let mut with_zap = Package::default();
+        with_zap.imports.insert(
+            "go.uber.org/zap".into(),
+            Arc::new(Package::default()),
+        );
+        assert!(analyzer_applies_to_package(&analyzer, &with_zap));
+        let mut with_slog = Package::default();
+        with_slog
+            .imports
+            .insert("log/slog".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&analyzer, &with_slog));
+    }
+
+    #[test]
+    fn fatcontext_skipped_without_context_import() {
+        let analyzer = Analyzer {
+            name: "fatcontext",
+            doc: "",
+            url: "",
+            run: |_p| Ok(None),
+            run_despite_errors: false,
+            requires: vec![],
+            fact_types: vec![],
+        };
+        let pkg = Package::default();
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        let mut with_ctx = Package::default();
+        with_ctx
+            .imports
+            .insert("context".into(), Arc::new(Package::default()));
+        assert!(analyzer_applies_to_package(&analyzer, &with_ctx));
     }
 }

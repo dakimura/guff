@@ -5,9 +5,9 @@
 //! (only unnecessary leading/trailing newlines).
 //!
 //! Comments inside blocks are required for leading-newline accuracy. Production
-//! load uses `Mode::NONE` (no `file.comments`), so each file is re-parsed with
-//! [`PARSE_COMMENTS`] and findings are mapped back onto the Pass [`FileSet`] by
-//! line number.
+//! load uses `Mode::NONE` (no body comments on the typed AST), so we scan each
+//! file once for COMMENT tokens and remap them onto the Pass [`FileSet`]. That
+//! avoids a full `PARSE_COMMENTS` re-parse of every file.
 //!
 //! DEFERRED: SuggestedFix; `ignore-leading` / `ignore-trailing` settings.
 
@@ -15,9 +15,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::{Arc, OnceLock};
 
-use guff::ast::{BlockStmt, CommentGroup, Decl, File, FuncDecl};
-use guff::parser::{parse_file, PARSE_COMMENTS};
-use guff::position::{FileSet, Pos};
+use guff::ast::{BlockStmt, Comment, CommentGroup, Decl, FuncDecl};
+use guff::position::{File, FileSet, Pos};
+use guff::scanner::{Scanner, SCAN_COMMENTS};
+use guff::token::Token;
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -200,35 +201,89 @@ fn run_func(
     walk::walk(&mut visitor, NodeRef::FuncDecl(decl));
 }
 
-fn run_file(
-    file: &File,
+fn run_file_decls(
+    decls: &[Decl],
     fset: &FileSet,
+    comments: &[CommentGroup],
     multi_if: bool,
     multi_func: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
-    for decl in &file.decls {
+    for decl in decls {
         let Decl::FuncDecl(f) = decl else {
             continue;
         };
-        run_func(fset, &file.comments, f, multi_if, multi_func, pending);
+        run_func(fset, comments, f, multi_if, multi_func, pending);
     }
 }
 
-fn reparse_with_comments(path: &std::path::Path) -> Option<(Arc<FileSet>, File)> {
-    let src = fs::read(path).ok()?;
-    let name = path.file_name()?.to_str()?;
-    let fset = FileSet::new();
-    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
-    Some((fset, file))
+fn src_may_have_comments(src: &[u8]) -> bool {
+    src.windows(2)
+        .any(|w| w == b"//" || w == b"/*")
 }
 
-fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
-    let ft = fset.file(file_pos)?;
-    if line < 1 || line as usize > ft.line_count() {
-        return None;
+/// Scan COMMENT tokens and remap them onto `pass_file`'s byte base.
+///
+/// Cheaper than a full `PARSE_COMMENTS` re-parse: we only tokenize, then walk
+/// the already-typed AST. Grouping matches `consume_comment_group(1)` —
+/// adjacent comments with no empty line between them form one group; a real
+/// (non-semicolon) token flushes the current group.
+fn collect_comments(src: &[u8], pass_file: &File) -> Vec<CommentGroup> {
+    if !src_may_have_comments(src) {
+        return Vec::new();
     }
-    Some(ft.line_start(line as usize).0 as u32)
+
+    let temp_fset = FileSet::new();
+    let temp_file = temp_fset.add_file(pass_file.name(), -1, src.len() as i64);
+    let temp_base = temp_file.base();
+    let pass_base = pass_file.base();
+
+    let mut sc = Scanner::new();
+    sc.init(Arc::clone(&temp_file), src, None, SCAN_COMMENTS);
+
+    let mut groups = Vec::new();
+    let mut cur: Vec<Comment> = Vec::new();
+    let mut endline: i64 = -1;
+
+    loop {
+        let (pos, tok, lit) = sc.scan();
+        match tok {
+            Token::EOF => break,
+            Token::COMMENT => {
+                let line = temp_fset.position(pos).line;
+                if !cur.is_empty() && (endline < 0 || line > endline + 1) {
+                    groups.push(CommentGroup {
+                        list: std::mem::take(&mut cur),
+                    });
+                }
+                let mut el = line;
+                if lit.as_bytes().get(1) == Some(&b'*') {
+                    el += lit.bytes().filter(|&b| b == b'\n').count() as i64;
+                }
+                endline = el;
+                cur.push(Comment {
+                    slash: Pos(pass_base + (pos.0 - temp_base)),
+                    text: lit,
+                });
+            }
+            Token::SEMICOLON => {
+                // Inserted newline semis sit between adjacent line comments;
+                // line-gap logic above already decides whether to join.
+            }
+            _ => {
+                if !cur.is_empty() {
+                    groups.push(CommentGroup {
+                        list: std::mem::take(&mut cur),
+                    });
+                    endline = -1;
+                }
+            }
+        }
+    }
+    if !cur.is_empty() {
+        groups.push(CommentGroup { list: cur });
+    }
+    groups
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -253,39 +308,31 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         }
 
-        // Prefer a comment-bearing reparse when the on-disk path is known.
-        // Fall back to the loaded AST (tests / overlays without comments).
-        let (check_fset, check_file, map_lines) = if let Some(path) = paths.get(i) {
-            if let Some((re_fset, parsed)) = reparse_with_comments(path) {
-                (re_fset, parsed, true)
-            } else {
-                (fset.clone(), (*file).clone(), false)
-            }
-        } else if !file.comments.is_empty() {
-            (fset.clone(), (*file).clone(), false)
-        } else {
-            (fset.clone(), (*file).clone(), false)
+        let Some(pass_file) = fset.file(file.pos()) else {
+            continue;
         };
 
-        let mut local = Vec::new();
-        run_file(
-            &check_file,
-            &check_fset,
-            options.multi_if,
-            options.multi_func,
-            &mut local,
-        );
-
-        if map_lines {
-            for (pos, message) in local {
-                let line = check_fset.position(Pos(pos as i64)).line;
-                if let Some(mapped) = line_pos(&fset, file.pos(), line) {
-                    pending.push((mapped, message));
+        // Prefer a comment scan when the on-disk path is known. Fall back to
+        // whatever comments the loaded AST already has (tests / overlays).
+        let comments = if let Some(path) = paths.get(i) {
+            match fs::read(path) {
+                Ok(src) if src.len() as i64 == pass_file.size() => {
+                    collect_comments(&src, pass_file.as_ref())
                 }
+                Ok(_) | Err(_) => file.comments.clone(),
             }
         } else {
-            pending.extend(local);
-        }
+            file.comments.clone()
+        };
+
+        run_file_decls(
+            &file.decls,
+            &fset,
+            &comments,
+            options.multi_if,
+            options.multi_func,
+            &mut pending,
+        );
     }
 
     for (pos, message) in pending {
