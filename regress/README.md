@@ -20,7 +20,6 @@ prometheus config — the gate still fails if `guff_only` grows or `both` shrink
 | **finding-set / display** | Full `./...` matches golangci-lint 2.12 on path+Text (`both=20`, `guff_only=0`, `golangci_only=0`): modernize 16 + govet `inline` 4. Default `output.path-mode: rel`. |
 | **gofumpt** | `guff run` format checks set `match_golangci` (omit gofumpt ≥v0.10 rules) so diagnostics match golangci-lint’s embedded `mvdan.cc/gofumpt@v0.9.2`. Native `guff fmt` still applies latest v0.10 rules. Override with `GUFF_GOFUMPT_MATCH_GOLANGCI=0` or pin a binary via `GUFF_GOFUMPT_BIN`. |
 | **staticcheck SA5011** | `:0` / empty-path diagnostics are suppressed; remaining SSA position gaps DEFERRED. |
-| **nilnesserr** | Still unimplemented (warning + skip only; does not affect finding counts). |
 
 ## Profiles
 

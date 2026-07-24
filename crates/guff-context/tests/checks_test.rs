@@ -3,7 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use guff_analysis::SettingsBag;
-use guff_context::{bodyclose, fatcontext, noctx, sqlclosecheck, BodycloseOptions};
+use guff_context::{bodyclose, contextcheck, fatcontext, noctx, sqlclosecheck, BodycloseOptions};
 use guff_runner::RunnerOptions;
 
 #[test]
@@ -159,5 +159,35 @@ fn sqlclosecheck_allows_defer_return_and_pass() {
         support::run_analyzer(sqlclosecheck(), &pkg).is_empty(),
         "{:?}",
         support::run_analyzer(sqlclosecheck(), &pkg)
+    );
+}
+
+#[test]
+fn contextcheck_flags_non_inherited_and_missing_ctx() {
+    let dir = support::testdata("contextcheck");
+    let pkg = support::typecheck_pkg("example.com/contextcheck", &dir.join("bad.go"));
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("Non-inherited new context")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should pass the context parameter")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn contextcheck_allows_inherited_context() {
+    let dir = support::testdata("contextcheck");
+    let pkg = support::typecheck_pkg("example.com/contextcheck/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(contextcheck(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(contextcheck(), &pkg)
     );
 }

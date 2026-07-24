@@ -1,6 +1,6 @@
 [package]
 name = "guff-gostaticanalysis"
-description = "Rust ports of gostaticanalysis-family go/analysis linters (forcetypeassert, nilnil, makezero, mirror, …)."
+description = "Rust ports of gostaticanalysis-family go/analysis linters (forcetypeassert, nilnil, makezero, mirror, nilnesserr, …)."
 keywords = ["go", "linter", "analysis", "gostaticanalysis"]
 categories = ["development-tools"]
 version.workspace = true
@@ -14,6 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
+guff-ssa = { path = "../guff-ssa" }
 guff-types = { path = "../guff-types" }
 
 [dev-dependencies]

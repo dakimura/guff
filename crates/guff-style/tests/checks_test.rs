@@ -12,9 +12,9 @@ use guff_style::{
     gosec, gosmopolitan, grouper, iface, inamedparam, interfacebloat, intrange, iotamixing, ireturn,
     lll, loggercheck, maintidx, mnd, modernize, musttag, nakedret, nestif, nlreturn, noinlineerr,
     nonamedreturns, nosprintfhostport, paralleltest, perfsprint, prealloc, predeclared, ginkgolinter,
-    promlinter, protogetter, reassign, recvcheck, sloglint, tagalign, tagliatelle, testableexamples,
+    promlinter, protogetter, reassign, recvcheck, sloglint, spancheck, tagalign, tagliatelle, testableexamples,
     testifylint, testpackage, thelper, tparallel, unconvert, unparam, unqueryvet, usestdlibvars,
-    usetesting, varnamelen, whitespace, wsl, wsl_v5,
+    usetesting, varnamelen, wastedassign, whitespace, wsl, wsl_v5, zerologlint,
 };
 
 #[test]
@@ -1515,6 +1515,34 @@ fn containedctx_allows_non_context_fields() {
         support::typecheck_fixture("containedctx", "example.com/containedctx/ok", "ok.go");
     let messages = support::run_analyzer(containedctx(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
+}
+
+#[test]
+fn spancheck_flags_unassigned_and_missing_end() {
+    let pkg = support::typecheck_fixture("spancheck", "example.com/spancheck", "bad.go");
+    let messages = support::run_analyzer(spancheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("span is unassigned, probable memory leak")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(".End is not called on all paths")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn spancheck_allows_end_calls() {
+    let pkg = support::typecheck_fixture("spancheck", "example.com/spancheck/ok", "ok.go");
+    assert!(
+        support::run_analyzer(spancheck(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(spancheck(), &pkg)
+    );
 }
 
 #[test]
@@ -6854,4 +6882,47 @@ fn ginkgolinter_respects_settings() {
             .any(|m| m.contains("must not use Expect with Should")),
         "{flagged:?}"
     );
+}
+
+#[test]
+fn wastedassign_flags_unused_local_assignments() {
+    let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign", "bad.go");
+    let messages = support::run_analyzer(wastedassign(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("assigned to a, but never used afterwards")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("assigned to b, but reassigned without using the value")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn wastedassign_allows_used_assignments() {
+    let pkg = support::typecheck_fixture("wastedassign", "example.com/wastedassign/ok", "ok.go");
+    let messages = support::run_analyzer(wastedassign(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn zerologlint_flags_undispatched_events() {
+    let pkg = support::typecheck_fixture("zerologlint", "example.com/zerologlint", "bad.go");
+    let messages = support::run_analyzer(zerologlint(), &pkg);
+    let undispatched = messages
+        .iter()
+        .filter(|m| m.contains("must be dispatched by Msg or Send method"))
+        .count();
+    assert!(undispatched >= 4, "expected multiple reports, got {undispatched}: {messages:?}");
+}
+
+#[test]
+fn zerologlint_allows_dispatched_events() {
+    let pkg = support::typecheck_fixture("zerologlint", "example.com/zerologlint/ok", "ok.go");
+    let messages = support::run_analyzer(zerologlint(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }

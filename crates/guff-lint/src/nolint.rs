@@ -457,7 +457,7 @@ fn is_known_nolint_target(name: &str) -> bool {
 /// Linters documented as not yet implemented in guff. `//nolint:<name>` must
 /// not be reported as unknown; unused-nolintlint also skips them (golangci
 /// would have matched real findings we cannot emit yet).
-const KNOWN_UNIMPLEMENTED_LINTERS: &[&str] = &["contextcheck"];
+const KNOWN_UNIMPLEMENTED_LINTERS: &[&str] = &[];
 
 fn expand_ranges(
     fset: &FileSet,

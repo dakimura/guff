@@ -14,7 +14,10 @@ path = "src/lib.rs"
 [dependencies]
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
+guff-ssa = { path = "../guff-ssa" }
 guff-types = { path = "../guff-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 guff-packages = { path = "../guff-packages" }

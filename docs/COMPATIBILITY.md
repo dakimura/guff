@@ -21,7 +21,7 @@
 
 ## 1. Linter 互換性（golangci-lint v2 全 114 linter）
 
-**サマリ: 108 / 114 実装（✅ 91 + 🟡 17）、未対応 6（すべて SSA / ctrlflow 依存で DEFERRED）。**
+**サマリ: 114 / 114 実装（✅ 97 + 🟡 17）。golangci-lint v2 全 linter 対応。**
 
 | linter | guff | 備考 |
 |--------|:----:|------|
@@ -33,7 +33,7 @@
 | canonicalheader | ✅ | |
 | clickhouselint | ✅ | |
 | containedctx | ✅ | |
-| contextcheck | ❌ | SSA 依存で未実装（→ R13/R17） |
+| contextcheck | 🟡 | SSA + パッケージ内 facts。HTTP handler / cross-pkg facts 完全パリティは DEFERRED |
 | copyloopvar | ✅ | |
 | cyclop | ✅ | |
 | decorder | ✅ | |
@@ -96,8 +96,8 @@
 | musttag | ✅ | |
 | nakedret | ✅ | |
 | nestif | ✅ | |
-| nilerr | ❌ | SSA 依存で未実装（→ R13/R17） |
-| nilnesserr | ❌ | SSA（nilness）依存で未実装（→ R13/R17） |
+| nilerr | ✅ | SSA。`//lint:ignore nilerr`（commentmap）は DEFERRED（`//nolint` は runner 層） |
+| nilnesserr | ✅ | SSA nilness 事実走査。variadic は flat Call args でメッセージ分類（go/ssa Alloc+Slice 完全一致は DEFERRED） |
 | nilnil | ✅ | |
 | nlreturn | ✅ | |
 | noctx | ✅ | |
@@ -116,7 +116,7 @@
 | revive | 🟡 | golint-default 23 + extended 77 = 100 rules。未実装 rule あり |
 | rowserrcheck | 🟡 | AST 近似。SSA 完全パリティは DEFERRED |
 | sloglint | ✅ | |
-| spancheck | ❌ | SSA / ctrlflow 依存で未実装（→ R13/R17） |
+| spancheck | 🟡 | AST 近似（`defer End` / 関数内 `End`）。x/tools ctrlflow 完全パリティは DEFERRED |
 | sqlclosecheck | 🟡 | AST 近似。SSA 完全パリティは DEFERRED |
 | staticcheck | ✅ | 167 analyzers（S* 37 + SA* 100 + ST* 18 + QF* 12） |
 | tagalign | 🟡 | 整列チェック対応。StrictStyle は DEFERRED |
@@ -133,12 +133,12 @@
 | usestdlibvars | ✅ | |
 | usetesting | ✅ | |
 | varnamelen | ✅ | |
-| wastedassign | ❌ | ctrlflow（PL05）依存で未実装（→ R13） |
+| wastedassign | ✅ | NaiveForm SSA（有効時のみ別ビルド） |
 | whitespace | ✅ | |
 | wrapcheck | ✅ | |
 | wsl | 🟡 | v2 で deprecated（`wsl_v5` の別名）。完全パリティは DEFERRED |
 | wsl_v5 | 🟡 | 完全パリティは DEFERRED |
-| zerologlint | ❌ | SSA 依存で未実装（→ R13/R17） |
+| zerologlint | ✅ | SSA（buildir）。ネストしたヘルパ経由の dispatch 追跡は部分対応 |
 
 > **共通の DEFERRED**: 各 linter の `SuggestedFix`（`--fix` の完全網羅）と、`//<linter>:ignore` 系の
 > コメントディレクティブは linter ごとに順次対応中。詳細はコード内 `// DEFERRED:`。

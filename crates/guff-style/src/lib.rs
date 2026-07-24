@@ -76,6 +76,8 @@
 //! - [`ginkgolinter`]
 //! - [`varnamelen`]
 //! - [`wsl_v5`]
+//! - [`wastedassign`]
+//! - [`zerologlint`]
 //!
 //! DEFERRED (see DEVELOPMENT.md R14): remaining style bundle
 //! (`guff-revive` / `guff-dupl`)
@@ -112,6 +114,7 @@ mod goheader;
 mod arangolint;
 mod containedctx;
 mod decorder;
+mod spancheck;
 mod embeddedstructfieldcheck;
 mod gochecksumtype;
 mod inamedparam;
@@ -158,6 +161,8 @@ mod varnamelen;
 mod whitespace;
 mod wsl;
 mod wsl_v5;
+mod wastedassign;
+mod zerologlint;
 
 pub use options::{
     AsasalintOptions, BidichkOptions, CopyloopvarOptions, CyclopOptions, DecorderOptions,
@@ -197,6 +202,8 @@ pub use gosmopolitan::analyzer as gosmopolitan;
 pub use goheader::analyzer as goheader;
 pub use arangolint::analyzer as arangolint;
 pub use containedctx::analyzer as containedctx;
+pub use spancheck::analyzer as spancheck;
+pub use spancheck::SpancheckOptions;
 pub use decorder::analyzer as decorder;
 pub use embeddedstructfieldcheck::analyzer as embeddedstructfieldcheck;
 pub use gochecksumtype::analyzer as gochecksumtype;
@@ -250,6 +257,8 @@ pub use varnamelen::analyzer as varnamelen;
 pub use whitespace::analyzer as whitespace;
 pub use wsl::analyzer as wsl;
 pub use wsl_v5::analyzer as wsl_v5;
+pub use wastedassign::analyzer as wastedassign;
+pub use zerologlint::analyzer as zerologlint;
 
 use guff_analysis::Analyzer;
 
@@ -330,5 +339,8 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         promlinter(),
         ginkgolinter(),
         varnamelen(),
+        wastedassign(),
+        zerologlint(),
+        spancheck(),
     ]
 }

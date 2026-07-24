@@ -150,9 +150,9 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-errcheck` | ✅（excludes / blank / assert） | `unchecked_call` FW 無しで実装 |
 | `guff-ineffassign` | ✅（gordonklaus CFG + generated 除外） | — |
 | `guff-unused` | ✅（単一パッケージ; 型・定数・メソッド・const グループ） | whole-program 版は未 |
-| `guff-gostaticanalysis` | ✅ **4**（forcetypeassert / nilnil / makezero / mirror） | nilerr / nilnesserr は SSA 依存で DEFERRED（→ R17） |
+| `guff-gostaticanalysis` | ✅ **6**（forcetypeassert / nilnil / makezero / mirror / nilnesserr / nilerr） | |
 | `guff-error` | ✅ **7**（errname / err113 / durationcheck / errorlint / wrapcheck / errchkjson / rowserrcheck） | 各 settings 配線済み。rowserrcheck は AST 近似（SSA 完全パリティは DEFERRED） |
-| `guff-context` | ✅ **4**（noctx / fatcontext / bodyclose / sqlclosecheck） | bodyclose / sqlclosecheck は AST 近似（SSA 完全パリティは DEFERRED）。contextcheck は SSA 依存で DEFERRED（→ R17） |
+| `guff-context` | ✅ **5**（noctx / fatcontext / bodyclose / sqlclosecheck / contextcheck） | bodyclose / sqlclosecheck は AST 近似。contextcheck は SSA + パッケージ内 facts（cross-pkg DEFERRED） |
 | `guff-style` | ✅ **75**（copyloopvar / usetesting / usestdlibvars / perfsprint / goconst / gosec / gocritic / modernize / exptostd / testifylint / sloglint / loggercheck / exhaustive / exhaustruct / musttag / revive 系複雑度（funlen / gocyclo / gocognit / cyclop / nestif / lll / maintidx）ほか多数。全一覧はレジストリ `crates/guff-lint/src/registry.rs` 参照） | 主要 `linters.settings` キーを各 analyzer に配線済み。DEFERRED: 各 SuggestedFix 完全パリティ、コメントディレクティブ、wsl(v4) 完全パリティ、perfsprint fiximports 等 |
 | `guff-comment` | ✅ **4**（godot / godox / dupword / godoclint） | settings 配線済み。SuggestedFix・godoclint strict/extra rules 等は DEFERRED |
 | `guff-import` | ✅ **4**（depguard / gomoddirectives / gomodguard / importas） | settings 配線済み。allowed modules/domains・version constraints・path placeholders・use-site SuggestedFix 等は DEFERRED |
@@ -322,8 +322,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 #### R13. go/analysis 系 linter（`guff-gostaticanalysis` ほか）🟡 部分完了
 - **目的**: gostaticanalysis / error / context 系ほか go/analysis ベースの linter を揃える。実装済みは §3.3。
 - **完了条件**: 各 linter に bad/ok testdata、golangci 相当の指摘、レジストリ登録。
-- **残（SSA / ctrlflow 依存 → R17 / PL05）**: nilerr / nilnesserr / contextcheck / wastedassign / spancheck / zerologlint。
-- **残（パリティ）**: errorlint の errorf 既定オフ / allowed マップ、gosec の未実装ルール（G113 / G115–G118 / G201–G202 / G304–G305 / G307 / G601 等）・severity/confidence、AST 近似 linter（bodyclose / sqlclosecheck / rowserrcheck 等）の SSA 完全パリティ、各 linter の SuggestedFix / コメントディレクティブ（`//exhaustruct:ignore` など）。
+- **残（パリティ）**: contextcheck cross-pkg facts / HTTP handler 端、spancheck ctrlflow 完全パリティ、errorlint の errorf 既定オフ / allowed マップ、gosec の未実装ルール、AST 近似 linter（bodyclose / sqlclosecheck / rowserrcheck 等）の SSA 完全パリティ、各 linter の SuggestedFix / コメントディレクティブ。
+- ~~**残（SSA / ctrlflow 依存）**: nilerr / contextcheck / wastedassign / spancheck / zerologlint~~ ✅ 2026-07-24 実装（spancheck/contextcheck は 🟡）。
 
 #### R14. スタンドアロン linter 🟡 部分完了
 - **目的**: `guff-revive`（独自ルールエンジン）/ `guff-misspell` / `guff-dupl` / `guff-style` バンドル / `guff-comment` / `guff-import`。実装済みは §3.3。
@@ -467,9 +467,8 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 #### R23. 互換性マトリクスの公開 ✅ 完了 (2026-07-17)
 - どの linter・どの設定キー・どの出力フォーマットが「対応済/部分/未対応」かを表にして公開。
 - **実装**: [`docs/COMPATIBILITY.md`](COMPATIBILITY.md) に互換性マトリクスを新設。
-  1. **Linter**: golangci-lint v2 の全 **114** linter を ✅/🟡/❌ で分類（**108 実装** = ✅ 91 + 🟡 17、
-     未対応 6 はいずれも SSA / ctrlflow 依存で DEFERRED: contextcheck / nilerr / nilnesserr /
-     spancheck / wastedassign / zerologlint）。formatter 6 種も別表。
+  1. **Linter**: golangci-lint v2 の全 **114** linter を ✅/🟡/❌ で分類（**114 実装** = ✅ 97 + 🟡 17）。
+     （2026-07-24: 残り 5 = nilerr / contextcheck / wastedassign / spancheck / zerologlint を実装し 109→114。）
   2. **設定キー**: `run` / `linters` / `linters.exclusions` / `formatters` / `issues` / `severity` /
      `output` の各キーを対応状況付きで一覧（パースのみ vs 実効を区別）。
   3. **出力フォーマット**: text / colored / json / checkstyle / sarif / tab / colored-tab /

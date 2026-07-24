@@ -412,7 +412,10 @@ dependencies = [
  "guff-ast",
  "guff-packages",
  "guff-runner",
+ "guff-ssa",
  "guff-types",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -482,6 +485,7 @@ dependencies = [
  "guff-ast",
  "guff-packages",
  "guff-runner",
+ "guff-ssa",
  "guff-types",
 ]
 
@@ -659,6 +663,7 @@ dependencies = [
  "guff-constant",
  "guff-packages",
  "guff-runner",
+ "guff-ssa",
  "guff-types",
  "regex",
  "regex-syntax",

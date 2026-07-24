@@ -14,6 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
+guff-ssa = { path = "../guff-ssa" }
 guff-types = { path = "../guff-types" }
 guff-constant = { path = "../guff-constant" }
 regex = "1"
