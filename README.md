@@ -84,12 +84,6 @@ curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.
 
 Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
 
-If the guff repository is private, export a token first:
-
-```bash
-export GITHUB_TOKEN=ghp_...   # repo read access
-```
-
 ### GitHub Action
 
 Add a workflow (Go must be available — use `actions/setup-go`):
@@ -129,15 +123,8 @@ docker pull ghcr.io/dakimura/guff:0.1.0
 docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.1.0 run ./...
 ```
 
-Tags: `0.1.0`, `0.1`, `0`, `latest` (and `v0.1.0` when present). The image includes a Go toolchain (`go list`).
+Tags: `0.1.0`, `0.1`, `0`, `latest` (and `v0.1.0` on newer releases). The image includes a Go toolchain (`go list`).
 
-While the repository (or the GHCR package) is private, authenticate first:
-
-```bash
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
-```
-
-Package settings → change visibility to Public if you want anonymous pulls.
 ### Usage
 
 From a Go module root:

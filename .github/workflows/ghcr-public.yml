@@ -1,0 +1,39 @@
+name: GHCR public
+
+# One-shot / occasional: set the container package visibility to public.
+# If this fails (GITHUB_TOKEN cannot change visibility), do it in the UI:
+#   https://github.com/users/dakimura/packages/container/package/guff
+#   → Package settings → Change visibility → Public
+
+on:
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  public:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set ghcr.io/dakimura/guff visibility to public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          PKG="guff"
+          # User-owned package endpoint (dakimura is a user, not an org).
+          if gh api --method PUT "/user/packages/container/${PKG}/visibility" -f visibility=public; then
+            echo "Set /user/packages/container/${PKG} → public"
+            exit 0
+          fi
+          # Fallback shapes seen in the wild.
+          if gh api --method PATCH "/user/packages/container/${PKG}" -f visibility=public; then
+            echo "Patched /user/packages/container/${PKG} → public"
+            exit 0
+          fi
+          echo "::error::Could not change package visibility via API."
+          echo "Open https://github.com/users/${OWNER}/packages/container/package/${PKG}"
+          echo "→ Package settings → Change visibility → Public"
+          exit 1

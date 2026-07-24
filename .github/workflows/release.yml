@@ -141,3 +141,13 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Make package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Best-effort: GITHUB_TOKEN sometimes cannot flip visibility; UI fallback is fine.
+          gh api --method PUT "/user/packages/container/guff/visibility" -f visibility=public \
+            || gh api --method PATCH "/user/packages/container/guff" -f visibility=public \
+            || true
