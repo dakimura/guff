@@ -8,7 +8,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff_analysis::passes::buildir;
-use guff_analysis::{filter_debug, is_call_to, referrers, short_call_name};
+use guff_analysis::{has_non_debug_referrer, is_call_to, referrers, short_call_name};
 use guff_ssa::instr::{Call, InstrData};
 use guff_ssa::value::Value;
 
@@ -24,11 +24,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
-        for (_, block) in func.blocks.iter() {
+        for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else { continue };
                 let val = Value::Instr(iid);
-                if !filter_debug(referrers(func, val), func).is_empty() {
+                if has_non_debug_referrer(referrers(func, val), func) {
                     continue;
                 }
                 let pure = PURE_FUNCS.iter().any(|n| is_call_to(&ir.prog, call, n));

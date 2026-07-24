@@ -80,7 +80,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
-        for (_, block) in func.blocks.iter() {
+        for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 let InstrData::BinOp(BinOp {
                     op, x, y, typ, ..

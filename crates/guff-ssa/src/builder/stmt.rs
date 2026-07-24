@@ -83,8 +83,8 @@ impl<'a> Builder<'a> {
     fn branch_stmt(&mut self, s: &BranchStmt) {
         let (target, label_exit) = if let Some(lbl) = &s.label {
             let name = lbl.name.clone();
-            if let Some(block) = self.labelled_block(&name, s.tok) {
-                (block, None)
+            if let Some(tb) = self.labelled_block(&name, s.tok) {
+                (tb, None)
             } else {
                 let lb = self.lblock_of(&name);
                 let exit = if self.func().jump_var.is_some() && s.tok == Token::GOTO {
@@ -92,21 +92,26 @@ impl<'a> Builder<'a> {
                 } else {
                     None
                 };
-                (lb, exit)
+                (
+                    crate::builder::TargetBlock {
+                        func: self.func_id,
+                        block: lb,
+                    },
+                    exit,
+                )
             }
         } else {
-            let block = self
+            let tb = self
                 .targeted_block(s.tok)
                 .unwrap_or_else(|| panic!("{:?} not in loop/switch", s.tok));
-            (block, None)
+            (tb, None)
         };
         let _ = label_exit;
 
-        let target_parent = self.prog.functions.get(self.func_id).blocks.get(target).parent;
-        if target_parent == self.func_id {
-            self.emit_jump(target);
+        if target.func == self.func_id {
+            self.emit_jump(target.block);
         } else {
-            let e = self.block_exit(target, s.tok_pos);
+            let e = self.block_exit(target.func, target.block, s.tok_pos);
             let jump = self.func().jump_var.expect("yield function has jump_var");
             let exit_id = self.int_const(e.id);
             self.store_jump_var(jump, exit_id, s.tok_pos);

@@ -157,9 +157,8 @@ pub(crate) fn build_syntactic_body(
 ///   4. jump to `init.done` and `return`, then run the post-construction passes.
 ///
 /// DEFERRED vs go/ssa: calling the `init` of imported packages (needs import
-/// resolution and prerequisite SSA packages), `n:1` package-level
-/// initialization (`var x, y = f()`, needs tuple extraction), and the transient
-/// per-initializer goversion switch.
+/// resolution and prerequisite SSA packages), and the transient per-initializer
+/// goversion switch.
 pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File]) {
     let fid = prog
         .packages
@@ -220,7 +219,23 @@ pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File])
             }
         } else {
             // n:1 initialization: var x, y = f()
-            todo!("n:1 package-level initialization (needs exprN/emitExtract)");
+            let tuple = b.expr_n(&varinit.rhs);
+            let block = b.block.expect("no current block");
+            let pos = varinit.rhs.pos();
+            for (i, &obj) in varinit.lhs.iter().enumerate() {
+                if obj.name(&b.prog.object_arena) == "_" {
+                    continue;
+                }
+                let g = *b
+                    .prog
+                    .packages
+                    .get(pkg_id)
+                    .objects
+                    .get(&obj)
+                    .expect("SSA Global for package-level var");
+                let elem = crate::emit::emit_extract(b.prog, b.func_id, block, tuple, i);
+                b.emit_store(g, elem, pos);
+            }
         }
     }
 
@@ -386,13 +401,23 @@ fn value_type(prog: &Program, fid: FuncId, v: Value) -> TypeId {
     crate::program::value_type_of(prog, prog.functions.get(fid), v)
 }
 
+/// A basic block that may belong to this function or an ancestor (range-over-func
+/// yield functions store parent `break` targets). BlockIds are function-local,
+/// so the owning [`FuncId`] must travel with them. (Go: `*BasicBlock` pointers
+/// carry their parent Function intrinsically.)
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TargetBlock {
+    pub func: FuncId,
+    pub block: BlockId,
+}
+
 /// Break / continue / fallthrough targets for the innermost breakable statement.
 /// (Go: `targets` in `builder.go`.)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LoopTargets {
-    pub break_: BlockId,
-    pub continue_: Option<BlockId>,
-    pub fallthrough_: Option<BlockId>,
+    pub break_: TargetBlock,
+    pub continue_: Option<TargetBlock>,
+    pub fallthrough_: Option<TargetBlock>,
 }
 
 /// Builder is the state used during construction of a single function's SSA IR.
@@ -418,6 +443,27 @@ impl<'a> Builder<'a> {
     }
 
     pub(crate) fn push_targets(&mut self, break_: BlockId, continue_: BlockId) {
+        let fid = self.func_id;
+        self.targets.push(LoopTargets {
+            break_: TargetBlock {
+                func: fid,
+                block: break_,
+            },
+            continue_: Some(TargetBlock {
+                func: fid,
+                block: continue_,
+            }),
+            fallthrough_: None,
+        });
+    }
+
+    /// Like [`push_targets`], but break/continue may belong to different
+    /// functions (yield body: parent `done` + local `ycont`).
+    pub(crate) fn push_targets_owned(
+        &mut self,
+        break_: TargetBlock,
+        continue_: TargetBlock,
+    ) {
         self.targets.push(LoopTargets {
             break_,
             continue_: Some(continue_),
@@ -431,10 +477,14 @@ impl<'a> Builder<'a> {
         break_: BlockId,
         fallthrough_: Option<BlockId>,
     ) {
+        let fid = self.func_id;
         self.targets.push(LoopTargets {
-            break_,
+            break_: TargetBlock {
+                func: fid,
+                block: break_,
+            },
             continue_: None,
-            fallthrough_,
+            fallthrough_: fallthrough_.map(|block| TargetBlock { func: fid, block }),
         });
     }
 

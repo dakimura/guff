@@ -14,11 +14,14 @@ use guff::token::Token;
 
 /// lift replaces local and new Allocs accessed only with load/store by SSA
 /// registers, inserting φ-nodes where necessary.
+///
+/// Returns `true` if any Alloc was lifted (CFG/instrs changed). Callers can
+/// skip a follow-up blockopt/dom pass when this returns `false`.
 /// (Go: `lift`)
-pub fn lift(prog: &mut Program, func_id: FuncId) {
+pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
     let f = prog.functions.get_mut(func_id);
     if f.blocks.is_empty() {
-        return;
+        return false;
     }
 
     f.compute_referrers();
@@ -26,6 +29,9 @@ pub fn lift(prog: &mut Program, func_id: FuncId) {
 
     let mut instr_to_block = HashMap::new();
     for (id, block) in f.blocks.iter() {
+        if block.deleted {
+            continue;
+        }
         for &instr_id in &block.instrs {
             instr_to_block.insert(instr_id, id);
         }
@@ -35,7 +41,12 @@ pub fn lift(prog: &mut Program, func_id: FuncId) {
     let mut num_allocs = 0;
 
     // Determine which allocs we can lift and number them densely.
-    let block_ids: Vec<_> = f.blocks.iter().map(|(id, _)| id).collect();
+    let block_ids: Vec<_> = f
+        .blocks
+        .iter()
+        .filter(|(_, b)| !b.deleted)
+        .map(|(id, _)| id)
+        .collect();
     for block_id in block_ids {
         let instrs = f.blocks.get(block_id).instrs.clone();
         for instr_id in instrs {
@@ -51,7 +62,7 @@ pub fn lift(prog: &mut Program, func_id: FuncId) {
     }
 
     if num_allocs == 0 {
-        return;
+        return false;
     }
 
     let mut renaming = vec![None; num_allocs as usize];
@@ -106,6 +117,7 @@ pub fn lift(prog: &mut Program, func_id: FuncId) {
     // Referrers still list lifted-away Stores/Loads; rebuild so analyzers
     // (e.g. SA4006 has_use) see post-lift use-def only.
     f.compute_referrers();
+    true
 }
 
 struct NewPhi {

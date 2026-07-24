@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::buildir;
-use guff_analysis::{filter_debug, referrers};
+use guff_analysis::{has_non_debug_referrer, referrers};
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::{Call, InstrData};
 use guff_ssa::value::Value;
@@ -27,13 +27,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
-        for (_, block) in func.blocks.iter() {
+        for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 if !is_append(&ir.prog, func, iid) {
                     continue;
                 }
                 let val = Value::Instr(iid);
-                if filter_debug(referrers(func, val), func).is_empty() {
+                if !has_non_debug_referrer(referrers(func, val), func) {
                     pending.push((
                         func.pos(iid).0 as u32,
                         "this result of append is never used, except maybe in other appends".into(),

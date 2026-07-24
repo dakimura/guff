@@ -18,7 +18,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
-        for (_, block) in func.blocks.iter() {
+        for (_, block) in func.live_blocks() {
             let instrs = filter_debug(&block.instrs, func);
             if instrs.len() < 2 {
                 continue;

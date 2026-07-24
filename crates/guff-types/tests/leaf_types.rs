@@ -64,6 +64,19 @@ fn slice_accessors() {
 }
 
 #[test]
+fn slice_elem_resolves_named() {
+    // Named slice types (e.g. `type Bytes []byte`) must not panic in slice_elem.
+    use guff_types::{new_named, new_type_name, ObjectArena};
+    let (mut arena, table) = init_universe();
+    let mut objects = ObjectArena::new();
+    let byte = table[BYTE as usize];
+    let slice = new_slice(&mut arena, byte);
+    let tn = new_type_name(&mut objects, "Bytes", None);
+    let named = new_named(&mut arena, &mut objects, tn, Some(slice), vec![]);
+    assert_eq!(slice_elem(&arena, named), byte);
+}
+
+#[test]
 fn pointer_accessors() {
     let (mut arena, table) = init_universe();
     let int = table[BasicKind::Int as usize];

@@ -30,7 +30,11 @@ fn is_io_writer_write(pass: &Pass<'_>, decl: &FuncDecl) -> Option<guff_types::ar
     let params = signature_params(&artifacts.types, sig)?;
     let param = tuple_at(&artifacts.types, params, 0);
     let ptyp = param.typ(&artifacts.objects)?;
-    let elem = slice_elem(&artifacts.types, ptyp);
+    let under = ptyp.underlying(&artifacts.types);
+    let TypeData::Slice(_) = artifacts.types.get(under) else {
+        return None;
+    };
+    let elem = slice_elem(&artifacts.types, under);
     let TypeData::Basic(b) = artifacts.types.get(elem) else {
         return None;
     };

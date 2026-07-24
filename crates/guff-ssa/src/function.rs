@@ -306,6 +306,9 @@ impl Function {
     pub fn compute_referrers(&mut self) {
         let mut referrers: HashMap<Value, Vec<InstrId>> = HashMap::new();
         for (_, block) in self.blocks.iter() {
+            if block.deleted {
+                continue;
+            }
             for &instr_id in &block.instrs {
                 let instr = self.instrs.get(instr_id);
                 instr.for_each_operand(|val| {
@@ -314,5 +317,10 @@ impl Function {
             }
         }
         self.referrers = Some(referrers);
+    }
+
+    /// Iterate non-deleted blocks (blockopt leaves deleted entries in the arena).
+    pub fn live_blocks(&self) -> impl Iterator<Item = (BlockId, &BasicBlock)> {
+        self.blocks.iter().filter(|(_, b)| !b.deleted)
     }
 }

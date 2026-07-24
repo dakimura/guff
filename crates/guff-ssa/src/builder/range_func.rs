@@ -12,7 +12,7 @@ use guff::ast::RangeStmt;
 use guff::token::Token;
 use guff::{Pos, NO_POS};
 use guff_types::object::var::new_var;
-use guff_types::{signature, tuple, BasicKind, TypeId};
+use guff_types::{signature, tuple, BasicKind};
 
 /// Jump-state constants for range-over-func iterators. (Go: `jReady`/`jBusy`/`jDone`.)
 fn j_ready(b: &mut Builder<'_>) -> Value {
@@ -165,6 +165,16 @@ impl<'a> Builder<'a> {
             .expect("yield function has RangeStmt syntax");
         let yield_label = self.prog.functions.get(y_fid).yield_label.clone();
 
+        // go/ssa's `startBody` allocates the entry block first so it remains
+        // Blocks[0] (CFG root). Create entry before yield-continue.
+        let entry = {
+            let mut yb = Builder::new(self.prog, y_fid);
+            let e = yb.new_basic_block("entry".to_string());
+            yb.set_block(Some(e));
+            e
+        };
+        crate::create::create_syntactic_params(self.prog, y_fid, entry);
+
         let ycont = {
             let mut yb = Builder::new(self.prog, y_fid);
             yb.new_basic_block("yield-continue".to_string())
@@ -177,14 +187,6 @@ impl<'a> Builder<'a> {
                 lb.resolved = true;
             }
         }
-
-        let entry = {
-            let mut yb = Builder::new(self.prog, y_fid);
-            let e = yb.new_basic_block("entry".to_string());
-            yb.set_block(Some(e));
-            e
-        };
-        crate::create::create_syntactic_params(self.prog, y_fid, entry);
 
         {
             let mut yb = Builder::new(self.prog, y_fid);
@@ -251,7 +253,17 @@ impl<'a> Builder<'a> {
             }
         }
 
-        yb.push_targets(done, ycont);
+        let parent_fid = self.func_id;
+        yb.push_targets_owned(
+            crate::builder::TargetBlock {
+                func: parent_fid,
+                block: done,
+            },
+            crate::builder::TargetBlock {
+                func: y_fid,
+                block: ycont,
+            },
+        );
         for stmt in &range.body.list {
             yb.stmt_with_label(stmt, yield_label.as_deref());
         }
@@ -395,8 +407,7 @@ impl<'a> Builder<'a> {
         e
     }
 
-    pub(crate) fn block_exit(&mut self, block: BlockId, pos: Pos) -> Exit {
-        let to = self.prog.functions.get(self.func_id).blocks.get(block).parent;
+    pub(crate) fn block_exit(&mut self, to: FuncId, block: BlockId, pos: Pos) -> Exit {
         let id = self.next_exit_id();
         let e = Exit {
             id,

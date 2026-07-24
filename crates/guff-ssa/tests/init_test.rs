@@ -129,3 +129,52 @@ fn test_package_init_bare_inits_has_no_guard() {
     assert!(asm.contains("*g = 3"), "global initializer still runs:\n{asm}");
     assert!(asm.contains("init#1()"), "declared init still called:\n{asm}");
 }
+
+/// n:1 package-level init `var a, b = f()` / blank LHS. Regression for the
+/// former `todo!("n:1 package-level initialization")`.
+#[test]
+fn test_package_init_n1() {
+    const SRC_N1: &str = "\
+package p
+
+func pair() (int, string) { return 1, \"x\" }
+
+var a, b = pair()
+var c, _ = pair()
+";
+    let fset = FileSet::new();
+    let file = parse_file(&fset, "p.go", SRC_N1.as_bytes(), Mode::NONE).expect("parse failed");
+
+    let mut check = Checker::new(Config::default());
+    check.check_files(vec![file.clone()]);
+
+    let type_pkg_id = check.pkg;
+    let mut prog = Program::new(
+        BuilderMode::default(),
+        check.info,
+        check.types,
+        check.objects,
+        check.packages,
+    );
+
+    let ssa_pkg_id = create_package(&mut prog, type_pkg_id);
+    populate_package_members(&mut prog, ssa_pkg_id, &[file.clone()]);
+    build_package_init(&mut prog, ssa_pkg_id, &[file]);
+
+    let init_fid = prog
+        .packages
+        .get(ssa_pkg_id)
+        .init
+        .expect("init function synthesized");
+    let asm = disassemble_function(prog.functions.get(init_fid), &prog);
+    println!("{asm}");
+
+    assert!(asm.contains("pair()"), "n:1 RHS call:\n{asm}");
+    assert!(
+        asm.contains("extract"),
+        "tuple extracts for n:1 lhs:\n{asm}"
+    );
+    assert!(asm.contains("*a ="), "store to a:\n{asm}");
+    assert!(asm.contains("*b ="), "store to b:\n{asm}");
+    assert!(asm.contains("*c ="), "store to c (blank sibling):\n{asm}");
+}

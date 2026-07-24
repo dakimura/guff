@@ -73,7 +73,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         fset,
         // Match honnef buildir: GlobalDebug is required so ValueForExpr /
         // DebugRef-based analyzers (SA4006, …) can recover SSA values.
-        BuilderMode::SANITY_CHECK_FUNCTIONS | BuilderMode::GLOBAL_DEBUG,
+        // Sanity checks stay test-only — they walk every function and are
+        // too expensive for production lint runs.
+        BuilderMode::GLOBAL_DEBUG,
     )
     .map_err(|e| format!("buildir: {e}"))?;
     if let Some(t0) = t0 {

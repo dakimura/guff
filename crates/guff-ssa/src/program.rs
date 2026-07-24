@@ -207,11 +207,13 @@ impl Program {
         crate::dom::build_dom_tree(f);
 
         if !self.mode.contains(crate::mode::BuilderMode::NAIVE_FORM) {
-            crate::lift::lift(self, func_id);
-            // Re-run block optimizations after lifting to cleanup any new opportunities.
-            let f = self.functions.get_mut(func_id);
-            crate::blockopt::optimize_blocks(f);
-            crate::dom::build_dom_tree(f);
+            let lifted = crate::lift::lift(self, func_id);
+            // Re-run blockopt/dom only when lifting rewrote the CFG.
+            if lifted {
+                let f = self.functions.get_mut(func_id);
+                crate::blockopt::optimize_blocks(f);
+                crate::dom::build_dom_tree(f);
+            }
         }
 
         // Assign register numbers ("tN") once all transformation passes are done.

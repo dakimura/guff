@@ -19,7 +19,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
         for &fid in &ir.src_funcs {
             let func = ir.prog.functions.get(fid);
-            for (_, block) in func.blocks.iter() {
+            for (_, block) in func.live_blocks() {
                 for &iid in &block.instrs {
                     let InstrData::MapUpdate(mu) = func.instrs.get(iid) else {
                         continue;

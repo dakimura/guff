@@ -13,7 +13,7 @@ use guff::ast::{Expr, Stmt};
 use guff::walk::NodeRef;
 use guff_analysis::code::object_of;
 use guff_analysis::passes::{buildir, inspect};
-use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{has_non_debug_referrer, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::value::Value;
 use guff_types::ObjectId;
 
@@ -121,7 +121,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
                 // Upstream: any non-DebugRef referrer means the param value was
                 // used (after lifting removes a dead spill Store).
-                if !filter_debug(referrers(func, Value::Param(pid)), func).is_empty() {
+                if has_non_debug_referrer(referrers(func, Value::Param(pid)), func) {
                     continue;
                 }
 

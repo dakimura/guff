@@ -2,7 +2,7 @@
 //!
 //! Port of go/ssa's `func.go` (`lblock`, `labelledBlock`, `targetedBlock`).
 
-use crate::builder::Builder;
+use crate::builder::{Builder, TargetBlock};
 use crate::function::LBlock;
 use crate::ids::{BlockId, FuncId};
 use guff::token::Token;
@@ -43,17 +43,24 @@ impl<'a> Builder<'a> {
     }
 
     /// Searches for the block associated with a labelled `break` / `continue`.
-    /// (Go: `labelledBlock`, without yield-function ancestor search.)
-    pub(crate) fn labelled_block(&self, name: &str, tok: Token) -> Option<BlockId> {
+    /// (Go: `labelledBlock`.) Returns the owning function — yield functions may
+    /// resolve to an ancestor's block.
+    pub(crate) fn labelled_block(&self, name: &str, tok: Token) -> Option<TargetBlock> {
         if let Some(block) = self.labelled_block_in(self.func_id, name, tok) {
-            return Some(block);
+            return Some(TargetBlock {
+                func: self.func_id,
+                block,
+            });
         }
         // Search ancestors if this is a yield function.
         if self.func().jump_var.is_some() {
             let mut fid = self.func_id;
             while let Some(parent) = self.prog.functions.get(fid).parent {
                 if let Some(block) = self.labelled_block_in(parent, name, tok) {
-                    return Some(block);
+                    return Some(TargetBlock {
+                        func: parent,
+                        block,
+                    });
                 }
                 fid = parent;
                 if self.prog.functions.get(fid).jump_var.is_none() {
@@ -75,8 +82,8 @@ impl<'a> Builder<'a> {
     }
 
     /// Returns the nearest unlabelled `break` / `continue` / `fallthrough` target.
-    /// (Go: `targetedBlock`, without yield-function ancestor search.)
-    pub(crate) fn targeted_block(&self, tok: Token) -> Option<BlockId> {
+    /// (Go: `targetedBlock`.)
+    pub(crate) fn targeted_block(&self, tok: Token) -> Option<TargetBlock> {
         for tgts in self.targets.iter().rev() {
             let block = match tok {
                 Token::BREAK => Some(tgts.break_),
@@ -84,8 +91,8 @@ impl<'a> Builder<'a> {
                 Token::FALLTHROUGH => tgts.fallthrough_,
                 _ => None,
             };
-            if block.is_some() {
-                return block;
+            if let Some(tb) = block {
+                return Some(tb);
             }
         }
         // Yield functions inherit break targets from the parent function.
@@ -97,16 +104,27 @@ impl<'a> Builder<'a> {
         None
     }
 
-    fn targeted_block_in(&self, fid: FuncId, tok: Token) -> Option<BlockId> {
+    fn targeted_block_in(&self, fid: FuncId, tok: Token) -> Option<TargetBlock> {
         // During range_func the parent's break target is recorded on its lblock
         // or we walk the parent's saved targets via the enclosing range label.
         // The parent Builder pushed (done, loop_) before building the yield fn;
         // mirror that by reading the parent's innermost labelled loop break.
         let f = self.prog.functions.get(fid);
         for lb in f.lblocks.values() {
-            if let Some(b) = lb.break_ {
-                if tok == Token::BREAK {
-                    return Some(b);
+            if tok == Token::BREAK {
+                if let Some(b) = lb.break_ {
+                    return Some(TargetBlock {
+                        func: fid,
+                        block: b,
+                    });
+                }
+            }
+            if tok == Token::CONTINUE {
+                if let Some(b) = lb.continue_ {
+                    return Some(TargetBlock {
+                        func: fid,
+                        block: b,
+                    });
                 }
             }
         }

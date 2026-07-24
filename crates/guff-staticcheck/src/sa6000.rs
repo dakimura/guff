@@ -41,7 +41,7 @@ fn find_call_block(
     func: &guff_ssa::function::Function,
     common: &guff_ssa::instr::CallCommon,
 ) -> Option<BlockId> {
-    for (bid, block) in func.blocks.iter() {
+    for (bid, block) in func.live_blocks() {
         for &iid in &block.instrs {
             if let InstrData::Call(c) = func.instrs.get(iid) {
                 if std::ptr::eq(&c.call as *const _, common as *const _) {

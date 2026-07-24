@@ -115,7 +115,7 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
 
         for &fid in &ir.src_funcs {
             let caller = ir.prog.functions.get(fid);
-            for (_, block) in caller.blocks.iter() {
+            for (_, block) in caller.live_blocks() {
                 for &iid in &block.instrs {
                     let Some((kind, common)) = call_common(caller, iid) else {
                         continue;

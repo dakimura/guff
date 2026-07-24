@@ -58,7 +58,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let mut pending = Vec::new();
         for &fid in &ir.src_funcs {
             let func = ir.prog.functions.get(fid);
-            for (bid, block) in func.blocks.iter() {
+            for (bid, block) in func.live_blocks() {
                 let instrs = filter_debug(&block.instrs, func);
                 for &iid in &instrs {
                     let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {

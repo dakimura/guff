@@ -64,7 +64,7 @@ fn check_goroutine_fn(
     if goroutine.blocks.is_empty() {
         return None;
     }
-    for (_, block) in goroutine.blocks.iter() {
+    for (_, block) in goroutine.live_blocks() {
         for &iid in &block.instrs {
             let InstrData::Call(Call { call, .. }) = goroutine.instrs.get(iid) else {
                 continue;
@@ -85,7 +85,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
-        for (_, block) in func.blocks.iter() {
+        for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 let InstrData::Go(Go { call, .. }) = func.instrs.get(iid) else {
                     continue;

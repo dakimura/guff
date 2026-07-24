@@ -32,8 +32,12 @@ pub fn new_slice(arena: &mut TypeArena, elem: TypeId) -> TypeId {
     arena.alloc(TypeData::Slice(Slice { elem }))
 }
 
-/// Free-function accessor — panics if `id` is not a Slice.
+/// Free-function accessor — panics if `id`'s underlying type is not a Slice.
+///
+/// Named / Alias slice types (e.g. `type Bytes []byte`) are resolved via
+/// [`TypeId::underlying`] first, matching [`crate::signature::signature_params`].
 pub fn slice_elem(arena: &TypeArena, id: TypeId) -> TypeId {
+    let id = id.underlying(arena);
     match arena.get(id) {
         TypeData::Slice(s) => s.elem,
         other => panic!("expected Slice, got {:?}", std::mem::discriminant(other)),

@@ -85,7 +85,7 @@ fn nil_check_partner(func: &Function, cond: Value) -> Option<(InstrId, Value, Va
 
 fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, NilCheck> {
     let mut maybe_nil = HashMap::new();
-    for (bid, block) in func.blocks.iter() {
+    for (bid, block) in func.live_blocks() {
         for &iid in &block.instrs {
             let InstrData::If(If { cond }) = func.instrs.get(iid) else {
                 continue;
@@ -201,7 +201,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             }
 
-            for (bid, block) in func.blocks.iter() {
+            for (bid, block) in func.live_blocks() {
                 for &iid in &block.instrs {
                     let ptr = match func.instrs.get(iid) {
                         InstrData::UnOp(UnOp {

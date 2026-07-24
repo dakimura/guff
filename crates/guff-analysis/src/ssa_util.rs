@@ -71,6 +71,15 @@ pub fn filter_debug(instrs: &[InstrId], func: &Function) -> Vec<InstrId> {
         .collect()
 }
 
+/// True if any non-`DebugRef` referrer exists (avoids allocating for the common
+/// "has any real use?" check in SA4017 / SA4010 / …).
+pub fn has_non_debug_referrer(instrs: &[InstrId], func: &Function) -> bool {
+    instrs
+        .iter()
+        .copied()
+        .any(|iid| !matches!(func.instrs.get(iid), InstrData::DebugRef(_)))
+}
+
 /// Reports whether `fn` has at least one path that returns normally.
 ///
 /// Port of `irutil.Terminates` (simplified; omits time.Tick recv edge case).
@@ -78,7 +87,7 @@ pub fn terminates(func: &Function, prog: &Program) -> bool {
     if func.blocks.is_empty() {
         return true;
     }
-    for (_, block) in func.blocks.iter() {
+    for (_, block) in func.live_blocks() {
         let Some(InstrData::Return(_)) = block_control(func, block) else {
             continue;
         };
@@ -232,7 +241,7 @@ pub fn each_call<F>(func: &Function, prog: &Program, mut f: F)
 where
     F: FnMut(BlockId, &Function, InstrId, &CallCommon, Option<FuncId>),
 {
-    for (bid, block) in func.blocks.iter() {
+    for (bid, block) in func.live_blocks() {
         for &iid in &block.instrs {
             let (common, callee) = match func.instrs.get(iid) {
                 InstrData::Call(Call { call, .. }) => (call, callcheck::static_callee(call)),
@@ -249,8 +258,7 @@ where
 
 /// Blocks that end in `return`.
 pub fn return_blocks(func: &Function) -> Vec<BlockId> {
-    func.blocks
-        .iter()
+    func.live_blocks()
         .filter_map(|(bid, block)| {
             matches!(block_control(func, block), Some(InstrData::Return(_))).then_some(bid)
         })
