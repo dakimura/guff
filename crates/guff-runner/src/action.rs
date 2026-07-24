@@ -470,10 +470,13 @@ pub fn analyze_with_settings(
                     | "loggercheck"
                     | "fatcontext"
                     | "lostcancel"
+                    | "SA1012"
+                    | "SA1029"
                     | "atomic"
                     | "sigchanyzer"
                     | "httpresponse"
                     | "defers"
+                    | "timeformat"
                     | "cgocall"
             ) {
                 *gate_keep.entry(analyzer.name).or_default() += 1;
@@ -507,10 +510,13 @@ pub fn analyze_with_settings(
         );
         report_import_gate("fatcontext", &gate_keep, &gate_skip, "no context import");
         report_import_gate("lostcancel", &gate_keep, &gate_skip, "no context import");
+        report_import_gate("SA1012", &gate_keep, &gate_skip, "no context import");
+        report_import_gate("SA1029", &gate_keep, &gate_skip, "no context import");
         report_import_gate("atomic", &gate_keep, &gate_skip, "no sync/atomic import");
         report_import_gate("sigchanyzer", &gate_keep, &gate_skip, "no os/signal import");
         report_import_gate("httpresponse", &gate_keep, &gate_skip, "no net/http import");
         report_import_gate("defers", &gate_keep, &gate_skip, "no time import");
+        report_import_gate("timeformat", &gate_keep, &gate_skip, "no time import");
         report_import_gate("cgocall", &gate_keep, &gate_skip, "no cgo import");
     }
 
@@ -545,13 +551,15 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
         "sloglint" => package_imports_prefix(package, "log/slog"),
         // loggercheck only fires on kitlog / klog / logr / slog / zap call sites.
         "loggercheck" => package_has_loggercheck_import(package),
-        // fatcontext / lostcancel only look at `context` APIs.
-        "fatcontext" | "lostcancel" => package_imports_prefix(package, "context"),
+        // fatcontext / lostcancel / SA1012 / SA1029 only look at `context` APIs.
+        "fatcontext" | "lostcancel" | "SA1012" | "SA1029" => {
+            package_imports_prefix(package, "context")
+        }
         // govet analyzers that already early-return without these imports.
         "atomic" => package_imports_prefix(package, "sync/atomic"),
         "sigchanyzer" => package_imports_prefix(package, "os/signal"),
         "httpresponse" => package_imports_prefix(package, "net/http"),
-        "defers" => package_imports_prefix(package, "time"),
+        "defers" | "timeformat" => package_imports_prefix(package, "time"),
         "cgocall" => {
             package_imports_prefix(package, "runtime/cgo")
                 || package_imports_prefix(package, "C")
@@ -1040,6 +1048,9 @@ mod tests {
             ("sigchanyzer", "os/signal"),
             ("httpresponse", "net/http"),
             ("defers", "time"),
+            ("timeformat", "time"),
+            ("SA1012", "context"),
+            ("SA1029", "context"),
         ];
         for &(name, import) in cases {
             let analyzer = Analyzer {
