@@ -38,7 +38,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         // a private FileSet would assign unrelated offsets and diagnostics would
         // map onto the wrong source files after JSON formatting.
         if let Some(path) = paths.get(i) {
-            if let Some(with_comments) = reparse_with_comments(path) {
+            if let Some(with_comments) = reparse_with_comments(path, pass.pkg().source_bytes(i)) {
                 check_file(file, &with_comments, &mut failures);
                 continue;
             }
@@ -48,11 +48,17 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     failures
 }
 
-fn reparse_with_comments(path: &Path) -> Option<File> {
-    let src = fs::read(path).ok()?;
+fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<File> {
+    let owned;
+    let src: &[u8] = if let Some(b) = cached {
+        b
+    } else {
+        owned = fs::read(path).ok()?;
+        &owned
+    };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    parse_file(&fset, name, &src, PARSE_COMMENTS).ok()
+    parse_file(&fset, name, src, PARSE_COMMENTS).ok()
 }
 
 fn import_specs(file: &File) -> Vec<&ImportSpec> {

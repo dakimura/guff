@@ -63,7 +63,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .type_artifacts
         .as_ref()
         .ok_or_else(|| "buildir requires type artifacts (load with types mode)".to_string())?
-        .snapshot();
+        .snapshot_for_ssa();
     let fset = pass.fset().clone();
     let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
     let t0 = timing.then(std::time::Instant::now);

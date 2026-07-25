@@ -314,7 +314,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
         // Prefer a comment scan when the on-disk path is known. Fall back to
         // whatever comments the loaded AST already has (tests / overlays).
-        let comments = if let Some(path) = paths.get(i) {
+        let comments = if let Some(bytes) = pass.pkg().source_bytes(i) {
+            if bytes.len() as i64 == pass_file.size() {
+                collect_comments(bytes, pass_file.as_ref())
+            } else {
+                file.comments.clone()
+            }
+        } else if let Some(path) = paths.get(i) {
             match fs::read(path) {
                 Ok(src) if src.len() as i64 == pass_file.size() => {
                     collect_comments(&src, pass_file.as_ref())

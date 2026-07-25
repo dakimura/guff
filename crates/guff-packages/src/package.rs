@@ -33,6 +33,20 @@ impl TypecheckArtifacts {
     pub fn snapshot(&self) -> Self {
         self.clone()
     }
+
+    /// Clone arenas SSA actually uses. `scopes` are unused by
+    /// [`guff_ssa::ssautil::build_package_for_analysis`] and are left empty to
+    /// avoid cloning a large ScopeArena on every buildir package.
+    pub fn snapshot_for_ssa(&self) -> Self {
+        Self {
+            type_pkg: self.type_pkg,
+            types: self.types.clone(),
+            objects: self.objects.clone(),
+            scopes: ScopeArena::new(),
+            packages: self.packages.clone(),
+            info: self.info.clone(),
+        }
+    }
 }
 
 /// A loaded Go package.

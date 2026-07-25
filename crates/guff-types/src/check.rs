@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use guff_constant::Value;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Config, Info, TypeCheckError};
@@ -363,48 +364,64 @@ impl ExportSeed {
         let ob_base = self.objects.len() as u32;
         let sc_base = self.scopes.len() as u32;
         let pk_base = self.packages.len() as u32;
-        let (mut ty_delta, mut ob_delta, mut sc_delta, mut pk_delta) = (0u32, 0u32, 0u32, 0u32);
 
-        for w in workers {
-            let r = Remapper {
-                ty_base,
-                ty_delta,
-                ob_base,
-                ob_delta,
-                sc_base,
-                sc_delta,
-                pk_base,
-                pk_delta,
-            };
+        // Prefix sums of overlay lengths → per-worker Remapper deltas. Remaps
+        // are independent across workers, so they run in parallel; only the
+        // subsequent arena extend + import_cache insert must stay ordered.
+        let mut prefixes: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(workers.len());
+        let (mut ty_delta, mut ob_delta, mut sc_delta, mut pk_delta) = (0u32, 0u32, 0u32, 0u32);
+        for w in &workers {
+            prefixes.push((ty_delta, ob_delta, sc_delta, pk_delta));
+            ty_delta += w.types.len() as u32;
+            ob_delta += w.objects.len() as u32;
+            sc_delta += w.scopes.len() as u32;
+            pk_delta += w.packages.len() as u32;
+        }
+
+        let remapped: Vec<WorkerOverlays> = workers
+            .into_par_iter()
+            .zip(prefixes)
+            .map(|(mut w, (ty_d, ob_d, sc_d, pk_d))| {
+                let r = Remapper {
+                    ty_base,
+                    ty_delta: ty_d,
+                    ob_base,
+                    ob_delta: ob_d,
+                    sc_base,
+                    sc_delta: sc_d,
+                    pk_base,
+                    pk_delta: pk_d,
+                };
+                for t in &mut w.types {
+                    crate::merge::remap_type(t, &r);
+                }
+                for o in &mut w.objects {
+                    crate::merge::remap_object(o, &r);
+                }
+                for s in &mut w.scopes {
+                    crate::merge::remap_scope(s, &r);
+                }
+                for p in &mut w.packages {
+                    crate::merge::remap_package(p, &r);
+                }
+                for (_path, id) in &mut w.cache_delta {
+                    *id = r.pkg(*id);
+                }
+                w
+            })
+            .collect();
+
+        for w in remapped {
             let WorkerOverlays {
-                mut types,
-                mut objects,
-                mut scopes,
-                mut packages,
+                types,
+                objects,
+                scopes,
+                packages,
                 cache_delta,
             } = w;
-
-            for t in &mut types {
-                crate::merge::remap_type(t, &r);
-            }
-            for o in &mut objects {
-                crate::merge::remap_object(o, &r);
-            }
-            for s in &mut scopes {
-                crate::merge::remap_scope(s, &r);
-            }
-            for p in &mut packages {
-                crate::merge::remap_package(p, &r);
-            }
             for (path, id) in cache_delta {
-                self.import_cache.insert(path, r.pkg(id));
+                self.import_cache.insert(path, id);
             }
-
-            ty_delta += types.len() as u32;
-            ob_delta += objects.len() as u32;
-            sc_delta += scopes.len() as u32;
-            pk_delta += packages.len() as u32;
-
             self.types.extend_base(types);
             self.objects.extend_base(objects);
             self.scopes.extend_base(scopes);

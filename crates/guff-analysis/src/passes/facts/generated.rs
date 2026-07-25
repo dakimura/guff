@@ -32,6 +32,32 @@ pub struct GeneratedResult {
     pub files: HashMap<String, Generator>,
 }
 
+fn is_generated_bytes(src: &[u8]) -> Option<Generator> {
+    for line in src.split(|&b| b == b'\n') {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        if line.starts_with(PREFIX) && line.ends_with(SUFFIX) {
+            let start = PREFIX.len();
+            let end = line.len().saturating_sub(SUFFIX.len());
+            if end <= start {
+                return Some(Generator::Unknown);
+            }
+            let text = std::str::from_utf8(&line[start..end]).ok()?;
+            return Some(match text {
+                "by goyacc." => Generator::Goyacc,
+                "by cmd/cgo;" => Generator::Cgo,
+                "by protoc-gen-go." => Generator::ProtocGenGo,
+                t if t.starts_with("by \"stringer ") => Generator::Stringer,
+                t if t.starts_with("by goyacc ") => Generator::Goyacc,
+                _ => Generator::Unknown,
+            });
+        }
+        if line == OLD_CGO {
+            return Some(Generator::Cgo);
+        }
+    }
+    None
+}
+
 fn is_generated(path: &Path) -> Option<Generator> {
     let f = std::fs::File::open(path).ok()?;
     let mut br = BufReader::new(f);
@@ -75,7 +101,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "generated requires inspect analyzer".to_string())?;
 
     let mut result = GeneratedResult::default();
-    for (i, file) in pass.files().iter().enumerate() {
+    for (i, _file) in pass.files().iter().enumerate() {
         let path = pass
             .pkg()
             .compiled_go_files
@@ -85,12 +111,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = path else {
             continue;
         };
-        if let Some(gen) = is_generated(path) {
+        let gen = if let Some(bytes) = pass.pkg().source_bytes(i) {
+            is_generated_bytes(bytes)
+        } else {
+            is_generated(path)
+        };
+        if let Some(gen) = gen {
             result
                 .files
                 .insert(path.to_string_lossy().into_owned(), gen);
         }
-        let _ = file; // file content unused; we read from disk like upstream
     }
     Ok(Some(Box::new(result)))
 }

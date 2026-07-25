@@ -788,20 +788,23 @@ fn build_source_seed(
     let mut widest = 0usize;
     let mut seed_hits = 0usize;
     let mut seed_misses = 0usize;
-    // (path, self_hash) in merge order — feeds the next wave's base_fp.
+    // Running fingerprint of the seed prefix. Extended after each merged pkg
+    // so wave N+1 does not re-hash the entire merged list (O(n²) SHA).
+    let mut running_fp = persist.as_ref().map(|_| {
+        crate::seed_cache::base_fingerprint(&crate::seed_cache::BaseFingerprintInput {
+            go_version: &env.go_version,
+            arch: &env.arch,
+            s0_lens,
+            s0_import_paths: &s0_import_paths,
+            merged: &[],
+        })
+    });
+    // (path, self_hash) in merge order — kept for debug / legacy callers.
     let mut merged: Vec<(String, String)> = Vec::new();
 
     for wave in &waves {
         widest = widest.max(wave.len());
-        let base_fp = persist.as_ref().map(|_| {
-            crate::seed_cache::base_fingerprint(&crate::seed_cache::BaseFingerprintInput {
-                go_version: &env.go_version,
-                arch: &env.arch,
-                s0_lens,
-                s0_import_paths: &s0_import_paths,
-                merged: &merged,
-            })
-        });
+        let base_fp = running_fp.clone();
 
         // Resolve each path to (path, overlay, from_cache, self_hash). `path` and
         // `self_hash` are returned so `merged` bookkeeping stays aligned with
@@ -865,6 +868,9 @@ fn build_source_seed(
                 seed_misses += 1;
             }
             if let Some(h) = self_hash {
+                if let Some(fp) = running_fp.as_mut() {
+                    *fp = crate::seed_cache::base_fingerprint_extend(fp, &path, &h);
+                }
                 merged.push((path, h));
             }
             overlays.push(overlay);

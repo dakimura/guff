@@ -143,9 +143,13 @@ pub struct BaseFingerprintInput<'a> {
 }
 
 /// Deterministic fingerprint of the seed prefix at a wave boundary.
+///
+/// Prefer [`base_fingerprint_extend`] across waves so each step is O(1) in the
+/// number of previously merged packages rather than O(n) SHA over the full list.
 pub fn base_fingerprint(input: &BaseFingerprintInput<'_>) -> String {
     let mut h = Sha256::new();
     h.update(format!("seed-base v{SEED_OVERLAY_SCHEMA}\n").as_bytes());
+    h.update(b"fp-chain v2\n");
     h.update(format!("go_version {}\n", input.go_version).as_bytes());
     h.update(format!("arch {}\n", input.arch).as_bytes());
     let (ty, ob, sc, pk) = input.s0_lens;
@@ -156,6 +160,15 @@ pub fn base_fingerprint(input: &BaseFingerprintInput<'_>) -> String {
     for (path, self_hash) in input.merged {
         h.update(format!("merged {path} {self_hash}\n").as_bytes());
     }
+    hex_encode(&h.finalize())
+}
+
+/// O(1) extension of a prior [`base_fingerprint`] after one more merged package.
+pub fn base_fingerprint_extend(prev: &str, path: &str, self_hash: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(prev.as_bytes());
+    h.update(b"\n");
+    h.update(format!("merged {path} {self_hash}\n").as_bytes());
     hex_encode(&h.finalize())
 }
 
