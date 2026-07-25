@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use guff::parser::{parse_file, Mode};
 use guff::position::FileSet;
@@ -36,7 +35,7 @@ fn build_stub_fixture(dir: &str, dep: (&str, &str)) {
             objects: check.objects,
             scopes: check.scopes,
             packages: check.packages,
-            info: check.info,
+            info: std::sync::Arc::new(check.info),
         },
         std::slice::from_ref(&main_file),
         fset,

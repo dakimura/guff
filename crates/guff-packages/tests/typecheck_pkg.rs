@@ -37,7 +37,7 @@ fn typecheck_valid_fixture() {
     let dir = testdata("valid");
     let pkg = typecheck_fixture(&dir, "main.go", "example.com/valid");
     assert!(!pkg.ill_typed, "{:?}", pkg.errors);
-    let info = pkg.types_info.as_ref().expect("types info");
+    let info = pkg.types_info.as_deref().expect("types info");
     let file = pkg.syntax.first().expect("syntax");
     let main_id = file
         .decls

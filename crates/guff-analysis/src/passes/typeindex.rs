@@ -368,7 +368,7 @@ mod tests {
                 fset: &fset,
                 files: &pkg.syntax,
                 pkg: &pkg,
-                types_info: pkg.types_info.as_ref(),
+                types_info: pkg.types_info.as_deref(),
                 types_sizes: default_sizes(),
                 diagnostics: &mut diags,
                 result_of: std::collections::HashMap::new(),
@@ -390,7 +390,7 @@ mod tests {
             fset: &fset,
             files: &pkg.syntax,
             pkg: &pkg,
-            types_info: pkg.types_info.as_ref(),
+            types_info: pkg.types_info.as_deref(),
             types_sizes: default_sizes(),
             diagnostics: &mut diags,
             result_of,
@@ -405,7 +405,7 @@ mod tests {
             .downcast::<Index>()
             .expect("Index");
 
-        let info = pkg.types_info.as_ref().unwrap();
+        let info = pkg.types_info.as_deref().unwrap();
         let artifacts = pkg.type_artifacts.as_ref().unwrap();
         // Resolve `helper` via Defs of its FuncDecl name.
         let helper = pkg

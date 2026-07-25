@@ -189,7 +189,7 @@ mod tests {
             objects: check.objects,
             scopes: check.scopes,
             packages: check.packages,
-            info: check.info.clone(),
+            info: std::sync::Arc::new(check.info.clone()),
         };
         (arts, obj)
     }

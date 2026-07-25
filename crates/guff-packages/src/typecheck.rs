@@ -483,24 +483,25 @@ pub fn typecheck_package_with_seed(
         });
     }
 
-    if mode.contains(LoadMode::NEED_TYPES) {
-        let info = if mode.contains(LoadMode::NEED_TYPES_INFO) {
-            check.info.clone()
-        } else {
-            std::mem::take(&mut check.info)
-        };
-        pkg.types = Some(check.pkg);
-        pkg.type_artifacts = Some(TypecheckArtifacts {
-            type_pkg: check.pkg,
-            types: check.types,
-            objects: check.objects,
-            scopes: check.scopes,
-            packages: check.packages,
-            info,
-        });
-    }
-    if mode.contains(LoadMode::NEED_TYPES_INFO) {
-        pkg.types_info = Some(check.info);
+    if mode.contains(LoadMode::NEED_TYPES) || mode.contains(LoadMode::NEED_TYPES_INFO) {
+        // One Arc for both consumers: type_artifacts (SSA/buildir) and
+        // types_info (analyzers). Avoids the former deep-clone of Info when
+        // both flags are set (the common lint path).
+        let info = std::sync::Arc::new(std::mem::take(&mut check.info));
+        if mode.contains(LoadMode::NEED_TYPES) {
+            pkg.types = Some(check.pkg);
+            pkg.type_artifacts = Some(TypecheckArtifacts {
+                type_pkg: check.pkg,
+                types: check.types,
+                objects: check.objects,
+                scopes: check.scopes,
+                packages: check.packages,
+                info: std::sync::Arc::clone(&info),
+            });
+        }
+        if mode.contains(LoadMode::NEED_TYPES_INFO) {
+            pkg.types_info = Some(info);
+        }
     }
     if mode.contains(LoadMode::NEED_SYNTAX) {
         pkg.syntax = std::mem::take(&mut check.files);
@@ -1101,7 +1102,7 @@ mod tests {
         );
         assert!(!pkg.ill_typed, "errors: {:?}", pkg.errors);
         assert!(pkg.types.is_some());
-        let info = pkg.types_info.as_ref().expect("types info");
+        let info = pkg.types_info.as_deref().expect("types info");
         let file = pkg.syntax.first().expect("syntax");
         let main_id = file
             .decls

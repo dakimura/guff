@@ -99,7 +99,7 @@ pub fn typecheck_with_deps(
         objects: check.objects.clone(),
         scopes: check.scopes.clone(),
         packages: check.packages.clone(),
-        info: check.info.clone(),
+        info: std::sync::Arc::new(check.info.clone()),
     };
     for (import_path, dep_file) in &dep_files {
         let Some(type_pkg) = check.packages.find_by_path(import_path) else {
@@ -117,7 +117,7 @@ pub fn typecheck_with_deps(
                 syntax: vec![dep_file.clone()],
                 fset: Some(fset.clone()),
                 types: Some(type_pkg),
-                types_info: Some(check.info.clone()),
+                types_info: Some(std::sync::Arc::new(check.info.clone())),
                 type_artifacts: Some(artifacts_snapshot.clone()),
                 types_sizes: Some(default_sizes()),
                 ..Package::default()
@@ -135,14 +135,14 @@ pub fn typecheck_with_deps(
         syntax: vec![main_file],
         fset: Some(fset),
         types: Some(check.pkg),
-        types_info: Some(check.info.clone()),
+        types_info: Some(std::sync::Arc::new(check.info.clone())),
         type_artifacts: Some(TypecheckArtifacts {
             type_pkg: check.pkg,
             types: check.types,
             objects: check.objects,
             scopes: check.scopes,
             packages: check.packages,
-            info: check.info,
+            info: std::sync::Arc::new(check.info),
         }),
         ill_typed,
         errors,

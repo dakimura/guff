@@ -170,7 +170,7 @@ mod tests {
             fset: &fset,
             files: &pkg.syntax,
             pkg: &pkg,
-            types_info: pkg.types_info.as_ref(),
+            types_info: pkg.types_info.as_deref(),
             types_sizes: default_sizes(),
             diagnostics: &mut diags,
             result_of: std::collections::HashMap::new(),

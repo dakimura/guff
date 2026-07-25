@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use guff_ssa::builder::Builder;
 use guff_ssa::program::Program;
 use guff_ssa::mode::BuilderMode;
@@ -25,8 +26,8 @@ fn test_stmt_assign() {
     let x_id = 1;
     let x_ident = Ident { id: x_id, name: "x".to_string(), ..Default::default() };
     let obj_x = guff_types::object::var::new_var(&mut prog.object_arena, "x", typ);
-    prog.info.uses.insert(x_id, obj_x);
-    prog.info.types.insert(x_id, TypeAndValue {
+    Arc::make_mut(&mut prog.info).uses.insert(x_id, obj_x);
+    Arc::make_mut(&mut prog.info).types.insert(x_id, TypeAndValue {
         mode: OperandMode::Variable,
         typ,
         val: None,
@@ -55,7 +56,7 @@ fn test_stmt_assign() {
     // x = 42
     let lit_id = 2;
     let lit = guff::ast::BasicLit { id: lit_id, value: "42".to_string(), kind: Some(Token::INT), ..Default::default() };
-    prog.info.types.insert(lit_id, TypeAndValue {
+    Arc::make_mut(&mut prog.info).types.insert(lit_id, TypeAndValue {
         mode: OperandMode::Constant,
         typ,
         val: Some(ConstantValue::Int64(42)),

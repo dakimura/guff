@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use guff_ssa::builder::Builder;
 use guff_ssa::program::Program;
 use guff_ssa::mode::BuilderMode;
@@ -27,7 +28,7 @@ fn test_expr_basic_lit() {
         ..Default::default()
     };
     
-    prog.info.types.insert(1, TypeAndValue {
+    Arc::make_mut(&mut prog.info).types.insert(1, TypeAndValue {
         mode: OperandMode::Constant,
         typ,
         val: Some(ConstantValue::Int64(42)),

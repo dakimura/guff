@@ -25,7 +25,9 @@ pub struct TypecheckArtifacts {
     pub objects: ObjectArena,
     pub scopes: ScopeArena,
     pub packages: PackageArena,
-    pub info: Info,
+    /// Shared with [`Package::types_info`] and SSA [`Program`] via Arc so
+    /// buildir does not deep-clone the (often large) `types`/`defs`/`uses` maps.
+    pub info: Arc<Info>,
 }
 
 impl TypecheckArtifacts {
@@ -36,7 +38,8 @@ impl TypecheckArtifacts {
 
     /// Clone arenas SSA actually uses. `scopes` are unused by
     /// [`guff_ssa::ssautil::build_package_for_analysis`] and are left empty to
-    /// avoid cloning a large ScopeArena on every buildir package.
+    /// avoid cloning a large ScopeArena on every buildir package. `info` is an
+    /// Arc bump (shared with the package and other readers).
     pub fn snapshot_for_ssa(&self) -> Self {
         Self {
             type_pkg: self.type_pkg,
@@ -44,7 +47,7 @@ impl TypecheckArtifacts {
             objects: self.objects.clone(),
             scopes: ScopeArena::new(),
             packages: self.packages.clone(),
-            info: self.info.clone(),
+            info: Arc::clone(&self.info),
         }
     }
 }
@@ -108,7 +111,10 @@ pub struct Package {
     /// that were already loaded to parse.
     pub source_files: Vec<Arc<[u8]>>,
     /// Type information for syntax trees.
-    pub types_info: Option<Info>,
+    ///
+    /// Shared with [`TypecheckArtifacts::info`] (same `Arc`) when both are
+    /// populated, so analyzers and buildir see one map without a deep clone.
+    pub types_info: Option<Arc<Info>>,
     /// Effective sizes for `types_info`.
     pub types_sizes: Option<Sizes>,
 }

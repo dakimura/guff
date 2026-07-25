@@ -31,8 +31,8 @@ pub struct Program {
     pub builtins: Arena<BuiltinId, Builtin>,
     /// maps each type-checker package to its SSA package
     pub package_map: HashMap<TypePackageId, PackageId>,
-    // Type information from guff-types
-    pub info: guff_types::Info,
+    // Type information from guff-types (Arc-shared with package / buildir snapshot).
+    pub info: Arc<guff_types::Info>,
     pub type_arena: guff_types::TypeArena,
     pub object_arena: guff_types::ObjectArena,
     pub package_arena: guff_types::PackageArena,
@@ -96,7 +96,7 @@ pub fn value_type_of(prog: &Program, f: &Function, v: Value) -> TypeId {
 impl Program {
     pub fn new(
         mode: BuilderMode,
-        info: guff_types::Info,
+        info: impl Into<Arc<guff_types::Info>>,
         type_arena: guff_types::TypeArena,
         object_arena: guff_types::ObjectArena,
         package_arena: guff_types::PackageArena,
@@ -109,7 +109,7 @@ impl Program {
             globals: Arena::new(),
             builtins: Arena::new(),
             package_map: HashMap::new(),
-            info,
+            info: info.into(),
             type_arena,
             object_arena,
             package_arena,

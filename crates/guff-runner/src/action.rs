@@ -184,7 +184,7 @@ impl Action {
                 fset: &fset,
                 files: &self.package.syntax,
                 pkg: &self.package,
-                types_info: self.package.types_info.as_ref(),
+                types_info: self.package.types_info.as_deref(),
                 types_sizes,
                 diagnostics: &mut diagnostics,
                 result_of,

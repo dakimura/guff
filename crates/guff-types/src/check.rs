@@ -23,6 +23,7 @@
 //!   `expr.go` (chunk 25) needs them; `ExprInfo` isn't defined yet.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use guff_constant::Value;
 use rayon::prelude::*;
@@ -113,7 +114,11 @@ pub struct Checker {
     pub importer: Option<Box<dyn crate::importer::Importer>>,
     /// Caches imported packages by path so each is imported at most once and
     /// `import`ing the same path twice yields the same package.
-    pub import_cache: HashMap<String, PackageId>,
+    ///
+    /// Shared with [`ExportSeed`] via [`Arc`] so [`Checker::from_seed`] is an
+    /// Arc bump rather than a HashMap deep clone (≈1455 entries × N workers).
+    /// Mutations go through [`Arc::make_mut`] (CoW).
+    pub import_cache: Arc<HashMap<String, PackageId>>,
     /// Source files of dependency packages, keyed by import path. When an
     /// `import "path"` names an entry here, the checker type-checks it
     /// recursively into the shared arenas (a built-in source importer), taking
@@ -214,7 +219,8 @@ pub struct ExportSeed {
     universe_comparable: TypeId,
     universe_nil: ObjectId,
     builtins: HashMap<BuiltinId, ObjectId>,
-    import_cache: HashMap<String, PackageId>,
+    /// Shared with workers via [`Checker::from_seed`] (Arc bump, CoW on write).
+    import_cache: Arc<HashMap<String, PackageId>>,
 }
 
 /// One finished worker's own arena allocations (its overlays), extracted via
@@ -420,7 +426,7 @@ impl ExportSeed {
                 cache_delta,
             } = w;
             for (path, id) in cache_delta {
-                self.import_cache.insert(path, id);
+                Arc::make_mut(&mut self.import_cache).insert(path, id);
             }
             self.types.extend_base(types);
             self.objects.extend_base(objects);
@@ -485,7 +491,7 @@ impl Checker {
             builtins,
             conf,
             importer: None,
-            import_cache: HashMap::new(),
+            import_cache: Arc::new(HashMap::new()),
             sources: HashMap::new(),
             importing: Vec::new(),
             ctxt: Context::new(),
@@ -591,7 +597,7 @@ impl Checker {
             builtins: seed.builtins.clone(),
             conf,
             importer: None,
-            import_cache: seed.import_cache.clone(),
+            import_cache: Arc::clone(&seed.import_cache),
             sources: HashMap::new(),
             importing: Vec::new(),
             ctxt: Context::new(),
@@ -683,7 +689,7 @@ impl Checker {
 
         // Cache before the recursive run so a diamond dependency resolves to the
         // same package (and a cycle back to us hits the `importing` guard).
-        self.import_cache.insert(path.to_string(), dep_pkg);
+        Arc::make_mut(&mut self.import_cache).insert(path.to_string(), dep_pkg);
 
         self.check_files(files);
 
@@ -745,7 +751,7 @@ impl Checker {
                 "C",
             );
             self.packages.get_mut(pkg).mark_complete();
-            self.import_cache.insert(path.to_string(), pkg);
+            Arc::make_mut(&mut self.import_cache).insert(path.to_string(), pkg);
             return Some(pkg);
         }
         if let Some(&pkg) = self.import_cache.get(path) {
@@ -772,7 +778,7 @@ impl Checker {
         let result = importer.import(&mut ctx, path);
         self.importer = Some(importer);
         if let Some(pkg) = result {
-            self.import_cache.insert(path.to_string(), pkg);
+            Arc::make_mut(&mut self.import_cache).insert(path.to_string(), pkg);
         }
         result
     }
