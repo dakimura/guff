@@ -18,8 +18,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         let Some(path) = pkg.compiled_go_files.get(i) else {
             continue;
         };
-        let Ok(src) = fs::read_to_string(path) else {
-            continue;
+        let src = if let Some(bytes) = pkg.source_bytes(i) {
+            match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_owned(),
+                Err(_) => continue,
+            }
+        } else {
+            match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            }
         };
         let Some(ft) = fset.file(file.pos()) else {
             continue;

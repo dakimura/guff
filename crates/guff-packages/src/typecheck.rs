@@ -392,6 +392,7 @@ pub fn typecheck_package_with_seed(
     }
 
     let mut syntax = Vec::new();
+    let mut source_files: Vec<Arc<[u8]>> = Vec::new();
     for path in paths {
         let src = match fs::read(path) {
             Ok(bytes) => bytes,
@@ -414,7 +415,10 @@ pub fn typecheck_package_with_seed(
                 .unwrap_or("file.go")
         });
         match parse_file(fset, name, &src, Mode::NONE) {
-            Ok(file) => syntax.push(file),
+            Ok(file) => {
+                syntax.push(file);
+                source_files.push(Arc::<[u8]>::from(src));
+            }
             Err(errs) => {
                 pkg.ill_typed = true;
                 for err in errs.iter() {
@@ -500,6 +504,13 @@ pub fn typecheck_package_with_seed(
     }
     if mode.contains(LoadMode::NEED_SYNTAX) {
         pkg.syntax = std::mem::take(&mut check.files);
+        // Keep bytes aligned with the syntax we handed the checker (same order
+        // as successful parses). Length may differ from `compiled_go_files`
+        // when some paths failed to parse.
+        pkg.source_files = source_files;
+        if pkg.source_files.len() > pkg.syntax.len() {
+            pkg.source_files.truncate(pkg.syntax.len());
+        }
     }
     if mode.contains(LoadMode::NEED_TYPES)
         || mode.contains(LoadMode::NEED_SYNTAX)

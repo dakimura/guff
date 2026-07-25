@@ -60,11 +60,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        if !path.is_file() {
-            continue;
-        }
-        let Ok(content) = fs::read_to_string(path) else {
-            continue;
+        let content = if let Some(bytes) = pass.pkg().source_bytes(i) {
+            match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_owned(),
+                Err(_) => continue,
+            }
+        } else {
+            if !path.is_file() {
+                continue;
+            }
+            match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            }
         };
         let file_pos = file.pos();
         let diffs = if restricted {

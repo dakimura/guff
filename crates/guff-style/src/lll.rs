@@ -13,16 +13,12 @@ use crate::options::LllOptions;
 const GO_COMMENT_DIRECTIVE_PREFIX: &str = "//go:";
 
 fn check_file(
-    path: &std::path::Path,
+    src: &str,
     line_start: impl Fn(usize) -> Option<u32>,
     line_length: usize,
     tab_width: usize,
     pending: &mut Vec<(u32, String)>,
 ) {
-    let Ok(src) = fs::read_to_string(path) else {
-        return;
-    };
-
     let tab_spaces = " ".repeat(tab_width);
     let mut multi_import = false;
 
@@ -79,14 +75,25 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = pkg.compiled_go_files.get(i) else {
             continue;
         };
-        if !path.is_file() {
-            continue;
-        }
+        let content = if let Some(bytes) = pkg.source_bytes(i) {
+            match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_owned(),
+                Err(_) => continue,
+            }
+        } else {
+            if !path.is_file() {
+                continue;
+            }
+            match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            }
+        };
         let Some(ft) = fset.file(file.pos()) else {
             continue;
         };
         check_file(
-            path,
+            &content,
             |line| {
                 if line == 0 || line > ft.line_count() {
                     return None;

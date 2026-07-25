@@ -98,8 +98,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        let Ok(body) = fs::read(path) else {
-            continue;
+        let body: Vec<u8> = if let Some(bytes) = pass.pkg().source_bytes(i) {
+            bytes.to_vec()
+        } else {
+            match fs::read(path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            }
         };
         let base_pos = file.file_start.0 as u32;
         check_body(&body, base_pos, &disallowed, &mut pending);

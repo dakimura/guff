@@ -87,6 +87,12 @@ pub struct Package {
     pub ill_typed: bool,
     /// Parsed syntax trees for `compiled_go_files`.
     pub syntax: Vec<File>,
+    /// Source bytes for each entry in [`Self::syntax`] (same length/order).
+    ///
+    /// Filled during typecheck so byte-oriented analyzers (misspell, revive
+    /// line/file length, bidichk, …) can avoid a second `fs::read` of files
+    /// that were already loaded to parse.
+    pub source_files: Vec<Arc<[u8]>>,
     /// Type information for syntax trees.
     pub types_info: Option<Info>,
     /// Effective sizes for `types_info`.
@@ -137,9 +143,17 @@ impl Clone for Package {
             fset: self.fset.clone(),
             ill_typed: self.ill_typed,
             syntax: self.syntax.clone(),
+            source_files: self.source_files.clone(),
             types_info: self.types_info.clone(),
             types_sizes: self.types_sizes,
         }
+    }
+}
+
+impl Package {
+    /// Source bytes for the `i`-th syntax file, when retained at typecheck.
+    pub fn source_bytes(&self, i: usize) -> Option<&[u8]> {
+        self.source_files.get(i).map(|b| b.as_ref())
     }
 }
 
