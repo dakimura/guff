@@ -173,10 +173,32 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             })
             .map(|p| p.import_path.clone())
             .collect();
-        if export_reuse_enabled(cfg, &third_party) {
-            let t_reuse = std::time::Instant::now();
-            match fetch_package_exports(cfg, &third_party) {
-                Ok(exports) => {
+        if !third_party.is_empty() {
+            let mode = export_reuse_mode();
+            if mode != ExportReuseMode::Off {
+                let t_reuse = std::time::Instant::now();
+                let exports = match mode {
+                    ExportReuseMode::Off => HashMap::new(),
+                    ExportReuseMode::CachedOnly => load_dep_export_cache(cfg, &third_party),
+                    ExportReuseMode::Fetch => {
+                        match fetch_package_exports(cfg, &third_party) {
+                            Ok(map) => {
+                                store_dep_export_cache(cfg, &map);
+                                map
+                            }
+                            Err(e) => {
+                                if timing {
+                                    eprintln!(
+                                        "guff:   golist dep-export-reuse failed after {:.2}s ({e}); using source seed",
+                                        t_reuse.elapsed().as_secs_f64(),
+                                    );
+                                }
+                                HashMap::new()
+                            }
+                        }
+                    }
+                };
+                if !exports.is_empty() {
                     let mut attached = 0usize;
                     for pkg in response.packages.iter_mut() {
                         if let Some(export) = exports.get(&pkg.id) {
@@ -188,22 +210,18 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
                     }
                     if timing {
                         eprintln!(
-                            "guff:   golist dep-export-reuse {:.2}s ({} attached / {} candidates)",
+                            "guff:   golist dep-export-reuse {:.2}s ({} attached / {} candidates, mode={:?})",
                             t_reuse.elapsed().as_secs_f64(),
                             attached,
                             third_party.len(),
+                            mode,
                         );
                     }
-                }
-                Err(e) => {
-                    // Best-effort: fall back to source seed. Never fail the load
-                    // because warm-cache reuse is optional.
-                    if timing {
-                        eprintln!(
-                            "guff:   golist dep-export-reuse failed after {:.2}s ({e}); using source seed",
-                            t_reuse.elapsed().as_secs_f64(),
-                        );
-                    }
+                } else if timing && mode == ExportReuseMode::CachedOnly {
+                    eprintln!(
+                        "guff:   golist dep-export-reuse cache miss ({} candidates); source seed",
+                        third_party.len(),
+                    );
                 }
             }
         }
@@ -252,110 +270,105 @@ fn fetch_package_exports(
     Ok(map)
 }
 
-/// Whether hybrid mode should attach warm-GOCACHE third-party export files.
+/// How hybrid mode may attach warm-GOCACHE third-party export `.a` files.
 ///
-/// - unset / `0|false|off` → never (default: keep pure hybrid source seed)
-/// - `1|true|on` → always attach when candidates exist
-/// - `auto` → GOCACHE nonempty **and** a single-package probe returns an
-///   existing Export within ~750ms (warm). Empty/cold GOCACHE stays source-only.
-///
-/// Opt-in by default because export-decoded third-party types can diverge from
-/// source typecheck (see hybrid vs export adjudication). Enable once findings
-/// identity is verified for a given codebase.
-fn export_reuse_enabled(cfg: &Config, third_party: &[String]) -> bool {
-    if third_party.is_empty() {
-        return false;
-    }
-    let Ok(v) = std::env::var("GUFF_EXPORT_REUSE") else {
-        return false;
-    };
-    let v = v.to_ascii_lowercase();
-    if matches!(v.as_str(), "0" | "false" | "off" | "no") {
-        return false;
-    }
-    if matches!(v.as_str(), "1" | "true" | "on" | "yes") {
-        return true;
-    }
-    if v == "auto" {
-        return gocache_nonempty(cfg) && probe_export_cached(cfg, &third_party[0]);
-    }
-    false
+/// - unset / `0|false|off` → [`Off`] (default). Pure hybrid source seed.
+/// - `auto` → [`CachedOnly`]: reuse a prior path map from
+///   `~/.cache/guff/dep_exports/` when `.a` files still exist. Never invokes
+///   `go list -export`. Measured slower+fatter on prometheus (export-decoded
+///   SSA); leave opt-in until that cost is fixed.
+/// - `1|true|on|fetch` → [`Fetch`]: run `go list -export` and refresh the map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportReuseMode {
+    Off,
+    CachedOnly,
+    Fetch,
 }
 
-fn gocache_nonempty(cfg: &Config) -> bool {
-    let mut env = parse_env(&cfg.resolved_env());
-    ensure_gocache(&mut env);
-    let cache = env
-        .iter()
-        .find(|(k, _)| k == "GOCACHE")
-        .map(|(_, v)| v.as_str())
-        .unwrap_or("");
-    if cache.is_empty() || cache == "off" {
-        return false;
-    }
-    let path = Path::new(cache);
-    let Ok(rd) = std::fs::read_dir(path) else {
-        return false;
-    };
-    rd.flatten().next().is_some()
-}
-
-/// Returns true when `go list -export` for one package finishes quickly and
-/// yields an on-disk Export path — evidence the GOCACHE is warm for this dep.
-fn probe_export_cached(cfg: &Config, path: &str) -> bool {
-    let mut cmd = Command::new("go");
-    if !cfg.dir.as_os_str().is_empty() {
-        cmd.current_dir(&cfg.dir);
-    }
-    cmd.args([
-        "list",
-        "-json=ImportPath,Export",
-        "-export",
-        path,
-    ]);
-    let mut env = parse_env(&cfg.resolved_env());
-    ensure_gocache(&mut env);
-    cmd.envs(env);
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(750);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return false;
-                }
-                let mut stdout = String::new();
-                if let Some(mut out) = child.stdout.take() {
-                    use std::io::Read;
-                    let _ = out.read_to_string(&mut stdout);
-                }
-                return stdout_has_existing_export(&stdout);
+fn export_reuse_mode() -> ExportReuseMode {
+    match std::env::var("GUFF_EXPORT_REUSE") {
+        Err(_) => ExportReuseMode::Off,
+        Ok(v) => {
+            let v = v.to_ascii_lowercase();
+            if matches!(v.as_str(), "0" | "false" | "off" | "no") {
+                ExportReuseMode::Off
+            } else if matches!(v.as_str(), "1" | "true" | "on" | "yes" | "fetch") {
+                ExportReuseMode::Fetch
+            } else if v == "auto" {
+                ExportReuseMode::CachedOnly
+            } else {
+                ExportReuseMode::Off
             }
-            Ok(None) if std::time::Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-            Err(_) => return false,
         }
     }
 }
 
-fn stdout_has_existing_export(stdout: &str) -> bool {
-    let stream = serde_json::Deserializer::from_str(stdout).into_iter::<JsonExport>();
-    for item in stream.flatten() {
-        if !item.export.is_empty() && Path::new(&item.export).exists() {
-            return true;
+fn dep_export_cache_dir() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("guff").join("dep_exports"));
         }
     }
-    false
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::var_os("HOME").map(|h| {
+            PathBuf::from(h)
+                .join("Library/Caches/guff/dep_exports")
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/guff/dep_exports"))
+    }
+}
+
+fn dep_export_cache_path(cfg: &Config) -> Option<PathBuf> {
+    let dir = dep_export_cache_dir()?;
+    let key = golist_cache_key(
+        cfg,
+        &[],
+        &["dep-export-reuse-v1".into()],
+    );
+    Some(dir.join(format!("{key}.json")))
+}
+
+/// Load a previously stored import_path → Export map, keeping only entries
+/// whose files still exist. Returns empty when the cache is missing/stale.
+fn load_dep_export_cache(cfg: &Config, want: &[String]) -> HashMap<String, String> {
+    let Some(path) = dep_export_cache_path(cfg) else {
+        return HashMap::new();
+    };
+    let Ok(bytes) = std::fs::read(&path) else {
+        return HashMap::new();
+    };
+    let Ok(stored) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else {
+        return HashMap::new();
+    };
+    let want: std::collections::HashSet<&str> = want.iter().map(String::as_str).collect();
+    let mut out = HashMap::new();
+    for (k, v) in stored {
+        if want.contains(k.as_str()) && !v.is_empty() && Path::new(&v).exists() {
+            out.insert(k, v);
+        }
+    }
+    // Require a useful fraction so a nearly-empty stale cache doesn't attach
+    // a handful of deps and leave the rest on a mixed (riskier) seed path.
+    if out.len() * 10 < want.len() * 8 {
+        return HashMap::new();
+    }
+    out
+}
+
+fn store_dep_export_cache(cfg: &Config, map: &HashMap<String, String>) {
+    let Some(path) = dep_export_cache_path(cfg) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(map) {
+        let _ = std::fs::write(path, bytes);
+    }
 }
 
 fn load_or_invoke_go(
