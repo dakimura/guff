@@ -67,17 +67,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let fset = pass.fset().clone();
     let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
     let t0 = timing.then(std::time::Instant::now);
-    let built = build_package_for_analysis(
-        artifacts,
-        pass.files(),
-        fset,
-        // Match honnef buildir: GlobalDebug is required so ValueForExpr /
-        // DebugRef-based analyzers (SA4006, …) can recover SSA values.
-        // Sanity checks stay test-only — they walk every function and are
-        // too expensive for production lint runs.
-        BuilderMode::GLOBAL_DEBUG,
-    )
-    .map_err(|e| format!("buildir: {e}"))?;
+    // GLOBAL_DEBUG emits DebugRefs needed by ValueForExpr (SA4006/SA4031).
+    // When those checks are off, skip the extra IR — settings default to true
+    // so unset bags (unit tests) stay conservative.
+    let mode = if pass
+        .settings::<bool>("buildir_global_debug")
+        .copied()
+        .unwrap_or(true)
+    {
+        BuilderMode::GLOBAL_DEBUG
+    } else {
+        BuilderMode::default()
+    };
+    let built = build_package_for_analysis(artifacts, pass.files(), fset, mode)
+        .map_err(|e| format!("buildir: {e}"))?;
     if let Some(t0) = t0 {
         let el = t0.elapsed().as_secs_f64();
         if el > 1.0 {

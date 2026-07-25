@@ -2262,6 +2262,12 @@ impl LinterSettings {
             },
         );
         bag.insert("staticcheck", self.staticcheck.to_guff_stylecheck());
+        // SA4006/SA4031 need SSA DebugRefs (`BuilderMode::GLOBAL_DEBUG`).
+        bag.insert(
+            "buildir_global_debug",
+            staticcheck_check_enabled(&self.staticcheck, "SA4006")
+                || staticcheck_check_enabled(&self.staticcheck, "SA4031"),
+        );
         bag.insert("revive", self.revive.to_guff_revive());
         bag.insert("dupl", self.dupl.to_guff_dupl());
         bag.insert("misspell", self.misspell.to_guff_misspell());
@@ -2467,6 +2473,49 @@ fn filter_staticcheck(
             enabled.contains(a.name)
         })
         .collect()
+}
+
+/// Whether a named staticcheck analyzer would survive [`filter_staticcheck`].
+fn staticcheck_check_enabled(settings: &StaticcheckSettings, name: &str) -> bool {
+    const DEFAULT_DISABLED: &[&str] = &[
+        "SA9003", "ST1000", "ST1003", "ST1016", "ST1020", "ST1021", "ST1022", "ST1023",
+    ];
+    let Some(checks) = settings.checks.as_ref() else {
+        return !DEFAULT_DISABLED.contains(&name);
+    };
+    if checks.is_empty() {
+        return !DEFAULT_DISABLED.contains(&name);
+    }
+    let mut allow_all = false;
+    let mut enabled = false;
+    let mut disabled = false;
+    let mut any_positive = false;
+    for c in checks {
+        if c == "all" {
+            allow_all = true;
+            continue;
+        }
+        if let Some(rest) = c.strip_prefix('-') {
+            if rest == name {
+                disabled = true;
+            }
+        } else {
+            any_positive = true;
+            if c == name {
+                enabled = true;
+            }
+        }
+    }
+    if disabled {
+        return false;
+    }
+    if allow_all {
+        return true;
+    }
+    if !any_positive {
+        return true;
+    }
+    enabled
 }
 
 impl ReviveSettings {
