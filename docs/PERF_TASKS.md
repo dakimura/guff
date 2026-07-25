@@ -116,9 +116,9 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 
 | シナリオ | wall | RSS | 備考 |
 |---|---:|---:|---|
-| cold（空 GUFF_CACHE, `--no-cache`） | **~7.7s** | ~7.5GB | load ~1.2 / typecheck ~3.9（seed ~3.4）/ analyze ~1.2 / fmt ~0.55 / filter ~0.05 |
+| cold（空 GUFF_CACHE, `--no-cache`） | **~7.5s** | ~7.8GB | load ~1.2 / typecheck ~3.8（seed ~3.3）/ analyze ~1.0 / fmt ~0.52 / filter ~0.04 |
 | cold seed-hot（GUFF_CACHE 永続, `--no-cache`） | **~4.1s** | ~7.6GB | seed ~0.5（1455 hit） |
-| warm 繰り返し（issues+fmt cache hot） | **~0.35s** | ~0.17GB | load 0.14 / cache setup **0.11**（並列 partition）/ 294 hit 0 miss / fmt 0.05 |
+| warm 繰り返し（issues+fmt cache hot） | **~0.41s** | ~0.16GB | load 0.21 / cache setup **0.10** / 294 hit 0 miss / fmt 0.06 |
 
 **2026-07-25 改善:**
 - 空 `compiled_go_files` パッケージ（`prompb/rwcommon`）を hit 扱い → 恒常 1-miss 解消
@@ -228,9 +228,9 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 - peak RSS ≤ baseline × **1.20**
 - `guff_only` 増分 = 0 / `golangci_only` 増分 = 0 / `both` 減少なし
 
-現 baseline（`regress/baseline*.json`、2026-07-22 Task 4 後に再ロック）:
-- tsdb: wall 2.54s / RSS 1.42GB / guff_issues 76
-- full: wall 7.95s / RSS 7.62GB / guff_issues 460
+現 baseline（`regress/baseline*.json`、2026-07-25 cold-analyze 残り後に再ロック）:
+- tsdb: wall ~2.16s / RSS ~1.39GB / guff_issues 4
+- full: wall ~7.10s / RSS ~7.91GB / guff_issues 20
 
 **両プロファイルが PASS しなければコミットしない。** 改善が出ても baseline は
 **ユーザー承認まで更新しない**（§0-6）。承認が出たら
