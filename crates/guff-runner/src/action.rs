@@ -606,7 +606,30 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
         "defers" | "timeformat" | "SA1002" | "SA1004" | "SA1015" => {
             package_imports_prefix(package, "time")
         }
-        "SA1000" => package_imports_prefix(package, "regexp"),
+        "SA1000" | "SA6000" => package_imports_prefix(package, "regexp"),
+        "SA1003" => package_imports_prefix(package, "encoding/binary"),
+        "SA1007" => package_imports_prefix(package, "net/url"),
+        "SA1014" | "SA1026" | "SA9005" => {
+            package_imports_prefix(package, "encoding/json")
+                || package_imports_prefix(package, "encoding/xml")
+        }
+        "SA1016" => package_imports_prefix(package, "os/signal"),
+        "SA1028" => package_imports_prefix(package, "sort"),
+        "SA1030" => package_imports_prefix(package, "strconv"),
+        "SA1031" => {
+            package_imports_prefix(package, "encoding/hex")
+                || package_imports_prefix(package, "encoding/base64")
+                || package_imports_prefix(package, "encoding/base32")
+        }
+        "durationcheck" => package_imports_prefix(package, "time"),
+        "zerologlint" => package_imports_prefix(package, "github.com/rs/zerolog"),
+        "ginkgolinter" => {
+            package_imports_prefix(package, "github.com/onsi/ginkgo")
+                || package_imports_prefix(package, "github.com/onsi/gomega")
+        }
+        "clickhouselint" => {
+            package_imports_prefix(package, "github.com/ClickHouse/clickhouse-go")
+        }
         "unmarshal" => {
             package_imports_prefix(package, "encoding/json")
                 || package_imports_prefix(package, "encoding/xml")
