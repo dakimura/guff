@@ -60,6 +60,9 @@ pub const TRACE: Mode = Mode(1 << 3);
 pub const DECLARATION_ERRORS: Mode = Mode(1 << 4);
 pub const SPURIOUS_ERRORS: Mode = Mode(1 << 5);
 pub const SKIP_OBJECT_RESOLUTION: Mode = Mode(1 << 6);
+/// Consume function and method bodies as raw tokens instead of building
+/// statement trees for them. See [`Parser::skip_body`].
+pub const SKIP_FUNC_BODIES: Mode = Mode(1 << 7);
 pub const ALL_ERRORS: Mode = SPURIOUS_ERRORS;
 
 // ====================================================================
@@ -1407,12 +1410,53 @@ impl Parser {
     }
 
     fn parse_body(&mut self) -> BlockStmt {
+        if self.mode.contains(SKIP_FUNC_BODIES) {
+            return self.skip_body();
+        }
         let lbrace = self.expect(Token::LBRACE);
         let list = self.parse_stmt_list();
         let rbrace = self.expect2(Token::RBRACE);
         BlockStmt {
             lbrace,
             list,
+            rbrace,
+            id: 0,
+        }
+    }
+
+    /// Scan a brace-balanced block without building statement nodes, returning
+    /// a block that keeps the real brace positions but an empty statement list.
+    ///
+    /// Only sound in combination with the type checker's `ignore_func_bodies`,
+    /// which is why [`SKIP_FUNC_BODIES`] is opt-in: a caller that reads
+    /// statements would silently see an empty function. It is used for the
+    /// dependency seed, where only the exported API matters and the statement
+    /// trees are built and dropped without ever being read.
+    ///
+    /// Braces inside strings, runes and comments are not tokens, so counting
+    /// `{`/`}` from the scanner is exact for any input the scanner accepts.
+    /// Only a truncated file can exhaust the tokens first; that leaves `tok` at
+    /// `EOF` and the `expect2` below reports the missing brace as usual.
+    fn skip_body(&mut self) -> BlockStmt {
+        let lbrace = self.expect(Token::LBRACE);
+        let mut depth = 1usize;
+        while self.tok != Token::EOF {
+            match self.tok {
+                Token::LBRACE => depth += 1,
+                Token::RBRACE => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            self.next();
+        }
+        let rbrace = self.expect2(Token::RBRACE);
+        BlockStmt {
+            lbrace,
+            list: Vec::new(),
             rbrace,
             id: 0,
         }
@@ -3378,6 +3422,128 @@ func describe(i Item) string {
         assert!(
             format!("{errs:?}").contains("must be function call"),
             "expected function-call error, got: {errs:?}"
+        );
+    }
+
+    fn parse_skipping_bodies(src: &str) -> Result<File, ErrorList> {
+        let fset = FileSet::new();
+        parse_file(&fset, "t.go", src.as_bytes(), SKIP_FUNC_BODIES)
+    }
+
+    #[test]
+    fn skip_func_bodies_keeps_declarations() {
+        // Signatures, receivers and everything around the bodies must survive;
+        // only the statement lists go away.
+        let src = "package p\n\
+                   import \"fmt\"\n\
+                   type T struct{ X int }\n\
+                   func (t *T) M(a int) (int, error) { fmt.Println(a); return a, nil }\n\
+                   func F[K comparable](m map[K]int) K {\n\tfor k := range m {\n\t\treturn k\n\t}\n\tvar z K\n\treturn z\n}\n\
+                   const C = 1\n";
+        let f = parse_skipping_bodies(src).unwrap();
+        assert_eq!(f.imports.len(), 1);
+        assert_eq!(f.decls.len(), 5, "every declaration is still produced");
+
+        // Struct and interface braces do not go through `parse_body`, so their
+        // members must keep being parsed — they are the exported API.
+        match &f.decls[1] {
+            Decl::GenDecl(g) => match &g.specs[0] {
+                Spec::TypeSpec(t) => match &t.ty {
+                    Expr::StructType(s) => {
+                        assert_eq!(s.fields.list.len(), 1, "struct fields survive");
+                    }
+                    other => panic!("expected a struct type, got {other:?}"),
+                },
+                _ => panic!("expected type spec"),
+            },
+            _ => panic!("expected the type decl"),
+        }
+
+        let m = match &f.decls[2] {
+            Decl::FuncDecl(fd) => fd,
+            _ => panic!("expected method decl"),
+        };
+        assert_eq!(m.name.name, "M");
+        assert!(m.recv.is_some(), "receiver survives");
+        assert_eq!(m.ty.params.as_ref().unwrap().list.len(), 1);
+        assert_eq!(m.ty.results.as_ref().unwrap().list.len(), 2);
+        let body = m.body.as_ref().expect("body is present but empty");
+        assert!(body.list.is_empty(), "no statements are built");
+        assert!(body.lbrace < body.rbrace, "brace positions are kept");
+
+        let g = match &f.decls[3] {
+            Decl::FuncDecl(fd) => fd,
+            _ => panic!("expected generic func decl"),
+        };
+        assert_eq!(g.name.name, "F");
+        assert!(g.ty.type_params.is_some(), "type parameters survive");
+        assert!(g.body.as_ref().unwrap().list.is_empty());
+    }
+
+    #[test]
+    fn skip_func_bodies_ignores_braces_in_literals_and_comments() {
+        // The scan counts brace *tokens*, so braces inside strings, raw
+        // strings, runes and comments must not unbalance it. If any did, the
+        // declaration after the function would be lost or misparsed.
+        let src = "package p\n\
+                   func F() {\n\
+                   \ts := \"}}}{\"\n\
+                   \tr := '}'\n\
+                   \tb := `\n}}} raw }`\n\
+                   \t// } line comment\n\
+                   \t/* } block } comment */\n\
+                   \tm := map[string]any{\"k\": struct{ A int }{A: 1}}\n\
+                   \tif len(s) > 0 {\n\t\tfunc() { _ = r }()\n\t}\n\
+                   \t_ = b\n\
+                   \t_ = m\n\
+                   }\n\
+                   type After struct{ Y string }\n";
+        let f = parse_skipping_bodies(src).unwrap();
+        assert_eq!(f.decls.len(), 2, "parsing resumed after the right brace");
+        match &f.decls[1] {
+            Decl::GenDecl(g) => match &g.specs[0] {
+                Spec::TypeSpec(t) => assert_eq!(t.name.name, "After"),
+                _ => panic!("expected type spec"),
+            },
+            _ => panic!("expected the trailing type decl"),
+        }
+    }
+
+    #[test]
+    fn skip_func_bodies_skips_function_literal_bodies() {
+        // Function literals in package-level initializers are skipped too: the
+        // type checker ignores their bodies in the same mode.
+        let src = "package p\nvar F = func(a int) int { return a * 2 }\n";
+        let f = parse_skipping_bodies(src).unwrap();
+        let spec = match &f.decls[0] {
+            Decl::GenDecl(g) => &g.specs[0],
+            _ => panic!("expected var decl"),
+        };
+        let value = match spec {
+            Spec::ValueSpec(v) => &v.values[0],
+            _ => panic!("expected value spec"),
+        };
+        match value {
+            Expr::FuncLit(lit) => {
+                assert_eq!(
+                    lit.ty.params.as_ref().unwrap().list.len(),
+                    1,
+                    "signature survives"
+                );
+                assert!(lit.body.list.is_empty(), "literal body is skipped");
+            }
+            other => panic!("expected a func literal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skip_func_bodies_reports_unterminated_body() {
+        // A truncated body must still be an error rather than a silent success.
+        let r = parse_skipping_bodies("package p\nfunc F() {\n\tif true {\n");
+        let errs = r.expect_err("unterminated body must be rejected");
+        assert!(
+            format!("{errs:?}").contains("expected '}'"),
+            "expected a missing-brace error, got: {errs:?}"
         );
     }
 

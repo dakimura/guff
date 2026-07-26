@@ -360,9 +360,9 @@ impl ExportSeed {
     /// merged arena layout — and therefore all downstream findings — is
     /// reproducible.
     ///
-    /// Correctness rests on wave independence: workers at the same topological
-    /// level never import each other, so a worker's overlay references only the
-    /// shared base and its own overlay, never a sibling's.
+    /// Correctness rests on wave independence: a wave never contains both a
+    /// package and one of its dependencies, so a worker's overlay references
+    /// only the shared base and its own overlay, never a sibling's.
     pub fn merge_wave(&mut self, workers: Vec<WorkerOverlays>) {
         // Base lengths are fixed for the whole wave (all workers cloned from the
         // seed as it was on entry); only the deltas accumulate.

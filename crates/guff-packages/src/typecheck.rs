@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use guff::parser::{parse_file, Mode};
+use guff::parser::{parse_file, Mode, SKIP_FUNC_BODIES};
 use guff::position::FileSet;
 use guff_exportdata::ExportImporter;
 use guff_types::api::Config as TypeConfig;
@@ -681,13 +681,24 @@ fn build_source_seed(
     let s0_import_paths = seed.sorted_import_paths();
 
     // Group the *source* dependencies into topological waves. Export-data deps
-    // are already in `S0` (treated as level 0). `level(P) = 1 + max(level(source
-    // dep))`; packages sharing a level never import one another (an import would
-    // force a strictly higher level), so a wave's packages are mutually
-    // independent and can be type-checked in parallel and merged with a uniform
-    // id relocation (see `ExportSeed::merge_wave`). `dep_load_order` is
-    // leaves-first, so each package's source deps are already leveled when we
-    // reach it — a single O(V+E) pass.
+    // are already in `S0` (treated as wave 0). Packages sharing a wave never
+    // import one another, so they can be type-checked in parallel and merged
+    // with a uniform id relocation (see `ExportSeed::merge_wave`).
+    //
+    // Waves are assigned **as late as possible**: `wave(P) = depth - height(P)`,
+    // where `height(P)` is the longest chain of source packages that depends on
+    // `P`. Assigning as *early* as possible (`1 + max(wave(dep))`) is equally
+    // valid — both put every dependency in a strictly earlier wave — but far
+    // worse balanced. A wave costs `max(total / threads, largest package)`, so a
+    // wave holding one huge package idles every other core for its duration.
+    // The expensive packages here are generated cloud SDKs that nothing else in
+    // the dependency graph imports (only the targets do), i.e. graph leaves. As
+    // early as possible scatters them across waves at their own dependency
+    // depth, where each serializes alone; as late as possible collapses all of
+    // them into the final wave so their costs overlap. On prometheus `./...`
+    // (1455 source deps, 13.1s of type-check CPU) this takes the cold seed build
+    // from 3.40s to 2.65s. Dropping the barriers entirely would only reach 2.2s
+    // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
     let order = dep_load_order(&needed, dep_graph, &loadable);
     let source_set: std::collections::HashSet<&str> = order
         .iter()
@@ -700,25 +711,49 @@ fn build_source_seed(
         })
         .collect();
 
-    let mut level: HashMap<String, u32> = HashMap::new();
-    let mut max_level = 0u32;
+    // Pass 1 (leaves-first): dependency depth, so every source dep's deps are
+    // already resolved when we reach it. Only `depth` (the deepest chain) is
+    // needed afterwards, but the per-package values drive that maximum.
+    let mut dep_depth: HashMap<&str, u32> = HashMap::new();
+    let mut depth = 0u32;
     for p in &order {
         if !source_set.contains(p.as_str()) {
             continue;
         }
-        let mut l = 0u32;
+        let mut d_max = 0u32;
         if let Some(deps) = dep_graph.get(p) {
             for d in deps {
                 if source_set.contains(d.as_str()) {
-                    l = l.max(level.get(d).copied().unwrap_or(0) + 1);
+                    d_max = d_max.max(dep_depth.get(d.as_str()).copied().unwrap_or(0) + 1);
                 }
             }
         }
-        max_level = max_level.max(l);
-        level.insert(p.clone(), l);
+        depth = depth.max(d_max);
+        dep_depth.insert(p.as_str(), d_max);
     }
 
-    let source_count = level.len();
+    // Pass 2 (consumers-first): `height(P)` = longest chain of source packages
+    // that depends on `P`. Walking `order` in reverse visits every consumer of
+    // `P` before `P` itself, so `height` is final by the time we read it — no
+    // reverse graph needed.
+    let mut height: HashMap<&str, u32> = HashMap::new();
+    for p in order.iter().rev() {
+        if !source_set.contains(p.as_str()) {
+            continue;
+        }
+        let h = height.get(p.as_str()).copied().unwrap_or(0);
+        height.insert(p.as_str(), h);
+        if let Some(deps) = dep_graph.get(p) {
+            for d in deps {
+                if source_set.contains(d.as_str()) {
+                    let e = height.entry(d.as_str()).or_insert(0);
+                    *e = (*e).max(h + 1);
+                }
+            }
+        }
+    }
+
+    let source_count = dep_depth.len();
     if source_count == 0 {
         if timing {
             eprintln!(
@@ -730,14 +765,19 @@ fn build_source_seed(
         return Some(Arc::new(seed));
     }
 
-    // Bucket by level; sort each wave by path so the merge order — and therefore
+    // Bucket by wave; sort each wave by path so the merge order — and therefore
     // the final arena layout and all downstream findings — is deterministic.
-    let mut waves: Vec<Vec<&str>> = vec![Vec::new(); (max_level + 1) as usize];
+    // Empty waves are dropped: as-late-as-possible placement can leave gaps, and
+    // merging nothing would only cost a pointless pass over the seed.
+    let mut waves: Vec<Vec<&str>> = vec![Vec::new(); (depth + 1) as usize];
     for p in &order {
-        if let Some(&l) = level.get(p) {
-            waves[l as usize].push(p.as_str());
+        if !source_set.contains(p.as_str()) {
+            continue;
         }
+        let h = height.get(p.as_str()).copied().unwrap_or(0);
+        waves[(depth - h) as usize].push(p.as_str());
     }
+    waves.retain(|w| !w.is_empty());
     for w in waves.iter_mut() {
         w.sort_unstable();
     }
@@ -983,11 +1023,17 @@ fn read_dep_sources(paths: &[PathBuf]) -> Vec<(PathBuf, Vec<u8>)> {
 /// Parse pre-read dependency sources into syntax trees sharing `fset`, in the
 /// order given. Files that fail to parse are skipped (dependency diagnostics
 /// are not reported on the source-seed path).
+///
+/// Function bodies are scanned but not built into statement trees
+/// ([`SKIP_FUNC_BODIES`]): the seed only needs each dependency's exported API,
+/// and `check_sources` type-checks it with `ignore_func_bodies`, so every
+/// statement node built here would be dropped unread. Bodies are roughly half
+/// of the parse cost of a dependency closure.
 fn parse_dep_sources(sources: &[(PathBuf, Vec<u8>)], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
     let mut out = Vec::with_capacity(sources.len());
     for (path, src) in sources {
         let name = path.to_str().unwrap_or("file.go");
-        if let Ok(file) = parse_file(fset, name, src, Mode::NONE) {
+        if let Ok(file) = parse_file(fset, name, src, SKIP_FUNC_BODIES) {
             out.push(file);
         }
     }

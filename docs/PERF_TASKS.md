@@ -103,7 +103,7 @@ rm -rf "$CACHE"
 ### 1.6 `GUFF_DEBUG_CACHE=1` が出す phase の読み方
 ```
 phase load_graph (go list) 1.15s     ← §0-4: 触らない
-phase typecheck_roots 3.55s          ← うち seed build 3.11s が最大（Task 4 の対象）
+phase typecheck_roots 3.55s          ← うち seed build 3.11s が最大（Task 4 / §1.8 の対象）
 phase analyze (run_on_packages) 1.89s ← buildir/testifylint が重い（Task 5 の対象）
 phase issues+filter 0.46s            ← Task 3 の対象
 phase format_checks 0.83s            ← サブプロセス。Task 1 の対象
@@ -120,6 +120,10 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 | cold seed-hot（GUFF_CACHE 永続, `--no-cache`） | **~4.1s** | ~7.6GB | seed ~0.5（1455 hit） |
 | warm 繰り返し（issues+fmt cache hot） | **~0.41s** | ~0.16GB | load 0.21 / cache setup **0.10** / 294 hit 0 miss / fmt 0.06 |
 
+（cold と cold seed-hot の行は 2026-07-26 の §1.8〜§1.10 で更新済み: cold **~4.9s / ~7.6GB**
+（load_graph 1.5 / typecheck 1.8（seed ~1.4）/ analyze 1.2 / format は解析と重なって 0）、
+cold seed-hot **~3.9s**。warm は不変。）
+
 **2026-07-25 改善:**
 - 空 `compiled_go_files` パッケージ（`prompb/rwcommon`）を hit 扱い → 恒常 1-miss 解消
 - warm cache partition を rayon 並列化 → setup 0.17→**0.11s**、warm **0.42→0.35s**（≤0.4s 達成）
@@ -127,6 +131,95 @@ cache setup+partition 0.60s          ← warm でのみ重い。Task 2 の対象
 
 履歴（2026-07-22）: cold 8.25→7.79s; seed-hot ~5.0s; warm 2.04→1.22→0.44s。
 **次の主戦場:** cold analyze（buildir は staticcheck/nilnesserr 有効時はほぼ全 pkg 必須で条件スキップ不可）、format のさらなる最適化は shared-read が逆に悪化したので見送り。
+
+### 1.8 seed の wave 割り当てを ALAP 化（DONE 2026-07-26）
+
+`build_source_seed` の wave を **最早（`1 + max(dep の wave)`）から最遅（`depth - height(P)`、
+`height` は P に依存する source パッケージの最長鎖）** へ変更。どちらも「依存は必ず前の wave」を
+満たすので merge の前提は不変。
+
+**なぜ効くか:** 1 wave のコストは `max(合計 / 実効並列度, 最大パッケージ)`。高コストなのは生成物の
+クラウド SDK（aws ec2 0.98s、google compute/v1 0.52s、azure armnetwork 0.46s、oracle core 0.42s、
+aws rds 0.41s …）で、これらは**依存グラフの葉**（targets からしか import されない）。最早割り当てでは
+各々が自分の依存深さの wave に単独で居座って直列化し、他コアが遊ぶ。最遅にすると全部が最終 wave に
+集まってコストが重なる。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:** `seed dep check` **3.40→2.65s**、
+wall **7.12→6.48s**、regress tsdb / full 両方 PASS。RSS は 7.87→8.60GB（tolerance 1.20 内）で、
+最終 wave が同時に保持する未マージ overlay が増えるぶんの増加。
+
+**決定性・キャッシュ互換:** wave 単位マージ・wave 内 path ソート・merge 順の一意性はいずれも不変なので、
+findings は cold 3 回で同一、変更前バイナリともバイト同一、seed cold（全ミス）↔ hot（全ヒット）も同一
+（hot は seed 0.41s / wall 4.09s のまま）。
+
+**上限の見積り（これ以上スケジューリングを詰めても無駄）:** per-package の実測コスト合計は 13.06s、
+critical path は 1.12s。実効並列度 N≈6（4 性能 + 6 効率コア機）でモデル化すると ASAP 4.29s /
+ALAP 2.58s / wave バリアを撤廃した完全非同期 DAG 2.18s（ALAP の実測 2.63s とよく一致）。
+**非同期化の残り伸び幅は ~0.4s しかない**うえ、overlay が base の絶対 id を埋め込む設計上マージ順が
+非決定的になり、seed 永続キャッシュのキー（`base_fp` = seed prefix の指紋）が毎回変わって全ミスに
+落ちる（seed-hot の 0.41s を失う）。よって wave 方式の維持が正解。次の一手はスケジューリングではなく
+**総 CPU 13.06s 自体の削減**（→ §1.9）。
+
+### 1.9 依存パッケージの関数本体をパースしない（DONE 2026-07-26）
+
+`parse_dep_sources` を `parser::SKIP_FUNC_BODIES` で呼ぶようにした。パーサは本体を
+**トークンとして読み飛ばすだけ**（`Parser::skip_body` が `{`/`}` トークンを数えて対応する閉じ括弧まで
+進み、実位置を持つ空の `BlockStmt` を返す）で、文の構文木を一切作らない。
+
+**なぜ安全か:** seed は各依存の exported API しか要らず、`check_sources` は既に
+`ignore_func_bodies` で型チェックしている（`decl.rs` の `FuncDecl`、`literals.rs` の `FuncLit` の
+両方で body の遅延キューを積まない）。つまり作った文ノードは一度も読まれずに捨てられていた。
+文字列・raw 文字列・ルーン・コメント内の `}` はトークンにならないのでブレース数えは厳密
+（`guff-ast` に4本のテストを追加）。**このモードは `ignore_func_bodies` とセットでのみ正しい**ので
+opt-in のままにしてある（文を読む利用者からは関数が空に見えてしまう）。
+
+**効果（prometheus `./...`、空 `GUFF_CACHE`）:** seed の CPU は parse 6.25→2.66s、
+typecheck 6.41→2.75s（**合計 12.66→5.41s**）。typecheck 側も半減するのは、巨大な文ノード群の
+**解放コスト**がそこに計上されていたため。`seed dep check` **2.65→1.40s**、
+`phase typecheck_roots` 3.09→1.85s、wall **6.48→5.41s**、peak RSS **8.60→7.61GB**
+（§1.8 の ALAP で増えた分を取り返して baseline 7.87GB を下回った）。
+
+**検証:** findings は cold 3 回で決定的、変更前バイナリとバイト同一、seed cold↔hot も同一
+（hot は seed 0.40s / wall 4.19s）。regress tsdb（wall 2.14→1.85s）/ full（wall 7.12→5.41s）とも PASS。
+
+**parse の残りを詰めるべきか（結論: 詰めない）:** 依存クロージャ 149.9MB / 12318 ファイルを
+シングルスレッドで実測すると、フルパース 4.08s → 本体スキップ 2.04s、うち**スキャン 0.87s（43%）/
+AST 構築 1.17s（57%）**（22.3M トークン）。本体を生バイトで読み飛ばす特殊スキャナを書いても
+削れるのは 0.4s 程度の CPU で、seed が既に wall 1.4s まで縮んだ今は wall 換算 0.1s 未満。
+AST 構築側は宣言そのものなので削れない。**seed 側の最適化はここで打ち止め。**
+
+### 1.10 format_checks を解析パイプラインと重ねる（DONE 2026-07-26）
+
+§1.8 / §1.9 の後にボトルネックが移動した（cold `./...`）:
+
+| phase | 時間 |
+|---|---:|
+| load_graph（`go list` サブプロセス） | 1.53s |
+| typecheck_roots | 1.85s（seed 1.40s） |
+| analyze | 1.28s |
+| format_checks | 0.64s |
+
+`go list` は 1.3s 前後かかるが**外部プロセス待ちでコアが遊んでいる**。フラグを削っても
+`-compiled` 抜き 1.01s / `-deps` 抜き 1.04s / `-test` 抜き 0.89s（対 1.08s）で安い勝ちは無い
+（cgo 持ちは 1792 中 2 パッケージだけなので `-compiled` はほぼ無料）。
+
+そこで **`run_and_write_inner` の先頭で `run_format_checks` を別スレッドに投げ**、結果は従来と
+同じ場所（`issues.extend`）で join するようにした。フォーマッタはファイルを直接読むだけで
+パッケージグラフも型情報も要らないので依存関係が無い。`--fix` は解析が読んでいるファイルを
+書き換えるため従来どおり逐次。
+
+**効果:** `format_checks 0.59s (overlapped with analysis; 0.00s waited)` ＝ **待ち時間ゼロ**で
+0.6s が消えた。コア競合の悪影響も無く、むしろ typecheck_roots 1.97→1.79s、analyze 1.28→1.16s。
+wall は直接計測で 5.30→4.88s。findings はバイト同一・3回決定的、両 regress PASS
+（full **7.120→4.930s** / RSS 7.87→7.73GB、tsdb **2.140→1.850s** / RSS 1.42→1.29GB）。
+warm（issues cache hot）も 0.39s で不変、`--fix` は逐次パスのまま。
+
+> 計測注意: 重いビルドやテスト直後は同じバイナリで wall が 1s 近くブレる（full で 4.93〜6.39s を
+> 観測）。ゲートの数字は machine が落ち着いてから取ること。
+
+**残る大物は `go list` の 1.3s**（cold では回避不能・warm は Task 2 のキャッシュ範囲）と
+`analyze` 1.16s（buildir が staticcheck/nilnesserr 有効時ほぼ全 pkg 必須＝§131 の判定どおり
+条件スキップ不可）。
 
 ### buildir 条件スキップ（Task 5 残り）— 2026-07-25 判定
 

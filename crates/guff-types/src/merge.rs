@@ -9,9 +9,10 @@
 //! ids into a worker's own overlay shift by that worker's `delta`.
 //!
 //! The invariant that makes a single additive shift correct: workers merged in
-//! one wave are mutually independent (same topological level ⇒ neither imports
-//! the other), so a worker's overlay references only the shared base and its own
-//! overlay — never a sibling's. See `crates/guff-packages/src/typecheck.rs`.
+//! one wave are mutually independent (a wave never holds both a package and one
+//! of its dependencies), so a worker's overlay references only the shared base
+//! and its own overlay — never a sibling's. See
+//! `crates/guff-packages/src/typecheck.rs`.
 
 use crate::arena::{ObjectData, ObjectId, PackageId, ScopeId, TypeData, TypeId};
 use crate::package::Package;

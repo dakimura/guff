@@ -638,6 +638,26 @@ pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, Run
 
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
     let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+
+    // Formatting reads files straight from disk and needs neither the package
+    // graph nor types, while `run_linters` opens with a `go list` subprocess
+    // that leaves the cores idle for over a second. Start the checks now and
+    // collect them below, so they cost wall time only if they outlast the
+    // analysis. `--fix` stays sequential: it rewrites the very files the
+    // analysis is reading, and it runs after the analysis' own fixes.
+    let fmt_job = opts
+        .formatters
+        .as_ref()
+        .filter(|cfg| !cfg.fix && !opts.fix)
+        .map(|cfg| {
+            let cfg = cfg.clone();
+            let filter = opts.filter.clone();
+            std::thread::spawn(move || {
+                let started = std::time::Instant::now();
+                (run_format_checks(&cfg, &filter), started.elapsed())
+            })
+        });
+
     let result = run_linters(opts)?;
     let tf = std::time::Instant::now();
     let (mut issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
@@ -647,7 +667,19 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
     if fixes_applied > 0 {
         eprintln!("guff: fixed {fixes_applied} issue(s)");
     }
-    if let Some(fmt_cfg) = &opts.formatters {
+    if let Some(job) = fmt_job {
+        let twait = std::time::Instant::now();
+        let (result, ran) = job.join().unwrap_or_else(|p| std::panic::resume_unwind(p));
+        let fmt_issues = result?;
+        if timing {
+            eprintln!(
+                "guff: phase format_checks {:.2}s (overlapped with analysis; {:.2}s waited)",
+                ran.as_secs_f64(),
+                twait.elapsed().as_secs_f64(),
+            );
+        }
+        issues.extend(fmt_issues);
+    } else if let Some(fmt_cfg) = &opts.formatters {
         let tfmt = std::time::Instant::now();
         let fmt_issues = run_format_checks(fmt_cfg, &opts.filter)?;
         if timing {
