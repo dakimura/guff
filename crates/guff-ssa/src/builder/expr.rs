@@ -5,7 +5,7 @@
 use crate::builder::Builder;
 use crate::value::Value;
 use crate::instr::InstrData;
-use guff::ast::{Expr, BasicLit, FuncLit, Ident, UnaryExpr, BinaryExpr, IndexExpr, SliceExpr, TypeAssertExpr, SelectorExpr};
+use guff::ast::{Expr, BasicLit, FuncLit, Ident, IndexListExpr, UnaryExpr, BinaryExpr, IndexExpr, SliceExpr, TypeAssertExpr, SelectorExpr};
 use guff_types::{BasicKind, OperandMode, SelectionKind};
 use std::cell::Cell;
 
@@ -163,7 +163,19 @@ impl<'a> Builder<'a> {
             Expr::UnaryExpr(un) => self.unary_expr(un),
             Expr::BinaryExpr(bin) => self.binary_expr(bin),
             Expr::CallExpr(call) => self.emit_call(call),
-            Expr::IndexExpr(idx) => self.index_expr(e, idx),
+            Expr::IndexExpr(idx) => {
+                // `f[T]` may be a one-argument generic instantiation rather than
+                // an index. (Go: IndexExpr case of expr0, `instance` guard.)
+                if crate::builder::is_instance(&self.prog.info, &idx.x) {
+                    self.expr(&idx.x)
+                } else {
+                    self.index_expr(e, idx)
+                }
+            }
+            // `f[X, Y]` is always a generic function instantiation; peel and let
+            // Ident/SelectorExpr perform the instance lookup. (Go: IndexListExpr
+            // case of expr0.) Soft-fail without Instances: still resolve via X.
+            Expr::IndexListExpr(IndexListExpr { x, .. }) => self.expr(x),
             Expr::SliceExpr(sl) => self.slice_expr(sl),
             Expr::TypeAssertExpr(ta) => self.type_assert_expr(ta),
             Expr::FuncLit(fl) => self.func_lit(fl),
@@ -325,7 +337,7 @@ impl<'a> Builder<'a> {
         if obj_id.pkg(&self.prog.object_arena).is_some() {
             if crate::create::is_package_level_object(self.prog, obj_id) {
                 if let Some(v) = crate::create::ensure_package_member(self.prog, obj_id) {
-                    return v;
+                    return self.maybe_instantiate_generic_func(id, v);
                 }
             }
         }
@@ -400,6 +412,26 @@ impl<'a> Builder<'a> {
         Value::Instr(id)
     }
 
+    /// If `v` is a package-level generic function and `id` has recorded type
+    /// arguments in [`Info::instances`](guff_types::Info::instances), return the
+    /// corresponding SSA instance; otherwise return `v` unchanged. (Go: the
+    /// `callee.typeparams.Len() > 0` branch of the Ident case in `expr0`.)
+    fn maybe_instantiate_generic_func(&mut self, id: &Ident, v: Value) -> Value {
+        let Value::Function(fid) = v else {
+            return v;
+        };
+        crate::builder::record_generic_params(self.prog, fid);
+        if self.prog.functions.get(fid).type_params.is_empty() {
+            return v;
+        }
+        let raw = crate::builder::instance_args(&self.prog.info, id.id);
+        if raw.is_empty() {
+            return v;
+        }
+        let targs: Vec<_> = raw.iter().map(|&t| self.typ_type(t)).collect();
+        Value::Function(self.prog.instance(fid, &[], &targs))
+    }
+
     /// index_expr translates a non-addressable index expression `x[i]` used as
     /// an rvalue: an array held in a register (`Index`), a string (`Index`
     /// yielding a byte), or a map (`Lookup`). Addressable slices/arrays and map
@@ -407,9 +439,8 @@ impl<'a> Builder<'a> {
     /// caller's addressability dispatch, so those modes are handled defensively.
     /// (Go: the `*ast.IndexExpr` case of `builder.expr0`.)
     ///
-    /// DEFERRED vs go/ssa: the generic-instantiation guard (`instance(e.X)`),
-    /// which needs builder generics support; and the untyped-index → int
-    /// conversion (a constant index retypes without emitting an instruction).
+    /// DEFERRED vs go/ssa: the untyped-index → int conversion (a constant index
+    /// retypes without emitting an instruction).
     fn index_expr(&mut self, e: &Expr, ie: &IndexExpr) -> Value {
         use crate::typeset::{index_type, IndexMode};
         let xt = self.type_of(ie.x.id());
@@ -419,7 +450,11 @@ impl<'a> Builder<'a> {
             &self.prog.package_arena,
             xt,
         );
-        let elem = elem.expect("indexable type has an element type");
+        let Some(elem) = elem else {
+            // Incomplete hybrid info / mis-routed generic instantiation — prefer
+            // a placeholder over aborting the SSA build for the whole package.
+            return self.invalid_zero();
+        };
         match mode {
             // Addressable slice/array: prefer IndexAddr + Load (reached only if
             // the checker's mode disagrees with the addressability dispatch).
@@ -460,7 +495,7 @@ impl<'a> Builder<'a> {
                 );
                 Value::Instr(id)
             }
-            IndexMode::Invalid => panic!("non-indexable type in IndexExpr"),
+            IndexMode::Invalid => self.invalid_zero(),
         }
     }
 

@@ -450,6 +450,22 @@ fn member_from_object(prog: &mut Program, pkg_id: PackageId, obj: ObjectId) {
                 f.signature = sig;
                 f.object = Some(obj);
             }
+            // Mirror go/ssa createFunction: populate typeparams from the signature
+            // so Ident-time generic instantiation can see them before Build.
+            if let Some(sig) = sig {
+                let rtparams = guff_types::signature::signature_recv_type_params(
+                    &prog.type_arena,
+                    sig,
+                )
+                .map(|l| l.list().to_vec())
+                .unwrap_or_default();
+                let tparams = guff_types::signature_type_params(&prog.type_arena, sig)
+                    .map(|l| l.list().to_vec())
+                    .unwrap_or_default();
+                let f = prog.functions.get_mut(fid);
+                f.recv_type_params = rtparams;
+                f.type_params = tparams;
+            }
             let pkg = prog.packages.get_mut(pkg_id);
             pkg.objects.insert(obj, Value::Function(fid));
             if member_name != "_" && !is_method {

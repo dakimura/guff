@@ -758,6 +758,16 @@ impl<'a> Builder<'a> {
         // The receiver is an address (`*struct`); the field's type is the type
         // of the location. (Go: `fieldOf(MustDeref(v.Type()), index)`.)
         let recv_ty = crate::program::value_type_of(self.prog, self.func(), recv);
+        if !guff_types::is_pointer(&self.prog.type_arena, recv_ty) {
+            // Incomplete hybrid info left a non-pointer receiver — placeholder.
+            let typ = self.prog.basic_type(BasicKind::Invalid);
+            return Box::new(crate::lvalue::Address {
+                addr: self.invalid_zero(),
+                typ: guff_types::new_pointer(&mut self.prog.type_arena, typ),
+                pos: se.sel.name_pos,
+                expr: Some(Expr::Ident(se.sel.clone())),
+            });
+        }
         let pointee = guff_types::pointer_elem(&self.prog.type_arena, recv_ty);
         let fld = crate::emit::field_of(self.prog, pointee, index);
         let fld_ty = fld
@@ -798,7 +808,17 @@ impl<'a> Builder<'a> {
             &self.prog.package_arena,
             xt,
         );
-        let elem = elem.expect("indexable type has an element type");
+        let Some(elem) = elem else {
+            // Incomplete type info / non-indexable — placeholder address.
+            let typ = self.prog.basic_type(BasicKind::Invalid);
+            let ptr = guff_types::new_pointer(&mut self.prog.type_arena, typ);
+            return Box::new(crate::lvalue::Address {
+                addr: self.invalid_zero(),
+                typ: ptr,
+                pos: ie.lbrack,
+                expr: Some(Expr::IndexExpr(ie.clone())),
+            });
+        };
         let pos = ie.lbrack;
         match mode {
             IndexMode::Map => {
@@ -839,8 +859,18 @@ impl<'a> Builder<'a> {
                     expr: Some(Expr::IndexExpr(ie.clone())),
                 })
             }
-            IndexMode::Value => panic!("string index is not addressable"),
-            IndexMode::Invalid => panic!("non-indexable type in IndexExpr address"),
+            IndexMode::Value | IndexMode::Invalid => {
+                // String indices aren't addressable; Invalid means incomplete
+                // hybrid info. Prefer a placeholder over aborting the build.
+                let typ = self.prog.basic_type(BasicKind::Invalid);
+                let ptr = guff_types::new_pointer(&mut self.prog.type_arena, typ);
+                Box::new(crate::lvalue::Address {
+                    addr: self.invalid_zero(),
+                    typ: ptr,
+                    pos,
+                    expr: Some(Expr::IndexExpr(ie.clone())),
+                })
+            }
         }
     }
 
@@ -889,6 +919,28 @@ pub(crate) fn unparen(e: &Expr) -> &Expr {
         e = &p.x;
     }
     e
+}
+
+/// Reports whether `expr` is a simple or qualified identifier that denotes a
+/// generic instantiation (present in [`Info::instances`](guff_types::Info::instances)).
+/// (Go: `instance` in `go/ssa/util.go`.)
+pub(crate) fn is_instance(info: &guff_types::Info, expr: &Expr) -> bool {
+    let id = match unparen(expr) {
+        Expr::Ident(id) => id.id,
+        Expr::SelectorExpr(sel) => sel.sel.id,
+        _ => return false,
+    };
+    info.instances.contains_key(&id)
+}
+
+/// Returns the type arguments recorded for the instantiated identifier `id`
+/// (the `T` in `T[int]`, or the `Sel` of `pkg.T[int]`). Empty when the
+/// identifier is not a recorded instance. (Go: `instanceArgs`.)
+pub(crate) fn instance_args(info: &guff_types::Info, id: u32) -> Vec<TypeId> {
+    info.instances
+        .get(&id)
+        .map(|inst| inst.type_args.clone())
+        .unwrap_or_default()
 }
 
 /// expr_reflect_name returns the Go `reflect.TypeOf` name of an AST expression

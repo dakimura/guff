@@ -1989,7 +1989,9 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
         }
         let upcase = l.to_uppercase();
         if upcase.starts_with("DEPRECATED: ") && !l.starts_with(DEPRECATED_PREFIX) {
-            let prefix = &l[.."DEPRECATED: ".len()];
+            let prefix = l
+                .get(..DEPRECATED_PREFIX.len())
+                .unwrap_or(DEPRECATED_PREFIX);
             report(
                 pending,
                 comment.slash.0 as u32,
@@ -2006,7 +2008,9 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             return;
         }
         for pat in deprecated_common_patterns() {
-            if l.len() >= pat.len() && l[..pat.len()].eq_ignore_ascii_case(pat) {
+            if l.get(..pat.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(pat))
+            {
                 report(
                     pending,
                     comment.slash.0 as u32,

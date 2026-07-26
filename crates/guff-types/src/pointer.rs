@@ -34,8 +34,12 @@ pub fn new_pointer(arena: &mut TypeArena, elem: TypeId) -> TypeId {
     arena.alloc(TypeData::Pointer(Pointer { base: elem }))
 }
 
-/// Free-function accessor — panics if `id` is not a Pointer.
+/// Free-function accessor — panics if `id`'s underlying type is not a Pointer.
+///
+/// Defined types whose underlying type is a pointer are accepted: we call
+/// [`TypeId::underlying`] first, matching [`crate::slice::slice_elem`].
 pub fn pointer_elem(arena: &TypeArena, id: TypeId) -> TypeId {
+    let id = id.underlying(arena);
     match arena.get(id) {
         TypeData::Pointer(p) => p.base,
         other => panic!("expected Pointer, got {:?}", std::mem::discriminant(other)),
