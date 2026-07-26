@@ -168,7 +168,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 |------|------|------------------------------------|
 | サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status）, **`custom`**（module plugin バイナリ生成） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines / swaggo（`exclusions.generated` lax/strict/disable）。`run` でも `formatters.enable` があれば整形診断を出す |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
-| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **52** 件をパース検証（CI ゲート） | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
+| 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity・`new*` / `whole-files`・`generated` を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **52** 件をパース検証（CI ゲート） | exclusions `warn-unused` 実効化は未 |
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
 | 出力 | `Formatter` 抽象 + text（`line-number` 別名）/ colored-line-number / json / checkstyle / sarif / tab / colored-tab / github-actions。`format:path` / config `path` でファイル書き出し | — |
 | nolint | ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）。`nolintlint` は `--enable nolintlint` | 書式/説明必須（NeedsMachineOnly / NeedsExplanation）は未 |
@@ -348,7 +348,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 > ゴール: 既存プロジェクトが `guff run ./...` に置き換えても「設定が効く」。
 
 - **R1** ✅ 診断を stdout に出力し、`--issues-exit-code`（既定 1）で終了コードを制御。
-- **R2** ✅ `.golangci.yml` の完全パース（issues / run / severity / output）＋後処理フィルタ（exclude-rules / max-* / severity / v2 `linters.exclusions`）。**残**: `issues.new`/`new-from-rev`、exclusions `warn-unused` / `generated`。
+- **R2** ✅ `.golangci.yml` の完全パース（issues / run / severity / output）＋後処理フィルタ（exclude-rules / max-* / severity / v2 `linters.exclusions` / `new*` / `whole-files` / `generated`）。**残**: exclusions `warn-unused`。
 - **R3** ✅ `//nolint` / `//nolint:linter`（同一行・直前行の AST 展開）＋ `nolintlint`。**残**: 書式/説明必須（NeedsMachineOnly / NeedsExplanation）。
 - **R4** ✅ `linters.settings` を各 analyzer に配線（`SettingsBag` を Pass / Runner へ）。**残**: errcheck `verbose`。
 - **R5** ✅ 補助サブコマンド（`version` / `linters`）＋ run フラグ（`--timeout` / `-j` / `--build-tags`）。

@@ -156,6 +156,30 @@ fn parse_v2_linters_exclusions_prometheus_shape() {
     // paths folded into exclude_files; rules appended.
     assert_eq!(issues.exclude_files.len(), 2);
     assert_eq!(issues.exclude_rules.len(), 2);
+    // v2 default generated mode is lax.
+    assert_eq!(issues.generated.as_deref(), Some("lax"));
+}
+
+#[test]
+fn parse_new_from_merge_base_and_whole_files() {
+    let yaml = r#"
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    generated: strict
+issues:
+  new-from-merge-base: origin/main
+  whole-files: true
+  max-issues-per-linter: 0
+  max-same-issues: 0
+"#;
+    let cfg = parse_config_str(yaml).unwrap();
+    let issues = cfg.effective_issues();
+    assert_eq!(issues.new_from_merge_base.as_deref(), Some("origin/main"));
+    assert!(issues.whole_files);
+    assert_eq!(issues.generated.as_deref(), Some("strict"));
 }
 
 #[test]

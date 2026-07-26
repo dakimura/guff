@@ -2,7 +2,8 @@
 //!
 //! Pipeline order (subset of golangci-lint):
 //! GOCACHE/cgo → path (dirs/files) → text exclude → exclude-rules (+ default excludes) →
-//! nolint → max-per-linter → max-same → severity (+ unused nolintlint).
+//! nolint → generated → diff (new-from-*) → uniq-by-line → max-per-linter → max-same →
+//! severity (+ unused nolintlint).
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ use guff_runner::{default_go_cache_dir, is_under_go_cache};
 use regex::Regex;
 
 use crate::config::{ExcludeRule, IssuesConfig, SeverityConfig};
+use crate::diff::{build_diff_state, DiffFilterSpec};
 use crate::nolint::NolintIndex;
 use crate::registry::linter_name_for_analyzer;
 
@@ -155,6 +157,10 @@ pub struct IssueFilter {
     pub report_unused_nolint: bool,
     /// Go build cache directory; issues under it are dropped (cgo artifacts).
     go_cache_dir: Option<PathBuf>,
+    /// Diff-based "new issues only" filter (golangci Diff processor).
+    diff_spec: Option<DiffFilterSpec>,
+    /// `linters.exclusions.generated` mode (`None` → do not filter).
+    generated: Option<guff_fmt::GeneratedMode>,
 }
 
 #[derive(Debug, Clone)]
@@ -253,8 +259,25 @@ impl IssueFilter {
             }
         }
 
-        // DEFERRED: issues.new / new-from-rev diff filtering (needs git integration).
-        let _ = (&issues.new, &issues.new_from_rev);
+        let diff_spec = DiffFilterSpec {
+            new: issues.new,
+            new_from_rev: issues.new_from_rev.clone(),
+            new_from_merge_base: issues.new_from_merge_base.clone(),
+            new_from_patch: issues.new_from_patch.clone(),
+            whole_files: issues.whole_files,
+        };
+        if diff_spec.enabled() {
+            filter.diff_spec = Some(diff_spec);
+        }
+
+        // v2 default for linters.exclusions.generated is lax when the key is
+        // present; when absent (None) we leave filtering off so v1 configs and
+        // tests without the key keep prior behavior. Callers that fold v2
+        // exclusions should set `issues.generated` explicitly (including
+        // `Some("lax")` when the YAML key is present).
+        if let Some(ref mode) = issues.generated {
+            filter.generated = Some(guff_fmt::GeneratedMode::parse(Some(mode.as_str())));
+        }
 
         filter
     }
@@ -278,7 +301,7 @@ impl IssueFilter {
             } else {
                 (String::new(), 0, 0)
             };
-            let source_line = read_source_line(&filename, line);
+            let source_line = None; // filled lazily in apply / for printing
             // Match golangci: when the pass/check name differs from the linter
             // name, prefix Text (`inline: …`, `SA1004: …`, category for suites).
             let text = format_issue_text(&from_linter, &analyzer, &diag.category, &diag.message);
@@ -348,6 +371,36 @@ impl IssueFilter {
             }
         }
 
+        // Drop issues in generated files (linters.exclusions.generated).
+        if let Some(mode) = self.generated {
+            if mode != guff_fmt::GeneratedMode::Disable {
+                let mut cache: HashMap<String, bool> = HashMap::new();
+                issues.retain(|issue| {
+                    if issue.filename.is_empty() {
+                        return true;
+                    }
+                    let is_gen = *cache.entry(issue.filename.clone()).or_insert_with(|| {
+                        file_is_generated(&issue.filename, mode)
+                    });
+                    !is_gen
+                });
+            }
+        }
+
+        // Diff processor: keep only issues in the new/changed region.
+        // Runs after excludes/nolint and before max-* (golangci Diff order).
+        if let Some(ref spec) = self.diff_spec {
+            match build_diff_state(spec) {
+                Ok(Some(state)) => {
+                    issues.retain(|issue| state.keeps(issue));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("guff: diff filter disabled: {e}");
+                }
+            }
+        }
+
         if self.uniq_by_line {
             let mut seen = std::collections::HashSet::new();
             issues.retain(|issue| {
@@ -379,6 +432,14 @@ impl IssueFilter {
 
         for issue in &mut issues {
             self.assign_severity(issue);
+        }
+
+        // Source lines are only needed for printing / JSON SourceLines — load
+        // after filtering so we don't read ~10k files that exclude-rules drop.
+        for issue in &mut issues {
+            if issue.source_line.is_none() {
+                issue.source_line = read_source_line(&issue.filename, issue.line);
+            }
         }
 
         issues
@@ -437,25 +498,8 @@ impl CompiledRule {
         if empty {
             return false;
         }
-        if let Some(re) = &self.text {
-            if !re.is_match(&issue.text) {
-                return false;
-            }
-        }
-        // Most default exclude rules are text+linter only; skip path work.
-        if self.path.is_some() || self.path_except.is_some() {
-            let path = normalize_slashes(&issue.filename);
-            if let Some(re) = &self.path {
-                if !re.is_match(path.as_ref()) {
-                    return false;
-                }
-            }
-            if let Some(re) = &self.path_except {
-                if re.is_match(path.as_ref()) {
-                    return false;
-                }
-            }
-        }
+        // Linters first: most rules are linter-scoped; avoid text/path regex
+        // work on the other ~10k issues that will never match.
         if !self.linters.is_empty() {
             let from = crate::config::normalize_linter_name(&issue.from_linter);
             let analyzer = crate::config::normalize_linter_name(&issue.analyzer);
@@ -471,10 +515,37 @@ impl CompiledRule {
                 return false;
             }
         }
+        if let Some(re) = &self.text {
+            if !re.is_match(&issue.text) {
+                return false;
+            }
+        }
+        if self.path.is_some() || self.path_except.is_some() {
+            let path = normalize_slashes(&issue.filename);
+            if let Some(re) = &self.path {
+                if !re.is_match(path.as_ref()) {
+                    return false;
+                }
+            }
+            if let Some(re) = &self.path_except {
+                if re.is_match(path.as_ref()) {
+                    return false;
+                }
+            }
+        }
         if let Some(re) = &self.source {
-            match &issue.source_line {
-                Some(line) if re.is_match(line) => {}
-                _ => return false,
+            // Prefer a pre-filled line; otherwise read just for this match so we
+            // don't force a full-tree source preload when only a few rules use
+            // `source:` (e.g. prometheus godot).
+            let owned;
+            let line = if let Some(ref l) = issue.source_line {
+                l.as_str()
+            } else {
+                owned = read_source_line(&issue.filename, issue.line).unwrap_or_default();
+                owned.as_str()
+            };
+            if !re.is_match(line) {
+                return false;
             }
         }
         true
@@ -569,6 +640,19 @@ fn read_source_line(filename: &str, line: i64) -> Option<String> {
     lines.get(idx).cloned()
 }
 
+/// Leading-bytes generated-file check (avoids reading multi-MB sources fully).
+fn file_is_generated(path: &str, mode: guff_fmt::GeneratedMode) -> bool {
+    const PREFIX: u64 = 16 * 1024;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    use std::io::Read;
+    let mut buf = vec![0u8; PREFIX as usize];
+    let n = f.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    guff_fmt::is_generated(&buf, mode)
+}
+
 /// Build an [`Issue`] from a cached diagnostic's already-resolved position
 /// (filename/line/column stored in the issues cache), without a `FileSet`.
 /// The lazy warm path uses this so cache hits never need parsing/type-checking.
@@ -583,7 +667,7 @@ pub fn issue_from_cached(
     url: &str,
     severity: &str,
 ) -> Issue {
-    let source_line = read_source_line(filename, line);
+    // Defer source_line to IssueFilter::apply (after exclude pipeline).
     let from_linter = linter_name_for_analyzer(analyzer).to_string();
     let text = format_issue_text(&from_linter, analyzer, category, message);
     Issue {
@@ -594,7 +678,7 @@ pub fn issue_from_cached(
         filename: filename.to_string(),
         line,
         column,
-        source_line,
+        source_line: None,
         diagnostic: Diagnostic {
             message: message.to_string(),
             category: category.to_string(),
@@ -800,6 +884,80 @@ mod tests {
         );
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].filename, "/src/main.go");
+    }
+
+    #[test]
+    fn comments_preset_drops_st1000_with_staticcheck_from_linter() {
+        use crate::config::parse_config_str;
+        let yaml = r#"
+version: "2"
+linters:
+  default: none
+  enable: [staticcheck]
+  exclusions:
+    presets: [comments]
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let filter = IssueFilter::from_config(&cfg.effective_issues(), &SeverityConfig::default());
+        let mut st = issue(
+            "staticcheck",
+            "a.go",
+            "ST1000: at least one file in a package should have a package comment",
+        );
+        st.analyzer = "ST1000".into();
+        let kept = filter.apply(vec![st, issue("errcheck", "a.go", "unchecked")], &[]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].from_linter, "errcheck");
+    }
+
+    #[test]
+    fn generated_lax_drops_issues_in_generated_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let gen = dir.path().join("gen.go");
+        let hand = dir.path().join("hand.go");
+        std::fs::write(
+            &gen,
+            "// Code generated by tool. DO NOT EDIT.\npackage p\n",
+        )
+        .unwrap();
+        std::fs::write(&hand, "package p\n").unwrap();
+
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            generated: Some("lax".into()),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue("revive", gen.to_str().unwrap(), "unused-parameter: x"),
+                issue("revive", hand.to_str().unwrap(), "unused-parameter: y"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].filename.ends_with("hand.go"));
+    }
+
+    #[test]
+    fn diff_filter_spec_wired_from_config() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            whole_files: true,
+            new_from_merge_base: Some("origin/main".into()),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let spec = filter.diff_spec.expect("diff enabled");
+        assert!(spec.whole_files);
+        assert_eq!(
+            spec.new_from_merge_base.as_deref(),
+            Some("origin/main")
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@
 pub mod cli;
 mod config;
 mod custom;
+mod diff;
 mod duration;
 mod exclude;
 mod fix;
@@ -237,7 +238,7 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
                 f.line,
                 1,
                 "File is not properly formatted",
-                "format",
+                "",
                 "",
                 "error",
             ));
@@ -654,7 +655,18 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
             let filter = opts.filter.clone();
             std::thread::spawn(move || {
                 let started = std::time::Instant::now();
-                (run_format_checks(&cfg, &filter), started.elapsed())
+                // Format checks use rayon heavily; pin them to a small private
+                // pool so they don't steal workers from the global pool that
+                // typecheck/analyze need during the overlap window.
+                // 2 workers is enough to finish during `go list` (~1.3s) without
+                // starving analysis; 1 worker makes format the critical path.
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(2)
+                    .thread_name(|i| format!("guff-fmt-{i}"))
+                    .build()
+                    .expect("format rayon pool");
+                let result = pool.install(|| run_format_checks(&cfg, &filter));
+                (result, started.elapsed())
             })
         });
 

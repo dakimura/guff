@@ -564,6 +564,8 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
             if is_meta_linter(linter) {
                 continue;
             }
+            // Default settings omit opinionated ST* from the staticcheck
+            // filter; those IDs are mapped via [`is_staticcheck_check_id`].
             if let Some(analyzers) = analyzers_for_linter(linter) {
                 for a in analyzers {
                     // Keep the first (alphabetically earliest) owner so shared
@@ -578,6 +580,11 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
     if let Some(name) = map.get(analyzer).copied() {
         return name;
     }
+    // Heuristic fallback for staticcheck check IDs not in the default map
+    // (ST1000 and other opinionated checks filtered by default settings).
+    if is_staticcheck_check_id(analyzer) {
+        return "staticcheck";
+    }
     for pname in guff_plugin::registered_names() {
         if let Some(analyzers) = guff_plugin::instantiated_analyzers(pname) {
             if analyzers.iter().any(|a| a.name == analyzer) {
@@ -588,10 +595,35 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
     analyzer
 }
 
+fn is_staticcheck_check_id(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    if bytes.len() < 2 {
+        return false;
+    }
+    match bytes[0] {
+        b'S' | b'Q' => {
+            // SA#### / ST#### / S1### / QF####
+            name.len() >= 2
+                && name[1..]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+                && name.chars().skip(1).any(|c| c.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::settings::{GovetSettings, LinterSettings, StaticcheckSettings};
+
+    #[test]
+    fn st1000_maps_to_staticcheck() {
+        assert_eq!(linter_name_for_analyzer("ST1000"), "staticcheck");
+        assert_eq!(linter_name_for_analyzer("SA1004"), "staticcheck");
+        assert_eq!(linter_name_for_analyzer("QF1008"), "staticcheck");
+    }
 
     #[test]
     fn standard_includes_staticcheck() {

@@ -180,7 +180,7 @@
 | `linters.exclusions.rules` | ✅ | linters / path / path-except / text / source |
 | `linters.exclusions.presets` | ✅ | comments / stdErrorHandling / commonFalsePositives / legacy |
 | `linters.exclusions.warn-unused` | ❌ | 未実効（DEFERRED） |
-| `linters.exclusions.generated` | ❌ | lax/strict/disable モードは未実効（DEFERRED） |
+| `linters.exclusions.generated` | ✅ | `lax`（v2 既定）/ `strict` / `disable`。先頭コメントの生成マーカーで issue を除外 |
 | `formatters.enable` / `settings` / `exclusions` | ✅ | §1.1 |
 | `issues.exclude` / `exclude-rules` | ✅ | |
 | `issues.exclude-dirs` / `exclude-files` | ✅ | |
@@ -188,7 +188,8 @@
 | `issues.max-issues-per-linter` / `max-same-issues` | ✅ | 既定 50 / 3 |
 | `issues.uniq-by-line` | ✅ | 既定 true |
 | `issues.include` | ✅ | 既定 exclusion の打ち消し |
-| `issues.new` / `new-from-rev` / `new-from-merge-base` / `new-from-patch` | ❌ | diff ベースのフィルタは未実装（DEFERRED） |
+| `issues.new` / `new-from-rev` / `new-from-merge-base` / `new-from-patch` | ✅ | git diff（subprocess）。失敗時は警告してスキップ |
+| `issues.whole-files` | ✅ | `new*` と併用。変更ファイル全体の issue を残す |
 | `severity.default-severity` / `rules` / `case-sensitive` | ✅ | |
 | `output.formats` / `format`（deprecated） | ✅ | §3 |
 | `output.print-linter-name` | ✅ | 既定 `true`。text / tab / colored-* に配線 |

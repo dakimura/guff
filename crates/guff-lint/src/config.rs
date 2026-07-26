@@ -190,7 +190,7 @@ pub struct IssuesConfig {
     pub max_same_issues: i32,
     #[serde(default, rename = "uniq-by-line")]
     pub uniq_by_line: Option<bool>,
-    /// DEFERRED: diff-based filtering (→ R2 follow-up / processor port).
+    /// Show only issues in the git working-tree diff (`--new`).
     #[serde(default)]
     pub new: bool,
     #[serde(default, rename = "new-from-rev")]
@@ -199,12 +199,19 @@ pub struct IssuesConfig {
     pub new_from_merge_base: Option<String>,
     #[serde(default, rename = "new-from-patch")]
     pub new_from_patch: Option<String>,
+    /// When true with a `new*` option, keep issues anywhere in changed files
+    /// (not only on changed lines).
+    #[serde(default, rename = "whole-files")]
+    pub whole_files: bool,
     #[serde(default)]
     pub include: Vec<String>,
     /// From v2 `linters.exclusions.paths-except`: when non-empty, only matching
     /// paths are kept (everything else is excluded).
     #[serde(default, rename = "paths-except", skip_serializing)]
     pub paths_except: Vec<String>,
+    /// From v2 `linters.exclusions.generated` (`lax` / `strict` / `disable`).
+    #[serde(default, skip_serializing)]
+    pub generated: Option<String>,
 }
 
 impl Default for IssuesConfig {
@@ -224,8 +231,10 @@ impl Default for IssuesConfig {
             new_from_rev: None,
             new_from_merge_base: None,
             new_from_patch: None,
+            whole_files: false,
             include: Vec::new(),
             paths_except: Vec::new(),
+            generated: None,
         }
     }
 }
@@ -246,8 +255,10 @@ impl IssuesConfig {
             && self.new_from_rev.is_none()
             && self.new_from_merge_base.is_none()
             && self.new_from_patch.is_none()
+            && !self.whole_files
             && self.include.is_empty()
             && self.paths_except.is_empty()
+            && self.generated.is_none()
     }
 }
 
@@ -402,7 +413,7 @@ pub struct LinterExclusions {
     pub presets: Vec<String>,
     #[serde(default, rename = "warn-unused")]
     pub warn_unused: bool,
-    /// DEFERRED: generated-file handling (`lax` / `strict` / `disable`).
+    /// Skip issues in generated files: `lax` / `strict` / `disable`.
     #[serde(default)]
     pub generated: Option<String>,
 }
@@ -985,8 +996,14 @@ fn merge_v2_exclusions(issues: &IssuesConfig, excl: &LinterExclusions) -> Issues
     out.exclude_rules.extend(excl.rules.iter().cloned());
     out.paths_except.extend(excl.paths_except.iter().cloned());
 
-    // DEFERRED: warn-unused (report unused exclusion rules), generated mode.
-    let _ = (excl.warn_unused, &excl.generated);
+    // golangci v2 default for `linters.exclusions.generated` is `lax`.
+    out.generated = Some(
+        excl.generated
+            .clone()
+            .unwrap_or_else(|| "lax".to_string()),
+    );
+    // DEFERRED: warn-unused (report unused exclusion rules).
+    let _ = excl.warn_unused;
 
     out
 }
