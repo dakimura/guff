@@ -311,9 +311,55 @@ fn expr_text(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Structural equality matching [`expr_text`] semantics (no String alloc).
+///
+/// Variants that [`expr_text`] cannot print yield `false`. `StarExpr` and
+/// `UnaryExpr(MUL)` both print as `*x`, so they compare equal. Call ellipsis
+/// is ignored (not represented in [`expr_text`]).
 fn exprs_equal(a: &Expr, b: &Expr) -> bool {
-    match (expr_text(a), expr_text(b)) {
-        (Some(x), Some(y)) => x == y,
+    match (a, b) {
+        (Expr::Ident(x), Expr::Ident(y)) => x.name == y.name,
+        (Expr::BasicLit(x), Expr::BasicLit(y)) => x.value == y.value,
+        (Expr::SelectorExpr(x), Expr::SelectorExpr(y)) => {
+            x.sel.name == y.sel.name && exprs_equal(&x.x, &y.x)
+        }
+        (Expr::StarExpr(x), Expr::StarExpr(y)) => exprs_equal(&x.x, &y.x),
+        (Expr::StarExpr(x), Expr::UnaryExpr(y)) if y.op == Token::MUL => {
+            exprs_equal(&x.x, &y.x)
+        }
+        (Expr::UnaryExpr(x), Expr::StarExpr(y)) if x.op == Token::MUL => {
+            exprs_equal(&x.x, &y.x)
+        }
+        (Expr::ParenExpr(x), Expr::ParenExpr(y)) => exprs_equal(&x.x, &y.x),
+        (Expr::IndexExpr(x), Expr::IndexExpr(y)) => {
+            exprs_equal(&x.x, &y.x) && exprs_equal(&x.index, &y.index)
+        }
+        (Expr::CallExpr(x), Expr::CallExpr(y)) => {
+            exprs_equal(&x.fun, &y.fun)
+                && x.args.len() == y.args.len()
+                && x.args
+                    .iter()
+                    .zip(y.args.iter())
+                    .all(|(a, b)| exprs_equal(a, b))
+        }
+        (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => {
+            matches!(
+                x.op,
+                Token::NOT | Token::AND | Token::MUL | Token::SUB
+            ) && x.op == y.op
+                && exprs_equal(&x.x, &y.x)
+        }
+        (Expr::BinaryExpr(x), Expr::BinaryExpr(y)) => {
+            x.op == y.op && exprs_equal(&x.x, &y.x) && exprs_equal(&x.y, &y.y)
+        }
+        (Expr::TypeAssertExpr(x), Expr::TypeAssertExpr(y)) => {
+            exprs_equal(&x.x, &y.x)
+                && match (&x.ty, &y.ty) {
+                    (None, None) => true,
+                    (Some(tx), Some(ty)) => exprs_equal(tx, ty),
+                    _ => false,
+                }
+        }
         _ => false,
     }
 }
