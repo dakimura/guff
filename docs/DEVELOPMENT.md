@@ -56,7 +56,8 @@ go list / モジュールグラフ (guff-packages)
 
 | 層 | クレート | 役割（Go 相当） |
 |----|----------|-----------------|
-| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate` |
+| **CLI** | `guff-lint` (`bin: guff`) | 設定・linter 選択・診断表示・`migrate`・`custom` |
+| **Plugins** | `guff-plugin`, `guff-plugin-example` | Module plugin API + サンプル（カスタムバイナリ用） |
 | **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | 各 linter の Analyzer 群 |
 | **Formatters** | `guff-fmt` | `guff fmt`（gofmt / gofumpt / goimports / gci / golines / swaggo） |
 | **Driver** | `guff-runner` | Analyzer の DAG 実行・パッケージ並列・メモリ管理 |
@@ -165,7 +166,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 
 | 項目 | 現状 | golangci-lint との差（ギャップ） |
 |------|------|------------------------------------|
-| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines / swaggo（`exclusions.generated` lax/strict/disable）。`run` でも `formatters.enable` があれば整形診断を出す |
+| サブコマンド | `run`, `fmt`, `migrate`, `version`, `linters`, `cache`（clean/status）, **`custom`**（module plugin バイナリ生成） | `help` 無し。`fmt` は gofmt / gofumpt / goimports / gci / golines / swaggo（`exclusions.generated` lax/strict/disable）。`run` でも `formatters.enable` があれば整形診断を出す |
 | run フラグ | `-c`, `--no-config`, `--preset`, `--enable`, `--disable`, `--sequential`, `--issues-exit-code`, `--build-tags`, `--timeout`, `-j/--concurrency`, `--out-format`（`format` / `format:path`）, `--no-cache`, `--fix` | — |
 | 設定ファイル | `.golangci.{yml,yaml}` / `.guff.{yml,yaml}` を上位まで探索。v1/v2 の linter 選択 + `issues` / `run` / `severity` / `output` をパースし、v2 `linters.exclusions`・`exclude-rules`・max-* ・severity を後処理適用。`run.build-tags` / `tests` を load へ、`run.timeout`（既定 `1m`）・`run.concurrency` / `-j` を実行に配線。`linters.settings` を各 analyzer に配線（キー詳細は §3.3・R13）。`output.formats` / `format` → `--out-format`。R22 の config corpus smoke で実 OSS の v2 設定 **52** 件をパース検証（CI ゲート） | `issues.new` / `new-from-rev`（diff 除外）・exclusions `warn-unused` 実効化・`generated` モードは未 |
 | プリセット | `standard` / `fast` / `all` / `none`。ただし `standard`==`all`（standard 5 系統）。追加 linter は `--enable <name>` で個別有効化（利用可能名は `guff linters` / §3.3） | 100+ linter を跨ぐ本来の `all` / `fast` / カテゴリプリセットに未対応 |
@@ -196,7 +197,9 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | `guff-<linter名>` | `guff-errcheck`, `guff-revive` | golangci と 1:1 の主要 linter |
 | `guff-<upstream名>` | `guff-gostaticanalysis` | 同一 org の小 linter を束ねる |
 | `guff-<カテゴリ>` | `guff-style`, `guff-comment` | 小さなスタンドアロン linter 群 |
-| `guff-lint` | — | CLI + レジストリ + nolint |
+| `guff-lint` | — | CLI + レジストリ + nolint + `guff custom` |
+| `guff-plugin` | — | Module plugin API（golangci `plugin-module-register` 相当） |
+| `guff-plugin-example` | — | サンプル module plugin（デフォルト `guff` にはリンクしない） |
 | `guff-fmt` | ✅ gofmt / gofumpt / goimports / gci / golines / swaggo（`guff fmt`） | — |
 
 **ルール**: 1 クレート = `analyzers() -> Vec<&'static Analyzer>` を公開。登録は `guff-lint` が行う。
@@ -250,6 +253,72 @@ staticcheck の `pattern` パッケージ相当。Go の AST ノードを s 式�
 - **注意（2026-07-14 の教訓）**: サブパターンの照合結果を必ず `?` で伝播すること。
   過去に `match_expr_node` 等が結果を捨てて常に成功し、`CallExpr` の関数部が未検証になって
   SA4021 が全ファイル誤検出した。ワイルドカード `_` は各 matcher で明示対応が要る。
+
+### 5.2 Module Plugin（golangci 互換）
+
+社内・非公開 linter を **カスタムバイナリに静的リンク**する方式。golangci-lint の
+[Module Plugin System](https://golangci-lint.run/docs/plugins/module-plugins/) と同じ運用手順。
+（Go の既存 module / `.so` プラグインはそのままでは動かない。プラグイン本体は Rust。）
+
+| 手順 | golangci-lint | guff |
+|------|---------------|------|
+| ビルド設定 | `.custom-gcl.yml` | 同じ（`.custom-guff.yml` も可） |
+| ビルド | `golangci-lint custom` | `guff custom` |
+| 実行時設定 | `.golangci.yml` → `linters.settings.custom` | 同じ |
+| 有効化 | `linters.enable: [name]` | 同じ |
+| 実行 | `./custom-gcl run` | `./custom-guff run` |
+
+**1. プラグイン crate**（参考: `crates/guff-plugin-example`）:
+
+```rust
+use guff_plugin::{decode_settings, LinterPlugin, PluginError, Analyzer, /* ... */};
+
+guff_plugin::register!("example", new_example);
+
+pub const FORCE_LINK: () = (); // `guff custom` がリンクを強制するのに必要
+
+fn new_example(settings: &serde_yaml::Value) -> Result<Box<dyn LinterPlugin>, PluginError> {
+    let s = decode_settings::<MySettings>(settings)?;
+    Ok(Box::new(PluginExample { settings: s }))
+}
+
+impl LinterPlugin for PluginExample {
+    fn build_analyzers(&self) -> Result<Vec<&'static Analyzer>, PluginError> { /* ... */ }
+    fn description(&self) -> &'static str { "find TODOs without an author" }
+}
+```
+
+**2. `.custom-gcl.yml`**:
+
+```yaml
+version: "0.1.0"
+name: custom-guff
+destination: .
+plugins:
+  - module: guff-plugin-example
+    path: ./crates/guff-plugin-example
+```
+
+**3. `guff custom`**（要: `GUFF_SRC` またはソースからビルドした `guff`）→ `./custom-guff`
+
+**4. `.golangci.yml`**:
+
+```yaml
+version: "2"
+linters:
+  default: none
+  enable: [example]
+  settings:
+    custom:
+      example:
+        type: module
+        description: find TODOs without an author
+        settings:
+          one: yes
+```
+
+`type` は `"module"` のみサポート。nested `settings` はプラグインの `New` と
+`SettingsBag`（`pass.settings::<serde_yaml::Value>("example")`）の両方に渡る。
 
 ---
 

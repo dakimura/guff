@@ -551,6 +551,8 @@ dependencies = [
  "guff-ineffassign",
  "guff-misspell",
  "guff-packages",
+ "guff-plugin",
+ "guff-plugin-example",
  "guff-revive",
  "guff-runner",
  "guff-staticcheck",
@@ -600,6 +602,31 @@ dependencies = [
  "guff-ast",
  "guff-constant",
  "guff-types",
+]
+
+[[package]]
+name = "guff-plugin"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "inventory",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "guff-plugin-example"
+version = "0.1.0"
+dependencies = [
+ "guff-analysis",
+ "guff-ast",
+ "guff-packages",
+ "guff-plugin",
+ "guff-runner",
+ "guff-types",
+ "serde",
+ "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]
@@ -832,6 +859,15 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown",
+]
+
+[[package]]
+name = "inventory"
+version = "0.3.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]

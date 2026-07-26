@@ -29,6 +29,8 @@ members = [
     "crates/guff-revive",
     "crates/guff-fmt",
     "crates/guff-lint",
+    "crates/guff-plugin",
+    "crates/guff-plugin-example",
     "crates/guff-ssa",
     "crates/guff-version",
 ]

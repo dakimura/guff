@@ -3,7 +3,9 @@
 //! Bundles golangci-lint `standard` preset linters behind a single
 //! `guff_runner::run` invocation.
 
+pub mod cli;
 mod config;
+mod custom;
 mod duration;
 mod exclude;
 mod fix;
@@ -19,6 +21,12 @@ pub use config::{
     FormatterExclusions, FormattersV2, IssuesConfig, LinterDefault, LinterExclusions,
     LinterSelection, OutputConfig, RunConfig, SeverityConfig, SeverityRule, CONFIG_FILE_NAMES,
     DEPRECATED_LINTERS, FORMATTER_NAMES,
+};
+
+pub use custom::{
+    build_custom, discover_custom_config, generate_custom_project, load_custom_config,
+    parse_custom_config, resolve_guff_src, BuildCustomOptions, CustomError, CustomGclConfig,
+    CustomPluginEntry, CUSTOM_CONFIG_NAMES,
 };
 
 pub use duration::parse_go_duration;
@@ -42,11 +50,11 @@ pub use registry::{
 };
 pub use fix::{apply_fixes, FixError};
 pub use settings::{
-    BodycloseSettings, DepguardDenySetting, DepguardRuleSetting, DepguardSettings, DupwordSettings,
-    ErrcheckSettings, ErrchkjsonSettings, FuncorderSettings, GodoclintSettings, GodotSettings,
-    GodoxSettings, GomoddirectivesSettings, GomodguardSettings, GovetSettings, LinterSettings,
-    ReviveRuleSetting, ReviveSettings, RowserrcheckSettings, StaticcheckSettings,
-    VarnamelenSettings, WrapcheckSettings,
+    BodycloseSettings, CustomLinterConfig, DepguardDenySetting, DepguardRuleSetting,
+    DepguardSettings, DupwordSettings, ErrcheckSettings, ErrchkjsonSettings, FuncorderSettings,
+    GodoclintSettings, GodotSettings, GodoxSettings, GomoddirectivesSettings, GomodguardSettings,
+    GovetSettings, LinterSettings, ReviveRuleSetting, ReviveSettings, RowserrcheckSettings,
+    StaticcheckSettings, VarnamelenSettings, WrapcheckSettings,
 };
 
 /// Package version (`CARGO_PKG_VERSION`), for `guff version`.

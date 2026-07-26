@@ -148,7 +148,43 @@ pub fn analyzers_for_linter_with_settings(
         "importas" => Some(vec![guff_import::importas()]),
         // Meta / post-processor linters (no go/analysis passes).
         "nolintlint" => Some(Vec::new()),
-        _ => None,
+        _ => {
+            // Module plugins (golangci `linters.settings.custom`).
+            if let Some(analyzers) = guff_plugin::instantiated_analyzers(name) {
+                Some(analyzers)
+            } else if guff_plugin::is_registered(name) {
+                if let Some(cfg) = settings.custom.get(name) {
+                    if !cfg.type_.is_empty() && cfg.type_ != "module" {
+                        eprintln!(
+                            "guff: plugin {name:?}: type {:?} unsupported (need \"module\")",
+                            cfg.type_
+                        );
+                        return None;
+                    }
+                    match guff_plugin::instantiate_with_description(
+                        name,
+                        &cfg.settings,
+                        &cfg.description,
+                    ) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            eprintln!("guff: plugin {name:?}: {e}");
+                            None
+                        }
+                    }
+                } else {
+                    match guff_plugin::instantiate(name, &serde_yaml::Value::Null) {
+                        Ok(a) => Some(a),
+                        Err(e) => {
+                            eprintln!("guff: plugin {name:?}: {e}");
+                            None
+                        }
+                    }
+                }
+            } else {
+                None
+            }
+        }
     }?;
     Some(settings.apply_to_analyzers(name, analyzers))
 }
@@ -277,13 +313,32 @@ pub const KNOWN_LINTER_NAMES: &[&str] = &[
     "zerologlint",
 ];
 
-/// All linter names known to the registry.
-pub fn known_linter_names() -> &'static [&'static str] {
-    KNOWN_LINTER_NAMES
+/// All linter names known to the registry (built-in + linked module plugins).
+pub fn known_linter_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = KNOWN_LINTER_NAMES.to_vec();
+    for n in guff_plugin::registered_names() {
+        if !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    names
 }
 
 /// One-line description for `guff linters` (golangci-style).
-pub fn linter_description(name: &str) -> &'static str {
+pub fn linter_description(name: &str) -> String {
+    let builtin = builtin_linter_description(name);
+    if !builtin.is_empty() {
+        return builtin.to_string();
+    }
+    if let Some(d) = guff_plugin::instantiated_description(name) {
+        if !d.is_empty() {
+            return d;
+        }
+    }
+    String::new()
+}
+
+fn builtin_linter_description(name: &str) -> &'static str {
     match name {
         "arangolint" => "Opinionated best practices for arangodb client.",
         "asasalint" => "Checks for pass []any as any in variadic func(...any).",
@@ -413,8 +468,7 @@ pub fn partition_linters(selection: &crate::config::LinterSelection) -> (Vec<Str
     let enabled_set: std::collections::HashSet<String> = enabled.iter().cloned().collect();
 
     let mut disabled: Vec<String> = known_linter_names()
-        .iter()
-        .copied()
+        .into_iter()
         .filter(|n| !enabled_set.contains(*n))
         .map(|s| s.to_string())
         .collect();
@@ -521,7 +575,17 @@ pub fn linter_name_for_analyzer(analyzer: &str) -> &str {
         }
         m
     });
-    map.get(analyzer).copied().unwrap_or(analyzer)
+    if let Some(name) = map.get(analyzer).copied() {
+        return name;
+    }
+    for pname in guff_plugin::registered_names() {
+        if let Some(analyzers) = guff_plugin::instantiated_analyzers(pname) {
+            if analyzers.iter().any(|a| a.name == analyzer) {
+                return pname;
+            }
+        }
+    }
+    analyzer
 }
 
 #[cfg(test)]
@@ -599,5 +663,68 @@ mod tests {
             analyzers_for_linter_with_settings("staticcheck", &settings).expect("staticcheck");
         assert!(!analyzers.iter().any(|a| a.name == "SA1004"));
         assert!(analyzers.iter().any(|a| a.name == "SA1000"));
+    }
+
+    #[test]
+    fn module_plugin_resolves_via_registry() {
+        use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+        use guff_plugin::{LinterPlugin, PluginError};
+        use std::sync::OnceLock;
+
+        struct P;
+        impl LinterPlugin for P {
+            fn build_analyzers(&self) -> Result<Vec<&'static Analyzer>, PluginError> {
+                Ok(vec![plug_analyzer()])
+            }
+            fn description(&self) -> &'static str {
+                "registry plugin test"
+            }
+        }
+        fn new_p(_: &serde_yaml::Value) -> Result<Box<dyn LinterPlugin>, PluginError> {
+            Ok(Box::new(P))
+        }
+        fn run(_: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+            Ok(None)
+        }
+        fn plug_analyzer() -> &'static Analyzer {
+            static A: OnceLock<Analyzer> = OnceLock::new();
+            A.get_or_init(|| Analyzer {
+                name: "plug_test_pass",
+                doc: "t",
+                url: "",
+                run: run as RunFn,
+                run_despite_errors: false,
+                requires: vec![],
+                fact_types: vec![],
+            })
+        }
+
+        guff_plugin::clear_instances();
+        guff_plugin::clear_manual_factories();
+        guff_plugin::register_factory("plugtest", new_p);
+
+        let settings = LinterSettings {
+            custom: [(
+                "plugtest".into(),
+                crate::settings::CustomLinterConfig {
+                    type_: "module".into(),
+                    description: "from config".into(),
+                    settings: serde_yaml::Value::Null,
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..LinterSettings::default()
+        };
+        let analyzers =
+            analyzers_for_linter_with_settings("plugtest", &settings).expect("plugtest");
+        assert_eq!(analyzers.len(), 1);
+        assert_eq!(analyzers[0].name, "plug_test_pass");
+        assert!(known_linter_names().contains(&"plugtest"));
+        assert_eq!(linter_description("plugtest"), "registry plugin test");
+
+        guff_plugin::clear_instances();
+        guff_plugin::clear_manual_factories();
     }
 }

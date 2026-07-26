@@ -90,6 +90,26 @@ pub struct LinterSettings {
     pub promlinter: PromlinterSettings,
     pub ginkgolinter: GinkgolinterSettings,
     pub wsl_v5: WslV5Settings,
+    /// golangci `linters.settings.custom` (module plugins).
+    pub custom: std::collections::HashMap<String, CustomLinterConfig>,
+}
+
+/// One entry under `linters.settings.custom.<name>`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct CustomLinterConfig {
+    /// Must be `"module"` for guff module plugins (golangci also has `"goplugin"`).
+    #[serde(default, rename = "type")]
+    pub type_: String,
+    #[serde(default)]
+    pub description: String,
+    /// Nested settings passed to the plugin's `New` factory.
+    #[serde(default)]
+    pub settings: serde_yaml::Value,
+    /// golangci goplugin path (unsupported; accepted for forward-compat).
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default, rename = "original-url")]
+    pub original_url: Option<String>,
 }
 
 /// `linters.settings.errcheck` / `linters-settings.errcheck`.
@@ -2244,6 +2264,23 @@ impl LinterSettings {
                 out.gosec = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("custom".into())) {
+            if let Some(cmap) = v.as_mapping() {
+                for (key, val) in cmap {
+                    let Some(name) = key.as_str() else {
+                        continue;
+                    };
+                    match serde_yaml::from_value::<CustomLinterConfig>(val.clone()) {
+                        Ok(cfg) => {
+                            out.custom.insert(name.to_string(), cfg);
+                        }
+                        Err(e) => {
+                            eprintln!("guff: ignoring linters.settings.custom.{name}: {e}");
+                        }
+                    }
+                }
+            }
+        }
         // Unknown linter keys are intentionally ignored (forward-compat with
         // golangci configs that mention linters guff does not have yet).
         out
@@ -2369,6 +2406,17 @@ impl LinterSettings {
         bag.insert("grouper", self.grouper.to_guff_grouper());
         bag.insert("ireturn", self.ireturn.to_guff_ireturn());
         bag.insert("gosec", self.gosec.to_guff_gosec());
+        for (name, cfg) in &self.custom {
+            if !cfg.type_.is_empty() && cfg.type_ != "module" {
+                eprintln!(
+                    "guff: linters.settings.custom.{name}: type {:?} is not supported (only \"module\")",
+                    cfg.type_
+                );
+                continue;
+            }
+            // Nested settings for Pass-time `pass.settings::<Value>(name)`.
+            bag.insert(name.clone(), cfg.settings.clone());
+        }
         Arc::new(bag)
     }
 
@@ -3520,6 +3568,37 @@ revive:
         assert!(revive.rule("enforce-map-style").is_some());
         assert_eq!(revive.rule_severity("comments-density"), Some("error"));
         assert_eq!(revive.rule_severity("enforce-map-style"), Some("warning"));
+    }
+
+    #[test]
+    fn parse_custom_module_settings() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+custom:
+  example:
+    type: module
+    description: find TODOs without an author
+    settings:
+      one: yes
+"#,
+        )
+        .unwrap();
+        let s = LinterSettings::from_yaml(&yaml);
+        let cfg = s.custom.get("example").expect("example custom");
+        assert_eq!(cfg.type_, "module");
+        assert_eq!(cfg.description, "find TODOs without an author");
+        let bag = s.to_bag();
+        let nested = bag
+            .get::<serde_yaml::Value>("example")
+            .expect("example settings in bag");
+        assert_eq!(
+            nested
+                .as_mapping()
+                .unwrap()
+                .get(serde_yaml::Value::String("one".into()))
+                .and_then(|v| v.as_str()),
+            Some("yes")
+        );
     }
 
     #[test]
