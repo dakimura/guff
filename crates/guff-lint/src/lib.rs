@@ -637,6 +637,29 @@ pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, Run
     }
 }
 
+/// Number of threads for the private format-check rayon pool.
+///
+/// The default is 2, and that is not arbitrary: format checks fully *overlap*
+/// the `go list` + typecheck + analyze window, so the phase never sits on the
+/// critical path. A cold `./...` sweep on a 10-core host (docs/PERF_TASKS_V2.md
+/// P0-1) shows wall is minimized at 2 threads (4.50s) and rises as the pool
+/// grows (4→4.73s, 10→4.80s): extra format threads finish the phase sooner
+/// (fmt 1.6s→0.6s) but only add CPU contention to the analysis that actually
+/// bounds the run. Seed-hot behaves the same (wall flat ~3.46s from 2 threads
+/// up). So 2 stays.
+///
+/// `GUFF_FMT_THREADS` overrides it. This is an **experimental** perf knob for
+/// re-running that sweep on other hardware; it is intentionally undocumented in
+/// the README and is not stable API.
+fn fmt_thread_count() -> usize {
+    if let Some(v) = std::env::var_os("GUFF_FMT_THREADS") {
+        if let Some(n) = v.to_str().and_then(|s| s.trim().parse::<usize>().ok()) {
+            return n.max(1);
+        }
+    }
+    2
+}
+
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
     let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
 
@@ -646,6 +669,7 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
     // collect them below, so they cost wall time only if they outlast the
     // analysis. `--fix` stays sequential: it rewrites the very files the
     // analysis is reading, and it runs after the analysis' own fixes.
+    let fmt_threads = fmt_thread_count();
     let fmt_job = opts
         .formatters
         .as_ref()
@@ -655,13 +679,14 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
             let filter = opts.filter.clone();
             std::thread::spawn(move || {
                 let started = std::time::Instant::now();
-                // Format checks use rayon heavily; pin them to a small private
-                // pool so they don't steal workers from the global pool that
-                // typecheck/analyze need during the overlap window.
-                // 2 workers is enough to finish during `go list` (~1.3s) without
-                // starving analysis; 1 worker makes format the critical path.
+                // Format checks run native Rust formatters over every file via
+                // rayon; pin them to a small private pool so they don't steal
+                // workers from the global pool that typecheck/analyze need during
+                // the overlap window. Sizing is relative to the host so a value
+                // tuned on a 10-core box doesn't wreck a 4-core one; see
+                // `fmt_thread_count`.
                 let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(2)
+                    .num_threads(fmt_threads)
                     .thread_name(|i| format!("guff-fmt-{i}"))
                     .build()
                     .expect("format rayon pool");
