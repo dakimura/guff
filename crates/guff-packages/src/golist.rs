@@ -49,8 +49,11 @@ impl From<GoListError> for crate::LoadError {
 /// Loads packages by invoking `go list -json`.
 ///
 /// Warm runs reuse a disk cache of the stdout under `$GUFF_CACHE/golist/`
-/// (R24.4) when the go.mod/sum fingerprint, args, and env are unchanged and
-/// every cached `Export` path still exists on disk.
+/// (R24.4) when the go.mod/sum fingerprint, **the set of `.go` file names under
+/// the root patterns**, args, and env are unchanged and every cached `Export`
+/// path still exists on disk. File *contents* are intentionally not hashed
+/// here — the issue cache already keys on content; this fingerprint only has
+/// to catch package add/remove (X-1).
 pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, GoListError> {
     let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
     let t_invoke = std::time::Instant::now();
@@ -291,7 +294,7 @@ fn stdlib_export_cache_path(cfg: &Config, paths: &[String]) -> Option<PathBuf> {
     let mut sorted = paths.to_vec();
     sorted.sort();
     args.extend(sorted);
-    let key = golist_cache_key(cfg, &[], &args);
+    let key = golist_cache_key(cfg, &[], &args, false);
     let prefix = key.get(..2).unwrap_or("00");
     Some(
         dir.join("stdlib_exports")
@@ -461,6 +464,7 @@ fn dep_export_cache_path(cfg: &Config) -> Option<PathBuf> {
         cfg,
         &[],
         &["dep-export-reuse-v1".into()],
+        false,
     );
     Some(dir.join(format!("{key}.json")))
 }
@@ -519,7 +523,9 @@ fn load_or_invoke_go(
     Ok(stdout)
 }
 
-const GOLIST_CACHE_VERSION: &str = "golist-v1";
+/// Bump when the key composition changes so stale entries under the old hash
+/// space are never looked up (they just rot and get cleaned eventually).
+const GOLIST_CACHE_VERSION: &str = "golist-v2";
 
 fn golist_cache_enabled(cfg: &Config) -> bool {
     if cfg.disable_cache {
@@ -571,7 +577,20 @@ fn guff_cache_dir() -> Option<PathBuf> {
     }
 }
 
-fn golist_cache_key(cfg: &Config, patterns: &[String], args: &[String]) -> String {
+/// Build the golist / stdlib-export / dep-export cache key.
+///
+/// When `include_go_files` is true (main `go list` stdout cache only), the
+/// sorted set of `.go` **file names** under the root patterns is folded in so
+/// that adding or deleting a package directory invalidates the cache (X-1).
+/// File contents are not hashed — content edits are the issue cache's job.
+/// Stdlib/dep-export callers pass `false` so local package churn does not
+/// needlessly bust their keys.
+fn golist_cache_key(
+    cfg: &Config,
+    patterns: &[String],
+    args: &[String],
+    include_go_files: bool,
+) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(GOLIST_CACHE_VERSION.as_bytes());
@@ -600,7 +619,8 @@ fn golist_cache_key(cfg: &Config, patterns: &[String], args: &[String]) -> Strin
     }
 
     // Fingerprint go.mod / go.sum near cfg.dir (walk up a few levels).
-    if let Some(mod_dir) = find_go_mod_dir(&cfg.dir) {
+    let mod_dir = find_go_mod_dir(&cfg.dir);
+    if let Some(mod_dir) = mod_dir.as_ref() {
         for name in ["go.mod", "go.sum"] {
             let path = mod_dir.join(name);
             match std::fs::read(&path) {
@@ -614,6 +634,24 @@ fn golist_cache_key(cfg: &Config, patterns: &[String], args: &[String]) -> Strin
                 }
             }
         }
+    }
+
+    if include_go_files {
+        let base = if cfg.dir.as_os_str().is_empty() {
+            std::env::current_dir().unwrap_or_default()
+        } else {
+            cfg.dir.clone()
+        };
+        let module_path = mod_dir
+            .as_ref()
+            .and_then(|d| read_module_path(&d.join("go.mod")));
+        hash_go_file_set(
+            &mut h,
+            &base,
+            mod_dir.as_deref(),
+            &pats,
+            module_path.as_deref(),
+        );
     }
 
     // Env subset that affects `go list` / export paths.
@@ -635,6 +673,169 @@ fn golist_cache_key(cfg: &Config, patterns: &[String], args: &[String]) -> Strin
     }
 
     hex_encode(&h.finalize())
+}
+
+/// Fold the sorted set of relative `.go` paths under `patterns` into `h`.
+///
+/// Cost on prometheus `./...` is ~4–6 ms (725 files) — fine next to warm
+/// `load_graph` of ~0.07 s. Names only; see [`golist_cache_key`].
+fn hash_go_file_set(
+    h: &mut impl sha2::Digest,
+    base: &Path,
+    module_root: Option<&Path>,
+    patterns: &[String],
+    module_path: Option<&str>,
+) {
+    let mut files = Vec::new();
+    for pat in patterns {
+        collect_go_files_for_pattern(base, module_root, pat, module_path, &mut files);
+    }
+    files.sort();
+    files.dedup();
+    h.update(format!("go_files={}\n", files.len()).as_bytes());
+    for f in &files {
+        h.update(f.as_bytes());
+        h.update(b"\n");
+    }
+}
+
+/// Collect `.go` file paths (relative to `base`, `/`-separated) matching a
+/// single `go list` pattern. Local (`./…`, `.`, absolute) and current-module
+/// path patterns are walked; other patterns (std, other modules) are skipped
+/// — those trees are not under `base` and go.mod already covers them.
+fn collect_go_files_for_pattern(
+    base: &Path,
+    module_root: Option<&Path>,
+    pattern: &str,
+    module_path: Option<&str>,
+    out: &mut Vec<String>,
+) {
+    let (root, recursive) = match resolve_pattern_root(base, module_root, pattern, module_path) {
+        Some(v) => v,
+        None => {
+            // Record the unresolved pattern so a later resolution (e.g. after
+            // `go get`) still changes the key rather than silently sticking.
+            out.push(format!("unresolved:{pattern}"));
+            return;
+        }
+    };
+    if !root.exists() {
+        out.push(format!("missing:{}", root.display()));
+        return;
+    }
+    if recursive {
+        walk_go_files(base, &root, out);
+    } else {
+        collect_go_files_in_dir(base, &root, out);
+    }
+}
+
+fn resolve_pattern_root(
+    base: &Path,
+    module_root: Option<&Path>,
+    pattern: &str,
+    module_path: Option<&str>,
+) -> Option<(PathBuf, bool)> {
+    let (prefix, recursive) = if pattern == "..." {
+        (".", true)
+    } else if let Some(p) = pattern.strip_suffix("/...") {
+        (if p.is_empty() { "." } else { p }, true)
+    } else {
+        (pattern, false)
+    };
+
+    let p = Path::new(prefix);
+    if prefix == "." || prefix.is_empty() {
+        return Some((base.to_path_buf(), recursive));
+    }
+    if prefix.starts_with('.') || p.is_absolute() {
+        let root = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            base.join(p)
+        };
+        return Some((root, recursive));
+    }
+    // `example.com/mod/...` → filesystem under the go.mod directory.
+    if let (Some(mod_path), Some(mod_root)) = (module_path, module_root) {
+        if prefix == mod_path {
+            return Some((mod_root.to_path_buf(), recursive));
+        }
+        if let Some(rel) = prefix.strip_prefix(mod_path) {
+            let rel = rel.trim_start_matches('/');
+            let root = if rel.is_empty() {
+                mod_root.to_path_buf()
+            } else {
+                mod_root.join(rel)
+            };
+            return Some((root, recursive));
+        }
+    }
+    None
+}
+
+fn walk_go_files(base: &Path, root: &Path, out: &mut Vec<String>) {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Some(name) = dir.file_name().and_then(|s| s.to_str()) {
+            // Match `go list ./...` skips (also mirrored in offline::walk_packages).
+            if dir != root
+                && (name == "vendor"
+                    || name == "testdata"
+                    || name == "node_modules"
+                    || name.starts_with('.')
+                    || name.starts_with('_'))
+            {
+                continue;
+            }
+        }
+        collect_go_files_in_dir(base, &dir, out);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+}
+
+fn collect_go_files_in_dir(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".go") {
+            continue;
+        }
+        let rel = path.strip_prefix(base).unwrap_or(&path);
+        out.push(rel.to_string_lossy().replace('\\', "/"));
+    }
+}
+
+/// Best-effort `module` path from a go.mod (first `module …` line). Used only
+/// to map `example.com/mod/...` patterns onto the filesystem under `base`.
+fn read_module_path(go_mod: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(go_mod).ok()?;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("module ") {
+            let path = rest.trim().trim_matches('"');
+            if !path.is_empty() {
+                return Some(path.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn find_go_mod_dir(start: &Path) -> Option<PathBuf> {
@@ -664,7 +865,7 @@ fn try_load_golist_cache(cfg: &Config, patterns: &[String], args: &[String]) -> 
     if !golist_cache_enabled(cfg) {
         return None;
     }
-    let key = golist_cache_key(cfg, patterns, args);
+    let key = golist_cache_key(cfg, patterns, args, true);
     let path = golist_cache_path(&key)?;
     std::fs::read_to_string(path).ok()
 }
@@ -673,7 +874,7 @@ fn store_golist_cache(cfg: &Config, patterns: &[String], args: &[String], stdout
     if !golist_cache_enabled(cfg) {
         return;
     }
-    let key = golist_cache_key(cfg, patterns, args);
+    let key = golist_cache_key(cfg, patterns, args, true);
     let Some(path) = golist_cache_path(&key) else {
         return;
     };
@@ -1293,8 +1494,8 @@ mod tests {
         };
         let pats = vec![".".to_string()];
         let args = golist_args(&cfg, &pats, 0);
-        let k1 = golist_cache_key(&cfg, &pats, &args);
-        let k2 = golist_cache_key(&cfg, &pats, &args);
+        let k1 = golist_cache_key(&cfg, &pats, &args, true);
+        let k2 = golist_cache_key(&cfg, &pats, &args, true);
         assert_eq!(k1, k2);
         assert_eq!(k1.len(), 64);
 
@@ -1303,7 +1504,7 @@ mod tests {
             ..cfg.clone()
         };
         let args2 = golist_args(&cfg2, &pats, 0);
-        let k3 = golist_cache_key(&cfg2, &pats, &args2);
+        let k3 = golist_cache_key(&cfg2, &pats, &args2, true);
         assert_ne!(k1, k3);
 
         let cfg3 = Config {
@@ -1311,6 +1512,88 @@ mod tests {
             ..cfg
         };
         assert!(!golist_cache_enabled(&cfg3));
+    }
+
+    #[test]
+    fn golist_cache_key_tracks_go_file_set_not_contents() {
+        // X-1: package add/remove must change the key; editing an existing
+        // file's contents must not (issue cache handles that).
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-golist-key-x1-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("pkg")).expect("mkdir");
+        std::fs::write(tmp.join("go.mod"), "module example.com/x1\n\ngo 1.22\n").expect("go.mod");
+        std::fs::write(tmp.join("pkg/a.go"), "package pkg\n").expect("a.go");
+
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS,
+            dir: tmp.clone(),
+            disable_cache: false,
+            ..Config::default()
+        };
+        let pats = vec!["./...".to_string()];
+        let args = golist_args(&cfg, &pats, 0);
+        let before = golist_cache_key(&cfg, &pats, &args, true);
+
+        // Content edit of an existing file → same key.
+        std::fs::write(tmp.join("pkg/a.go"), "package pkg\n\nfunc A() {}\n").expect("edit");
+        let after_edit = golist_cache_key(&cfg, &pats, &args, true);
+        assert_eq!(before, after_edit, "content edit must not change golist key");
+
+        // New package → different key.
+        std::fs::create_dir_all(tmp.join("newpkg")).expect("mkdir new");
+        std::fs::write(tmp.join("newpkg/x.go"), "package newpkg\n").expect("new");
+        let after_add = golist_cache_key(&cfg, &pats, &args, true);
+        assert_ne!(before, after_add, "new package must change golist key");
+
+        // Delete the new package → back to the original key.
+        std::fs::remove_dir_all(tmp.join("newpkg")).expect("rm new");
+        let after_del = golist_cache_key(&cfg, &pats, &args, true);
+        assert_eq!(before, after_del, "deleting the new package must restore key");
+
+        // include_go_files=false must ignore the file set (stdlib/dep-export).
+        std::fs::create_dir_all(tmp.join("other")).expect("mkdir other");
+        std::fs::write(tmp.join("other/y.go"), "package other\n").expect("other");
+        let without = golist_cache_key(&cfg, &pats, &args, false);
+        let without2 = golist_cache_key(&cfg, &pats, &args, false);
+        assert_eq!(without, without2);
+        assert_ne!(
+            golist_cache_key(&cfg, &pats, &args, true),
+            without,
+            "include_go_files must actually affect the key"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn collect_go_files_skips_vendor_testdata_and_dot_dirs() {
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-golist-walk-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("keep")).expect("mkdir");
+        std::fs::create_dir_all(tmp.join("vendor/x")).expect("vendor");
+        std::fs::create_dir_all(tmp.join("testdata")).expect("testdata");
+        std::fs::create_dir_all(tmp.join(".git")).expect(".git");
+        std::fs::create_dir_all(tmp.join("_hidden")).expect("_hidden");
+        std::fs::write(tmp.join("keep/a.go"), "package keep\n").unwrap();
+        std::fs::write(tmp.join("vendor/x/v.go"), "package x\n").unwrap();
+        std::fs::write(tmp.join("testdata/t.go"), "package testdata\n").unwrap();
+        std::fs::write(tmp.join(".git/g.go"), "package g\n").unwrap();
+        std::fs::write(tmp.join("_hidden/h.go"), "package h\n").unwrap();
+
+        let mut files = Vec::new();
+        collect_go_files_for_pattern(&tmp, None, "./...", None, &mut files);
+        files.sort();
+        assert_eq!(files, vec!["keep/a.go".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
