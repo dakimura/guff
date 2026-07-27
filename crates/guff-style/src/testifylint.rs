@@ -2510,7 +2510,52 @@ fn check_formatter_fmt(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(
     }
 }
 
+/// Memo for [`lookup_named_type`], keyed by `(pkg_path, name)`.
+///
+/// The uncached lookup scans **every package in the type closure** — 1455 of them
+/// on prometheus `./...` — and runs `cut_vendor` on each path. It is called from
+/// inside the per-node `preorder_stack` callback (via `implements_testify_suite`
+/// / `implements_testing_t`), so the work was O(nodes x packages), and the *miss*
+/// is the expensive case: a package that does not import testify scans the whole
+/// list to return `None`, once per candidate node. samply put `cut_vendor` at
+/// 1.095s of the 1.169s testifylint spent in total — 94% of the worst
+/// per-package unit cost of any analyzer (PERF_TASKS_V2 §1.4 / B-3).
+///
+/// Safe to memoize for the lifetime of one run: the lookup only reads
+/// `type_artifacts.packages` / `.scopes`, and no analyzer mutates those during a
+/// run — `with_types_mut` clones and edits the *types* arena only. Reset per
+/// package next to [`TYPE_SCRATCH`], since rayon workers reuse threads across
+/// packages and a stale entry would answer for the wrong type closure.
+///
+/// A `Vec` rather than a map: there are six call sites and a handful of distinct
+/// keys, so a linear scan over ~5 entries beats hashing.
+thread_local! {
+    static NAMED_TYPE_MEMO: RefCell<Vec<(String, String, Option<TypeId>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+fn reset_named_type_memo() {
+    NAMED_TYPE_MEMO.with(|c| c.borrow_mut().clear());
+}
+
 fn lookup_named_type(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<TypeId> {
+    if let Some(hit) = NAMED_TYPE_MEMO.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(p, n, _)| p == pkg_path && n == name)
+            .map(|(_, _, typ)| *typ)
+    }) {
+        return hit;
+    }
+    let found = lookup_named_type_uncached(pass, pkg_path, name);
+    NAMED_TYPE_MEMO.with(|c| {
+        c.borrow_mut()
+            .push((pkg_path.to_string(), name.to_string(), found))
+    });
+    found
+}
+
+fn lookup_named_type_uncached(pass: &Pass<'_>, pkg_path: &str, name: &str) -> Option<TypeId> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     for i in 0..artifacts.packages.len() {
         let pid = artifacts.packages.id_at(i);
@@ -4000,6 +4045,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Fresh scratch for this package (rayon workers reuse threads across pkgs).
     reset_type_scratch();
+    reset_named_type_memo();
 
     let options = pass
         .settings::<TestifylintOptions>("testifylint")

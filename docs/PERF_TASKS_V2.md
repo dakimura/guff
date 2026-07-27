@@ -348,7 +348,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~B-0~~ | ~~preorder 総時間の計測（B-1 の GO/NO-GO）~~ **DONE** | — | 27.9% と判明 | 小 | ゼロ |
 | **B-1** | **本物の Inspector（フラットイベント列 + 種別マスク）** | cold | **0.15〜0.25s**（B-0 実測に基づく改訂。上限 0.32s） | 大 | 中 |
 | B-2 | buildir/SSA の関数単位 遅延構築 | cold | 0.2〜0.5s? | 大 | **高** |
-| B-3 | testifylint の高速化（単価 61ms の解明） | cold | 0.1〜0.3s? | 中 | 中 |
+| ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
 | B-4 | revive の `shared_walk` を全ルールに拡大 | cold | 0.05〜0.2s? | 中 | 中 |
 | B-5 | 型の構造的インターン（hash-consing） | cold | 0.1〜0.3s? | 大 | **高** |
 | B-6 | 型チェッカの `Expr::clone` 除去 | cold | 0.1〜0.3s? | 中 | 中 |
@@ -1855,6 +1855,88 @@ samply で「1 箇所直せば半減する」明確な原因が見えたとき�
   ```
 - 3 回決定性、両 regress PASS。
 
+### 原因（2026-07-28、samply 実測。推測ではない）
+
+**原因は `lookup_named_type` の O(nodes × packages) 走査だった。** 候補として挙がっていた
+「SSA 舐め直し / 正規表現の再コンパイル / AST の複数周回 / `format!`」は**どれも違いました。**
+
+`--inclusive` で testifylint 内部を割ると:
+
+| 合計 CPU | 全体比 | symbol |
+|---:|---:|---|
+| 1.169s | 6.06% | `guff_style::testifylint::run` |
+| 1.109s | 5.75% | `guff_style::testifylint::lookup_named_type` |
+| **1.095s** | **5.68%** | **`guff_style::testifylint::cut_vendor`** |
+| 0.052s | 0.27% | `check_call` |
+| 0.007s | 0.04% | `implements_iface` |
+
+**`cut_vendor` が testifylint の 94%。** self CPU 上位でも
+`<core::str::pattern::StrSearcher>::new` が 0.767s（全体 4.0%）で 4 位に居て、
+`--callers` で見ると**全部が `cut_vendor` ← `lookup_named_type`** でした。
+
+仕組み:
+
+1. `lookup_named_type` は `type_artifacts.packages` を**全件線形走査**する（prometheus では 1455 件）。
+2. 各パッケージについて `cut_vendor(pkg.path())` を呼ぶ。中身は `path.rfind("/vendor/")` で、
+   **`&str` パターンの `rfind` は呼び出しごとに two-way searcher を構築する**。
+   針 8 バイト・干し草 40 バイトなので、**セットアップだけでほぼ全部**（それが `StrSearcher::new`）。
+3. そしてこれが `preorder_stack` のコールバック**＝ノードごと**に呼ばれる
+   （`implements_testify_suite` / `implements_testing_t` 経由）。
+
+**miss が最悪ケース**という点が重要です。testify を import していないパッケージは
+1455 件を全部走査して `None` を返し、それを候補ノードごとに繰り返します。
+
+### DONE（2026-07-28）— **testifylint 1.12s → 0.08s CPU（−93%）/ analyze wall 1.17s → 0.75s / cold wall 4.44s → 4.01s。findings byte 一致。**
+
+**実装:** `(pkg_path, name) → Option<TypeId>` の thread-local memo を追加し、
+`run` の先頭で `reset_type_scratch()` の隣で clear する（既存の `TYPE_SCRATCH` と同じ作法。
+rayon ワーカーはパッケージ間でスレッドを再利用するので、reset を忘れると
+**別の型クロージャの答えを返してしまう**）。呼び出し箇所は 6 つ・キーの種類は数個なので、
+`HashMap` ではなく `Vec` の線形探索（ハッシュより速い）。
+
+**memo が安全な理由:** `lookup_named_type` が読むのは `type_artifacts.packages` / `.scopes` だけで、
+run 中にこれを書き換える analyzer は居ません（`with_types_mut` は **types** アリーナの
+クローンを触るだけ）。よって 1 回の `run` の間、答えは不変です。
+
+**`cut_vendor` 自体は書き換えていません。** memo で呼び出し回数が 3 桁減るので、
+`rfind` を手書きバイト走査に置き換える価値がなくなりました（§0-9 の「1 コミット 1 論点」）。
+
+**計測（A/B/A/B 交互 3 往復。X-3 に従いバッチ測定は不可）:**
+
+| | PRE | POST |
+|---|---|---|
+| cold wall | 4.47 / 4.39 / 4.47 s | **4.00 / 3.96 / 4.06 s** |
+| **phase analyze** | 1.16 / 1.18 / 1.18 s | **0.76 / 0.74 / 0.76 s** |
+| phase typecheck_roots | 1.64 / 1.60 / 1.64 s | 1.60 / 1.59 / 1.65 s（不変） |
+| peak RSS | 7.52〜7.69 GB | 7.42〜7.60 GB |
+| `-j 1` wall | 9.89s | **9.02s**（逐次でも改善。並列パスだけの細工ではない） |
+
+per-analyzer テーブル（合計 CPU）:
+
+| analyzer | PRE | POST |
+|---|---:|---:|
+| **testifylint** | **1.12s / 19 actions（59ms/pkg）** | **0.08s / 19 actions（4.2ms/pkg）** |
+| buildir | 2.17s | 2.26s（誤差。未変更） |
+| revive | 0.71s | 0.72s |
+
+testifylint は **上位 20 の 2 位から圏外**に落ちました。
+`inspect preorder` の絶対値は 2.13s → 2.14s で不変（比率が 27.7% → 31.6% に上がるのは
+分母の analyze CPU が減ったから。**B-1 の期待値は変わっていない**ので注意）。
+
+**検証:**
+- findings **byte 一致**（prometheus `./...` の全 60 行の出力を pre/post で `diff` → 空）
+- 決定性 **3 回で md5 完全一致**（`493f0518…`、pre とも一致）
+- `cargo test -p guff-style` → **275 passed / 0 failed**（X-4 で直した testifylint 7 本を含む。
+  `implements_testify_suite` / `implements_testing_t` / `net/http.HandlerFunc` の 3 経路を通る）
+- tsdb regress **PASS**（wall 1.540s / RSS 1.24GB / both 4 / only 0,0）
+- full regress **PASS**（wall **3.970s** vs baseline 4.940s / RSS 7.60GB / both 20 / only 0,0）
+
+**prometheus 過剰適合について（この節の警告への回答）:**
+効果の**絶対値**は「testify を import するパッケージ数 × その AST サイズ」に比例するので
+コードベース依存です。ただし直したのは **O(nodes × packages) → O(packages) というアルゴリズム**で、
+prometheus 固有の定数ではありません。**型クロージャが大きいリポジトリほど効きます**
+（miss が最悪ケースなので、testify を薄く使うリポジトリでも効く）。
+
 ---
 
 ## B-4 — revive の `shared_walk` を全ルールに拡大
@@ -2343,10 +2425,10 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 
 第2弾の目標は次のとおりに設定します:
 
-| シナリオ | 着手時（2026-07-27） | **現在（B-0/B-8 後）** | 第2弾の目標 | 主な手段 |
+| シナリオ | 着手時（2026-07-27） | **現在（B-3 後 / 2026-07-28）** | 第2弾の目標 | 主な手段 |
 |---|---:|---:|---:|---|
-| cold（空キャッシュ） | 4.75s | **4.32〜4.37s** | **3.5s** | ~~P0-1~~, ~~P0-2~~, B-1, B-3, A-1 |
-| cold（seed hot） | 3.68s | 3.46s | **2.8s** | 同上 |
+| cold（空キャッシュ） | 4.75s | **3.96〜4.06s**（full regress 3.97s） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, B-1, A-1 |
+| cold（seed hot） | 3.68s | 3.46s（B-3 後は未再計測） | **2.8s** | 同上 |
 | warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, A-9 |
 | warm（デーモン） | — | — | **0.05s** | C-2 |
 | peak RSS（cold full） | 7.57GB | 7.58GB | **6.0GB** | C-8 の調査結果次第 |
