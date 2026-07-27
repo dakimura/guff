@@ -130,6 +130,13 @@ command -v go >/dev/null 2>&1 || die "go not found"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 [[ -x /usr/bin/time ]] || die "/usr/bin/time not found"
 
+# Refuse to measure on a contended machine (docs/PERF_TASKS_V2.md §S-1). The
+# gate's wall tolerance is ratio=1.0+0.15s, so a couple of stolen cores fail it
+# for reasons that have nothing to do with the code. Skip with PERF_GUARD=0.
+if [[ "${PERF_GUARD:-1}" != "0" && -x "$ROOT/scripts/perf-guard.sh" ]]; then
+  "$ROOT/scripts/perf-guard.sh" || die "machine is contended (set PERF_GUARD=0 to override)"
+fi
+
 GUFF="$(resolve_guff)"
 GOLANGCI="$(resolve_golangci)"
 PROM="$(resolve_prometheus)"
