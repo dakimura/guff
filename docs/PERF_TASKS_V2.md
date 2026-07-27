@@ -2598,3 +2598,34 @@ guff-ineffassign / guff-misspell / guff-plugin-example / guff-revive / guff-unus
 ゲートに追加した瞬間、そのクレートの must-flag テストが**静かに空配列を assert する側に
 回ります**（＝ X-2 / X-4 と同じ事故）。ゲートに analyzer を足すときは、
 **その analyzer のクレートの `tests/support.rs` が `imports` を埋めているか**を必ず先に見ること。
+
+### X-5 — `parse_v2_modernize_settings` が落ちている（**古い期待値。X-4 と同じ「数を assert した」事故**）
+
+**発見の経緯:** X-4 のあと `cargo test --workspace` を通したら、guff-style とは無関係に
+これ 1 本だけ残りました。**`main` で以前から落ちています**（変更を stash して確認済み）。
+
+**症状:** `crates/guff-lint/tests/settings_test.rs:979` で `left: 9 / right: 3`。
+
+**原因:** `to_guff_modernize()`（`crates/guff-lint/src/settings.rs`）は、
+ユーザーの `disable:` に **`SUITE_EXTRA_OFF` の 6 個を追記**します
+（`errorsastype` / `slicesdelete` / `bloop` / `importcomment` / `reflecttypeassert` / `stringscut`
+＝ guff は実装しているが golangci-lint が vendor する x/tools Suite v0.44 では有効化されない
+チェッカ。golangci と finding set を合わせるための意図的な既定 OFF）。
+よって fixture が 3 個 disable すると **3 + 6 = 9** になります。
+テストの `assert_eq!(opts.disable.len(), 3)` は `SUITE_EXTRA_OFF` 導入前の期待値でした。
+
+### DONE（2026-07-28）— **不変条件を assert する形に直した（`len()` の直値をやめた）。**
+
+`len() == 9` に書き換えるのは**同じ事故を繰り返す**（Suite の内容が変わるたびに落ちる）ので、
+代わりに次を assert:
+
+1. **ユーザーの 3 個が先頭に、順序どおり残る**（`take(3)` で比較）
+2. **suite-extra が追記されている**（`stringscut` の存在）
+3. **重複が入っていない**（sort+dedup して長さ不変）
+
+これで「ユーザー指定を落とす」「追記を忘れる」「二重に足す」の 3 方向を守れます。
+
+**検証:** `cargo test -p guff-lint --test settings_test` → **61 passed / 0 failed**。
+テストのみの変更。**これで `cargo test --workspace` が全 crate green になり、
+以後の性能タスクのチェックリスト「`cargo test --workspace` が通る」が実際に使えるようになりました**
+（それまでは常に赤で、回帰を隠していました）。

@@ -976,9 +976,34 @@ fn parse_v2_modernize_settings() {
     let opts = bag
         .get::<guff_style::ModernizeOptions>("modernize")
         .expect("modernize options");
-    assert_eq!(opts.disable.len(), 3);
-    assert!(opts.disable.iter().any(|d| d == "omitzero"));
-    assert!(opts.disable.iter().any(|d| d == "newexpr"));
+    // `to_guff_modernize` appends its `SUITE_EXTRA_OFF` list — the checkers guff
+    // implements that golangci-lint's vendored x/tools Suite does not enable — on
+    // top of whatever the user disabled. So the length is 3 + that list, and
+    // asserting a literal count made this test fail as soon as the list grew.
+    // Assert the invariants instead: the user's entries lead, in order, and the
+    // suite-extra defaults are appended without duplicating anything.
+    assert_eq!(
+        opts.disable
+            .iter()
+            .take(3)
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["omitzero", "newexpr", "any"],
+    );
+    assert!(
+        opts.disable.iter().any(|d| d == "stringscut"),
+        "suite-extra defaults must be appended: {:?}",
+        opts.disable
+    );
+    let mut deduped = opts.disable.clone();
+    deduped.sort();
+    deduped.dedup();
+    assert_eq!(
+        deduped.len(),
+        opts.disable.len(),
+        "duplicate disable entries: {:?}",
+        opts.disable
+    );
 }
 
 #[test]
