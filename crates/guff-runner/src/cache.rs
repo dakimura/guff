@@ -846,11 +846,18 @@ fn remap_pos(fset: &FileSet, filename: &str, offset: i64) -> Option<u32> {
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    // Lower-case, zero-padded hex via a lookup table — same output as
+    // `format!("{b:02x}")` but without a per-byte String alloc + format machinery.
+    // This is on the cache-key path (once per file/package hash), so it runs
+    // thousands of times per invocation. Mirrors guff-fmt's fmt_cache::hex_encode.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        s.push(HEX[(b >> 4) as usize] as char);
+        s.push(HEX[(b & 0xf) as usize] as char);
+    }
+    s
 }
 
 /// Partition packages into cache hits and misses; load hit diagnostics.
@@ -916,6 +923,24 @@ mod tests {
     use guff::position::FileSet;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    #[test]
+    fn hex_encode_matches_format() {
+        // The lookup-table encoder must be byte-for-byte identical to the old
+        // `format!("{b:02x}")`: cache keys are built from its output, so any
+        // divergence would silently invalidate every cached package.
+        for bytes in [
+            vec![],
+            vec![0x00],
+            vec![0x0f],
+            vec![0xff],
+            vec![0x00, 0x0f, 0xff, 0xa5, 0x5a],
+            (0u8..=255).collect::<Vec<_>>(),
+        ] {
+            let want: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            assert_eq!(hex_encode(&bytes), want, "mismatch for {bytes:?}");
+        }
+    }
 
     fn pkg_with_file(dir: &Path, name: &str, body: &str) -> Arc<Package> {
         let path = dir.join(name);
