@@ -336,7 +336,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | B-5 | 型の構造的インターン（hash-consing） | cold | 0.1〜0.3s? | 大 | **高** |
 | B-6 | 型チェッカの `Expr::clone` 除去 | cold | 0.1〜0.3s? | 中 | 中 |
 | B-7 | ソースバイトの一回読みを format/misspell と共有 | cold | 0.05〜0.2s? | 中 | 低 |
-| B-8 | warm の `go list` をパース済み形式でキャッシュ | **warm** | **0.1〜0.18s?** | 中 | 中 |
+| ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
 | B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
 
 ### Tier C — 大物・実験（時間と注意力に余裕があるときだけ）
@@ -1962,6 +1962,69 @@ S-3 で `load_graph` の内訳（サブプロセス / JSON パース / グラフ
 
 - `Package` に `#[derive(Serialize, Deserialize)]` を足すために構造を変える。
 - スキーマバージョンを付け忘れる。
+
+### DONE（2026-07-27）— **warm wall 0.35s → 0.20s（−0.15s / −42%）。ただし本文の想定とは別の場所だった。**
+
+**GO/NO-GO 計測の結果、本文が想定していた「JSON 再パース + グラフ再構築」は犯人ではありませんでした。**
+warm の `load_graph` 0.22s の内訳（既存の `=1` タイマーで足りた。S-3 は不要だった）:
+
+| 内訳 | warm 実測 | 正体 |
+|---|---:|---|
+| `golist invoke(main)` | 0.01s | **stdout キャッシュ hit**。サブプロセスは起動していない（＝バグではない） |
+| `golist parse+build` | **0.03s** | 14MB の JSON パース + 1792 pkg のグラフ構築。**本文が狙っていた部分。既に十分速い** |
+| `golist stdlib-export` | **0.15s** | **2 本目の `go list -export`（stdlib 243 pkg）。キャッシュが無かった** |
+
+つまり**本文どおりの B-8（パース済みグラフの bincode 化）は削減上限 0.03s ＝ ルール14 により NO-GO**。
+代わりに真の 0.15s、すなわち **stdlib export パスのキャッシュ**を実装しました。
+
+**実装（`crates/guff-packages/src/golist.rs`）:** `load_or_fetch_stdlib_exports()` を追加し、
+`import_path → .a` マップを `$GUFF_CACHE/stdlib_exports/<2桁>/<key>.json` に保存する。
+既存の `load_dep_export_cache`（third-party 用・`GUFF_EXPORT_REUSE` 専用）と同じ設計を、
+既定で走る stdlib 経路に持ち込んだ形です。
+
+- キーは既存の `golist_cache_key()` を再利用（dir / tests / mode / build flags /
+  go.mod+go.sum / env サブセットが既に入っている）＋ **スキーマ版 `stdlib-export-v1`**
+  ＋ **要求された stdlib パス集合（ソート済み）** ＋ **ツールチェイン指紋**。
+- **ツールチェイン指紋 `go_toolchain_fingerprint()` が必要な理由**: `.a` は GOCACHE に居るので
+  **Go を上げても古い `.a` はディスクに残る**。「パスが存在する」だけでは Go 上げ後に
+  旧 stdlib で型チェックしてしまう。`golist_cache_key` の env サブセットは GOROOT/GOVERSION が
+  **export されていて初めて**効く（通常されていない）ので、`PATH` から `go` を解決して
+  canonical path + size + mtime を鍵に混ぜる。stat 数回で済む（`go env GOVERSION` は
+  サブプロセス＝このキャッシュが消したいものそのもの）。
+- 破損 / 切り詰め / 非 JSON / 空マップ / **`.a` が消えている**のいずれも `None` を返して
+  素の `go list -export` にフォールバック（クラッシュしない）。書き込みは tmp+rename。
+- `--no-cache` では `golist_cache_enabled()` が false なのでキャッシュを読み書きしない
+  （cold ゲートの前提を壊さない。実測で `stdlib_exports/` が作られないことを確認）。
+
+**実測（クリーン環境、prometheus `./...`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| warm wall | 0.35〜0.37s | **0.20〜0.22s** |
+| warm `load_graph` | 0.21〜0.23s | **0.06〜0.07s** |
+| warm `golist stdlib-export` | 0.15〜0.16s | **0.00s**（cache hit 243 pkgs） |
+| warm peak RSS | 137〜143MB | 140〜146MB（誤差内。JSON マップ 32KB ぶん） |
+| cold wall / RSS | 変化なし（`--no-cache` は経路に入らない） | 〃 |
+
+**検証:** warm findings 5 回すべてバイト同一・20 件。cold findings は変更前とバイト一致。
+`-j 1` 交互 4 往復で pre 中央値 9.71s / new 9.72s（`--no-cache` なので当然だが確認済み）。
+tsdb PASS（wall 1.510s / RSS 1.260GB）、full PASS（wall 4.320s / RSS 7.581GB、
+guff_only=0 / golangci_only=0 / both 20）。単体テスト 2 本追加
+（roundtrip・破損拒否・`.a` 消失拒否・キーが集合と順序無関係であること）。baseline 未更新。
+
+**キャッシュ無効化の検証で分かった既存の別問題（B-8 の範囲外・未修正）:**
+
+- **既存ファイルの編集は正しく無効化される。** `web/api/v1/api.go` に misspell を仕込むと
+  `cache hits=285 misses=9` で 9 root だけ再解析し、21 件目として正しく検出。戻すと
+  出力がバイト単位で baseline に一致。
+- **しかし新規パッケージの追加は warm 実行で見落とされる。** `tmpb8/x.go` を足しても
+  `294 roots / 1792 pkgs` のまま検出されない。原因は `golist_cache_key()` が
+  **`.go` ファイルの集合を鍵に入れていない**こと（go.mod/go.sum しか見ない）＝
+  **`load_or_invoke_go` の既存 stdout キャッシュの問題で、B-8 の変更とは無関係**
+  （`load_or_invoke_go` は 1 行も触っていない）。
+  **これは性能ではなく正しさの問題なので、別タスクとして扱うべきです。**
+  直すなら「root パターンに含まれるディレクトリの mtime か .go ファイル一覧を鍵に混ぜる」
+  が筋。**着手するときは性能タスクと混ぜないこと（§0-9）。**
 
 ---
 

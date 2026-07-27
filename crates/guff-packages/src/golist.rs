@@ -147,7 +147,7 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             .map(|p| p.import_path.clone())
             .collect();
         if !stdlib.is_empty() {
-            let exports = fetch_package_exports(cfg, &stdlib)?;
+            let exports = load_or_fetch_stdlib_exports(cfg, &stdlib, timing)?;
             for pkg in response.packages.iter_mut() {
                 if let Some(export) = exports.get(&pkg.id) {
                     if !export.is_empty() {
@@ -236,6 +236,139 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
 
     let _ = mode; // mode informs golist_args; refine clears fields later.
     Ok(response)
+}
+
+/// Stdlib export paths, from disk cache when possible (PERF_TASKS_V2 B-8).
+///
+/// The stdlib `go list -export` is the *dominant* cost of a warm run: measured
+/// on prometheus `./...`, warm `load_graph` is 0.22s and this subprocess is
+/// 0.15s of it — 42% of the whole 0.36s warm wall. The main `go list` stdout is
+/// already cached (`load_or_invoke_go`), and re-parsing its 14MB of JSON costs
+/// only 0.03s, so this second subprocess is what warm runs actually wait on.
+///
+/// The answer is a pure function of the toolchain and the requested package
+/// set, both of which are in the key, so caching the `import_path → .a` map
+/// removes the subprocess entirely on a warm run.
+fn load_or_fetch_stdlib_exports(
+    cfg: &Config,
+    paths: &[String],
+    timing: bool,
+) -> Result<HashMap<String, String>, GoListError> {
+    if !golist_cache_enabled(cfg) {
+        return fetch_package_exports(cfg, paths);
+    }
+    let cache_path = stdlib_export_cache_path(cfg, paths);
+    if let Some(p) = cache_path.as_ref() {
+        if let Some(map) = load_stdlib_export_cache(p) {
+            if timing {
+                eprintln!(
+                    "guff:   golist stdlib-export cache hit ({} pkgs)",
+                    map.len(),
+                );
+            }
+            return Ok(map);
+        }
+    }
+    let map = fetch_package_exports(cfg, paths)?;
+    if let Some(p) = cache_path.as_ref() {
+        store_stdlib_export_cache(p, &map);
+    }
+    Ok(map)
+}
+
+/// Bump when the on-disk shape of the stdlib export cache changes; an old file
+/// then simply misses instead of being misread (`PERF_TASKS.md` Task 4 lesson).
+const STDLIB_EXPORT_CACHE_VERSION: &str = "stdlib-export-v1";
+
+fn stdlib_export_cache_path(cfg: &Config, paths: &[String]) -> Option<PathBuf> {
+    let dir = guff_cache_dir()?;
+    // Feed the version, the toolchain identity and the exact requested set
+    // through `golist_cache_key`, which already folds in dir/tests/mode, build
+    // flags, go.mod+go.sum and the `go list`-relevant env subset.
+    let mut args = Vec::with_capacity(paths.len() + 2);
+    args.push(STDLIB_EXPORT_CACHE_VERSION.to_string());
+    args.push(go_toolchain_fingerprint());
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    args.extend(sorted);
+    let key = golist_cache_key(cfg, &[], &args);
+    let prefix = key.get(..2).unwrap_or("00");
+    Some(
+        dir.join("stdlib_exports")
+            .join(prefix)
+            .join(format!("{key}.json")),
+    )
+}
+
+/// Identity of the `go` toolchain that produced the cached export paths.
+///
+/// "The cached `.a` still exists" is not sufficient on its own: the archives
+/// live in GOCACHE, which survives a toolchain upgrade, so after upgrading Go
+/// the previous stdlib archives can still be on disk and we would type-check
+/// against them. `golist_cache_key`'s env subset only covers this when GOROOT /
+/// GOVERSION happen to be exported, which they usually are not. So resolve the
+/// `go` binary on `PATH` (matching [`invoke_go`], which spawns plain `go`) and
+/// fingerprint it. A few `stat` calls; asking `go env GOVERSION` would cost a
+/// subprocess, which is the very thing this cache exists to avoid.
+fn go_toolchain_fingerprint() -> String {
+    let Some(path) = std::env::var_os("PATH") else {
+        return "go=unknown".to_string();
+    };
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("go");
+        // `metadata` follows symlinks, so version-manager shims report the
+        // real toolchain rather than the (stable) link.
+        let Ok(meta) = std::fs::metadata(&candidate) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        let real = std::fs::canonicalize(&candidate).unwrap_or(candidate);
+        return format!("go={} len={} mtime={}", real.display(), meta.len(), mtime);
+    }
+    "go=unknown".to_string()
+}
+
+/// Load a cached stdlib export map, or `None` when it is missing, unreadable,
+/// corrupt, or references an archive that is no longer on disk (GOCACHE is
+/// cleaned independently of `GUFF_CACHE`). Every failure falls back to a fresh
+/// `go list -export` — a bad cache file must never abort the run.
+fn load_stdlib_export_cache(path: &Path) -> Option<HashMap<String, String>> {
+    let bytes = std::fs::read(path).ok()?;
+    let map: HashMap<String, String> = serde_json::from_slice(&bytes).ok()?;
+    if map.is_empty() {
+        return None;
+    }
+    if map
+        .values()
+        .any(|v| v.is_empty() || !Path::new(v).exists())
+    {
+        return None;
+    }
+    Some(map)
+}
+
+fn store_stdlib_export_cache(path: &Path, map: &HashMap<String, String>) {
+    if map.is_empty() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(bytes) = serde_json::to_vec(map) else {
+        return;
+    };
+    // tmp + rename so a concurrent reader never sees a half-written file.
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
 }
 
 /// Second `go list -export` for hybrid source mode: resolve export `.a` paths
@@ -1178,6 +1311,78 @@ mod tests {
             ..cfg
         };
         assert!(!golist_cache_enabled(&cfg3));
+    }
+
+    #[test]
+    fn stdlib_export_cache_roundtrips_and_rejects_bad_files() {
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-stdlib-export-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        std::fs::create_dir_all(&tmp).expect("mkdir");
+        let path = tmp.join("exports.json");
+
+        // A real archive path must exist on disk for the load to be accepted,
+        // so point at a file we create ourselves.
+        let archive = tmp.join("fmt.a");
+        std::fs::write(&archive, b"not really an archive").expect("write archive");
+        let mut map = HashMap::new();
+        map.insert("fmt".to_string(), archive.display().to_string());
+
+        store_stdlib_export_cache(&path, &map);
+        assert_eq!(load_stdlib_export_cache(&path).as_ref(), Some(&map));
+
+        // Archive deleted out from under us (GOCACHE cleaned) → miss, not a
+        // stale hit against a vanished path.
+        std::fs::remove_file(&archive).expect("rm archive");
+        assert!(load_stdlib_export_cache(&path).is_none());
+
+        // Corrupt / truncated / empty content → miss, never a panic.
+        std::fs::write(&path, b"{\"fmt\": \"/tmp/tr").expect("write truncated");
+        assert!(load_stdlib_export_cache(&path).is_none());
+        std::fs::write(&path, b"not json at all").expect("write garbage");
+        assert!(load_stdlib_export_cache(&path).is_none());
+        std::fs::write(&path, b"{}").expect("write empty map");
+        assert!(load_stdlib_export_cache(&path).is_none());
+
+        // Missing file → miss.
+        std::fs::remove_file(&path).expect("rm cache");
+        assert!(load_stdlib_export_cache(&path).is_none());
+
+        // An empty map is not worth a file.
+        store_stdlib_export_cache(&path, &HashMap::new());
+        assert!(!path.exists());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn stdlib_export_cache_key_tracks_requested_set_and_toolchain() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/golist");
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS,
+            dir,
+            disable_cache: false,
+            ..Config::default()
+        };
+        let a = stdlib_export_cache_path(&cfg, &["fmt".into(), "io".into()]);
+        let b = stdlib_export_cache_path(&cfg, &["io".into(), "fmt".into()]);
+        let c = stdlib_export_cache_path(&cfg, &["fmt".into()]);
+        // Order must not matter (the set is sorted into the key) …
+        assert_eq!(a, b);
+        // … but the membership must.
+        assert_ne!(a, c);
+        if let Some(p) = a {
+            assert!(p.to_string_lossy().contains("stdlib_exports"));
+        }
+
+        // The fingerprint is stable within a run; either it found `go` on PATH
+        // or it says so explicitly — never an empty string that would silently
+        // key every toolchain the same.
+        let fp = go_toolchain_fingerprint();
+        assert_eq!(fp, go_toolchain_fingerprint());
+        assert!(fp.starts_with("go="), "unexpected fingerprint: {fp}");
     }
 
     #[test]
