@@ -12,14 +12,18 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / P0-1 / P0-2 / A-5 / B-0 / B-8 / X-1 / X-2。** 各タスク節末尾の `### DONE` に実測値があります。
+> **完了済み: S-1 / S-2 / P0-1 / P0-2 / A-5 / B-0 / B-8 / X-1 / X-2 / X-4。**
+> **NO-GO と判定済み: A-2**（理由は §A-2 と §5 の表）。各タスク節末尾の `### DONE` に実測値があります。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は **X-3（計測作法）** のみ。
-> ~~X-1 / X-2 は DONE~~。とくに:
+> ~~X-1 / X-2 / X-4 は DONE~~。とくに:
 >
 > - **X-3 は計測の前提です**: この開発機は単発で数十秒スパイクします。
 >   そして **A/B/A/B の交互測定をしないと、存在しない回帰が見えます**（実例あり）。
+> - **S-2（samply）は済んでいるので、GO/NO-GO は推測せず測れます。**
+>   `scripts/perf-profile.py` でブラウザ無しに self / inclusive / callers を出せます（§S-2 の DONE 参照）。
+>   実際にこれで A-2 を NO-GO に落とし、B-3 の真犯人を一発で特定しました。
 
 ---
 
@@ -2517,3 +2521,80 @@ B-0 / B-8 の計測中、`cold -j 1` が 9.7s で安定している最中に **1
 B-0 でこれを踏みました。逐次バッチだと **+0.27s の「回帰」**が見えましたが、
 交互測定に切り替えると **post 4.35s / pre 4.36s ＝ 差なし**にきれいに消えました。
 0.1s 単位を争うタスク（Tier A のほぼ全部）では、バッチ測定は**存在しない回帰を捏造します。**
+
+### X-4 — `guff-style` の `checks_test` が 19 本落ちている（**X-2 と同一原因**）
+
+**発見の経緯:** B-3（testifylint）の findings 安全網を用意しようとして踏みました。
+**prometheus では testifylint の検出が 0 件**なので（実測: modernize 16 / govet 4 の計 20 件のみ）、
+testifylint を触るタスクの findings 検証は **`cargo test -p guff-style` が唯一の安全網**です。
+そこが落ちていると、B-3 は「検証できないので着手できない」になります。
+
+**症状:** `cargo test -p guff-style` で **19 本 failed / 256 passed**。うち 7 本が testifylint。
+
+```
+clickhouselint_flags_missing_err_and_batch_close   sloglint_flags_mixed_args_by_default
+exptostd_flags_exp_constraints                     sloglint_settings_static_msg_forbidden_keys_and_attr_only
+exptostd_flags_exp_maps                            testifylint_disable_all_then_enable_subset
+exptostd_flags_exp_slices_import_only_when_...     testifylint_flags_blank_imports
+ginkgolinter_flags_common_assertion_mistakes       testifylint_flags_common_anti_patterns
+ginkgolinter_respects_settings                     testifylint_flags_mock_expect
+loggercheck_custom_rules_from_settings             testifylint_go_require_ignore_http_handlers
+loggercheck_flags_odd_kv_pairs                     testifylint_require_error_fn_pattern
+loggercheck_require_string_key_and_noprintflike    testifylint_suite_thelper_when_enabled
+zerologlint_flags_undispatched_events
+```
+
+**原因: X-2 と 1 文字違いで同じ。** `crates/guff-style/tests/support.rs:114` が
+`imports: HashMap::new()` のままで、`run_on_packages` の import ゲート
+（`analyzer_applies_to_package` → `package_imports_prefix`）が空マップを見て
+**analyzer をそもそもスケジュールしません。** 落ちている 19 本は
+「import ゲートを持つ analyzer」と完全に一致します。X-2 は `guff-govet` 側だけを直しました。
+
+**本番は壊れていません**（X-2 と同じ理由。`Package.imports` は `go list` 由来で埋まる）。
+
+### DONE（2026-07-28）— **19 本 → 0 本。275/275 PASS。ゲート破壊プローブ確認済み。**
+
+`crates/guff-style/tests/support.rs` の `typecheck_with_deps` で、パース済み
+`main_file.imports` と `deps` の import path から `Package.imports` を埋める
+（値は `Package::default()` の stub。ゲートはキーしか見ない）。X-2 の実装をそのまま移植し、
+`unquote_import_path` も同じものをローカルに置いた。
+
+**そのうえで露出した 1 件は「テストの期待値が間違っていた」ものだった:**
+`testifylint_flags_common_anti_patterns` は `messages.contains("zero")` を
+**あるはず**として assert していましたが、`zero` チェッカは
+`IMPLEMENTED`（`crates/guff-style/src/testifylint.rs`）から**意図的に外されています** —
+golangci-lint 2.12 が vendor する testifylint は v1.6.4 で `zero` を持たないため、
+有効化すると `guff_only` 差分が出ます。19 本が「最初の assert で落ちていた」ので、
+この誤りは**ずっと隠れていました**。
+
+→ assert を**否定形に反転**しました（`!messages.any(|m| m.starts_with("zero:"))`）。
+`bad.go:50` に `assert.True(t, ts.IsZero())`（`check_zero` が拾う形）があるので
+**空振りの assert ではなく**、`zero` を誤って既定 ON にしたらここで落ちます。
+つまり golangci 互換の判断を守る回帰ガードになりました。
+
+**検証:**
+- `cargo test -p guff-style` → **275 passed / 0 failed**（before: 256/19）
+- ゲート破壊プローブ: `action.rs:652` の `"testifylint" => package_imports_prefix(...)` を
+  一時的に `=> false` にして再実行 → **testifylint の 7 本がちょうど落ちる**（他は無傷）。
+  戻すと 275/275。よってこのテスト群は実際にゲート通過を見張っている。
+- 本番コードは未変更（`crates/guff-style/tests/` のみ）。findings / 性能への影響なし。
+
+**残っている同種の穴（未修理。ただし現時点で症状は出ていない）:**
+
+```bash
+rg -n 'imports: HashMap::new\(\)' crates/*/tests/
+```
+
+2026-07-28 時点で **10 クレートがまだ空マップのまま**です:
+guff-comment / guff-dupl / guff-errcheck / guff-gostaticanalysis / guff-import /
+guff-ineffassign / guff-misspell / guff-plugin-example / guff-revive / guff-unused。
+
+**それでもこの 10 個は今テストが通っています。** `analyzer_applies_to_package`
+（`crates/guff-runner/src/action.rs:652` 付近）の import ゲートは **analyzer 名の
+ホワイトリスト**なので、ゲートに載っていない analyzer は空マップでも素通りします。
+つまり「空マップ ＝ 壊れている」ではなく、**「空マップ ＋ ゲート対象 ＝ 壊れている」**です。
+
+**したがって危険なのは将来です:** これら 10 クレートのどれかの analyzer を後から
+ゲートに追加した瞬間、そのクレートの must-flag テストが**静かに空配列を assert する側に
+回ります**（＝ X-2 / X-4 と同じ事故）。ゲートに analyzer を足すときは、
+**その analyzer のクレートの `tests/support.rs` が `imports` を埋めているか**を必ず先に見ること。

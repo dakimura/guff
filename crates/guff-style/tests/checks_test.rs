@@ -4762,9 +4762,15 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("float-compare")),
         "float-compare: {messages:?}"
     );
+    // `zero` must stay *off*: golangci-lint 2.12 vendors testifylint v1.6.4,
+    // which does not ship that checker, so `IMPLEMENTED` deliberately omits it
+    // (see the comment there). `bad.go:50` has `assert.True(t, ts.IsZero())`,
+    // which `check_zero` would flag, so this asserts the gate rather than the
+    // absence of a test case — enabling `zero` by default would show up here
+    // instead of as `guff_only` findings against golangci-lint.
     assert!(
-        messages.iter().any(|m| m.contains("zero")),
-        "zero: {messages:?}"
+        !messages.iter().any(|m| m.starts_with("zero:")),
+        "zero must stay disabled to match golangci-lint: {messages:?}"
     );
     assert!(
         messages.iter().any(|m| m.contains("negative-positive")),

@@ -90,6 +90,25 @@ pub fn typecheck_with_deps(
         );
     }
 
+    // Populate `imports` from the AST so `run_on_packages`' import gate
+    // (`analyzer_applies_to_package` → `package_imports_prefix`) can see them.
+    // The gate only inspects keys; stub values are enough. Without this, every
+    // gated analyzer (testifylint, exptostd, sloglint, …) is silently skipped
+    // and its "must flag" tests assert on an empty diagnostic list. Same fix as
+    // X-2 made for the guff-govet harness; see docs/PERF_TASKS_V2.md §X-4.
+    let mut imports = HashMap::new();
+    for imp in &main_file.imports {
+        let path = unquote_import_path(&imp.path.value);
+        if !path.is_empty() {
+            imports.insert(path, Arc::new(Package::default()));
+        }
+    }
+    for (import_path, _) in deps {
+        imports
+            .entry((*import_path).to_string())
+            .or_insert_with(|| Arc::new(Package::default()));
+    }
+
     Arc::new(Package {
         id: pkg_id.into(),
         pkg_path: pkg_id.into(),
@@ -111,10 +130,22 @@ pub fn typecheck_with_deps(
         }),
         ill_typed,
         errors,
-        imports: HashMap::new(),
+        imports,
         types_sizes: Some(default_sizes()),
         ..Package::default()
     })
+}
+
+/// Strip matching outer `"` / `` ` `` from an import path literal (AST keeps quotes).
+fn unquote_import_path(lit: &str) -> String {
+    let bytes = lit.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if (first == b'"' && last == b'"') || (first == b'`' && last == b'`') {
+            return lit[1..lit.len() - 1].to_string();
+        }
+    }
+    lit.to_string()
 }
 
 pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
