@@ -52,6 +52,15 @@ codegen-units = 1
 panic = "unwind"
 strip = true
 
+# Sampling-profiler profile (samply / Instruments). Identical codegen to
+# `release` but keeps symbols so stacks are readable. Never measure regress wall
+# times with this profile: `strip = false` / `debug = 1` change the binary size,
+# so the numbers do not match `target/release/guff`. See docs/DEVELOPMENT.md §9.3.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 1
+
 # Faster iteration for benchmarks without full release build times.
 [profile.bench]
 inherits = "release"

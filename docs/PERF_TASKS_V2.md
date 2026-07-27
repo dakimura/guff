@@ -496,6 +496,79 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 コード変更なし。`cargo build --release` が従来どおり通ること、
 `./regress/run.sh` が PASS することだけ確認。
 
+### DONE（2026-07-28）— **`[profile.profiling]` + `scripts/perf-profile.py`（ヘッドレス集計）。B-3 の真犯人を即座に特定できた。**
+
+**入れたもの:**
+
+1. ルート `Cargo.toml` に `[profile.profiling]`（`inherits = "release"` + `strip = false` /
+   `debug = 1`）。`[profile.release]` は 1 文字も変えていない。
+   ビルド `cargo build --profile profiling` → `target/profiling/guff`（2m01s / 20.7MB）。
+2. `samply 0.13.1` を `cargo install samply` で導入。
+3. **`scripts/perf-profile.py`（新規）** — samply プロファイルを**ブラウザなしで**集計する。
+   手順書どおり `samply record` は Firefox Profiler UI を開くが、**エージェント/SSH/CI では
+   UI を開けないので数字が取り出せない**。これが無いと S-2 は「取得はできるが読めない」で終わる。
+
+**`perf-profile.py` の使い方（`--unstable-presymbolicate` が必須）:**
+
+```bash
+cd .../prometheus
+CACHE=$(mktemp -d)
+GUFF_CACHE="$CACHE" samply record --save-only --unstable-presymbolicate \
+  -o /tmp/guff.json.gz -- .../target/profiling/guff run --no-cache -c .golangci.yml ./... >/dev/null
+rm -rf "$CACHE"
+
+.../scripts/perf-profile.py /tmp/guff.json.gz --top 35          # self CPU 上位
+.../scripts/perf-profile.py /tmp/guff.json.gz --inclusive 'Scanner|testifylint'
+.../scripts/perf-profile.py /tmp/guff.json.gz --callers 'memmove' --depth 3
+.../scripts/perf-profile.py /tmp/guff.json.gz --threads
+```
+
+- `--unstable-presymbolicate` を付けないと `.syms.json` サイドカーが出ず、
+  **全フレームが `0x1684` のような生アドレスになって読めない**（実際に踏んだ）。
+- プロファイル側のライブラリ ID は Breakpad 形式（`05160B71CC51…0`）、サイドカー側は
+  ダッシュ付き小文字 UUID なので、スクリプト内で変換している。ここを間違えると
+  「シンボルが 1 個も解決しない」表が出る（実際に踏んだ）。
+- 時間は各サンプルの `threadCPUDelta`（µs）で重み付けしている。**したがって出る数字は
+  「全ワーカースレッドの合計 CPU」で、wall ではない**（§1.6）。`go list` 待ちや rayon の
+  バリアで寝ているスレッドは ~0 しか計上されない。**この数字を wall として引用してはいけない。**
+
+**実測（cold prometheus `./...`、合計 CPU 19.29s、self 上位）:**
+
+| CPU | % | symbol | 関連タスク |
+|---:|---:|---|---|
+| 1.895s | 9.8% | `_platform_memmove` | （下記の内訳参照） |
+| 0.916s | 4.8% | `guff::walk::preorder_stack::rec` | **B-1** |
+| 0.785s | 4.1% | `guff::scanner::Scanner::scan` | A-3 |
+| **0.767s** | **4.0%** | **`<core::str::pattern::StrSearcher>::new`** | **B-3（真犯人）** |
+| 0.623s | 3.2% | `guff_ssa::ssautil::load::build_package_for_analysis` | B-2 |
+| 0.608s+0.496s | 5.7% | `BuildHasher::hash_one` + `sip::Hasher::write` | **A-1（SipHash が 1.1s）** |
+| 0.366s+0.320s | 3.6% | `drop_in_place<ast::Expr>` + `Expr::clone` | B-6 |
+| 0.345s | 1.8% | `sha2::sha256::compress256` | （キャッシュ鍵。仕様） |
+| 0.341s | 1.8% | `guff::position::File::position_internal` | A-4 |
+
+`memmove` の呼び出し元内訳（`--callers 'memmove|memcpy' --depth 3`）:
+
+| CPU | 呼び出し元 |
+|---:|---|
+| 0.542s | `RawVec::grow_one`（`Vec` の再確保。`with_capacity` 不足） |
+| 0.267s | `guff_ssa::arena::Arena::alloc` ← `member_from_object` |
+| 0.118s | `ast::Ident::clone` ← `Expr::clone` |
+| 0.068s | `Scanner::scan` ← `Parser::next0` |
+
+つまり **`memmove` の 9.8% は「1 箇所の巨大コピー」ではなく `Vec` 成長とアリーナ確保の裾野**。
+A-2 が狙っていた `src.to_vec()` は**この表に出てこない**（→ A-2 の NO-GO 判定に直結）。
+
+**注意（この手順の限界）:**
+- `profiling` ビルドの wall を regress ゲートに使ってはいけない（手順書どおり）。ゲートは常に
+  `target/release/guff`。
+- `lto = "fat"` なので**インライン化された小関数は呼び出し元に吸収されて表に出ない。**
+  「表に無い＝コストが無い」ではない。`Scanner::init` のように**シンボルが残っているもの**については
+  inclusive 0.024s を信用してよいが、完全に消えた関数は `--callers` で親側から追うこと。
+
+**検証:** `cargo build --release` 従来どおり通る / tsdb regress **PASS**（wall 1.500s vs baseline
+1.740s、RSS 1.27GB vs 1.32GB、both 4 / only 0,0）。guff のコードは 1 行も触っていないので
+findings 検証は不要。
+
 ---
 
 ## S-3 — `GUFF_DEBUG_CACHE=2` で phase 内訳を細分化

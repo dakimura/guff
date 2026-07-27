@@ -574,6 +574,45 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 - そのセッションで何をしたか → [`SESSION-LOG.md`](SESSION-LOG.md) の表の先頭に 1 行。
 - 冗長になりがちな詳細（設定キー全列挙・完了履歴）は本書に書かず、コード内 `// DEFERRED:` と `SESSION-LOG.md` / git に委ねる。
 
+### 9.4 プロファイリング（samply）
+
+phase タイマー（`GUFF_DEBUG_CACHE=1`）は「どの phase が遅いか」までしか分からない。
+**関数レベルでどこに時間が行っているか**を見るには `samply`（macOS / Linux 両対応の
+サンプリングプロファイラ、UI は Firefox Profiler）を使う。
+
+```bash
+cargo install samply                    # 初回のみ
+cargo build --profile profiling         # → target/profiling/guff
+
+cd /path/to/prometheus
+CACHE=$(mktemp -d)
+GUFF_CACHE="$CACHE" samply record -- \
+  /path/to/guff/target/profiling/guff run --no-cache -c .golangci.yml ./... >/dev/null
+rm -rf "$CACHE"                         # 一時キャッシュの後片付けを忘れない
+```
+
+`samply record` はプロファイル取得後にローカルサーバを立ち上げてブラウザを開く。
+ブラウザを開かずファイルだけ残すなら `samply record --save-only -o profile.json.gz -- …`。
+
+**専用プロファイル `[profile.profiling]`（ルート `Cargo.toml`）を使う理由**:
+`[profile.release]` は `strip = true` なのでシンボルが消えてスタックが読めない。
+`profiling` は `inherits = "release"` に `strip = false` / `debug = 1` を足しただけで、
+最適化（`opt-level = 3` / `lto = "fat"` / `codegen-units = 1`）は release と同一。
+**`[profile.release]` 自体は変更しないこと** — `lto` / `codegen-units` / `panic` は意図して
+選ばれている（§43 のコメント参照）。
+
+**落とし穴（守らないと結論を間違える）**:
+
+- **`profiling` ビルドの wall を regress ゲートや PERF タスクの数値に使ってはいけない。**
+  `strip=false` / `debug=1` でバイナリサイズが変わり、release と数字が一致しない。
+  ゲートは常に `target/release/guff`。
+- guff は並列実行なので、フレームグラフは**スレッドごとに分けて見る**。
+  「全スレッドの合計 CPU」と「wall」を混同しない（合計 CPU が 6s でも wall は 1s かもしれない）。
+- 計測前に `./scripts/perf-guard.sh` を通す（他プロセスに CPU を食われていると比率まで歪む）。
+
+詳細な計測プロトコル（cold / warm の定義、findings 同一性の検証、GO/NO-GO 判定）は
+[`PERF_TASKS.md`](PERF_TASKS.md) §1〜§2 と [`PERF_TASKS_V2.md`](PERF_TASKS_V2.md) §1〜§2 にある。
+
 ---
 
 ## 10. セッション記録
