@@ -16,8 +16,9 @@
 > **NO-GO と判定済み: A-2**（理由は §A-2 と §5 の表）。各タスク節末尾の `### DONE` に実測値があります。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
-> を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は **X-3（計測作法）** のみ。
-> ~~X-1 / X-2 / X-4 は DONE~~。とくに:
+> を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
+> **X-3（計測作法）** と **X-6（`guff-staticcheck` の 3 本。既存の false positive / 検出漏れ）**。
+> ~~X-1 / X-2 / X-4 / X-5 は DONE~~。とくに:
 >
 > - **X-3 は計測の前提です**: この開発機は単発で数十秒スパイクします。
 >   そして **A/B/A/B の交互測定をしないと、存在しない回帰が見えます**（実例あり）。
@@ -2707,7 +2708,37 @@ guff-ineffassign / guff-misspell / guff-plugin-example / guff-revive / guff-unus
 
 これで「ユーザー指定を落とす」「追記を忘れる」「二重に足す」の 3 方向を守れます。
 
-**検証:** `cargo test -p guff-lint --test settings_test` → **61 passed / 0 failed**。
-テストのみの変更。**これで `cargo test --workspace` が全 crate green になり、
-以後の性能タスクのチェックリスト「`cargo test --workspace` が通る」が実際に使えるようになりました**
-（それまでは常に赤で、回帰を隠していました）。
+**検証:** `cargo test -p guff-lint --test settings_test` → **61 passed / 0 failed**。テストのみの変更。
+
+> ⚠️ **訂正（同日）:** この DONE を書いた時点では「これで `cargo test --workspace` が全 crate green」と
+> 判断しましたが、**間違いでした。** `cargo test` は**最初に失敗したテストバイナリで打ち切る**ため、
+> guff-lint より後に走る `guff-staticcheck` に到達していなかっただけです。
+> 直した結果その先に進めるようになり、**新たに 3 本の既存失敗が露出しました（→ X-6）。**
+> **教訓: `cargo test --workspace` の「失敗 1 本」を信用してはいけない。
+> 全体像を見るには `cargo test --workspace --no-fail-fast` を使うこと。**
+
+### X-6 — `guff-staticcheck` の `checks_test` が 3 本落ちている（**未修理。X-4 / X-5 とは別原因**）
+
+**発見の経緯:** X-5 を直したことで `cargo test --workspace` が guff-staticcheck まで到達し、
+**それまで fail-fast に隠れていた** 3 本が見えるようになりました。
+
+```
+sa4010_allows_ok_cases            ← ok fixture に対して誤検出（false positive）
+sa4017_allows_ok_cases            ← 同上
+sa5011_flags_possible_nil_deref   ← 検出できていない（空配列）
+```
+
+**`main` で以前から落ちています**（B-3 の変更を stash して確認済み。325 passed / 3 failed で同一）。
+**X-2 / X-4 の import ゲート問題ではありません** —
+`crates/guff-staticcheck/tests/support.rs:102` は既に `imports` を埋めています。
+
+**性能タスクとは無関係な linter の挙動の問題**なので、§0-9 に従って**あえて直していません。**
+いずれも SSA / CFG ベースのチェックなので、修理はリスクが高く、独立したタスクにするべきです。
+
+**本番の影響は限定的**と考えられます: full regress は `guff_only=0 / golangci_only=0`
+（golangci-lint と完全一致）を維持しているので、**prometheus の実コードでは差が出ていません。**
+つまり fixture レベルの取りこぼし／誤検出です。ただし SA5011 は
+「nil deref を見逃す」方向なので、**別リポジトリでは検出漏れになりえます。**
+
+**着手するときの注意:** `cargo test --workspace --no-fail-fast` で全体を見ること
+（`--no-fail-fast` 無しだと、この 3 本の手前で別の失敗が出た瞬間また見えなくなります）。
