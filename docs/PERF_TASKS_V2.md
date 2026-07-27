@@ -164,7 +164,101 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 とはいえ 2.05 は合格ライン 2.5 にそこそこ近いので、**wall が 0.2s 単位で効くタスク
 （A-5, A-9, B-8 など warm 系）ではさらに静かな状態を作ること。**
 
-### 1.3 現在の phase 内訳（**2026-07-27 クリーン再計測**。ここが「攻める場所」の地図）
+### 1.3-post 現在の phase 内訳（**2026-07-28 / B-3 後のクリーン実測。こちらが最新の「地図」**）
+
+> 下の §1.3 は**着手時（2026-07-27）の記録**として残してあります。差分を見たいとき以外は、
+> **この節の数字を使ってください。**
+
+**cold（空 `GUFF_CACHE`, `--no-cache`）— wall 3.96〜4.06s / RSS 7.42〜7.60GB / findings 20**
+
+| phase | wall | 2026-07-27 比 | 何をしているか | 次に攻めるタスク |
+|---|---:|---:|---|---|
+| load_graph（`go list`） | **1.23s** | −0.02 | 外部プロセス待ち（`golist invoke(main)` 1.01s ＝ 14.1MB の stdout / `stdlib-export` 0.16s / パース 0.03s / `connect_imports` 0.01s）。**CPU は遊んでいる** | C-3 のみ（要特大工数） |
+| typecheck_roots | **1.58s** | −0.29 | seed + target | A-1, B-5, B-6, P0-3 |
+| **format_checks** | **1.68s**（並列に重畳、待ち 0.00s） | −0.07 | 2 スレッド専用プール | **P0-1 は「wall に効かない」で終わっている。重畳が崩れたらここが critical path** |
+| analyze | **0.75s** | **−0.47** | 全 analyzer | **B-1**（`preorder_stack` が self 0.87s / inclusive 2.81s）, B-2, B-4 |
+| issues+filter | 0.03s | — | | 触らない |
+| print | 0.00s | — | | 触らない |
+
+**cold seed-hot（`GUFF_CACHE` 永続, `--no-cache`）— wall 3.10s / RSS 7.47GB**
+
+| phase | wall |
+|---|---:|
+| load_graph | 1.09s |
+| typecheck_roots | 0.87s |
+| analyze | 0.75s |
+| **format_checks** | **1.78s**（重畳、待ち 0.00s） |
+
+> ⚠️ **seed-hot では format_checks 1.78s が wall 3.10s の 57%。**
+> 直列 phase の合計は 1.09+0.87+0.75+0.03 = **2.74s** で、format はまだ内側に隠れています
+> （t=0 に開始して 1.78s で終わるため）。**しかし余裕は 0.96s しかありません。**
+> **cold を 1s 詰めた瞬間に format が critical path になり、そこから先は
+> 「analyze / typecheck をどれだけ速くしても wall が動かない」領域に入ります。**
+> B-1 や A-1 に着手する前に、**その改善が format の内側に収まるかを確認**してください。
+
+**warm（キャッシュ hot）— wall 0.21s ×3 / RSS 0.14GB（B-8 / X-1 後と同一。B-3 は warm に効かない）**
+
+| phase | wall |
+|---|---:|
+| load_graph | 0.07s |
+| cache setup+partition | 0.09s（294 hit / 0 miss） |
+| issues+filter | 0.03s |
+| format_checks | 0.07s |
+
+**analyze の中身（合計 CPU、B-3 後の上位 12）:**
+
+```
+                         buildir      2.26s      66 actions   ← 1 pkg あたり 34ms。単独で最重量
+                          revive      0.72s     293 actions
+                        misspell      0.45s     293 actions
+                      whitespace      0.27s     293 actions
+                          inline      0.27s     293 actions
+                       modernize      0.26s     293 actions
+                       copylocks      0.20s     293 actions
+                       typeindex      0.20s     293 actions
+                        gocritic      0.12s      66 actions
+                          SA4023      0.11s      66 actions
+                          SA5001      0.10s     293 actions
+                      composites      0.09s     293 actions
+（testifylint は 1.12s → 0.08s になり圏外。§B-3 参照）
+```
+
+**`inspect preorder`: 12361 calls / 54,385,011 nodes / 2.14s CPU（analyze CPU の 31.6%）。**
+絶対値は B-3 前後で不変（2.13s → 2.14s）で、**比率が上がったのは分母が縮んだだけ**です。
+**B-1 の期待値（wall 0.15〜0.25s）は変わっていません。**
+
+**samply の self CPU 上位（合計 18.50s。B-3 前は 19.29s）:**
+
+| CPU | % | symbol | タスク |
+|---:|---:|---|---|
+| 1.942s | 10.5% | `_platform_memmove`（内訳: `RawVec::grow_one` / SSA アリーナ / `Ident::clone`） | A-3 と同じ「小さい確保が大量」領域 |
+| 0.874s | 4.7% | `guff::walk::preorder_stack::rec` | **B-1** |
+| 0.789s+0.474s | 6.8% | `Scanner::scan` + `Scanner::next` | **A-3** |
+| 0.579s | 3.1% | `guff_ssa::ssautil::load::build_package_for_analysis` | B-2 |
+| **0.574s+0.514s** | **5.9%** | **`BuildHasher::hash_one` + `sip::Hasher::write`（SipHash）** | **A-1** |
+| 0.461+0.309+0.308s | 5.8% | `mi_free` / `mi_malloc_aligned` / `mi_page_free_list_extend` | アロケータ。A-3 と連動 |
+| 0.328s+0.296s | 3.4% | `drop_in_place<ast::Expr>` + `Expr::clone` | B-6 |
+| 0.323s | 1.7% | `sha2::sha256::compress256` | キャッシュ鍵。仕様 |
+| 0.234s+0.245s | 2.6% | `pthread_mutex_init` + `pthread_mutex_unlock` | A-4 / C-6 |
+
+**A-1 の GO/NO-GO 材料（測ってあります）:** SipHash 合計 1.088s ＝ wall 換算 **約 0.18s** で
+基準は超えます。ただし `--callers` で割ると**呼び出し元が分散**しています:
+
+| CPU | 呼び出し元 |
+|---:|---|
+| 0.290s | `build_package_for_analysis` ← `buildir::run`（SSA 構築） |
+| 0.148s | `member_from_object` ← `build_package_for_analysis` |
+| 0.104s | `guff::token::lookup` ← `Scanner::scan`（**キーワード表。`match` にすれば HashMap 不要**） |
+| 0.089s | `Arc::drop_slow` ← `drop_in_place<ast::File>` |
+| 0.082s | `collect_objects` ← `Checker::check_files` |
+| （以下 0.06s 未満が延々と続く） |
+
+つまり **「1 箇所替えれば終わり」ではない**ので、§A-1 の指示どおり **crate ごと・1 コミットずつ**、
+かつ **guff-ssa（合計 0.44s）から**着手するのが最も効率的です。
+**その前に §0-12（iteration order 依存の洗い出し）を必ず終わらせること** — SSA の構築順が
+変わると findings が動く可能性があります。
+
+### 1.3 phase 内訳（**2026-07-27 クリーン計測 / 着手時の記録。最新は §1.3-post**）
 
 **cold（空 `GUFF_CACHE`, `--no-cache`）— wall 4.71〜4.79s / RSS 7.60〜7.72GB / findings 20**
 
@@ -204,7 +298,7 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 warm を詰めるなら **`go list` の 0.21s（B-8）が主戦場**です。ここを潰さない限り warm は
 0.2s を割れません。**逆に P0-1 は warm には効きません**（warm の format は 0.09s）。
 
-### 1.4 analyze の中身（**2026-07-27 クリーン実測**、worker 横断の合計 CPU）
+### 1.4 analyze の中身（**2026-07-27 クリーン実測 / 着手時の記録。最新は §1.3-post**）
 
 **この表は wall ではありません**（`PERF_TASKS.md` §1.6 の注意を再読すること）。
 並列に走るので実 wall はこの 1/6 くらいです（実際 analyze の wall は 1.20s）。
@@ -370,7 +464,13 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | C-7 | 依存 seed のプリウォーム（バックグラウンド投機実行） | cold | ? | 大 | 中 |
 | C-8 | メモリ削減（7.6GB → 4GB）で並列度を上げる | cold | ? | 大 | 中 |
 
-**推奨着手順:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
+**推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
+
+**2026-07-28 時点の残り推奨順:** `B-1 → A-1（guff-ssa から）→ A-3 → B-2`。
+**ただし §1.3-post の警告を先に読むこと** — seed-hot では format_checks（1.78s 重畳）に対して
+直列 phase の余裕が **0.96s しかなく**、cold を約 1s 詰めた時点で format が critical path に
+変わります。そこから先は analyze / typecheck をいくら速くしても wall が動きません。
+S-3（未着手）は format_checks の内訳を出すので、**その局面では S-3 が前提条件になります。**
 
 自信がなければ **Tier S と Tier P0 だけやって終わりにしてよい**です。それでも十分な成果です。
 
@@ -2429,7 +2529,7 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 | シナリオ | 着手時（2026-07-27） | **現在（B-3 後 / 2026-07-28）** | 第2弾の目標 | 主な手段 |
 |---|---:|---:|---:|---|
 | cold（空キャッシュ） | 4.75s | **3.96〜4.06s**（full regress 3.97s） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, B-1, A-1 |
-| cold（seed hot） | 3.68s | 3.46s（B-3 後は未再計測） | **2.8s** | 同上 |
+| cold（seed hot） | 3.68s | **3.10s** | **2.8s** | 同上（残り 0.30s） |
 | warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, A-9 |
 | warm（デーモン） | — | — | **0.05s** | C-2 |
 | peak RSS（cold full） | 7.57GB | 7.58GB | **6.0GB** | C-8 の調査結果次第 |
