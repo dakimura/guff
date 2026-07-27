@@ -328,7 +328,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
 | A-1 | ハッシャを FxHash に差し替え | cold/warm | 0.1〜0.4s? | 中 | **中**（§0-12） |
-| A-2 | Scanner の `src.to_vec()` 除去 | cold | 0.05〜0.15s? | 小 | 低 |
+| ~~A-2~~ | ~~Scanner の `src.to_vec()` 除去~~ **NO-GO**（`Scanner::init` は合計 CPU 0.024s。§A-2 参照） | — | 0 | — | — |
 | A-3 | トークンごとの `String` 割り当て削減 | cold | 0.1〜0.3s? | 中 | 低 |
 | A-4 | `File::add_line` の Mutex 除去 | cold | 0.05〜0.2s? | 小 | 中 |
 | A-5 | `hex_encode` の `format!` 除去 | warm | 0.01〜0.05s? | 極小 | 極低 |
@@ -1075,6 +1075,38 @@ rg -n 'struct Scanner|Scanner \{|scanner:' crates/guff-ast/src | head -20
 
 - ソースを `String` に変える。`from_utf8_lossy` の挙動（不正 UTF-8 の扱い）が変わって
   findings が変わります。**`[u8]` のまま**扱うこと。
+
+### NO-GO（2026-07-28）— **`Scanner::init` は合計 CPU 0.024s。上限が基準の 1/20 未満。着手しない。**
+
+S-2 で入れた samply + `scripts/perf-profile.py` で、この節が要求している
+「`Scanner::init` / `to_vec` の比率」を実測しました（cold prometheus `./...`、
+**全ワーカースレッドの合計 CPU 19.29s** に対して）:
+
+| 指標 | 合計 CPU | 全体比 |
+|---|---:|---:|
+| `Scanner::init` の inclusive | **0.024s** | 0.12% |
+| `Scanner::init` 配下の `_platform_memmove` | **0.020s** | 0.10% |
+| `memmove` のうち直接の呼び出し元が `Scanner*` / `parse_file`（甘めの上限） | **0.096s** | 0.50% |
+| 参考: `parse_file` の inclusive | 3.876s | 20.1% |
+
+**判定: NO-GO。** 一番甘く見積もった 0.096s でも**合計 CPU** であって wall ではありません。
+パースは 6 並列で走るので wall 換算は **0.016s 程度**。§0-14 の基準（wall 換算 0.05s 未満なら
+やらない）を 3 倍下回ります。
+
+**なぜ 150MB の memcpy が効かないのか（第1弾 §1.9 の 150MB / 12318 ファイルは正しい）:**
+`_platform_memmove` 自体は確かに self CPU 1.895s（9.8%）で単独 1 位ですが、
+`--callers` で割ると内訳は **`RawVec::grow_one` 0.542s（`Vec` の再確保）/ `guff_ssa::arena::Arena::alloc`
+0.267s / `Ident::clone` 0.118s** で、**`Scanner::init` の一括コピーは表に出てきません。**
+150MB を 12318 回に割ると 1 ファイル平均 12KB で、`memmove` としては帯域律速の一瞬で終わります。
+つまり「大きなコピーが 1 万回」より「小さな `Vec` の成長が数百万回」のほうが桁で高い、
+という素直な結果です。
+
+**この判定が示す次の方向（A-2 の代わりに攻めるべき所）:**
+`Vec` 成長 0.542s は「`with_capacity` を渡していない `Vec`」の裾野です。A-3（トークンごとの
+`String`）と重なる領域なので、**A-3 を先に見るほうが期待値が高い**。
+
+**得られた副産物:** `Arc<[u8]>` 化を入れずに済んだので、この節が最大の落とし穴として挙げていた
+**RSS 増加リスクをそもそも負わずに終われました。**
 
 ---
 
@@ -2272,6 +2304,7 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 | `GUFF_DEP_SOURCE=0`（export-data 経路） | 第1弾 §0-5。cold 22.9s + 検出数が変わる。袋小路 |
 | buildir のパッケージ単位スキップ | 第1弾「buildir 条件スキップ判定」。staticcheck + nilnesserr 有効下では不可 |
 | format の shared-read | 第1弾 §1.7。試して**逆に悪化**した |
+| **A-2**（`Scanner` の `src.to_vec()` 除去） | **samply 実測で `Scanner::init` の inclusive が合計 CPU 0.024s（0.12%）**。甘い上限でも 0.096s＝wall 換算 0.016s で §0-14 の基準を大きく下回る。§A-2 の NO-GO 節に内訳あり |
 
 **新しく「やらない」と判定したものは、必ずこの表に理由つきで追記してください。**
 それが次のエージェントの時間を守ります。
