@@ -328,8 +328,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
-| **B-0** | **preorder 総時間の計測（B-1 の GO/NO-GO）** | — | — | 小 | ゼロ |
-| **B-1** | **本物の Inspector（フラットイベント列 + 種別マスク）** | cold | **0.3〜0.7s?** | 大 | 中 |
+| ~~B-0~~ | ~~preorder 総時間の計測（B-1 の GO/NO-GO）~~ **DONE** | — | 27.9% と判明 | 小 | ゼロ |
+| **B-1** | **本物の Inspector（フラットイベント列 + 種別マスク）** | cold | **0.15〜0.25s**（B-0 実測に基づく改訂。上限 0.32s） | 大 | 中 |
 | B-2 | buildir/SSA の関数単位 遅延構築 | cold | 0.2〜0.5s? | 大 | **高** |
 | B-3 | testifylint の高速化（単価 61ms の解明） | cold | 0.1〜0.3s? | 中 | 中 |
 | B-4 | revive の `shared_walk` を全ルールに拡大 | cold | 0.05〜0.2s? | 中 | 中 |
@@ -1452,6 +1452,80 @@ AST を**一度だけ**歩いてフラットなイベント配列（各要素に
 
 - 計測せずに B-1 を始める（§0-14）。
 - `Instant::now()` を `preorder` のコールバック内側（＝ノードごと）に置く。**破滅します。**
+
+### DONE（2026-07-27）— **判定: 条件付き GO（27.9%）。ただし cold wall の上限は 0.32s しかない。**
+
+`InspectResult::preorder`（`crates/guff-analysis/src/passes/inspect.rs`）に
+スレッドローカル計装を入れ、`GUFF_DEBUG_CACHE` 有効時のみ集計するようにした。
+`crates/guff-runner/src/action.rs` は各アクションの前後でスレッドカウンタを差分して
+analyzer 別に按分する（1 アクションは 1 スレッドで完走するので正しい）。
+
+**実測（クリーン環境・cold prometheus `./...`・3 回）:**
+
+```
+guff: inspect preorder: 12361 calls, 54385011 nodes visited, 2.11s total CPU (27.9% of analyze CPU)
+```
+
+| 回 | preorder 総 CPU | analyze CPU 比 | calls | nodes |
+|---:|---:|---:|---:|---:|
+| 1 | 2.07s | 27.1% | 12,361 | 54,385,011 |
+| 2 | 2.14s | 27.9% | 12,361 | 54,385,011 |
+| 3 | 2.11s | 27.9% | 12,361 | 54,385,011 |
+
+calls / nodes は 3 回とも**完全一致**（決定的）。analyze の総 CPU は約 **7.7s**、analyze の
+**wall は 1.16s**（有効並列度 ≈ 6.6）。
+
+**判定は §B-0 の基準どおり 20〜40% ＝ 条件付き GO（軽量版＝設計項目 1〜3、部分木スキップ抜き）。
+ただし着手前に必ず次の 3 点を読むこと。**
+
+**(1) 上限は 0.32s、現実的には 0.15〜0.25s。** preorder が**タダになっても** analyze wall は
+`1.16s × 0.279 = 0.32s` しか縮みません。events 配列の構築コスト（293 pkg × 1 walk）と、
+マスクに合致したノードのコールバック本体は残るので、現実的な取り分は **cold wall 0.15〜0.25s**。
+doc の当初見積もり「0.3〜0.7s」は**過大**でした。工数「大」＋144 箇所のマスク漏れリスクに
+見合うかは、この数字で判断してください。
+
+**(2) analyze CPU の上位は `preorder` を使っていない。** ここが最大の発見です。
+
+| analyzer | analyze CPU | うち preorder |
+|---|---:|---:|
+| buildir | 2.17s | **0**（SSA 構築。walk しない） |
+| testifylint | 1.13s | **0**（独自 walk） |
+| revive | 0.73s | **0**（`shared_walk`） |
+| misspell | 0.43s | **0** |
+| modernize | 0.28s | **0** |
+| whitespace | 0.25s | **0** |
+| typeindex | 0.17s | **0** |
+| gocritic | 0.11s | **0** |
+| inline | 0.26s | 0.26s |
+| copylocks | 0.20s | 0.19s |
+| SA5001 / composites / SA1012 / errorsas / SA4023 / unreachable / structtag / unusedresult / ST1005 … | 各 0.06〜0.10s | ほぼ全部 |
+
+つまり **B-1 が触れるのは analyze CPU 7.7s のうち 2.1s だけ**で、上位 8 個（合計 5.3s）には
+1 秒も効きません。§1.4 の「裾野の大半は AST を丸ごと舐めているだけ → B-0/B-1」という読みは
+**半分正しく半分間違い**でした（裾野が walk 主体なのは正しいが、裾野の合計が 2.1s しかない）。
+逆に言えば、**B-1 を入れたあとに revive / misspell / modernize / whitespace を
+同じ inspector に載せ替えれば取り分は倍以上になる**（B-4 がその一部）。
+B-1 に着手するなら、この「載せ替え先」もセットで計画すること。
+
+**(3) `preorder` の再帰呼び出し（二次コスト）を計装中に発見。**
+`crates/guff-staticcheck/src/sa4023.rs:52`（`interface_from_typed_nil`）は
+**preorder のコールバックの中から候補識別子ごとにフルファイル walk を回します**。
+その結果 SA4023 だけで **8.4M ノード / 66 アクション**（1 アクション 127k ノード。
+inline の 15k の 8 倍）を訪問しています。計装では depth 0 のときだけ時間を積むことで
+二重計上を避けています（それをやる前は SA4023 の preorder 時間 0.15s が
+自分の analyzer 総時間 0.08s を上回るという矛盾が出ていました）。
+**時間としては 0.09s なので単独では追う価値がありませんが、B-1 でマスク版に移行すると
+この二次パターンは自動的に安くなります**（内側の walk が `AssignStmt` だけの線形スキャンになる）。
+
+**検証:** findings byte 一致 20/20、tsdb PASS（wall 1.700s / RSS 1.245GB）、
+full PASS（wall 4.210s / RSS 7.581GB、guff_only=0 / golangci_only=0 / both 20）。
+計装 OFF（`GUFF_DEBUG_CACHE` 未設定）のオーバーヘッドは、変更前バイナリと**交互に 5 往復**
+計測して post 中央値 4.35s / pre 中央値 4.36s ＝**差なし**（LazyLock の `bool` を 1 回読む
+分岐だけで、ノードごとのコストはゼロ）。baseline 未更新。
+
+> ⚠️ 計測手順の注意: 「変更前を 3 回 → 変更後を 3 回」の順で測ったら +0.27s の差が出ましたが、
+> **交互計測ではきれいに消えました**（マシンのドリフト）。0.1s 単位を争うときは
+> **必ず交互（A/B/A/B）で測ること。** §1.1 のルール 11 の実運用版です。
 
 ---
 

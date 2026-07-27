@@ -21,6 +21,7 @@ mod ssa_util;
 mod validate;
 
 pub use passes::buildir::BuildIrResult;
+pub use passes::inspect::{preorder_stats_enabled, preorder_thread_totals, preorder_totals};
 pub use passes::facts::deprecated::{DeprecatedResult, IsDeprecated};
 pub use passes::typeindex::Index as TypeIndex;
 pub use pattern_match::{match_env, match_pattern, match_pos, matches};

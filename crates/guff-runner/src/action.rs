@@ -54,6 +54,14 @@ struct ActionState {
 static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, usize)>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Debug-only per-analyzer share of [`InspectResult::preorder`] time
+/// (PERF_TASKS_V2 B-0). Keyed by analyzer name; value is `(nanos, nodes)`.
+///
+/// Filled by diffing the calling thread's preorder counters across one action —
+/// valid because an action runs to completion on the thread that started it.
+static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u64, u64)>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
 fn timing_enabled() -> bool {
     std::env::var_os("GUFF_DEBUG_CACHE").is_some()
 }
@@ -63,6 +71,16 @@ fn record_analyzer_time(name: &'static str, nanos: u128) {
     let entry = m.entry(name).or_insert((0, 0));
     entry.0 += nanos;
     entry.1 += 1;
+}
+
+fn record_preorder_share(name: &'static str, nanos: u64, nodes: u64) {
+    if nanos == 0 && nodes == 0 {
+        return;
+    }
+    let mut m = PREORDER_BY_ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = m.entry(name).or_insert((0, 0));
+    entry.0 += nanos;
+    entry.1 += nodes;
 }
 
 /// Print and reset the per-analyzer timing table (top entries by total time).
@@ -77,6 +95,7 @@ pub(crate) fn report_analyzer_timing() {
     let mut rows: Vec<(&'static str, u128, usize)> =
         m.iter().map(|(k, (t, c))| (*k, *t, *c)).collect();
     rows.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
+    let analyze_total: u128 = rows.iter().map(|(_, t, _)| *t).sum();
     eprintln!("guff: per-analyzer analyze time (summed across workers, top 20):");
     for (name, nanos, count) in rows.iter().take(20) {
         eprintln!(
@@ -87,6 +106,47 @@ pub(crate) fn report_analyzer_timing() {
         );
     }
     m.clear();
+    drop(m);
+    report_preorder_timing(analyze_total);
+}
+
+/// Print the B-0 measurement: how much of the analyze phase is spent inside
+/// `InspectResult::preorder` re-walking ASTs.
+///
+/// `analyze_total` is the summed per-analyzer CPU from the table above, so the
+/// share is apples-to-apples (both are summed across workers, not wall).
+fn report_preorder_timing(analyze_total: u128) {
+    if !guff_analysis::preorder_stats_enabled() {
+        return;
+    }
+    let (calls, nodes, nanos) = guff_analysis::preorder_totals();
+    if calls == 0 {
+        return;
+    }
+    let share = if analyze_total > 0 {
+        nanos as f64 / analyze_total as f64 * 100.0
+    } else {
+        0.0
+    };
+    eprintln!(
+        "guff: inspect preorder: {calls} calls, {nodes} nodes visited, \
+         {:.2}s total CPU ({share:.1}% of analyze CPU)",
+        nanos as f64 / 1e9,
+    );
+    let mut by = PREORDER_BY_ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut rows: Vec<(&'static str, u64, u64)> =
+        by.iter().map(|(k, (t, n))| (*k, *t, *n)).collect();
+    rows.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
+    eprintln!("guff: preorder CPU by analyzer (top 20):");
+    for (name, ns, nd) in rows.iter().take(20) {
+        eprintln!(
+            "  {:>30} {:>9.2}s  {:>12} nodes",
+            name,
+            *ns as f64 / 1e9,
+            nd,
+        );
+    }
+    by.clear();
 }
 
 impl std::fmt::Debug for Action {
@@ -194,11 +254,18 @@ impl Action {
             .build();
 
             let start = timing_enabled().then(std::time::Instant::now);
+            let pre_before = guff_analysis::preorder_thread_totals();
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 (self.analyzer.run)(&mut pass)
             }));
             if let Some(start) = start {
                 record_analyzer_time(self.analyzer.name, start.elapsed().as_nanos());
+                let pre_after = guff_analysis::preorder_thread_totals();
+                record_preorder_share(
+                    self.analyzer.name,
+                    pre_after.2.saturating_sub(pre_before.2),
+                    pre_after.1.saturating_sub(pre_before.1),
+                );
             }
             r
         };
