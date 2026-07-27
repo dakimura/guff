@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use guff::parser::{parse_file, Mode, SKIP_FUNC_BODIES};
+use guff::parser::{parse_file, Mode, SKIP_FUNC_BODIES, SKIP_OBJECT_RESOLUTION};
 use guff::position::FileSet;
 use guff_exportdata::ExportImporter;
 use guff_types::api::Config as TypeConfig;
@@ -1029,11 +1029,18 @@ fn read_dep_sources(paths: &[PathBuf]) -> Vec<(PathBuf, Vec<u8>)> {
 /// and `check_sources` type-checks it with `ignore_func_bodies`, so every
 /// statement node built here would be dropped unread. Bodies are roughly half
 /// of the parse cost of a dependency closure.
+///
+/// Object resolution is also skipped ([`SKIP_OBJECT_RESOLUTION`]): `resolve_file`
+/// walks the tree filling each `Ident.obj` with a pointer to its declaration
+/// (Go's deprecated `ast.Object` mechanism). The type checker does its own scope
+/// resolution and never reads `Ident.obj`, and no analyzer runs on dependency
+/// ASTs — the only `obj` readers (ineffassign, maintidx) run on *target*
+/// packages, parsed separately. So on this path resolution is pure waste.
 fn parse_dep_sources(sources: &[(PathBuf, Vec<u8>)], fset: &Arc<FileSet>) -> Vec<guff::ast::File> {
     let mut out = Vec::with_capacity(sources.len());
     for (path, src) in sources {
         let name = path.to_str().unwrap_or("file.go");
-        if let Ok(file) = parse_file(fset, name, src, SKIP_FUNC_BODIES) {
+        if let Ok(file) = parse_file(fset, name, src, SKIP_FUNC_BODIES | SKIP_OBJECT_RESOLUTION) {
             out.push(file);
         }
     }
