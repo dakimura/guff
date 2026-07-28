@@ -1,6 +1,8 @@
 //! `range-val-address` — warn when taking the address of a range value (pre-Go 1.22).
 
-use guff::ast::{AssignStmt, CallExpr, CompositeLit, Expr, Ident, IndexExpr, KeyValueExpr, RangeStmt, UnaryExpr};
+use guff::ast::{
+    CallExpr, CompositeLit, Expr, Ident, IndexExpr, KeyValueExpr, UnaryExpr,
+};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -8,37 +10,63 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{type_string, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let guff::ast::Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let Some(body) = &f.body else {
-                continue;
-            };
-            walk::inspect(NodeRef::BlockStmt(body), |n| {
-                let Some(NodeRef::RangeStmt(range)) = n else {
-                    return true;
-                };
-                let Some(value_expr) = range.value.as_ref() else {
-                    return true;
-                };
-                let Expr::Ident(value) = unparen(value_expr) else {
-                    return true;
-                };
-                let value_is_ptr = pass
-                    .types_info()
-                    .and_then(|info| info.types.get(&value.id()))
-                    .map(|t| type_string(pass, t.typ).starts_with('*'))
-                    .unwrap_or(false);
-                inspect_range_body(&range.body, value, value_is_ptr, &mut failures);
-                true
-            });
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        let Some(body) = &f.body else {
+            return;
+        };
+        walk::inspect(NodeRef::BlockStmt(body), |n| {
+            let Some(NodeRef::RangeStmt(range)) = n else {
+                return true;
+            };
+            let Some(value_expr) = range.value.as_ref() else {
+                return true;
+            };
+            let Expr::Ident(value) = unparen(value_expr) else {
+                return true;
+            };
+            let value_is_ptr = self
+                .pass
+                .types_info()
+                .and_then(|info| info.types.get(&value.id()))
+                .map(|t| type_string(self.pass, t.typ).starts_with('*'))
+                .unwrap_or(false);
+            inspect_range_body(&range.body, value, value_is_ptr, &mut self.failures);
+            true
+        });
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn inspect_range_body(

@@ -1,24 +1,48 @@
 //! `defer` — warn on common defer gotchas.
 
 use guff::ast::{CallExpr, Expr, FuncLit, Stmt};
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 use crate::util::{is_ident, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let guff::ast::Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            if let Some(body) = &f.body {
-                visit_block(&body.list, false, false, 0, &mut failures);
-            }
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        if let Some(body) = &f.body {
+            visit_block(&body.list, false, false, 0, &mut self.failures);
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn visit_block(
@@ -38,8 +62,8 @@ fn visit_block(
                         rule: "defer",
                         pos: ret.return_.0 as u32,
                         message: "return in a defer function has no effect".into(),
-            confidence: None,
-        });
+                        confidence: None,
+                    });
                 }
             }
             Stmt::DeferStmt(d) => {

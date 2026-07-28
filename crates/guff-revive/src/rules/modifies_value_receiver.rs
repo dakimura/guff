@@ -1,6 +1,6 @@
 //! `modifies-value-receiver` — warn on assignments to value method receivers.
 
-use guff::ast::{AssignStmt, Decl, Expr, FuncDecl, Ident, IncDecStmt, ReturnStmt, SelectorExpr, Stmt, UnaryExpr};
+use guff::ast::{AssignStmt, Expr, Ident, SelectorExpr, UnaryExpr};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -8,71 +8,97 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{type_string, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let Some(recv) = f.recv.as_ref().and_then(|r| r.list.first()) else {
-                continue;
-            };
-            if matches!(unparen(&recv.ty.as_ref().expect("recv type")), Expr::StarExpr(_)) {
-                continue;
-            }
-            let recv_name = recv
-                .names
-                .first()
-                .map(|id| id.name.as_str())
-                .unwrap_or("_");
-            if recv_name == "_" {
-                continue;
-            }
-            if let Some(typ) = recv.ty.as_ref().and_then(|e| {
-                pass.types_info()
-                    .and_then(|info| info.types.get(&e.id()).map(|t| t.typ))
-            }) {
-                let ty = type_string(pass, typ);
-                if ty.starts_with("[]") || ty.starts_with("map[") {
-                    continue;
-                }
-            }
-            let Some(body) = &f.body else {
-                continue;
-            };
-            if returns_receiver(recv_name, body) {
-                continue;
-            }
-            walk::inspect(NodeRef::BlockStmt(body), |n| {
-                match n {
-                    Some(NodeRef::AssignStmt(assign)) => {
-                        if modifies_receiver(recv_name, assign) {
-                            failures.push(Failure {
-                                rule: "modifies-value-receiver",
-                                pos: assign.lhs.first().map(|e| e.pos().0).unwrap_or(0) as u32,
-                                message: "suspicious assignment to a by-value method receiver".into(),
-            confidence: None,
-        });
-                        }
-                    }
-                    Some(NodeRef::IncDecStmt(inc)) => {
-                        if receiver_selector(recv_name, &inc.x).is_some() {
-                            failures.push(Failure {
-                                rule: "modifies-value-receiver",
-                                pos: inc.x.pos().0 as u32,
-                                message: "suspicious assignment to a by-value method receiver".into(),
-            confidence: None,
-        });
-                        }
-                    }
-                    _ => {}
-                }
-                true
-            });
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        let Some(recv) = f.recv.as_ref().and_then(|r| r.list.first()) else {
+            return;
+        };
+        if matches!(unparen(&recv.ty.as_ref().expect("recv type")), Expr::StarExpr(_)) {
+            return;
+        }
+        let recv_name = recv
+            .names
+            .first()
+            .map(|id| id.name.as_str())
+            .unwrap_or("_");
+        if recv_name == "_" {
+            return;
+        }
+        if let Some(typ) = recv.ty.as_ref().and_then(|e| {
+            self.pass
+                .types_info()
+                .and_then(|info| info.types.get(&e.id()).map(|t| t.typ))
+        }) {
+            let ty = type_string(self.pass, typ);
+            if ty.starts_with("[]") || ty.starts_with("map[") {
+                return;
+            }
+        }
+        let Some(body) = &f.body else {
+            return;
+        };
+        if returns_receiver(recv_name, body) {
+            return;
+        }
+        walk::inspect(NodeRef::BlockStmt(body), |n| {
+            match n {
+                Some(NodeRef::AssignStmt(assign)) => {
+                    if modifies_receiver(recv_name, assign) {
+                        self.failures.push(Failure {
+                            rule: "modifies-value-receiver",
+                            pos: assign.lhs.first().map(|e| e.pos().0).unwrap_or(0) as u32,
+                            message: "suspicious assignment to a by-value method receiver".into(),
+                            confidence: None,
+                        });
+                    }
+                }
+                Some(NodeRef::IncDecStmt(inc)) => {
+                    if receiver_selector(recv_name, &inc.x).is_some() {
+                        self.failures.push(Failure {
+                            rule: "modifies-value-receiver",
+                            pos: inc.x.pos().0 as u32,
+                            message: "suspicious assignment to a by-value method receiver".into(),
+                            confidence: None,
+                        });
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn returns_receiver(recv_name: &str, body: &guff::ast::BlockStmt) -> bool {

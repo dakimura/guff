@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 
-use guff::ast::{Decl, Expr, FuncDecl, Ident, StructType};
+use guff::ast::{Decl, Expr, File, FuncDecl, Ident};
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
@@ -10,49 +11,87 @@ use crate::util::{receiver_type_key, unparen};
 
 const PACKAGE_FUNCS: &str = "_";
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    let mut methods: HashMap<String, HashMap<String, (String, String)>> = HashMap::new();
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+    methods: HashMap<String, HashMap<String, (String, String)>>,
+}
 
-    for file in pass.files() {
-        let file_name = file
-            .name
-            .name
-            .as_str(); // fallback; real path resolved per compiled file below
-        let file_label = pass
-            .pkg()
-            .compiled_go_files
-            .first()
-            .and_then(|p| p.file_name())
-            .and_then(|s| s.to_str())
-            .unwrap_or(file_name);
-
-        for decl in &file.decls {
-            match decl {
-                Decl::FuncDecl(f) => {
-                    check_method_name(
-                        receiver_holder(f),
-                        &f.name,
-                        file_label,
-                        &mut methods,
-                        &mut failures,
-                    );
-                }
-                Decl::GenDecl(g) => {
-                    for spec in &g.specs {
-                        let guff::ast::Spec::TypeSpec(ts) = spec else {
-                            continue;
-                        };
-                        if let Expr::StructType(st) = unparen(&ts.ty) {
-                            check_struct_fields(&ts.name.name, &st.fields.list, &mut failures);
-                        }
-                    }
-                }
-                _ => {}
-            }
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
+            methods: HashMap::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        // Package-level decls only (mirrors the previous `file.decls` walk).
+        let NodeRef::File(file) = n else {
+            return;
+        };
+        check_file(self.pass, file, &mut self.methods, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}
+
+fn check_file(
+    pass: &Pass<'_>,
+    file: &File,
+    methods: &mut HashMap<String, HashMap<String, (String, String)>>,
+    failures: &mut Vec<Failure>,
+) {
+    let file_name = file.name.name.as_str();
+    // Preserve historical file label: always the first compiled path's basename.
+    let file_label = pass
+        .pkg()
+        .compiled_go_files
+        .first()
+        .and_then(|p| p.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or(file_name);
+
+    for decl in &file.decls {
+        match decl {
+            Decl::FuncDecl(f) => {
+                check_method_name(
+                    receiver_holder(f),
+                    &f.name,
+                    file_label,
+                    methods,
+                    failures,
+                );
+            }
+            Decl::GenDecl(g) => {
+                for spec in &g.specs {
+                    let guff::ast::Spec::TypeSpec(ts) = spec else {
+                        continue;
+                    };
+                    if let Expr::StructType(st) = unparen(&ts.ty) {
+                        check_struct_fields(&ts.name.name, &st.fields.list, failures);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn receiver_holder(f: &FuncDecl) -> String {
@@ -97,10 +136,7 @@ fn check_method_name(
         });
         return;
     }
-    entry.insert(
-        norm,
-        (file_name.to_string(), id.name.clone()),
-    );
+    entry.insert(norm, (file_name.to_string(), id.name.clone()));
 }
 
 fn check_struct_fields(struct_name: &str, fields: &[guff::ast::Field], failures: &mut Vec<Failure>) {
@@ -119,8 +155,8 @@ fn check_struct_fields(struct_name: &str, fields: &[guff::ast::Field], failures:
                         "Field '{}' differs only by capitalization to other field in the struct type {}",
                         id.name, struct_name
                     ),
-            confidence: None,
-        });
+                    confidence: None,
+                });
             } else {
                 seen.insert(norm, ());
             }

@@ -13,11 +13,11 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ） / A-3a / B-4（batch 1–4: 25 rules）**。
+> A-1（guff-ssa のみ） / A-3a / B-4（A 分類完了: 32 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-4 の残り（A 分類の ~7）か B-7（misspell 共有 read）。**
+> **次は B-7（misspell 共有 read）の GO/NO-GO 計測。** B-4 の A は完了。残り outside は B/C のみ。
 > analyze の残りは buildir / revive / misspell。B-2 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -2538,6 +2538,20 @@ cold wall ~3.93s。findings 20 件 byte 同一。両 regress PASS
 残り A: ~7（`defer` / `confusing-naming` / `deep-exit` / `forbidden-call-in-wg-go` /
 `inefficient-map-lookup` / `modifies-value-receiver` / `range-val-address`）。
 C は触らない。prometheus 有効で未統合の A は尽きた（残りは B/C: ifelse 三本 / blank-imports / comment-spacings）。
+
+### DONE batch 5（2026-07-29）— **残り A 7 ルールを shared_walk へ。findings 同一。A 分類完了。**
+
+取り込んだルール:
+
+1. `confusing-naming` / `deep-exit` / `forbidden-call-in-wg-go`
+2. `inefficient-map-lookup` / `modifies-value-receiver` / `range-val-address` / `defer`
+
+**実測:** revive CPU ~0.75〜0.76s。cold wall ~2.95〜3.01s（seed-hot 3 回）/ regress full 3.940s。
+findings 20 件 byte 同一（batch 4 とも同一・3 回決定的）。両 regress PASS
+（tsdb 1.530s / full 3.940s）。
+
+**A 分類は完了**（当初 31 + batch 3 の `package-naming`）。残り outside は B（ifelse 三本）と C のみ。触らない。
+次は **B-7（misspell 共有 read）の GO/NO-GO 計測**。
 
 ---
 

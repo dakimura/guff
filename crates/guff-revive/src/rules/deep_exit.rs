@@ -7,53 +7,81 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{is_pkg_dot_name, is_test_package, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let is_test = pass
-        .files()
-        .first()
-        .map(|f| is_test_package(&f.name.name))
-        .unwrap_or(false);
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::FuncDecl(f)) = n else {
+pub struct Checker {
+    is_test: bool,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new(pass: &Pass<'_>) -> Self {
+        let is_test = pass
+            .files()
+            .first()
+            .map(|f| is_test_package(&f.name.name))
+            .unwrap_or(false);
+        Self {
+            is_test,
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        // Top-level FuncDecl only (mirrors the previous outer walk that pruned
+        // into each FuncDecl body via a nested inspect).
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        if must_ignore(f, self.is_test) {
+            return;
+        }
+        let Some(body) = &f.body else {
+            return;
+        };
+        walk::inspect(NodeRef::BlockStmt(body), |inner| {
+            let Some(NodeRef::ExprStmt(stmt)) = inner else {
                 return true;
             };
-            if must_ignore(f, is_test) {
-                return false;
-            }
-            if let Some(body) = &f.body {
-                walk::inspect(NodeRef::BlockStmt(body), |inner| {
-                    let Some(NodeRef::ExprStmt(stmt)) = inner else {
-                        return true;
-                    };
-                    let Expr::CallExpr(call) = &stmt.x else {
-                        return true;
-                    };
-                    if let Some((pkg, name)) = exit_call(call) {
-                        let msg = if pkg == "flag"
-                            && name == "NewFlagSet"
-                            && call.args.len() == 2
-                            && is_pkg_dot_name(&call.args[1], "flag", "ExitOnError")
-                        {
-                            "calls to flag.NewFlagSet with flag.ExitOnError only in main() or init() functions".into()
-                        } else {
-                            format!("calls to {pkg}.{name} only in main() or init() functions")
-                        };
-                        failures.push(Failure {
-                            rule: "deep-exit",
-                            pos: call.fun.pos().0 as u32,
-                            message: msg,
-            confidence: None,
-        });
-                    }
-                    true
+            let Expr::CallExpr(call) = &stmt.x else {
+                return true;
+            };
+            if let Some((pkg, name)) = exit_call(call) {
+                let msg = if pkg == "flag"
+                    && name == "NewFlagSet"
+                    && call.args.len() == 2
+                    && is_pkg_dot_name(&call.args[1], "flag", "ExitOnError")
+                {
+                    "calls to flag.NewFlagSet with flag.ExitOnError only in main() or init() functions"
+                        .into()
+                } else {
+                    format!("calls to {pkg}.{name} only in main() or init() functions")
+                };
+                self.failures.push(Failure {
+                    rule: "deep-exit",
+                    pos: call.fun.pos().0 as u32,
+                    message: msg,
+                    confidence: None,
                 });
             }
-            false
+            true
         });
     }
-    failures
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn must_ignore(f: &FuncDecl, is_test: bool) -> bool {

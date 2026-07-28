@@ -7,42 +7,65 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{go_version_at_least, is_ident, unparen};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    if !go_version_at_least(pass, 1, 25) {
-        return Vec::new();
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+        if !go_version_at_least(pass, 1, 25) {
+            return None;
+        }
+        Some(Self {
+            failures: Vec::new(),
+        })
     }
 
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(NodeRef::CallExpr(call)) = n else {
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::CallExpr(call) = n else {
+            return;
+        };
+        if !is_ident_dot_name(&call.fun, "wg", "Go") || call.args.len() != 1 {
+            return;
+        }
+        let Expr::FuncLit(FuncLit { body, .. }) = unparen(&call.args[0]) else {
+            return;
+        };
+        walk::inspect(NodeRef::BlockStmt(body), |inner| {
+            let Some(NodeRef::CallExpr(inner_call)) = inner else {
                 return true;
             };
-            if !is_ident_dot_name(&call.fun, "wg", "Go") || call.args.len() != 1 {
-                return true;
+            if let Some(callee) = forbidden_callee(inner_call) {
+                self.failures.push(Failure {
+                    rule: "forbidden-call-in-wg-go",
+                    pos: inner_call.pos().0 as u32,
+                    message: format!("do not call {callee} inside wg.Go"),
+                    confidence: None,
+                });
+                return false;
             }
-            let Expr::FuncLit(FuncLit { body, .. }) = unparen(&call.args[0]) else {
-                return true;
-            };
-            walk::inspect(NodeRef::BlockStmt(body), |inner| {
-                let Some(NodeRef::CallExpr(inner_call)) = inner else {
-                    return true;
-                };
-                if let Some(callee) = forbidden_callee(inner_call) {
-                    failures.push(Failure {
-                        rule: "forbidden-call-in-wg-go",
-                        pos: inner_call.pos().0 as u32,
-                        message: format!("do not call {callee} inside wg.Go"),
-            confidence: None,
-        });
-                    return false;
-                }
-                true
-            });
             true
         });
     }
-    failures
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn is_ident_dot_name(fun: &Expr, recv: &str, name: &str) -> bool {
