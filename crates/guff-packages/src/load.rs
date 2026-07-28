@@ -77,7 +77,8 @@ fn refine(
     requested_mode: LoadMode,
     response: DriverResponse,
 ) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let timing = crate::debug::enabled();
+    let detail = crate::debug::detailed();
     let t_refine = std::time::Instant::now();
     let mut by_id: HashMap<String, Arc<Package>> = HashMap::new();
     for pkg in response.packages {
@@ -125,6 +126,18 @@ fn refine(
     // need the full dependency set (e.g. the issues-cache hash registry).
     let mut all: Vec<Arc<Package>> = by_id.into_values().collect();
     all.sort_by(|a, b| a.id.cmp(&b.id));
+
+    if detail {
+        // The level-1 line only covers `connect_imports`; this is the whole of
+        // `refine` (index, connect, clear-unrequested, root lookup, id sort), so
+        // the gap against `phase load_graph` is attributable.
+        eprintln!(
+            "guff:     refine total {:.2}s ({} pkgs, {} roots)",
+            t_refine.elapsed().as_secs_f64(),
+            all.len(),
+            roots.len(),
+        );
+    }
 
     let _ = cfg;
     Ok((roots, all))

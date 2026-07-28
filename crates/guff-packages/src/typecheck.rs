@@ -21,6 +21,41 @@ use guff_types::{Checker, ExportSeed, WorkerOverlays};
 use crate::load_mode::LoadMode;
 use crate::package::{Error, ErrorKind, Package, TypecheckArtifacts};
 
+/// Sub-phase accounting inside [`typecheck_package_with_seed`], summed across
+/// rayon workers (so the totals are CPU, not wall — `PERF_TASKS.md` §1.6).
+///
+/// Only written when `GUFF_DEBUG_CACHE` is at level 2. The counters are global
+/// and monotonic; callers snapshot them around the window they care about and
+/// diff (see `typecheck_roots`), which also keeps repeated calls in one process
+/// from mixing.
+mod detail {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    pub(super) static READ_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static PARSE_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static SEED_NS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static CHECK_NS: AtomicU64 = AtomicU64::new(0);
+
+    /// `Some(Instant)` only when level-2 accounting is on, so an unset
+    /// `GUFF_DEBUG_CACHE` costs no clock read even on the per-file paths.
+    pub(super) fn start(on: bool) -> Option<Instant> {
+        on.then(Instant::now)
+    }
+
+    pub(super) fn add(counter: &AtomicU64, since: Option<Instant>) {
+        if let Some(t) = since {
+            counter.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// (read, parse, seed, check) totals so far.
+    pub(super) fn snapshot() -> [Duration; 4] {
+        [&READ_NS, &PARSE_NS, &SEED_NS, &CHECK_NS]
+            .map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+    }
+}
+
 /// Toolchain parameters used when type-checking loaded packages.
 #[derive(Debug, Clone)]
 pub struct TypecheckEnv {
@@ -204,8 +239,10 @@ pub fn typecheck_roots(
         .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
         .collect();
 
-    let dbg = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let dbg = crate::debug::enabled();
+    let acct = crate::debug::detailed();
     let tc_start;
+    let acct_before;
     let mut checked: HashMap<String, Arc<Package>> = {
         let ts = std::time::Instant::now();
         let seed = if env.from_source {
@@ -220,6 +257,11 @@ pub fn typecheck_roots(
                 env.from_source,
             );
         }
+        // Taken after the seed build so the diff below covers only the target
+        // packages. The seed builders drive `Checker` directly and do not touch
+        // these counters, but `typecheck_packages` (via `refine`) does, so
+        // starting from a snapshot rather than zero is what makes this correct.
+        acct_before = detail::snapshot();
         tc_start = std::time::Instant::now();
         if env.parallel {
             target_ids
@@ -262,6 +304,15 @@ pub fn typecheck_roots(
             "guff:   typecheck_roots target check {:.2}s ({} targets)",
             tc_start.elapsed().as_secs_f64(),
             target_ids.len(),
+        );
+    }
+    if acct {
+        let after = detail::snapshot();
+        let [read, parse, seed, check] =
+            std::array::from_fn(|i| (after[i] - acct_before[i]).as_secs_f64());
+        eprintln!(
+            "guff:     target check read {read:.2}s / parse {parse:.2}s / seed-clone {seed:.2}s \
+             / check_files {check:.2}s (summed across workers)",
         );
     }
 
@@ -391,9 +442,11 @@ pub fn typecheck_package_with_seed(
         return;
     }
 
+    let acct = crate::debug::detailed();
     let mut syntax = Vec::new();
     let mut source_files: Vec<Arc<[u8]>> = Vec::new();
     for path in paths {
+        let t_read = detail::start(acct);
         let src = match fs::read(path) {
             Ok(bytes) => bytes,
             Err(err) => {
@@ -406,6 +459,7 @@ pub fn typecheck_package_with_seed(
                 continue;
             }
         };
+        detail::add(&detail::READ_NS, t_read);
         // Prefer a stable path string for diagnostics (compat/R21 diffs on
         // file:line:linter). Fall back to the basename only when the path is
         // not valid UTF-8.
@@ -414,7 +468,10 @@ pub fn typecheck_package_with_seed(
                 .and_then(|s| s.to_str())
                 .unwrap_or("file.go")
         });
-        match parse_file(fset, name, &src, Mode::NONE) {
+        let t_parse = detail::start(acct);
+        let parsed = parse_file(fset, name, &src, Mode::NONE);
+        detail::add(&detail::PARSE_NS, t_parse);
+        match parsed {
             Ok(file) => {
                 syntax.push(file);
                 source_files.push(Arc::<[u8]>::from(src));
@@ -442,6 +499,7 @@ pub fn typecheck_package_with_seed(
         go_version: env.go_version.clone(),
         ..TypeConfig::default()
     };
+    let t_seed = detail::start(acct);
     let mut check = if let Some(seed) = seed {
         Checker::from_seed(seed, conf)
     } else {
@@ -466,9 +524,12 @@ pub fn typecheck_package_with_seed(
             &mut done,
         );
     }
+    detail::add(&detail::SEED_NS, t_seed);
 
     let files = syntax;
+    let t_check = detail::start(acct);
     check.check_files(files);
+    detail::add(&detail::CHECK_NS, t_check);
 
     pkg.ill_typed = !check.errors.is_empty();
     for err in &check.errors {
@@ -636,7 +697,7 @@ fn build_source_seed(
     }
 
     let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let timing = crate::debug::enabled();
     let t_check_start = std::time::Instant::now();
 
     let make_conf = || TypeConfig {

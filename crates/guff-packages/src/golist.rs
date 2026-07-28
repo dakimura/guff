@@ -55,7 +55,7 @@ impl From<GoListError> for crate::LoadError {
 /// here — the issue cache already keys on content; this fingerprint only has
 /// to catch package add/remove (X-1).
 pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, GoListError> {
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let timing = crate::debug::enabled();
     let t_invoke = std::time::Instant::now();
     let mode = cfg.effective_mode();
     let args = golist_args(cfg, patterns, 0);
@@ -513,13 +513,42 @@ fn load_or_invoke_go(
     patterns: &[String],
     args: &[String],
 ) -> Result<String, GoListError> {
+    // `detail` splits the level-1 `golist invoke(main)` total into the parts that
+    // behave differently: the disk-cache probe (warm) and the `go list`
+    // subprocess (cold, and the one C-3 would have to replace).
+    let detail = crate::debug::detailed();
+    let t_probe = std::time::Instant::now();
     if let Some(cached) = try_load_golist_cache(cfg, patterns, args) {
         if export_paths_exist(&cached) {
+            if detail {
+                eprintln!(
+                    "guff:     golist cache probe {:.2}s (hit, {} bytes)",
+                    t_probe.elapsed().as_secs_f64(),
+                    cached.len(),
+                );
+            }
             return Ok(cached);
         }
     }
+    if detail {
+        eprintln!(
+            "guff:     golist cache probe {:.2}s (miss)",
+            t_probe.elapsed().as_secs_f64(),
+        );
+    }
+    let t_exec = std::time::Instant::now();
     let stdout = invoke_go(cfg, args)?;
+    let exec = t_exec.elapsed();
+    let t_store = std::time::Instant::now();
     store_golist_cache(cfg, patterns, args, &stdout);
+    if detail {
+        eprintln!(
+            "guff:     golist subprocess {:.2}s ({} bytes), cache store {:.2}s",
+            exec.as_secs_f64(),
+            stdout.len(),
+            t_store.elapsed().as_secs_f64(),
+        );
+    }
     Ok(stdout)
 }
 

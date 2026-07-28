@@ -492,7 +492,7 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
   - **R25.3 `go list` cold 23s** — warm は 1.3s（OS キャッシュ）。golist ディスクキャッシュ（R24.4）は cold 初回には効かない。優先度低。
   - ~~**R25.2 残・隔離済み非致命 panic**~~ — `int64(x)` 等の明示型変換未対応（`expr.rs` ident TypeName）と `as_signature` が Named を解けない件、MethodVal 誤タグ時の `recv_type` panic を修正。`./tsdb/...` は prometheus `.golangci.yml` 下で panic 0・完走を確認。
   - **hybrid peak RSS** — 依存 AST 早期破棄で full ~13.4 GiB→~10.7 GiB。さらなる削減は未着手。
-- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。RSS は `/usr/bin/time -l`。base 溢れの切り分けは `position.rs::add_file` に一時プローブ（`next_base > u32::MAX` で eprintln）。
+- **計測**: `GUFF_DEBUG_CACHE=1` で phase 別時間 + per-analyzer 集計（`report_analyzer_timing`）+ slow buildir(>1s) pkg。`=2` でサブ phase の内訳（§9.3.1）。RSS は `/usr/bin/time -l`。base 溢れの切り分けは `position.rs::add_file` に一時プローブ（`next_base > u32::MAX` で eprintln）。
 - **回帰ゲート（ローカル）**: `regress/` — prometheus 本体の `.golangci.yml` で guff の wall / peak RSS と golangci-lint との finding-set 差分を比較し、悪化時のみ FAIL（絶対一致は不要）。`tsdb`（既定）と `full`（`./...`）の 2 プロファイル。`./regress/run.sh` / `--profile full` / `--update-baseline`。詳細は [`regress/README.md`](../regress/README.md)。
 - **完了（2026-07-20）— 決定性 + hybrid seed AST 早期破棄**: govet `unreachable` 報告順の pos ソート；ineffassign multi-var の `(pos, name)` ソート；`import_package` の `sources.remove`。`full` peak **~13.4 GiB→~10.7 GiB**。
 - **テスト**: `cargo test --workspace`（green）+ `-j 1` / `RAYON_NUM_THREADS=1` diff で 3 モード一致確認。
@@ -574,10 +574,35 @@ git clone --depth 1 https://github.com/stbenjam/no-sprintf-host-port.git
 - そのセッションで何をしたか → [`SESSION-LOG.md`](SESSION-LOG.md) の表の先頭に 1 行。
 - 冗長になりがちな詳細（設定キー全列挙・完了履歴）は本書に書かず、コード内 `// DEFERRED:` と `SESSION-LOG.md` / git に委ねる。
 
+### 9.3.1 phase タイマーの詳細レベル（`GUFF_DEBUG_CACHE=2`）
+
+`GUFF_DEBUG_CACHE` を **`2` 以上**にすると、phase 合計の下に内訳が出る（`=1` の出力は不変）。
+値が数値でない場合（`=1` / 空 / `=on` など）は従来どおりレベル 1。
+
+```
+guff:     golist cache probe 0.00s (miss)                    ← ディスクキャッシュ判定
+guff:     golist subprocess 1.00s (14069597 bytes), cache store 0.00s
+guff:     refine total 0.01s (1792 pkgs, 294 roots)
+guff:     target check read 0.04s / parse 0.89s / seed-clone 0.02s / check_files 1.71s (summed across workers)
+guff:     format collect_paths 0.00s (725 files, 1 roots)
+guff:     format gofumpt 0.57s (0 unformatted)               ← formatter ごと
+```
+
+注意点:
+
+- **`target check …` は wall ではなく全ワーカーの合計 CPU**（`PERF_TASKS.md` §1.6）。
+  wall と混同しない。
+- **`format …` の行は phase の行の間に割り込む。** format は専用プールの別スレッドで
+  重畳しているので、**出力順は毎回変わる**（行は `eprintln!` のロックで壊れない）。
+- 未設定時のオーバーヘッドはゼロ。ファイル単位の計測は `Option<Instant>` で、
+  レベル 2 でなければ時計を読まない。
+- 実装は `crates/guff-packages/src/debug.rs` と `crates/guff-lint/src/debug.rs`
+  （2 crate に共通の下位 crate が無いので写しが 2 つある。レベルの決め方を変えるときは両方）。
+
 ### 9.4 プロファイリング（samply）
 
-phase タイマー（`GUFF_DEBUG_CACHE=1`）は「どの phase が遅いか」までしか分からない。
-**関数レベルでどこに時間が行っているか**を見るには `samply`（macOS / Linux 両対応の
+phase タイマー（`GUFF_DEBUG_CACHE=1` / `=2`）は「どの phase・どのサブ phase が遅いか」までしか
+分からない。**関数レベルでどこに時間が行っているか**を見るには `samply`（macOS / Linux 両対応の
 サンプリングプロファイラ、UI は Firefox Profiler）を使う。
 
 ```bash

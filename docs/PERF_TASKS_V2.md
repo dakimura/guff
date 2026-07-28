@@ -12,7 +12,7 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / S-2 / P0-1 / P0-2 / A-5 / B-0 / B-8 / X-1 / X-2 / X-4。**
+> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-3 / B-8 / X-1 / X-2 / X-4 / X-5。**
 > **NO-GO と判定済み: A-2**（理由は §A-2 と §5 の表）。各タスク節末尾の `### DONE` に実測値があります。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -194,7 +194,11 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 > （t=0 に開始して 1.78s で終わるため）。**しかし余裕は 0.96s しかありません。**
 > **cold を 1s 詰めた瞬間に format が critical path になり、そこから先は
 > 「analyze / typecheck をどれだけ速くしても wall が動かない」領域に入ります。**
-> B-1 や A-1 に着手する前に、**その改善が format の内側に収まるかを確認**してください。
+>
+> **↑ この懸念は S-3（2026-07-28 DONE）で解消済みです。** 内訳を取ったところ
+> format の 1.58s は **gci 0.40 + gofumpt 0.57 + goimports 0.61 ＝ 同じ 725 ファイルの 3 周**で、
+> critical path 化しても **CPU の最大 2/3 を落とせる未着手のレバー**が残っています。
+> **B-1 / A-1 を先に進めて問題ありません。** 詳細は §S-3 の DONE 節。
 
 **warm（キャッシュ hot）— wall 0.21s ×3 / RSS 0.14GB（B-8 / X-1 後と同一。B-3 は warm に効かない）**
 
@@ -412,7 +416,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 |---|---|---|---|---|---|
 | S-1 | 計測環境クリーン判定スクリプト | （全部） | — | 極小 | ゼロ |
 | S-2 | プロファイラ（samply）手順の常設 | （全部） | — | 小 | ゼロ |
-| S-3 | `GUFF_DEBUG_CACHE=2` で phase 内訳を細分化 | （全部） | — | 小 | 低 |
+| ~~S-3~~ | ~~`GUFF_DEBUG_CACHE=2` で phase 内訳を細分化~~ **DONE**（format_checks の正体 = 3 formatter × 725 ファイルの 3 周） | （全部） | — | 小 | 低 |
 
 ### Tier P0 — 今回の調査で見つかった「たぶん既に損している」もの
 
@@ -450,6 +454,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | B-7 | ソースバイトの一回読みを format/misspell と共有 | cold | 0.05〜0.2s? | 中 | 低 |
 | ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
 | B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
+| **B-10** | **formatter 間で read + parse を共有する（S-3 で発見）** | cold（format が critical path になったときだけ） | **format CPU の最大 2/3** | 中 | 中 |
 
 ### Tier C — 大物・実験（時間と注意力に余裕があるときだけ）
 
@@ -467,10 +472,15 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
 **2026-07-28 時点の残り推奨順:** `B-1 → A-1（guff-ssa から）→ A-3 → B-2`。
-**ただし §1.3-post の警告を先に読むこと** — seed-hot では format_checks（1.78s 重畳）に対して
-直列 phase の余裕が **0.96s しかなく**、cold を約 1s 詰めた時点で format が critical path に
-変わります。そこから先は analyze / typecheck をいくら速くしても wall が動きません。
-S-3（未着手）は format_checks の内訳を出すので、**その局面では S-3 が前提条件になります。**
+
+> **§1.3-post の「余裕 0.96s」問題は S-3 で決着しました。そのまま進めて構いません。**
+> seed-hot では format_checks（1.78s 重畳）に対して直列 phase の余裕が 0.96s しかなく、
+> cold を約 1s 詰めると format が critical path になる——という懸念でしたが、
+> **S-3 の内訳で「format 1.58s ＝ gci 0.40 + gofumpt 0.57 + goimports 0.61、
+> すなわち同じ 725 ファイルの 3 周」**と判明しました（§S-3 の DONE）。
+> つまり format が critical path 化しても、**そこには CPU の最大 2/3 を落とせる
+> 未着手のレバーが残っています。** 先に format を潰しておく必要はありません。
+> （ただし §5 の「format の shared-read は逆に悪化」の先例があるので、着手は要 GO/NO-GO。）
 
 自信がなければ **Tier S と Tier P0 だけやって終わりにしてよい**です。それでも十分な成果です。
 
@@ -715,6 +725,143 @@ findings 検証は不要。
 - `GUFF_DEBUG_CACHE=1` の出力が**変更前とバイト同一**であること（`diff` で確認）。
 - `GUFF_DEBUG_CACHE` 未設定での wall が変わらないこと（3 回計測して誤差内）。
 - findings diff = 空、両 regress PASS。
+
+### DONE（2026-07-28）— **`GUFF_DEBUG_CACHE=2` を追加。最大の収穫は「format_checks は 3 formatter × 725 ファイルの 3 周」。**
+
+**入れたもの:**
+
+| ファイル | 内容 |
+|---|---|
+| `crates/guff-packages/src/debug.rs`（新規） | レベル判定（0 = off / 1 = phase 合計 / 2+ = 内訳）。`enabled()` / `detailed()` |
+| `crates/guff-lint/src/debug.rs`（新規） | 同じロジックの写し。この 2 crate に共通の下位 crate が無いため（`guff-analysis` も既に独立して同じ env を読んでいる） |
+| `golist.rs` | `load_or_invoke_go` に **cache probe / subprocess / cache store** の分解 |
+| `load.rs` | `refine total`（既存の `connect_imports` は connect だけを測っている） |
+| `typecheck.rs` | `typecheck_package_with_seed` に **read / parse / seed-clone / check_files** のグローバル `AtomicU64` 累算。`typecheck_roots` が target ループの前後で **snapshot して差分**（seed 分と混ざらない） |
+| `lib.rs`（guff-lint） | `format collect_paths` と **formatter ごと**の秒数＋検出数 |
+
+**レベルの決め方:** `GUFF_DEBUG_CACHE` の値を `u8` としてパースし、パースできなければ 1。
+`.max(1)` してあるので、従来の `var_os(..).is_some()` と同じく **`=` （空）や `=0` も「on（レベル1）」のまま**です。
+
+> **手順書の「既存の `=1` 出力を `=2` に載せ替える」は採用していません。** §S-3 の検証条件が
+> 「`=1` の出力が変更前とバイト同一」で、載せ替えるとこれが破れるためです。**`=1` は 1 行も
+> 動かさず、`=2` で行を足すだけ**にしてあります（過去の記録値がそのまま比較できる）。
+
+**オーバーヘッド:** 高頻度パス（ファイルごと）の `Instant::now()` は `detail::start(on)` が
+`on.then(Instant::now)` なので、**未設定時は時計を読みません**（`bool` 1 回の分岐だけ）。
+実測は下の A/B 参照。
+
+**実測（クリーン環境・load 1.52・cold prometheus `./...`・`GUFF_DEBUG_CACHE=2`、
+wall 3.95s / RSS 7.46GB / findings 20）:**
+
+```
+guff:     format collect_paths 0.00s (725 files, 1 roots)
+guff:     golist cache probe 0.00s (miss)
+guff:     format gci 0.40s (0 unformatted)
+guff:     format gofumpt 0.57s (0 unformatted)
+guff:     golist subprocess 1.00s (14069597 bytes), cache store 0.00s
+guff:   golist invoke(main) 1.00s (14069597 bytes)
+guff:   golist parse+build 0.03s (1792 pkgs)
+guff:   golist stdlib-export 0.16s
+guff:   refine connect_imports 0.01s (1792 pkgs)
+guff:     refine total 0.01s (1792 pkgs, 294 roots)
+guff: phase load_graph (go list) 1.21s (294 roots, 1792 total pkgs)
+guff: phase cache setup+partition 0.00s (1 hits, 293 misses)
+guff:     format goimports 0.61s (0 unformatted)
+guff:     seed dep check 1.13s (...), 1455 source deps in 35 waves (widest 161), 243 export deps
+guff:   typecheck_roots seed build 1.15s (from_source=true)
+guff:   typecheck_roots target check 0.44s (293 targets)
+guff:     target check read 0.04s / parse 0.89s / seed-clone 0.02s / check_files 1.71s (summed across workers)
+guff: phase typecheck_roots 1.60s (293 pkgs)
+guff: phase analyze (run_on_packages) 0.75s
+guff: phase issues+filter 0.03s
+guff: phase format_checks 1.58s (overlapped with analysis; 0.00s waited)
+```
+
+> `format …` の行が phase の行の間に挟まるのは、format が別スレッドで重畳しているからで、
+> **順序は毎回変わります**（`eprintln!` は行単位でロックされるので行は壊れません）。
+> むしろ「format が何秒目に終わったか」が読めるので、そのままにしてあります。
+
+#### 読み取れたこと (1) — **format_checks 1.58s の正体は「同じ 725 ファイルを 3 周」**
+
+| 内訳 | 秒（2 スレッド専用プール上） |
+|---|---:|
+| collect_paths（ツリー走査） | **0.00s**（第1弾 2026-07-25 で 1 回に共有済み） |
+| gci | 0.40s |
+| gofumpt | 0.57s |
+| goimports | 0.61s |
+
+`run_format_checks`（`crates/guff-lint/src/lib.rs`）は **`cfg.enable` の formatter ごとに
+`Runner::check_files(&files)` を呼び直します。** ファイル一覧の walk だけは共有済みですが、
+**読み込みとフォーマット本体は formatter の数だけ繰り返し**です（prometheus は
+gci + gofumpt + goimports の 3 つ）。
+
+**これが §1.3-post の「余裕 0.96s」問題への答えです。** format が critical path 化しても、
+**そこには最大で CPU の 2/3 を落とせる既知のレバーが残っている**ので、
+**B-1 / A-1 の前に format を先に潰す必要はありません。** 順番はこれまでどおりで構いません。
+
+> ⚠️ ただし §5 の禁止リストに「**format の shared-read は第1弾 §1.7 で試して逆に悪化**」が
+> あります。**あれはバイト列の共有の話**で、ここで見えているのは
+> 「read + フォーマット本体（＝パースと整形）の 3 重実行」です。別の話ですが、
+> 先例があるので**着手するなら必ず GO/NO-GO 計測から**（新タスクとして起票すること）。
+
+#### 読み取れたこと (2) — target check の内訳（合計 CPU 2.66s / wall 0.44s ＝ 実効並列度 6.0）
+
+| 内訳 | 合計 CPU | 比率 |
+|---|---:|---:|
+| `check_files`（型チェック本体） | **1.71s** | 64% |
+| `parse_file` | **0.89s** | 33% |
+| `fs::read` | 0.04s | 2% |
+| seed clone + importer | 0.02s | 1% |
+
+**P0-3（target パースの object resolution スキップ）の上限がこれで確定します。**
+parse を**丸ごと消しても** wall 換算 `0.44 × 0.33 ≈ 0.15s`、そのうち `resolve_file` は一部なので、
+**上限は 0.15s を大きく下回ります。** §0-14 の基準（0.1s）ぎりぎりか、下回る可能性が高い。
+着手するなら、まず `resolve_file` 単独の CPU を samply（S-2）で切り出すこと。
+
+ついでに **B-6（`Expr::clone` 除去）と B-5（型のインターン）の当たり所も 1.71s の中**だと
+確定しました（samply の `drop_in_place<ast::Expr>` + `Expr::clone` = 0.62s はここと seed の両方に散る）。
+
+#### 読み取れたこと (3) — load_graph 1.21s は全部説明がついた
+
+`subprocess 1.00s`（`go list` の外部プロセス待ち）＋ `stdlib-export 0.16s` ＋
+`parse+build 0.03s` ＋ `refine 0.01s`。**83% が外部プロセス待ちで、CPU は遊んでいます。**
+`cache probe` は cold で 0.00s（ミス）なので、キャッシュ判定自体のコストはゼロ。
+**C-3 以外にここを詰める手はありません**（§1.3-post の記述を裏付け）。
+
+**検証:**
+
+- **findings byte 一致**: 変更前バイナリの出力と `diff` が空（20 件）。`=1` / `=2` / 未設定 /
+  `-j 1` のすべてで確認。**cold 3 回とも同一**。
+- **`=1` の出力が構造的に不変**: 秒数を正規化して `diff` すると、差分は
+  (a) 上位20リストの同着順の揺れ、(b) preorder の % の小数、(c) `/usr/bin/time` の有無 のみ。
+  **行の追加・削除・文言変更はゼロ。**
+- **未設定時のオーバーヘッドなし**（§0-11 / B-0 の教訓に従い **A/B/A/B の交互 4 往復**）:
+
+  | 回 | pre | post |
+  |---:|---:|---:|
+  | 1 | 4.49s | 4.34s |
+  | 2 | 4.00s | 3.97s |
+  | 3 | 4.00s | 3.97s |
+  | 4 | 3.99s | 3.97s |
+  | **中央値** | **4.00s** | **3.97s** |
+
+  差 −0.03s（＝ノイズ）。1 回目が両方とも高いのは初回のファイルキャッシュ。
+- **`-j 1` も不変**（同じく交互）: pre 8.86 / 8.88s、post 8.86 / 8.91s。
+- `cargo test --workspace --release --no-fail-fast`: **2796 passed / 3 failed**。
+  失敗は **X-6 の 3 本ちょうど**（`sa4010` / `sa4017` / `sa5011`）で、§X-6 のとおり `main` で
+  以前から落ちているもの。**この変更で増えていません。**
+- `cargo build --release` の警告数 **183 → 183**（増減なし）。
+- **regress 両方 PASS**:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.740s | **1.510s** | 1,319,845,888 | **1,248,411,648** | both 4 / only 0,0 |
+  | full | 4.940s | **3.840s** | 7,608,352,768 | **7,580,041,216** | both 20 / only 0,0 |
+
+  baseline 未更新。
+
+> **「狙った phase が下がったか」は N/A です** — S-3 は計測タスクで、高速化はしていません
+> （§4 テンプレートのこの項目は Tier S には当てはまりません）。
 
 ---
 
@@ -2348,6 +2495,52 @@ guff_only=0 / golangci_only=0 / both 20）。単体テスト 2 本追加
 
 着手してよい唯一の条件: **`base_fp` の設計を変えて、マージ順に依存しない決定的なキーに
 できる目処が立った場合。** その場合でも、まずユーザーに相談してください。
+
+---
+
+## B-10 — formatter 間で read + parse を共有する（**S-3 で発見。着手条件つき**）
+
+### 着手条件（先に読む）
+
+**format_checks が critical path に乗っていない限り、このタスクをやっても wall は 1ms も動きません。**
+P0-1 のスイープが実証したとおり、format は分析ウィンドウに完全に重畳しており `waited=0.00s` です。
+**つまり「format を速くする」こと自体には価値がありません。**
+
+着手してよい条件は 1 つだけ: **`GUFF_DEBUG_CACHE=1` で `phase format_checks` の
+`waited` が 0.00s より大きくなったとき**（＝ 直列 phase の合計が format の秒数を下回り、
+format を待つようになったとき）。§1.3-post の seed-hot の余裕はそのとき 0 です。
+
+### 根拠（S-3 の実測）
+
+`run_format_checks`（`crates/guff-lint/src/lib.rs`）は `cfg.enable` の formatter ごとに
+`Runner::check_files(&files)` を呼び直します。ファイル一覧の walk は第1弾（2026-07-25）で
+1 回に共有済みですが、**読み込みとフォーマット本体は formatter の数だけ繰り返し**です:
+
+```
+guff:     format collect_paths 0.00s (725 files, 1 roots)   ← 共有済み
+guff:     format gci       0.40s
+guff:     format gofumpt   0.57s
+guff:     format goimports 0.61s
+guff: phase format_checks 1.58s
+```
+
+prometheus は gci + gofumpt + goimports の 3 つなので、**同じ 725 ファイルを 3 周**しています。
+3 つとも Go ソースをパースしてから整形するので、原理的には read 1 回 + parse 1 回に畳めます。
+
+### やる前に必ず読むこと
+
+**§5 の禁止リストに「format の shared-read は第1弾 §1.7 で試して逆に悪化した」があります。**
+あれは**バイト列の共有**の話で、ここで狙うのは **parse の共有**なので別物ですが、
+**同じ場所で一度失敗している**という事実は重い。したがって:
+
+1. まず S-2（samply）で `check_file` の内訳を取り、**parse が本当に支配的か**を確認する
+   （整形本体・差分計算が支配的なら共有しても効かない → NO-GO）。
+2. `--fix` 経路（`MetaFormatter` を chain する側）には手を出さない。逐次であることが
+   正しさの前提です（§P0-1「やってはいけない」）。
+3. formatter ごとの attribution（どの formatter が検出したか）を壊さないこと。
+   findings の linter 名が変わったら即ロールバック。
+4. `fmt_check` warm キャッシュ（`check_with_cache`）の経路と共存すること。warm では
+   format は 0.07s しかないので、**warm を 1ms でも悪化させたら差し引きで負け**です。
 
 ---
 

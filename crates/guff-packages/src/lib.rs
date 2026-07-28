@@ -9,6 +9,7 @@
 //!   Use of this source code is governed by a BSD-style license.
 
 mod config;
+mod debug;
 mod dedup;
 mod driver;
 mod golist;

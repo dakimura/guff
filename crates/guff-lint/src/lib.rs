@@ -6,6 +6,7 @@
 pub mod cli;
 mod config;
 mod custom;
+mod debug;
 mod diff;
 mod duration;
 mod exclude;
@@ -207,9 +208,20 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
 
     // One tree walk for all formatters (prometheus enables gci+gofumpt+goimports;
     // previously each `check` re-walked). Attribution stays per-formatter.
+    let detail = crate::debug::detailed();
+    let t_collect = std::time::Instant::now();
     let files = Runner::collect_paths(&cfg.paths).map_err(|e| RunError::Message(e.to_string()))?;
+    if detail {
+        eprintln!(
+            "guff:     format collect_paths {:.2}s ({} files, {} roots)",
+            t_collect.elapsed().as_secs_f64(),
+            files.len(),
+            cfg.paths.len(),
+        );
+    }
     let mut issues = Vec::new();
     for name in &cfg.enable {
+        let t_fmt = std::time::Instant::now();
         let meta = MetaFormatter::new(
             std::slice::from_ref(name),
             cfg.gofmt.clone(),
@@ -231,6 +243,15 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
         let findings = runner
             .check_files(&files)
             .map_err(|e| RunError::Message(e.to_string()))?;
+        if detail {
+            // Each formatter re-reads and re-formats every file: this is where a
+            // 3-formatter config (prometheus: gci+gofumpt+goimports) pays 3x.
+            eprintln!(
+                "guff:     format {name} {:.2}s ({} unformatted)",
+                t_fmt.elapsed().as_secs_f64(),
+                findings.len(),
+            );
+        }
         for f in findings {
             issues.push(issue_from_cached(
                 name,
@@ -333,7 +354,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         ..Config::default()
     };
 
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let timing = crate::debug::enabled();
     let t0 = std::time::Instant::now();
 
     let (roots, all_packages) =
@@ -473,7 +494,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         );
     }
 
-    if std::env::var_os("GUFF_DEBUG_CACHE").is_some() {
+    if crate::debug::enabled() {
         eprintln!(
             "guff: cache hits={} misses={} (lazy: type-checked {} of {} roots)",
             hits,
@@ -661,7 +682,7 @@ fn fmt_thread_count() -> usize {
 }
 
 fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
-    let timing = std::env::var_os("GUFF_DEBUG_CACHE").is_some();
+    let timing = crate::debug::enabled();
 
     // Formatting reads files straight from disk and needs neither the package
     // graph nor types, while `run_linters` opens with a `go list` subprocess
