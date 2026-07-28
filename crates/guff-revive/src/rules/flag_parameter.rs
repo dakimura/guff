@@ -1,49 +1,74 @@
 //! `flag-parameter` — warn on boolean parameters used as control flags.
 
-use guff::ast::{Decl, Expr, FuncDecl, Ident, IfStmt, Stmt};
+use std::collections::HashSet;
+
+use guff::ast::{Expr, FuncDecl, Ident};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 use crate::util::is_bool_type_expr;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let Some(body) = &f.body else {
-                continue;
-            };
-            let bool_params = collect_bool_params(f);
-            if bool_params.is_empty() {
-                continue;
-            }
-            walk::inspect(NodeRef::BlockStmt(body), |n| {
-                let Some(NodeRef::IfStmt(if_stmt)) = n else {
-                    return true;
-                };
-                if let Some(name) = cond_uses_bool_param(&if_stmt.cond, &bool_params) {
-                    failures.push(Failure {
-                        rule: "flag-parameter",
-                        pos: if_stmt.if_.0 as u32,
-                        message: format!(
-                            "parameter '{name}' seems to be a control flag, avoid control coupling"
-                        ),
-            confidence: None,
-        });
-                }
-                true
-            });
-        }
-    }
-    failures
+pub struct Checker {
+    failures: Vec<Failure>,
 }
 
-fn collect_bool_params(f: &FuncDecl) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        let Some(body) = &f.body else {
+            return;
+        };
+        let bool_params = collect_bool_params(f);
+        if bool_params.is_empty() {
+            return;
+        }
+        walk::inspect(NodeRef::BlockStmt(body), |n| {
+            let Some(NodeRef::IfStmt(if_stmt)) = n else {
+                return true;
+            };
+            if let Some(name) = cond_uses_bool_param(&if_stmt.cond, &bool_params) {
+                self.failures.push(Failure {
+                    rule: "flag-parameter",
+                    pos: if_stmt.if_.0 as u32,
+                    message: format!(
+                        "parameter '{name}' seems to be a control flag, avoid control coupling"
+                    ),
+                    confidence: None,
+                });
+            }
+            true
+        });
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}
+
+fn collect_bool_params(f: &FuncDecl) -> HashSet<String> {
+    let mut out = HashSet::new();
     let Some(params) = &f.ty.params else {
         return out;
     };
@@ -58,7 +83,7 @@ fn collect_bool_params(f: &FuncDecl) -> std::collections::HashSet<String> {
     out
 }
 
-fn cond_uses_bool_param(cond: &Expr, params: &std::collections::HashSet<String>) -> Option<String> {
+fn cond_uses_bool_param(cond: &Expr, params: &HashSet<String>) -> Option<String> {
     match cond {
         Expr::Ident(Ident { name, .. }) if params.contains(name) => Some(name.clone()),
         Expr::BinaryExpr(b) => {

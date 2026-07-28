@@ -1,6 +1,7 @@
 //! `function-length` — warn on functions exceeding statement/line limits (50/75 default).
 
-use guff::ast::{AssignStmt, BlockStmt, Decl, Expr, FuncDecl, FuncLit, Stmt};
+use guff::ast::{BlockStmt, Expr, FuncDecl, FuncLit, Stmt};
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
@@ -8,44 +9,73 @@ use crate::failure::Failure;
 const MAX_STMTS: usize = 50;
 const MAX_LINES: usize = 75;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let Some(body) = &f.body else {
-                continue;
-            };
-            if body.list.is_empty() {
-                continue;
-            }
-            let stmt_count = count_stmts(&body.list);
-            if stmt_count > MAX_STMTS {
-                failures.push(Failure {
-                    rule: "function-length",
-                    pos: f.name.name_pos.0 as u32,
-                    message: format!(
-                        "maximum number of statements per function exceeded; max {MAX_STMTS} but got {stmt_count}"
-                    ),
-            confidence: None,
-        });
-            }
-            let line_count = count_lines(pass, body);
-            if line_count > MAX_LINES {
-                failures.push(Failure {
-                    rule: "function-length",
-                    pos: f.name.name_pos.0 as u32,
-                    message: format!(
-                        "maximum number of lines per function exceeded; max {MAX_LINES} but got {line_count}"
-                    ),
-            confidence: None,
-        });
-            }
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
+        Self {
+            pass,
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_func(self.pass, f, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
+}
+
+fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
+    let Some(body) = &f.body else {
+        return;
+    };
+    if body.list.is_empty() {
+        return;
+    }
+    let stmt_count = count_stmts(&body.list);
+    if stmt_count > MAX_STMTS {
+        failures.push(Failure {
+            rule: "function-length",
+            pos: f.name.name_pos.0 as u32,
+            message: format!(
+                "maximum number of statements per function exceeded; max {MAX_STMTS} but got {stmt_count}"
+            ),
+            confidence: None,
+        });
+    }
+    let line_count = count_lines(pass, body);
+    if line_count > MAX_LINES {
+        failures.push(Failure {
+            rule: "function-length",
+            pos: f.name.name_pos.0 as u32,
+            message: format!(
+                "maximum number of lines per function exceeded; max {MAX_LINES} but got {line_count}"
+            ),
+            confidence: None,
+        });
+    }
 }
 
 fn count_lines(pass: &Pass<'_>, body: &BlockStmt) -> usize {

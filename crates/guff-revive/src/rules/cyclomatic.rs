@@ -1,6 +1,6 @@
 //! `cyclomatic` — restrict maximum cyclomatic complexity (default 10).
 
-use guff::ast::{Decl, Expr, FuncDecl};
+use guff::ast::{Expr, FuncDecl};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -9,30 +9,53 @@ use crate::failure::Failure;
 
 const MAX_COMPLEXITY: usize = 10;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            let c = complexity(f);
-            if c > MAX_COMPLEXITY {
-                failures.push(Failure {
-                    rule: "cyclomatic",
-                    pos: f.name.name_pos.0 as u32,
-                    message: format!(
-                        "function {} has cyclomatic complexity {} (> max enabled {})",
-                        func_name(f),
-                        c,
-                        MAX_COMPLEXITY
-                    ),
-            confidence: None,
-        });
-            }
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        let c = complexity(f);
+        if c > MAX_COMPLEXITY {
+            self.failures.push(Failure {
+                rule: "cyclomatic",
+                pos: f.name.name_pos.0 as u32,
+                message: format!(
+                    "function {} has cyclomatic complexity {} (> max enabled {})",
+                    func_name(f),
+                    c,
+                    MAX_COMPLEXITY
+                ),
+                confidence: None,
+            });
+        }
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn recv_string(expr: &Expr) -> String {
