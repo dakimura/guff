@@ -18,7 +18,7 @@
 //! - `reportCycle` emits a single concise [`Code::InvalidInitCycle`] error
 //!   rather than Go's multi-line error with one `refers to` line per edge.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use guff_types_errors::Code;
 
@@ -96,7 +96,7 @@ impl Checker {
 
         // Track which n:1 declarations (keyed by a representative variable) have
         // already emitted an Initializer.
-        let mut emitted: HashSet<ObjectId> = HashSet::new();
+        let mut emitted: HashSet<ObjectId> = HashSet::default();
 
         while !remaining.is_empty() {
             // Select the next node: minimum by `node_less`.
@@ -116,7 +116,7 @@ impl Checker {
                     &self.objects,
                     from,
                     from,
-                    &mut HashSet::new(),
+                    &mut HashSet::default(),
                 );
                 // If `from` is not part of the cycle, `cycle` is empty; the
                 // cycle is reported when the algorithm reaches an object that
@@ -189,27 +189,38 @@ impl Checker {
     /// Equivalent to `dependencyGraph`.
     fn dependency_graph(&self) -> Vec<GraphNode> {
         // M maps each dependency object to its node index.
-        let mut m: HashMap<ObjectId, usize> = HashMap::new();
+        // Sort by source order so FxHash key iteration cannot change node indices
+        // (PERF_TASKS_V2 §0-12 / A-1).
+        let mut m: HashMap<ObjectId, usize> = HashMap::default();
         let mut nodes: Vec<GraphNode> = Vec::new();
-        for &obj in self.obj_map.keys() {
+        let mut objs: Vec<ObjectId> = self.obj_map.keys().copied().collect();
+        objs.sort_by_key(|o| o.order(&self.objects));
+        for obj in objs {
             if is_dependency(&self.objects, obj) {
                 m.insert(obj, nodes.len());
                 nodes.push(GraphNode {
                     obj,
-                    pred: HashSet::new(),
-                    succ: HashSet::new(),
+                    pred: HashSet::default(),
+                    succ: HashSet::default(),
                     ndeps: 0,
                 });
             }
         }
 
         // Compute edges: for each dependency obj -> d, create n->s and s->n.
-        for (&obj, n_idx) in m.iter() {
+        // Sort for deterministic HashSet population order (not required for
+        // correctness, but keeps cycle dumps stable across hashers).
+        let mut edge_objs: Vec<ObjectId> = m.keys().copied().collect();
+        edge_objs.sort_by_key(|o| o.order(&self.objects));
+        for obj in edge_objs {
+            let n_idx = m[&obj];
             if let Some(info) = self.obj_map.get(&obj) {
-                for &d in info.deps.keys() {
+                let mut deps: Vec<ObjectId> = info.deps.keys().copied().collect();
+                deps.sort_by_key(|o| o.order(&self.objects));
+                for d in deps {
                     if let Some(&d_idx) = m.get(&d) {
-                        nodes[*n_idx].succ.insert(d_idx);
-                        nodes[d_idx].pred.insert(*n_idx);
+                        nodes[n_idx].succ.insert(d_idx);
+                        nodes[d_idx].pred.insert(n_idx);
                     }
                 }
             }
@@ -233,8 +244,16 @@ impl Checker {
         for &n in &func_g {
             // Connect each predecessor p of n with each successor s, then drop
             // the edges to/from n.
-            let preds: Vec<usize> = nodes[n].pred.iter().copied().collect();
-            let succs: Vec<usize> = nodes[n].succ.iter().copied().collect();
+            let preds: Vec<usize> = {
+                let mut v: Vec<usize> = nodes[n].pred.iter().copied().collect();
+                v.sort_unstable();
+                v
+            };
+            let succs: Vec<usize> = {
+                let mut v: Vec<usize> = nodes[n].succ.iter().copied().collect();
+                v.sort_unstable();
+                v
+            };
             for &p in &preds {
                 if p != n {
                     for &s in &succs {
@@ -255,7 +274,7 @@ impl Checker {
         // pred/succ reference positions within the new vector. We keep only G
         // nodes; all edges to/from function nodes have already been removed, so
         // every surviving edge points within G.
-        let mut old_to_new: HashMap<usize, usize> = HashMap::new();
+        let mut old_to_new: HashMap<usize, usize> = HashMap::default();
         for (new_idx, &old) in g.iter().enumerate() {
             old_to_new.insert(old, new_idx);
         }

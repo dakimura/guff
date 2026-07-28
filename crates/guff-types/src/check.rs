@@ -22,7 +22,7 @@
 //!   resolver phase). `imports`/`untyped`/`used_vars` are added when
 //!   `expr.go` (chunk 25) needs them; `ExprInfo` isn't defined yet.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use std::sync::Arc;
 
 use guff_constant::Value;
@@ -155,14 +155,14 @@ pub struct Checker {
     /// Local variables that have been read (used). A local `Var` of the
     /// checker's own package not in this set at the end of its function body
     /// triggers a "declared and not used" error. Equivalent to `usedVars`.
-    pub used_vars: std::collections::HashSet<ObjectId>,
+    pub used_vars: crate::hash::HashSet<ObjectId>,
     /// The `PkgName` objects bound by this package's `import` declarations, in
     /// source order. Any not in `used_pkg_names` at the end of checking is
     /// reported as an unused import. Equivalent to `check.imports`.
     pub imports: Vec<ObjectId>,
     /// The set of `PkgName` objects referred to by a qualified identifier
     /// (`pkg.X`). Equivalent to `check.usedPkgNames`.
-    pub used_pkg_names: std::collections::HashSet<ObjectId>,
+    pub used_pkg_names: crate::hash::HashSet<ObjectId>,
     /// Maps each dot-imported package to the `PkgName` that dot-imported it.
     /// When a bare identifier resolves to an object of one of these packages,
     /// the corresponding `PkgName` is marked used. Simplification of Go's
@@ -175,7 +175,7 @@ pub struct Checker {
     /// in place by `update_expr_type` as their context becomes known and
     /// flushed by `record_untyped` at the end of checking. Equivalent to Go's
     /// `check.untyped`.
-    pub untyped: std::collections::HashMap<u32, crate::recording::ExprInfo>,
+    pub untyped: crate::hash::HashMap<u32, crate::recording::ExprInfo>,
 
     // ---- delayed actions and cycle path ----------------------------------
     /// Stack of delayed action segments; processed in FIFO order.
@@ -245,7 +245,7 @@ pub struct WorkerOverlays {
 /// changes in a way that would make old bytes misinterpreted rather than
 /// cleanly fail to decode; callers should treat a schema mismatch as a cache
 /// miss and fall back to rebuilding from source.
-pub const SEED_OVERLAY_SCHEMA: u32 = 1;
+pub const SEED_OVERLAY_SCHEMA: u32 = 2;
 
 /// On-disk envelope wrapping a [`WorkerOverlays`] payload with a schema tag,
 /// so [`WorkerOverlays::decode`] can reject stale/foreign blobs up front
@@ -491,8 +491,8 @@ impl Checker {
             builtins,
             conf,
             importer: None,
-            import_cache: Arc::new(HashMap::new()),
-            sources: HashMap::new(),
+            import_cache: Arc::new(HashMap::default()),
+            sources: HashMap::default(),
             importing: Vec::new(),
             ctxt: Context::new(),
             pkg,
@@ -501,14 +501,14 @@ impl Checker {
             errors: Vec::new(),
             first_err: None,
             files: Vec::new(),
-            used_vars: std::collections::HashSet::new(),
+            used_vars: crate::hash::HashSet::default(),
             imports: Vec::new(),
-            used_pkg_names: std::collections::HashSet::new(),
-            dot_imported: HashMap::new(),
-            untyped: std::collections::HashMap::new(),
-            obj_map: HashMap::new(),
+            used_pkg_names: crate::hash::HashSet::default(),
+            dot_imported: HashMap::default(),
+            untyped: crate::hash::HashMap::default(),
+            obj_map: HashMap::default(),
             obj_list: Vec::new(),
-            methods: HashMap::new(),
+            methods: HashMap::default(),
             delayed: Vec::new(),
             obj_path: Vec::new(),
             env: Environment::default(),
@@ -598,7 +598,7 @@ impl Checker {
             conf,
             importer: None,
             import_cache: Arc::clone(&seed.import_cache),
-            sources: HashMap::new(),
+            sources: HashMap::default(),
             importing: Vec::new(),
             ctxt: Context::new(),
             pkg,
@@ -607,14 +607,14 @@ impl Checker {
             errors: Vec::new(),
             first_err: None,
             files: Vec::new(),
-            used_vars: std::collections::HashSet::new(),
+            used_vars: crate::hash::HashSet::default(),
             imports: Vec::new(),
-            used_pkg_names: std::collections::HashSet::new(),
-            dot_imported: HashMap::new(),
-            untyped: std::collections::HashMap::new(),
-            obj_map: HashMap::new(),
+            used_pkg_names: crate::hash::HashSet::default(),
+            dot_imported: HashMap::default(),
+            untyped: crate::hash::HashMap::default(),
+            obj_map: HashMap::default(),
             obj_list: Vec::new(),
-            methods: HashMap::new(),
+            methods: HashMap::default(),
             delayed: Vec::new(),
             obj_path: Vec::new(),
             env: Environment::default(),
@@ -864,8 +864,8 @@ impl Checker {
         // PkgNames. SSA uses it to walk the transitive import closure instead of
         // scanning the whole (seed-inflated) object arena.
         let mut import_ids: Vec<PackageId> = Vec::new();
-        let mut seen_imports: std::collections::HashSet<PackageId> =
-            std::collections::HashSet::new();
+        let mut seen_imports: crate::hash::HashSet<PackageId> =
+            crate::hash::HashSet::default();
         for &obj in &self.imports {
             if let crate::arena::ObjectData::PkgName(p) = self.objects.get(obj) {
                 let imported = p.imported();

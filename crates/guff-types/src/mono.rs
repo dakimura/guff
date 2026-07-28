@@ -40,7 +40,7 @@
 //! their own vertices = conservative), and the multi-line secondary-error
 //! detail (collapsed to a single message, matching this port's error policy).
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff::ast::Expr;
 

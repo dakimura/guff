@@ -20,7 +20,7 @@
 //!   return the original unchanged unless the substitution map is
 //!   empty AND no children changed.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use crate::arena::{ObjectArena, ObjectData, ObjectId, TypeArena, TypeData, TypeId};
 use crate::context::Context;
@@ -37,7 +37,7 @@ pub type SubstMap = HashMap<TypeId, TypeId>;
 /// lengths.
 pub fn make_subst_map(tpars: &[TypeId], targs: &[TypeId]) -> SubstMap {
     assert_eq!(tpars.len(), targs.len(), "make_subst_map: length mismatch");
-    let mut m = HashMap::with_capacity(tpars.len());
+    let mut m = HashMap::with_capacity_and_hasher(tpars.len(), Default::default());
     for (t, a) in tpars.iter().zip(targs.iter()) {
         m.insert(*t, *a);
     }

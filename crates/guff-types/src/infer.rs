@@ -33,7 +33,7 @@
 //! untyped-argument default-type step (Go's `--- 3 ---`) is deferred; pass
 //! all-typed args for now.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use crate::alias::unalias_readonly;
 use crate::arena::{ObjectArena, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
@@ -64,7 +64,7 @@ pub fn is_parameterized(
 ) -> bool {
     let mut w = TpWalker {
         tparams,
-        seen: HashMap::new(),
+        seen: HashMap::default(),
     };
     w.is_parameterized(type_arena, object_arena, typ)
 }
@@ -291,7 +291,7 @@ pub fn kill_cycles(
     let mut w = CycleFinder {
         tparams,
         inferred,
-        seen: HashSet::new(),
+        seen: HashSet::default(),
     };
     for &t in tparams {
         w.walk(type_arena, object_arena, t);
@@ -544,7 +544,7 @@ pub fn infer(
     let params = if params_len > 0 && targs_padded.iter().any(|t| t.is_some()) {
         // Build a SubstMap with only the Some entries (chunk-9 subst
         // skips lookups it doesn't have).
-        let mut smap: SubstMap = HashMap::new();
+        let mut smap: SubstMap = HashMap::default();
         for (i, t) in targs_padded.iter().enumerate() {
             if let Some(t) = t {
                 smap.insert(tparams[i], *t);
@@ -737,7 +737,7 @@ pub fn infer(
 /// Build a SubstMap from `tparams` and a parallel `inferred` list,
 /// skipping `None` entries.
 fn build_subst_map(tparams: &[TypeId], inferred: &[Option<TypeId>]) -> SubstMap {
-    let mut m: SubstMap = HashMap::with_capacity(tparams.len());
+    let mut m: SubstMap = HashMap::with_capacity_and_hasher(tparams.len(), Default::default());
     for (i, &tp) in tparams.iter().enumerate() {
         if let Some(t) = inferred[i] {
             m.insert(tp, t);

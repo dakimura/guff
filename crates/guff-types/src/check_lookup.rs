@@ -26,7 +26,7 @@
 //!   always satisfied (matches the Checker-less path in `conversions.rs`).
 //! - The "possibly missing ~" alternative-type suggestion is omitted.
 
-use std::collections::HashSet;
+use crate::hash::HashSet;
 
 use guff_types_errors::Code;
 
@@ -327,12 +327,12 @@ pub fn implements(
         if !tts.comparable() {
             return Ok(());
         }
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         if comparable_type(types, oarena, parena, v, false, &mut seen).is_ok() {
             return Ok(());
         }
         if constraint {
-            let mut seen2 = HashSet::new();
+            let mut seen2 = HashSet::default();
             if comparable_type(types, oarena, parena, v, true, &mut seen2).is_ok() {
                 // DEFERRED: go1.20 version gate — treated as satisfied.
                 return Ok(());

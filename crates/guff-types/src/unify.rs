@@ -28,7 +28,7 @@
 //! - **Depth-limit panic**: matches Go's `panicAtUnificationDepthLimit =
 //!   true` behaviour.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use crate::alias::unalias_readonly;
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
@@ -103,7 +103,7 @@ impl Unifier {
         enable_interface_inference: bool,
     ) -> Self {
         assert!(tparams.len() >= targs.len());
-        let mut slot_of = HashMap::with_capacity(tparams.len());
+        let mut slot_of = HashMap::with_capacity_and_hasher(tparams.len(), Default::default());
         let mut handles = Vec::with_capacity(tparams.len());
         for (i, &tp) in tparams.iter().enumerate() {
             let initial = if i < targs.len() { targs[i] } else { None };

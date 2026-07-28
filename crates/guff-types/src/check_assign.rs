@@ -10,7 +10,7 @@
 //! `self`'s arenas to the routines. The free functions are untouched and still
 //! usable directly (e.g. with stub closures in tests).
 
-use std::collections::HashSet;
+use crate::hash::HashSet;
 
 use guff::ast::Expr;
 use guff_constant::{make_string, uint64_val};
@@ -670,7 +670,7 @@ impl Checker {
             None => return,
         };
 
-        let mut seen: HashSet<String> = HashSet::new();
+        let mut seen: HashSet<String> = HashSet::default();
         let mut lhs_vars: Vec<ObjectId> = Vec::with_capacity(lhs.len());
         let mut new_vars: Vec<ObjectId> = Vec::new();
         let mut has_err = false;

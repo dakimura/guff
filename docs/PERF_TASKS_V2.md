@@ -13,12 +13,12 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ） / A-3a / B-4（A 分類完了: 32 rules）**。
+> A-1（guff-ssa + guff-types） / A-3a / B-4（A 分類完了: 32 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は A-1 残り（guff-types / keywords）か B-10（formatter 間 read+parse 共有）。**
+> **次は A-1 残り（keywords / guff-runner）か B-10（formatter 間 read+parse 共有）。**
 > analyze の残りは buildir / revive / misspell。B-2 / B-7 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -1307,8 +1307,30 @@ findings が 1 回でも揺れたら即ロールバック。**「5 回中 4 回�
 **検証:** findings 20 件 before と byte 同一、§2.2 を 5 回決定的、`-j 1` 同一、
 seed cold↔hot 同一。`cargo test -p guff-ssa --release` PASS。regress tsdb / full とも PASS。
 
-**残り:** guff-types / keywords / guff-runner。推奨順どおり次は **A-3**（SipHash 残は
-後からでもよい）。
+**残り:** keywords（`guff-ast` `token.rs`）/ guff-runner。推奨順どおり次は **A-3** だったが
+A-3a 済・A-3b/c NO-GO なので、残りは **A-1 keywords/runner** か **B-10**。
+
+### DONE（2026-07-29）— **guff-types を FxHash 化。findings byte 一致（5 回・`-j 1`・seed cold↔hot）。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"` + `crates/guff-types/src/hash.rs`（SSA と同パターン）。
+2. §0-12: `initorder::dependency_graph` の `obj_map.keys()` / deps を source `order()` でソート。
+   func 除去時の pred/succ 収集も sort。
+3. `SEED_OVERLAY_SCHEMA` 1 → **2**（`Scope.elems` などマップの serde 順変化に備える）。
+4. crate 内の `HashMap`/`HashSet` を一括差し替え（`::default()` /
+   `with_capacity_and_hasher`）。
+
+**実測（prometheus `./...`、seed-hot、`--no-cache`、3 回）:**
+
+| 指標 | おおよそ |
+|---|---:|
+| typecheck_roots | ~0.83s |
+| buildir CPU | ~1.81〜1.91s |
+| cold wall | ~2.96〜3.02s |
+
+**検証:** findings 20 件が変更前（B-7 後）と byte 同一、§2.2 を **5 回**決定的、
+`-j 1` 同一、seed cold↔hot 同一。`cargo test -p guff-types --release` PASS。
 
 ---
 

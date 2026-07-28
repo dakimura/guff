@@ -21,8 +21,8 @@
 //! - Union/Interface term-set identity uses structural
 //!   [`identical`](identical) via upgraded `termlist` (D01).
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use crate::hash::HashMap;
+use crate::hash::HashSet;
 
 use crate::alias::unalias_readonly;
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
@@ -314,7 +314,7 @@ pub fn identical_with(
     let mut stack: Vec<(TypeId, TypeId)> = Vec::new();
     // Top-level identity has no in-flight type-parameter renaming; generic
     // signatures build their own map (see `identical_signatures`).
-    let rename: HashMap<TypeId, TypeId> = HashMap::new();
+    let rename: HashMap<TypeId, TypeId> = HashMap::default();
     identical_inner(arena, oarena, parena, x, y, &mut stack, cfg, &rename)
 }
 
@@ -624,7 +624,7 @@ fn identical_unions(
     y: TypeId,
 ) -> bool {
     // Go: computeUnionTypeSet on both, then .terms.equal (D01).
-    let mut union_sets = HashMap::new();
+    let mut union_sets = HashMap::default();
     let xset = crate::typeset::compute_union_type_set(arena, oarena, parena, &mut union_sets, x);
     let yset = crate::typeset::compute_union_type_set(arena, oarena, parena, &mut union_sets, y);
     termlist::equal(arena, oarena, parena, &xset.terms, &yset.terms)
@@ -784,7 +784,7 @@ pub fn comparable(
     parena: &PackageArena,
     t: TypeId,
 ) -> bool {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     comparable_type(arena, oarena, parena, t, true, &mut seen).is_ok()
 }
 

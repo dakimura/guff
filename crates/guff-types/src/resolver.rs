@@ -34,7 +34,7 @@
 //! - `package_objects`/`unused_imports` are deferred — `package_objects` needs
 //!   `objDecl` (chunk 23). Forward pointer at the bottom of this file.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff::ast::{Decl, Expr, FuncDecl, ImportSpec, Spec, TypeSpec};
 use guff::Token;

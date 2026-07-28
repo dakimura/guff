@@ -44,6 +44,7 @@ pub mod decl;
 pub mod errors;
 pub mod expr;
 pub mod format;
+pub mod hash;
 pub mod importer;
 pub mod index;
 pub mod infer;

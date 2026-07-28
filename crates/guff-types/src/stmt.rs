@@ -22,7 +22,7 @@
 //!   allowed.
 //! - `recordScope` is a no-op (Info recording — §18b).
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff::ast::{BasicLit, BinaryExpr, BlockStmt, CallExpr, Expr, Stmt};
 use guff::token::Token;
@@ -1070,7 +1070,7 @@ impl Checker {
                 // Maps an underlying constant value to the (type, pos) pairs of
                 // every case it has appeared in, for duplicate-case detection
                 // across the whole switch (Go's `valueMap seen`).
-                let mut seen: HashMap<CaseKey, Vec<(TypeId, u32)>> = HashMap::new();
+                let mut seen: HashMap<CaseKey, Vec<(TypeId, u32)>> = HashMap::default();
 
                 let n = s.body.list.len();
                 for (i, c) in s.body.list.iter().enumerate() {

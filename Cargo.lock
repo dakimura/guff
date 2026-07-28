@@ -712,6 +712,7 @@ dependencies = [
  "guff-types-errors",
  "guff-version",
  "rayon",
+ "rustc-hash",
  "serde",
 ]
 

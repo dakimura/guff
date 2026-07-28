@@ -5,7 +5,7 @@
 //! to a [`crate::scope::Scope`] but keyed by `id`, not by raw name (so
 //! that unexported identifiers from different packages don't collide).
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use crate::arena::{ObjectArena, ObjectId, PackageArena};
 

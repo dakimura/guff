@@ -16,7 +16,7 @@
 //! - `describef` (Trace bookkeeping), `iota` capture for func literals inside
 //!   const declarations (go.dev/issue/22345), and `Info` recording are omitted.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use guff::ast::{CompositeLit, Expr, FuncLit};
 use guff_constant::{Kind as ConstKind, Value};
@@ -365,7 +365,7 @@ impl Checker {
         // distinct, so we must also compare types. For a concrete key type the
         // underlying value alone determines duplication.
         let key_is_interface = is_non_type_param_interface(&self.types, key_t);
-        let mut visited: HashMap<MapKey, Vec<TypeId>> = HashMap::new();
+        let mut visited: HashMap<MapKey, Vec<TypeId>> = HashMap::default();
         for el in &e.elts {
             let kv = match el {
                 Expr::KeyValueExpr(kv) => kv,
@@ -424,7 +424,7 @@ impl Checker {
     ///
     /// Equivalent to `Checker.indexedElts`.
     fn indexed_elts(&mut self, elts: &[Expr], typ: TypeId, length: i64) -> i64 {
-        let mut visited: HashSet<i64> = HashSet::new();
+        let mut visited: HashSet<i64> = HashSet::default();
         let mut index: i64 = 0;
         let mut max: i64 = 0;
         for el in elts {

@@ -13,7 +13,7 @@
 //!   that jumps over a variable declaration or into a block) is **deferred**:
 //!   a `goto` to any label declared somewhere in the function is accepted.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use guff::ast::{BlockStmt, Stmt};
 use guff::token::Token;
@@ -47,13 +47,13 @@ impl Checker {
     pub fn labels(&mut self, body: &BlockStmt) {
         // Collect every label declared anywhere in the function (labels are
         // function-scoped); report duplicates.
-        let mut all: HashMap<String, u32> = HashMap::new();
+        let mut all: HashMap<String, u32> = HashMap::default();
         self.collect_labels(&body.list, &mut all);
 
         // Validate every labeled branch and record which labels are used. (Run
         // even when no labels are declared: a `goto L` to a nonexistent label
         // must still report UndeclaredLabel.)
-        let mut used: HashSet<String> = HashSet::new();
+        let mut used: HashSet<String> = HashSet::default();
         let mut enclosing: Vec<(String, LabelKind)> = Vec::new();
         self.label_branches_list(&body.list, &all, &mut enclosing, &mut used);
 

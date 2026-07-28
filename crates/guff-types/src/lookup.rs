@@ -412,14 +412,14 @@ fn consolidate_multiples(
 /// using `Identical` for instantiated-type equivalence.
 struct InstanceLookup {
     buf: [Option<TypeId>; 3],
-    overflow: std::collections::HashMap<ObjectId, Vec<TypeId>>,
+    overflow: crate::hash::HashMap<ObjectId, Vec<TypeId>>,
 }
 
 impl InstanceLookup {
     fn new() -> Self {
         Self {
             buf: [None, None, None],
-            overflow: std::collections::HashMap::new(),
+            overflow: crate::hash::HashMap::default(),
         }
     }
 
@@ -532,7 +532,7 @@ pub fn has_invalid_embedded_fields(
     object_arena: &ObjectArena,
     t: TypeId,
 ) -> bool {
-    let mut seen: std::collections::HashSet<TypeId> = std::collections::HashSet::new();
+    let mut seen: crate::hash::HashSet<TypeId> = crate::hash::HashSet::default();
     has_invalid_embedded_fields_inner(type_arena, object_arena, t, &mut seen)
 }
 
@@ -540,7 +540,7 @@ fn has_invalid_embedded_fields_inner(
     type_arena: &TypeArena,
     object_arena: &ObjectArena,
     t: TypeId,
-    seen: &mut std::collections::HashSet<TypeId>,
+    seen: &mut crate::hash::HashSet<TypeId>,
 ) -> bool {
     let s_id = {
         let base = deref_struct_ptr(type_arena, t).underlying(type_arena);

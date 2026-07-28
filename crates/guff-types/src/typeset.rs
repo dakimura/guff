@@ -16,7 +16,7 @@
 //! - **Version / import-constraint checks**, error reporting, and
 //!   `embedPos`-based duplicate-method errors are Checker-side concerns.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -229,7 +229,7 @@ pub fn compute_interface_type_set(
     // Method dedup uses `Object.Id()` — the package-qualified name for
     // unexported identifiers (so unexported methods from different
     // packages don't collide).
-    let mut seen: HashMap<String, ObjectId> = HashMap::new();
+    let mut seen: HashMap<String, ObjectId> = HashMap::default();
     let mut all_methods: Vec<ObjectId> = Vec::new();
 
     for m in &methods {
@@ -242,7 +242,7 @@ pub fn compute_interface_type_set(
 
     let mut all_terms: TermList = all_termlist();
     let mut all_comparable = false;
-    let mut union_sets: HashMap<TypeId, TypeSet> = HashMap::new();
+    let mut union_sets: HashMap<TypeId, TypeSet> = HashMap::default();
 
     for &typ in &embeddeds {
         let u = typ.underlying(arena);
@@ -425,7 +425,7 @@ pub(crate) fn intersect_term_lists(
                 filtered.push(Some(term));
                 continue;
             };
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             if comparable_type(arena, oarena, parena, typ, false, &mut seen).is_ok() {
                 filtered.push(Some(term));
             }

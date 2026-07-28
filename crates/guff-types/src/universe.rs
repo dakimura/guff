@@ -20,7 +20,7 @@
 //!   intentionally not ported. Go 1.22+ always enables type aliases, so the
 //!   hijack is obsolete for our supported language levels.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff_constant::{make_bool, make_int64};
 
@@ -256,7 +256,7 @@ pub fn init_universe_full() -> Universe {
         BuiltinId::String,
         BuiltinId::StringData,
     ];
-    let mut builtins = HashMap::new();
+    let mut builtins = HashMap::default();
     for id in all_ids {
         let obj = new_builtin(&mut o_arena, id, invalid_typ);
         builtins.insert(id, obj);

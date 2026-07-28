@@ -9,7 +9,7 @@
 //!   aliases, so this hijack is obsolete for our supported language levels.
 //! - **`WriteTo` / `Display`** are deferred.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -129,7 +129,7 @@ pub fn new_scope(
         parent,
         children: Vec::new(),
         number: 0,
-        elems: HashMap::new(),
+        elems: HashMap::default(),
         pos,
         end,
         comment: comment.into(),

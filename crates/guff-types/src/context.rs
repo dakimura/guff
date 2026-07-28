@@ -17,7 +17,7 @@
 //! `(origin TypeId, type args Vec<TypeId>)`. No string hashing needed —
 //! and instance lookup is `O(args.len())` instead of `O(hash) + bucket`.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use crate::arena::TypeId;
 

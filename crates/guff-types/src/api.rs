@@ -23,7 +23,7 @@
 //!   `Addressable`, `HasOk`, …) are DEFERRED — the `mode` field is retained
 //!   so they can be added trivially later.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff_constant::Value;
 use guff_types_errors::Code;

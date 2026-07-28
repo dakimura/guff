@@ -32,7 +32,7 @@
 //! - The alias `fromRHS`/`validAlias` reset — we set the `TypeName`'s type to
 //!   `Typ[Invalid]` directly instead.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff::ast::Expr;
 use guff_types_errors::Code;
@@ -52,7 +52,7 @@ impl Checker {
         //   - absent        : not seen yet (white)
         //   - value >= 0     : seen, not done (grey); value is the path index
         //   - value <  0     : seen and done (black)
-        let mut path_idx: HashMap<ObjectId, i64> = HashMap::new();
+        let mut path_idx: HashMap<ObjectId, i64> = HashMap::default();
 
         // `obj_list` is the source-sorted package-level object list (filled by
         // `sort_objects`). Snapshot it because `direct_cycle` mutates `self`.
