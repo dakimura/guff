@@ -22,8 +22,8 @@ fn build_package_for_analysis_leaves_package_intact() {
     typecheck_package(
         &mut pkg,
         &fset,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
+        &std::collections::HashMap::default(),
+        &std::collections::HashMap::default(),
         default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,

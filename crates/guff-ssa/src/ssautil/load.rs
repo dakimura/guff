@@ -5,7 +5,7 @@
 //! the go/packages-driven helpers for programs already type-checked in a shared
 //! arena.
 
-use std::collections::HashSet;
+use crate::hash::{HashMap, HashSet};
 use std::sync::Arc;
 
 use guff::ast::File;
@@ -219,12 +219,12 @@ fn do_packages<'a>(
     initial: &[LoadedPackage<'a>],
     include_dep_syntax: bool,
 ) -> Vec<Option<PackageId>> {
-    let mut is_initial = HashSet::new();
+    let mut is_initial = HashSet::default();
     for lp in initial {
         is_initial.insert(lp.type_pkg);
     }
 
-    let mut ssamap = HashMap::<TypePackageId, Option<PackageId>>::new();
+    let mut ssamap = HashMap::<TypePackageId, Option<PackageId>>::default();
     for lp in initial {
         visit_packages(prog, lp.type_pkg, &is_initial, include_dep_syntax, lp, &mut ssamap);
     }
@@ -234,8 +234,6 @@ fn do_packages<'a>(
         .map(|lp| ssamap.get(&lp.type_pkg).copied().flatten())
         .collect()
 }
-
-use std::collections::HashMap;
 
 fn visit_packages<'a>(
     prog: &mut Program,

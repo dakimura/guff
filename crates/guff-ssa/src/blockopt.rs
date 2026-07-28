@@ -43,7 +43,7 @@ fn delete_unreachable_blocks(f: &mut Function) {
     }
 
     // Mark reachable blocks
-    let mut reachable = std::collections::HashSet::new();
+    let mut reachable = crate::hash::HashSet::default();
     let root_id = f.blocks.iter().next().map(|(id, _)| id).unwrap();
     mark_reachable(f, root_id, &mut reachable);
     
@@ -64,7 +64,7 @@ fn delete_unreachable_blocks(f: &mut Function) {
     }
 }
 
-fn mark_reachable(f: &Function, id: BlockId, reachable: &mut std::collections::HashSet<BlockId>) {
+fn mark_reachable(f: &Function, id: BlockId, reachable: &mut crate::hash::HashSet<BlockId>) {
     if reachable.insert(id) {
         for &succ_id in &f.blocks.get(id).succs {
             mark_reachable(f, succ_id, reachable);

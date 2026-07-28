@@ -12,13 +12,15 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5。**
+> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> A-1（guff-ssa のみ）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、B-1d（部分木スキップ。実装して計測した結果。§B-1 末尾）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は `A-1（guff-ssa から） → A-3 → B-2`。** B-1 で分かったこととして、
+> **次は `A-3 → B-2`。** A-1 の残り（guff-types / guff-ast keywords / guff-runner）は後回しでよい
+> （guff-ssa が SipHash callers の最大塊だった）。B-1 で分かったこととして、
 > **analyze phase に残っているのは「AST を歩くコスト」ではなく analyzer 自身の callback**
-> です（buildir 2.10s が単独最大）。preorder 側をさらに削っても wall は動きません。
+> です（buildir が単独最大。A-1 guff-ssa 後は ~1.94s）。preorder 側をさらに削っても wall は動きません。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -476,7 +478,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-28 時点の残り推奨順:** `A-1（guff-ssa から） → A-3 → B-2`
+**2026-07-28 時点の残り推奨順:** `A-3 → B-2`（A-1 guff-ssa DONE。types/keywords/runner は後回し可）
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
 wall を狙うなら analyze の callback 中身＝ buildir / revive / misspell へ。詳細は §B-1 末尾）。
@@ -1218,6 +1220,7 @@ SipHash は DoS 耐性のために選ばれていますが、guff は**信頼で
 
 ホットな順に。**一度に全部やらないこと。** 1 crate ずつ、1 コミットずつ。
 
+0. ~~`crates/guff-ssa`（全 `HashMap`/`HashSet`）~~ **DONE**（§末尾。SipHash callers 最大塊）
 1. `crates/guff-types/src/scope.rs` の `Scope.elems: HashMap<String, ObjectId>`
    — スコープ検索は型チェックの最内周
 2. `crates/guff-types/src/check.rs` の `import_cache` / `obj_map` / `methods` / `untyped`
@@ -1276,6 +1279,36 @@ rg -n 'for .* in .*(\.iter\(\)|\.values\(\)|\.keys\(\)|\.drain\(\))' crates/guff
 ### ロールバック基準
 
 findings が 1 回でも揺れたら即ロールバック。**「5 回中 4 回同じだった」は失敗です。**
+
+### DONE（2026-07-28）— **guff-ssa を FxHash 化。buildir CPU 2.22s → 1.94s（−0.28s）。findings byte 一致。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"`（`crates/guff-ssa/Cargo.toml`）。`FxHashMap`/`FxHashSet` は
+   `std::collections::HashMap<_, _, FxBuildHasher>` の別名なので **`::new()` /
+   `::with_capacity()` は使えない**（`RandomState` 専用）。`::default()` /
+   `::with_capacity_and_hasher(n, Default::default())` に置き換える。
+2. `crates/guff-ssa/src/hash.rs` で `HashMap`/`HashSet` を crate 内エイリアス化し、
+   SSA 構築の全マップを差し替え。
+3. §0-12 の順序依存を先に潰した:
+   - `targeted_block_in`: yield_label 優先 + lblock 名ソート
+   - `all_functions` / `runtime_types` / `compute_method_set`: 名前順
+   - `buildir` / `wastedassign` の `collect_src_funcs`: メンバー名ソート
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| buildir CPU（66 actions） | 2.22s | **1.94s** |
+| analyze wall | 0.64s | 0.62〜0.63s |
+| cold wall | 3.98s | 3.98〜4.06s（誤差。format 重畳） |
+| peak RSS | 7.53GB | 7.34〜7.41GB |
+
+**検証:** findings 20 件 before と byte 同一、§2.2 を 5 回決定的、`-j 1` 同一、
+seed cold↔hot 同一。`cargo test -p guff-ssa --release` PASS。regress tsdb / full とも PASS。
+
+**残り:** guff-types / keywords / guff-runner。推奨順どおり次は **A-3**（SipHash 残は
+後からでもよい）。
 
 ---
 

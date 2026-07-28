@@ -526,9 +526,9 @@ pub fn imported_type_packages_closure(
     prog: &Program,
     main_type_pkg: TypePackageId,
 ) -> Vec<TypePackageId> {
-    use std::collections::HashSet;
+    use crate::hash::HashSet;
 
-    let mut seen: HashSet<TypePackageId> = HashSet::new();
+    let mut seen: HashSet<TypePackageId> = HashSet::default();
     let mut out: Vec<TypePackageId> = Vec::new();
     let mut stack: Vec<TypePackageId> =
         prog.package_arena.get(main_type_pkg).imports().to_vec();
@@ -549,7 +549,7 @@ pub fn imported_type_packages_closure(
 /// Populates SSA members for imported packages (e.g. test stubs registered via
 /// `add_dependency_source`) so cross-package calls resolve during `buildir`.
 pub fn populate_imported_package_members(prog: &mut Program, main_type_pkg: TypePackageId) {
-    use std::collections::{HashMap, HashSet};
+    use crate::hash::{HashMap, HashSet};
 
     // Restrict population to the target's *transitive import closure*. With the
     // R24.3 shared export seed the object arena holds every root package's deps
@@ -569,7 +569,7 @@ pub fn populate_imported_package_members(prog: &mut Program, main_type_pkg: Type
     // O(objects); `order` keeps the deterministic arena-id ordering the previous
     // HashSet walk did not.
     let mut order: Vec<TypePackageId> = Vec::new();
-    let mut by_pkg: HashMap<TypePackageId, Vec<ObjectId>> = HashMap::new();
+    let mut by_pkg: HashMap<TypePackageId, Vec<ObjectId>> = HashMap::default();
     for obj in prog.object_arena.ids() {
         let Some(pkg) = obj.pkg(&prog.object_arena) else {
             continue;

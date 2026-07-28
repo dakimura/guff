@@ -11,7 +11,7 @@ use crate::value::Value;
 use guff_constant::Value as ConstantValue;
 use guff_types::{ObjectId, TypeId, PackageId as TypePackageId};
 use guff::position::FileSet;
-use std::collections::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Builtin represents a Go built-in function.
@@ -55,13 +55,10 @@ pub struct Program {
     pub method_set_cache: crate::methods::MethodSetCache,
     /// Maps concrete receiver types to lazily-built SSA method implementations.
     /// (Go: `Program.methodSets`.)
-    pub concrete_method_sets: std::collections::HashMap<
-        TypeId,
-        crate::methods::ConcreteMethodSet,
-    >,
+    pub concrete_method_sets: HashMap<TypeId, crate::methods::ConcreteMethodSet>,
     /// Memoization of [`Program::object_method`] for methods without package
     /// syntax. (Go: `Program.objectMethods`.)
-    pub object_methods: std::collections::HashMap<ObjectId, FuncId>,
+    pub object_methods: HashMap<ObjectId, FuncId>,
     /// Functions waiting for [`crate::instantiate::Program::build_instance`].
     /// (Go: the builder's enqueue list, drained by `iterate`.)
     pub(crate) pending_builds: Vec<FuncId>,
@@ -69,7 +66,7 @@ pub struct Program {
     /// [`Program::runtime_types`]. Populated when interface conversions are
     /// emitted (currently empty until `MakeInterface` is fully modeled).
     /// (Go: `Program.makeInterfaceTypes`.)
-    pub(crate) make_interface_types: std::collections::HashSet<TypeId>,
+    pub(crate) make_interface_types: HashSet<TypeId>,
 }
 
 /// Returns the type of value `v`, interpreted in function `f`'s value-space.
@@ -108,7 +105,7 @@ impl Program {
             constants: Arena::new(),
             globals: Arena::new(),
             builtins: Arena::new(),
-            package_map: HashMap::new(),
+            package_map: HashMap::default(),
             info: info.into(),
             type_arena,
             object_arena,
@@ -118,10 +115,10 @@ impl Program {
             canon: crate::canon::Canonizer::default(),
             ctxt: guff_types::Context::new(),
             method_set_cache: crate::methods::MethodSetCache::default(),
-            concrete_method_sets: std::collections::HashMap::new(),
-            object_methods: std::collections::HashMap::new(),
+            concrete_method_sets: HashMap::default(),
+            object_methods: HashMap::default(),
             pending_builds: Vec::new(),
-            make_interface_types: std::collections::HashSet::new(),
+            make_interface_types: HashSet::default(),
         }
     }
 
@@ -176,7 +173,11 @@ impl Program {
     /// we return the recorded conversion operands until `MakeInterface` is
     /// fully wired.
     pub fn runtime_types(&self) -> Vec<TypeId> {
-        self.make_interface_types.iter().copied().collect()
+        // Deterministic order for callers that walk these (ssautil::all_functions).
+        // TypeId has no public Ord; Debug is stable for a given arena id.
+        let mut types: Vec<TypeId> = self.make_interface_types.iter().copied().collect();
+        types.sort_by_key(|t| format!("{t:?}"));
+        types
     }
 
     /// emit_const returns a constant with the specified value and type.

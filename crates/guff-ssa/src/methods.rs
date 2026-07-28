@@ -4,7 +4,7 @@
 //! [`Program::object_method`], [`Program::lookup_method`], and the concrete
 //! method-set cache used to avoid duplicate wrapper synthesis.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 
 use guff_types::{
     alias::unalias_readonly, is_interface, is_pointer, lookup_field_or_method,
@@ -283,13 +283,15 @@ fn compute_method_set(prog: &mut Program, t: TypeId) -> Vec<Selection> {
     return Vec::new();
   }
 
-  let mut names = HashSet::new();
-  let mut seen_types = HashSet::new();
+  let mut names = HashSet::default();
+  let mut seen_types = HashSet::default();
   collect_method_names(prog, t, &mut names, &mut seen_types);
 
   let mut sels = Vec::new();
-  let mut seen_objs = HashSet::new();
-  for name in names {
+  let mut seen_objs = HashSet::default();
+  let mut name_list: Vec<String> = names.into_iter().collect();
+  name_list.sort();
+  for name in name_list {
     let result = lookup_field_or_method(
       &mut prog.type_arena,
       &prog.object_arena,

@@ -29,7 +29,7 @@
 //! recursive local types (`type X struct{ next *X }`) terminate.
 
 use std::cell::Cell;
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use guff_types::{
     ChanDir, Context, ObjectArena, ObjectData, ObjectId, PackageId, TypeArena, TypeData, TypeId,
 };
@@ -97,7 +97,7 @@ impl Subster {
             "makeSubster argument count must match: got {}; want {}",
             got, want
         );
-        let mut replacements = HashMap::with_capacity(want);
+        let mut replacements = HashMap::with_capacity_and_hasher(want, Default::default());
         for (&tp, &ta) in rtparams.iter().zip(rtargs.iter()) {
             replacements.insert(tp, ta);
         }
@@ -106,10 +106,10 @@ impl Subster {
         }
         Self {
             replacements,
-            cache: HashMap::new(),
+            cache: HashMap::default(),
             origin_scope: None,
             ctxt: Context::new(),
-            uniqueness: HashMap::new(),
+            uniqueness: HashMap::default(),
         }
     }
 

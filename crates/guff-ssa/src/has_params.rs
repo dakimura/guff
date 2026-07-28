@@ -11,7 +11,7 @@
 //! a type mentions a *specific* set of type parameters (used during inference).
 //! Here any `TypeParam` occurrence counts, matching Go's `typeparams.Free.Has`.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff_types::{
     named_type_args, named_underlying, unalias_readonly, ObjectArena, ObjectData, ObjectId,

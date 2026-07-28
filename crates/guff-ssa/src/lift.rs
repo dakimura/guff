@@ -2,7 +2,7 @@
 //!
 //! Port of go/ssa's `lift.go`.
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 use crate::program::Program;
 use crate::function::Function;
 use crate::ids::{BlockId, InstrId, FuncId};
@@ -27,7 +27,7 @@ pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
     f.compute_referrers();
     let df = DomFrontier::build(f);
 
-    let mut instr_to_block = HashMap::new();
+    let mut instr_to_block = HashMap::default();
     for (id, block) in f.blocks.iter() {
         if block.deleted {
             continue;
@@ -37,7 +37,7 @@ pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
         }
     }
 
-    let mut new_phis = HashMap::new();
+    let mut new_phis = HashMap::default();
     let mut num_allocs = 0;
 
     // Determine which allocs we can lift and number them densely.
@@ -138,7 +138,7 @@ fn lift_alloc(
         return true;
     }
 
-    let mut def_blocks = HashSet::new();
+    let mut def_blocks = HashSet::default();
     for &instr_id in referrers.unwrap() {
         let instr = f.instrs.get(instr_id);
         match instr {
@@ -157,7 +157,7 @@ fn lift_alloc(
     let alloc_block_id = *instr_to_block.get(&alloc_id).expect("alloc block not found");
     def_blocks.insert(alloc_block_id);
 
-    let mut has_already = HashSet::new();
+    let mut has_already = HashSet::default();
     let mut work = def_blocks.clone();
     let mut w: Vec<BlockId> = def_blocks.into_iter().collect();
 
@@ -322,7 +322,7 @@ fn replace_all(f: &mut Function, x: Value, y: Value) {
 
 fn remove_dead_phis(prog: &mut Program, func_id: FuncId, new_phis: &mut HashMap<BlockId, Vec<NewPhi>>) {
     let f = prog.functions.get_mut(func_id);
-    let mut live_phis = HashSet::new();
+    let mut live_phis = HashSet::default();
     
     for nps in new_phis.values() {
         for np in nps {

@@ -43,11 +43,20 @@ fn format_reason(reason: WastedReason, comment: &str) -> Option<String> {
 fn collect_src_funcs(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
     let mut funcs = Vec::new();
     let ssa_pkg = prog.packages.get(pkg);
-    for member in ssa_pkg.members.values() {
-        if let MemberData::Function(fid) = member {
-            funcs.push(*fid);
-            collect_anon_funcs(prog, *fid, &mut funcs);
-        }
+    // Sort by member name so FxHash map order cannot reorder analyzer walks
+    // (PERF_TASKS_V2 §0-12 / §A-1).
+    let mut top: Vec<(&str, FuncId)> = ssa_pkg
+        .members
+        .iter()
+        .filter_map(|(name, m)| match m {
+            MemberData::Function(fid) => Some((name.as_str(), *fid)),
+            _ => None,
+        })
+        .collect();
+    top.sort_by(|(a, _), (b, _)| a.cmp(b));
+    for (_, fid) in top {
+        funcs.push(fid);
+        collect_anon_funcs(prog, fid, &mut funcs);
     }
     funcs
 }

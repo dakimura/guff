@@ -16,3 +16,4 @@ guff-ast = { path = "../guff-ast" }
 guff-constant = { path = "../guff-constant" }
 guff-packages = { path = "../guff-packages" }
 guff-types = { path = "../guff-types" }
+rustc-hash = "2"

@@ -1,7 +1,7 @@
 //! Inferred switch discovery from SSA control flow — port of
 //! go/ssa/ssautil/switch.go.
 
-use std::collections::HashSet;
+use crate::hash::HashSet;
 use std::fmt;
 
 use guff::token::Token;
@@ -125,7 +125,7 @@ impl fmt::Display for Switch {
 /// order. (Go: `ssautil.Switches`.)
 pub fn switches(_prog: &Program, f: &Function) -> Vec<Switch> {
     let mut out = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     for b in f.dom_preorder() {
         if let Some((x, k)) = is_comparison_block(f, b) {
             let mut sw = Switch {

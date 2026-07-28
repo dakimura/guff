@@ -105,12 +105,22 @@ impl<'a> Builder<'a> {
     }
 
     fn targeted_block_in(&self, fid: FuncId, tok: Token) -> Option<TargetBlock> {
-        // During range_func the parent's break target is recorded on its lblock
-        // or we walk the parent's saved targets via the enclosing range label.
-        // The parent Builder pushed (done, loop_) before building the yield fn;
-        // mirror that by reading the parent's innermost labelled loop break.
+        // During range_func the parent's break/continue targets are recorded on
+        // the yield function's label. Prefer that named lblock; only fall back
+        // to a sorted scan so FxHash map order cannot pick an arbitrary label
+        // (PERF_TASKS_V2 §0-12).
+        if let Some(name) = self.func().yield_label.as_deref() {
+            if let Some(block) = self.labelled_block_in(fid, name, tok) {
+                return Some(TargetBlock {
+                    func: fid,
+                    block,
+                });
+            }
+        }
         let f = self.prog.functions.get(fid);
-        for lb in f.lblocks.values() {
+        let mut labels: Vec<&crate::function::LBlock> = f.lblocks.values().collect();
+        labels.sort_by(|a, b| a.name.cmp(&b.name));
+        for lb in labels {
             if tok == Token::BREAK {
                 if let Some(b) = lb.break_ {
                     return Some(TargetBlock {

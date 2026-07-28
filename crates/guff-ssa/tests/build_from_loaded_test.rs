@@ -29,8 +29,8 @@ fn build_package_from_loaded_matches_from_source() {
     typecheck_package(
         &mut loaded,
         &fset,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
+        &std::collections::HashMap::default(),
+        &std::collections::HashMap::default(),
         default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,

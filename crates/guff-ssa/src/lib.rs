@@ -24,6 +24,7 @@ pub mod emit;
 pub mod function;
 pub mod global;
 pub mod has_params;
+pub(crate) mod hash;
 pub mod ids;
 pub mod instantiate;
 pub mod instr;

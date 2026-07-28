@@ -1,6 +1,6 @@
 //! SSA program traversal utilities — port of go/ssa/ssautil/visit.go.
 
-use std::collections::HashSet;
+use crate::hash::HashSet;
 
 use guff_types::{
     is_interface, named, new_pointer, signature_type_params, SelectionKind, TypeData, TypeId,
@@ -17,14 +17,17 @@ use crate::value::Value;
 ///
 /// Precondition: packages that should contribute have been built.
 pub fn all_functions(prog: &mut Program) -> HashSet<FuncId> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
 
     let pkg_ids = prog.all_packages();
     let mut root_fns = Vec::new();
     let mut exported_types = Vec::new();
 
     for pkg_id in pkg_ids {
-        let member_pairs: Vec<_> = prog.packages.get(pkg_id).members.clone().into_iter().collect();
+        let mut member_pairs: Vec<_> = prog.packages.get(pkg_id).members.clone().into_iter().collect();
+        // FxHash (and previously SipHash) iteration order must not affect the
+        // order in which we seed reachability / lazily create methods.
+        member_pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
         for (_, mem) in member_pairs {
             match mem {
                 MemberData::Function(fid) => root_fns.push(fid),

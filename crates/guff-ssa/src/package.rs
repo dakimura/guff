@@ -1,6 +1,6 @@
 //! SSA Package.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use guff_types::{PackageId as TypePackageId, ObjectId};
 use crate::member::MemberData;
 use crate::ids::{FuncId, GlobalId};
@@ -40,8 +40,8 @@ impl Package {
     pub fn new(pkg: TypePackageId) -> Self {
         Self {
             pkg,
-            members: HashMap::new(),
-            objects: HashMap::new(),
+            members: HashMap::default(),
+            objects: HashMap::default(),
             debug: false,
             ninit: 0,
             init: None,

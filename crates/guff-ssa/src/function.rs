@@ -1,6 +1,6 @@
 //! SSA Function.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use crate::arena::{Arena, ArenaId};
 use crate::canon::CanonListId;
 use crate::ids::{BlockId, FreeVarId, FuncId, InstrId, PackageId, ParamId};
@@ -217,13 +217,13 @@ impl Function {
             freevars: Arena::new(),
             locals: Vec::new(),
             named_results: Vec::new(),
-            objects: HashMap::new(),
+            objects: HashMap::default(),
             referrers: None,
-            reg_nums: HashMap::new(),
-            instr_pos: HashMap::new(),
+            reg_nums: HashMap::default(),
+            instr_pos: HashMap::default(),
             synthetic: None,
             anon_funcs: Vec::new(),
-            lblocks: HashMap::new(),
+            lblocks: HashMap::default(),
             jump_var: None,
             exits: Vec::new(),
             source_func: None,
@@ -239,7 +239,7 @@ impl Function {
             recv_type_args: Vec::new(),
             subst: None,
             build_strategy: BuildStrategy::Unset,
-            generic_instances: HashMap::new(),
+            generic_instances: HashMap::default(),
             method: None,
         }
     }
@@ -304,7 +304,7 @@ impl Function {
     }
 
     pub fn compute_referrers(&mut self) {
-        let mut referrers: HashMap<Value, Vec<InstrId>> = HashMap::new();
+        let mut referrers: HashMap<Value, Vec<InstrId>> = HashMap::default();
         for (_, block) in self.blocks.iter() {
             if block.deleted {
                 continue;

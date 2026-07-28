@@ -14,7 +14,7 @@
 //! reduces to equality of the canonical-representative vector. The empty list has
 //! no representative (`None`), matching Go's nil `*typeList`.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use std::mem::Discriminant;
 
 use guff_types::{
