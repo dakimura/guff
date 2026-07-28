@@ -1,6 +1,7 @@
 //! `unexported-return` — exported functions should not return unexported types.
 
-use guff::ast::{Decl, FuncDecl};
+use guff::ast::FuncDecl;
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 use guff_types::arena::TypeData;
 use guff_types::ObjectId;
@@ -8,20 +9,47 @@ use guff_types::ObjectId;
 use crate::failure::Failure;
 use crate::util::{is_importable_package, receiver_type_key, type_string};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    if !is_importable_package(&pass.pkg().name) {
-        return Vec::new();
-    }
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            check_func(pass, f, &mut failures);
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
+    failures: Vec<Failure>,
+}
+
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
+        if !is_importable_package(&pass.pkg().name) {
+            return None;
         }
+        Some(Self {
+            pass,
+            failures: Vec::new(),
+        })
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_func(self.pass, f, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
@@ -50,7 +78,6 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
         };
         // Must use type info — a lowercase Ident may be a predeclared builtin
         // (`string`, `error`, `int`, …) which is not an "unexported" package type.
-        // The previous AST-only `!id.is_exported()` check false-positived on those.
         let Some(typ) = crate::util::type_of(pass, ty_expr) else {
             continue;
         };
@@ -77,8 +104,6 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     };
     let types = &artifacts.types;
     let objects = &artifacts.objects;
-    // Check Named/Alias on the type itself before underlying — otherwise
-    // `type unexported struct{}` collapses to Struct and is treated as exported.
     match types.get(typ) {
         TypeData::Named(n) => return named_exported(objects, types, n.obj()),
         TypeData::Alias(a) => {
@@ -116,7 +141,11 @@ fn exported_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     }
 }
 
-fn named_exported(objects: &guff_types::ObjectArena, types: &guff_types::TypeArena, obj: ObjectId) -> bool {
+fn named_exported(
+    objects: &guff_types::ObjectArena,
+    types: &guff_types::TypeArena,
+    obj: ObjectId,
+) -> bool {
     if obj.pkg(objects).is_none() {
         return true;
     }

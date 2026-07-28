@@ -1,39 +1,63 @@
 //! `get-return` — warn on getter-like functions that return nothing.
 
-use guff::ast::{Decl, Expr, FuncType};
+use guff::ast::{Expr, FuncType};
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 use crate::util::unparen;
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            if !is_getter(&f.name.name) {
-                continue;
-            }
-            if has_results(&f.ty) {
-                continue;
-            }
-            if is_http_handler(&f.ty) {
-                continue;
-            }
-            failures.push(Failure {
-                rule: "get-return",
-                pos: f.name.name_pos.0 as u32,
-                message: format!(
-                    "function '{}' seems to be a getter but it does not return any result",
-                    f.name.name
-                ),
-            confidence: None,
-        });
+pub struct Checker {
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        if !is_getter(&f.name.name) {
+            return;
+        }
+        if has_results(&f.ty) {
+            return;
+        }
+        if is_http_handler(&f.ty) {
+            return;
+        }
+        self.failures.push(Failure {
+            rule: "get-return",
+            pos: f.name.name_pos.0 as u32,
+            message: format!(
+                "function '{}' seems to be a getter but it does not return any result",
+                f.name.name
+            ),
+            confidence: None,
+        });
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn is_getter(name: &str) -> bool {

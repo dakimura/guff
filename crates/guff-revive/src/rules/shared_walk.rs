@@ -12,17 +12,18 @@ use crate::config;
 use crate::failure::Failure;
 use super::{
     argument_limit, atomic, banned_characters, bare_return, bool_literal_in_expr, call_to_gc,
-    constant_logical_expr, context_as_argument, context_keys_type, dot_imports, duplicated_imports,
-    empty_lines, enforce_map_style, enforce_slice_style, enforce_switch_style, epoch_naming,
-    error_naming, error_return, error_strings, errorf, function_result_limit, identical_branches,
-    identical_ifelseif_branches, identical_ifelseif_conditions, identical_switch_branches,
-    identical_switch_conditions, if_return, increment_decrement, multiline_if_init, nested_structs,
-    optimize_operands_order, range, range_val_in_closure, receiver_naming, redefines_builtin_id,
-    redundant_import_alias, string_format, string_of_int, struct_tag, time_date, time_equal,
-    unchecked_type_assertion, unexported_naming, unhandled_error, unnecessary_format,
-    unnecessary_if, unnecessary_stmt, unreachable_code, unsecure_url_scheme, unused_parameter,
-    unused_receiver, use_any, use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough,
-    var_declaration, var_naming,
+    confusing_results, constant_logical_expr, context_as_argument, context_keys_type, dot_imports,
+    duplicated_imports, empty_lines, enforce_map_style, enforce_slice_style, enforce_switch_style,
+    epoch_naming, error_naming, error_return, error_strings, errorf, function_result_limit,
+    get_return, identical_branches, identical_ifelseif_branches, identical_ifelseif_conditions,
+    identical_switch_branches, identical_switch_conditions, if_return, increment_decrement,
+    multiline_if_init, nested_structs, optimize_operands_order, range, range_val_in_closure,
+    receiver_naming, redefines_builtin_id, redundant_import_alias, string_format, string_of_int,
+    struct_tag, time_date, time_equal, time_naming, unchecked_type_assertion, unexported_naming,
+    unexported_return, unhandled_error, unnecessary_format, unnecessary_if, unnecessary_stmt,
+    unreachable_code, unsecure_url_scheme, unused_parameter, unused_receiver, use_any,
+    use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough, var_declaration,
+    var_naming, waitgroup_by_value,
 };
 
 /// Fan-out visitor: each enabled rule's checker sees every node; walk never prunes.
@@ -33,6 +34,7 @@ struct SharedFileRules<'a> {
     bare_return: Option<bare_return::Checker>,
     bool_literal_in_expr: Option<bool_literal_in_expr::Checker>,
     call_to_gc: Option<call_to_gc::Checker>,
+    confusing_results: Option<confusing_results::Checker>,
     context_as_argument: Option<context_as_argument::Checker>,
     constant_logical_expr: Option<constant_logical_expr::Checker>,
     context_keys_type: Option<context_keys_type::Checker<'a>>,
@@ -48,6 +50,7 @@ struct SharedFileRules<'a> {
     error_strings: Option<error_strings::Checker>,
     errorf: Option<errorf::Checker<'a>>,
     function_result_limit: Option<function_result_limit::Checker>,
+    get_return: Option<get_return::Checker>,
     identical_branches: Option<identical_branches::Checker>,
     identical_ifelseif_branches: Option<identical_ifelseif_branches::Checker<'a>>,
     identical_ifelseif_conditions: Option<identical_ifelseif_conditions::Checker<'a>>,
@@ -68,8 +71,10 @@ struct SharedFileRules<'a> {
     struct_tag: Option<struct_tag::Checker>,
     time_date: Option<time_date::Checker>,
     time_equal: Option<time_equal::Checker<'a>>,
+    time_naming: Option<time_naming::Checker<'a>>,
     unchecked_type_assertion: Option<unchecked_type_assertion::Checker>,
     unexported_naming: Option<unexported_naming::Checker>,
+    unexported_return: Option<unexported_return::Checker<'a>>,
     unhandled_error: Option<unhandled_error::Checker<'a>>,
     unnecessary_format: Option<unnecessary_format::Checker>,
     unnecessary_if: Option<unnecessary_if::Checker>,
@@ -85,6 +90,7 @@ struct SharedFileRules<'a> {
     useless_fallthrough: Option<useless_fallthrough::Checker>,
     var_declaration: Option<var_declaration::Checker<'a>>,
     var_naming: Option<var_naming::Checker>,
+    waitgroup_by_value: Option<waitgroup_by_value::Checker>,
 }
 
 macro_rules! take_map {
@@ -112,6 +118,7 @@ impl<'a> SharedFileRules<'a> {
             bool_literal_in_expr: enabled("bool-literal-in-expr")
                 .then(bool_literal_in_expr::Checker::new),
             call_to_gc: enabled("call-to-gc").then(call_to_gc::Checker::new),
+            confusing_results: enabled("confusing-results").then(confusing_results::Checker::new),
             context_as_argument: enabled("context-as-argument")
                 .then(|| context_as_argument::Checker::new(pass)),
             constant_logical_expr: enabled("constant-logical-expr")
@@ -136,6 +143,7 @@ impl<'a> SharedFileRules<'a> {
             errorf: enabled("errorf").then(|| errorf::Checker::new(pass)),
             function_result_limit: enabled("function-result-limit")
                 .then(function_result_limit::Checker::new),
+            get_return: enabled("get-return").then(get_return::Checker::new),
             identical_branches: enabled("identical-branches").then(identical_branches::Checker::new),
             identical_ifelseif_branches: enabled("identical-ifelseif-branches")
                 .then(|| identical_ifelseif_branches::Checker::new(pass)),
@@ -168,9 +176,13 @@ impl<'a> SharedFileRules<'a> {
             struct_tag: enabled("struct-tag").then(struct_tag::Checker::new),
             time_date: enabled("time-date").then(time_date::Checker::new),
             time_equal: enabled("time-equal").then(|| time_equal::Checker::new(pass)),
+            time_naming: enabled("time-naming").then(|| time_naming::Checker::new(pass)),
             unchecked_type_assertion: enabled("unchecked-type-assertion")
                 .then(unchecked_type_assertion::Checker::new),
             unexported_naming: enabled("unexported-naming").then(unexported_naming::Checker::new),
+            unexported_return: enabled("unexported-return")
+                .then(|| unexported_return::Checker::try_new(pass))
+                .flatten(),
             unhandled_error: enabled("unhandled-error")
                 .then(|| unhandled_error::Checker::try_new(pass))
                 .flatten(),
@@ -192,6 +204,7 @@ impl<'a> SharedFileRules<'a> {
             var_declaration: enabled("var-declaration")
                 .then(|| var_declaration::Checker::new(pass)),
             var_naming: enabled("var-naming").then(|| var_naming::Checker::new(pass)),
+            waitgroup_by_value: enabled("waitgroup-by-value").then(waitgroup_by_value::Checker::new),
         }
     }
 
@@ -206,6 +219,7 @@ impl<'a> SharedFileRules<'a> {
             bare_return,
             bool_literal_in_expr,
             call_to_gc,
+            confusing_results,
             context_as_argument,
             constant_logical_expr,
             context_keys_type,
@@ -221,6 +235,7 @@ impl<'a> SharedFileRules<'a> {
             error_strings,
             errorf,
             function_result_limit,
+            get_return,
             identical_branches,
             identical_ifelseif_branches,
             identical_ifelseif_conditions,
@@ -241,8 +256,10 @@ impl<'a> SharedFileRules<'a> {
             struct_tag,
             time_date,
             time_equal,
+            time_naming,
             unchecked_type_assertion,
             unexported_naming,
+            unexported_return,
             unhandled_error,
             unnecessary_format,
             unnecessary_if,
@@ -258,6 +275,7 @@ impl<'a> SharedFileRules<'a> {
             useless_fallthrough,
             var_declaration,
             var_naming,
+            waitgroup_by_value,
         )
     }
 
@@ -290,6 +308,7 @@ impl<'a> SharedFileRules<'a> {
             "bare-return" => bare_return,
             "bool-literal-in-expr" => bool_literal_in_expr,
             "call-to-gc" => call_to_gc,
+            "confusing-results" => confusing_results,
             "context-as-argument" => context_as_argument,
             "constant-logical-expr" => constant_logical_expr,
             "context-keys-type" => context_keys_type,
@@ -305,6 +324,7 @@ impl<'a> SharedFileRules<'a> {
             "error-strings" => error_strings,
             "errorf" => errorf,
             "function-result-limit" => function_result_limit,
+            "get-return" => get_return,
             "identical-branches" => identical_branches,
             "identical-ifelseif-branches" => identical_ifelseif_branches,
             "identical-ifelseif-conditions" => identical_ifelseif_conditions,
@@ -325,8 +345,10 @@ impl<'a> SharedFileRules<'a> {
             "struct-tag" => struct_tag,
             "time-date" => time_date,
             "time-equal" => time_equal,
+            "time-naming" => time_naming,
             "unchecked-type-assertion" => unchecked_type_assertion,
             "unexported-naming" => unexported_naming,
+            "unexported-return" => unexported_return,
             "unhandled-error" => unhandled_error,
             "unnecessary-format" => unnecessary_format,
             "unnecessary-if" => unnecessary_if,
@@ -342,6 +364,7 @@ impl<'a> SharedFileRules<'a> {
             "useless-fallthrough" => useless_fallthrough,
             "var-declaration" => var_declaration,
             "var-naming" => var_naming,
+            "waitgroup-by-value" => waitgroup_by_value,
         );
         map
     }
@@ -365,6 +388,7 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             bare_return,
             bool_literal_in_expr,
             call_to_gc,
+            confusing_results,
             context_as_argument,
             constant_logical_expr,
             context_keys_type,
@@ -380,6 +404,7 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             error_strings,
             errorf,
             function_result_limit,
+            get_return,
             identical_branches,
             identical_ifelseif_branches,
             identical_ifelseif_conditions,
@@ -400,8 +425,10 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             struct_tag,
             time_date,
             time_equal,
+            time_naming,
             unchecked_type_assertion,
             unexported_naming,
+            unexported_return,
             unhandled_error,
             unnecessary_format,
             unnecessary_if,
@@ -417,6 +444,7 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             useless_fallthrough,
             var_declaration,
             var_naming,
+            waitgroup_by_value,
         );
         true
     }

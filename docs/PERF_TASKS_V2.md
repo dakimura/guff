@@ -13,11 +13,11 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ） / A-3a / B-4（batch 1: 10 rules）**。
+> A-1（guff-ssa のみ） / A-3a / B-4（batch 1: 10 rules + batch 2: 5 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-4 の残り（A 分類の ~21）か B-7（misspell 共有 read）。**
+> **次は B-4 の残り（A 分類の ~16）か B-7（misspell 共有 read）。**
 > analyze の残りは buildir / revive / misspell。B-2 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -2493,6 +2493,21 @@ cold wall ~3.93s。findings 20 件 byte 同一。両 regress PASS
 （tsdb 1.570s / full 3.960s）。
 
 残り A: ~21（`exported` / `time-naming` / `get-return` / `defer` …）。C は触らない。
+
+### DONE batch 2（2026-07-28）— **5 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. （prometheus 有効）`time-naming` / `unexported-return`
+2. `get-return` / `confusing-results` / `waitgroup-by-value`
+
+**注意:** `time-naming` は `error-naming` と同様に `NodeRef::File` でパッケージ宣言だけ見る。
+
+**実測:** revive CPU ~0.77s（batch 1 と同帯）。cold wall ~3.91s。findings 20 件 byte 同一（3 回決定的）。
+両 regress PASS（tsdb 1.560s / full 3.850s）。
+
+残り A: ~16（`exported` / `defer` / …）。C は触らない。prometheus 有効で未統合は
+主に `exported`（A・重い）と B/C（ifelse 三本 / blank-imports / comment-spacings）。
 
 ---
 
