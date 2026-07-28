@@ -14,11 +14,12 @@
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa のみ） / A-3a / B-4（A 分類完了: 32 rules）**。
-> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
+> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
+> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-7（misspell 共有 read）の GO/NO-GO 計測。** B-4 の A は完了。残り outside は B/C のみ。
-> analyze の残りは buildir / revive / misspell。B-2 は NO-GO。
+> **次は A-1 残り（guff-types / keywords）か B-10（formatter 間 read+parse 共有）。**
+> analyze の残りは buildir / revive / misspell。B-2 / B-7 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -453,10 +454,10 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~B-1~~ | ~~本物の Inspector（フラットイベント列 + 種別マスク）~~ **完了（打ち止め）**。B-1a: wall −0.12s / preorder CPU 2.01→0.86s。**B-1b/c: 並列 wall ±0.00s・`-j 1` −0.08s・preorder CPU 0.88→0.73s**。**B-1d: 実装して計測し NO-GO（走査 −85% でも CPU +0.02s）→ revert** | cold | **実績 −0.12s**（見込み 0.15〜0.25s には届かず。理由は §B-1） | 大 | 中 |
 | B-2 | buildir/SSA の関数単位 遅延構築 | cold | 0.2〜0.5s? | 大 | **高** |
 | ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
-| B-4 | revive の `shared_walk` を全ルールに拡大 | cold | 0.05〜0.2s? | 中 | 中 |
+| ~~B-4~~ | ~~revive の `shared_walk` を全ルールに拡大~~ **DONE（A 32 rules）。B/C は触らない** | cold | 誤差帯（revive ~0.75s） | 中 | 中 |
 | B-5 | 型の構造的インターン（hash-consing） | cold | 0.1〜0.3s? | 大 | **高** |
 | B-6 | 型チェッカの `Expr::clone` 除去 | cold | 0.1〜0.3s? | 中 | 中 |
-| B-7 | ソースバイトの一回読みを format/misspell と共有 | cold | 0.05〜0.2s? | 中 | 低 |
+| ~~B-7~~ | ~~ソースバイトの一回読みを format/misspell と共有~~ **NO-GO**（§B-7） | cold | — | 中 | 低 |
 | ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
 | B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
 | **B-10** | **formatter 間で read + parse を共有する（S-3 で発見）** | cold（format が critical path になったときだけ） | **format CPU の最大 2/3** | 中 | 中 |
@@ -476,8 +477,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-28 時点の残り推奨順:** `B-4（revive shared_walk）→ B-7（misspell 共有 read）` /
-A-1 残り（types/keywords）。B-2 は NO-GO。
+**2026-07-29 時点の残り推奨順:** `A-1 残り（guff-types / keywords）→ B-10（formatter 共有）` /
+B-6。B-2 / B-7 は NO-GO。B-4 A 完了。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
 wall を狙うなら analyze の callback 中身＝ buildir / revive / misspell へ。詳細は §B-1 末尾）。
@@ -2692,6 +2693,23 @@ format_checks が 1.70 / 1.79 / 1.78s、wall が 4.75 / 4.71 / 4.79s と**ほぼ
 - findings diff = 空、3 回決定性。
 - **RSS が増えていないこと**（このタスクの最大リスク）。
 - 両 regress PASS。
+
+### NO-GO（2026-07-29）— **misspell↔typecheck 共有は既済。format 共有は B-10 へ。**
+
+監査結果:
+
+1. **misspell は既に `Package::source_bytes` を優先**（`typecheck.rs` が保持した `Arc<[u8]>`）。
+   ディスク再読はキャッシュ欠落時のフォールバックだけ。B-7 の misspell 半は **既に DONE**
+   （コミット `501aabb` 系）。
+2. **format_checks は別経路で `fs::read`**（formatter 間では walk 共有済みだが、
+   typecheck/misspell とは共有していない）。これは **B-10** の範疇。
+3. ページキャッシュ温まり済みの cold 3 連で format/wall が一致していた事実（§B-7 冒頭）と合わせ、
+   **追加の共有 read インフラは wall 0.05s 未満見込み → NO-GO。**
+
+付随: misspell が `source_bytes` から毎回 `String::to_owned` していたのを `Cow::Borrowed` に変更
+（アロケーション削減。共有 read 自体は変えていない）。
+
+次は **A-1 残り（guff-types / keywords）** か **B-10**。
 
 ---
 

@@ -1,5 +1,6 @@
 //! `misspell` analyzer — flags commonly misspelled English words in Go sources.
 
+use std::borrow::Cow;
 use std::fs;
 use std::sync::OnceLock;
 
@@ -60,9 +61,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        let content = if let Some(bytes) = pass.pkg().source_bytes(i) {
+        // Prefer typecheck's retained source bytes (no disk re-read, no String copy).
+        let content: Cow<'_, str> = if let Some(bytes) = pass.pkg().source_bytes(i) {
             match std::str::from_utf8(bytes) {
-                Ok(s) => s.to_owned(),
+                Ok(s) => Cow::Borrowed(s),
                 Err(_) => continue,
             }
         } else {
@@ -70,7 +72,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             }
             match fs::read_to_string(path) {
-                Ok(s) => s,
+                Ok(s) => Cow::Owned(s),
                 Err(_) => continue,
             }
         };
