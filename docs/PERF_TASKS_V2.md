@@ -13,13 +13,12 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ） / A-3a**。
+> A-1（guff-ssa のみ） / A-3a / B-4（batch 1: 10 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は revive / misspell 側（B-4 / B-7）か、A-1 の残り（guff-types / keywords）。**
-> analyze の残りは buildir callback の中身。B-2（関数単位遅延）は消費者のほぼ全部が
-> `src_funcs` 全走査なので NO-GO。
+> **次は B-4 の残り（A 分類の ~21）か B-7（misspell 共有 read）。**
+> analyze の残りは buildir / revive / misspell。B-2 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -2468,6 +2467,32 @@ B-1 が GO なら、**B-4 より B-1 を先にやってください。** B-1 後
 - findings diff = 空。**revive の検出が 1 件も消えていないこと**を、
   ルール名ごとに確認する（`--out-format json` の `Text` にルール名が入っているはず）。
 - 3 回決定性、両 regress PASS。
+
+### 仕分け（2026-07-28）— 52 本の非 shared_walk
+
+| 分類 | 数 | 内容 |
+|---|---:|---|
+| **A** shared_walk 化可 | 31 | フィルタのみ（Checker 化） |
+| **B** 既に ifelse 共有 | 3 | early-return / indent-error-flow / superfluous-else |
+| **C** 特殊（入れない） | 18 | prune / ファイルメタ / CFG / パッケージパス |
+
+### DONE batch 1（2026-07-28）— **10 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. `dot-imports` / `duplicated-imports` / `redundant-import-alias` /
+   `argument-limit` / `function-result-limit`
+2. （prometheus 有効）`context-as-argument` / `error-naming` / `error-return` /
+   `receiver-naming` / `unused-receiver`
+
+**注意:** `error-naming` は `NodeRef::File` でパッケージ宣言だけ見る。
+`GenDecl` 全訪問にすると関数内 `var` まで拾って findings が増える（実測で 1 件増えた）。
+
+**実測:** revive CPU ~0.76s → ~0.74s（誤差帯。有効ルールの walk 統合はまだ半分）。
+cold wall ~3.93s。findings 20 件 byte 同一。両 regress PASS
+（tsdb 1.570s / full 3.960s）。
+
+残り A: ~21（`exported` / `time-naming` / `get-return` / `defer` …）。C は触らない。
 
 ---
 

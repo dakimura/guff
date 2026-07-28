@@ -1,29 +1,60 @@
 //! `receiver-naming` — receiver names should be short and consistent.
 
-use guff::ast::{Decl, FuncDecl};
+use std::collections::HashMap;
+
+use guff::ast::{File, FuncDecl};
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
 use crate::util::{is_blank, receiver_type_key};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        // Consistency is per-file (mirrors revive), not package-wide.
-        let mut type_receiver = std::collections::HashMap::new();
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            check_method(f, &mut type_receiver, &mut failures);
+pub struct Checker {
+    type_receiver: HashMap<String, String>,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new() -> Self {
+        Self {
+            type_receiver: HashMap::new(),
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn on_file(&mut self, _file: &File) {
+        self.type_receiver.clear();
+    }
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_method(f, &mut self.type_receiver, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new();
+    for file in pass.files() {
+        c.on_file(file);
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn check_method(
     f: &FuncDecl,
-    type_receiver: &mut std::collections::HashMap<String, String>,
+    type_receiver: &mut HashMap<String, String>,
     failures: &mut Vec<Failure>,
 ) {
     let Some(recv) = &f.recv else {
@@ -71,8 +102,8 @@ fn check_method(
                     "receiver name {} should be consistent with previous receiver name {} for {}",
                     name.name, prev, recv_type
                 ),
-            confidence: None,
-        });
+                confidence: None,
+            });
         }
         return;
     }

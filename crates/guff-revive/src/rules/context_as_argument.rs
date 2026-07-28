@@ -9,7 +9,8 @@
 
 use std::collections::HashSet;
 
-use guff::ast::{Decl, FuncDecl};
+use guff::ast::FuncDecl;
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::config;
@@ -17,18 +18,42 @@ use crate::failure::Failure;
 use crate::settings::RuleArgument;
 use crate::util::{expr_string, is_pkg_dot_type};
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let allow_types = allow_types_before(pass);
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            check_func(f, &allow_types, &mut failures);
+pub struct Checker {
+    allow_types: HashSet<String>,
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn new(pass: &Pass<'_>) -> Self {
+        Self {
+            allow_types: allow_types_before(pass),
+            failures: Vec::new(),
         }
     }
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_func(f, &self.allow_types, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let mut c = Checker::new(pass);
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn allow_types_before(pass: &Pass<'_>) -> HashSet<String> {
@@ -77,8 +102,8 @@ fn check_func(f: &FuncDecl, allow_types: &HashSet<String>, failures: &mut Vec<Fa
                 rule: "context-as-argument",
                 pos: field.pos().0 as u32,
                 message: "context.Context should be the first parameter of a function".into(),
-            confidence: None,
-        });
+                confidence: None,
+            });
             break;
         }
         if let Some(ty) = &field.ty {

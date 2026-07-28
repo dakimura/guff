@@ -11,34 +11,43 @@ use guff_analysis::Pass;
 use crate::config;
 use crate::failure::Failure;
 use super::{
-    atomic, banned_characters, bare_return, bool_literal_in_expr, call_to_gc,
-    constant_logical_expr, context_keys_type, empty_lines, enforce_map_style, enforce_slice_style,
-    enforce_switch_style, epoch_naming, error_strings, errorf, identical_branches,
+    argument_limit, atomic, banned_characters, bare_return, bool_literal_in_expr, call_to_gc,
+    constant_logical_expr, context_as_argument, context_keys_type, dot_imports, duplicated_imports,
+    empty_lines, enforce_map_style, enforce_slice_style, enforce_switch_style, epoch_naming,
+    error_naming, error_return, error_strings, errorf, function_result_limit, identical_branches,
     identical_ifelseif_branches, identical_ifelseif_conditions, identical_switch_branches,
     identical_switch_conditions, if_return, increment_decrement, multiline_if_init, nested_structs,
-    optimize_operands_order, range, range_val_in_closure, redefines_builtin_id, string_format,
-    string_of_int, struct_tag, time_date, time_equal, unchecked_type_assertion, unexported_naming,
-    unhandled_error, unnecessary_format, unnecessary_if, unnecessary_stmt, unreachable_code,
-    unsecure_url_scheme, unused_parameter, use_any, use_errors_new, use_fmt_print, use_slices_sort,
-    useless_fallthrough, var_declaration, var_naming,
+    optimize_operands_order, range, range_val_in_closure, receiver_naming, redefines_builtin_id,
+    redundant_import_alias, string_format, string_of_int, struct_tag, time_date, time_equal,
+    unchecked_type_assertion, unexported_naming, unhandled_error, unnecessary_format,
+    unnecessary_if, unnecessary_stmt, unreachable_code, unsecure_url_scheme, unused_parameter,
+    unused_receiver, use_any, use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough,
+    var_declaration, var_naming,
 };
 
 /// Fan-out visitor: each enabled rule's checker sees every node; walk never prunes.
 struct SharedFileRules<'a> {
+    argument_limit: Option<argument_limit::Checker>,
     atomic: Option<atomic::Checker<'a>>,
     banned_characters: Option<banned_characters::Checker>,
     bare_return: Option<bare_return::Checker>,
     bool_literal_in_expr: Option<bool_literal_in_expr::Checker>,
     call_to_gc: Option<call_to_gc::Checker>,
+    context_as_argument: Option<context_as_argument::Checker>,
     constant_logical_expr: Option<constant_logical_expr::Checker>,
     context_keys_type: Option<context_keys_type::Checker<'a>>,
+    dot_imports: Option<dot_imports::Checker>,
+    duplicated_imports: Option<duplicated_imports::Checker>,
     empty_lines: Option<empty_lines::Checker<'a>>,
     enforce_map_style: Option<enforce_map_style::Checker>,
     enforce_slice_style: Option<enforce_slice_style::Checker>,
     enforce_switch_style: Option<enforce_switch_style::Checker>,
     epoch_naming: Option<epoch_naming::Checker<'a>>,
+    error_naming: Option<error_naming::Checker>,
+    error_return: Option<error_return::Checker>,
     error_strings: Option<error_strings::Checker>,
     errorf: Option<errorf::Checker<'a>>,
+    function_result_limit: Option<function_result_limit::Checker>,
     identical_branches: Option<identical_branches::Checker>,
     identical_ifelseif_branches: Option<identical_ifelseif_branches::Checker<'a>>,
     identical_ifelseif_conditions: Option<identical_ifelseif_conditions::Checker<'a>>,
@@ -51,7 +60,9 @@ struct SharedFileRules<'a> {
     optimize_operands_order: Option<optimize_operands_order::Checker>,
     range: Option<range::Checker>,
     range_val_in_closure: Option<range_val_in_closure::Checker>,
+    receiver_naming: Option<receiver_naming::Checker>,
     redefines_builtin_id: Option<redefines_builtin_id::Checker>,
+    redundant_import_alias: Option<redundant_import_alias::Checker>,
     string_format: Option<string_format::Checker>,
     string_of_int: Option<string_of_int::Checker<'a>>,
     struct_tag: Option<struct_tag::Checker>,
@@ -66,6 +77,7 @@ struct SharedFileRules<'a> {
     unreachable_code: Option<unreachable_code::Checker>,
     unsecure_url_scheme: Option<unsecure_url_scheme::Checker>,
     unused_parameter: Option<unused_parameter::Checker>,
+    unused_receiver: Option<unused_receiver::Checker>,
     use_any: Option<use_any::Checker>,
     use_errors_new: Option<use_errors_new::Checker>,
     use_fmt_print: Option<use_fmt_print::Checker>,
@@ -91,6 +103,7 @@ impl<'a> SharedFileRules<'a> {
         let all = config::all_rules();
         let enabled = |name: &str| settings.rule_enabled(name, config::DEFAULT_RULES, all);
         Self {
+            argument_limit: enabled("argument-limit").then(argument_limit::Checker::new),
             atomic: enabled("atomic").then(|| atomic::Checker::try_new(pass)).flatten(),
             banned_characters: enabled("banned-characters")
                 .then(|| banned_characters::Checker::try_new(pass))
@@ -99,10 +112,14 @@ impl<'a> SharedFileRules<'a> {
             bool_literal_in_expr: enabled("bool-literal-in-expr")
                 .then(bool_literal_in_expr::Checker::new),
             call_to_gc: enabled("call-to-gc").then(call_to_gc::Checker::new),
+            context_as_argument: enabled("context-as-argument")
+                .then(|| context_as_argument::Checker::new(pass)),
             constant_logical_expr: enabled("constant-logical-expr")
                 .then(constant_logical_expr::Checker::new),
             context_keys_type: enabled("context-keys-type")
                 .then(|| context_keys_type::Checker::new(pass)),
+            dot_imports: enabled("dot-imports").then(dot_imports::Checker::new),
+            duplicated_imports: enabled("duplicated-imports").then(duplicated_imports::Checker::new),
             empty_lines: enabled("empty-lines").then(|| empty_lines::Checker::new(pass)),
             enforce_map_style: enabled("enforce-map-style")
                 .then(|| enforce_map_style::Checker::try_new(pass))
@@ -113,8 +130,12 @@ impl<'a> SharedFileRules<'a> {
             enforce_switch_style: enabled("enforce-switch-style")
                 .then(|| enforce_switch_style::Checker::new(pass)),
             epoch_naming: enabled("epoch-naming").then(|| epoch_naming::Checker::new(pass)),
+            error_naming: enabled("error-naming").then(error_naming::Checker::new),
+            error_return: enabled("error-return").then(error_return::Checker::new),
             error_strings: enabled("error-strings").then(error_strings::Checker::new),
             errorf: enabled("errorf").then(|| errorf::Checker::new(pass)),
+            function_result_limit: enabled("function-result-limit")
+                .then(function_result_limit::Checker::new),
             identical_branches: enabled("identical-branches").then(identical_branches::Checker::new),
             identical_ifelseif_branches: enabled("identical-ifelseif-branches")
                 .then(|| identical_ifelseif_branches::Checker::new(pass)),
@@ -135,8 +156,11 @@ impl<'a> SharedFileRules<'a> {
             range: enabled("range").then(range::Checker::new),
             range_val_in_closure: enabled("range-val-in-closure")
                 .then(range_val_in_closure::Checker::new),
+            receiver_naming: enabled("receiver-naming").then(receiver_naming::Checker::new),
             redefines_builtin_id: enabled("redefines-builtin-id")
                 .then(redefines_builtin_id::Checker::new),
+            redundant_import_alias: enabled("redundant-import-alias")
+                .then(redundant_import_alias::Checker::new),
             string_format: enabled("string-format")
                 .then(|| string_format::Checker::try_new(pass))
                 .flatten(),
@@ -158,6 +182,7 @@ impl<'a> SharedFileRules<'a> {
                 .then(|| unsecure_url_scheme::Checker::try_new(pass))
                 .flatten(),
             unused_parameter: enabled("unused-parameter").then(unused_parameter::Checker::new),
+            unused_receiver: enabled("unused-receiver").then(unused_receiver::Checker::new),
             use_any: enabled("use-any").then(use_any::Checker::new),
             use_errors_new: enabled("use-errors-new").then(use_errors_new::Checker::new),
             use_fmt_print: enabled("use-fmt-print").then(|| use_fmt_print::Checker::new(pass)),
@@ -175,20 +200,27 @@ impl<'a> SharedFileRules<'a> {
             ($($f:ident),* $(,)?) => { $(self.$f.is_some())||* };
         }
         any!(
+            argument_limit,
             atomic,
             banned_characters,
             bare_return,
             bool_literal_in_expr,
             call_to_gc,
+            context_as_argument,
             constant_logical_expr,
             context_keys_type,
+            dot_imports,
+            duplicated_imports,
             empty_lines,
             enforce_map_style,
             enforce_slice_style,
             enforce_switch_style,
             epoch_naming,
+            error_naming,
+            error_return,
             error_strings,
             errorf,
+            function_result_limit,
             identical_branches,
             identical_ifelseif_branches,
             identical_ifelseif_conditions,
@@ -201,7 +233,9 @@ impl<'a> SharedFileRules<'a> {
             optimize_operands_order,
             range,
             range_val_in_closure,
+            receiver_naming,
             redefines_builtin_id,
+            redundant_import_alias,
             string_format,
             string_of_int,
             struct_tag,
@@ -216,6 +250,7 @@ impl<'a> SharedFileRules<'a> {
             unreachable_code,
             unsecure_url_scheme,
             unused_parameter,
+            unused_receiver,
             use_any,
             use_errors_new,
             use_fmt_print,
@@ -227,7 +262,13 @@ impl<'a> SharedFileRules<'a> {
     }
 
     fn on_file(&mut self, file: &'a File) {
+        if let Some(c) = &mut self.duplicated_imports {
+            c.on_file(file);
+        }
         if let Some(c) = &mut self.empty_lines {
+            c.on_file(file);
+        }
+        if let Some(c) = &mut self.receiver_naming {
             c.on_file(file);
         }
         if let Some(c) = &mut self.unexported_naming {
@@ -243,20 +284,27 @@ impl<'a> SharedFileRules<'a> {
         take_map!(
             map,
             self,
+            "argument-limit" => argument_limit,
             "atomic" => atomic,
             "banned-characters" => banned_characters,
             "bare-return" => bare_return,
             "bool-literal-in-expr" => bool_literal_in_expr,
             "call-to-gc" => call_to_gc,
+            "context-as-argument" => context_as_argument,
             "constant-logical-expr" => constant_logical_expr,
             "context-keys-type" => context_keys_type,
+            "dot-imports" => dot_imports,
+            "duplicated-imports" => duplicated_imports,
             "empty-lines" => empty_lines,
             "enforce-map-style" => enforce_map_style,
             "enforce-slice-style" => enforce_slice_style,
             "enforce-switch-style" => enforce_switch_style,
             "epoch-naming" => epoch_naming,
+            "error-naming" => error_naming,
+            "error-return" => error_return,
             "error-strings" => error_strings,
             "errorf" => errorf,
+            "function-result-limit" => function_result_limit,
             "identical-branches" => identical_branches,
             "identical-ifelseif-branches" => identical_ifelseif_branches,
             "identical-ifelseif-conditions" => identical_ifelseif_conditions,
@@ -269,7 +317,9 @@ impl<'a> SharedFileRules<'a> {
             "optimize-operands-order" => optimize_operands_order,
             "range" => range,
             "range-val-in-closure" => range_val_in_closure,
+            "receiver-naming" => receiver_naming,
             "redefines-builtin-id" => redefines_builtin_id,
+            "redundant-import-alias" => redundant_import_alias,
             "string-format" => string_format,
             "string-of-int" => string_of_int,
             "struct-tag" => struct_tag,
@@ -284,6 +334,7 @@ impl<'a> SharedFileRules<'a> {
             "unreachable-code" => unreachable_code,
             "unsecure-url-scheme" => unsecure_url_scheme,
             "unused-parameter" => unused_parameter,
+            "unused-receiver" => unused_receiver,
             "use-any" => use_any,
             "use-errors-new" => use_errors_new,
             "use-fmt-print" => use_fmt_print,
@@ -308,20 +359,27 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             };
         }
         visit_all!(
+            argument_limit,
             atomic,
             banned_characters,
             bare_return,
             bool_literal_in_expr,
             call_to_gc,
+            context_as_argument,
             constant_logical_expr,
             context_keys_type,
+            dot_imports,
+            duplicated_imports,
             empty_lines,
             enforce_map_style,
             enforce_slice_style,
             enforce_switch_style,
             epoch_naming,
+            error_naming,
+            error_return,
             error_strings,
             errorf,
+            function_result_limit,
             identical_branches,
             identical_ifelseif_branches,
             identical_ifelseif_conditions,
@@ -334,7 +392,9 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             optimize_operands_order,
             range,
             range_val_in_closure,
+            receiver_naming,
             redefines_builtin_id,
+            redundant_import_alias,
             string_format,
             string_of_int,
             struct_tag,
@@ -349,6 +409,7 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             unreachable_code,
             unsecure_url_scheme,
             unused_parameter,
+            unused_receiver,
             use_any,
             use_errors_new,
             use_fmt_print,
