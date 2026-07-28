@@ -19,6 +19,7 @@
 // * `p.error` collects into a shared `Rc<RefCell<ErrorList>>` because
 //   the scanner's `ErrorHandler` and the parser both write to it.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::panic::{catch_unwind, panic_any, AssertUnwindSafe};
 use std::rc::Rc;
@@ -138,7 +139,7 @@ struct Parser {
     // Next token
     pos: Pos,
     tok: Token,
-    lit: String,
+    lit: Cow<'static, str>,
     string_end: Pos,
 
     // Error recovery
@@ -181,7 +182,7 @@ impl Parser {
             go_version: String::new(),
             pos: NO_POS,
             tok: Token::ILLEGAL,
-            lit: String::new(),
+            lit: Cow::Borrowed(""),
             string_end: NO_POS,
             sync_pos: NO_POS,
             sync_cnt: 0,
@@ -211,7 +212,7 @@ impl Parser {
         }
         let comment = Comment {
             slash: self.pos,
-            text: self.lit.clone(),
+            text: self.lit.clone().into_owned(),
         };
         self.next0();
         (comment, endline)
@@ -455,7 +456,7 @@ impl Parser {
     fn parse_ident(&mut self) -> Ident {
         let pos = self.pos;
         let name = if self.tok == Token::IDENT {
-            let n = self.lit.clone();
+            let n = self.lit.clone().into_owned();
             self.next();
             n
         } else {
@@ -725,7 +726,7 @@ impl Parser {
                 value_pos: self.pos,
                 value_end: self.string_end,
                 kind: Some(self.tok),
-                value: self.lit.clone(),
+                value: self.lit.clone().into_owned(),
             };
             self.next();
             Some(bl)
@@ -1497,7 +1498,7 @@ impl Parser {
                     value_pos: self.pos,
                     value_end: end,
                     kind: Some(self.tok),
-                    value: self.lit.clone(),
+                    value: self.lit.clone().into_owned(),
                 };
                 self.next();
                 Expr::BasicLit(bl)
@@ -2172,7 +2173,7 @@ impl Parser {
         if self.tok != Token::LBRACE {
             if self.tok == Token::SEMICOLON {
                 semi_pos = self.pos;
-                semi_lit = self.lit.clone();
+                semi_lit = self.lit.clone().into_owned();
                 self.next();
             } else {
                 self.expect(Token::SEMICOLON);
@@ -2579,7 +2580,7 @@ impl Parser {
         let mut end = self.pos;
         let mut path = String::new();
         if self.tok == Token::STRING {
-            path = self.lit.clone();
+            path = self.lit.clone().into_owned();
             end = self.string_end;
             self.next();
         } else if self.tok.is_literal() {

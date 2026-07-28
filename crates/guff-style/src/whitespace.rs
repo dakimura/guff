@@ -263,7 +263,7 @@ fn collect_comments(src: &[u8], pass_file: &File) -> Vec<CommentGroup> {
                 endline = el;
                 cur.push(Comment {
                     slash: Pos(pass_base + (pos.0 - temp_base)),
-                    text: lit,
+                    text: lit.into_owned(),
                 });
             }
             Token::SEMICOLON => {

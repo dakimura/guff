@@ -13,14 +13,13 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ）**。
-> **NO-GO と判定済み: A-2**（§A-2）**、B-1d（部分木スキップ。実装して計測した結果。§B-1 末尾）**。
+> A-1（guff-ssa のみ） / A-3a**。
+> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は `A-3 → B-2`。** A-1 の残り（guff-types / guff-ast keywords / guff-runner）は後回しでよい
-> （guff-ssa が SipHash callers の最大塊だった）。B-1 で分かったこととして、
-> **analyze phase に残っているのは「AST を歩くコスト」ではなく analyzer 自身の callback**
-> です（buildir が単独最大。A-1 guff-ssa 後は ~1.94s）。preorder 側をさらに削っても wall は動きません。
+> **次は revive / misspell 側（B-4 / B-7）か、A-1 の残り（guff-types / keywords）。**
+> analyze の残りは buildir callback の中身。B-2（関数単位遅延）は消費者のほぼ全部が
+> `src_funcs` 全走査なので NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -478,7 +477,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-28 時点の残り推奨順:** `A-3 → B-2`（A-1 guff-ssa DONE。types/keywords/runner は後回し可）
+**2026-07-28 時点の残り推奨順:** `B-4（revive shared_walk）→ B-7（misspell 共有 read）` /
+A-1 残り（types/keywords）。B-2 は NO-GO。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
 wall を狙うなら analyze の callback 中身＝ buildir / revive / misspell へ。詳細は §B-1 末尾）。
@@ -1458,6 +1458,20 @@ A-3a は工数が極小なので、GO/NO-GO なしでやってよいです。
 
 - `from_utf8_lossy` を `from_utf8_unchecked` に変える。**不正 UTF-8 のファイルで UB。**
   Go の scanner は不正 UTF-8 を明示的にエラーにするので、挙動を変えると findings が変わります。
+
+### DONE（2026-07-28）— **A-3a: `scan`/`Parser.lit` を `Cow<'static, str>` 化。セミコロン `"\n"`/`";"` の割当を消した。**
+
+**入れたもの:** `Scanner::scan` の戻り値と `Parser.lit` を `Cow<'static, str>` に変更。
+挿入／明示セミコロンは `Cow::Borrowed`、識別子・リテラル・コメントだけ `Cow::Owned`。
+
+**実測:** findings 20 件 byte 同一・3 回決定的。`cargo test -p guff-ast --release` PASS。
+cold wall ~3.87s / RSS ~7.43GB（A-1 後と同程度。A-3a 単体の wall 効果は誤差帯）。
+両 regress PASS（tsdb 1.60s / full 3.88s）。
+
+### NO-GO（2026-07-28）— **A-3b/c。アロケータ合計 CPU 5.8% < 10% 基準。**
+
+§1.3-post samply: `mi_free`+`mi_malloc_aligned`+`mi_page_free_list_extend` = **5.8%**。
+節の GO/NO-GO（10% 超でなければ A-3b/c はやらない）に抵触。Ident インターン（A-3c）は C-1 側。
 
 ---
 

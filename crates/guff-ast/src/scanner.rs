@@ -19,6 +19,7 @@
 // bytes, matching Go's behavior — only the literal's byte content
 // differs.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::position::{File, Pos, Position, NO_POS};
@@ -749,12 +750,12 @@ impl<'eh> Scanner<'eh> {
 
     /// Scan the next token. Returns `(pos, token, literal)`. The end of
     /// source is signaled by `Token::EOF`.
-    pub fn scan(&mut self) -> (Pos, Token, String) {
+    pub fn scan(&mut self) -> (Pos, Token, Cow<'static, str>) {
         loop {
             if self.nl_pos.is_valid() {
                 let p = self.nl_pos;
                 self.nl_pos = NO_POS;
-                return (p, Token::SEMICOLON, "\n".to_string());
+                return (p, Token::SEMICOLON, Cow::Borrowed("\n"));
             }
 
             self.skip_whitespace();
@@ -763,13 +764,13 @@ impl<'eh> Scanner<'eh> {
 
             let mut insert_semi = false;
             let tok;
-            let mut lit = String::new();
+            let mut lit: Cow<'static, str> = Cow::Borrowed("");
 
             let ch = self.ch;
             if is_letter(ch) {
-                lit = self.scan_identifier();
+                lit = Cow::Owned(self.scan_identifier());
                 if lit.len() > 1 {
-                    tok = token::lookup(&lit);
+                    tok = token::lookup(lit.as_ref());
                     match tok {
                         Token::IDENT
                         | Token::BREAK
@@ -788,38 +789,38 @@ impl<'eh> Scanner<'eh> {
                 insert_semi = true;
                 let (t, l) = self.scan_number();
                 tok = t;
-                lit = l;
+                lit = Cow::Owned(l);
             } else {
                 self.next(); // always make progress
                 match ch {
                     EOF => {
                         if self.insert_semi {
                             self.insert_semi = false;
-                            return (pos, Token::SEMICOLON, "\n".to_string());
+                            return (pos, Token::SEMICOLON, Cow::Borrowed("\n"));
                         }
                         tok = Token::EOF;
                     }
                     c if c == '\n' as i32 => {
                         // Only reachable when insert_semi was set.
                         self.insert_semi = false;
-                        return (pos, Token::SEMICOLON, "\n".to_string());
+                        return (pos, Token::SEMICOLON, Cow::Borrowed("\n"));
                     }
                     c if c == '"' as i32 => {
                         insert_semi = true;
                         tok = Token::STRING;
-                        lit = self.scan_string();
+                        lit = Cow::Owned(self.scan_string());
                         self.string_end = Pos(pos.0 + lit.len() as i64);
                     }
                     c if c == '\'' as i32 => {
                         insert_semi = true;
                         tok = Token::CHAR;
-                        lit = self.scan_rune();
+                        lit = Cow::Owned(self.scan_rune());
                     }
                     c if c == '`' as i32 => {
                         insert_semi = true;
                         tok = Token::STRING;
                         let (l, raw_len) = self.scan_raw_string();
-                        lit = l;
+                        lit = Cow::Owned(l);
                         self.string_end = Pos(pos.0 + raw_len as i64);
                     }
                     c if c == ':' as i32 => {
@@ -837,7 +838,7 @@ impl<'eh> Scanner<'eh> {
                     c if c == ',' as i32 => tok = Token::COMMA,
                     c if c == ';' as i32 => {
                         tok = Token::SEMICOLON;
-                        lit = ";".to_string();
+                        lit = Cow::Borrowed(";");
                     }
                     c if c == '(' as i32 => tok = Token::LPAREN,
                     c if c == ')' as i32 => {
@@ -883,7 +884,7 @@ impl<'eh> Scanner<'eh> {
                                 continue;
                             }
                             tok = Token::COMMENT;
-                            lit = comment;
+                            lit = Cow::Owned(comment);
                         } else {
                             tok = self.switch2(Token::QUO, Token::QuoAssign);
                         }
@@ -958,8 +959,8 @@ impl<'eh> Scanner<'eh> {
                         insert_semi = self.insert_semi;
                         tok = Token::ILLEGAL;
                         lit = match char::from_u32(ch as u32) {
-                            Some(c) => c.to_string(),
-                            None => String::new(),
+                            Some(c) => Cow::Owned(c.to_string()),
+                            None => Cow::Borrowed(""),
                         };
                     }
                 }
@@ -3787,9 +3788,9 @@ mod tests {
                 }
                 let (_, tok, mut lit) = s.scan();
                 match tok {
-                    Token::PERIOD => lit = ".".to_string(),
-                    Token::ADD => lit = "+".to_string(),
-                    Token::SUB => lit = "-".to_string(),
+                    Token::PERIOD => lit = Cow::Borrowed("."),
+                    Token::ADD => lit = Cow::Borrowed("+"),
+                    Token::SUB => lit = Cow::Borrowed("-"),
                     _ => {}
                 }
                 if i == 0 {
