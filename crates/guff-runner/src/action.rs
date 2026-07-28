@@ -55,11 +55,16 @@ static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, u
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Debug-only per-analyzer share of [`InspectResult::preorder`] time
-/// (PERF_TASKS_V2 B-0). Keyed by analyzer name; value is `(nanos, nodes)`.
+/// (PERF_TASKS_V2 B-0). Keyed by analyzer name; value is
+/// `(nanos, nodes scanned, nodes delivered)`.
 ///
 /// Filled by diffing the calling thread's preorder counters across one action —
 /// valid because an action runs to completion on the thread that started it.
-static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u64, u64)>>> =
+///
+/// `scanned` vs `delivered` is how B-1c progress is read: an analyzer still on
+/// the unmasked API has the two equal, a migrated one delivers only the kinds
+/// it asked for.
+static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u64, u64, u64)>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn timing_enabled() -> bool {
@@ -73,14 +78,15 @@ fn record_analyzer_time(name: &'static str, nanos: u128) {
     entry.1 += 1;
 }
 
-fn record_preorder_share(name: &'static str, nanos: u64, nodes: u64) {
+fn record_preorder_share(name: &'static str, nanos: u64, nodes: u64, hits: u64) {
     if nanos == 0 && nodes == 0 {
         return;
     }
     let mut m = PREORDER_BY_ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
-    let entry = m.entry(name).or_insert((0, 0));
+    let entry = m.entry(name).or_insert((0, 0, 0));
     entry.0 += nanos;
     entry.1 += nodes;
+    entry.2 += hits;
 }
 
 /// Print and reset the per-analyzer timing table (top entries by total time).
@@ -119,7 +125,7 @@ fn report_preorder_timing(analyze_total: u128) {
     if !guff_analysis::preorder_stats_enabled() {
         return;
     }
-    let (calls, nodes, nanos) = guff_analysis::preorder_totals();
+    let (calls, nodes, nanos, hits) = guff_analysis::preorder_totals();
     if calls == 0 {
         return;
     }
@@ -129,21 +135,28 @@ fn report_preorder_timing(analyze_total: u128) {
         0.0
     };
     eprintln!(
-        "guff: inspect preorder: {calls} calls, {nodes} nodes visited, \
+        "guff: inspect preorder: {calls} calls, {nodes} nodes scanned, \
+         {hits} delivered ({:.0}% filtered by mask), \
          {:.2}s total CPU ({share:.1}% of analyze CPU)",
+        if nodes > 0 {
+            (1.0 - hits as f64 / nodes as f64) * 100.0
+        } else {
+            0.0
+        },
         nanos as f64 / 1e9,
     );
     let mut by = PREORDER_BY_ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
-    let mut rows: Vec<(&'static str, u64, u64)> =
-        by.iter().map(|(k, (t, n))| (*k, *t, *n)).collect();
-    rows.sort_by_key(|(_, t, _)| std::cmp::Reverse(*t));
+    let mut rows: Vec<(&'static str, u64, u64, u64)> =
+        by.iter().map(|(k, (t, n, h))| (*k, *t, *n, *h)).collect();
+    rows.sort_by_key(|(_, t, _, _)| std::cmp::Reverse(*t));
     eprintln!("guff: preorder CPU by analyzer (top 20):");
-    for (name, ns, nd) in rows.iter().take(20) {
+    for (name, ns, nd, nh) in rows.iter().take(20) {
         eprintln!(
-            "  {:>30} {:>9.2}s  {:>12} nodes",
+            "  {:>30} {:>9.2}s  {:>12} scanned  {:>12} delivered",
             name,
             *ns as f64 / 1e9,
             nd,
+            nh,
         );
     }
     by.clear();
@@ -266,6 +279,7 @@ impl Action {
                     self.analyzer.name,
                     pre_after.2.saturating_sub(pre_before.2),
                     pre_after.1.saturating_sub(pre_before.1),
+                    pre_after.3.saturating_sub(pre_before.3),
                 );
             }
             r

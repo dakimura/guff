@@ -127,6 +127,29 @@ macro_rules! node_variants {
         #[repr(u8)]
         pub enum NodeKind { $($variant),* }
 
+        impl NodeKind {
+            /// How many kinds exist. A [`NodeMask`] is a `u64`, so this is
+            /// checked against 64 below rather than left to a runtime shift
+            /// overflow the day a 65th variant is added.
+            pub const COUNT: usize = [$(stringify!($variant)),*].len();
+
+            /// This kind's single-bit mask.
+            #[inline]
+            pub const fn bit(self) -> u64 {
+                1u64 << (self as u8)
+            }
+        }
+
+        const _: () = assert!(
+            NodeKind::COUNT <= 64,
+            "NodeMask is a u64 bitset; widen it before adding a 65th NodeRef variant",
+        );
+
+        impl NodeMask {
+            /// Every kind — what an unfiltered traversal asks for.
+            pub const ALL: NodeMask = NodeMask(0 $(| NodeKind::$variant.bit())*);
+        }
+
         impl<'a> NodeRef<'a> {
             /// Short type name (e.g. `"Ident"`, `"FuncDecl"`). Equivalent of
             /// Go's `reflect.TypeOf(n).Elem().Name()` for AST values.
@@ -186,6 +209,79 @@ node_variants![
     // Files and packages
     File, Package,
 ];
+
+/// A set of [`NodeKind`]s, as the `u64` bitset Go's `inspector` calls a
+/// "type mask".
+///
+/// The point of a mask is that a traversal can decide *without touching the
+/// node* whether a caller wants it. Most analyzers care about one or two of the
+/// 56 kinds, so the mask is what turns "walk the tree and `let else { return }`
+/// 99% of it away" into "scan only what was asked for".
+///
+/// Build one with [`node_mask!`](crate::node_mask):
+///
+/// ```
+/// # use guff::{node_mask, walk::{NodeKind, NodeMask}};
+/// const CALLS: NodeMask = node_mask!(CallExpr, GoStmt);
+/// assert!(CALLS.contains(NodeKind::CallExpr));
+/// assert!(!CALLS.contains(NodeKind::Ident));
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeMask(u64);
+
+impl NodeMask {
+    /// The empty mask. Matches nothing; `node_mask!()` of no kinds.
+    pub const NONE: NodeMask = NodeMask(0);
+
+    /// This mask plus `kind`.
+    #[inline]
+    pub const fn with(self, kind: NodeKind) -> NodeMask {
+        NodeMask(self.0 | kind.bit())
+    }
+
+    /// The union of two masks.
+    #[inline]
+    pub const fn union(self, other: NodeMask) -> NodeMask {
+        NodeMask(self.0 | other.0)
+    }
+
+    /// Whether `kind` is in this mask.
+    #[inline]
+    pub const fn contains(self, kind: NodeKind) -> bool {
+        self.0 & kind.bit() != 0
+    }
+
+    /// Whether the two masks share any kind. This is the subtree-skip test:
+    /// a subtree whose kinds don't intersect the wanted mask can be jumped over.
+    #[inline]
+    pub const fn intersects(self, other: NodeMask) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// Whether this mask matches nothing.
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The raw bits.
+    #[inline]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+}
+
+/// Build a [`NodeMask`] from variant names: `node_mask!(AssignStmt, CallExpr)`.
+///
+/// Const-evaluable, so callers can hold it in a `const` and pay nothing at run
+/// time. Names are [`NodeKind`] variants, i.e. [`NodeRef`] variants.
+#[macro_export]
+macro_rules! node_mask {
+    ($($variant:ident),* $(,)?) => {
+        $crate::walk::NodeMask::NONE
+            $(.with($crate::walk::NodeKind::$variant))*
+    };
+}
 
 /// Promote an `&Expr` to the narrow `NodeRef` variant matching its
 /// concrete type. Walk dispatch never sees `NodeRef::Expr` because

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use guff::ast::File;
-use guff::walk::{NodeKind, NodeRef, preorder_stack};
+use guff::walk::{NodeKind, NodeMask, NodeRef, preorder_stack};
 use guff_packages::Package;
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
@@ -30,7 +30,13 @@ use crate::pass::Pass;
 #[derive(Default)]
 struct PreorderCounters {
     calls: AtomicU64,
+    /// Events *scanned*. This is the traversal work, and it stays the same
+    /// whether or not the caller passed a mask — until B-1d lets a masked scan
+    /// jump over whole subtrees, at which point this is the number that drops.
     nodes: AtomicU64,
+    /// Events *delivered* to the callback. `nodes - hits` is what B-1c's masks
+    /// have taken off the callback path so far.
+    hits: AtomicU64,
     nanos: AtomicU64,
 }
 
@@ -87,35 +93,37 @@ pub fn preorder_stats_enabled() -> bool {
     *PREORDER_ENABLED
 }
 
-/// `(calls, nodes, nanos)` accumulated by **this thread** so far.
+/// `(calls, nodes, nanos, hits)` accumulated by **this thread** so far.
 ///
 /// The runner snapshots this around each analyzer run and attributes the delta
 /// to that analyzer — cheaper than threading an analyzer name into the hot path,
 /// and correct because one action runs to completion on one thread.
-pub fn preorder_thread_totals() -> (u64, u64, u64) {
+pub fn preorder_thread_totals() -> (u64, u64, u64, u64) {
     if !*PREORDER_ENABLED {
-        return (0, 0, 0);
+        return (0, 0, 0, 0);
     }
     PREORDER_LOCAL.with(|c| {
         (
             c.calls.load(Ordering::Relaxed),
             c.nodes.load(Ordering::Relaxed),
             c.nanos.load(Ordering::Relaxed),
+            c.hits.load(Ordering::Relaxed),
         )
     })
 }
 
-/// `(calls, nodes, nanos)` summed across every worker thread.
-pub fn preorder_totals() -> (u64, u64, u64) {
+/// `(calls, nodes, nanos, hits)` summed across every worker thread.
+pub fn preorder_totals() -> (u64, u64, u64, u64) {
     if !*PREORDER_ENABLED {
-        return (0, 0, 0);
+        return (0, 0, 0, 0);
     }
     let reg = PREORDER_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
-    reg.iter().fold((0, 0, 0), |(ca, no, na), c| {
+    reg.iter().fold((0, 0, 0, 0), |(ca, no, na, hi), c| {
         (
             ca + c.calls.load(Ordering::Relaxed),
             no + c.nodes.load(Ordering::Relaxed),
             na + c.nanos.load(Ordering::Relaxed),
+            hi + c.hits.load(Ordering::Relaxed),
         )
     })
 }
@@ -228,23 +236,54 @@ impl InspectResult {
     where
         F: FnMut(NodeRef<'_>),
     {
+        self.preorder_typed(NodeMask::ALL, files, f);
+    }
+
+    /// Visit only the nodes whose kind is in `mask`, in preorder.
+    ///
+    /// Port of Go's `inspector.Preorder(types, f)` (PERF_TASKS_V2 B-1b). The
+    /// sequence is exactly `preorder` filtered by `mask` — same nodes, same
+    /// order — so a caller that already discarded other kinds itself (the
+    /// `let NodeRef::X(x) = n else { return }` shape at ~144 call sites) can
+    /// pass a mask and get identical behaviour without the per-node callback.
+    ///
+    /// **Keep the `else { return }` when migrating.** A mask that is missing a
+    /// kind the body handles silently drops findings; `unreachable!()` would
+    /// turn that into a crash but does not make the mask any more correct, and
+    /// the discarded-kind branch costs nothing once the mask filters it out.
+    pub fn preorder_typed<F>(&self, mask: NodeMask, files: &[File], f: F)
+    where
+        F: FnMut(NodeRef<'_>),
+    {
         if *PREORDER_ENABLED {
-            return self.preorder_counted(files, f);
+            return self.preorder_counted(mask, files, f);
         }
-        self.visit_all(files, f);
+        self.visit_masked(mask, files, f);
     }
 
     /// The traversal itself: a linear scan when the events match, the original
     /// recursive walk otherwise. Both produce the identical node sequence — the
     /// events were recorded by the same [`preorder_stack`] call shape.
+    ///
+    /// Returns how many nodes were scanned and how many were delivered; both
+    /// are dropped on the release path (the counters are only read under
+    /// `GUFF_DEBUG_CACHE`) and exist so the two arms can't disagree about what
+    /// counts as work.
     #[inline]
-    fn visit_all<F>(&self, files: &[File], mut f: F)
+    fn visit_masked<F>(&self, mask: NodeMask, files: &[File], mut f: F) -> (u64, u64)
     where
         F: FnMut(NodeRef<'_>),
     {
+        let mut scanned: u64 = 0;
+        let mut hits: u64 = 0;
         match self.events_for(files) {
             Some(events) => {
+                scanned = events.len() as u64;
                 for &e in events {
+                    if !mask.contains(e.kind) {
+                        continue;
+                    }
+                    hits += 1;
                     // SAFETY: `events_for` just confirmed these events were
                     // recorded from this exact slice, and `Events::_owner` keeps
                     // its AST alive; the nodes are therefore live and unmoved.
@@ -255,36 +294,39 @@ impl InspectResult {
                 let mut stack = Vec::new();
                 for file in files {
                     preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
-                        f(n);
+                        scanned += 1;
+                        if mask.contains(n.kind()) {
+                            hits += 1;
+                            f(n);
+                        }
                         true
                     });
                 }
             }
         }
+        (scanned, hits)
     }
 
-    /// Same traversal as [`preorder`](Self::preorder), plus B-0 accounting.
+    /// Same traversal as [`preorder_typed`](Self::preorder_typed), plus B-0
+    /// accounting.
     ///
     /// Split out so the default path costs one branch on a cached `bool` per
-    /// call. The node counter is a plain local incremented in the callback and
-    /// published once at the end — no atomics per node.
+    /// call. The counters are plain locals published once at the end — no
+    /// atomics per node.
     #[cold]
-    fn preorder_counted<F>(&self, files: &[File], mut f: F)
+    fn preorder_counted<F>(&self, mask: NodeMask, files: &[File], f: F)
     where
         F: FnMut(NodeRef<'_>),
     {
         let guard = DepthGuard::enter();
         let start = (guard.0 == 0).then(std::time::Instant::now);
-        let mut nodes: u64 = 0;
-        self.visit_all(files, |n| {
-            nodes += 1;
-            f(n);
-        });
+        let (scanned, hits) = self.visit_masked(mask, files, f);
         let nanos = start.map_or(0, |s| s.elapsed().as_nanos() as u64);
         drop(guard);
         PREORDER_LOCAL.with(|c| {
             c.calls.fetch_add(1, Ordering::Relaxed);
-            c.nodes.fetch_add(nodes, Ordering::Relaxed);
+            c.nodes.fetch_add(scanned, Ordering::Relaxed);
+            c.hits.fetch_add(hits, Ordering::Relaxed);
             c.nanos.fetch_add(nanos, Ordering::Relaxed);
         });
     }
@@ -314,6 +356,7 @@ pub fn analyzer() -> &'static Analyzer {
 
 #[cfg(test)]
 mod tests {
+    use guff::node_mask;
     use guff::parser::{parse_file, Mode};
     use guff::position::FileSet;
     use guff::walk::preorder;
@@ -436,6 +479,69 @@ mod tests {
         });
         assert_eq!(first, direct);
         assert!(first < whole, "subset must visit fewer nodes ({first} vs {whole})");
+    }
+
+    /// A masked traversal must be **exactly** the unmasked one filtered — same
+    /// nodes, same order — on both the flat and the fallback path. If the two
+    /// disagreed, migrating a call site to a mask would change findings.
+    #[test]
+    fn masked_preorder_is_the_unmasked_sequence_filtered() {
+        let (pkg, fset) = two_file_package();
+        let flat = flat_result(&pkg, &fset);
+        let mask = node_mask!(Ident, CallExpr, FuncDecl);
+
+        let mut all: Vec<(&'static str, *const ())> = Vec::new();
+        flat.preorder(&pkg.syntax, |n| all.push((n.kind_name(), n.erased_ptr())));
+        let expected: Vec<_> = all
+            .iter()
+            .copied()
+            .filter(|(k, _)| matches!(*k, "Ident" | "CallExpr" | "FuncDecl"))
+            .collect();
+        assert!(!expected.is_empty(), "fixture must contain those kinds");
+        assert!(expected.len() < all.len(), "mask must filter something out");
+
+        let mut got: Vec<(&'static str, *const ())> = Vec::new();
+        flat.preorder_typed(mask, &pkg.syntax, |n| {
+            got.push((n.kind_name(), n.erased_ptr()));
+        });
+        assert_eq!(expected, got, "flat masked scan");
+
+        // The fallback path (a slice the events weren't built from) has to
+        // filter identically — it is a separate arm of `visit_masked`.
+        let one = std::slice::from_ref(&pkg.syntax[0]);
+        let mut fb_all: Vec<(&'static str, *const ())> = Vec::new();
+        flat.preorder(one, |n| fb_all.push((n.kind_name(), n.erased_ptr())));
+        let fb_expected: Vec<_> = fb_all
+            .iter()
+            .copied()
+            .filter(|(k, _)| matches!(*k, "Ident" | "CallExpr" | "FuncDecl"))
+            .collect();
+        let mut fb_got: Vec<(&'static str, *const ())> = Vec::new();
+        flat.preorder_typed(mask, one, |n| fb_got.push((n.kind_name(), n.erased_ptr())));
+        assert_eq!(fb_expected, fb_got, "fallback masked walk");
+    }
+
+    /// `NodeMask::ALL` is generated from the same variant list as `NodeKind`,
+    /// so `preorder` and `preorder_typed(ALL, ..)` must not diverge — that
+    /// equality is what makes every unmigrated call site correct.
+    #[test]
+    fn all_mask_matches_every_kind() {
+        let (pkg, fset) = two_file_package();
+        let flat = flat_result(&pkg, &fset);
+
+        let mut plain = 0usize;
+        flat.preorder(&pkg.syntax, |n| {
+            assert!(NodeMask::ALL.contains(n.kind()), "{} missing", n.kind_name());
+            plain += 1;
+        });
+        let mut masked = 0usize;
+        flat.preorder_typed(NodeMask::ALL, &pkg.syntax, |_| masked += 1);
+        assert_eq!(plain, masked);
+
+        assert!(NodeMask::NONE.is_empty());
+        let mut none = 0usize;
+        flat.preorder_typed(NodeMask::NONE, &pkg.syntax, |_| none += 1);
+        assert_eq!(none, 0, "the empty mask must deliver nothing");
     }
 
     /// Without an owning package handle there is nothing to anchor raw pointers
