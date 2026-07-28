@@ -2292,6 +2292,19 @@ rg -n 'buildir' crates/guff-analysis/src/passes/buildir.rs
 - GO/NO-GO を飛ばす。**このタスクは工数が大きく、NO-GO の可能性も十分あります。**
 - SSA の構築順を実行ごとに変える設計にする。
 
+### NO-GO（2026-07-28）— **消費者のほぼ全部が `src_funcs` 全走査。遅延構築しても仕事が残る。**
+
+**判定材料:**
+
+1. **`src_funcs` 全走査が 18 箇所**（nilnesserr / nilerr / callcheck / contextcheck /
+   wastedassign / zerologlint / SA* 多数）。`find_map` で 1 関数だけ取るのは 3 箇所だけ。
+   遅延構築しても、これらの analyzer が走った瞬間に全関数を建て直す。
+2. **buildir inclusive 2.21s のうち `member_from_object` が 1.14s**（import 先メンバー生成）。
+   関数本体の遅延ではここは消えない。A-1（guff-ssa FxHash）後の buildir ~1.9s でも同じ構造。
+3. 高リスク（並列時の内部可変性ロック）に見合う wall 上限が見えない。
+
+**やらない。** buildir を削るなら B-5（型アリーナ共有）や import メンバー生成の絞り込み方向。
+
 ---
 
 ## B-3 — testifylint の高速化（単価 61ms の解明）
