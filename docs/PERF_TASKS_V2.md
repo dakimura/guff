@@ -445,7 +445,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
 | ~~B-0~~ | ~~preorder 総時間の計測（B-1 の GO/NO-GO）~~ **DONE** | — | 27.9% と判明 | 小 | ゼロ |
-| **B-1** | **本物の Inspector（フラットイベント列 + 種別マスク）** | cold | **0.15〜0.25s**（B-0 実測に基づく改訂。上限 0.32s） | 大 | 中 |
+| **B-1** | **本物の Inspector（フラットイベント列 + 種別マスク）** — **B-1a DONE（wall −0.12s、preorder CPU 2.01→0.86s）**。B-1b/c/d 未着手 | cold | **0.15〜0.25s**（B-0 実測に基づく改訂。上限 0.32s） | 大 | 中 |
 | B-2 | buildir/SSA の関数単位 遅延構築 | cold | 0.2〜0.5s? | 大 | **高** |
 | ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
 | B-4 | revive の `shared_walk` を全ルールに拡大 | cold | 0.05〜0.2s? | 中 | 中 |
@@ -471,7 +471,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-28 時点の残り推奨順:** `B-1 → A-1（guff-ssa から）→ A-3 → B-2`。
+**2026-07-28 時点の残り推奨順:** `B-1b/c/d → A-1（guff-ssa から）→ A-3 → B-2`
+（**B-1a は DONE**。cold は 3.96〜4.06s → **3.74s**）。
 
 > **§1.3-post の「余裕 0.96s」問題は S-3 で決着しました。そのまま進めて構いません。**
 > seed-hot では format_checks（1.78s 重畳）に対して直列 phase の余裕が 0.96s しかなく、
@@ -1998,6 +1999,84 @@ push イベントに持たせる必要があります（Go 版と同じ）。
 findings が変わる / RSS が baseline × 1.20 を超える / wall が下がらない → その段を revert。
 **段ごとにコミットしているので、revert は 1 段だけで済みます。これが段階分けの理由です。**
 
+### B-1a DONE（2026-07-28）— **wall −0.12s / preorder CPU 2.01s → 0.86s。`unsafe` を 1 箇所導入。**
+
+#### Rust では手順書どおりには移植できない（設計判断）
+
+**`AnalysisResult` は `Box<dyn Any + Send + Sync>` ＝ `'static` です。**
+Go の `inspector` は `[]ast.Node` を結果に持てますが、`NodeRef<'a>` は AST を借用するので
+**フラットな event 配列をそのまま `InspectResult` に持たせられません。**
+
+ユーザー判断で **「Go 版に忠実（unsafe あり）」** を採用しました。採った形:
+
+| 要素 | 内容 |
+|---|---|
+| `Event` | `{ ptr: *const (), kind: NodeKind }`（`Copy` な 16 バイト POD） |
+| 復元 | `unsafe { NodeRef::from_erased(kind, ptr) }` |
+| **生存保証** | `Events` が **`Arc<Package>` を保持**する。これで「AST が events より長生きする」が**このファイル内で閉じた事実**になり、runner の drop 順に依存しなくなる |
+| **同一性ガード** | `(files.as_ptr(), files.len())` を保存し、**deref せず比較のみ**。不一致なら**従来の再帰 walk にフォールバック** |
+| 適用率 | 呼び出し 144 箇所のうち **134 箇所が `pass.files()`**（＝ events を作ったのと同じスライス）。残り 10 箇所（`from_ref(file)` 等）はフォールバック |
+
+**56 バリアントのリストは `node_variants!` マクロ 1 箇所に集約**しました
+（`crates/guff-ast/src/walk.rs`）。`kind_name` / `kind` / `erased_ptr` / `from_erased` を
+すべてそこから生成しています。**手書きのリストが 3 本並ぶ状態こそが「バリアントが 1 個消える」
+現実的な経路**なので、既存の `kind_name` もマクロ生成に寄せました（`stringify!` なので文字列は不変）。
+
+#### 実測（クリーン環境、A/B/A/B 交互 4 往復）
+
+| 回 | pre | B-1a |
+|---:|---:|---:|
+| 1 | 4.23s | 4.20s |
+| 2 | 3.85s | 3.68s |
+| 3 | 3.86s | 3.70s |
+| 4 | 3.86s | 3.77s |
+| **中央値** | **3.855s** | **3.735s（−0.12s）** |
+
+| 指標 | pre | B-1a |
+|---|---:|---:|
+| `phase analyze` | 0.72s | **0.61s** |
+| `inspect preorder` 合計 CPU | 2.01s | **0.86s（−57%）** |
+| preorder calls / nodes | 12361 / 54,385,011 | **完全一致** |
+| peak RSS（4 回の最大） | 7.62GB | 7.68GB（+0.8%） |
+| `-j 1` wall | 8.79 / 8.80s | **8.38 / 8.37s** |
+
+**nodes が 1 個も違わないのが要点です。** フラット配列は再帰 walk が出したのと
+**同じ列を同じ順で**再生しているので、どの analyzer も違う木を見ることはありません。
+
+**events 配列の構築コストは analyze CPU に含まれています**（`inspect::run` が 293 パッケージ分
+1 回ずつ walk する）。上の analyze −0.11s は**それを差し引いた後の値**です。
+1 パッケージあたり preorder 呼び出しは平均 42 回なので、構築 1 回は十分に償却されます。
+
+RSS 増（+0.8%）は events 配列そのもの。ノード総数 ≈ 1.3M × 16 バイト ≈ 21MB の想定と整合します。
+
+#### 検証
+
+- findings byte 一致（cold `-jN` **3 回とも同一**、`-j 1`、変更前バイナリとも一致）。
+- `cargo test --workspace --release --no-fail-fast`: **2799 passed / 3 failed**
+  （2796 + 新規 3 本。失敗は X-6 の 3 本のみで不変）。
+- 新規テスト 3 本（`crates/guff-analysis/src/passes/inspect.rs`）:
+  - `flat_events_match_the_recursive_walk` — 2 ファイルのパッケージで
+    **(kind_name, ポインタ) の列が再帰 walk と完全一致**することを確認。
+    「静かに短い列」＝ findings 消失なので、件数ではなく**列そのもの**を比較しています。
+  - `foreign_file_slice_falls_back_to_walking` — 別スライスを渡すと `events_for` が `None` を返し、
+    渡されたぶんだけを walk すること。
+  - `no_owner_means_no_events` — `pkg_arc` が無い pass では events を作らず、walk 結果が一致すること。
+- 警告数 183 → 183。
+- **regress 両方 PASS**（baseline 未更新）:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.740s | **1.470s** | 1,319,845,888 | **1,322,123,264** | both 4 / only 0,0 |
+  | full | 4.940s | **3.800s** | 7,608,352,768 | **7,598,784,512** | both 20 / only 0,0 |
+
+#### 残り（未実施）
+
+- **B-1b（マスク付き API）と B-1c（144 箇所の移行）と B-1d（部分木スキップ）は未着手です。**
+  B-1a だけで doc 見込み 0.15〜0.25s の約半分を回収しました。残りはマスクで
+  「該当種別のイベントだけ」を舐めるようにする分です。
+- `compat/` スイートは未実行（B-1a は API 互換でマスクを一切導入していないため、
+  マスク漏れのリスクが原理的に存在しない）。**B-1c に入る段では必須**です。
+
 ---
 
 ## B-2 — buildir/SSA の関数単位 遅延構築
@@ -2721,7 +2800,7 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 
 | シナリオ | 着手時（2026-07-27） | **現在（B-3 後 / 2026-07-28）** | 第2弾の目標 | 主な手段 |
 |---|---:|---:|---:|---|
-| cold（空キャッシュ） | 4.75s | **3.96〜4.06s**（full regress 3.97s） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, B-1, A-1 |
+| cold（空キャッシュ） | 4.75s | **3.735s**（full regress 3.800s。B-1a 後） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, ~~B-1a~~, B-1b/c/d, A-1 |
 | cold（seed hot） | 3.68s | **3.10s** | **2.8s** | 同上（残り 0.30s） |
 | warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, A-9 |
 | warm（デーモン） | — | — | **0.05s** | C-2 |

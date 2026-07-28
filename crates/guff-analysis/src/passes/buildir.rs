@@ -170,6 +170,7 @@ mod tests {
             fset: &fset,
             files: &pkg.syntax,
             pkg: &pkg,
+            pkg_arc: None,
             types_info: pkg.types_info.as_deref(),
             types_sizes: default_sizes(),
             diagnostics: &mut diags,

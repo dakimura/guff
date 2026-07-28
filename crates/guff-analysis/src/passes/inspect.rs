@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 
 use guff::ast::File;
-use guff::walk::{NodeRef, preorder_stack};
+use guff::walk::{NodeKind, NodeRef, preorder_stack};
+use guff_packages::Package;
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
 use crate::pass::Pass;
@@ -119,40 +120,154 @@ pub fn preorder_totals() -> (u64, u64, u64) {
     })
 }
 
+/// One visited node, flattened out of the AST (PERF_TASKS_V2 B-1a).
+///
+/// Go's `inspector` stores `[]ast.Node` — an interface value that already
+/// carries the concrete type. `NodeRef<'a>` borrows, so it cannot live in a
+/// `'static` `AnalysisResult`; the equivalent here is the kind plus a
+/// type-erased pointer, which round-trips through `NodeRef::from_erased`.
+#[derive(Clone, Copy)]
+struct Event {
+    ptr: *const (),
+    kind: NodeKind,
+}
+
+/// The preorder sequence of one package's files, built once.
+struct Events {
+    /// Nodes in exactly the order [`preorder_stack`] would visit them.
+    nodes: Vec<Event>,
+    /// Identity of the `&[File]` the events came from. **Compared, never
+    /// dereferenced.** A caller that hands `preorder` some other slice (a
+    /// single file, a filtered list) falls back to walking it.
+    files_ptr: *const File,
+    files_len: usize,
+    /// Keeps that AST alive for as long as any clone of this result exists.
+    ///
+    /// Without it, `from_erased` would be sound only because of how the runner
+    /// happens to order `release_finished_deps` against dropping the `Action`
+    /// that owns the package. With it, the guarantee is local and cannot be
+    /// invalidated from outside this file.
+    _owner: Arc<Package>,
+}
+
+// SAFETY: `Events` is immutable once built, and its raw pointers are only ever
+// read through `&`. They point into the AST owned by `_owner`, and
+// `Arc<Package>` is already shared across rayon workers by the runner — so
+// sharing these pointers is exactly as safe as sharing that `&Package`.
+unsafe impl Send for Events {}
+unsafe impl Sync for Events {}
+
+/// Rebuild a node reference, tying its lifetime to the caller's `files`.
+///
+/// # Safety
+///
+/// `e` must have been recorded from a node inside `files` (checked by
+/// [`InspectResult::events_for`] before this is reached).
+#[inline]
+unsafe fn node_in<'a>(files: &'a [File], e: Event) -> NodeRef<'a> {
+    // Binds the returned lifetime to the borrow of `files` rather than letting
+    // it be inferred as anything the callback would accept.
+    let _ = files;
+    unsafe { NodeRef::from_erased(e.kind, e.ptr) }
+}
+
 /// Result of the `inspect` analyzer.
 ///
-/// Simplified stand-in for Go's `ast/inspector.Inspector`. Dependent analyzers
-/// call [`InspectResult::preorder`] with the same [`File`] slice from the pass.
-///
-/// Empty on purpose: this port rewalks on each [`preorder`] call, so collecting
-/// node ids at analyzer-run time was unused overhead.
+/// Port of Go's `ast/inspector.Inspector`: the package's AST is flattened once,
+/// and each dependent analyzer scans that array instead of re-walking the tree.
+/// Dependent analyzers call [`InspectResult::preorder`] with the same [`File`]
+/// slice from the pass.
 #[derive(Clone, Default)]
-pub struct InspectResult {}
+pub struct InspectResult {
+    /// `None` when the pass gave no owning package handle (tests, ad-hoc
+    /// passes). Every entry point degrades to the recursive walk.
+    events: Option<Arc<Events>>,
+}
 
 impl InspectResult {
+    /// Flatten `pass`'s files, or produce a walk-only result if the pass has no
+    /// owning `Arc<Package>` to anchor the pointers to.
+    fn build(pass: &Pass<'_>) -> Self {
+        let Some(owner) = pass.pkg_arc().cloned() else {
+            return Self::default();
+        };
+        let files = pass.files();
+        let mut nodes = Vec::new();
+        let mut stack = Vec::new();
+        for file in files {
+            preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
+                nodes.push(Event {
+                    ptr: n.erased_ptr(),
+                    kind: n.kind(),
+                });
+                true
+            });
+        }
+        nodes.shrink_to_fit();
+        Self {
+            events: Some(Arc::new(Events {
+                nodes,
+                files_ptr: files.as_ptr(),
+                files_len: files.len(),
+                _owner: owner,
+            })),
+        }
+    }
+
+    /// The flattened events, but only if `files` is the very slice they were
+    /// built from.
+    #[inline]
+    fn events_for(&self, files: &[File]) -> Option<&[Event]> {
+        let ev = self.events.as_ref()?;
+        (ev.files_ptr == files.as_ptr() && ev.files_len == files.len())
+            .then(|| ev.nodes.as_slice())
+    }
+
     /// Visit every AST node in each file once, in preorder.
-    pub fn preorder<F>(&self, files: &[File], mut f: F)
+    pub fn preorder<F>(&self, files: &[File], f: F)
     where
         F: FnMut(NodeRef<'_>),
     {
         if *PREORDER_ENABLED {
             return self.preorder_counted(files, f);
         }
-        let mut stack = Vec::new();
-        for file in files {
-            preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
-                f(n);
-                true
-            });
+        self.visit_all(files, f);
+    }
+
+    /// The traversal itself: a linear scan when the events match, the original
+    /// recursive walk otherwise. Both produce the identical node sequence — the
+    /// events were recorded by the same [`preorder_stack`] call shape.
+    #[inline]
+    fn visit_all<F>(&self, files: &[File], mut f: F)
+    where
+        F: FnMut(NodeRef<'_>),
+    {
+        match self.events_for(files) {
+            Some(events) => {
+                for &e in events {
+                    // SAFETY: `events_for` just confirmed these events were
+                    // recorded from this exact slice, and `Events::_owner` keeps
+                    // its AST alive; the nodes are therefore live and unmoved.
+                    f(unsafe { node_in(files, e) });
+                }
+            }
+            None => {
+                let mut stack = Vec::new();
+                for file in files {
+                    preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
+                        f(n);
+                        true
+                    });
+                }
+            }
         }
     }
 
-    /// Same walk as [`preorder`](Self::preorder), plus B-0 accounting.
+    /// Same traversal as [`preorder`](Self::preorder), plus B-0 accounting.
     ///
-    /// Split out so the default path keeps the original loop verbatim: the only
-    /// cost when `GUFF_DEBUG_CACHE` is unset is one branch on a cached `bool`
-    /// per call. The node counter is a plain local incremented in the callback
-    /// and published once at the end — no atomics per node.
+    /// Split out so the default path costs one branch on a cached `bool` per
+    /// call. The node counter is a plain local incremented in the callback and
+    /// published once at the end — no atomics per node.
     #[cold]
     fn preorder_counted<F>(&self, files: &[File], mut f: F)
     where
@@ -161,14 +276,10 @@ impl InspectResult {
         let guard = DepthGuard::enter();
         let start = (guard.0 == 0).then(std::time::Instant::now);
         let mut nodes: u64 = 0;
-        let mut stack = Vec::new();
-        for file in files {
-            preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
-                nodes += 1;
-                f(n);
-                true
-            });
-        }
+        self.visit_all(files, |n| {
+            nodes += 1;
+            f(n);
+        });
         let nanos = start.map_or(0, |s| s.elapsed().as_nanos() as u64);
         drop(guard);
         PREORDER_LOCAL.with(|c| {
@@ -179,8 +290,8 @@ impl InspectResult {
     }
 }
 
-fn run(_pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    Ok(Some(Box::new(InspectResult::default())))
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    Ok(Some(Box::new(InspectResult::build(pass))))
 }
 
 fn inspect_analyzer_impl() -> Analyzer {
@@ -235,5 +346,116 @@ mod tests {
     #[test]
     fn inspect_analyzer_validates() {
         assert!(crate::validate::validate(&[analyzer()]).is_ok());
+    }
+
+    /// Two files, so the flat path has to concatenate per-file walks the same
+    /// way the recursive one does.
+    const SRC2: &str = "package p\n\nvar v = map[string][]int{\"a\": {1, 2}}\n\n\
+                        type T struct{ X int }\n\n\
+                        func (t *T) M() error { defer func() {}(); return nil }\n";
+
+    fn flat_result(pkg: &Arc<Package>, fset: &Arc<guff::position::FileSet>) -> InspectResult {
+        let mut diags = Vec::new();
+        let mut facts = crate::facts::FactStore::default();
+        let mut pass = crate::pass::PassInput {
+            analyzer: analyzer(),
+            fset,
+            files: &pkg.syntax,
+            pkg,
+            pkg_arc: Some(Arc::clone(pkg)),
+            types_info: None,
+            types_sizes: guff_types::default_sizes(),
+            diagnostics: &mut diags,
+            result_of: std::collections::HashMap::new(),
+            facts: &mut facts,
+            settings: Arc::new(crate::SettingsBag::default()),
+        }
+        .build();
+        let result = run(&mut pass).expect("run").expect("result");
+        result
+            .downcast_ref::<InspectResult>()
+            .expect("InspectResult")
+            .clone()
+    }
+
+    fn two_file_package() -> (Arc<Package>, Arc<guff::position::FileSet>) {
+        let fset = FileSet::new();
+        let a = parse_file(&fset, "a.go", SRC.as_bytes(), Mode::NONE).expect("parse a");
+        let b = parse_file(&fset, "b.go", SRC2.as_bytes(), Mode::NONE).expect("parse b");
+        let pkg = Package {
+            id: "p".into(),
+            syntax: vec![a, b],
+            ..Package::default()
+        };
+        (Arc::new(pkg), fset)
+    }
+
+    /// The flat event array must reproduce the recursive walk **exactly** —
+    /// same nodes, same order, same identity. A silently shorter sequence is
+    /// how B-1 would drop findings.
+    #[test]
+    fn flat_events_match_the_recursive_walk() {
+        let (pkg, fset) = two_file_package();
+        let flat = flat_result(&pkg, &fset);
+        assert!(flat.events.is_some(), "expected the flat path to be built");
+
+        let mut expected: Vec<(&'static str, *const ())> = Vec::new();
+        for file in &pkg.syntax {
+            preorder(NodeRef::File(file), |n| {
+                expected.push((n.kind_name(), n.erased_ptr()));
+                true
+            });
+        }
+
+        let mut got: Vec<(&'static str, *const ())> = Vec::new();
+        flat.preorder(&pkg.syntax, |n| got.push((n.kind_name(), n.erased_ptr())));
+
+        assert!(expected.len() > 40, "expected many nodes, got {}", expected.len());
+        assert_eq!(expected, got);
+    }
+
+    /// A caller that passes some other slice must not be served the cached
+    /// events; it gets a real walk of what it actually handed us.
+    #[test]
+    fn foreign_file_slice_falls_back_to_walking() {
+        let (pkg, fset) = two_file_package();
+        let flat = flat_result(&pkg, &fset);
+
+        let only_first = std::slice::from_ref(&pkg.syntax[0]);
+        assert!(flat.events_for(only_first).is_none());
+
+        let mut whole = 0usize;
+        flat.preorder(&pkg.syntax, |_| whole += 1);
+        let mut first = 0usize;
+        flat.preorder(only_first, |_| first += 1);
+
+        let mut direct = 0usize;
+        preorder(NodeRef::File(&pkg.syntax[0]), |_| {
+            direct += 1;
+            true
+        });
+        assert_eq!(first, direct);
+        assert!(first < whole, "subset must visit fewer nodes ({first} vs {whole})");
+    }
+
+    /// Without an owning package handle there is nothing to anchor raw pointers
+    /// to, so `build` must decline and every call must still walk correctly.
+    #[test]
+    fn no_owner_means_no_events() {
+        let empty = InspectResult::default();
+        assert!(empty.events.is_none());
+
+        let fset = FileSet::new();
+        let file = parse_file(&fset, "p.go", SRC.as_bytes(), Mode::NONE).expect("parse");
+        let files = std::slice::from_ref(&file);
+
+        let mut walked = 0usize;
+        empty.preorder(files, |_| walked += 1);
+        let mut direct = 0usize;
+        preorder(NodeRef::File(&file), |_| {
+            direct += 1;
+            true
+        });
+        assert_eq!(walked, direct);
     }
 }

@@ -244,6 +244,7 @@ impl Action {
                 fset: &fset,
                 files: &self.package.syntax,
                 pkg: &self.package,
+                pkg_arc: Some(Arc::clone(&self.package)),
                 types_info: self.package.types_info.as_deref(),
                 types_sizes,
                 diagnostics: &mut diagnostics,

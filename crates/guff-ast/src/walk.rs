@@ -105,70 +105,87 @@ pub enum NodeRef<'a> {
     Package(&'a Package),
 }
 
-impl<'a> NodeRef<'a> {
-    /// Short type name (e.g. `"Ident"`, `"FuncDecl"`). Equivalent of
-    /// Go's `reflect.TypeOf(n).Elem().Name()` for AST values.
-    pub fn kind_name(self) -> &'static str {
-        match self {
-            NodeRef::Comment(_) => "Comment",
-            NodeRef::CommentGroup(_) => "CommentGroup",
-            NodeRef::Field(_) => "Field",
-            NodeRef::FieldList(_) => "FieldList",
-            NodeRef::BadExpr(_) => "BadExpr",
-            NodeRef::Ident(_) => "Ident",
-            NodeRef::BasicLit(_) => "BasicLit",
-            NodeRef::Ellipsis(_) => "Ellipsis",
-            NodeRef::FuncLit(_) => "FuncLit",
-            NodeRef::CompositeLit(_) => "CompositeLit",
-            NodeRef::ParenExpr(_) => "ParenExpr",
-            NodeRef::SelectorExpr(_) => "SelectorExpr",
-            NodeRef::IndexExpr(_) => "IndexExpr",
-            NodeRef::IndexListExpr(_) => "IndexListExpr",
-            NodeRef::SliceExpr(_) => "SliceExpr",
-            NodeRef::TypeAssertExpr(_) => "TypeAssertExpr",
-            NodeRef::CallExpr(_) => "CallExpr",
-            NodeRef::StarExpr(_) => "StarExpr",
-            NodeRef::UnaryExpr(_) => "UnaryExpr",
-            NodeRef::BinaryExpr(_) => "BinaryExpr",
-            NodeRef::KeyValueExpr(_) => "KeyValueExpr",
-            NodeRef::ArrayType(_) => "ArrayType",
-            NodeRef::StructType(_) => "StructType",
-            NodeRef::FuncType(_) => "FuncType",
-            NodeRef::InterfaceType(_) => "InterfaceType",
-            NodeRef::MapType(_) => "MapType",
-            NodeRef::ChanType(_) => "ChanType",
-            NodeRef::BadStmt(_) => "BadStmt",
-            NodeRef::DeclStmt(_) => "DeclStmt",
-            NodeRef::EmptyStmt(_) => "EmptyStmt",
-            NodeRef::LabeledStmt(_) => "LabeledStmt",
-            NodeRef::ExprStmt(_) => "ExprStmt",
-            NodeRef::SendStmt(_) => "SendStmt",
-            NodeRef::IncDecStmt(_) => "IncDecStmt",
-            NodeRef::AssignStmt(_) => "AssignStmt",
-            NodeRef::GoStmt(_) => "GoStmt",
-            NodeRef::DeferStmt(_) => "DeferStmt",
-            NodeRef::ReturnStmt(_) => "ReturnStmt",
-            NodeRef::BranchStmt(_) => "BranchStmt",
-            NodeRef::BlockStmt(_) => "BlockStmt",
-            NodeRef::IfStmt(_) => "IfStmt",
-            NodeRef::CaseClause(_) => "CaseClause",
-            NodeRef::SwitchStmt(_) => "SwitchStmt",
-            NodeRef::TypeSwitchStmt(_) => "TypeSwitchStmt",
-            NodeRef::CommClause(_) => "CommClause",
-            NodeRef::SelectStmt(_) => "SelectStmt",
-            NodeRef::ForStmt(_) => "ForStmt",
-            NodeRef::RangeStmt(_) => "RangeStmt",
-            NodeRef::ImportSpec(_) => "ImportSpec",
-            NodeRef::ValueSpec(_) => "ValueSpec",
-            NodeRef::TypeSpec(_) => "TypeSpec",
-            NodeRef::BadDecl(_) => "BadDecl",
-            NodeRef::GenDecl(_) => "GenDecl",
-            NodeRef::FuncDecl(_) => "FuncDecl",
-            NodeRef::File(_) => "File",
-            NodeRef::Package(_) => "Package",
+// ============================================================
+// Node kinds — flat discriminant and type-erased round trip.
+// ============================================================
+
+/// Declares everything that has to list all 56 `NodeRef` variants exactly once.
+///
+/// `kind_name` used to spell the list out by hand; the flat inspector added two
+/// more such lists (discriminant, erasure), and three hand-kept copies of the
+/// same 56 names is how a variant silently goes missing. Every variant holds a
+/// single `&T` whose type is named by the variant, so one name per row is enough.
+macro_rules! node_variants {
+    ($($variant:ident),* $(,)?) => {
+        /// Flat discriminant of a [`NodeRef`] variant, in declaration order.
+        ///
+        /// Paired with an erased pointer this reproduces a `NodeRef` without
+        /// carrying the enum's payload, which is what lets the inspector's event
+        /// array be a `Copy` POD (Go's `inspector` stores `[]ast.Node` directly;
+        /// `NodeRef<'a>` borrows, so it cannot live in a `'static` result).
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[repr(u8)]
+        pub enum NodeKind { $($variant),* }
+
+        impl<'a> NodeRef<'a> {
+            /// Short type name (e.g. `"Ident"`, `"FuncDecl"`). Equivalent of
+            /// Go's `reflect.TypeOf(n).Elem().Name()` for AST values.
+            pub fn kind_name(self) -> &'static str {
+                match self { $(NodeRef::$variant(_) => stringify!($variant),)* }
+            }
+
+            /// This node's [`NodeKind`].
+            pub fn kind(self) -> NodeKind {
+                match self { $(NodeRef::$variant(_) => NodeKind::$variant,)* }
+            }
+
+            /// The referenced node as a type-erased thin pointer.
+            ///
+            /// Lossless when kept together with [`kind`](NodeRef::kind):
+            /// [`from_erased`](NodeRef::from_erased) inverts the pair.
+            pub fn erased_ptr(self) -> *const () {
+                match self { $(NodeRef::$variant(x) => (x as *const $variant).cast(),)* }
+            }
+
+            /// Inverse of [`kind`](NodeRef::kind) + [`erased_ptr`](NodeRef::erased_ptr).
+            ///
+            /// # Safety
+            ///
+            /// `ptr` must be what `erased_ptr` returned for a `NodeRef` whose
+            /// `kind` was `kind` — pairing a pointer with the wrong kind
+            /// reinterprets the node as an unrelated type. The node must also
+            /// still be alive, and not have moved, for all of `'a`.
+            pub unsafe fn from_erased(kind: NodeKind, ptr: *const ()) -> NodeRef<'a> {
+                match kind {
+                    $(NodeKind::$variant => {
+                        NodeRef::$variant(unsafe { &*ptr.cast::<$variant>() })
+                    })*
+                }
+            }
         }
-    }
+    };
 }
+
+node_variants![
+    // Comments and fields
+    Comment, CommentGroup, Field, FieldList,
+    // Expressions
+    BadExpr, Ident, BasicLit, Ellipsis, FuncLit, CompositeLit, ParenExpr, SelectorExpr,
+    IndexExpr, IndexListExpr, SliceExpr, TypeAssertExpr, CallExpr, StarExpr, UnaryExpr,
+    BinaryExpr, KeyValueExpr,
+    // Types
+    ArrayType, StructType, FuncType, InterfaceType, MapType, ChanType,
+    // Statements
+    BadStmt, DeclStmt, EmptyStmt, LabeledStmt, ExprStmt, SendStmt, IncDecStmt, AssignStmt,
+    GoStmt, DeferStmt, ReturnStmt, BranchStmt, BlockStmt, IfStmt, CaseClause, SwitchStmt,
+    TypeSwitchStmt, CommClause, SelectStmt, ForStmt, RangeStmt,
+    // Specs
+    ImportSpec, ValueSpec, TypeSpec,
+    // Declarations
+    BadDecl, GenDecl, FuncDecl,
+    // Files and packages
+    File, Package,
+];
 
 /// Promote an `&Expr` to the narrow `NodeRef` variant matching its
 /// concrete type. Walk dispatch never sees `NodeRef::Expr` because

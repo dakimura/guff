@@ -26,6 +26,13 @@ pub struct Pass<'a> {
     fset: &'a Arc<FileSet>,
     files: &'a [File],
     pkg: &'a Package,
+    /// Owning handle to the same package as `pkg`, when the caller has one.
+    ///
+    /// Only the `inspect` pass uses it: its flat event array holds raw pointers
+    /// into `files`, and keeping the `Arc` alongside them makes "the AST
+    /// outlives the events" a local fact instead of a property of the runner's
+    /// drop order. `None` (tests, ad-hoc passes) simply disables that fast path.
+    pkg_arc: Option<Arc<Package>>,
     type_pkg: Option<PackageId>,
     types_info: Option<&'a Info>,
     types_sizes: Sizes,
@@ -43,6 +50,8 @@ pub struct PassInput<'a> {
     pub fset: &'a Arc<FileSet>,
     pub files: &'a [File],
     pub pkg: &'a Package,
+    /// Owning handle to `pkg`. See [`Pass::pkg_arc`]; `None` is always valid.
+    pub pkg_arc: Option<Arc<Package>>,
     pub types_info: Option<&'a Info>,
     pub types_sizes: Sizes,
     pub diagnostics: &'a mut Vec<Diagnostic>,
@@ -71,6 +80,7 @@ impl<'a> PassInput<'a> {
             fset: self.fset,
             files: self.files,
             pkg: self.pkg,
+            pkg_arc: self.pkg_arc,
             type_pkg: self.pkg.types,
             types_info: self.types_info,
             types_sizes: self.types_sizes,
@@ -95,6 +105,11 @@ impl<'a> Pass<'a> {
 
     pub fn pkg(&self) -> &Package {
         self.pkg
+    }
+
+    /// Owning handle to [`pkg`](Self::pkg), when the caller supplied one.
+    pub fn pkg_arc(&self) -> Option<&Arc<Package>> {
+        self.pkg_arc.as_ref()
     }
 
     pub fn type_pkg(&self) -> Option<PackageId> {
@@ -253,6 +268,7 @@ mod tests {
             fset: &fset,
             files: &pkg.syntax,
             pkg: &pkg,
+            pkg_arc: None,
             types_info: pkg.types_info.as_deref(),
             types_sizes: pkg.types_sizes.unwrap_or_else(default_sizes),
             diagnostics: &mut diags,
@@ -280,6 +296,7 @@ mod tests {
             fset: &fset,
             files: &pkg.syntax,
             pkg: &pkg,
+            pkg_arc: None,
             types_info: pkg.types_info.as_deref(),
             types_sizes: default_sizes(),
             diagnostics: &mut diags,
