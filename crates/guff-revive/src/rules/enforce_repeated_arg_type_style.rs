@@ -1,6 +1,7 @@
 //! `enforce-repeated-arg-type-style` — enforce short vs full repeated parameter types.
 
-use guff::ast::{Decl, FuncDecl};
+use guff::ast::FuncDecl;
+use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::config;
@@ -15,48 +16,68 @@ enum RepeatedTypeStyle {
     Full,
 }
 
-pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let args = config::rule_arguments(pass, "enforce-repeated-arg-type-style");
-    if args.is_empty() {
-        return Vec::new();
-    }
-    let (arg_style, ret_style) = match args.first() {
-        Some(RuleArgument::String(s)) => {
-            let style = repeated_style_from_string(Some(s.as_str()));
-            if style == RepeatedTypeStyle::Any {
-                return Vec::new();
-            }
-            (style, style)
-        }
-        Some(RuleArgument::Map(map)) => {
-            let arg = map_value_style(map, "funcArgStyle");
-            let ret = map_value_style(map, "funcRetValStyle");
-            if arg == RepeatedTypeStyle::Any && ret == RepeatedTypeStyle::Any {
-                return Vec::new();
-            }
-            (arg, ret)
-        }
-        _ => return Vec::new(),
-    };
-    check_all(pass, arg_style, ret_style)
-}
-
-fn check_all(
-    pass: &Pass<'_>,
+pub struct Checker {
     arg_style: RepeatedTypeStyle,
     ret_style: RepeatedTypeStyle,
-) -> Vec<Failure> {
-    let mut failures = Vec::new();
-    for file in pass.files() {
-        for decl in &file.decls {
-            let Decl::FuncDecl(f) = decl else {
-                continue;
-            };
-            check_func(f, arg_style, ret_style, &mut failures);
+    failures: Vec<Failure>,
+}
+
+impl Checker {
+    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+        let args = config::rule_arguments(pass, "enforce-repeated-arg-type-style");
+        if args.is_empty() {
+            return None;
         }
+        let (arg_style, ret_style) = match args.first() {
+            Some(RuleArgument::String(s)) => {
+                let style = repeated_style_from_string(Some(s.as_str()));
+                if style == RepeatedTypeStyle::Any {
+                    return None;
+                }
+                (style, style)
+            }
+            Some(RuleArgument::Map(map)) => {
+                let arg = map_value_style(map, "funcArgStyle");
+                let ret = map_value_style(map, "funcRetValStyle");
+                if arg == RepeatedTypeStyle::Any && ret == RepeatedTypeStyle::Any {
+                    return None;
+                }
+                (arg, ret)
+            }
+            _ => return None,
+        };
+        Some(Self {
+            arg_style,
+            ret_style,
+            failures: Vec::new(),
+        })
     }
-    let _ = pass;
-    failures
+
+    pub fn visit(&mut self, n: NodeRef<'_>) {
+        let NodeRef::FuncDecl(f) = n else {
+            return;
+        };
+        check_func(f, self.arg_style, self.ret_style, &mut self.failures);
+    }
+
+    pub fn into_failures(self) -> Vec<Failure> {
+        self.failures
+    }
+}
+
+pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    let Some(mut c) = Checker::try_new(pass) else {
+        return Vec::new();
+    };
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            if let Some(n) = n {
+                c.visit(n);
+            }
+            true
+        });
+    }
+    c.into_failures()
 }
 
 fn check_func(
@@ -88,8 +109,8 @@ fn check_fields(
                         rule: "enforce-repeated-arg-type-style",
                         pos: field.pos().0 as u32,
                         message: format!("{kind} types should not be omitted"),
-            confidence: None,
-        });
+                        confidence: None,
+                    });
                 }
             }
         }
@@ -103,8 +124,8 @@ fn check_fields(
                             rule: "enforce-repeated-arg-type-style",
                             pos: field.pos().0 as u32,
                             message: format!("repeated {kind} type \"{cur_ty}\" can be omitted"),
-            confidence: None,
-        });
+                            confidence: None,
+                        });
                     }
                 }
                 prev = current;

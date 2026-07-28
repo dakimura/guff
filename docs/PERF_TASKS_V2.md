@@ -13,11 +13,11 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa のみ） / A-3a / B-4（batch 1: 10 rules + batch 2: 5 rules）**。
+> A-1（guff-ssa のみ） / A-3a / B-4（batch 1–3: 20 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-4 の残り（A 分類の ~16）か B-7（misspell 共有 read）。**
+> **次は B-4 の残り（A 分類の ~11）か B-7（misspell 共有 read）。**
 > analyze の残りは buildir / revive / misspell。B-2 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -2508,6 +2508,18 @@ cold wall ~3.93s。findings 20 件 byte 同一。両 regress PASS
 
 残り A: ~16（`exported` / `defer` / …）。C は触らない。prometheus 有効で未統合は
 主に `exported`（A・重い）と B/C（ifelse 三本 / blank-imports / comment-spacings）。
+
+### DONE batch 3（2026-07-28）— **5 ルールを shared_walk へ。findings 同一。**
+
+取り込んだルール:
+
+1. `import-alias-naming` / `imports-blocklist` / `package-naming`
+2. `enforce-repeated-arg-type-style` / `redundant-test-main-exit`
+
+**実測:** revive CPU ~0.75s。cold wall ~3.85s。findings 20 件 byte 同一（3 回決定的）。
+両 regress PASS（tsdb 1.520s / full 3.880s）。
+
+残り outside ~32（A 推定 ~11 + B/C）。prometheus 有効で未統合は主に `exported`。
 
 ---
 

@@ -13,17 +13,18 @@ use crate::failure::Failure;
 use super::{
     argument_limit, atomic, banned_characters, bare_return, bool_literal_in_expr, call_to_gc,
     confusing_results, constant_logical_expr, context_as_argument, context_keys_type, dot_imports,
-    duplicated_imports, empty_lines, enforce_map_style, enforce_slice_style, enforce_switch_style,
-    epoch_naming, error_naming, error_return, error_strings, errorf, function_result_limit,
-    get_return, identical_branches, identical_ifelseif_branches, identical_ifelseif_conditions,
-    identical_switch_branches, identical_switch_conditions, if_return, increment_decrement,
-    multiline_if_init, nested_structs, optimize_operands_order, range, range_val_in_closure,
-    receiver_naming, redefines_builtin_id, redundant_import_alias, string_format, string_of_int,
-    struct_tag, time_date, time_equal, time_naming, unchecked_type_assertion, unexported_naming,
-    unexported_return, unhandled_error, unnecessary_format, unnecessary_if, unnecessary_stmt,
-    unreachable_code, unsecure_url_scheme, unused_parameter, unused_receiver, use_any,
-    use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough, var_declaration,
-    var_naming, waitgroup_by_value,
+    duplicated_imports, empty_lines, enforce_map_style, enforce_repeated_arg_type_style,
+    enforce_slice_style, enforce_switch_style, epoch_naming, error_naming, error_return,
+    error_strings, errorf, function_result_limit, get_return, identical_branches,
+    identical_ifelseif_branches, identical_ifelseif_conditions, identical_switch_branches,
+    identical_switch_conditions, if_return, import_alias_naming, imports_blocklist,
+    increment_decrement, multiline_if_init, nested_structs, optimize_operands_order, package_naming,
+    range, range_val_in_closure, receiver_naming, redefines_builtin_id, redundant_import_alias,
+    redundant_test_main_exit, string_format, string_of_int, struct_tag, time_date, time_equal,
+    time_naming, unchecked_type_assertion, unexported_naming, unexported_return, unhandled_error,
+    unnecessary_format, unnecessary_if, unnecessary_stmt, unreachable_code, unsecure_url_scheme,
+    unused_parameter, unused_receiver, use_any, use_errors_new, use_fmt_print, use_slices_sort,
+    useless_fallthrough, var_declaration, var_naming, waitgroup_by_value,
 };
 
 /// Fan-out visitor: each enabled rule's checker sees every node; walk never prunes.
@@ -42,6 +43,7 @@ struct SharedFileRules<'a> {
     duplicated_imports: Option<duplicated_imports::Checker>,
     empty_lines: Option<empty_lines::Checker<'a>>,
     enforce_map_style: Option<enforce_map_style::Checker>,
+    enforce_repeated_arg_type_style: Option<enforce_repeated_arg_type_style::Checker>,
     enforce_slice_style: Option<enforce_slice_style::Checker>,
     enforce_switch_style: Option<enforce_switch_style::Checker>,
     epoch_naming: Option<epoch_naming::Checker<'a>>,
@@ -57,15 +59,19 @@ struct SharedFileRules<'a> {
     identical_switch_branches: Option<identical_switch_branches::Checker<'a>>,
     identical_switch_conditions: Option<identical_switch_conditions::Checker<'a>>,
     if_return: Option<if_return::Checker>,
+    import_alias_naming: Option<import_alias_naming::Checker>,
+    imports_blocklist: Option<imports_blocklist::Checker>,
     increment_decrement: Option<increment_decrement::Checker>,
     multiline_if_init: Option<multiline_if_init::Checker<'a>>,
     nested_structs: Option<nested_structs::Checker>,
     optimize_operands_order: Option<optimize_operands_order::Checker>,
+    package_naming: Option<package_naming::Checker>,
     range: Option<range::Checker>,
     range_val_in_closure: Option<range_val_in_closure::Checker>,
     receiver_naming: Option<receiver_naming::Checker>,
     redefines_builtin_id: Option<redefines_builtin_id::Checker>,
     redundant_import_alias: Option<redundant_import_alias::Checker>,
+    redundant_test_main_exit: Option<redundant_test_main_exit::Checker>,
     string_format: Option<string_format::Checker>,
     string_of_int: Option<string_of_int::Checker<'a>>,
     struct_tag: Option<struct_tag::Checker>,
@@ -131,6 +137,9 @@ impl<'a> SharedFileRules<'a> {
             enforce_map_style: enabled("enforce-map-style")
                 .then(|| enforce_map_style::Checker::try_new(pass))
                 .flatten(),
+            enforce_repeated_arg_type_style: enabled("enforce-repeated-arg-type-style")
+                .then(|| enforce_repeated_arg_type_style::Checker::try_new(pass))
+                .flatten(),
             enforce_slice_style: enabled("enforce-slice-style")
                 .then(|| enforce_slice_style::Checker::try_new(pass))
                 .flatten(),
@@ -154,6 +163,10 @@ impl<'a> SharedFileRules<'a> {
             identical_switch_conditions: enabled("identical-switch-conditions")
                 .then(|| identical_switch_conditions::Checker::new(pass)),
             if_return: enabled("if-return").then(if_return::Checker::new),
+            import_alias_naming: enabled("import-alias-naming").then(import_alias_naming::Checker::new),
+            imports_blocklist: enabled("imports-blocklist")
+                .then(|| imports_blocklist::Checker::try_new(pass))
+                .flatten(),
             increment_decrement: enabled("increment-decrement")
                 .then(increment_decrement::Checker::new),
             multiline_if_init: enabled("multiline-if-init")
@@ -161,6 +174,7 @@ impl<'a> SharedFileRules<'a> {
             nested_structs: enabled("nested-structs").then(nested_structs::Checker::new),
             optimize_operands_order: enabled("optimize-operands-order")
                 .then(optimize_operands_order::Checker::new),
+            package_naming: enabled("package-naming").then(package_naming::Checker::new),
             range: enabled("range").then(range::Checker::new),
             range_val_in_closure: enabled("range-val-in-closure")
                 .then(range_val_in_closure::Checker::new),
@@ -169,6 +183,9 @@ impl<'a> SharedFileRules<'a> {
                 .then(redefines_builtin_id::Checker::new),
             redundant_import_alias: enabled("redundant-import-alias")
                 .then(redundant_import_alias::Checker::new),
+            redundant_test_main_exit: enabled("redundant-test-main-exit")
+                .then(|| redundant_test_main_exit::Checker::try_new(pass))
+                .flatten(),
             string_format: enabled("string-format")
                 .then(|| string_format::Checker::try_new(pass))
                 .flatten(),
@@ -227,6 +244,8 @@ impl<'a> SharedFileRules<'a> {
             duplicated_imports,
             empty_lines,
             enforce_map_style,
+            enforce_repeated_arg_type_style,
+            enforce_repeated_arg_type_style,
             enforce_slice_style,
             enforce_switch_style,
             epoch_naming,
@@ -242,15 +261,23 @@ impl<'a> SharedFileRules<'a> {
             identical_switch_branches,
             identical_switch_conditions,
             if_return,
+            import_alias_naming,
+            imports_blocklist,
+            import_alias_naming,
+            imports_blocklist,
             increment_decrement,
             multiline_if_init,
             nested_structs,
             optimize_operands_order,
+            package_naming,
+            package_naming,
             range,
             range_val_in_closure,
             receiver_naming,
             redefines_builtin_id,
             redundant_import_alias,
+            redundant_test_main_exit,
+            redundant_test_main_exit,
             string_format,
             string_of_int,
             struct_tag,
@@ -316,6 +343,7 @@ impl<'a> SharedFileRules<'a> {
             "duplicated-imports" => duplicated_imports,
             "empty-lines" => empty_lines,
             "enforce-map-style" => enforce_map_style,
+            "enforce-repeated-arg-type-style" => enforce_repeated_arg_type_style,
             "enforce-slice-style" => enforce_slice_style,
             "enforce-switch-style" => enforce_switch_style,
             "epoch-naming" => epoch_naming,
@@ -331,15 +359,19 @@ impl<'a> SharedFileRules<'a> {
             "identical-switch-branches" => identical_switch_branches,
             "identical-switch-conditions" => identical_switch_conditions,
             "if-return" => if_return,
+            "import-alias-naming" => import_alias_naming,
+            "imports-blocklist" => imports_blocklist,
             "increment-decrement" => increment_decrement,
             "multiline-if-init" => multiline_if_init,
             "nested-structs" => nested_structs,
             "optimize-operands-order" => optimize_operands_order,
+            "package-naming" => package_naming,
             "range" => range,
             "range-val-in-closure" => range_val_in_closure,
             "receiver-naming" => receiver_naming,
             "redefines-builtin-id" => redefines_builtin_id,
             "redundant-import-alias" => redundant_import_alias,
+            "redundant-test-main-exit" => redundant_test_main_exit,
             "string-format" => string_format,
             "string-of-int" => string_of_int,
             "struct-tag" => struct_tag,
