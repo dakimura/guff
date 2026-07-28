@@ -14,7 +14,7 @@
 //! typecheck / export-data sharing / `go list` metadata cache remain DEFERRED
 //! (R24 items 2–4).
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use std::env;
 use std::fs;
 use std::io;
@@ -341,9 +341,9 @@ impl IssueCache {
         Ok(Self {
             dir,
             salt: salt.into(),
-            file_hashes: Mutex::new(HashMap::new()),
-            pkg_hashes: Mutex::new(HashMap::new()),
-            dep_self_hashes: HashMap::new(),
+            file_hashes: Mutex::new(HashMap::default()),
+            pkg_hashes: Mutex::new(HashMap::default()),
+            dep_self_hashes: HashMap::default(),
         })
     }
 
@@ -699,7 +699,7 @@ impl IssueCache {
         }
         let all_hash = hex_encode(&h_all.finalize());
 
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         out.insert(HashMode::NeedOnlySelf as u8, self_hash);
         out.insert(HashMode::NeedDirectDeps as u8, direct_hash);
         out.insert(HashMode::NeedAllDeps as u8, all_hash);
@@ -900,7 +900,7 @@ pub fn save_to_cache(
     packages: &[Arc<Package>],
     diagnostics: &[(String, Diagnostic)],
 ) {
-    let mut per_pkg: HashMap<String, Vec<(String, Diagnostic)>> = HashMap::new();
+    let mut per_pkg: HashMap<String, Vec<(String, Diagnostic)>> = HashMap::default();
     for (action_id, diag) in diagnostics {
         let pkg_path = action_id.split('@').nth(1).unwrap_or("");
         per_pkg

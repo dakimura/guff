@@ -9,6 +9,7 @@
 
 mod action;
 mod cache;
+mod hash;
 mod load_mode;
 mod memory;
 mod runner;

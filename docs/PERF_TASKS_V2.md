@@ -13,13 +13,13 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa + guff-types + keywords） / A-3a / B-4（A 分類完了: 32 rules）**。
+> A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は A-1 残り（guff-runner）か B-10（formatter 間 read+parse 共有）。**
-> analyze の残りは buildir / revive / misspell。B-2 / B-7 は NO-GO。
+> **次は B-10 以外の Tier B（B-10 は `format_checks waited=0` の間は着手しない）**、
+> または analyze 残り（buildir / revive）。A-1 は完了。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -477,7 +477,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `A-1 残り（guff-types / keywords）→ B-10（formatter 共有）` /
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → Tier B 残り / analyze（buildir・revive） /
 B-6。B-2 / B-7 は NO-GO。B-4 A 完了。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
@@ -1338,6 +1338,33 @@ A-3a 済・A-3b/c NO-GO なので、残りは **A-1 keywords/runner** か **B-10
 findings byte 同一（3 回）、両 regress PASS。
 
 **残り A-1:** guff-runner（`cache.rs` / `action.rs`）。次は runner か **B-10**。
+
+### DONE（2026-07-29）— **guff-runner を FxHash 化。findings byte 一致（5 回・`-j 1`・seed cold↔hot）。**
+
+**入れたもの:**
+
+1. `rustc-hash = "2"` + `crates/guff-runner/src/hash.rs`（SSA/types と同パターン）。
+2. `action.rs` / `cache.rs` / `load_mode.rs` / `memory.rs` / `runner.rs` の
+   `HashMap`/`HashSet` を差し替え。`Pass.result_of` は analysis API 境界のため
+   **`std::collections::HashMap` のまま**（`RandomState`）。`typecheck_package` へ渡す
+   import マップも呼び出し側で `std::collections::HashMap`。
+3. §0-12: timing dump / dep-hash レジストリシリアライズは既にキーソート済み。追加修正なし。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | おおよそ |
+|---|---:|
+| typecheck_roots（seed cold） | ~1.60s |
+| typecheck_roots（seed hot） | ~0.85s |
+| buildir CPU | ~1.85〜1.97s |
+| cold wall | ~3.92s |
+| seed-hot wall | ~2.97s |
+| format_checks waited | **0.00s**（B-10 着手条件未達） |
+
+**検証:** findings 20 件が keywords 後と byte 同一、§2.2 を **5 回**決定的、`-j 1` 同一、
+seed cold↔hot 同一。`cargo test -p guff-runner --release` PASS。両 regress PASS。
+
+**A-1 完了。** 次は B-10 以外（waited=0 の間は B-10 NO-START）。
 
 ---
 
@@ -2738,7 +2765,7 @@ format_checks が 1.70 / 1.79 / 1.78s、wall が 4.75 / 4.71 / 4.79s と**ほぼ
 付随: misspell が `source_bytes` から毎回 `String::to_owned` していたのを `Cow::Borrowed` に変更
 （アロケーション削減。共有 read 自体は変えていない）。
 
-次は **A-1 残り（guff-types / keywords）** か **B-10**。
+次は **A-1 guff-runner 完了後**、B-10 は `format_checks waited > 0` になるまで着手しない。
 
 ---
 

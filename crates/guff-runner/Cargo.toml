@@ -17,6 +17,7 @@ guff-analysis = { path = "../guff-analysis" }
 guff-packages = { path = "../guff-packages" }
 guff-types = { path = "../guff-types" }
 rayon = "1.10"
+rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

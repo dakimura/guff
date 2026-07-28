@@ -2,7 +2,7 @@
 //!
 //! Port of `golang.org/x/tools/go/analysis/checker` (`Action`, `Analyze`).
 
-use std::collections::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -52,7 +52,7 @@ struct ActionState {
 /// exceed wall-clock; the point is the *relative* cost and the action count
 /// (which reveals fact-producing analyzers fanning out over dependencies).
 static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, usize)>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
 /// Debug-only per-analyzer share of [`InspectResult::preorder`] time
 /// (PERF_TASKS_V2 B-0). Keyed by analyzer name; value is
@@ -65,7 +65,7 @@ static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, u
 /// the unmasked API has the two equal, a migrated one delivers only the kinds
 /// it asked for.
 static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u64, u64, u64)>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
 fn timing_enabled() -> bool {
     std::env::var_os("GUFF_DEBUG_CACHE").is_some()
@@ -219,7 +219,8 @@ impl Action {
             return;
         }
 
-        let mut result_of = HashMap::new();
+        let mut result_of: std::collections::HashMap<&'static str, Arc<_>> =
+            std::collections::HashMap::new();
         let mut facts = FactStore::default();
 
         for dep in &self.deps {
@@ -464,7 +465,7 @@ pub fn analyze_with_settings(
     validate(analyzers)?;
     ensure_builtin_fact_decoders();
 
-    let mut actions: HashMap<(*const Analyzer, String), Arc<Action>> = HashMap::new();
+    let mut actions: HashMap<(*const Analyzer, String), Arc<Action>> = HashMap::default();
     let mut all: Vec<Arc<Action>> = Vec::new();
 
     fn mk_action(
@@ -541,8 +542,8 @@ pub fn analyze_with_settings(
 
     let mut roots = Vec::new();
     // Import-gate skip/keep counters (debug only). Keys are analyzer names.
-    let mut gate_skip: HashMap<&'static str, usize> = HashMap::new();
-    let mut gate_keep: HashMap<&'static str, usize> = HashMap::new();
+    let mut gate_skip: HashMap<&'static str, usize> = HashMap::default();
+    let mut gate_keep: HashMap<&'static str, usize> = HashMap::default();
     for &analyzer in analyzers {
         for pkg in packages {
             if !analyzer_applies_to_package(analyzer, pkg) {
@@ -765,7 +766,7 @@ fn package_imports_prefix(package: &Package, prefix: &str) -> bool {
 }
 
 fn topo_postorder(roots: &[Arc<Action>]) -> Vec<Arc<Action>> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut out = Vec::new();
 
     fn visit(act: &Arc<Action>, seen: &mut HashSet<usize>, out: &mut Vec<Arc<Action>>) {
@@ -852,7 +853,7 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
 /// Counts, per action (keyed by `Arc` pointer), how many actions list it as a
 /// dependency — i.e. how many consumers will read its result.
 fn reverse_dep_counts(order: &[Arc<Action>]) -> HashMap<usize, AtomicUsize> {
-    let mut counts: HashMap<usize, AtomicUsize> = HashMap::with_capacity(order.len());
+    let mut counts: HashMap<usize, AtomicUsize> = HashMap::with_capacity_and_hasher(order.len(), Default::default());
     for act in order {
         counts
             .entry(Arc::as_ptr(act) as usize)
@@ -893,7 +894,7 @@ fn release_finished_deps(act: &Arc<Action>, remaining: &HashMap<usize, AtomicUsi
 /// `order.iter().position()` key (O(n² log n)), which dominated the analyze phase
 /// on large runs and made parallel execution slower than sequential.
 fn dependency_waves(order: &[Arc<Action>]) -> Vec<Vec<Arc<Action>>> {
-    let mut level: HashMap<usize, usize> = HashMap::with_capacity(order.len());
+    let mut level: HashMap<usize, usize> = HashMap::with_capacity_and_hasher(order.len(), Default::default());
     let mut waves: Vec<Vec<Arc<Action>>> = Vec::new();
     for act in order {
         let mut lvl = 0usize;
@@ -1021,8 +1022,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &HashMap::new(),
-            &HashMap::new(),
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,

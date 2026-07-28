@@ -2,7 +2,7 @@
 //!
 //! Port of golangci-lint `linter/config.go` load-mode union logic.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 
 use guff_analysis::Analyzer;
 use guff_packages::{load_for_go_analysis, LoadMode};
@@ -109,10 +109,9 @@ mod tests {
     #[test]
     fn load_mode_for_analyzers_respects_overrides() {
         let analyzers = [dummy("ast"), dummy("types")];
-        let overrides = HashMap::from([
-            ("ast", ast_only_load_mode()),
-            ("types", types_load_mode()),
-        ]);
+        let mut overrides = HashMap::default();
+        overrides.insert("ast", ast_only_load_mode());
+        overrides.insert("types", types_load_mode());
         let mode = load_mode_for_analyzers(&analyzers, &overrides);
         assert!(mode.contains(LoadMode::NEED_TYPES));
         assert!(mode.contains(LoadMode::NEED_SYNTAX));

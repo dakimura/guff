@@ -26,7 +26,7 @@ pub fn trim_package_memory(pkg: &mut Package, keep_syntax: bool) {
 
 /// Applies [`trim_package_memory`] to every package referenced by `packages`.
 pub fn trim_packages(packages: &mut [Arc<Package>], root_ids: &[String]) {
-    let roots: std::collections::HashSet<&str> =
+    let roots: crate::hash::HashSet<&str> =
         root_ids.iter().map(String::as_str).collect();
     for pkg in packages {
         let keep = roots.contains(pkg.id.as_str());

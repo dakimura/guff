@@ -2,7 +2,7 @@
 //!
 //! Port of `golangci-lint/pkg/goanalysis/runner.go`.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use std::sync::Arc;
 
 use guff_analysis::{Analyzer, Diagnostic, SettingsBag, ValidateError};
@@ -216,8 +216,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &HashMap::new(),
-            &HashMap::new(),
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,

@@ -653,6 +653,7 @@ dependencies = [
  "guff-packages",
  "guff-types",
  "rayon",
+ "rustc-hash",
  "serde",
  "serde_json",
  "sha2",
