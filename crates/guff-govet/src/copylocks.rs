@@ -6,8 +6,9 @@ use guff::ast::{
     AssignStmt, CallExpr, CompositeLit, Expr, FieldList, FuncType, GenDecl, Ident, RangeStmt,
     ReturnStmt, Spec, ValueSpec,
 };
+use guff::node_mask;
 use guff::token::Token;
-use guff::walk::NodeRef;
+use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -292,7 +293,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     let mut checker = LockChecker::new();
-    inspect.preorder(pass.files(), |n| {
+    const WANTED: NodeMask = node_mask!(
+        AssignStmt,
+        GenDecl,
+        CompositeLit,
+        ReturnStmt,
+        CallExpr,
+        FuncDecl,
+        FuncLit,
+        RangeStmt,
+    );
+    inspect.preorder_typed(WANTED, pass.files(), |n| {
         match n {
             NodeRef::AssignStmt(s) => pending.extend(collect_assign(pass, &mut checker, s)),
             NodeRef::GenDecl(g) => pending.extend(collect_gendecl(pass, &mut checker, g)),

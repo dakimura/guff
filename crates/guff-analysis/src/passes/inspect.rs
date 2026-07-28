@@ -43,6 +43,24 @@ struct PreorderCounters {
 static PREORDER_ENABLED: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("GUFF_DEBUG_CACHE").is_some());
 
+/// Escape hatch for the B-1c migration: `GUFF_INSPECT_MASKS=0` makes every
+/// [`InspectResult::preorder_typed`] call behave as if it had asked for
+/// [`NodeMask::ALL`].
+///
+/// A mask that omits a kind its callback handles does not fail loudly — the
+/// analyzer just stops finding things, which is the worst kind of regression
+/// and invisible on a corpus where that analyzer happens to be silent. With
+/// this switch the check is a single binary run twice over any corpus: masks on
+/// vs masks off must produce byte-identical findings. Read once into a
+/// `LazyLock`, so the cost is one branch on a cached `bool` per *call*.
+static MASKS_ENABLED: LazyLock<bool> =
+    LazyLock::new(|| std::env::var("GUFF_INSPECT_MASKS").as_deref() != Ok("0"));
+
+/// Whether node-kind masks are honoured (`GUFF_INSPECT_MASKS` is not `0`).
+pub fn masks_enabled() -> bool {
+    *MASKS_ENABLED
+}
+
 static PREORDER_REGISTRY: LazyLock<Mutex<Vec<Arc<PreorderCounters>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
@@ -251,10 +269,16 @@ impl InspectResult {
     /// kind the body handles silently drops findings; `unreachable!()` would
     /// turn that into a crash but does not make the mask any more correct, and
     /// the discarded-kind branch costs nothing once the mask filters it out.
+    ///
+    /// Setting `GUFF_INSPECT_MASKS=0` widens every mask back to
+    /// [`NodeMask::ALL`], which is how a migration is checked: one binary, two
+    /// runs, and any silently-narrow mask anywhere shows up as a findings diff
+    /// on real code. See [`masks_enabled`].
     pub fn preorder_typed<F>(&self, mask: NodeMask, files: &[File], f: F)
     where
         F: FnMut(NodeRef<'_>),
     {
+        let mask = if *MASKS_ENABLED { mask } else { NodeMask::ALL };
         if *PREORDER_ENABLED {
             return self.preorder_counted(mask, files, f);
         }

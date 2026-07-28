@@ -136,12 +136,17 @@ fn report_preorder_timing(analyze_total: u128) {
     };
     eprintln!(
         "guff: inspect preorder: {calls} calls, {nodes} nodes scanned, \
-         {hits} delivered ({:.0}% filtered by mask), \
+         {hits} delivered ({:.0}% filtered by mask{}), \
          {:.2}s total CPU ({share:.1}% of analyze CPU)",
         if nodes > 0 {
             (1.0 - hits as f64 / nodes as f64) * 100.0
         } else {
             0.0
+        },
+        if guff_analysis::masks_enabled() {
+            ""
+        } else {
+            "; DISABLED via GUFF_INSPECT_MASKS=0"
         },
         nanos as f64 / 1e9,
     );

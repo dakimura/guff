@@ -20,6 +20,7 @@ use guff::ast::{CommentGroup, Decl, Expr, GenDecl, Spec, ValueSpec};
 use guff::parse_directive;
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::object_pkg_path;
@@ -218,7 +219,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Idents that appear as SelectorExpr.Sel are reported via the selector.
     let mut selector_sels = HashSet::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(SelectorExpr), pass.files(), |n| {
         if let NodeRef::SelectorExpr(sel) = n {
             selector_sels.insert(sel.sel.id);
         }
@@ -228,7 +229,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // non-stdlib candidate appears (prometheus typically only hits reflect.Ptr).
     let mut local: Option<HashSet<ObjectId>> = None;
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(SelectorExpr, Ident), pass.files(), |n| {
         match n {
             NodeRef::SelectorExpr(sel) => {
                 let info = match pass.types_info() {

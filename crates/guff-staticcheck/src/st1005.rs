@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Decl, Expr, Spec};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_call_to_any};
 use guff_analysis::passes::inspect;
@@ -127,7 +128,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         {
             continue;
         }
-        inspect.preorder(std::slice::from_ref(file), |node| {
+        inspect.preorder_typed(node_mask!(CallExpr), std::slice::from_ref(file), |node| {
             let NodeRef::CallExpr(call) = node else {
                 return;
             };
