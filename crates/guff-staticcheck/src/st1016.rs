@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::inspect;
@@ -34,7 +35,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // type name → (first method pos, counts of receiver names)
     let mut by_type: BTreeMap<String, (u32, BTreeMap<String, usize>)> = BTreeMap::new();
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(FuncDecl), pass.files(), |node| {
         let NodeRef::FuncDecl(fd) = node else {
             return;
         };

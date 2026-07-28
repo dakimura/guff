@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CaseClause, FuncType, Stmt};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -49,7 +50,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(CaseClause, FuncDecl, FuncLit), pass.files(), |n| {
         match n {
             NodeRef::CaseClause(clause) => {
                 if let Some(pos) = check_case_clause(clause) {

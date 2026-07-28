@@ -8,6 +8,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BasicLit, Expr};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_constant::string_val;
 use guff_types::arena::ObjectData;
@@ -123,7 +124,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
     {
         let files = pass.files();
-        inspect.preorder(files, |n| {
+        inspect.preorder_typed(node_mask!(CallExpr), files, |n| {
             let NodeRef::CallExpr(call) = n else {
                 return;
             };

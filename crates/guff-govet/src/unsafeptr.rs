@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, CallExpr, Expr, SelectorExpr, StarExpr, UnaryExpr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -66,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "unsafeptr requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(CallExpr, StarExpr, UnaryExpr), pass.files(), |n| {
         match n {
             NodeRef::CallExpr(call) if call.args.len() == 1 => {
                 if is_unsafe_pointer_type(pass, &call.fun)

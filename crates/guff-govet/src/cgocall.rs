@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr, UnaryExpr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -66,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "cgocall requires inspect analyzer".to_string())?
         .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
             return;
         };

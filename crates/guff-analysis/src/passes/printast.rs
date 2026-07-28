@@ -5,6 +5,7 @@
 
 use std::sync::OnceLock;
 
+use guff::node_mask;
 use guff::walk::NodeRef;
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
@@ -21,7 +22,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     {
         let files = pass.files();
         let mut reported = false;
-        inspect.preorder(files, |n| {
+        inspect.preorder_typed(node_mask!(FuncDecl), files, |n| {
             if reported {
                 return;
             }

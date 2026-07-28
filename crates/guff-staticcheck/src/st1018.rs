@@ -4,6 +4,7 @@
 
 use std::sync::OnceLock;
 
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -134,7 +135,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, Diagnostic)> = Vec::new();
     {
         let files = pass.files();
-        inspect.preorder(files, |n| {
+        inspect.preorder_typed(node_mask!(BasicLit), files, |n| {
             let NodeRef::BasicLit(lit) = n else {
                 return;
             };

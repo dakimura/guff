@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr, SelectorExpr};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::passes::inspect;
@@ -45,7 +46,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push((match_pos(node), "(*net/url.URL).Query returns a copy, modifying it doesn't change the URL".into()));
         true
     });
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
         };

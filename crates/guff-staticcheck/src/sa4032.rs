@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, selector_name};
@@ -69,7 +70,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .collect();
     let mut all_pending = Vec::new();
     for (file, tags) in tagged_files {
-        inspect.preorder(std::slice::from_ref(file), |node| {
+        inspect.preorder_typed(node_mask!(BinaryExpr), std::slice::from_ref(file), |node| {
             let NodeRef::BinaryExpr(bin) = node else {
                 return;
             };

@@ -11,6 +11,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{call_name, expr_to_string};
 use guff_analysis::passes::inspect;
@@ -463,7 +464,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
             return;
         };

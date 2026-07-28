@@ -9,6 +9,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff::ast::{BinaryExpr, Expr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_integer_literal;
@@ -34,7 +35,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4003 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(bin) = node else { return };
         let Some((tname, unsigned)) = is_unsigned(pass, &bin.x) else { return };
         if !unsigned { return; }

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, ForStmt, SelectStmt, Stmt, UnaryExpr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -62,7 +63,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut seen_selects = HashSet::new();
     let mut pending: Vec<(u32, String)> = Vec::new();
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(ForStmt, SelectStmt), pass.files(), |node| {
         if let NodeRef::ForStmt(fs) = node {
             if check_for_select(fs) {
                 if let Stmt::SelectStmt(sel) = &fs.body.list[0] {

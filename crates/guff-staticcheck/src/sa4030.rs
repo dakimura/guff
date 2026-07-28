@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{call_name, is_integer_literal};
 
@@ -22,7 +23,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4030 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
         };

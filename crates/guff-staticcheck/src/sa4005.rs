@@ -9,6 +9,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, SelectorExpr, Stmt};
+use guff::node_mask;
 use guff::walk::{expr_ref, preorder, NodeRef};
 use guff_analysis::code::{object_of, refers_to};
 use guff_analysis::passes::inspect;
@@ -31,7 +32,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
     let mut pending = Vec::new();
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(FuncDecl), pass.files(), |node| {
         let NodeRef::FuncDecl(fd) = node else {
             return;
         };

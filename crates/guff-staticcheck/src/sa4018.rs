@@ -9,6 +9,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 
@@ -24,7 +25,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4018 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(assign) = node else { return };
         if assign.tok != Some(Token::ASSIGN) || assign.lhs.len() != assign.rhs.len() { return; }
         for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {

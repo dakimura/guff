@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, Expr, IfStmt, Stmt};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
@@ -207,7 +208,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     // Skip ifs that are else-if continuations (only process chain roots).
     let mut else_ifs = HashSet::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         if let NodeRef::IfStmt(i) = node {
             if let Some(Stmt::IfStmt(els)) = i.else_.as_deref() {
                 else_ifs.insert(els.id);
@@ -216,7 +217,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     });
 
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         if let NodeRef::IfStmt(i) = node {
             if else_ifs.contains(&i.id) {
                 return;

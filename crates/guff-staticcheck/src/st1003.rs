@@ -7,8 +7,9 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{FieldList, FuncDecl};
+use guff::node_mask;
 use guff::token::Token;
-use guff::walk::NodeRef;
+use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::is_in_test_at;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -190,7 +191,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    inspect.preorder(pass.files(), |node| {
+    const WANTED: NodeMask = node_mask!(
+        AssignStmt,
+        FuncDecl,
+        GenDecl,
+        InterfaceType,
+        RangeStmt,
+        StructType,
+    );
+    inspect.preorder_typed(WANTED, pass.files(), |node| {
         match node {
             NodeRef::AssignStmt(stmt) if stmt.tok == Some(Token::DEFINE) => {
                 for exp in &stmt.lhs {

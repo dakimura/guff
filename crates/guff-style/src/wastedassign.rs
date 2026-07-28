@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, RunError, RunFn, Pass};
@@ -65,7 +66,7 @@ fn collect_type_switch_lines(pass: &Pass<'_>) -> HashSet<i64> {
         return lines;
     };
     let fset = pass.fset();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(TypeSwitchStmt), pass.files(), |n| {
         if let NodeRef::TypeSwitchStmt(stmt) = n {
             lines.insert(fset.as_ref().position(stmt.switch).line);
         }

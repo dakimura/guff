@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::expr_to_int;
@@ -108,7 +109,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, u32, String, String)> = Vec::new();
     {
         let files = pass.files();
-        inspect.preorder(files, |n| {
+        inspect.preorder_typed(node_mask!(CallExpr), files, |n| {
             let NodeRef::CallExpr(call) = n else {
                 return;
             };

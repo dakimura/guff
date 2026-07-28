@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{BasicLit, Expr, Field, StructType};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
@@ -209,7 +210,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let pkg_path = pass.pkg().pkg_path.clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(StructType), pass.files(), |n| {
         let NodeRef::StructType(StructType { fields, .. }) = n else {
             return;
         };

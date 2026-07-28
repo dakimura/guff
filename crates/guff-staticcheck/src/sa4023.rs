@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, Ident};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::callcheck;
@@ -47,7 +48,7 @@ fn interface_from_typed_nil(pass: &Pass<'_>, id: &Ident) -> bool {
         return false;
     };
     let mut found = false;
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(AssignStmt { lhs, rhs, .. }) = node else {
             return;
         };
@@ -113,7 +114,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(bin) = node else {
             return;
         };

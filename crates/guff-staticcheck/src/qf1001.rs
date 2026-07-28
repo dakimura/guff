@@ -5,8 +5,9 @@
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::token::Token;
-use guff::walk::{expr_ref, preorder, NodeRef};
+use guff::walk::{NodeMask, NodeRef, expr_ref, preorder};
 use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
@@ -212,7 +213,13 @@ fn needs_outer_parens(pass: &Pass<'_>, unary_pos: u32) -> bool {
     let Some(inspect) = inspect else {
         return false;
     };
-    inspect.preorder(pass.files(), |node| {
+    const WANTED: NodeMask = node_mask!(
+        BinaryExpr,
+        ForStmt,
+        IfStmt,
+        SwitchStmt,
+    );
+    inspect.preorder_typed(WANTED, pass.files(), |node| {
         if needed {
             return;
         }
@@ -255,7 +262,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, u32, Vec<(String, String)>)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(UnaryExpr), pass.files(), |node| {
         let NodeRef::UnaryExpr(u) = node else {
             return;
         };

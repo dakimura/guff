@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, CallExpr, Expr, Stmt, UnaryExpr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{call_name, is_call_to, is_call_to_any};
@@ -18,7 +19,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(SelectStmt), pass.files(), |node| {
         let NodeRef::SelectStmt(sel) = node else {
             return;
         };

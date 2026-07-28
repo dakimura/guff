@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr, SelectorExpr};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::callcheck::{self, Call, CallContext};
 use guff_analysis::code::{expr_to_int, selector_name};
@@ -52,7 +53,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4015 requires inspect analyzer".to_string())?
         .clone();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
         };

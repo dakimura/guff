@@ -5,6 +5,7 @@
 
 use std::sync::OnceLock;
 
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_in_test_at;
 use guff_analysis::passes::inspect;
@@ -29,7 +30,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let whitelist = opts.effective_dot_import_whitelist();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(ImportSpec), pass.files(), |node| {
         let NodeRef::ImportSpec(imp) = node else {
             return;
         };

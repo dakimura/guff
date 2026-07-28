@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, Expr, UnaryExpr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
@@ -41,7 +42,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push((match_pos(node), "the address of a variable cannot be nil".into()));
         true
     });
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(bin) = node else {
             return;
         };

@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, Ident, RangeStmt};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::code::object_of;
@@ -49,7 +50,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(assign) = node else {
             return;
         };
@@ -61,7 +62,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(RangeStmt), pass.files(), |node| {
         let NodeRef::RangeStmt(rs) = node else {
             return;
         };

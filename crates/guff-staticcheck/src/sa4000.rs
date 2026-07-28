@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{call_name, is_generated_at};
@@ -42,7 +43,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4000 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(op) = node else {
             return;
         };

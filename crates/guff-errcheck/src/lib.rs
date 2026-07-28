@@ -11,7 +11,8 @@ use guff::ast::{
     AssignStmt, CallExpr, Expr, ExprStmt, GenDecl, GoStmt, Ident, IndexExpr, IndexListExpr,
     ParenExpr, Spec, TypeAssertExpr,
 };
-use guff::walk::NodeRef;
+use guff::node_mask;
+use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{self, type_with_name};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
@@ -109,7 +110,15 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
         skip_assert_positions: HashSet::new(),
     };
 
-    inspect.preorder(pass.files(), |n| {
+    const WANTED: NodeMask = node_mask!(
+        AssignStmt,
+        DeferStmt,
+        ExprStmt,
+        GenDecl,
+        GoStmt,
+        TypeAssertExpr,
+    );
+    inspect.preorder_typed(WANTED, pass.files(), |n| {
         match n {
             NodeRef::ExprStmt(ExprStmt { x, .. }) => visitor.visit_expr_stmt(x),
             NodeRef::GoStmt(GoStmt { call, .. }) => visitor.visit_go_defer(call),

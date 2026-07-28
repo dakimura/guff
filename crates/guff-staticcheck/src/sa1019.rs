@@ -5,7 +5,8 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CompositeLit, Expr, ImportSpec, SelectorExpr};
-use guff::walk::NodeRef;
+use guff::node_mask;
+use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{
     knowledge_selector_name, object_pkg_path, stdlib_version, version_compare,
 };
@@ -115,7 +116,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     let mut current_fn: Option<guff_types::arena::ObjectId> = None;
 
-    inspect.preorder(pass.files(), |node| {
+    const WANTED: NodeMask = node_mask!(
+        CompositeLit,
+        FuncDecl,
+        ImportSpec,
+        SelectorExpr,
+    );
+    inspect.preorder_typed(WANTED, pass.files(), |node| {
         match node {
             NodeRef::FuncDecl(f) => {
                 current_fn = pass

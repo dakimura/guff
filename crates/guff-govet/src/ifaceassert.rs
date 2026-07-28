@@ -3,6 +3,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, CaseClause, Expr, ExprStmt, Stmt, TypeAssertExpr, TypeSwitchStmt};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -78,7 +79,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "ifaceassert requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(TypeAssertExpr, TypeSwitchStmt), pass.files(), |n| {
         match n {
             NodeRef::TypeAssertExpr(ta) => {
                 let Some(t) = ta.ty.as_deref() else {

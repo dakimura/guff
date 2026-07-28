@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BinaryExpr, Expr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, is_integer_literal, is_nil};
@@ -164,7 +165,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |n| {
         let NodeRef::BinaryExpr(expr) = n else {
             return;
         };

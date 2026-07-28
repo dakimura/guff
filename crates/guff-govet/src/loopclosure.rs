@@ -6,6 +6,7 @@ use guff::ast::{
     AssignStmt, BlockStmt, CallExpr, CaseClause, CommClause, Expr, FuncLit, GoStmt, Ident,
     IncDecStmt, RangeStmt, Stmt,
 };
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -273,7 +274,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "loopclosure requires inspect analyzer".to_string())?
         .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    // `loop_vars` returns `None` for every other kind — see its match.
+    inspect.preorder_typed(node_mask!(RangeStmt, ForStmt), pass.files(), |n| {
         let Some((vars, body)) = loop_vars(pass, n) else {
             return;
         };

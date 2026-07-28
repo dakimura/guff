@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BranchStmt, ReturnStmt, Stmt};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
@@ -15,7 +16,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4004 requires inspect analyzer".to_string())?;
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(FuncDecl, FuncLit), pass.files(), |node| {
         let body = match node {
             NodeRef::FuncDecl(f) => f.body.as_ref().map(|b| &b.list),
             NodeRef::FuncLit(f) => Some(&f.body.list),

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, FuncDecl, FuncType, Ident, InterfaceType};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -193,7 +194,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "stdmethods requires inspect analyzer".to_string())?
         .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(FuncDecl, InterfaceType), pass.files(), |n| {
         match n {
             NodeRef::FuncDecl(FuncDecl {
                 name,

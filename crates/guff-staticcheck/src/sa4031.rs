@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::{buildir, inspect};
@@ -84,7 +85,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(bin) = node else {
             return;
         };
@@ -106,7 +107,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             format!("this nil check is {qualifier} true"),
         ));
     });
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(BinaryExpr, IfStmt), pass.files(), |node| {
         let cmp_node = match node {
             NodeRef::IfStmt(if_) => {
                 if let Expr::BinaryExpr(cond) = &if_.cond {

@@ -10,6 +10,7 @@ use guff_analysis::{match_pos, matches, AnalysisResult, Analyzer, RunError, RunF
 
 
 use guff::ast::{CallExpr, Expr, Ident};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::selector_name;
 
@@ -67,7 +68,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push((match_pos(node), format!("{typ} is a type, not a function, and {rhs} doesn't sort your values; consider using sort.{alt} instead")));
         true
     });
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(assign) = node else { return };
         let Some(rhs) = assign.rhs.first() else { return };
         let Some(name) = conversion_name(pass, rhs) else { return };

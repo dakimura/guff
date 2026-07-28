@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, CallExpr, Expr, IfStmt, SliceExpr, Stmt};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{call_name, expr_to_int, expr_to_string, is_call_to, same_non_dynamic};
@@ -145,7 +146,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut seen = HashSet::new();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
         let NodeRef::IfStmt(if_) = n else {
             return;
         };

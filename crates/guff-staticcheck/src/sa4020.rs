@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{CaseClause, Expr, Stmt, TypeSwitchStmt};
+use guff::node_mask;
 use guff::walk::NodeRef;
 
 use guff_analysis::passes::inspect;
@@ -30,7 +31,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4020 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(TypeSwitchStmt), pass.files(), |node| {
         let NodeRef::TypeSwitchStmt(ts) = node else {
             return;
         };

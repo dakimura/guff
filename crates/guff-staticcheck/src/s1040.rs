@@ -3,6 +3,7 @@
 //! Port of `honnef.co/go/tools/simple/s1040`.
 
 use guff::ast::Expr;
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
@@ -37,7 +38,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
 
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(TypeAssertExpr), pass.files(), |n| {
         let NodeRef::TypeAssertExpr(expr) = n else {
             return;
         };

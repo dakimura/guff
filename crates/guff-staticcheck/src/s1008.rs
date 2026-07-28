@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{BinaryExpr, BlockStmt, Expr, IfStmt, ReturnStmt, Stmt};
 use guff::ast::is_generated;
 use guff::commentmap::{new_comment_map, CommentMap};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::predeclared_bool_ident;
@@ -207,7 +208,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 guff::walk::NodeRef::File(file),
                 &file.comments,
             );
-            inspect.preorder(std::slice::from_ref(file), |n| {
+            inspect.preorder_typed(node_mask!(BlockStmt), std::slice::from_ref(file), |n| {
                 let NodeRef::BlockStmt(block) = n else {
                     return;
                 };

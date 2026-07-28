@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, IndexExpr};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_of_type_with_name};
 use guff_analysis::passes::inspect;
@@ -52,7 +53,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut skip: HashSet<u32> = HashSet::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(AssignStmt { lhs, .. }) = node else {
             return;
         };
@@ -66,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     });
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(IndexExpr), pass.files(), |node| {
         let NodeRef::IndexExpr(ix) = node else {
             return;
         };

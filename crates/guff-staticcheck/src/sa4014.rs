@@ -11,6 +11,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use std::collections::HashMap;
 
 use guff::ast::{Expr, IfStmt, Stmt};
+use guff::node_mask;
 use guff::walk::NodeRef;
 
 use crate::render::render_expr;
@@ -38,7 +39,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
     let mut seen_ifs: HashMap<u32, ()> = HashMap::new();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         let NodeRef::IfStmt(if_) = node else { return };
         if if_.else_.is_none() { return; }
         let Some(conds) = collect_conds(if_) else { return };

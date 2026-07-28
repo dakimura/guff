@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BlockStmt, IfStmt, Stmt};
+use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::inspect;
@@ -17,7 +18,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |n| {
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
         let NodeRef::IfStmt(ifs) = n else {
             return;
         };

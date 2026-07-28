@@ -5,6 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, BinaryExpr, Expr};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::expr_to_int;
@@ -49,7 +50,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(AssignStmt, BinaryExpr), pass.files(), |node| {
         match node {
             NodeRef::AssignStmt(AssignStmt { lhs, rhs, tok, .. }) => {
                 if !matches!(tok, Some(Token::ShrAssign) | Some(Token::ShlAssign)) {

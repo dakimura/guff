@@ -8,6 +8,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{Decl, Expr, Spec};
+use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::object_of;
@@ -146,7 +147,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(node_mask!(DeclStmt), pass.files(), |node| {
         let NodeRef::DeclStmt(ds) = node else {
             return;
         };
