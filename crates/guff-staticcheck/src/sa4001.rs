@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 static PAT1: OnceLock<Pattern> = OnceLock::new();
@@ -25,7 +25,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4001 requires inspect analyzer".to_string())?
         .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(
+        entry_mask(pat1()).union(entry_mask(pat2())),
+        pass.files(),
+        |node| {
         if let Some(m) = match_pattern(pass, pat1(), node) {
             let skip = m.state.get("obj").and_then(|v| v.as_ident()).is_some_and(|id| is_cgo_ident(&id.name));
             if !skip {

@@ -138,6 +138,19 @@ macro_rules! node_variants {
             pub const fn bit(self) -> u64 {
                 1u64 << (self as u8)
             }
+
+            /// Inverse of [`NodeRef::kind_name`]. `None` for anything that is
+            /// not one of the 56 variant names.
+            ///
+            /// Callers that build a mask from names must treat `None` as "I
+            /// don't know what this is" and widen to [`NodeMask::ALL`] — a name
+            /// silently dropped from a mask silently drops findings.
+            pub fn from_name(name: &str) -> Option<NodeKind> {
+                match name {
+                    $(stringify!($variant) => Some(NodeKind::$variant),)*
+                    _ => None,
+                }
+            }
         }
 
         const _: () = assert!(

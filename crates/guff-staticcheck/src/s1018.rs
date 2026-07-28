@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::callcheck::is_slice_type;
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
@@ -26,7 +26,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .clone();
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(entry_mask(pat()), pass.files(), |node| {
         let Some(m) = match_pattern(pass, pat(), node) else {
             return;
         };

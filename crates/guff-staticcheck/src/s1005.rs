@@ -9,7 +9,7 @@ use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{entry_mask, match_pattern, match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 static PAT_BLANK_RECV1: OnceLock<Pattern> = OnceLock::new();
 static PAT_BLANK_RECV2: OnceLock<Pattern> = OnceLock::new();
@@ -40,7 +40,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
 
-    inspect.preorder(pass.files(), |node| {
+    inspect.preorder_typed(entry_mask(pat_blank_recv1()), pass.files(), |node| {
         if match_pattern(pass, pat_blank_recv1(), node).is_some() {
             pending.push((
                 match_pos(node),

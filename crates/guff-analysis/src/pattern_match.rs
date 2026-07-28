@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use guff::walk::NodeRef;
+use guff::walk::{NodeKind, NodeMask, NodeRef};
 use guff_pattern::{match_node, IndexSymbol, MatchEnv, Matcher, Pattern};
 
 use crate::pass::Pass;
@@ -47,22 +47,38 @@ where
         }
     }
 
-    let kinds: HashSet<_> = pat.entry_kinds.iter().copied().collect();
-    let visit_all = kinds.is_empty();
-
-    inspect.preorder(pass.files(), |node| {
-        if !visit_all {
-            let name = node.kind_name();
-            if !kinds.contains(name) {
-                return;
-            }
-        }
+    inspect.preorder_typed(entry_mask(pat), pass.files(), |node| {
         if let Some(m) = match_pattern(pass, pat, node) {
             if !f(node, m) {
                 return;
             }
         }
     });
+}
+
+/// The [`NodeMask`] of the node kinds `pat` can possibly match at its root.
+///
+/// This replaces what used to be a per-node `HashSet<&str>` lookup on
+/// `node.kind_name()` inside the walk: the pattern already knows which kinds it
+/// can start at, and expressing that as a mask lets the traversal skip the rest
+/// without a callback (and, once B-1d lands, without visiting them at all).
+///
+/// Widens to [`NodeMask::ALL`] both when `entry_kinds` is empty (the pattern can
+/// match anywhere — the old `visit_all` case) and when any name fails to resolve
+/// to a [`NodeKind`], because a name we don't recognise is a kind we cannot
+/// prove the pattern won't match.
+pub fn entry_mask(pat: &Pattern) -> NodeMask {
+    if pat.entry_kinds.is_empty() {
+        return NodeMask::ALL;
+    }
+    let mut mask = NodeMask::NONE;
+    for name in &pat.entry_kinds {
+        match NodeKind::from_name(name) {
+            Some(kind) => mask = mask.with(kind),
+            None => return NodeMask::ALL,
+        }
+    }
+    mask
 }
 
 /// Returns `true` if the typeindex path handled the pattern (even with zero hits).
@@ -140,6 +156,25 @@ fn resolve_index_symbol(
             &sym.typename,
             &sym.ident,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every name a pattern can report as an entry kind must resolve to a
+    /// [`NodeKind`]. If one stops resolving, `entry_mask` still stays correct
+    /// (it widens to `ALL`), but silently — and every pattern-based analyzer
+    /// goes back to scanning the whole tree. This is the alarm for that.
+    #[test]
+    fn every_pattern_entry_kind_names_a_node_kind() {
+        for name in guff_pattern::all_entry_kinds() {
+            assert!(
+                NodeKind::from_name(name).is_some(),
+                "pattern entry kind {name:?} does not name a NodeRef variant",
+            );
+        }
     }
 }
 
