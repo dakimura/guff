@@ -13,12 +13,12 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa + guff-types） / A-3a / B-4（A 分類完了: 32 rules）**。
+> A-1（guff-ssa + guff-types + keywords） / A-3a / B-4（A 分類完了: 32 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は A-1 残り（keywords / guff-runner）か B-10（formatter 間 read+parse 共有）。**
+> **次は A-1 残り（guff-runner）か B-10（formatter 間 read+parse 共有）。**
 > analyze の残りは buildir / revive / misspell。B-2 / B-7 は NO-GO。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
@@ -1331,6 +1331,13 @@ A-3a 済・A-3b/c NO-GO なので、残りは **A-1 keywords/runner** か **B-10
 
 **検証:** findings 20 件が変更前（B-7 後）と byte 同一、§2.2 を **5 回**決定的、
 `-j 1` 同一、seed cold↔hot 同一。`cargo test -p guff-types --release` PASS。
+
+### DONE（2026-07-29）— **keywords（`guff-ast`）を FxHash 化。findings 同一。**
+
+`token.rs` の `keywords()` OnceLock マップを `FxHashMap` に。lookup のみ（iterate なし）。
+findings byte 同一（3 回）、両 regress PASS。
+
+**残り A-1:** guff-runner（`cache.rs` / `action.rs`）。次は runner か **B-10**。
 
 ---
 

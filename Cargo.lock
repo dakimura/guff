@@ -374,6 +374,9 @@ dependencies = [
 [[package]]
 name = "guff-ast"
 version = "0.1.0"
+dependencies = [
+ "rustc-hash",
+]
 
 [[package]]
 name = "guff-build"

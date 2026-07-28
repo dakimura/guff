@@ -3,7 +3,7 @@
 // Original: Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -321,7 +321,7 @@ static TOKENS: [Option<&'static str>; TOKEN_COUNT] = {
 fn keywords() -> &'static HashMap<&'static str, Token> {
     static KEYWORDS: OnceLock<HashMap<&'static str, Token>> = OnceLock::new();
     KEYWORDS.get_or_init(|| {
-        let mut m = HashMap::new();
+        let mut m = HashMap::default();
         let begin = Token::KeywordBeg.as_i32() + 1;
         let end = Token::KeywordEnd.as_i32();
         for i in begin..end {
