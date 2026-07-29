@@ -14,12 +14,12 @@
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
-> buildir lazy import members（§B-2 follow-up）**。
+> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
-> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
+> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-5 / A-9 / misspell など。B-10 は `format_checks waited=0` の間は着手しない。**
+> **次は B-5 / misspell など。B-10 は `format_checks waited=0` の間は着手しない。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -442,7 +442,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~A-6~~ | ~~`Context::lookup` の `Vec` 割り当て除去~~ **NO-GO**（lookup 14k 回 ≪ 100万。§A-6） | — | 0 | — | — |
 | ~~A-7~~ | ~~`typecheck_one_target` の `Package` 丸ごと clone 除去~~ **NO-GO**（clone 0.005s。§A-7） | — | 0 | — | — |
 | ~~A-8~~ | ~~`target-cpu=native` / PGO~~ **A-8a NO-GO**（native wall ±0）。**A-8b DONE**（PGO `-j1` −0.28s / 並列 −0.11s。スクリプト常設。baseline 未更新） | 全部 | **−0.11〜0.28s**（PGO） | 中 | 低 |
-| A-9 | 起動コスト（レジストリ構築・設定パース）の計測と削減 | warm | 0.0〜0.05s? | 小 | 低 |
+| ~~A-9~~ | ~~起動コスト（レジストリ構築・設定パース）~~ **NO-GO**（startup **0.01s** &lt; 0.02s。タイマー常設。§A-9） | warm | 0 | — | — |
 
 ### Tier B — 構造的（中〜大。必ず GO/NO-GO 計測を先に）
 
@@ -475,8 +475,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-5 / A-9 /
-misspell。A-4 / A-6 / A-7 / A-8a は NO-GO。A-8b（PGO）DONE。
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-5 /
+misspell。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
 B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（§B-2 follow-up）。B-7 は NO-GO。B-4 A 完了。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s** → lazy 後 **~2.56〜2.58s seed-hot**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
@@ -1930,6 +1930,21 @@ staticcheck だけで **161 個**、style で **77 個**、govet で **30 個** 
 - **warm の wall が下がったこと**（cold では誤差に埋もれます。`PERF_TASKS.md` §1.4 の warm 手順で測る）。
 - 両 regress PASS。
 
+### NO-GO（2026-07-29）— **startup 0.01s。タイマーだけ残す。**
+
+`cli::main` 先頭 → `run_and_print` 直前を `GUFF_DEBUG_CACHE=1` で
+`phase startup (config+registry)` として出力。
+
+**実測（prometheus `./...` warm ×3、issues cache hot）:**
+
+| 回 | startup |
+|---|---:|
+| 1 | **0.01s** |
+| 2 | **0.01s** |
+| 3 | **0.01s**（warm wall 0.21s） |
+
+閾値 0.02s 未満 → **最適化しない**。phase 行は今後も warm 内訳の地図として残す。
+
 ---
 
 # Tier B — 構造的（GO/NO-GO 計測を必ず先に）
@@ -3285,7 +3300,7 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 |---|---:|---:|---:|---|
 | cold（空キャッシュ） | 4.75s | **3.79s**（full regress 実測。B-1c 後） | **3.5s** | ~~P0-1~~, ~~P0-2~~, ~~B-3~~, ~~B-1（全段）~~, A-1 |
 | cold（seed hot） | 3.68s | **3.10s** | **2.8s** | 同上（残り 0.30s） |
-| warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, A-9 |
+| warm（キャッシュ hot） | 0.36s | **0.20〜0.22s ✅ 達成** | **0.20s** | ~~B-8~~, ~~A-9~~ |
 | warm（デーモン） | — | — | **0.05s** | C-2 |
 | peak RSS（cold full） | 7.57GB | 7.58GB | **6.0GB** | C-8 の調査結果次第 |
 

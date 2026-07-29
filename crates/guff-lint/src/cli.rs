@@ -3,7 +3,7 @@
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use guff_fmt::{MetaFormatter, Runner, RunnerOptions};
@@ -212,10 +212,12 @@ enum CacheCommand {
 
 /// Run the guff CLI (also used by binaries produced by `guff custom`).
 pub fn main() -> ExitCode {
+    // A-9: wall from process entry through config+registry, before run_linters.
+    let startup = Instant::now();
     guff_runner::init_rayon_global_stack();
     let cli = Cli::parse();
     match cli.command {
-        Commands::Run(args) => match run_cmd(args) {
+        Commands::Run(args) => match run_cmd(args, startup) {
             Ok(code) => ExitCode::from(code as u8),
             Err(err @ RunError::Timeout) => {
                 eprintln!("guff: {err}");
@@ -298,7 +300,7 @@ fn custom_cmd(args: CustomArgs) -> Result<PathBuf, CustomError> {
     })
 }
 
-fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
+fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     let loaded = load_run_config(
         args.no_config,
         args.config.as_ref(),
@@ -383,6 +385,13 @@ fn run_cmd(args: RunArgs) -> Result<i32, RunError> {
                 )));
             }
         }
+    }
+
+    if crate::debug::enabled() {
+        eprintln!(
+            "guff: phase startup (config+registry) {:.2}s",
+            startup.elapsed().as_secs_f64()
+        );
     }
 
     run_and_print(&LintOptions {
