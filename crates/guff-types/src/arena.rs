@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use crate::alias::Alias;
 use crate::array::Array;
 use crate::basic::Basic;
-use crate::chan::Chan;
+use crate::chan::{Chan, ChanDir};
+use crate::hash::HashMap;
 use crate::interface::Interface;
 use crate::map::Map;
 use crate::named::Named;
@@ -123,9 +124,17 @@ impl PackageId {
 ///
 /// Mutation is performed via [`TypeArena::get_mut`]. Concurrent access is not
 /// supported (matching `go/types`' single-threaded `Checker`).
+///
+/// Structural types (Pointer / Slice / Array / Map / Chan / Signature) are
+/// hash-consed via [`InternKey`] so identical shapes reuse one [`TypeId`]
+/// (B-5). Named / Interface / etc. are never interned.
 #[derive(Debug, Default, Clone)]
 pub struct TypeArena {
     types: Layered<TypeData>,
+    /// Intern table for the frozen base (shared across [`TypeArena::shared_clone`]).
+    intern_base: Arc<HashMap<InternKey, TypeId>>,
+    /// Intern table for types appended after the last freeze / shared_clone.
+    intern_overlay: HashMap<InternKey, TypeId>,
 }
 
 /// Storage for all Go objects (variables, functions, type names, etc.).
@@ -306,6 +315,71 @@ pub enum ObjectData {
     PkgName(PkgName),
 }
 
+/// Shallow structural key for B-5 hash-consing. Pointer / Array / Map / Chan /
+/// Signature only — **not Slice**.
+///
+/// Slice is excluded because some analyzers (revive `var-declaration`) compare
+/// `TypeId`s with `==` instead of structural [`identical`](crate::predicates::identical).
+/// Interning `[]T` makes the LHS type-expr and RHS composite-lit share an id and
+/// flips findings vs golangci on prometheus. Pointer/Array/Map/Chan do not have
+/// that regression in the current suite.
+///
+/// Signature includes `recv` so two methods with the same params/results but
+/// different receivers do not incorrectly share a `TypeId` (the `recv` field
+/// would otherwise be lost on reuse).
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+enum InternKey {
+    Pointer(TypeId),
+    Array { len: i64, elem: TypeId },
+    Map { key: TypeId, elem: TypeId },
+    Chan { dir: ChanDir, elem: TypeId },
+    Signature {
+        recv: Option<ObjectId>,
+        params: Option<TypeId>,
+        results: Option<TypeId>,
+        variadic: bool,
+        rparams: Vec<TypeId>,
+        tparams: Vec<TypeId>,
+    },
+}
+
+impl InternKey {
+    fn from_data(data: &TypeData) -> Option<Self> {
+        Some(match data {
+            TypeData::Pointer(p) => Self::Pointer(p.elem()),
+            TypeData::Array(a) => Self::Array {
+                len: a.len(),
+                elem: a.elem(),
+            },
+            TypeData::Map(m) => Self::Map {
+                key: m.key(),
+                elem: m.elem(),
+            },
+            TypeData::Chan(c) => Self::Chan {
+                dir: c.dir(),
+                elem: c.elem(),
+            },
+            TypeData::Signature(s) => Self::Signature {
+                recv: s.recv(),
+                params: s.params(),
+                results: s.results(),
+                variadic: s.variadic(),
+                rparams: s
+                    .recv_type_params()
+                    .map(|l| l.list().to_vec())
+                    .unwrap_or_default(),
+                tparams: s
+                    .type_params()
+                    .map(|l| l.list().to_vec())
+                    .unwrap_or_default(),
+            },
+            // Slice intentionally not interned — see InternKey docs.
+            TypeData::Slice(_) => return None,
+            _ => return None,
+        })
+    }
+}
+
 /// B-5 GO/NO-GO: counts of structural types and how many unique shallow keys
 /// they would collapse to under hash-consing. Each pair is `(count, unique)`.
 #[derive(Debug, Clone, Copy)]
@@ -341,7 +415,25 @@ impl TypeArena {
     }
 
     /// Insert `data` and return a stable [`TypeId`] pointing to it.
+    ///
+    /// Structural shapes (Pointer / Array / Map / Chan / Signature — not Slice)
+    /// are hash-consed. Lookup checks overlay then frozen base.
     pub fn alloc(&mut self, data: TypeData) -> TypeId {
+        if let Some(key) = InternKey::from_data(&data) {
+            if let Some(&id) = self.intern_overlay.get(&key) {
+                return id;
+            }
+            if let Some(&id) = self.intern_base.get(&key) {
+                return id;
+            }
+            let id = self.alloc_fresh(data);
+            self.intern_overlay.insert(key, id);
+            return id;
+        }
+        self.alloc_fresh(data)
+    }
+
+    fn alloc_fresh(&mut self, data: TypeData) -> TypeId {
         // Index is 1-based so Option<TypeId> can use 0 as the niche.
         let raw = (self.types.push(data) + 1) as u32;
         TypeId(NonZeroU32::new(raw).expect("arena index never 0"))
@@ -363,61 +455,49 @@ impl TypeArena {
         self.types.is_empty()
     }
 
-    /// Shallow structural-duplicate stats for B-5 GO/NO-GO (Pointer / Slice /
-    /// Array / Map / Chan / Signature only). Keys use child `TypeId`s as-is —
-    /// the same shape the planned intern table would use.
+    /// Shallow structural-duplicate stats for B-5 (Pointer / Slice / Array /
+    /// Map / Chan / Signature). Slice is counted even though it is not interned.
     pub fn structural_dup_stats(&self) -> StructuralDupStats {
-        use crate::hash::HashMap;
-
         #[derive(Hash, Eq, PartialEq)]
-        enum Key {
-            Pointer(TypeId),
+        enum StatKey {
+            Intern(InternKey),
             Slice(TypeId),
-            Array { len: i64, elem: TypeId },
-            Map { key: TypeId, elem: TypeId },
-            Chan { dir: crate::chan::ChanDir, elem: TypeId },
-            Signature {
-                params: Option<TypeId>,
-                results: Option<TypeId>,
-                variadic: bool,
-                rparams: Vec<TypeId>,
-                tparams: Vec<TypeId>,
-            },
         }
 
-        let mut seen: HashMap<Key, u32> = HashMap::default();
+        let mut seen: HashMap<StatKey, u32> = HashMap::default();
         let mut kind_n = [0usize; 6];
         let mut kind_unique = [0usize; 6];
 
         for i in 1..=self.len() {
             let id = TypeId::from_index(i);
             let (kind, key) = match self.get(id) {
-                TypeData::Pointer(p) => (0, Key::Pointer(p.elem())),
-                TypeData::Slice(s) => (1, Key::Slice(s.elem())),
+                TypeData::Pointer(p) => (0, StatKey::Intern(InternKey::Pointer(p.elem()))),
+                TypeData::Slice(s) => (1, StatKey::Slice(s.elem())),
                 TypeData::Array(a) => (
                     2,
-                    Key::Array {
+                    StatKey::Intern(InternKey::Array {
                         len: a.len(),
                         elem: a.elem(),
-                    },
+                    }),
                 ),
                 TypeData::Map(m) => (
                     3,
-                    Key::Map {
+                    StatKey::Intern(InternKey::Map {
                         key: m.key(),
                         elem: m.elem(),
-                    },
+                    }),
                 ),
                 TypeData::Chan(c) => (
                     4,
-                    Key::Chan {
+                    StatKey::Intern(InternKey::Chan {
                         dir: c.dir(),
                         elem: c.elem(),
-                    },
+                    }),
                 ),
                 TypeData::Signature(s) => (
                     5,
-                    Key::Signature {
+                    StatKey::Intern(InternKey::Signature {
+                        recv: s.recv(),
                         params: s.params(),
                         results: s.results(),
                         variadic: s.variadic(),
@@ -429,7 +509,7 @@ impl TypeArena {
                             .type_params()
                             .map(|l| l.list().to_vec())
                             .unwrap_or_default(),
-                    },
+                    }),
                 ),
                 _ => continue,
             };
@@ -460,12 +540,20 @@ impl TypeArena {
     /// read-only across packages (see [`TypeArena::shared_clone`]).
     pub fn freeze(&mut self) {
         self.types.freeze();
+        if !self.intern_overlay.is_empty() {
+            let base = Arc::make_mut(&mut self.intern_base);
+            for (k, v) in self.intern_overlay.drain() {
+                base.entry(k).or_insert(v);
+            }
+        }
     }
 
     /// Clone sharing the frozen base (an `Arc` bump, no element copies).
     pub fn shared_clone(&self) -> Self {
         Self {
             types: self.types.shared_clone(),
+            intern_base: Arc::clone(&self.intern_base),
+            intern_overlay: HashMap::default(),
         }
     }
 
@@ -480,8 +568,20 @@ impl TypeArena {
     }
 
     /// Append relocated elements into the base (R25).
+    ///
+    /// Structural keys that are already interned stay pointing at the first id;
+    /// newly seen keys are registered. Parallel-wave duplicates therefore remain
+    /// in the arena but do not poison future lookups.
     pub(crate) fn extend_base(&mut self, items: Vec<TypeData>) {
+        let start = self.types.len();
         self.types.extend_base(items);
+        let intern = Arc::make_mut(&mut self.intern_base);
+        for i in start..self.types.len() {
+            let id = TypeId::from_index(i + 1);
+            if let Some(key) = InternKey::from_data(self.types.get(i)) {
+                intern.entry(key).or_insert(id);
+            }
+        }
     }
 }
 

@@ -12,12 +12,17 @@ fn type_id_niche_optimization() {
 }
 
 #[test]
-fn alloc_returns_distinct_ids() {
+fn alloc_interns_identical_pointers() {
     let (mut arena, table) = init_universe();
     let int_id = table[BasicKind::Int as usize];
     let p1 = new_pointer(&mut arena, int_id);
     let p2 = new_pointer(&mut arena, int_id);
-    assert_ne!(p1, p2, "fresh pointer allocations must have distinct IDs");
+    assert_eq!(p1, p2, "identical structural pointers must share a TypeId (B-5)");
+
+    arena.freeze();
+    let mut child = arena.shared_clone();
+    let p3 = new_pointer(&mut child, int_id);
+    assert_eq!(p3, p1, "shared_clone must reuse frozen base pointer");
 }
 
 #[test]
