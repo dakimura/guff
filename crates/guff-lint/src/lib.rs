@@ -81,7 +81,8 @@ use std::time::Duration;
 
 use guff_analysis::{Analyzer, SettingsBag};
 use guff_packages::{
-    load_for_go_analysis, load_graph, typecheck_roots, Config, LoadMode, TypecheckEnv,
+    load_for_go_analysis, load_graph, typecheck_roots_with_prebuilt_seed, Config, LoadMode,
+    TypecheckEnv, start_seed_speculation,
 };
 use guff_runner::{
     build_salt, default_cache_dir, detect_go_version, run_on_packages, HashMode, IssueCache,
@@ -369,6 +370,21 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     let timing = crate::debug::enabled();
     let t0 = std::time::Instant::now();
 
+    // C-7: when issues cache is off (`--no-cache`) but GUFF_CACHE still holds a
+    // previous golist stdout + stdlib-export map, start seed against that
+    // remembered graph while the authoritative `go list` runs. Format already
+    // overlaps on a private 2-thread pool; the global pool is otherwise idle.
+    let mut speculate_env = TypecheckEnv::from_env(&meta_cfg.resolved_env(), "gc");
+    speculate_env.from_source = dep_source;
+    speculate_env.parallel = !sequential;
+    speculate_env.skip_object_resolution =
+        !analyzers_need_ast_object_resolution(&opts.analyzers);
+    let speculate_job = if !opts.use_cache && dep_source {
+        start_seed_speculation(&meta_cfg, &opts.patterns, &speculate_env)
+    } else {
+        None
+    };
+
     let (roots, all_packages) =
         load_graph(&meta_cfg, &opts.patterns).map_err(RunnerError::Load)?;
     if timing {
@@ -479,7 +495,12 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     env.parallel = !sequential;
     // P0-3: skip Ident.obj resolution unless an analyzer that reads it is on.
     env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers);
-    let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
+    let prebuilt = speculate_job.and_then(|job| {
+        job.finish_if_matches(&all_packages, &miss_ids)
+            .map(|s| (s.seed, s.fset))
+    });
+    let miss_roots =
+        typecheck_roots_with_prebuilt_seed(&all_packages, &miss_ids, analysis_mode, &env, prebuilt);
     if timing {
         eprintln!(
             "guff: phase typecheck_roots {:.2}s ({} pkgs)",

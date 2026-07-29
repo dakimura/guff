@@ -231,6 +231,19 @@ pub fn typecheck_roots(
     mode: LoadMode,
     env: &TypecheckEnv,
 ) -> Vec<Arc<Package>> {
+    typecheck_roots_with_prebuilt_seed(all, target_ids, mode, env, None)
+}
+
+/// Like [`typecheck_roots`], but reuses a speculative seed when `prebuilt` is
+/// `Some` (PERF_TASKS_V2 C-7). The seed's [`FileSet`] is kept alive for import
+/// positions; targets are parsed into that same set.
+pub fn typecheck_roots_with_prebuilt_seed(
+    all: &[Arc<Package>],
+    target_ids: &[String],
+    mode: LoadMode,
+    env: &TypecheckEnv,
+    prebuilt: Option<(Arc<ExportSeed>, Arc<FileSet>)>,
+) -> Vec<Arc<Package>> {
     if target_ids.is_empty() || !needs_typecheck(mode) {
         return Vec::new();
     }
@@ -238,7 +251,10 @@ pub fn typecheck_roots(
     let by_id: HashMap<String, Arc<Package>> =
         all.iter().map(|p| (p.id.clone(), Arc::clone(p))).collect();
 
-    let fset = FileSet::new();
+    let (fset, prebuilt_seed) = match prebuilt {
+        Some((seed, fset)) => (fset, Some(seed)),
+        None => (FileSet::new(), None),
+    };
     let sizes = env.sizes();
     let export_paths = collect_export_paths(&by_id);
     let dep_graph: HashMap<String, Vec<String>> = by_id
@@ -252,18 +268,36 @@ pub fn typecheck_roots(
     let acct_before;
     let mut checked: HashMap<String, Arc<Package>> = {
         let ts = std::time::Instant::now();
-        let seed = if env.from_source {
-            build_source_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
+        let seed = if let Some(s) = prebuilt_seed {
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={}, prebuilt)",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            Some(s)
+        } else if env.from_source {
+            let s = build_source_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={})",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            s
         } else {
-            build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env)
+            let s = build_export_seed(target_ids, &by_id, &export_paths, &dep_graph, &fset, env);
+            if dbg {
+                eprintln!(
+                    "guff:   typecheck_roots seed build {:.2}s (from_source={})",
+                    ts.elapsed().as_secs_f64(),
+                    env.from_source,
+                );
+            }
+            s
         };
-        if dbg {
-            eprintln!(
-                "guff:   typecheck_roots seed build {:.2}s (from_source={})",
-                ts.elapsed().as_secs_f64(),
-                env.from_source,
-            );
-        }
         if acct {
             if let Some(ref s) = seed {
                 let st = s.types().structural_dup_stats();
@@ -694,6 +728,29 @@ fn build_export_seed(
 /// intentionally dropped ([`Checker::capture_export_seed`] does not capture
 /// errors); only the target packages report issues.
 fn build_source_seed(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    build_source_seed_inner(targets, by_id, export_paths, dep_graph, fset, env)
+}
+
+/// Public entry for C-7 speculative prewarm ([`crate::speculate`]).
+pub(crate) fn build_source_seed_for_speculate(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+    dep_graph: &HashMap<String, Vec<String>>,
+    fset: &Arc<FileSet>,
+    env: &TypecheckEnv,
+) -> Option<Arc<ExportSeed>> {
+    build_source_seed_inner(targets, by_id, export_paths, dep_graph, fset, env)
+}
+
+fn build_source_seed_inner(
     targets: &[String],
     by_id: &HashMap<String, Arc<Package>>,
     export_paths: &HashMap<String, PathBuf>,

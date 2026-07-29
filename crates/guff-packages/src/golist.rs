@@ -899,6 +899,141 @@ fn try_load_golist_cache(cfg: &Config, patterns: &[String], args: &[String]) -> 
     std::fs::read_to_string(path).ok()
 }
 
+/// Like [`try_load_golist_cache`], but ignores `cfg.disable_cache`.
+///
+/// Used by C-7 speculation: `--no-cache` still wants to *read* a previous warm
+/// run's golist stdout so seed can start while the authoritative `go list`
+/// subprocess is in flight. Writes remain gated by [`golist_cache_enabled`].
+fn try_peek_golist_cache(cfg: &Config, patterns: &[String], args: &[String]) -> Option<String> {
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        if let Ok(v) = std::env::var(key) {
+            if v == "off" {
+                return None;
+            }
+        }
+    }
+    // Avoid the X-1 `.go` filename walk when there is nothing to peek.
+    let dir = guff_cache_dir()?;
+    if !dir.join("golist").is_dir() {
+        return None;
+    }
+    let key = golist_cache_key(cfg, patterns, args, true);
+    let path = golist_cache_path(&key)?;
+    std::fs::read_to_string(path).ok()
+}
+
+/// Read-only stdlib-export map from disk (no subprocess). `None` on miss.
+fn peek_stdlib_export_cache(
+    cfg: &Config,
+    paths: &[String],
+) -> Option<HashMap<String, String>> {
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        if let Ok(v) = std::env::var(key) {
+            if v == "off" {
+                return None;
+            }
+        }
+    }
+    let path = stdlib_export_cache_path(cfg, paths)?;
+    load_stdlib_export_cache(&path)
+}
+
+/// Package graph recovered from a previous run's golist + stdlib-export caches.
+pub struct PeekedGraph {
+    pub roots: Vec<String>,
+    pub packages: Vec<Arc<Package>>,
+}
+
+/// Best-effort read of the golist disk caches for C-7 speculation.
+///
+/// Ignores `disable_cache`. Returns `Ok(None)` when there is no usable cache
+/// (or stdlib exports are missing — without them the seed fingerprint would
+/// almost always miss against the authoritative fetch).
+pub fn peek_cached_graph(
+    cfg: &Config,
+    patterns: &[String],
+) -> Result<Option<PeekedGraph>, GoListError> {
+    let args = golist_args(cfg, patterns, 0);
+    let Some(stdout) = try_peek_golist_cache(cfg, patterns, &args) else {
+        return Ok(None);
+    };
+    if !export_paths_exist(&stdout) {
+        return Ok(None);
+    }
+
+    let mut roots = Vec::new();
+    let mut packages = Vec::new();
+    let mut seen: HashMap<String, JsonPackage> = HashMap::new();
+    let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonPackage>();
+    for item in stream {
+        let p = item.map_err(|e| GoListError::Json(e.to_string()))?;
+        if p.import_path.is_empty() {
+            return Ok(None);
+        }
+        if seen.contains_key(&p.import_path) {
+            continue;
+        }
+        seen.insert(p.import_path.clone(), p.clone());
+        let pkg = json_package_to_package(&p, cfg)?;
+        if !p.dep_only {
+            roots.push(pkg.id.clone());
+        }
+        packages.push(Arc::new(pkg));
+    }
+    if packages.is_empty() {
+        return Ok(None);
+    }
+
+    if cfg.dep_source {
+        let stdlib: Vec<String> = seen
+            .values()
+            .filter(|p| p.standard && p.import_path != "unsafe" && p.error.is_none())
+            .map(|p| p.import_path.clone())
+            .collect();
+        if !stdlib.is_empty() {
+            let Some(exports) = peek_stdlib_export_cache(cfg, &stdlib) else {
+                return Ok(None);
+            };
+            for pkg in packages.iter_mut() {
+                if let Some(export) = exports.get(&pkg.id) {
+                    if !export.is_empty() && Path::new(export).exists() {
+                        Arc::make_mut(pkg).export_file = PathBuf::from(export);
+                    }
+                }
+            }
+        }
+        // Default dep-export reuse is Off; when CachedOnly/Fetch is on, attach
+        // whatever the dep-export cache already holds (no subprocess).
+        let third_party: Vec<String> = seen
+            .values()
+            .filter(|p| {
+                !p.standard
+                    && p.error.is_none()
+                    && p.import_path != "unsafe"
+                    && !p.import_path.contains(' ')
+                    && !p.import_path.ends_with(".test")
+                    && p.module.as_ref().is_some_and(|m| !m.main)
+            })
+            .map(|p| p.import_path.clone())
+            .collect();
+        if !third_party.is_empty() {
+            let mode = export_reuse_mode();
+            if mode != ExportReuseMode::Off {
+                let exports = load_dep_export_cache(cfg, &third_party);
+                for pkg in packages.iter_mut() {
+                    if let Some(export) = exports.get(&pkg.id) {
+                        if !export.is_empty() && Path::new(export).exists() {
+                            Arc::make_mut(pkg).export_file = PathBuf::from(export);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Some(PeekedGraph { roots, packages }))
+}
+
 fn store_golist_cache(cfg: &Config, patterns: &[String], args: &[String], stdout: &str) {
     if !golist_cache_enabled(cfg) {
         return;

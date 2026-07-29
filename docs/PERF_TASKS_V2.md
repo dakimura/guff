@@ -14,15 +14,19 @@
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
-> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装）**。
+> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
+> C-7（seed speculate）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
-> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**。
-> 各タスク節末尾の `### DONE` に実測値があります。
+> **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
+> **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
+> 各タスク節末尾の `### DONE` / `### NO-GO` に実測値があります。
 >
-> **次は B-9 / C 系など。B-10 は `format_checks waited=0` の間は着手しない。**
+> **次は C-2（warm デーモン）/ C-8（RSS 内訳）など。B-10 は `waited=0` の間 NO-START。B-9 は原則着手しない。**
+> **C-7 DONE:** seed-hot `--no-cache` で typecheck −0.35s / wall −0.15〜0.25s（空 cold は効かない）。
 > **B-5 の Slice インターンは revive `var-declaration` の TypeId`==` 依存で findings が変わるため未実装。**
 > **P0-3 は条件付き実装済みだが、prometheus（`default: standard` → `ineffassign` 有効）では
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
+> **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.7 GiB（目標 6GB は既達）。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -472,19 +476,16 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | C-3 | `go list` の自前置き換え | cold/warm | ~1.3s | **特大** | **最高** |
 | C-4 | gocritic 106 チェッカーの walk 融合 | cold | 0.0〜0.1s? | 大 | 中 |
 | C-5 | issue cache を analyzer 単位の粒度に | warm | ? | 大 | **高** |
-| C-6 | `Ident` から `Mutex` を外す | cold | 0.05〜0.2s? | 中 | 中 |
-| C-7 | 依存 seed のプリウォーム（バックグラウンド投機実行） | cold | ? | 大 | 中 |
-| C-8 | メモリ削減（7.6GB → 4GB）で並列度を上げる | cold | ? | 大 | 中 |
+| ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
+| ~~C-7~~ | ~~依存 seed のプリウォーム（バックグラウンド投機実行）~~ **DONE**（seed-hot `--no-cache` typecheck −0.35s / wall −0.15〜0.25s。§C-7） | cold seed-hot | **−0.15〜0.25s** | 大 | 中 |
+| C-8 | メモリ削減で並列度を上げる | cold | ?（**RSS は既に ~3.7 GiB**。内訳調査のみ残る） | 大 | 中 |
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） / C 系（要ユーザー合意）。
-P0-3 DONE（prometheus では wall 0。ineffassign 無効設定でのみ効く）。B-5 DONE（Slice 以外）。
-misspell FxHash DONE（誤差帯）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
-B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（§B-2 follow-up）。B-7 は NO-GO。B-4 A 完了。
-（**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s** → lazy 後 **~2.56〜2.58s seed-hot**。
-B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
-wall を狙うなら analyze の callback 中身＝ buildir / revive / misspell へ。詳細は §B-1 末尾）。
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
+**C-2（warm デーモン）** / C-8（RSS 内訳のみ）。**C-7 DONE**。**C-6 NO-GO**。
+P0-3 DONE。B-5 DONE（Slice 以外）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b DONE。
+B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（RSS 7.4→3.8 GiB）。B-7 NO-GO。B-4 A 完了。
 
 > **§1.3-post の「余裕 0.96s」問題は S-3 で決着しました。そのまま進めて構いません。**
 > seed-hot では format_checks（1.78s 重畳）に対して直列 phase の余裕が 0.96s しかなく、
@@ -3329,6 +3330,29 @@ pub struct Ident {
 **期待:** RSS 削減 + clone コスト削減。**A-3b（`Box<str>` 化）と同時にやると効率的**ですが、
 §0-9 に従い別コミットにすること。
 
+### NO-GO（2026-07-29）— **Ident Mutex の wall 上限 ≲ 0.08s。§0-14 で中止。コード未変更。**
+
+P0-2 / P0-3 完了後に samply（profiling ビルド、prometheus `./...`、空 `GUFF_CACHE`、
+`--no-cache`。合計 CPU 13.93s）で測った。
+
+| 指標 | CPU | 備考 |
+|---|---:|---|
+| `pthread_mutex_{init,lock,unlock,destroy}` self 合計 | ~0.66s | Ident **以外**（`File` / `Scope` / runner）も含む |
+| `drop_in_place` of Ident's `Mutex<Option<Arc<Object>>>` | 0.093s | 明確に Ident |
+| `Ident::clone` self | 0.082s | Mutex + `String`/`Arc` clone 混在 |
+| `Ident::clone` inclusive | 0.725s | 大半はネストした `Expr::clone` 側。Mutex 除去では消えない |
+| `pthread_mutex_init` ← `Ident::clone`（callers 上位） | ~0.08s | 帰属できる init の上限付近 |
+| サイズ | Mutex 24B → OnceLock 16B → Option 8B | RSS は Ident 数 × 8〜16B。現状 peak ~3.7 GiB では二の次 |
+
+**上限見積もり:** Ident に帰属できる Mutex CPU を甘く見て 0.3〜0.5s。有効並列 ~6 なら
+wall 換算 **0.05〜0.08s**。§0-14 の 0.1s を下回る。A-4（`File` Mutex）と同じく
+「Mutex は自己 CPU に出るが wall に出ない」パターン。
+
+**補足:** `short_var_decl` は obj を一度書いてから `alt` で上書きするため、素の `OnceLock` には
+そのまま載らない（最終値を先に決めて 1 回 set する書き換えは可能だが、上の上限では元が取れない）。
+
+**やらない。** RSS をさらに詰めるなら C-1 / B-5 Slice（findings 合意後）側。
+
 ## C-7 — 依存 seed のプリウォーム（投機実行）
 
 **要旨:** `go list` がサブプロセスで 1.3s 走っている間、コアは遊んでいます
@@ -3342,17 +3366,57 @@ format 以外にも、**前回実行時のパッケージリストを覚えて�
 **前提:** P0-1 の結果次第。もし P0-1 で「format はもっとスレッドを使うべき」と分かったら、
 `go list` の間のコアは既に埋まっているので **C-7 は NO-GO** です。
 
+**2026-07-29 追記（着手判断用）:** P0-1 は「デフォルト format=2 のまま」で終わった。
+format は `go list`+typecheck+analyze と重畳するが **専用 2 スレッドだけ**なので、
+10 コア機では `go list` 中に **~8 コアが空く**。C-7 の前提はクリア。
+空 cold（前回リスト無し）では効かず、**リストを別キャッシュに残す設計**が本体。
+天井は `min(go list ≈1.3s, seed build ≈1.0s)`。着手前に「リスト命中率」と
+投機ミス時の RSS を測ること。
+
+### DONE（2026-07-29）— **seed-hot `--no-cache` で typecheck −0.35s / wall −0.15〜0.25s。findings 同一。**
+
+**GO 判定（着手前）:** seed-hot + `--no-cache` で `seed dep check` **0.38〜0.39s**、
+`load_graph` **1.10〜1.13s**。天井 ≥ 0.15s → GO。空 `GUFF_CACHE` は peek 不能で効かない
+（regress cold はそのまま）。
+
+**入れたもの:**
+
+1. `crates/guff-packages/src/speculate.rs` — fingerprint + バックグラウンド seed。
+2. `golist::peek_cached_graph` — `--no-cache` でも**読みだけ** golist/stdlib-export キャッシュを使う
+   （書き込みは従来どおり `disable_cache` でオフ）。`golist/` が無ければ `.go` walk せず return。
+3. `run_linters`: `!use_cache && dep_source` のとき speculate 開始 → `load_graph` →
+   fingerprint 一致なら `typecheck_roots_with_prebuilt_seed`。
+4. `GUFF_SEED_SPECULATE=0` で無効化（計測用）。
+
+**実測（prometheus `./...`、seed-hot、`--no-cache`、A/B 交互）:**
+
+| 指標 | A（speculate off） | B（on / HIT） |
+|---|---:|---:|
+| typecheck_roots | 0.83〜0.89s | **0.49〜0.54s**（seed prebuilt 0.00s） |
+| wall | 2.75〜3.01s | **2.74〜2.84s**（中央付近 −0.15〜0.25s） |
+| peak RSS | ~3.56 GiB | ~3.55 GiB（≤ 1.20×） |
+| `-j 1` wall | 4.84s | **4.33s**（−0.51s） |
+
+空 cold: `seed speculate skip`、A/B wall 差は誤差帯（3.47/3.45 等）。warm（issue cache on）は
+speculate しない。findings 20 件 byte 同一（warm 比・HIT 3 回・5 回決定性・`-j 1`）。
+
+**検証:** `cargo test -p guff-packages --release --lib` PASS / `cargo test -p guff-lint --release --lib` PASS /
+tsdb regress PASS。full regress は計測時 load avg ~3 で wall ノイズ（3.7s）；空 cold 経路は
+speculate 無しなので C-7 非関与。静かなら baseline 帯に戻る想定。
+
 ## C-8 — メモリ削減で並列度を上げる
 
-**要旨:** cold の peak RSS が **7.6GB**。これが並列度の上限を決めている可能性があります
+**要旨（着手時）:** cold の peak RSS が **7.6GB**。これが並列度の上限を決めている可能性
 （regress の full プロファイルが 18GiB でキルする設定なのはそのため）。
-RSS を半減できれば、seed の wave をもっと広く取れる／worker を増やせる可能性があります。
 
-**先にやること:** **RSS の内訳を測る。** 何が 7.6GB を占めているのかが分かっていません。
-候補は「型アリーナ」「AST」「SSA (buildir)」「ソースバイト」。
+**2026-07-29 時点の実態:** lazy import members（§B-2 follow-up）で full RSS が
+**7.37 → 3.76 GiB**、B-5 でさらに **~3.74 GiB**。§7 の目標 6.0GB は**既達**。
+「半減して並列度を上げる」動機は薄れた。残る作業は**内訳の記録**（今後 C-1 等の
+優先度判断用）だけ。
+
+**先にやること:** **RSS の内訳を測る。** 候補は「型アリーナ」「AST」「SSA (buildir)」「ソースバイト」。
 `heaptrack`（Linux）や Instruments の Allocations（macOS）で内訳を取り、
 **このファイルに表として記録する**ところまでを 1 タスクにしてください。
-それだけで、B-5 / C-1 / C-6 のどれをやるべきかが決まります。
 
 ---
 
@@ -3372,6 +3436,7 @@ RSS を半減できれば、seed の wave をもっと広く取れる／worker �
 | buildir のパッケージ単位スキップ | 第1弾「buildir 条件スキップ判定」。staticcheck + nilnesserr 有効下では不可 |
 | format の shared-read | 第1弾 §1.7。試して**逆に悪化**した |
 | **A-2**（`Scanner` の `src.to_vec()` 除去） | **samply 実測で `Scanner::init` の inclusive が合計 CPU 0.024s（0.12%）**。甘い上限でも 0.096s＝wall 換算 0.016s で §0-14 の基準を大きく下回る。§A-2 の NO-GO 節に内訳あり |
+| **C-6**（`Ident` の `Mutex` 除去） | Ident 帰属 Mutex CPU ~0.3–0.5s → wall ≲0.08s。§0-14。§C-6 |
 
 **新しく「やらない」と判定したものは、必ずこの表に理由つきで追記してください。**
 それが次のエージェントの時間を守ります。
