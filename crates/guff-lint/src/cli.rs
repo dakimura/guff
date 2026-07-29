@@ -20,6 +20,7 @@ use crate::{
     LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputSpec, PrinterOptions,
     RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
+use crate::watch::run_watch;
 
 #[derive(Parser)]
 #[command(name = "guff", about = "Run Go linters through the guff analysis pipeline")]
@@ -153,6 +154,12 @@ struct RunArgs {
     /// Apply suggested fixes to source files and omit fixed issues from output.
     #[arg(long)]
     fix: bool,
+
+    /// Stay running and re-lint when `.go` / `go.mod` files change (C-2).
+    /// Keeps the package graph and issue-cache hashes in memory; does not
+    /// retain type/SSA arenas between passes (idle RSS stays warm-sized).
+    #[arg(long)]
+    watch: bool,
 }
 
 #[derive(Parser)]
@@ -394,7 +401,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         );
     }
 
-    run_and_print(&LintOptions {
+    let opts = LintOptions {
         patterns: args.patterns,
         analyzers,
         sequential,
@@ -413,7 +420,12 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         formatters,
         path_mode,
         path_prefix: loaded.path_prefix,
-    })
+    };
+    if args.watch {
+        run_watch(&opts)
+    } else {
+        run_and_print(&opts)
+    }
 }
 
 /// Build the `guff run` formatter-diagnostics config from `formatters` config.

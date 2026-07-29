@@ -68,6 +68,7 @@ pub mod pointer;
 pub mod predicates;
 pub mod recording;
 pub mod resolver;
+pub mod retained;
 pub mod return_check;
 pub mod scope;
 pub mod selection;
@@ -176,6 +177,7 @@ pub use predicates::{
 };
 pub use r#struct::{new_struct, struct_field, struct_num_fields, struct_tag, Struct};
 pub use resolver::DeclInfo;
+pub use retained::{account_info, account_typecheck_arenas, RetainedBytes};
 pub use scope::{
     insert as scope_insert, lookup as scope_lookup, lookup_chain, lookup_ignoring_case, new_scope,
     Scope,

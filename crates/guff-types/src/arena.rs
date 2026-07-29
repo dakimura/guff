@@ -276,6 +276,11 @@ impl<T: Clone> Layered<T> {
             overlay: Vec::new(),
         }
     }
+
+    /// Borrow the shared base and owned overlay (RSS attribution, C-8).
+    pub(crate) fn parts(&self) -> (&Arc<Vec<T>>, &Vec<T>) {
+        (&self.base, &self.overlay)
+    }
 }
 
 /// Backing data for each [`TypeId`]. One variant per Go type kind.
@@ -762,5 +767,173 @@ impl PackageArena {
             let id = self.id_at(i);
             (self.get(id).path() == path).then_some(id)
         })
+    }
+}
+
+// ---- RSS attribution (PERF_TASKS_V2 C-8) ------------------------------------
+
+impl TypeArena {
+    /// Charge this arena's slot storage into `acct` (Arc base deduped).
+    pub fn account_retained(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, false);
+    }
+
+    /// Owned overlay only (SSA incremental cost on top of a shared base).
+    pub fn account_overlay_only(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, true);
+    }
+
+    fn account_retained_inner(&self, acct: &mut crate::retained::RetainedBytes, overlay_only: bool) {
+        use crate::retained::{account_arc_map_approx, account_arc_vec_slots, account_owned_map_approx};
+        use std::mem::size_of;
+
+        let (base, overlay) = self.types.parts();
+        if overlay_only {
+            acct.type_slots = acct
+                .type_slots
+                .saturating_add(overlay.capacity().saturating_mul(size_of::<TypeData>()));
+        } else {
+            account_arc_vec_slots(
+                &mut acct.seen_ptrs,
+                base,
+                overlay.capacity(),
+                &mut acct.type_slots,
+            );
+            account_arc_map_approx(&mut acct.seen_ptrs, &self.intern_base, &mut acct.intern_tables);
+        }
+        account_owned_map_approx(&self.intern_overlay, &mut acct.intern_tables);
+    }
+
+    /// Bytes in the owned overlay only (no Arc base).
+    pub fn overlay_slot_bytes(&self) -> usize {
+        let (_, overlay) = self.types.parts();
+        overlay.capacity().saturating_mul(std::mem::size_of::<TypeData>())
+    }
+}
+
+impl ObjectArena {
+    pub fn account_retained(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, false);
+    }
+
+    pub fn account_overlay_only(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, true);
+    }
+
+    fn account_retained_inner(&self, acct: &mut crate::retained::RetainedBytes, overlay_only: bool) {
+        use crate::retained::account_arc_vec_slots;
+        use std::mem::size_of;
+
+        let (base, overlay) = self.objects.parts();
+        let name_len = |obj: &ObjectData| -> usize {
+            match obj {
+                ObjectData::Var(v) => v.name().len(),
+                ObjectData::Func(f) => f.name().len(),
+                ObjectData::TypeName(t) => t.name().len(),
+                ObjectData::Const(c) => c.name().len(),
+                ObjectData::Nil(n) => n.name().len(),
+                ObjectData::Builtin(b) => b.name().len(),
+                ObjectData::PkgName(p) => p.name().len(),
+            }
+        };
+        if overlay_only {
+            acct.object_slots = acct
+                .object_slots
+                .saturating_add(overlay.capacity().saturating_mul(size_of::<ObjectData>()));
+            for obj in overlay.iter() {
+                acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+            }
+            return;
+        }
+        let first = account_arc_vec_slots(
+            &mut acct.seen_ptrs,
+            base,
+            overlay.capacity(),
+            &mut acct.object_slots,
+        );
+        if first {
+            for obj in base.iter() {
+                acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+            }
+        }
+        for obj in overlay.iter() {
+            acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+        }
+    }
+
+    pub fn overlay_slot_bytes(&self) -> usize {
+        let (_, overlay) = self.objects.parts();
+        overlay.capacity().saturating_mul(std::mem::size_of::<ObjectData>())
+    }
+}
+
+impl ScopeArena {
+    pub fn account_retained(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, false);
+    }
+
+    pub fn account_overlay_only(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, true);
+    }
+
+    fn account_retained_inner(&self, acct: &mut crate::retained::RetainedBytes, overlay_only: bool) {
+        use crate::retained::account_arc_vec_slots;
+        use crate::scope::Scope;
+        use std::mem::size_of;
+
+        let (base, overlay) = self.scopes.parts();
+        if overlay_only {
+            acct.scope_slots = acct
+                .scope_slots
+                .saturating_add(overlay.capacity().saturating_mul(size_of::<Scope>()));
+            return;
+        }
+        account_arc_vec_slots(
+            &mut acct.seen_ptrs,
+            base,
+            overlay.capacity(),
+            &mut acct.scope_slots,
+        );
+    }
+}
+
+impl PackageArena {
+    pub fn account_retained(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, false);
+    }
+
+    pub fn account_overlay_only(&self, acct: &mut crate::retained::RetainedBytes) {
+        self.account_retained_inner(acct, true);
+    }
+
+    fn account_retained_inner(&self, acct: &mut crate::retained::RetainedBytes, overlay_only: bool) {
+        use crate::retained::account_arc_vec_slots;
+        use std::mem::size_of;
+
+        let (base, overlay) = self.packages.parts();
+        let path_bytes = |p: &Package| p.path().len().saturating_add(p.name().len());
+        if overlay_only {
+            acct.package_slots = acct
+                .package_slots
+                .saturating_add(overlay.capacity().saturating_mul(size_of::<Package>()));
+            for p in overlay.iter() {
+                acct.name_bytes = acct.name_bytes.saturating_add(path_bytes(p));
+            }
+            return;
+        }
+        let first = account_arc_vec_slots(
+            &mut acct.seen_ptrs,
+            base,
+            overlay.capacity(),
+            &mut acct.package_slots,
+        );
+        if first {
+            for p in base.iter() {
+                acct.name_bytes = acct.name_bytes.saturating_add(path_bytes(p));
+            }
+        }
+        for p in overlay.iter() {
+            acct.name_bytes = acct.name_bytes.saturating_add(path_bytes(p));
+        }
     }
 }

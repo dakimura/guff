@@ -15,18 +15,23 @@
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
-> C-7（seed speculate）**。
+> C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
 > 各タスク節末尾の `### DONE` / `### NO-GO` に実測値があります。
 >
-> **次は C-2（warm デーモン）/ C-8（RSS 内訳）など。B-10 は `waited=0` の間 NO-START。B-9 は原則着手しない。**
+> **次は C-1（AST・要合意）や B-10（`waited>0` まで NO-START）など。B-9 は原則着手しない。**
+> **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
+> 編集は seed 再構築が残り ~1.35s。ExportSeed 保持 follow-up は当面やらない（§C-2）。
+> **`--watch` なしの one-shot は従来どおり**（warm 0.21s 実測維持）。
 > **C-7 DONE:** seed-hot `--no-cache` で typecheck −0.35s / wall −0.15〜0.25s（空 cold は効かない）。
+> **C-8 DONE:** peak RSS ~3.46 GiB。内訳は型アリーナ ~1.0 GiB + AST est ~0.4 GiB + Info ~0.2 GiB。
+> SSA incremental は無視できる（lazy import members 後）。`GUFF_DEBUG_RSS=1` で再計測可。
 > **B-5 の Slice インターンは revive `var-declaration` の TypeId`==` 依存で findings が変わるため未実装。**
 > **P0-3 は条件付き実装済みだが、prometheus（`default: standard` → `ineffassign` 有効）では
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
-> **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.7 GiB（目標 6GB は既達）。**
+> **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -472,20 +477,22 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
 | C-1 | AST アリーナ化 + 文字列インターン | cold | 0.3〜1.0s? | **特大** | **最高** |
-| C-2 | 常駐デーモン / watch モード | warm | 0.41s→~0.05s | **特大** | 中 |
+| ~~C-2~~ | ~~常駐デーモン / watch モード~~ **DONE（MVP）**。`guff run --watch`。再パス 0.07〜0.10s / 編集 ~1.35s（one-shot 同条件 ~1.95s）。型/SSA 非保持。§C-2 | warm | **再パス −0.11s** | 大 | 中 |
 | C-3 | `go list` の自前置き換え | cold/warm | ~1.3s | **特大** | **最高** |
 | C-4 | gocritic 106 チェッカーの walk 融合 | cold | 0.0〜0.1s? | 大 | 中 |
 | C-5 | issue cache を analyzer 単位の粒度に | warm | ? | 大 | **高** |
 | ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
 | ~~C-7~~ | ~~依存 seed のプリウォーム（バックグラウンド投機実行）~~ **DONE**（seed-hot `--no-cache` typecheck −0.35s / wall −0.15〜0.25s。§C-7） | cold seed-hot | **−0.15〜0.25s** | 大 | 中 |
-| C-8 | メモリ削減で並列度を上げる | cold | ?（**RSS は既に ~3.7 GiB**。内訳調査のみ残る） | 大 | 中 |
+| ~~C-8~~ | ~~メモリ削減で並列度を上げる~~ **DONE（内訳のみ）**。peak ~3.46 GiB。主因は型アリーナ (~1.0 GiB) + AST (~0.4) + Info (~0.2)。SSA incremental ≈0。§C-8 | cold | 内訳記録 | 小 | ゼロ |
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
 **2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
-**C-2（warm デーモン）** / C-8（RSS 内訳のみ）。**C-7 DONE**。**C-6 NO-GO**。
+**C-1（AST・ユーザー合意後）**。**C-2 / C-7 / C-8 DONE**。**C-6 NO-GO**。
 P0-3 DONE。B-5 DONE（Slice 以外）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b DONE。
 B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（RSS 7.4→3.8 GiB）。B-7 NO-GO。B-4 A 完了。
+RSS をさらに詰めるなら **C-1（AST）** か **B-5 Slice（findings 合意後）** — 内訳は §C-8。
+Watch のコンテンツ編集をさらに詰めるなら **セッション内 ExportSeed 保持**（RSS ↔ wall トレードオフ・要合意）。
 
 > **§1.3-post の「余裕 0.96s」問題は S-3 で決着しました。そのまま進めて構いません。**
 > seed-hot では format_checks（1.78s 重畳）に対して直列 phase の余裕が 0.96s しかなく、
@@ -3270,6 +3277,56 @@ prometheus は gci + gofumpt + goimports の 3 つなので、**同じ 725 フ�
 **設計メモ:** 既存の dep-hash レジストリ（`crates/guff-runner/src/cache.rs`）が
 すでに「何が変わったか」を決定的に判定できるので、その仕組みをメモリ上で回すのが自然です。
 
+### DONE（2026-07-29）— **MVP: `guff run --watch`。再パス 0.07〜0.10s。型/SSA は保持しない。**
+
+**入れたもの（`--watch` 時のみ。デフォルト one-shot は従来どおり `run_and_print`）:**
+
+1. `guff run --watch`（`--fix` とは併用不可）。
+2. `IssueCache::invalidate_paths` — dirty ファイルの content hash を落とし、
+   該当パッケージの `dep_self_hashes` だけ再計算。
+3. `prepare_linter_run` / `run_linters_on_graph` — メタデータグラフ＋キャッシュを
+   セッションで再利用（`load_graph` は構造変化時だけ）。one-shot も内部的にこれを呼ぶが、
+   挙動・findings・warm wall は変更前と同値（実測 0.21s / ~0.14 GiB）。
+4. `notify-debouncer-mini` — `.go` / `go.mod` 監視。追加・削除・mod 変更は
+   フル `go list` やり直し。
+5. `GUFF_WATCH_MAX_ITERS=N` — 計測用（非公開）。
+
+**意図的にやらなかったこと（RSS 防衛）:** 型アリーナ / SSA をパス間で保持しない。
+idle RSS を warm 級（~0.15 GiB）に保つ。コンテンツ編集時の seed 再構築（~0.6s）は
+残る — それを潰すにはセッション内 `ExportSeed` 保持が要り、RSS が cold 級に戻る。
+
+**実測（prometheus `./...`、Darwin arm64、disk cache hot）:**
+
+| シナリオ | wall | peak RSS | 備考 |
+|---|---:|---:|---|
+| one-shot warm（変更なし） | **0.21s** | ~0.14 GiB | 回帰なし（変更前と同値） |
+| `--watch` pass #1（初回・全 hit） | **0.10s** | — | format 非重畳でも one-shot より速い |
+| `--watch` pass #2（mtime only） | **0.07s** | ~0.15 GiB | 全 hit・`load_graph` スキップ |
+| `--watch` pass #2（1 ファイル編集） | **~1.35s** | ~2.6 GiB | 65 miss → seed 0.57s + analyze |
+| one-shot（同 1 ファイル編集） | **~1.95s** | ~2.8 GiB | watch より **+0.6s**（主に load_graph） |
+
+findings: warm one-shot ↔ `--watch` MAX_ITERS=1 で **byte 同一**。
+tsdb regress PASS。one-shot wall/RSS 悪化なし。
+
+### 放置（2026-07-30）— **ExportSeed 保持などの follow-up は当面やらない**
+
+ユーザー判断: コード量の割に効果（とくに編集パス）が小さいので、**この MVP のまま放置**。
+再開するときの前提メモ:
+
+| 項目 | 内容 |
+|---|---|
+| 既定 CLI | `--watch` **なし** → `run_and_print`。挙動・warm 0.21s は C-2 前と同じ |
+| MVP の勝ち分 | 無変更再パス 0.21→0.07〜0.10s。編集は 1.95→1.35s（seed 再構築が残る） |
+| やらなかった本丸 | セッション内 `ExportSeed` / 型・SSA 保持 → 編集を 0.05s 級に近づける |
+| やらなかった理由 | idle RSS が cold 級（数 GiB）に戻る。§0-2 とのトレードオフで合意が要る |
+| 再開条件 | 「watch 編集を本気で速くする」「idle RSS 増を許容する」を明示合意してから |
+| 入口 | `crates/guff-lint/src/watch.rs` / `IssueCache::invalidate_paths` / §C-2 本節 |
+
+**残り follow-up（合意後・別コミット）:** `ExportSeed`（と必要なら dirty 以外の
+`TypecheckArtifacts`）をセッション保持。その時点で idle RSS が跳ねる。
+
+---
+
 ## C-3 — `go list` の自前置き換え
 
 **要旨:** `go.mod` / モジュールキャッシュを自前で読み、`go list` サブプロセスを廃止する。
@@ -3417,6 +3474,62 @@ speculate 無しなので C-7 非関与。静かなら baseline 帯に戻る想�
 **先にやること:** **RSS の内訳を測る。** 候補は「型アリーナ」「AST」「SSA (buildir)」「ソースバイト」。
 `heaptrack`（Linux）や Instruments の Allocations（macOS）で内訳を取り、
 **このファイルに表として記録する**ところまでを 1 タスクにしてください。
+
+### DONE（2026-07-29）— **内訳記録。peak ~3.46 GiB。主因は型アリーナ + AST。SSA は無視可。**
+
+**入れたもの（計測用。既定オフ）:**
+
+1. `GUFF_DEBUG_RSS=1` — typecheck / analyze 直後にカテゴリ別の retained 概算を stderr へ。
+2. `guff_types::RetainedBytes` — `Layered` の Arc base をポインタ identity で dedup。
+3. `guff_packages::report_packages` — 型アリーナ / Info / source / AST ノード概算。
+4. `buildir` — SSA **incremental**（overlay + 粗く SSA funcs）の peak サンプル。
+   共有 seed base は post-typecheck 側で既に計上済みなので除外。
+
+Instruments / heaptrack の代わりに**カテゴリ帰属**にした（C-8 が欲しい切断面そのもの）。
+ピーク RSS は従来どおり `/usr/bin/time -lp`。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、Darwin arm64。
+load avg はやや高めだったが RSS は安定）:**
+
+| 指標 | 値 | 備考 |
+|---|---:|---|
+| peak RSS（`time -lp`） | **3.46 GiB**（3,717,283,840 B） | B-5 後の ~3.7 GiB 帯と一致 |
+| attributed sum（下界） | **1.62 GiB**（1662 MiB） | スロット + 概算。未計上あり（下記） |
+| findings | 20 | 計測のみ。byte 同一性は非対象 |
+
+**カテゴリ内訳（post typecheck = post analyze。analyze はパッケージを trim しない）:**
+
+| カテゴリ | MiB | peak RSS 比 | 次に効くタスク |
+|---|---:|---:|---|
+| **型アリーナ slots（types）** | **800** | 23% | B-5 Slice（合意後）/ C-1 周辺 |
+| 型アリーナ objects | 148 | 4% | （上に従属） |
+| 型アリーナ scopes | 49 | 1% | target から scopes を落とせるなら小勝ち |
+| 型アリーナ packages + names + intern | 36 | 1% | — |
+| **型まわり合計** | **1032** | **29%** | |
+| **Info maps** | **191** | 5% | マップ粒度・寿命（高リスク） |
+| **AST envelope 概算**（2.26M nodes × ~192B） | **414** | 12% | **C-1** |
+| AST 文字列 | 8 | — | A-3 系の延長 |
+| **ソースバイト**（1101 files, Arc dedup） | **16** | 0.5% | 触る価値なし |
+| **SSA incremental peak**（66 buildir） | **≲1** | ~0% | **これ以上の SSA RSS 攻めは NO-GO** |
+
+**読み方:**
+
+- attributed（1.62 GiB）≪ peak（3.46 GiB）の差 ~1.8 GiB は、主に
+  (1) `TypeData` 内の `Vec` ヒープ（Interface methods 等。`size_of` スロットに含まれない）、
+  (2) HashMap バケットの甘め見積もり、(3) mimalloc フリーリスト / 一時バッファ /
+  rayon スタック、(4) seed 構築中の一時アリーナ。
+  **順序付けには十分な分解能**（型 ≫ AST ≫ Info ≫ source ≫ SSA）。
+- lazy import members 後、**SSA は peak RSS の主因ではない**。C-8 着手時の
+  「buildir がアリーナ丸ごと clone で RSS を支配」仮説は既に解消済み。
+- 並列度をさらに上げる動機は薄い（目標 6 GiB 既達）。RSS を詰めるなら
+  **C-1（AST）** か **B-5 Slice（findings 合意）**。壁時計を詰めるなら C-2 / B-10 条件待ち。
+
+**再計測:**
+
+```bash
+GUFF_CACHE=$(mktemp -d) GUFF_DEBUG_RSS=1 GUFF_DEBUG_CACHE=1 \
+  /usr/bin/time -lp target/release/guff run --no-cache -c .golangci.yml ./...
+```
 
 ---
 

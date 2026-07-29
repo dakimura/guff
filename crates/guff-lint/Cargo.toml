@@ -44,6 +44,7 @@ guff-revive = { path = "../guff-revive" }
 guff-fmt = { path = "../guff-fmt" }
 guff-plugin = { path = "../guff-plugin" }
 rayon = "1"
+notify-debouncer-mini = "0.5"
 
 [dev-dependencies]
 tempfile = "3"

@@ -14,7 +14,7 @@
 //! typecheck / export-data sharing / `go list` metadata cache remain DEFERRED
 //! (R24 items 2–4).
 
-use crate::hash::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io;
@@ -402,6 +402,68 @@ impl IssueCache {
         self.dir.join(format!(
             "dep_hash_registry.v{DEP_HASH_REGISTRY_SCHEMA}.{graph_key}.bin"
         ))
+    }
+
+    /// Drop in-memory content hashes for `paths` and refresh `dep_self_hashes`
+    /// for every package that compiles one of those files.
+    ///
+    /// Used by `guff run --watch` after a content-only edit so the next
+    /// [`Self::get_cached`] recomputes `NeedAllDeps` keys (dirty package + every
+    /// root that lists it in `deps`) without re-hashing the whole module.
+    /// Prefer over-invalidating: unknown owners still clear file/pkg hash maps.
+    pub fn invalidate_paths(
+        &mut self,
+        paths: &[PathBuf],
+        packages: &[Arc<Package>],
+    ) -> Result<(), CacheError> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        let mut dirty: HashSet<PathBuf> = HashSet::default();
+        for p in paths {
+            dirty.insert(p.clone());
+            if let Ok(c) = fs::canonicalize(p) {
+                dirty.insert(c);
+            }
+        }
+
+        {
+            let mut guard = self.file_hashes.lock().unwrap();
+            guard.retain(|p, _| {
+                if dirty.contains(p) {
+                    return false;
+                }
+                if let Ok(c) = fs::canonicalize(p) {
+                    if dirty.contains(&c) {
+                        return false;
+                    }
+                }
+                true
+            });
+        }
+        // Mode hashes fold dep self-hashes; safest to drop all and recompute
+        // on demand after registry entries below are refreshed.
+        self.pkg_hashes.lock().unwrap().clear();
+
+        for pkg in packages {
+            let touches = pkg.compiled_go_files.iter().any(|f| {
+                dirty.contains(f)
+                    || fs::canonicalize(f)
+                        .map(|c| dirty.contains(&c))
+                        .unwrap_or(false)
+            });
+            if !touches {
+                continue;
+            }
+            let h = self.self_hash(pkg)?;
+            if !pkg.pkg_path.is_empty() {
+                self.dep_self_hashes.insert(pkg.pkg_path.clone(), h.clone());
+            }
+            if !pkg.id.is_empty() {
+                self.dep_self_hashes.insert(pkg.id.clone(), h);
+            }
+        }
+        Ok(())
     }
 
     /// Self-only content hash of a package (its own compiled files).
@@ -1041,6 +1103,32 @@ mod tests {
         c1.put(&pkg, fset, HashMode::NeedAllDeps, &[]).unwrap();
         let c2 = IssueCache::open(tmp.path().to_path_buf(), "salt-b").unwrap();
         assert!(c2.get(&pkg, fset, HashMode::NeedAllDeps).is_err());
+    }
+
+    #[test]
+    fn invalidate_paths_forces_miss_without_new_cache() {
+        let tmp = TempDir::new().unwrap();
+        let mut cache = IssueCache::open(tmp.path().to_path_buf(), "salt-v1").unwrap();
+        let pkg_dir = tmp.path().join("src");
+        fs::create_dir_all(&pkg_dir).unwrap();
+        let pkg = pkg_with_file(&pkg_dir, "a.go", "package p\n");
+        let fset = pkg.fset.as_ref().unwrap();
+        cache
+            .set_dep_hashes(std::slice::from_ref(&pkg))
+            .unwrap();
+        cache
+            .put(&pkg, fset, HashMode::NeedAllDeps, &[])
+            .unwrap();
+        assert!(cache.get(&pkg, fset, HashMode::NeedAllDeps).is_ok());
+
+        fs::write(pkg.compiled_go_files[0].as_path(), "package p\n// changed\n").unwrap();
+        cache
+            .invalidate_paths(&pkg.compiled_go_files, std::slice::from_ref(&pkg))
+            .unwrap();
+        assert!(
+            cache.get(&pkg, fset, HashMode::NeedAllDeps).is_err(),
+            "content edit + invalidate_paths must miss"
+        );
     }
 
     #[test]

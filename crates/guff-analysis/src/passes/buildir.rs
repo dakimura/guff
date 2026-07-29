@@ -102,6 +102,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    if std::env::var_os("GUFF_DEBUG_RSS").is_some() {
+        sample_ssa_rss(pass.pkg().pkg_path.as_str(), &built.prog);
+    }
+
     let src_funcs = collect_src_funcs(&built.prog, built.pkg);
     Ok(Some(Box::new(BuildIrResult {
         prog: Arc::new(built.prog),
@@ -109,6 +113,58 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         type_pkg: built.type_pkg,
         src_funcs,
     })))
+}
+
+/// One-shot SSA incremental size sample (PERF_TASKS_V2 C-8). Shared type-arena
+/// bases are already counted in the post-typecheck report; here we charge the
+/// owned overlays + SSA function arena so concurrent peak ≈ this × workers.
+fn sample_ssa_rss(pkg_path: &str, prog: &Program) {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    static SAMPLED: AtomicBool = AtomicBool::new(false);
+    static PEAK_INCR: AtomicU64 = AtomicU64::new(0);
+    static SAMPLES: AtomicU64 = AtomicU64::new(0);
+
+    let mut acct = guff_types::RetainedBytes::default();
+    prog.type_arena.account_overlay_only(&mut acct);
+    prog.object_arena.account_overlay_only(&mut acct);
+    prog.package_arena.account_overlay_only(&mut acct);
+    // ScopeArena is emptied in snapshot_for_ssa.
+    let fn_bytes = prog.functions.len().saturating_mul(512); // rough Function envelope
+    let incr = acct.types_total().saturating_add(fn_bytes);
+    let n = SAMPLES.fetch_add(1, Ordering::Relaxed) + 1;
+    let peak = {
+        let mut cur = PEAK_INCR.load(Ordering::Relaxed);
+        while incr as u64 > cur {
+            match PEAK_INCR.compare_exchange_weak(
+                cur,
+                incr as u64,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(v) => cur = v,
+            }
+        }
+        PEAK_INCR.load(Ordering::Relaxed)
+    };
+
+    // Print the first sample in detail; always refresh a running peak line
+    // every 16th package so the final peak is visible without flooding.
+    if !SAMPLED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "guff:   ssa sample pkg={pkg_path} incremental≈{:.1}MiB \
+             (type/obj/pkg overlays + ~SSA funcs; shared seed base excluded)",
+            incr as f64 / (1024.0 * 1024.0),
+        );
+    }
+    if n % 16 == 0 || n == 1 {
+        eprintln!(
+            "guff:   ssa incremental peak≈{:.1}MiB across {n} buildir pkgs \
+             (× concurrency ≈ additive RSS during analyze)",
+            peak as f64 / (1024.0 * 1024.0),
+        );
+    }
 }
 
 fn buildir_analyzer_impl() -> Analyzer {

@@ -18,6 +18,7 @@ mod load_mode;
 mod offline;
 mod package;
 mod preset;
+mod rss;
 mod seed_cache;
 mod speculate;
 mod typecheck;
@@ -33,6 +34,7 @@ pub use package::{
     DriverResponse, Error, ErrorKind, Module, ModuleError, Package, TypecheckArtifacts,
 };
 pub use preset::load_for_go_analysis;
+pub use rss::{attribute_packages, enabled as rss_enabled, report_packages, PackageRssReport};
 pub use speculate::{start_seed_speculation, SpeculativeSeed, SpeculativeSeedJob};
 pub use typecheck::{
     needs_typecheck, typecheck_package, typecheck_package_with_seed, typecheck_packages,

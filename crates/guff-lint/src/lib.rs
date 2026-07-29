@@ -16,6 +16,7 @@ mod nolint;
 mod pathutil;
 mod registry;
 mod settings;
+mod watch;
 
 pub use config::{
     backup_path, discover_config, load_config, migrate_config_file, normalize_linter_name,
@@ -322,33 +323,37 @@ fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
 /// Load packages and run analyzers. Returns diagnostics and non-zero exit hint.
 pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     guff_runner::init_rayon_global_stack();
+    let prepared = prepare_linter_run(opts)?;
+    run_linters_on_graph(opts, &prepared.graph, prepared.cache, prepared.speculate_job)
+}
+
+/// Metadata-only package graph (`go list`), shared by one-shot and `--watch`.
+#[derive(Clone)]
+pub struct MetadataGraph {
+    pub roots: Vec<std::sync::Arc<guff_packages::Package>>,
+    pub all_packages: Vec<std::sync::Arc<guff_packages::Package>>,
+}
+
+pub(crate) struct PreparedLint {
+    pub(crate) graph: MetadataGraph,
+    pub(crate) cache: Option<std::sync::Arc<IssueCache>>,
+    pub(crate) speculate_job: Option<guff_packages::SpeculativeSeedJob>,
+}
+
+fn metadata_and_full_cfg(opts: &LintOptions) -> (Config, Config, LoadMode, bool, bool) {
     let mut build_flags = Vec::new();
     if !opts.build_tags.is_empty() {
         build_flags.push(format!("-tags={}", opts.build_tags.join(",")));
     }
     let sequential = opts.sequential || opts.concurrency == Some(1);
-
-    // Lazy load: first resolve package *metadata only* (`go list`, no parsing or
-    // type-checking). This is enough to compute issues-cache keys and decide
-    // which packages actually need work. Full analysis mode is kept separately
-    // for the packages that miss the cache.
     let analysis_mode = load_for_go_analysis();
-    // Metadata mode = analysis mode minus the parse/type-check bits. Enough for
-    // `go list` + cache-key computation; no source is parsed or type-checked.
     let metadata_mode = LoadMode::NEED_NAME
         | LoadMode::NEED_FILES
         | LoadMode::NEED_COMPILED_GO_FILES
         | LoadMode::NEED_IMPORTS
         | LoadMode::NEED_DEPS
         | LoadMode::NEED_EXPORT_FILE
-        // Retain Module.GoVersion across the metadata→typecheck handoff so
-        // analyzers that gate on the module language version (modernize, …)
-        // do not fall back to the hard-coded go1.22 default.
         | LoadMode::NEED_MODULE;
-    // Hybrid source mode (default): type-check third-party dependencies from
-    // source and skip the cold `go list -export` build for them (stdlib still
-    // comes from export data). Opt out with `GUFF_DEP_SOURCE=0`. See
-    // docs/COLD-HYBRID-SOURCE-MODE.md and docs/PURE-SOURCE-TYPECHECK.md.
     let dep_source = dep_source_enabled();
     let meta_cfg = Config {
         mode: metadata_mode,
@@ -366,14 +371,14 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         dep_source,
         ..Config::default()
     };
+    (meta_cfg, full_cfg, analysis_mode, dep_source, sequential)
+}
 
+pub(crate) fn prepare_linter_run(opts: &LintOptions) -> Result<PreparedLint, RunnerError> {
+    let (meta_cfg, _full_cfg, _analysis_mode, dep_source, sequential) = metadata_and_full_cfg(opts);
     let timing = crate::debug::enabled();
     let t0 = std::time::Instant::now();
 
-    // C-7: when issues cache is off (`--no-cache`) but GUFF_CACHE still holds a
-    // previous golist stdout + stdlib-export map, start seed against that
-    // remembered graph while the authoritative `go list` runs. Format already
-    // overlaps on a private 2-thread pool; the global pool is otherwise idle.
     let mut speculate_env = TypecheckEnv::from_env(&meta_cfg.resolved_env(), "gc");
     speculate_env.from_source = dep_source;
     speculate_env.parallel = !sequential;
@@ -395,11 +400,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
             all_packages.len(),
         );
     }
-    let t1 = std::time::Instant::now();
 
-    // Build the cache with a complete dependency-hash registry over *all* loaded
-    // packages (roots + transitive deps) so `NeedAllDeps` hashing is
-    // deterministic and warm runs hit reliably.
     let cache = if opts.use_cache {
         open_issue_cache(opts).map(|mut c| {
             if let Err(err) = c.set_dep_hashes(&all_packages) {
@@ -410,6 +411,32 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     } else {
         None
     };
+
+    Ok(PreparedLint {
+        graph: MetadataGraph {
+            roots,
+            all_packages,
+        },
+        cache,
+        speculate_job,
+    })
+}
+
+/// Analyze a preloaded metadata graph (used by one-shot and `--watch` re-runs).
+///
+/// `speculate_job` is only set on the first cold `--no-cache` path; watch
+/// re-runs pass `None`.
+pub(crate) fn run_linters_on_graph(
+    opts: &LintOptions,
+    graph: &MetadataGraph,
+    cache: Option<std::sync::Arc<IssueCache>>,
+    speculate_job: Option<guff_packages::SpeculativeSeedJob>,
+) -> Result<LintResult, RunnerError> {
+    let (_, full_cfg, analysis_mode, dep_source, sequential) = metadata_and_full_cfg(opts);
+    let timing = crate::debug::enabled();
+    let t1 = std::time::Instant::now();
+    let roots = &graph.roots;
+    let all_packages = &graph.all_packages;
 
     // Partition roots into cache hits (issues restored from disk — no parsing)
     // and misses (need type-checking + analysis). Parallelize lookups: each hit
@@ -493,14 +520,13 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
     env.parallel = !sequential;
-    // P0-3: skip Ident.obj resolution unless an analyzer that reads it is on.
     env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers);
     let prebuilt = speculate_job.and_then(|job| {
-        job.finish_if_matches(&all_packages, &miss_ids)
+        job.finish_if_matches(all_packages, &miss_ids)
             .map(|s| (s.seed, s.fset))
     });
     let miss_roots =
-        typecheck_roots_with_prebuilt_seed(&all_packages, &miss_ids, analysis_mode, &env, prebuilt);
+        typecheck_roots_with_prebuilt_seed(all_packages, &miss_ids, analysis_mode, &env, prebuilt);
     if timing {
         eprintln!(
             "guff: phase typecheck_roots {:.2}s ({} pkgs)",
@@ -508,6 +534,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
             miss_roots.len(),
         );
     }
+    guff_packages::report_packages("post typecheck_roots", &miss_roots);
     let t3 = std::time::Instant::now();
 
     let result = run_on_packages(
@@ -528,6 +555,7 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
             t3.elapsed().as_secs_f64(),
         );
     }
+    guff_packages::report_packages("post analyze", &miss_roots);
 
     if crate::debug::enabled() {
         eprintln!(
@@ -539,8 +567,6 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
         );
     }
 
-    // Package list for output/nolint: type-checked misses (carry the `FileSet`
-    // for fresh diagnostics) plus metadata-only hits (supply source paths).
     let mut packages = miss_roots;
     packages.extend(hit_roots);
 
