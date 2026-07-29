@@ -306,6 +306,32 @@ pub enum ObjectData {
     PkgName(PkgName),
 }
 
+/// B-5 GO/NO-GO: counts of structural types and how many unique shallow keys
+/// they would collapse to under hash-consing. Each pair is `(count, unique)`.
+#[derive(Debug, Clone, Copy)]
+pub struct StructuralDupStats {
+    pub total_types: usize,
+    pub structural: usize,
+    pub unique_structural: usize,
+    pub pointer: (usize, usize),
+    pub slice: (usize, usize),
+    pub array: (usize, usize),
+    pub map: (usize, usize),
+    pub chan: (usize, usize),
+    pub signature: (usize, usize),
+}
+
+impl StructuralDupStats {
+    /// `1 - unique/structural`. Zero when there are no structural types.
+    pub fn dup_rate(&self) -> f64 {
+        if self.structural == 0 {
+            0.0
+        } else {
+            1.0 - (self.unique_structural as f64 / self.structural as f64)
+        }
+    }
+}
+
 impl TypeArena {
     /// Create an empty arena. To get the predeclared basic types as well, use
     /// [`crate::basic::init_universe`] which returns a populated arena plus
@@ -335,6 +361,99 @@ impl TypeArena {
 
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
+    }
+
+    /// Shallow structural-duplicate stats for B-5 GO/NO-GO (Pointer / Slice /
+    /// Array / Map / Chan / Signature only). Keys use child `TypeId`s as-is —
+    /// the same shape the planned intern table would use.
+    pub fn structural_dup_stats(&self) -> StructuralDupStats {
+        use crate::hash::HashMap;
+
+        #[derive(Hash, Eq, PartialEq)]
+        enum Key {
+            Pointer(TypeId),
+            Slice(TypeId),
+            Array { len: i64, elem: TypeId },
+            Map { key: TypeId, elem: TypeId },
+            Chan { dir: crate::chan::ChanDir, elem: TypeId },
+            Signature {
+                params: Option<TypeId>,
+                results: Option<TypeId>,
+                variadic: bool,
+                rparams: Vec<TypeId>,
+                tparams: Vec<TypeId>,
+            },
+        }
+
+        let mut seen: HashMap<Key, u32> = HashMap::default();
+        let mut kind_n = [0usize; 6];
+        let mut kind_unique = [0usize; 6];
+
+        for i in 1..=self.len() {
+            let id = TypeId::from_index(i);
+            let (kind, key) = match self.get(id) {
+                TypeData::Pointer(p) => (0, Key::Pointer(p.elem())),
+                TypeData::Slice(s) => (1, Key::Slice(s.elem())),
+                TypeData::Array(a) => (
+                    2,
+                    Key::Array {
+                        len: a.len(),
+                        elem: a.elem(),
+                    },
+                ),
+                TypeData::Map(m) => (
+                    3,
+                    Key::Map {
+                        key: m.key(),
+                        elem: m.elem(),
+                    },
+                ),
+                TypeData::Chan(c) => (
+                    4,
+                    Key::Chan {
+                        dir: c.dir(),
+                        elem: c.elem(),
+                    },
+                ),
+                TypeData::Signature(s) => (
+                    5,
+                    Key::Signature {
+                        params: s.params(),
+                        results: s.results(),
+                        variadic: s.variadic(),
+                        rparams: s
+                            .recv_type_params()
+                            .map(|l| l.list().to_vec())
+                            .unwrap_or_default(),
+                        tparams: s
+                            .type_params()
+                            .map(|l| l.list().to_vec())
+                            .unwrap_or_default(),
+                    },
+                ),
+                _ => continue,
+            };
+            kind_n[kind] += 1;
+            let e = seen.entry(key).or_insert(0);
+            if *e == 0 {
+                kind_unique[kind] += 1;
+            }
+            *e += 1;
+        }
+
+        let structural: usize = kind_n.iter().sum();
+        let unique_structural: usize = kind_unique.iter().sum();
+        StructuralDupStats {
+            total_types: self.len(),
+            structural,
+            unique_structural,
+            pointer: (kind_n[0], kind_unique[0]),
+            slice: (kind_n[1], kind_unique[1]),
+            array: (kind_n[2], kind_unique[2]),
+            map: (kind_n[3], kind_unique[3]),
+            chan: (kind_n[4], kind_unique[4]),
+            signature: (kind_n[5], kind_unique[5]),
+        }
     }
 
     /// Fold appended types into the shared base so this arena can be shared

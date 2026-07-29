@@ -257,6 +257,31 @@ pub fn typecheck_roots(
                 env.from_source,
             );
         }
+        if acct {
+            if let Some(ref s) = seed {
+                let st = s.types().structural_dup_stats();
+                eprintln!(
+                    "guff:   type arena structural dups (seed): types={} structural={} unique={} \
+                     dup_rate={:.1}%  ptr={}/{} slice={}/{} array={}/{} map={}/{} chan={}/{} sig={}/{}",
+                    st.total_types,
+                    st.structural,
+                    st.unique_structural,
+                    st.dup_rate() * 100.0,
+                    st.pointer.0,
+                    st.pointer.1,
+                    st.slice.0,
+                    st.slice.1,
+                    st.array.0,
+                    st.array.1,
+                    st.map.0,
+                    st.map.1,
+                    st.chan.0,
+                    st.chan.1,
+                    st.signature.0,
+                    st.signature.1,
+                );
+            }
+        }
         // Taken after the seed build so the diff below covers only the target
         // packages. The seed builders drive `Checker` directly and do not touch
         // these counters, but `typecheck_packages` (via `refine`) does, so

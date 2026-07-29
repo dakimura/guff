@@ -340,6 +340,11 @@ impl ExportSeed {
         )
     }
 
+    /// Frozen type arena (B-5 structural-dup measurement).
+    pub fn types(&self) -> &TypeArena {
+        &self.types
+    }
+
     /// Sorted import-cache keys (deterministic; HashMap iteration order is not).
     pub fn sorted_import_paths(&self) -> Vec<String> {
         let mut keys: Vec<String> = self.import_cache.keys().cloned().collect();

@@ -106,8 +106,8 @@ pub use api_predicates::{
     api_identical_ignore_tags, api_implements, api_satisfies,
 };
 pub use arena::{
-    ObjectArena, ObjectData, ObjectId, PackageArena, PackageId, ScopeArena, ScopeId, TypeArena,
-    TypeData, TypeId,
+    ObjectArena, ObjectData, ObjectId, PackageArena, PackageId, ScopeArena, ScopeId,
+    StructuralDupStats, TypeArena, TypeData, TypeId,
 };
 pub use array::{array_elem, array_len, new_array, Array};
 pub use assignments::{assignable_to, AssignableResult};
