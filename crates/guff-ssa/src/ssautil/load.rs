@@ -14,7 +14,7 @@ use guff_packages::TypecheckArtifacts;
 use guff_types::{Checker, Config, PackageId as TypePackageId, TypeCheckError};
 
 use crate::builder::build_package;
-use crate::create::{create_package, imported_type_packages_closure, populate_imported_package_members, populate_package_members};
+use crate::create::{create_package, imported_type_packages_closure, populate_package_members};
 use crate::ids::PackageId;
 use crate::mode::BuilderMode;
 use crate::program::Program;
@@ -66,7 +66,10 @@ pub fn build_package_from_loaded(
 
     let ssa_pkg = create_package(&mut prog, type_pkg);
     populate_package_members(&mut prog, ssa_pkg, &files);
-    populate_imported_package_members(&mut prog, type_pkg);
+    // Import members are created on demand via `ensure_package_member` during
+    // `build_package`. Eager `populate_imported_package_members` used to dominate
+    // buildir CPU (~1.8s) while most imported objects were never referenced
+    // (PERF_TASKS_V2 §B-2 follow-up 2026-07-29).
     build_package(&mut prog, ssa_pkg, &files);
 
     Ok(BuildPackageResult {
@@ -103,7 +106,7 @@ pub fn build_package_for_analysis(
 
     let ssa_pkg = create_package(&mut prog, type_pkg);
     populate_package_members(&mut prog, ssa_pkg, files);
-    populate_imported_package_members(&mut prog, type_pkg);
+    // See comment in `build_package_from_loaded`: lazy import members.
     build_package(&mut prog, ssa_pkg, files);
 
     Ok(BuildPackageResult {
@@ -171,7 +174,7 @@ pub fn build_package_from_source(
 
     let ssa_pkg = create_package(&mut prog, type_pkg);
     populate_package_members(&mut prog, ssa_pkg, &files);
-    populate_imported_package_members(&mut prog, type_pkg);
+    // Lazy import members — see `build_package_from_loaded`.
     build_package(&mut prog, ssa_pkg, &files);
 
     Ok(BuildPackageResult {

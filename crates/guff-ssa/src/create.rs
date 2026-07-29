@@ -548,6 +548,15 @@ pub fn imported_type_packages_closure(
 
 /// Populates SSA members for imported packages (e.g. test stubs registered via
 /// `add_dependency_source`) so cross-package calls resolve during `buildir`.
+///
+/// **Not called by the analysis build path** (`build_package_for_analysis` / 
+/// `build_package_from_loaded` / `build_package_from_source`). Those rely on
+/// [`ensure_package_member`] during `build_package`, which only materializes
+/// members that are actually referenced. Eager population of the full import
+/// closure dominated buildir CPU on prometheus (~1.8s of ~1.9s) while findings
+/// stayed identical when skipped (PERF_TASKS_V2 §B-2 follow-up 2026-07-29).
+///
+/// Kept public for tests / tooling that want every import member present up front.
 pub fn populate_imported_package_members(prog: &mut Program, main_type_pkg: TypePackageId) {
     use crate::hash::{HashMap, HashSet};
 

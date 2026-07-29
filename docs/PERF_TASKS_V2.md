@@ -13,12 +13,13 @@
 > ### 📌 セッションを引き継いだ人はここから
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
-> A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules）**。
-> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
+> A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
+> buildir lazy import members（§B-2 follow-up）**。
+> **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は A-4 / analyze（buildir・revive）など。B-10 は `format_checks waited=0` の間は着手しない。**
+> **次は B-5 / A-9 / misspell など。B-10 は `format_checks waited=0` の間は着手しない。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -381,14 +382,14 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 | `golangci_only` の増分 | **0** |
 | `both` の減少 | **禁止** |
 
-現 baseline（`regress/baseline*.json`、**2026-07-29 B-6 後に再ロック**）:
+現 baseline（`regress/baseline*.json`、**2026-07-29 lazy import members / A-8 後に再ロック**）:
 
 | プロファイル | baseline wall | baseline RSS | findings |
 |---|---:|---:|---|
-| tsdb | **1.430s** | **1,280,819,200** (~1.19 GiB) | both 4 / only 0,0 |
-| full | **3.680s** | **7,370,866,688** (~6.86 GiB) | both 20 / only 0,0 |
+| tsdb | **1.360s** | **1,141,440,512** (~1.06 GiB) | both 4 / only 0,0 |
+| full | **3.360s** | **4,034,396,160** (~3.76 GiB) | both 20 / only 0,0 |
 
-（旧 baseline は tsdb 1.740s / full 4.940s。第2弾の改善をゲートに焼き込んだ。）
+（旧 baseline は tsdb 1.430s / full 3.680s。lazy import members で wall・RSS とも下がった。）
 
 **両プロファイル PASS しなければコミットしない。baseline はユーザー承認まで更新しない**（§0-6）。
 
@@ -436,11 +437,11 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | A-1 | ハッシャを FxHash に差し替え | cold/warm | 0.1〜0.4s? | 中 | **中**（§0-12） |
 | ~~A-2~~ | ~~Scanner の `src.to_vec()` 除去~~ **NO-GO**（`Scanner::init` は合計 CPU 0.024s。§A-2 参照） | — | 0 | — | — |
 | A-3 | トークンごとの `String` 割り当て削減 | cold | 0.1〜0.3s? | 中 | 低 |
-| A-4 | `File::add_line` の Mutex 除去 | cold | 0.05〜0.2s? | 小 | 中 |
+| ~~A-4~~ | ~~`File::add_line` の Mutex 除去~~ **NO-GO**（`-j1` wall 差 ±0.00s。§A-4） | — | 0 | — | — |
 | A-5 | `hex_encode` の `format!` 除去 | warm | 0.01〜0.05s? | 極小 | 極低 |
-| A-6 | `Context::lookup` の `Vec` 割り当て除去 | cold | 0.0〜0.1s? | 小 | 低 |
-| A-7 | `typecheck_one_target` の `Package` 丸ごと clone 除去 | cold | 0.0〜0.1s? | 小 | 中 |
-| A-8 | `target-cpu=native` / PGO ビルド | 全部 | 0.2〜0.7s? | 中 | 低 |
+| ~~A-6~~ | ~~`Context::lookup` の `Vec` 割り当て除去~~ **NO-GO**（lookup 14k 回 ≪ 100万。§A-6） | — | 0 | — | — |
+| ~~A-7~~ | ~~`typecheck_one_target` の `Package` 丸ごと clone 除去~~ **NO-GO**（clone 0.005s。§A-7） | — | 0 | — | — |
+| ~~A-8~~ | ~~`target-cpu=native` / PGO~~ **A-8a NO-GO**（native wall ±0）。**A-8b DONE**（PGO `-j1` −0.28s / 並列 −0.11s。スクリプト常設。baseline 未更新） | 全部 | **−0.11〜0.28s**（PGO） | 中 | 低 |
 | A-9 | 起動コスト（レジストリ構築・設定パース）の計測と削減 | warm | 0.0〜0.05s? | 小 | 低 |
 
 ### Tier B — 構造的（中〜大。必ず GO/NO-GO 計測を先に）
@@ -449,7 +450,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 |---|---|---|---|---|---|
 | ~~B-0~~ | ~~preorder 総時間の計測（B-1 の GO/NO-GO）~~ **DONE** | — | 27.9% と判明 | 小 | ゼロ |
 | ~~B-1~~ | ~~本物の Inspector（フラットイベント列 + 種別マスク）~~ **完了（打ち止め）**。B-1a: wall −0.12s / preorder CPU 2.01→0.86s。**B-1b/c: 並列 wall ±0.00s・`-j 1` −0.08s・preorder CPU 0.88→0.73s**。**B-1d: 実装して計測し NO-GO（走査 −85% でも CPU +0.02s）→ revert** | cold | **実績 −0.12s**（見込み 0.15〜0.25s には届かず。理由は §B-1） | 大 | 中 |
-| B-2 | buildir/SSA の関数単位 遅延構築 | cold | 0.2〜0.5s? | 大 | **高** |
+| ~~B-2~~ | ~~buildir/SSA の関数単位 遅延構築~~ **NO-GO**（消費者は `src_funcs` 全走査）。**follow-up DONE: lazy import members**（eager `populate_imported_package_members` 除去 → buildir 1.81→0.11s / wall −0.27s / RSS 半減） | cold | **−0.27s wall / buildir −94%** | 中 | 中 |
 | ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
 | ~~B-4~~ | ~~revive の `shared_walk` を全ルールに拡大~~ **DONE（A 32 rules）。B/C は触らない** | cold | 誤差帯（revive ~0.75s） | 中 | 中 |
 | B-5 | 型の構造的インターン（hash-consing） | cold | 0.1〜0.3s? | 大 | **高** |
@@ -474,9 +475,10 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → Tier B 残り / analyze（buildir・revive） /
-B-6。B-2 / B-7 は NO-GO。B-4 A 完了。
-（**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s**。
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-5 / A-9 /
+misspell。A-4 / A-6 / A-7 / A-8a は NO-GO。A-8b（PGO）DONE。
+B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（§B-2 follow-up）。B-7 は NO-GO。B-4 A 完了。
+（**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s** → lazy 後 **~2.56〜2.58s seed-hot**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
 wall を狙うなら analyze の callback 中身＝ buildir / revive / misspell へ。詳細は §B-1 末尾）。
 
@@ -1577,6 +1579,37 @@ cold wall ~3.87s / RSS ~7.43GB（A-1 後と同程度。A-3a 単体の wall 効�
 - `Mutex` を `RwLock` に変えるだけ。**書き込みが主なので改善しません。**
 - `unsafe` でロックを外す。
 
+### NO-GO（2026-07-29）— **実装して計測したが wall に出ない。revert。**
+
+**GO/NO-GO 計測（着手前）:** `File::add_line` に `Instant` + Atomic を仕込んで cold prometheus
+`./...` を 1 回: **calls=7,932,985 / 計測 CPU 0.673s（85 ns/call）**。コール数は十分多いが、
+`Instant::now()` 自体が数十 ns なので、この 0.673s は**上限の過大評価**（真の Mutex コストは
+おそらく ~0.2s CPU 前後）。
+
+**実装したこと（2 案とも revert 済み）:**
+
+1. **`Scanner::init` で `set_lines_for_content` → `next` から `add_line` 削除。**
+   追加の全バイト走査が載る。`-j1` で **before 7.62s / after 7.72s** と**悪化**したので即捨て。
+2. **手順書どおりローカル `pending_lines: Vec<i64>` + `File::add_lines` 一括 flush。**
+   `error` / `line_for` / EOF / `parse_file` 終了時に flush。findings byte 一致・
+   `guff-ast` 170/170 PASS・決定性 3/3。
+
+**交互測定（before/after バイナリ、`-j1` ×5、load ~3.2）:**
+
+| | before 中央値 | after 中央値 |
+|---|---:|---:|
+| wall | **7.50s** | **7.50s** |
+| typecheck_roots | 3.81s | 3.80s |
+| seed dep check | 2.70s | 2.69s |
+
+並列 cold も before/after とも 3.6〜3.9s 帯で、after が系統的に速い兆候なし。
+**wall 換算の削減は誤差帯（≪ 0.1s）→ Rule 14 で NO-GO。** コードはすべて revert。
+
+**学び:** Darwin arm64 の無競合 `Mutex` は改行単位でも既に安い。追加パス（案1）は論外で、
+ローカルバッファ（案2）も flush / Vec 成長で相殺されて wall に出ない。
+次に触るなら `position_internal` の**読み**側（S-2 で self 0.34s）の方が余地があるが、
+別タスクとして切り出すこと。
+
 ---
 
 ## A-5 — `hex_encode` の `format!` を除去（**一番簡単。腕慣らしに最適**）
@@ -1687,6 +1720,14 @@ prometheus がどれだけジェネリクスを使っているか不明なので
 - `cargo test --workspace`（`guff-types` のジェネリクステストが本丸）。
 - 両 regress PASS。
 
+### NO-GO（2026-07-29）— **lookup 14,268 回 ≪ 100万。コード未変更。**
+
+prometheus cold `./...` で `Context::lookup` に Atomic カウンタを仕込み計測:
+**calls=14,268 / total_targs=19,209 / avg_targs=1.35**。
+手順書の閾値「100 万回未満なら NO-GO」を 2 桁下回る。
+仮に毎回 `Vec` 確保が 100ns でも上限は ~1.4ms CPU → wall 換算は誤差以下。
+実装せず計測コードのみ revert。
+
 ---
 
 ## A-7 — `typecheck_one_target` の `Package` 丸ごと clone を除去
@@ -1725,6 +1766,13 @@ samply で `Package::clone` が見えなければ **NO-GO**。
   ```bash
   rg -n 'as \*const .* as usize|ptr::eq' crates/guff-packages/src crates/guff-types/src
   ```
+
+### NO-GO（2026-07-29）— **Package::clone 合計 CPU 0.005s。コード未変更。**
+
+`typecheck_one_target` の `(**by_id.get(id)?).clone()` を Instant 計測（prometheus cold）:
+**n=293 / cpu=0.005s / 18 µs/call**。
+手順書の見込みどおり「見た目が悪いだけで実は安い」。wall 換算 ≪ 0.1s → Rule 14 で NO-GO。
+（参考: `GUFF_DEBUG_CACHE=2` の `seed-clone 0.02s` は別経路の seed 組み立てで、この clone は含まない。）
 
 ---
 
@@ -1794,6 +1842,60 @@ RUSTFLAGS="-Cprofile-use=/tmp/pgo-data/merged.profdata" cargo build --release
 
 - PGO ビルドの数字で `--update-baseline` する。**絶対にやらないこと。**
 - `.cargo/config.toml` を CI 確認なしにコミットする。
+
+### NO-GO（2026-07-29）— **A-8a `target-cpu=native` は aarch64-apple-darwin で wall に出ない。**
+
+`.cargo/config.toml` はコミットしない（CI の `cargo build --release` が素で走るため）。
+運用は `RUSTFLAGS='-C target-cpu=native' cargo build --release` を
+`docs/DEVELOPMENT.md` §9.4 に Tips として記載するだけ。
+
+**交互測定（generic vs native バイナリ、seed-hot `GUFF_CACHE`、`--no-cache`、load ~2）:**
+
+並列（既定 `-j`）×3 往復:
+
+| | generic | native |
+|---|---:|---:|
+| wall | 2.90 / 2.91 / 2.93 | 3.46† / 2.96 / 2.92 |
+| analyze | 0.60〜0.61s | 0.60〜0.61s |
+| buildir CPU | 1.91〜1.96s | 1.86〜1.93s |
+
+† 1 本目の 3.46s は X-3 スパイク（format/load 以外は通常帯）。中央値は generic **2.91s** /
+native **2.96s**。
+
+`-j 1` ×5 往復（CPU 差が見えやすい条件）:
+
+| | generic 中央値 | native 中央値 | Δ |
+|---|---:|---:|---:|
+| wall | **5.34s** | **5.39s** | **+0.05s**（native が遅い） |
+
+findings 20 件は generic/native 全ランで **byte 同一**（cksum 一致・3 回以上決定的）。
+`format_checks waited=0.00s` のまま（B-10 着手条件未達）。
+
+**結論:** Apple Silicon では baseline `aarch64` と `native` の差がほぼ無い（または
+メモリ束縛で隠れる）。wall 換算 ≪ 0.1s → Rule 14 で **A-8a は NO-GO**。
+Tips としての `RUSTFLAGS` 記載は残す（x86-64 ローカルでは効く余地がある）。
+**A-8b（PGO）は別途測る**（下の DONE）。
+
+### DONE（2026-07-29）— **A-8b PGO: `scripts/build-pgo.sh` 常設。`-j1` wall −0.28s。baseline 未更新。**
+
+入れたもの:
+
+1. [`scripts/build-pgo.sh`](../scripts/build-pgo.sh) — profile-generate → prometheus cold+warm 訓練
+   → `llvm-profdata merge` → profile-use。guff の findings 非ゼロ終了を許容。
+2. `docs/DEVELOPMENT.md` §9.5 に native / PGO のローカル手順。
+3. **`.cargo/config.toml` は置かない**（CI の素 `cargo build --release` を壊さない）。
+
+**交互測定（generic vs PGO、seed-hot、`--no-cache`、findings byte 同一）:**
+
+| | generic 中央値 | PGO 中央値 | Δ |
+|---|---:|---:|---:|
+| 並列 wall（×3） | 2.85s | **2.74s** | **−0.11s** |
+| `-j 1` wall（×5） | 5.19s | **4.91s** | **−0.28s** |
+| analyze（並列） | 0.55〜0.58s | 0.53s | −0.03〜0.05s |
+| buildir CPU | 1.77〜1.82s | 1.76〜1.83s | 誤差 |
+
+バイナリサイズ: generic 18.1MB → PGO **14.2MB**。
+**`--update-baseline` はしていない**（PGO はローカル手段。ゲートは常に素の release）。
 
 ---
 
@@ -2357,6 +2459,41 @@ rg -n 'buildir' crates/guff-analysis/src/passes/buildir.rs
 3. 高リスク（並列時の内部可変性ロック）に見合う wall 上限が見えない。
 
 **やらない。** buildir を削るなら B-5（型アリーナ共有）や import メンバー生成の絞り込み方向。
+
+### DONE（2026-07-29）— **lazy import members。buildir CPU 1.81s → 0.11s（−94%）。findings byte 一致。RSS 半減。**
+
+B-2（関数単位遅延）は NO-GO のまま。代わりに §B-2 末尾の「import メンバー生成の絞り込み」を実装した。
+
+**変更:** `build_package_for_analysis` / `build_package_from_loaded` /
+`build_package_from_source` から `populate_imported_package_members` の呼び出しを外した。
+import 先メンバーは `build_package` 中の `ensure_package_member` が参照されたものだけ作る。
+関数自体は tests / 明示 eager 用に `pub` のまま残す。
+
+**根拠（GO 判定）:**
+
+1. samply（profiling ビルド）: `member_from_object` inclusive **1.038s** /
+   `build_package_for_analysis` inclusive **1.751s**。呼び出し元はすべて
+   `build_package_for_analysis ← buildir`。
+2. 消費者（`buildir::collect_src_funcs` / staticcheck）は**主パッケージ**の
+   `members` だけを見る。import 側を全生成しても analyzer は触らない。
+3. 交互測定（seed-hot、`--no-cache`、eager vs lazy）:
+
+| | eager 中央値 | lazy 中央値 |
+|---|---:|---:|
+| wall | 2.86s | **2.59s**（−0.27s） |
+| analyze | 0.55〜0.59s | **0.36s** |
+| buildir CPU | **1.81s** | **0.10〜0.11s** |
+
+findings 20 件は eager/lazy・5 回決定性・`-j 1`・seed cold すべて **byte 同一**。
+
+**regress（再ロック済み）:**
+
+| プロファイル | 旧 baseline | 新 baseline wall | 旧 RSS | 新 RSS | findings |
+|---|---:|---:|---:|---:|---|
+| tsdb | 1.430s | **1.360s** | 1.28GB | **1.06GB** | both 4 |
+| full | 3.680s | **3.360s** | 7.37GB | **3.76GB** | both 20 |
+
+`cargo test -p guff-ssa --release` PASS。baseline は 2026-07-29 に再ロック。
 
 ---
 

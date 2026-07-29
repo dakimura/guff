@@ -635,6 +635,30 @@ rm -rf "$CACHE"                         # 一時キャッシュの後片付け�
   「全スレッドの合計 CPU」と「wall」を混同しない（合計 CPU が 6s でも wall は 1s かもしれない）。
 - 計測前に `./scripts/perf-guard.sh` を通す（他プロセスに CPU を食われていると比率まで歪む）。
 
+### 9.5 ローカル向け高速ビルド（`target-cpu=native` / PGO）
+
+**配布・CI・regress baseline には使わない。** CI は素の `cargo build --release` で、
+`.cargo/config.toml` に `target-cpu=native` を書いてコミットすると他マシンや CI で
+不正命令になり得る。
+
+**`target-cpu=native`（都度 `RUSTFLAGS`）:**
+
+```bash
+RUSTFLAGS='-C target-cpu=native' cargo build --release -p guff-lint
+```
+
+2026-07-29 の aarch64-apple-darwin 実測では wall 差は誤差帯（§A-8a NO-GO）。
+x86-64 ローカルでは効く余地がある。
+
+**PGO（Profile-Guided Optimization）:**
+
+```bash
+./scripts/build-pgo.sh
+# → target/release/guff（PGO 済み）。元の generic は target/release/guff.generic.bak
+```
+
+手順の詳細と注意（`--update-baseline` 禁止）は [`PERF_TASKS_V2.md`](PERF_TASKS_V2.md) §A-8。
+
 詳細な計測プロトコル（cold / warm の定義、findings 同一性の検証、GO/NO-GO 判定）は
 [`PERF_TASKS.md`](PERF_TASKS.md) §1〜§2 と [`PERF_TASKS_V2.md`](PERF_TASKS_V2.md) §1〜§2 にある。
 
