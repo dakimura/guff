@@ -381,16 +381,14 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 | `golangci_only` の増分 | **0** |
 | `both` の減少 | **禁止** |
 
-現 baseline（`regress/baseline*.json`）と、**2026-07-27 クリーン環境での実測**:
+現 baseline（`regress/baseline*.json`、**2026-07-29 B-6 後に再ロック**）:
 
-| プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings | 判定 |
-|---|---:|---:|---:|---:|---|---|
-| tsdb | 1.740s | **1.630s** | 1,319,845,888 | **1,293,205,504** | both 4 / only 0,0 | **PASS** |
-| full | 4.940s | **4.770s** | 7,608,352,768 | **7,570,423,808** | both 20 / only 0,0 | **PASS** |
+| プロファイル | baseline wall | baseline RSS | findings |
+|---|---:|---:|---|
+| tsdb | **1.430s** | **1,280,819,200** (~1.19 GiB) | both 4 / only 0,0 |
+| full | **3.680s** | **7,370,866,688** (~6.86 GiB) | both 20 / only 0,0 |
 
-**つまり第2弾の着手時点で、両プロファイルとも green です。**
-最初のタスクに入る前にこの表を再現できることを確認してください。再現できないなら、
-それは**あなたの変更のせいではなく環境のせい**である可能性が高い（→ §1.1）。
+（旧 baseline は tsdb 1.740s / full 4.940s。第2弾の改善をゲートに焼き込んだ。）
 
 **両プロファイル PASS しなければコミットしない。baseline はユーザー承認まで更新しない**（§0-6）。
 
