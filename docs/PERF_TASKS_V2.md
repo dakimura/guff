@@ -12,14 +12,13 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、B-1d**（§B-1 末尾）**、B-2**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-10 以外の Tier B（B-10 は `format_checks waited=0` の間は着手しない）**、
-> または analyze 残り（buildir / revive）。A-1 は完了。
+> **次は A-4 / analyze（buildir・revive）など。B-10 は `format_checks waited=0` の間は着手しない。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -456,7 +455,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~B-3~~ | ~~testifylint の高速化（単価 61ms の解明）~~ **DONE**（原因は `lookup_named_type` の O(nodes × packages) 走査。`cut_vendor` が testifylint の 94%） | cold | **−0.43s 達成**（analyze 1.17→0.75s） | 中 | 中 |
 | ~~B-4~~ | ~~revive の `shared_walk` を全ルールに拡大~~ **DONE（A 32 rules）。B/C は触らない** | cold | 誤差帯（revive ~0.75s） | 中 | 中 |
 | B-5 | 型の構造的インターン（hash-consing） | cold | 0.1〜0.3s? | 大 | **高** |
-| B-6 | 型チェッカの `Expr::clone` 除去 | cold | 0.1〜0.3s? | 中 | 中 |
+| ~~B-6~~ | ~~型チェッカの `Expr::clone` 除去~~ **DONE**（`Operand<'a>` が `&Expr` を保持。typecheck cold −0.17s） | cold | **−0.17s** typecheck | 中 | 中 |
 | ~~B-7~~ | ~~ソースバイトの一回読みを format/misspell と共有~~ **NO-GO**（§B-7） | cold | — | 中 | 低 |
 | ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
 | B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
@@ -2703,6 +2702,31 @@ rg -c 'e\.clone\(\)' crates/guff-types/src/expr.rs
 - findings diff = 空。**型エラーを含むコードでエラーメッセージが変わらないこと**を
   重点確認する（`compat/` のテストか、わざと型エラーのある .go を作る）。
 - 3 回決定性、`cargo test --workspace`（`guff-types` のテストが本丸）、両 regress PASS。
+
+### DONE（2026-07-29）— **`Operand.expr` を `&Expr` に。typecheck_roots cold ~1.60s → ~1.43s。findings 同一。**
+
+**入れたもの:**
+
+1. `Operand<'a> { expr: Option<&'a Expr>, ... }` — Go の `*syntax.Expr` と同じ借用モデル。
+   「エラー時だけ clone」は happy-path の `convert_untyped` / comparison が式木を
+   必要とするため不十分だった。
+2. `raw_expr` / `expr_or_type` / `call_expr` / `selector` などが `Some(e)` を設定。
+   中間の `Expr::Variant(….clone())` 代入を除去（`raw_expr` が上書き、または親 `&Expr`）。
+3. `go`/`defer` だけは AST が裸の `CallExpr` なので、一時 `Expr::CallExpr` を 1 回 wrap
+   （稀な経路）。
+4. AST 借用の lifetime は `&mut self` と分離（elision が self に紐づくと E0499）。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before（A-1 runner 後） | after |
+|---|---:|---:|
+| typecheck_roots（seed cold） | ~1.60s | **~1.43s** |
+| typecheck_roots（seed hot） | ~0.85s | ~0.85s |
+| cold wall | ~3.92s | **~3.68s** |
+| seed-hot wall | ~2.97s | ~3.00s（誤差） |
+
+**検証:** findings 20 件 byte 同一（3 回・`-j 1`・seed cold↔hot）。
+`cargo test -p guff-types --release` PASS。両 regress PASS。
 
 ---
 

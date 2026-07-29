@@ -6,7 +6,7 @@ use guff_types::{representable_const, BasicKind, Checker, Config};
 use guff_types_errors::Code;
 
 /// Build a Constant operand with untyped-int type holding `n`.
-fn untyped_int_const(c: &Checker, n: i64) -> Operand {
+fn untyped_int_const(c: &Checker, n: i64) -> Operand<'static> {
     Operand {
         mode: OperandMode::Constant,
         expr: None,

@@ -150,9 +150,9 @@ impl Checker {
             // Package-qualified type name (`pkg.T`, e.g. `unsafe.Pointer`).
             // Mirrors Go's `typInternal` SelectorExpr case: run the selector in
             // type context and accept it only if it denotes a type.
-            Expr::SelectorExpr(sel) => {
+            Expr::SelectorExpr(_) => {
                 let mut x = Operand::invalid();
-                self.selector(&mut x, sel, true);
+                self.selector(&mut x, e, true);
                 match x.mode {
                     OperandMode::TypeExpr => x.typ.unwrap_or_else(|| self.invalid_type()),
                     // Invalid: error already reported by `selector`.

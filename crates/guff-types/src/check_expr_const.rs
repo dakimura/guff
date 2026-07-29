@@ -368,15 +368,15 @@ impl Checker {
         }
         if let Some(v) = val {
             x.val = Some(v.clone());
-            if let Some(xe) = x.expr.clone() {
-                self.update_expr_val(&xe, v);
+            if let Some(xe) = x.expr {
+                self.update_expr_val(xe, v);
             }
         }
         if let Some(nt) = new_type {
             if Some(nt) != x.typ {
                 x.typ = Some(nt);
-                if let Some(xe) = x.expr.clone() {
-                    self.update_expr_type(&xe, nt, false);
+                if let Some(xe) = x.expr {
+                    self.update_expr_type(xe, nt, false);
                 }
             }
         }

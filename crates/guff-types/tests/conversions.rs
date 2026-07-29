@@ -18,7 +18,7 @@ use guff_types::{
 const NEVER: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, &Operand, TypeId) -> bool =
     &|_, _, _, _, _| false;
 
-fn op(typ: TypeId) -> Operand {
+fn op(typ: TypeId) -> Operand<'static> {
     let mut x = Operand::invalid();
     x.typ = Some(typ);
     x

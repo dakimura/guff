@@ -49,12 +49,12 @@ fn ident(name: &str) -> Ident {
 }
 
 /// Build the selector expression `<base>.<sel>` where `base` is an identifier.
-fn selector_expr(base: &str, sel: &str) -> SelectorExpr {
-    SelectorExpr {
+fn selector_expr(base: &str, sel: &str) -> Expr {
+    Expr::SelectorExpr(SelectorExpr {
         id: 0,
         x: Box::new(Expr::Ident(ident(base))),
         sel: ident(sel),
-    }
+    })
 }
 
 /// An integer-literal expression.
@@ -69,15 +69,15 @@ fn int_lit(v: &str) -> Expr {
 }
 
 /// Build the call expression `<fun_ident>(args...)`.
-fn call(fun: &str, args: Vec<Expr>) -> CallExpr {
-    CallExpr {
+fn call(fun: &str, args: Vec<Expr>) -> Expr {
+    Expr::CallExpr(CallExpr {
         id: 0,
         fun: Box::new(Expr::Ident(ident(fun))),
         lparen: Pos(1),
         args,
         ellipsis: Pos(0),
         rparen: Pos(1),
-    }
+    })
 }
 
 #[test]

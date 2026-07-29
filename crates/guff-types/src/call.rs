@@ -68,7 +68,11 @@ impl Checker {
     /// (ordinary call, or statement-only builtin). Callers use it to decide
     /// whether the call is legal in statement position (`ExprStmt`, `go`,
     /// `defer`).
-    pub fn call_expr(&mut self, x: &mut Operand, call: &CallExpr) -> ExprKind {
+    pub fn call_expr<'a>(&mut self, x: &mut Operand<'a>, call_e: &'a Expr) -> ExprKind {
+        let call = match call_e {
+            Expr::CallExpr(c) => c,
+            _ => panic!("call_expr: expected CallExpr"),
+        };
         // Evaluate the callee. Explicit generic function instantiation in call
         // position — `f[targs](args)` — is handled specially: `index_expr`
         // signals a generic-function operand and `func_inst` instantiates the
@@ -116,7 +120,7 @@ impl Checker {
         match x.mode {
             OperandMode::Invalid => {
                 self.use_args(&call.args);
-                x.expr = Some(Expr::CallExpr(call.clone()));
+                x.expr = Some(call_e);
                 return ExprKind::Statement;
             }
             OperandMode::TypeExpr => {
@@ -166,7 +170,7 @@ impl Checker {
                         );
                     }
                 }
-                x.expr = Some(Expr::CallExpr(call.clone()));
+                x.expr = Some(call_e);
                 return ExprKind::Conversion;
             }
             OperandMode::Builtin => {
@@ -174,7 +178,7 @@ impl Checker {
                 if !self.builtin(x, call, id) {
                     x.mode = OperandMode::Invalid;
                 }
-                x.expr = Some(Expr::CallExpr(call.clone()));
+                x.expr = Some(call_e);
                 // Go returns `predeclaredFuncs[id].kind` (expression or
                 // statement) regardless of success.
                 return PREDECLARED_FUNCS[id as usize].kind;
@@ -201,7 +205,7 @@ impl Checker {
                 self.use_args(&call.args);
                 x.mode = OperandMode::Invalid;
                 x.typ = Some(self.invalid_type());
-                x.expr = Some(Expr::CallExpr(call.clone()));
+                x.expr = Some(call_e);
                 return ExprKind::Statement;
             }
         };
@@ -214,7 +218,7 @@ impl Checker {
             None => {
                 x.mode = OperandMode::Invalid;
                 x.typ = Some(self.invalid_type());
-                x.expr = Some(Expr::CallExpr(call.clone()));
+                x.expr = Some(call_e);
                 return ExprKind::Statement;
             }
         };
@@ -236,7 +240,7 @@ impl Checker {
                 x.typ = results;
             }
         }
-        x.expr = Some(Expr::CallExpr(call.clone()));
+        x.expr = Some(call_e);
         ExprKind::Statement
     }
 
@@ -666,9 +670,10 @@ impl Checker {
     ///
     /// Extracted from the front of `Checker.selector`. The cgo special cases
     /// and `usedPkgNames` bookkeeping are omitted.
-    fn qualified_ident(
+    fn qualified_ident<'a>(
         &mut self,
-        x: &mut Operand,
+        x: &mut Operand<'a>,
+        sel_expr: &'a Expr,
         e: &SelectorExpr,
         pkg: crate::PackageId,
         sel: &str,
@@ -688,7 +693,7 @@ impl Checker {
                     None => format!("undefined: {}.{}", pname, sel),
                 };
                 self.error(e.sel.pos().0 as u32, Code::UndeclaredImportedName, msg);
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
         };
@@ -723,12 +728,12 @@ impl Checker {
             }
             _ => {
                 // PkgName/Nil can't be looked up in another package's scope.
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
         }
         x.typ = Some(typ);
-        x.expr = Some(Expr::SelectorExpr(e.clone()));
+        x.expr = Some(sel_expr);
     }
 
     /// Resolve a selector expression `x.f`, recording the result in `x`.
@@ -739,7 +744,11 @@ impl Checker {
     ///
     /// A qualified identifier (`pkg.X`) is handled up front via
     /// [`Checker::qualified_ident`].
-    pub fn selector(&mut self, x: &mut Operand, e: &SelectorExpr, want_type: bool) {
+    pub fn selector<'a>(&mut self, x: &mut Operand<'a>, sel_expr: &'a Expr, want_type: bool) {
+        let e = match sel_expr {
+            Expr::SelectorExpr(s) => s,
+            _ => panic!("selector: expected SelectorExpr"),
+        };
         let sel = e.sel.name.as_str().to_string();
 
         // Qualified identifier (`pkg.X`): if `e.X` is an identifier that resolves
@@ -754,7 +763,7 @@ impl Checker {
                     // Mark the package as used (Go: `usedPkgNames`), so the
                     // unused-import check does not flag it.
                     self.used_pkg_names.insert(pname);
-                    self.qualified_ident(x, e, pkg, &sel);
+                    self.qualified_ident(x, sel_expr, e, pkg, &sel);
                     return;
                 }
             }
@@ -771,11 +780,11 @@ impl Checker {
                     Code::UncalledBuiltin,
                     format!("invalid use of {} in selector expression", xs),
                 );
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
             OperandMode::Invalid => {
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
             _ => {}
@@ -788,7 +797,7 @@ impl Checker {
                 Code::NotAType,
                 format!("{}.{} is not a type", self.operand_str(x), sel),
             );
-            self.set_selector_error(x, e);
+            self.set_selector_error(x, sel_expr);
             return;
         }
 
@@ -816,7 +825,7 @@ impl Checker {
                     Code::AmbiguousSelector,
                     format!("ambiguous selector {}.{}", self.operand_str(x), sel),
                 );
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
             LookupResult::PtrRecvRequired => {
@@ -830,7 +839,7 @@ impl Checker {
                     format!("cannot call pointer method {} on {}", sel, ts)
                 };
                 self.error(e.sel.pos().0 as u32, Code::InvalidMethodExpr, msg);
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
             LookupResult::NotFound => {
@@ -838,7 +847,7 @@ impl Checker {
                 // invalid (go.dev/issue/49541).
                 let under = xtyp.underlying(&self.types);
                 if !is_valid(&self.types, under) {
-                    self.set_selector_error(x, e);
+                    self.set_selector_error(x, sel_expr);
                     return;
                 }
                 let why = if is_interface_ptr(&self.types, xtyp) {
@@ -855,7 +864,7 @@ impl Checker {
                     Code::MissingFieldOrMethod,
                     format!("{}.{} undefined ({})", self.operand_str(x), sel, why),
                 );
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
         };
@@ -880,7 +889,7 @@ impl Checker {
                         sel
                     ),
                 );
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
 
@@ -907,7 +916,7 @@ impl Checker {
                     Code::InvalidDeclCycle,
                     "illegal cycle in method declaration".to_string(),
                 );
-                self.set_selector_error(x, e);
+                self.set_selector_error(x, sel_expr);
                 return;
             }
 
@@ -998,7 +1007,7 @@ impl Checker {
             }
         }
 
-        x.expr = Some(Expr::SelectorExpr(e.clone()));
+        x.expr = Some(sel_expr);
     }
 
     /// The effective signature of method `method` selected on `recv_type` via
@@ -1086,16 +1095,16 @@ impl Checker {
 
     /// Set the operand to the canonical invalid-selector state.
     /// Mirrors the `Error:` label in `Checker.selector`.
-    fn set_selector_error(&mut self, x: &mut Operand, e: &SelectorExpr) {
+    fn set_selector_error<'a>(&mut self, x: &mut Operand<'a>, sel_expr: &'a Expr) {
         x.mode = OperandMode::Invalid;
         x.typ = Some(self.invalid_type());
-        x.expr = Some(Expr::SelectorExpr(e.clone()));
+        x.expr = Some(sel_expr);
     }
 
     /// Short rendering of an operand for error messages. Uses the expression
     /// source where available, else the operand's type.
-    pub(crate) fn operand_str(&self, x: &Operand) -> String {
-        match &x.expr {
+    pub(crate) fn operand_str(&self, x: &Operand<'_>) -> String {
+        match x.expr {
             Some(Expr::Ident(id)) => id.name.to_string(),
             _ => match x.typ {
                 Some(t) => self.type_str(t),

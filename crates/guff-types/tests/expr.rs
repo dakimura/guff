@@ -103,8 +103,9 @@ fn iota_outside_const_decl_errors() {
 #[test]
 fn expr_dispatches_ident() {
     let mut check = checker("package p\nfunc f() {}\n");
+    let e = Expr::Ident(ident("f"));
     let mut x = Operand::invalid();
-    check.expr(&mut x, &Expr::Ident(ident("f")));
+    check.expr(&mut x, &e);
     assert_eq!(x.mode, OperandMode::Value);
 }
 
@@ -119,13 +120,27 @@ fn parse_expr(src: &str) -> Expr {
     parse_expr_from(&fset, "expr.go", src.as_bytes(), Mode::NONE).expect("parse expr")
 }
 
-/// Evaluate `src` as an expression in an empty package and return the operand.
-fn eval(src: &str) -> (Checker, Operand) {
+/// Snapshot of an evaluated expression (Operand borrows the AST, so tests
+/// cannot return the Operand itself alongside a dropped local Expr).
+struct Eval {
+    check: Checker,
+    mode: OperandMode,
+    typ: Option<guff_types::TypeId>,
+    val: Option<Value>,
+}
+
+/// Evaluate `src` as an expression in an empty package.
+fn eval(src: &str) -> Eval {
     let mut check = checker("package p\n");
     let e = parse_expr(src);
     let mut x = Operand::invalid();
     check.expr(&mut x, &e);
-    (check, x)
+    Eval {
+        check,
+        mode: x.mode,
+        typ: x.typ,
+        val: x.val.clone(),
+    }
 }
 
 fn as_i64(v: &Value) -> i64 {
@@ -134,84 +149,85 @@ fn as_i64(v: &Value) -> i64 {
 
 #[test]
 fn int_literal_is_untyped_constant() {
-    let (check, x) = eval("42");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), 42);
-    assert!(check.errors.is_empty());
+    let ev = eval("42");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), 42);
+    assert!(ev.check.errors.is_empty());
 }
 
 #[test]
 fn string_literal_constant() {
-    let (_check, x) = eval("\"hi\"");
-    assert_eq!(x.mode, OperandMode::Constant);
+    let ev = eval("\"hi\"");
+    assert_eq!(ev.mode, OperandMode::Constant);
 }
 
 #[test]
 fn unary_negate_constant() {
-    let (_check, x) = eval("-7");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), -7);
+    let ev = eval("-7");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), -7);
 }
 
 #[test]
 fn unary_complement_constant() {
-    let (_check, x) = eval("^0");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), -1);
+    let ev = eval("^0");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), -1);
 }
 
 #[test]
 fn unary_not_on_bool_constant() {
-    let (_check, x) = eval("!true");
-    assert_eq!(x.mode, OperandMode::Constant);
+    let ev = eval("!true");
+    assert_eq!(ev.mode, OperandMode::Constant);
     // !true == false
-    assert!(matches!(x.val, Some(Value::Bool(false))));
+    assert!(matches!(ev.val, Some(Value::Bool(false))));
 }
 
 #[test]
 fn unary_not_on_int_is_error() {
-    let (check, x) = eval("!5");
-    assert_eq!(x.mode, OperandMode::Invalid);
-    assert!(!check.errors.is_empty());
+    let ev = eval("!5");
+    assert_eq!(ev.mode, OperandMode::Invalid);
+    assert!(!ev.check.errors.is_empty());
 }
 
 #[test]
 fn paren_expr_unwraps() {
-    let (_check, x) = eval("(-3)");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), -3);
+    let ev = eval("(-3)");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), -3);
 }
 
 // ---- chunk 25c: binary / comparison / shift ----
 
 #[test]
 fn binary_add_constants() {
-    let (check, x) = eval("1 + 2");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), 3);
-    assert!(check.errors.is_empty());
+    let ev = eval("1 + 2");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), 3);
+    assert!(ev.check.errors.is_empty());
 }
 
 #[test]
 fn binary_mixed_int_float() {
     // untyped int + untyped float => untyped float 3.5
-    let (check, x) = eval("1 + 2.5");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert!(check.errors.is_empty());
+    let ev = eval("1 + 2.5");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert!(ev.check.errors.is_empty());
 }
 
 #[test]
 fn integer_division_is_integer() {
-    let (_check, x) = eval("7 / 2");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), 3);
+    let ev = eval("7 / 2");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), 3);
 }
 
 #[test]
 fn division_by_zero_errors() {
-    let (check, x) = eval("1 / 0");
-    assert_eq!(x.mode, OperandMode::Invalid);
-    assert!(check
+    let ev = eval("1 / 0");
+    assert_eq!(ev.mode, OperandMode::Invalid);
+    assert!(ev
+        .check
         .errors
         .iter()
         .any(|e| e.msg.contains("division by zero")));
@@ -219,36 +235,36 @@ fn division_by_zero_errors() {
 
 #[test]
 fn string_concat() {
-    let (_check, x) = eval("\"a\" + \"b\"");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert!(matches!(x.val, Some(Value::String(_))));
+    let ev = eval("\"a\" + \"b\"");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert!(matches!(ev.val, Some(Value::String(_))));
 }
 
 #[test]
 fn comparison_yields_bool_constant() {
-    let (check, x) = eval("3 < 5");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert!(matches!(x.val, Some(Value::Bool(true))));
-    assert_eq!(x.typ.unwrap().kind(&check.types), TypeKind::Basic);
+    let ev = eval("3 < 5");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert!(matches!(ev.val, Some(Value::Bool(true))));
+    assert_eq!(ev.typ.unwrap().kind(&ev.check.types), TypeKind::Basic);
 }
 
 #[test]
 fn equality_constant() {
-    let (_check, x) = eval("2 == 2");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert!(matches!(x.val, Some(Value::Bool(true))));
+    let ev = eval("2 == 2");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert!(matches!(ev.val, Some(Value::Bool(true))));
 }
 
 #[test]
 fn shift_constant() {
-    let (_check, x) = eval("1 << 4");
-    assert_eq!(x.mode, OperandMode::Constant);
-    assert_eq!(as_i64(x.val.as_ref().unwrap()), 16);
+    let ev = eval("1 << 4");
+    assert_eq!(ev.mode, OperandMode::Constant);
+    assert_eq!(as_i64(ev.val.as_ref().unwrap()), 16);
 }
 
 #[test]
 fn add_bool_is_error() {
-    let (check, x) = eval("true + false");
-    assert_eq!(x.mode, OperandMode::Invalid);
-    assert!(!check.errors.is_empty());
+    let ev = eval("true + false");
+    assert_eq!(ev.mode, OperandMode::Invalid);
+    assert!(!ev.check.errors.is_empty());
 }

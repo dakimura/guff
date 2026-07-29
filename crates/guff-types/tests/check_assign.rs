@@ -20,7 +20,7 @@ fn add_niladic_method(c: &mut Checker, t: TypeId, name: &str) {
     add_method(&mut c.types, &c.objects, t, m);
 }
 
-fn value_of(typ: TypeId) -> Operand {
+fn value_of(typ: TypeId) -> Operand<'static> {
     Operand {
         mode: OperandMode::Value,
         expr: None,

@@ -6,7 +6,8 @@
 //!
 //! ## Wiring
 //!
-//! - `expr` uses [`guff::ast::Expr`] from the `guff-ast` crate.
+//! - `expr` borrows [`guff::ast::Expr`] from the AST (Go's `*syntax.Expr`;
+//!   no deep clone on the typecheck hot path).
 //! - `val` uses [`guff_constant::Value`] from `guff-constant`.
 //! - `id` uses our existing [`crate::BuiltinId`] for the `Builtin` mode.
 //!
@@ -99,17 +100,21 @@ impl OperandMode {
 /// The zero value (via [`Operand::invalid`]) is a ready-to-use invalid
 /// operand — matching Go's zero-value contract.
 ///
+/// `'a` is the lifetime of the AST expression this operand refers to
+/// (package syntax for real nodes; a stack-local synthetic `Expr` for
+/// compound assignments and similar).
+///
 /// Equivalent to `types2.operand`.
 #[derive(Debug, Clone, Default)]
-pub struct Operand {
+pub struct Operand<'a> {
     pub mode: OperandMode,
-    pub expr: Option<Expr>,
+    pub expr: Option<&'a Expr>,
     pub typ: Option<TypeId>,
     pub val: Option<Value>,
     pub id: Option<BuiltinId>,
 }
 
-impl Operand {
+impl<'a> Operand<'a> {
     /// A fresh invalid operand. Equivalent to Go's `operand{}` zero value.
     pub fn invalid() -> Self {
         Self::default()
@@ -120,7 +125,7 @@ impl Operand {
     ///
     /// Equivalent to `operand.Pos`.
     pub fn pos(&self) -> i64 {
-        match &self.expr {
+        match self.expr {
             Some(e) => e.pos().0,
             None => 0,
         }
@@ -202,7 +207,7 @@ pub fn operand_string(
     arena: &TypeArena,
     oarena: &crate::arena::ObjectArena,
     parena: &crate::arena::PackageArena,
-    x: &Operand,
+    x: &Operand<'_>,
 ) -> String {
     // Special-case nilvalue first.
     if x.mode == OperandMode::NilValue {
@@ -268,7 +273,7 @@ pub fn operand_string(
     out
 }
 
-impl fmt::Display for Operand {
+impl fmt::Display for Operand<'_> {
     /// `Display` requires a [`TypeArena`] for full rendering, so this
     /// fallback uses a placeholder when none is available. Prefer
     /// [`operand_string`] in test/debug code.

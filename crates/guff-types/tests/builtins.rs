@@ -57,15 +57,15 @@ fn int_lit(v: &str) -> Expr {
     })
 }
 
-fn call(fun: &str, args: Vec<Expr>) -> CallExpr {
-    CallExpr {
+fn call(fun: &str, args: Vec<Expr>) -> Expr {
+    Expr::CallExpr(CallExpr {
         id: 0,
         fun: Box::new(ident(fun)),
         lparen: Pos(1),
         args,
         ellipsis: Pos(0),
         rparen: Pos(1),
-    }
+    })
 }
 
 #[test]
@@ -174,7 +174,9 @@ fn dotdotdot_on_non_append_errors() {
 
     // len(s...) — `...` is only valid for append.
     let mut c = call("len", vec![ident("s")]);
-    c.ellipsis = Pos(5);
+    if let Expr::CallExpr(ref mut call) = c {
+        call.ellipsis = Pos(5);
+    }
     let mut op = Operand::invalid();
     check.call_expr(&mut op, &c);
     assert_eq!(op.mode, OperandMode::Invalid);

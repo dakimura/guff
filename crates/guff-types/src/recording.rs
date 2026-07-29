@@ -336,7 +336,7 @@ impl Checker {
             // convert_untyped is a no-op (matches Go).
             let mut c = Operand {
                 mode: old.mode,
-                expr: Some(e.clone()),
+                expr: Some(e),
                 typ: Some(old.typ),
                 val: Some(val.clone()),
                 id: None,

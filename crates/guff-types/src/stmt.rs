@@ -231,8 +231,11 @@ impl Checker {
     /// uncalled-builtin classification (which needs `rawExpr`'s `exprKind`) is
     /// DEFERRED.
     fn suspended_call(&mut self, keyword: &str, call: &CallExpr) {
+        // GoStmt/DeferStmt store a bare CallExpr, not an Expr node — wrap once
+        // so call_expr can borrow it like every other call site.
+        let call_e = Expr::CallExpr(call.clone());
         let mut x = Operand::invalid();
-        let kind = self.call_expr(&mut x, call);
+        let kind = self.call_expr(&mut x, &call_e);
         // Go's `suspendedCall`: a `go`/`defer` target must be a plain call, not
         // a conversion (which produces a value) or an expression-builtin (whose
         // result is discarded).

@@ -49,7 +49,7 @@ fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
 }
 
 /// A non-constant value operand of type `v` — Go's `operand{mode: value, typ: V}`.
-fn value_operand(v: TypeId) -> Operand {
+fn value_operand(v: TypeId) -> Operand<'static> {
     Operand {
         mode: OperandMode::Value,
         typ: Some(v),

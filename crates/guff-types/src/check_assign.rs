@@ -183,8 +183,8 @@ impl Checker {
             {
                 final_ = x_typ; // integer→string keeps the argument type
             }
-            if let Some(e) = x.expr.clone() {
-                self.update_expr_type(&e, final_, true);
+            if let Some(e) = x.expr {
+                self.update_expr_type(e, final_, true);
             }
         }
 
@@ -622,7 +622,7 @@ impl Checker {
     /// type assertion, or channel receive) is expanded to `(value, bool)` and
     /// the flag is `true`; a tuple-valued expression (e.g. a multi-return call)
     /// is unpacked with the flag `false`.
-    fn eval_multi(&mut self, e: &Expr, want: usize) -> (Vec<Operand>, bool) {
+    fn eval_multi<'e>(&mut self, e: &'e Expr, want: usize) -> (Vec<Operand<'e>>, bool) {
         let mut x = Operand::invalid();
         self.expr(&mut x, e);
         if x.mode == OperandMode::Invalid {
@@ -637,7 +637,7 @@ impl Checker {
                     let mut op = Operand::invalid();
                     op.mode = OperandMode::Value;
                     op.typ = v.typ(&self.objects);
-                    op.expr = x.expr.clone();
+                    op.expr = x.expr;
                     out.push(op);
                 }
                 return (out, false);
@@ -650,11 +650,11 @@ impl Checker {
             let mut value = Operand::invalid();
             value.mode = OperandMode::Value;
             value.typ = value_typ;
-            value.expr = x.expr.clone();
+            value.expr = x.expr;
             let mut ok = Operand::invalid();
             ok.mode = OperandMode::Value;
             ok.typ = Some(self.basic(BasicKind::Bool));
-            ok.expr = x.expr.clone();
+            ok.expr = x.expr;
             return (vec![value, ok], true);
         }
         (vec![x], false)

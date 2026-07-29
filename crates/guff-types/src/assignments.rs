@@ -252,14 +252,14 @@ fn terms_all(terms: &[(bool, Option<TypeId>)], mut f: impl FnMut(TypeId) -> bool
 /// recurse on; the first failing (or specifc-type-less) term short-circuits,
 /// matching Go's `Tp.is`/`Vp.is` early-return semantics. Returns the last
 /// evaluated `(ok, code)` — `(true, None)` when all terms pass.
-fn assign_over_terms(
+fn assign_over_terms<'a>(
     arena: &mut TypeArena,
     oarena: &ObjectArena,
     parena: &PackageArena,
     terms: &[(bool, Option<TypeId>)],
     implements: &dyn Fn(&mut TypeArena, &ObjectArena, &PackageArena, TypeId, TypeId) -> bool,
     representable: &dyn Fn(&TypeArena, &Operand, TypeId) -> bool,
-    mut make: impl FnMut(TypeId) -> (Operand, TypeId),
+    mut make: impl FnMut(TypeId) -> (Operand<'a>, TypeId),
 ) -> AssignableResult {
     let mut result = AssignableResult::no(Code::IncompatibleAssign);
     for &(_, typ) in terms {

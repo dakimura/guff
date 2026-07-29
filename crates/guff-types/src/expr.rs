@@ -50,7 +50,7 @@ impl Checker {
     /// Equivalent to `Checker.expr` (without the assignment target). The
     /// operand is reduced to a single value (the `singleValue` step is a
     /// no-op until tuple-valued expressions land with call.go).
-    pub fn expr(&mut self, x: &mut Operand, e: &Expr) -> ExprKind {
+    pub fn expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a Expr) -> ExprKind {
         // DEFERRED: singleValue(x) — only matters for multi-valued operands
         // (function calls), which aren't checked yet.
         self.raw_expr(x, e, None)
@@ -61,19 +61,24 @@ impl Checker {
     ///
     /// Equivalent to `Checker.exprWithHint`. Only a bare `CompositeLit`
     /// consumes the hint; every other expression form ignores it.
-    pub fn expr_with_hint(&mut self, x: &mut Operand, e: &Expr, hint: TypeId) -> ExprKind {
+    pub fn expr_with_hint<'a>(
+        &mut self,
+        x: &mut Operand<'a>,
+        e: &'a Expr,
+        hint: TypeId,
+    ) -> ExprKind {
         self.raw_expr(x, e, Some(hint))
     }
 
     /// Type-check `e` as a type expression when possible, otherwise as a value.
     ///
     /// Equivalent to `Checker.exprOrType` (without the `allowGeneric` path).
-    pub(crate) fn expr_or_type(&mut self, x: &mut Operand, e: &Expr) {
+    pub(crate) fn expr_or_type<'a>(&mut self, x: &mut Operand<'a>, e: &'a Expr) {
         let t = self.typ(e);
         if is_valid(&self.types, t) {
             x.mode = OperandMode::TypeExpr;
             x.typ = Some(t);
-            x.expr = Some(e.clone());
+            x.expr = Some(e);
             self.record_type_and_value(e, OperandMode::TypeExpr, t, None);
         } else {
             self.expr(x, e);
@@ -86,12 +91,17 @@ impl Checker {
     /// `record`, which are deferred). `hint`, when set, is the composite
     /// literal element type threaded to a bare inner `{...}`. Returns the
     /// expression's [`ExprKind`] (conversion/expression/statement).
-    fn raw_expr(&mut self, x: &mut Operand, e: &Expr, hint: Option<TypeId>) -> ExprKind {
+    fn raw_expr<'a>(
+        &mut self,
+        x: &mut Operand<'a>,
+        e: &'a Expr,
+        hint: Option<TypeId>,
+    ) -> ExprKind {
         let kind = self.expr_internal(x, e, hint);
         // Go's `rawExpr` tail sets `x.expr = e` before recording, so the
         // delayed-untyped machinery (`update_expr_type`, which keys on the
         // operand's expr) sees the full source node. Mirror that here.
-        x.expr = Some(e.clone());
+        x.expr = Some(e);
         // Record the type (and constant value) of `e` in `Info.Types`
         // (Go's `rawExpr` tail `check.record(x)`, chunk 50).
         self.record(x, e);
@@ -102,7 +112,12 @@ impl Checker {
     /// The core expression dispatch.
     ///
     /// Equivalent to `Checker.exprInternal` (chunk-25a subset).
-    fn expr_internal(&mut self, x: &mut Operand, e: &Expr, hint: Option<TypeId>) -> ExprKind {
+    fn expr_internal<'a>(
+        &mut self,
+        x: &mut Operand<'a>,
+        e: &'a Expr,
+        hint: Option<TypeId>,
+    ) -> ExprKind {
         // Ensure a valid invalid-state on bailout (Go's go.dev/issue/5770).
         x.mode = OperandMode::Invalid;
         x.typ = Some(self.invalid_type());
@@ -122,8 +137,8 @@ impl Checker {
             Expr::StarExpr(st) => self.star_expr(x, st),
             Expr::UnaryExpr(u) => self.unary(x, u),
             Expr::BinaryExpr(b) => self.binary(x, b),
-            Expr::SelectorExpr(s) => self.selector(x, s, false),
-            Expr::CallExpr(c) => return self.call_expr(x, c),
+            Expr::SelectorExpr(_) => self.selector(x, e, false),
+            Expr::CallExpr(_) => return self.call_expr(x, e),
             Expr::IndexExpr(ie) => {
                 // A generic function value `f[targs]` used as a value: `index_expr`
                 // signals it, then `func_inst` instantiates the signature.
@@ -166,7 +181,7 @@ impl Checker {
     }
 
     /// Type-check a pointer dereference `*x`.
-    fn star_expr(&mut self, x: &mut Operand, e: &StarExpr) {
+    fn star_expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a StarExpr) {
         self.expr(x, &e.x);
         if x.mode == OperandMode::Invalid {
             return;
@@ -197,7 +212,7 @@ impl Checker {
     ///
     /// Equivalent to `Checker.basicLit` — the overflow recheck (`overflow`)
     /// and the go1.13 digit-separator `langCompat` gate are deferred.
-    fn basic_lit(&mut self, x: &mut Operand, e: &BasicLit) {
+    fn basic_lit<'a>(&mut self, x: &mut Operand<'a>, e: &BasicLit) {
         let kind = match e.kind {
             Some(k) => k,
             None => {
@@ -224,7 +239,7 @@ impl Checker {
             );
             return;
         }
-        x.expr = Some(Expr::BasicLit(e.clone()));
+        // expr set by raw_expr
         // DEFERRED: check.overflow(x) — integer over/underflow recheck.
     }
 
@@ -234,7 +249,7 @@ impl Checker {
     /// The `.(type)` form (`ty == None`) is only legal inside a type switch
     /// guard, which is handled directly in `stmt.rs`; reaching it here is a
     /// syntax error.
-    fn type_assert(&mut self, x: &mut Operand, e: &guff::ast::TypeAssertExpr) {
+    fn type_assert<'a>(&mut self, x: &mut Operand<'a>, e: &'a guff::ast::TypeAssertExpr) {
         self.expr(x, &e.x);
         if x.mode == OperandMode::Invalid {
             return;
@@ -288,7 +303,7 @@ impl Checker {
         self.type_assertion(e.lparen.0 as u32, x, t, false);
         x.mode = OperandMode::CommaOk;
         x.typ = Some(t);
-        x.expr = Some(Expr::TypeAssertExpr(e.clone()));
+        // expr set by raw_expr
     }
 
     /// Type-check a unary expression.
@@ -296,7 +311,7 @@ impl Checker {
     /// Equivalent to `Checker.unary` for the value/constant operators
     /// (`+`, `-`, `^`, `!`) and address-of (`&`). The channel receive (`<-`,
     /// needs `chanElem`) and `~` (type-constraint only) cases are DEFERRED.
-    fn unary(&mut self, x: &mut Operand, e: &UnaryExpr) {
+    fn unary<'a>(&mut self, x: &mut Operand<'a>, e: &'a UnaryExpr) {
         self.expr(x, &e.x);
         if x.mode == OperandMode::Invalid {
             return;
@@ -397,7 +412,7 @@ impl Checker {
                         0
                     };
                     x.val = Some(unary_op(op, v.clone(), prec));
-                    x.expr = Some(Expr::UnaryExpr(e.clone()));
+                    // expr set by raw_expr
                     // DEFERRED: check.overflow(x).
                     return;
                 }
@@ -412,7 +427,7 @@ impl Checker {
     ///
     /// Equivalent to `Checker.binary`. Comparison and shift are delegated;
     /// constant operands are folded.
-    fn binary(&mut self, x: &mut Operand, e: &BinaryExpr) {
+    fn binary<'a>(&mut self, x: &mut Operand<'a>, e: &'a BinaryExpr) {
         let mut y = Operand::invalid();
         self.expr(x, &e.x);
         self.expr(&mut y, &e.y);
@@ -503,7 +518,7 @@ impl Checker {
                 op
             };
             x.val = Some(binary_op(xv, fold_op, yv));
-            x.expr = Some(Expr::BinaryExpr(e.clone()));
+            // expr set by raw_expr
             // DEFERRED: check.overflow(x).
             return;
         }
@@ -516,7 +531,7 @@ impl Checker {
     /// versa). Simplified `Checker.matchTypes` — the `mayConvert` guard is
     /// reduced to "attempt only when at least one operand is untyped"; a true
     /// type mismatch surfaces as a conversion error from `convert_untyped`.
-    pub(crate) fn match_types(&mut self, x: &mut Operand, y: &mut Operand) {
+    pub(crate) fn match_types<'a>(&mut self, x: &mut Operand<'a>, y: &mut Operand<'a>) {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         let yt = y.typ.unwrap_or_else(|| self.invalid_type());
         if (x.is_nil() && has_nil(&self.types, yt)) || (y.is_nil() && has_nil(&self.types, xt)) {
@@ -541,7 +556,7 @@ impl Checker {
     /// Simplified `Checker.comparison`: the assignability check is reduced to
     /// `Identical` (operands have already been matched), and ordering uses an
     /// `all_ordered` predicate.
-    pub(crate) fn comparison(&mut self, x: &mut Operand, y: &mut Operand, op: Token, pos: u32) {
+    pub(crate) fn comparison<'a>(&mut self, x: &mut Operand<'a>, y: &mut Operand<'a>, op: Token, pos: u32) {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         let yt = y.typ.unwrap_or_else(|| self.invalid_type());
         if !is_valid(&self.types, xt) || !is_valid(&self.types, yt) {
@@ -601,11 +616,11 @@ impl Checker {
             // so the recorded types reflect the materialized form.
             let dx = default_type(&self.types, &self.typ, xt);
             let dy = default_type(&self.types, &self.typ, yt);
-            if let Some(xe) = x.expr.clone() {
-                self.update_expr_type(&xe, dx, true);
+            if let Some(xe) = x.expr {
+                self.update_expr_type(xe, dx, true);
             }
-            if let Some(ye) = y.expr.clone() {
-                self.update_expr_type(&ye, dy, true);
+            if let Some(ye) = y.expr {
+                self.update_expr_type(ye, dy, true);
             }
         }
 
@@ -618,7 +633,7 @@ impl Checker {
     /// Simplified `Checker.shift`: handles the common constant case and the
     /// non-constant value case. The full untyped-lhs / delayed-type machinery
     /// (Go's `updateExprType` interplay) is DEFERRED.
-    fn shift(&mut self, x: &mut Operand, y: &mut Operand, e: &BinaryExpr, op: Token) {
+    fn shift<'a>(&mut self, x: &mut Operand<'a>, y: &mut Operand<'a>, e: &BinaryExpr, op: Token) {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
 
         // The shift count must be an integer.
@@ -657,7 +672,7 @@ impl Checker {
             };
             let (count, _) = uint64_val(&yv);
             x.val = Some(shift(xv, op, count as u32));
-            x.expr = Some(Expr::BinaryExpr(e.clone()));
+            // expr set by raw_expr
             // If x was untyped, it stays untyped int here (default applied
             // later). x.typ is unchanged.
             return;
@@ -668,7 +683,7 @@ impl Checker {
         // its node as a shift-lhs operand. When it later materialises, its
         // final type is checked to be an integer (Go's `info.isLhs = true`).
         if x.mode == OperandMode::Constant && is_untyped(&self.types, xt) {
-            if let Some(xe) = x.expr.clone() {
+            if let Some(xe) = x.expr {
                 if let Some(info) = self.untyped.get_mut(&xe.id()) {
                     info.is_lhs = true;
                 }
@@ -687,9 +702,9 @@ impl Checker {
     /// Equivalent to `Checker.ident` (`typexpr.go`). `want_type` requests that
     /// the identifier denote a type. The use/dependency-tracking and version
     /// gates are deferred (see module docs).
-    pub fn ident(&mut self, x: &mut Operand, e: &Ident, want_type: bool) {
+    pub fn ident<'a>(&mut self, x: &mut Operand<'a>, e: &Ident, want_type: bool) {
         x.mode = OperandMode::Invalid;
-        x.expr = Some(Expr::Ident(e.clone()));
+        // expr set by raw_expr
 
         let name = e.name.as_str();
         let obj = match self.lookup(name) {

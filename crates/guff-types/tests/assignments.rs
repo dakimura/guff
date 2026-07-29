@@ -26,7 +26,7 @@ fn b(u: &Universe, k: BasicKind) -> TypeId {
 }
 
 /// Build a typed `value`-mode operand of type `typ`.
-fn val(typ: TypeId) -> Operand {
+fn val(typ: TypeId) -> Operand<'static> {
     let mut x = Operand::invalid();
     x.mode = guff_types::OperandMode::Value;
     x.typ = Some(typ);
@@ -34,7 +34,7 @@ fn val(typ: TypeId) -> Operand {
 }
 
 /// Build an untyped constant-mode operand of type `typ`.
-fn untyped(typ: TypeId) -> Operand {
+fn untyped(typ: TypeId) -> Operand<'static> {
     let mut x = Operand::invalid();
     x.mode = guff_types::OperandMode::Constant;
     x.typ = Some(typ);

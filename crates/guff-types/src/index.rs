@@ -61,7 +61,7 @@ impl Checker {
     /// the index expression and returns `false`.
     ///
     /// Equivalent to `Checker.indexExpr` (chunk-28 subset, chunk-71 func inst).
-    pub fn index_expr(&mut self, x: &mut Operand, e: &IndexExpr) -> bool {
+    pub fn index_expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a IndexExpr) -> bool {
         self.expr(x, &e.x);
 
         match x.mode {
@@ -153,7 +153,7 @@ impl Checker {
                 // known.
                 x.mode = OperandMode::MapIndex;
                 x.typ = Some(elem);
-                x.expr = Some(Expr::IndexExpr(e.clone()));
+                // expr set by raw_expr / caller
                 return false;
             }
             Indexable::None => {
@@ -178,7 +178,7 @@ impl Checker {
         }
 
         self.index(&e.index, length);
-        x.expr = Some(Expr::IndexExpr(e.clone()));
+        // expr set by raw_expr / caller
         false
     }
 
@@ -187,7 +187,7 @@ impl Checker {
     /// Equivalent to `Checker.sliceExpr` (chunk-28 subset). The type-set
     /// iteration over type parameters is reduced to the operand's underlying
     /// type (the common concrete case).
-    pub fn slice_expr(&mut self, x: &mut Operand, e: &SliceExpr) {
+    pub fn slice_expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a SliceExpr) {
         self.expr(x, &e.x);
         if x.mode == OperandMode::Invalid {
             self.use_slice_indices(e);

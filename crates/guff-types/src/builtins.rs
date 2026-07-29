@@ -54,7 +54,7 @@ impl Checker {
     /// the caller) otherwise.
     ///
     /// Equivalent to `Checker.builtin` (chunk-29a subset).
-    pub fn builtin(&mut self, x: &mut Operand, call: &CallExpr, id: BuiltinId) -> bool {
+    pub fn builtin<'a>(&mut self, x: &mut Operand<'a>, call: &'a CallExpr, id: BuiltinId) -> bool {
         let bin = builtin_info(id);
         let has_dots = crate::util::has_dots(call);
 
@@ -219,7 +219,7 @@ impl Checker {
     }
 
     /// `complex(x, y floatT) complexT`.
-    fn builtin_complex(&mut self, x: &mut Operand, args: &[Operand], _call: &CallExpr) -> bool {
+    fn builtin_complex<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>], _call: &CallExpr) -> bool {
         let mut y = args[1].clone();
 
         // Convert or check untyped arguments.
@@ -364,10 +364,10 @@ impl Checker {
     }
 
     /// `min(x, ...)` / `max(x, ...)`.
-    fn builtin_min_max(
+    fn builtin_min_max<'a>(
         &mut self,
-        x: &mut Operand,
-        args: &[Operand],
+        x: &mut Operand<'a>,
+        args: &[Operand<'a>],
         id: BuiltinId,
         name: &str,
     ) -> bool {
@@ -519,7 +519,7 @@ impl Checker {
 
     /// `unsafe.Offsetof(x.f) uintptr`, where the argument must be a selector
     /// (its operand is *not* pre-evaluated — handled here).
-    fn builtin_offsetof(&mut self, x: &mut Operand, call: &CallExpr) -> bool {
+    fn builtin_offsetof<'a>(&mut self, x: &mut Operand<'a>, call: &'a CallExpr) -> bool {
         let arg0 = &call.args[0];
         let selx = match unparen_expr(arg0) {
             Expr::SelectorExpr(s) => s,
@@ -629,7 +629,7 @@ impl Checker {
     /// `x` already holds the first (evaluated) argument; `args[1]` is the
     /// length. The go1.17 version gate is applied at the dispatch site (see
     /// `builtin`).
-    fn builtin_add(&mut self, x: &mut Operand, args: &[Operand]) -> bool {
+    fn builtin_add<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let usp = self.basic(BasicKind::UnsafePointer);
         self.assignment(x, Some(usp), "argument to unsafe.Add");
         if x.mode == OperandMode::Invalid {
@@ -646,7 +646,7 @@ impl Checker {
 
     /// `unsafe.Slice(ptr *T, len IntegerType) []T`. The go1.17 version gate is
     /// applied at the dispatch site (see `builtin`).
-    fn builtin_slice(&mut self, x: &mut Operand, args: &[Operand]) -> bool {
+    fn builtin_slice<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         let (u, _) = common_under(&mut self.types, &self.objects, &self.packages, xt, None);
         let base = u.and_then(|uid| match self.types.get(uid) {
@@ -702,7 +702,7 @@ impl Checker {
 
     /// `unsafe.String(ptr *byte, len IntegerType) string`. The go1.20 version
     /// gate is treated as satisfied.
-    fn builtin_string(&mut self, x: &mut Operand, args: &[Operand]) -> bool {
+    fn builtin_string<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let byte_t = self.basic(BasicKind::Uint8);
         let ptr_byte = new_pointer(&mut self.types, byte_t);
         self.assignment(x, Some(ptr_byte), "argument to unsafe.String");
@@ -898,7 +898,7 @@ impl Checker {
     }
 
     /// `delete(m, k)`.
-    fn builtin_delete(&mut self, x: &mut Operand, args: &[Operand]) -> bool {
+    fn builtin_delete<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let map_typ = x.typ.unwrap_or_else(|| self.invalid_type());
         // DEFERRED: type-parameter map (underIs) — use the underlying type.
         let u = map_typ.underlying(&self.types);
@@ -946,11 +946,11 @@ impl Checker {
     }
 
     /// `append(s S, x ...E) S`.
-    fn builtin_append(
+    fn builtin_append<'a>(
         &mut self,
-        x: &mut Operand,
-        call: &CallExpr,
-        _args: &[Operand],
+        x: &mut Operand<'a>,
+        call: &'a CallExpr,
+        _args: &[Operand<'a>],
         _nargs: usize,
     ) -> bool {
         // The first argument must be a slice; E is its element type.
@@ -1047,7 +1047,7 @@ impl Checker {
     }
 
     /// `copy(dst, src []E) int`.
-    fn builtin_copy(&mut self, x: &mut Operand, args: &[Operand]) -> bool {
+    fn builtin_copy<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let y = &args[1];
         let dst_typ = x.typ.unwrap_or_else(|| self.invalid_type());
         let src_typ = y.typ.unwrap_or_else(|| self.invalid_type());
