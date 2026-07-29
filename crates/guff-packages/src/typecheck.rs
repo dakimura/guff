@@ -76,6 +76,11 @@ pub struct TypecheckEnv {
     /// per-package checking stay on the main thread (avoids small default worker
     /// stacks overflowing on deep hybrid type-check trees).
     pub parallel: bool,
+    /// Skip AST object resolution ([`SKIP_OBJECT_RESOLUTION`]) when parsing
+    /// target packages. Safe when no enabled analyzer reads `Ident.obj`
+    /// (today: `ineffassign`, `maintidx`). The type checker uses stamped node
+    /// ids + `Info` maps, not `Ident.obj`. Default `false` (resolve).
+    pub skip_object_resolution: bool,
 }
 
 impl Default for TypecheckEnv {
@@ -86,6 +91,7 @@ impl Default for TypecheckEnv {
             go_version: String::new(),
             from_source: true,
             parallel: true,
+            skip_object_resolution: false,
         }
     }
 }
@@ -130,6 +136,7 @@ impl TypecheckEnv {
                 .unwrap_or_default(),
             from_source: false,
             parallel: true,
+            skip_object_resolution: false,
         }
     }
 
@@ -494,7 +501,15 @@ pub fn typecheck_package_with_seed(
                 .unwrap_or("file.go")
         });
         let t_parse = detail::start(acct);
-        let parsed = parse_file(fset, name, &src, Mode::NONE);
+        // Object resolution fills `Ident.obj`. Only ineffassign / maintidx read
+        // it; when the caller opts out via `env.skip_object_resolution`, skip
+        // the walk (P0-3). Type checking still stamps node ids below.
+        let parse_mode = if env.skip_object_resolution {
+            SKIP_OBJECT_RESOLUTION
+        } else {
+            Mode::NONE
+        };
+        let parsed = parse_file(fset, name, &src, parse_mode);
         detail::add(&detail::PARSE_NS, t_parse);
         match parsed {
             Ok(file) => {
@@ -1283,6 +1298,7 @@ mod tests {
             go_version: String::new(),
             from_source: false,
             parallel: true,
+            skip_object_resolution: false,
         };
         assert_eq!(env.sizes().word_size, 4);
     }

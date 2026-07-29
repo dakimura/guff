@@ -306,6 +306,18 @@ impl LintOptions {
     }
 }
 
+/// Analyzers that read `ast::Ident.obj` (filled by parser object resolution).
+///
+/// Today only `ineffassign` and `maintidx`. When neither is enabled, target
+/// parse can set [`TypecheckEnv::skip_object_resolution`] (P0-3).
+const AST_OBJECT_RESOLUTION_ANALYZERS: &[&str] = &["ineffassign", "maintidx"];
+
+fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
+    analyzers
+        .iter()
+        .any(|a| AST_OBJECT_RESOLUTION_ANALYZERS.contains(&a.name))
+}
+
 /// Load packages and run analyzers. Returns diagnostics and non-zero exit hint.
 pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     guff_runner::init_rayon_global_stack();
@@ -465,6 +477,8 @@ pub fn run_linters(opts: &LintOptions) -> Result<LintResult, RunnerError> {
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
     env.parallel = !sequential;
+    // P0-3: skip Ident.obj resolution unless an analyzer that reads it is on.
+    env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers);
     let miss_roots = typecheck_roots(&all_packages, &miss_ids, analysis_mode, &env);
     if timing {
         eprintln!(
@@ -864,6 +878,24 @@ mod format_check_tests {
             use_format_cache: false,
             cache_dir: None,
         }
+    }
+
+    #[test]
+    fn analyzers_need_ast_object_resolution_gates_p0_3() {
+        assert!(!analyzers_need_ast_object_resolution(&[]));
+        let printf = guff_govet::analyzers()
+            .into_iter()
+            .find(|a| a.name == "printf")
+            .expect("printf");
+        assert!(!analyzers_need_ast_object_resolution(&[printf]));
+        assert!(analyzers_need_ast_object_resolution(&[
+            guff_ineffassign::analyzer()
+        ]));
+        assert!(analyzers_need_ast_object_resolution(&[guff_style::maintidx()]));
+        assert!(analyzers_need_ast_object_resolution(&[
+            printf,
+            guff_ineffassign::analyzer(),
+        ]));
     }
 
     #[test]

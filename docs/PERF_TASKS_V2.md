@@ -12,7 +12,7 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
@@ -21,6 +21,8 @@
 >
 > **次は B-9 / C 系など。B-10 は `format_checks waited=0` の間は着手しない。**
 > **B-5 の Slice インターンは revive `var-declaration` の TypeId`==` 依存で findings が変わるため未実装。**
+> **P0-3 は条件付き実装済みだが、prometheus（`default: standard` → `ineffassign` 有効）では
+> スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -429,7 +431,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 |---|---|---|---|---|---|
 | **P0-1** | **format_checks の 2 スレッド固定を見直す** | cold | **0.3〜0.8s?** | 小 | 低 |
 | **P0-2** | **依存パースで `SKIP_OBJECT_RESOLUTION`** | cold | **0.2〜0.5s?** | 小 | 低 |
-| P0-3 | target パースの object resolution も条件スキップ | cold | 0.05〜0.15s? | 中 | 中 |
+| ~~P0-3~~ | ~~target パースの object resolution も条件スキップ~~ **DONE**（条件付き実装。prometheus は `ineffassign` 有効で発火せず。上限: parse CPU −0.45s / target wall −0.05s。§P0-3） | cold | **0（prometheus）** / 天井 −0.05〜0.2s | 中 | 中 |
 
 ### Tier A — 低リスク・小〜中の確実な勝ち
 
@@ -476,8 +478,9 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9 / C 系。
-B-5 DONE（Slice 以外）。misspell FxHash DONE（誤差帯）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） / C 系（要ユーザー合意）。
+P0-3 DONE（prometheus では wall 0。ineffassign 無効設定でのみ効く）。B-5 DONE（Slice 以外）。
+misspell FxHash DONE（誤差帯）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
 B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（§B-2 follow-up）。B-7 は NO-GO。B-4 A 完了。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s** → lazy 後 **~2.56〜2.58s seed-hot**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
@@ -1197,6 +1200,38 @@ cd .../prometheus && cat .golangci.yml
 - 「prometheus の設定では ineffassign が無効だから常にスキップでいい」と決め打つ。
   **guff は他人の設定でも動かなければいけません。** 必ず条件判定にする。
 - 述語を「型チェック後」に評価する。パース前に決まっていなければ意味がありません。
+
+### DONE（2026-07-29）— **条件付き実装。prometheus では `ineffassign` が Standard 既定で有効なため発火せず wall ±0。天井は十分。**
+
+**発見（着手前の設定確認）:** prometheus `.golangci.yml` は `linters.default` 未指定 →
+guff/golangci とも **`standard` 既定** → **`ineffassign` が有効**（明示 `enable:` リストには無い）。
+`maintidx` は無効。よって prometheus 本番経路ではスキップ条件が成り立たない。
+
+**GO/NO-GO 天井（`FORCE_SKIP` で強制発火・A/B/A/B ×3）:**
+
+| 指標 | resolve ON | skip ON |
+|---|---:|---:|
+| target parse（合計 CPU） | 0.90〜0.93s | **0.48〜0.49s（−0.45s）** |
+| target check wall | 0.32〜0.35s | **0.28〜0.29s（−0.05s）** |
+| cold wall（中央寄り） | 3.41〜3.44s | **3.19〜3.25s（〜−0.2s）** |
+
+samply（既存 profile）でも `parser_resolver::Resolver::walk_func_decl` inclusive **0.68〜0.79s**。
+
+**実装:**
+- `TypecheckEnv::skip_object_resolution`（default `false`）
+- `guff-lint`: `ineffassign` / `maintidx` が analyzer 集合に居なければ `true`
+- `typecheck_package_with_seed`: そのとき `parse_file(..., SKIP_OBJECT_RESOLUTION)`
+
+**検証:**
+- prometheus（ineffassign ON → skip 発火せず）: findings byte 一致 20/20 ×3 + `-j 1`
+- ineffassign / maintidx ユニットテスト PASS（`TypecheckEnv::default()` = resolve ON）
+- 述語ユニットテスト PASS
+- tsdb regress PASS（wall 1.38s / both 4 / only 0,0）
+- full regress PASS（wall 3.41s / RSS 3.50 GiB / both 20 / only 0,0）
+- baseline 未更新
+
+**prometheus wall への寄与は 0。** 効くのは `default: none` かつ ineffassign/maintidx を
+明示 enable していない設定。C-6（`Ident` の `Mutex` 除去）の前提として残す価値あり。
 
 ---
 
