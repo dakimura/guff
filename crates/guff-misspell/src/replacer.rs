@@ -1,9 +1,9 @@
 //! Spelling correction engine (port of `misspell/replace.go`).
 
-use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use regex::Regex;
+use rustc_hash::FxHashMap;
 
 use crate::case::{apply_case, case_style, CaseStyle};
 use crate::notwords::remove_not_words;
@@ -20,11 +20,11 @@ fn is_word_byte(b: u8) -> bool {
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'\'')
 }
 
-static DICT_MAIN: LazyLock<HashMap<String, String>> =
+static DICT_MAIN: LazyLock<FxHashMap<String, String>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_main.tsv")));
-static DICT_US: LazyLock<HashMap<String, String>> =
+static DICT_US: LazyLock<FxHashMap<String, String>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_us.tsv")));
-static DICT_UK: LazyLock<HashMap<String, String>> =
+static DICT_UK: LazyLock<FxHashMap<String, String>> =
     LazyLock::new(|| load_dict_tsv(include_str!("../data/dict_uk.tsv")));
 
 /// Default golangci/misspell replacer (DictMain + US locale, no extras/ignores).
@@ -64,7 +64,7 @@ pub struct Diff {
 /// Spelling replacer backed by golangci/misspell dictionaries.
 #[derive(Clone)]
 pub struct Replacer {
-    corrected: Arc<HashMap<String, String>>,
+    corrected: Arc<FxHashMap<String, String>>,
 }
 
 impl Replacer {
@@ -196,8 +196,8 @@ impl Default for Replacer {
     }
 }
 
-fn load_dict_tsv(data: &str) -> HashMap<String, String> {
-    let mut map = HashMap::new();
+fn load_dict_tsv(data: &str) -> FxHashMap<String, String> {
+    let mut map = FxHashMap::default();
     for line in data.lines() {
         if let Some((typo, correction)) = line.split_once('\t') {
             map.insert(typo.to_string(), correction.to_string());

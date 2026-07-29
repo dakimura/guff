@@ -14,12 +14,12 @@
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
-> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ）**。
+> buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**。
 > 各タスク節末尾の `### DONE` に実測値があります。
 >
-> **次は B-5 / misspell など。B-10 は `format_checks waited=0` の間は着手しない。**
+> **次は B-5 など。B-10 は `format_checks waited=0` の間は着手しない。**
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -475,8 +475,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-5 /
-misspell。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
+**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-5。
+misspell FxHash DONE（誤差帯）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b（PGO）DONE。
 B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（§B-2 follow-up）。B-7 は NO-GO。B-4 A 完了。
 （**B-1 は全段 DONE / B-1d は NO-GO**。cold は 3.96〜4.06s → **3.74〜3.87s** → lazy 後 **~2.56〜2.58s seed-hot**。
 B-1b/c は findings 同一・CPU −17% だが**並列 wall は動かない**ので、
@@ -1944,6 +1944,24 @@ staticcheck だけで **161 個**、style で **77 個**、govet で **30 個** 
 | 3 | **0.01s**（warm wall 0.21s） |
 
 閾値 0.02s 未満 → **最適化しない**。phase 行は今後も warm 内訳の地図として残す。
+
+---
+
+## misspell — 辞書を FxHash 化（A-1 延長）
+
+### DONE（2026-07-29）— **`Replacer` 辞書を `FxHashMap`。misspell CPU 誤差帯。findings 同一。**
+
+`crates/guff-misspell` の ~30k エントリ訂正辞書を `std::HashMap` → `rustc_hash::FxHashMap`
+（lookup のみ。イテレーション順依存なし）。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before（文書値） | after |
+|---|---:|---:|
+| misspell CPU（293 actions） | 0.43〜0.45s | **0.42s**（誤差帯） |
+
+**検証:** findings 20 件 byte 同一（3 回・`-j 1`）。`cargo test -p guff-misspell --release` PASS。
+Aho-Corasick 等は境界/case リスクのため未着手。
 
 ---
 

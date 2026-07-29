@@ -582,6 +582,7 @@ dependencies = [
  "guff-runner",
  "guff-types",
  "regex",
+ "rustc-hash",
 ]
 
 [[package]]
