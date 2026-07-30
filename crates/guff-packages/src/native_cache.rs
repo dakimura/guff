@@ -3,6 +3,9 @@
 //! Mirrors the `go list` stdout cache under `$GUFF_CACHE/golist/`: once the
 //! package graph is computed, subsequent warm runs reload it instead of
 //! re-walking GOMODCACHE + GOROOT (~0.8s → tens of ms).
+//!
+//! Reads are allowed under `--no-cache` (C-7 golist peek pattern); writes stay
+//! gated by [`cache_enabled`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -102,6 +105,12 @@ pub(crate) fn cache_enabled(cfg: &Config) -> bool {
     if cfg.disable_cache {
         return false;
     }
+    peek_allowed()
+}
+
+/// Read path remains open under `--no-cache` (C-7 golist peek pattern).
+/// Writes stay gated by [`cache_enabled`].
+fn peek_allowed() -> bool {
     for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
         if let Ok(v) = std::env::var(key) {
             if v == "off" {
@@ -113,7 +122,13 @@ pub(crate) fn cache_enabled(cfg: &Config) -> bool {
 }
 
 pub(crate) fn try_load(cfg: &Config, patterns: &[String]) -> Option<DriverResponse> {
-    if !cache_enabled(cfg) {
+    if !peek_allowed() {
+        return None;
+    }
+    // Avoid the `.go` filename walk when there is nothing to peek (same as
+    // golist `try_peek_golist_cache`).
+    let dir = guff_cache_dir()?;
+    if !dir.join("native_list").is_dir() {
         return None;
     }
     let key = cache_key(cfg, patterns);

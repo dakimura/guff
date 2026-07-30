@@ -12,27 +12,26 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-3c Phase 3 DONE（2026-07-31）:** 速度フォロー 2 本。
+> 1. **`--no-cache` でも `native_list/` を peek**（書き込みは `disable_cache` のままオフ。C-7 と同型）。
+>    恒久 `GUFF_CACHE` + `--no-cache` の load_graph **0.20s → 0.04s**。
+> 2. **`modmeta/` を package JSON×N → `module@version`（+ stdlib VERSION）単位の 1 blob**
+>    （`modmeta-v2`）。prometheus で **~1489 → 243 ファイル**。modmeta 再構築自体は
+>    グラフ組み立て残りで ~0.20s（peek が主戦場）。
+> `verify` prometheus `./...` **diff 空**。findings **28≡28**（off≡on）。§C-3c。
+>
 > **C-3c Phase 2 DONE（2026-07-30）:** native list **既定オン**。
 > ① warm ディスクキャッシュ `$GUFF_CACHE/native_list/`（warm wall **0.15s**）
 > ② 完全 `-test` + for-test 依存 ③ **header-only 走査 + 並列 BFS + `modmeta/` 恒久キャッシュ**
 > （GOMODCACHE/GOROOT）。`verify` prometheus `./...` **diff 空**。findings **28≡28**。
 >
-> **cold load_graph（A/B、Darwin arm64）:**
-> - 空 `GUFF_CACHE`（初回）: go list 0.75s → native **0.70s**（−0.05s。go は GOCACHE warm）
-> - **恒久 `GUFF_CACHE` + `--no-cache`**（現実の cold）: 0.76s → **0.23s**（**−0.53s**）/
->   wall 2.0s → **1.85s**
+> **cold load_graph（A/B、Darwin arm64）— Phase 3 後:**
+> - 空 `GUFF_CACHE`（初回）: go list 0.75s → native **~0.58s**（modmeta 書き込み込み）
+> - **恒久 `GUFF_CACHE` + `--no-cache`**: go list 0.75s → native peek **0.04s**（**−0.71s**）/
+>   wall ~1.94s → **~1.80s**
+> - warm: load **0.04s** / wall **0.15s**
 >
 > `GUFF_NATIVE_LIST=off` で旧経路。残: repo `vendor/` / C-3e cgo。B-9 はやらない。§C-3c。
->
-> **⏭ 次セッション（C-3c Phase 3・速度フォロー）— 両方やれ:**
-> 1. **`--no-cache` でも `native_list/` を peek**（書き込みは disable のまま）。
->    go list の C-7 peek と同じ。いま `--no-cache` は graph を毎回 modmeta から再構築して
->    **~0.20s**；warm graph hit は **0.04s**。`native_cache::try_load` が `disable_cache` で
->    early-return しているのが犯人。
-> 2. **`modmeta` を package 単位 JSON×N → `module@version`（+ stdlib）単位の 1 blob** に。
->    現状 1489 ファイルの syscall が modmeta-hit 0.19s の大半。設計の「メインモジュール 5ms」に近づける。
-> ゲート: `GUFF_NATIVE_LIST=verify` prometheus `./...` diff 空、findings 28≡28、A/B/A/B。
-> 計測は `PERF_TASKS.md` §0（絶対ルール）。終わったら §C-3c に実測を追記。
 >
 > **C-3d DONE（2026-07-30）:** stdlib を GOROOT ソース typecheck + seed overlay 永続化。
 > **既定オン**（`GUFF_STDLIB_SOURCE=export` で旧 `.a` 経路）。`go list -export` stdlib
@@ -55,7 +54,7 @@
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
 > C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
-> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン）**。
+> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン + Phase 3 peek/modmeta-v2）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -4067,13 +4066,34 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 |---|---|---|---:|---|---|
 | ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
 | ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
-| C-3c | ネイティブ lister（+ warm キャッシュ + `-test`） | **DONE** | warm −0.02s / go 主コール消滅 | 主コールが消える（bail/cgo 除く） | 低（検証済み） |
+| C-3c | ネイティブ lister（+ warm キャッシュ + `-test` + peek + modmeta-v2） | **DONE** | `--no-cache` peek **0.04s** / go 主コール消滅 | 主コールが消える（bail/cgo 除く） | 低（検証済み） |
 | ~~C-3d~~ | ~~stdlib 型スナップショット~~ **DONE**（既定ソース・export 修正で findings 同一） | 中〜大 | seed-hot `--no-cache` で export 0.18s 消滅 | export コール消滅 + go-less | 低（修正後） |
 | C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a / C-3b / C-3d は DONE。C-3c Phase 2 は DONE（既定オン）**。
+**C-3a / C-3b / C-3d は DONE。C-3c Phase 2+3 は DONE（既定オン + peek + modmeta-v2）**。
 残は repo `vendor/` / C-3e。**wall だけが目的なら C-3 の安い削りはもう終わっています**
 （残りは製品タスク）。
+
+### C-3c Phase 3 DONE メモ（2026-07-31）
+
+**入れたもの:**
+1. `native_cache::try_load` が `--no-cache`（`disable_cache`）でも **peek**（C-7 golist と同型）。
+   書き込みは従来どおり `cache_enabled` でオフ。`native_list/` 無ければ key walk 前に return。
+2. `modmeta-v2` — package 単位 JSON×N → **`module@version`（+ stdlib VERSION）単位の 1 blob**。
+   `ModMetaSession` が list 走査中に blob を 1 回だけ読み、dirty を終了時に flush。
+
+**実測（prometheus `./...`、Darwin arm64、A/B/A/B）:**
+
+| 条件 | go list load | native load | wall (off→native) |
+|---|---:|---:|---:|
+| 恒久 GUFF_CACHE + `--no-cache` | 0.75s | **0.04s**（peek） | 1.94 → **1.80s** |
+| warm（issue cache hot） | 0.06s | **0.04s** | 0.17 → **0.15s** |
+| native_list 無し（modmeta 再構築） | — | **~0.20s** | — |
+
+modmeta ファイル数 **~1489 → 243**。modmeta 再構築が ~0.20s に留まるのは
+blob 読込より **グラフ組み立て**が支配的なため。フルグラフは `native_list/` peek が担う。
+
+verify（peek / modmeta 両経路）diff 空 / findings **28≡28**（off≡on）。
 
 ### C-3c Phase 2 DONE メモ（2026-07-30）
 

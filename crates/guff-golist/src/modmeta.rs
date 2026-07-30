@@ -1,18 +1,24 @@
-//! Permanent per-package metadata cache for immutable modules (C-3c §④).
+//! Permanent per-module metadata cache for immutable modules (C-3c §④).
 //!
 //! GOMODCACHE packages are content-addressed (`module@version`) and GOROOT
 //! packages are fixed per toolchain — once scanned for a given GOOS/GOARCH /
 //! build-tags fingerprint they never need to be re-read. The main module is
 //! never cached here (it changes).
+//!
+//! Phase 3 stores **one blob per `module@version`** (or stdlib VERSION), not
+//! one JSON per package. Warm hits then pay ~N modules of syscalls instead of
+//! ~N packages (~1489 → ~250 on prometheus).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use guff_build::{Context, Package as BuildPackage};
 
-const MODMETA_VERSION: &str = "modmeta-v1";
+const MODMETA_VERSION: &str = "modmeta-v2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedPkgMeta {
@@ -55,7 +61,7 @@ impl CachedPkgMeta {
     }
 }
 
-/// Cache key material that must match for a hit to be valid.
+/// Cache key material for a **module** blob (all packages share one file).
 pub struct ModMetaKey<'a> {
     pub module_path: &'a str,
     pub module_version: &'a str,
@@ -66,6 +72,134 @@ pub struct ModMetaKey<'a> {
     /// `true` for GOROOT packages (version key = toolchain identity).
     pub standard: bool,
     pub goroot_version: &'a str,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModuleBlob {
+    version: String,
+    /// import path → package metadata
+    packages: HashMap<String, CachedPkgMeta>,
+}
+
+struct BlobState {
+    packages: HashMap<String, CachedPkgMeta>,
+    dirty: bool,
+    path: PathBuf,
+}
+
+/// Session-scoped modmeta cache: load each module blob once, flush dirty blobs
+/// at the end of a list walk.
+pub struct ModMetaSession {
+    blobs: Mutex<HashMap<String, BlobState>>,
+}
+
+impl ModMetaSession {
+    pub fn new() -> Self {
+        Self {
+            blobs: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Import a package directory, using the module-level modmeta cache for
+    /// immutable modules.
+    pub fn import_dir(
+        &self,
+        ctxt: &Context,
+        dir: &Path,
+        key: &ModMetaKey<'_>,
+    ) -> Result<BuildPackage, guff_build::BuildError> {
+        if !cache_enabled() || (!key.standard && key.module_version.is_empty()) {
+            return ctxt.import_dir(dir);
+        }
+
+        if let Some(meta) = self.lookup(key) {
+            let mut pkg = BuildPackage {
+                dir: dir.to_path_buf(),
+                import_path: key.pkg_path.to_string(),
+                goroot: key.standard,
+                ..BuildPackage::default()
+            };
+            meta.apply_to(&mut pkg);
+            return Ok(pkg);
+        }
+
+        let pkg = ctxt.import_dir(dir)?;
+        self.insert(key, CachedPkgMeta::from_build(&pkg));
+        Ok(pkg)
+    }
+
+    fn lookup(&self, key: &ModMetaKey<'_>) -> Option<CachedPkgMeta> {
+        let hash = module_key_hash(key);
+        let guard = self.blobs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(state) = guard.get(&hash) {
+            return state.packages.get(key.pkg_path).cloned();
+        }
+        drop(guard);
+
+        let path = cache_path_for_hash(&hash)?;
+        let loaded = load_blob(&path);
+        let mut guard = self.blobs.lock().unwrap_or_else(|e| e.into_inner());
+        // Another thread may have loaded while we read disk.
+        if let Some(state) = guard.get(&hash) {
+            return state.packages.get(key.pkg_path).cloned();
+        }
+        let packages = loaded.unwrap_or_default();
+        let hit = packages.get(key.pkg_path).cloned();
+        guard.insert(
+            hash,
+            BlobState {
+                packages,
+                dirty: false,
+                path,
+            },
+        );
+        hit
+    }
+
+    fn insert(&self, key: &ModMetaKey<'_>, meta: CachedPkgMeta) {
+        let Some(path) = cache_path(key) else {
+            return;
+        };
+        let hash = module_key_hash(key);
+        let mut guard = self.blobs.lock().unwrap_or_else(|e| e.into_inner());
+        let state = guard.entry(hash).or_insert_with(|| BlobState {
+            packages: HashMap::new(),
+            dirty: false,
+            path,
+        });
+        state.packages.insert(key.pkg_path.to_string(), meta);
+        state.dirty = true;
+    }
+
+    /// Persist any module blobs that gained new packages during this session.
+    pub fn flush(&self) {
+        if !cache_enabled() {
+            return;
+        }
+        let mut guard = self.blobs.lock().unwrap_or_else(|e| e.into_inner());
+        for state in guard.values_mut() {
+            if !state.dirty {
+                continue;
+            }
+            if let Some(parent) = state.path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let blob = ModuleBlob {
+                version: MODMETA_VERSION.to_string(),
+                packages: state.packages.clone(),
+            };
+            if let Ok(bytes) = serde_json::to_vec(&blob) {
+                let _ = std::fs::write(&state.path, bytes);
+                state.dirty = false;
+            }
+        }
+    }
+}
+
+impl Default for ModMetaSession {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn cache_enabled() -> bool {
@@ -119,7 +253,7 @@ fn cache_root() -> Option<PathBuf> {
     }
 }
 
-fn key_hash(key: &ModMetaKey<'_>) -> String {
+fn module_key_hash(key: &ModMetaKey<'_>) -> String {
     let mut h = Sha256::new();
     h.update(MODMETA_VERSION.as_bytes());
     h.update(b"\n");
@@ -131,8 +265,6 @@ fn key_hash(key: &ModMetaKey<'_>) -> String {
         h.update(b"@");
         h.update(key.module_version.as_bytes());
     }
-    h.update(b"\n");
-    h.update(key.pkg_path.as_bytes());
     h.update(b"\n");
     h.update(key.goos.as_bytes());
     h.update(b"/");
@@ -152,43 +284,22 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn cache_path(key: &ModMetaKey<'_>) -> Option<PathBuf> {
+    cache_path_for_hash(&module_key_hash(key))
+}
+
+fn cache_path_for_hash(hash: &str) -> Option<PathBuf> {
     let root = cache_root()?;
-    let hash = key_hash(key);
     let prefix = hash.get(..2).unwrap_or("00");
     Some(root.join(prefix).join(format!("{hash}.json")))
 }
 
-/// Load cached package metadata, or `None` on miss / disabled.
-pub fn load(key: &ModMetaKey<'_>) -> Option<CachedPkgMeta> {
-    if !cache_enabled() {
-        return None;
-    }
-    // Immutable packages without a version cannot be keyed safely.
-    if !key.standard && key.module_version.is_empty() {
-        return None;
-    }
-    let path = cache_path(key)?;
+fn load_blob(path: &Path) -> Option<HashMap<String, CachedPkgMeta>> {
     let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
-}
-
-/// Store package metadata (best-effort).
-pub fn store(key: &ModMetaKey<'_>, meta: &CachedPkgMeta) {
-    if !cache_enabled() {
-        return;
+    let blob: ModuleBlob = serde_json::from_slice(&bytes).ok()?;
+    if blob.version != MODMETA_VERSION {
+        return None;
     }
-    if !key.standard && key.module_version.is_empty() {
-        return;
-    }
-    let Some(path) = cache_path(key) else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(bytes) = serde_json::to_vec(meta) {
-        let _ = std::fs::write(path, bytes);
-    }
+    Some(blob.packages)
 }
 
 /// Read GOROOT/VERSION (or fallback string) for stdlib cache keys.
@@ -197,28 +308,4 @@ pub fn goroot_version(goroot: &Path) -> String {
     std::fs::read_to_string(path)
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "unknown".into())
-}
-
-/// Import a package directory, using the modmeta cache for immutable modules.
-pub fn import_dir_cached(
-    ctxt: &Context,
-    dir: &Path,
-    key: &ModMetaKey<'_>,
-) -> Result<BuildPackage, guff_build::BuildError> {
-    if let Some(meta) = load(key) {
-        let mut pkg = BuildPackage {
-            dir: dir.to_path_buf(),
-            import_path: key.pkg_path.to_string(),
-            goroot: key.standard,
-            ..BuildPackage::default()
-        };
-        meta.apply_to(&mut pkg);
-        return Ok(pkg);
-    }
-    let pkg = ctxt.import_dir(dir)?;
-    // Only persist successful scans of immutable packages.
-    if key.standard || !key.module_version.is_empty() {
-        store(key, &CachedPkgMeta::from_build(&pkg));
-    }
-    Ok(pkg)
 }

@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 use crate::bail::{Bail, BailReason};
 use crate::modcache::ModCache;
-use crate::modmeta::{self, ModMetaKey};
+use crate::modmeta::{self, ModMetaKey, ModMetaSession};
 use crate::resolve::{resolve_import, ResolvedModule};
 use crate::workspace::{load_workspace, Workspace};
 
@@ -133,6 +133,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     }
     let goroot = PathBuf::from(&ctxt.goroot);
     let goroot_ver = modmeta::goroot_version(&goroot);
+    let modmeta_session = ModMetaSession::new();
 
     let root_dirs = expand_patterns(
         &ctxt,
@@ -178,7 +179,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                     standard: module.standard,
                     goroot_version: &goroot_ver,
                 };
-                let result = modmeta::import_dir_cached(&ctxt, dir, &key);
+                let result = modmeta_session.import_dir(&ctxt, dir, &key);
                 (pkg_path.clone(), dir.clone(), module.clone(), *is_root, result)
             })
             .collect();
@@ -253,6 +254,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     pkgs.sort_by(|a, b| a.id.cmp(&b.id));
     response.roots.sort();
     response.packages = pkgs;
+    modmeta_session.flush();
     Ok(response)
 }
 
