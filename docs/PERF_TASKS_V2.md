@@ -464,14 +464,14 @@ cd /Users/dakimura/projects/src/github.com/dakimura/guff
 | `golangci_only` の増分 | **0** |
 | `both` の減少 | **禁止** |
 
-現 baseline（`regress/baseline*.json`、**2026-07-29 lazy import members / A-8 後に再ロック**）:
+現 baseline（`regress/baseline*.json`、**2026-07-30 C-3a + A-10 後に再ロック**）:
 
 | プロファイル | baseline wall | baseline RSS | findings |
 |---|---:|---:|---|
-| tsdb | **1.360s** | **1,141,440,512** (~1.06 GiB) | both 4 / only 0,0 |
-| full | **3.360s** | **4,034,396,160** (~3.76 GiB) | both 20 / only 0,0 |
+| tsdb | **1.250s** | **1,132,838,912** (~1.05 GiB) | both 4 / only 0,0 |
+| full | **2.770s** | **3,729,309,696** (~3.47 GiB) | both 20 / only 0,0 |
 
-（旧 baseline は tsdb 1.430s / full 3.680s。lazy import members で wall・RSS とも下がった。）
+（旧 baseline は tsdb 1.360s / full 3.360s。C-3a の `go list` 削減と A-10 の teardown 省略をゲートに焼き込んだ。）
 
 **両プロファイル PASS しなければコミットしない。baseline はユーザー承認まで更新しない**（§0-6）。
 
