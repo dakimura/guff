@@ -59,8 +59,16 @@ impl ExportImporter {
         let payload = new_reader(&data).ok()?;
         let fset = self.fset.clone();
         let universe = &self.universe;
-        let mut noop = NoopImporter;
-        let pkg = read(&mut noop, ctx, universe, payload, path, &fset).ok()?;
+        // Resolve transitive packages from the cache (preloaded in dependency
+        // order by `preload_exports`). A true NoopImporter made `do_pkg` mint
+        // stub PackageIds for already-decoded deps (e.g. embed → io/fs), so
+        // named types like `fs.File` were duplicated and Implements failed
+        // (`embed.FS` ↛ `fs.FS`).
+        let mut cache_imp = CacheImporter {
+            cache: &self.cache,
+            unsafe_pkg: self.universe.unsafe_pkg,
+        };
+        let pkg = read(&mut cache_imp, ctx, universe, payload, path, &fset).ok()?;
         self.cache.insert(path.to_string(), pkg);
         Some(pkg)
     }
@@ -90,13 +98,25 @@ impl Importer for ExportImporter {
     }
 }
 
-/// Stub importer used while decoding a single export blob.
-/// Transitive dependencies must already be in the cache (loaded by prior
-/// [`ExportImporter::import`] calls).
-struct NoopImporter;
+/// Importer used while decoding a single export blob.
+///
+/// Transitive dependencies must already be in [`ExportImporter::cache`]
+/// (loaded by prior [`ExportImporter::import`] calls via topo preload).
+struct CacheImporter<'a> {
+    cache: &'a HashMap<String, PackageId>,
+    unsafe_pkg: PackageId,
+}
 
-impl Importer for NoopImporter {
-    fn import(&mut self, _ctx: &mut ImportCtx<'_>, _path: &str) -> Option<PackageId> {
-        None
+impl Importer for CacheImporter<'_> {
+    fn import(&mut self, ctx: &mut ImportCtx<'_>, path: &str) -> Option<PackageId> {
+        if path == "unsafe" {
+            return Some(self.unsafe_pkg);
+        }
+        let &pkg = self.cache.get(path)?;
+        if ctx.packages.get(pkg).complete() {
+            Some(pkg)
+        } else {
+            None
+        }
     }
 }

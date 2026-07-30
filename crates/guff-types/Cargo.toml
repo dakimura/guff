@@ -24,3 +24,4 @@ rayon = "1.10"
 
 [dev-dependencies]
 guff-exportdata = { path = "../guff-exportdata" }
+tempfile = "3"

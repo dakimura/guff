@@ -160,10 +160,22 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             Vec::new()
         };
 
+        // C-3d: hybrid cold path type-checks stdlib from GOROOT source (seed
+        // overlays persist under GUFF_CACHE). Skipping `go list -export` removes
+        // the warm/cold subprocess and is findings-identical after the
+        // export-importer Pkg / CacheImporter fixes. Opt back into `.a` with
+        // `GUFF_STDLIB_SOURCE=0` / `export` / `off`.
+        let skip_stdlib_export = !stdlib_export_requested();
         let (exports, compiled) = std::thread::scope(|s| {
             let compiled_job = (!want_compiled.is_empty())
                 .then(|| s.spawn(|| load_or_fetch_compiled_files(cfg, &want_compiled, timing)));
-            let exports = if stdlib.is_empty() {
+            let exports = if stdlib.is_empty() || skip_stdlib_export {
+                if timing && skip_stdlib_export && !stdlib.is_empty() {
+                    eprintln!(
+                        "guff:   golist stdlib-export skipped ({} pkgs from source)",
+                        stdlib.len(),
+                    );
+                }
                 Ok(HashMap::default())
             } else {
                 load_or_fetch_stdlib_exports(cfg, &stdlib, timing)
@@ -274,10 +286,17 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     }
 
     if timing {
-        eprintln!(
-            "guff:   golist stdlib-export {:.2}s",
-            t_stdlib.elapsed().as_secs_f64(),
-        );
+        if !stdlib_export_requested() {
+            eprintln!(
+                "guff:   golist stdlib-export skipped+cgo {:.2}s",
+                t_stdlib.elapsed().as_secs_f64(),
+            );
+        } else {
+            eprintln!(
+                "guff:   golist stdlib-export {:.2}s",
+                t_stdlib.elapsed().as_secs_f64(),
+            );
+        }
     }
 
     let _ = mode; // mode informs golist_args; refine clears fields later.
@@ -1316,7 +1335,9 @@ pub fn peek_cached_graph(
             .filter(|p| p.standard && p.import_path != "unsafe" && p.error.is_none())
             .map(|p| p.import_path.clone())
             .collect();
-        if !stdlib.is_empty() {
+        // C-3d: when stdlib is sourced, the seed fingerprint does not need `.a`
+        // paths — skip the export-cache requirement.
+        if !stdlib.is_empty() && stdlib_export_requested() {
             let Some(exports) = peek_stdlib_export_cache(cfg, &stdlib) else {
                 return Ok(None);
             };
@@ -1748,6 +1769,27 @@ fn uses_export_data(cfg: &Config) -> bool {
     let mode = cfg.effective_mode();
     mode.contains(LoadMode::NEED_EXPORT_FILE)
         || (mode.contains(LoadMode::NEED_TYPES) && !mode.contains(LoadMode::NEED_DEPS))
+}
+
+/// Whether hybrid mode should still fetch stdlib `.a` paths via `go list -export`.
+///
+/// **Default: no** (C-3d). Stdlib is type-checked from GOROOT source and persisted
+/// as seed overlays. Set `GUFF_STDLIB_SOURCE=0` / `false` / `off` / `export` to
+/// restore the legacy export-data path (debugging / A/B).
+pub fn stdlib_export_requested() -> bool {
+    match std::env::var("GUFF_STDLIB_SOURCE") {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no" | "export"
+        ),
+        // Unset → source (default ON for C-3d).
+        Err(_) => false,
+    }
+}
+
+/// True when stdlib is type-checked from source (the default after C-3d).
+pub fn stdlib_from_source_env() -> bool {
+    !stdlib_export_requested()
 }
 
 fn invoke_go(cfg: &Config, args: &[String]) -> Result<String, GoListError> {

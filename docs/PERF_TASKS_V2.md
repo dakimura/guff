@@ -12,10 +12,17 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-3d DONE（2026-07-30）:** stdlib を GOROOT ソース typecheck + seed overlay 永続化。
+> **既定オン**（`GUFF_STDLIB_SOURCE=export` で旧 `.a` 経路）。`go list -export` stdlib
+> サブプロセス削除。export importer 修正で findings **28≡28**（TB Pkg + CacheImporter）。
+> go-less: `go` 不在 or `GUFF_NATIVE_LIST=force` で `./...` 完走（fake `go` 0 回）。
+> native 既定は **まだ off**（warm list キャッシュ無し + `-test` バリアント未完で
+> roots 294→118）。nested `go.mod` を `./...` から除外する修正入り。§C-3d。
+>
 > **C-3c Phase 1（2026-07-30）:** ネイティブ lister 骨格 + オラクル。
 > 新クレート `guff-golist`（escape / GOMODCACHE / go.mod require+replace /
-> GOROOT vendor / Go 1.26 experiment tags / **go.work**）。`GUFF_NATIVE_LIST=verify` で
-> hybrid（61）/ helm `pkg/chart`（629）/ **prometheus `model`（424, go.work）** が diff 空。
+> GOROOT vendor / Go 1.26 experiment tags / **go.work** / **nested-module skip**）。
+> `GUFF_NATIVE_LIST=verify` で hybrid / helm `pkg/chart` / prometheus `model` diff 空。
 > 既定はまだ `off`。未着手: 恒久キャッシュ / repo `vendor/` / 完全 `-test` バリアント /
 > C-3e cgo 委譲 / 既定オン。
 >
@@ -29,7 +36,7 @@
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
 > C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
-> C-9（seed Info skip）**。
+> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -3988,10 +3995,40 @@ findings は差を吸収してしまうので、オラクルとしては鈍す�
 - **Go バージョンごとに一度だけ**払えば、以後は `.a` デコードより速い可能性が高い
   （現状 `stdlib-export` 0.15s ＋ Phase A のデコードが消える）。
 
-**GO/NO-GO に必要な計測（未実施）:**
-①GOROOT ソースからの stdlib 全 typecheck の初回コスト、②スナップショットのサイズと復元時間、
-③復元した型 vs export data 由来の型で **findings 同一**。
-**③が本丸のリスク**です（export data には型チェックで捨てられる情報の差がある）。
+#### DONE（2026-07-30）— **stdlib-export 削除・既定ソース。findings 28≡28。go-less 到達。**
+
+**ブロッカー修正（export 経路側）:**
+1. `guff-exportdata/ureader.rs` `prepare_named_underlying` — named iface メソッド clone 時に
+   **`Pkg` を保持**（Go ureader と同じ）。これで `testing.TB.private()` の Implements が通る。
+2. `guff-exportdata/importer.rs` — decode 中の `NoopImporter` を **`CacheImporter`** に置換。
+   既デコード deps（`embed`→`io/fs`）を stub 化せず共有し、`embed.FS` → `fs.FS` が通る。
+3. 回帰: `guff-types/tests/export_sealed_iface.rs`（sealed iface / `testing.TB` / `embed.FS`）。
+
+**製品挙動:**
+- hybrid `dep_source` 既定で stdlib `.a` を付けない（`stdlib_export_requested()` = false）。
+- 永続化は既存 seed overlay（`GUFF_CACHE/seed/`）。専用 VERSION キー blob は不要だった。
+- `GUFF_STDLIB_SOURCE=export|0|off` で旧 `go list -export` 経路に戻せる。
+
+**C-3c 追補（go-less 用）:**
+- `./...` walk が nested `go.mod`（prometheus `compliance/`）をスキップ（`go list` と同じ）。
+- `guff-build` `discover_goroot` が PATH / Homebrew Cellar から GOROOT を探す（`go env` なし）。
+- `GUFF_NATIVE_LIST` 既定は **off のまま**（warm の golist stdout キャッシュを守る +
+  `-test` バリアント未完で roots 294 vs 118）。`go` 不在時は Off 分岐が native を使う。
+  明示 `force` / `on` で go-less / 優先 native。
+
+| 計測（prometheus `./...`） | export (A) | source 既定 (B) |
+|---|---:|---:|
+| findings | **28** | **28**（diff 空・決定的） |
+| warm | 0.18s | **0.18s** |
+| seed-hot `--no-cache` | ~2.10s（毎回 export 0.18s※） | **~2.05s** |
+| cold 空キャッシュ | ~2.45s | ~2.49s（seed +0.1s ≈ export −0.1s） |
+| go-less `force` + fake `go` | — | **完走 / GO_INVOKED=0**（findings 27※※） |
+
+※ `--no-cache` は golist/stdlib_exports 書き込みも止めるので A は毎回 export を払う。
+※※ native の `-test` バリアント未完で 1 件欠ける。`./model/...` は go-less≡default。
+
+**残:** native warm キャッシュ + 完全 `-test` → 既定オン合意。C-3e（cgo CompiledGoFiles）。
+B-9 はやらない。
 
 ---
 
@@ -4014,12 +4051,12 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 | ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
 | ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
 | C-3c | ネイティブ lister（+ 恒久キャッシュ） | **大** | −0.2〜0.3s（キャッシュ後） | 主コールが消える | 中〜高 |
-| C-3d | stdlib 型スナップショット | 中〜大 | −0.15s + Phase A | export コールが消える | **高**（型の同一性） |
+| ~~C-3d~~ | ~~stdlib 型スナップショット~~ **DONE**（既定ソース・export 修正で findings 同一） | 中〜大 | seed-hot `--no-cache` で export 0.18s 消滅 | export コール消滅 + go-less | 低（修正後） |
 | C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a / C-3b は DONE。C-3c Phase 1（オラクル + native list）は骨格完了・既定オフ。**
-続きは恒久キャッシュ → 既定オン合意 → C-3e → C-3d。**wall だけが目的なら
-C-3 の安い削りはもう終わっています**（残り 0.26s ＋ プロセス起動 0.078s）。
+**C-3a / C-3b / C-3d は DONE。C-3c Phase 1 は骨格完了・既定オフ**
+（nested-module skip 追加）。続きは native warm キャッシュ + `-test` バリアント → 既定オン合意 → C-3e。
+**wall だけが目的なら C-3 の安い削りはもう終わっています**（残りは製品タスク）。
 
 ### C-3c Phase 1 DONE メモ（2026-07-30）
 

@@ -1,10 +1,16 @@
 //! Native package driver (PERF_TASKS_V2 §C-3c) wrapping `guff-golist`.
 //!
 //! Feature flag: `GUFF_NATIVE_LIST`
-//! - unset / `0` / `off` / `false` — prefer `go list` (current default)
+//! - unset / `0` / `off` / `false` — prefer `go list` when available (**default**).
+//!   When `go` is missing, native is still tried (go-less).
 //! - `1` / `on` / `true` — try native first; bail → `go list`
 //! - `verify` — run both when native succeeds; print graph diffs; use `go list`
-//! - `force` — native only (error on bail; for tests)
+//! - `force` — native only (error on bail; for tests / go-less CI)
+//!
+//! Default stays off until native grows a warm list cache and full `-test`
+//! variants (root counts still differ: go list ~294 vs native ~118 on
+//! prometheus). Nested-module `./...` skipping and C-3d stdlib-from-source
+//! make `force` / go-less usable today.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,6 +52,8 @@ impl NativeListMode {
                     Self::Off
                 }
             },
+            // Default off: warm `go list` stdout cache stays critical-path.
+            // Go-less still uses native via the Off branch when `go` is absent.
             Err(_) => Self::Off,
         }
     }
@@ -236,22 +244,15 @@ fn to_module(m: ListModule) -> Module {
     }
 }
 
-/// Re-run the hybrid stdlib-export / cgo post-pass by shelling out through
-/// `go_list_driver` is wrong (full re-list). For v1 we leave export files empty
-/// on the native path and let typecheck source-check stdlib when no `.a` is
-/// attached — same as offline. When `go` is available and `dep_source`, the
-/// `On` path currently skips the dedicated stdlib `-export` query; C-3d will
-/// replace it. Callers that need export parity should use `verify` / `go list`.
+/// Native graphs keep stdlib on the source path (C-3d). Cgo `CompiledGoFiles`
+/// still come from `go list` when native bails; when native succeeds with cgo
+/// packages present, `GoFiles` (which already include `*.go` from cgo) are used
+/// until C-3e wires a dedicated compiled-files attach.
 fn attach_hybrid_exports(
     cfg: &Config,
-    mut response: DriverResponse,
+    response: DriverResponse,
 ) -> Result<DriverResponse, LoadError> {
     let _ = cfg;
-    // Placeholder: keep native response as-is. Hybrid export attach for native
-    // graphs lands with C-3d / a extracted helper from golist.rs.
-    // Marking packages that look standard is already done via empty module +
-    // GOROOT resolution inside guff-golist.
-    let _ = &mut response;
     Ok(response)
 }
 

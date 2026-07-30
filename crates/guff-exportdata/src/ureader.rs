@@ -448,18 +448,28 @@ fn read_object(
 }
 
 fn prepare_named_underlying(state: &mut PkgState<'_, '_, '_, '_>, named: TypeId, underlying: TypeId) -> TypeId {
-    let method_specs: Vec<(String, TypeId)> = match state.ctx.types.get(underlying) {
-        TypeData::Interface(iface) if iface.num_explicit_methods() > 0 => (0..iface.num_explicit_methods())
-            .filter_map(|i| {
-                let m = iface.explicit_method(i);
-                match state.ctx.objects.get(m) {
-                    ObjectData::Func(f) => Some((f.name().to_string(), f.typ()?)),
-                    _ => None,
-                }
-            })
-            .collect(),
-        _ => return underlying,
-    };
+    // Mirror Go's ureader `(*reader).typ` named-interface rewrite (#49906): when a
+    // named type's underlying is an interface with explicit methods, clone those
+    // methods so each has a receiver whose type is the named type. Critical:
+    // preserve each method's `Pkg` — unexported interface methods (e.g.
+    // `testing.TB.private`) are looked up with the method's package, and a
+    // missing pkg makes Implements fail for types in the same package.
+    let method_specs: Vec<(String, TypeId, Option<PackageId>)> =
+        match state.ctx.types.get(underlying) {
+            TypeData::Interface(iface) if iface.num_explicit_methods() > 0 => (0..iface
+                .num_explicit_methods())
+                .filter_map(|i| {
+                    let m = iface.explicit_method(i);
+                    match state.ctx.objects.get(m) {
+                        ObjectData::Func(f) => {
+                            Some((f.name().to_string(), f.typ()?, m.pkg(state.ctx.objects)))
+                        }
+                        _ => None,
+                    }
+                })
+                .collect(),
+            _ => return underlying,
+        };
     if method_specs.is_empty() {
         return underlying;
     }
@@ -470,11 +480,18 @@ fn prepare_named_underlying(state: &mut PkgState<'_, '_, '_, '_>, named: TypeId,
         _ => Vec::new(),
     };
     let mut new_methods = Vec::new();
-    for (name, sig) in method_specs {
+    for (name, sig, pkg) in method_specs {
         let recv = new_param(state.ctx.objects, "", named);
         set_var_kind(state.ctx.objects, recv, VarKind::Recv);
+        if let Some(pkg) = pkg {
+            recv.set_pkg(state.ctx.objects, pkg);
+        }
         let new_sig = clone_signature_with_recv(state.ctx.types, sig, recv);
-        new_methods.push(new_func(state.ctx.objects, name, Some(new_sig)));
+        let f = new_func(state.ctx.objects, name, Some(new_sig));
+        if let Some(pkg) = pkg {
+            f.set_pkg(state.ctx.objects, pkg);
+        }
+        new_methods.push(f);
     }
     let new_iface = new_interface_type(state.ctx.types, new_methods, embeds);
     state.ifaces.push(new_iface);

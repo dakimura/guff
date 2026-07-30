@@ -134,11 +134,26 @@ fn host_goos() -> &'static str {
     }
 }
 
-/// Returns `GOROOT` from the environment, or from `go env GOROOT` if available.
+/// Returns `GOROOT` from the environment, PATH layout, well-known install
+/// locations, or `go env` as last resort.
+///
+/// Prefer not spawning `go` (C-3b): after `$GOROOT`, look for a `go` binary on
+/// `PATH` and take its toolchain root (Homebrew `…/libexec` included), then
+/// probe common install dirs so go-less runs still see stdlib when `go` is
+/// absent from a stripped `PATH`. Only if that fails do we shell out to
+/// `go env GOROOT` for exotic installers.
 fn discover_goroot() -> String {
     let from_env = env_or("GOROOT", "");
     if !from_env.is_empty() {
         return clean_path(&from_env);
+    }
+    if let Some(root) = goroot_from_path() {
+        return clean_path(&root.to_string_lossy());
+    }
+    for candidate in well_known_goroot_candidates() {
+        if candidate.join("VERSION").is_file() && candidate.join("src").is_dir() {
+            return clean_path(&candidate.to_string_lossy());
+        }
     }
     if let Ok(output) = Command::new("go").args(["env", "GOROOT"]).output() {
         if output.status.success() {
@@ -149,6 +164,47 @@ fn discover_goroot() -> String {
         }
     }
     String::new()
+}
+
+/// GOROOT inferred from the `go` binary on PATH (no subprocess).
+fn goroot_from_path() -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for dir in env::split_paths(&path) {
+        let candidate = dir.join("go");
+        if !candidate.is_file() {
+            continue;
+        }
+        let real = std::fs::canonicalize(&candidate).unwrap_or(candidate);
+        let base = real.parent()?.parent()?;
+        for root in [base.to_path_buf(), base.join("libexec")] {
+            if root.join("VERSION").is_file() && root.join("src").is_dir() {
+                return Some(root);
+            }
+        }
+    }
+    None
+}
+
+fn well_known_goroot_candidates() -> Vec<PathBuf> {
+    let mut out = vec![
+        PathBuf::from("/usr/local/go"),
+        PathBuf::from("/opt/homebrew/opt/go/libexec"),
+        PathBuf::from("/usr/local/opt/go/libexec"),
+    ];
+    // Homebrew Cellar: /opt/homebrew/Cellar/go/<ver>/libexec
+    for cellar in ["/opt/homebrew/Cellar/go", "/usr/local/Cellar/go"] {
+        let Ok(entries) = std::fs::read_dir(cellar) else {
+            continue;
+        };
+        let mut versions: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path().join("libexec"))
+            .filter(|p| p.join("VERSION").is_file())
+            .collect();
+        versions.sort();
+        out.extend(versions.into_iter().rev()); // newest first
+    }
+    out
 }
 
 /// Default `GOPATH` when the environment variable is unset.

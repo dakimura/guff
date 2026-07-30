@@ -600,6 +600,11 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
                 continue;
             }
         }
+        // Nested modules (their own go.mod) are outside `./...` of the parent,
+        // matching `go list` — and often live in go.work as sibling `use`s.
+        if dir != root && dir.join("go.mod").is_file() {
+            continue;
+        }
         if ctxt.import_dir(&dir).is_ok() {
             out.push(dir.clone());
         }
