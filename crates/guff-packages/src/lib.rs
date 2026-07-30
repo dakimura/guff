@@ -17,6 +17,7 @@ mod golist;
 mod load;
 mod load_mode;
 mod native;
+mod native_cache;
 mod offline;
 mod package;
 mod preset;

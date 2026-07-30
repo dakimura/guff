@@ -15,7 +15,7 @@ impl Context {
     ///
     /// Equivalent to `build.Context.ImportDir`.
     pub fn import_dir(&self, dir: impl AsRef<Path>) -> Result<Package, BuildError> {
-        let dir = dir.as_ref().canonicalize().map_err(BuildError::Io)?;
+        let dir = abs_or_canonicalize(dir.as_ref())?;
         let mut pkg = Package {
             dir: dir.clone(),
             import_path: ".".to_string(),
@@ -31,6 +31,12 @@ impl Context {
         let mut all_tags = HashSet::new();
         let mut first_file: Option<String> = None;
         let mut first_pkg = String::new();
+        let mut imports = Vec::new();
+        let mut test_imports = Vec::new();
+        let mut xtest_imports = Vec::new();
+        let mut seen_imp = HashSet::new();
+        let mut seen_test_imp = HashSet::new();
+        let mut seen_xtest_imp = HashSet::new();
 
         let entries = fs::read_dir(&pkg.dir)?;
         let mut names: Vec<String> = entries
@@ -44,7 +50,9 @@ impl Context {
             }
 
             let path = pkg.dir.join(&name);
-            let content = match fs::read(&path) {
+            // Build tags + package + imports live in the file header. Full-file
+            // reads dominate listing of GOMODCACHE (C-3c); 64 KiB is enough.
+            let content = match read_go_header(&path) {
                 Ok(c) => c,
                 Err(e) => {
                     pkg.invalid_go_files.push(name);
@@ -106,18 +114,41 @@ impl Context {
                 all_tags.insert("cgo".to_string());
                 if self.cgo_enabled {
                     pkg.cgo_files.push(name);
+                    for imp in info.imports {
+                        if seen_imp.insert(imp.clone()) {
+                            imports.push(imp);
+                        }
+                    }
                 } else {
                     pkg.ignored_go_files.push(name);
                 }
             } else if is_xtest {
                 pkg.xtest_go_files.push(name);
+                for imp in info.imports {
+                    if seen_xtest_imp.insert(imp.clone()) {
+                        xtest_imports.push(imp);
+                    }
+                }
             } else if is_test {
                 pkg.test_go_files.push(name);
+                for imp in info.imports {
+                    if seen_test_imp.insert(imp.clone()) {
+                        test_imports.push(imp);
+                    }
+                }
             } else {
                 pkg.go_files.push(name);
+                for imp in info.imports {
+                    if seen_imp.insert(imp.clone()) {
+                        imports.push(imp);
+                    }
+                }
             }
         }
 
+        pkg.imports = imports;
+        pkg.test_imports = test_imports;
+        pkg.xtest_imports = xtest_imports;
         pkg.all_tags = all_tags.into_iter().collect();
         pkg.all_tags.sort();
 
@@ -133,6 +164,28 @@ impl Context {
 
         Ok(())
     }
+}
+
+/// Bytes to read from each `.go` file for build-tag / package / import scan.
+const GO_HEADER_BYTES: u64 = 64 * 1024;
+
+fn read_go_header(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let f = fs::File::open(path)?;
+    let mut buf = Vec::with_capacity(GO_HEADER_BYTES as usize);
+    let mut take = f.take(GO_HEADER_BYTES);
+    take.read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Prefer the path as-is when absolute; canonicalize only when needed.
+fn abs_or_canonicalize(dir: &Path) -> Result<PathBuf, BuildError> {
+    if dir.is_absolute() {
+        // Avoid canonicalize() on the listing hot path — it is a syscall per
+        // package and dominates GOMODCACHE walks on Darwin.
+        return Ok(dir.to_path_buf());
+    }
+    dir.canonicalize().map_err(BuildError::Io)
 }
 
 /// Returns the absolute path of `dir`, using `ctxt.dir` as base when relative.

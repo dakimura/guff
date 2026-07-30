@@ -44,6 +44,13 @@ pub struct Package {
     /// `_test.go` files with `package foo_test`.
     pub xtest_go_files: Vec<String>,
 
+    /// Import paths from non-test GoFiles + CgoFiles (declaration order, deduped).
+    pub imports: Vec<String>,
+    /// Import paths from TestGoFiles.
+    pub test_imports: Vec<String>,
+    /// Import paths from XTestGoFiles.
+    pub xtest_imports: Vec<String>,
+
     /// Build tags consulted while classifying files in this directory.
     pub all_tags: Vec<String>,
 }

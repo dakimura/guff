@@ -41,7 +41,7 @@ pub enum BailReason {
     ExcludeOrRetract,
     /// Unsupported pattern (only `.` / `./...` / abs / main-module paths).
     UnsupportedPattern,
-    /// `Config.tests == true` (test variants; v2).
+    /// Formerly used when `Config.tests` was unsupported; kept for ABI stability.
     Tests,
     /// Build flags other than `-tags=...`.
     UnsupportedBuildFlags,

@@ -8,6 +8,7 @@ mod bail;
 mod escape;
 mod list;
 mod modcache;
+mod modmeta;
 mod resolve;
 mod workspace;
 

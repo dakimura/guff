@@ -12,19 +12,38 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-3c Phase 2 DONE（2026-07-30）:** native list **既定オン**。
+> ① warm ディスクキャッシュ `$GUFF_CACHE/native_list/`（warm wall **0.15s**）
+> ② 完全 `-test` + for-test 依存 ③ **header-only 走査 + 並列 BFS + `modmeta/` 恒久キャッシュ**
+> （GOMODCACHE/GOROOT）。`verify` prometheus `./...` **diff 空**。findings **28≡28**。
+>
+> **cold load_graph（A/B、Darwin arm64）:**
+> - 空 `GUFF_CACHE`（初回）: go list 0.75s → native **0.70s**（−0.05s。go は GOCACHE warm）
+> - **恒久 `GUFF_CACHE` + `--no-cache`**（現実の cold）: 0.76s → **0.23s**（**−0.53s**）/
+>   wall 2.0s → **1.85s**
+>
+> `GUFF_NATIVE_LIST=off` で旧経路。残: repo `vendor/` / C-3e cgo。B-9 はやらない。§C-3c。
+>
+> **⏭ 次セッション（C-3c Phase 3・速度フォロー）— 両方やれ:**
+> 1. **`--no-cache` でも `native_list/` を peek**（書き込みは disable のまま）。
+>    go list の C-7 peek と同じ。いま `--no-cache` は graph を毎回 modmeta から再構築して
+>    **~0.20s**；warm graph hit は **0.04s**。`native_cache::try_load` が `disable_cache` で
+>    early-return しているのが犯人。
+> 2. **`modmeta` を package 単位 JSON×N → `module@version`（+ stdlib）単位の 1 blob** に。
+>    現状 1489 ファイルの syscall が modmeta-hit 0.19s の大半。設計の「メインモジュール 5ms」に近づける。
+> ゲート: `GUFF_NATIVE_LIST=verify` prometheus `./...` diff 空、findings 28≡28、A/B/A/B。
+> 計測は `PERF_TASKS.md` §0（絶対ルール）。終わったら §C-3c に実測を追記。
+>
 > **C-3d DONE（2026-07-30）:** stdlib を GOROOT ソース typecheck + seed overlay 永続化。
 > **既定オン**（`GUFF_STDLIB_SOURCE=export` で旧 `.a` 経路）。`go list -export` stdlib
 > サブプロセス削除。export importer 修正で findings **28≡28**（TB Pkg + CacheImporter）。
 > go-less: `go` 不在 or `GUFF_NATIVE_LIST=force` で `./...` 完走（fake `go` 0 回）。
-> native 既定は **まだ off**（warm list キャッシュ無し + `-test` バリアント未完で
-> roots 294→118）。nested `go.mod` を `./...` から除外する修正入り。§C-3d。
+> nested `go.mod` を `./...` から除外する修正入り。§C-3d。
 >
 > **C-3c Phase 1（2026-07-30）:** ネイティブ lister 骨格 + オラクル。
 > 新クレート `guff-golist`（escape / GOMODCACHE / go.mod require+replace /
 > GOROOT vendor / Go 1.26 experiment tags / **go.work** / **nested-module skip**）。
-> `GUFF_NATIVE_LIST=verify` で hybrid / helm `pkg/chart` / prometheus `model` diff 空。
-> 既定はまだ `off`。未着手: 恒久キャッシュ / repo `vendor/` / 完全 `-test` バリアント /
-> C-3e cgo 委譲 / 既定オン。
+> Phase 2 で warm キャッシュ + `-test` + 既定オンまで完了。
 >
 > **C-9 DONE（2026-07-30）:** seed が捨てる `Info` への記録を止める（Go の nil-map ゲート相当）。
 > `-j 1` seed ≈ **−0.15s** / wall ≈ **−0.17s**。findings byte 同一。§C-9。
@@ -36,7 +55,7 @@
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
 > C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
-> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）**。
+> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -4012,9 +4031,9 @@ findings は差を吸収してしまうので、オラクルとしては鈍す�
 **C-3c 追補（go-less 用）:**
 - `./...` walk が nested `go.mod`（prometheus `compliance/`）をスキップ（`go list` と同じ）。
 - `guff-build` `discover_goroot` が PATH / Homebrew Cellar から GOROOT を探す（`go env` なし）。
-- `GUFF_NATIVE_LIST` 既定は **off のまま**（warm の golist stdout キャッシュを守る +
-  `-test` バリアント未完で roots 294 vs 118）。`go` 不在時は Off 分岐が native を使う。
-  明示 `force` / `on` で go-less / 優先 native。
+- `GUFF_NATIVE_LIST` 既定は **on**（Phase 2: warm `native_list/` キャッシュ +
+  完全 `-test` + for-test 依存バリアント）。`GUFF_NATIVE_LIST=off` で旧経路。
+  明示 `force` で go-less / `verify` でオラクル。
 
 | 計測（prometheus `./...`） | export (A) | source 既定 (B) |
 |---|---:|---:|
@@ -4022,13 +4041,11 @@ findings は差を吸収してしまうので、オラクルとしては鈍す�
 | warm | 0.18s | **0.18s** |
 | seed-hot `--no-cache` | ~2.10s（毎回 export 0.18s※） | **~2.05s** |
 | cold 空キャッシュ | ~2.45s | ~2.49s（seed +0.1s ≈ export −0.1s） |
-| go-less `force` + fake `go` | — | **完走 / GO_INVOKED=0**（findings 27※※） |
+| go-less `force` + fake `go` | — | **完走 / GO_INVOKED=0**（findings 28） |
 
 ※ `--no-cache` は golist/stdlib_exports 書き込みも止めるので A は毎回 export を払う。
-※※ native の `-test` バリアント未完で 1 件欠ける。`./model/...` は go-less≡default。
 
-**残:** native warm キャッシュ + 完全 `-test` → 既定オン合意。C-3e（cgo CompiledGoFiles）。
-B-9 はやらない。
+**残:** repo `vendor/` / C-3e（cgo CompiledGoFiles）。B-9 はやらない。
 
 ---
 
@@ -4050,13 +4067,36 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 |---|---|---|---:|---|---|
 | ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
 | ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
-| C-3c | ネイティブ lister（+ 恒久キャッシュ） | **大** | −0.2〜0.3s（キャッシュ後） | 主コールが消える | 中〜高 |
+| C-3c | ネイティブ lister（+ warm キャッシュ + `-test`） | **DONE** | warm −0.02s / go 主コール消滅 | 主コールが消える（bail/cgo 除く） | 低（検証済み） |
 | ~~C-3d~~ | ~~stdlib 型スナップショット~~ **DONE**（既定ソース・export 修正で findings 同一） | 中〜大 | seed-hot `--no-cache` で export 0.18s 消滅 | export コール消滅 + go-less | 低（修正後） |
 | C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a / C-3b / C-3d は DONE。C-3c Phase 1 は骨格完了・既定オフ**
-（nested-module skip 追加）。続きは native warm キャッシュ + `-test` バリアント → 既定オン合意 → C-3e。
-**wall だけが目的なら C-3 の安い削りはもう終わっています**（残りは製品タスク）。
+**C-3a / C-3b / C-3d は DONE。C-3c Phase 2 は DONE（既定オン）**。
+残は repo `vendor/` / C-3e。**wall だけが目的なら C-3 の安い削りはもう終わっています**
+（残りは製品タスク）。
+
+### C-3c Phase 2 DONE メモ（2026-07-30）
+
+**入れたもの:**
+1. 完全 `-test` IDs + for-test 依存 `Q [P.test]`
+2. `$GUFF_CACHE/native_list/` warm グラフキャッシュ
+3. **走査高速化:** `.go` ヘッダ 64KiB のみ / import 再読込廃止 / `./...` 二重 `import_dir` 廃止 /
+   `canonicalize` 回避 / 並列 BFS
+4. **`$GUFF_CACHE/modmeta/`** — `module@version`（+ stdlib VERSION）恒久メタデータ
+5. `GUFF_NATIVE_LIST` **既定 on**
+
+**実測（prometheus `./...`、Darwin arm64、A/B 交互）:**
+
+| 条件 | go list load | native load | wall (off→native) |
+|---|---:|---:|---:|
+| 空 GUFF_CACHE（初回） | 0.75s | **0.70s** | 2.35 → 2.32s |
+| 恒久 GUFF_CACHE + `--no-cache` | 0.76s | **0.23s** | 2.0 → **1.85s** |
+| warm（issue cache hot） | 0.06s | **0.04s** | 0.17 → **0.15s** |
+
+verify diff 空 / findings 28≡28。空 GUFF_CACHE が go list に大きく勝てないのは
+**go 側 GOCACHE が常に warm**なため（設計書どおり「初回 ≈ go list、勝つのはキャッシュ後」）。
+
+**残タスク:** repo `vendor/`、C-3e（cgo CompiledGoFiles 委譲）。
 
 ### C-3c Phase 1 DONE メモ（2026-07-30）
 
@@ -4077,12 +4117,13 @@ listing では無視。cgo は GoFiles マージ + `runtime/cgo` を Deps に合
 **使い方:**
 ```bash
 GUFF_NATIVE_LIST=verify guff run --no-cache ./...   # 両方走らせて diff、結果は go list
-GUFF_NATIVE_LIST=on      guff run --no-cache ./...   # native 優先、bail 時 go list
+GUFF_NATIVE_LIST=off     guff run --no-cache ./...   # 旧 go list 優先
 GUFF_NATIVE_LIST=force   guff run --no-cache ./...   # native のみ（go 無し CI 向け）
+# 既定（unset）= on: native 優先、bail 時 go list
 ```
 
-**残タスク（Phase 2+）:** `module@version` 恒久キャッシュ、repo `vendor/`、
-go list 同等の test バリアント、既定オン、C-3e/C-3d。
+**Phase 1 時点の残（Phase 2 で解消）:** `module@version` 恒久キャッシュ相当の warm キャッシュ、
+go list 同等の test バリアント、既定オン。
 
 ---
 

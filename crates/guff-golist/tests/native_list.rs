@@ -122,3 +122,165 @@ fn bails_on_old_go_version() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn lists_test_variants_like_go_list() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    write(
+        &tmp.join("go.mod"),
+        "module example.com/foo\n\ngo 1.22\n",
+    );
+    write(&tmp.join("foo.go"), "package foo\n\nfunc F() int { return 1 }\n");
+    write(
+        &tmp.join("foo_test.go"),
+        "package foo\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
+    );
+    write(
+        &tmp.join("foo_ext_test.go"),
+        "package foo_test\n\nimport (\n\t\"testing\"\n\t\"example.com/foo\"\n)\n\nfunc TestExt(t *testing.T) { if foo.F() != 1 { t.Fatal() } }\n",
+    );
+
+    let cfg = ListConfig {
+        dir: tmp.clone(),
+        tests: true,
+        need_deps: true,
+        gomodcache: Some(tmp.join("empty-cache")),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &[".".to_string()]).expect("list with tests");
+
+    let ids: Vec<_> = resp.packages.iter().map(|p| p.id.as_str()).collect();
+    assert!(ids.contains(&"example.com/foo"), "plain: {ids:?}");
+    assert!(
+        ids.contains(&"example.com/foo [example.com/foo.test]"),
+        "internal variant: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"example.com/foo_test [example.com/foo.test]"),
+        "external variant: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"example.com/foo.test"),
+        "testmain: {ids:?}"
+    );
+
+    let plain = resp
+        .packages
+        .iter()
+        .find(|p| p.id == "example.com/foo")
+        .unwrap();
+    assert_eq!(plain.compiled_go_files.len(), 1, "plain stays prod-only");
+    assert!(plain.for_test.is_empty());
+
+    let internal = resp
+        .packages
+        .iter()
+        .find(|p| p.id == "example.com/foo [example.com/foo.test]")
+        .unwrap();
+    assert_eq!(internal.pkg_path, "example.com/foo");
+    assert_eq!(internal.for_test, "example.com/foo");
+    assert_eq!(internal.compiled_go_files.len(), 2);
+
+    let external = resp
+        .packages
+        .iter()
+        .find(|p| p.id == "example.com/foo_test [example.com/foo.test]")
+        .unwrap();
+    assert_eq!(external.pkg_path, "example.com/foo_test");
+    assert_eq!(external.for_test, "example.com/foo");
+    let foo_import = external
+        .imports
+        .iter()
+        .find(|(src, _)| src == "example.com/foo")
+        .expect("imports foo");
+    assert_eq!(
+        foo_import.1, "example.com/foo [example.com/foo.test]",
+        "xtest must import the internal test variant"
+    );
+
+    assert!(resp.roots.iter().any(|r| r == "example.com/foo"));
+    assert!(resp
+        .roots
+        .iter()
+        .any(|r| r == "example.com/foo [example.com/foo.test]"));
+    assert!(resp
+        .roots
+        .iter()
+        .any(|r| r == "example.com/foo_test [example.com/foo.test]"));
+    assert!(resp.roots.iter().any(|r| r == "example.com/foo.test"));
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn lists_fortest_dep_variants() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-fortest-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(tmp.join("a")).unwrap();
+    fs::create_dir_all(tmp.join("b")).unwrap();
+
+    write(
+        &tmp.join("go.mod"),
+        "module example.com/mod\n\ngo 1.22\n",
+    );
+    write(&tmp.join("a/a.go"), "package a\n\nfunc A() int { return 1 }\n");
+    write(
+        &tmp.join("a/a_test.go"),
+        "package a\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {}\n",
+    );
+    write(
+        &tmp.join("a/a_ext_test.go"),
+        "package a_test\n\nimport (\n\t\"testing\"\n\t\"example.com/mod/a\"\n\t\"example.com/mod/b\"\n)\n\nfunc TestExt(t *testing.T) { _ = a.A(); _ = b.B() }\n",
+    );
+    // b imports a → must be recompiled as b [a.test] for a's test binary.
+    write(
+        &tmp.join("b/b.go"),
+        "package b\n\nimport \"example.com/mod/a\"\n\nfunc B() int { return a.A() }\n",
+    );
+
+    let cfg = ListConfig {
+        dir: tmp.clone(),
+        tests: true,
+        need_deps: true,
+        gomodcache: Some(tmp.join("empty-cache")),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &["./a".to_string()]).expect("list");
+    let ids: Vec<_> = resp.packages.iter().map(|p| p.id.as_str()).collect();
+    assert!(
+        ids.contains(&"example.com/mod/b [example.com/mod/a.test]"),
+        "missing for-test dep variant: {ids:?}"
+    );
+    let b_var = resp
+        .packages
+        .iter()
+        .find(|p| p.id == "example.com/mod/b [example.com/mod/a.test]")
+        .unwrap();
+    assert!(b_var.dep_only);
+    assert_eq!(b_var.for_test, "example.com/mod/a");
+    let a_imp = b_var
+        .imports
+        .iter()
+        .find(|(src, _)| src == "example.com/mod/a")
+        .unwrap();
+    assert_eq!(a_imp.1, "example.com/mod/a [example.com/mod/a.test]");
+
+    let _ = fs::remove_dir_all(&tmp);
+}

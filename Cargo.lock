@@ -552,7 +552,11 @@ name = "guff-golist"
 version = "0.1.0"
 dependencies = [
  "guff-build",
+ "rayon",
  "rustc-hash",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

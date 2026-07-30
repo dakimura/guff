@@ -4,12 +4,13 @@ use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use guff_build::go_source::parse_go_file_info;
 use guff_build::{find_module_root, Context, ModFile};
 use rustc_hash::{FxHashMap, FxHashSet};
+use rayon::prelude::*;
 
 use crate::bail::{Bail, BailReason};
 use crate::modcache::ModCache;
+use crate::modmeta::{self, ModMetaKey};
 use crate::resolve::{resolve_import, ResolvedModule};
 use crate::workspace::{load_workspace, Workspace};
 
@@ -56,6 +57,8 @@ pub struct ListPackage {
     pub module: Option<ListModule>,
     pub standard: bool,
     pub dep_only: bool,
+    /// Package under test (`ForTest` in `go list` JSON). Empty when not a test variant.
+    pub for_test: String,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +132,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
         }
     }
     let goroot = PathBuf::from(&ctxt.goroot);
+    let goroot_ver = modmeta::goroot_version(&goroot);
 
     let root_dirs = expand_patterns(
         &ctxt,
@@ -150,16 +154,6 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     let mut direct_imports: FxHashMap<String, Vec<String>> = FxHashMap::default();
 
     for dir in &root_dirs {
-        let build_pkg = ctxt.import_dir(dir).map_err(|e| {
-            Bail::new(
-                BailReason::Io,
-                format!("import_dir {}: {e}", dir.display()),
-            )
-        })?;
-        if !build_pkg.cgo_files.is_empty() {
-            // C-3e: keep listing with GoFiles only; compiled cgo output is
-            // attached later via go list when available. Do not bail the graph.
-        }
         let (pkg_path, module) = package_identity(dir, &workspace)?;
         if !seen.insert(pkg_path.clone()) {
             continue;
@@ -167,59 +161,131 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
         queue.push_back((pkg_path, dir.clone(), module, true));
     }
 
-    while let Some((pkg_path, dir, module, is_root)) = queue.pop_front() {
-        let build_pkg = match ctxt.import_dir(&dir) {
-            Ok(p) => p,
-            Err(e) => {
-                packages.insert(
-                    pkg_path.clone(),
-                    ListPackage {
-                        id: pkg_path.clone(),
-                        name: String::new(),
-                        pkg_path: pkg_path.clone(),
-                        dir: dir.clone(),
-                        go_files: Vec::new(),
-                        compiled_go_files: Vec::new(),
-                        ignored_files: Vec::new(),
-                        imports: Vec::new(),
-                        deps: Vec::new(),
-                        module: Some(to_list_module(&module)),
-                        standard: module.standard,
-                        dep_only: !is_root,
-                    },
-                );
-                let _ = e;
-                if is_root {
-                    response.roots.push(pkg_path);
-                }
-                continue;
-            }
-        };
-        if !build_pkg.cgo_files.is_empty() {
-            // See root-path note: GoFiles-only listing is fine for the graph.
-        }
+    // Process the BFS queue in parallel batches: import_dir is syscall-bound
+    // and independent across packages already in the queue.
+    while !queue.is_empty() {
+        let batch: Vec<(String, PathBuf, ResolvedModule, bool)> = queue.drain(..).collect();
+        let scanned: Vec<_> = batch
+            .par_iter()
+            .map(|(pkg_path, dir, module, is_root)| {
+                let key = ModMetaKey {
+                    module_path: &module.path,
+                    module_version: &module.version,
+                    pkg_path,
+                    goos: &ctxt.goos,
+                    goarch: &ctxt.goarch,
+                    build_tags: &ctxt.build_tags,
+                    standard: module.standard,
+                    goroot_version: &goroot_ver,
+                };
+                let result = modmeta::import_dir_cached(&ctxt, dir, &key);
+                (pkg_path.clone(), dir.clone(), module.clone(), *is_root, result)
+            })
+            .collect();
 
+        for (pkg_path, dir, module, is_root, build_result) in scanned {
+            let build_pkg = match build_result {
+                Ok(p) => p,
+                Err(e) => {
+                    // `./...` walk is a cheap `.go` name gate; dirs with no
+                    // buildable files (build tags / empty) are not roots.
+                    if is_root {
+                        let _ = e;
+                        continue;
+                    }
+                    packages.insert(
+                        pkg_path.clone(),
+                        ListPackage {
+                            id: pkg_path.clone(),
+                            name: String::new(),
+                            pkg_path: pkg_path.clone(),
+                            dir: dir.clone(),
+                            go_files: Vec::new(),
+                            compiled_go_files: Vec::new(),
+                            ignored_files: Vec::new(),
+                            imports: Vec::new(),
+                            deps: Vec::new(),
+                            module: Some(to_list_module(&module)),
+                            standard: module.standard,
+                            dep_only: true,
+                            for_test: String::new(),
+                        },
+                    );
+                    let _ = e;
+                    continue;
+                }
+            };
+
+            // ... rest of package processing continues below via helper
+            process_listed_package(
+                cfg,
+                &workspace,
+                &cache,
+                &goroot,
+                &mut response,
+                &mut seen,
+                &mut queue,
+                &mut packages,
+                &mut direct_imports,
+                pkg_path,
+                module,
+                is_root,
+                build_pkg,
+            )?;
+        }
+    }
+
+    // Packages that import the package-under-test (or another for-test variant)
+    // must be recompiled as `Q [P.test]` — matching cmd/go list -test.
+    if cfg.tests {
+        emit_fortest_dep_variants(&mut packages, &mut direct_imports);
+    }
+
+    // Fill transitive deps from the direct-import graph.
+    for id in packages.keys().cloned().collect::<Vec<_>>() {
+        let deps = transitive_deps(&id, &direct_imports);
+        if let Some(pkg) = packages.get_mut(&id) {
+            pkg.deps = deps;
+        }
+    }
+
+    let mut pkgs: Vec<ListPackage> = packages.into_values().collect();
+    pkgs.sort_by(|a, b| a.id.cmp(&b.id));
+    response.roots.sort();
+    response.packages = pkgs;
+    Ok(response)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_listed_package(
+    cfg: &ListConfig,
+    workspace: &Workspace,
+    cache: &ModCache,
+    goroot: &Path,
+    response: &mut ListResponse,
+    mut seen: &mut FxHashSet<String>,
+    mut queue: &mut VecDeque<(String, PathBuf, ResolvedModule, bool)>,
+    mut packages: &mut FxHashMap<String, ListPackage>,
+    direct_imports: &mut FxHashMap<String, Vec<String>>,
+    pkg_path: String,
+    module: ResolvedModule,
+    is_root: bool,
+    build_pkg: guff_build::Package,
+) -> Result<(), Bail> {
         let go_files = abs_join(&build_pkg.dir, &build_pkg.go_files);
         // Match go list's Package.GoFiles which merges CgoFiles into GoFiles.
         let mut go_files_with_cgo = go_files.clone();
         go_files_with_cgo.extend(abs_join(&build_pkg.dir, &build_pkg.cgo_files));
-        let mut compiled = go_files_with_cgo.clone();
-        // Only root packages get test files merged (go list `-test` applies to
-        // the query roots, not the whole dependency closure).
-        if cfg.tests && is_root {
-            compiled.extend(abs_join(&build_pkg.dir, &build_pkg.test_go_files));
-        }
+        // Plain package stays production-only. Test files go on `P [P.test]`.
+        let compiled = go_files_with_cgo.clone();
         let ignored = abs_join(&build_pkg.dir, &build_pkg.ignored_go_files);
-        // Imports come from GoFiles + CgoFiles (and tests when applicable).
-        let imports = collect_imports(if cfg.tests && is_root {
-            &compiled
-        } else {
-            &go_files_with_cgo
-        });
+        // Imports already extracted during import_dir (header scan) — do not
+        // re-read sources.
+        let imports = &build_pkg.imports;
 
         let mut import_list: Vec<(String, String)> = Vec::new();
         let mut direct_ids: Vec<String> = Vec::new();
-        for import_path in &imports {
+        for import_path in imports {
             if import_path == "C" {
                 // Pure-cgo packages still appear in Imports; skip like go/packages.
                 continue;
@@ -283,85 +349,181 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                 name: build_pkg.name.clone(),
                 pkg_path: pkg_path.clone(),
                 dir: build_pkg.dir.clone(),
-                go_files: go_files_with_cgo,
+                go_files: go_files_with_cgo.clone(),
                 compiled_go_files: compiled,
                 ignored_files: ignored,
                 imports: import_list,
                 deps: Vec::new(), // filled below
-                module: list_mod,
+                module: list_mod.clone(),
                 standard: module.standard,
                 dep_only: !is_root,
+                for_test: String::new(),
             },
         );
 
-        // External tests (`package foo_test`) as a separate package. Id matches
-        // go list's non-variant form closely enough for analysis; full
-        // `foo_test [foo.test]` variants remain v2.
-        if cfg.tests && is_root && !build_pkg.xtest_go_files.is_empty() {
-            let xtest_id = format!("{pkg_path}_test");
-            if seen.insert(xtest_id.clone()) {
-                let xtest_files = abs_join(&build_pkg.dir, &build_pkg.xtest_go_files);
-                let mut xtest_imports = collect_imports(&xtest_files);
-                if !xtest_imports.iter().any(|i| i == &pkg_path) {
-                    xtest_imports.push(pkg_path.clone());
+        // `-test` variants matching `cmd/go list -test` / go/packages IDs:
+        //   P [P.test]       — internal tests (prod + *_test.go, same package)
+        //   P_test [P.test]  — external tests (package P_test)
+        //   P.test           — synthetic testmain (stub; no generated source)
+        if cfg.tests && is_root {
+            let has_internal = !build_pkg.test_go_files.is_empty();
+            let has_external = !build_pkg.xtest_go_files.is_empty();
+            if has_internal || has_external {
+                let test_bin = format!("{pkg_path}.test");
+                let internal_id = format!("{pkg_path} [{test_bin}]");
+                let mut variant_ids_for_testmain: Vec<String> = Vec::new();
+
+                if has_internal {
+                    let mut internal_files = go_files_with_cgo.clone();
+                    internal_files.extend(abs_join(&build_pkg.dir, &build_pkg.test_go_files));
+                    let mut internal_imps = build_pkg.imports.clone();
+                    for imp in &build_pkg.test_imports {
+                        if !internal_imps.iter().any(|i| i == imp) {
+                            internal_imps.push(imp.clone());
+                        }
+                    }
+                    let (pairs, directs) = resolve_import_paths(
+                        &internal_imps,
+                        &workspace,
+                        &cache,
+                        &goroot,
+                        module.standard,
+                        cfg.need_deps,
+                        &mut packages,
+                        &mut seen,
+                        &mut queue,
+                        None,
+                    )?;
+                    direct_imports.insert(internal_id.clone(), directs);
+                    packages.insert(
+                        internal_id.clone(),
+                        ListPackage {
+                            id: internal_id.clone(),
+                            name: build_pkg.name.clone(),
+                            pkg_path: pkg_path.clone(),
+                            dir: build_pkg.dir.clone(),
+                            go_files: internal_files.clone(),
+                            compiled_go_files: internal_files,
+                            ignored_files: Vec::new(),
+                            imports: pairs,
+                            deps: Vec::new(),
+                            module: list_mod.clone(),
+                            standard: module.standard,
+                            dep_only: false,
+                            for_test: pkg_path.clone(),
+                        },
+                    );
+                    response.roots.push(internal_id.clone());
+                    variant_ids_for_testmain.push(internal_id.clone());
                 }
-                xtest_imports.sort();
-                xtest_imports.dedup();
-                let mut xtest_pairs: Vec<(String, String)> = Vec::new();
-                let mut xtest_direct: Vec<String> = Vec::new();
-                for import_path in &xtest_imports {
-                    if import_path == "C" {
-                        continue;
-                    }
-                    if import_path == "unsafe" {
-                        xtest_pairs.push((import_path.clone(), "unsafe".into()));
-                        xtest_direct.push("unsafe".into());
-                        ensure_unsafe(&mut packages, &mut seen);
-                        continue;
-                    }
-                    let (dep_dir, dep_mod) = resolve_import(
-                        import_path,
+
+                if has_external {
+                    let xtest_id = format!("{pkg_path}_test [{test_bin}]");
+                    let xtest_files = abs_join(&build_pkg.dir, &build_pkg.xtest_go_files);
+                    // Import of P resolves to the internal test variant when
+                    // present (same as cmd/go); otherwise the plain package.
+                    let p_target = if has_internal {
+                        internal_id.clone()
+                    } else {
+                        pkg_path.clone()
+                    };
+                    let rewrite = [(pkg_path.as_str(), p_target.as_str())];
+                    let (mut pairs, mut directs) = resolve_import_paths(
+                        &build_pkg.xtest_imports,
                         &workspace,
                         &cache,
                         &goroot,
                         false,
+                        cfg.need_deps,
+                        &mut packages,
+                        &mut seen,
+                        &mut queue,
+                        Some(&rewrite),
                     )?;
-                    let dep_id = dep_mod.pkg_id.clone();
-                    xtest_pairs.push((import_path.clone(), dep_id.clone()));
-                    xtest_direct.push(dep_id.clone());
-                    if cfg.need_deps && !seen.contains(&dep_id) {
-                        if seen.insert(dep_id.clone()) {
-                            queue.push_back((dep_id, dep_dir, dep_mod, false));
+                    // Ensure the package under test is imported even if the
+                    // xtest sources don't mention it (rare, but go list does).
+                    if !pairs.iter().any(|(src, _)| src == &pkg_path) {
+                        pairs.push((pkg_path.clone(), p_target.clone()));
+                        directs.push(p_target.clone());
+                    }
+                    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                    pairs.dedup_by(|a, b| a.0 == b.0);
+                    directs.sort();
+                    directs.dedup();
+                    direct_imports.insert(xtest_id.clone(), directs);
+                    packages.insert(
+                        xtest_id.clone(),
+                        ListPackage {
+                            id: xtest_id.clone(),
+                            name: format!("{}_test", build_pkg.name),
+                            pkg_path: format!("{pkg_path}_test"),
+                            dir: build_pkg.dir.clone(),
+                            go_files: xtest_files.clone(),
+                            compiled_go_files: xtest_files,
+                            ignored_files: Vec::new(),
+                            imports: pairs,
+                            deps: Vec::new(),
+                            module: list_mod.clone(),
+                            standard: false,
+                            dep_only: false,
+                            for_test: pkg_path.clone(),
+                        },
+                    );
+                    response.roots.push(xtest_id.clone());
+                    variant_ids_for_testmain.push(xtest_id);
+                }
+
+                // Synthetic testmain. cmd/go emits a generated file under
+                // GOCACHE; we stub an empty package so roots match. Analysis
+                // skips empty compiled_go_files; verify ignores file diffs.
+                if seen.insert(test_bin.clone()) {
+                    let mut tm_imports: Vec<(String, String)> = Vec::new();
+                    let mut tm_direct: Vec<String> = Vec::new();
+                    for vid in &variant_ids_for_testmain {
+                        // testmain imports variants by their IDs.
+                        tm_imports.push((vid.clone(), vid.clone()));
+                        tm_direct.push(vid.clone());
+                    }
+                    if !has_internal {
+                        // xtest-only: go list also imports the plain package.
+                        tm_imports.push((pkg_path.clone(), pkg_path.clone()));
+                        tm_direct.push(pkg_path.clone());
+                    }
+                    for std in ["testing", "os", "reflect", "testing/internal/testdeps"] {
+                        if let Ok((dep_dir, dep_mod)) =
+                            resolve_import(std, &workspace, &cache, &goroot, false)
+                        {
+                            let dep_id = dep_mod.pkg_id.clone();
+                            tm_imports.push((std.to_string(), dep_id.clone()));
+                            tm_direct.push(dep_id.clone());
+                            if cfg.need_deps && seen.insert(dep_id.clone()) {
+                                queue.push_back((dep_id, dep_dir, dep_mod, false));
+                            }
                         }
                     }
-                }
-                xtest_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                xtest_direct.sort();
-                xtest_direct.dedup();
-                direct_imports.insert(xtest_id.clone(), xtest_direct);
-                packages.insert(
-                    xtest_id.clone(),
-                    ListPackage {
-                        id: xtest_id.clone(),
-                        name: format!("{}_test", build_pkg.name),
-                        pkg_path: xtest_id.clone(),
-                        dir: build_pkg.dir.clone(),
-                        go_files: xtest_files.clone(),
-                        compiled_go_files: xtest_files,
-                        ignored_files: Vec::new(),
-                        imports: xtest_pairs,
-                        deps: Vec::new(),
-                        module: if module.standard {
-                            None
-                        } else {
-                            Some(to_list_module(&module))
+                    tm_imports.sort_by(|a, b| a.0.cmp(&b.0));
+                    tm_direct.sort();
+                    tm_direct.dedup();
+                    direct_imports.insert(test_bin.clone(), tm_direct);
+                    packages.insert(
+                        test_bin.clone(),
+                        ListPackage {
+                            id: test_bin.clone(),
+                            name: "main".into(),
+                            pkg_path: test_bin.clone(),
+                            dir: build_pkg.dir.clone(),
+                            go_files: Vec::new(),
+                            compiled_go_files: Vec::new(),
+                            ignored_files: Vec::new(),
+                            imports: tm_imports,
+                            deps: Vec::new(),
+                            module: list_mod,
+                            standard: false,
+                            dep_only: false,
+                            for_test: String::new(),
                         },
-                        standard: false,
-                        dep_only: !is_root,
-                    },
-                );
-                if is_root {
-                    response.roots.push(xtest_id);
+                    );
+                    response.roots.push(test_bin);
                 }
             }
         }
@@ -369,21 +531,155 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
         if is_root {
             response.roots.push(pkg_path);
         }
-    }
+        Ok(())
+}
 
-    // Fill transitive deps from the direct-import graph.
-    for id in packages.keys().cloned().collect::<Vec<_>>() {
-        let deps = transitive_deps(&id, &direct_imports);
-        if let Some(pkg) = packages.get_mut(&id) {
-            pkg.deps = deps;
+/// Emit `Q [P.test]` for dependencies that import the package under test.
+///
+/// cmd/go recompiles any non-stdlib package in the test binary's link set that
+/// imports `P` (or another for-test variant) so it sees `P [P.test]`. Those
+/// packages are DepOnly and carry `ForTest=P`.
+fn emit_fortest_dep_variants(
+    packages: &mut FxHashMap<String, ListPackage>,
+    direct_imports: &mut FxHashMap<String, Vec<String>>,
+) {
+    // Primary test packages: ForTest set, not DepOnly (P [P.test] / P_test [P.test]).
+    let mut by_fortest: FxHashMap<String, Vec<String>> = FxHashMap::default();
+    for pkg in packages.values() {
+        if !pkg.for_test.is_empty() && !pkg.dep_only {
+            by_fortest
+                .entry(pkg.for_test.clone())
+                .or_default()
+                .push(pkg.id.clone());
         }
     }
 
-    let mut pkgs: Vec<ListPackage> = packages.into_values().collect();
-    pkgs.sort_by(|a, b| a.id.cmp(&b.id));
-    response.roots.sort();
-    response.packages = pkgs;
-    Ok(response)
+    for (p, primary_ids) in by_fortest {
+        let test_bin = format!("{p}.test");
+        let p_variant = format!("{p} [{test_bin}]");
+        // Only when an internal test variant exists does cmd/go recompile
+        // dependents against `P [P.test]`. Xtest-only links plain `P`.
+        if !packages.contains_key(&p_variant) {
+            continue;
+        }
+
+        // plain import path → variant id for this test binary
+        let mut var_map: FxHashMap<String, String> = FxHashMap::default();
+        var_map.insert(p.clone(), p_variant.clone());
+
+        // Reachable plain package ids from the test packages (+ testmain).
+        let mut reachable: FxHashSet<String> = FxHashSet::default();
+        let mut stack: Vec<String> = primary_ids.clone();
+        let testmain = format!("{p}.test");
+        if packages.contains_key(&testmain) {
+            stack.push(testmain);
+        }
+        while let Some(id) = stack.pop() {
+            let Some(deps) = direct_imports.get(&id) else {
+                continue;
+            };
+            for dep in deps {
+                let plain = plain_package_id(dep);
+                if plain == "unsafe" || plain == "C" {
+                    continue;
+                }
+                if reachable.insert(plain.clone()) {
+                    // Continue walking via the plain package's imports.
+                    stack.push(plain);
+                }
+            }
+        }
+
+        // Fixed-point: any reachable non-stdlib package that imports a shadowed
+        // path gets a `Q [P.test]` variant.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            let candidates: Vec<String> = reachable.iter().cloned().collect();
+            for q in candidates {
+                if var_map.contains_key(&q) {
+                    continue;
+                }
+                let Some(qpkg) = packages.get(&q) else {
+                    continue;
+                };
+                if qpkg.standard {
+                    continue;
+                }
+                // Skip other packages' test variants / testmains.
+                if q.contains(' ') || q.ends_with(".test") {
+                    continue;
+                }
+                let imports_shadowed = qpkg.imports.iter().any(|(src, id)| {
+                    var_map.contains_key(src)
+                        || var_map.contains_key(&plain_package_id(id))
+                        || var_map.values().any(|v| v == id)
+                });
+                if !imports_shadowed {
+                    continue;
+                }
+
+                let q_var = format!("{q} [{test_bin}]");
+                if packages.contains_key(&q_var) {
+                    var_map.insert(q.clone(), q_var);
+                    continue;
+                }
+
+                let mut new_pkg = qpkg.clone();
+                new_pkg.id = q_var.clone();
+                new_pkg.pkg_path = q.clone();
+                new_pkg.for_test = p.clone();
+                new_pkg.dep_only = true;
+                // Remap imports onto variants we already know; a second pass
+                // below finishes remapping once the fixed point settles.
+                remap_imports_with_var_map(&mut new_pkg.imports, &var_map);
+                let directs: Vec<String> = new_pkg.imports.iter().map(|(_, id)| id.clone()).collect();
+                direct_imports.insert(q_var.clone(), directs);
+                packages.insert(q_var.clone(), new_pkg);
+                var_map.insert(q, q_var);
+                changed = true;
+            }
+        }
+
+        // Final remap: every package whose id ends with ` [P.test]` (including
+        // primaries) should import via var_map.
+        let suffix = format!(" [{test_bin}]");
+        let ids: Vec<String> = packages.keys().cloned().collect();
+        for id in ids {
+            if !id.ends_with(&suffix) {
+                continue;
+            }
+            let Some(pkg) = packages.get_mut(&id) else {
+                continue;
+            };
+            remap_imports_with_var_map(&mut pkg.imports, &var_map);
+            let directs: Vec<String> = pkg.imports.iter().map(|(_, tid)| tid.clone()).collect();
+            direct_imports.insert(id, directs);
+        }
+    }
+}
+
+fn plain_package_id(id: &str) -> String {
+    match id.find(' ') {
+        Some(i) => id[..i].to_string(),
+        None => id.to_string(),
+    }
+}
+
+fn remap_imports_with_var_map(
+    imports: &mut Vec<(String, String)>,
+    var_map: &FxHashMap<String, String>,
+) {
+    for (src, id) in imports.iter_mut() {
+        if let Some(v) = var_map.get(src) {
+            *id = v.clone();
+            continue;
+        }
+        let plain = plain_package_id(id);
+        if let Some(v) = var_map.get(&plain) {
+            *id = v.clone();
+        }
+    }
 }
 
 fn check_bail_preconditions(cfg: &ListConfig, patterns: &[String]) -> Result<(), Bail> {
@@ -507,8 +803,60 @@ fn ensure_unsafe(packages: &mut FxHashMap<String, ListPackage>, seen: &mut FxHas
             module: None,
             standard: true,
             dep_only: true,
+            for_test: String::new(),
         },
     );
+}
+
+/// Resolve import paths, optionally rewriting source→id pairs.
+///
+/// `rewrite` maps source import path → already-known package id (used so
+/// external tests import `P [P.test]` instead of plain `P`).
+fn resolve_import_paths(
+    imports: &[String],
+    workspace: &Workspace,
+    cache: &ModCache,
+    goroot: &Path,
+    from_stdlib: bool,
+    need_deps: bool,
+    packages: &mut FxHashMap<String, ListPackage>,
+    seen: &mut FxHashSet<String>,
+    queue: &mut VecDeque<(String, PathBuf, ResolvedModule, bool)>,
+    rewrite: Option<&[(&str, &str)]>,
+) -> Result<(Vec<(String, String)>, Vec<String>), Bail> {
+    let mut import_list: Vec<(String, String)> = Vec::new();
+    let mut direct_ids: Vec<String> = Vec::new();
+    for import_path in imports {
+        if import_path == "C" {
+            continue;
+        }
+        if let Some(pairs) = rewrite {
+            if let Some((_, target)) = pairs.iter().find(|(src, _)| *src == import_path) {
+                import_list.push((import_path.clone(), (*target).to_string()));
+                direct_ids.push((*target).to_string());
+                continue;
+            }
+        }
+        if import_path == "unsafe" {
+            import_list.push((import_path.clone(), "unsafe".into()));
+            direct_ids.push("unsafe".into());
+            ensure_unsafe(packages, seen);
+            continue;
+        }
+        let (dep_dir, dep_mod) =
+            resolve_import(import_path, workspace, cache, goroot, from_stdlib)?;
+        let dep_id = dep_mod.pkg_id.clone();
+        import_list.push((import_path.clone(), dep_id.clone()));
+        direct_ids.push(dep_id.clone());
+        if need_deps && seen.insert(dep_id.clone()) {
+            queue.push_back((dep_id, dep_dir, dep_mod, false));
+        }
+    }
+    import_list.sort_by(|a, b| a.0.cmp(&b.0));
+    import_list.dedup_by(|a, b| a.0 == b.0);
+    direct_ids.sort();
+    direct_ids.dedup();
+    Ok((import_list, direct_ids))
 }
 
 fn expand_patterns(
@@ -591,6 +939,7 @@ fn path_prefix_match(import_path: &str, module_path: &str) -> bool {
 }
 
 fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<(), Bail> {
+    let _ = ctxt; // build tags applied later in import_dir
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         if let Some(name) = dir.file_name().and_then(|s| s.to_str()) {
@@ -605,7 +954,9 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
         if dir != root && dir.join("go.mod").is_file() {
             continue;
         }
-        if ctxt.import_dir(&dir).is_ok() {
+        // Cheap gate: any `.go` name. Full import_dir (build tags / NoGo) runs
+        // once in the main loop — do not scan every directory twice.
+        if dir_has_go_file(&dir) {
             out.push(dir.clone());
         }
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -621,23 +972,15 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
     Ok(())
 }
 
-fn collect_imports(go_files: &[PathBuf]) -> Vec<String> {
-    let mut seen = FxHashSet::default();
-    let mut out = Vec::new();
-    for path in go_files {
-        let Ok(content) = fs::read(path) else {
-            continue;
-        };
-        let Ok(info) = parse_go_file_info(&content) else {
-            continue;
-        };
-        for imp in info.imports {
-            if seen.insert(imp.clone()) {
-                out.push(imp);
-            }
-        }
-    }
-    out
+fn dir_has_go_file(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.file_name()
+            .to_string_lossy()
+            .ends_with(".go")
+    })
 }
 
 fn abs_join(dir: &Path, files: &[String]) -> Vec<PathBuf> {

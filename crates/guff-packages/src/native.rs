@@ -1,16 +1,13 @@
 //! Native package driver (PERF_TASKS_V2 §C-3c) wrapping `guff-golist`.
 //!
 //! Feature flag: `GUFF_NATIVE_LIST`
-//! - unset / `0` / `off` / `false` — prefer `go list` when available (**default**).
-//!   When `go` is missing, native is still tried (go-less).
-//! - `1` / `on` / `true` — try native first; bail → `go list`
+//! - unset / `1` / `on` / `true` — try native first; bail → `go list` (**default**)
+//! - `0` / `off` / `false` — prefer `go list` when available
 //! - `verify` — run both when native succeeds; print graph diffs; use `go list`
 //! - `force` — native only (error on bail; for tests / go-less CI)
 //!
-//! Default stays off until native grows a warm list cache and full `-test`
-//! variants (root counts still differ: go list ~294 vs native ~118 on
-//! prometheus). Nested-module `./...` skipping and C-3d stdlib-from-source
-//! make `force` / go-less usable today.
+//! Default is on once warm disk cache + full `-test` variants land (C-3c).
+//! `GUFF_NATIVE_LIST=off` restores the previous `go list`-first path.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,20 +38,19 @@ impl NativeListMode {
     pub fn from_env() -> Self {
         match std::env::var("GUFF_NATIVE_LIST") {
             Ok(v) => match v.trim().to_ascii_lowercase().as_str() {
-                "" | "0" | "false" | "off" | "no" => Self::Off,
-                "1" | "true" | "on" | "yes" => Self::On,
+                "" | "1" | "true" | "on" | "yes" => Self::On,
+                "0" | "false" | "off" | "no" => Self::Off,
                 "verify" => Self::Verify,
                 "force" => Self::Force,
                 other => {
                     eprintln!(
-                        "guff: warning: unknown GUFF_NATIVE_LIST={other:?}; treating as off"
+                        "guff: warning: unknown GUFF_NATIVE_LIST={other:?}; treating as on"
                     );
-                    Self::Off
+                    Self::On
                 }
             },
-            // Default off: warm `go list` stdout cache stays critical-path.
-            // Go-less still uses native via the Off branch when `go` is absent.
-            Err(_) => Self::Off,
+            // Default on: warm native_list disk cache + full `-test` variants.
+            Err(_) => Self::On,
         }
     }
 }
@@ -146,9 +142,28 @@ pub fn native_or_golist(cfg: &Config, patterns: &[String]) -> Result<DriverRespo
 }
 
 fn load_native(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, Bail> {
+    if let Some(cached) = crate::native_cache::try_load(cfg, patterns) {
+        if crate::debug::enabled() {
+            eprintln!(
+                "guff:   native list cache hit ({} pkgs)",
+                cached.packages.len()
+            );
+        }
+        return Ok(cached);
+    }
     let list_cfg = list_config_from(cfg)?;
+    let t0 = std::time::Instant::now();
     let resp = list_packages(&list_cfg, patterns)?;
-    Ok(to_driver_response(cfg, resp))
+    let response = to_driver_response(cfg, resp);
+    if crate::debug::enabled() {
+        eprintln!(
+            "guff:   native list {:.2}s ({} pkgs)",
+            t0.elapsed().as_secs_f64(),
+            response.packages.len()
+        );
+    }
+    crate::native_cache::store(cfg, patterns, &response);
+    Ok(response)
 }
 
 fn list_config_from(cfg: &Config) -> Result<ListConfig, Bail> {
@@ -215,10 +230,15 @@ fn to_package(p: ListPackage) -> Package {
             }),
         );
     }
+    let pkg_path = if let Some(space) = p.id.find(' ') {
+        p.id[..space].to_string()
+    } else {
+        p.pkg_path.clone()
+    };
     Package {
         id: p.id,
         name: p.name,
-        pkg_path: p.pkg_path,
+        pkg_path,
         dir: p.dir,
         go_files: p.go_files,
         compiled_go_files: p.compiled_go_files,
@@ -226,6 +246,7 @@ fn to_package(p: ListPackage) -> Package {
         imports,
         deps: p.deps,
         module: p.module.map(to_module),
+        for_test: p.for_test,
         ..Package::default()
     }
 }
@@ -298,6 +319,11 @@ pub fn diff_responses(native: &DriverResponse, golist: &DriverResponse) -> Vec<S
         let Some(gp) = go_by.get(id) else {
             continue;
         };
+        // Testmain (`P.test`) from native is a stub without GOCACHE-generated
+        // sources — skip file / import detail diffs; ID presence still checked.
+        if is_testmain_id(id) && (np.name == "main" || gp.name == "main") {
+            continue;
+        }
         if np.name != gp.name {
             diffs.push(format!("{id}: name {:?} vs {:?}", np.name, gp.name));
         }
@@ -381,6 +407,11 @@ fn norm_deps(deps: &[String]) -> Vec<String> {
 
 fn is_stdlib_id(id: &str) -> bool {
     !id.contains('.')
+}
+
+/// `pkg.test` testmain id (no space) — not `pkg [pkg.test]`.
+fn is_testmain_id(id: &str) -> bool {
+    !id.contains(' ') && id.ends_with(".test")
 }
 
 #[cfg(test)]
