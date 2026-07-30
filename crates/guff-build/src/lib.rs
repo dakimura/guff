@@ -18,7 +18,10 @@ mod package;
 pub use context::{default_context, release_tags_for_version, Context, DEFAULT};
 pub use import_path::is_local_import;
 pub use match_file::MatchError;
-pub use module::{find_module_root, module_import_dir, parse_mod_contents, parse_mod_file, ModFile, Require};
+pub use module::{
+    find_module_root, module_import_dir, parse_mod_contents, parse_mod_file, ModFile, Replace,
+    Require,
+};
 pub use package::{
     BuildError, ImportMode, MultiplePackageError, NoGoError, Package,
 };

@@ -1,11 +1,13 @@
-//! Package driver trait and default `go list` / offline implementations.
+//! Package driver trait and default `go list` / native / offline implementations.
 //!
-//! Port of `external.go` (`driver`, `defaultDriver`). When `go` is on PATH the
-//! default driver shells out to `go list -json`; otherwise it falls back to the
-//! pure-Rust [`OfflineDriver`] (PL02).
+//! Port of `external.go` (`driver`, `defaultDriver`). Prefer order:
+//! 1. [`crate::native`] when `GUFF_NATIVE_LIST` says so (C-3c)
+//! 2. `go list` when `go` is on PATH
+//! 3. [`OfflineDriver`] as last resort (main module + GOROOT only)
 
 use crate::config::Config;
 use crate::golist::{go_available, go_list_driver};
+use crate::native::native_or_golist;
 use crate::offline::{offline_driver, OfflineDriver};
 use crate::package::DriverResponse;
 use crate::LoadError;
@@ -27,17 +29,25 @@ impl Driver for GoListDriver {
     }
 }
 
-/// Driver that prefers `go list`, falling back to [`OfflineDriver`] when `go`
-/// is missing from PATH (CI sandboxes / offline environments).
+/// Driver that prefers native list / `go list` / offline per env and PATH.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AutoDriver;
 
 impl Driver for AutoDriver {
     fn load(&self, cfg: &Config, patterns: &[String]) -> Result<DriverResponse, LoadError> {
-        if go_available() {
-            go_list_driver(cfg, patterns).map_err(Into::into)
-        } else {
-            offline_driver(cfg, patterns)
+        // `native_or_golist` honours GUFF_NATIVE_LIST and falls back appropriately.
+        // When the mode is Off and go is missing it still tries native before
+        // offline so external modules from GOMODCACHE work without `go`.
+        match native_or_golist(cfg, patterns) {
+            Ok(resp) => Ok(resp),
+            Err(err) if !go_available() => {
+                // Last resort: offline (no external modules).
+                match offline_driver(cfg, patterns) {
+                    Ok(resp) => Ok(resp),
+                    Err(_) => Err(err),
+                }
+            }
+            Err(err) => Err(err),
         }
     }
 }

@@ -28,6 +28,7 @@ members = [
     "crates/guff-dupl",
     "crates/guff-revive",
     "crates/guff-fmt",
+    "crates/guff-golist",
     "crates/guff-lint",
     "crates/guff-plugin",
     "crates/guff-plugin-example",

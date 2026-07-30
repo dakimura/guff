@@ -15,6 +15,7 @@ path = "src/lib.rs"
 guff-ast = { path = "../guff-ast" }
 guff-build = { path = "../guff-build" }
 guff-exportdata = { path = "../guff-exportdata" }
+guff-golist = { path = "../guff-golist" }
 guff-types = { path = "../guff-types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

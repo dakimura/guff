@@ -1,0 +1,16 @@
+[package]
+name = "guff-golist"
+description = "Native Go package lister (C-3c): go.mod + GOMODCACHE without shelling out to go list."
+keywords = ["go", "modules", "packages"]
+categories = ["development-tools"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "guff_golist"
+path = "src/lib.rs"
+
+[dependencies]
+guff-build = { path = "../guff-build" }
+rustc-hash = "2"

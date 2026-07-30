@@ -16,6 +16,7 @@ mod driver;
 mod golist;
 mod load;
 mod load_mode;
+mod native;
 mod offline;
 mod package;
 mod preset;
@@ -32,6 +33,7 @@ pub use golist::{
 };
 pub use load::{load, load_graph, load_graph_with_driver, load_with_driver, LoadError};
 pub use load_mode::LoadMode;
+pub use native::{diff_responses, native_or_golist, NativeListMode};
 pub use offline::{offline_driver, OfflineDriver};
 pub use package::{
     DriverResponse, Error, ErrorKind, Module, ModuleError, Package, TypecheckArtifacts,

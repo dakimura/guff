@@ -548,6 +548,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "guff-golist"
+version = "0.1.0"
+dependencies = [
+ "guff-build",
+ "rustc-hash",
+]
+
+[[package]]
 name = "guff-gostaticanalysis"
 version = "0.1.0"
 dependencies = [
@@ -661,6 +669,7 @@ dependencies = [
  "guff-ast",
  "guff-build",
  "guff-exportdata",
+ "guff-golist",
  "guff-types",
  "rayon",
  "rustc-hash",

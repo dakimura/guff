@@ -13,6 +13,12 @@ pub struct ModFile {
     pub module_path: String,
     pub go_version: Option<String>,
     pub requires: Vec<Require>,
+    /// `replace` directives (old path[/version] → new path[/version or local]).
+    pub replaces: Vec<Replace>,
+    /// True when the file contains an `exclude` directive (native lister bails).
+    pub has_exclude: bool,
+    /// True when the file contains a `retract` directive (native lister bails).
+    pub has_retract: bool,
 }
 
 /// A `require` directive entry.
@@ -20,6 +26,18 @@ pub struct ModFile {
 pub struct Require {
     pub path: String,
     pub version: String,
+    pub indirect: bool,
+}
+
+/// A `replace` directive entry.
+///
+/// `new_version` empty means a local filesystem replace (`=> ../foo`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replace {
+    pub old_path: String,
+    pub old_version: String,
+    pub new_path: String,
+    pub new_version: String,
 }
 
 /// Walks upward from `start` to find a directory containing `go.mod`.
@@ -47,15 +65,19 @@ pub fn parse_mod_contents(data: &str) -> Result<ModFile, BuildError> {
     let mut module_path = String::new();
     let mut go_version = None;
     let mut requires = Vec::new();
-    let mut in_require_block = false;
+    let mut replaces = Vec::new();
+    let mut has_exclude = false;
+    let mut has_retract = false;
+    let mut block: Option<BlockKind> = None;
 
-    for line in data.lines() {
-        let line = strip_comment(line).trim();
+    for raw in data.lines() {
+        let indirect_hint = raw.contains("//") && raw.contains("indirect");
+        let line = strip_comment(raw).trim();
         if line.is_empty() {
             continue;
         }
         if line == ")" {
-            in_require_block = false;
+            block = None;
             continue;
         }
         if line.starts_with("module ") {
@@ -66,21 +88,68 @@ pub fn parse_mod_contents(data: &str) -> Result<ModFile, BuildError> {
             go_version = Some(line["go ".len()..].trim().to_string());
             continue;
         }
-        if line.starts_with("require (") {
-            in_require_block = true;
-            let rest = line["require (".len()..].trim();
-            if !rest.is_empty() && rest != ")" {
-                if let Some(req) = parse_require_line(rest) {
-                    requires.push(req);
-                }
+        if line.starts_with("toolchain ") {
+            continue;
+        }
+        if starts_directive(line, "exclude") {
+            has_exclude = true;
+            if line.contains('(') && !line.contains(')') {
+                block = Some(BlockKind::Ignore);
             }
             continue;
         }
-        if line.starts_with("require ") || in_require_block {
-            let text = line.strip_prefix("require ").unwrap_or(line);
-            if let Some(req) = parse_require_line(text) {
+        if starts_directive(line, "retract") {
+            has_retract = true;
+            if line.contains('(') && !line.contains(')') {
+                block = Some(BlockKind::Ignore);
+            }
+            continue;
+        }
+        if starts_directive(line, "require") {
+            if let Some(rest) = open_block(line, "require") {
+                block = Some(BlockKind::Require);
+                if !rest.is_empty() {
+                    if let Some(mut req) = parse_require_line(rest) {
+                        req.indirect = req.indirect || indirect_hint;
+                        requires.push(req);
+                    }
+                }
+            } else if let Some(mut req) =
+                parse_require_line(line.strip_prefix("require ").unwrap_or(line))
+            {
+                req.indirect = req.indirect || indirect_hint;
                 requires.push(req);
             }
+            continue;
+        }
+        if starts_directive(line, "replace") {
+            if let Some(rest) = open_block(line, "replace") {
+                block = Some(BlockKind::Replace);
+                if !rest.is_empty() {
+                    if let Some(r) = parse_replace_line(rest) {
+                        replaces.push(r);
+                    }
+                }
+            } else if let Some(r) = parse_replace_line(line.strip_prefix("replace ").unwrap_or(line))
+            {
+                replaces.push(r);
+            }
+            continue;
+        }
+        match block {
+            Some(BlockKind::Require) => {
+                if let Some(mut req) = parse_require_line(line) {
+                    req.indirect = req.indirect || indirect_hint;
+                    requires.push(req);
+                }
+            }
+            Some(BlockKind::Replace) => {
+                if let Some(r) = parse_replace_line(line) {
+                    replaces.push(r);
+                }
+            }
+            Some(BlockKind::Ignore) => {}
+            None => {}
         }
     }
 
@@ -92,7 +161,33 @@ pub fn parse_mod_contents(data: &str) -> Result<ModFile, BuildError> {
         module_path,
         go_version,
         requires,
+        replaces,
+        has_exclude,
+        has_retract,
     })
+}
+
+#[derive(Clone, Copy)]
+enum BlockKind {
+    Require,
+    Replace,
+    Ignore,
+}
+
+fn starts_directive(line: &str, name: &str) -> bool {
+    line == name
+        || line.starts_with(&format!("{name} "))
+        || line.starts_with(&format!("{name}("))
+}
+
+/// Returns `Some(rest)` when `line` opens a parenthesized block (`name (`).
+fn open_block<'a>(line: &'a str, name: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(name)?.trim_start();
+    let rest = rest.strip_prefix('(')?.trim();
+    if rest == ")" {
+        return Some("");
+    }
+    Some(rest)
 }
 
 /// Maps `import_path` within a module to a filesystem directory.
@@ -112,6 +207,7 @@ pub fn module_import_dir(module_root: &Path, module_path: &str, import_path: &st
 }
 
 fn parse_require_line(line: &str) -> Option<Require> {
+    let indirect = line.contains("indirect");
     let line = line.trim().trim_end_matches(')');
     if line.is_empty() {
         return None;
@@ -122,6 +218,27 @@ fn parse_require_line(line: &str) -> Option<Require> {
     Some(Require {
         path: path.to_string(),
         version,
+        indirect,
+    })
+}
+
+fn parse_replace_line(line: &str) -> Option<Replace> {
+    let line = line.trim().trim_end_matches(')');
+    if line.is_empty() {
+        return None;
+    }
+    let (left, right) = line.split_once("=>")?;
+    let mut left = left.split_whitespace();
+    let old_path = left.next()?.to_string();
+    let old_version = left.next().unwrap_or("").to_string();
+    let mut right = right.split_whitespace();
+    let new_path = right.next()?.to_string();
+    let new_version = right.next().unwrap_or("").to_string();
+    Some(Replace {
+        old_path,
+        old_version,
+        new_path,
+        new_version,
     })
 }
 

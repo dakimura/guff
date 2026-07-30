@@ -22,7 +22,11 @@ fn parse_mod_file_extracts_module_and_requires() {
             requires: vec![guff_build::Require {
                 path: "example.com/other".to_string(),
                 version: "v1.0.0".to_string(),
+                indirect: false,
             }],
+            replaces: vec![],
+            has_exclude: false,
+            has_retract: false,
         }
     );
 }

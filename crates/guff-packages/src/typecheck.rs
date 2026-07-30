@@ -1370,7 +1370,8 @@ mod tests {
         let mut export_paths = HashMap::default();
         export_paths.insert(dep_id.clone(), dep_export);
 
-        let dep_graph = HashMap::from([(dep_id.clone(), Vec::<String>::new())]);
+        let mut dep_graph = HashMap::default();
+        dep_graph.insert(dep_id.clone(), Vec::<String>::new());
 
         let fset = FileSet::new();
         typecheck_package(
@@ -1401,7 +1402,8 @@ mod tests {
 
         let mut export_paths = HashMap::default();
         export_paths.insert(dep_id.clone(), dep_export);
-        let dep_graph = HashMap::from([(dep_id.clone(), Vec::<String>::new())]);
+        let mut dep_graph = HashMap::default();
+        dep_graph.insert(dep_id.clone(), Vec::<String>::new());
 
         let mut by_id = HashMap::default();
         let mut pkg_a = package_from_dir("example.com/withdep_a", &dir);

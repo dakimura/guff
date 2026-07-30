@@ -210,14 +210,86 @@ fn cgo_supported(goos: &str, goarch: &str) -> bool {
     )
 }
 
-/// Minimal toolchain tags for the target architecture.
+/// Toolchain tags for the target architecture and enabled GOEXPERIMENTs.
 ///
-/// Full `buildcfg.toolTags` (GOAMD64 levels, experiments, etc.) is deferred;
-/// P1-b only needs release/build/os/arch tags for `match_file`.
+/// Mirrors `internal/buildcfg.toolTags` closely enough for stdlib `go:build`
+/// lines (regabi / greenteagc / arch versions). Baseline experiments follow
+/// Go 1.26's `buildcfg` defaults; `GOEXPERIMENT` overrides apply on top.
 fn default_tool_tags(goarch: &str) -> Vec<String> {
+    let mut tags = Vec::new();
     match goarch {
-        "amd64" => vec!["amd64.v1".to_string()],
-        "386" => vec!["386.sse2".to_string()],
-        _ => Vec::new(),
+        "amd64" => tags.push("amd64.v1".to_string()),
+        "386" => tags.push("386.sse2".to_string()),
+        "arm64" => tags.push("arm64.v8.0".to_string()),
+        _ => {}
     }
+    for exp in enabled_goexperiments() {
+        tags.push(format!("goexperiment.{exp}"));
+    }
+    tags
+}
+
+/// Experiment names enabled for file matching (`goexperiment.x` tags).
+fn enabled_goexperiments() -> Vec<&'static str> {
+    // Baseline for Go ≥ 1.26 (see GOROOT/src/internal/buildcfg/exp.go).
+    // Older toolchains ignore unknown experiment tags in match_file.
+    let mut on = vec![
+        "regabiwrappers",
+        "regabiargs",
+        "randomizedheapbase64",
+        "greenteagc",
+    ];
+    // Dwarf5 is on except darwin/ios/aix — we approximate with host OS.
+    if !matches!(host_goos(), "darwin" | "ios" | "aix") {
+        on.push("dwarf5");
+    }
+
+    let goexp = env::var("GOEXPERIMENT").unwrap_or_default();
+    if goexp.is_empty() {
+        return on;
+    }
+    if goexp == "none" {
+        return Vec::new();
+    }
+    for part in goexp.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(name) = part.strip_prefix("no") {
+            if name == "regabi" {
+                on.retain(|e| *e != "regabiwrappers" && *e != "regabiargs");
+            } else {
+                on.retain(|e| *e != name);
+            }
+            continue;
+        }
+        if part == "regabi" {
+            for e in ["regabiwrappers", "regabiargs"] {
+                if !on.contains(&e) {
+                    on.push(e);
+                }
+            }
+            continue;
+        }
+        // Only accept names we know about (static lifetime).
+        let known = [
+            "regabiwrappers",
+            "regabiargs",
+            "randomizedheapbase64",
+            "greenteagc",
+            "dwarf5",
+            "fieldtrack",
+            "boringcrypto",
+            "staticlockranking",
+            "heapminimum512kib",
+            "preemptibleloops",
+        ];
+        if let Some(k) = known.iter().copied().find(|k| *k == part) {
+            if !on.contains(&k) {
+                on.push(k);
+            }
+        }
+    }
+    on
 }

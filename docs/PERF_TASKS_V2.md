@@ -12,6 +12,13 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-3c Phase 1（2026-07-30）:** ネイティブ lister 骨格 + オラクル。
+> 新クレート `guff-golist`（escape / GOMODCACHE / go.mod require+replace /
+> GOROOT vendor / Go 1.26 experiment tags / **go.work**）。`GUFF_NATIVE_LIST=verify` で
+> hybrid（61）/ helm `pkg/chart`（629）/ **prometheus `model`（424, go.work）** が diff 空。
+> 既定はまだ `off`。未着手: 恒久キャッシュ / repo `vendor/` / 完全 `-test` バリアント /
+> C-3e cgo 委譲 / 既定オン。
+>
 > **C-9 DONE（2026-07-30）:** seed が捨てる `Info` への記録を止める（Go の nil-map ゲート相当）。
 > `-j 1` seed ≈ **−0.15s** / wall ≈ **−0.17s**。findings byte 同一。§C-9。
 >
@@ -4010,9 +4017,37 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 | C-3d | stdlib 型スナップショット | 中〜大 | −0.15s + Phase A | export コールが消える | **高**（型の同一性） |
 | C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a / C-3b は DONE。** 続きは**製品として go 非依存を取りに行くと決めたときだけ**
-C-3c → C-3e → C-3d の順で。**wall だけが目的なら C-3 はもう終わっています**
-（残り 0.26s ＋ プロセス起動 0.078s のために native lister を書くのは割に合いません）。
+**C-3a / C-3b は DONE。C-3c Phase 1（オラクル + native list）は骨格完了・既定オフ。**
+続きは恒久キャッシュ → 既定オン合意 → C-3e → C-3d。**wall だけが目的なら
+C-3 の安い削りはもう終わっています**（残り 0.26s ＋ プロセス起動 0.078s）。
+
+### C-3c Phase 1 DONE メモ（2026-07-30）
+
+**入れたもの:**
+1. `crates/guff-golist` — `list_packages` / `Bail` / module path escape / GOMODCACHE
+2. `guff-packages::native` — `GUFF_NATIVE_LIST={off,on,verify,force}` + graph diff オラクル
+3. `guff-build` — `replace`/`exclude`/`retract` パース、Go 1.26 experiment tool tags
+4. AutoDriver: mode に従い native ↔ `go list` ↔ offline
+
+**オラクル実測（`tests: false`）:** hybrid 61 / helm `pkg/chart` 629 /
+prometheus `model` 424（**go.work**）いずれも OK。
+
+**go.work 対応（同日追記）:** `use` モジュールをすべて main として解決、workspace
+`replace` 優先、同一 path の require は粗 MVS（最高バージョン）。`exclude`/`retract` は
+listing では無視。cgo は GoFiles マージ + `runtime/cgo` を Deps に合成（CompiledGoFiles
+生成物は C-3e）。
+
+**使い方:**
+```bash
+GUFF_NATIVE_LIST=verify guff run --no-cache ./...   # 両方走らせて diff、結果は go list
+GUFF_NATIVE_LIST=on      guff run --no-cache ./...   # native 優先、bail 時 go list
+GUFF_NATIVE_LIST=force   guff run --no-cache ./...   # native のみ（go 無し CI 向け）
+```
+
+**残タスク（Phase 2+）:** `module@version` 恒久キャッシュ、repo `vendor/`、
+go list 同等の test バリアント、既定オン、C-3e/C-3d。
+
+---
 
 ## C-4 — gocritic 106 チェッカーの walk 融合
 

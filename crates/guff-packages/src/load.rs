@@ -226,6 +226,7 @@ mod tests {
     use super::*;
     use crate::driver::Driver;
     use crate::package::DriverResponse;
+    use std::collections::HashMap;
 
     struct FakeDriver {
         response: DriverResponse,
