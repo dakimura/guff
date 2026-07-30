@@ -60,8 +60,9 @@
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
 > **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
 >
-> **次の小粒候補（未着手）:** `position_internal` 再測、B-5 Slice（findings 合意後）。
-> ~~seed SHA→blake3~~ **DONE（A-5 follow-up）** / ~~`guff-packages` FxHash~~ **DONE**。
+> **次の小粒候補（未着手）:** B-5 Slice（findings 合意後）。
+> ~~seed SHA→blake3~~ **DONE** / ~~`guff-packages` FxHash~~ **DONE** /
+> ~~`position_internal`~~ **NO-GO**（ほぼ format 側・重畳中で wall ≈0）。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
