@@ -21,6 +21,12 @@
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
 > 各タスク節末尾の `### DONE` / `### NO-GO` に実測値があります。
 >
+> **C-3a DONE（2026-07-30）: cold −0.30〜0.35s / `load_graph` 1.24s → 0.86s / findings byte 同一。**
+> 旧 C-3 は「工数特大・リスク最高」と書かれていましたが、**`go list` のコスト内訳を
+> 誰も測っていなかっただけ**でした。実際には 1.02s のうち **0.56s が guff の要求しない仕事**
+> （`-compiled=true` 0.39s ＋ 読まないフィールドの marshal 0.17s）で、
+> **`go list` を 1 行も置き換えずに**削れました。§C-3.0 に内訳、§C-3a に DONE 記録。
+> **残る C-3b〜C-3e（`go` 非依存化）は wall ではなく製品判断のタスクです**（§C-3 ロードマップ）。
 > **次は C-1（AST・要合意）や B-10（`waited>0` まで NO-START）など。B-9 は原則着手しない。**
 > **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
 > 編集は seed 再構築が残り ~1.35s。ExportSeed 保持 follow-up は当面やらない（§C-2）。
@@ -191,7 +197,7 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 
 | phase | wall | 2026-07-27 比 | 何をしているか | 次に攻めるタスク |
 |---|---:|---:|---|---|
-| load_graph（`go list`） | **1.23s** | −0.02 | 外部プロセス待ち（`golist invoke(main)` 1.01s ＝ 14.1MB の stdout / `stdlib-export` 0.16s / パース 0.03s / `connect_imports` 0.01s）。**CPU は遊んでいる** | C-3 のみ（要特大工数） |
+| load_graph（`go list`） | ~~1.23s~~ → **0.86s**（C-3a 後） | −0.02 | 外部プロセス待ち（`golist invoke(main)` ~~1.01s~~ → **0.62s** / `stdlib-export` 0.16s / パース 0.03s / `connect_imports` 0.01s）。**CPU は遊んでいる** | ~~C-3a 済~~。残りは C-3c（製品判断） |
 | typecheck_roots | **1.58s** | −0.29 | seed + target | A-1, B-5, B-6, P0-3 |
 | **format_checks** | **1.68s**（並列に重畳、待ち 0.00s） | −0.07 | 2 スレッド専用プール | **P0-1 は「wall に効かない」で終わっている。重畳が崩れたらここが critical path** |
 | analyze | **0.75s** | **−0.47** | 全 analyzer | **B-1**（`preorder_stack` が self 0.87s / inclusive 2.81s）, B-2, B-4 |
@@ -478,7 +484,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 |---|---|---|---|---|---|
 | C-1 | AST アリーナ化 + 文字列インターン | cold | 0.3〜1.0s? | **特大** | **最高** |
 | ~~C-2~~ | ~~常駐デーモン / watch モード~~ **DONE（MVP）**。`guff run --watch`。再パス 0.07〜0.10s / 編集 ~1.35s（one-shot 同条件 ~1.95s）。型/SSA 非保持。§C-2 | warm | **再パス −0.11s** | 大 | 中 |
-| C-3 | `go list` の自前置き換え | cold/warm | ~1.3s | **特大** | **最高** |
+| **C-3a** | **`go list` に無駄な仕事をさせない**（`-json=fields` + `-compiled=false`）。§C-3a | cold | **−0.36s（実測）** | **小** | **低** |
+| C-3b〜e | `go` 依存の段階的除去（native lister / stdlib スナップショット / cgo 委譲）。§C-3 | cold | −0.2〜0.5s | 大〜特大 | 中〜高 |
 | C-4 | gocritic 106 チェッカーの walk 融合 | cold | 0.0〜0.1s? | 大 | 中 |
 | C-5 | issue cache を analyzer 単位の粒度に | warm | ? | 大 | **高** |
 | ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
@@ -847,7 +854,11 @@ parse を**丸ごと消しても** wall 換算 `0.44 × 0.33 ≈ 0.15s`、その
 `subprocess 1.00s`（`go list` の外部プロセス待ち）＋ `stdlib-export 0.16s` ＋
 `parse+build 0.03s` ＋ `refine 0.01s`。**83% が外部プロセス待ちで、CPU は遊んでいます。**
 `cache probe` は cold で 0.00s（ミス）なので、キャッシュ判定自体のコストはゼロ。
-**C-3 以外にここを詰める手はありません**（§1.3-post の記述を裏付け）。
+~~**C-3 以外にここを詰める手はありません**~~
+**（2026-07-30 訂正）** この結論は「外部プロセス待ち＝手が出せない」という前提でしたが、
+**待っている中身を測っていませんでした**。`go list` の 1.02s のうち **0.56s は
+guff が要求しなくてよい仕事**です（`-compiled=true` の 0.39s ＋ 読みもしないフィールドの
+marshal 0.17s）。**§C-3a を見てください（実測 `load_graph` 1.24s → 0.83s / findings 同一）。**
 
 **検証:**
 
@@ -3327,22 +3338,399 @@ tsdb regress PASS。one-shot wall/RSS 悪化なし。
 
 ---
 
-## C-3 — `go list` の自前置き換え
+## C-3 — `go list` への依存を減らす（2026-07-30 全面改訂）
 
-**要旨:** `go.mod` / モジュールキャッシュを自前で読み、`go list` サブプロセスを廃止する。
+> **旧 C-3（「go.mod を自前で読んで `go list` を廃止する」一枚岩・工数特大・リスク最高）は
+> この節で置き換えました。** 旧版の主張「置き換えは Go ツールチェーンの再実装であり、
+> パッケージ集合が 1 つでもズレたら findings が変わる」は**今でも正しい**のですが、
+> **`go list` のコスト内訳を誰も測っていなかった**ため、「全部やるか、何もやらないか」に
+> 見えていただけでした。測ったところ、**現状 1.02s のうち 0.56s は
+> guff が要求しなくてよい仕事**で、これは `go list` を一切置き換えずに削れます。
+>
+> **独立にコミットできる 5 段（C-3a〜C-3e）に分解しました。**
+> **C-3a は実測済みで cold −0.36s / findings byte 同一。** C-3c まで到達すれば
+> 「cgo を使わないリポジトリでは `go` バイナリ不要」になります。
 
-**期待:** cold 1.3s / warm 0.21s の削減。
+### C-3.0 — GO/NO-GO 計測: `go list` の 1.02s の内訳（2026-07-30 実測）
 
-**リスク:** **最高。** `PERF_TASKS.md` §0-4 は「`go list` に手を出すな」と明示していますが、
-その根拠は「**guff 側のオーバーヘッドがゼロだから**（コストは `go list` 自身）」であって、
-「`go list` を置き換えるな」ではありません。とはいえ、build constraints / cgo / vendor /
-workspace (`go.work`) / replace directive / ビルドタグの正しい解釈を自前で再実装するのは
-**Go ツールチェーンの再実装**であり、パッケージ集合が 1 つでもズレたら findings が変わります。
+**この節が旧 C-3 に欠けていた唯一のものです。** 再現は `scripts/golist-breakdown.sh`。
 
-**現実的な折衷:** 置き換えではなく **`go list` の起動を早める**。
-現在は設定パース後に起動していますが、**CLI 引数を読んだ直後（設定ファイルを読む前）**に
-投機的に起動できれば、設定パース時間ぶんだけ隠れます。
-効果は A-9 で測った起動コストぶんなので、まず A-9 をやってから判断してください。
+計測条件: prometheus `./...`、warm GOCACHE、go1.26.4 darwin/arm64、
+§1.2 のガード合格（load avg 1.35 / lowpowermode 0）、各変種 3 回を**交互**（§X-3）。
+下表は `-test=false`（内訳を見るため。prometheus 実運用は `-test=true` で絶対値は約 1.7 倍）。
+
+| 変種 | wall | stdout | 前段との差が意味するもの |
+|---|---:|---:|---|
+| `go version` だけ | **0.078s** | — | **プロセス起動の下限。`go` を呼ぶ限り毎回これを払う** |
+| `-json=ImportPath -compiled=false -deps=true` | 0.240s | 0.09MB | モジュール解決 + 全パッケージのロード |
+| ↑ + guff が読む全フィールド | 0.341s | 8.7MB | フィールド出力 **+0.10s** |
+| ↑ + **`-compiled=true`** | 0.735s | 9.1MB | **+0.394s** |
+| ↑ + **`-json`（フィールド無指定＝全部）** | **0.903s** | 9.8MB | **+0.168s** ← **これが現状** |
+
+**現状 0.90s の帰属:**
+
+| 内訳 | 秒 | guff に必要か |
+|---|---:|---|
+| プロセス起動 | 0.078 | `go` を呼ぶ限り不可避（C-3c で消える） |
+| モジュール解決 + パッケージロード | 0.16 | **必要**（C-3c の置き換え対象） |
+| guff が読むフィールドの出力 | 0.10 | **必要** |
+| `-compiled=true` | **0.39** | **ほぼ不要**（C-3a） |
+| guff が読まないフィールドの marshal | **0.17** | **不要**（C-3a） |
+
+**→ 0.90s のうち 0.56s（62%）は `go list` を置き換えずに削れます。**
+
+**重要: `-compiled=true` の 0.39s は cgo のコストではありません。**
+`CGO_ENABLED=0` で測っても同じでした（0.737s vs 0.716s ＝ 誤差帯）。
+そもそも cgo パッケージはグラフ 1530 個中 **2 個**（`runtime/cgo` と
+`github.com/prometheus/client_golang/prometheus`）しかありません。
+`-compiled` は cmd/go にビルドアクショングラフを組ませるフラグで、その**固定費**です。
+
+**なぜ `-json`（全フィールド）を使っているのか:** `golist.rs` には
+`json_flag()` という「LoadMode から必要フィールドだけを選ぶ」実装が既にあるのですが、
+**`golist_args()` が `go_version` に常に `0` を渡している**ため
+（`golist.rs:61` / `956`）、`go_version < 19` の分岐に落ちて `-json` になります。
+**選択出力のコードは書かれているのに一度も動いていません。**
+
+### C-3.1 — `CompiledGoFiles` は 1530 個中 1527 個で `GoFiles` と完全一致（実測）
+
+prometheus `./...` の全パッケージで `CompiledGoFiles`（basename）と `GoFiles` を比較した結果、
+一致しなかったのは **3 個だけ**:
+
+| パッケージ | 差の理由 | guff への影響 |
+|---|---|---|
+| `unsafe` | Compiled が空 | **既に特別扱い済み**（`golist.rs:1116-1117` が clear する） |
+| `runtime/cgo` | `CgoFiles` あり | stdlib なので **export data から復元され、Compiled は読まれない** |
+| `client_golang/prometheus` | `CgoFiles` あり | **ここだけ本当に Compiled が要る** |
+
+**規則は厳密です:** `CompiledGoFiles != GoFiles` ⟺ そのパッケージが
+`CgoFiles` / `SwigFiles` / `SwigCXXFiles` を持つ（`unsafe` を除く）。
+そして **`CgoFiles`・`SwigFiles` は `-compiled=false` の出力にも入っている**ので、
+第 1 コールの結果だけで「誰に Compiled が要るか」が確定します。
+
+さらに **hybrid モード（既定）では stdlib の `CompiledGoFiles` は一度も読まれません**。
+`typecheck.rs:785-790` が `export_paths` を優先し、stdlib は export data から復元して
+source typecheck しないためです。つまり Compiled の第 2 コールが要るのは
+**「`CgoFiles`/`SwigFiles` を持つ非 stdlib パッケージ」だけ**で、prometheus では **1 個**です。
+
+そして `json_package_to_package` には既に
+「`compiled_go_files` が空なら `go_files` で埋める」フォールバックがあります
+（`golist.rs:1118-1120`）。**非 cgo パッケージは今のコードのまま正しくなります。**
+
+---
+
+### C-3a — `go list` に無駄な仕事をさせない（**最優先。`go list` は置き換えない**）
+
+**要旨:** 3 つだけ変える。
+
+1. **`-json=<フィールド列>` を実際に使う。** `golist_args` に本物の Go マイナーバージョンを
+   渡す。**`go env GOVERSION` を呼んではいけません**（0.074s のサブプロセス。C-3b で消す対象）。
+   **`$GOROOT/VERSION` の 1 行目**を読むこと（実測 **0.011ms**、7000 倍速い）。
+   `GOROOT` は `cfg.resolved_env()` → なければ `go` の実体パスから導出。
+   取れなければ従来どおり `-json`（フォールバック）。
+2. **`-compiled=false` にする。** 非 cgo パッケージは既存フォールバックで
+   `compiled_go_files = go_files` になる。
+3. **cgo/swig を持つ非 stdlib パッケージにだけ、第 2 の
+   `go list -json=ImportPath,CompiledGoFiles -compiled=true <paths>` を投げる。**
+   **既存の stdlib-export コールと並列に**走らせること（両者は独立）。
+   実測 0.16s だが、その 0.078s はプロセス起動なので stdlib-export の 0.15s に隠れる。
+   **cgo パッケージが 0 個のリポジトリではこのコール自体が消えます。**
+
+**⚠️ C-3a で唯一の落とし穴（必ず読むこと）:**
+`json_flag()` が返すフィールド集合は **LoadMode から導出**されますが、
+`json_package_to_package()` は **LoadMode に関係なく**
+`ForTest` / `Target` / `EmbedFiles` / `EmbedPatterns` / `Ignored*` / `C*Files` などを読みます。
+`-json`（全部）だとこの不整合が見えませんが、**選択出力にした瞬間に静かに空になります。**
+`other_files` / `ignored_files` は `guff-analysis/src/pass.rs:68,74,132,136` が実際に読みます。
+
+→ **対策:** `json_flag` を「LoadMode 由来の集合 **∪** `JsonPackage` が deserialize する全フィールド」に
+すること。**`JsonPackage` のフィールドを増やしたら `json_flag` も増やす**というテストを足すこと
+（コンパイル時に落ちないので、テストがないと必ず腐ります）。
+
+**実装場所:** `crates/guff-packages/src/golist.rs` の
+`golist_args` / `json_flag` / `go_list_driver`。**約 80〜120 行。**
+
+#### GO 判定（2026-07-30・**実装前に shim で実測済み**）
+
+`go` を装う shim で `-json` → `-json=<全 deserialize フィールド>`、`-compiled=true` → `-compiled=false`
+に書き換え、**guff 本体は無改造**のまま prometheus `./...` を cold（空 `GUFF_CACHE` + `--no-cache`）で A/B 交互 3 回:
+
+| run | A（現状） | B（C-3a 相当） | findings |
+|---|---:|---:|---|
+| 1 | 3.553s | **3.216s** | 60 / 60 **byte 同一** |
+| 2 | 3.480s | **3.116s** | 60 / 60 **byte 同一** |
+| 3 | 3.477s | **3.122s** | 60 / 60 **byte 同一** |
+
+phase 内訳（`GUFF_DEBUG_CACHE=2`）:
+
+| phase | A | B |
+|---|---:|---:|
+| `golist subprocess` | 1.02s (14.07MB) | **0.62s** (13.40MB) |
+| `golist stdlib-export` | 0.16s | 0.15s |
+| **`load_graph`** | **1.24s** | **0.83s** |
+| 総パッケージ数 | 1792 | **1792**（同一） |
+
+**cold wall −0.36s / `load_graph` −0.41s / findings byte 同一。**
+§0-14 の基準（0.1s）を大きく超えます。**GO。**
+
+**注意:** この shim 実験は cgo の第 2 コール**なし**（＝ `client_golang/prometheus` の
+Compiled が `GoFiles + CgoFiles` に落ちた状態）でも prometheus では findings が変わりませんでした。
+これは当該パッケージが root ではなく依存で、依存の診断は報告されないためです。
+**「だから cgo 対応は要らない」と読まないこと** — 型が壊れれば他リポジトリで findings が動きます。
+第 2 コールは正しさのために必須です。
+
+### DONE（2026-07-30）— **cold −0.30〜0.35s / `load_graph` 1.24s → 0.86s。findings byte 同一。warm 回帰なし。**
+
+**入れたもの（`crates/guff-packages/src/golist.rs` のみ、+約 330 行）:**
+
+1. **`go_minor_version()`** — `$GOROOT/VERSION` の 1 行目から Go マイナー版を得る。
+   `cfg.resolved_env()` の `GOROOT` → 無ければ PATH 上の `go` を canonicalize して
+   `<bin の親>` と `<bin の親>/libexec` を試す（`VERSION` と `src/` の両方があるものだけ採用）。
+   PATH 由来は `OnceLock` で 1 回だけ。取れなければ `0` を返して従来の `-json` に落ちる。
+   **サブプロセスは 1 本も増えていません。**
+2. `golist_args` が本物の版を渡すようになり、**`-json=<フィールド>` が初めて有効化**。
+3. **`DESERIALIZED_FIELDS`** — `JsonPackage` が decode する全 29 フィールドを `json_flag` が
+   無条件に要求する。LoadMode 由来の追加分はその上に載る。
+4. **`defers_compiled(cfg)`（= `cfg.dep_source`）** — hybrid のとき主コールを `-compiled=false` に。
+   export 経路（`GUFF_DEP_SOURCE=0`）は `-export=true` でどのみち builder が動くので**据え置き**。
+5. **cgo/SWIG 限定の第 2 コール** `go list -e -json=ImportPath,Dir,CompiledGoFiles -compiled=true`。
+   対象は `needs_compiled_query()`（`CgoFiles`/`SwigFiles`/`SwigCXXFiles` を持ち、
+   エラー無し、id に空白を含まない＝テストバリアント除外）。
+   **stdlib-export コールと `std::thread::scope` で並列。** 失敗しても `GoFiles`
+   フォールバックのまま続行（run は落とさない）。
+6. **`compiled_files` ディスクキャッシュ**（B-8 と同設計）。`peek_compiled_files_cache` を
+   `peek_cached_graph`（C-7 投機）にも通した。
+
+**実測（prometheus `./...`、変更前バイナリと A/B 交互、§1.2 ガード合格）:**
+
+| | 変更前 | 変更後 | 差 |
+|---|---:|---:|---:|
+| cold wall（3 ペア） | 3.830 / 3.896 / 3.912s | **3.578 / 3.545 / 3.528s** | **−0.30〜0.35s** |
+| warm wall（4 ペア） | 0.311 / 0.299 / 0.303 / 0.303s | **0.293 / 0.290 / 0.297 / 0.297s** | −0.01s（**回帰なし**） |
+
+**phase（cold, `GUFF_DEBUG_CACHE=2`）:**
+
+| | 変更前 | 変更後 |
+|---|---:|---:|
+| `golist subprocess` | 1.02s (14.07MB) | **0.62s** (13.40MB) |
+| `golist compiled-files` | — | 2 attached / 2 cgo pkgs（**stdlib-export の陰に隠れる**） |
+| `golist stdlib-export` | 0.16s | 0.18s |
+| **`load_graph`** | **1.24s** | **0.86s** |
+| 総パッケージ数 | 1792 | 1792（同一） |
+
+warm では `compiled-files cache hit (2 pkgs)` → `stdlib-export 0.00s` → `load_graph` **0.08s**
+（変更前 0.07s。サブプロセスは 1 本も出ない）。
+
+**findings（全部 byte 同一。件数一致ではなく `diff` が空）:**
+
+| ケース | 結果 |
+|---|---|
+| prometheus `./...` cold ×3（変更前バイナリと） | **byte 同一**、3 回とも決定的 |
+| prometheus `./...` warm ×4 | **byte 同一** |
+| `-j 1` | **byte 同一**（wall 9.0s ≫ `-jN` 3.15s。逆転なし） |
+| `--tests=false` / `GUFF_DEP_SOURCE=0` | **byte 同一** |
+| **helm**（cgo 3: `runtime/cgo` / `plugin` / client_golang） | **byte 同一**（3 findings） |
+| **mercari-globalone**（4056 pkgs、cgo 2: DataDog `go-libddwaf`） | **byte 同一**、`compiled-files 2 attached` |
+
+**その他:** peak RSS 3.70 GiB（baseline 帯 3.46〜3.7 GiB 内）。
+`cargo test -p guff-packages --lib` **46 passed**（新規 6 本）。
+`cargo test --workspace --release --no-fail-fast` **2811 passed / 3 failed** で、
+失敗は **X-6 の 3 本ちょうど**（`sa4010`/`sa4017`/`sa5011`。`main` で以前から落ちているもの。
+`325 passed; 3 failed` のシグネチャが §X-6 の記録と一致）。`guff-packages` の警告数 **45 → 45**。
+**regress 両方 PASS**（baseline 未更新）:
+
+| プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+|---|---:|---:|---:|---:|---|
+| tsdb | 1.360s | **1.330s** | 1,141,440,512 | 1,139,326,976 | both 4 / only 0,0 |
+| full | 3.360s | **3.270s** | 4,034,396,160 | **3,741,138,944** | both 20 / only 0,0 |
+
+#### 踏んだ罠（次の人へ。C-3c でも同じ形が出ます）
+
+**`go list -compiled` の `CompiledGoFiles` は 2 種類のパスが混ざっています。**
+パッケージ自身のソースは **`Dir` からの相対ファイル名**、cgo 生成物は **GOCACHE の絶対パス**。
+最初これを**そのまま**キャッシュに保存したため、`load_compiled_files_cache` の存在チェック
+（相対名を CWD 基準で `exists()`）が必ず false になり、**キャッシュが毎回ミス**していました。
+症状は「findings は正しいのに warm が 0.285s → 0.40s に悪化」。
+→ `-json=…,Dir,…` も要求して**保存前に絶対化**。
+`compiled_files_cache_roundtrips_and_rejects_unresolvable_paths` が相対パスを拒否することで回帰を防ぎます。
+
+**もう 1 つ:** `cargo test --workspace` は fail-fast なので guff-staticcheck で止まります
+（§X-6 の 3 本）。全体像には `--no-fail-fast` を使うこと。
+
+**⚠️ 未確認:** 検証はすべて **Go 1.26.4 / darwin arm64 / モジュールモード**。
+`-json=<fields>` は Go 1.19+ 限定で、それ未満は `go_minor_version()` が 0 を返して
+従来経路に落ちる設計ですが、**古いツールチェーンでの実走は未確認**です。
+vendor ディレクトリ有りのリポジトリも未確認（`go list` に任せているので影響は無いはず）。
+
+---
+
+### C-3b — `go env` / `go version` サブプロセスの撲滅
+
+**要旨:** **完全 warm 実行でも `go` サブプロセスが 6 本走っています**（2026-07-30 実測。
+`go` を装う shim で全呼び出しを記録）:
+
+| 呼び出し | 回数 | 呼び出し元 |
+|---|---:|---|
+| `go env GOVERSION` | **4** | `guff-runner/cache.rs:270`（issue cache salt）/ `guff-packages/typecheck.rs:123` |
+| `go version` | 1 | `golist.rs:1578`（`go_available`） |
+| `go env GOCACHE` | 1 | `guff-runner/cache.rs:155` |
+
+**1 本あたり 0.074s。** 置き換え先はすべてファイル 1 個の読み取りで済みます:
+
+| 現状 | 置き換え | 実測 |
+|---|---|---:|
+| `go env GOVERSION` | `$GOROOT/VERSION` の 1 行目（`go1.26.4`） | **0.011ms** |
+| `go env GOCACHE` | `default_gocache_path()` が既にある（`golist.rs:1368`） | 0 |
+| `go version`（存在確認） | PATH 上の `go` を `stat`（`go_toolchain_fingerprint()` が既にやっている） | 0 |
+
+`GOROOT` 自体は `go env GOROOT` なしで取れます（`cfg.resolved_env()` の `GOROOT` →
+なければ PATH 上の `go` を canonicalize して `../libexec` or `../..`）。
+**取れなければ従来のサブプロセスにフォールバック**すること。
+
+#### GO/NO-GO（2026-07-30 実測・**単独では基準未満**）
+
+bash shim で `go env`/`go version` を即答にして warm A/B（初回は shim の page-in で汚染、2・3 回目を採用）:
+
+| | A（実 `go`） | B（shim） |
+|---|---:|---:|
+| warm wall | 0.285 / 0.286s | 0.270 / 0.268s |
+
+**−0.017s。** ただし **shim 自体が bash で 1 本 5〜10ms 払っている**ので、
+真の上限はこれより大きい（6 本 × 0.074s ＝ 0.44s ぶんのスレッド待ちが、
+並列に重なって wall にはこれだけしか出ていない）。
+
+**単独では §0-14 の 0.1s に届きません。**
+それでも**やる価値がある理由は 2 つ**:
+
+1. **C-3c/C-3d の前提**。ここが残っていると「`go` なしで動く」に到達できません。
+2. **実装が数十行で、リスクがほぼゼロ**（フォールバック付きの読み取り置換）。
+
+**→ C-3c に進むと決めたときにセットで入れる。単独で wall を狙って着手しない。**
+
+---
+
+### C-3c — ネイティブ lister（`go list` の置き換え本体）
+
+**ここが旧 C-3 の本体ですが、C-3.0 の内訳が出た今は「残り 0.26s ＋ プロセス起動 0.078s」の話です。**
+**wall だけが目的なら ROI は C-3a の 1/2 以下。** それでも狙う理由は
+**`go` への依存を切ること**（単一バイナリ配布 / Go 無し CI・Docker イメージ / バージョン差の排除）です。
+**性能タスクではなく製品タスクとして扱ってください。**
+
+#### なぜ「Go ツールチェーンの再実装」にならずに済むのか（2026-07-30 の新事実）
+
+**(1) MVS（最小バージョン選択）が要らない。**
+Go 1.17 以降のモジュールグラフ枝刈りにより、**メインモジュールの `go.mod` の
+`require` 群だけで、インポート解決に必要なモジュールが全部揃います。**
+prometheus で実測: パッケージグラフに現れるモジュール **242 個が、
+`go.mod` の require 251 行に全部含まれていました**（例外はメインモジュール自身のみ）。
+**`go.mod` を 1 個読むだけでモジュール解決が閉じます。** 推移的なモジュールグラフを辿る必要はありません。
+
+**(2) 走査対象の 92% が不変（immutable）で、恒久キャッシュできる。**
+prometheus `./...` の 1530 パッケージディレクトリの内訳と、
+Rust で readdir + 各 `.go` の先頭 4KB を読む実測コスト（8 スレッド）:
+
+| 区分 | dirs | files | 走査実測 | 可変性 |
+|---|---:|---:|---:|---|
+| GOMODCACHE | 1176 | 15018 | 0.15s | **不変**（content-addressed・read-only） |
+| GOROOT | 241 | 3445 | （残り） | **不変**（ツールチェーン単位） |
+| **メインモジュール** | **113** | **709** | **0.005s** | 可変 |
+| 合計 | 1530 | 19172 | **0.20s** | |
+
+**毎回走査しなければならないのは 113 ディレクトリ / 709 ファイル ＝ 5ms だけ**です。
+残りは `module@version` をキーに `GUFF_CACHE` へ**恒久的に**（無効化不要で）置けます。
+`go list` は GOCACHE を持っていてなお 0.24s 払っているので、
+**ネイティブ lister は原理的に `go list` より速くなれます。**
+
+⚠️ ただし **初回（キャッシュ無し）は 0.20s** で、`go list` の実質 0.26s とほぼ差がありません。
+**「速いのはキャッシュが効いてから」**であり、そこを取り違えないこと。
+なお走査は **CPU ではなく syscall バウンド**です（1 スレッド 0.25s → 8 スレッド 0.20s。
+スレッドを増やしても伸びません）。
+
+**(3) 土台は既にある。** `crates/guff-build/`（1383 行）は `go/build` の移植で、
+build constraints（`//go:build` / `+build` / `_GOOS_GOARCH` サフィックス）の判定
+（`match_file.rs`）とディレクトリのインポート（`import_dir.rs`）を持っています。
+`crates/guff-packages/src/offline.rs`（428 行）は `go` 不在時のフォールバック driver として
+既にこれでパッケージを組み立てています。**足りないのは「外部モジュールの解決」だけ**で、
+`offline.rs:7-8,167-168` に `DEFERRED` として明記されています。
+`go.mod` パーサも `crates/guff-import/src/gomod.rs` に
+（require / replace / exclude / retract / toolchain 対応の）実装済みのものがあります。
+
+#### 設計（必ずこの順で）
+
+**新クレート `guff-golist`**（`guff-packages` を太らせない）。`Driver` trait を実装し、
+`AutoDriver` の前段に入れる。**判定は「使えるなら使う、少しでも怪しければ `go list`」。**
+
+**サポート外なら即フォールバック（bail）する条件を、最初から明示的に持つこと:**
+
+| 条件 | 初版 |
+|---|---|
+| `go.mod` の `go` ディレクティブ < 1.17 | **bail**（枝刈り前提が崩れる） |
+| `go.work` が存在 | **bail**（第 2 版で対応） |
+| `vendor/` が存在 | **bail**（第 2 版。`vendor/modules.txt` は簡単なので早めに） |
+| `GOFLAGS` / `build_flags` に `-tags` 以外 | **bail** |
+| require されたモジュールが GOMODCACHE に未展開 | **bail**（ダウンロードは絶対にしない） |
+| `CgoFiles` を持つパッケージがある | **cgo だけ `go list` に委譲**（C-3e） |
+| `-test=true` | 第 2 版（テストバリアント `pkg [pkg.test]` の生成が要る） |
+| パターンが `./…` / `.` / 絶対パス / 自モジュール以外 | **bail** |
+
+**等価性オラクル（これが工数の半分。先に作ること）:**
+`GUFF_NATIVE_LIST=verify` で**両方**走らせ、`DriverResponse` を正規化して diff し、
+不一致を stderr に出す（かつ `go list` の結果を採用する）。
+`regress/` のコーパス（prometheus / helm / mercari-globalone / `compat/`）で
+**diff 空**を確認してから既定オンにします。**findings ではなくパッケージグラフを直接比較すること** —
+findings は差を吸収してしまうので、オラクルとしては鈍すぎます。
+
+**段取り:** ①オラクル → ②`go.mod` 解決 + GOMODCACHE 探索 → ③ディレクトリ走査
+（`guff-build` 再利用）→ ④`module@version` 恒久キャッシュ → ⑤ vendor → ⑥ `go.work` → ⑦ `-test`。
+**各段でオラクル diff 空を確認。1 段 = 1 コミット。**
+
+---
+
+### C-3d — stdlib の型情報を `go list -export` なしで得る
+
+**C-3c を入れても `go` は消えません。** hybrid モードは stdlib の型を
+**GOCACHE の `.a`（export data）**から取っており、その `.a` のパスを
+`go list -export` に聞いているからです（warm 0.15s / cold は stdlib のビルドを伴う）。
+
+**案:** **GOROOT のソースから stdlib を一度 typecheck し、guff 自身の形式で
+`GUFF_CACHE` に永続化する**（キーは `$GOROOT/VERSION` + GOOS/GOARCH）。
+
+- guff は既に stdlib をソースから型付けできます（offline driver がそれをやっています）。
+- 永続化の器も既にあります（`seed_cache.rs` の overlay 永続化 / `ExportSeed`）。
+- **Go バージョンごとに一度だけ**払えば、以後は `.a` デコードより速い可能性が高い
+  （現状 `stdlib-export` 0.15s ＋ Phase A のデコードが消える）。
+
+**GO/NO-GO に必要な計測（未実施）:**
+①GOROOT ソースからの stdlib 全 typecheck の初回コスト、②スナップショットのサイズと復元時間、
+③復元した型 vs export data 由来の型で **findings 同一**。
+**③が本丸のリスク**です（export data には型チェックで捨てられる情報の差がある）。
+
+---
+
+### C-3e — cgo
+
+**`go` を完全に不要にできない唯一の本質的な理由。** `import "C"` の解決には
+cgo（＝ C コンパイラ）が要ります。**再実装しないこと。**
+
+**方針:** `CgoFiles` を持つパッケージが存在するときだけ、
+**そのパッケージに限定して** `go list -compiled=true` に委譲する（C-3a で作る第 2 コールがそのまま使える）。
+**cgo を使わないリポジトリでは `go` が 1 回も呼ばれない**状態に到達できます。
+prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は export data 経路なので不要です。
+
+---
+
+### C-3 ロードマップまとめ
+
+| 段 | 内容 | 工数 | cold への効果 | `go` 依存 | リスク |
+|---|---|---|---:|---|---|
+| ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
+| C-3b | `go env`/`go version` の撲滅 | 小 | −0.02s（単独では基準未満） | −3 種 | 低 |
+| C-3c | ネイティブ lister（+ 恒久キャッシュ） | **大** | −0.2〜0.3s（キャッシュ後） | 主コールが消える | 中〜高 |
+| C-3d | stdlib 型スナップショット | 中〜大 | −0.15s + Phase A | export コールが消える | **高**（型の同一性） |
+| C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
+
+**C-3a は DONE。** 続きは**製品として go 非依存を取りに行くと決めたときだけ**
+C-3b → C-3c → C-3e → C-3d の順で。**wall だけが目的なら C-3 はもう終わっています**
+（残り 0.26s ＋ プロセス起動 0.078s のために native lister を書くのは割に合いません）。
 
 ## C-4 — gocritic 106 チェッカーの walk 融合
 
@@ -3599,6 +3987,9 @@ GUFF_CACHE=$(mktemp -d) GUFF_DEBUG_RSS=1 GUFF_DEBUG_CACHE=1 \
 
 **cold の下限は `go list` の 1.3s + 型チェックの実コストで決まる**ので、
 C-3 に手を出さない限り 3s を大きく割ることはできません。
+**（2026-07-30 追記）** その「`go list` の 1.3s」は**固定費ではありませんでした**。
+**§C-3a（工数小・低リスク）だけで `load_graph` 1.24s → 0.83s / cold wall 3.48s → 3.12s が
+実測できています**（findings byte 同一）。**目標 3.5s は C-3a 単独で達成見込みです。**
 **「真の 0.1s」は cold では不可能**という第1弾の結論は変わりません。
 そこを狙うなら C-2（デーモン）です。
 

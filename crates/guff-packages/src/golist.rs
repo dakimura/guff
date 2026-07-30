@@ -58,7 +58,7 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     let timing = crate::debug::enabled();
     let t_invoke = std::time::Instant::now();
     let mode = cfg.effective_mode();
-    let args = golist_args(cfg, patterns, 0);
+    let args = golist_args(cfg, patterns, go_minor_version(cfg));
     let stdout = load_or_invoke_go(cfg, patterns, &args)?;
     if timing {
         eprintln!(
@@ -149,15 +149,58 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             .filter(|p| p.standard && p.import_path != "unsafe" && p.error.is_none())
             .map(|p| p.import_path.clone())
             .collect();
-        if !stdlib.is_empty() {
-            let exports = load_or_fetch_stdlib_exports(cfg, &stdlib, timing)?;
-            for pkg in response.packages.iter_mut() {
-                if let Some(export) = exports.get(&pkg.id) {
-                    if !export.is_empty() {
-                        Arc::make_mut(pkg).export_file = PathBuf::from(export);
-                    }
+        // C-3a: the main call ran with `-compiled=false`, so the cgo/SWIG
+        // packages still need their real `CompiledGoFiles`. That query and the
+        // stdlib export query are independent subprocesses, and each is mostly
+        // the ~0.078s `go` startup, so run them together rather than back to
+        // back.
+        let want_compiled = if defers_compiled(cfg) {
+            needs_compiled_query(&seen)
+        } else {
+            Vec::new()
+        };
+
+        let (exports, compiled) = std::thread::scope(|s| {
+            let compiled_job = (!want_compiled.is_empty())
+                .then(|| s.spawn(|| load_or_fetch_compiled_files(cfg, &want_compiled, timing)));
+            let exports = if stdlib.is_empty() {
+                Ok(HashMap::new())
+            } else {
+                load_or_fetch_stdlib_exports(cfg, &stdlib, timing)
+            };
+            let compiled = compiled_job.map_or(Ok(HashMap::new()), |j| {
+                j.join().unwrap_or_else(|_| {
+                    Err(GoListError::Internal("compiled-files query panicked".into()))
+                })
+            });
+            (exports, compiled)
+        });
+
+        let exports = exports?;
+        for pkg in response.packages.iter_mut() {
+            if let Some(export) = exports.get(&pkg.id) {
+                if !export.is_empty() {
+                    Arc::make_mut(pkg).export_file = PathBuf::from(export);
                 }
             }
+        }
+
+        // A failed cgo query must not abort the run: the packages keep the
+        // `GoFiles` fallback, exactly as before this call existed.
+        match compiled {
+            Ok(map) => {
+                let attached = attach_compiled_files(&mut response.packages, &map);
+                if timing && !want_compiled.is_empty() {
+                    eprintln!(
+                        "guff:   golist compiled-files {attached} attached / {} cgo pkgs",
+                        want_compiled.len(),
+                    );
+                }
+            }
+            Err(e) if timing => {
+                eprintln!("guff:   golist compiled-files failed ({e}); using GoFiles");
+            }
+            Err(_) => {}
         }
 
         let third_party: Vec<String> = seen
@@ -338,6 +381,82 @@ fn go_toolchain_fingerprint() -> String {
     "go=unknown".to_string()
 }
 
+/// Go minor version of the toolchain that will serve `go list` (26 for
+/// go1.26.4), or 0 when it cannot be determined.
+///
+/// This gates `-json=<fields>` (Go 1.19+) and `-pgo=off` (Go 1.21+), so it runs
+/// on every load. `go env GOVERSION` would answer it exactly — and costs a
+/// 0.074s subprocess, which is the same order as the flag it is deciding about.
+/// `$GOROOT/VERSION` is a one-line file (measured 0.011ms) holding the same
+/// string, so read that instead. Returning 0 is always safe: the caller falls
+/// back to the pre-1.19 flag set.
+fn go_minor_version(cfg: &Config) -> u32 {
+    static CACHE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    // The env override is per-Config, so only the PATH-derived answer is worth
+    // memoizing; an explicit GOROOT is a cheap path join.
+    if let Some(root) = env_goroot(cfg) {
+        if let Some(v) = parse_goroot_version(&root) {
+            return v;
+        }
+    }
+    *CACHE.get_or_init(|| {
+        go_root_from_path()
+            .as_deref()
+            .and_then(parse_goroot_version)
+            .unwrap_or(0)
+    })
+}
+
+fn env_goroot(cfg: &Config) -> Option<PathBuf> {
+    for entry in cfg.resolved_env() {
+        if let Some(v) = entry.strip_prefix("GOROOT=") {
+            if !v.is_empty() {
+                return Some(PathBuf::from(v));
+            }
+        }
+    }
+    None
+}
+
+/// GOROOT inferred from the `go` binary on PATH, without running it.
+///
+/// After canonicalization `…/bin/go`'s grandparent is GOROOT for both the
+/// upstream layout (`/usr/local/go/bin/go`) and Homebrew's
+/// (`…/Cellar/go/1.26.4/libexec/bin/go`). The `libexec` child is tried too for
+/// packagings that do not resolve the symlink into it. A candidate only counts
+/// when it holds both `VERSION` and `src/`, so a wrong guess degrades to 0
+/// rather than to a wrong version.
+fn go_root_from_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("go");
+        if !candidate.is_file() {
+            continue;
+        }
+        let real = std::fs::canonicalize(&candidate).unwrap_or(candidate);
+        let Some(base) = real.parent().and_then(Path::parent) else {
+            continue;
+        };
+        for root in [base.to_path_buf(), base.join("libexec")] {
+            if root.join("VERSION").is_file() && root.join("src").is_dir() {
+                return Some(root);
+            }
+        }
+    }
+    None
+}
+
+/// Minor version from a `$GOROOT/VERSION` first line such as `go1.26.4`.
+fn parse_goroot_version(root: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(root.join("VERSION")).ok()?;
+    let line = text.lines().next()?.trim();
+    let rest = line.strip_prefix("go")?;
+    let minor = rest.split('.').nth(1)?;
+    // Trim any pre-release suffix (`1.21rc1` → `21`).
+    let digits: String = minor.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
 /// Load a cached stdlib export map, or `None` when it is missing, unreadable,
 /// corrupt, or references an archive that is no longer on disk (GOCACHE is
 /// cleaned independently of `GUFF_CACHE`). Every failure falls back to a fresh
@@ -404,6 +523,169 @@ fn fetch_package_exports(
         }
     }
     Ok(map)
+}
+
+/// Bump when the on-disk shape of the compiled-files cache changes.
+const COMPILED_FILES_CACHE_VERSION: &str = "compiled-files-v1";
+
+fn compiled_files_cache_path(cfg: &Config, paths: &[String]) -> Option<PathBuf> {
+    let dir = guff_cache_dir()?;
+    let mut args = Vec::with_capacity(paths.len() + 2);
+    args.push(COMPILED_FILES_CACHE_VERSION.to_string());
+    args.push(go_toolchain_fingerprint());
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    args.extend(sorted);
+    let key = golist_cache_key(cfg, &[], &args, false);
+    let prefix = key.get(..2).unwrap_or("00");
+    Some(
+        dir.join("compiled_files")
+            .join(prefix)
+            .join(format!("{key}.json")),
+    )
+}
+
+/// `import_path → CompiledGoFiles` for the cgo/SWIG packages, from disk when
+/// possible (a warm run must not pay a subprocess the main call no longer pays).
+///
+/// Mirrors [`load_or_fetch_stdlib_exports`]: cgo-generated files live in
+/// GOCACHE, which is cleaned independently of `GUFF_CACHE`, so a cached entry
+/// naming a file that is gone must miss rather than resurrect a dead path.
+fn load_compiled_files_cache(path: &Path) -> Option<HashMap<String, Vec<String>>> {
+    let bytes = std::fs::read(path).ok()?;
+    let map: HashMap<String, Vec<String>> = serde_json::from_slice(&bytes).ok()?;
+    if map.is_empty() {
+        return None;
+    }
+    if map
+        .values()
+        .any(|files| files.is_empty() || files.iter().any(|f| !Path::new(f).exists()))
+    {
+        return None;
+    }
+    Some(map)
+}
+
+fn store_compiled_files_cache(path: &Path, map: &HashMap<String, Vec<String>>) {
+    if map.is_empty() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(bytes) = serde_json::to_vec(map) else {
+        return;
+    };
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, bytes).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+fn load_or_fetch_compiled_files(
+    cfg: &Config,
+    paths: &[String],
+    timing: bool,
+) -> Result<HashMap<String, Vec<String>>, GoListError> {
+    if !golist_cache_enabled(cfg) {
+        return fetch_compiled_files(cfg, paths);
+    }
+    let cache_path = compiled_files_cache_path(cfg, paths);
+    if let Some(p) = cache_path.as_ref() {
+        if let Some(map) = load_compiled_files_cache(p) {
+            if timing {
+                eprintln!(
+                    "guff:   golist compiled-files cache hit ({} pkgs)",
+                    map.len(),
+                );
+            }
+            return Ok(map);
+        }
+    }
+    let map = fetch_compiled_files(cfg, paths)?;
+    if let Some(p) = cache_path.as_ref() {
+        store_compiled_files_cache(p, &map);
+    }
+    Ok(map)
+}
+
+/// Read-only compiled-files map from disk (no subprocess). `None` on miss.
+fn peek_compiled_files_cache(
+    cfg: &Config,
+    paths: &[String],
+) -> Option<HashMap<String, Vec<String>>> {
+    for key in ["GUFF_CACHE", "GOLANGCI_LINT_CACHE"] {
+        if let Ok(v) = std::env::var(key) {
+            if v == "off" {
+                return None;
+            }
+        }
+    }
+    let path = compiled_files_cache_path(cfg, paths)?;
+    load_compiled_files_cache(&path)
+}
+
+/// Second `go list -compiled=true`, restricted to the cgo/SWIG packages.
+///
+/// `CompiledGoFiles` mixes two kinds of path: the package's own sources come
+/// back as bare file names relative to `Dir`, while the cgo-generated ones are
+/// absolute GOCACHE paths. `Dir` is requested so both can be stored absolute —
+/// the cache validates entries by testing that every file still exists, and a
+/// bare name would fail that test from any working directory.
+fn fetch_compiled_files(
+    cfg: &Config,
+    paths: &[String],
+) -> Result<HashMap<String, Vec<String>>, GoListError> {
+    if paths.is_empty() {
+        return Ok(HashMap::new());
+    }
+    const BATCH: usize = 200;
+    let mut map = HashMap::new();
+    for chunk in paths.chunks(BATCH) {
+        let mut args = vec![
+            "list".to_string(),
+            "-e".to_string(),
+            "-json=ImportPath,Dir,CompiledGoFiles".to_string(),
+            "-compiled=true".to_string(),
+        ];
+        args.extend(cfg.build_flags.clone());
+        args.push("--".to_string());
+        args.extend(chunk.iter().cloned());
+        let stdout = invoke_go(cfg, &args)?;
+        let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonCompiled>();
+        for item in stream {
+            let c = item.map_err(|e| GoListError::Json(e.to_string()))?;
+            if c.compiled_go_files.is_empty() {
+                continue;
+            }
+            let files = abs_join(Path::new(&c.dir), &c.compiled_go_files)
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            map.insert(c.import_path, files);
+        }
+    }
+    Ok(map)
+}
+
+/// Overwrite `compiled_go_files` for the packages the second call answered for.
+fn attach_compiled_files(
+    packages: &mut [Arc<Package>],
+    compiled: &HashMap<String, Vec<String>>,
+) -> usize {
+    if compiled.is_empty() {
+        return 0;
+    }
+    let mut attached = 0;
+    for pkg in packages.iter_mut() {
+        let Some(files) = compiled.get(&pkg.id) else {
+            continue;
+        };
+        Arc::make_mut(pkg).compiled_go_files =
+            filter_compiled_go_files(files.iter().map(PathBuf::from).collect());
+        attached += 1;
+    }
+    attached
 }
 
 /// How hybrid mode may attach warm-GOCACHE third-party export `.a` files.
@@ -953,7 +1235,7 @@ pub fn peek_cached_graph(
     cfg: &Config,
     patterns: &[String],
 ) -> Result<Option<PeekedGraph>, GoListError> {
-    let args = golist_args(cfg, patterns, 0);
+    let args = golist_args(cfg, patterns, go_minor_version(cfg));
     let Some(stdout) = try_peek_golist_cache(cfg, patterns, &args) else {
         return Ok(None);
     };
@@ -1001,6 +1283,22 @@ pub fn peek_cached_graph(
                     }
                 }
             }
+        }
+
+        // Speculation is only useful when it reproduces the authoritative
+        // graph, so a cgo package whose `CompiledGoFiles` is not already
+        // cached means the fingerprint would miss anyway — give up instead of
+        // seeding from the `GoFiles` fallback.
+        let want_compiled = if defers_compiled(cfg) {
+            needs_compiled_query(&seen)
+        } else {
+            Vec::new()
+        };
+        if !want_compiled.is_empty() {
+            let Some(compiled) = peek_compiled_files_cache(cfg, &want_compiled) else {
+                return Ok(None);
+            };
+            attach_compiled_files(&mut packages, &compiled);
         }
         // Default dep-export reuse is Off; when CachedOnly/Fetch is on, attach
         // whatever the dep-export cache already holds (no subprocess).
@@ -1186,18 +1484,17 @@ fn golist_args(cfg: &Config, patterns: &[String], go_version: u32) -> Vec<String
             | LoadMode::NEED_TYPES_INFO.0,
     );
 
+    let wants_compiled = mode.contains(LoadMode::NEED_COMPILED_GO_FILES)
+        || mode.contains(LoadMode::NEED_SYNTAX)
+        || mode.contains(LoadMode::NEED_TYPES)
+        || mode.contains(LoadMode::NEED_TYPES_INFO)
+        || mode.contains(LoadMode::NEED_TYPES_SIZES);
+
     let mut args = vec![
         "list".to_string(),
         "-e".to_string(),
         json_flag(cfg, go_version),
-        format!(
-            "-compiled={}",
-            mode.contains(LoadMode::NEED_COMPILED_GO_FILES)
-                || mode.contains(LoadMode::NEED_SYNTAX)
-                || mode.contains(LoadMode::NEED_TYPES)
-                || mode.contains(LoadMode::NEED_TYPES_INFO)
-                || mode.contains(LoadMode::NEED_TYPES_SIZES)
-        ),
+        format!("-compiled={}", wants_compiled && !defers_compiled(cfg)),
         format!("-test={}", cfg.tests),
         format!("-export={}", uses_export_data(cfg)),
         format!("-deps={}", mode.contains(LoadMode::NEED_IMPORTS)),
@@ -1221,6 +1518,43 @@ fn golist_args(cfg: &Config, patterns: &[String], go_version: u32) -> Vec<String
     args
 }
 
+/// Every JSON field [`JsonPackage`] decodes.
+///
+/// Kept in sync with that struct by `json_flag_requests_every_decoded_field`,
+/// which fails the build's test run if a `#[serde(rename)]` is added there and
+/// not here.
+const DESERIALIZED_FIELDS: &[&str] = &[
+    "ImportPath",
+    "Dir",
+    "Name",
+    "Target",
+    "Export",
+    "GoFiles",
+    "CompiledGoFiles",
+    "IgnoredGoFiles",
+    "IgnoredOtherFiles",
+    "EmbedPatterns",
+    "EmbedFiles",
+    "CFiles",
+    "CgoFiles",
+    "CXXFiles",
+    "MFiles",
+    "HFiles",
+    "FFiles",
+    "SFiles",
+    "SwigFiles",
+    "SwigCXXFiles",
+    "SysoFiles",
+    "Imports",
+    "ImportMap",
+    "Deps",
+    "Module",
+    "ForTest",
+    "DepOnly",
+    "Standard",
+    "Error",
+];
+
 fn json_flag(cfg: &Config, go_version: u32) -> String {
     if go_version < 19 {
         return "-json".to_string();
@@ -1238,7 +1572,17 @@ fn json_flag(cfg: &Config, go_version: u32) -> String {
         }
     };
 
-    add(&["Name", "ImportPath", "Error"]);
+    // Everything `JsonPackage` decodes, unconditionally.
+    //
+    // The mode-driven additions below mirror golangci-lint and decide what
+    // `go list` should *compute*. They are not a safe answer to what guff
+    // *reads*: `json_package_to_package` fills `for_test`, `target`, the embed
+    // lists and the `other_files` group regardless of `LoadMode`, and
+    // `guff-analysis`'s `Pass` reads `other_files` / `ignored_files`. Under a
+    // bare `-json` that mismatch is invisible because every field is present;
+    // under `-json=<fields>` an omission turns into a silently empty vector and
+    // a findings change nobody can trace back to here.
+    add(DESERIALIZED_FIELDS);
     if cfg.dep_source {
         // Needed to classify stdlib (resolved via export data) vs third-party
         // (type-checked from source) in the hybrid source mode.
@@ -1303,6 +1647,48 @@ fn json_flag(cfg: &Config, go_version: u32) -> String {
     }
 
     format!("-json={}", fields.join(","))
+}
+
+/// Whether `CompiledGoFiles` is resolved by a second, cgo-restricted `go list`
+/// instead of by `-compiled=true` on the main call (PERF_TASKS_V2 C-3a).
+///
+/// `-compiled=true` makes cmd/go build the action graph for **every** package
+/// in the answer, which measured 0.39s of the main call's 0.90s on prometheus
+/// `./...` — and it is not cgo work (`CGO_ENABLED=0` costs the same). What it
+/// buys is almost nothing: `CompiledGoFiles == GoFiles` for 1527 of those 1530
+/// packages. The three exceptions are `unsafe` (already special-cased in
+/// [`json_package_to_package`]) and the two packages holding `CgoFiles`.
+///
+/// So run the main call with `-compiled=false`, let the existing
+/// empty-`CompiledGoFiles` fallback fill in `GoFiles`, and ask a second
+/// `go list -compiled=true` about the cgo/SWIG packages only — a set the
+/// first call's own `CgoFiles`/`SwigFiles` output identifies.
+///
+/// Only for the hybrid source mode: the export path passes `-export=true`,
+/// which builds the action graph regardless, so deferring would add a
+/// subprocess and save nothing.
+fn defers_compiled(cfg: &Config) -> bool {
+    cfg.dep_source
+}
+
+/// Packages whose `CompiledGoFiles` cannot be derived from `GoFiles`.
+///
+/// Test-variant ids (`pkg [pkg.test]`) are excluded: they are not valid
+/// `go list` arguments and would abort the whole batch.
+fn needs_compiled_query(seen: &HashMap<String, JsonPackage>) -> Vec<String> {
+    let mut out: Vec<String> = seen
+        .values()
+        .filter(|p| {
+            (!p.cgo_files.is_empty()
+                || !p.swig_files.is_empty()
+                || !p.swig_cxx_files.is_empty())
+                && p.error.is_none()
+                && !p.import_path.contains(' ')
+        })
+        .map(|p| p.import_path.clone())
+        .collect();
+    out.sort();
+    out
 }
 
 fn uses_export_data(cfg: &Config) -> bool {
@@ -1463,7 +1849,7 @@ fn other_files(p: &JsonPackage) -> Vec<String> {
     out
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 struct JsonPackage {
     #[serde(rename = "ImportPath")]
     import_path: String,
@@ -1533,6 +1919,17 @@ struct JsonExport {
     import_path: String,
     #[serde(default, rename = "Export")]
     export: String,
+}
+
+/// Minimal shape for the cgo/SWIG-restricted `go list -compiled=true` (C-3a).
+#[derive(Debug, Clone, Deserialize)]
+struct JsonCompiled {
+    #[serde(rename = "ImportPath")]
+    import_path: String,
+    #[serde(default, rename = "Dir")]
+    dir: String,
+    #[serde(default, rename = "CompiledGoFiles")]
+    compiled_go_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -1614,6 +2011,201 @@ mod tests {
     #[test]
     fn normalize_pattern_keeps_dot_relative() {
         assert_eq!(normalize_pattern("./foo"), "./foo");
+    }
+
+    /// Extract the `#[serde(rename = "…")]` names of one struct in this file.
+    fn serde_renames_of(struct_name: &str) -> Vec<String> {
+        let src = include_str!("golist.rs");
+        let start = src
+            .find(&format!("struct {struct_name} {{"))
+            .unwrap_or_else(|| panic!("{struct_name} not found"));
+        let body = &src[start..];
+        let end = body.find("\n}").expect("struct end");
+        body[..end]
+            .match_indices("rename = \"")
+            .map(|(i, m)| {
+                let rest = &body[i + m.len()..];
+                rest[..rest.find('"').expect("closing quote")].to_string()
+            })
+            .collect()
+    }
+
+    /// `-json=<fields>` only asks for what we list, but `json_package_to_package`
+    /// reads whatever `JsonPackage` can decode. A field added to the struct and
+    /// not to `DESERIALIZED_FIELDS` would deserialize to its default forever,
+    /// which no type error and no compiler warning would catch.
+    #[test]
+    fn json_flag_requests_every_decoded_field() {
+        let decoded = serde_renames_of("JsonPackage");
+        assert!(
+            decoded.len() > 20,
+            "extraction looks broken, got {decoded:?}"
+        );
+        let requested: std::collections::HashSet<&str> =
+            DESERIALIZED_FIELDS.iter().copied().collect();
+        let missing: Vec<&String> = decoded
+            .iter()
+            .filter(|f| !requested.contains(f.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "JsonPackage decodes {missing:?} but json_flag never asks go list \
+             for them; add them to DESERIALIZED_FIELDS"
+        );
+
+        let decoded_set: std::collections::HashSet<&str> =
+            decoded.iter().map(String::as_str).collect();
+        let stale: Vec<&&str> = DESERIALIZED_FIELDS
+            .iter()
+            .filter(|f| !decoded_set.contains(**f))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "DESERIALIZED_FIELDS lists {stale:?}, which JsonPackage no longer decodes"
+        );
+    }
+
+    #[test]
+    fn json_flag_selects_fields_from_go_119() {
+        let cfg = Config {
+            mode: LoadMode::LOAD_ALL_SYNTAX,
+            ..Config::default()
+        };
+        // Pre-1.19 toolchains have no field selection; asking for one would
+        // make `go list` treat it as a pattern.
+        assert_eq!(json_flag(&cfg, 18), "-json");
+        let flag = json_flag(&cfg, 26);
+        assert!(flag.starts_with("-json="));
+        for f in DESERIALIZED_FIELDS {
+            assert!(flag.contains(f), "{flag} is missing {f}");
+        }
+    }
+
+    #[test]
+    fn dep_source_defers_compiled_to_the_cgo_query() {
+        let hybrid = Config {
+            mode: LoadMode::NEED_COMPILED_GO_FILES,
+            dep_source: true,
+            ..Config::default()
+        };
+        assert!(golist_args(&hybrid, &[], 26).contains(&"-compiled=false".to_string()));
+
+        // The export path builds the action graph anyway, so deferring there
+        // would buy a subprocess and no time.
+        let export = Config {
+            dep_source: false,
+            ..hybrid
+        };
+        assert!(golist_args(&export, &[], 26).contains(&"-compiled=true".to_string()));
+    }
+
+    #[test]
+    fn needs_compiled_query_selects_only_cgo_and_swig() {
+        let pkg = |path: &str, cgo: &[&str], swig: &[&str]| JsonPackage {
+            import_path: path.to_string(),
+            cgo_files: cgo.iter().map(|s| (*s).to_string()).collect(),
+            swig_files: swig.iter().map(|s| (*s).to_string()).collect(),
+            ..JsonPackage::default()
+        };
+        let mut seen = HashMap::new();
+        for p in [
+            pkg("plain", &[], &[]),
+            pkg("withcgo", &["c.go"], &[]),
+            pkg("withswig", &[], &["s.swig"]),
+            // Test variants are not valid `go list` arguments.
+            pkg("withcgo [withcgo.test]", &["c.go"], &[]),
+        ] {
+            seen.insert(p.import_path.clone(), p);
+        }
+        assert_eq!(
+            needs_compiled_query(&seen),
+            vec!["withcgo".to_string(), "withswig".to_string()]
+        );
+    }
+
+    #[test]
+    fn compiled_files_cache_roundtrips_and_rejects_unresolvable_paths() {
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-compiled-files-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).expect("mkdir");
+        let path = tmp.join("compiled.json");
+
+        let src = tmp.join("a.go");
+        let generated = tmp.join("_cgo_gotypes.go");
+        std::fs::write(&src, b"package a").expect("a.go");
+        std::fs::write(&generated, b"package a").expect("generated");
+        let mut map = HashMap::new();
+        map.insert(
+            "example.com/a".to_string(),
+            vec![
+                src.display().to_string(),
+                generated.display().to_string(),
+            ],
+        );
+
+        store_compiled_files_cache(&path, &map);
+        assert_eq!(load_compiled_files_cache(&path).as_ref(), Some(&map));
+
+        // `go list -compiled` names a package's own sources relative to `Dir`.
+        // Storing them that way makes the existence check depend on the
+        // process's working directory, so the entry can never be validated —
+        // which silently turns every warm run back into a subprocess.
+        let mut relative = HashMap::new();
+        relative.insert("example.com/a".to_string(), vec!["a.go".to_string()]);
+        store_compiled_files_cache(&path, &relative);
+        assert!(
+            load_compiled_files_cache(&path).is_none(),
+            "relative paths must not validate"
+        );
+
+        // Generated files live in GOCACHE, which is cleaned independently.
+        store_compiled_files_cache(&path, &map);
+        std::fs::remove_file(&generated).expect("rm generated");
+        assert!(load_compiled_files_cache(&path).is_none());
+
+        // Corrupt / empty content is a miss, never a panic.
+        std::fs::write(&path, b"{\"a\": [\"/tmp/tr").expect("truncated");
+        assert!(load_compiled_files_cache(&path).is_none());
+        std::fs::write(&path, b"{}").expect("empty");
+        assert!(load_compiled_files_cache(&path).is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn go_minor_version_parses_goroot_version_file() {
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-goroot-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("src")).expect("mkdir");
+        std::fs::write(tmp.join("VERSION"), "go1.26.4\ntime 2026-05-29T15:26:39Z\n")
+            .expect("VERSION");
+        assert_eq!(parse_goroot_version(&tmp), Some(26));
+
+        // Pre-release suffixes and a missing/garbled file must not panic.
+        std::fs::write(tmp.join("VERSION"), "go1.21rc1\n").expect("VERSION");
+        assert_eq!(parse_goroot_version(&tmp), Some(21));
+        std::fs::write(tmp.join("VERSION"), "devel +abcdef\n").expect("VERSION");
+        assert_eq!(parse_goroot_version(&tmp), None);
+        std::fs::remove_file(tmp.join("VERSION")).expect("rm");
+        assert_eq!(parse_goroot_version(&tmp), None);
+
+        // An explicit GOROOT in the config wins over PATH discovery.
+        std::fs::write(tmp.join("VERSION"), "go1.22.0\n").expect("VERSION");
+        let cfg = Config {
+            env: Some(vec![format!("GOROOT={}", tmp.display())]),
+            ..Config::default()
+        };
+        assert_eq!(go_minor_version(&cfg), 22);
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
