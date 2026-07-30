@@ -2,7 +2,7 @@
 //!
 //! Port of `gcexportdata/importer.go`.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,8 +28,8 @@ impl ExportImporter {
         Self {
             fset,
             universe,
-            paths: HashMap::new(),
-            cache: HashMap::new(),
+            paths: HashMap::default(),
+            cache: HashMap::default(),
             importing: Vec::new(),
         }
     }

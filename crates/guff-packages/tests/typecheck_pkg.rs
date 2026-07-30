@@ -23,8 +23,8 @@ fn typecheck_fixture(dir: &PathBuf, go_file: &str, id: &str) -> guff_packages::P
     typecheck_package(
         &mut pkg,
         &fset,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
+        &guff_packages::FxHashMap::default(),
+        &guff_packages::FxHashMap::default(),
         guff_types::default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,

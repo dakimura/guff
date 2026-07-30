@@ -2,7 +2,7 @@
 //!
 //! Port of `golist.go` (`goListDriver`, `createDriverResponse`).
 
-use std::collections::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -73,8 +73,8 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     let env = cfg.resolved_env();
     response.compiler = "gc".to_string();
     response.arch = TypecheckEnv::from_env(&env, "gc").arch;
-    let mut seen: HashMap<String, JsonPackage> = HashMap::new();
-    let mut additional_errors: HashMap<String, Vec<Error>> = HashMap::new();
+    let mut seen: HashMap<String, JsonPackage> = HashMap::default();
+    let mut additional_errors: HashMap<String, Vec<Error>> = HashMap::default();
 
     let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonPackage>();
     for item in stream {
@@ -164,11 +164,11 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             let compiled_job = (!want_compiled.is_empty())
                 .then(|| s.spawn(|| load_or_fetch_compiled_files(cfg, &want_compiled, timing)));
             let exports = if stdlib.is_empty() {
-                Ok(HashMap::new())
+                Ok(HashMap::default())
             } else {
                 load_or_fetch_stdlib_exports(cfg, &stdlib, timing)
             };
-            let compiled = compiled_job.map_or(Ok(HashMap::new()), |j| {
+            let compiled = compiled_job.map_or(Ok(HashMap::default()), |j| {
                 j.join().unwrap_or_else(|_| {
                     Err(GoListError::Internal("compiled-files query panicked".into()))
                 })
@@ -224,7 +224,7 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             if mode != ExportReuseMode::Off {
                 let t_reuse = std::time::Instant::now();
                 let exports = match mode {
-                    ExportReuseMode::Off => HashMap::new(),
+                    ExportReuseMode::Off => HashMap::default(),
                     ExportReuseMode::CachedOnly => load_dep_export_cache(cfg, &third_party),
                     ExportReuseMode::Fetch => {
                         match fetch_package_exports(cfg, &third_party) {
@@ -239,7 +239,7 @@ pub fn go_list_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
                                         t_reuse.elapsed().as_secs_f64(),
                                     );
                                 }
-                                HashMap::new()
+                                HashMap::default()
                             }
                         }
                     }
@@ -546,10 +546,10 @@ fn fetch_package_exports(
     paths: &[String],
 ) -> Result<HashMap<String, String>, GoListError> {
     if paths.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(HashMap::default());
     }
     const BATCH: usize = 200;
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
     for chunk in paths.chunks(BATCH) {
         let mut args = vec![
             "list".to_string(),
@@ -681,10 +681,10 @@ fn fetch_compiled_files(
     paths: &[String],
 ) -> Result<HashMap<String, Vec<String>>, GoListError> {
     if paths.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(HashMap::default());
     }
     const BATCH: usize = 200;
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
     for chunk in paths.chunks(BATCH) {
         let mut args = vec![
             "list".to_string(),
@@ -799,16 +799,16 @@ fn dep_export_cache_path(cfg: &Config) -> Option<PathBuf> {
 /// whose files still exist. Returns empty when the cache is missing/stale.
 fn load_dep_export_cache(cfg: &Config, want: &[String]) -> HashMap<String, String> {
     let Some(path) = dep_export_cache_path(cfg) else {
-        return HashMap::new();
+        return HashMap::default();
     };
     let Ok(bytes) = std::fs::read(&path) else {
-        return HashMap::new();
+        return HashMap::default();
     };
     let Ok(stored) = serde_json::from_slice::<HashMap<String, String>>(&bytes) else {
-        return HashMap::new();
+        return HashMap::default();
     };
-    let want: std::collections::HashSet<&str> = want.iter().map(String::as_str).collect();
-    let mut out = HashMap::new();
+    let want: HashSet<&str> = want.iter().map(String::as_str).collect();
+    let mut out = HashMap::default();
     for (k, v) in stored {
         if want.contains(k.as_str()) && !v.is_empty() && Path::new(&v).exists() {
             out.insert(k, v);
@@ -817,7 +817,7 @@ fn load_dep_export_cache(cfg: &Config, want: &[String]) -> HashMap<String, Strin
     // Require a useful fraction so a nearly-empty stale cache doesn't attach
     // a handful of deps and leave the rest on a mixed (riskier) seed path.
     if out.len() * 10 < want.len() * 8 {
-        return HashMap::new();
+        return HashMap::default();
     }
     out
 }
@@ -1289,7 +1289,7 @@ pub fn peek_cached_graph(
 
     let mut roots = Vec::new();
     let mut packages = Vec::new();
-    let mut seen: HashMap<String, JsonPackage> = HashMap::new();
+    let mut seen: HashMap<String, JsonPackage> = HashMap::default();
     let stream = serde_json::Deserializer::from_str(&stdout).into_iter::<JsonPackage>();
     for item in stream {
         let p = item.map_err(|e| GoListError::Json(e.to_string()))?;
@@ -1491,9 +1491,12 @@ fn json_module_to_module(m: &JsonModule) -> Module {
     }
 }
 
-fn build_import_stubs(imports: &[String], import_map: &HashMap<String, String>) -> HashMap<String, Arc<Package>> {
+fn build_import_stubs(
+    imports: &[String],
+    import_map: &HashMap<String, String>,
+) -> std::collections::HashMap<String, Arc<Package>> {
     let mut ids: HashMap<String, bool> = imports.iter().map(|id| (id.clone(), true)).collect();
-    let mut out = HashMap::new();
+    let mut out = std::collections::HashMap::new();
     for (path, id) in import_map {
         out.insert(
             path.clone(),
@@ -1606,7 +1609,7 @@ fn json_flag(cfg: &Config, go_version: u32) -> String {
 
     let mode = cfg.effective_mode();
     let mut fields = Vec::new();
-    let mut added = HashMap::<String, bool>::new();
+    let mut added = HashMap::<String, bool>::default();
     let mut add = |list: &[&str]| {
         for f in list {
             if !added.contains_key(*f) {
@@ -2092,7 +2095,7 @@ mod tests {
             decoded.len() > 20,
             "extraction looks broken, got {decoded:?}"
         );
-        let requested: std::collections::HashSet<&str> =
+        let requested: HashSet<&str> =
             DESERIALIZED_FIELDS.iter().copied().collect();
         let missing: Vec<&String> = decoded
             .iter()
@@ -2104,7 +2107,7 @@ mod tests {
              for them; add them to DESERIALIZED_FIELDS"
         );
 
-        let decoded_set: std::collections::HashSet<&str> =
+        let decoded_set: HashSet<&str> =
             decoded.iter().map(String::as_str).collect();
         let stale: Vec<&&str> = DESERIALIZED_FIELDS
             .iter()
@@ -2158,7 +2161,7 @@ mod tests {
             swig_files: swig.iter().map(|s| (*s).to_string()).collect(),
             ..JsonPackage::default()
         };
-        let mut seen = HashMap::new();
+        let mut seen = HashMap::default();
         for p in [
             pkg("plain", &[], &[]),
             pkg("withcgo", &["c.go"], &[]),
@@ -2189,7 +2192,7 @@ mod tests {
         let generated = tmp.join("_cgo_gotypes.go");
         std::fs::write(&src, b"package a").expect("a.go");
         std::fs::write(&generated, b"package a").expect("generated");
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         map.insert(
             "example.com/a".to_string(),
             vec![
@@ -2205,7 +2208,7 @@ mod tests {
         // Storing them that way makes the existence check depend on the
         // process's working directory, so the entry can never be validated —
         // which silently turns every warm run back into a subprocess.
-        let mut relative = HashMap::new();
+        let mut relative = HashMap::default();
         relative.insert("example.com/a".to_string(), vec!["a.go".to_string()]);
         store_compiled_files_cache(&path, &relative);
         assert!(
@@ -2457,7 +2460,7 @@ mod tests {
         // so point at a file we create ourselves.
         let archive = tmp.join("fmt.a");
         std::fs::write(&archive, b"not really an archive").expect("write archive");
-        let mut map = HashMap::new();
+        let mut map = HashMap::default();
         map.insert("fmt".to_string(), archive.display().to_string());
 
         store_stdlib_export_cache(&path, &map);
@@ -2481,7 +2484,7 @@ mod tests {
         assert!(load_stdlib_export_cache(&path).is_none());
 
         // An empty map is not worth a file.
-        store_stdlib_export_cache(&path, &HashMap::new());
+        store_stdlib_export_cache(&path, &HashMap::default());
         assert!(!path.exists());
 
         let _ = std::fs::remove_dir_all(&tmp);

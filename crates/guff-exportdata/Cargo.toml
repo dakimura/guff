@@ -17,6 +17,7 @@ guff-types = { path = "../guff-types" }
 guff-constant = { path = "../guff-constant" }
 dashu = "0.4"
 thiserror = "2"
+rustc-hash = "2"
 
 [dev-dependencies]
 guff-types = { path = "../guff-types" }

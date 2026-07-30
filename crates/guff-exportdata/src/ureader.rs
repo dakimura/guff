@@ -1,6 +1,6 @@
 //! Port of `internal/gcimporter/ureader_yes.go`.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 
 use guff::position::FileSet;

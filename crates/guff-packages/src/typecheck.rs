@@ -3,7 +3,7 @@
 //! Port of golangci-lint `loadFromSource` / `loadFromExportData` and the
 //! `types.Config` wiring in `go/packages`.
 
-use std::collections::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -160,11 +160,14 @@ pub fn typecheck_packages(
         .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
         .collect();
 
-    let targets: Vec<String> = if mode.contains(LoadMode::NEED_DEPS) {
+    let mut targets: Vec<String> = if mode.contains(LoadMode::NEED_DEPS) {
         by_id.keys().cloned().collect()
     } else {
         root_ids.to_vec()
     };
+    // FxHashMap iteration order is deterministic but differs from SipHash;
+    // keep sequential typecheck order stable for FileSet positions.
+    targets.sort();
 
     // Build a shared dependency seed once (R24.3) so parallel checkers clone the
     // already-loaded stdlib/common deps instead of reloading per package. In
@@ -422,7 +425,7 @@ fn typecheck_one_target_arc(
 }
 
 fn collect_export_paths(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
     for (id, pkg) in by_id {
         if pkg.export_file.as_os_str().is_empty() {
             continue;
@@ -571,7 +574,7 @@ pub fn typecheck_package_with_seed(
 
     if seed.is_none() {
         let mut visiting = Vec::new();
-        let mut done = std::collections::HashSet::new();
+        let mut done = HashSet::default();
         preload_exports(
             &mut check,
             &pkg.deps,
@@ -653,7 +656,7 @@ fn build_export_seed(
     env: &TypecheckEnv,
 ) -> Option<Arc<ExportSeed>> {
     let mut needed: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::default();
     for id in targets {
         let Some(pkg) = by_id.get(id) else {
             continue;
@@ -688,7 +691,7 @@ fn build_export_seed(
     }
     check.set_importer(Box::new(importer));
     let mut visiting = Vec::new();
-    let mut done = std::collections::HashSet::new();
+    let mut done = HashSet::default();
     preload_exports(
         &mut check,
         &needed,
@@ -743,7 +746,7 @@ fn build_source_seed_inner(
 ) -> Option<Arc<ExportSeed>> {
     // Transitive dependency closure of the targets (leaves included).
     let mut needed: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::default();
     let mut stack: Vec<String> = Vec::new();
     for id in targets {
         if let Some(pkg) = by_id.get(id) {
@@ -776,7 +779,7 @@ fn build_source_seed_inner(
         return None;
     }
 
-    let loadable: std::collections::HashSet<String> = needed.iter().cloned().collect();
+    let loadable: HashSet<String> = needed.iter().cloned().collect();
     let timing = crate::debug::enabled();
     let t_check_start = std::time::Instant::now();
 
@@ -802,7 +805,7 @@ fn build_source_seed_inner(
     check.set_importer(Box::new(make_importer()));
     {
         let mut visiting = Vec::new();
-        let mut done = std::collections::HashSet::new();
+        let mut done = HashSet::default();
         preload_exports(
             &mut check,
             &needed,
@@ -841,7 +844,7 @@ fn build_source_seed_inner(
     // from 3.40s to 2.65s. Dropping the barriers entirely would only reach 2.2s
     // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
     let order = dep_load_order(&needed, dep_graph, &loadable);
-    let source_set: std::collections::HashSet<&str> = order
+    let source_set: HashSet<&str> = order
         .iter()
         .map(String::as_str)
         .filter(|p| {
@@ -855,7 +858,7 @@ fn build_source_seed_inner(
     // Pass 1 (leaves-first): dependency depth, so every source dep's deps are
     // already resolved when we reach it. Only `depth` (the deepest chain) is
     // needed afterwards, but the per-package values drive that maximum.
-    let mut dep_depth: HashMap<&str, u32> = HashMap::new();
+    let mut dep_depth: HashMap<&str, u32> = HashMap::default();
     let mut depth = 0u32;
     for p in &order {
         if !source_set.contains(p.as_str()) {
@@ -877,7 +880,7 @@ fn build_source_seed_inner(
     // that depends on `P`. Walking `order` in reverse visits every consumer of
     // `P` before `P` itself, so `height` is final by the time we read it — no
     // reverse graph needed.
-    let mut height: HashMap<&str, u32> = HashMap::new();
+    let mut height: HashMap<&str, u32> = HashMap::default();
     for p in order.iter().rev() {
         if !source_set.contains(p.as_str()) {
             continue;
@@ -1111,10 +1114,10 @@ fn build_source_seed_inner(
 fn dep_load_order(
     needed: &[String],
     dep_graph: &HashMap<String, Vec<String>>,
-    loadable: &std::collections::HashSet<String>,
+    loadable: &HashSet<String>,
 ) -> Vec<String> {
     let mut order = Vec::new();
-    let mut done = std::collections::HashSet::new();
+    let mut done = HashSet::default();
     let mut visiting: Vec<String> = Vec::new();
     for id in needed {
         dep_load_order_visit(id, dep_graph, loadable, &mut done, &mut visiting, &mut order);
@@ -1125,8 +1128,8 @@ fn dep_load_order(
 fn dep_load_order_visit(
     path: &str,
     dep_graph: &HashMap<String, Vec<String>>,
-    loadable: &std::collections::HashSet<String>,
-    done: &mut std::collections::HashSet<String>,
+    loadable: &HashSet<String>,
+    done: &mut HashSet<String>,
     visiting: &mut Vec<String>,
     order: &mut Vec<String>,
 ) {
@@ -1207,7 +1210,7 @@ fn preload_exports(
     dep_graph: &HashMap<String, Vec<String>>,
     export_paths: &HashMap<String, PathBuf>,
     visiting: &mut Vec<String>,
-    done: &mut std::collections::HashSet<String>,
+    done: &mut HashSet<String>,
 ) {
     for dep in deps {
         preload_export(check, dep, dep_graph, export_paths, visiting, done);
@@ -1220,7 +1223,7 @@ fn preload_export(
     dep_graph: &HashMap<String, Vec<String>>,
     export_paths: &HashMap<String, PathBuf>,
     visiting: &mut Vec<String>,
-    done: &mut std::collections::HashSet<String>,
+    done: &mut HashSet<String>,
 ) {
     if path == "unsafe" || path == "C" {
         return;
@@ -1248,7 +1251,7 @@ fn preload_export(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use crate::hash::{HashMap, HashSet};
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -1291,8 +1294,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
             default_sizes(),
             &TypecheckEnv::default(),
             mode,
@@ -1323,8 +1326,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &HashMap::new(),
-            &HashMap::new(),
+            &HashMap::default(),
+            &HashMap::default(),
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,
@@ -1364,7 +1367,7 @@ mod tests {
             }),
         );
 
-        let mut export_paths = HashMap::new();
+        let mut export_paths = HashMap::default();
         export_paths.insert(dep_id.clone(), dep_export);
 
         let dep_graph = HashMap::from([(dep_id.clone(), Vec::<String>::new())]);
@@ -1396,11 +1399,11 @@ mod tests {
         let dir = testdata("withdep");
         let dep_id = "example.com/simple".to_string();
 
-        let mut export_paths = HashMap::new();
+        let mut export_paths = HashMap::default();
         export_paths.insert(dep_id.clone(), dep_export);
         let dep_graph = HashMap::from([(dep_id.clone(), Vec::<String>::new())]);
 
-        let mut by_id = HashMap::new();
+        let mut by_id = HashMap::default();
         let mut pkg_a = package_from_dir("example.com/withdep_a", &dir);
         pkg_a.id = "example.com/withdep_a".into();
         pkg_a.pkg_path = "example.com/withdep_a".into();

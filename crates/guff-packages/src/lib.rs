@@ -9,6 +9,7 @@
 //!   Use of this source code is governed by a BSD-style license.
 
 mod config;
+mod hash;
 mod debug;
 mod dedup;
 mod driver;
@@ -36,6 +37,8 @@ pub use package::{
     DriverResponse, Error, ErrorKind, Module, ModuleError, Package, TypecheckArtifacts,
 };
 pub use preset::load_for_go_analysis;
+/// Fast hashmap used by package-loading hot paths (and a few public typecheck helpers).
+pub use rustc_hash::FxHashMap;
 pub use rss::{attribute_packages, enabled as rss_enabled, report_packages, PackageRssReport};
 pub use speculate::{start_seed_speculation, SpeculativeSeed, SpeculativeSeedJob};
 pub use typecheck::{

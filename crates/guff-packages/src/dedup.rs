@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use crate::package::Package;
+use crate::hash::HashSet;
 
 /// Regex equivalent: `^(.*) \[(.*)\.test\]`
 fn try_parse_test_package(pkg: &Package) -> Option<String> {
@@ -22,7 +23,7 @@ fn try_parse_test_package(pkg: &Package) -> Option<String> {
 /// When `go/packages` loads tests, it returns both `pkg` and `pkg [pkg.test]`.
 /// Linters should analyze only the latter to avoid false unused-code warnings.
 pub fn filter_duplicate_packages(pkgs: Vec<Arc<Package>>) -> Vec<Arc<Package>> {
-    let mut packages_with_tests = std::collections::HashSet::new();
+    let mut packages_with_tests = HashSet::default();
     for pkg in &pkgs {
         if let Some(name) = try_parse_test_package(pkg) {
             packages_with_tests.insert(name);

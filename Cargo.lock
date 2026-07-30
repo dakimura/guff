@@ -490,6 +490,7 @@ dependencies = [
  "guff-ast",
  "guff-constant",
  "guff-types",
+ "rustc-hash",
  "thiserror",
 ]
 
@@ -620,6 +621,7 @@ dependencies = [
  "guff-exportdata",
  "guff-types",
  "rayon",
+ "rustc-hash",
  "serde",
  "serde_json",
  "sha2",

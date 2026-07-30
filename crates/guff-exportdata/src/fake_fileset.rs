@@ -1,6 +1,6 @@
 //! Port of `internal/gcimporter/bimport.go` (`fakeFileSet`).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 
 use guff::position::{FileSet, Pos, NO_POS};
@@ -44,7 +44,7 @@ impl FakeFileSet {
     pub fn new(fset: Arc<FileSet>) -> Self {
         Self {
             fset,
-            index: HashMap::new(),
+            index: HashMap::default(),
             files: Vec::new(),
         }
     }

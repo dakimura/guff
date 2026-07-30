@@ -11,7 +11,7 @@
 //! Empty `GUFF_CACHE` has nothing to peek → speculation is a no-op (regress cold).
 //! Warm issue-cache runs should not call this (go list is already ~0.07s).
 
-use std::collections::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -37,7 +37,7 @@ pub fn seed_input_fingerprint(
 ) -> String {
     let export_paths = collect_existing_exports(by_id);
     let mut needed: Vec<String> = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::default();
     let mut stack: Vec<String> = Vec::new();
     for id in targets {
         if let Some(pkg) = by_id.get(id) {
@@ -107,7 +107,7 @@ pub fn seed_input_fingerprint(
 }
 
 fn collect_existing_exports(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
     for (id, pkg) in by_id {
         if pkg.export_file.as_os_str().is_empty() {
             continue;

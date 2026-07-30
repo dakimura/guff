@@ -61,7 +61,7 @@
 > **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
 >
 > **次の小粒候補（未着手）:** seed SHA→blake3（A-5 follow-up）、`position_internal` 再測、
-> `guff-packages` FxHash（A-1 延長）、B-5 Slice（findings 合意後）。
+> B-5 Slice（findings 合意後）。~~`guff-packages` FxHash~~ **DONE（A-1 延長）**。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は

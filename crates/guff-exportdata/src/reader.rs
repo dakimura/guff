@@ -2,7 +2,7 @@
 //!
 //! Port of `golang.org/x/tools/go/gcexportdata`.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap as HashMap;
 use std::sync::Arc;
 
 use guff::position::FileSet;
@@ -84,7 +84,7 @@ pub fn read(
         }
     };
 
-    let mut imports = HashMap::new();
+    let mut imports = HashMap::default();
     let name = path.rsplit('/').next().unwrap_or(path);
     let pkg = new_package(
         ctx.packages,

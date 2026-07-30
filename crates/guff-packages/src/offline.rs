@@ -7,7 +7,9 @@
 //! DEFERRED: external module deps from `go.mod` `require` (needs module cache /
 //! `go mod download`); export-data population (needs a Go toolchain build).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::hash::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -63,7 +65,7 @@ pub fn offline_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
     // otherwise huge without export data).
     let need_deps = mode.contains(crate::load_mode::LoadMode::NEED_DEPS);
 
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::default();
     let mut queue: VecDeque<(String, PathBuf, bool)> = VecDeque::new();
     for dir in &roots {
         match ctxt.import_dir(dir) {
@@ -129,7 +131,7 @@ pub fn offline_driver(cfg: &Config, patterns: &[String]) -> Result<DriverRespons
             Vec::new()
         };
 
-        let mut imports = HashMap::new();
+        let mut imports = std::collections::HashMap::new();
         let mut deps = Vec::new();
         for import_path in &import_paths {
             if import_path == "C" || import_path == "unsafe" {
@@ -356,7 +358,7 @@ fn walk_packages(ctxt: &Context, root: &Path, out: &mut Vec<PathBuf>) -> Result<
 }
 
 fn collect_imports(go_files: &[PathBuf]) -> Vec<String> {
-    let mut seen = HashSet::new();
+    let mut seen = HashSet::default();
     let mut out = Vec::new();
     for path in go_files {
         let Ok(content) = fs::read(path) else {

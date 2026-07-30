@@ -11,6 +11,7 @@ use guff::walk::{self, NodeRef};
 use guff_types::{account_typecheck_arenas, RetainedBytes};
 
 use crate::package::Package;
+use crate::hash::HashSet;
 
 static ENABLED: LazyLock<bool> =
     LazyLock::new(|| std::env::var_os("GUFF_DEBUG_RSS").is_some());
@@ -49,7 +50,7 @@ pub fn attribute_packages(packages: &[Arc<Package>]) -> PackageRssReport {
         packages: packages.len(),
         ..PackageRssReport::default()
     };
-    let mut seen_src: std::collections::HashSet<usize> = Default::default();
+    let mut seen_src: HashSet<usize> = Default::default();
     let avg_node = std::mem::size_of::<Expr>().max(64);
 
     for pkg in packages {

@@ -2,7 +2,7 @@
 //!
 //! Port of `packages.Load` and the non-typecheck portion of `refine` from `packages.go`.
 
-use std::collections::HashMap;
+use crate::hash::HashMap;
 use std::sync::Arc;
 
 use crate::config::Config;
@@ -80,7 +80,7 @@ fn refine(
     let timing = crate::debug::enabled();
     let detail = crate::debug::detailed();
     let t_refine = std::time::Instant::now();
-    let mut by_id: HashMap<String, Arc<Package>> = HashMap::new();
+    let mut by_id: HashMap<String, Arc<Package>> = HashMap::default();
     for pkg in response.packages {
         by_id.insert(pkg.id.clone(), pkg);
     }
