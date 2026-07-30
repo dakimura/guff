@@ -446,15 +446,59 @@ fn go_root_from_path() -> Option<PathBuf> {
     None
 }
 
+/// First line of `$GOROOT/VERSION` (e.g. `go1.26.4`), or `None` when unreadable.
+fn read_goroot_version_line(root: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(root.join("VERSION")).ok()?;
+    let line = text.lines().next()?.trim().to_string();
+    if line.starts_with("go") && line.len() > 2 {
+        Some(line)
+    } else {
+        None
+    }
+}
+
 /// Minor version from a `$GOROOT/VERSION` first line such as `go1.26.4`.
 fn parse_goroot_version(root: &Path) -> Option<u32> {
-    let text = std::fs::read_to_string(root.join("VERSION")).ok()?;
-    let line = text.lines().next()?.trim();
+    let line = read_goroot_version_line(root)?;
     let rest = line.strip_prefix("go")?;
     let minor = rest.split('.').nth(1)?;
     // Trim any pre-release suffix (`1.21rc1` → `21`).
     let digits: String = minor.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
+}
+
+/// Toolchain version string (`go1.26.4`), without spawning `go` when possible.
+///
+/// Order: `$GOVERSION` → `$GOROOT/VERSION` (via PATH-derived GOROOT) →
+/// `go env GOVERSION` as a last-resort fallback. Memoized: cold runs used to
+/// pay this subprocess 3× on the critical path (docs/PERF_TASKS_V2.md §C-3b).
+pub fn detect_go_version_string() -> String {
+    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            if let Ok(v) = std::env::var("GOVERSION") {
+                let v = v.trim().to_string();
+                if !v.is_empty() {
+                    return v;
+                }
+            }
+            if let Some(v) = go_root_from_path()
+                .as_deref()
+                .and_then(read_goroot_version_line)
+            {
+                return v;
+            }
+            std::process::Command::new("go")
+                .args(["env", "GOVERSION"])
+                .output()
+                .ok()
+                .and_then(|o| {
+                    let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    (!s.is_empty()).then_some(s)
+                })
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 /// Load a cached stdlib export map, or `None` when it is missing, unreadable,
@@ -1970,15 +2014,22 @@ struct JsonPackageError {
     err: String,
 }
 
-/// Returns true when `go` is available on PATH.
+/// Returns true when a `go` binary is present on PATH.
+///
+/// A plain `stat` is enough: spawning `go version` costs ~0.07s and is not a
+/// stronger signal than "the binary exists" for driver selection — a broken
+/// toolchain still fails at the first real `go list`.
 pub fn go_available() -> bool {
-    Command::new("go")
-        .arg("version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("go");
+        if candidate.is_file() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Canonicalize a local pattern the way golangci-lint does.
@@ -2206,6 +2257,46 @@ mod tests {
         assert_eq!(go_minor_version(&cfg), 22);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn detect_go_version_string_reads_goroot_version_without_subprocess() {
+        // When GOVERSION is unset and PATH points at a fake GOROOT layout, the
+        // VERSION file alone must answer — no `go env` involved.
+        let tmp = std::env::temp_dir().join(format!(
+            "guff-goversion-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id(),
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let bin = tmp.join("bin");
+        let src = tmp.join("src");
+        std::fs::create_dir_all(&bin).expect("bin");
+        std::fs::create_dir_all(&src).expect("src");
+        std::fs::write(tmp.join("VERSION"), "go1.26.4\n").expect("VERSION");
+        // A placeholder "go" binary so go_root_from_path accepts the layout.
+        let go_bin = bin.join("go");
+        std::fs::write(&go_bin, b"#!/bin/sh\nexit 1\n").expect("go");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&go_bin).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&go_bin, perms).unwrap();
+        }
+
+        let line = read_goroot_version_line(&tmp);
+        assert_eq!(line.as_deref(), Some("go1.26.4"));
+        assert_eq!(parse_goroot_version(&tmp), Some(26));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn go_available_is_true_when_go_is_on_path() {
+        // Real developers have `go` on PATH; this is a smoke check that the
+        // stat-based probe agrees with that fact (no subprocess).
+        assert!(go_available(), "expected a go binary on PATH in the test env");
     }
 
     #[test]

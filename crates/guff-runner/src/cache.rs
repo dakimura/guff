@@ -125,7 +125,9 @@ fn user_cache_dir() -> Option<PathBuf> {
 
 /// Resolve the Go build cache directory (`GOCACHE`).
 ///
-/// Precedence: `GOCACHE` env → `go env GOCACHE` → `{UserCacheDir}/go-build`.
+/// Precedence: `GOCACHE` env → platform default (`~/Library/Caches/go-build` on
+/// macOS, …) → `go env GOCACHE` as a last resort. The middle step used to be a
+/// 0.07s `go env` subprocess on every cold start (docs/PERF_TASKS_V2.md §C-3b).
 /// Returns an error when the value is `"off"` (Go disables the build cache).
 pub fn default_go_cache_dir() -> Result<PathBuf, CacheError> {
     if let Ok(v) = env::var(ENV_GOCACHE) {
@@ -142,13 +144,39 @@ pub fn default_go_cache_dir() -> Result<PathBuf, CacheError> {
             return Ok(p);
         }
     }
+    if let Some(p) = default_gocache_path() {
+        return Ok(p);
+    }
     if let Some(from_go) = detect_go_cache_from_go_env() {
         return Ok(from_go);
     }
-    let base = user_cache_dir().ok_or_else(|| {
-        CacheError::Message("could not locate a user cache directory; set GOCACHE".into())
-    })?;
-    Ok(base.join("go-build"))
+    Err(CacheError::Message(
+        "could not locate a user cache directory; set GOCACHE".into(),
+    ))
+}
+
+fn default_gocache_path() -> Option<PathBuf> {
+    if let Ok(xdg) = env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg).join("go-build"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Caches/go-build"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return env::var_os("LOCALAPPDATA").map(|h| PathBuf::from(h).join("go-build"));
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/go-build"));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        None
+    }
 }
 
 fn detect_go_cache_from_go_env() -> Option<PathBuf> {
@@ -265,15 +293,12 @@ pub fn build_salt(
     )
 }
 
-/// Best-effort `go env GOVERSION` (empty when `go` is unavailable).
+/// Best-effort Go toolchain version (empty when unavailable).
+///
+/// Prefers `$GOROOT/VERSION` over `go env GOVERSION` — see
+/// [`guff_packages::detect_go_version_string`].
 pub fn detect_go_version() -> String {
-    let output = std::process::Command::new("go")
-        .args(["env", "GOVERSION"])
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => String::new(),
-    }
+    guff_packages::detect_go_version_string()
 }
 
 /// One diagnostic stored relative to a filename (not FileSet-absolute Pos).

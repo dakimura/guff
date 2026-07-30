@@ -26,7 +26,9 @@ mod typecheck;
 pub use config::Config;
 pub use dedup::{filter_duplicate_packages, filter_test_main_packages};
 pub use driver::{default_driver, offline_only_driver, AutoDriver, Driver, GoListDriver};
-pub use golist::{go_available, go_list_driver, normalize_pattern, GoListError};
+pub use golist::{
+    detect_go_version_string, go_available, go_list_driver, normalize_pattern, GoListError,
+};
 pub use load::{load, load_graph, load_graph_with_driver, load_with_driver, LoadError};
 pub use load_mode::LoadMode;
 pub use offline::{offline_driver, OfflineDriver};

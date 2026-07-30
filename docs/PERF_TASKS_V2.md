@@ -15,7 +15,7 @@
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
-> C-3a（`go list` の無駄取り） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
+> C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -26,7 +26,9 @@
 > 誰も測っていなかっただけ**でした。実際には 1.02s のうち **0.56s が guff の要求しない仕事**
 > （`-compiled=true` 0.39s ＋ 読まないフィールドの marshal 0.17s）で、
 > **`go list` を 1 行も置き換えずに**削れました。§C-3.0 に内訳、§C-3a に DONE 記録。
-> **残る C-3b〜C-3e（`go` 非依存化）は wall ではなく製品判断のタスクです**（§C-3 ロードマップ）。
+> **残る C-3c〜C-3e（`go` 非依存化）は wall ではなく製品判断のタスクです**（§C-3 ロードマップ）。
+> **C-3b DONE（2026-07-30）:** cold の `go env`/`go version` 5 本を VERSION/stat/default path に置換。
+> subprocess は消えたが **cold wall は ±0（この機では `go env` 自体が real 0.00s）**。§C-3b。
 >
 > **A-10 DONE（2026-07-30）: cold −0.27s / `-j 1` −0.19s / findings byte 同一。**
 > A-9 が測った「起動側」の反対側＝**「最後の phase からプロセス終了まで」を誰も測っていなかった**
@@ -550,7 +552,8 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | C-1 | AST アリーナ化 + 文字列インターン | cold | 0.3〜1.0s? | **特大** | **最高** |
 | ~~C-2~~ | ~~常駐デーモン / watch モード~~ **DONE（MVP）**。`guff run --watch`。再パス 0.07〜0.10s / 編集 ~1.35s（one-shot 同条件 ~1.95s）。型/SSA 非保持。§C-2 | warm | **再パス −0.11s** | 大 | 中 |
 | **C-3a** | **`go list` に無駄な仕事をさせない**（`-json=fields` + `-compiled=false`）。§C-3a | cold | **−0.36s（実測）** | **小** | **低** |
-| C-3b〜e | `go` 依存の段階的除去（native lister / stdlib スナップショット / cgo 委譲）。§C-3 | cold | −0.2〜0.5s | 大〜特大 | 中〜高 |
+| ~~C-3b~~ | ~~`go env`/`go version` 撲滅~~ **DONE**（cold 5 本消滅・wall ±0。§C-3b） | cold | **±0** | 小 | 低 |
+| C-3c〜e | `go` 依存の段階的除去（native lister / stdlib スナップショット / cgo 委譲）。§C-3 | cold | −0.2〜0.5s | 大〜特大 | 中〜高 |
 | C-4 | gocritic 106 チェッカーの walk 融合 | cold | 0.0〜0.1s? | 大 | 中 |
 | C-5 | issue cache を analyzer 単位の粒度に | warm | ? | 大 | **高** |
 | ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
@@ -3792,6 +3795,29 @@ bash shim で `go env`/`go version` を即答にして warm A/B（初回は shim
 
 **→ C-3c に進むと決めたときにセットで入れる。単独で wall を狙って着手しない。**
 
+#### DONE（2026-07-30）— **cold の `go env`/`go version` を 5 本 → 0。wall は誤差帯。findings byte 同一。**
+
+低リスク枠が尽きたあとの次手として実装。cold `--no-cache` では warm より多く
+（`env GOVERSION` ×3 + `version` ×1 + `env GOCACHE` ×1 = **5 本**）が直列寄りに見えたが、
+この開発機では `go` がページイン済みだと `go env` 自体が **real 0.00s** で、
+A/B 交互の cold wall は **±0（誤差帯）**。§0-14 の wall 基準には届かないまま。
+
+**入れたもの:**
+
+1. `guff_packages::detect_go_version_string()` — `$GOVERSION` → `$GOROOT/VERSION` →
+   `go env GOVERSION`（フォールバック）。`OnceLock` でプロセス内は 1 回。
+2. `TypecheckEnv::from_env` と `guff_runner::detect_go_version` がそれを使う。
+3. `go_available()` は PATH 上の `go` を `stat`（`go version` を起動しない）。
+4. `default_go_cache_dir` は platform default（`~/Library/Caches/go-build` 等）を
+   `go env GOCACHE` より先に試す。
+
+**検証:**
+- cold の `go` 呼び出し: **9 → 4**（残るのは `go list` 系のみ。env/version は 0）。
+- findings **20 件 byte 同一**・3 回決定的。
+- 両 regress PASS（baseline 未更新）: tsdb 1.280s / full 2.850s。
+
+**次にやる人へ:** wall を取りに行くなら **C-3c（要合意）**。C-3b 単体の cold wall は期待しないこと。
+
 ---
 
 ### C-3c — ネイティブ lister（`go list` の置き換え本体）
@@ -3909,13 +3935,13 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 | 段 | 内容 | 工数 | cold への効果 | `go` 依存 | リスク |
 |---|---|---|---:|---|---|
 | ~~**C-3a**~~ | ~~`-json=fields` + `-compiled=false` + cgo 限定第 2 コール~~ **DONE** | 小（実績 +330 行） | **−0.30〜0.35s（実測）** | 変わらず | 低 |
-| C-3b | `go env`/`go version` の撲滅 | 小 | −0.02s（単独では基準未満） | −3 種 | 低 |
+| ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
 | C-3c | ネイティブ lister（+ 恒久キャッシュ） | **大** | −0.2〜0.3s（キャッシュ後） | 主コールが消える | 中〜高 |
 | C-3d | stdlib 型スナップショット | 中〜大 | −0.15s + Phase A | export コールが消える | **高**（型の同一性） |
 | C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a は DONE。** 続きは**製品として go 非依存を取りに行くと決めたときだけ**
-C-3b → C-3c → C-3e → C-3d の順で。**wall だけが目的なら C-3 はもう終わっています**
+**C-3a / C-3b は DONE。** 続きは**製品として go 非依存を取りに行くと決めたときだけ**
+C-3c → C-3e → C-3d の順で。**wall だけが目的なら C-3 はもう終わっています**
 （残り 0.26s ＋ プロセス起動 0.078s のために native lister を書くのは割に合いません）。
 
 ## C-4 — gocritic 106 チェッカーの walk 融合
