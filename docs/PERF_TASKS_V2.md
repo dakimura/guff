@@ -12,13 +12,17 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-9 DONE（2026-07-30）:** seed が捨てる `Info` への記録を止める（Go の nil-map ゲート相当）。
+> `-j 1` seed ≈ **−0.15s** / wall ≈ **−0.17s**。findings byte 同一。§C-9。
+>
 > **C-1 Phase 2 MVP DONE（2026-07-30）:** DeclInfo/Initializer → NodeId。seed ≈ −0.07s。
 > Phase 3/4 は条件付き GO で着手しない（§C-1）。
 >
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
-> C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
+> C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
+> C-9（seed Info skip）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -38,9 +42,10 @@
 > ため、**`drop(LintResult)` の 0.28s** が丸ごと隠れていました。診断を全部 stdout に出した後で
 > ~3.7 GiB の参照グラフを free していたので、one-shot だけ `std::mem::forget` に変更。§A-10。
 >
-> **⚠️ 地図は §1.3-post2（2026-07-30）に更新しました。cold wall は 2.72s です。**
+> **⚠️ 地図は §1.3-post2（2026-07-30）に更新しました。cold wall は 2.72s です（C-9 前）。**
+> **C-9 後の `-j 1` seed は ≈ −0.15s。並列 cold はマシン負荷でブレやすいが同方向。**
 > **cold の直列 phase 合計 2.71s ＝ `real` 2.72s で、計測されていない区間はもうありません。**
-> **残る攻めどころは ① seed dep check ~1.0s（B-9 = 触らない。C-1 Phase 2 で ≈−0.07s）
+> **残る攻めどころは ① seed dep check（B-9 = 触らない。C-9 で ≈−0.15s）
 > ② `go list` 0.85s（C-3c = 製品判断）の 2 つ。**
 > **analyze は 0.37s まで落ちたので、C-4（gocritic walk 融合）の期待値は消えました。**
 > **B-10 は `waited=0.00s` / 余裕 0.9s なので依然 NO-START。B-9 は原則着手しない。**
@@ -54,6 +59,9 @@
 > **P0-3 は条件付き実装済みだが、prometheus（`default: standard` → `ineffassign` 有効）では
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
 > **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
+>
+> **次の小粒候補（未着手）:** seed SHA→blake3（A-5 follow-up）、`position_internal` 再測、
+> `guff-packages` FxHash（A-1 延長）、B-5 Slice（findings 合意後）。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -562,12 +570,13 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~C-6~~ | ~~`Ident` から `Mutex` を外す~~ **NO-GO**（Ident Mutex 帰属 CPU ~0.3–0.5s → wall ≲0.08s。§C-6） | cold | 0 | — | — |
 | ~~C-7~~ | ~~依存 seed のプリウォーム（バックグラウンド投機実行）~~ **DONE**（seed-hot `--no-cache` typecheck −0.35s / wall −0.15〜0.25s。§C-7） | cold seed-hot | **−0.15〜0.25s** | 大 | 中 |
 | ~~C-8~~ | ~~メモリ削減で並列度を上げる~~ **DONE（内訳のみ）**。peak ~3.46 GiB。主因は型アリーナ (~1.0 GiB) + AST (~0.4) + Info (~0.2)。SSA incremental ≈0。§C-8 | cold | 内訳記録 | 小 | ゼロ |
+| ~~C-9~~ | ~~seed が捨てる `Info` 記録を止める~~ **DONE**（Go nil-map 相当。`-j 1` seed −0.15s。§C-9） | cold | **−0.15s（`-j 1`）** | 小 | 低 |
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
 **2026-07-30 時点の残り（★ 最新）:** **wall だけを狙う低リスクなタスクは尽きました。**
 §1.3-post2 のとおり cold 2.72s の直列内訳は `go list` 0.85 / seed 1.08 / target 0.32 / analyze 0.37 で、
-**未計測の隙間はゼロ**です。C-1 Phase 2 で seed ≈ −0.07s。ここから先の壁時計は
+**未計測の隙間はゼロ**です。C-9 で seed ≈ −0.15s（`-j 1`）。ここから先の壁時計は
 **C-3c（`go` 非依存化。製品タスク）** か、B-5 Slice（findings 合意）程度。
 `B-10` は `waited=0.00s` の間 NO-START、`B-9` は原則着手しない、`C-4` は analyze 0.37s で期待値消滅、
 `C-5` は先に「設定変更時の再解析コスト」の計測から。C-1 Phase 3/4 は条件付き GO で NO-START。
@@ -4181,6 +4190,48 @@ load avg はやや高めだったが RSS は安定）:**
 GUFF_CACHE=$(mktemp -d) GUFF_DEBUG_RSS=1 GUFF_DEBUG_CACHE=1 \
   /usr/bin/time -lp target/release/guff run --no-cache -c .golangci.yml ./...
 ```
+
+---
+
+## C-9 — seed が捨てる `Info` 記録を止める（**A-10 型の死に仕事。2026-07-30 発見**）
+
+### 目的
+
+seed worker は `Checker::into_worker_overlays` で**アリーナ overlay だけ**残し、
+`Info`（`types`/`defs`/`uses`/…）は丸ごと drop する。それなのに typecheck 中は
+Go の nil-map ゲート無しで全部の `record_*` が HashMap に書き込んでいた。
+Go 本体は `if m := check.Types; m != nil` でスキップする。
+
+### 入れたもの
+
+1. `Checker::record_info`（default `true`）+ `set_record_info(false)`。
+   seed の `check_sources` だけ false（`ignore_func_bodies` と併用）。
+2. 全 `record_*` / `record_untyped` / `file_versions` / `record_scope` /
+   `record_implicit` をゲート。`record_comma_ok_types` は Info 用の throwaway
+   `Var`/`Tuple` アリーナ割当もスキップ（overlay TypeId ノイズ削減）。
+3. `!record_info` のとき `init_order` をスキップ（`Info.init_order` 専用。
+   seed の soft cycle error は元々 discard）。
+4. `unused_imports` を `ignore_func_bodies` 時に early-return（**Go と同じ**。
+   コメントは「Go はスキップするが guff は常に走る」と誤っていた）。
+5. ついでに C-1 後の抜け: `syntax_index` を FxHash 化、method collect の
+   無駄な `recv` `Expr::clone` を借用に変更。
+
+### DONE（2026-07-30）— **`-j 1` seed −0.15s / wall −0.17s。findings byte 同一。**
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`、release、A/B 交互）:**
+
+| 指標 | before（中央） | after（中央） | Δ |
+|---|---:|---:|---:|
+| `-j 1` seed dep check | 2.265s | 2.11s | **−0.15s** |
+| `-j 1` typecheck_roots | 3.105s | 2.95s | **−0.15s** |
+| `-j 1` wall (`real`) | 5.51s | 5.34s | **−0.17s** |
+| findings stdout | 3635 B | 3635 B | byte 同一（並列・`-j 1`） |
+| `cargo test -p guff-types --release --tests` | — | PASS | |
+
+並列 cold は load 汚染でブレが大きいが、落ち着いたペアでは seed ≈ −0.08〜0.17s。
+決定性: after 同士の findings も byte 同一。
+
+**判定:** A-10 と同じ「捨てる直前の仕事」パターン。GO。baseline 更新はユーザー承認待ち。
 
 ---
 

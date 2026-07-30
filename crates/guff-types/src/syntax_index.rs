@@ -5,11 +5,12 @@
 //! `files` vector. The AST is not mutated for the duration of typechecking, so
 //! the pointers remain valid until `files` is replaced or dropped.
 
-use std::collections::HashMap;
 use std::ptr::NonNull;
 
 use guff::ast::{BlockStmt, Expr, FuncDecl, TypeSpec};
 use guff::NodeId;
+
+use crate::hash::HashMap;
 
 /// Maps stamped node ids to locations inside `Checker::files`.
 #[derive(Debug, Default)]

@@ -200,7 +200,7 @@ impl Checker {
     /// skipped, matching Go's behaviour of only recording source nodes.
     /// Equivalent to `Checker.recordScope`.
     pub fn record_scope(&mut self, node_id: u32, scope: ScopeId) {
-        if node_id != 0 {
+        if self.record_info && node_id != 0 {
             self.info.scopes.insert(node_id, scope);
         }
     }
@@ -209,7 +209,7 @@ impl Checker {
     /// explicit identifier in the source), for `Info::implicits`. Synthetic
     /// nodes carry id `0` and are skipped. Equivalent to `Checker.recordImplicit`.
     pub fn record_implicit(&mut self, node_id: u32, obj: ObjectId) {
-        if node_id != 0 {
+        if self.record_info && node_id != 0 {
             self.info.implicits.insert(node_id, obj);
         }
     }

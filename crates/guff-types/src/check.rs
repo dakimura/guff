@@ -201,6 +201,10 @@ pub struct Checker {
     /// is a large speedup. Never set for target packages (they need full body
     /// checks to produce findings).
     pub ignore_func_bodies: bool,
+    /// When false, skip writing [`Info`] maps (and `init_order`). Matches Go's
+    /// nil-map gates on `check.Types` / `Defs` / … Seed workers discard `Info`
+    /// via [`Self::into_worker_overlays`], so recording there is pure waste.
+    pub record_info: bool,
 }
 
 /// Shared, already-decoded export-data graph for parallel type-checks (R24.3).
@@ -523,6 +527,7 @@ impl Checker {
             env: Environment::default(),
             mono: crate::mono::MonoGraph::default(),
             ignore_func_bodies: false,
+            record_info: true,
         }
     }
 
@@ -631,6 +636,7 @@ impl Checker {
             mono: crate::mono::MonoGraph::default(),
             // A from_seed checker always checks a *target* package fully.
             ignore_func_bodies: false,
+            record_info: true,
         }
     }
 
@@ -638,6 +644,12 @@ impl Checker {
     /// (`Config.IgnoreFuncBodies`). See the field docs on [`Checker`].
     pub fn set_ignore_func_bodies(&mut self, ignore: bool) {
         self.ignore_func_bodies = ignore;
+    }
+
+    /// Enable/disable writing into [`Info`] (Go: nil `Info` maps). Seed workers
+    /// that only keep arena overlays should disable this.
+    pub fn set_record_info(&mut self, record: bool) {
+        self.record_info = record;
     }
 
     /// Borrow an expression from [`Self::files`] by stamped id.
@@ -899,7 +911,11 @@ impl Checker {
         self.package_objects();
         self.process_delayed(0); // includes all function bodies (once stmt.go lands)
         self.record_untyped(); // flush still-untyped expressions into Info.Types
-        self.init_order(); // compute Info.init_order from the dependency graph
+        // init_order only fills Info.init_order (+ soft cycle errors). Seed
+        // workers discard Info, so skip the graph walk when not recording.
+        if self.record_info {
+            self.init_order();
+        }
         self.unused_imports(); // report imports never referred to (resolver.go)
 
         // Detect unbounded recursive instantiation (non-monomorphizable
@@ -938,9 +954,13 @@ impl Checker {
     /// (resolver.go). Blank (`_`) and dot (`.`) imports are never bound
     /// (deferred, D16), so they never enter `self.imports` and are correctly
     /// never reported. Go skips this entirely when function bodies are not
-    /// checked (`IgnoreFuncBodies`); we always check them, so we always run it.
+    /// checked (`IgnoreFuncBodies`); we match that.
     /// A soft error is used to match Go's `softErrorf` (checking continues).
     fn unused_imports(&mut self) {
+        // If function bodies are not checked, packages' uses are likely missing.
+        if self.ignore_func_bodies {
+            return;
+        }
         // Snapshot (pos, path, name) for each unused import before reporting to
         // avoid borrowing `self` while iterating `self.imports`.
         let unused: Vec<(u32, String, String)> = self

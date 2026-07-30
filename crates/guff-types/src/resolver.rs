@@ -325,7 +325,7 @@ impl Checker {
 
         for file in &files {
             self.env.version = file.go_version.clone();
-            if !file.go_version.is_empty() {
+            if self.record_info && !file.go_version.is_empty() {
                 self.info
                     .file_versions
                     .insert(file.id, file.go_version.clone());
@@ -627,9 +627,9 @@ impl Checker {
             }
         } else {
             // method: unpack the receiver base type name and queue it.
-            let recv_ty = fd.recv.as_ref().unwrap().list[0].ty.clone();
-            if let Some(rty) = recv_ty {
-                let (ptr, base) = unpack_recv(&rty);
+            let recv_field = &fd.recv.as_ref().unwrap().list[0];
+            if let Some(rty) = recv_field.ty.as_ref() {
+                let (ptr, base) = unpack_recv(rty);
                 if let Some(recv) = base {
                     if name != "_" {
                         methods.push(MethodInfo { obj, ptr, recv });

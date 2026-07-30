@@ -111,6 +111,9 @@ impl Checker {
     /// `_`, or a file's package name — currently never recorded). Stamped
     /// identifiers only (`id.id() != 0`).
     pub fn record_def(&mut self, id: &Ident, obj: Option<ObjectId>) {
+        if !self.record_info {
+            return;
+        }
         let nid = id.id();
         if nid == 0 {
             return;
@@ -121,6 +124,9 @@ impl Checker {
     /// Records that identifier `id` *denotes* the already-declared `obj`
     /// (Go's `Checker.recordUse`). Stamped identifiers only.
     pub fn record_use(&mut self, id: &Ident, obj: ObjectId) {
+        if !self.record_info {
+            return;
+        }
         let nid = id.id();
         if nid == 0 {
             return;
@@ -146,7 +152,7 @@ impl Checker {
         indirect: bool,
     ) {
         self.record_use(&e.sel, obj);
-        if e.id == 0 {
+        if !self.record_info || e.id == 0 {
             return;
         }
         self.info
@@ -163,6 +169,9 @@ impl Checker {
     /// call sites in `typexpr.rs` / `call.rs`. Synthetic / unstamped idents are
     /// dropped.
     pub fn record_instance(&mut self, expr: &Expr, targs: Vec<TypeId>, typ: TypeId) {
+        if !self.record_info {
+            return;
+        }
         let ident = match instantiated_ident(expr) {
             Some(id) => id,
             None => return, // Go panics ("not found"); be defensive instead.
@@ -236,6 +245,12 @@ impl Checker {
     /// keyed by its (untyped) type (Go's `Checker.recordUntyped`). Called once
     /// at the end of `check_files`.
     pub fn record_untyped(&mut self) {
+        if !self.record_info {
+            // Go: `if !check.recordTypes() { return }`. Drop the stash so we
+            // don't retain it until the checker is freed.
+            self.untyped.clear();
+            return;
+        }
         let entries: Vec<(u32, ExprInfo)> = self.untyped.drain().collect();
         for (nid, info) in entries {
             if info.mode == OperandMode::Invalid {
@@ -363,6 +378,9 @@ impl Checker {
         typ: TypeId,
         val: Option<Value>,
     ) {
+        if !self.record_info {
+            return;
+        }
         if mode == OperandMode::Invalid {
             return; // omit
         }
@@ -398,6 +416,11 @@ impl Checker {
     /// preserved, only `typ` changes. Defensive about a missing entry (Go
     /// asserts one exists); `recordCommaOkTypesInSyntax` is not ported.
     pub fn record_comma_ok_types(&mut self, e: &Expr, t0: TypeId, t1: TypeId) {
+        // Only mutates Info.Types (plus throwaway arena temps for the 2-tuple).
+        // Skip entirely when Info is discarded — avoids overlay TypeId noise.
+        if !self.record_info {
+            return;
+        }
         // Build the 2-tuple (var t0, var t1) once (Go uses unnamed LocalVars).
         let v0 = new_var(&mut self.objects, "", t0);
         let v1 = new_var(&mut self.objects, "", t1);

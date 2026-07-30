@@ -960,6 +960,9 @@ fn build_source_seed_inner(
         }
         let mut check = Checker::from_seed(seed, make_conf());
         check.set_ignore_func_bodies(true);
+        // Seed keeps only arena overlays (`into_worker_overlays`); Info maps
+        // would be allocated and then dropped. Match Go's nil-Info path.
+        check.set_record_info(false);
         // Fallback importer only; every dep should already be in the seed cache.
         check.set_importer(Box::new(make_importer()));
         check.add_dependency_source(path.to_string(), files);
