@@ -80,6 +80,7 @@ pub mod stmt;
 pub mod r#struct;
 pub mod struct_check;
 pub mod subst;
+pub mod syntax_index;
 pub mod termlist;
 pub mod tuple;
 pub mod type_;

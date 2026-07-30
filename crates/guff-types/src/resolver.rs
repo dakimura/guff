@@ -36,7 +36,7 @@
 
 use crate::hash::HashMap;
 
-use guff::ast::{Decl, Expr, FuncDecl, ImportSpec, Spec, TypeSpec};
+use guff::ast::{Decl, Expr, FuncDecl, ImportSpec, Spec};
 use guff::Token;
 use guff_constant::make_int64;
 use guff_types_errors::Code;
@@ -52,9 +52,9 @@ use crate::{ObjectId, ScopeId};
 
 /// Describes a package-level const, type, var, or func declaration.
 ///
-/// Equivalent to `types2.declInfo`. Pointers to AST nodes become owned clones
-/// (the AST nodes are `Clone`); `*Scope`/`*Var`/`Object` become `ScopeId` /
-/// `ObjectId`.
+/// Equivalent to `types2.declInfo`. AST nodes are stored as stamped
+/// [`guff::NodeId`] handles into [`crate::check::Checker::files`] (via
+/// [`crate::syntax_index::SyntaxIndex`]) instead of owned clones.
 #[derive(Default)]
 pub struct DeclInfo {
     /// Scope of the file containing this declaration.
@@ -64,15 +64,17 @@ pub struct DeclInfo {
     /// LHS of an n:1 variable declaration, or empty.
     pub lhs: Vec<ObjectId>,
     /// Declared type expression (const/var only), or `None`.
-    pub vtyp: Option<Expr>,
+    pub vtyp: Option<guff::NodeId>,
     /// Init/orig expression (const/var only), or `None`.
-    pub init: Option<Expr>,
+    pub init: Option<guff::NodeId>,
     /// If set, the init expression is inherited from a previous constant.
     pub inherited: bool,
-    /// Type declaration, or `None`.
-    pub tdecl: Option<TypeSpec>,
-    /// Func declaration, or `None`.
-    pub fdecl: Option<FuncDecl>,
+    /// Type declaration ([`guff::ast::TypeSpec::id`]), or `None`.
+    pub tdecl: Option<guff::NodeId>,
+    /// Func declaration keyed by [`guff::ast::FuncType::id`], or `None`.
+    pub fdecl: Option<guff::NodeId>,
+    /// Function body ([`guff::ast::BlockStmt::id`]) when present.
+    pub fbody: Option<guff::NodeId>,
     /// Objects this declaration's init expression depends on (lazy).
     pub deps: HashMap<ObjectId, bool>,
 }
@@ -81,12 +83,7 @@ impl DeclInfo {
     /// Reports whether the declared object has an initialization expression or
     /// a function body. Equivalent to `declInfo.hasInitializer`.
     pub fn has_initializer(&self) -> bool {
-        self.init.is_some()
-            || self
-                .fdecl
-                .as_ref()
-                .map(|f| f.body.is_some())
-                .unwrap_or(false)
+        self.init.is_some() || self.fbody.is_some()
     }
 
     /// Adds `obj` to the set of objects this declaration depends on.
@@ -307,6 +304,7 @@ impl Checker {
         // Take the files out so we can iterate while mutating `self` freely
         // (Go iterates `check.files` directly under a GC). Restored at the end.
         let files = std::mem::take(&mut self.files);
+        self.syntax.clear();
 
         let pkg_scope = self.packages.get(self.pkg).scope();
 
@@ -355,8 +353,8 @@ impl Checker {
                     Decl::GenDecl(gd) => {
                         // Tracks the last ValueSpec carrying a type or init
                         // values, for inherited constant initializers.
-                        let mut last_type: Option<Expr> = None;
-                        let mut last_values: Vec<Expr> = Vec::new();
+                        let mut last_type: Option<guff::NodeId> = None;
+                        let mut last_values: Vec<guff::NodeId> = Vec::new();
                         let mut have_last = false;
 
                         for (iota, spec) in gd.specs.iter().enumerate() {
@@ -369,8 +367,21 @@ impl Checker {
                                         // Determine which init exprs to use.
                                         let mut inherited = true;
                                         if vs.ty.is_some() || !vs.values.is_empty() {
-                                            last_type = vs.ty.clone();
-                                            last_values = vs.values.clone();
+                                            if let Some(ty) = &vs.ty {
+                                                self.syntax.insert_expr(ty);
+                                            }
+                                            for v in &vs.values {
+                                                self.syntax.insert_expr(v);
+                                            }
+                                            last_type = vs
+                                                .ty
+                                                .as_ref()
+                                                .and_then(|e| guff::NodeId::from_u32(e.id()));
+                                            last_values = vs
+                                                .values
+                                                .iter()
+                                                .filter_map(|e| guff::NodeId::from_u32(e.id()))
+                                                .collect();
                                             have_last = true;
                                             inherited = false;
                                         } else if !have_last {
@@ -407,11 +418,11 @@ impl Checker {
                                                 vs.names[i].pos().0 as u32,
                                             );
 
-                                            let init = last_values.get(i).cloned();
+                                            let init = last_values.get(i).copied();
                                             let d = DeclInfo {
                                                 file_scope: Some(file_scope),
                                                 version: self.env.version.clone(),
-                                                vtyp: last_type.clone(),
+                                                vtyp: last_type,
                                                 init,
                                                 inherited,
                                                 ..DeclInfo::default()
@@ -433,6 +444,13 @@ impl Checker {
                                             false,
                                         );
 
+                                        if let Some(ty) = &vs.ty {
+                                            self.syntax.insert_expr(ty);
+                                        }
+                                        for v in &vs.values {
+                                            self.syntax.insert_expr(v);
+                                        }
+
                                         // n:1 var decl: one shared rhs feeds all
                                         // lhs vars (so each depends on it).
                                         let shared = vs.values.len() == 1;
@@ -453,23 +471,34 @@ impl Checker {
                                             lhs.push(obj);
                                         }
 
+                                        let vtyp =
+                                            vs.ty.as_ref().and_then(|e| guff::NodeId::from_u32(e.id()));
                                         for (i, name) in names.iter().enumerate() {
                                             let obj = lhs[i];
+                                            let init = if shared {
+                                                vs.values
+                                                    .first()
+                                                    .and_then(|e| guff::NodeId::from_u32(e.id()))
+                                            } else {
+                                                vs.values
+                                                    .get(i)
+                                                    .and_then(|e| guff::NodeId::from_u32(e.id()))
+                                            };
                                             let d = if shared {
                                                 DeclInfo {
                                                     file_scope: Some(file_scope),
                                                     version: self.env.version.clone(),
                                                     lhs: lhs.clone(),
-                                                    vtyp: vs.ty.clone(),
-                                                    init: vs.values.first().cloned(),
+                                                    vtyp,
+                                                    init,
                                                     ..DeclInfo::default()
                                                 }
                                             } else {
                                                 DeclInfo {
                                                     file_scope: Some(file_scope),
                                                     version: self.env.version.clone(),
-                                                    vtyp: vs.ty.clone(),
-                                                    init: vs.values.get(i).cloned(),
+                                                    vtyp,
+                                                    init,
                                                     ..DeclInfo::default()
                                                 }
                                             };
@@ -487,6 +516,7 @@ impl Checker {
                                     }
                                 },
                                 Spec::TypeSpec(ts) => {
+                                    self.syntax.insert_type_spec(ts);
                                     let name = ts.name.name.clone();
                                     let obj = new_type_name(&mut self.objects, name.clone(), None);
                                     obj.set_pkg(&mut self.objects, self.pkg);
@@ -494,7 +524,7 @@ impl Checker {
                                     let d = DeclInfo {
                                         file_scope: Some(file_scope),
                                         version: self.env.version.clone(),
-                                        tdecl: Some(ts.clone()),
+                                        tdecl: guff::NodeId::from_u32(ts.id),
                                         ..DeclInfo::default()
                                     };
                                     self.declare_pkg_obj(&name, obj, d);
@@ -504,6 +534,7 @@ impl Checker {
                         }
                     }
                     Decl::FuncDecl(fd) => {
+                        self.syntax.insert_func_decl(fd);
                         self.collect_func_decl(fd, file_scope, &mut methods);
                     }
                 }
@@ -614,7 +645,11 @@ impl Checker {
         let info = DeclInfo {
             file_scope: Some(file_scope),
             version: self.env.version.clone(),
-            fdecl: Some(fd.clone()),
+            fdecl: guff::NodeId::from_u32(fd.ty.id),
+            fbody: fd
+                .body
+                .as_ref()
+                .and_then(|b| guff::NodeId::from_u32(b.id)),
             ..DeclInfo::default()
         };
         // Methods aren't package-level objects, but we still track them in the
@@ -648,7 +683,8 @@ impl Checker {
             }
 
             // done if the decl describes a defined type (not an alias).
-            let tdecl = self.obj_map.get(&obj)?.tdecl.as_ref()?;
+            let tdecl_id = self.obj_map.get(&obj)?.tdecl?;
+            let tdecl = self.syntax.type_spec(tdecl_id)?;
             let is_alias = tdecl.assign.is_valid();
             if !is_alias {
                 return Some(obj);
@@ -695,7 +731,8 @@ impl Checker {
                 let is_alias = self
                     .obj_map
                     .get(&obj)
-                    .and_then(|d| d.tdecl.as_ref())
+                    .and_then(|d| d.tdecl)
+                    .and_then(|id| self.syntax.type_spec(id))
                     .map(|t| t.assign.is_valid())
                     .unwrap_or(false);
                 if is_alias {

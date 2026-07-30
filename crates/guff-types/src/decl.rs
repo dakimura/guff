@@ -122,28 +122,28 @@ impl Checker {
 
         match kind {
             DeclKind::Type => {
-                if let Some(tdecl) = self.obj_map.get(&obj).and_then(|d| d.tdecl.clone()) {
-                    self.type_decl(obj, &tdecl);
+                if let Some(tdecl_id) = self.obj_map.get(&obj).and_then(|d| d.tdecl) {
+                    let ts = self.type_spec_ref(tdecl_id) as *const TypeSpec;
+                    let ts = unsafe { &*ts };
+                    self.type_decl(obj, ts);
                     // methods can only be added to top-level types.
                     self.collect_methods(obj);
                 }
             }
             DeclKind::Func => self.func_decl(obj),
             DeclKind::Const => {
-                let d = self.obj_map.get(&obj);
-                let (vtyp, init, inherited) = match d {
-                    Some(d) => (d.vtyp.clone(), d.init.clone(), d.inherited),
+                let (vtyp, init, inherited) = match self.obj_map.get(&obj) {
+                    Some(d) => (d.vtyp, d.init, d.inherited),
                     None => (None, None, false),
                 };
-                self.const_decl(obj, vtyp.as_ref(), init.as_ref(), inherited);
+                self.const_decl(obj, vtyp, init, inherited);
             }
             DeclKind::Var => {
-                let d = self.obj_map.get(&obj);
-                let (vtyp, init, lhs) = match d {
-                    Some(d) => (d.vtyp.clone(), d.init.clone(), d.lhs.clone()),
+                let (vtyp, init, lhs) = match self.obj_map.get(&obj) {
+                    Some(d) => (d.vtyp, d.init, d.lhs.clone()),
                     None => (None, None, Vec::new()),
                 };
-                self.var_decl(obj, &lhs, vtyp.as_ref(), init.as_ref());
+                self.var_decl(obj, &lhs, vtyp, init);
             }
         }
 
@@ -161,8 +161,8 @@ impl Checker {
     fn const_decl(
         &mut self,
         obj: ObjectId,
-        typ: Option<&Expr>,
-        init: Option<&Expr>,
+        typ: Option<guff::NodeId>,
+        init: Option<guff::NodeId>,
         _inherited: bool,
     ) {
         // Set iota for this constant (resolver stored it as the const's value).
@@ -177,7 +177,12 @@ impl Checker {
         }
 
         // Determine the declared type, if any.
-        if let Some(te) = typ {
+        // Look up AST via raw pointers so `&mut self` methods can run afterward
+        // (nodes live in `self.files`, which typecheck does not mutate).
+        let typ_ptr: Option<*const Expr> = typ.map(|id| self.expr_ref(id) as *const Expr);
+        let init_ptr: Option<*const Expr> = init.map(|id| self.expr_ref(id) as *const Expr);
+        if let Some(p) = typ_ptr {
+            let te = unsafe { &*p };
             let t = self.typ(te);
             if !is_const_type(&self.types, t) {
                 if is_valid(&self.types, t.underlying(&self.types)) {
@@ -202,7 +207,8 @@ impl Checker {
 
         // Check the initialization expression.
         let mut x = Operand::invalid();
-        if let Some(ie) = init {
+        if let Some(p) = init_ptr {
+            let ie = unsafe { &*p };
             self.expr(&mut x, ie);
         }
         self.init_const(obj, &mut x);
@@ -215,9 +221,19 @@ impl Checker {
     /// or empty/single for the ordinary case.
     ///
     /// Equivalent to `Checker.varDecl`.
-    fn var_decl(&mut self, obj: ObjectId, lhs: &[ObjectId], typ: Option<&Expr>, init: Option<&Expr>) {
+    fn var_decl(
+        &mut self,
+        obj: ObjectId,
+        lhs: &[ObjectId],
+        typ: Option<guff::NodeId>,
+        init: Option<guff::NodeId>,
+    ) {
+        let typ_ptr: Option<*const Expr> = typ.map(|id| self.expr_ref(id) as *const Expr);
+        let init_ptr: Option<*const Expr> = init.map(|id| self.expr_ref(id) as *const Expr);
+
         // Determine the declared type, if any.
-        if let Some(te) = typ {
+        if let Some(p) = typ_ptr {
+            let te = unsafe { &*p };
             let t = self.typ(te);
             if let ObjectData::Var(v) = self.objects.get_mut(obj) {
                 v.set_typ(t);
@@ -225,10 +241,10 @@ impl Checker {
         }
 
         // No initializer: type must have been given (else arityMatch erred).
-        let init = match init {
-            Some(e) => e,
+        let init = match init_ptr {
+            Some(p) => unsafe { &*p },
             None => {
-                if typ.is_none() {
+                if typ_ptr.is_none() {
                     let invalid = self.invalid_type();
                     if let ObjectData::Var(v) = self.objects.get_mut(obj) {
                         v.set_typ(invalid);
@@ -252,7 +268,7 @@ impl Checker {
         // `init_vars` then unpacks the tuple and checks each assignment; when
         // a sibling is processed later, `obj_decl` sees its type already set
         // and skips it, so this runs only once.
-        if typ.is_some() {
+        if typ_ptr.is_some() {
             let t = obj.typ(&self.objects).unwrap_or_else(|| self.invalid_type());
             for &l in lhs {
                 self.set_var_typ(l, t);
@@ -291,8 +307,8 @@ impl Checker {
         match gd.tok {
             Some(Token::CONST) => {
                 // `iota` value + inheritance of the previous spec's type/values.
-                let mut last_type: Option<Expr> = None;
-                let mut last_values: Vec<Expr> = Vec::new();
+                let mut last_type: Option<guff::NodeId> = None;
+                let mut last_values: Vec<guff::NodeId> = Vec::new();
                 let mut have_last = false;
 
                 for (iota, spec) in gd.specs.iter().enumerate() {
@@ -303,8 +319,21 @@ impl Checker {
 
                     let mut inherited = true;
                     if vs.ty.is_some() || !vs.values.is_empty() {
-                        last_type = vs.ty.clone();
-                        last_values = vs.values.clone();
+                        if let Some(ty) = &vs.ty {
+                            self.syntax.insert_expr(ty);
+                        }
+                        for v in &vs.values {
+                            self.syntax.insert_expr(v);
+                        }
+                        last_type = vs
+                            .ty
+                            .as_ref()
+                            .and_then(|e| guff::NodeId::from_u32(e.id()));
+                        last_values = vs
+                            .values
+                            .iter()
+                            .filter_map(|e| guff::NodeId::from_u32(e.id()))
+                            .collect();
                         have_last = true;
                         inherited = false;
                     } else if !have_last {
@@ -328,8 +357,8 @@ impl Checker {
                         obj.set_pkg(&mut self.objects, self.pkg);
                         obj.set_pos(&mut self.objects, name.pos().0 as u32);
                         lhs.push(obj);
-                        let init = last_values.get(i).cloned();
-                        self.const_decl(obj, last_type.as_ref(), init.as_ref(), inherited);
+                        let init = last_values.get(i).copied();
+                        self.const_decl(obj, last_type, init, inherited);
                     }
 
                     // process function literals in init expressions before
@@ -349,6 +378,17 @@ impl Checker {
                         Spec::ValueSpec(vs) => vs,
                         _ => continue,
                     };
+
+                    if let Some(ty) = &vs.ty {
+                        self.syntax.insert_expr(ty);
+                    }
+                    for v in &vs.values {
+                        self.syntax.insert_expr(v);
+                    }
+                    let vtyp = vs
+                        .ty
+                        .as_ref()
+                        .and_then(|e| guff::NodeId::from_u32(e.id()));
 
                     let top = self.delayed.len();
                     let n = vs.names.len();
@@ -372,12 +412,16 @@ impl Checker {
                     if v == n {
                         // n:n — each value initializes its variable.
                         for (i, &obj) in lhs.iter().enumerate() {
-                            self.var_decl(obj, &[], vs.ty.as_ref(), vs.values.get(i));
+                            let init = vs
+                                .values
+                                .get(i)
+                                .and_then(|e| guff::NodeId::from_u32(e.id()));
+                            self.var_decl(obj, &[], vtyp, init);
                         }
                     } else if v == 0 {
                         // declared type only, no initializers.
                         for &obj in &lhs {
-                            self.var_decl(obj, &[], vs.ty.as_ref(), None);
+                            self.var_decl(obj, &[], vtyp, None);
                         }
                     } else {
                         // n:1 multi-valued spread (`var a, b = f()`) or a count
@@ -435,10 +479,13 @@ impl Checker {
     ///
     /// Equivalent to `Checker.funcDecl` (signature half).
     fn func_decl(&mut self, obj: ObjectId) {
-        let fdecl = match self.obj_map.get(&obj).and_then(|d| d.fdecl.clone()) {
-            Some(f) => f,
+        let fdecl_id = match self.obj_map.get(&obj).and_then(|d| d.fdecl) {
+            Some(id) => id,
             None => return,
         };
+        let fbody_id = self.obj_map.get(&obj).and_then(|d| d.fbody);
+        let fdecl = self.func_decl_ref(fdecl_id) as *const guff::ast::FuncDecl;
+        let fdecl = unsafe { &*fdecl };
 
         // DEFERRED: Go pre-creates an empty Signature and sets obj.typ before
         // funcType to guard against cycles; we build the signature atomically
@@ -453,10 +500,14 @@ impl Checker {
         // can refer to forward-declared package-level names. The body scope is
         // parented at the declaring file scope captured now.
         if !self.ignore_func_bodies {
-            if let Some(body) = fdecl.body.clone() {
+            if let Some(body_id) = fbody_id {
                 let parent = self.env.scope;
                 let ftid = fdecl.ty.id;
-                self.later(move |check| check.func_body(Some(obj), sig, ftid, parent, &body));
+                self.later(move |check| {
+                    let body = check.block_ref(body_id) as *const guff::ast::BlockStmt;
+                    let body = unsafe { &*body };
+                    check.func_body(Some(obj), sig, ftid, parent, body);
+                });
             }
         }
 

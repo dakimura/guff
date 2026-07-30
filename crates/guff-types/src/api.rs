@@ -156,8 +156,8 @@ pub struct Instance {
 pub struct Initializer {
     /// The variable(s) being initialized, in source order.
     pub lhs: Vec<crate::arena::ObjectId>,
-    /// The initialization expression.
-    pub rhs: guff::ast::Expr,
+    /// Stamped id of the initialization expression (C-1 Phase 2).
+    pub rhs: guff::NodeId,
 }
 
 /// The type and (for constants) value of an expression.

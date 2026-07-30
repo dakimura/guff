@@ -93,10 +93,13 @@ impl Checker {
                     // For direct-cycle detection an alias vs. defined type makes
                     // no difference. If the RHS is not a bare name we are at the
                     // end of the path and done.
-                    let rhs_name = match self.obj_map.get(&tname).and_then(|d| d.tdecl.as_ref()) {
-                        Some(tdecl) => match &tdecl.ty {
-                            Expr::Ident(id) => id.name.clone(),
-                            _ => break,
+                    let rhs_name = match self.obj_map.get(&tname).and_then(|d| d.tdecl) {
+                        Some(tdecl_id) => match self.syntax.type_spec(tdecl_id) {
+                            Some(tdecl) => match &tdecl.ty {
+                                Expr::Ident(id) => id.name.clone(),
+                                _ => break,
+                            },
+                            None => break,
                         },
                         None => break,
                     };

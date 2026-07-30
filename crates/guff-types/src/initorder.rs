@@ -154,8 +154,8 @@ impl Checker {
             if !emitted.insert(representative) {
                 continue; // initializer already emitted
             }
-            let rhs = match &info.init {
-                Some(e) => e.clone(),
+            let rhs = match info.init {
+                Some(id) => id,
                 None => continue, // defensive: hasInitializer implies init for vars
             };
             self.info

@@ -146,6 +146,9 @@ pub struct Checker {
     // ---- file-checking-phase state (populated by the resolver, chunk 22) -
     /// The source files of the package being checked.
     pub files: Vec<guff::ast::File>,
+    /// Stamped-id → pointer index into [`Self::files`] (C-1 Phase 2). Cleared
+    /// and rebuilt by [`Self::collect_objects`].
+    pub syntax: crate::syntax_index::SyntaxIndex,
     /// Maps each package-level (and method) object to its declaration info.
     pub obj_map: HashMap<ObjectId, crate::resolver::DeclInfo>,
     /// `obj_map`'s keys, sorted by source order (filled by `sort_objects`).
@@ -506,6 +509,7 @@ impl Checker {
             errors: Vec::new(),
             first_err: None,
             files: Vec::new(),
+            syntax: crate::syntax_index::SyntaxIndex::default(),
             used_vars: crate::hash::HashSet::default(),
             imports: Vec::new(),
             used_pkg_names: crate::hash::HashSet::default(),
@@ -612,6 +616,7 @@ impl Checker {
             errors: Vec::new(),
             first_err: None,
             files: Vec::new(),
+            syntax: crate::syntax_index::SyntaxIndex::default(),
             used_vars: crate::hash::HashSet::default(),
             imports: Vec::new(),
             used_pkg_names: crate::hash::HashSet::default(),
@@ -633,6 +638,44 @@ impl Checker {
     /// (`Config.IgnoreFuncBodies`). See the field docs on [`Checker`].
     pub fn set_ignore_func_bodies(&mut self, ignore: bool) {
         self.ignore_func_bodies = ignore;
+    }
+
+    /// Borrow an expression from [`Self::files`] by stamped id.
+    ///
+    /// # Safety of the lifetime
+    /// The returned reference points into `self.files`. Callers must not
+    /// mutate `files` / `syntax` while it is live. Typecheck never mutates the
+    /// AST after `collect_objects`, so this is sound for checker internals.
+    pub(crate) fn expr_ref(&self, id: guff::NodeId) -> &guff::ast::Expr {
+        let e = self
+            .syntax
+            .expr(id)
+            .unwrap_or_else(|| panic!("syntax index missing expr id {}", id.as_u32()));
+        unsafe { &*(e as *const guff::ast::Expr) }
+    }
+
+    pub(crate) fn type_spec_ref(&self, id: guff::NodeId) -> &guff::ast::TypeSpec {
+        let ts = self
+            .syntax
+            .type_spec(id)
+            .unwrap_or_else(|| panic!("syntax index missing TypeSpec id {}", id.as_u32()));
+        unsafe { &*(ts as *const guff::ast::TypeSpec) }
+    }
+
+    pub(crate) fn func_decl_ref(&self, id: guff::NodeId) -> &guff::ast::FuncDecl {
+        let fd = self
+            .syntax
+            .func_decl(id)
+            .unwrap_or_else(|| panic!("syntax index missing FuncDecl id {}", id.as_u32()));
+        unsafe { &*(fd as *const guff::ast::FuncDecl) }
+    }
+
+    pub(crate) fn block_ref(&self, id: guff::NodeId) -> &guff::ast::BlockStmt {
+        let b = self
+            .syntax
+            .block(id)
+            .unwrap_or_else(|| panic!("syntax index missing BlockStmt id {}", id.as_u32()));
+        unsafe { &*(b as *const guff::ast::BlockStmt) }
     }
 
     /// Register the source files of a dependency package under its import path.
@@ -677,6 +720,7 @@ impl Checker {
         let saved_pkg = std::mem::replace(&mut self.pkg, dep_pkg);
         let saved_info = std::mem::take(&mut self.info);
         let saved_files = std::mem::take(&mut self.files);
+        let saved_syntax = std::mem::take(&mut self.syntax);
         let saved_used = std::mem::take(&mut self.used_vars);
         let saved_imports = std::mem::take(&mut self.imports);
         let saved_used_pkg_names = std::mem::take(&mut self.used_pkg_names);
@@ -704,6 +748,7 @@ impl Checker {
         self.pkg = saved_pkg;
         self.info = saved_info;
         self.files = saved_files;
+        self.syntax = saved_syntax;
         self.used_vars = saved_used;
         self.imports = saved_imports;
         self.used_pkg_names = saved_used_pkg_names;

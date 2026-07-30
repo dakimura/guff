@@ -10,7 +10,7 @@ use crate::value::Value;
 use crate::block::BasicBlock;
 use crate::lvalue::{LValue, Address};
 use guff_types::{signature_type_params, BasicKind, ObjectId, TypeId};
-use guff::ast::{Decl, Expr, File, FuncDecl, Ident, Stmt};
+use guff::ast::{Decl, Expr, File, FuncDecl, Ident, Spec, Stmt};
 use guff::{Pos, NO_POS};
 
 pub mod expr;
@@ -201,12 +201,14 @@ pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File])
     // Initialize package-level vars in dependency order.
     let init_order = b.prog.info.init_order.clone();
     for varinit in &init_order {
+        let rhs = find_pkg_level_expr(files, varinit.rhs.as_u32())
+            .expect("init_order rhs must resolve in package files");
         if varinit.lhs.len() == 1 {
             // 1:1 initialization: var x = a()
             let obj = varinit.lhs[0];
             let is_blank = obj.name(&b.prog.object_arena) == "_";
-            let pos = varinit.rhs.pos();
-            let rval = b.expr(&varinit.rhs);
+            let pos = rhs.pos();
+            let rval = b.expr(rhs);
             if !is_blank {
                 let g = *b
                     .prog
@@ -219,9 +221,9 @@ pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File])
             }
         } else {
             // n:1 initialization: var x, y = f()
-            let tuple = b.expr_n(&varinit.rhs);
+            let tuple = b.expr_n(rhs);
             let block = b.block.expect("no current block");
-            let pos = varinit.rhs.pos();
+            let pos = rhs.pos();
             for (i, &obj) in varinit.lhs.iter().enumerate() {
                 if obj.name(&b.prog.object_arena) == "_" {
                     continue;
@@ -280,6 +282,34 @@ pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File])
     drop(b);
 
     prog.finish_function(fid);
+}
+
+/// Resolve a stamped expression id from package-level `var`/`const` specs.
+/// Used for [`guff_types::Initializer::rhs`] after C-1 Phase 2 (NodeId).
+fn find_pkg_level_expr(files: &[File], id: u32) -> Option<&Expr> {
+    for file in files {
+        for decl in &file.decls {
+            let Decl::GenDecl(gd) = decl else {
+                continue;
+            };
+            for spec in &gd.specs {
+                let Spec::ValueSpec(vs) = spec else {
+                    continue;
+                };
+                if let Some(ty) = &vs.ty {
+                    if ty.id() == id {
+                        return Some(ty);
+                    }
+                }
+                for v in &vs.values {
+                    if v.id() == id {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// build_package builds the SSA bodies of every function declared in package

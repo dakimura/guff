@@ -12,6 +12,9 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **C-1 Phase 2 MVP DONE（2026-07-30）:** DeclInfo/Initializer → NodeId。seed ≈ −0.07s。
+> Phase 3/4 は条件付き GO で着手しない（§C-1）。
+>
 > **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
@@ -37,8 +40,8 @@
 >
 > **⚠️ 地図は §1.3-post2（2026-07-30）に更新しました。cold wall は 2.72s です。**
 > **cold の直列 phase 合計 2.71s ＝ `real` 2.72s で、計測されていない区間はもうありません。**
-> **残る攻めどころは ① seed dep check 1.08s ② `go list` 0.85s の 2 つだけで、
-> どちらもユーザー合意が必要な領域（B-9 / C-1 / C-3c）です。**
+> **残る攻めどころは ① seed dep check ~1.0s（B-9 = 触らない。C-1 Phase 2 で ≈−0.07s）
+> ② `go list` 0.85s（C-3c = 製品判断）の 2 つ。**
 > **analyze は 0.37s まで落ちたので、C-4（gocritic walk 融合）の期待値は消えました。**
 > **B-10 は `waited=0.00s` / 余裕 0.9s なので依然 NO-START。B-9 は原則着手しない。**
 > **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
@@ -549,7 +552,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
-| C-1 | AST アリーナ化 + 文字列インターン | cold | 0.3〜1.0s? | **特大** | **最高** |
+| ~~C-1~~ | ~~AST アリーナ化 + 文字列インターン~~ **DONE（Phase 2 MVP）**。DeclInfo → NodeId。seed ≈ −0.07s。Phase 3/4 NO-START。§C-1 | cold | **−0.07s** | 特大→中 | 最高→中 |
 | ~~C-2~~ | ~~常駐デーモン / watch モード~~ **DONE（MVP）**。`guff run --watch`。再パス 0.07〜0.10s / 編集 ~1.35s（one-shot 同条件 ~1.95s）。型/SSA 非保持。§C-2 | warm | **再パス −0.11s** | 大 | 中 |
 | **C-3a** | **`go list` に無駄な仕事をさせない**（`-json=fields` + `-compiled=false`）。§C-3a | cold | **−0.36s（実測）** | **小** | **低** |
 | ~~C-3b~~ | ~~`go env`/`go version` 撲滅~~ **DONE**（cold 5 本消滅・wall ±0。§C-3b） | cold | **±0** | 小 | 低 |
@@ -564,11 +567,10 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **2026-07-30 時点の残り（★ 最新）:** **wall だけを狙う低リスクなタスクは尽きました。**
 §1.3-post2 のとおり cold 2.72s の直列内訳は `go list` 0.85 / seed 1.08 / target 0.32 / analyze 0.37 で、
-**未計測の隙間はゼロ**です。ここから先は次の 3 つしかなく、**いずれも着手前にユーザー合意が必要**:
-**① C-1（AST アリーナ化・特大・最高リスク）② C-3b→C-3c（`go` 非依存化。製品タスク）
-③ B-5 Slice インターン（findings 変化の合意が前提。RSS 向け）**。
+**未計測の隙間はゼロ**です。C-1 Phase 2 で seed ≈ −0.07s。ここから先の壁時計は
+**C-3c（`go` 非依存化。製品タスク）** か、B-5 Slice（findings 合意）程度。
 `B-10` は `waited=0.00s` の間 NO-START、`B-9` は原則着手しない、`C-4` は analyze 0.37s で期待値消滅、
-`C-5` は先に「設定変更時の再解析コスト」の計測から。
+`C-5` は先に「設定変更時の再解析コスト」の計測から。C-1 Phase 3/4 は条件付き GO で NO-START。
 
 **2026-07-29 時点の残り推奨順（履歴）:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
 **C-1（AST・ユーザー合意後）**。**C-2 / C-7 / C-8 DONE**。**C-6 NO-GO**。
@@ -3459,8 +3461,57 @@ prometheus は gci + gofumpt + goimports の 3 つなので、**同じ 725 フ�
 
 **前提:** A-2 / A-3 / B-1 が全部終わってから。それらを先にやれば、C-1 の効果は目減りします
 （＝**C-1 は最後の手段**）。
+A-2 / A-3b/c は **NO-GO**、B-1 は **DONE**（2026-07-30 時点）なので待ちは不要。
 
 **着手前に必ず:** 「これをやらないと目標に届かないのか」をユーザーと合意すること。
+
+### GO/NO-GO（2026-07-30）— **条件付き GO。Phase 2（DeclInfo → NodeId）まで。Phase 3/4 はやらない。**
+
+ユーザー合意済みのゲート: wall 上限 `<0.10s` → NO-GO / `0.10–0.30s` → Phase 2 で打ち切り /
+`≥0.30s` → Phase 3 まで。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE` + `--no-cache`、profiling バイナリ、
+samply + `scripts/perf-profile.py`。合計 CPU 13.77s。analyze 中の既存 SSA panic ありだが
+seed/typecheck はプロファイルに含まれる）:**
+
+| 指標 | 合計 CPU | 帰属 |
+|---|---:|---|
+| `FuncDecl::clone` inclusive（DeclInfo 経路） | **0.60s** | seed collect+obj_decl 0.29 + target 0.31 |
+| `Expr::clone`（collect_objects / obj_decl callers） | **0.21s** | DeclInfo vtyp/init とネスト |
+| `drop_in_place<DeclInfo>` inclusive | **0.17s** | 保持していた clone 木の解放 |
+| 参考: `parse_file` inclusive | 4.19s | 大半は Scanner。第1弾で parse 詰め打ち止め済み |
+
+**Phase 2 上限:** DeclInfo 経路の clone+drop ≈ **0.8–1.2s CPU**。
+実効並列 ~6 → **wall 換算 ≈ 0.13–0.25s** → **条件付き GO 帯**。
+
+**判定:** Phase 1（AstArena 基盤）+ Phase 2（DeclInfo/Initializer を NodeId 化）まで実装し、
+**Phase 3（parser 直接 alloc + 文字列インターン）と Phase 4（NodeRef 全面書き換え）はやらない。**
+
+旧期待「RSS 7.6→4GB」は陳腐化（§C-8 で peak ~3.5 GiB・目標既達）。主目標は seed wall。
+
+### DONE（2026-07-30）— **Phase 2 MVP。条件付き GO どおり Phase 3/4 は着手しない。**
+
+**入れたもの:**
+
+1. [`crates/guff-ast/src/arena.rs`](crates/guff-ast/src/arena.rs) — `NodeId` / `AstArena` / Phase 1 ラウンドトリップ
+   （`package` + 空 `func`）。本番 parser は未接続。
+2. [`crates/guff-types/src/syntax_index.rs`](crates/guff-types/src/syntax_index.rs) —
+   stamped id → `NonNull` into `Checker::files`。
+3. `DeclInfo` の `vtyp`/`init`/`tdecl`/`fdecl`/`fbody` を `Option<NodeId>` に変更。
+   `Initializer.rhs` も `NodeId`（SSA はパッケージ `ValueSpec` から解決）。
+4. `func_decl` の `body.clone()` をやめ、遅延クロージャが `block_ref` で借用。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE` + `--no-cache`、release、3 回）:**
+
+| 指標 | §1.3-post2 baseline | Phase 2 後 |
+|---|---:|---:|
+| seed dep check | 1.08s | **0.99 / 1.01 / 1.06s**（中央 ≈ **−0.07s**） |
+| typecheck_roots | 1.45s | **1.29 / 1.32 / 1.38s** |
+| findings stdout | — | 3 回 **byte 同一**（3635 B） |
+| regress tsdb | — | **PASS**（P=R=100%、wall/RSS 悪化なし） |
+
+上限見積もり 0.13–0.25s に対し実効は下限付近。条件付き GO の「Phase 2 で打ち切り」を維持し、
+**Phase 3/4 は NO-START。**
 
 ## C-2 — 常駐デーモン / watch モード
 

@@ -7,6 +7,7 @@
 //
 // The AVL tree backing `FileSet` lives in a private `tree` module.
 
+pub mod arena;
 pub mod ast;
 pub mod commentmap;
 pub mod constraint;
@@ -32,6 +33,7 @@ pub mod walk;
 
 mod tree;
 
+pub use arena::{arena_to_file, file_to_arena, AstArena, AstNode, NodeId, NodeListId};
 pub use directive::{parse_directive, Directive, DirectiveArg};
 pub use errors::{print_error, Error, ErrorList};
 pub use position::{File, FileSet, LineInfo, Pos, Position, NO_POS};
