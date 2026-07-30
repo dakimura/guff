@@ -14,8 +14,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
+use blake3::Hasher as Blake3;
 use guff_types::{WorkerOverlays, SEED_OVERLAY_SCHEMA};
 
 use crate::package::Package;
@@ -23,10 +22,9 @@ use crate::package::Package;
 /// Env var: set to `0`/`false`/`off` to disable seed persistence. Unset or any
 /// other value leaves it **enabled** (default ON).
 ///
-/// Persistence is cheap on a miss: source is read once (shared with the parser),
-/// hashed on the worker threads, and the disk writes run on a background thread
-/// off the critical path — so a fresh/empty cache pays no measurable penalty,
-/// while a persistent `GUFF_CACHE` gets the seed-hot speedup on the next run.
+/// Persistence hashes sources on the worker (blake3) and encodes overlays in
+/// parallel; disk writes run on a background thread. An empty cache still pays
+/// hashing + encode on the miss path (see PERF_TASKS_V2 A-5 blake3 follow-up).
 pub const ENV_GUFF_SEED_PERSIST: &str = "GUFF_SEED_PERSIST";
 
 /// Whether per-package seed overlay persistence is enabled (default ON).
@@ -113,17 +111,15 @@ pub fn pkg_self_hash(pkg: &Package) -> Option<String> {
 pub fn pkg_self_hash_from_sources(pkg_path: &str, sources: &[(PathBuf, Vec<u8>)]) -> String {
     let mut files: Vec<&(PathBuf, Vec<u8>)> = sources.iter().collect();
     files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut h = Sha256::new();
+    let mut h = Blake3::new();
     h.update(b"package hash\n");
     h.update(format!("pkgpath {pkg_path}\n").as_bytes());
     for (f, bytes) in &files {
-        let mut fh = Sha256::new();
-        fh.update(bytes);
-        let dig = hex_encode(&fh.finalize());
+        let dig = hex_encode(blake3::hash(bytes).as_bytes());
         let display = f.to_string_lossy();
         h.update(format!("file {display} {dig}\n").as_bytes());
     }
-    hex_encode(&h.finalize())
+    hex_encode(h.finalize().as_bytes())
 }
 
 /// Inputs that identify the seed prefix a worker overlay was built against.
@@ -147,7 +143,7 @@ pub struct BaseFingerprintInput<'a> {
 /// Prefer [`base_fingerprint_extend`] across waves so each step is O(1) in the
 /// number of previously merged packages rather than O(n) SHA over the full list.
 pub fn base_fingerprint(input: &BaseFingerprintInput<'_>) -> String {
-    let mut h = Sha256::new();
+    let mut h = Blake3::new();
     h.update(format!("seed-base v{SEED_OVERLAY_SCHEMA}\n").as_bytes());
     h.update(b"fp-chain v2\n");
     h.update(format!("go_version {}\n", input.go_version).as_bytes());
@@ -160,16 +156,16 @@ pub fn base_fingerprint(input: &BaseFingerprintInput<'_>) -> String {
     for (path, self_hash) in input.merged {
         h.update(format!("merged {path} {self_hash}\n").as_bytes());
     }
-    hex_encode(&h.finalize())
+    hex_encode(h.finalize().as_bytes())
 }
 
 /// O(1) extension of a prior [`base_fingerprint`] after one more merged package.
 pub fn base_fingerprint_extend(prev: &str, path: &str, self_hash: &str) -> String {
-    let mut h = Sha256::new();
+    let mut h = Blake3::new();
     h.update(prev.as_bytes());
     h.update(b"\n");
     h.update(format!("merged {path} {self_hash}\n").as_bytes());
-    hex_encode(&h.finalize())
+    hex_encode(h.finalize().as_bytes())
 }
 
 /// On-disk path for one overlay blob.
@@ -179,9 +175,7 @@ pub fn base_fingerprint_extend(prev: &str, path: &str, self_hash: &str) -> Strin
 /// wave `base_fp`; without `path` they would clobber one file and cache hits
 /// would load the wrong overlay (silent findings loss).
 pub fn overlay_path(seed_dir: &Path, path: &str, self_hash: &str, base_fp: &str) -> PathBuf {
-    let mut ph = Sha256::new();
-    ph.update(path.as_bytes());
-    let path_key = hex_encode(&ph.finalize());
+    let path_key = hex_encode(blake3::hash(path.as_bytes()).as_bytes());
     seed_dir.join(format!(
         "{path_key}.{self_hash}.{base_fp}.v{SEED_OVERLAY_SCHEMA}.bin"
     ))

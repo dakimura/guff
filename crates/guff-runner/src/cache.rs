@@ -25,6 +25,7 @@ use guff::position::FileSet;
 use guff_analysis::{Diagnostic, EncodedFact};
 use guff_packages::Package;
 use serde::{Deserialize, Serialize};
+use blake3::Hasher as Blake3;
 use sha2::{Digest, Sha256};
 
 /// Environment variables consulted by [`default_cache_dir`] (first wins).
@@ -501,7 +502,7 @@ impl IssueCache {
         let mut files: Vec<PathBuf> = pkg.compiled_go_files.clone();
         files.sort();
 
-        let mut h = Sha256::new();
+        let mut h = Blake3::new();
         h.update(b"package hash\n");
         h.update(format!("pkgpath {}\n", pkg.pkg_path).as_bytes());
         for f in &files {
@@ -509,7 +510,7 @@ impl IssueCache {
             let display = f.to_string_lossy();
             h.update(format!("file {display} {}\n", hex_encode(&fh)).as_bytes());
         }
-        Ok(hex_encode(&h.finalize()))
+        Ok(hex_encode(h.finalize().as_bytes()))
     }
 
     pub fn dir(&self) -> &Path {
@@ -811,9 +812,7 @@ impl IssueCache {
             }
         }
         let bytes = fs::read(path)?;
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        let dig: [u8; 32] = hasher.finalize().into();
+        let dig = *blake3::hash(&bytes).as_bytes();
         self.file_hashes
             .lock()
             .unwrap()
@@ -824,7 +823,7 @@ impl IssueCache {
 
 /// Schema version for the on-disk dep-hash registry. Bump when the fingerprint
 /// inputs or the serialized map format change.
-const DEP_HASH_REGISTRY_SCHEMA: u32 = 1;
+const DEP_HASH_REGISTRY_SCHEMA: u32 = 2;
 
 /// Deterministic fingerprint of the loaded package graph + source file identity.
 ///
