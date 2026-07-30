@@ -12,6 +12,7 @@ use crate::bail::{Bail, BailReason};
 use crate::modcache::ModCache;
 use crate::modmeta::{self, ModMetaKey, ModMetaSession};
 use crate::resolve::{resolve_import, ResolvedModule};
+use crate::vendor::{load_vendor_index, VendorIndex};
 use crate::workspace::{load_workspace, Workspace};
 
 /// Input for [`list_packages`] (mirrors the subset of `packages.Config` we need).
@@ -59,6 +60,8 @@ pub struct ListPackage {
     pub dep_only: bool,
     /// Package under test (`ForTest` in `go list` JSON). Empty when not a test variant.
     pub for_test: String,
+    /// True when the package has `CgoFiles` (needs `go list -compiled` for real CompiledGoFiles).
+    pub has_cgo: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -106,12 +109,13 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
     let module_root = active.dir.clone();
     let mod_file = active.mod_file.clone();
 
-    if module_root.join("vendor").is_dir() {
-        return Err(Bail::new(
-            BailReason::Vendor,
-            "vendor/ present (native list v1 unsupported)",
-        ));
-    }
+    // Repo vendor/: parse modules.txt. Workspace mode (go.work) ignores module
+    // vendor directories, matching cmd/go.
+    let vendor = if workspace.root.join("go.work").is_file() {
+        None
+    } else {
+        load_vendor_index(&module_root)?
+    };
 
     // Version / exclude gates apply to the active module (the one we list from).
     // Other workspace modules are only used for path resolution.
@@ -210,6 +214,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                             standard: module.standard,
                             dep_only: true,
                             for_test: String::new(),
+                            has_cgo: false,
                         },
                     );
                     let _ = e;
@@ -223,6 +228,7 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                 &workspace,
                 &cache,
                 &goroot,
+                vendor.as_ref(),
                 &mut response,
                 &mut seen,
                 &mut queue,
@@ -264,6 +270,7 @@ fn process_listed_package(
     workspace: &Workspace,
     cache: &ModCache,
     goroot: &Path,
+    vendor: Option<&VendorIndex>,
     response: &mut ListResponse,
     mut seen: &mut FxHashSet<String>,
     mut queue: &mut VecDeque<(String, PathBuf, ResolvedModule, bool)>,
@@ -278,6 +285,7 @@ fn process_listed_package(
         // Match go list's Package.GoFiles which merges CgoFiles into GoFiles.
         let mut go_files_with_cgo = go_files.clone();
         go_files_with_cgo.extend(abs_join(&build_pkg.dir, &build_pkg.cgo_files));
+        let has_cgo = !build_pkg.cgo_files.is_empty();
         // Plain package stays production-only. Test files go on `P [P.test]`.
         let compiled = go_files_with_cgo.clone();
         let ignored = abs_join(&build_pkg.dir, &build_pkg.ignored_go_files);
@@ -304,6 +312,7 @@ fn process_listed_package(
                 &cache,
                 &goroot,
                 module.standard,
+                vendor,
             )?;
             let dep_id = dep_mod.pkg_id.clone();
             import_list.push((import_path.clone(), dep_id.clone()));
@@ -319,11 +328,11 @@ fn process_listed_package(
         import_list.dedup_by(|a, b| a.0 == b.0);
         // go list synthesizes a Deps entry on runtime/cgo for cgo packages
         // (not an Imports entry). Skip for runtime/cgo itself.
-        if !build_pkg.cgo_files.is_empty() && pkg_path != "runtime/cgo" {
+        if has_cgo && pkg_path != "runtime/cgo" {
             let cgo = "runtime/cgo";
             if !direct_ids.iter().any(|d| d == cgo) {
                 if let Ok((dep_dir, dep_mod)) =
-                    resolve_import(cgo, &workspace, &cache, &goroot, false)
+                    resolve_import(cgo, &workspace, &cache, &goroot, false, vendor)
                 {
                     let dep_id = dep_mod.pkg_id.clone();
                     // Deps only — do not add to import_list / Imports map.
@@ -360,6 +369,7 @@ fn process_listed_package(
                 standard: module.standard,
                 dep_only: !is_root,
                 for_test: String::new(),
+                has_cgo,
             },
         );
 
@@ -389,6 +399,7 @@ fn process_listed_package(
                         &workspace,
                         &cache,
                         &goroot,
+                        vendor,
                         module.standard,
                         cfg.need_deps,
                         &mut packages,
@@ -413,6 +424,7 @@ fn process_listed_package(
                             standard: module.standard,
                             dep_only: false,
                             for_test: pkg_path.clone(),
+                            has_cgo,
                         },
                     );
                     response.roots.push(internal_id.clone());
@@ -435,6 +447,7 @@ fn process_listed_package(
                         &workspace,
                         &cache,
                         &goroot,
+                        vendor,
                         false,
                         cfg.need_deps,
                         &mut packages,
@@ -469,6 +482,7 @@ fn process_listed_package(
                             standard: false,
                             dep_only: false,
                             for_test: pkg_path.clone(),
+                            has_cgo: false,
                         },
                     );
                     response.roots.push(xtest_id.clone());
@@ -493,7 +507,7 @@ fn process_listed_package(
                     }
                     for std in ["testing", "os", "reflect", "testing/internal/testdeps"] {
                         if let Ok((dep_dir, dep_mod)) =
-                            resolve_import(std, &workspace, &cache, &goroot, false)
+                            resolve_import(std, &workspace, &cache, &goroot, false, vendor)
                         {
                             let dep_id = dep_mod.pkg_id.clone();
                             tm_imports.push((std.to_string(), dep_id.clone()));
@@ -523,6 +537,7 @@ fn process_listed_package(
                             standard: false,
                             dep_only: false,
                             for_test: String::new(),
+                            has_cgo: false,
                         },
                     );
                     response.roots.push(test_bin);
@@ -806,6 +821,7 @@ fn ensure_unsafe(packages: &mut FxHashMap<String, ListPackage>, seen: &mut FxHas
             standard: true,
             dep_only: true,
             for_test: String::new(),
+            has_cgo: false,
         },
     );
 }
@@ -819,6 +835,7 @@ fn resolve_import_paths(
     workspace: &Workspace,
     cache: &ModCache,
     goroot: &Path,
+    vendor: Option<&VendorIndex>,
     from_stdlib: bool,
     need_deps: bool,
     packages: &mut FxHashMap<String, ListPackage>,
@@ -846,7 +863,7 @@ fn resolve_import_paths(
             continue;
         }
         let (dep_dir, dep_mod) =
-            resolve_import(import_path, workspace, cache, goroot, from_stdlib)?;
+            resolve_import(import_path, workspace, cache, goroot, from_stdlib, vendor)?;
         let dep_id = dep_mod.pkg_id.clone();
         import_list.push((import_path.clone(), dep_id.clone()));
         direct_ids.push(dep_id.clone());

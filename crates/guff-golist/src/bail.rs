@@ -35,7 +35,7 @@ pub enum BailReason {
     GoVersionTooOld,
     /// `go.work` present but the cwd is not inside any `use` module.
     GoWork,
-    /// `vendor/` directory present (v2).
+    /// `vendor/` directory present without usable `modules.txt`.
     Vendor,
     /// `exclude` / `retract` in go.mod (conservative).
     ExcludeOrRetract,
@@ -47,7 +47,7 @@ pub enum BailReason {
     UnsupportedBuildFlags,
     /// A required module is not extracted under GOMODCACHE (never download).
     ModuleNotInCache,
-    /// Package imports `"C"` / has cgo files (C-3e delegates to `go list`).
+    /// Package imports `"C"` / has cgo files (reserved; C-3e delegates per-package).
     HasCgo,
     /// Import path could not be resolved.
     UnresolvedImport,

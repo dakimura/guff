@@ -2460,9 +2460,21 @@ fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diag
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return;
     };
-    let under = unalias_readonly(&artifacts.types, arg_ty).underlying(&artifacts.types);
-    if is_interface(&artifacts.types, under) {
+    // TypeOf(x) where x has an interface type is a dynamic operation; don't
+    // transform it to TypeFor (x/tools reflecttypefor). Also skip when the
+    // static type is Invalid or an incomplete Named/Alias — under
+    // `run_despite_errors`, TypesInfo can carry Invalid for otherwise
+    // well-typed interface params (seen on prometheus `parser.Expr`), and
+    // suggesting TypeFor would be a false positive.
+    let typ = unalias_readonly(&artifacts.types, arg_ty);
+    if is_interface(&artifacts.types, typ) {
         return;
+    }
+    let under = typ.underlying(&artifacts.types);
+    match artifacts.types.get(under) {
+        TypeData::Basic(b) if b.kind() == BasicKind::Invalid => return,
+        TypeData::Named(_) | TypeData::Alias(_) => return,
+        _ => {}
     }
     if is_complicated_type(pass, arg_ty) {
         return;

@@ -5347,9 +5347,12 @@ fn modernize_flags_reflecttypefor() {
         "reflecttypefor.go",
     );
     let messages = support::run_analyzer(modernize(), &pkg);
-    assert!(
-        messages.iter().filter(|m| m.contains("TypeFor")).count() >= 2,
-        "{messages:?}"
+    let hits: Vec<_> = messages.iter().filter(|m| m.contains("TypeFor")).collect();
+    assert_eq!(
+        hits.len(),
+        2,
+        "expected 2 TypeFor hits (concrete + Elem; interface arg skipped), got {} {messages:?}",
+        hits.len()
     );
 }
 

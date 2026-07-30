@@ -6,6 +6,7 @@ use guff_build::{module_import_dir, ModFile, Replace};
 
 use crate::bail::{Bail, BailReason};
 use crate::modcache::{module_dir, ModCache};
+use crate::vendor::VendorIndex;
 use crate::workspace::{Workspace, WorkspaceModule};
 
 /// Module that owns a resolved package directory.
@@ -19,7 +20,7 @@ pub struct ResolvedModule {
     pub indirect: bool,
     pub go_version: String,
     pub standard: bool,
-    /// Package id as reported by `go list` (may be `vendor/...`).
+    /// Package id as reported by `go list` (may be `vendor/...` for GOROOT).
     pub pkg_id: String,
 }
 
@@ -27,12 +28,16 @@ pub struct ResolvedModule {
 ///
 /// `from_standard` is true when the importing package lives in GOROOT (so
 /// `GOROOT/src/vendor/` wins over GOMODCACHE, matching `go list`).
+///
+/// When `vendor` is `Some`, third-party imports resolve from `vendor/` (and
+/// GOMODCACHE is skipped), matching `-mod=vendor`.
 pub fn resolve_import(
     import_path: &str,
     workspace: &Workspace,
     cache: &ModCache,
     goroot: &Path,
     from_standard: bool,
+    vendor: Option<&VendorIndex>,
 ) -> Result<(PathBuf, ResolvedModule), Bail> {
     if import_path == "unsafe" || import_path == "C" {
         return Err(Bail::new(
@@ -84,12 +89,42 @@ pub fn resolve_import(
         }
     }
 
-    // 3. replace / require → GOMODCACHE (workspace replaces first).
-    if let Some(resolved) = resolve_via_modules(import_path, workspace, cache)? {
+    // 3. Repo `vendor/` (`-mod=vendor`). ImportPath stays the module path;
+    // Dir is under vendor/. Module.Dir/GoMod are omitted by `go list`.
+    if let Some(v) = vendor {
+        if let Some(mod_meta) = v.module_for(import_path) {
+            let pkg_dir = v.dir.join(import_path);
+            if !pkg_dir.is_dir() {
+                return Err(Bail::new(
+                    BailReason::UnresolvedImport,
+                    format!(
+                        "vendored package {import_path} listed in modules.txt but missing under {}",
+                        pkg_dir.display()
+                    ),
+                ));
+            }
+            return Ok((
+                pkg_dir,
+                ResolvedModule {
+                    path: mod_meta.path.clone(),
+                    version: mod_meta.version.clone(),
+                    dir: PathBuf::new(),
+                    go_mod: PathBuf::new(),
+                    main: false,
+                    indirect: false,
+                    go_version: mod_meta.go_version.clone(),
+                    standard: false,
+                    pkg_id: import_path.to_string(),
+                },
+            ));
+        }
+        // Vendor mode: do not fall through to GOMODCACHE.
+    } else if let Some(resolved) = resolve_via_modules(import_path, workspace, cache)? {
+        // 4. replace / require → GOMODCACHE (workspace replaces first).
         return Ok(resolved);
     }
 
-    // 4. GOROOT stdlib.
+    // 5. GOROOT stdlib.
     if !goroot.as_os_str().is_empty() {
         let dir = goroot.join("src").join(import_path);
         if dir.is_dir() {
@@ -367,5 +402,5 @@ pub fn resolve_import_single(
         }],
         replaces: Vec::new(),
     };
-    resolve_import(import_path, &ws, cache, goroot, from_standard)
+    resolve_import(import_path, &ws, cache, goroot, from_standard, None)
 }

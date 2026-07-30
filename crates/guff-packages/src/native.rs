@@ -247,6 +247,7 @@ fn to_package(p: ListPackage) -> Package {
         deps: p.deps,
         module: p.module.map(to_module),
         for_test: p.for_test,
+        has_cgo: p.has_cgo,
         ..Package::default()
     }
 }
@@ -265,15 +266,48 @@ fn to_module(m: ListModule) -> Module {
     }
 }
 
-/// Native graphs keep stdlib on the source path (C-3d). Cgo `CompiledGoFiles`
-/// still come from `go list` when native bails; when native succeeds with cgo
-/// packages present, `GoFiles` (which already include `*.go` from cgo) are used
-/// until C-3e wires a dedicated compiled-files attach.
+/// Native graphs keep stdlib on the source path (C-3d). Cgo packages get real
+/// `CompiledGoFiles` (including GOCACHE `_cgo_*.go`) via a scoped
+/// `go list -compiled=true` — same second call as C-3a, only for packages with
+/// `has_cgo`. Non-cgo repos never invoke `go`.
 fn attach_hybrid_exports(
     cfg: &Config,
-    response: DriverResponse,
+    mut response: DriverResponse,
 ) -> Result<DriverResponse, LoadError> {
-    let _ = cfg;
+    if !cfg.dep_source {
+        return Ok(response);
+    }
+    let mut want: Vec<String> = response
+        .packages
+        .iter()
+        .filter(|p| p.has_cgo && p.errors.is_empty() && !p.id.contains(' '))
+        .map(|p| {
+            // `go list` args are import paths; test-variant ids are excluded above.
+            if p.pkg_path.is_empty() {
+                p.id.clone()
+            } else {
+                p.pkg_path.clone()
+            }
+        })
+        .collect();
+    want.sort();
+    want.dedup();
+    if want.is_empty() {
+        return Ok(response);
+    }
+    match crate::golist::attach_compiled_files_for_paths(cfg, &mut response.packages, &want) {
+        Ok(n) => {
+            if crate::debug::enabled() && n > 0 {
+                eprintln!("guff:   native cgo compiled-files attached ({n} pkgs)");
+            }
+        }
+        Err(e) => {
+            // Non-fatal: keep GoFiles fallback (same policy as C-3a).
+            if crate::debug::enabled() {
+                eprintln!("guff:   native cgo compiled-files skipped: {e}");
+            }
+        }
+    }
     Ok(response)
 }
 
@@ -334,10 +368,11 @@ pub fn diff_responses(native: &DriverResponse, golist: &DriverResponse) -> Vec<S
             ));
         }
         if norm_files(&np.compiled_go_files) != norm_files(&gp.compiled_go_files) {
-            // Cgo / generated: ignore when GoFiles match (CompiledGoFiles may
-            // include go tool output native listing does not see).
+            // After C-3e, cgo packages should match. Soft-ignore only when the
+            // native side still has the GoFiles fallback (attach failed / no go).
             let go_same = norm_files(&np.go_files) == norm_files(&gp.go_files);
-            if !go_same
+            let native_is_fallback = norm_files(&np.compiled_go_files) == norm_files(&np.go_files);
+            if !(go_same && native_is_fallback)
                 && norm_files(&np.go_files) != norm_files(&gp.compiled_go_files)
                 && norm_files(&np.compiled_go_files) != norm_files(&gp.go_files)
             {

@@ -948,17 +948,23 @@ fn check_flag_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
 }
 
 fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    // Builtin `append` only — go-critic's `append($_)` does not match methods
+    // named `append` (e.g. `cmd.append(app)`).
+    if matches!(call.fun.as_ref(), Expr::Ident(id) if id.name == "append")
+        && call.args.len() == 1
+        && !call.ellipsis.is_valid()
+    {
+        report(
+            pending,
+            call.fun.pos().0 as u32,
+            "no-op append call, probably missing arguments",
+        );
+    }
+
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
     match name.as_str() {
-        "append" if call.args.len() == 1 && !call.ellipsis.is_valid() => {
-            report(
-                pending,
-                call.fun.pos().0 as u32,
-                "no-op append call, probably missing arguments",
-            );
-        }
         n if (n == "filepath.Join"
             || n == "path/filepath.Join"
             || n.ends_with("/filepath.Join"))
@@ -4469,6 +4475,24 @@ fn is_byte_slice_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
     }
 }
 
+/// go-critic `stringXbytes` Where: `m["re"].Type.Is("*regexp.Regexp")` (stdlib only).
+fn is_stdlib_regexp_recv(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let rendered = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    rendered == "*regexp.Regexp"
+}
+
 fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
@@ -4656,7 +4680,9 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                     }
                 }
             }
-            // $re.Match([]byte($s)) and friends
+            // $re.Match([]byte($s)) and friends — go-critic requires
+            // `*regexp.Regexp` (stdlib). Forks like github.com/grafana/regexp
+            // share the API but must not match.
             if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
                 if matches!(
                     sel.sel.name.as_str(),
@@ -4664,17 +4690,19 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                 ) && !call.args.is_empty()
                 {
                     if let Some(_s) = is_byte_slice_conv(&call.args[0]) {
-                        let suggest = match sel.sel.name.as_str() {
-                            "Match" => "MatchString",
-                            "FindIndex" => "FindStringIndex",
-                            "FindAllIndex" => "FindAllStringIndex",
-                            _ => return,
-                        };
-                        report(
-                            pending,
-                            call.args[0].pos().0 as u32,
-                            format!("can replace `[]byte($s)` arg with `{suggest}`"),
-                        );
+                        if is_stdlib_regexp_recv(pass, &sel.x) {
+                            let suggest = match sel.sel.name.as_str() {
+                                "Match" => "MatchString",
+                                "FindIndex" => "FindStringIndex",
+                                "FindAllIndex" => "FindAllStringIndex",
+                                _ => unreachable!(),
+                            };
+                            report(
+                                pending,
+                                call.args[0].pos().0 as u32,
+                                format!("can replace `[]byte($s)` arg with `{suggest}`"),
+                            );
+                        }
                     }
                 }
             }

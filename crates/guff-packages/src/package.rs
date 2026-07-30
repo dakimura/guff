@@ -91,6 +91,9 @@ pub struct Package {
     pub module: Option<Module>,
     /// Package under test, if any (`ForTest` in go list JSON).
     pub for_test: String,
+    /// True when the package has cgo sources (`CgoFiles`). Used by C-3e to
+    /// decide which packages need a `go list -compiled=true` attach.
+    pub has_cgo: bool,
 
     // -- Filled in Phase 4; left empty in Phase 2 --
 
@@ -158,6 +161,7 @@ impl Clone for Package {
             deps: self.deps.clone(),
             module: self.module.clone(),
             for_test: self.for_test.clone(),
+            has_cgo: self.has_cgo,
             types: self.types,
             type_artifacts: None,
             fset: self.fset.clone(),

@@ -2,7 +2,7 @@
 //!
 //! Port of `packages.Load` and the non-typecheck portion of `refine` from `packages.go`.
 
-use crate::hash::HashMap;
+use crate::hash::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::config::Config;
@@ -75,7 +75,7 @@ pub fn load_graph_with_driver<D: Driver>(
 fn refine(
     cfg: &Config,
     requested_mode: LoadMode,
-    response: DriverResponse,
+    mut response: DriverResponse,
 ) -> Result<(Vec<Arc<Package>>, Vec<Arc<Package>>), LoadError> {
     let timing = crate::debug::enabled();
     let detail = crate::debug::detailed();
@@ -113,6 +113,19 @@ fn refine(
     // Clear against the *implied* mode so fields fetched because of implication
     // (e.g. NEED_MODULE via NEED_TYPES) are retained — matching go/packages.
     clear_unrequested_fields(&mut by_id, requested_mode.implied());
+
+    // golangci-lint drops the plain `P` when `P [P.test]` exists (and drops
+    // synthetic testmains). Without this, unused / ineffassign / friends report
+    // false positives on the prod-only view of packages that have tests.
+    let all_pkgs: Vec<Arc<Package>> = by_id.values().cloned().collect();
+    let keep: HashSet<String> = crate::dedup::filter_test_main_packages(
+        crate::dedup::filter_duplicate_packages(all_pkgs),
+    )
+    .into_iter()
+    .map(|p| p.id.clone())
+    .collect();
+    by_id.retain(|id, _| keep.contains(id));
+    response.roots.retain(|id| keep.contains(id));
 
     let mut roots = Vec::with_capacity(response.roots.len());
     for root in response.roots {

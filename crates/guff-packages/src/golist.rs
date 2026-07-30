@@ -741,7 +741,7 @@ fn attach_compiled_files(
     }
     let mut attached = 0;
     for pkg in packages.iter_mut() {
-        let Some(files) = compiled.get(&pkg.id) else {
+        let Some(files) = compiled.get(&pkg.id).or_else(|| compiled.get(&pkg.pkg_path)) else {
             continue;
         };
         Arc::make_mut(pkg).compiled_go_files =
@@ -749,6 +749,23 @@ fn attach_compiled_files(
         attached += 1;
     }
     attached
+}
+
+/// C-3e: fetch + attach `CompiledGoFiles` for the given import paths only.
+///
+/// Used by the native lister after a successful graph walk. Failures are
+/// returned to the caller (which treats them as non-fatal).
+pub(crate) fn attach_compiled_files_for_paths(
+    cfg: &Config,
+    packages: &mut [Arc<Package>],
+    paths: &[String],
+) -> Result<usize, GoListError> {
+    if paths.is_empty() {
+        return Ok(0);
+    }
+    let timing = crate::debug::enabled();
+    let map = load_or_fetch_compiled_files(cfg, paths, timing)?;
+    Ok(attach_compiled_files(packages, &map))
 }
 
 /// How hybrid mode may attach warm-GOCACHE third-party export `.a` files.

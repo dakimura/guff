@@ -63,7 +63,7 @@ fn cache_path(key: &str) -> Option<PathBuf> {
     )
 }
 
-const NATIVE_LIST_CACHE_VERSION: &str = "native-list-v1";
+const NATIVE_LIST_CACHE_VERSION: &str = "native-list-v2";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedGraph {
@@ -88,6 +88,8 @@ struct CachedPackage {
     deps: Vec<String>,
     module: Option<CachedModule>,
     for_test: String,
+    #[serde(default)]
+    has_cgo: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -196,6 +198,18 @@ fn cache_key(cfg: &Config, patterns: &[String]) -> String {
                 Err(_) => {
                     h.update(format!("file={name}=missing\n").as_bytes());
                 }
+            }
+        }
+        // Vendor mode changes resolution without touching go.mod contents.
+        let modules_txt = mod_dir.join("vendor").join("modules.txt");
+        match std::fs::read(&modules_txt) {
+            Ok(bytes) => {
+                h.update(b"file=vendor/modules.txt\n");
+                h.update(&bytes);
+                h.update(b"\n");
+            }
+            Err(_) => {
+                h.update(b"file=vendor/modules.txt=missing\n");
             }
         }
     }
@@ -410,6 +424,7 @@ impl CachedGraph {
                         go_version: m.go_version.clone(),
                     }),
                     for_test: p.for_test.clone(),
+                    has_cgo: p.has_cgo,
                 })
                 .collect(),
         }
@@ -475,6 +490,7 @@ impl CachedPackage {
                 error: None,
             }),
             for_test: self.for_test,
+            has_cgo: self.has_cgo,
             ..Package::default()
         }
     }

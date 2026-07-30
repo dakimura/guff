@@ -10,6 +10,7 @@ mod list;
 mod modcache;
 mod modmeta;
 mod resolve;
+mod vendor;
 mod workspace;
 
 pub use bail::{Bail, BailReason};
@@ -17,4 +18,5 @@ pub use escape::escape_path;
 pub use list::{list_packages, ListConfig, ListModule, ListPackage, ListResponse};
 pub use modcache::{default_gomodcache, module_dir, ModCache};
 pub use resolve::ResolvedModule;
+pub use vendor::{load_vendor_index, parse_modules_txt, VendorIndex, VendorModule};
 pub use workspace::{find_workspace_root, load_workspace, Workspace, WorkspaceModule};

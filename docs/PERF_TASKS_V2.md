@@ -31,7 +31,12 @@
 >   wall ~1.94s → **~1.80s**
 > - warm: load **0.04s** / wall **0.15s**
 >
-> `GUFF_NATIVE_LIST=off` で旧経路。残: repo `vendor/` / C-3e cgo。B-9 はやらない。§C-3c。
+> `GUFF_NATIVE_LIST=off` で旧経路。**repo `vendor/` + C-3e DONE（2026-07-31）。**
+> B-9 はやらない。§C-3c / §C-3e。
+>
+> **vendor/ + C-3e DONE（2026-07-31）:** `vendor/modules.txt` をパースして `-mod=vendor`
+> 解決（go.work 時は cmd/go 同様に無視）。C-3e は `has_cgo` パッケージだけ
+> `go list -compiled=true` に委譲（C-3a 第 2 コール再利用）。cgo 無しリポは go ゼロ呼び出し。
 >
 > **C-3d DONE（2026-07-30）:** stdlib を GOROOT ソース typecheck + seed overlay 永続化。
 > **既定オン**（`GUFF_STDLIB_SOURCE=export` で旧 `.a` 経路）。`go list -export` stdlib
@@ -3978,12 +3983,12 @@ build constraints（`//go:build` / `+build` / `_GOOS_GOARCH` サフィックス�
 | 条件 | 初版 |
 |---|---|
 | `go.mod` の `go` ディレクティブ < 1.17 | **bail**（枝刈り前提が崩れる） |
-| `go.work` が存在 | **bail**（第 2 版で対応） |
-| `vendor/` が存在 | **bail**（第 2 版。`vendor/modules.txt` は簡単なので早めに） |
+| `go.work` が存在 | **対応済み**（use + workspace replace + 粗 MVS） |
+| `vendor/` が存在 | **対応済み**（`vendor/modules.txt`。go.work 時は無視。modules.txt 無しは bail） |
 | `GOFLAGS` / `build_flags` に `-tags` 以外 | **bail** |
-| require されたモジュールが GOMODCACHE に未展開 | **bail**（ダウンロードは絶対にしない） |
-| `CgoFiles` を持つパッケージがある | **cgo だけ `go list` に委譲**（C-3e） |
-| `-test=true` | 第 2 版（テストバリアント `pkg [pkg.test]` の生成が要る） |
+| require されたモジュールが GOMODCACHE に未展開 | **bail**（ダウンロードは絶対にしない。vendor 時は vendor から解決） |
+| `CgoFiles` を持つパッケージがある | **cgo だけ `go list` に委譲**（C-3e DONE） |
+| `-test=true` | **対応済み**（`P [P.test]` / `P_test [P.test]` / `P.test` + for-test 依存） |
 | パターンが `./…` / `.` / 絶対パス / 自モジュール以外 | **bail** |
 
 **等価性オラクル（これが工数の半分。先に作ること）:**
@@ -4044,19 +4049,24 @@ findings は差を吸収してしまうので、オラクルとしては鈍す�
 
 ※ `--no-cache` は golist/stdlib_exports 書き込みも止めるので A は毎回 export を払う。
 
-**残:** repo `vendor/` / C-3e（cgo CompiledGoFiles）。B-9 はやらない。
+**残:** なし（C-3 製品タスク完了）。B-9 はやらない。
 
 ---
 
-### C-3e — cgo
+### C-3e — cgo **DONE（2026-07-31）**
 
 **`go` を完全に不要にできない唯一の本質的な理由。** `import "C"` の解決には
 cgo（＝ C コンパイラ）が要ります。**再実装しないこと。**
 
-**方針:** `CgoFiles` を持つパッケージが存在するときだけ、
-**そのパッケージに限定して** `go list -compiled=true` に委譲する（C-3a で作る第 2 コールがそのまま使える）。
-**cgo を使わないリポジトリでは `go` が 1 回も呼ばれない**状態に到達できます。
-prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は export data 経路なので不要です。
+**方針（実装済み）:** `CgoFiles` を持つパッケージが存在するときだけ、
+**そのパッケージに限定して** `go list -compiled=true` に委譲する（C-3a の第 2 コールを
+`attach_hybrid_exports` → `attach_compiled_files_for_paths` 経由で再利用）。
+**cgo を使わないリポジトリでは `go` が 1 回も呼ばれない。**
+失敗時は GoFiles フォールバック（C-3a と同ポリシー）。
+
+**あわせて repo `vendor/` DONE:** `vendor/modules.txt` パーサ + `resolve_import` で
+`vendor/<import>` を優先（GOMODCACHE スキップ）。`go.work` 時は vendor 無視。
+`vendor/` のみで `modules.txt` 無しは従来どおり bail。
 
 ---
 
@@ -4068,11 +4078,9 @@ prometheus では非 stdlib の cgo パッケージは **1 個**、stdlib 側は
 | ~~C-3b~~ | ~~`go env`/`go version` の撲滅~~ **DONE**（cold で 5 本消滅。wall ±0） | 小 | **±0（誤差帯）** | −3 種 | 低 |
 | C-3c | ネイティブ lister（+ warm キャッシュ + `-test` + peek + modmeta-v2） | **DONE** | `--no-cache` peek **0.04s** / go 主コール消滅 | 主コールが消える（bail/cgo 除く） | 低（検証済み） |
 | ~~C-3d~~ | ~~stdlib 型スナップショット~~ **DONE**（既定ソース・export 修正で findings 同一） | 中〜大 | seed-hot `--no-cache` で export 0.18s 消滅 | export コール消滅 + go-less | 低（修正後） |
-| C-3e | cgo は `go list` に委譲 | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
+| ~~C-3e~~ | ~~cgo は `go list` に委譲~~ **DONE**（+ repo `vendor/modules.txt`） | 小 | — | cgo 無しリポジトリで **ゼロ** | 低 |
 
-**C-3a / C-3b / C-3d は DONE。C-3c Phase 2+3 は DONE（既定オン + peek + modmeta-v2）**。
-残は repo `vendor/` / C-3e。**wall だけが目的なら C-3 の安い削りはもう終わっています**
-（残りは製品タスク）。
+**C-3a〜C-3e すべて DONE**（C-3c Phase 2+3 含む）。**wall だけが目的なら C-3 の安い削りはもう終わっています。**
 
 ### C-3c Phase 3 DONE メモ（2026-07-31）
 
@@ -4116,7 +4124,7 @@ verify（peek / modmeta 両経路）diff 空 / findings **28≡28**（off≡on�
 verify diff 空 / findings 28≡28。空 GUFF_CACHE が go list に大きく勝てないのは
 **go 側 GOCACHE が常に warm**なため（設計書どおり「初回 ≈ go list、勝つのはキャッシュ後」）。
 
-**残タスク:** repo `vendor/`、C-3e（cgo CompiledGoFiles 委譲）。
+**残タスク:** なし（repo `vendor/` + C-3e は 2026-07-31 に DONE）。
 
 ### C-3c Phase 1 DONE メモ（2026-07-30）
 

@@ -284,3 +284,92 @@ fn lists_fortest_dep_variants() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn lists_from_vendor_modules_txt() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-vendor-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    let main = tmp.join("main");
+    write(
+        &main.join("go.mod"),
+        "module example.com/app\n\ngo 1.22\n\nrequire example.com/lib v1.0.0\n",
+    );
+    write(
+        &main.join("main.go"),
+        "package main\n\nimport (\n\t\"fmt\"\n\t\"example.com/lib\"\n)\n\nfunc main() { fmt.Println(lib.V) }\n",
+    );
+
+    // Plant vendor/ instead of GOMODCACHE — empty cache must still resolve.
+    write(
+        &main.join("vendor/modules.txt"),
+        "# example.com/lib v1.0.0\n## explicit; go 1.22\nexample.com/lib\n",
+    );
+    write(
+        &main.join("vendor/example.com/lib/go.mod"),
+        "module example.com/lib\n\ngo 1.22\n",
+    );
+    write(
+        &main.join("vendor/example.com/lib/lib.go"),
+        "package lib\n\nconst V = 1\n",
+    );
+
+    let cfg = ListConfig {
+        dir: main.clone(),
+        need_deps: true,
+        gomodcache: Some(tmp.join("empty-cache")),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &[".".to_string()]).expect("list with vendor/");
+    let lib = resp
+        .packages
+        .iter()
+        .find(|p| p.id == "example.com/lib")
+        .expect("example.com/lib from vendor/");
+    assert!(
+        lib.dir.ends_with("vendor/example.com/lib"),
+        "dir should be under vendor/: {}",
+        lib.dir.display()
+    );
+    let m = lib.module.as_ref().expect("module metadata");
+    assert_eq!(m.path, "example.com/lib");
+    assert_eq!(m.version, "v1.0.0");
+    assert_eq!(m.go_version, "1.22");
+    assert!(m.dir.as_os_str().is_empty(), "go list omits Module.Dir when vendored");
+    assert!(resp.packages.iter().any(|p| p.id == "fmt"));
+
+    let _ = fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn bails_on_vendor_without_modules_txt() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-vendor-bail-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    write(&tmp.join("go.mod"), "module example.com/app\n\ngo 1.22\n");
+    write(&tmp.join("main.go"), "package main\n\nfunc main() {}\n");
+    fs::create_dir_all(tmp.join("vendor")).unwrap();
+
+    let cfg = ListConfig {
+        dir: tmp.clone(),
+        ..ListConfig::default()
+    };
+    let err = list_packages(&cfg, &[".".to_string()]).unwrap_err();
+    assert_eq!(err.reason, BailReason::Vendor);
+
+    let _ = fs::remove_dir_all(&tmp);
+}
