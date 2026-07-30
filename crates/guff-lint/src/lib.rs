@@ -698,6 +698,24 @@ impl LintResult {
     }
 }
 
+/// What to do with the analysis artifacts once the diagnostics are printed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Teardown {
+    /// Free the package graph, syntax trees and type arenas before returning.
+    Free,
+    /// Leave them allocated because the process is about to exit.
+    ///
+    /// A cold `./...` sweep over Prometheus keeps ~3.7 GiB of packages, ASTs and
+    /// type arenas reachable from [`LintResult`]. Walking that graph to free it
+    /// costs **0.28s single-threaded** (docs/PERF_TASKS_V2.md §A-10) and happens
+    /// *after* the last diagnostic has been written, so a one-shot CLI pays it as
+    /// pure latency for memory the kernel is about to reclaim wholesale.
+    ///
+    /// Only correct when nothing runs after the call. Anything long-lived
+    /// (`--watch`, tests, embedders) must use [`Teardown::Free`].
+    LeakOnProcessExit,
+}
+
 /// Run linters and print text diagnostics to stdout.
 ///
 /// Returns [`LintOptions::issues_exit_code`] if any diagnostic, otherwise 0.
@@ -708,14 +726,23 @@ pub fn run_and_print(opts: &LintOptions) -> Result<i32, RunError> {
 
 /// Like [`run_and_print`], but writes diagnostics to `out` (for tests / custom sinks).
 pub fn run_and_write(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
+    run_and_write_with_teardown(opts, out, Teardown::Free)
+}
+
+/// Like [`run_and_write`], but lets a process that exits next skip the teardown.
+pub fn run_and_write_with_teardown(
+    opts: &LintOptions,
+    out: &mut dyn Write,
+    teardown: Teardown,
+) -> Result<i32, RunError> {
     if opts.analyzers.is_empty() {
         eprintln!("guff: no analyzers enabled (missing linter crates?)");
         return Ok(0);
     }
 
     match opts.timeout {
-        Some(t) if !t.is_zero() => run_and_write_with_timeout(opts, out, t),
-        _ => run_and_write_inner(opts, out),
+        Some(t) if !t.is_zero() => run_and_write_with_timeout(opts, out, t, teardown),
+        _ => run_and_write_inner(opts, out, teardown),
     }
 }
 
@@ -742,7 +769,11 @@ fn fmt_thread_count() -> usize {
     2
 }
 
-fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, RunError> {
+fn run_and_write_inner(
+    opts: &LintOptions,
+    out: &mut dyn Write,
+    teardown: Teardown,
+) -> Result<i32, RunError> {
     let timing = crate::debug::enabled();
 
     // Formatting reads files straight from disk and needs neither the package
@@ -811,11 +842,27 @@ fn run_and_write_inner(opts: &LintOptions, out: &mut dyn Write) -> Result<i32, R
     if timing {
         eprintln!("guff: phase print {:.2}s", tp.elapsed().as_secs_f64());
     }
-    Ok(if issues.is_empty() {
+    let code = if issues.is_empty() {
         0
     } else {
         opts.issues_exit_code
-    })
+    };
+    let td = std::time::Instant::now();
+    match teardown {
+        Teardown::Free => drop(result),
+        Teardown::LeakOnProcessExit => std::mem::forget(result),
+    }
+    if timing {
+        eprintln!(
+            "guff: phase teardown {:.2}s ({})",
+            td.elapsed().as_secs_f64(),
+            match teardown {
+                Teardown::Free => "freed",
+                Teardown::LeakOnProcessExit => "left to process exit",
+            },
+        );
+    }
+    Ok(code)
 }
 
 /// Run on a worker thread and abort the process-visible wait when `timeout` elapses.
@@ -827,6 +874,7 @@ fn run_and_write_with_timeout(
     opts: &LintOptions,
     out: &mut dyn Write,
     timeout: Duration,
+    teardown: Teardown,
 ) -> Result<i32, RunError> {
     // Collect into a buffer on the worker so we only print on success.
     let opts = opts.clone();
@@ -836,7 +884,7 @@ fn run_and_write_with_timeout(
         .stack_size(LINT_WORKER_STACK)
         .spawn(move || {
             let mut buf = Vec::new();
-            let result = run_and_write_inner(&opts, &mut buf);
+            let result = run_and_write_inner(&opts, &mut buf, teardown);
             let _ = tx.send(match result {
                 Ok(code) => Ok((buf, code)),
                 Err(e) => Err(e.to_string()),

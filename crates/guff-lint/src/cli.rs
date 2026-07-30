@@ -15,10 +15,11 @@ use crate::custom::{
 use crate::{
     default_stdout_format, discover_config, format_linters_listing, formats_from_output_config,
     guff_version, is_meta_linter, load_config, migrate_config_file, parse_go_duration,
-    partition_linters, resolve_linters_with_settings, resolve_out_formats, run_and_print,
-    version_banner, ConfigError, ConfigFile, FormattersV2, IssueFilter, LinterDefault,
-    LinterSelection, LinterSettings, LintOptions, IssuesConfig, OutputSpec, PrinterOptions,
-    RunError, SeverityConfig, DEFAULT_TIMEOUT, EXIT_TIMEOUT, NOLINTLINT_NAME,
+    partition_linters, resolve_linters_with_settings, resolve_out_formats,
+    run_and_write_with_teardown, version_banner, ConfigError, ConfigFile, FormattersV2,
+    IssueFilter, LinterDefault, LinterSelection, LinterSettings, LintOptions, IssuesConfig,
+    OutputSpec, PrinterOptions, RunError, SeverityConfig, Teardown, DEFAULT_TIMEOUT,
+    EXIT_TIMEOUT, NOLINTLINT_NAME,
 };
 use crate::watch::run_watch;
 
@@ -424,7 +425,9 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     if args.watch {
         run_watch(&opts)
     } else {
-        run_and_print(&opts)
+        // One shot: the process exits as soon as this returns, so hand the
+        // package graph and type arenas to the kernel instead of walking them.
+        run_and_write_with_teardown(&opts, &mut io::stdout(), Teardown::LeakOnProcessExit)
     }
 }
 

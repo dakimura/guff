@@ -12,10 +12,10 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
-> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
-> C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
+> C-3a（`go list` の無駄取り） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -27,7 +27,18 @@
 > （`-compiled=true` 0.39s ＋ 読まないフィールドの marshal 0.17s）で、
 > **`go list` を 1 行も置き換えずに**削れました。§C-3.0 に内訳、§C-3a に DONE 記録。
 > **残る C-3b〜C-3e（`go` 非依存化）は wall ではなく製品判断のタスクです**（§C-3 ロードマップ）。
-> **次は C-1（AST・要合意）や B-10（`waited>0` まで NO-START）など。B-9 は原則着手しない。**
+>
+> **A-10 DONE（2026-07-30）: cold −0.27s / `-j 1` −0.19s / findings byte 同一。**
+> A-9 が測った「起動側」の反対側＝**「最後の phase からプロセス終了まで」を誰も測っていなかった**
+> ため、**`drop(LintResult)` の 0.28s** が丸ごと隠れていました。診断を全部 stdout に出した後で
+> ~3.7 GiB の参照グラフを free していたので、one-shot だけ `std::mem::forget` に変更。§A-10。
+>
+> **⚠️ 地図は §1.3-post2（2026-07-30）に更新しました。cold wall は 2.72s です。**
+> **cold の直列 phase 合計 2.71s ＝ `real` 2.72s で、計測されていない区間はもうありません。**
+> **残る攻めどころは ① seed dep check 1.08s ② `go list` 0.85s の 2 つだけで、
+> どちらもユーザー合意が必要な領域（B-9 / C-1 / C-3c）です。**
+> **analyze は 0.37s まで落ちたので、C-4（gocritic walk 融合）の期待値は消えました。**
+> **B-10 は `waited=0.00s` / 余裕 0.9s なので依然 NO-START。B-9 は原則着手しない。**
 > **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
 > 編集は seed 再構築が残り ~1.35s。ExportSeed 保持 follow-up は当面やらない（§C-2）。
 > **`--watch` なしの one-shot は従来どおり**（warm 0.21s 実測維持）。
@@ -188,10 +199,54 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 とはいえ 2.05 は合格ライン 2.5 にそこそこ近いので、**wall が 0.2s 単位で効くタスク
 （A-5, A-9, B-8 など warm 系）ではさらに静かな状態を作ること。**
 
-### 1.3-post 現在の phase 内訳（**2026-07-28 / B-3 後のクリーン実測。こちらが最新の「地図」**）
+### 1.3-post2 現在の phase 内訳（**2026-07-30 / C-3a + A-10 後のクリーン実測。★ これが最新の「地図」**）
 
-> 下の §1.3 は**着手時（2026-07-27）の記録**として残してあります。差分を見たいとき以外は、
-> **この節の数字を使ってください。**
+> 下の §1.3-post（2026-07-28）と §1.3（2026-07-27）は履歴として残してあります。
+> **差分を見たいとき以外は、この節の数字を使ってください。**
+
+**cold（空 `GUFF_CACHE`, `--no-cache`）— wall 2.71〜2.76s / RSS 3.75 GB / findings 20**
+
+| phase | wall | §1.3-post 比 | 何をしているか | 残っているレバー |
+|---|---:|---:|---|---|
+| startup | 0.01s | — | 設定 + レジストリ | **A-9 で NO-GO 済み** |
+| load_graph（`go list`） | **0.85s** | −0.38 | 外部プロセス待ち。CPU は遊んでいる | C-3c（**製品判断**。wall は残り 0.26s + 起動 0.078s） |
+| cache setup+partition | 0.00s | — | `--no-cache` なので実質ゼロ | 触らない |
+| typecheck_roots | **1.45s** | −0.13 | うち **seed dep check 1.08s**（1455 source deps / 35 waves / widest 161）+ merge 0.05s + target ~0.32s | **ここが最大**。ただし wave 撤廃は **B-9 = 原則着手しない** |
+| analyze | **0.37s** | **−0.38** | 全 analyzer | B-2 follow-up（lazy import members）が効いて**もう小さい**。C-4 の期待値も消滅 |
+| issues+filter | 0.03s | — | | 触らない |
+| **format_checks** | **1.65〜1.81s** | ±0 | 2 スレッド専用プール。**`waited=0.00s`** | **B-10 は依然 NO-START**（下記） |
+| **teardown** | **0.00s** | **−0.28** | A-10 で leak に変更 | 済み |
+| （プロセス終了） | 0.045s | — | rayon join / mimalloc / 静的変数 | 基準未満。`process::exit` は入れていない |
+
+**直列 phase の合計 = 0.01 + 0.85 + 1.45 + 0.37 + 0.03 = 2.71s。`real` = 2.72s で閉じています。**
+**つまり今は「計測されていない直列区間」がありません**（A-10 前は 0.33s ありました）。
+
+> **B-10（formatter の read+parse 共有）の着手条件は満たされていません。**
+> format 1.65〜1.81s に対して直列 phase が 2.71s なので、format はまだ内側に隠れており
+> `waited=0.00s` です。**余裕は約 0.9s。** cold をさらに 0.9s 詰めたら
+> format が critical path になり、そのとき初めて B-10 に価値が出ます。
+
+**cold の攻めどころは実質 2 つだけになりました:**
+**① seed dep check 1.08s（B-9 = 触らない / C-1 = 要合意）**、**② `go list` 0.85s（C-3c = 製品判断）**。
+**どちらもユーザー合意が必要な領域です。**
+
+**warm（キャッシュ hot）— wall 0.21s ×2 / RSS 0.14GB / 294 hits 0 misses**
+
+| phase | wall |
+|---|---:|
+| startup | 0.01s |
+| load_graph | 0.08s |
+| cache setup+partition | 0.01s |
+| issues+filter | 0.03s |
+| format_checks | 0.07〜0.08s |
+| teardown | 0.00s |
+
+warm は B-8 後 0.21s で動いていません。`go list` の 0.08s が最大要素で、
+これを消すのは C-3b + C-3c（製品タスク）です。
+
+### 1.3-post phase 内訳（**2026-07-28 / B-3 後のクリーン実測。履歴。最新は §1.3-post2**）
+
+> 下の §1.3 は**着手時（2026-07-27）の記録**として残してあります。
 
 **cold（空 `GUFF_CACHE`, `--no-cache`）— wall 3.96〜4.06s / RSS 7.42〜7.60GB / findings 20**
 
@@ -286,7 +341,7 @@ lowpowermode = 0。** 満たさないなら Chrome を閉じるか、落ち着�
 **その前に §0-12（iteration order 依存の洗い出し）を必ず終わらせること** — SSA の構築順が
 変わると findings が動く可能性があります。
 
-### 1.3 phase 内訳（**2026-07-27 クリーン計測 / 着手時の記録。最新は §1.3-post**）
+### 1.3 phase 内訳（**2026-07-27 クリーン計測 / 着手時の記録。最新は §1.3-post2**）
 
 **cold（空 `GUFF_CACHE`, `--no-cache`）— wall 4.71〜4.79s / RSS 7.60〜7.72GB / findings 20**
 
@@ -375,8 +430,17 @@ warm を詰めるなら **`go list` の 0.21s（B-8）が主戦場**です。こ
 
 ### 2.1 findings 同一性
 
-`PERF_TASKS.md` §2.1 の `gen()` 関数をそのまま使ってください。**diff が空でなければロールバック。**
-件数の一致で満足しないこと（§2.1 の注意書き参照）。
+`PERF_TASKS.md` §2.1 の `gen()` 関数を **`scripts/findings-gen.sh` として常設**しました
+（毎回コピペする必要はありません）:
+
+```bash
+./scripts/findings-gen.sh /tmp/before.txt          # 変更前（prometheus。第2引数で別リポジトリ）
+# … 実装してビルド …
+./scripts/findings-gen.sh /tmp/after.txt
+diff /tmp/before.txt /tmp/after.txt && echo IDENTICAL
+```
+
+**diff が空でなければロールバック。** 件数の一致で満足しないこと（§2.1 の注意書き参照）。
 
 ### 2.2 決定性
 
@@ -461,6 +525,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~A-7~~ | ~~`typecheck_one_target` の `Package` 丸ごと clone 除去~~ **NO-GO**（clone 0.005s。§A-7） | — | 0 | — | — |
 | ~~A-8~~ | ~~`target-cpu=native` / PGO~~ **A-8a NO-GO**（native wall ±0）。**A-8b DONE**（PGO `-j1` −0.28s / 並列 −0.11s。スクリプト常設。baseline 未更新） | 全部 | **−0.11〜0.28s**（PGO） | 中 | 低 |
 | ~~A-9~~ | ~~起動コスト（レジストリ構築・設定パース）~~ **NO-GO**（startup **0.01s** &lt; 0.02s。タイマー常設。§A-9） | warm | 0 | — | — |
+| ~~A-10~~ | ~~終了時のティアダウンを払わない~~ **DONE**（`drop(LintResult)` が print 後に 0.28s。one-shot だけ leak。§A-10） | cold | **−0.27s（実測）** | 極小 | 低 |
 
 ### Tier B — 構造的（中〜大。必ず GO/NO-GO 計測を先に）
 
@@ -494,7 +559,15 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-29 時点の残り推奨順:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
+**2026-07-30 時点の残り（★ 最新）:** **wall だけを狙う低リスクなタスクは尽きました。**
+§1.3-post2 のとおり cold 2.72s の直列内訳は `go list` 0.85 / seed 1.08 / target 0.32 / analyze 0.37 で、
+**未計測の隙間はゼロ**です。ここから先は次の 3 つしかなく、**いずれも着手前にユーザー合意が必要**:
+**① C-1（AST アリーナ化・特大・最高リスク）② C-3b→C-3c（`go` 非依存化。製品タスク）
+③ B-5 Slice インターン（findings 変化の合意が前提。RSS 向け）**。
+`B-10` は `waited=0.00s` の間 NO-START、`B-9` は原則着手しない、`C-4` は analyze 0.37s で期待値消滅、
+`C-5` は先に「設定変更時の再解析コスト」の計測から。
+
+**2026-07-29 時点の残り推奨順（履歴）:** `B-10 は waited=0 の間 NO-START` → B-9（原則着手しない） /
 **C-1（AST・ユーザー合意後）**。**C-2 / C-7 / C-8 DONE**。**C-6 NO-GO**。
 P0-3 DONE。B-5 DONE（Slice 以外）。A-4 / A-6 / A-7 / A-8a / A-9 は NO-GO。A-8b DONE。
 B-2 関数単位遅延は NO-GO、**lazy import members は DONE**（RSS 7.4→3.8 GiB）。B-7 NO-GO。B-4 A 完了。
@@ -2017,6 +2090,119 @@ staticcheck だけで **161 個**、style で **77 個**、govet で **30 個** 
 
 **検証:** findings 20 件 byte 同一（3 回・`-j 1`）。`cargo test -p guff-misspell --release` PASS。
 Aho-Corasick 等は境界/case リスクのため未着手。
+
+---
+
+## A-10 — 終了時のティアダウンを払わない（**A-9 の裏側。2026-07-30 発見**）
+
+### 目的
+
+**A-9 は「プロセス開始から最初の phase まで」を測って 0.01s と結論しましたが、
+反対側の端＝「最後の phase からプロセス終了まで」は誰も測っていませんでした。**
+そこに **0.28s** ありました。
+
+`phase print` が終わった時点で診断はすべて stdout に出ています。しかし
+`LintResult`（`packages: Vec<Arc<Package>>` ＋ `RunResult`）はまだ生きていて、
+`run_and_write_inner` を抜けるときに drop されます。cold `./...` ではここに
+**~3.7 GiB のパッケージ・AST・型アリーナ**がぶら下がっているので、
+その参照グラフを辿って free するだけで **0.28s（シングルスレッド）** かかります。
+**そして直後にプロセスが終了し、カーネルがアドレス空間をまとめて回収します。**
+
+### GO/NO-GO 判定（**先にこれをやる。一時パッチで足りる**）
+
+phase タイマーは各々が**自分の所要時間**を測るので、**phase と phase の隙間は見えません。**
+プロセス開始からの**絶対時刻**を打たないと見つかりません。
+
+```bash
+# cli::main 冒頭の `startup: Instant` を OnceLock に入れ、要所で
+#   eprintln!("guff: PROBE {label} {:.3}s", start.elapsed().as_secs_f64())
+# を打つ一時パッチを当てて cold を回す。
+```
+
+**上限の判定は「phase の合計」と `/usr/bin/time` の `real` の差**です。
+差が 0.1s を超えていたら、どこかに計測されていない直列区間があります。
+
+**2026-07-30 実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 絶対時刻 | 位置 |
+|---:|---|
+| 0.006s | `run_linters` 突入 |
+| 0.854s | `prepare_linter_run` 完了（`go list`） |
+| 2.697s | `run_linters_on_graph` 完了 |
+| 2.701s | `drop(prepared.graph)` 完了（Arc の参照が残るので **4ms**） |
+| 2.732s | **`phase print` 完了 — 出力は全部済んでいる** |
+| 2.732s | `drop(issues)` 完了 |
+| **3.015s** | **`drop(result)` 完了 ← ここで 0.283s** |
+| 3.015s | `run_cmd` から復帰 |
+| 3.06s | `real`（残り 0.045s がプロセス終了そのもの） |
+
+**帰属:** phase 合計 2.73s に対して `real` 3.06s。差 0.33s の内訳は
+**`drop(result)` 0.28s ＋ プロセス終了 0.045s**。
+上限 0.28s は §0-14 の 0.1s 基準を大きく超える → **GO**。
+
+### 手順
+
+1. `Teardown { Free, LeakOnProcessExit }` を `guff-lint` に追加。
+2. `run_and_write_inner` の末尾で、`Free` なら従来どおり drop、
+   `LeakOnProcessExit` なら `std::mem::forget(result)`。
+   **`phase teardown` 行を出して、どちらを選んだか記録に残すこと。**
+3. **`Teardown::LeakOnProcessExit` を渡すのは `cli.rs` の one-shot 経路だけ。**
+   既存の `run_and_write` / `run_and_print` は `Free` のまま（＝公開 API の挙動は不変）。
+
+### やってはいけない
+
+- **`run_and_write` / `run_and_print` 自体を leak させる。** ライブラリ API なので、
+  埋め込み側がループで呼ぶと無限に増えます。
+- **`--watch` を leak させる。** 常駐プロセスなのでパスごとに数 GiB 積み上がります。
+  幸い `watch.rs` は `run_linters_on_graph` を直接呼ぶので `run_and_write_inner` を通りません
+  （**この分離は維持すること**）。
+- **`std::process::exit` で済ませる。** timeout 経路（`run_and_write_with_timeout`）は
+  worker スレッドで `Vec<u8>` に集めてから main スレッドが書き出すので、
+  worker から `exit` すると**出力が消えます**。
+- **副作用のある `Drop` を leak させる。** 着手前に `rg 'impl Drop for'` で全部見ること。
+  実際に確認した結果:
+  - `IssueCache` / fmt キャッシュに `Drop` は**無い**（書き込みは解析中に完了している）。
+    そもそも `Arc<IssueCache>` は `RunnerOptions` の一時値なので `run_on_packages` 直後に落ちます。
+  - `seed_cache::OverlayWriter` の `Drop`（writer スレッドの join）は**本物の副作用**ですが、
+    `typecheck.rs` のローカルで seed ビルド中に完結し、`LintResult` からは辿れません。
+  - 残る `Drop` は `DepthGuard` / `TempGuard` / `DirGuard` / `BailoutSilence` / テスト用 `TempFile`
+    のみで、いずれも `LintResult` に到達しません。
+
+### DONE（2026-07-30）— **cold −0.27s / `-j 1` −0.19s / findings byte 同一。**
+
+**入れたもの:** `Teardown` enum ＋ `run_and_write_with_teardown`。
+`cli.rs` の one-shot（`--watch` なし）だけが `LeakOnProcessExit` を渡す。
+`phase teardown 0.00s (left to process exit)` が出るようになりました。
+
+**実測（A/B/A/B 交互、§X-3。`head` = 144e1ff、`a10` = 本変更）:**
+
+| 条件 | head | a10 | 差 |
+|---|---:|---:|---:|
+| cold wall（4 往復の各ペア） | 3.11 / 3.10 / 3.27 / 3.31s | **2.78 / 2.86 / 2.94 / 3.14s** | **−0.33 / −0.24 / −0.33 / −0.17** |
+| cold wall（中央値） | 3.19s | **2.90s** | **−0.29s** |
+| `-j 1` wall（2・3 回目） | 6.55 / 6.58s | **6.38 / 6.36s** | **−0.19s** |
+| `phase teardown` | 0.28s（drop） | **0.00s** | |
+| peak RSS | 3.74 GB | 3.76 GB | +0.7%（誤差帯。ピークは解析中で teardown より前） |
+| warm wall | 0.21s | **0.21s** | ±0.00（warm の result は 0.14GB なので元から安い） |
+
+**検証:**
+- findings **20 件 byte 同一**（`diff` 空）・**3 回とも同一**（`scripts/findings-gen.sh`）。
+- **warm 2 回目が `294 hits / 0 misses`** — leak がキャッシュ永続化を壊していない証拠。
+- `--watch` スモーク（`./tsdb/...`）: pass #1 0.95s → pass #2 0.02s。
+  `phase teardown` 行は出ない（＝ `Free` 経路のまま）。
+- `cargo test --workspace --release --no-fail-fast`: **2811 passed / 3 failed**。
+  失敗は **X-6 の 3 本ちょうど**（`sa4010` / `sa4017` / `sa5011`）で `main` から不変。
+- `guff-lint` の警告数 4 → 4（増減なし）。
+- **regress 両方 PASS**（baseline 未更新）:
+
+  | プロファイル | baseline wall | 実測 wall | baseline RSS | 実測 RSS | findings |
+  |---|---:|---:|---:|---:|---|
+  | tsdb | 1.360s | **1.390s** | 1,141,440,512 | 1,115,570,176 | both 4 / only 0,0 |
+  | full | 3.360s | **2.900s** | 4,034,396,160 | **3,745,628,160** | both 20 / only 0,0 |
+
+**次にやる人へ:** 残り 0.045s（rayon プールの join / mimalloc / 静的変数）は基準未満なので
+`std::process::exit` は**入れていません**。同じ「終端の隙間」を疑うなら、
+まず **phase 合計と `real` の差**を見ること。今は 2.73 → 2.72s（`real` 2.72s）でほぼ閉じています。
 
 ---
 
