@@ -1,42 +1,59 @@
 #!/usr/bin/env bash
-# benchmarks/run.sh — wall-clock harness: guff vs golangci-lint (standard preset).
+# benchmarks/run.sh — wall-clock harness: guff vs golangci-lint.
 #
 # Usage:
-#   ./benchmarks/run.sh              # fixture + benchmarks/local
+#   ./benchmarks/run.sh              # fixture + benchmarks/local (standard.yml)
 #   ./benchmarks/run.sh --smoke      # fixture only (offline, fast)
-#   ./benchmarks/run.sh --oss        # also clone/bench repos.txt (may FAIL on guff;
-#                                    staticcheck→SSA gaps until R17)
+#   ./benchmarks/run.sh --oss --tier pr
+#   ./benchmarks/run.sh --oss --tier pr,nightly
 #   ./benchmarks/run.sh --quick      # 1 sample (default: 3)
 #
-# Env:
-#   GUFF_BIN / GOLANGCI_LINT_BIN / BENCH_CORPUS / BENCH_SAMPLES / SKIP_GOLANGCI=1
+# OSS targets use each checkout's real golangci-lint v2 config (via corpus/).
+# Fixture / local keep benchmarks/standard.yml.
 #
-# Output: benchmarks/results/<timestamp>.{tsv,md}
+# Env:
+#   GUFF_BIN / GOLANGCI_LINT_BIN / BENCH_SAMPLES / SKIP_GOLANGCI=1 / CORPUS_CACHE
+#
+# Output: benchmarks/results/<timestamp>.{tsv,md} and SCOREBOARD.md (when --oss)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BENCH_DIR="$ROOT/benchmarks"
-CORPUS="${BENCH_CORPUS:-$BENCH_DIR/corpus}"
-CONFIG="$BENCH_DIR/standard.yml"
-REPOS_FILE="$BENCH_DIR/repos.txt"
+CONFIG_STANDARD="$BENCH_DIR/standard.yml"
 RESULTS_DIR="$BENCH_DIR/results"
-mkdir -p "$CORPUS" "$RESULTS_DIR"
+PREPARE="$ROOT/corpus/prepare.sh"
+PATCH_UNLIMITED="$ROOT/corpus/patch_unlimited_issues.py"
+mkdir -p "$RESULTS_DIR"
 
 SMOKE=0
 OSS=0
 SAMPLES="${BENCH_SAMPLES:-3}"
+TIER="pr"
+PERF_GATE=1
 
-for arg in "$@"; do
-  case "$arg" in
-    --smoke) SMOKE=1 ;;
-    --oss) OSS=1 ;;
-    --quick) SAMPLES=1 ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --smoke) SMOKE=1; shift ;;
+    --oss) OSS=1; shift ;;
+    --quick) SAMPLES=1; shift ;;
+    --tier)
+      TIER="$2"
+      shift 2
+      ;;
+    --tier=*)
+      TIER="${1#*=}"
+      shift
+      ;;
+    --no-perf-gate)
+      PERF_GATE=0
+      shift
+      ;;
     -h|--help)
-      sed -n '2,18p' "$0"
+      sed -n '2,22p' "$0"
       exit 0
       ;;
     *)
-      echo "unknown arg: $arg" >&2
+      echo "unknown arg: $1" >&2
       exit 2
       ;;
   esac
@@ -86,7 +103,7 @@ if [[ "${SKIP_GOLANGCI:-0}" != "1" ]]; then
   GCL_VER="$("$GOLANGCI" version --short 2>/dev/null || "$GOLANGCI" version 2>/dev/null | head -1 || echo unknown)"
 fi
 
-echo -e "target\ttool\tmode\tsample\tseconds\texit_code\tissues\tok" >"$TSV"
+echo -e "target\ttool\tmode\tsample\tseconds\texit_code\tissues\tok\tconfig" >"$TSV"
 
 RESULT_LINE=""
 time_cmd() {
@@ -97,7 +114,6 @@ time_cmd() {
   status_file="$(mktemp)"
   elapsed="$(
     cd "$target_dir"
-    go list ./... >/dev/null 2>&1 || true
     python3 -c '
 import subprocess, sys, time
 out, status = sys.argv[1], sys.argv[2]
@@ -128,7 +144,6 @@ for c in candidates:
             raise SystemExit
     except Exception:
         pass
-# Prefer counting non-log lines if JSON missing (treat as 0 on crash).
 if "panic" in text.lower() or "lint worker exited" in text:
     print(0)
 else:
@@ -136,7 +151,6 @@ else:
 PY
   )"
   rm -f "$out_file" "$status_file"
-  # ok=1 when exit 0 (issues-exit-code is forced to 0)
   local ok=0
   [[ "$exit_code" == "0" ]] && ok=1
   RESULT_LINE="${elapsed}"$'\t'"${exit_code}"$'\t'"${issues}"$'\t'"${ok}"
@@ -149,34 +163,43 @@ bench_one() {
   local mode="$4"
   local sample="$5"
   local cache_dir="$6"
+  local config="$7"
+  local packages="$8"
+  local timeout="$9"
+  local config_label="${10:-$config}"
 
   local -a cmd
+  # shellcheck disable=SC2206
+  local -a pkg_args=($packages)
   if [[ "$tool" == "guff" ]]; then
     cmd=(
       env "GUFF_CACHE=$cache_dir" "GOLANGCI_LINT_CACHE=$cache_dir"
       "$GUFF" run
-      -c "$CONFIG"
+      -c "$config"
       --out-format json
       --issues-exit-code 0
-      --timeout 5m
-      ./...
+      --timeout "$timeout"
+      "${pkg_args[@]}"
     )
   else
     cmd=(
       env "GOLANGCI_LINT_CACHE=$cache_dir" "GUFF_CACHE=$cache_dir"
       "$GOLANGCI" run
-      -c "$CONFIG"
+      -c "$config"
       --output.json.path=stdout
       --issues-exit-code 0
-      --timeout=5m
-      ./...
+      --timeout="$timeout"
+      --max-issues-per-linter=0
+      --max-same-issues=0
+      --allow-parallel-runners
+      "${pkg_args[@]}"
     )
   fi
 
   time_cmd "$target_dir" "${cmd[@]}"
   local seconds exit_code issues ok
   IFS=$'\t' read -r seconds exit_code issues ok <<<"$RESULT_LINE"
-  echo -e "${target_name}\t${tool}\t${mode}\t${sample}\t${seconds}\t${exit_code}\t${issues}\t${ok}" >>"$TSV"
+  echo -e "${target_name}\t${tool}\t${mode}\t${sample}\t${seconds}\t${exit_code}\t${issues}\t${ok}\t${config_label}" >>"$TSV"
   local mark=""
   [[ "$ok" != "1" ]] && mark=" FAIL"
   printf '  %-16s %-7s #%d  %8ss  exit=%s  issues≈%s%s\n' \
@@ -186,7 +209,20 @@ bench_one() {
 bench_target() {
   local name="$1"
   local dir="$2"
+  local config="$3"
+  local packages="$4"
+  local timeout="$5"
   echo "=== $name ($dir) ==="
+  echo "  config: $config"
+  echo "  packages: $packages  timeout: $timeout"
+
+  local run_config
+  run_config="$(mktemp "${TMPDIR:-/tmp}/guff-bench-config.XXXXXX.yml")"
+  if [[ "$config" == "$CONFIG_STANDARD" ]]; then
+    cp "$config" "$run_config"
+  else
+    python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"
+  fi
 
   local guff_cache gcl_cache
   guff_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-bench-guff.XXXXXX")"
@@ -195,50 +231,23 @@ bench_target() {
   local i
   for ((i = 1; i <= SAMPLES; i++)); do
     rm -rf "${guff_cache:?}"/*
-    bench_one "$name" "$dir" "guff" "cold" "$i" "$guff_cache"
+    bench_one "$name" "$dir" "guff" "cold" "$i" "$guff_cache" "$run_config" "$packages" "$timeout" "$config"
   done
   for ((i = 1; i <= SAMPLES; i++)); do
-    bench_one "$name" "$dir" "guff" "warm" "$i" "$guff_cache"
+    bench_one "$name" "$dir" "guff" "warm" "$i" "$guff_cache" "$run_config" "$packages" "$timeout" "$config"
   done
 
   if [[ "${SKIP_GOLANGCI:-0}" != "1" ]]; then
     for ((i = 1; i <= SAMPLES; i++)); do
       rm -rf "${gcl_cache:?}"/*
-      bench_one "$name" "$dir" "golangci-lint" "cold" "$i" "$gcl_cache"
+      bench_one "$name" "$dir" "golangci-lint" "cold" "$i" "$gcl_cache" "$run_config" "$packages" "$timeout" "$config"
     done
     for ((i = 1; i <= SAMPLES; i++)); do
-      bench_one "$name" "$dir" "golangci-lint" "warm" "$i" "$gcl_cache"
+      bench_one "$name" "$dir" "golangci-lint" "warm" "$i" "$gcl_cache" "$run_config" "$packages" "$timeout" "$config"
     done
   fi
 
-  rm -rf "$guff_cache" "$gcl_cache"
-}
-
-clone_repo() {
-  local name="$1"
-  local url="$2"
-  local ref="$3"
-  local dest="$CORPUS/$name"
-  command -v git >/dev/null 2>&1 || die "git not found (needed for --oss)"
-  if [[ -d "$dest/.git" ]]; then
-    git -C "$dest" fetch --depth 1 origin "refs/tags/${ref}:refs/tags/${ref}" >/dev/null 2>&1 \
-      || git -C "$dest" fetch --depth 1 origin "$ref" >/dev/null 2>&1 \
-      || true
-    git -C "$dest" checkout -q "$ref" 2>/dev/null \
-      || git -C "$dest" checkout -q "tags/$ref" 2>/dev/null \
-      || die "cannot checkout $ref in $dest"
-  else
-    echo "cloning $name ($ref)..." >&2
-    rm -rf "$dest"
-    if ! git clone --depth 1 --branch "$ref" "$url" "$dest" >/dev/null 2>&1; then
-      git clone --depth 1 "$url" "$dest" >/dev/null
-      git -C "$dest" fetch --depth 1 origin tag "$ref" >/dev/null 2>&1 || true
-      git -C "$dest" checkout -q "$ref" 2>/dev/null \
-        || git -C "$dest" checkout -q "tags/$ref" \
-        || die "clone/checkout failed for $name@$ref"
-    fi
-  fi
-  echo "$dest"
+  rm -rf "$guff_cache" "$gcl_cache" "$run_config"
 }
 
 echo "guff benchmark harness"
@@ -247,36 +256,62 @@ echo "  go:       $GO_VER"
 echo "  guff:     $GUFF_VER ($GUFF)"
 echo "  golangci: $GCL_VER (${GOLANGCI:-skipped})"
 echo "  samples:  $SAMPLES"
-echo "  config:   $CONFIG"
+echo "  standard: $CONFIG_STANDARD"
 echo "  tsv:      $TSV"
 echo
 
-bench_target "fixture" "$BENCH_DIR/fixture"
+bench_target "fixture" "$BENCH_DIR/fixture" "$CONFIG_STANDARD" "./..." "5m"
 
 if [[ "$SMOKE" -eq 0 ]]; then
-  bench_target "local" "$BENCH_DIR/local"
+  bench_target "local" "$BENCH_DIR/local" "$CONFIG_STANDARD" "./..." "5m"
 fi
 
 if [[ "$OSS" -eq 1 ]]; then
-  while read -r name url ref; do
-    [[ -z "${name:-}" || "$name" == \#* ]] && continue
-    dest="$(clone_repo "$name" "$url" "$ref")"
-    bench_target "$name" "$dest"
-  done <"$REPOS_FILE"
+  [[ -x "$PREPARE" ]] || die "missing $PREPARE"
+  echo "Preparing OSS corpus (tier=$TIER)..."
+  prep_list="$(mktemp "${TMPDIR:-/tmp}/guff-bench-prep.XXXXXX")"
+  "$PREPARE" --tier "$TIER" >"$prep_list"
+  while IFS=$'\t' read -r name dir config packages timeout tier; do
+    [[ -z "${name:-}" ]] && continue
+    bench_target "$name" "$dir" "$config" "$packages" "$timeout"
+  done <"$prep_list"
+  rm -f "$prep_list"
 fi
 
 SUMMARY_MD="$RESULTS_DIR/${STAMP}.md"
-python3 - "$TSV" "$SUMMARY_MD" "$HOST" "$GO_VER" "$GUFF_VER" "$GCL_VER" "$SAMPLES" <<'PY'
+SCOREBOARD="$RESULTS_DIR/SCOREBOARD.md"
+python3 - "$TSV" "$SUMMARY_MD" "$SCOREBOARD" "$HOST" "$GO_VER" "$GUFF_VER" "$GCL_VER" "$SAMPLES" "$OSS" "$PERF_GATE" <<'PY'
 import collections, statistics, sys
-tsv, out, host, go_ver, guff_ver, gcl_ver, samples = sys.argv[1:]
+from pathlib import Path
+
+(
+    tsv,
+    out,
+    scoreboard,
+    host,
+    go_ver,
+    guff_ver,
+    gcl_ver,
+    samples,
+    oss,
+    perf_gate,
+) = sys.argv[1:]
+oss = oss == "1"
+perf_gate = perf_gate == "1"
+
 rows = []
+configs = {}
 with open(tsv, encoding="utf-8") as f:
     next(f)
     for line in f:
         parts = line.rstrip("\n").split("\t")
         if len(parts) < 8:
             continue
-        target, tool, mode, _sample, seconds, exit_code, issues, ok = parts
+        if len(parts) >= 9:
+            target, tool, mode, _sample, seconds, exit_code, issues, ok, config = parts[:9]
+            configs[target] = config
+        else:
+            target, tool, mode, _sample, seconds, exit_code, issues, ok = parts
         rows.append((target, tool, mode, float(seconds), int(exit_code), issues, ok == "1"))
 
 groups = collections.defaultdict(list)
@@ -305,6 +340,18 @@ def fmtr(x, ok):
         return "—"
     return f"{x:.2f}x"
 
+def short_config(path: str) -> str:
+    if not path:
+        return "—"
+    p = Path(path)
+    # Prefer repo-relative style for OSS checkouts under corpus/cache/<name>/...
+    parts = p.parts
+    if "cache" in parts:
+        i = parts.index("cache")
+        if i + 2 < len(parts):
+            return str(Path(*parts[i + 2 :]))
+    return p.name
+
 lines = [
     "# Benchmark results",
     "",
@@ -313,11 +360,15 @@ lines = [
     f"- guff: `{guff_ver}`",
     f"- golangci-lint: `{gcl_ver}`",
     f"- Samples per cell: {samples} (median reported; `FAIL` if any sample exited non-zero)",
-    "- Preset: standard five linters via `benchmarks/standard.yml`",
+    "- Fixture/local: `benchmarks/standard.yml` (standard five linters)",
+    "- OSS: each repo's real golangci-lint v2 config (own-config)",
+    "- Protocol: GOCACHE warm (prepare), tool caches cold then warm; clone/mod download excluded",
     "",
-    "| Target | guff cold | guff warm | golangci cold | golangci warm | guff/gcl warm |",
-    "|--------|----------:|----------:|--------------:|--------------:|--------------:|",
+    "| Target | config | guff cold | guff warm | golangci cold | golangci warm | speedup (warm) |",
+    "|--------|--------|----------:|----------:|--------------:|--------------:|---------------:|",
 ]
+
+gate_failures = []
 for t in targets:
     keys = {
         "gc": (t, "guff", "cold"),
@@ -329,19 +380,73 @@ for t in targets:
     cc, cw = med(groups.get(keys["cc"], [])), med(groups.get(keys["cw"], []))
     ok_g = all_ok(keys["gc"]) and all_ok(keys["gw"])
     ok_c = all_ok(keys["cc"]) and all_ok(keys["cw"]) if keys["cc"] in groups or keys["cw"] in groups else False
-    ratio_ok = ok_g and ok_c and cw == cw and cw > 0
-    ratio = (gw / cw) if ratio_ok else float("nan")
+    # speedup = golangci_warm / guff_warm  (>1 means guff faster)
+    ratio_ok = ok_g and ok_c and cw == cw and gw == gw and gw > 0
+    speedup = (cw / gw) if ratio_ok else float("nan")
+    cfg = short_config(configs.get(t, ""))
     lines.append(
-        f"| {t} | {fmt(gc, all_ok(keys['gc']))} | {fmt(gw, all_ok(keys['gw']))} | "
-        f"{fmt(cc, all_ok(keys['cc']))} | {fmt(cw, all_ok(keys['cw']))} | {fmtr(ratio, ratio_ok)} |"
+        f"| {t} | `{cfg}` | {fmt(gc, all_ok(keys['gc']))} | {fmt(gw, all_ok(keys['gw']))} | "
+        f"{fmt(cc, all_ok(keys['cc']))} | {fmt(cw, all_ok(keys['cw']))} | {fmtr(speedup, ratio_ok)} |"
     )
+    if perf_gate and t not in ("fixture", "local"):
+        if not ok_g:
+            gate_failures.append(f"{t}: guff failed")
+        elif ratio_ok and speedup < 1.0:
+            gate_failures.append(f"{t}: speedup {speedup:.2f}x < 1.0 (guff slower than golangci-lint)")
+
 lines.append("")
-lines.append("Ratio `<1.0x` means guff warm was faster than golangci-lint warm.")
-lines.append("OSS targets often `FAIL` on guff until SSA gaps (R17) land; prefer `fixture` / `local`.")
+lines.append(
+    "Speedup = golangci warm / guff warm. Values `>1.0x` mean guff was faster. "
+    "≈20x is a SCOREBOARD claim, not a hard CI fail threshold."
+)
 text = "\n".join(lines) + "\n"
-open(out, "w", encoding="utf-8").write(text)
+Path(out).write_text(text, encoding="utf-8")
 print(text)
+
+if oss:
+    sb = [
+        "# OSS SCOREBOARD (guff vs golangci-lint, own-config)",
+        "",
+        f"- Host: `{host}`",
+        f"- Go: `{go_ver}`",
+        f"- guff: `{guff_ver}`",
+        f"- golangci-lint: `{gcl_ver}`",
+        f"- Samples: {samples} (median)",
+        "- Both tools use each repository's real golangci-lint **v2** config.",
+        "- GOCACHE warm; linter caches measured cold then warm; clone/mod excluded.",
+        "",
+        "| Target | config | guff warm | golangci warm | speedup |",
+        "|--------|--------|----------:|--------------:|--------:|",
+    ]
+    for t in targets:
+        if t in ("fixture", "local"):
+            continue
+        gw = med(groups.get((t, "guff", "warm"), []))
+        cw = med(groups.get((t, "golangci-lint", "warm"), []))
+        ok_g = all_ok((t, "guff", "warm"))
+        ok_c = all_ok((t, "golangci-lint", "warm"))
+        ratio_ok = ok_g and ok_c and gw == gw and cw == cw and gw > 0
+        speedup = (cw / gw) if ratio_ok else float("nan")
+        cfg = short_config(configs.get(t, ""))
+        sb.append(
+            f"| {t} | `{cfg}` | {fmt(gw, ok_g)} | {fmt(cw, ok_c)} | {fmtr(speedup, ratio_ok)} |"
+        )
+    sb.append("")
+    sb.append(f"Full run detail: `{Path(out).name}`")
+    sb.append("")
+    Path(scoreboard).write_text("\n".join(sb) + "\n", encoding="utf-8")
+    print(f"Wrote {scoreboard}")
+
+if gate_failures:
+    print("PERF GATE FAIL:", file=sys.stderr)
+    for msg in gate_failures:
+        print(f"  - {msg}", file=sys.stderr)
+    raise SystemExit(1)
 PY
 
 echo "Wrote $TSV"
 echo "Wrote $SUMMARY_MD"
+if [[ "$OSS" -eq 1 ]]; then
+  echo "Wrote $SCOREBOARD"
+  cp "$SUMMARY_MD" "$RESULTS_DIR/RESULTS.md"
+fi

@@ -322,9 +322,21 @@ Canonical guide (architecture, status, roadmap): [`docs/DEVELOPMENT.md`](docs/DE
 cargo build --release -p guff-lint
 ./benchmarks/smoke.sh          # offline smoke
 ./benchmarks/run.sh            # fixture + local corpus
+./benchmarks/run.sh --oss --tier pr   # famous repos, own .golangci.yml
 ```
 
-Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md). Harness: [`benchmarks/README.md`](benchmarks/README.md).
+Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).  
+OSS own-config SCOREBOARD: [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md).  
+Harness: [`benchmarks/README.md`](benchmarks/README.md). Corpus: [`corpus/README.md`](corpus/README.md).
+
+### Compatibility (finding-set vs golangci-lint)
+
+```bash
+./compat/smoke.sh                    # fixture (CI)
+./compat/run.sh --oss --tier pr      # gin / caddy / helm, own config
+```
+
+Details: [`compat/README.md`](compat/README.md).
 
 ### Prometheus regression gate (local)
 
@@ -376,6 +388,7 @@ guff/
 ├── Dockerfile              # ghcr.io/dakimura/guff
 ├── scripts/install.sh      # curl | sh binary install
 ├── THIRD_PARTY_LICENSES.md
+├── corpus/                 # shared OSS clones (own-config inventory)
 ├── benchmarks/             # vs golangci-lint wall-clock harness
 ├── compat/                 # finding-set diff harness
 ├── regress/                # prometheus RSS / wall / finding-set gate

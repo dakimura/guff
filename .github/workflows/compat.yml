@@ -33,3 +33,36 @@ jobs:
 
       - name: Compat smoke (fixture)
         run: ./compat/smoke.sh
+
+  oss-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release -p guff-lint
+
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-pr-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-pr-
+
+      - name: Compat OSS (pr tier, own-config)
+        run: ./compat/run.sh --oss --tier pr

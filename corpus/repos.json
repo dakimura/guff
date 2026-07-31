@@ -1,0 +1,67 @@
+[
+  {
+    "name": "gin",
+    "url": "https://github.com/gin-gonic/gin.git",
+    "ref": "v1.12.0",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "10m"
+  },
+  {
+    "name": "caddy",
+    "url": "https://github.com/caddyserver/caddy.git",
+    "ref": "v2.11.4",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "15m"
+  },
+  {
+    "name": "helm",
+    "url": "https://github.com/helm/helm.git",
+    "ref": "v4.2.3",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "15m"
+  },
+  {
+    "name": "consul",
+    "url": "https://github.com/hashicorp/consul.git",
+    "ref": "v1.21.5",
+    "packages": "./...",
+    "tier": "nightly",
+    "timeout": "30m"
+  },
+  {
+    "name": "grafana",
+    "url": "https://github.com/grafana/grafana.git",
+    "ref": "v13.1.1",
+    "packages": "./pkg/...",
+    "tier": "nightly",
+    "timeout": "30m"
+  },
+  {
+    "name": "containerd",
+    "url": "https://github.com/containerd/containerd.git",
+    "ref": "v2.3.3",
+    "packages": "./pkg/...",
+    "tier": "nightly",
+    "timeout": "30m"
+  },
+  {
+    "name": "vault",
+    "url": "https://github.com/hashicorp/vault.git",
+    "ref": "v1.20.1",
+    "packages": "./helper/...",
+    "tier": "weekly",
+    "timeout": "30m"
+  },
+  {
+    "name": "kubernetes",
+    "url": "https://github.com/kubernetes/kubernetes.git",
+    "ref": "v1.34.10",
+    "packages": "./staging/src/k8s.io/apimachinery/...",
+    "tier": "weekly",
+    "timeout": "30m",
+    "config": "hack/golangci.yaml"
+  }
+]

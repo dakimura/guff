@@ -2,13 +2,17 @@
 # compat/run.sh — guff vs golangci-lint finding-set diff harness (R21).
 #
 # Usage:
-#   ./compat/run.sh              # fixture + benchmarks/local
+#   ./compat/run.sh              # fixture + benchmarks/local (standard.yml)
 #   ./compat/run.sh --smoke      # fixture only (CI gate)
-#   ./compat/run.sh --oss        # also clone/compare repos.txt
-#   ./compat/run.sh --update-allowlist   # rewrite allowlist from current diffs
+#   ./compat/run.sh --oss --tier pr
+#   ./compat/run.sh --oss --tier nightly
+#   ./compat/run.sh --update-allowlist   # rewrite allowlists from current diffs
+#
+# OSS targets use each checkout's real golangci-lint v2 config (via corpus/).
+# Fixture / local keep compat/standard.yml.
 #
 # Env:
-#   GUFF_BIN / GOLANGCI_LINT_BIN / COMPAT_CORPUS / SKIP_GOLANGCI=1
+#   GUFF_BIN / GOLANGCI_LINT_BIN / CORPUS_CACHE
 #
 # Exit 0 when every target's unexpected-diff set is empty (allowlist covers
 # all known mismatches). Exit 1 on unexpected diffs or tool failure.
@@ -16,29 +20,40 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPAT_DIR="$ROOT/compat"
-CORPUS="${COMPAT_CORPUS:-$COMPAT_DIR/corpus}"
-CONFIG="$COMPAT_DIR/standard.yml"
-REPOS_FILE="$COMPAT_DIR/repos.txt"
-ALLOWLIST="$COMPAT_DIR/allowlist.txt"
+CONFIG_STANDARD="$COMPAT_DIR/standard.yml"
+ALLOWLIST_DIR="$COMPAT_DIR/allowlists"
+# Legacy single-file allowlist (still honored if present and dir missing entries).
+ALLOWLIST_LEGACY="$COMPAT_DIR/allowlist.txt"
 RESULTS_DIR="$COMPAT_DIR/results"
 NORMALIZE="$COMPAT_DIR/normalize.py"
-mkdir -p "$CORPUS" "$RESULTS_DIR"
+PREPARE="$ROOT/corpus/prepare.sh"
+PATCH_UNLIMITED="$ROOT/corpus/patch_unlimited_issues.py"
+mkdir -p "$RESULTS_DIR" "$ALLOWLIST_DIR"
 
 SMOKE=0
 OSS=0
 UPDATE_ALLOWLIST=0
+TIER="pr"
 
-for arg in "$@"; do
-  case "$arg" in
-    --smoke) SMOKE=1 ;;
-    --oss) OSS=1 ;;
-    --update-allowlist) UPDATE_ALLOWLIST=1 ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --smoke) SMOKE=1; shift ;;
+    --oss) OSS=1; shift ;;
+    --update-allowlist) UPDATE_ALLOWLIST=1; shift ;;
+    --tier)
+      TIER="$2"
+      shift 2
+      ;;
+    --tier=*)
+      TIER="${1#*=}"
+      shift
+      ;;
     -h|--help)
-      sed -n '2,16p' "$0"
+      sed -n '2,20p' "$0"
       exit 0
       ;;
     *)
-      echo "unknown arg: $arg" >&2
+      echo "unknown arg: $1" >&2
       exit 2
       ;;
   esac
@@ -80,7 +95,8 @@ fi
 command -v go >/dev/null 2>&1 || die "go not found"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 [[ -f "$NORMALIZE" ]] || die "missing $NORMALIZE"
-[[ -f "$CONFIG" ]] || die "missing $CONFIG"
+[[ -f "$CONFIG_STANDARD" ]] || die "missing $CONFIG_STANDARD"
+[[ -d "$ALLOWLIST_DIR" ]] || die "missing $ALLOWLIST_DIR"
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 RUN_DIR="$RESULTS_DIR/$STAMP"
@@ -94,32 +110,46 @@ GCL_VER="$("$GOLANGCI" version --short 2>/dev/null || "$GOLANGCI" version 2>/dev
 echo "guff compat harness (R21)"
 echo "  guff:     $GUFF_VER ($GUFF)"
 echo "  golangci: $GCL_VER ($GOLANGCI)"
-echo "  config:   $CONFIG"
-echo "  allowlist:$ALLOWLIST"
+echo "  standard: $CONFIG_STANDARD"
+echo "  allowlists:$ALLOWLIST_DIR"
 echo "  results:  $RUN_DIR"
 echo
 
 run_target() {
   local name="$1"
   local dir="$2"
+  local config="$3"
+  local packages="$4"
+  local timeout="$5"
   echo "=== $name ($dir) ==="
+  echo "  config: $config"
+  echo "  packages: $packages  timeout: $timeout"
 
-  local guff_json gcl_json guff_cache gcl_cache
+  local guff_json gcl_json guff_cache gcl_cache run_config
   guff_json="$RUN_DIR/${name}.guff.json"
   gcl_json="$RUN_DIR/${name}.golangci.json"
   guff_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-compat-guff.XXXXXX")"
   gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-compat-gcl.XXXXXX")"
 
+  # Force unlimited issue caps so max-same-issues truncation cannot rotate keys.
+  run_config="$RUN_DIR/${name}.config.yml"
+  if [[ "$config" == "$CONFIG_STANDARD" ]]; then
+    cp "$config" "$run_config"
+  else
+    python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"
+  fi
+
+  # shellcheck disable=SC2086
   (
     cd "$dir"
     env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
       "$GUFF" run \
-      -c "$CONFIG" \
+      -c "$run_config" \
       --out-format json \
       --issues-exit-code 0 \
-      --timeout 5m \
+      --timeout "$timeout" \
       --no-cache \
-      ./...
+      $packages
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr" || {
     echo "guff failed for $name; see $RUN_DIR/${name}.guff.stderr" >&2
     cat "$RUN_DIR/${name}.guff.stderr" >&2 || true
@@ -127,16 +157,20 @@ run_target() {
     return 1
   }
 
+  # shellcheck disable=SC2086
   (
     cd "$dir"
     env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
       "$GOLANGCI" run \
-      -c "$CONFIG" \
+      -c "$run_config" \
       --output.json.path=stdout \
       --path-mode abs \
       --issues-exit-code 0 \
-      --timeout=5m \
-      ./...
+      --timeout="$timeout" \
+      --max-issues-per-linter=0 \
+      --max-same-issues=0 \
+      --allow-parallel-runners \
+      $packages
   ) >"$gcl_json" 2>"$RUN_DIR/${name}.golangci.stderr" || {
     echo "golangci-lint failed for $name; see $RUN_DIR/${name}.golangci.stderr" >&2
     cat "$RUN_DIR/${name}.golangci.stderr" >&2 || true
@@ -147,12 +181,17 @@ run_target() {
   rm -rf "$guff_cache" "$gcl_cache"
   printf '%s\t%s\t%s\t%s\n' "$name" "$dir" "$guff_json" "$gcl_json" >>"$MANIFEST"
 
+  local allow_args=(--allowlist-dir "$ALLOWLIST_DIR")
+  if [[ -f "$ALLOWLIST_LEGACY" ]]; then
+    allow_args+=(--allowlist "$ALLOWLIST_LEGACY")
+  fi
+
   python3 "$NORMALIZE" diff \
     --target "$name" \
     --root "$dir" \
     --guff "$guff_json" \
     --golangci "$gcl_json" \
-    --allowlist "$ALLOWLIST" \
+    "${allow_args[@]}" \
     --report "$RUN_DIR/${name}.md" \
     --json-out "$RUN_DIR/${name}.summary.json" \
     || true
@@ -173,51 +212,37 @@ if not s["ok"]:
 PY
 }
 
-clone_repo() {
-  local name="$1"
-  local url="$2"
-  local ref="$3"
-  local dest="$CORPUS/$name"
-  command -v git >/dev/null 2>&1 || die "git not found (needed for --oss)"
-  if [[ -d "$dest/.git" ]]; then
-    git -C "$dest" fetch --depth 1 origin "refs/tags/${ref}:refs/tags/${ref}" >/dev/null 2>&1 \
-      || git -C "$dest" fetch --depth 1 origin "$ref" >/dev/null 2>&1 \
-      || true
-    git -C "$dest" checkout -q "$ref" 2>/dev/null \
-      || git -C "$dest" checkout -q "tags/$ref" 2>/dev/null \
-      || die "cannot checkout $ref in $dest"
-  else
-    echo "cloning $name ($ref)..." >&2
-    rm -rf "$dest"
-    if ! git clone --depth 1 --branch "$ref" "$url" "$dest" >/dev/null 2>&1; then
-      git clone --depth 1 "$url" "$dest" >/dev/null
-      git -C "$dest" fetch --depth 1 origin tag "$ref" >/dev/null 2>&1 || true
-      git -C "$dest" checkout -q "$ref" 2>/dev/null \
-        || git -C "$dest" checkout -q "tags/$ref" \
-        || die "clone/checkout failed for $name@$ref"
-    fi
-  fi
-  echo "$dest"
-}
+FAILED_TARGETS=0
 
-run_target "fixture" "$ROOT/benchmarks/fixture"
+run_target "fixture" "$ROOT/benchmarks/fixture" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
 
 if [[ "$SMOKE" -eq 0 ]]; then
-  run_target "local" "$ROOT/benchmarks/local"
+  run_target "local" "$ROOT/benchmarks/local" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
 fi
 
 if [[ "$OSS" -eq 1 ]]; then
-  while read -r name url ref; do
-    [[ -z "${name:-}" || "$name" == \#* ]] && continue
-    dest="$(clone_repo "$name" "$url" "$ref")"
-    run_target "$name" "$dest" || true
-  done <"$REPOS_FILE"
+  [[ -x "$PREPARE" ]] || die "missing $PREPARE"
+  echo "Preparing OSS corpus (tier=$TIER)..."
+  prep_list="$(mktemp "${TMPDIR:-/tmp}/guff-compat-prep.XXXXXX")"
+  "$PREPARE" --tier "$TIER" >"$prep_list"
+  while IFS=$'\t' read -r name dir config packages timeout tier; do
+    [[ -z "${name:-}" ]] && continue
+    if ! run_target "$name" "$dir" "$config" "$packages" "$timeout"; then
+      FAILED_TARGETS=$((FAILED_TARGETS + 1))
+    fi
+  done <"$prep_list"
+  rm -f "$prep_list"
 fi
 
 REPORT="$RUN_DIR/REPORT.md"
+allow_args=(--allowlist-dir "$ALLOWLIST_DIR")
+if [[ -f "$ALLOWLIST_LEGACY" ]]; then
+  allow_args+=(--allowlist "$ALLOWLIST_LEGACY")
+fi
+
 # Diff may be non-zero before allowlist update; final gate is below.
 python3 "$NORMALIZE" report "$MANIFEST" \
-  --allowlist "$ALLOWLIST" \
+  "${allow_args[@]}" \
   --report "$REPORT" \
   --json-out "$RUN_DIR/summary.json" \
   || true
@@ -225,41 +250,80 @@ if [[ "$SMOKE" -eq 0 ]]; then
   cp "$REPORT" "$RESULTS_DIR/RESULTS.md"
 fi
 
-# Rebuild allowlist from full per-target diffs when requested.
+# Rebuild per-target allowlists from full diffs when requested.
+# Merges with existing entries so flaky/extra keys from prior runs are kept.
 if [[ "$UPDATE_ALLOWLIST" -eq 1 ]]; then
-  {
-    echo "# Known finding-set diffs between guff and golangci-lint (R21)."
-    echo "# Format: <target> <guff-only|golangci-only> <normalized-key>"
-    echo "# normalized-key = relpath:line:linter:message"
-    echo "# Regenerated by: ./compat/run.sh --update-allowlist"
-    echo "#"
-    echo "# Prefer fixing guff over growing this list. Entries here are accepted"
-    echo "# mismatches (message phrasing, enable-set gaps, known DEFERRED)."
-    echo "#"
-    echo "# Notable classes:"
-    echo "# - ST1000 package-comment: guff staticcheck enables it; golangci's"
-    echo "#   bundled staticcheck defaults often omit stylecheck ST1000."
-    echo "# - local ineffassign: guff reports more assignment sites than golangci."
-    echo "# Ensure issues.max-*-issues: 0 in standard.yml (defaults truncate)."
-    echo
-    while IFS=$'\t' read -r name dir guff_json gcl_json; do
-      python3 - "$NORMALIZE" "$name" "$dir" "$guff_json" "$gcl_json" <<'PY'
+  python3 - "$NORMALIZE" "$MANIFEST" "$ALLOWLIST_DIR" <<'PY'
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-from normalize import diff_sets, issue_keys, load_issues
-name, root, guff_json, gcl_json = sys.argv[2:6]
-r = diff_sets(name, issue_keys(load_issues(guff_json), root), issue_keys(load_issues(gcl_json), root), [])
-for k in sorted(r.guff_only):
-    print(f"{name} guff-only {k}")
-for k in sorted(r.golangci_only):
-    print(f"{name} golangci-only {k}")
+from normalize import diff_sets, issue_keys, load_issues, parse_allowlist
+
+manifest = Path(sys.argv[2])
+allow_dir = Path(sys.argv[3])
+allow_dir.mkdir(parents=True, exist_ok=True)
+
+header = """# Known finding-set diffs between guff and golangci-lint (R21).
+# Format: <target> <guff-only|golangci-only> <normalized-key>
+# normalized-key = relpath:line:linter:message
+# Regenerated by: ./compat/run.sh --update-allowlist
+#
+# Prefer fixing guff over growing this list. Entries here are accepted
+# mismatches (message phrasing, enable-set gaps, known DEFERRED).
+"""
+
+def load_existing(path: Path) -> set[str]:
+    if not path.is_file():
+        return set()
+    return {f"{e.target} {e.side} {e.key}" for e in parse_allowlist(path)}
+
+by_target: dict[str, set[str]] = {}
+for raw in manifest.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    name, root, guff_json, gcl_json = line.split("\t")
+    r = diff_sets(
+        name,
+        issue_keys(load_issues(guff_json), root),
+        issue_keys(load_issues(gcl_json), root),
+        [],
+    )
+    lines = set()
+    for k in r.guff_only:
+        lines.add(f"{name} guff-only {k}")
+    for k in r.golangci_only:
+        lines.add(f"{name} golangci-only {k}")
+    by_target[name] = lines
+
+default_targets = {"fixture", "local"}
+default_lines: set[str] = set(load_existing(allow_dir / "_default.txt"))
+for name, lines in sorted(by_target.items()):
+    if name in default_targets:
+        default_lines |= lines
+    else:
+        path = allow_dir / f"{name}.txt"
+        merged = load_existing(path) | lines
+        path.write_text(
+            header + "\n" + "\n".join(sorted(merged)) + ("\n" if merged else ""),
+            encoding="utf-8",
+        )
+        print(f"Updated {path} ({len(merged)} entries)")
+
+default_path = allow_dir / "_default.txt"
+default_path.write_text(
+    header
+    + "\n# Fixture / local (standard.yml) known diffs.\n\n"
+    + "\n".join(sorted(default_lines))
+    + ("\n" if default_lines else ""),
+    encoding="utf-8",
+)
+print(f"Updated {default_path} ({len(default_lines)} entries)")
 PY
-    done <"$MANIFEST"
-  } >"$ALLOWLIST"
-  echo "Updated $ALLOWLIST"
+  cp "$ALLOWLIST_DIR/_default.txt" "$ALLOWLIST_LEGACY"
   python3 "$NORMALIZE" report "$MANIFEST" \
-    --allowlist "$ALLOWLIST" \
+    --allowlist-dir "$ALLOWLIST_DIR" \
     --report "$REPORT" \
     --json-out "$RUN_DIR/summary.json" \
     || true
@@ -272,6 +336,11 @@ echo
 echo "Wrote $REPORT"
 if [[ "$SMOKE" -eq 0 ]]; then
   echo "Wrote $RESULTS_DIR/RESULTS.md"
+fi
+
+if [[ "$FAILED_TARGETS" -gt 0 ]]; then
+  echo "FAIL: $FAILED_TARGETS target(s) failed to run" >&2
+  exit 1
 fi
 
 python3 - "$RUN_DIR/summary.json" <<'PY'

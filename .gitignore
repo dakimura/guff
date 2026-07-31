@@ -11,11 +11,15 @@
 # Environment
 .env
 
-# Benchmark corpus clones and raw run artifacts (keep RESULTS.md)
+# Shared OSS corpus clones
+/corpus/cache/
+
+# Benchmark corpus clones and raw run artifacts (keep RESULTS.md / SCOREBOARD.md)
 /benchmarks/corpus/
 /benchmarks/results/*.tsv
 /benchmarks/results/*.md
 !/benchmarks/results/RESULTS.md
+!/benchmarks/results/SCOREBOARD.md
 
 # Compat harness clones and raw run artifacts (keep RESULTS.md)
 /compat/corpus/

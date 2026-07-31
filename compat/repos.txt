@@ -1,9 +1,7 @@
-# Target corpora for optional `./compat/run.sh --oss`.
-# Format: <name> <git-url> <ref>
+# Optional OSS list redirected to the shared corpus.
+# Prefer: ./compat/run.sh --oss --tier pr
 #
-# Keep this list small and pinned. Prefer modules that type-check cleanly under
-# the standard five linters. Unexpected finding-set diffs must be allowlisted.
+# Authoritative inventory: ../corpus/repos.json
+# This file is kept so older docs mentioning compat/repos.txt still resolve.
 
-intern https://github.com/josharian/intern.git v1.0.0
-xid https://github.com/rs/xid.git v1.6.0
-toml https://github.com/BurntSushi/toml.git v1.4.0
+# (intentionally empty — use corpus/repos.json via --oss --tier)

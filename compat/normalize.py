@@ -94,6 +94,8 @@ _STATICCHECK_CODE = re.compile(r"^(?:SA|ST|S|QF)\d{4}:\s*")
 _MODERNIZE_CHECK = re.compile(r"^[a-z][a-z0-9]*:\s*")
 # golangci govet prefixes the pass name (`inline: Constant …`); guff omits it.
 _GOVET_PASS = re.compile(r"^[a-z][a-z0-9]*:\s*")
+# guff errcheck often includes the callee; golangci may omit it.
+_ERRCHECK_OF = re.compile(r"^Error return value of `.+?` is not checked$")
 
 # Known equivalent phrasings across guff and golangci-lint.
 _ERRCHECK_EQUIV = {
@@ -103,9 +105,11 @@ _ERRCHECK_EQUIV = {
 
 
 def normalize_message(linter: str, text: str) -> str:
-    t = text.strip()
-    if linter == "errcheck" and t in _ERRCHECK_EQUIV:
-        return "Error return value is not checked"
+    # Collapse whitespace so multiline staticcheck / regex dumps stay one key.
+    t = re.sub(r"\s+", " ", (text or "").strip())
+    if linter == "errcheck":
+        if t in _ERRCHECK_EQUIV or _ERRCHECK_OF.match(t):
+            return "Error return value is not checked"
     if linter == "unused":
         t = _UNUSED_PREFIX.sub("", t)
     if linter == "staticcheck":
@@ -157,6 +161,49 @@ def parse_allowlist(path: Path | str | None) -> list[AllowEntry]:
             raise ValueError(f"bad allowlist side {side!r} in {raw!r}")
         out.append(AllowEntry(target=target, side=side, key=key))
     return out
+
+
+def allowlist_paths_for_target(allowlist_dir: Path | str, target: str) -> list[Path]:
+    """Return allowlist files to load for ``target`` (``_default`` + ``<target>``)."""
+    d = Path(allowlist_dir)
+    paths: list[Path] = []
+    default = d / "_default.txt"
+    if default.is_file():
+        paths.append(default)
+    specific = d / f"{target}.txt"
+    if specific.is_file():
+        paths.append(specific)
+    return paths
+
+
+def parse_allowlist_dir(allowlist_dir: Path | str | None, targets: Iterable[str]) -> list[AllowEntry]:
+    """Load ``_default.txt`` plus each target's ``<name>.txt`` under ``allowlist_dir``."""
+    if allowlist_dir is None:
+        return []
+    seen: set[Path] = set()
+    out: list[AllowEntry] = []
+    for target in targets:
+        for path in allowlist_paths_for_target(allowlist_dir, target):
+            if path in seen:
+                continue
+            seen.add(path)
+            out.extend(parse_allowlist(path))
+    return out
+
+
+def resolve_allowlist(
+    *,
+    allowlist: Path | str | None = None,
+    allowlist_dir: Path | str | None = None,
+    targets: Iterable[str] | None = None,
+) -> list[AllowEntry]:
+    """Load entries from a single file and/or a per-target allowlist directory."""
+    entries: list[AllowEntry] = []
+    if allowlist is not None:
+        entries.extend(parse_allowlist(allowlist))
+    if allowlist_dir is not None:
+        entries.extend(parse_allowlist_dir(allowlist_dir, targets or ["_default"]))
+    return entries
 
 
 @dataclass
@@ -258,7 +305,8 @@ def format_report(results: list[DiffResult]) -> str:
     lines.append("")
     lines.append(
         "Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. "
-        "`unexpected` counts diffs not covered by `allowlist.txt`."
+        "`unexpected` counts diffs not covered by the allowlist "
+        "(`compat/allowlists/`)."
     )
     lines.append("")
 
@@ -286,7 +334,7 @@ def format_report(results: list[DiffResult]) -> str:
         if r.allowed_guff or r.allowed_golangci:
             n = len(r.allowed_guff) + len(r.allowed_golangci)
             lines.append(f"### Allowed known diffs ({n})")
-            # Keep RESULTS.md readable; full keys live in allowlist.txt.
+            # Keep RESULTS.md readable; full keys live in allowlists/.
             shown = 0
             for k in sorted(r.allowed_guff):
                 if shown >= 8:
@@ -300,7 +348,7 @@ def format_report(results: list[DiffResult]) -> str:
                 shown += 1
             remaining = n - shown
             if remaining > 0:
-                lines.append(f"- … and {remaining} more (see `allowlist.txt`)")
+                lines.append(f"- … and {remaining} more (see `compat/allowlists/`)")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -319,6 +367,11 @@ def main(argv: list[str] | None = None) -> int:
     p_diff.add_argument("--guff", required=True)
     p_diff.add_argument("--golangci", required=True)
     p_diff.add_argument("--allowlist", default=None)
+    p_diff.add_argument(
+        "--allowlist-dir",
+        default=None,
+        help="Directory of per-target allowlists (_default.txt + <target>.txt)",
+    )
     p_diff.add_argument("--report", default=None, help="Write markdown report path")
     p_diff.add_argument(
         "--json-out",
@@ -332,6 +385,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_report.add_argument("manifest")
     p_report.add_argument("--allowlist", default=None)
+    p_report.add_argument(
+        "--allowlist-dir",
+        default=None,
+        help="Directory of per-target allowlists (_default.txt + <target>.txt)",
+    )
     p_report.add_argument("--report", required=True)
     p_report.add_argument("--json-out", default=None)
 
@@ -343,7 +401,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "diff":
-        allow = parse_allowlist(args.allowlist)
+        allow = resolve_allowlist(
+            allowlist=args.allowlist,
+            allowlist_dir=args.allowlist_dir,
+            targets=[args.target],
+        )
         result = diff_sets(
             args.target,
             issue_keys(load_issues(args.guff), args.root),
@@ -377,13 +439,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.ok else 1
 
     if args.cmd == "report":
-        allow = parse_allowlist(args.allowlist)
-        results: list[DiffResult] = []
+        rows: list[tuple[str, str, str, str]] = []
         for raw in Path(args.manifest).read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
             target, root, guff_json, gcl_json = line.split("\t")
+            rows.append((target, root, guff_json, gcl_json))
+        allow = resolve_allowlist(
+            allowlist=args.allowlist,
+            allowlist_dir=args.allowlist_dir,
+            targets=[t for t, *_ in rows],
+        )
+        results: list[DiffResult] = []
+        for target, root, guff_json, gcl_json in rows:
             results.append(
                 diff_sets(
                     target,

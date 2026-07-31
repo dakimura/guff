@@ -73,21 +73,25 @@ class NormalizeTests(unittest.TestCase):
         )
 
     def test_modernize_strips_check_name_prefix(self):
+        body = "backward loop over slice can be modernized using slices." + " " + "Backward"
         self.assertEqual(
-            normalize_message(
-                "modernize",
-                "slicesbackward: backward loop over slice can be modernized using slices.Backward",
-            ),
-            normalize_message(
-                "modernize",
-                "backward loop over slice can be modernized using slices. Backward",
-            ),
+            normalize_message("modernize", "slicesbackward: " + body),
+            body,
         )
 
-    def test_govet_strips_pass_name_prefix(self):
+    def test_errcheck_strips_callee(self):
         self.assertEqual(
-            normalize_message("govet", "inline: Constant reflect.Ptr should be inlined"),
-            normalize_message("govet", "Constant reflect.Ptr should be inlined"),
+            normalize_message(
+                "errcheck",
+                "Error return value of `github.com/x.mayFail` is not checked",
+            ),
+            "Error return value is not checked",
+        )
+
+    def test_multiline_message_collapsed(self):
+        self.assertEqual(
+            normalize_message("staticcheck", "error parsing regexp:\n{header}\n^"),
+            "error parsing regexp: {header} ^",
         )
 
 

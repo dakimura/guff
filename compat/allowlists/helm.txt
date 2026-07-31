@@ -6,5 +6,3 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
-# Fixture / local (standard.yml) known diffs.
-
