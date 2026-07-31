@@ -29,6 +29,15 @@ fn import_dir_classifies_files_on_linux() {
 }
 
 #[test]
+fn import_dir_with_skips_tests_without_opening() {
+    let dir = testdata("simple");
+    let pkg = ctx("linux").import_dir_with(&dir, false).unwrap();
+    assert_eq!(pkg.go_files, vec!["bar_linux.go", "foo.go"]);
+    assert!(pkg.test_go_files.is_empty());
+    assert!(pkg.test_imports.is_empty());
+}
+
+#[test]
 fn import_dir_ignores_linux_file_on_darwin() {
     let dir = testdata("simple");
     let pkg = ctx("darwin").import_dir(&dir).unwrap();
@@ -50,4 +59,22 @@ fn import_dir_no_go_when_only_tagged_out_files() {
     let err = ctx("darwin").import_dir(&base).unwrap_err();
     let _ = std::fs::remove_dir_all(&base);
     assert!(matches!(err, BuildError::NoGo(_)));
+}
+
+#[test]
+fn import_dir_reads_past_large_leading_block_comment() {
+    // math/big/natdiv.go places `package` past 24 KiB; shrinking the header
+    // read below that silently dropped production files and broke verify.
+    let base = std::env::temp_dir().join(format!("guff_build_hdr_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let mut src = String::from("/*\n");
+    src.push_str(&"x".repeat(30_000));
+    src.push_str("\n*/\npackage hdrtest\n");
+    std::fs::write(base.join("bigcomment.go"), src).unwrap();
+
+    let pkg = ctx("darwin").import_dir_with(&base, false).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
+    assert_eq!(pkg.name, "hdrtest");
+    assert_eq!(pkg.go_files, vec!["bigcomment.go"]);
 }

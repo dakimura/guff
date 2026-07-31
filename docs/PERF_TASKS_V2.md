@@ -12,6 +12,23 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **native list skip dep `*_test.go` DONE（2026-07-31）:** 空 cold samply の本丸だった
+> `load_package_files` / `__open`。依存パッケージは test ファイルを使わない
+> （`cfg.tests && is_root` だけ）ので `import_dir_with(..., include_tests=false)` で
+> 開かない。加えて `good_os_arch` / `_` `.` を open 前に弾く。
+> empty-cold native list **0.58→0.47s（−0.11s）** / load **≈ −0.11s** / wall **≈ −0.12s**。
+> `GUFF_NATIVE_LIST=verify` OK。findings 同一。tsdb+full regress PASS（guff_only=0、
+> RSS 悪化なし）。※ header を 16KiB に縮めると `math/big/natdiv.go`（package が 24KiB超）
+> が落ちるので **64KiB のまま**。
+>
+> **SKIP_FUNC_BODIES byte-level brace skip DONE（2026-07-31）:** 空 cold を samply
+> で切り直し。typecheck CPU の本丸は seed の `skip_body` が**本体をフルトークン化**
+> していたこと（`Scanner::scan` self 0.59s）。`Scanner::skip_to_closing_brace` で
+> 文字走査だけにして keyword lookup / literal 割当を省略。
+> `-j 1` seed **1.89→1.68s（−0.21s）** / typecheck **2.41→2.20s** / wall **−0.21s**。
+> 並列 empty-cold の seed 中央 ≈ **−0.06s**（wall は load/format ノイズで見えにくい）。
+> samply: `Scanner::scan` 0.59→0.37s。findings byte 同一 / seed cold↔hot 同一。
+>
 > **goimports names-only resolve + SKIP_STAMP DONE（2026-07-31）:** 本ファイルの初回
 > parse を `SKIP_OBJECT_RESOLUTION | SKIP_STAMP_NODE_IDS` にし、直後に
 > `resolve_file_names_only`（`ObjDecl::Name`、AST クローン無し）で `Ident.obj` だけ埋める。
@@ -120,9 +137,11 @@
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
 > **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
 >
-> **次の小粒候補（未着手）:** B-5 Slice は findings ずれで見送り（ユーザー方針）。
-> goimports 初回 parse の残りは素の scan/parse（resolve/stamp は安い経路へ移した）。
-> sibling parse キャッシュは get_fixes が小さいうちは後回し。
+> **次の小粒候補（未着手）:** goimports 初回 parse の残りは素の scan/parse。
+> sibling parse キャッシュは get_fixes が小さいうちは後回し。空 cold の残りは
+> typecheck 内の check/stamp と、syscall バウンドな header open の更なる詰め
+> （dirfd/openat 等。期待値は小）。
+> ~~native list skip dep tests~~ **DONE** / ~~SKIP_FUNC_BODIES byte skip~~ **DONE** /
 > ~~seed SHA→blake3~~ **DONE** / ~~`guff-packages` FxHash~~ **DONE** /
 > ~~`position_internal`~~ **NO-GO** / ~~B-10~~ **DONE** / ~~P0-1b~~ **DONE** /
 > ~~goimports identity fast-path~~ **DONE** / ~~goimports names-only resolve~~ **DONE**。
@@ -638,7 +657,11 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-31 時点の残り（★ 最新）:** goimports names-only resolve + identity fast-path +
+**2026-07-31 時点の残り（★ 最新）:** SKIP_FUNC_BODIES byte skip + native list skip
+dep tests DONE。empty-cold wall ≈ **1.8s** 帯（load≈0.6 / typecheck≈1.0）。
+seed-hot ≈ **1.10s**。format は waited=0 でほぼ隠れている。B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（goimports names-only 直後・履歴）:** goimports names-only resolve + identity fast-path +
 P0-1b + B-10 DONE。seed-hot ≈ **1.10s** / empty-cold ≈ **1.85–1.9s**（typecheck+load）。
 format は waited=0 でほぼ隠れている。B-5 Slice は findings ずれで見送り。
 

@@ -183,7 +183,9 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                     standard: module.standard,
                     goroot_version: &goroot_ver,
                 };
-                let result = modmeta_session.import_dir(&ctxt, dir, &key);
+                // Test files are only attached to `P [P.test]` for pattern roots.
+                let include_tests = cfg.tests && *is_root;
+                let result = modmeta_session.import_dir(&ctxt, dir, &key, include_tests);
                 (pkg_path.clone(), dir.clone(), module.clone(), *is_root, result)
             })
             .collect();

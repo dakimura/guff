@@ -167,6 +167,138 @@ impl<'eh> Scanner<'eh> {
         self.string_end
     }
 
+    /// Skip from the current character to the `}` that closes `depth` open
+    /// braces, without building tokens. Used by [`crate::parser::SKIP_FUNC_BODIES`]:
+    /// the seed only needs brace positions, and full tokenization of bodies is
+    /// pure waste (identifiers, keyword lookup, literal allocation).
+    ///
+    /// Precondition: the opening `{` has already been consumed (scanner sits on
+    /// the first character inside the block) and `depth >= 1`.
+    ///
+    /// On success, returns the [`Pos`] of the matching `}`, leaves the scanner
+    /// ready to [`Scanner::scan`] the next token, and sets `insert_semi` as a
+    /// normal `}` token would. Braces inside strings, runes and comments are
+    /// ignored — same rules as token-based skipping. Newlines still update the
+    /// [`File`] line table via [`Scanner::next`].
+    pub(crate) fn skip_to_closing_brace(&mut self, mut depth: usize) -> Option<Pos> {
+        debug_assert!(depth >= 1);
+        // Pending newline-as-semicolon from a prior token must not fire mid-skip:
+        // we are inside a block, not between statements the parser will see.
+        self.nl_pos = NO_POS;
+        loop {
+            let ch = self.ch;
+            if ch < 0 {
+                return None;
+            }
+            let offs = self.offset;
+            self.next();
+            match ch {
+                c if c == '{' as i32 => depth += 1,
+                c if c == '}' as i32 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let pos = self.file.as_ref().unwrap().pos(offs as i64);
+                        self.insert_semi = true;
+                        return Some(pos);
+                    }
+                }
+                c if c == '"' as i32 => self.skip_string(),
+                c if c == '\'' as i32 => self.skip_rune(),
+                c if c == '`' as i32 => self.skip_raw_string(),
+                c if c == '/' as i32 => {
+                    if self.ch == '/' as i32 || self.ch == '*' as i32 {
+                        self.skip_comment();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Like [`Scanner::scan_string`] but does not allocate the literal.
+    fn skip_string(&mut self) {
+        let offs = self.offset - 1;
+        loop {
+            let ch = self.ch;
+            if ch == '\n' as i32 || ch < 0 {
+                self.error(offs, "string literal not terminated");
+                break;
+            }
+            self.next();
+            if ch == '"' as i32 {
+                break;
+            }
+            if ch == '\\' as i32 {
+                self.scan_escape('"' as i32);
+            }
+        }
+    }
+
+    /// Like [`Scanner::scan_rune`] but does not allocate the literal.
+    fn skip_rune(&mut self) {
+        let offs = self.offset - 1;
+        let mut valid = true;
+        let mut n = 0usize;
+        loop {
+            let ch = self.ch;
+            if ch == '\n' as i32 || ch < 0 {
+                if valid {
+                    self.error(offs, "rune literal not terminated");
+                    valid = false;
+                }
+                break;
+            }
+            self.next();
+            if ch == '\'' as i32 {
+                break;
+            }
+            n += 1;
+            if ch == '\\' as i32 && !self.scan_escape('\'' as i32) {
+                valid = false;
+            }
+        }
+        if valid && n != 1 {
+            self.error(offs, "illegal rune literal");
+        }
+    }
+
+    /// Like [`Scanner::scan_raw_string`] but does not allocate the literal.
+    fn skip_raw_string(&mut self) {
+        let offs = self.offset - 1;
+        loop {
+            let ch = self.ch;
+            if ch < 0 {
+                self.error(offs, "raw string literal not terminated");
+                break;
+            }
+            self.next();
+            if ch == '`' as i32 {
+                break;
+            }
+        }
+    }
+
+    /// Like [`Scanner::scan_comment`] but does not allocate the comment text.
+    fn skip_comment(&mut self) {
+        if self.ch == '/' as i32 {
+            self.next();
+            while self.ch != '\n' as i32 && self.ch >= 0 {
+                self.next();
+            }
+        } else {
+            // /* … */
+            self.next();
+            while self.ch >= 0 {
+                let ch = self.ch;
+                self.next();
+                if ch == '*' as i32 && self.ch == '/' as i32 {
+                    self.next();
+                    break;
+                }
+            }
+        }
+    }
+
     /// Read the next Unicode char into `self.ch`. `self.ch < 0` means EOF.
     fn next(&mut self) {
         if self.rd_offset < self.src.len() {

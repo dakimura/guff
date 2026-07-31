@@ -102,14 +102,19 @@ impl ModMetaSession {
 
     /// Import a package directory, using the module-level modmeta cache for
     /// immutable modules.
+    ///
+    /// `include_tests` controls whether `*_test.go` headers are opened. Only
+    /// pattern roots need them (`list` passes `cfg.tests && is_root`); deps and
+    /// cached GOMODCACHE/GOROOT packages never do.
     pub fn import_dir(
         &self,
         ctxt: &Context,
         dir: &Path,
         key: &ModMetaKey<'_>,
+        include_tests: bool,
     ) -> Result<BuildPackage, guff_build::BuildError> {
         if !cache_enabled() || (!key.standard && key.module_version.is_empty()) {
-            return ctxt.import_dir(dir);
+            return ctxt.import_dir_with(dir, include_tests);
         }
 
         if let Some(meta) = self.lookup(key) {
@@ -123,7 +128,10 @@ impl ModMetaSession {
             return Ok(pkg);
         }
 
-        let pkg = ctxt.import_dir(dir)?;
+        // Immutable modules are never list roots, so tests are never needed.
+        // Always scan without tests so the cached blob stays lean and matches
+        // what dep walks ask for.
+        let pkg = ctxt.import_dir_with(dir, false)?;
         self.insert(key, CachedPkgMeta::from_build(&pkg));
         Ok(pkg)
     }

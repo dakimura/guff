@@ -1438,27 +1438,46 @@ impl Parser {
     /// dependency seed, where only the exported API matters and the statement
     /// trees are built and dropped without ever being read.
     ///
-    /// Braces inside strings, runes and comments are not tokens, so counting
-    /// `{`/`}` from the scanner is exact for any input the scanner accepts.
-    /// Only a truncated file can exhaust the tokens first; that leaves `tok` at
-    /// `EOF` and the `expect2` below reports the missing brace as usual.
+    /// Walks the source at character level ([`crate::scanner::Scanner::skip_to_closing_brace`])
+    /// rather than tokenizing: braces inside strings, runes and comments are
+    /// still ignored, and newlines still update the file line table, but
+    /// identifiers / keyword lookup / literal allocation are skipped. A
+    /// truncated body returns `None` from the scanner and is reported as
+    /// `expected '}'` here.
     fn skip_body(&mut self) -> BlockStmt {
-        let lbrace = self.expect(Token::LBRACE);
-        let mut depth = 1usize;
-        while self.tok != Token::EOF {
-            match self.tok {
-                Token::LBRACE => depth += 1,
-                Token::RBRACE => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
+        // `tok` is already `{`; the scanner sits on the first character inside
+        // the block. Do not `expect` (which would tokenize the first body
+        // token) — hand the whole interior to the byte-level skipper.
+        let lbrace = self.pos;
+        if self.tok != Token::LBRACE {
+            self.error_expected(lbrace, "'{'");
             self.next();
+            return BlockStmt {
+                lbrace,
+                list: Vec::new(),
+                rbrace: NO_POS,
+                id: 0,
+            };
         }
-        let rbrace = self.expect2(Token::RBRACE);
+        let rbrace = match self.scanner.skip_to_closing_brace(1) {
+            Some(pos) => pos,
+            None => {
+                self.error_expected(self.pos, "'}'");
+                // Resync the token stream from EOF / current scanner state.
+                self.next();
+                return BlockStmt {
+                    lbrace,
+                    list: Vec::new(),
+                    rbrace: NO_POS,
+                    id: 0,
+                };
+            }
+        };
+        // Present as if we had just scanned `}` so `next()` mirrors `expect2`.
+        self.pos = rbrace;
+        self.tok = Token::RBRACE;
+        self.lit = Cow::Borrowed("}");
+        self.next();
         BlockStmt {
             lbrace,
             list: Vec::new(),
@@ -3489,8 +3508,8 @@ func describe(i Item) string {
 
     #[test]
     fn skip_func_bodies_ignores_braces_in_literals_and_comments() {
-        // The scan counts brace *tokens*, so braces inside strings, raw
-        // strings, runes and comments must not unbalance it. If any did, the
+        // The byte-level skip counts braces outside strings/runes/comments, so
+        // braces inside those must not unbalance it. If any did, the
         // declaration after the function would be lost or misparsed.
         let src = "package p\n\
                    func F() {\n\

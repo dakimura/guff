@@ -48,7 +48,7 @@ impl Context {
             return Ok(pkg);
         }
 
-        self.load_package_files(&mut pkg)?;
+        self.load_package_files(&mut pkg, true)?;
         Ok(pkg)
     }
 

@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::context::Context;
@@ -13,8 +14,23 @@ use crate::package::{BuildError, MultiplePackageError, NoGoError, Package};
 impl Context {
     /// Loads the Go package in the named directory.
     ///
-    /// Equivalent to `build.Context.ImportDir`.
+    /// Equivalent to `build.Context.ImportDir`. Includes `*_test.go` files.
     pub fn import_dir(&self, dir: impl AsRef<Path>) -> Result<Package, BuildError> {
+        self.import_dir_with(dir, true)
+    }
+
+    /// Like [`Context::import_dir`], but when `include_tests` is false skips
+    /// every `*_test.go` without opening it.
+    ///
+    /// Native `go list` only needs test files for pattern roots (`cfg.tests &&
+    /// is_root`); dependency packages pay ~25% of header opens on `_test.go`
+    /// that are then thrown away. Skipping them is the main empty-cold lever
+    /// left in `load_package_files`.
+    pub fn import_dir_with(
+        &self,
+        dir: impl AsRef<Path>,
+        include_tests: bool,
+    ) -> Result<Package, BuildError> {
         let dir = abs_or_canonicalize(dir.as_ref())?;
         let mut pkg = Package {
             dir: dir.clone(),
@@ -22,12 +38,16 @@ impl Context {
             ..Package::default()
         };
         self.fill_roots(&mut pkg);
-        self.load_package_files(&mut pkg)?;
+        self.load_package_files(&mut pkg, include_tests)?;
         Ok(pkg)
     }
 
     /// Classifies `.go` files in `pkg.dir` into [`Package`] file lists.
-    pub(crate) fn load_package_files(&self, pkg: &mut Package) -> Result<(), BuildError> {
+    pub(crate) fn load_package_files(
+        &self,
+        pkg: &mut Package,
+        include_tests: bool,
+    ) -> Result<(), BuildError> {
         let mut all_tags = HashSet::new();
         let mut first_file: Option<String> = None;
         let mut first_pkg = String::new();
@@ -48,10 +68,25 @@ impl Context {
             if !name.ends_with(".go") {
                 continue;
             }
+            // Go's matchFile rejects these without reading; keep them out of
+            // ignored_go_files too.
+            if name.starts_with('_') || name.starts_with('.') {
+                continue;
+            }
+            if !include_tests && name.ends_with("_test.go") {
+                continue;
+            }
+            // Filename `_$GOOS` / `_$GOARCH` gates need no open (C-3c hot path).
+            if !self.use_all_files && !self.good_os_arch_file(&name, &mut None) {
+                pkg.ignored_go_files.push(name);
+                continue;
+            }
 
             let path = pkg.dir.join(&name);
             // Build tags + package + imports live in the file header. Full-file
-            // reads dominate listing of GOMODCACHE (C-3c); 64 KiB is enough.
+            // reads dominate listing of GOMODCACHE (C-3c). 64 KiB covers large
+            // leading block comments (e.g. math/big/natdiv.go places `package`
+            // past 24 KiB) while still avoiding a full read of huge std files.
             let content = match read_go_header(&path) {
                 Ok(c) => c,
                 Err(e) => {
@@ -69,9 +104,7 @@ impl Context {
             };
 
             if !matched {
-                if !name.starts_with('_') && !name.starts_with('.') {
-                    pkg.ignored_go_files.push(name);
-                }
+                pkg.ignored_go_files.push(name);
                 continue;
             }
 
@@ -167,10 +200,12 @@ impl Context {
 }
 
 /// Bytes to read from each `.go` file for build-tag / package / import scan.
+///
+/// Must clear large leading documentation comments — `math/big/natdiv.go` puts
+/// `package` past 24 KiB. Shrinking this broke `GUFF_NATIVE_LIST=verify`.
 const GO_HEADER_BYTES: u64 = 64 * 1024;
 
 fn read_go_header(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
     let f = fs::File::open(path)?;
     let mut buf = Vec::with_capacity(GO_HEADER_BYTES as usize);
     let mut take = f.take(GO_HEADER_BYTES);
