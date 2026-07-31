@@ -518,12 +518,18 @@ pub(crate) fn run_linters_on_graph(
     let t2 = std::time::Instant::now();
 
     // Type-check + analyze only the packages that missed the cache.
-    // Fact-producing analyzers (contextcheck, SA1019, …) also need same-module
-    // imported packages typechecked so package facts can be computed — otherwise
-    // cross-pkg findings are silently dropped (helm nolintlint/contextcheck drift).
+    // contextcheck needs same-module imported packages typechecked so package
+    // facts can be computed — otherwise cross-pkg findings are silently dropped
+    // (helm). Other fact producers (modernize, deprecated, …) do not need this
+    // expansion; gating on any `fact_types` inflated peak RSS by hundreds of MB
+    // on prometheus without changing findings.
     let root_miss_ids = miss_ids.clone();
-    let typecheck_ids =
-        expand_fact_typecheck_ids(&opts.analyzers, all_packages, &root_miss_ids);
+    let need_fact_pkgs = analyzers_need_same_module_fact_packages(&opts.analyzers);
+    let typecheck_ids = if need_fact_pkgs {
+        expand_fact_typecheck_ids(all_packages, &root_miss_ids)
+    } else {
+        root_miss_ids.clone()
+    };
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
     env.parallel = !sequential;
@@ -534,18 +540,22 @@ pub(crate) fn run_linters_on_graph(
     });
     let mut typed =
         typecheck_roots_with_prebuilt_seed(all_packages, &typecheck_ids, analysis_mode, &env, prebuilt);
-    rewire_typed_imports(&mut typed);
-    let typed_by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> =
-        typed.iter().map(|p| (p.id.clone(), std::sync::Arc::clone(p))).collect();
-    let miss_roots: Vec<std::sync::Arc<guff_packages::Package>> = root_miss_ids
-        .iter()
-        .filter_map(|id| typed_by_id.get(id).cloned())
-        .collect();
+    let miss_roots: Vec<std::sync::Arc<guff_packages::Package>> = if need_fact_pkgs {
+        rewire_typed_imports(&mut typed);
+        let typed_by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> =
+            typed.iter().map(|p| (p.id.clone(), std::sync::Arc::clone(p))).collect();
+        root_miss_ids
+            .iter()
+            .filter_map(|id| typed_by_id.get(id).cloned())
+            .collect()
+    } else {
+        typed
+    };
     if timing {
         eprintln!(
             "guff: phase typecheck_roots {:.2}s ({} pkgs, {} analyze roots)",
             t2.elapsed().as_secs_f64(),
-            typed.len(),
+            typecheck_ids.len(),
             miss_roots.len(),
         );
     }
@@ -595,16 +605,19 @@ pub(crate) fn run_linters_on_graph(
     })
 }
 
-/// Whether any enabled analyzer (or its requires) advertises facts that need
-/// imported packages to be typechecked and analyzed.
-fn analyzers_need_fact_packages(analyzers: &[&guff_analysis::Analyzer]) -> bool {
-    fn has_facts(a: &guff_analysis::Analyzer) -> bool {
-        if !a.fact_types.is_empty() {
-            return true;
-        }
-        a.requires.iter().any(|r| has_facts(r))
+/// Whether any enabled analyzer needs same-module import packages typechecked
+/// so its package facts can be produced (kkHAIKE/contextcheck `getPkgRoot`).
+///
+/// Do **not** key this off arbitrary `fact_types`: modernize / deprecated /
+/// exhaustive advertise facts but do not need the same-module source expansion,
+/// and expanding for them regresses peak RSS on large corpora (prometheus).
+pub(crate) fn analyzers_need_same_module_fact_packages(
+    analyzers: &[&guff_analysis::Analyzer],
+) -> bool {
+    fn needs(a: &guff_analysis::Analyzer) -> bool {
+        a.name == "contextcheck" || a.requires.iter().any(|r| needs(r))
     }
-    analyzers.iter().any(|a| has_facts(a))
+    analyzers.iter().any(|a| needs(a))
 }
 
 /// Module path used to bound fact-package typecheck expansion (kkHAIKE/contextcheck
@@ -624,15 +637,11 @@ fn package_module_key(pkg: &guff_packages::Package) -> String {
 }
 
 /// Extend cache-miss root ids with same-module imported packages that have
-/// source files, so fact producers can run on them.
+/// source files, so contextcheck fact producers can run on them.
 fn expand_fact_typecheck_ids(
-    analyzers: &[&guff_analysis::Analyzer],
     all_packages: &[std::sync::Arc<guff_packages::Package>],
     miss_ids: &[String],
 ) -> Vec<String> {
-    if !analyzers_need_fact_packages(analyzers) {
-        return miss_ids.to_vec();
-    }
     let by_id: HashMap<&str, &std::sync::Arc<guff_packages::Package>> = all_packages
         .iter()
         .map(|p| (p.id.as_str(), p))

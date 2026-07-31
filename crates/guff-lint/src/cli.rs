@@ -402,6 +402,13 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         );
     }
 
+    let mut bag = (*settings.to_bag()).clone();
+    // contextcheck needs (1) same-module fact typecheck, (2) methods in SrcFuncs,
+    // (3) SSA on ill-typed packages. Each costs peak RSS on large corpora, so
+    // enable only when that analyzer is in the run.
+    let need_ctx = crate::analyzers_need_same_module_fact_packages(&analyzers);
+    bag.insert("buildir_src_methods", need_ctx);
+    bag.insert("buildir_despite_errors", need_ctx);
     let opts = LintOptions {
         patterns: args.patterns,
         analyzers,
@@ -410,7 +417,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         build_tags,
         tests: loaded.tests,
         filter,
-        settings: settings.to_bag(),
+        settings: std::sync::Arc::new(bag),
         timeout,
         concurrency,
         out_formats,

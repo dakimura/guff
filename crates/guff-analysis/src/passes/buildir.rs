@@ -33,14 +33,47 @@ pub struct BuildIrResult {
 unsafe impl Send for BuildIrResult {}
 unsafe impl Sync for BuildIrResult {}
 
-fn collect_src_funcs(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
+fn collect_src_funcs(prog: &Program, pkg: PackageId, include_methods: bool) -> Vec<FuncId> {
+    if include_methods {
+        collect_src_funcs_with_methods(prog, pkg)
+    } else {
+        collect_src_funcs_members_only(prog, pkg)
+    }
+}
+
+/// Package-level functions only (`Package.members`). Cheaper RSS/walk; enough
+/// when no consumer needs method bodies in `SrcFuncs` (prometheus without
+/// contextcheck).
+fn collect_src_funcs_members_only(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
+    use guff_ssa::member::MemberData;
+
+    let mut funcs = Vec::new();
+    let ssa_pkg = prog.packages.get(pkg);
+    // Sort by member name so FxHash map order cannot reorder analyzer walks
+    // (PERF_TASKS_V2 §0-12 / §A-1).
+    let mut top: Vec<(&str, FuncId)> = ssa_pkg
+        .members
+        .iter()
+        .filter_map(|(name, m)| match m {
+            MemberData::Function(fid) => Some((name.as_str(), *fid)),
+            _ => None,
+        })
+        .collect();
+    top.sort_by(|(a, _), (b, _)| a.cmp(b));
+    for (_, fid) in top {
+        funcs.push(fid);
+        collect_anon_funcs(prog, fid, &mut funcs);
+    }
+    funcs
+}
+
+/// Match `golang.org/x/tools/go/analysis/passes/buildssa`: SrcFuncs is every
+/// named function declared in the package's AST (package-level *and* methods).
+/// Methods are absent from `Package.members`, so this is required for
+/// contextcheck on receivers like `(*ReadyChecker).IsReady` (helm).
+fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
     use std::collections::HashSet;
 
-    // Match `golang.org/x/tools/go/analysis/passes/buildssa`: SrcFuncs is every
-    // named function declared in the package's AST (package-level *and* methods).
-    // Methods are intentionally absent from `Package.members` (go/ssa Members),
-    // so walking members alone misses receivers like `(*ReadyChecker).IsReady`
-    // and silences contextcheck on helm.
     let mut seen = HashSet::new();
     let mut named: Vec<(String, FuncId)> = Vec::new();
     for (fid, f) in prog.functions.iter() {
@@ -83,9 +116,19 @@ fn collect_anon_funcs(prog: &Program, fid: FuncId, out: &mut Vec<FuncId>) {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    // Still build SSA for ill-typed packages when possible (golangci / go/ssa
-    // do the same). Callers that must skip on type errors already gate via
-    // `run_despite_errors` on their own analyzer.
+    // Still build SSA for ill-typed packages when requested (golangci / go/ssa
+    // do the same for contextcheck on helm). Default skip keeps prometheus-sized
+    // peak RSS down; guff-lint sets `buildir_despite_errors` when contextcheck
+    // is enabled. Analyzer `run_despite_errors` stays true so the runner reaches
+    // this gate instead of skipping the action entirely.
+    if pass.pkg().ill_typed
+        && !pass
+            .settings::<bool>("buildir_despite_errors")
+            .copied()
+            .unwrap_or(false)
+    {
+        return Err("buildir: package is ill-typed".into());
+    }
     let artifacts = pass
         .pkg()
         .type_artifacts
@@ -125,7 +168,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         sample_ssa_rss(pass.pkg().pkg_path.as_str(), &built.prog);
     }
 
-    let src_funcs = collect_src_funcs(&built.prog, built.pkg);
+    // Default true (go/ssa SrcFuncs includes methods) for direct analyzer use /
+    // unit tests. guff-lint sets this false when contextcheck is off to avoid
+    // ~70MiB peak RSS on large corpora that do not need method SrcFuncs.
+    let include_methods = pass
+        .settings::<bool>("buildir_src_methods")
+        .copied()
+        .unwrap_or(true);
+    let src_funcs = collect_src_funcs(&built.prog, built.pkg, include_methods);
     Ok(Some(Box::new(BuildIrResult {
         prog: Arc::new(built.prog),
         pkg: built.pkg,
@@ -192,9 +242,10 @@ fn buildir_analyzer_impl() -> Analyzer {
         doc: "build SSA IR for later passes",
         url: "https://staticcheck.dev/docs/checks/",
         run: run as RunFn,
-        // Match go/analysis + golangci: packages with type errors still get SSA
-        // when possible. Otherwise fact producers (contextcheck) and SSA linters
-        // silently skip ill-typed roots (helm pkg/kube under guff's checker).
+        // Allow the runner to invoke buildir on ill-typed packages; the run()
+        // body then honors `buildir_despite_errors` (set by guff-lint when
+        // contextcheck is enabled). Without this, helm's ill-typed pkgs are
+        // skipped before contextcheck can see SSA.
         run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
