@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 use std::sync::Arc;
 
 use guff_ssa::ids::FuncId;
-use guff_ssa::member::MemberData;
 use guff_ssa::mode::BuilderMode;
 use guff_ssa::program::Program;
 use guff_ssa::ids::PackageId;
@@ -35,20 +34,40 @@ unsafe impl Send for BuildIrResult {}
 unsafe impl Sync for BuildIrResult {}
 
 fn collect_src_funcs(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
+    use std::collections::HashSet;
+
+    // Match `golang.org/x/tools/go/analysis/passes/buildssa`: SrcFuncs is every
+    // named function declared in the package's AST (package-level *and* methods).
+    // Methods are intentionally absent from `Package.members` (go/ssa Members),
+    // so walking members alone misses receivers like `(*ReadyChecker).IsReady`
+    // and silences contextcheck on helm.
+    let mut seen = HashSet::new();
+    let mut named: Vec<(String, FuncId)> = Vec::new();
+    for (fid, f) in prog.functions.iter() {
+        if f.pkg != Some(pkg) {
+            continue;
+        }
+        if f.object.is_none() {
+            continue;
+        }
+        if f.blocks.is_empty() {
+            continue;
+        }
+        if matches!(
+            f.synthetic.as_deref(),
+            Some("from type information (on demand)" | "missing generic origin")
+        ) {
+            continue;
+        }
+        if !seen.insert(fid) {
+            continue;
+        }
+        named.push((f.name.clone(), fid));
+    }
+    named.sort_by(|(a, _), (b, _)| a.cmp(b));
+
     let mut funcs = Vec::new();
-    let ssa_pkg = prog.packages.get(pkg);
-    // Sort by member name so FxHash map order cannot reorder analyzer walks
-    // (PERF_TASKS_V2 §0-12 / §A-1).
-    let mut top: Vec<(&str, FuncId)> = ssa_pkg
-        .members
-        .iter()
-        .filter_map(|(name, m)| match m {
-            MemberData::Function(fid) => Some((name.as_str(), *fid)),
-            _ => None,
-        })
-        .collect();
-    top.sort_by(|(a, _), (b, _)| a.cmp(b));
-    for (_, fid) in top {
+    for (_, fid) in named {
         funcs.push(fid);
         collect_anon_funcs(prog, fid, &mut funcs);
     }
@@ -64,9 +83,9 @@ fn collect_anon_funcs(prog: &Program, fid: FuncId, out: &mut Vec<FuncId>) {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    if pass.pkg().ill_typed {
-        return Err("buildir: package is ill-typed".into());
-    }
+    // Still build SSA for ill-typed packages when possible (golangci / go/ssa
+    // do the same). Callers that must skip on type errors already gate via
+    // `run_despite_errors` on their own analyzer.
     let artifacts = pass
         .pkg()
         .type_artifacts
@@ -173,7 +192,10 @@ fn buildir_analyzer_impl() -> Analyzer {
         doc: "build SSA IR for later passes",
         url: "https://staticcheck.dev/docs/checks/",
         run: run as RunFn,
-        run_despite_errors: false,
+        // Match go/analysis + golangci: packages with type errors still get SSA
+        // when possible. Otherwise fact producers (contextcheck) and SSA linters
+        // silently skip ill-typed roots (helm pkg/kube under guff's checker).
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     }

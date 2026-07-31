@@ -102,25 +102,43 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, NilCheck
             } else {
                 None
             };
+            // Only pointer/interface nil-checks mark a value as maybe-nil.
+            // `if *m == nil` on a `*map`/`*slice` compares the map/slice value
+            // (not the pointer) — do not peel that load, or later `*m = …` is
+            // falsely reported (prometheus `(*Annotations).Add` / `Merge`).
+            // When the compared value *is* a pointer/interface, peel loads so
+            // Alloc'd locals (`var x *T`) unify across distinct load instrs.
+            let consider = |prog: &Program, func: &Function, v: Value| -> Option<Value> {
+                let v = flatten_ssa_value(func, v);
+                let typ = value_type_of(prog, func, v);
+                if !is_pointer_or_interface_type(&prog.type_arena, typ) {
+                    return None;
+                }
+                Some(peel_load(func, v))
+            };
             if is_nil_const_operand(prog, func, x) {
-                maybe_nil.insert(
-                    peel_load(func, y),
-                    NilCheck {
-                        bin_op: bin_id,
-                        check_block: bid,
-                        non_nil_block,
-                    },
-                );
+                if let Some(key) = consider(prog, func, y) {
+                    maybe_nil.insert(
+                        key,
+                        NilCheck {
+                            bin_op: bin_id,
+                            check_block: bid,
+                            non_nil_block,
+                        },
+                    );
+                }
             }
             if is_nil_const_operand(prog, func, y) {
-                maybe_nil.insert(
-                    peel_load(func, x),
-                    NilCheck {
-                        bin_op: bin_id,
-                        check_block: bid,
-                        non_nil_block,
-                    },
-                );
+                if let Some(key) = consider(prog, func, x) {
+                    maybe_nil.insert(
+                        key,
+                        NilCheck {
+                            bin_op: bin_id,
+                            check_block: bid,
+                            non_nil_block,
+                        },
+                    );
+                }
             }
         }
     }

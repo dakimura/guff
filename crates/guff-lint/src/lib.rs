@@ -76,6 +76,7 @@ pub const EXIT_TIMEOUT: i32 = 4;
 /// Default `run.timeout` when neither CLI nor config set one (golangci-lint default).
 pub const DEFAULT_TIMEOUT: &str = "1m";
 
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -517,20 +518,34 @@ pub(crate) fn run_linters_on_graph(
     let t2 = std::time::Instant::now();
 
     // Type-check + analyze only the packages that missed the cache.
+    // Fact-producing analyzers (contextcheck, SA1019, …) also need same-module
+    // imported packages typechecked so package facts can be computed — otherwise
+    // cross-pkg findings are silently dropped (helm nolintlint/contextcheck drift).
+    let root_miss_ids = miss_ids.clone();
+    let typecheck_ids =
+        expand_fact_typecheck_ids(&opts.analyzers, all_packages, &root_miss_ids);
     let mut env = TypecheckEnv::from_env(&full_cfg.resolved_env(), "gc");
     env.from_source = dep_source;
     env.parallel = !sequential;
     env.skip_object_resolution = !analyzers_need_ast_object_resolution(&opts.analyzers);
     let prebuilt = speculate_job.and_then(|job| {
-        job.finish_if_matches(all_packages, &miss_ids)
+        job.finish_if_matches(all_packages, &typecheck_ids)
             .map(|s| (s.seed, s.fset))
     });
-    let miss_roots =
-        typecheck_roots_with_prebuilt_seed(all_packages, &miss_ids, analysis_mode, &env, prebuilt);
+    let mut typed =
+        typecheck_roots_with_prebuilt_seed(all_packages, &typecheck_ids, analysis_mode, &env, prebuilt);
+    rewire_typed_imports(&mut typed);
+    let typed_by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> =
+        typed.iter().map(|p| (p.id.clone(), std::sync::Arc::clone(p))).collect();
+    let miss_roots: Vec<std::sync::Arc<guff_packages::Package>> = root_miss_ids
+        .iter()
+        .filter_map(|id| typed_by_id.get(id).cloned())
+        .collect();
     if timing {
         eprintln!(
-            "guff: phase typecheck_roots {:.2}s ({} pkgs)",
+            "guff: phase typecheck_roots {:.2}s ({} pkgs, {} analyze roots)",
             t2.elapsed().as_secs_f64(),
+            typed.len(),
             miss_roots.len(),
         );
     }
@@ -561,7 +576,7 @@ pub(crate) fn run_linters_on_graph(
         eprintln!(
             "guff: cache hits={} misses={} (lazy: type-checked {} of {} roots)",
             hits,
-            miss_ids.len(),
+            root_miss_ids.len(),
             miss_roots.len(),
             roots.len(),
         );
@@ -578,6 +593,135 @@ pub(crate) fn run_linters_on_graph(
         path_mode: opts.path_mode,
         path_prefix: opts.path_prefix.clone(),
     })
+}
+
+/// Whether any enabled analyzer (or its requires) advertises facts that need
+/// imported packages to be typechecked and analyzed.
+fn analyzers_need_fact_packages(analyzers: &[&guff_analysis::Analyzer]) -> bool {
+    fn has_facts(a: &guff_analysis::Analyzer) -> bool {
+        if !a.fact_types.is_empty() {
+            return true;
+        }
+        a.requires.iter().any(|r| has_facts(r))
+    }
+    analyzers.iter().any(|a| has_facts(a))
+}
+
+/// Module path used to bound fact-package typecheck expansion (kkHAIKE/contextcheck
+/// `getPkgRoot` / same-module facts). Prefer `Package.module.path`.
+fn package_module_key(pkg: &guff_packages::Package) -> String {
+    if let Some(m) = pkg.module.as_ref() {
+        if !m.path.is_empty() {
+            return m.path.clone();
+        }
+    }
+    let parts: Vec<&str> = pkg.pkg_path.split('/').collect();
+    if parts.len() < 3 || !parts[0].contains('.') {
+        parts.first().copied().unwrap_or("").to_string()
+    } else {
+        parts[..3].join("/")
+    }
+}
+
+/// Extend cache-miss root ids with same-module imported packages that have
+/// source files, so fact producers can run on them.
+fn expand_fact_typecheck_ids(
+    analyzers: &[&guff_analysis::Analyzer],
+    all_packages: &[std::sync::Arc<guff_packages::Package>],
+    miss_ids: &[String],
+) -> Vec<String> {
+    if !analyzers_need_fact_packages(analyzers) {
+        return miss_ids.to_vec();
+    }
+    let by_id: HashMap<&str, &std::sync::Arc<guff_packages::Package>> = all_packages
+        .iter()
+        .map(|p| (p.id.as_str(), p))
+        .collect();
+    let mut out: Vec<String> = miss_ids.to_vec();
+    let mut seen: HashSet<String> = miss_ids.iter().cloned().collect();
+    let mut stack = miss_ids.to_vec();
+    let root_modules: HashSet<String> = miss_ids
+        .iter()
+        .filter_map(|id| by_id.get(id.as_str()).map(|p| package_module_key(p)))
+        .collect();
+    while let Some(id) = stack.pop() {
+        let Some(pkg) = by_id.get(id.as_str()) else {
+            continue;
+        };
+        for dep in pkg.imports.values() {
+            if dep.compiled_go_files.is_empty() {
+                continue;
+            }
+            if !root_modules.contains(&package_module_key(dep)) {
+                continue;
+            }
+            if seen.insert(dep.id.clone()) {
+                out.push(dep.id.clone());
+                stack.push(dep.id.clone());
+            }
+        }
+    }
+    out
+}
+
+/// Point each typed package's `imports` at other typed packages (same id), so
+/// fact-producer actions see typechecked dependency `Arc`s rather than metadata stubs.
+///
+/// Important: [`Package`]'s [`Clone`] deliberately drops `type_artifacts` (cheap
+/// metadata clones). This helper must not go through `Arc::make_mut` while other
+/// `Arc`s to the same package exist, or SSA/buildir lose their arenas.
+fn rewire_typed_imports(typed: &mut [std::sync::Arc<guff_packages::Package>]) {
+    let by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> = typed
+        .iter()
+        .map(|p| (p.id.clone(), std::sync::Arc::clone(p)))
+        .collect();
+    for slot in typed.iter_mut() {
+        let mut imports =
+            HashMap::with_capacity(slot.imports.len());
+        let mut changed = false;
+        for (path, imp) in &slot.imports {
+            if let Some(typed_imp) = by_id.get(&imp.id) {
+                if !std::sync::Arc::ptr_eq(imp, typed_imp) {
+                    changed = true;
+                }
+                imports.insert(path.clone(), std::sync::Arc::clone(typed_imp));
+            } else {
+                imports.insert(path.clone(), std::sync::Arc::clone(imp));
+            }
+        }
+        if !changed {
+            continue;
+        }
+        let p = slot.as_ref();
+        *slot = std::sync::Arc::new(guff_packages::Package {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            pkg_path: p.pkg_path.clone(),
+            dir: p.dir.clone(),
+            errors: p.errors.clone(),
+            go_files: p.go_files.clone(),
+            compiled_go_files: p.compiled_go_files.clone(),
+            other_files: p.other_files.clone(),
+            embed_files: p.embed_files.clone(),
+            embed_patterns: p.embed_patterns.clone(),
+            ignored_files: p.ignored_files.clone(),
+            export_file: p.export_file.clone(),
+            target: p.target.clone(),
+            imports,
+            deps: p.deps.clone(),
+            module: p.module.clone(),
+            for_test: p.for_test.clone(),
+            has_cgo: p.has_cgo,
+            types: p.types,
+            type_artifacts: p.type_artifacts.clone(),
+            fset: p.fset.clone(),
+            ill_typed: p.ill_typed,
+            syntax: p.syntax.clone(),
+            source_files: p.source_files.clone(),
+            types_info: p.types_info.clone(),
+            types_sizes: p.types_sizes,
+        });
+    }
 }
 
 fn open_issue_cache(opts: &LintOptions) -> Option<IssueCache> {

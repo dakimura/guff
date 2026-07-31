@@ -200,7 +200,16 @@ impl Action {
     }
 
     fn execute(&self) {
+        // Hard prerequisites are same-package `requires` (e.g. buildir). Same-analyzer
+        // actions on imported packages exist only to produce facts — if those fail
+        // (no types/syntax on an export-only dep), continue without their facts
+        // rather than aborting the whole action. Otherwise a single untyped import
+        // (stdlib / module cache) would silence fact producers like contextcheck
+        // on well-typed roots (helm pkg/kube ↔ deployment/util).
         for dep in &self.deps {
+            if !Arc::ptr_eq(&dep.package, &self.package) {
+                continue;
+            }
             if let Some(err) = dep.error() {
                 let mut state = self.state.lock().unwrap();
                 state.error = Some(format!("failed prerequisites: {err}"));
@@ -496,6 +505,11 @@ pub fn analyze_with_settings(
                 paths.sort();
                 for path in paths {
                     if let Some(dep_pkg) = package.imports.get(&path) {
+                        // Fact producers need a typechecked package (SSA). Skip
+                        // export-only / not-yet-typed import stubs.
+                        if dep_pkg.type_artifacts.is_none() {
+                            continue;
+                        }
                         deps.push(mk_action(
                             req,
                             Arc::clone(dep_pkg),
@@ -514,6 +528,9 @@ pub fn analyze_with_settings(
             paths.sort();
             for path in paths {
                 if let Some(dep_pkg) = package.imports.get(&path) {
+                    if dep_pkg.type_artifacts.is_none() {
+                        continue;
+                    }
                     deps.push(mk_action(
                         analyzer,
                         Arc::clone(dep_pkg),

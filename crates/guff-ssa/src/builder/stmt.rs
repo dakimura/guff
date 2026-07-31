@@ -1325,7 +1325,9 @@ impl<'a> Builder<'a> {
                 self.comp_lit_array_slice(addr, cl, typ, u, is_zero, sb)
             }
             TypeData::Map(_) => self.comp_lit_map(addr, cl, typ, u, sb),
-            other => panic!("unexpected composite literal core type: {other:?}"),
+            // Ill-typed packages can surface Invalid/basic here; skip rather than
+            // aborting SSA for the whole package (needed for contextcheck parity).
+            _ => {}
         }
     }
 

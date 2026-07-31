@@ -116,7 +116,7 @@ impl Program {
 
     let rtargs = receiver_type_args(self, obj);
     if !targs.is_empty() || !rtargs.is_empty() {
-      let origin_fid = self
+      let origin = self
         .func_value(obj)
         .or_else(|| {
           // Method object may already be an instantiated signature on a generic
@@ -135,8 +135,21 @@ impl Program {
               None
             }
           })
-        })
-        .expect("generic method must have an SSA origin function");
+        });
+      let Some(origin_fid) = origin else {
+        // Ill-typed / incomplete import graphs: synthesize an empty method
+        // rather than aborting SSA for the whole package.
+        let name = obj.name(&self.object_arena).to_string();
+        let fid = create_function(self, name, None, None);
+        {
+          let f = self.functions.get_mut(fid);
+          f.object = Some(obj);
+          f.signature = Some(sig);
+          f.synthetic = Some("missing generic origin".to_string());
+        }
+        self.object_methods.insert(obj, fid);
+        return fid;
+      };
       return self.instance(origin_fid, &rtargs, targs);
     }
 

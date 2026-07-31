@@ -5,12 +5,12 @@
 //! `context.TODO`, and that callees without a context parameter receive one
 //! when they internally use a non-inherited context.
 //!
-//! Uses `buildir` SSA. Package facts are exported for intra-package analysis;
-//! cross-package fact import is wired when dependency facts are available.
+//! Uses `buildir` SSA. Package facts are exported for intra- and same-module
+//! cross-package analysis (import packages are typechecked when this analyzer
+//! is enabled). External modules without source in the fact closure are skipped.
 //!
 //! DEFERRED: `//@contextcheck(req_has_ctx)` / nolint directives; full HTTP
-//! handler `r.Context()` edge cases; cross-package fact propagation when deps
-//! lack exported facts.
+//! handler `r.Context()` edge cases.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -50,7 +50,7 @@ const CTX_IN: i32 = 1;
 const CTX_OUT: i32 = 2;
 const CTX_IN_FIELD: i32 = 4;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EntryType {
     None,
     Normal,
@@ -434,6 +434,12 @@ impl<'a> Runner<'a> {
     }
 
     fn callee_func(&self, func: &Function, iid: InstrId) -> Option<FuncId> {
+        // Match upstream `getFunction`: CallInstruction static callees and
+        // MakeClosure's anonymous function (needed to chase closure bodies that
+        // call `context.Background` / `TODO`).
+        if let InstrData::MakeClosure(mc) = func.instrs.get(iid) {
+            return Some(mc.fn_);
+        }
         let common = instr_call_common(func, iid)?;
         if common.method.is_some() {
             return None;
@@ -446,6 +452,26 @@ impl<'a> Runner<'a> {
             .functions
             .iter()
             .find_map(|(fid, f)| (f.object == Some(obj)).then_some(fid))
+    }
+
+    /// Callees to chase from `iid`: upstream Call/MakeClosure targets, plus bare
+    /// `Function` values returned by a `return` (go/ssa emits those for
+    /// non-capturing func lits; guff may also do so when free-var capture fails
+    /// under incomplete types — helm `RsListFromClient`).
+    fn instr_callees(&self, func: &Function, iid: InstrId) -> Vec<FuncId> {
+        if let Some(fid) = self.callee_func(func, iid) {
+            return vec![fid];
+        }
+        let InstrData::Return(ret) = func.instrs.get(iid) else {
+            return Vec::new();
+        };
+        ret.results
+            .iter()
+            .filter_map(|v| match v {
+                Value::Function(fid) => Some(*fid),
+                _ => None,
+            })
+            .collect()
     }
 
     fn get_http_req_ctx(&self, f: &Function, least1: bool) -> Vec<Value> {
@@ -752,10 +778,7 @@ impl<'a> Runner<'a> {
                 let lookup_fn = self
                     .callee_func(f, iid)
                     .map(|fid| self.prog.functions.get(fid));
-                if let Some(res) = self.get_value(
-                    &key,
-                    lookup_fn.unwrap_or(f),
-                ) {
+                if let Some(res) = self.get_value(&key, lookup_fn.unwrap_or(f)) {
                     if !res.valid {
                         let chain: Vec<String> = res.funcs.iter().rev().cloned().collect();
                         let chain_str = chain.join("->");
@@ -777,15 +800,23 @@ impl<'a> Runner<'a> {
 
         for (_, block) in f.live_blocks() {
             for &iid in &block.instrs {
+                // Upstream `getCtxType` is ok for CallInstruction / MakeClosure.
+                // Also walk `return fn` (bare Function) — go/ssa does this for
+                // non-capturing func lits; guff may too when free-var capture
+                // fails (helm `RsListFromClient` under incomplete client types).
+                let callees = self.instr_callees(f, iid);
+                let is_call_like = instr_call_common(f, iid).is_some()
+                    || matches!(f.instrs.get(iid), InstrData::MakeClosure(_))
+                    || !callees.is_empty();
+                if !is_call_like {
+                    continue;
+                }
+
                 if self.is_background_or_todo(f, iid) {
                     ret = false;
                 }
 
                 let tp_flags = self.instr_ctx_flags(f, iid);
-                if tp_flags == 0 {
-                    continue;
-                }
-
                 if tp_flags & CTX_OUT != 0 {
                     continue;
                 }
@@ -794,45 +825,44 @@ impl<'a> Runner<'a> {
                     ret = false;
                 }
 
-                let Some(callee) = self.callee_func(f, iid) else {
-                    continue;
-                };
-                let callee_fn = self.prog.functions.get(callee);
-                let key = self.func_rel_string(callee_fn);
+                for callee in callees {
+                    let callee_fn = self.prog.functions.get(callee);
+                    let key = self.func_rel_string(callee_fn);
 
-                if let Some(res) = self.get_value(&key, callee_fn) {
-                    if !res.valid {
-                        ret = false;
-                        if !saved {
-                            saved = true;
-                            self.set_fact(&org_key, false, &res.funcs);
+                    if let Some(res) = self.get_value(&key, callee_fn) {
+                        if !res.valid {
+                            ret = false;
+                            if !saved {
+                                saved = true;
+                                self.set_fact(&org_key, false, &res.funcs);
+                            }
                         }
-                    }
-                    continue;
-                }
-
-                if key.ends_with("$thunk") || key.ends_with("$bound") {
-                    continue;
-                }
-
-                if self.check_is_entry(callee_fn) == EntryType::Normal {
-                    if callee_fn.blocks.is_empty() {
                         continue;
                     }
-                    if checking.get(&key).copied().unwrap_or(false) {
+
+                    if key.ends_with("$thunk") || key.ends_with("$bound") {
                         continue;
                     }
-                    checking.insert(key.clone(), true);
-                    let valid = self.check_func_without_ctx(callee_fn, checking);
-                    self.set_fact(&key, valid, &[callee_fn.name.clone()]);
-                    if !valid && !saved {
-                        if let Some(res) = self.get_value(&key, callee_fn) {
-                            saved = true;
-                            self.set_fact(&org_key, false, &res.funcs);
+
+                    if self.check_is_entry(callee_fn) == EntryType::Normal {
+                        if callee_fn.blocks.is_empty() {
+                            continue;
                         }
-                    }
-                    if !valid {
-                        ret = false;
+                        if checking.get(&key).copied().unwrap_or(false) {
+                            continue;
+                        }
+                        checking.insert(key.clone(), true);
+                        let valid = self.check_func_without_ctx(callee_fn, checking);
+                        self.set_fact(&key, valid, &[callee_fn.name.clone()]);
+                        if !valid && !saved {
+                            if let Some(res) = self.get_value(&key, callee_fn) {
+                                saved = true;
+                                self.set_fact(&org_key, false, &res.funcs);
+                            }
+                        }
+                        if !valid {
+                            ret = false;
+                        }
                     }
                 }
             }
@@ -849,7 +879,12 @@ impl<'a> Runner<'a> {
             if self.current_fact.entries.contains_key(&key) {
                 continue;
             }
-            match self.check_is_entry(f) {
+            let entry = self.check_is_entry(f);
+            match entry {
+                EntryType::WithCtx | EntryType::WithHttpHandler => {
+                    entry_funcs.push((fid, entry));
+                }
+                EntryType::None => {}
                 EntryType::Normal => {
                     if self.get_value(&key, f).is_some() {
                         continue;
@@ -859,10 +894,6 @@ impl<'a> Runner<'a> {
                     let valid = self.check_func_without_ctx(f, &mut checking);
                     self.set_fact(&key, valid, &[f.name.clone()]);
                 }
-                EntryType::WithCtx | EntryType::WithHttpHandler => {
-                    entry_funcs.push((fid, self.check_is_entry(f)));
-                }
-                EntryType::None => {}
             }
         }
 
@@ -966,7 +997,7 @@ pub fn analyzer() -> &'static Analyzer {
             doc: "check whether the function uses a non-inherited context",
             url: "https://github.com/kkHAIKE/contextcheck",
             run: run as RunFn,
-            run_despite_errors: false,
+            run_despite_errors: true,
             requires: vec![buildir::analyzer()],
             fact_types: vec![FactTypeId::of::<CtxFact>()],
         }

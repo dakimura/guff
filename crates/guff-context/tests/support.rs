@@ -56,6 +56,9 @@ pub fn typecheck_with_deps(
     let main_file = parse_file(&fset, main_name, &main_src, Mode::NONE).expect("parse main");
 
     let mut check = Checker::new(Config::default());
+    if !pkg_id.is_empty() {
+        check.packages.get_mut(check.pkg).set_path(pkg_id.to_string());
+    }
     let mut dep_files: HashMap<String, guff::ast::File> = HashMap::new();
     for (import_path, dep_path) in deps {
         let src = fs::read(dep_path).expect("read dependency source");

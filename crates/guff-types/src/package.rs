@@ -37,6 +37,13 @@ impl Package {
         &self.path
     }
 
+    /// Sets the package's import path (Go: `Package.path` is normally fixed at
+    /// [`new_package`], but source checkers allocate with `""` and fill it in
+    /// from the loader's known path before checking).
+    pub fn set_path(&mut self, path: impl Into<String>) {
+        self.path = path.into();
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }

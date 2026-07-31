@@ -182,6 +182,42 @@ fn contextcheck_flags_non_inherited_and_missing_ctx() {
 }
 
 #[test]
+fn contextcheck_flags_closure_chain_like_helm() {
+    // Mirrors helm's GetNewReplicaSet -> RsListFromClient -> $closure(Background)
+    // pattern: a no-ctx helper builds a closure that passes context.Background
+    // into a ctx-taking API; callers with ctx must be told to pass it down.
+    let dir = support::testdata("contextcheck_closure");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_closure",
+        &dir.join("closure.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should pass the context parameter")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn contextcheck_flags_noncapturing_closure_return() {
+    // Bare Function return (no free vars → no MakeClosure), same invalid chain.
+    let dir = support::testdata("contextcheck_nocapture");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_nocapture",
+        &dir.join("nocapture.go"),
+    );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("should pass the context parameter")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn contextcheck_allows_inherited_context() {
     let dir = support::testdata("contextcheck");
     let pkg = support::typecheck_pkg("example.com/contextcheck/ok", &dir.join("ok.go"));

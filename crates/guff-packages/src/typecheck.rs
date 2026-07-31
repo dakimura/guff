@@ -565,6 +565,12 @@ pub fn typecheck_package_with_seed(
     } else {
         Checker::new(conf)
     };
+    // Checker allocates the package under check with an empty path; set the
+    // real import path so `Object.Pkg().Path()` / `type_func_name` match go/types
+    // (needed for cross-package facts like contextcheck).
+    if !pkg.pkg_path.is_empty() {
+        check.packages.get_mut(check.pkg).set_path(pkg.pkg_path.clone());
+    }
 
     let mut importer = ExportImporter::with_fset(fset.clone());
     for (path, file) in export_paths {
