@@ -12,6 +12,28 @@
 >
 > ### 📌 セッションを引き継いだ人はここから
 >
+> **goimports names-only resolve + SKIP_STAMP DONE（2026-07-31）:** 本ファイルの初回
+> parse を `SKIP_OBJECT_RESOLUTION | SKIP_STAMP_NODE_IDS` にし、直後に
+> `resolve_file_names_only`（`ObjDecl::Name`、AST クローン無し）で `Ident.obj` だけ埋める。
+> samply: `Goimports::format` 0.78→0.40s / `walk_func_decl` 0.45→0.34s / parse_file −0.27s。
+> seed-hot wall **≈ 1.10s**（旧 ≈ 1.25–1.3s）/ goimports-only format_checks **≈ 0.12s**。
+> findings 3635 byte 同一。両 regress PASS。
+>
+> **goimports identity fast-path DONE（2026-07-31）:** import rewrite が no-op のとき
+> `go/format.Source`（再パース+print）を飛ばして `src` を返す。samply で Source/print が
+> goimports CPU の約半分だった。goimports-only format **~0.62s → ~0.30s**。
+> seed-hot format ~1.25s。gofmt 本体の直しは gofumpt/gofmt 側に任せる（併走前提）。
+> findings 同一。両 regress PASS。
+>
+> **P0-1b DONE（2026-07-31）:** C-3c/B-10 後に format が seed-hot critical path
+> （`waited` ≈ 0.5s）。fmt 既定を 2 → `(ncpu/3).clamp(2,4)`（10-core → 3）。
+> seed-hot wall **≈ −0.4s** / empty-cold **≈ −0.1s**。findings 同一。§P0-1。
+>
+> **B-10 DONE（2026-07-31）:** formatter check を 1 パス化（read 1 回）+ native
+> gci/gofumpt の skip-object parse 共有。goimports は独自 parse。C-3c 後は
+> `format_checks waited` が cold 0.02〜0.06s / seed-hot **0.54s** で着手条件クリア。
+> wall は小幅（goimports 支配）。findings byte 同一。両 regress PASS。§B-10。
+>
 > **C-3c Phase 3 DONE（2026-07-31）:** 速度フォロー 2 本。
 > 1. **`--no-cache` でも `native_list/` を peek**（書き込みは `disable_cache` のままオフ。C-7 と同型）。
 >    恒久 `GUFF_CACHE` + `--no-cache` の load_graph **0.20s → 0.04s**。
@@ -55,11 +77,12 @@
 > **C-1 Phase 2 MVP DONE（2026-07-30）:** DeclInfo/Initializer → NodeId。seed ≈ −0.07s。
 > Phase 3/4 は条件付き GO で着手しない（§C-1）。
 >
-> **完了済み: S-1 / S-2 / S-3 / P0-1 / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
+> **完了済み: S-1 / S-2 / S-3 / P0-1（+P0-1b） / P0-2 / P0-3 / A-5 / A-10 / B-0 / B-1（a/b/c 全段） / B-3 / B-6 / B-8 / X-1 / X-2 / X-4 / X-5 /
 > A-1（guff-ssa + guff-types + keywords + guff-runner） / A-3a / B-4（A 分類完了: 32 rules） / A-8b（PGO スクリプト） /
 > buildir lazy import members（§B-2 follow-up） / A-9（計測のみ） / misspell FxHash / B-5（インターン実装） /
 > C-3a（`go list` の無駄取り） / C-3b（`go env`/`go version` 撲滅） / C-7（seed speculate） / C-8（RSS 内訳） / C-2（`--watch` MVP） /
-> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン + Phase 3 peek/modmeta-v2）**。
+> C-9（seed Info skip） / **C-3d（stdlib ソース + go-less）** / **C-3c（native list 既定オン + Phase 3 peek/modmeta-v2）** /
+> **B-10（formatter read+parse 共有）**。
 > **NO-GO と判定済み: A-2**（§A-2）**、A-3b/c**（§A-3）**、A-4**（§A-4）**、A-6**（§A-6）**、A-7**（§A-7）**、A-8a**（§A-8）**、B-1d**（§B-1 末尾）**、B-2（関数単位遅延）**（§B-2）**、
 > **B-7**（§B-7。misspell↔typecheck 共有は既済。format 共有は B-10）**、**A-9**（§A-9。startup 0.01s）**、
 > **C-6**（§C-6。Ident Mutex の wall 上限 &lt; 0.1s）**。
@@ -85,7 +108,7 @@
 > **残る攻めどころは ① seed dep check（B-9 = 触らない。C-9 で ≈−0.15s）
 > ② `go list` 0.85s（C-3c = 製品判断）の 2 つ。**
 > **analyze は 0.37s まで落ちたので、C-4（gocritic walk 融合）の期待値は消えました。**
-> **B-10 は `waited=0.00s` / 余裕 0.9s なので依然 NO-START。B-9 は原則着手しない。**
+> **B-10 DONE（2026-07-31）。** B-9 は原則着手しない。
 > **C-2 DONE（MVP・2026-07-30 放置）:** `guff run --watch`。再パス 0.07〜0.10s。
 > 編集は seed 再構築が残り ~1.35s。ExportSeed 保持 follow-up は当面やらない（§C-2）。
 > **`--watch` なしの one-shot は従来どおり**（warm 0.21s 実測維持）。
@@ -97,9 +120,12 @@
 > スキップが発火せず wall は動かない。`default: none` かつ ineffassign/maintidx 無効な設定で効く。**
 > **C-8 の前提「RSS 7.6GB」は古い。lazy import members 後は ~3.5–3.7 GiB（目標 6GB は既達）。**
 >
-> **次の小粒候補（未着手）:** B-5 Slice（findings 合意後）。
+> **次の小粒候補（未着手）:** B-5 Slice は findings ずれで見送り（ユーザー方針）。
+> goimports 初回 parse の残りは素の scan/parse（resolve/stamp は安い経路へ移した）。
+> sibling parse キャッシュは get_fixes が小さいうちは後回し。
 > ~~seed SHA→blake3~~ **DONE** / ~~`guff-packages` FxHash~~ **DONE** /
-> ~~`position_internal`~~ **NO-GO**（ほぼ format 側・重畳中で wall ≈0）。
+> ~~`position_internal`~~ **NO-GO** / ~~B-10~~ **DONE** / ~~P0-1b~~ **DONE** /
+> ~~goimports identity fast-path~~ **DONE** / ~~goimports names-only resolve~~ **DONE**。
 >
 > **性能タスクの前に、まず [§8「次セッションへの引き継ぎ」](#8-次セッションへの引き継ぎ--性能タスク中に見つかった別問題2026-07-27)
 > を読むこと。** 性能作業中に見つけた**性能以外の問題**のうち、未修理は
@@ -559,7 +585,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 | ID | タスク | 効く所 | 期待 | 工数 | リスク |
 |---|---|---|---|---|---|
-| **P0-1** | **format_checks の 2 スレッド固定を見直す** | cold | **0.3〜0.8s?** | 小 | 低 |
+| ~~P0-1~~ | ~~format_checks の 2 スレッド固定を見直す~~ **DONE（2026-07-27: 既定2のまま）+ P0-1b（2026-07-31: `(ncpu/3).clamp(2,4)`。seed-hot ≈ −0.4s）** | cold | **−0.4s seed-hot** | 小 | 低 |
 | **P0-2** | **依存パースで `SKIP_OBJECT_RESOLUTION`** | cold | **0.2〜0.5s?** | 小 | 低 |
 | ~~P0-3~~ | ~~target パースの object resolution も条件スキップ~~ **DONE**（条件付き実装。prometheus は `ineffassign` 有効で発火せず。上限: parse CPU −0.45s / target wall −0.05s。§P0-3） | cold | **0（prometheus）** / 天井 −0.05〜0.2s | 中 | 中 |
 
@@ -592,7 +618,7 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 | ~~B-7~~ | ~~ソースバイトの一回読みを format/misspell と共有~~ **NO-GO**（§B-7） | cold | — | 中 | 低 |
 | ~~B-8~~ | ~~warm の `go list` をパース済み形式でキャッシュ~~ **DONE**（実際の犯人は stdlib `go list -export`。パース済みグラフ化は上限 0.03s で NO-GO） | **warm** | **−0.15s 達成**（0.35→0.20s） | 中 | 中 |
 | B-9 | seed の wave バリアを部分的に撤廃 | cold | ~0.1s | 大 | **高** |
-| **B-10** | **formatter 間で read + parse を共有する（S-3 で発見）** | cold（format が critical path になったときだけ） | **format CPU の最大 2/3** | 中 | 中 |
+| **~~B-10~~** | ~~formatter 間で read + parse を共有する（S-3 で発見）~~ **DONE**（check: read 1 回 + native gci/gofumpt 共有 parse。goimports は独自。wall 小幅 / warm format ~0.07→0.04s。§B-10） | cold（format critical） | **小幅**（goimports 支配） | 中 | 中 |
 
 ### Tier C — 大物・実験（時間と注意力に余裕があるときだけ）
 
@@ -612,7 +638,23 @@ CACHE=$(mktemp -d); GUFF_CACHE="$CACHE" /usr/bin/time -lp "$GUFFBIN" run --no-ca
 
 **推奨着手順（着手時の計画）:** `S-1 → S-2 → S-3 → P0-1 → P0-2 → A-5 → A-2 → B-0 → （B-0 の結果次第で B-1）→ A-1 → …`
 
-**2026-07-30 時点の残り（★ 最新）:** **wall だけを狙う低リスクなタスクは尽きました。**
+**2026-07-31 時点の残り（★ 最新）:** goimports names-only resolve + identity fast-path +
+P0-1b + B-10 DONE。seed-hot ≈ **1.10s** / empty-cold ≈ **1.85–1.9s**（typecheck+load）。
+format は waited=0 でほぼ隠れている。B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（identity fast-path 直後・履歴）:** goimports identity fast-path + P0-1b + B-10 DONE。
+seed-hot ≈ 1.25–1.3s / empty-cold ≈ 2.0s（typecheck+load）。goimports 初期 parse が残り。
+B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（P0-1b 直後・履歴）:** **B-10 + P0-1b DONE。** seed-hot wall ≈ 1.2s 帯。
+empty-cold は typecheck+load（≈2.0s）が本丸。goimports 単体 / seed は B-9 除外で残り薄い。
+B-5 Slice は findings ずれで見送り。
+
+**2026-07-31 時点の残り（B-10 直後・履歴）:** **B-10 DONE。** C-3c 後 seed-hot では format が
+critical path（waited ~0.5s）。B-10 で gci/gofumpt を畳んだが **goimports が残る本丸**。
+B-5 Slice は findings ずれで見送り。`B-9` は原則着手しない。`C-4` は analyze 0.37s で期待値消滅。
+
+**2026-07-30 時点の残り（履歴）:** **wall だけを狙う低リスクなタスクは尽きました。**
 §1.3-post2 のとおり cold 2.72s の直列内訳は `go list` 0.85 / seed 1.08 / target 0.32 / analyze 0.37 で、
 **未計測の隙間はゼロ**です。C-9 で seed ≈ −0.15s（`-j 1`）。ここから先の壁時計は
 **C-3c（`go` 非依存化。製品タスク）** か、B-5 Slice（findings 合意）程度。
@@ -1159,6 +1201,24 @@ doc が懸念した「format が wall の 52% ＝ critical path 化」は**測�
 当初検討した `(ncpu/4).max(2)` は、このスイープでは 12 コア以上の機で 3〜4 スレッドになり
 **wall を悪化させる**ため採用しない。`GUFF_FMT_THREADS` だけ残し（他ハードでの再測定用）、
 既定は定数 2。findings byte 一致（20/20）、tsdb gate PASS、`-j 1` 挙動も不変（既定を触っていない）。
+
+### DONE（2026-07-31）— **P0-1b: C-3c/B-10 後に再スイープ。既定を `(ncpu/3).clamp(2,4)` へ。**
+
+分析が短くなり seed-hot で `waited` ≈ 0.5–0.6s（format が critical path）。
+prometheus `./...`・10-core arm64・A/B 交互 3 回:
+
+| threads | seed-hot wall (med) | empty-cold wall (med) |
+|---:|---:|---:|
+| 2（旧既定） | 1.69s | 2.14s |
+| **3** | **1.24s** | **2.03s** |
+| 4 | 1.24s | 2.01s |
+| 6 | 1.23s | 2.01s |
+
+**既定変更:** `(available_parallelism()/3).clamp(2, 4)`（10-core → 3）。
+`GUFF_FMT_THREADS` は従来どおり上書き。`-j 1` / sequential では format も 1 スレッド。
+
+確認 A/B（既定 vs `GUFF_FMT_THREADS=2`）: seed-hot **≈ −0.4s** / empty-cold **≈ −0.1s**。
+findings byte 同一。両 regress PASS（full wall 2.11→2.00）。
 
 ---
 
@@ -3494,6 +3554,89 @@ prometheus は gci + gofumpt + goimports の 3 つなので、**同じ 725 フ�
    findings の linter 名が変わったら即ロールバック。
 4. `fmt_check` warm キャッシュ（`check_with_cache`）の経路と共存すること。warm では
    format は 0.07s しかないので、**warm を 1ms でも悪化させたら差し引きで負け**です。
+
+### DONE（2026-07-31）— **check 経路で read 1 回 + native gci/gofumpt の skip-object parse 共有。findings 同一。wall は小幅。**
+
+**ゲート再計測（C-3c 後）:** cold `waited` 0.02〜0.06s、seed-hot `waited` **0.54s** → **GO**。
+
+**入れたもの:**
+
+1. [`check_files_multi`](crates/guff-fmt/src/runner.rs) — ファイルごと `fs::read` 1 回、有効
+   formatter を独立に `format`。attribution は enable 順のまま（`AttributedFinding`）。
+2. `fmt_check` は content hash 1 回 → formatter ごと get/put。
+3. native **gci + gofumpt** が揃っているとき skip-object AST を 1 回パース
+   （[`format_gci_gofumpt_shared`](crates/guff-fmt/src/native/mod.rs)）。goimports は
+   object-resolution 付きのため独自 parse のまま。
+4. `--fix` / `MetaFormatter` chain は未変更。
+
+**実測（prometheus `./...`、空 `GUFF_CACHE`、`--no-cache`）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| format_checks（cold） | 1.93〜2.09s | **1.88〜2.11s**（誤差〜小幅減） |
+| format_checks waited（cold） | 0.02〜0.06s | 0.04〜0.06s |
+| format_checks（seed-hot） | 1.65s / waited 0.54s | **1.63s / waited 0.52s** |
+| warm format_checks | ~0.07s | **~0.04s**（hash 1 回化） |
+| findings | 3635 B | **byte 同一**（3 cold + `-j 1` + seed-hot） |
+
+goimports が format の半分近くを占め、かつ共有できないため、期待していた「最大 2/3」は
+出ない。構造的には 3 周 → 1 周 + gci/gofumpt parse 共有まで入れた。これ以上詰めるなら
+goimports 側（別タスク）か fmt スレッド数。
+
+**検証:** `cargo test -p guff-fmt --release`（共有パス一致テスト含む）PASS。
+regress tsdb / full とも PASS（P=R=100%）。
+
+### DONE（2026-07-31）— **goimports: import no-op 時に `go/format.Source` を省略。**
+
+samply（goimports-only、profiling）: `Goimports::format` inclusive 1.46s のうち
+`go/format.Source` ≈ 0.74s。prometheus は unformatted=0 なのでほぼ全ファイルで
+reconstruct が identity → Source は死に仕事。
+
+**入れたもの:** [`format_inner_impl`](crates/guff-fmt/src/native/goimports/mod.rs) /
+`format_only_inner` で reconstruct 後 `dist == src`（CR 無視）なら `src.to_vec()` を返す。
+import 追加/削除があるファイルは従来どおり `go/format.Source(dist)`。
+（gofmt だけの直しは gofumpt/gofmt が併走する前提。goimports 単独設定では
+import-stable な gofmt 差分を見逃しうる。）
+
+**実測（prometheus、`GUFF_FMT_THREADS` 既定=3）:**
+
+| 指標 | before | after |
+|---|---:|---:|
+| goimports-only format | ~0.62s | **~0.30s** |
+| seed-hot format_checks | ~1.4s | **~1.26s** |
+| full regress wall | 2.11 | **1.95** |
+| findings | — | **byte 同一** |
+
+両 regress PASS。
+
+### DONE（2026-07-31）— **goimports: names-only resolve + SKIP_STAMP。**
+
+samply（goimports-only）: 初回 `parse_file` inclusive ≈ 2.4s のうち
+`walk_func_decl`+`declare`+`ObjDecl::clone`+stamp がまとめて重い。フル
+`resolve_file` は goimports に不要な AST クローンを大量に作っていた。
+
+**入れたもの:**
+- [`SKIP_STAMP_NODE_IDS`](crates/guff-ast/src/parser.rs) モード
+- [`ObjDecl::Name`](crates/guff-ast/src/scope.rs) +
+  [`resolve_file_names_only`](crates/guff-ast/src/parser_resolver.rs)
+- goimports 本ファイル: `PARSE_COMMENTS|ALL_ERRORS|SKIP_OBJECT|SKIP_STAMP` のあと
+  names-only resolve。sibling / format-only も `SKIP_STAMP`
+
+（フル `SKIP_OBJECT` だけだと local `x.y` が全部 missing package に見え、
+NeedsResolver / subprocess で format が数秒に戻る — 以前の失敗実験と同じ。）
+
+**実測（prometheus、`GUFF_FMT_THREADS=3`）:**
+
+| 指標 | before (identity 後) | after |
+|---|---:|---:|
+| `Goimports::format` inclusive (samply) | 0.78s | **0.40s** |
+| `walk_func_decl` inclusive | 0.45s | **0.34s** |
+| goimports-only format_checks | ~0.30s | **~0.12s** |
+| seed-hot wall | ≈ 1.25–1.3s | **≈ 1.10s** |
+| empty-cold wall | ≈ 2.0s | **≈ 1.85–1.9s** |
+| findings | 3635 | **同一** |
+
+両 regress PASS（tsdb / full）。
 
 ---
 

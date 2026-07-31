@@ -26,7 +26,11 @@ pub use gofumpt::{Gofumpt, GofumptOptions};
 pub use goimports::{Goimports, GoimportsOptions};
 pub use golines::{Golines, GolinesOptions};
 pub use meta::{is_formatter, MetaFormatter, KNOWN_FORMATTERS};
-pub use runner::{FormatError, FormatFinding, Runner, RunnerOptions, RunStats};
+pub use native::{NativeKind, NativeOptions, SharedSkipObject};
+pub use runner::{
+    check_files_multi, AttributedFinding, FormatError, FormatFinding, Runner, RunnerOptions,
+    RunStats,
+};
 pub use swaggo::Swaggo;
 
 /// A source formatter: rewrite Go source bytes.
@@ -54,6 +58,15 @@ pub trait Formatter: Send + Sync {
     /// caller then falls back to per-file [`format`](Self::format) checks with
     /// identical behavior.
     fn list_unformatted(&self, _files: &[&std::path::Path]) -> Option<Vec<std::path::PathBuf>> {
+        None
+    }
+
+    /// Native options for B-10 shared skip-object parse, when this formatter
+    /// participates as gci or gofumpt. Default: not participating.
+    fn native_shared_skip_object(
+        &self,
+        _filename: &str,
+    ) -> Option<native::SharedSkipObject> {
         None
     }
 }

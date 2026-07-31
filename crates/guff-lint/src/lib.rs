@@ -209,8 +209,9 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
         return Ok(Vec::new());
     }
 
-    // One tree walk for all formatters (prometheus enables gci+gofumpt+goimports;
-    // previously each `check` re-walked). Attribution stays per-formatter.
+    // One tree walk + one read per file for all formatters (B-10). Attribution
+    // stays per-formatter (golangci-style). Native gci+gofumpt also share a
+    // skip-object parse inside `check_files_multi`.
     let detail = crate::debug::detailed();
     let t_collect = std::time::Instant::now();
     let files = Runner::collect_paths(&cfg.paths).map_err(|e| RunError::Message(e.to_string()))?;
@@ -222,51 +223,54 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
             cfg.paths.len(),
         );
     }
-    let mut issues = Vec::new();
-    for name in &cfg.enable {
-        let t_fmt = std::time::Instant::now();
-        let meta = MetaFormatter::new(
-            std::slice::from_ref(name),
-            cfg.gofmt.clone(),
-            cfg.gofumpt.clone(),
-            cfg.goimports.clone(),
-            cfg.gci.clone(),
-            cfg.golines.clone(),
-        )
+    let meta = MetaFormatter::new(
+        &cfg.enable,
+        cfg.gofmt.clone(),
+        cfg.gofumpt.clone(),
+        cfg.goimports.clone(),
+        cfg.gci.clone(),
+        cfg.golines.clone(),
+    )
+    .map_err(|e| RunError::Message(e.to_string()))?;
+    let formatters = meta.into_formatters();
+    let runner_opts = RunnerOptions {
+        exclude_paths: cfg.exclude_paths.clone(),
+        generated: cfg.generated,
+        format_cache: format_cache.clone(),
+        ..Default::default()
+    };
+    let t_fmt = std::time::Instant::now();
+    let findings = guff_fmt::check_files_multi(&formatters, &files, &runner_opts)
         .map_err(|e| RunError::Message(e.to_string()))?;
-        let runner = Runner::new(
-            meta,
-            RunnerOptions {
-                exclude_paths: cfg.exclude_paths.clone(),
-                generated: cfg.generated,
-                format_cache: format_cache.clone(),
-                ..Default::default()
-            },
+    if detail {
+        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for f in &findings {
+            *counts.entry(f.formatter.as_str()).or_default() += 1;
+        }
+        let summary: Vec<String> = cfg
+            .enable
+            .iter()
+            .map(|n| format!("{n}={}", counts.get(n.as_str()).copied().unwrap_or(0)))
+            .collect();
+        eprintln!(
+            "guff:     format multi {:.2}s ({} formatters; unformatted {})",
+            t_fmt.elapsed().as_secs_f64(),
+            formatters.len(),
+            summary.join(", "),
         );
-        let findings = runner
-            .check_files(&files)
-            .map_err(|e| RunError::Message(e.to_string()))?;
-        if detail {
-            // Each formatter re-reads and re-formats every file: this is where a
-            // 3-formatter config (prometheus: gci+gofumpt+goimports) pays 3x.
-            eprintln!(
-                "guff:     format {name} {:.2}s ({} unformatted)",
-                t_fmt.elapsed().as_secs_f64(),
-                findings.len(),
-            );
-        }
-        for f in findings {
-            issues.push(issue_from_cached(
-                name,
-                &f.file,
-                f.line,
-                1,
-                "File is not properly formatted",
-                "",
-                "",
-                "error",
-            ));
-        }
+    }
+    let mut issues = Vec::new();
+    for f in findings {
+        issues.push(issue_from_cached(
+            &f.formatter,
+            &f.file,
+            f.line,
+            1,
+            "File is not properly formatted",
+            "",
+            "",
+            "error",
+        ));
     }
     Ok(filter.apply(issues, &[]))
 }
@@ -910,16 +914,36 @@ pub fn run_and_write_with_teardown(
 /// bounds the run. Seed-hot behaves the same (wall flat ~3.46s from 2 threads
 /// up). So 2 stays.
 ///
-/// `GUFF_FMT_THREADS` overrides it. This is an **experimental** perf knob for
-/// re-running that sweep on other hardware; it is intentionally undocumented in
-/// the README and is not stable API.
-fn fmt_thread_count() -> usize {
+/// Private rayon pool size for overlapped format checks.
+///
+/// P0-1 (2026-07-27) found that with analysis ≈ 4s, format was fully overlapped
+/// and raising the count only stole CPU from typecheck — default stayed 2.
+/// After C-3c / B-10 (2026-07-31) analysis is ~1.1–1.9s and seed-hot
+/// `format_checks waited` is ~0.5–0.6s with 2 threads, so format is on the
+/// critical path. Remeasured sweep (prometheus `./...`, 10-core arm64):
+///
+/// | threads | seed-hot wall (med) | empty-cold wall (med) |
+/// |---:|---:|---:|
+/// | 2 | 1.69s | 2.14s |
+/// | 3 | 1.24s | 2.03s |
+/// | 4 | 1.24s | 2.01s |
+/// | 6 | 1.23s | 2.01s |
+///
+/// Default is `(ncpu/3).clamp(2, 4)` (10-core → 3). `GUFF_FMT_THREADS` still
+/// overrides. With `-j 1` / sequential analysis, format also uses 1 thread.
+fn fmt_thread_count(concurrency: Option<usize>, sequential: bool) -> usize {
     if let Some(v) = std::env::var_os("GUFF_FMT_THREADS") {
         if let Some(n) = v.to_str().and_then(|s| s.trim().parse::<usize>().ok()) {
             return n.max(1);
         }
     }
-    2
+    if sequential || concurrency == Some(1) {
+        return 1;
+    }
+    let ncpu = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    (ncpu / 3).clamp(2, 4)
 }
 
 fn run_and_write_inner(
@@ -935,7 +959,10 @@ fn run_and_write_inner(
     // collect them below, so they cost wall time only if they outlast the
     // analysis. `--fix` stays sequential: it rewrites the very files the
     // analysis is reading, and it runs after the analysis' own fixes.
-    let fmt_threads = fmt_thread_count();
+    let fmt_threads = fmt_thread_count(
+        opts.concurrency,
+        opts.sequential || opts.concurrency == Some(1),
+    );
     let fmt_job = opts
         .formatters
         .as_ref()
@@ -946,11 +973,10 @@ fn run_and_write_inner(
             std::thread::spawn(move || {
                 let started = std::time::Instant::now();
                 // Format checks run native Rust formatters over every file via
-                // rayon; pin them to a small private pool so they don't steal
-                // workers from the global pool that typecheck/analyze need during
-                // the overlap window. Sizing is relative to the host so a value
-                // tuned on a 10-core box doesn't wreck a 4-core one; see
-                // `fmt_thread_count`.
+                // rayon; pin them to a private pool so they don't steal the
+                // whole global pool from typecheck/analyze. Pool size: see
+                // `fmt_thread_count` (raised after C-3c made format critical
+                // on seed-hot).
                 let pool = rayon::ThreadPoolBuilder::new()
                     .num_threads(fmt_threads)
                     .thread_name(|i| format!("guff-fmt-{i}"))

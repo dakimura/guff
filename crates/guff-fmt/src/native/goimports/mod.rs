@@ -27,8 +27,9 @@ use std::sync::Arc;
 
 use guff::ast::{Decl, Spec};
 use guff::format::{self as go_format, FormatError as AstFormatError};
-use guff::parser::{Mode as ParserMode, ALL_ERRORS, PARSE_COMMENTS};
+use guff::parser::{Mode as ParserMode, ALL_ERRORS, PARSE_COMMENTS, SKIP_OBJECT_RESOLUTION, SKIP_STAMP_NODE_IDS};
 use guff::parser_interface;
+use guff::parser_resolver;
 use guff::token::Token;
 use guff::{FileSet, Pos, NO_POS};
 
@@ -37,11 +38,16 @@ use crate::runner::FormatError;
 
 pub use fix::{FormatOutcome, ImportFix, ImportFixType, ImportInfo};
 
-/// Parse with comments + object resolution. `ALL_ERRORS` disables the
-/// parser's Bailout panic after 10 errors (which races under rayon and
-/// otherwise aborts format_checks workers).
-const PARSER_MODE_RESOLVE: ParserMode =
-    ParserMode(PARSE_COMMENTS.0 | ALL_ERRORS.0);
+/// Parse with comments, skip full object resolution and node-id stamping.
+/// After parse, [`parser_resolver::resolve_file_names_only`] fills `Ident.obj`
+/// without cloning declaring AST nodes — enough for
+/// [`fix::collect_references`] to skip local `x.y` while still seeing
+/// unresolved package selectors (matching `x/tools/imports.Process`).
+/// `ALL_ERRORS` disables the parser's Bailout panic after 10 errors (which
+/// races under rayon and otherwise aborts format_checks workers).
+const PARSER_MODE: ParserMode = ParserMode(
+    PARSE_COMMENTS.0 | ALL_ERRORS.0 | SKIP_OBJECT_RESOLUTION.0 | SKIP_STAMP_NODE_IDS.0,
+);
 
 const C_IMPORT: &str = "\"C\"";
 
@@ -171,8 +177,10 @@ fn format_only_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFor
         opts.filename.as_str()
     };
     let fset = Arc::new(FileSet::new());
-    const MODE: ParserMode =
-        ParserMode(PARSE_COMMENTS.0 | guff::parser::SKIP_OBJECT_RESOLUTION.0 | ALL_ERRORS.0);
+    // format-only: skip object resolution + stamp (no add/remove; layout + gofmt).
+    const MODE: ParserMode = ParserMode(
+        PARSE_COMMENTS.0 | SKIP_OBJECT_RESOLUTION.0 | SKIP_STAMP_NODE_IDS.0 | ALL_ERRORS.0,
+    );
     let file = match parser_interface::parse_file(&fset, filename, Some(src), MODE) {
         Ok(f) => f,
         Err(_) => return go_format::source(src),
@@ -180,10 +188,16 @@ fn format_only_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFor
     let region = import_region(&fset, &file, src)?;
     let imps = collect_imps(&fset, &file, src)?;
     if imps.is_empty() && !region.saw_import && region.c_chunks.is_empty() {
-        return go_format::source(src);
+        // No imports to rewrite. `go/format.Source` would still re-parse; for an
+        // already-clean file the identity result is `src` (check mode). When the
+        // body needs gofmt, gofumpt/gofmt in the same `guff run` catch it.
+        return Ok(src.to_vec());
     }
     let dist = reconstruct(src, &region, &imps, &local);
-    let dist: Vec<u8> = dist.into_iter().filter(|&b| b != b'\r').collect();
+    let dist = strip_cr(&dist);
+    if bytes_eq_strip_cr(dist.as_slice(), src) {
+        return Ok(src.to_vec());
+    }
     go_format::source(&dist)
 }
 
@@ -196,13 +210,15 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
     };
 
     let fset = Arc::new(FileSet::new());
-    let file = match parser_interface::parse_file(&fset, filename, Some(src), PARSER_MODE_RESOLVE) {
+    let file = match parser_interface::parse_file(&fset, filename, Some(src), PARSER_MODE) {
         Ok(f) => f,
         // Unparseable / too many errors: try format-only, else leave bytes.
         Err(_) => {
             return format_only_inner(src, opts).map(FormatOutcome::Formatted);
         }
     };
+    // Cheap names-only resolve: sets Ident.obj for locals without ObjDecl AST clones.
+    parser_resolver::resolve_file_names_only(&file);
 
     // cgo files (`import "C"`) carry a preamble comment bound to the C import
     // that goimports lays out specially; our textual reconstruction does not
@@ -222,12 +238,36 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
     let imps = arrange(collect_imps(&fset, &file, src)?, &fixes);
 
     if imps.is_empty() && !region.saw_import && region.c_chunks.is_empty() {
-        return Ok(FormatOutcome::Formatted(go_format::source(src)?));
+        return Ok(FormatOutcome::Formatted(src.to_vec()));
     }
 
     let dist = reconstruct(src, &region, &imps, &local);
-    let dist: Vec<u8> = dist.into_iter().filter(|&b| b != b'\r').collect();
+    let dist = strip_cr(&dist);
+    if bytes_eq_strip_cr(dist.as_slice(), src) {
+        // Import rewrite is a no-op. Skip `go/format.Source` (re-parse+print)
+        // and the AST print — check mode only needs output==input, and a body
+        // that still needs gofmt is reported by gofumpt/gofmt when enabled.
+        // Profile: print/Source was ~half of native goimports CPU on prometheus.
+        return Ok(FormatOutcome::Formatted(src.to_vec()));
+    }
     Ok(FormatOutcome::Formatted(go_format::source(&dist)?))
+}
+
+fn strip_cr(s: &[u8]) -> Vec<u8> {
+    if !s.contains(&b'\r') {
+        return s.to_vec();
+    }
+    s.iter().copied().filter(|&b| b != b'\r').collect()
+}
+
+fn bytes_eq_strip_cr(a: &[u8], b: &[u8]) -> bool {
+    if a == b {
+        return true;
+    }
+    if !a.contains(&b'\r') && !b.contains(&b'\r') {
+        return false;
+    }
+    strip_cr(a) == strip_cr(b)
 }
 
 #[derive(Debug, Clone)]
@@ -881,6 +921,24 @@ func F() {
         let src = b"package p\n\nimport (\n\t\"os\"\n\n\t\"fmt\"\n)\n\nfunc f() { fmt.Println(os.Args) }\n";
         let out = format(src, &opts("", "p.go")).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), String::from_utf8(src.to_vec()).unwrap());
+    }
+
+    #[test]
+    fn local_selector_not_treated_as_package() {
+        // Shadowing `fmt` must not spuriously add/keep a fmt import.
+        let src = br#"package pkg
+
+func F() {
+	fmt := struct{ Println func(string) }{Println: func(string) {}}
+	fmt.Println("hi")
+}
+"#;
+        let out = format(src, &opts("", "a.go")).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(
+            !s.contains("import"),
+            "local fmt.Println must not add import:\n{s}"
+        );
     }
 
     #[test]

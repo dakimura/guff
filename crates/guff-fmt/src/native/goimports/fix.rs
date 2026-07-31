@@ -7,13 +7,14 @@ use std::sync::{Arc, OnceLock};
 
 use guff::ast::{ast_is_exported, Decl, Expr, File, Spec, ValueSpec};
 use guff::format::FormatError as AstFormatError;
-use guff::parser::{Mode as ParserMode, ALL_ERRORS, PARSE_COMMENTS, SKIP_OBJECT_RESOLUTION};
+use guff::parser::{Mode as ParserMode, ALL_ERRORS, PARSE_COMMENTS, SKIP_OBJECT_RESOLUTION, SKIP_STAMP_NODE_IDS};
 use guff::parser_interface;
 use guff::walk::{self, NodeRef};
 use guff::FileSet;
 
-const PARSER_MODE_SIBLING: ParserMode =
-    ParserMode(PARSE_COMMENTS.0 | SKIP_OBJECT_RESOLUTION.0 | ALL_ERRORS.0);
+const PARSER_MODE_SIBLING: ParserMode = ParserMode(
+    PARSE_COMMENTS.0 | SKIP_OBJECT_RESOLUTION.0 | SKIP_STAMP_NODE_IDS.0 | ALL_ERRORS.0,
+);
 
 const C_IMPORT: &str = "\"C\"";
 

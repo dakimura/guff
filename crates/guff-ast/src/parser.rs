@@ -64,6 +64,10 @@ pub const SKIP_OBJECT_RESOLUTION: Mode = Mode(1 << 6);
 /// Consume function and method bodies as raw tokens instead of building
 /// statement trees for them. See [`Parser::skip_body`].
 pub const SKIP_FUNC_BODIES: Mode = Mode(1 << 7);
+/// Skip [`crate::stamp::stamp_node_ids`] after parse. Formatters that do not
+/// feed the type checker can set this; identifiers are still stamped inline
+/// by the parser when created.
+pub const SKIP_STAMP_NODE_IDS: Mode = Mode(1 << 8);
 pub const ALL_ERRORS: Mode = SPURIOUS_ERRORS;
 
 // ====================================================================
@@ -3153,7 +3157,9 @@ pub fn parse_file(
         }
         // Assign stable node ids to every unstamped expression so the type
         // checker's `Info` maps (Defs/Uses/Types) can key on them.
-        crate::stamp::stamp_node_ids(&mut file);
+        if !mode.contains(SKIP_STAMP_NODE_IDS) {
+            crate::stamp::stamp_node_ids(&mut file);
+        }
         if errs.is_empty() {
             Ok(file)
         } else {

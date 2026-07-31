@@ -45,8 +45,7 @@ pub fn resolve_file<'a>(
     decl_err: Option<Box<dyn Fn(Pos, &str) + 'a>>,
 ) {
     let pkg_scope = Scope::new(None);
-    let still_owned: Vec<Ident>;
-    {
+    let still_owned = {
         let mut r = Resolver {
             _handle: Arc::clone(handle),
             decl_err,
@@ -56,28 +55,61 @@ pub fn resolve_file<'a>(
             depth: 1,
             label_scope: None,
             target_stack: Vec::new(),
+            names_only: false,
         };
-
-        for decl in file.decls.iter() {
-            r.walk_decl(decl);
-        }
-        r.close_scope();
-        debug_assert!(r.top_scope.is_none(), "unbalanced scopes");
-        debug_assert!(r.label_scope.is_none(), "unbalanced label scopes");
-
-        // Resolve global identifiers within the same file.
-        let mut still: Vec<&Ident> = Vec::new();
-        for ident in r.unresolved.drain(..) {
-            let obj = r.pkg_scope.lookup(&ident.name);
-            *ident.obj.lock().unwrap() = obj.clone();
-            if obj.is_none() {
-                still.push(ident);
-            }
-        }
-        still_owned = still.into_iter().cloned().collect();
-    }
+        run_resolve(&mut r, file);
+        finish_unresolved(&mut r)
+    };
     file.scope = Some(pkg_scope);
     file.unresolved = still_owned;
+}
+
+/// Like [`resolve_file`], but only populates `Ident.obj` for local vs
+/// unresolved package-name detection (goimports `collectReferences`).
+///
+/// Skips cloning declaring AST nodes into [`ObjDecl`] (uses
+/// [`ObjDecl::Name`]) and does not assign `file.scope` / `file.unresolved`.
+/// Call after a parse with [`crate::parser::SKIP_OBJECT_RESOLUTION`].
+pub fn resolve_file_names_only(file: &File) {
+    // PosFile is unused by the walk; keep a trivial handle for the shared
+    // Resolver shape.
+    let fset = crate::position::FileSet::new();
+    let handle = fset.add_file("", -1, 1);
+    let pkg_scope = Scope::new(None);
+    let mut r = Resolver {
+        _handle: handle,
+        decl_err: None,
+        pkg_scope: Arc::clone(&pkg_scope),
+        top_scope: Some(Arc::clone(&pkg_scope)),
+        unresolved: Vec::new(),
+        depth: 1,
+        label_scope: None,
+        target_stack: Vec::new(),
+        names_only: true,
+    };
+    run_resolve(&mut r, file);
+    let _ = finish_unresolved(&mut r);
+}
+
+fn run_resolve<'a>(r: &mut Resolver<'a>, file: &'a File) {
+    for decl in file.decls.iter() {
+        r.walk_decl(decl);
+    }
+    r.close_scope();
+    debug_assert!(r.top_scope.is_none(), "unbalanced scopes");
+    debug_assert!(r.label_scope.is_none(), "unbalanced label scopes");
+}
+
+fn finish_unresolved<'a>(r: &mut Resolver<'a>) -> Vec<Ident> {
+    let mut still: Vec<&Ident> = Vec::new();
+    for ident in r.unresolved.drain(..) {
+        let obj = r.pkg_scope.lookup(&ident.name);
+        *ident.obj.lock().unwrap() = obj.clone();
+        if obj.is_none() {
+            still.push(ident);
+        }
+    }
+    still.into_iter().cloned().collect()
 }
 
 struct Resolver<'a> {
@@ -89,6 +121,8 @@ struct Resolver<'a> {
     depth: usize,
     label_scope: Option<Arc<Scope>>,
     target_stack: Vec<Vec<&'a Ident>>,
+    /// When set, record [`ObjDecl::Name`] instead of cloning AST decls.
+    names_only: bool,
 }
 
 impl<'a> Resolver<'a> {
@@ -138,6 +172,15 @@ impl<'a> Resolver<'a> {
 
     // ---------------- declare / resolve ----------------------------
 
+    #[inline]
+    fn pack_decl(&self, make: impl FnOnce() -> ObjDecl) -> ObjDecl {
+        if self.names_only {
+            ObjDecl::Name
+        } else {
+            make()
+        }
+    }
+
     /// Declare `idents` as new objects in `scope`. `decl` is recorded
     /// on the object so callers can later trace declarations back.
     fn declare(
@@ -148,6 +191,11 @@ impl<'a> Resolver<'a> {
         kind: ObjKind,
         idents: &[&'a Ident],
     ) {
+        let data = if self.names_only {
+            ObjData::None
+        } else {
+            data
+        };
         for ident in idents {
             // Build a fresh object referencing this declaration.
             let mut obj = (*Object::new(kind, &ident.name)).clone();
@@ -191,7 +239,11 @@ impl<'a> Resolver<'a> {
         for x in &assign.lhs {
             if let Expr::Ident(ident) = x {
                 let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
-                obj.decl = ObjDecl::AssignStmt(Box::new(assign.clone()));
+                obj.decl = if self.names_only {
+                    ObjDecl::Name
+                } else {
+                    ObjDecl::AssignStmt(Box::new(assign.clone()))
+                };
                 let arc = Arc::new(obj);
                 *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
                 if ident.name != "_" {
@@ -368,7 +420,7 @@ impl<'a> Resolver<'a> {
     fn walk_labeled(&mut self, l: &'a LabeledStmt) {
         if let Some(scope) = self.label_scope.clone() {
             self.declare(
-                ObjDecl::LabeledStmt(Box::new(l.clone())),
+                self.pack_decl(|| ObjDecl::LabeledStmt(Box::new(l.clone()))),
                 ObjData::None,
                 &scope,
                 ObjKind::Lbl,
@@ -517,23 +569,32 @@ impl<'a> Resolver<'a> {
             lhs_idents.push(id);
         }
         if !lhs_idents.is_empty() && r.tok == Some(Token::DEFINE) {
-            // Synthesize an AssignStmt to feed shortVarDecl with proper
-            // LHS / RHS. Since we only need it to register the idents,
-            // build a minimal AST.
-            let lhs_exprs: Vec<Expr> = lhs_idents
-                .iter()
-                .map(|id| Expr::Ident((*id).clone()))
-                .collect();
-            let synth = AssignStmt {
-                lhs: lhs_exprs,
-                tok_pos: r.tok_pos,
-                tok: Some(Token::DEFINE),
-                rhs: vec![],
-            };
-            // shortVarDecl reads .lhs only via Ident match — pass the
-            // synthesized stmt but register against the ORIGINAL idents
-            // by manually mimicking the logic:
-            self.short_var_decl_for_idents(&synth, &lhs_idents);
+            if self.names_only {
+                self.short_var_decl_for_idents(&AssignStmt {
+                    lhs: Vec::new(),
+                    tok_pos: r.tok_pos,
+                    tok: Some(Token::DEFINE),
+                    rhs: vec![],
+                }, &lhs_idents);
+            } else {
+                // Synthesize an AssignStmt to feed shortVarDecl with proper
+                // LHS / RHS. Since we only need it to register the idents,
+                // build a minimal AST.
+                let lhs_exprs: Vec<Expr> = lhs_idents
+                    .iter()
+                    .map(|id| Expr::Ident((*id).clone()))
+                    .collect();
+                let synth = AssignStmt {
+                    lhs: lhs_exprs,
+                    tok_pos: r.tok_pos,
+                    tok: Some(Token::DEFINE),
+                    rhs: vec![],
+                };
+                // shortVarDecl reads .lhs only via Ident match — pass the
+                // synthesized stmt but register against the ORIGINAL idents
+                // by manually mimicking the logic:
+                self.short_var_decl_for_idents(&synth, &lhs_idents);
+            }
         } else if !lhs_idents.is_empty() {
             // Walk normally.
             if let Some(k) = &r.key {
@@ -555,7 +616,11 @@ impl<'a> Resolver<'a> {
         let mut new_count = 0usize;
         for ident in idents {
             let mut obj = (*Object::new(ObjKind::Var, &ident.name)).clone();
-            obj.decl = ObjDecl::AssignStmt(Box::new(decl.clone()));
+            obj.decl = if self.names_only {
+                ObjDecl::Name
+            } else {
+                ObjDecl::AssignStmt(Box::new(decl.clone()))
+            };
             let arc = Arc::new(obj);
             *ident.obj.lock().unwrap() = Some(Arc::clone(&arc));
             if ident.name != "_" {
@@ -600,7 +665,7 @@ impl<'a> Resolver<'a> {
                         }
                         let names: Vec<&'a Ident> = vs.names.iter().collect();
                         self.declare(
-                            ObjDecl::ValueSpec(Box::new(vs.clone())),
+                            self.pack_decl(|| ObjDecl::ValueSpec(Box::new(vs.clone()))),
                             ObjData::Int(i as i64),
                             &scope,
                             kind,
@@ -617,7 +682,7 @@ impl<'a> Resolver<'a> {
                 for spec in &g.specs {
                     if let Spec::TypeSpec(ts) = spec {
                         self.declare(
-                            ObjDecl::TypeSpec(Box::new(ts.clone())),
+                            self.pack_decl(|| ObjDecl::TypeSpec(Box::new(ts.clone()))),
                             ObjData::None,
                             &scope,
                             ObjKind::Typ,
@@ -658,7 +723,7 @@ impl<'a> Resolver<'a> {
         if f.recv.is_none() && f.name.name != "init" {
             let scope = Arc::clone(&self.pkg_scope);
             self.declare(
-                ObjDecl::FuncDecl(Box::new(f.clone())),
+                self.pack_decl(|| ObjDecl::FuncDecl(Box::new(f.clone()))),
                 ObjData::None,
                 &scope,
                 ObjKind::Fun,
@@ -697,7 +762,7 @@ impl<'a> Resolver<'a> {
             for f in &fl.list {
                 let names: Vec<&'a Ident> = f.names.iter().collect();
                 self.declare(
-                    ObjDecl::Field(Box::new(f.clone())),
+                    self.pack_decl(|| ObjDecl::Field(Box::new(f.clone()))),
                     ObjData::None,
                     &scope,
                     kind,

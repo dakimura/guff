@@ -58,7 +58,36 @@ fn format_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFormatEr
     let _ = fset.add_file("gofumpt_base.go", 1, 10);
 
     let mut file = parser_interface::parse_file(&fset, "", Some(src), PARSER_MODE)?;
-    sort_imports(&fset, &mut file);
+    format_parsed_inner(&fset, &mut file, opts)
+}
+
+/// B-10: format an already-parsed skip-object AST (shared with native gci).
+pub(crate) fn format_parsed(
+    fset: &Arc<FileSet>,
+    file: &mut guff::ast::File,
+    opts: &NativeOptions,
+) -> Result<Vec<u8>, FormatError> {
+    match format_parsed_inner(fset, file, opts) {
+        Ok(out) => Ok(out),
+        Err(AstFormatError::Parse(e)) => Err(FormatError::Message {
+            formatter: "native-gofumpt".into(),
+            path: path_label(opts),
+            message: e.to_string(),
+        }),
+        Err(AstFormatError::Io(e)) => Err(FormatError::Io {
+            formatter: "native-gofumpt".into(),
+            path: path_label(opts),
+            source: e,
+        }),
+    }
+}
+
+fn format_parsed_inner(
+    fset: &Arc<FileSet>,
+    file: &mut guff::ast::File,
+    opts: &NativeOptions,
+) -> Result<Vec<u8>, AstFormatError> {
+    sort_imports(fset, file);
 
     let fumpt_opts = FumptOptions {
         lang_version: opts.lang.clone().unwrap_or_default(),
@@ -73,10 +102,10 @@ fn format_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFormatEr
             Extra::default()
         },
     };
-    apply_file(&fset, &mut file, fumpt_opts);
+    apply_file(fset, file, fumpt_opts);
     // Ensure imports are sorted so we never take format.Node's re-parse path.
     // (gofumpt may emit `if T{}.M()` without parens; re-parsing that fails.)
-    sort_imports(&fset, &mut file);
+    sort_imports(fset, file);
 
     let cfg = Config {
         mode: PRINTER_MODE,
@@ -84,7 +113,7 @@ fn format_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFormatEr
         indent: 0,
     };
     let mut buf = Vec::new();
-    cfg.fprint(&mut buf, &fset, PrintNode::File(&file))?;
+    cfg.fprint(&mut buf, fset, PrintNode::File(file))?;
     if !buf.ends_with(b"\n") {
         buf.push(b'\n');
     }

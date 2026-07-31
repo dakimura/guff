@@ -83,6 +83,12 @@ impl MetaFormatter {
         self.formatters.iter().map(|f| f.name()).collect()
     }
 
+    /// Consume into the chained formatter list (check-mode multi-pass uses this
+    /// so each formatter stays independently attributable).
+    pub fn into_formatters(self) -> Vec<Box<dyn Formatter>> {
+        self.formatters
+    }
+
     /// Primary formatter name when this meta wraps exactly one formatter.
     pub fn primary_name(&self) -> Option<&str> {
         (self.formatters.len() == 1).then(|| self.formatters[0].name())

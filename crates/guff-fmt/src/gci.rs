@@ -151,6 +151,17 @@ impl Formatter for Gci {
         }
     }
 
+    fn native_shared_skip_object(&self, filename: &str) -> Option<native::SharedSkipObject> {
+        if !self.use_native() {
+            return None;
+        }
+        // Comment stripping is applied in `format`; keep that path for parity.
+        if self.options.no_inline_comments || self.options.no_prefix_comments {
+            return None;
+        }
+        Some(native::SharedSkipObject::Gci(self.native_opts(filename)))
+    }
+
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
         // Comment-stripping options need per-file format (list mode can't see them).
         if self.options.no_inline_comments || self.options.no_prefix_comments {

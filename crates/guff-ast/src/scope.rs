@@ -83,6 +83,10 @@ pub enum ObjDecl {
     /// No declaration recorded.
     #[default]
     None,
+    /// Name is in scope and should resolve on idents, but the declaring
+    /// AST node was not cloned. Used by
+    /// [`crate::parser_resolver::resolve_file_names_only`] (goimports).
+    Name,
     Field(Box<Field>),
     ImportSpec(Box<ImportSpec>),
     ValueSpec(Box<ValueSpec>),
@@ -133,7 +137,7 @@ impl Object {
     pub fn pos(&self) -> Pos {
         let name = self.name.as_str();
         match &self.decl {
-            ObjDecl::None => NO_POS,
+            ObjDecl::None | ObjDecl::Name => NO_POS,
             ObjDecl::Field(d) => {
                 for n in &d.names {
                     if n.name == name {

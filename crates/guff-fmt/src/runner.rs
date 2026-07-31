@@ -11,6 +11,7 @@ use similar::TextDiff;
 
 use crate::generated::{is_generated, GeneratedMode};
 use crate::meta::MetaFormatter;
+use crate::Formatter;
 
 /// Errors from formatting / walking.
 #[derive(Debug)]
@@ -81,6 +82,14 @@ pub struct FormatFinding {
     /// File that is not properly formatted.
     pub file: String,
     /// 1-based line number of the change (start of the first differing hunk).
+    pub line: i64,
+}
+
+/// [`FormatFinding`] tagged with the formatter that produced it (B-10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttributedFinding {
+    pub formatter: String,
+    pub file: String,
     pub line: i64,
 }
 
@@ -468,6 +477,229 @@ impl Runner {
             .iter()
             .any(|pat| path_matches(&s, pat))
     }
+}
+
+/// Check-mode multi-formatter pass (B-10): one `fs::read` per file, then each
+/// formatter's `format` independently. Findings are grouped by formatter in
+/// `formatters` order (same attribution as the old per-formatter `check_files`
+/// loop). Does not touch `--fix` chaining.
+///
+/// When `opts.format_cache` is set, content is hashed once per file and each
+/// formatter probes/puts under its own cache key.
+pub fn check_files_multi(
+    formatters: &[Box<dyn Formatter>],
+    files: &[PathBuf],
+    opts: &RunnerOptions,
+) -> Result<Vec<AttributedFinding>, FormatError> {
+    if formatters.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let cache = opts.format_cache.as_ref();
+    let fingerprints: Vec<(&str, String)> = formatters
+        .iter()
+        .map(|f| (f.name(), f.options_fingerprint()))
+        .collect();
+
+    // Per-file results: Vec of (formatter_index, lines). Empty lines = clean.
+    let per_file: Vec<Result<Vec<(usize, Vec<i64>)>, FormatError>> = files
+        .par_iter()
+        .map(|path| check_file_multi(path, formatters, &fingerprints, opts, cache))
+        .collect();
+
+    // Preserve legacy issue order: all findings for formatter[0] (sorted by
+    // file, line), then formatter[1], …
+    let mut by_fmt: Vec<Vec<AttributedFinding>> =
+        (0..formatters.len()).map(|_| Vec::new()).collect();
+    for (path, res) in files.iter().zip(per_file) {
+        let path_str = path.to_string_lossy().to_string();
+        for (fmt_idx, lines) in res? {
+            let name = formatters[fmt_idx].name();
+            for line in lines {
+                by_fmt[fmt_idx].push(AttributedFinding {
+                    formatter: name.to_string(),
+                    file: path_str.clone(),
+                    line,
+                });
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for mut group in by_fmt {
+        group.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+        out.append(&mut group);
+    }
+    Ok(out)
+}
+
+fn check_file_multi(
+    path: &Path,
+    formatters: &[Box<dyn Formatter>],
+    fingerprints: &[(&str, String)],
+    opts: &RunnerOptions,
+    cache: Option<&crate::FormatCheckCache>,
+) -> Result<Vec<(usize, Vec<i64>)>, FormatError> {
+    use crate::{content_hash, CachedCheck};
+
+    if is_excluded_path(path, &opts.exclude_paths) {
+        return Ok(Vec::new());
+    }
+    let path_str = path.to_string_lossy();
+    let src = fs::read(path).map_err(|e| FormatError::Io {
+        formatter: "guff-fmt".into(),
+        path: path_str.to_string(),
+        source: e,
+    })?;
+    if is_generated(&src, opts.generated) {
+        return Ok(Vec::new());
+    }
+
+    let ch = cache.map(|_| content_hash(&src));
+    let mut out = Vec::with_capacity(formatters.len());
+
+    // Prefer a shared skip-object parse when native gci + gofumpt are both in
+    // the set (B-10 parse share). Other formatters still run on `src`.
+    let shared = try_shared_gci_gofumpt(formatters, fingerprints, &path_str, &src, ch.as_deref(), cache);
+
+    for (i, formatter) in formatters.iter().enumerate() {
+        if let Some(lines) = shared.as_ref().and_then(|s| s[i].clone()) {
+            out.push((i, lines));
+            continue;
+        }
+
+        let name = fingerprints[i].0;
+        let opts_fp = &fingerprints[i].1;
+        if let (Some(cache), Some(ch)) = (cache, ch.as_ref()) {
+            match cache.get(name, opts_fp, ch) {
+                Some(CachedCheck::Clean) => {
+                    out.push((i, Vec::new()));
+                    continue;
+                }
+                Some(CachedCheck::Lines(lines)) => {
+                    out.push((i, lines));
+                    continue;
+                }
+                None => {}
+            }
+        }
+
+        let formatted = formatter.format(&path_str, &src)?;
+        let lines = if formatted == src {
+            Vec::new()
+        } else {
+            let old = String::from_utf8_lossy(&src);
+            let new = String::from_utf8_lossy(&formatted);
+            let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
+            first_changed_lines(&diff)
+        };
+        if let (Some(cache), Some(ch)) = (cache, ch.as_ref()) {
+            let entry = if lines.is_empty() {
+                CachedCheck::Clean
+            } else {
+                CachedCheck::Lines(lines.clone())
+            };
+            cache.put(name, opts_fp, ch, &entry);
+        }
+        out.push((i, lines));
+    }
+    Ok(out)
+}
+
+/// When both native `gci` and `gofumpt` are present, parse once and format both.
+/// Returns `Some(per_formatter)` where `per_formatter[i] = Some(lines)` if that
+/// index was handled, `None` if the caller should format normally. `None` for
+/// the whole result means shared path was not applicable.
+fn try_shared_gci_gofumpt(
+    formatters: &[Box<dyn Formatter>],
+    fingerprints: &[(&str, String)],
+    path_str: &str,
+    src: &[u8],
+    content_hash: Option<&str>,
+    cache: Option<&crate::FormatCheckCache>,
+) -> Option<Vec<Option<Vec<i64>>>> {
+    use crate::CachedCheck;
+
+    if std::env::var_os("GUFF_NATIVE_FMT").is_some_and(|v| v == "0") {
+        return None;
+    }
+    let gci_i = formatters.iter().position(|f| f.name() == "gci")?;
+    let gofumpt_i = formatters.iter().position(|f| f.name() == "gofumpt")?;
+
+    // If both are cache hits, skip the shared parse entirely.
+    if let (Some(cache), Some(ch)) = (cache, content_hash) {
+        let gci_hit = cache.get(fingerprints[gci_i].0, &fingerprints[gci_i].1, ch);
+        let fumpt_hit = cache.get(fingerprints[gofumpt_i].0, &fingerprints[gofumpt_i].1, ch);
+        if gci_hit.is_some() && fumpt_hit.is_some() {
+            let mut slots = vec![None; formatters.len()];
+            slots[gci_i] = Some(match gci_hit.unwrap() {
+                CachedCheck::Clean => Vec::new(),
+                CachedCheck::Lines(l) => l,
+            });
+            slots[gofumpt_i] = Some(match fumpt_hit.unwrap() {
+                CachedCheck::Clean => Vec::new(),
+                CachedCheck::Lines(l) => l,
+            });
+            return Some(slots);
+        }
+        // One hit: still fall through to shared parse for the miss; the hit
+        // will be overwritten with the same result (or we could skip — but
+        // re-format is rare on warm partial hits).
+    }
+
+    let gci_fmt = formatters[gci_i].as_ref();
+    let fumpt_fmt = formatters[gofumpt_i].as_ref();
+    // Build native opts via format() only if both expose the shared helper.
+    // Concrete types: call through Formatter::format is the fallback; shared
+    // path lives on native module and needs NativeOptions from the wrappers.
+    let (gci_out, fumpt_out) =
+        crate::native::format_gci_gofumpt_shared(src, path_str, gci_fmt, fumpt_fmt)?;
+
+    let lines_of = |out: &Vec<u8>| -> Vec<i64> {
+        if out.as_slice() == src {
+            Vec::new()
+        } else {
+            let old = String::from_utf8_lossy(src);
+            let new = String::from_utf8_lossy(out);
+            let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
+            first_changed_lines(&diff)
+        }
+    };
+
+    let gci_lines = match gci_out {
+        Ok(ref o) => lines_of(o),
+        Err(_) => return None, // fall back to per-formatter format()
+    };
+    let fumpt_lines = match fumpt_out {
+        Ok(ref o) => lines_of(o),
+        Err(_) => return None,
+    };
+
+    if let (Some(cache), Some(ch)) = (cache, content_hash) {
+        let put = |idx: usize, lines: &[i64]| {
+            let entry = if lines.is_empty() {
+                CachedCheck::Clean
+            } else {
+                CachedCheck::Lines(lines.to_vec())
+            };
+            cache.put(fingerprints[idx].0, &fingerprints[idx].1, ch, &entry);
+        };
+        put(gci_i, &gci_lines);
+        put(gofumpt_i, &fumpt_lines);
+    }
+
+    let mut slots = vec![None; formatters.len()];
+    slots[gci_i] = Some(gci_lines);
+    slots[gofumpt_i] = Some(fumpt_lines);
+    let _ = (gci_out, fumpt_out);
+    Some(slots)
+}
+
+fn is_excluded_path(path: &Path, exclude_paths: &[String]) -> bool {
+    if exclude_paths.is_empty() {
+        return false;
+    }
+    let s = path.to_string_lossy().replace('\\', "/");
+    exclude_paths.iter().any(|pat| path_matches(&s, pat))
 }
 
 /// Recursively gather formatter-eligible `.go` files under `root`, applying the

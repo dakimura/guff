@@ -96,6 +96,33 @@ pub struct NativeOptions {
     pub filename: String,
 }
 
+/// Role in B-10's shared skip-object parse (native gci + gofumpt only).
+#[derive(Debug, Clone)]
+pub enum SharedSkipObject {
+    Gci(NativeOptions),
+    Gofumpt(NativeOptions),
+}
+
+/// Parse once (`PARSE_COMMENTS | SKIP_OBJECT_RESOLUTION`), run native gci then
+/// gofumpt. Returns `None` when either formatter is not participating in the
+/// shared path (subprocess / comment-strip opts / wrong role).
+pub fn format_gci_gofumpt_shared(
+    src: &[u8],
+    filename: &str,
+    gci: &dyn crate::Formatter,
+    gofumpt: &dyn crate::Formatter,
+) -> Option<(Result<Vec<u8>, FormatError>, Result<Vec<u8>, FormatError>)> {
+    let gci_opts = match gci.native_shared_skip_object(filename)? {
+        SharedSkipObject::Gci(o) => o,
+        _ => return None,
+    };
+    let fumpt_opts = match gofumpt.native_shared_skip_object(filename)? {
+        SharedSkipObject::Gofumpt(o) => o,
+        _ => return None,
+    };
+    Some(gci::format_shared_with_gofumpt(src, &gci_opts, &fumpt_opts))
+}
+
 /// Format `src` with the requested native formatter.
 ///
 /// Returns [`Err`] with a [`FormatError::Message`] wrapping

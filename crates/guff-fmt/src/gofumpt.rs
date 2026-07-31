@@ -171,6 +171,13 @@ impl Formatter for Gofumpt {
         Ok(output.stdout)
     }
 
+    fn native_shared_skip_object(&self, filename: &str) -> Option<native::SharedSkipObject> {
+        if !self.use_native() {
+            return None;
+        }
+        Some(native::SharedSkipObject::Gofumpt(self.native_opts(filename)))
+    }
+
     fn list_unformatted(&self, files: &[&Path]) -> Option<Vec<PathBuf>> {
         // Native path: return None so the runner formats each file once via
         // `check_file` (avoids list-then-reformat double work on flagged files).

@@ -65,14 +65,87 @@ fn format_inner(src: &[u8], opts: &NativeOptions) -> Result<Vec<u8>, AstFormatEr
         // No imports (or only generated skip — we don't skip by default).
         return Ok(src.to_vec());
     };
+    format_from_parsed_imports(src, &parsed, &sections)
+}
 
+/// B-10: share one skip-object parse with gofumpt. Returns `(gci_out, gofumpt_out)`.
+pub(crate) fn format_shared_with_gofumpt(
+    src: &[u8],
+    gci_opts: &NativeOptions,
+    fumpt_opts: &NativeOptions,
+) -> (Result<Vec<u8>, FormatError>, Result<Vec<u8>, FormatError>) {
+    let map_err = |e: AstFormatError, which: &str| -> FormatError {
+        match e {
+            AstFormatError::Parse(e) => FormatError::Message {
+                formatter: which.into(),
+                path: path_label(gci_opts),
+                message: e.to_string(),
+            },
+            AstFormatError::Io(e) => FormatError::Io {
+                formatter: which.into(),
+                path: path_label(gci_opts),
+                source: e,
+            },
+        }
+    };
+
+    let sections = match resolve_sections(gci_opts) {
+        Ok(s) => s,
+        Err(e) => {
+            let err = map_err(e, "native-gci");
+            return (Err(err), Err(FormatError::Message {
+                formatter: "native-gofumpt".into(),
+                path: path_label(fumpt_opts),
+                message: "shared parse aborted after gci section resolve".into(),
+            }));
+        }
+    };
+
+    let fset = Arc::new(FileSet::new());
+    // gofumpt inserts a dummy base file; keep gci's parse filename for positions.
+    let _ = fset.add_file("gofumpt_base.go", 1, 10);
+    let name = if gci_opts.filename.is_empty() {
+        "gci.go"
+    } else {
+        gci_opts.filename.as_str()
+    };
+    let mut file = match parser_interface::parse_file(&fset, name, Some(src), PARSER_MODE) {
+        Ok(f) => f,
+        Err(e) => {
+            let gci_err = map_err(AstFormatError::Parse(e), "native-gci");
+            let fumpt_err = FormatError::Message {
+                formatter: "native-gofumpt".into(),
+                path: path_label(fumpt_opts),
+                message: gci_err.to_string(),
+            };
+            return (Err(gci_err), Err(fumpt_err));
+        }
+    };
+
+    let gci_out = match extract_imports(src, &fset, &file) {
+        Ok(None) => Ok(src.to_vec()),
+        Ok(Some(parsed)) => format_from_parsed_imports(src, &parsed, &sections)
+            .map_err(|e| map_err(e, "native-gci")),
+        Err(e) => Err(map_err(e, "native-gci")),
+    };
+
+    let fumpt_out = super::gofumpt::format_parsed(&fset, &mut file, fumpt_opts);
+
+    (gci_out, fumpt_out)
+}
+
+fn format_from_parsed_imports(
+    src: &[u8],
+    parsed: &ParsedImports,
+    sections: &[Section],
+) -> Result<Vec<u8>, AstFormatError> {
     // gci: do not reformat when ≤1 non-C import.
     if parsed.imports.len() <= 1 {
         return Ok(src.to_vec());
     }
 
-    let grouped = assign_sections(&parsed.imports, &sections)?;
-    let dist = reconstruct(src, &parsed, &sections, &grouped);
+    let grouped = assign_sections(&parsed.imports, sections)?;
+    let dist = reconstruct(src, parsed, sections, &grouped);
     // Match gci: strip CR, then gofmt.
     let dist: Vec<u8> = dist.into_iter().filter(|&b| b != b'\r').collect();
     go_format::source(&dist)
@@ -383,7 +456,14 @@ fn parse_imports(src: &[u8], filename: &str) -> Result<Option<ParsedImports>, As
         filename
     };
     let file = parser_interface::parse_file(&fset, name, Some(src), PARSER_MODE)?;
+    extract_imports(src, &fset, &file)
+}
 
+fn extract_imports(
+    src: &[u8],
+    fset: &FileSet,
+    file: &guff::ast::File,
+) -> Result<Option<ParsedImports>, AstFormatError> {
     if file.imports.is_empty() {
         return Ok(None);
     }
@@ -599,6 +679,37 @@ mod tests {
             filename: "p.go".into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn shared_with_gofumpt_matches_separate_paths() {
+        let src = br#"package p
+
+import (
+	"github.com/foo/bar"
+	"fmt"
+)
+
+func f( a int ) {
+	fmt.Println(a)
+	_ = bar.X
+}
+"#;
+        let gci_opts = opts(&["standard", "default"]);
+        let fumpt_opts = NativeOptions {
+            filename: "p.go".into(),
+            extra_rules: false,
+            match_golangci: true,
+            ..Default::default()
+        };
+        let gci_alone = format(src, &gci_opts).unwrap();
+        let fumpt_alone = super::super::gofumpt::format(src, &fumpt_opts).unwrap();
+        let (gci_shared, fumpt_shared) =
+            format_shared_with_gofumpt(src, &gci_opts, &fumpt_opts);
+        assert_eq!(gci_shared.unwrap(), gci_alone);
+        assert_eq!(fumpt_shared.unwrap(), fumpt_alone);
+        // Sanity: at least one formatter rewrites this fixture.
+        assert!(gci_alone != src || fumpt_alone != src);
     }
 
     #[test]
