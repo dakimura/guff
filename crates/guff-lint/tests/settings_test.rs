@@ -1,6 +1,5 @@
 //! R4: `linters.settings` changes analyzer behaviour / selection.
 
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,7 +9,7 @@ use guff_lint::{
     analyzers_for_linter_with_settings, parse_config_str, ErrcheckSettings, GovetSettings,
     IssueFilter, LintResult, LinterSettings, StaticcheckSettings,
 };
-use guff_packages::{typecheck_package, LoadMode, Package, TypecheckEnv};
+use guff_packages::{typecheck_package, FxHashMap, LoadMode, Package, TypecheckEnv};
 use guff_runner::{run_on_packages, RunnerOptions};
 use guff_types::default_sizes;
 
@@ -38,8 +37,8 @@ fn typecheck_fixture(dir: &PathBuf, id: &str, file: &str) -> Arc<Package> {
     typecheck_package(
         &mut pkg,
         &fset,
-        &HashMap::new(),
-        &HashMap::new(),
+        &FxHashMap::default(),
+        &FxHashMap::default(),
         default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,
@@ -327,6 +326,17 @@ fn parse_v2_misspell_settings() {
     assert!(opts.restricted());
     assert_eq!(opts.ignore_words, vec!["amercia"]);
     assert_eq!(opts.extra_words.len(), 1);
+}
+
+#[test]
+fn parse_v2_misspell_ignore_rules_alias() {
+    let contents = fs::read_to_string(testdata_config("v2_misspell_ignore_rules.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(
+        settings.misspell.ignore_words,
+        vec!["Unknwon".to_string(), "Creater".to_string()]
+    );
 }
 
 #[test]

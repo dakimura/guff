@@ -35,9 +35,10 @@
 //!
 //! DEFERRED: remaining rules (G113, G115–G118, G201–G202, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
-//! entropy / full `gosec:disable` block directives / per-rule `config` map, G104 config allowlist /
-//! audit mode, G107 local string-lit TryResolve, full G204 TryResolve / G102 Ident const
-//! resolution, `severity`/`confidence` filters, concurrency.
+//! entropy / full `gosec:disable` block directives / per-rule `config` map,
+//! G104 audit mode + config allowlist extensions, G107 local string-lit
+//! TryResolve, full G204 TryResolve / G102 Ident const resolution,
+//! `severity`/`confidence` filters, concurrency.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -51,7 +52,12 @@ use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, ObjectId, TypeData};
+use guff_types::check_lookup::implements;
+use guff_types::new_pointer;
+use guff_types::scope::lookup;
 use guff_types::typestring::type_string;
+use guff_types::TypeId;
+use guff_types::alias::unalias_readonly;
 use regex::Regex;
 
 use crate::options::GosecOptions;
@@ -711,7 +717,12 @@ fn g101_secret_regexes() -> &'static [(String, Regex)] {
 /// Approximates gosec's zxcvbn thresholds (DEFERRED: true zxcvbn parity).
 fn shannon_entropy_total(s: &str) -> (f64, f64) {
     let truncated = if s.len() > G101_TRUNCATE {
-        &s[..G101_TRUNCATE]
+        // Truncate on a char boundary — secrets may contain multi-byte UTF-8.
+        let mut end = G101_TRUNCATE;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        &s[..end]
     } else {
         s
     };
@@ -1744,94 +1755,120 @@ fn errors_by_arg(pass: &Pass<'_>, call: &CallExpr) -> Vec<bool> {
     result_type_errors(pass, tav.typ)
 }
 
+/// Default G104 whitelist from securego/gosec `rules/errors.go` (non-audit).
+const G104_FMT_FUNCS: &[&str] = &[
+    "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln",
+];
+const G104_BUFFER_METHODS: &[&str] = &["Write", "WriteByte", "WriteRune", "WriteString"];
+
+fn expr_type_id(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    let info = pass.types_info()?;
+    Some(info.types.get(&expr.id())?.typ)
+}
+
+fn imported_named_type(pass: &Pass<'_>, import_path: &str, name: &str) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg_id = artifacts.packages.find_by_path(import_path)?;
+    let scope = artifacts.packages.get(pkg_id).scope();
+    let obj = lookup(&artifacts.scopes, scope, name)?;
+    obj.typ(&artifacts.objects)
+}
+
+fn recv_implements_named_iface(
+    pass: &Pass<'_>,
+    recv: &Expr,
+    iface_path: &str,
+    iface_name: &str,
+) -> bool {
+    let Some(typ) = expr_type_id(pass, recv) else {
+        return false;
+    };
+    let Some(iface) = imported_named_type(pass, iface_path, iface_name) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let resolved = unalias_readonly(&artifacts.types, typ);
+    let mut types = artifacts.types.clone();
+    let v = if matches!(types.get(resolved), TypeData::Named(_))
+        && !matches!(
+            types.get(resolved.underlying(&types)),
+            TypeData::Interface(_)
+        ) {
+        new_pointer(&mut types, resolved)
+    } else {
+        typ
+    };
+    implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        v,
+        iface,
+        false,
+    )
+    .is_ok()
+}
+
+fn g104_whitelisted(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    if let Some((pkg, name)) = resolve_pkg_call(pass, call) {
+        if pkg == "fmt" && G104_FMT_FUNCS.contains(&name.as_str()) {
+            return true;
+        }
+        if pkg == "os" && name == "Unsetenv" {
+            return true;
+        }
+        if (pkg == "math/rand" || pkg == "math/rand/v2") && name == "Read" {
+            return true;
+        }
+    }
+
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return false;
+    };
+    let method = sel.sel.name.as_str();
+
+    if let Some(ty_name) = type_name_of(pass, sel.x.as_ref()) {
+        let bare = ty_name.strip_prefix('*').unwrap_or(&ty_name);
+        match bare {
+            "bytes.Buffer" | "strings.Builder"
+                if G104_BUFFER_METHODS.contains(&method) =>
+            {
+                return true;
+            }
+            "io.PipeWriter" if method == "CloseWithError" => return true,
+            "hash.Hash" if method == "Write" => return true,
+            _ => {}
+        }
+    }
+
+    // hash.Hash.Write — concrete digests (sha1, sha256, …) implement the iface.
+    if method == "Write" && recv_implements_named_iface(pass, sel.x.as_ref(), "hash", "Hash") {
+        return true;
+    }
+
+    false
+}
+
 fn check_g104_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     enabled: &HashSet<&'static str>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    if enabled.contains("G104") && call_returns_error(pass, call) {
+    if !enabled.contains("G104") || g104_whitelisted(pass, call) {
+        return;
+    }
+    if call_returns_error(pass, call) {
         pending.push((call.lparen.0 as u32, "G104: Errors unhandled.".to_string()));
     }
 }
 
-fn check_g104_assign(
-    pass: &Pass<'_>,
-    assign: &AssignStmt,
-    enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
-) {
-    if !enabled.contains("G104") {
-        return;
-    }
-    if assign.rhs.len() == 1 {
-        let Expr::CallExpr(call) = &assign.rhs[0] else {
-            return;
-        };
-        let error_results = errors_by_arg(pass, call);
-        for (i, lhs) in assign.lhs.iter().enumerate() {
-            let Expr::Ident(id) = lhs else {
-                continue;
-            };
-            if id.name == "_" && error_results.get(i).copied().unwrap_or(false) {
-                pending.push((id.name_pos.0 as u32, "G104: Errors unhandled.".to_string()));
-            }
-        }
-        return;
-    }
-    for (i, lhs) in assign.lhs.iter().enumerate() {
-        let Expr::Ident(id) = lhs else {
-            continue;
-        };
-        if id.name != "_" {
-            continue;
-        }
-        if let Some(Expr::CallExpr(call)) = assign.rhs.get(i) {
-            if call_returns_error(pass, call) {
-                pending.push((id.name_pos.0 as u32, "G104: Errors unhandled.".to_string()));
-            }
-        }
-    }
-}
-
-fn check_g104_value_spec(
-    pass: &Pass<'_>,
-    spec: &ValueSpec,
-    enabled: &HashSet<&'static str>,
-    pending: &mut Vec<(u32, String)>,
-) {
-    if !enabled.contains("G104") || spec.values.is_empty() {
-        return;
-    }
-    if spec.values.len() == 1 {
-        let Expr::CallExpr(call) = &spec.values[0] else {
-            return;
-        };
-        let error_results = errors_by_arg(pass, call);
-        for (i, name) in spec.names.iter().enumerate() {
-            if name.name == "_" && error_results.get(i).copied().unwrap_or(false) {
-                pending.push((
-                    name.name_pos.0 as u32,
-                    "G104: Errors unhandled.".to_string(),
-                ));
-            }
-        }
-        return;
-    }
-    for (i, name) in spec.names.iter().enumerate() {
-        if name.name != "_" {
-            continue;
-        }
-        if let Some(Expr::CallExpr(call)) = spec.values.get(i) {
-            if call_returns_error(pass, call) {
-                pending.push((
-                    name.name_pos.0 as u32,
-                    "G104: Errors unhandled.".to_string(),
-                ));
-            }
-        }
-    }
-}
+// G104 AssignStmt / ValueSpec (`_ = err`-style) are only reported by upstream
+// gosec when global `audit` is enabled. golangci does not enable audit by
+// default, so guff matches non-audit behaviour (ExprStmt / go / defer only).
+// Audit mode + config allowlist remain DEFERRED.
 
 fn check_call(
     pass: &Pass<'_>,
@@ -2078,11 +2115,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_g104_call(pass, &stmt.call, &enabled, &mut pending);
                 }
                 NodeRef::AssignStmt(stmt) => {
-                    check_g104_assign(pass, stmt, &enabled, &mut pending);
+                    // G104 assign (`_ = f()`) is audit-mode only upstream; skip.
                     check_g402_assign(pass, stmt, &enabled, &mut pending);
-                }
-                NodeRef::ValueSpec(spec) => {
-                    check_g104_value_spec(pass, spec, &enabled, &mut pending)
                 }
                 _ => {}
             }

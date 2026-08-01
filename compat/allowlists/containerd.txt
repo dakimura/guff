@@ -6,3 +6,4 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
+containerd guff-only pkg/oci/spec_opts.go:692:staticcheck:possible nil pointer dereference

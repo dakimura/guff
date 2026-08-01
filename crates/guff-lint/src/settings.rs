@@ -238,7 +238,8 @@ pub struct DuplSettings {
 pub struct MisspellSettings {
     #[serde(default)]
     pub locale: Option<String>,
-    #[serde(default, rename = "ignore-words")]
+    /// golangci v1 `ignore-words`; v2 renamed to `ignore-rules` (both accepted).
+    #[serde(default, rename = "ignore-words", alias = "ignore-rules")]
     pub ignore_words: Vec<String>,
     #[serde(default, rename = "extra-words")]
     pub extra_words: Vec<MisspellExtraWordSetting>,

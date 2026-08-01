@@ -6,111 +6,13 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
-consul guff-only acl/acl_test.go:103:unparam:checkAllowPeeringWrite - prefix is unused
-consul guff-only acl/acl_test.go:107:unparam:checkAllowOperatorRead - prefix is unused
-consul guff-only acl/acl_test.go:111:unparam:checkAllowOperatorWrite - prefix is unused
-consul guff-only acl/acl_test.go:147:unparam:checkAllowSnapshot - prefix is unused
-consul guff-only acl/acl_test.go:159:unparam:checkDenyACLRead - prefix is unused
-consul guff-only acl/acl_test.go:163:unparam:checkDenyACLWrite - prefix is unused
-consul guff-only acl/acl_test.go:183:unparam:checkDenyIntentionDefaultAllow - prefix is unused
-consul guff-only acl/acl_test.go:19:unparam:checkAllowACLRead - prefix is unused
-consul guff-only acl/acl_test.go:203:unparam:checkDenyKeyringRead - prefix is unused
-consul guff-only acl/acl_test.go:207:unparam:checkDenyKeyringWrite - prefix is unused
-consul guff-only acl/acl_test.go:231:unparam:checkDenyMeshRead - prefix is unused
-consul guff-only acl/acl_test.go:235:unparam:checkDenyMeshWrite - prefix is unused
-consul guff-only acl/acl_test.go:239:unparam:checkDenyPeeringRead - prefix is unused
-consul guff-only acl/acl_test.go:23:unparam:checkAllowACLWrite - prefix is unused
-consul guff-only acl/acl_test.go:243:unparam:checkDenyPeeringWrite - prefix is unused
-consul guff-only acl/acl_test.go:247:unparam:checkDenyOperatorRead - prefix is unused
-consul guff-only acl/acl_test.go:251:unparam:checkDenyOperatorWrite - prefix is unused
-consul guff-only acl/acl_test.go:295:unparam:checkDenySnapshot - prefix is unused
-consul guff-only acl/acl_test.go:307:unparam:checkDefaultACLRead - prefix is unused
-consul guff-only acl/acl_test.go:311:unparam:checkDefaultACLWrite - prefix is unused
-consul guff-only acl/acl_test.go:331:unparam:checkDefaultIntentionDefaultAllow - prefix is unused
-consul guff-only acl/acl_test.go:351:unparam:checkDefaultKeyringRead - prefix is unused
-consul guff-only acl/acl_test.go:355:unparam:checkDefaultKeyringWrite - prefix is unused
-consul guff-only acl/acl_test.go:379:unparam:checkDefaultMeshRead - prefix is unused
-consul guff-only acl/acl_test.go:383:unparam:checkDefaultMeshWrite - prefix is unused
-consul guff-only acl/acl_test.go:387:unparam:checkDefaultPeeringRead - prefix is unused
-consul guff-only acl/acl_test.go:391:unparam:checkDefaultPeeringWrite - prefix is unused
-consul guff-only acl/acl_test.go:395:unparam:checkDefaultOperatorRead - prefix is unused
-consul guff-only acl/acl_test.go:399:unparam:checkDefaultOperatorWrite - prefix is unused
-consul guff-only acl/acl_test.go:439:unparam:checkDefaultSnapshot - prefix is unused
-consul guff-only acl/acl_test.go:43:unparam:checkAllowIntentionDefaultAllow - prefix is unused
-consul guff-only acl/acl_test.go:63:unparam:checkAllowKeyringRead - prefix is unused
-consul guff-only acl/acl_test.go:67:unparam:checkAllowKeyringWrite - prefix is unused
-consul guff-only acl/acl_test.go:91:unparam:checkAllowMeshRead - prefix is unused
-consul guff-only acl/acl_test.go:95:unparam:checkAllowMeshWrite - prefix is unused
-consul guff-only acl/acl_test.go:99:unparam:checkAllowPeeringRead - prefix is unused
-consul guff-only acl/policy_authorizer.go:393:unparam:<func literal> - path is unused
-consul guff-only acl/policy_authorizer.go:422:unparam:<func literal> - path is unused
-consul guff-only acl/policy_authorizer.go:652:unparam:<func literal> - path is unused
-consul guff-only acl/policy_authorizer.go:675:unparam:<func literal> - path is unused
-consul guff-only acl/policy_authorizer.go:858:unparam:<func literal> - path is unused
-consul guff-only acl/policy_authorizer.go:877:unparam:<func literal> - path is unused
 consul guff-only agent/consul/authmethod/authmethods.go:164:staticcheck:argument logger is overwritten before first use
-consul guff-only agent/consul/authmethod/kubeauth/k8s.go:29:unparam:<func literal> - logger is unused
-consul guff-only agent/consul/authmethod/testauth/testing.go:94:unparam:newValidator - logger is unused
-consul guff-only agent/consul/gateways/controller_gateways_test.go:4100:staticcheck:trying to marshal unsupported type github.com/hashicorp/consul/agent/structs.ServiceRouteReferences, via x.Services
-consul guff-only agent/consul/gateways/controller_gateways_test.go:4154:unparam:<func literal> - entry is unused
-consul guff-only agent/consul/gateways/controller_gateways_test.go:4155:unparam:<func literal> - entry is unused
-consul guff-only agent/consul/gateways/controller_gateways_test.go:4156:unparam:<func literal> - entry is unused
-consul guff-only agent/consul/prepared_query/walk_test.go:58:unparam:<func literal> - path is unused
-consul guff-only agent/consul/rate/handler_test.go:294:unparam:<func literal> - cfg is unused
-consul guff-only agent/consul/rate/handler_test.go:325:unparam:<func literal> - cfg is unused
-consul guff-only agent/consul/rate/handler_test.go:411:unparam:<func literal> - entity is unused
-consul guff-only agent/grpc-external/services/acl/login_test.go:157:unparam:<func literal> - methodName is unused
-consul guff-only agent/grpc-external/services/acl/login_test.go:199:unparam:<func literal> - methodName is unused
-consul guff-only agent/grpc-external/services/acl/login_test.go:229:unparam:<func literal> - methodName is unused
-consul guff-only agent/grpc-external/services/acl/login_test.go:49:unparam:<func literal> - methodName is unused
-consul guff-only agent/grpc-external/services/acl/login_test.go:86:unparam:<func literal> - methodName is unused
-consul guff-only agent/grpc-external/services/acl/logout_test.go:153:unparam:<func literal> - rpcInfo is unused
-consul guff-only agent/grpc-internal/balancer/balancer_test.go:143:unparam:<func literal> - b is unused
-consul guff-only agent/hcp/bootstrap/config-loader/loader_test.go:114:unparam:<func literal> - source is unused
-consul guff-only agent/hcp/bootstrap/config-loader/loader_test.go:98:unparam:<func literal> - source is unused
-consul guff-only agent/hcp/bootstrap/testing.go:31:unparam:<func literal> - r is unused
-consul guff-only agent/hcp/client/http_client_test.go:24:unparam:<func literal> - w is unused
-consul guff-only agent/rpc/middleware/interceptors.go:160:unparam:<func literal> - replyv is unused
-consul guff-only agent/structs/acl.go:88:staticcheck:Printf call needs 13 args but has 1 args
-consul guff-only agent/structs/acl.go:89:staticcheck:Printf call needs 13 args but has 1 args
-consul guff-only agent/structs/acl_ce.go:66:staticcheck:Printf call needs 2 args but has 1 args
-consul guff-only agent/structs/config_entry_routes.go:253:unparam:validateURLRewrite - rewrite is unused
-consul guff-only agent/structs/config_entry_routes.go:260:unparam:validateHeaderFilter - filter is unused
-consul guff-only agent/uiserver/uiserver_test.go:602:unparam:<func literal> - data is unused
-consul guff-only command/acl/token/clone/token_clone_test.go:47:staticcheck:should use raw string (`...`) with regexp.Compile to avoid having to escape twice
-consul guff-only command/connect/envoy/envoy_test.go:1469:unparam:<func literal> - args is unused
-consul guff-only command/connect/envoy/envoy_test.go:1481:unparam:<func literal> - args is unused
-consul guff-only command/connect/envoy/envoy_test.go:1668:unparam:<func literal> - r is unused
-consul guff-only command/connect/envoy/envoy_test.go:1680:unparam:<func literal> - r is unused
-consul guff-only command/connect/envoy/envoy_test.go:1797:unparam:<func literal> - r is unused
-consul guff-only command/peering/generate/generate.go:89:staticcheck:could omit type []string from declaration; it will be inferred from the right-hand side
-consul guff-only command/services/config.go:94:unparam:<func literal> - f is unused
-consul guff-only command/snapshot/decode/snapshot_decode.go:172:unparam:<func literal> - header is unused
-consul guff-only command/snapshot/inspect/snapshot_inspect.go:278:unparam:<func literal> - header is unused
-consul guff-only internal/controller/cache/index/convenience_test.go:302:unparam:<func literal> - val is unused
-consul guff-only internal/controller/cache/index/convenience_test.go:342:unparam:<func literal> - val is unused
-consul guff-only internal/multicluster/internal/controllers/v1compat/controller.go:53:unparam:mapConfigEntryEvents - ctx is unused
-consul guff-only internal/multicluster/internal/controllers/v1compat/controller.go:71:unparam:<func literal> - r is unused
-consul guff-only internal/multicluster/internal/types/computed_exported_services.go:31:unparam:aclReadHookComputedExportedServices - res is unused
-consul guff-only internal/multicluster/internal/types/namespace_exported_services.go:27:unparam:aclReadHookNamespaceExportedServices - id is unused
-consul guff-only internal/multicluster/internal/types/namespace_exported_services.go:31:unparam:aclWriteHookNamespaceExportedServices - res is unused
-consul guff-only internal/multicluster/internal/types/partition_exported_services.go:27:unparam:aclReadHookPartitionExportedServices - id is unused
-consul guff-only internal/multicluster/internal/types/partition_exported_services.go:31:unparam:aclWriteHookPartitionExportedServices - res is unused
-consul guff-only internal/resource/hooks_test.go:100:unparam:<func literal> - dec is unused
-consul guff-only internal/resource/hooks_test.go:109:unparam:<func literal> - dec is unused
-consul guff-only internal/resource/hooks_test.go:139:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:148:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:178:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:187:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:197:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:226:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:235:unparam:<func literal> - a is unused
-consul guff-only internal/resource/hooks_test.go:38:unparam:<func literal> - dec is unused
-consul guff-only internal/resource/hooks_test.go:47:unparam:<func literal> - dec is unused
 consul golangci-only agent/grpc-external/services/resource/write.go:206:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:207:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:212:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/structs/acl_templated_policy.go:303:govet:cannot inline: type parameter inference is not yet supported
+consul golangci-only agent/structs/config_entry_discoverychain_test.go:34:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
+consul golangci-only agent/structs/config_entry_discoverychain_test.go:37:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
 consul golangci-only agent/structs/config_entry_gateways.go:1008:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/xds/routes.go:516:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only command/exec/exec.go:696:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))

@@ -5,11 +5,16 @@
 //! a parameter is unused when its name does not appear as an identifier in the
 //! function body (excluding `_ = param` intentional keeps).
 //!
+//! Functions whose signature cannot be changed are skipped (AST approx of
+//! upstream SSA `signRequiredBy`):
+//! - package-level funcs referenced as values (not only called)
+//! - func literals that are not immediately invoked (IIFE / `go`/`defer`)
+//!
 //! Upstream also checks unused / constant results and uses SSA for interface
 //! satisfaction, forwarded calls, and call-graph precision.
 //!
-//! DEFERRED: SSA-based analysis (`buildir`), unused/constant results,
-//! interface-satisfaction skips, generated-file skips, recursive-only uses.
+//! DEFERRED: full SSA (`buildir`), unused/constant results, interface-method
+//! skips, generated-file skips, recursive-only uses, `paramsRequiredBy`.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -138,10 +143,132 @@ fn should_check_exported(pass: &Pass<'_>, fd: &FuncDecl, check_exported: bool) -
     !fd.name.is_exported()
 }
 
+/// Record identity of a `FuncLit` (node id, falling back to body `{` pos).
+fn func_lit_key(lit: &FuncLit) -> u32 {
+    if lit.id != 0 {
+        lit.id
+    } else {
+        lit.body.lbrace.0 as u32
+    }
+}
+
+fn unwrap_func_lit(expr: &Expr) -> Option<&FuncLit> {
+    match expr {
+        Expr::FuncLit(lit) => Some(lit),
+        Expr::ParenExpr(p) => unwrap_func_lit(&p.x),
+        _ => None,
+    }
+}
+
+/// Collect call-fun Ident ids, and FuncLit keys used in value positions
+/// (call args / composite elts / assign|return values) — signature required.
+fn collect_call_sites(files: &[guff::ast::File]) -> (HashSet<u32>, HashSet<u32>) {
+    let mut call_fun_ids = HashSet::new();
+    let mut value_lits = HashSet::new();
+
+    let mark_value_expr = |expr: &Expr, value_lits: &mut HashSet<u32>| {
+        if let Some(lit) = unwrap_func_lit(expr) {
+            value_lits.insert(func_lit_key(lit));
+        }
+    };
+
+    for file in files {
+        walk::inspect(NodeRef::File(file), |n| {
+            match n {
+                Some(NodeRef::CallExpr(call)) => {
+                    match &*call.fun {
+                        Expr::Ident(id) => {
+                            call_fun_ids.insert(id.id);
+                        }
+                        Expr::SelectorExpr(sel) => {
+                            call_fun_ids.insert(sel.sel.id);
+                        }
+                        _ => {}
+                    }
+                    for arg in &call.args {
+                        mark_value_expr(arg, &mut value_lits);
+                    }
+                }
+                Some(NodeRef::CompositeLit(lit)) => {
+                    for elt in &lit.elts {
+                        match elt {
+                            Expr::KeyValueExpr(kv) => {
+                                mark_value_expr(&kv.value, &mut value_lits);
+                            }
+                            other => mark_value_expr(other, &mut value_lits),
+                        }
+                    }
+                }
+                Some(NodeRef::AssignStmt(asgn)) => {
+                    for rhs in &asgn.rhs {
+                        mark_value_expr(rhs, &mut value_lits);
+                    }
+                }
+                Some(NodeRef::ReturnStmt(ret)) => {
+                    for r in &ret.results {
+                        mark_value_expr(r, &mut value_lits);
+                    }
+                }
+                Some(NodeRef::ValueSpec(spec)) => {
+                    for v in &spec.values {
+                        mark_value_expr(v, &mut value_lits);
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    (call_fun_ids, value_lits)
+}
+
+/// Package-level (non-method) funcs referenced as values — signature required.
+fn collect_sign_required_funcs(
+    files: &[guff::ast::File],
+    call_fun_ids: &HashSet<u32>,
+) -> HashSet<String> {
+    let mut pkg_funcs = HashSet::new();
+    let mut decl_name_ids = HashSet::new();
+    for file in files {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if fd.recv.is_some() {
+                continue;
+            }
+            pkg_funcs.insert(fd.name.name.clone());
+            decl_name_ids.insert(fd.name.id);
+        }
+    }
+
+    let mut required = HashSet::new();
+    for file in files {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(NodeRef::Ident(id)) = n else {
+                return true;
+            };
+            if !pkg_funcs.contains(&id.name) {
+                return true;
+            }
+            if decl_name_ids.contains(&id.id) {
+                return true;
+            }
+            if call_fun_ids.contains(&id.id) {
+                return true;
+            }
+            required.insert(id.name.clone());
+            true
+        });
+    }
+    required
+}
+
 fn check_func_decl(
     pass: &Pass<'_>,
     fd: &FuncDecl,
     check_exported: bool,
+    sign_required: &HashSet<String>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -153,6 +280,10 @@ fn check_func_decl(
     if !should_check_exported(pass, fd, check_exported) {
         return;
     }
+    // Methods keep AST checking; interface-satisfaction skips are DEFERRED.
+    if fd.recv.is_none() && sign_required.contains(&fd.name.name) {
+        return;
+    }
     let Some(params) = &fd.ty.params else {
         return;
     };
@@ -160,7 +291,11 @@ fn check_func_decl(
     check_params(&func_name, &params.list, body, pending);
 }
 
-fn check_func_lit(lit: &FuncLit, pending: &mut Vec<(u32, String)>) {
+fn check_func_lit(lit: &FuncLit, value_lits: &HashSet<u32>, pending: &mut Vec<(u32, String)>) {
+    // Literals stored / passed / returned have a fixed signature.
+    if value_lits.contains(&func_lit_key(lit)) {
+        return;
+    }
     let Some(params) = &lit.ty.params else {
         return;
     };
@@ -177,19 +312,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .copied()
         .unwrap_or_default();
 
+    let files = pass.files();
+    let (call_fun_ids, value_lits) = collect_call_sites(files);
+    let sign_required = collect_sign_required_funcs(files, &call_fun_ids);
+
     let mut pending: Vec<(u32, String)> = Vec::new();
-    for file in pass.files() {
+    for file in files {
         for decl in &file.decls {
             let Decl::FuncDecl(fd) = decl else {
                 continue;
             };
-            check_func_decl(pass, fd, opts.check_exported, &mut pending);
+            check_func_decl(pass, fd, opts.check_exported, &sign_required, &mut pending);
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(NodeRef::FuncLit(lit)) = n else {
                 return true;
             };
-            check_func_lit(lit, &mut pending);
+            check_func_lit(lit, &value_lits, &mut pending);
             true
         });
     }

@@ -218,6 +218,10 @@ fn check_gen_decl(pass: &Pass<'_>, gen: &guff::ast::GenDecl, pending: &mut Vec<(
             if vs.names[i].name == "_" {
                 continue 'spec;
             }
+            // `var x T = nil` still needs T — untyped nil cannot be omitted.
+            if matches!(v, Expr::Ident(id) if id.name == "nil") {
+                continue 'spec;
+            }
             let Some(trhs) = info.types.get(&v.id()).map(|tv| tv.typ) else {
                 continue 'spec;
             };

@@ -8,15 +8,36 @@ use guff::ast::Expr;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_string, is_call_to_any};
+use guff_analysis::code::is_call_to_any;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
-fn should_use_raw_string(val: &str) -> bool {
-    if val.contains('`') {
+/// Upstream inspects the quoted source literal (`lit.Value`), not the
+/// decoded string: require a `\\` pair and reject any other escape
+/// (`\` followed by a non-`\`), so e.g. `"...\n..."` is not flagged.
+fn should_use_raw_string_src(quoted: &str) -> bool {
+    if !quoted.starts_with('"') || quoted.contains('`') {
         return false;
     }
-    val.contains('\\')
+    if !quoted.contains(r"\\") {
+        return false;
+    }
+    let mut bs = false;
+    for c in quoted.chars() {
+        if !bs && c == '\\' {
+            bs = true;
+            continue;
+        }
+        if bs && c == '\\' {
+            bs = false;
+            continue;
+        }
+        if bs {
+            // backslash followed by non-backslash → escape sequence
+            return false;
+        }
+    }
+    true
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -41,10 +62,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if lit.kind != Some(Token::STRING) || lit.value.starts_with('`') {
             return;
         }
-        let Some(val) = expr_to_string(pass, &call.args[0]) else {
-            return;
-        };
-        if !should_use_raw_string(&val) {
+        if !should_use_raw_string_src(&lit.value) {
             return;
         }
         pending.push(lit.value_pos.0 as u32);
@@ -86,8 +104,15 @@ mod tests {
     }
 
     #[test]
-    fn raw_string_heuristic() {
-        assert!(should_use_raw_string(r"\A\w+"));
-        assert!(!should_use_raw_string("\n"));
+    fn raw_string_heuristic_matches_upstream() {
+        assert!(should_use_raw_string_src(r#""\\A\\w+""#));
+        assert!(should_use_raw_string_src(r#""\\d+""#));
+        // `\n` is a non-`\\` escape → do not suggest raw string
+        assert!(!should_use_raw_string_src(
+            r#""   ([a-zA-Z0-9\\-]{36}) - ([^\n]+)""#
+        ));
+        assert!(!should_use_raw_string_src(r#""foo\nbar""#));
+        assert!(!should_use_raw_string_src(r#""no doubles""#));
+        assert!(!should_use_raw_string_src(r#"`already raw\\d`"#));
     }
 }
