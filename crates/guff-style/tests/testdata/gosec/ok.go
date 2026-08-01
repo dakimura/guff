@@ -154,3 +154,10 @@ func okWalkNoSink() error {
 		return err
 	})
 }
+
+func okG107NonIdentURL() {
+	base := "https://example.com"
+	_, _ = http.Get(base + "/ok")
+	_, _ = http.Post(base+"/ok", "text/plain", nil)
+}
+

@@ -6,97 +6,26 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 #
-# Shrunk via SA5011 FreeVar fix + structtag anonymous-field skip.
+# Shrunk: nosec prev-line, G107 Ident-only, errcheck hash.Write,
+# bodyclose Cleanup/escape/synthetic, SA4014 pos + LAND/LOR render,
+# SA4019 +build-only (ignore gofmt dual //go:build).
 
-grafana guff-only pkg/cmd/grafana-cli/services/api_client.go:75:bodyclose:response body must be closed
 grafana guff-only pkg/components/imguploader/gcs/gcsuploader.go:230:staticcheck:ineffective assignment to field .PredefinedACL
-grafana guff-only pkg/components/simplejson/simplejson_go11.go:4:staticcheck:identical build constraints "go1.1" and "go1.1"
-grafana guff-only pkg/infra/process/root_check.go:4:staticcheck:identical build constraints "!windows" and "!windows"
-grafana guff-only pkg/infra/slugify/slugify.go:60:errcheck:Error return value is not checked
-grafana guff-only pkg/middleware/cookies/cookies.go:43:gosec:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
-grafana guff-only pkg/registry/apis/datasource/converter/converter.go:124:errcheck:Error return value is not checked
-grafana guff-only pkg/registry/apis/datasource/converter/converter.go:125:errcheck:Error return value is not checked
-grafana guff-only pkg/registry/apis/datasource/converter/converter.go:126:errcheck:Error return value is not checked
 grafana guff-only pkg/registry/apis/datasource/converter/converter_test.go:58:staticcheck:trying to marshal unsupported type github.com/grafana/grafana/pkg/services/datasources.UpdateSecretFn, via x.UpdateSecretFn
 grafana guff-only pkg/registry/apis/datasource/converter/converter_test.go:70:staticcheck:trying to marshal unsupported type github.com/grafana/grafana/pkg/services/datasources.UpdateSecretFn, via x.UpdateSecretFn
 grafana guff-only pkg/registry/apis/provisioning/jobs/migrate/unifiedstorage_test.go:458:staticcheck:identical expressions on the left and right side of the '&&' operator
-grafana guff-only pkg/registry/apis/provisioning/resources/errors.go:123:staticcheck:could omit type error from declaration; it will be inferred from the right-hand side
 grafana guff-only pkg/registry/apis/secret/service/consolidation.go:165:prealloc:Consider preallocating currentBatch
 grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:51:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:52:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:55:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:61:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
-grafana guff-only pkg/server/health_test.go:107:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/server/health_test.go:119:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/server/health_test.go:130:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/server/health_test.go:137:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/server/health_test.go:84:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/server/health_test.go:95:gosec:G107: Potential HTTP request made with variable url
 grafana guff-only pkg/services/accesscontrol/database/externalservices_test.go:5:goimports:File is not properly formatted
 grafana guff-only pkg/services/accesscontrol/mock/mock.go:123:staticcheck:should merge variable declaration with assignment on next line
-grafana guff-only pkg/services/accesscontrol/roles.go:5:gosec:G505: Blocklisted import crypto/sha1: weak cryptographic primitive
-grafana guff-only pkg/services/apiserver/utils/uids.go:20:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:21:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:22:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:23:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:26:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:27:errcheck:Error return value is not checked
-grafana guff-only pkg/services/apiserver/utils/uids.go:28:errcheck:Error return value is not checked
-grafana guff-only pkg/services/authz/zanzana/store/migration/migrator.go:169:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/services/frontend/index.go:180:gosec:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
-grafana guff-only pkg/services/ngalert/eval/eval_test.go:1602:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/services/ngalert/models/accesscontrol.go:5:gosec:G505: Blocklisted import crypto/sha1: weak cryptographic primitive
-grafana guff-only pkg/services/ngalert/models/fingerprint.go:39:gosec:G103: Use of unsafe calls should be audited
-grafana guff-only pkg/services/ngalert/notifier/legacy_storage/routes.go:406:gosec:G103: Use of unsafe calls should be audited
-grafana guff-only pkg/services/ngalert/provisioning/mute_timings.go:475:gosec:G103: Use of unsafe calls should be audited
-grafana guff-only pkg/services/ngalert/schedule/registry.go:260:gosec:G103: Use of unsafe calls should be audited
 grafana guff-only pkg/services/ngalert/sender/notifier_ext.go:360:gosec:G104: Errors unhandled.
 grafana guff-only pkg/services/ngalert/sender/notifier_ext.go:361:gosec:G104: Errors unhandled.
 grafana guff-only pkg/services/ngalert/sender/notifier_test.go:416:gosec:G104: Errors unhandled.
 grafana guff-only pkg/services/ngalert/state/template/funcs.go:103:staticcheck:Printf call needs 3 args but has 2 args
 grafana guff-only pkg/services/ngalert/state/template/funcs.go:70:staticcheck:Printf call needs 3 args but has 2 args
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:108:bodyclose:response body must be closed
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:108:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:73:bodyclose:response body must be closed
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:73:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:82:bodyclose:response body must be closed
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:82:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:91:bodyclose:response body must be closed
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:91:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:99:bodyclose:response body must be closed
-grafana guff-only pkg/services/pluginsintegration/plugintest/plugins_test.go:99:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/services/publicdashboards/internal/commands/generate_datasources/generate.go:60:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/tests/api/alerting/api_alertmanager_test.go:132:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/tests/api/alerting/api_alertmanager_test.go:587:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/tests/api/alerting/api_notification_channel_test.go:95:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/tests/api/annotations/annotations_test.go:373:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/annotations/annotations_test.go:406:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/correlations/common_test.go:67:gosec:G107: Potential HTTP request made with variable url
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:345:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:370:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:491:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:519:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:555:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:585:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:616:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:646:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:672:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:726:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:746:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:868:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:888:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:913:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:933:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:955:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:989:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:114:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:182:bodyclose:response body must be closed
-grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:219:bodyclose:response body must be closed
-grafana guff-only pkg/tests/web/index_view_test.go:106:bodyclose:response body must be closed
 grafana guff-only pkg/tsdb/cloud-monitoring/cloudmonitoring.go:33:staticcheck:error parsing regexp: regex parse error: [-\/^$+?.()|[\]{}] ^^ error: unclosed character class
 grafana guff-only pkg/tsdb/cloud-monitoring/converter/converter.go:97:staticcheck:this value of frame.Meta is never used
 grafana guff-only pkg/tsdb/cloud-monitoring/converter/converter.go:99:staticcheck:this value of frame.Meta.Notices is never used
-grafana guff-only pkg/tsdb/cloud-monitoring/utils.go:92:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/tsdb/influxdb/influxql/influxql_test.go:101:bodyclose:response body must be closed
-grafana guff-only pkg/tsdb/influxdb/influxql/influxql_test.go:71:bodyclose:response body must be closed
-grafana guff-only pkg/tsdb/influxdb/influxql/influxql_test.go:83:bodyclose:response body must be closed

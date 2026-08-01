@@ -8,7 +8,8 @@
 //! - **G103** — `unsafe` calls (`Pointer` / `String` / `StringData` / `Slice` / `SliceData`)
 //! - **G104** — unchecked errors
 //! - **G106** — `ssh.InsecureIgnoreHostKey`
-//! - **G107** — HTTP request with variable URL (SSRF; BasicLit/Const safe; full TryResolve DEFERRED)
+//! - **G107** — HTTP request with variable URL (SSRF; Ident-only like upstream
+//!   `ResolveVar`; BasicLit/Const safe; full TryResolve DEFERRED)
 //! - **G108** — blank import of `net/http/pprof`
 //! - **G109** — `strconv.Atoi` result converted to `int16`/`int32`
 //! - **G110** — potential decompression bomb (`io.Copy`/`CopyBuffer` from archive reader)
@@ -1064,16 +1065,27 @@ fn is_pkg_sel_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
     imported_pkg_path(pass, id).is_some()
 }
 
-/// True when an inline `#nosec` / `//nosec` / `gosec:disable` on the same line
-/// suppresses `rule` (e.g. `G112`). Bare `#nosec` suppresses all rules.
+/// True when a `#nosec` / `//nosec` / `gosec:disable` suppresses `rule`.
+///
+/// Matches gosec CommentMap association: same-line trailing comments, and a
+/// short preceding comment block (e.g. `// #nosec G124` one or two lines above).
+///
+/// Uses in-memory [`Package::source_bytes`] — never re-reads the filesystem
+/// (cold-wall sensitive; production parses without `PARSE_COMMENTS`).
 fn nosec_suppresses(pass: &Pass<'_>, pos: u32, rule: &str) -> bool {
     let position = pass.fset().position(guff::position::Pos(pos as i64));
     let line = position.line;
+    if line == 0 {
+        return false;
+    }
+
+    // AST comments first (when PARSE_COMMENTS was used).
+    const PREV_LINES: i64 = 3;
     for file in pass.files() {
         for cg in &file.comments {
             for c in &cg.list {
                 let cline = pass.fset().position(c.slash).line;
-                if cline != line {
+                if cline > line || line - cline > PREV_LINES {
                     continue;
                 }
                 if comment_suppresses_nosec(&c.text, rule) {
@@ -1082,19 +1094,58 @@ fn nosec_suppresses(pass: &Pass<'_>, pos: u32, rule: &str) -> bool {
             }
         }
     }
-    // Fallback when trailing comments were not retained on the AST File.
-    if !position.filename.is_empty() {
-        if let Ok(src) = std::fs::read_to_string(&position.filename) {
-            if line >= 1 {
-                if let Some(line_txt) = src.lines().nth((line as usize).saturating_sub(1)) {
-                    if comment_suppresses_nosec(line_txt, rule) {
-                        return true;
-                    }
-                }
-            }
+
+    // Fall back to retained source bytes (same buffers typecheck already read).
+    if position.filename.is_empty() {
+        return false;
+    }
+    let Some(src) = package_source_for_file(pass, &position.filename) else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(src);
+    let lines: Vec<&str> = text.lines().collect();
+    if line < 1 || (line as usize) > lines.len() {
+        return false;
+    }
+    let idx = (line as usize) - 1;
+    if comment_suppresses_nosec(lines[idx], rule) {
+        return true;
+    }
+    let mut i = idx;
+    let mut walked = 0i64;
+    while i > 0 && walked < PREV_LINES {
+        i -= 1;
+        walked += 1;
+        let t = lines[i].trim();
+        if t.is_empty() {
+            continue;
+        }
+        if !(t.starts_with("//") || t.starts_with("/*") || t.starts_with('*')) {
+            break;
+        }
+        if comment_suppresses_nosec(lines[i], rule) {
+            return true;
         }
     }
     false
+}
+
+/// Locate retained source for `filename` (FileSet path from typecheck).
+fn package_source_for_file<'a>(pass: &'a Pass<'_>, filename: &str) -> Option<&'a [u8]> {
+    let pkg = pass.pkg();
+    for (i, path) in pkg.compiled_go_files.iter().enumerate() {
+        if path.to_str() == Some(filename) {
+            return pkg.source_bytes(i);
+        }
+    }
+    // Basename fallback for synthetic / relative FileSet names in tests.
+    let want = std::path::Path::new(filename).file_name()?;
+    for (i, path) in pkg.compiled_go_files.iter().enumerate() {
+        if path.file_name() == Some(want) {
+            return pkg.source_bytes(i);
+        }
+    }
+    None
 }
 
 fn comment_suppresses_nosec(text: &str, rule: &str) -> bool {
@@ -1546,14 +1597,16 @@ fn find_temp_dir_args(pass: &Pass<'_>, suspect: &Expr) -> bool {
 }
 
 fn g107_url_tainted(pass: &Pass<'_>, arg: &Expr) -> bool {
-    // Literal URL is safe.
+    // Upstream gosec `ResolveVar` only inspects *ast.Ident URL args; calls,
+    // selectors, and binary exprs (e.g. `srv.URL+"/x"`, `fmt.Sprintf(...)`)
+    // are not flagged.
+    let Expr::Ident(ident) = arg else {
+        return false;
+    };
+    // Literal URL via const folding elsewhere is handled by Const below.
     if string_lit_from_expr(arg).is_some() {
         return false;
     }
-    let Expr::Ident(ident) = arg else {
-        // Non-ident expressions (calls, selectors, …) are treated as tainted.
-        return true;
-    };
     let Some(obj) = object_of(pass, ident) else {
         return true;
     };

@@ -50,7 +50,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let c = counts.entry(s).or_insert(0);
             *c += 1;
             if *c == 2 {
-                pending.push((cond.id() as u32, "this condition occurs multiple times in this if/else if chain".into()));
+                // Use Pos, not node id — FileSet maps offsets, and ids are only
+                // for types.Info keys (misusing id landed diagnostics in deps).
+                pending.push((cond.pos().0 as u32, "this condition occurs multiple times in this if/else if chain".into()));
             }
         }
     });

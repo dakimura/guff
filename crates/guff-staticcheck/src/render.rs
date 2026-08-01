@@ -48,8 +48,10 @@ fn token_str(op: Token) -> &'static str {
         Token::LEQ => "<=",
         Token::GTR => ">",
         Token::GEQ => ">=",
-        Token::OR => "||",
-        Token::AND => "&&",
+        Token::LOR => "||",
+        Token::LAND => "&&",
+        Token::OR => "|",
+        Token::AND => "&",
         Token::ADD => "+",
         Token::SUB => "-",
         Token::MUL => "*",
@@ -63,7 +65,7 @@ fn token_str(op: Token) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use guff::ast::{Ident, UnaryExpr};
+    use guff::ast::{BinaryExpr, Ident, UnaryExpr};
 
     #[test]
     fn renders_ident_and_unary() {
@@ -76,5 +78,28 @@ mod tests {
             id: 0,
         });
         assert_eq!(render_expr(&not_x), "!x");
+    }
+
+    #[test]
+    fn renders_logical_and_or_distinctly() {
+        let lhs = Expr::Ident(Ident::new_ident("a"));
+        let rhs = Expr::Ident(Ident::new_ident("b"));
+        let land = Expr::BinaryExpr(BinaryExpr {
+            x: Box::new(lhs.clone()),
+            op_pos: Default::default(),
+            op: Token::LAND,
+            y: Box::new(rhs.clone()),
+            id: 0,
+        });
+        let lor = Expr::BinaryExpr(BinaryExpr {
+            x: Box::new(lhs),
+            op_pos: Default::default(),
+            op: Token::LOR,
+            y: Box::new(rhs),
+            id: 0,
+        });
+        assert_eq!(render_expr(&land), "a && b");
+        assert_eq!(render_expr(&lor), "a || b");
+        assert_ne!(render_expr(&land), render_expr(&lor));
     }
 }

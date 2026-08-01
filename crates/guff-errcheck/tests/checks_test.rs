@@ -118,7 +118,7 @@ fn errcheck_disable_default_exclusions_flags_fmt_println() {
 
     assert!(
         support::run_analyzer(analyzer(), &pkg).is_empty(),
-        "default exclusions should skip fmt.Println"
+        "default exclusions should skip fmt.Println and hash.Hash.Write"
     );
 
     let mut bag = SettingsBag::new();

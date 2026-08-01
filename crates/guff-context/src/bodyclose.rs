@@ -294,6 +294,61 @@ fn mark_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
     }
 }
 
+/// `t.Cleanup(func(){ … resp.Body.Close() … })` marks `resp` closed.
+fn mark_cleanup_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return;
+    };
+    if sel.sel.name != "Cleanup" {
+        return;
+    }
+    let Some(Expr::FuncLit(fun)) = call.args.first() else {
+        return;
+    };
+    if fun.ty.params.as_ref().is_some_and(|p| !p.list.is_empty()) {
+        return;
+    }
+    inspect(NodeRef::BlockStmt(&fun.body), |n| {
+        let Some(n) = n else {
+            return true;
+        };
+        if matches!(n, NodeRef::FuncLit(_)) {
+            return false;
+        }
+        if let NodeRef::CallExpr(c) = n {
+            mark_close(c, usages);
+        }
+        true
+    });
+}
+
+/// If a tracked response ident is passed as a call argument, treat it as
+/// closed/escaped (callee owns the body). Skips `.Body.Close()` itself.
+fn mark_escaped_arg(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
+    if body_close_var(call).is_some() {
+        return;
+    }
+    for arg in &call.args {
+        if let Some(name) = ident_name(arg) {
+            if let Some(u) = usages.get_mut(name) {
+                u.closed = true;
+                u.consumed = true;
+            }
+        }
+    }
+}
+
+fn is_response_composite(expr: &Expr) -> bool {
+    match expr {
+        Expr::UnaryExpr(u) if u.op == guff::token::Token::AND => {
+            matches!(u.x.as_ref(), Expr::CompositeLit(_))
+        }
+        Expr::CompositeLit(_) => true,
+        Expr::ParenExpr(p) => is_response_composite(&p.x),
+        _ => false,
+    }
+}
+
 fn handle_defer_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
     match call.fun.as_ref() {
         Expr::SelectorExpr(_) => mark_close(call, usages),
@@ -343,6 +398,12 @@ fn check_body(
             }
             NodeRef::CallExpr(call) => {
                 mark_close(call, &mut usages);
+                // `t.Cleanup(func() { resp.Body.Close() })` — common in tests;
+                // upstream SSA sees the close; scan no-arg Cleanup closures.
+                mark_cleanup_close(call, &mut usages);
+                // Passing `resp` to another call transfers ownership for this
+                // AST approximation (e.g. `return handleResponse(res)`).
+                mark_escaped_arg(call, &mut usages);
                 if check_consumption {
                     mark_consumption(pass, call, &mut usages);
                 }
@@ -431,7 +492,16 @@ fn handle_assign(
                 .get(i)
                 .is_some_and(|e| is_httptest_result_call(pass, e));
 
+        // Synthetic `&http.Response{…}` / `http.Response{…}` have no live body
+        // from an HTTP round-trip (upstream SSA does not flag these).
+        let skip_composite = assign
+            .rhs
+            .first()
+            .is_some_and(is_response_composite)
+            || assign.rhs.get(i).is_some_and(is_response_composite);
+
         let is_resp = !skip_httptest
+            && !skip_composite
             && (expr_is_response(pass, lhs) || rhs_result_is_response(pass, assign, i));
 
         if let Some(prev) = usages.remove(name) {

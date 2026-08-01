@@ -364,6 +364,29 @@ impl Visitor<'_, '_> {
             &artifacts.packages,
             obj,
         ));
+        // Receiver expression type: `h.Write` with `h hash.Hash` must match
+        // default exclude `(hash.Hash).Write` even when the method object is
+        // the embedded `io.Writer.Write` (displays as `io.Write`).
+        if let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) {
+            if let Some(info) = self.pass.types_info() {
+                if let Some(tav) = info.types.get(&sel.x.id()) {
+                    let mut ty = guff_types::alias::unalias_readonly(&artifacts.types, tav.typ);
+                    if let guff_types::arena::TypeData::Pointer(p) = artifacts.types.get(ty) {
+                        ty = guff_types::alias::unalias_readonly(&artifacts.types, p.elem());
+                    }
+                    let recv_str = guff_types::typestring::type_string(
+                        &artifacts.types,
+                        &artifacts.objects,
+                        &artifacts.packages,
+                        ty,
+                        None,
+                    );
+                    if !recv_str.is_empty() {
+                        names.push(format!("({recv_str}).{}", sel.sel.name));
+                    }
+                }
+            }
+        }
         names
     }
 
