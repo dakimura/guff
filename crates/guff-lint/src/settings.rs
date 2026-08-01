@@ -83,6 +83,7 @@ pub struct LinterSettings {
     pub grouper: GrouperSettings,
     pub ireturn: IreturnSettings,
     pub gosec: GosecSettings,
+    pub nolintlint: NolintlintSettings,
     pub funcorder: FuncorderSettings,
     pub varnamelen: VarnamelenSettings,
     pub unparam: UnparamSettings,
@@ -1727,6 +1728,15 @@ impl GosecSettings {
     }
 }
 
+/// `linters.settings.nolintlint` / `linters-settings.nolintlint`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct NolintlintSettings {
+    /// When true, do not report unused `//nolint` directives (golangci default: false).
+    #[serde(default, rename = "allow-unused")]
+    pub allow_unused: bool,
+    // DEFERRED: allow-leading-space / require-explanation / require-specific.
+}
+
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
 ///
 /// `None` fields keep upstream defaults (all checks enabled).
@@ -2266,6 +2276,11 @@ impl LinterSettings {
         if let Some(v) = map.get(serde_yaml::Value::String("gosec".into())) {
             if let Ok(s) = serde_yaml::from_value::<GosecSettings>(v.clone()) {
                 out.gosec = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("nolintlint".into())) {
+            if let Ok(s) = serde_yaml::from_value::<NolintlintSettings>(v.clone()) {
+                out.nolintlint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("custom".into())) {

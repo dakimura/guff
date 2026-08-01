@@ -320,7 +320,10 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     let linter_names = selection.resolve_names();
     let settings = &loaded.linter_settings;
 
-    let report_unused_nolint = linter_names.iter().any(|n| n == NOLINTLINT_NAME);
+    // golangci `linters.settings.nolintlint.allow-unused: true` disables unused
+    // directive reports while keeping nolintlint enabled for other checks.
+    let report_unused_nolint = linter_names.iter().any(|n| n == NOLINTLINT_NAME)
+        && !settings.nolintlint.allow_unused;
 
     let mut unknown = Vec::new();
     let analyzers = if linter_names.is_empty() && args.enable.is_empty() {

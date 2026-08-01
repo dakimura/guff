@@ -17,6 +17,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"unsafe"
 
@@ -85,6 +86,10 @@ func bad() {
 
 	a := "attacker"
 	_ = template.HTML(a)
+
+	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		return os.Remove(path)
+	})
 }
 
 func returnsErr() error { return nil }

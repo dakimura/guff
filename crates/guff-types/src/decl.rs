@@ -65,6 +65,22 @@ impl Checker {
     /// object whose type is already set is "black" (done); otherwise its
     /// declaration is processed under the declaring file's scope.
     pub fn obj_decl(&mut self, obj: ObjectId) {
+        // Grey: already on the declaration path → cycle. Match go/types:
+        // Const/Var may still hold the Invalid placeholder while grey; bail
+        // without re-entering (cycle errors are reported via init_order).
+        if self.obj_path.iter().any(|&o| o == obj) {
+            let placeholder = self.invalid_type();
+            if matches!(
+                self.objects.get(obj),
+                ObjectData::Const(_) | ObjectData::Var(_)
+            ) {
+                if obj.typ(&self.objects) == Some(placeholder) {
+                    // Keep Invalid; break the cycle so the outer decl finishes.
+                }
+            }
+            return;
+        }
+
         // black: already type-checked. `Const`/`Var` carry a `Typ[Invalid]`
         // placeholder from the resolver; treat that as "not yet checked" so we
         // run their declaration (chunk 23b).

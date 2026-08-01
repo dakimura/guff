@@ -12,6 +12,17 @@ use guff_analysis::code::{expr_to_string, selector_name};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+const KNOWN_GOOS: &[&str] = &[
+    "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux",
+    "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows", "zos",
+];
+
+const KNOWN_GOARCH: &[&str] = &[
+    "386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle",
+    "mips64", "mips64le", "mips64p32", "mips64p32le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64",
+    "s390", "s390x", "sparc", "sparc64", "wasm",
+];
+
 fn file_build_tags(pass: &Pass<'_>, file_idx: usize, file: &guff::ast::File) -> Vec<String> {
     let mut tags = file_build_tags_from_ast(file);
     if !tags.is_empty() {
@@ -49,11 +60,141 @@ fn file_build_tags_from_ast(file: &guff::ast::File) -> Vec<String> {
     tags
 }
 
-fn tag_implies(tags: &[String], want: &str) -> bool {
-    tags.iter().any(|tag| {
-        tag.split_whitespace().any(|t| t == want)
-            || tag.contains(want)
-    })
+/// True when no (GOOS, GOARCH) pair that builds this file has `runtime.GOOS == goos`.
+fn goos_impossible(tags: &[String], goos: &str) -> bool {
+    if tags.is_empty() {
+        return false;
+    }
+    // Multiple `//go:build` / `// +build` lines are AND-combined.
+    let expr = tags.join(" && ");
+    !KNOWN_GOARCH
+        .iter()
+        .any(|arch| eval_constraint(&expr, Some(goos), Some(arch)))
+}
+
+/// True when no (GOOS, GOARCH) pair that builds this file has `runtime.GOARCH == goarch`.
+fn goarch_impossible(tags: &[String], goarch: &str) -> bool {
+    if tags.is_empty() {
+        return false;
+    }
+    let expr = tags.join(" && ");
+    !KNOWN_GOOS
+        .iter()
+        .any(|os| eval_constraint(&expr, Some(os), Some(goarch)))
+}
+
+/// Evaluate a `//go:build` expression under a fixed GOOS/GOARCH.
+///
+/// Non-OS/non-ARCH identifiers (e.g. `cgo`, custom tags) are treated as true so
+/// we only flag comparisons that are impossible for every interpretation of
+/// those tags — matching staticcheck's "never equal" wording without a full
+/// tag-space search.
+fn eval_constraint(expr: &str, goos: Option<&str>, goarch: Option<&str>) -> bool {
+    let mut p = Parser {
+        s: expr.as_bytes(),
+        i: 0,
+        goos,
+        goarch,
+    };
+    let Ok(v) = p.parse_or() else {
+        return true; // malformed → don't flag
+    };
+    p.skip_ws();
+    if p.i != p.s.len() {
+        return true;
+    }
+    v
+}
+
+struct Parser<'a> {
+    s: &'a [u8],
+    i: usize,
+    goos: Option<&'a str>,
+    goarch: Option<&'a str>,
+}
+
+impl<'a> Parser<'a> {
+    fn skip_ws(&mut self) {
+        while self.i < self.s.len() && self.s[self.i].is_ascii_whitespace() {
+            self.i += 1;
+        }
+    }
+
+    fn parse_or(&mut self) -> Result<bool, ()> {
+        let mut v = self.parse_and()?;
+        loop {
+            self.skip_ws();
+            if self.s.get(self.i..).is_some_and(|s| s.starts_with(b"||")) {
+                self.i += 2;
+                v = self.parse_and()? || v;
+            } else {
+                return Ok(v);
+            }
+        }
+    }
+
+    fn parse_and(&mut self) -> Result<bool, ()> {
+        let mut v = self.parse_unary()?;
+        loop {
+            self.skip_ws();
+            if self.s.get(self.i..).is_some_and(|s| s.starts_with(b"&&")) {
+                self.i += 2;
+                v = self.parse_unary()? && v;
+            } else {
+                return Ok(v);
+            }
+        }
+    }
+
+    fn parse_unary(&mut self) -> Result<bool, ()> {
+        self.skip_ws();
+        if self.s.get(self.i) == Some(&b'!') {
+            self.i += 1;
+            return Ok(!self.parse_unary()?);
+        }
+        if self.s.get(self.i) == Some(&b'(') {
+            self.i += 1;
+            let v = self.parse_or()?;
+            self.skip_ws();
+            if self.s.get(self.i) != Some(&b')') {
+                return Err(());
+            }
+            self.i += 1;
+            return Ok(v);
+        }
+        self.parse_ident()
+    }
+
+    fn parse_ident(&mut self) -> Result<bool, ()> {
+        self.skip_ws();
+        let start = self.i;
+        while self.i < self.s.len()
+            && (self.s[self.i].is_ascii_alphanumeric()
+                || self.s[self.i] == b'_'
+                || self.s[self.i] == b'.')
+        {
+            self.i += 1;
+        }
+        if start == self.i {
+            return Err(());
+        }
+        let name = std::str::from_utf8(&self.s[start..self.i]).map_err(|_| ())?;
+        Ok(self.eval_tag(name))
+    }
+
+    fn eval_tag(&self, name: &str) -> bool {
+        if name == "unix" {
+            return self.goos.is_some_and(|os| os != "windows" && os != "plan9");
+        }
+        if KNOWN_GOOS.contains(&name) {
+            return self.goos == Some(name);
+        }
+        if KNOWN_GOARCH.contains(&name) {
+            return self.goarch == Some(name);
+        }
+        // Unknown / custom tags: assume satisfiable.
+        true
+    }
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -86,12 +227,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return;
             };
             let msg = match sym.as_deref() {
-                Some(s) if s == "runtime.GOOS" && !tag_implies(&tags, &go_val) => Some(format!(
+                Some(s) if s == "runtime.GOOS" && goos_impossible(&tags, &go_val) => Some(format!(
                     "due to the file's build constraints, runtime.GOOS will never equal {go_val:?}"
                 )),
-                Some(s) if s == "runtime.GOARCH" && !tag_implies(&tags, &go_val) => Some(format!(
-                    "due to the file's build constraints, runtime.GOARCH will never equal {go_val:?}"
-                )),
+                Some(s) if s == "runtime.GOARCH" && goarch_impossible(&tags, &go_val) => Some(
+                    format!(
+                        "due to the file's build constraints, runtime.GOARCH will never equal {go_val:?}"
+                    ),
+                ),
                 _ => None,
             };
             if let Some(msg) = msg {
@@ -130,5 +273,17 @@ mod tests {
     #[test]
     fn sa4032_validates() {
         assert!(validate(&[analyzer()]).is_ok());
+    }
+
+    #[test]
+    fn not_windows_allows_freebsd() {
+        assert!(!goos_impossible(&["!windows".into()], "freebsd"));
+        assert!(goos_impossible(&["!windows".into()], "windows"));
+    }
+
+    #[test]
+    fn linux_only_rejects_windows() {
+        assert!(goos_impossible(&["linux".into()], "windows"));
+        assert!(!goos_impossible(&["linux".into()], "linux"));
     }
 }

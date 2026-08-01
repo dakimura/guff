@@ -15,6 +15,7 @@
 //! - **G111** — `http.Dir("/")` directory traversal
 //! - **G112** — `http.Server` without `ReadHeaderTimeout`/`ReadTimeout` (Slowloris)
 //! - **G114** — `net/http` serve helpers without timeouts
+//! - **G122** — `filepath.Walk`/`WalkDir` callback path into race-prone `os` sinks (AST approx of SSA)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`)
@@ -261,8 +262,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G124", "G203", "G204", "G301",
-    "G302", "G303", "G306", "G402", "G403",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G122", "G124", "G203", "G204",
+    "G301", "G302", "G303", "G306", "G402", "G403",
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -314,6 +315,7 @@ const G110_COPY_CALLS: &[(&str, &str)] = &[("io", "Copy"), ("io", "CopyBuffer")]
 const G303_TMP_PATTERN: &str = r"^(/(usr|var))?/tmp(/.*)?$";
 const G303_WHAT: &str = "File creation in shared tmp directory without using ioutil.Tempfile";
 const G107_WHAT: &str = "Potential HTTP request made with variable url";
+const G122_WHAT: &str = "Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal";
 const G109_WHAT: &str =
     "Potential Integer overflow made by strconv.Atoi result conversion to int16/32";
 const G110_WHAT: &str = "Potential DoS vulnerability via decompression bomb";
@@ -529,6 +531,109 @@ fn imported_pkg_path(pass: &Pass<'_>, pkg_ident: &Ident) -> Option<String> {
             Some(cut_vendor(path).to_string())
         }
         _ => None,
+    }
+}
+
+/// AST approx of gosec G122 (SSA walk-symlink-race): race-prone `os`/`ioutil`
+/// sinks fed by the callback path of `filepath.Walk` / `WalkDir` / `io/fs.WalkDir`.
+///
+/// Covers inline `FuncLit` callbacks (the common case). Named-function callbacks
+/// and full SSA path-dependence remain DEFERRED.
+fn check_g122_walk_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    pkg: &str,
+    name: &str,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let cb_idx = match (pkg, name) {
+        ("path/filepath", "Walk" | "WalkDir") => 1usize,
+        ("io/fs", "WalkDir") => 2usize,
+        _ => return,
+    };
+    let Some(cb_expr) = call.args.get(cb_idx) else {
+        return;
+    };
+    let Expr::FuncLit(fl) = cb_expr else {
+        return;
+    };
+    let Some(params) = fl.ty.params.as_ref() else {
+        return;
+    };
+    let Some(path_param) = params
+        .list
+        .first()
+        .and_then(|f| f.names.first())
+        .map(|id| id.name.as_str())
+    else {
+        return;
+    };
+    if path_param.is_empty() || path_param == "_" {
+        return;
+    }
+    let path_name = path_param.to_string();
+    preorder(NodeRef::FuncLit(fl), |n| {
+        if let NodeRef::CallExpr(inner) = n {
+            if let Some(pos) = g122_sink_pos(pass, inner, &path_name) {
+                pending.push((pos, format!("G122: {G122_WHAT}")));
+            }
+        }
+        true
+    });
+}
+
+fn g122_sink_arg_indexes(pkg: &str, name: &str) -> Option<&'static [usize]> {
+    match (pkg, name) {
+        (
+            "os",
+            "Open" | "OpenFile" | "Create" | "WriteFile" | "ReadFile" | "Remove" | "RemoveAll"
+            | "Mkdir" | "MkdirAll" | "Chmod" | "Chown" | "Lchown" | "Chtimes",
+        ) => Some(&[0]),
+        ("os", "Rename" | "Symlink" | "Link") => Some(&[0, 1]),
+        ("io/ioutil", "ReadFile" | "WriteFile") => Some(&[0]),
+        _ => None,
+    }
+}
+
+fn g122_sink_pos(pass: &Pass<'_>, call: &CallExpr, path_param: &str) -> Option<u32> {
+    // Package funcs only — `root.Remove(path)` (*os.Root) is the safe alternative.
+    if !is_pkg_sel_call(pass, call) {
+        return None;
+    }
+    let (pkg, name) = resolve_pkg_call(pass, call)?;
+    let indexes = g122_sink_arg_indexes(&pkg, &name)?;
+    for &idx in indexes {
+        let Some(arg) = call.args.get(idx) else {
+            continue;
+        };
+        if expr_mentions_ident(arg, path_param) {
+            return Some(call.pos().0 as u32);
+        }
+    }
+    None
+}
+
+fn expr_mentions_ident(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::Ident(id) => id.name == name,
+        Expr::ParenExpr(p) => expr_mentions_ident(&p.x, name),
+        Expr::CallExpr(c) => c.args.iter().any(|a| expr_mentions_ident(a, name)),
+        Expr::BinaryExpr(b) => {
+            expr_mentions_ident(&b.x, name) || expr_mentions_ident(&b.y, name)
+        }
+        Expr::SelectorExpr(s) => expr_mentions_ident(&s.x, name),
+        Expr::IndexExpr(i) => {
+            expr_mentions_ident(&i.x, name) || expr_mentions_ident(&i.index, name)
+        }
+        Expr::UnaryExpr(u) => expr_mentions_ident(&u.x, name),
+        Expr::StarExpr(s) => expr_mentions_ident(&s.x, name),
+        Expr::SliceExpr(s) => {
+            expr_mentions_ident(&s.x, name)
+                || s.low.as_ref().is_some_and(|e| expr_mentions_ident(e, name))
+                || s.high.as_ref().is_some_and(|e| expr_mentions_ident(e, name))
+                || s.max.as_ref().is_some_and(|e| expr_mentions_ident(e, name))
+        }
+        _ => false,
     }
 }
 
@@ -1806,6 +1911,10 @@ fn check_call(
                 }
             }
         }
+    }
+
+    if enabled.contains("G122") {
+        check_g122_walk_call(pass, call, &pkg, &name, pending);
     }
 
     if enabled.contains("G301") && G301_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {

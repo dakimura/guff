@@ -17,14 +17,16 @@
 //!
 //! ## Deferrals
 //!
-//! - `objDecl(f)` (forcing a method's signature to be fully checked) is
-//!   skipped — methods built structurally already have signatures; reinstated
-//!   with `decl.go` (chunk 23).
 //! - `funcString`'s rich rendering is simplified to a `type_string` of the
 //!   signature.
 //! - The comparability **version gate** in `implements` (go1.20) is treated as
 //!   always satisfied (matches the Checker-less path in `conversions.rs`).
 //! - The "possibly missing ~" alternative-type suggestion is omitted.
+//!
+//! Checker wrappers call [`Checker::ensure_method_sigs`] before the free
+//! [`missing_method`] / [`implements`] so package-level `var _ Iface = (*T)(nil)`
+//! checks that appear *before* method declarations still see resolved
+//! signatures (Go's `objDecl(f)` in `missingMethod`).
 
 use crate::hash::HashSet;
 
@@ -34,8 +36,10 @@ use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, T
 use crate::check::Checker;
 use crate::interface::interface_typeset;
 use crate::lookup::{
-    has_invalid_embedded_fields, lookup_field_or_method, lookup_field_or_method_fold, LookupResult,
+    as_named, deref, has_invalid_embedded_fields, lookup_field_or_method,
+    lookup_field_or_method_fold, LookupResult,
 };
+use crate::named::{named_method, named_num_methods};
 use crate::operand::Operand;
 use crate::pointer::pointer_elem;
 use crate::predicates::{comparable_type, identical, is_interface, is_valid};
@@ -191,7 +195,8 @@ pub fn missing_method(
                     }
                     Some(f) => {
                         cur_f = Some(f);
-                        // DEFERRED: objDecl(f) (chunk 23).
+                        // Free-function path cannot call Checker::obj_decl; see
+                        // Checker::ensure_method_sigs for the source-checked case.
                         let ftyp = f.typ(oarena);
                         let mtyp = m.typ(oarena);
                         if !sig_identical(types, oarena, parena, ftyp, mtyp) {
@@ -376,8 +381,32 @@ pub fn implements(
 }
 
 impl Checker {
+    /// Force [`Self::obj_decl`] on every method attached to `v`'s named base
+    /// (following a single pointer indirection). Mirrors Go `missingMethod`'s
+    /// `objDecl(f)` so interface checks see real signatures even when a
+    /// package-level `var _ I = (T)(nil)` appears *before* the method decls.
+    pub fn ensure_method_sigs(&mut self, v: TypeId) {
+        use crate::named::named_origin;
+
+        let (base, _) = deref(&self.types, v);
+        let Some(named) = as_named(&self.types, base) else {
+            return;
+        };
+        // Methods live on the origin for instances.
+        let origin = named_origin(&self.types, named);
+        let n = named_num_methods(&self.types, origin);
+        // Collect ids first — `obj_decl` may mutate arenas.
+        let methods: Vec<ObjectId> = (0..n).map(|i| named_method(&self.types, origin, i)).collect();
+        for m in methods {
+            if matches!(self.objects.get(m), ObjectData::Func(_)) {
+                self.obj_decl(m);
+            }
+        }
+    }
+
     /// See the free [`missing_method`].
     pub fn missing_method(&mut self, v: TypeId, t: TypeId, static_: bool) -> Option<MissingMethod> {
+        self.ensure_method_sigs(v);
         missing_method(
             &mut self.types,
             &self.objects,
@@ -390,6 +419,7 @@ impl Checker {
 
     /// See the free [`implements`].
     pub fn implements(&mut self, v: TypeId, t: TypeId, constraint: bool) -> Result<(), String> {
+        self.ensure_method_sigs(v);
         implements(
             &mut self.types,
             &self.objects,
@@ -416,6 +446,7 @@ impl Checker {
         if !is_valid(&self.types, v) {
             return Ok(());
         }
+        self.ensure_method_sigs(v);
         match missing_method(
             &mut self.types,
             &self.objects,

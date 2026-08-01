@@ -96,6 +96,19 @@ fn ineffassign_allows_named_result_assign_in_defer() {
 }
 
 #[test]
+fn ineffassign_allows_assignment_used_after_goto() {
+    // `pos = …; goto chomp` where chomp uses `pos` must not be flagged.
+    // Regression for containerd pkg/filters/scanner.go.
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg("example.com/ineffassign/goto", &dir.join("goto_ok.go"));
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "{:?}",
+        support::run_analyzer(analyzer(), &pkg)
+    );
+}
+
+#[test]
 fn ineffassign_skips_generated_files() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg(

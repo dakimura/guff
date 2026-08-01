@@ -1295,6 +1295,22 @@ fn parse_v2_inamedparam_settings() {
 }
 
 #[test]
+fn parse_v2_nolintlint_allow_unused() {
+    let yaml = r#"
+version: "2"
+linters:
+  enable:
+    - nolintlint
+  settings:
+    nolintlint:
+      allow-unused: true
+"#;
+    let cfg = parse_config_str(yaml).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert!(settings.nolintlint.allow_unused);
+}
+
+#[test]
 fn parse_v2_nonamedreturns_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_nonamedreturns_settings.yml")).unwrap();

@@ -739,9 +739,35 @@ impl Checker {
             return;
         }
 
-        // Determine the object's type, forcing its declaration if needed.
+        // Type-check the object. Match go/types `Checker.ident`:
+        // - `typ == nil` → force objDecl (TypeName / Func before their decl).
+        // - Const/Var still at the resolver's Typ[Invalid] placeholder → same
+        //   as Go's nil (not yet checked); force objDecl so forward refs like
+        //   `var UTC = &utcLoc` see utcLoc's real type.
+        // - TypeName from this package when a type is wanted → force for cycle
+        //   detection (go.dev/issue/25790).
         let mut typ = obj.typ(&self.objects);
-        if typ.is_none() || (is_type_name && want_type) {
+        let is_const_or_var = matches!(
+            self.objects.get(obj),
+            ObjectData::Const(_) | ObjectData::Var(_)
+        );
+        let needs_obj_decl = match typ {
+            None => true,
+            Some(t)
+                if is_const_or_var && t == self.invalid_type() =>
+            {
+                true
+            }
+            Some(_)
+                if is_type_name
+                    && want_type
+                    && obj.pkg(&self.objects) == Some(self.pkg) =>
+            {
+                true
+            }
+            _ => false,
+        };
+        if needs_obj_decl {
             self.obj_decl(obj);
             typ = obj.typ(&self.objects);
         }

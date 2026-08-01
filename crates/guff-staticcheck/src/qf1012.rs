@@ -93,29 +93,31 @@ fn implements_iface(
         return false;
     };
     if let Some(iface) = imported_type(pass, iface_path, iface_name) {
-        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-            return false;
-        };
-        let resolved = unalias_readonly(&artifacts.types, typ);
-        let mut types = artifacts.types.clone();
-        let v = if matches!(types.get(resolved), TypeData::Named(_))
-            && !matches!(
-                types.get(resolved.underlying(&types)),
-                TypeData::Interface(_)
-            ) {
-            new_pointer(&mut types, resolved)
-        } else {
-            typ
-        };
-        return implements(
-            &mut types,
-            &artifacts.objects,
-            &artifacts.packages,
-            v,
-            iface,
-            false,
-        )
-        .is_ok();
+        if let Some(artifacts) = pass.pkg().type_artifacts.as_ref() {
+            let resolved = unalias_readonly(&artifacts.types, typ);
+            let mut types = artifacts.types.clone();
+            let v = if matches!(types.get(resolved), TypeData::Named(_))
+                && !matches!(
+                    types.get(resolved.underlying(&types)),
+                    TypeData::Interface(_)
+                ) {
+                new_pointer(&mut types, resolved)
+            } else {
+                typ
+            };
+            if implements(
+                &mut types,
+                &artifacts.objects,
+                &artifacts.packages,
+                v,
+                iface,
+                false,
+            )
+            .is_ok()
+            {
+                return true;
+            }
+        }
     }
     method_result_count(pass, typ, method) == Some(2)
 }
@@ -140,7 +142,7 @@ fn sprint_to_fprint(name: &str) -> Option<&'static str> {
 fn match_write_bytes_sprintf<'a>(
     pass: &Pass<'_>,
     call: &'a CallExpr,
-) -> Option<(&'a Expr, &'static str, &'a [Expr])> {
+) -> Option<(&'a Expr, &'static str, &'static str, &'a [Expr])> {
     let Expr::SelectorExpr(sel) = &*call.fun else {
         return None;
     };
@@ -167,35 +169,52 @@ fn match_write_bytes_sprintf<'a>(
     if !implements_writer(pass, &sel.x) {
         return None;
     }
-    Some((&sel.x, fprint, &inner.args))
+    Some((&sel.x, fprint, "Write", &inner.args))
 }
 
 fn match_write_string_sprintf<'a>(
     pass: &Pass<'_>,
     call: &'a CallExpr,
-) -> Option<(&'a Expr, &'static str, &'a [Expr])> {
+) -> Option<(&'a Expr, &'static str, &'static str, &'a [Expr])> {
     let Expr::SelectorExpr(sel) = &*call.fun else {
         return None;
     };
-    if sel.sel.name != "WriteString" || !is_method_val(pass, sel, "WriteString") {
-        return None;
-    }
-    if call.args.len() != 1 {
+    if sel.sel.name != "WriteString" || call.args.len() != 1 {
         return None;
     }
     let Expr::CallExpr(inner) = &call.args[0] else {
         return None;
     };
-    if !is_call_to_any(pass, inner, SPRINT_FNS) {
-        return None;
+
+    // Resolve Sprint* — typed call_name first, then AST `fmt.Sprint*`.
+    let fprint = if is_call_to_any(pass, inner, SPRINT_FNS) {
+        let name = guff_analysis::code::call_name(pass, &inner.fun)?;
+        sprint_to_fprint(&name)?
+    } else {
+        let Expr::SelectorExpr(inner_sel) = inner.fun.as_ref() else {
+            return None;
+        };
+        if !matches!(inner_sel.x.as_ref(), Expr::Ident(id) if id.name == "fmt") {
+            return None;
+        }
+        match inner_sel.sel.name.as_str() {
+            "Sprint" => "Fprint",
+            "Sprintf" => "Fprintf",
+            "Sprintln" => "Fprintln",
+            _ => return None,
+        }
+    };
+    let args = inner.args.as_slice();
+
+    // Ideal: MethodVal + io.StringWriter + io.Writer.
+    if is_method_val(pass, sel, "WriteString")
+        && implements_string_writer(pass, &sel.x)
+        && implements_writer(pass, &sel.x)
+    {
+        return Some((&sel.x, fprint, "WriteString", args));
     }
-    let name = guff_analysis::code::call_name(pass, &inner.fun)?;
-    let fprint = sprint_to_fprint(&name)?;
-    // Needs both StringWriter and Writer.
-    if !implements_string_writer(pass, &sel.x) || !implements_writer(pass, &sel.x) {
-        return None;
-    }
-    Some((&sel.x, fprint, &inner.args))
+
+    None
 }
 
 fn render_args(args: &[Expr]) -> String {
@@ -207,6 +226,15 @@ fn render_args(args: &[Expr]) -> String {
         s.push_str(&render_expr(a));
     }
     s
+}
+
+fn fprint_to_sprint(fprint: &str) -> &'static str {
+    match fprint {
+        "Fprint" => "Sprint",
+        "Fprintf" => "Sprintf",
+        "Fprintln" => "Sprintln",
+        _ => "Sprint*",
+    }
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -222,7 +250,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         };
         let matched = match_write_bytes_sprintf(pass, call)
             .or_else(|| match_write_string_sprintf(pass, call));
-        let Some((recv, fprint, args)) = matched else {
+        let Some((recv, fprint, write_method, args)) = matched else {
             return;
         };
         let recv_s = render_expr(recv);
@@ -232,7 +260,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         } else {
             format!("fmt.{fprint}({recv_s}, {args_s})")
         };
-        let msg = format!("Use fmt.{fprint}(...) instead of Write/WriteString(fmt.Sprint*(...))");
+        // Match upstream / golangci phrasing exactly (compat finding-set keys).
+        let sprint = fprint_to_sprint(fprint);
+        let msg = format!(
+            "Use fmt.{fprint}(...) instead of {write_method}(fmt.{sprint}(...))"
+        );
         pending.push((
             call.pos().0 as u32,
             call.end().0 as u32,

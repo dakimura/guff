@@ -844,6 +844,8 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
     }
 
     let workers = concurrency.unwrap_or_else(|| {
+        // Analyze SSA overlays are small vs the shared seed base; allow full
+        // ncpu here. Seed/target typecheck stay on the capped global pool.
         std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)

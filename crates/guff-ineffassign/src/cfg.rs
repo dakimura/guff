@@ -80,6 +80,8 @@ pub struct CfgBuilder {
     defers: Vec<bool>,
     breaks: BranchStack,
     continues: BranchStack,
+    /// `goto` edges keyed by label **name** (guff has no Label ObjectId).
+    gotos: HashMap<String, Branch>,
     label_stmt: Option<(ObjectId, u32)>,
     defs: HashMap<u32, Option<ObjectId>>,
     uses: HashMap<u32, ObjectId>,
@@ -184,6 +186,8 @@ impl CfgBuilder {
             .unwrap_or_default();
         self.results.push(result_names);
         self.defers.push(false);
+        // Labels are function-scoped; drop leftover goto edges from prior funcs.
+        self.gotos.clear();
 
         let saved = self.block;
         self.new_block();
@@ -242,8 +246,17 @@ impl CfgBuilder {
                 }
             }
             Stmt::LabeledStmt(s) => {
+                // Upstream keys gotos by label Obj; guff tracks labels by name.
+                let parents = self.block.map(|b| vec![b]).unwrap_or_default();
+                let dst = self.new_block_from(&parents);
+                self.goto_set_destination(s.label.name.clone(), dst);
                 if let Some(obj) = self.resolve_obj(&s.label) {
                     self.label_stmt = Some((obj, s.stmt.pos().0 as u32));
+                } else {
+                    // Label idents are not in defs/uses; still track name for
+                    // labeled break/continue via a synthetic absence — only
+                    // unlabeled break/continue use stmt_label today.
+                    self.label_stmt = None;
                 }
                 self.walk_stmt(&s.stmt);
                 self.label_stmt = None;
@@ -510,6 +523,13 @@ impl CfgBuilder {
                 self.continues.add_source(idx, self.block.unwrap(), &mut self.blocks);
                 self.new_block();
             }
+            Token::GOTO => {
+                if let Some(label) = s.label.as_ref() {
+                    self.goto_add_source(label.name.clone(), self.block.unwrap());
+                }
+                // Unreachable fall-through after goto (no parents).
+                self.new_block();
+            }
             _ => {}
         }
     }
@@ -670,6 +690,22 @@ impl CfgBuilder {
         self.label_stmt.map(|(obj, _)| obj)
     }
 
+    fn goto_add_source(&mut self, name: String, src: BlockId) {
+        let br = self.gotos.entry(name).or_default();
+        br.srcs.push(src);
+        if let Some(dst) = br.dst {
+            self.blocks[src.0].children.push(dst);
+        }
+    }
+
+    fn goto_set_destination(&mut self, name: String, dst: BlockId) {
+        let br = self.gotos.entry(name).or_default();
+        br.dst = Some(dst);
+        for src in br.srcs.clone() {
+            self.blocks[src.0].children.push(dst);
+        }
+    }
+
     fn new_block(&mut self) -> BlockId {
         let id = BlockId(self.blocks.len());
         self.blocks.push(CfgBlock::default());
@@ -692,7 +728,10 @@ impl CfgBuilder {
 
 impl BranchStack {
     fn push(&mut self, label: Option<ObjectId>) -> usize {
-        self.0.push(Branch { label, ..Default::default() });
+        self.0.push(Branch {
+            label,
+            ..Default::default()
+        });
         self.0.len() - 1
     }
 

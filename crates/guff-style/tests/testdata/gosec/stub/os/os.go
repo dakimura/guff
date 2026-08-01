@@ -5,6 +5,8 @@ type FileMode uint32
 const ModePerm FileMode = 0777
 
 type File struct{}
+type FileInfo interface{}
+type DirEntry interface{}
 
 func Mkdir(name string, perm FileMode) error                         { return nil }
 func MkdirAll(path string, perm FileMode) error                      { return nil }
@@ -13,3 +15,5 @@ func Chmod(name string, mode FileMode) error                         { return ni
 func WriteFile(name string, data []byte, perm FileMode) error        { return nil }
 func Create(name string) (*File, error)                              { return nil, nil }
 func TempDir() string                                                { return "/tmp" }
+func Remove(name string) error                                       { return nil }
+func RemoveAll(path string) error                                    { return nil }

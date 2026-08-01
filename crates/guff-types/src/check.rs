@@ -252,7 +252,7 @@ pub struct WorkerOverlays {
 /// changes in a way that would make old bytes misinterpreted rather than
 /// cleanly fail to decode; callers should treat a schema mismatch as a cache
 /// miss and fall back to rebuilding from source.
-pub const SEED_OVERLAY_SCHEMA: u32 = 4;
+pub const SEED_OVERLAY_SCHEMA: u32 = 5;
 
 /// On-disk envelope wrapping a [`WorkerOverlays`] payload with a schema tag,
 /// so [`WorkerOverlays::decode`] can reject stale/foreign blobs up front

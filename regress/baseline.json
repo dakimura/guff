@@ -9,7 +9,7 @@
   "isolate_gocache": false,
   "guff": {
     "wall_seconds": 0.73,
-    "peak_rss_bytes": 815546368
+    "peak_rss_bytes": 748388352
   },
   "compat": {
     "guff_issues": 4,

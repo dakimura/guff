@@ -772,13 +772,19 @@ fn build_source_seed_inner(
             stack.extend(deps.iter().cloned());
         }
     }
-    // Keep dependencies we can load: either from export data (stdlib, hybrid
-    // mode) or from source (third-party, and everything in pure-source mode).
+    // After filter_duplicate_packages, plain `P` is gone and only `P [P.test]`
+    // remains — resolve by pkg_path so importers (e.g. consul flags→QF1012) see
+    // real types. Seed production files only: `_test.go` in the cold seed
+    // roughly doubles type-arena RSS on prometheus `./...`.
     needed.retain(|p| {
         export_paths.contains_key(p)
-            || by_id
-                .get(p)
-                .is_some_and(|pk| !pk.compiled_go_files.is_empty())
+            || crate::dedup::package_for_import_path(by_id, p).is_some_and(|pk| {
+                pk.compiled_go_files.iter().any(|f| {
+                    f.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_none_or(|n| !n.ends_with("_test.go"))
+                })
+            })
     });
     needed.sort();
     if needed.is_empty() {
@@ -855,9 +861,13 @@ fn build_source_seed_inner(
         .map(String::as_str)
         .filter(|p| {
             !export_paths.contains_key(*p)
-                && by_id
-                    .get(*p)
-                    .is_some_and(|pk| !pk.compiled_go_files.is_empty())
+                && crate::dedup::package_for_import_path(by_id, p).is_some_and(|pk| {
+                    pk.compiled_go_files.iter().any(|f| {
+                        f.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_none_or(|n| !n.ends_with("_test.go"))
+                    })
+                })
         })
         .collect();
 
@@ -1004,13 +1014,23 @@ fn build_source_seed_inner(
         // `self_hash` are returned so `merged` bookkeeping stays aligned with
         // merge order after filter_map drops failures.
         let resolve_one = |path: &str| -> Option<(String, WorkerOverlays, bool, Option<String>)> {
-            let pkg = by_id.get(path)?;
-            if pkg.compiled_go_files.is_empty() {
+            let pkg = crate::dedup::package_for_import_path(by_id, path)?;
+            let seed_files: Vec<PathBuf> = pkg
+                .compiled_go_files
+                .iter()
+                .filter(|f| {
+                    f.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_none_or(|n| !n.ends_with("_test.go"))
+                })
+                .cloned()
+                .collect();
+            if seed_files.is_empty() {
                 return None;
             }
             // Read each source file once; the bytes feed both the self-hash key
             // and (on a miss) the parser, so a miss never re-reads from disk.
-            let sources = read_dep_sources(&pkg.compiled_go_files);
+            let sources = read_dep_sources(&seed_files);
             let self_hash = persist
                 .as_ref()
                 .map(|_| crate::seed_cache::pkg_self_hash_from_sources(&pkg.pkg_path, &sources));

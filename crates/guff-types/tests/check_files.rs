@@ -770,3 +770,28 @@ fn call_and_statement_builtin_in_statement_position_ok() {
         check.errors
     );
 }
+
+
+#[test]
+fn flag_map_value_implements_interface_var_before_methods() {
+    // Regression: consul `command/flags` declares
+    // `var _ flag.Value = (*FlagMapValue)(nil)` *before* the Set/String methods.
+    // Implements must force obj_decl on those methods (Go missingMethod).
+    let check = check_src(
+        "package p\n\
+         type error interface { Error() string }\n\
+         type Value interface {\n\
+         \tString() string\n\
+         \tSet(string) error\n\
+         }\n\
+         var _ Value = (*FlagMapValue)(nil)\n\
+         type FlagMapValue map[string]string\n\
+         func (h *FlagMapValue) String() string { return \"\" }\n\
+         func (h *FlagMapValue) Set(value string) error { return nil }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}

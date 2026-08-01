@@ -76,6 +76,9 @@ impl Checker {
         // (Go's lazy `Named.Method(i)`). No-op for non-instances.
         if let Some(v) = x.typ {
             self.expand_instance_methods(v);
+            // Free `implements` cannot call `obj_decl`; resolve method sigs here
+            // so `var _ I = (*T)(nil)` before method decls still typechecks.
+            self.ensure_method_sigs(v);
         }
         self.expand_instance_methods(target);
         assignable_to_fn(
@@ -377,8 +380,14 @@ impl Checker {
         let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
         let lhs_has_type = lhs_typ.map(|t| is_valid(&self.types, t)).unwrap_or(false);
 
+        // Match Go: only assign Typ[Invalid] when lhs has no type yet (nil in
+        // go/types). If varDecl already set an explicit type (e.g. time.UTC's
+        // `*Location`), keep it — a forward-ref init like `&utcLoc` must not
+        // clobber the declared type (go/types assignments.go initVar).
         if x.mode == OperandMode::Invalid || !is_valid(&self.types, xtyp) {
-            self.set_var_typ(lhs, self.invalid_type());
+            if !lhs_has_type {
+                self.set_var_typ(lhs, self.invalid_type());
+            }
             x.mode = OperandMode::Invalid;
             return;
         }

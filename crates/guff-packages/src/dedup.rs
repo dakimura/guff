@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use crate::hash::{HashMap, HashSet};
 use crate::package::Package;
-use crate::hash::HashSet;
 
 /// Regex equivalent: `^(.*) \[(.*)\.test\]`
 fn try_parse_test_package(pkg: &Package) -> Option<String> {
@@ -46,6 +46,20 @@ pub fn filter_test_main_packages(pkgs: Vec<Arc<Package>>) -> Vec<Arc<Package>> {
     pkgs.into_iter()
         .filter(|pkg| !(pkg.name == "main" && pkg.pkg_path.ends_with(".test")))
         .collect()
+}
+
+/// Resolve an import path to a loaded package.
+///
+/// Prefers the plain package id (`path == id`). After refine, production `P`
+/// may be absent while `P [P.test]` remains — fall back to `pkg_path`.
+pub fn package_for_import_path<'a>(
+    by_id: &'a HashMap<String, Arc<Package>>,
+    path: &str,
+) -> Option<&'a Arc<Package>> {
+    if let Some(p) = by_id.get(path) {
+        return Some(p);
+    }
+    by_id.values().find(|p| p.pkg_path == path)
 }
 
 #[cfg(test)]
@@ -101,5 +115,17 @@ mod tests {
         let out = filter_test_main_packages(pkgs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].pkg_path, "example.com/foo");
+    }
+
+    #[test]
+    fn package_for_import_path_finds_for_test_survivor() {
+        let mut by_id = HashMap::default();
+        let survivor = pkg(
+            "example.com/foo [example.com/foo.test]",
+            "example.com/foo",
+        );
+        by_id.insert(survivor.id.clone(), Arc::clone(&survivor));
+        let got = package_for_import_path(&by_id, "example.com/foo").unwrap();
+        assert_eq!(got.id, survivor.id);
     }
 }

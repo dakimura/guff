@@ -30,9 +30,8 @@ fn ident(name: &str) -> Ident {
     }
 }
 
-// NOTE: a package-level `var v` test is deferred to chunk 23b — until varDecl
-// runs, the resolver leaves `v` with a Typ[Invalid] placeholder (D18), so
-// `ident` returns early (invalid) before setting the Variable mode.
+// Package-level vars start with a Typ[Invalid] placeholder; `ident` forces
+// `obj_decl` when that placeholder is still present (Go: typ == nil).
 
 #[test]
 fn ident_of_type_name() {

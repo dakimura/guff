@@ -27,7 +27,7 @@ mod speculate;
 mod typecheck;
 
 pub use config::Config;
-pub use dedup::{filter_duplicate_packages, filter_test_main_packages};
+pub use dedup::{filter_duplicate_packages, filter_test_main_packages, package_for_import_path};
 pub use driver::{default_driver, offline_only_driver, AutoDriver, Driver, GoListDriver};
 pub use golist::{
     detect_go_version_string, go_available, go_list_driver, normalize_pattern,

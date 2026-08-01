@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -144,4 +145,12 @@ func okCookieLaterSecure() *http.Cookie {
 	}
 	cookie.Secure = true
 	return cookie
+}
+
+func okWalkNoSink() error {
+	return filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		_ = path
+		_ = info
+		return err
+	})
 }

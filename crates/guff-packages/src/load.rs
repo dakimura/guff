@@ -166,7 +166,14 @@ fn connect_imports(by_id: &mut HashMap<String, Arc<Package>>) {
         for path in import_paths {
             let stub_id = pkg.imports.get(&path).map(|p| p.id.clone());
             let Some(stub_id) = stub_id else { continue };
-            if let Some(resolved) = by_id.get(&stub_id).cloned() {
+            // After filter_duplicate_packages, plain `P` may be gone while
+            // `P [P.test]` remains — resolve stub id / import path via pkg_path.
+            let resolved = by_id
+                .get(&stub_id)
+                .cloned()
+                .or_else(|| crate::dedup::package_for_import_path(by_id, &stub_id).cloned())
+                .or_else(|| crate::dedup::package_for_import_path(by_id, &path).cloned());
+            if let Some(resolved) = resolved {
                 Arc::make_mut(by_id.get_mut(&id).expect("pkg"))
                     .imports
                     .insert(path, resolved);

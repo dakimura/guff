@@ -36,8 +36,27 @@ pub fn init_rayon_global_stack() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         const STACK: usize = 8 * 1024 * 1024;
+        // Cap seed/target typecheck width. For-test-gap seeds roughly double
+        // type arenas on prometheus `./...`; unbounded ncpu workers overlapping
+        // those arenas blow the regress RSS limit. Analyze uses its own pool
+        // (full ncpu by default). GUFF_RAYON_THREADS overrides (0 = ncpu).
+        let ncpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2);
+        let threads = match std::env::var("GUFF_RAYON_THREADS") {
+            Ok(v) => {
+                let v = v.trim();
+                if v == "0" {
+                    ncpu
+                } else {
+                    v.parse::<usize>().unwrap_or(4).max(1)
+                }
+            }
+            Err(_) => (ncpu / 2).clamp(3, 4),
+        };
         let _ = rayon::ThreadPoolBuilder::new()
             .stack_size(STACK)
+            .num_threads(threads)
             .build_global();
     });
 }
