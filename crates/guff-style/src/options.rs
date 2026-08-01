@@ -576,7 +576,7 @@ pub struct TestifylintOptions {
     pub formatter_check_format_string: bool,
     /// `formatter.require-f-funcs` (default false).
     pub formatter_require_f_funcs: bool,
-    /// `formatter.require-string-msg` (default true).
+    /// `formatter.require-string-msg`. Golangci injects false when unset.
     pub formatter_require_string_msg: bool,
     /// `suite-extra-assert-call.mode` (default `remove`).
     pub suite_extra_assert_call_mode: SuiteExtraAssertCallMode,
@@ -598,7 +598,8 @@ impl Default for TestifylintOptions {
             time_compare_suppress_calls_pattern: None,
             formatter_check_format_string: true,
             formatter_require_f_funcs: false,
-            formatter_require_string_msg: true,
+            // Match golangci-lint's injected zero-value (see settings.rs).
+            formatter_require_string_msg: false,
             suite_extra_assert_call_mode: SuiteExtraAssertCallMode::Remove,
             require_error_fn_pattern: None,
             go_require_ignore_http_handlers: false,

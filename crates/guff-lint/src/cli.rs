@@ -360,6 +360,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
 
     let mut filter = loaded.filter;
     filter.report_unused_nolint = report_unused_nolint;
+    filter.enabled_linters = linter_names.iter().cloned().collect();
 
     let timeout = resolve_timeout(args.timeout.as_deref(), loaded.timeout.as_deref())?;
     let concurrency = args.concurrency.or(loaded.concurrency);

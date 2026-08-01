@@ -250,6 +250,23 @@ impl Action {
                 "analysis skipped: package {} is ill-typed",
                 self.package.pkg_path
             ));
+            // DEBUG: surface typecheck errors once per package when skipping.
+            if std::env::var_os("GUFF_DEBUG_ILL_TYPED").is_some() {
+                static ONCE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+                    std::sync::OnceLock::new();
+                let seen = ONCE.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+                let mut g = seen.lock().unwrap();
+                if g.insert(self.package.pkg_path.clone()) {
+                    eprintln!(
+                        "guff: ill_typed {} ({} errors):",
+                        self.package.pkg_path,
+                        self.package.errors.len()
+                    );
+                    for e in self.package.errors.iter().take(20) {
+                        eprintln!("  {:?}", e);
+                    }
+                }
+            }
             return;
         }
 

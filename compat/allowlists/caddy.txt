@@ -5,7 +5,3 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
-
-caddy guff-only modules/caddyhttp/reverseproxy/httptransport.go:791:gosec:G402: TLS InsecureSkipVerify may be set to true.
-caddy guff-only modules/caddyhttp/reverseproxy/selectionpolicies.go:666:gosec:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
-caddy guff-only modules/caddytls/capools.go:624:gosec:G402: TLS InsecureSkipVerify may be set to true.

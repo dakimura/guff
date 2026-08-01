@@ -118,10 +118,10 @@ const IMPLEMENTED: &[&str] = &[
     "suite-method-signature",
     "suite-subtest-run",
     "suite-thelper",
-    "time-compare",
     "useless-assert",
-    // `zero` exists in newer testifylint; golangci 2.12 vendors v1.6.4 which
-    // does not ship it. Keep it out of enable-all so configs match golangci.
+    // `time-compare` / `zero` exist in newer testifylint; golangci 2.12 vendors
+    // v1.6.4 which does not ship them. Keep them out of enable-all so configs
+    // match golangci.
 ];
 
 /// Upstream `DefaultExpectedVarPattern`.
@@ -1615,10 +1615,9 @@ fn check_compares(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, 
 }
 
 fn check_contains(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec<(u32, String)>) {
-    if check_contains_string(pass, call, pending) {
-        return;
-    }
-    check_contains_subset(pass, call, pending);
+    // Upstream v1.6.4 (golangci 2.12) only rewrites True/False+strings.Contains;
+    // the multi-arg Contains→Subset heuristic is not in that release.
+    let _ = check_contains_string(pass, call, pending);
 }
 
 fn check_contains_string(

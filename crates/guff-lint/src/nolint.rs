@@ -63,6 +63,14 @@ pub struct NolintIndex {
     /// Keys: absolute path, and basename, both normalized with `/`.
     files: HashMap<String, Vec<IgnoredRange>>,
     unknown_linters: HashSet<String>,
+    /// Linters enabled for this run. Unused `//nolint:L` is suppressed when `L`
+    /// is absent (golangci `nolint_filter` skips disabled linters).
+    /// Empty = do not apply this filter (tests / callers that omit the set).
+    enabled_linters: HashSet<String>,
+    /// Absolute paths belonging to packages guff marked `ill_typed`. Analyzers
+    /// with `run_despite_errors: false` are skipped there, so their `//nolint`
+    /// directives cannot be consumed — do not report them as unused.
+    ill_typed_files: HashSet<String>,
 }
 
 impl NolintIndex {
@@ -99,6 +107,10 @@ impl NolintIndex {
                         continue;
                     }
                 }
+                if pkg.ill_typed {
+                    let path_str = path.to_string_lossy().replace('\\', "/");
+                    index.ill_typed_files.insert(path_str);
+                }
                 index.add_file(path);
             }
         }
@@ -111,6 +123,14 @@ impl NolintIndex {
             );
         }
         index
+    }
+
+    /// Restrict unused-directive reporting to these enabled linter names.
+    pub fn set_enabled_linters<I>(&mut self, names: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.enabled_linters = names.into_iter().collect();
     }
 
     fn add_file(&mut self, path: &Path) {
@@ -317,6 +337,22 @@ impl NolintIndex {
                         if KNOWN_UNIMPLEMENTED_LINTERS.contains(&lint.as_str()) {
                             continue;
                         }
+                        // golangci: don't expect disabled linters to cover their
+                        // nolint statements (nolint_filter shouldPassIssue).
+                        if !self.enabled_linters.is_empty()
+                            && !self.enabled_linters.contains(lint.as_str())
+                        {
+                            continue;
+                        }
+                        // guff may mark a package ill_typed while go/types is
+                        // clean (e.g. gin). Analyzers that refuse ill_typed
+                        // packages never see those files, so their directives
+                        // stay unmatched — that is not an unused-nolintlint hit.
+                        if self.ill_typed_files.contains(filename)
+                            && linter_skipped_on_ill_typed(lint)
+                        {
+                            continue;
+                        }
                         let lint_key = (
                             filename.clone(),
                             ir.from,
@@ -339,6 +375,15 @@ impl NolintIndex {
         }
         out
     }
+}
+
+/// True when every analyzer for `lint` has `run_despite_errors: false`, so the
+/// runner skips the linter on ill-typed packages.
+fn linter_skipped_on_ill_typed(lint: &str) -> bool {
+    let Some(analyzers) = analyzers_for_linter(lint) else {
+        return false;
+    };
+    !analyzers.is_empty() && analyzers.iter().all(|a| !a.run_despite_errors)
 }
 
 fn unused_issue(
@@ -686,5 +731,44 @@ mod tests {
         let issues = vec![issue("staticcheck", path.to_str().unwrap(), 4, "SA")];
         let kept = index.filter_issues(issues, false);
         assert_eq!(kept.len(), 1);
+    }
+
+    #[test]
+    fn unused_skipped_for_disabled_linter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(&path, "package p\n\nvar x int //nolint:errcheck\n").unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        index.set_enabled_linters(["nolintlint".into(), "gosec".into()]);
+        let kept = index.filter_issues(Vec::new(), true);
+        assert!(
+            kept.is_empty(),
+            "expected no unused for disabled errcheck, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn unused_skipped_for_ill_typed_type_sensitive_linter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(&path, "package p\n\nvar x int //nolint:errcheck\n").unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ill_typed: true,
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        index.set_enabled_linters(["nolintlint".into(), "errcheck".into()]);
+        let kept = index.filter_issues(Vec::new(), true);
+        assert!(
+            kept.is_empty(),
+            "expected no unused for skipped-on-ill_typed errcheck, got {kept:?}"
+        );
     }
 }

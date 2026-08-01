@@ -916,6 +916,13 @@ fn is_tls_config_type_name(name: &str) -> bool {
     bare == "crypto/tls.Config"
 }
 
+/// Upstream G402 `requiredType` is exactly `crypto/tls.Config` (no pointer).
+/// Assignments through `*tls.Config` (the common `cfg := new(tls.Config)` case)
+/// are intentionally not matched by gosec v2.26 / golangci 2.12.
+fn is_tls_config_assign_type_name(name: &str) -> bool {
+    name == "crypto/tls.Config"
+}
+
 fn is_http_server_type_name(name: &str) -> bool {
     let bare = name.strip_prefix('*').unwrap_or(name);
     bare == "net/http.Server"
@@ -1084,7 +1091,7 @@ fn check_g402_assign(
     let Some(name) = type_name_of(pass, &sel.x) else {
         return;
     };
-    if !is_tls_config_type_name(&name) {
+    if !is_tls_config_assign_type_name(&name) {
         return;
     }
     check_g402_tls_field(
@@ -1170,7 +1177,11 @@ impl CookieSecurity {
                 self.http_only_ok = resolve_bool_const(value) == Some(true);
             }
             "SameSite" => {
-                self.same_site_ok = is_safe_samesite(pass, value);
+                // SSA G124 only upgrades to safe (Lax/Strict); an unsafe value
+                // does not clear a prior safe SameSite (gosec insecure_cookie).
+                if is_safe_samesite(pass, value) {
+                    self.same_site_ok = true;
+                }
             }
             _ => {}
         }
@@ -1206,10 +1217,86 @@ fn check_g124_composite(
     if !is_http_cookie_type_expr(pass, ty) {
         return;
     }
-    if cookie_security_from_composite(pass, lit).is_secure() {
+    let mut sec = cookie_security_from_composite(pass, lit);
+    if !sec.is_secure() {
+        // Upstream SSA G124 folds later field stores on the same allocation
+        // (non-path-sensitive). Match that so `Secure: false` followed by
+        // `cookie.Secure = true` is not reported (caddy CookieHashSelection).
+        // Scope the binding search to the enclosing function body only —
+        // a whole-package preorder per cookie lit is far too expensive.
+        if let Some(body) = enclosing_func_body(pass, lit.lbrace.0 as u32) {
+            if let Some(name) = cookie_composite_binding_name(body, lit.lbrace.0 as u32) {
+                collect_cookie_param_stores(pass, body, &name, &mut sec);
+            }
+        }
+    }
+    if sec.is_secure() {
         return;
     }
     pending.push((lit.lbrace.0 as u32, format!("G124: {G124_WHAT}")));
+}
+
+/// If `lit` is the RHS of `name := &http.Cookie{…}` / `name = &http.Cookie{…}`
+/// inside `body`, return `name`.
+fn cookie_composite_binding_name(body: &guff::ast::BlockStmt, lit_pos: u32) -> Option<String> {
+    let mut found = None;
+    preorder(NodeRef::BlockStmt(body), |n| {
+        if found.is_some() {
+            return false;
+        }
+        match n {
+            NodeRef::AssignStmt(assign) => {
+                for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
+                    if cookie_lit_under(rhs, lit_pos) {
+                        if let Expr::Ident(id) = lhs {
+                            found = Some(id.name.clone());
+                        }
+                    }
+                }
+            }
+            NodeRef::ValueSpec(spec) => {
+                for (name, val) in spec.names.iter().zip(spec.values.iter()) {
+                    if cookie_lit_under(val, lit_pos) {
+                        found = Some(name.name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
+fn cookie_lit_under(expr: &Expr, lit_pos: u32) -> bool {
+    match expr {
+        Expr::UnaryExpr(u) if u.op == Token::AND => cookie_lit_under(&u.x, lit_pos),
+        Expr::ParenExpr(p) => cookie_lit_under(&p.x, lit_pos),
+        Expr::CompositeLit(cl) => cl.lbrace.0 as u32 == lit_pos,
+        _ => false,
+    }
+}
+
+fn enclosing_func_body<'a>(
+    pass: &'a Pass<'_>,
+    pos: u32,
+) -> Option<&'a guff::ast::BlockStmt> {
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(func) = decl else {
+                continue;
+            };
+            let Some(body) = func.body.as_ref() else {
+                continue;
+            };
+            let start = body.lbrace.0 as u32;
+            let end = body.rbrace.0 as u32;
+            if pos >= start && pos <= end {
+                return Some(body);
+            }
+        }
+    }
+    None
 }
 
 /// Track `*http.Cookie` parameters: SSA G124 flags params whose Secure /
@@ -1911,7 +1998,10 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "Inspects source code for security problems",
         url: "https://github.com/securego/gosec",
         run: run as RunFn,
-        run_despite_errors: false,
+        // AST/types-info rules still produce useful findings when guff's
+        // typechecker marks a package ill-typed (e.g. gin interface assign
+        // FPs). Match golangci/gosec which runs against go/types-clean packages.
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })

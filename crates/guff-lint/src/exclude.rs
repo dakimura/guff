@@ -6,7 +6,7 @@
 //! severity (+ unused nolintlint).
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -155,6 +155,8 @@ pub struct IssueFilter {
     severity_rules: Vec<(CompiledRule, String)>,
     /// When true, unused `//nolint` directives are reported as `nolintlint`.
     pub report_unused_nolint: bool,
+    /// Linters enabled for this run (for unused-nolintlint parity with golangci).
+    pub enabled_linters: HashSet<String>,
     /// Go build cache directory; issues under it are dropped (cgo artifacts).
     go_cache_dir: Option<PathBuf>,
     /// Diff-based "new issues only" filter (golangci Diff processor).
@@ -346,6 +348,7 @@ impl IssueFilter {
         if self.report_unused_nolint && !packages.is_empty() {
             let mut idx =
                 NolintIndex::from_packages_for_issues(packages, &issues, true);
+            idx.set_enabled_linters(self.enabled_linters.iter().cloned());
             idx.mark_matches(&issues);
             issues.retain(|issue| {
                 !self
@@ -367,6 +370,7 @@ impl IssueFilter {
                     &issues,
                     false,
                 );
+                idx.set_enabled_linters(self.enabled_linters.iter().cloned());
                 issues = idx.filter_issues(issues, false);
             }
         }

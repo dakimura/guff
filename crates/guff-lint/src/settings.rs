@@ -661,7 +661,10 @@ pub struct TestifylintFormatterSettings {
     pub check_format_string: bool,
     #[serde(default, rename = "require-f-funcs")]
     pub require_f_funcs: bool,
-    #[serde(default = "default_true", rename = "require-string-msg")]
+    // golangci-lint always injects this flag into the analyzer config; the Go
+    // zero value is false, which overrides testifylint's own default (true).
+    // Match that effective default so unset YAML agrees with golangci 2.12.
+    #[serde(default, rename = "require-string-msg")]
     pub require_string_msg: bool,
 }
 
@@ -693,7 +696,8 @@ impl Default for TestifylintFormatterSettings {
         Self {
             check_format_string: true,
             require_f_funcs: false,
-            require_string_msg: true,
+            // Match golangci-lint's injected zero-value when YAML omits the key.
+            require_string_msg: false,
         }
     }
 }

@@ -5,9 +5,3 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
-
-gin guff-only binding/json_test.go:53:testifylint:time-compare: equality-based assertion on time.Time can be flaky
-gin guff-only context_test.go:2898:testifylint:time-compare: equality-based assertion on time.Time can be flaky
-gin guff-only context_test.go:3147:testifylint:time-compare: equality-based assertion on time.Time can be flaky
-gin guff-only context_test.go:511:testifylint:time-compare: equality-based assertion on time.Time can be flaky
-gin guff-only context_test.go:871:testifylint:formatter: do not use non-string value as first element (msg) of msgAndArgs

@@ -126,3 +126,22 @@ func okPerms() error {
 	_ = template.HTML("<b>ok</b>")
 	return nil
 }
+
+func okTLSAssignFromField(skip bool) *tls.Config {
+	cfg := new(tls.Config)
+	// Upstream G402 does not match *tls.Config assignments.
+	cfg.InsecureSkipVerify = skip
+	return cfg
+}
+
+func okCookieLaterSecure() *http.Cookie {
+	cookie := &http.Cookie{
+		Name:     "session",
+		Value:    "abc",
+		Secure:   false,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	cookie.Secure = true
+	return cookie
+}
