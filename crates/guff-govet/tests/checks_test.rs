@@ -327,6 +327,14 @@ fn structtag_flags_unexported_json() {
 }
 
 #[test]
+fn structtag_allows_embedded_json_tag() {
+    let dir = support::testdata("structtag");
+    let pkg = support::typecheck_pkg("example.com/govet/structtag/ok", &dir.join("ok.go"));
+    let messages = support::run_analyzer(structtag_analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
 fn composites_flags_unkeyed_imported_struct() {
     let dir = support::testdata("composites");
     let stub = dir.join("stub/other/config.go");

@@ -22,4 +22,14 @@ func h(st *int) *int {
 	return st
 }
 
+// Interface method use on RHS before overwrite (consul authmethods pattern).
+type Logger interface {
+	Named(string) Logger
+}
+
+func withNamed(logger Logger) Logger {
+	logger = logger.Named("authmethod")
+	return logger
+}
+
 func main() {}

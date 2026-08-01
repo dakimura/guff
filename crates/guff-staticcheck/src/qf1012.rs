@@ -298,7 +298,7 @@ fn qf1012_analyzer_impl() -> Analyzer {
         doc: "use fmt.Fprintf(x, ...) instead of x.Write(fmt.Sprintf(...))",
         url: "https://staticcheck.dev/docs/checks/#QF1012",
         run: run as RunFn,
-        run_despite_errors: false,
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     }

@@ -6,13 +6,17 @@
 //! value has any non-DebugRef use after lifting, it was read. The previous AST
 //! walk missed uses in `if`/`for` conditions and false-positived e.g.
 //! `if st == nil { st = ... }` in prometheus `model/textparse`.
+//!
+//! When SSA misses interface-method uses of a param (e.g.
+//! `logger = logger.Named(...)` after lift), fall back to an AST value-use
+//! check so we do not false-positive overwrite-before-use.
 
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Stmt};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::object_of;
+use guff_analysis::code::{object_of, refers_to};
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{has_non_debug_referrer, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::value::Value;
@@ -75,6 +79,84 @@ fn stmt_assigns_to(pass: &Pass<'_>, stmt: &Stmt, obj: ObjectId) -> bool {
     }
 }
 
+/// True if `obj` appears in a value position (not solely as a plain assign LHS).
+/// Covers SSA gaps for interface method receivers: `p = p.M()`.
+fn body_has_value_use(pass: &Pass<'_>, body: &[Stmt], obj: ObjectId) -> bool {
+    body.iter().any(|s| stmt_has_value_use(pass, s, obj))
+}
+
+fn stmt_has_value_use(pass: &Pass<'_>, stmt: &Stmt, obj: ObjectId) -> bool {
+    match stmt {
+        Stmt::AssignStmt(a) => a.rhs.iter().any(|e| refers_to(pass, e, obj)),
+        Stmt::IncDecStmt(i) => refers_to(pass, &i.x, obj),
+        Stmt::ExprStmt(e) => refers_to(pass, &e.x, obj),
+        Stmt::ReturnStmt(r) => r.results.iter().any(|e| refers_to(pass, e, obj)),
+        Stmt::SendStmt(s) => {
+            refers_to(pass, &s.chan_, obj) || refers_to(pass, &s.value, obj)
+        }
+        Stmt::GoStmt(g) => {
+            refers_to(pass, &g.call.fun, obj) || g.call.args.iter().any(|a| refers_to(pass, a, obj))
+        }
+        Stmt::DeferStmt(d) => {
+            refers_to(pass, &d.call.fun, obj) || d.call.args.iter().any(|a| refers_to(pass, a, obj))
+        }
+        Stmt::BlockStmt(b) => body_has_value_use(pass, &b.list, obj),
+        Stmt::IfStmt(i) => {
+            i.init
+                .as_ref()
+                .is_some_and(|s| stmt_has_value_use(pass, s, obj))
+                || refers_to(pass, &i.cond, obj)
+                || body_has_value_use(pass, &i.body.list, obj)
+                || i.else_
+                    .as_ref()
+                    .is_some_and(|e| stmt_has_value_use(pass, e, obj))
+        }
+        Stmt::ForStmt(f) => {
+            f.init
+                .as_ref()
+                .is_some_and(|s| stmt_has_value_use(pass, s, obj))
+                || f.cond.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || f.post
+                    .as_ref()
+                    .is_some_and(|s| stmt_has_value_use(pass, s, obj))
+                || body_has_value_use(pass, &f.body.list, obj)
+        }
+        Stmt::RangeStmt(r) => {
+            refers_to(pass, &r.x, obj) || body_has_value_use(pass, &r.body.list, obj)
+        }
+        Stmt::SwitchStmt(s) => {
+            s.init
+                .as_ref()
+                .is_some_and(|st| stmt_has_value_use(pass, st, obj))
+                || s.tag.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || s.body.list.iter().any(|c| {
+                    matches!(c, Stmt::CaseClause(cc) if body_has_value_use(pass, &cc.body, obj)
+                        || cc.list.iter().any(|e| refers_to(pass, e, obj)))
+                })
+        }
+        Stmt::TypeSwitchStmt(s) => {
+            s.init
+                .as_ref()
+                .is_some_and(|i| stmt_has_value_use(pass, i, obj))
+                || stmt_has_value_use(pass, &s.assign, obj)
+                || s.body.list.iter().any(|c| {
+                    matches!(c, Stmt::CaseClause(cc) if body_has_value_use(pass, &cc.body, obj))
+                })
+        }
+        Stmt::SelectStmt(s) => s.body.list.iter().any(|c| match c {
+            Stmt::CommClause(cc) => {
+                cc.comm
+                    .as_ref()
+                    .is_some_and(|comm| stmt_has_value_use(pass, comm, obj))
+                    || body_has_value_use(pass, &cc.body, obj)
+            }
+            _ => false,
+        }),
+        Stmt::LabeledStmt(l) => stmt_has_value_use(pass, &l.stmt, obj),
+        _ => false,
+    }
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -123,6 +205,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 // Upstream: any non-DebugRef referrer means the param value was
                 // used (after lifting removes a dead spill Store).
                 if has_non_debug_referrer(referrers(func, Value::Param(pid)), func) {
+                    continue;
+                }
+                // SSA may miss interface-method uses of the param; AST bailout.
+                if body_has_value_use(pass, body, obj) {
                     continue;
                 }
 

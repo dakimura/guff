@@ -15,6 +15,7 @@ path = "src/lib.rs"
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
 regex = "1"
+unicode-general-category = "1"
 
 [dev-dependencies]
 guff-packages = { path = "../guff-packages" }

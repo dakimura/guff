@@ -29,7 +29,24 @@ fn exclude_word(word: &str, ignore: &HashSet<&str>) -> bool {
     let Some(ch) = word.chars().next() else {
         return true;
     };
-    ch.is_ascii_digit() || ch.is_ascii_punctuation()
+    // Match upstream `excludeWords`: unicode.IsDigit || IsPunct || IsSymbol
+    // (ASCII-only checks miss box-drawing `│` etc. in tree comments).
+    use unicode_general_category::{get_general_category, GeneralCategory as GC};
+    matches!(
+        get_general_category(ch),
+        GC::DecimalNumber
+            | GC::ConnectorPunctuation
+            | GC::DashPunctuation
+            | GC::OpenPunctuation
+            | GC::ClosePunctuation
+            | GC::InitialPunctuation
+            | GC::FinalPunctuation
+            | GC::OtherPunctuation
+            | GC::MathSymbol
+            | GC::CurrencySymbol
+            | GC::ModifierSymbol
+            | GC::OtherSymbol
+    )
 }
 
 /// Detect adjacent duplicate words; return joined list of duplicates if any.

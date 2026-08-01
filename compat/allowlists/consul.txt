@@ -5,20 +5,15 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+#
+# Remaining: govet `inline` const-only (type-parameter inference not ported).
 
-consul guff-only agent/consul/authmethod/authmethods.go:164:staticcheck:argument logger is overwritten before first use
 consul golangci-only agent/grpc-external/services/resource/write.go:206:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:207:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:212:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/structs/acl_templated_policy.go:303:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only agent/structs/config_entry_discoverychain_test.go:34:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
-consul golangci-only agent/structs/config_entry_discoverychain_test.go:37:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
 consul golangci-only agent/structs/config_entry_gateways.go:1008:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/xds/routes.go:516:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only command/exec/exec.go:696:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
 consul golangci-only command/snapshot/save/snapshot_save.go:80:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only command/snapshot/save/snapshot_save.go:96:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only internal/protohcl/oneof.go:41:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
-consul golangci-only internal/protohcl/oneof.go:43:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
-consul golangci-only internal/protohcl/oneof.go:45:staticcheck:Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
 consul golangci-only internal/resource/resourcetest/client.go:125:govet:cannot inline: type parameter inference is not yet supported

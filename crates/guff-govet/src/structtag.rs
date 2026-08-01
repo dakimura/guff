@@ -192,7 +192,12 @@ fn check_field(
             }
         }
     }
-    let name = field.names.first().map(|n| n.name.as_str()).unwrap_or("");
+    // Upstream skips anonymous (embedded) fields for the unexported-tag
+    // check (`field.Anonymous()` → return). Empty `names` means embedded.
+    let Some(ident) = field.names.first() else {
+        return;
+    };
+    let name = ident.name.as_str();
     if !field_exported(name) {
         for enc in ["json", "xml"] {
             match tag_get(&tag, enc) {

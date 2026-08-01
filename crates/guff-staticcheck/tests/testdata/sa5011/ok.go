@@ -42,3 +42,16 @@ func okShortCircuit(a *Issuer) *DNS {
 	}
 	return nil
 }
+
+// Captured err FreeVar after nil-check must not flag later Store (containerd
+// GIDFromFS pattern: gid, err = ... inside a closure that closed over err).
+func okCapturedErr() {
+	var err error
+	f := func() {
+		if err != nil {
+			return
+		}
+		err = nil
+	}
+	f()
+}

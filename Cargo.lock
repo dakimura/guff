@@ -462,6 +462,7 @@ dependencies = [
  "guff-runner",
  "guff-types",
  "regex",
+ "unicode-general-category",
 ]
 
 [[package]]

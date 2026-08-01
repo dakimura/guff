@@ -139,13 +139,16 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilC
 }
 
 fn cannot_be_nil_source(func: &Function, ptr: Value) -> bool {
-    let Value::Instr(iid) = ptr else {
-        return false;
-    };
-    matches!(
-        func.instrs.get(iid),
-        InstrData::Alloc(_) | InstrData::FieldAddr(_) | InstrData::IndexAddr(_)
-    )
+    // Address of a variable cell (local alloc, captured free var, or global)
+    // is never nil — Stores through them are not nil dereferences.
+    match ptr {
+        Value::FreeVar(_) | Value::Global(_) => return true,
+        Value::Instr(iid) => matches!(
+            func.instrs.get(iid),
+            InstrData::Alloc(_) | InstrData::FieldAddr(_) | InstrData::IndexAddr(_)
+        ),
+        _ => false,
+    }
 }
 
 fn is_index_addr_on_slice(

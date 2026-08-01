@@ -5,3 +5,8 @@ func process() {
 	line := "no duplicates here"
 	_ = line
 }
+
+// Tree diagrams use box-drawing symbols (upstream excludeWords / IsSymbol).
+//	      │     │  ├──digest
+func treeComment() {}
+

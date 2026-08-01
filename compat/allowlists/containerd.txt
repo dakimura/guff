@@ -5,5 +5,20 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+#
+# Fixed: SA5011 FreeVar/Global, dupword Unicode symbols, structtag embedded
+# fields. Remaining: SA9003 empty branch; golangci-only gosec taint/G118.
 
-containerd guff-only pkg/oci/spec_opts.go:692:staticcheck:possible nil pointer dereference
+containerd guff-only core/mount/manager/mkfs.go:95:staticcheck:empty branch
+containerd golangci-only cmd/ctr/commands/content/content.go:594:gosec:G703: Path traversal via taint analysis
+containerd golangci-only cmd/ctr/commands/content/content.go:603:gosec:G702: Command injection via taint analysis
+containerd golangci-only cmd/ctr/commands/content/content.go:614:gosec:G703: Path traversal via taint analysis
+containerd golangci-only cmd/ctr/commands/content/content.go:619:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_manager.go:381:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_manager.go:410:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_manager.go:427:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_unix.go:101:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_unix.go:120:gosec:G703: Path traversal via taint analysis
+containerd golangci-only core/runtime/v2/shim_unix.go:98:gosec:G703: Path traversal via taint analysis
+containerd golangci-only internal/cri/server/podsandbox/recover.go:160:gosec:G118: Goroutine uses context.Background/TODO while request-scoped context is available
+containerd golangci-only internal/cri/server/podsandbox/sandbox_run.go:322:gosec:G118: Goroutine uses context.Background/TODO while request-scoped context is available

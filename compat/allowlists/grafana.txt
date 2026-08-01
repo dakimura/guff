@@ -5,34 +5,14 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+#
+# Shrunk via SA5011 FreeVar fix + structtag anonymous-field skip.
 
-grafana guff-only pkg/api/webassets/webassets.go:92:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/apis/appplugin/v0alpha1/types.go:14:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/appplugin/v0alpha1/types.go:30:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/connection.go:109:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/connection.go:60:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/connection.go:86:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/datasource.go:157:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/datasource.go:19:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/query.go:61:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/datasource/v0alpha1/query.go:73:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/iam/v0alpha1/types_display.go:12:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/iam/v0alpha1/types_sso.go:15:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/iam/v0alpha1/types_sso.go:37:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/iam/v0alpha1/types_team.go:23:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/iam/v0alpha1/types_user.go:8:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/service/v0alpha1/types.go:13:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/service/v0alpha1/types.go:33:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/userstorage/v0alpha1/types.go:12:govet:struct field has json tag but is not exported
-grafana guff-only pkg/apis/userstorage/v0alpha1/types.go:33:govet:struct field has json tag but is not exported
 grafana guff-only pkg/cmd/grafana-cli/services/api_client.go:75:bodyclose:response body must be closed
 grafana guff-only pkg/components/imguploader/gcs/gcsuploader.go:230:staticcheck:ineffective assignment to field .PredefinedACL
 grafana guff-only pkg/components/simplejson/simplejson_go11.go:4:staticcheck:identical build constraints "go1.1" and "go1.1"
-grafana guff-only pkg/infra/fs/copy.go:74:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/infra/fs/copy.go:85:staticcheck:possible nil pointer dereference
 grafana guff-only pkg/infra/process/root_check.go:4:staticcheck:identical build constraints "!windows" and "!windows"
 grafana guff-only pkg/infra/slugify/slugify.go:60:errcheck:Error return value is not checked
-grafana guff-only pkg/kinds/general.go:11:govet:struct field has json tag but is not exported
 grafana guff-only pkg/middleware/cookies/cookies.go:43:gosec:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
 grafana guff-only pkg/registry/apis/datasource/converter/converter.go:124:errcheck:Error return value is not checked
 grafana guff-only pkg/registry/apis/datasource/converter/converter.go:125:errcheck:Error return value is not checked
@@ -63,10 +43,6 @@ grafana guff-only pkg/services/apiserver/utils/uids.go:26:errcheck:Error return 
 grafana guff-only pkg/services/apiserver/utils/uids.go:27:errcheck:Error return value is not checked
 grafana guff-only pkg/services/apiserver/utils/uids.go:28:errcheck:Error return value is not checked
 grafana guff-only pkg/services/authz/zanzana/store/migration/migrator.go:169:staticcheck:possible nil pointer dereference
-grafana guff-only pkg/services/featuremgmt/feature_toggle_api/types.go:20:govet:struct field has json tag but is not exported
-grafana guff-only pkg/services/featuremgmt/feature_toggle_api/types.go:57:govet:struct field has json tag but is not exported
-grafana guff-only pkg/services/featuremgmt/feature_toggle_api/types.go:66:govet:struct field has json tag but is not exported
-grafana guff-only pkg/services/featuremgmt/feature_toggle_api/types.go:75:govet:struct field has json tag but is not exported
 grafana guff-only pkg/services/frontend/index.go:180:gosec:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
 grafana guff-only pkg/services/ngalert/eval/eval_test.go:1602:staticcheck:possible nil pointer dereference
 grafana guff-only pkg/services/ngalert/models/accesscontrol.go:5:gosec:G505: Blocklisted import crypto/sha1: weak cryptographic primitive
@@ -116,8 +92,6 @@ grafana guff-only pkg/tests/api/dashboards/api_dashboards_test.go:989:bodyclose:
 grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:114:bodyclose:response body must be closed
 grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:182:bodyclose:response body must be closed
 grafana guff-only pkg/tests/api/plugins/api_plugins_test.go:219:bodyclose:response body must be closed
-grafana guff-only pkg/tests/apis/types.go:17:govet:struct field has json tag but is not exported
-grafana guff-only pkg/tests/apis/types.go:9:govet:struct field has json tag but is not exported
 grafana guff-only pkg/tests/web/index_view_test.go:106:bodyclose:response body must be closed
 grafana guff-only pkg/tsdb/cloud-monitoring/cloudmonitoring.go:33:staticcheck:error parsing regexp: regex parse error: [-\/^$+?.()|[\]{}] ^^ error: unclosed character class
 grafana guff-only pkg/tsdb/cloud-monitoring/converter/converter.go:97:staticcheck:this value of frame.Meta is never used
