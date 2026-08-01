@@ -158,6 +158,10 @@ pub struct FormatterRunConfig {
     pub use_format_cache: bool,
     /// Explicit cache root (same as issue cache). `None` → env / default.
     pub cache_dir: Option<std::path::PathBuf>,
+    /// golangci `run.tests` — when false, skip `*_test.go` format diagnostics.
+    pub include_tests: bool,
+    /// golangci `run.build-tags` for build-constraint filtering.
+    pub build_tags: Vec<String>,
 }
 
 /// Check (or fix) formatting for `guff run`; returns issues for unformatted files.
@@ -167,6 +171,21 @@ pub struct FormatterRunConfig {
 /// formatter. With `fix`, files are rewritten via the chained formatters and no
 /// issues are produced.
 fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<Vec<Issue>, RunError> {
+    run_format_checks_inner(cfg, Some(filter))
+}
+
+/// Format findings without the exclude/nolint pipeline.
+///
+/// Callers that merge format issues with analysis diagnostics before a single
+/// [`IssueFilter::apply`] (so `//nolint:gofumpt` marks correctly) use this.
+fn run_format_checks_raw(cfg: &FormatterRunConfig) -> Result<Vec<Issue>, RunError> {
+    run_format_checks_inner(cfg, None)
+}
+
+fn run_format_checks_inner(
+    cfg: &FormatterRunConfig,
+    filter: Option<&IssueFilter>,
+) -> Result<Vec<Issue>, RunError> {
     use guff_fmt::{
         format_cache_dir_from_env, FormatCheckCache, MetaFormatter, Runner, RunnerOptions,
     };
@@ -199,6 +218,9 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
             RunnerOptions {
                 exclude_paths: cfg.exclude_paths.clone(),
                 generated: cfg.generated,
+                include_tests: cfg.include_tests,
+                build_tags: cfg.build_tags.clone(),
+                filter_build_constraints: true,
                 ..Default::default()
             },
         );
@@ -237,6 +259,9 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
         exclude_paths: cfg.exclude_paths.clone(),
         generated: cfg.generated,
         format_cache: format_cache.clone(),
+        include_tests: cfg.include_tests,
+        build_tags: cfg.build_tags.clone(),
+        filter_build_constraints: true,
         ..Default::default()
     };
     let t_fmt = std::time::Instant::now();
@@ -272,7 +297,10 @@ fn run_format_checks(cfg: &FormatterRunConfig, filter: &IssueFilter) -> Result<V
             "error",
         ));
     }
-    Ok(filter.apply(issues, &[]))
+    match filter {
+        Some(f) => Ok(f.apply(issues, &[])),
+        None => Ok(issues),
+    }
 }
 
 /// Hybrid cold path is on by default. `GUFF_DEP_SOURCE=0` / `false` / `off` opts
@@ -780,23 +808,34 @@ pub struct LintResult {
 }
 
 impl LintResult {
+    /// Diagnostics before exclude / `//nolint` / severity / limits.
+    ///
+    /// Positions are resolved; paths are still absolute (filters need that).
+    pub fn unfiltered_issues(&self) -> Vec<Issue> {
+        let mut issues = self.cached_issues.clone();
+        if let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) {
+            issues.extend(IssueFilter::collect_issues(fset, &self.run.diagnostics()));
+        }
+        issues
+    }
+
+    /// Apply the configured post-processing filter and path display mode.
+    pub fn filter_issues(&self, mut issues: Vec<Issue>) -> Vec<Issue> {
+        issues = self.filter.apply(issues, &self.packages);
+        let prefix = self.path_prefix.as_deref();
+        for issue in &mut issues {
+            issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix);
+        }
+        issues
+    }
+
     /// Issues after applying the configured post-processing filter.
     pub fn issues(&self) -> Vec<Issue> {
         // Cache-restored issues carry resolved positions already. Freshly
         // analyzed diagnostics (cache misses) are resolved against the shared
         // `FileSet` of the type-checked packages. Both streams then go through
         // the same filter pipeline (exclude rules, //nolint, severity, limits).
-        let mut issues = self.cached_issues.clone();
-        if let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) {
-            issues.extend(IssueFilter::collect_issues(fset, &self.run.diagnostics()));
-        }
-        let mut issues = self.filter.apply(issues, &self.packages);
-        // Path display last — filters need absolute paths for GOCACHE / reads.
-        let prefix = self.path_prefix.as_deref();
-        for issue in &mut issues {
-            issue.filename = format_issue_path(&issue.filename, self.path_mode, prefix);
-        }
-        issues
+        self.filter_issues(self.unfiltered_issues())
     }
 
     pub fn diagnostic_count(&self) -> usize {
@@ -969,7 +1008,6 @@ fn run_and_write_inner(
         .filter(|cfg| !cfg.fix && !opts.fix)
         .map(|cfg| {
             let cfg = cfg.clone();
-            let filter = opts.filter.clone();
             std::thread::spawn(move || {
                 let started = std::time::Instant::now();
                 // Format checks run native Rust formatters over every file via
@@ -982,39 +1020,59 @@ fn run_and_write_inner(
                     .thread_name(|i| format!("guff-fmt-{i}"))
                     .build()
                     .expect("format rayon pool");
-                let result = pool.install(|| run_format_checks(&cfg, &filter));
+                // Raw findings: merged with analysis before one filter.apply so
+                // //nolint:gofumpt (etc.) marks as used (golangci parity).
+                let result = pool.install(|| run_format_checks_raw(&cfg));
                 (result, started.elapsed())
             })
         });
 
     let result = run_linters(opts)?;
     let tf = std::time::Instant::now();
-    let (mut issues, fixes_applied) = result.issues_and_fix(opts.fix)?;
+    let mut issues = result.unfiltered_issues();
+    let mut fmt_ran = None;
+    let mut fmt_waited = None;
+    if let Some(job) = fmt_job {
+        let twait = std::time::Instant::now();
+        let (fmt_result, ran) = job.join().unwrap_or_else(|p| std::panic::resume_unwind(p));
+        fmt_waited = Some(twait.elapsed());
+        fmt_ran = Some(ran);
+        issues.extend(fmt_result?);
+    }
+    let (issues, fixes_applied) = {
+        let filtered = result.filter_issues(issues);
+        if opts.fix {
+            if let Some(fset) = result.packages.iter().find_map(|p| p.fset.as_ref()) {
+                apply_fixes(fset, &filtered)?
+            } else {
+                (filtered, 0)
+            }
+        } else {
+            (filtered, 0)
+        }
+    };
     if timing {
         eprintln!("guff: phase issues+filter {:.2}s", tf.elapsed().as_secs_f64());
+        if let (Some(ran), Some(waited)) = (fmt_ran, fmt_waited) {
+            eprintln!(
+                "guff: phase format_checks {:.2}s (overlapped with analysis; {:.2}s waited)",
+                ran.as_secs_f64(),
+                waited.as_secs_f64(),
+            );
+        }
     }
     if fixes_applied > 0 {
         eprintln!("guff: fixed {fixes_applied} issue(s)");
     }
-    if let Some(job) = fmt_job {
-        let twait = std::time::Instant::now();
-        let (result, ran) = job.join().unwrap_or_else(|p| std::panic::resume_unwind(p));
-        let fmt_issues = result?;
-        if timing {
-            eprintln!(
-                "guff: phase format_checks {:.2}s (overlapped with analysis; {:.2}s waited)",
-                ran.as_secs_f64(),
-                twait.elapsed().as_secs_f64(),
-            );
+    // `--fix` (or formatter fix mode): rewrite files after analysis; no issues.
+    if opts.fix || opts.formatters.as_ref().is_some_and(|c| c.fix) {
+        if let Some(fmt_cfg) = &opts.formatters {
+            let tfmt = std::time::Instant::now();
+            let _ = run_format_checks(fmt_cfg, &opts.filter)?;
+            if timing {
+                eprintln!("guff: phase format_checks {:.2}s", tfmt.elapsed().as_secs_f64());
+            }
         }
-        issues.extend(fmt_issues);
-    } else if let Some(fmt_cfg) = &opts.formatters {
-        let tfmt = std::time::Instant::now();
-        let fmt_issues = run_format_checks(fmt_cfg, &opts.filter)?;
-        if timing {
-            eprintln!("guff: phase format_checks {:.2}s", tfmt.elapsed().as_secs_f64());
-        }
-        issues.extend(fmt_issues);
     }
     let tp = std::time::Instant::now();
     print_issues_with(&opts.out_formats, &opts.printer, &issues, out).map_err(RunError::Io)?;
@@ -1151,6 +1209,8 @@ mod format_check_tests {
             fix,
             use_format_cache: false,
             cache_dir: None,
+            include_tests: true,
+            build_tags: Vec::new(),
         }
     }
 

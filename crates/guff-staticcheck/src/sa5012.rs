@@ -10,15 +10,17 @@ use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn check_new_replacer(call: &mut Call<'_>, ctx: &CallContext<'_>) {
-    if let Some(arg) = call.args.first() {
-        if let Some(n) = composite_lit_len(ctx, arg.value) {
+    // `NewReplacer(slice...)` / single non-literal arg: length is unknown at
+    // analysis time — do not treat `args.len()==1` as an odd pair count.
+    if call.args.len() == 1 {
+        if let Some(n) = composite_lit_len(ctx, call.args[0].value) {
             if n % 2 != 0 {
                 call.args[0].invalid(format!(
                     "argument \"oldnew\" is expected to have even number of elements, but has {n} elements"
                 ));
-                return;
             }
         }
+        return;
     }
     if call.args.len() % 2 != 0 {
         call.invalid(format!(

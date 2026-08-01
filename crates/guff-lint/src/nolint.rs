@@ -142,10 +142,11 @@ impl NolintIndex {
         let mut all = inline;
         all.extend(expanded);
 
-        self.files.insert(path_str.clone(), all.clone());
-        if let Some(base) = path.file_name().and_then(|s| s.to_str()) {
-            self.files.insert(base.replace('\\', "/"), all);
-        }
+        self.files.insert(path_str, all);
+        // Basename is resolved in lookup_mut — do not store a second clone,
+        // or suppress() via basename would mark a duplicate while
+        // collect_unused() still sees the absolute entry as unused
+        // (formatters often hit basename fallback).
     }
 
     fn extract_inline_ranges(
@@ -242,9 +243,19 @@ impl NolintIndex {
         }
         let base = Path::new(&norm)
             .file_name()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_string())?;
-        self.files.get_mut(&base)
+            .and_then(|s| s.to_str())?;
+        // Prefer the absolute key with this basename (single source of truth).
+        let abs = self
+            .files
+            .keys()
+            .find(|k| {
+                Path::new(k.as_str())
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    == Some(base)
+            })
+            .cloned()?;
+        self.files.get_mut(&abs)
     }
 
     fn collect_unused(&self) -> Vec<Issue> {
@@ -277,18 +288,9 @@ impl NolintIndex {
             }
         }
         for (filename, ranges) in &self.files {
-            // Prefer absolute keys only once (skip basenames that mirror a longer key).
+            // Absolute paths only (basename aliases removed).
             if !filename.contains('/') && !filename.contains('\\') {
-                let mirrored = self.files.keys().any(|k| {
-                    k != filename
-                        && Path::new(k)
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            == Some(filename.as_str())
-                });
-                if mirrored {
-                    continue;
-                }
+                continue;
             }
             for ir in ranges {
                 if ir.is_expansion {
@@ -452,6 +454,12 @@ fn extract_range(
 fn is_known_nolint_target(name: &str) -> bool {
     name == NOLINTLINT_NAME
         || analyzers_for_linter(name).is_some()
+        // Formatters are not analysis linters but are valid //nolint targets
+        // (golangci treats gofumpt/gofmt/… the same as linters for nolint).
+        || matches!(
+            name,
+            "gofmt" | "gofumpt" | "goimports" | "gci" | "golines" | "swaggo"
+        )
         // Enabled-in-config but not-yet-implemented linters (e.g. contextcheck)
         // still appear in //nolint; treat them as known so we don't warn.
         || KNOWN_UNIMPLEMENTED_LINTERS.contains(&name)

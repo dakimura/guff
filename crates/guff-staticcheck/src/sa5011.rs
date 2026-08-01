@@ -83,8 +83,8 @@ fn nil_check_partner(func: &Function, cond: Value) -> Option<(InstrId, Value, Va
     Some((iid, *x, *y, eq_nil))
 }
 
-fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, NilCheck> {
-    let mut maybe_nil = HashMap::new();
+fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilCheck>> {
+    let mut maybe_nil: HashMap<Value, Vec<NilCheck>> = HashMap::new();
     for (bid, block) in func.live_blocks() {
         for &iid in &block.instrs {
             let InstrData::If(If { cond }) = func.instrs.get(iid) else {
@@ -116,28 +116,21 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, NilCheck
                 }
                 Some(peel_load(func, v))
             };
+            let push = |maybe_nil: &mut HashMap<Value, Vec<NilCheck>>, key: Value| {
+                maybe_nil.entry(key).or_default().push(NilCheck {
+                    bin_op: bin_id,
+                    check_block: bid,
+                    non_nil_block,
+                });
+            };
             if is_nil_const_operand(prog, func, x) {
                 if let Some(key) = consider(prog, func, y) {
-                    maybe_nil.insert(
-                        key,
-                        NilCheck {
-                            bin_op: bin_id,
-                            check_block: bid,
-                            non_nil_block,
-                        },
-                    );
+                    push(&mut maybe_nil, key);
                 }
             }
             if is_nil_const_operand(prog, func, y) {
                 if let Some(key) = consider(prog, func, x) {
-                    maybe_nil.insert(
-                        key,
-                        NilCheck {
-                            bin_op: bin_id,
-                            check_block: bid,
-                            non_nil_block,
-                        },
-                    );
+                    push(&mut maybe_nil, key);
                 }
             }
         }
@@ -175,32 +168,45 @@ fn is_guarded_by_non_nil(func: &Function, check: &NilCheck, deref_block: BlockId
     check_bb.dominates(deref) && (non_nil.dominates(deref) || non_nil_block == deref_block)
 }
 
+/// True when any recorded nil-check of this pointer guards `deref_block`.
+///
+/// A function often has several `if p != nil` / `if p == nil { return }` on the
+/// same pointer (caddy `respHeaderOps`, short-circuit `a != nil && a.F`). A
+/// single HashMap slot used to keep only the last check, so an earlier guarded
+/// deref was matched against a later check and falsely reported.
+fn any_check_guards(func: &Function, checks: &[NilCheck], deref_block: BlockId) -> bool {
+    checks
+        .iter()
+        .any(|check| is_guarded_by_non_nil(func, check, deref_block))
+}
+
 fn lookup_maybe_nil<'a>(
     prog: &Program,
     func: &Function,
-    maybe_nil: &'a HashMap<Value, NilCheck>,
+    maybe_nil: &'a HashMap<Value, Vec<NilCheck>>,
     ptr: Value,
     deref_block: BlockId,
 ) -> Option<&'a NilCheck> {
     let key = peel_load(func, ptr);
-    if let Some(check) = maybe_nil.get(&key) {
-        // Exact key: if guarded, do not fall through to a nil-const alias scan
-        // (that could spuriously report a different check).
-        if is_guarded_by_non_nil(func, check, deref_block) {
+    if let Some(checks) = maybe_nil.get(&key) {
+        if any_check_guards(func, checks, deref_block) {
             return None;
         }
-        return Some(check);
+        // Not guarded by any check — relate to the first (earliest) check.
+        return checks.first();
     }
     // Nil-pointer-const keys may not be pointer-identical. Only then scan.
     if !is_nil_pointer_const(prog, key) {
         return None;
     }
-    maybe_nil.iter().find_map(|(&k, check)| {
-        if ptr_keys_equal(prog, func, k, key) && !is_guarded_by_non_nil(func, check, deref_block) {
-            Some(check)
-        } else {
-            None
+    maybe_nil.iter().find_map(|(&k, checks)| {
+        if !ptr_keys_equal(prog, func, k, key) {
+            return None;
         }
+        if any_check_guards(func, checks, deref_block) {
+            return None;
+        }
+        checks.first()
     })
 }
 

@@ -111,6 +111,13 @@ func okPerms() error {
 		Addr:              ":8080",
 		ReadHeaderTimeout: 3 * time.Second,
 	}
+	_ = &http.Cookie{
+		Name:     "session",
+		Value:    "abc",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	}
 	bigValue, err := strconv.Atoi("30")
 	if err != nil {
 		return err

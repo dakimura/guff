@@ -16,8 +16,11 @@ use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{self, type_with_name};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_types::arena::ObjectData;
-use guff_types::TypeId;
+use guff_types::api_predicates::api_implements;
+use guff_types::arena::{ObjectData, TypeData};
+use guff_types::basic::BasicKind;
+use guff_types::operand::OperandMode;
+use guff_types::{new_pointer, TypeId};
 
 use expreq::unparen;
 
@@ -90,6 +93,21 @@ fn build_exclude_set(opts: &Options) -> HashSet<String> {
             continue;
         }
         set.insert(sym.to_string());
+        // golangci configs often list `(pkg.Type).Method` while guff's
+        // `type_func_name` for some interface calls is `pkg.Method` or
+        // `(interface).Method`. Accept those aliases.
+        if let Some(rest) = sym.strip_prefix('(') {
+            if let Some((type_part, method)) = rest.split_once(").") {
+                if !method.is_empty() {
+                    set.insert(format!("(interface).{method}"));
+                    if let Some((pkg, _)) = type_part.rsplit_once('.') {
+                        if !pkg.is_empty() {
+                            set.insert(format!("{pkg}.{method}"));
+                        }
+                    }
+                }
+            }
+        }
     }
     set
 }
@@ -163,6 +181,19 @@ impl Visitor<'_, '_> {
     }
 
     fn call_display_name(&self, call: &CallExpr) -> String {
+        // Prefer `os.Stderr.Write` form so golangci EXC0001 / std-error-handling
+        // presets match (`(os.)?std(out|err)\..*`).
+        if let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) {
+            if let Expr::SelectorExpr(recv) = unparen(&sel.x) {
+                if let Expr::Ident(pkg) = unparen(&recv.x) {
+                    if pkg.name == "os"
+                        && (recv.sel.name == "Stderr" || recv.sel.name == "Stdout")
+                    {
+                        return format!("os.{}.{}", recv.sel.name, sel.sel.name);
+                    }
+                }
+            }
+        }
         if let Some(obj) = self.call_target_object(call) {
             if let Some(artifacts) = self.pass.pkg().type_artifacts.as_ref() {
                 let name = code::type_func_name(
@@ -385,6 +416,14 @@ impl Visitor<'_, '_> {
         let Some(tav) = info.types.get(&call.id) else {
             return vec![false];
         };
+        // Void calls are recorded as NoValue + Typ[Invalid] (guff-types
+        // recording). Invalid must not be treated as implementing `error`.
+        if matches!(
+            tav.mode,
+            OperandMode::NoValue | OperandMode::Invalid | OperandMode::Builtin | OperandMode::TypeExpr
+        ) {
+            return vec![false];
+        }
         result_type_errors(self.pass, tav.typ)
     }
 
@@ -429,8 +468,62 @@ fn result_type_errors(pass: &Pass<'_>, typ: TypeId) -> Vec<bool> {
     }
 }
 
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+/// True when `typ` is (or implements) the predeclared `error` interface.
+///
+/// kisielk/errcheck checks `types.Implements` / assignability to `error`, not
+/// only the named type `error` — gin's `*Error` must count.
 fn is_error_type(pass: &Pass<'_>, typ: TypeId) -> bool {
-    type_with_name(pass, typ, "error")
+    if type_with_name(pass, typ, "error") {
+        return true;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    // Typ[Invalid] is used for NoValue / broken types — never an error value.
+    if matches!(
+        artifacts.types.get(typ),
+        TypeData::Basic(b) if b.kind() == BasicKind::Invalid
+    ) {
+        return false;
+    }
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    if api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    ) {
+        return true;
+    }
+    let ptr = new_pointer(&mut types, typ);
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        ptr,
+        err,
+    )
 }
 
 pub fn analyzer() -> &'static Analyzer {

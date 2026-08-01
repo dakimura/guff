@@ -245,12 +245,121 @@ pub fn object_of(pass: &Pass<'_>, ident: &Ident) -> Option<ObjectId> {
     info.uses.get(&ident.id).copied()
 }
 
-/// Reports whether `expr` refers to `obj`.
+/// Reports whether `expr` refers to `obj` (honnef `code.RefersTo`).
+///
+/// Walks through parentheses, selectors, indexes, calls, unary/binary ops,
+/// composites, and function literals so cases like `append(x, …)` or a
+/// recursive `visit = func…{ visit(…) }` correctly suppress S1021.
 pub fn refers_to(pass: &Pass<'_>, expr: &Expr, obj: ObjectId) -> bool {
-    let Expr::Ident(ident) = expr else {
-        return false;
-    };
-    object_of(pass, ident) == Some(obj)
+    match expr {
+        Expr::Ident(ident) => object_of(pass, ident) == Some(obj),
+        Expr::ParenExpr(p) => refers_to(pass, &p.x, obj),
+        Expr::SelectorExpr(s) => refers_to(pass, &s.x, obj),
+        Expr::IndexExpr(i) => {
+            refers_to(pass, &i.x, obj) || refers_to(pass, &i.index, obj)
+        }
+        Expr::IndexListExpr(i) => {
+            refers_to(pass, &i.x, obj) || i.indices.iter().any(|e| refers_to(pass, e, obj))
+        }
+        Expr::SliceExpr(s) => {
+            refers_to(pass, &s.x, obj)
+                || s.low.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || s.high.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || s.max.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+        }
+        Expr::StarExpr(s) => refers_to(pass, &s.x, obj),
+        Expr::UnaryExpr(u) => refers_to(pass, &u.x, obj),
+        Expr::BinaryExpr(b) => refers_to(pass, &b.x, obj) || refers_to(pass, &b.y, obj),
+        Expr::CallExpr(c) => {
+            refers_to(pass, &c.fun, obj) || c.args.iter().any(|a| refers_to(pass, a, obj))
+        }
+        Expr::TypeAssertExpr(t) => refers_to(pass, &t.x, obj),
+        Expr::CompositeLit(cl) => {
+            cl.ty.as_ref().is_some_and(|t| refers_to(pass, t, obj))
+                || cl.elts.iter().any(|e| refers_to(pass, e, obj))
+        }
+        Expr::KeyValueExpr(kv) => {
+            refers_to(pass, &kv.key, obj) || refers_to(pass, &kv.value, obj)
+        }
+        Expr::FuncLit(fl) => fl.body.list.iter().any(|stmt| stmt_refers_to(pass, stmt, obj)),
+        _ => false,
+    }
+}
+
+fn stmt_refers_to(pass: &Pass<'_>, stmt: &guff::ast::Stmt, obj: ObjectId) -> bool {
+    use guff::ast::Stmt;
+    match stmt {
+        Stmt::ExprStmt(e) => refers_to(pass, &e.x, obj),
+        Stmt::AssignStmt(a) => {
+            a.lhs.iter().any(|e| refers_to(pass, e, obj))
+                || a.rhs.iter().any(|e| refers_to(pass, e, obj))
+        }
+        Stmt::ReturnStmt(r) => r.results.iter().any(|e| refers_to(pass, e, obj)),
+        Stmt::IfStmt(i) => {
+            i.init
+                .as_ref()
+                .is_some_and(|s| stmt_refers_to(pass, s, obj))
+                || refers_to(pass, &i.cond, obj)
+                || i.body.list.iter().any(|s| stmt_refers_to(pass, s, obj))
+                || i.else_
+                    .as_ref()
+                    .is_some_and(|s| stmt_refers_to(pass, s, obj))
+        }
+        Stmt::ForStmt(f) => {
+            f.init
+                .as_ref()
+                .is_some_and(|s| stmt_refers_to(pass, s, obj))
+                || f.cond.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || f.post
+                    .as_ref()
+                    .is_some_and(|s| stmt_refers_to(pass, s, obj))
+                || f.body.list.iter().any(|s| stmt_refers_to(pass, s, obj))
+        }
+        Stmt::RangeStmt(r) => {
+            r.key.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || r.value.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || refers_to(pass, &r.x, obj)
+                || r.body.list.iter().any(|s| stmt_refers_to(pass, s, obj))
+        }
+        Stmt::BlockStmt(b) => b.list.iter().any(|s| stmt_refers_to(pass, s, obj)),
+        Stmt::GoStmt(g) => call_refers_to(pass, &g.call, obj),
+        Stmt::DeferStmt(d) => call_refers_to(pass, &d.call, obj),
+        Stmt::SendStmt(s) => {
+            refers_to(pass, &s.chan_, obj) || refers_to(pass, &s.value, obj)
+        }
+        Stmt::IncDecStmt(i) => refers_to(pass, &i.x, obj),
+        Stmt::SwitchStmt(s) => {
+            s.init
+                .as_ref()
+                .is_some_and(|st| stmt_refers_to(pass, st, obj))
+                || s.tag.as_ref().is_some_and(|e| refers_to(pass, e, obj))
+                || s.body.list.iter().any(|st| stmt_refers_to(pass, st, obj))
+        }
+        Stmt::TypeSwitchStmt(s) => {
+            s.init
+                .as_ref()
+                .is_some_and(|st| stmt_refers_to(pass, st, obj))
+                || stmt_refers_to(pass, &s.assign, obj)
+                || s.body.list.iter().any(|st| stmt_refers_to(pass, st, obj))
+        }
+        Stmt::CaseClause(c) => {
+            c.list.iter().any(|e| refers_to(pass, e, obj))
+                || c.body.iter().any(|s| stmt_refers_to(pass, s, obj))
+        }
+        Stmt::CommClause(c) => {
+            c.comm
+                .as_ref()
+                .is_some_and(|s| stmt_refers_to(pass, s, obj))
+                || c.body.iter().any(|s| stmt_refers_to(pass, s, obj))
+        }
+        Stmt::SelectStmt(s) => s.body.list.iter().any(|st| stmt_refers_to(pass, st, obj)),
+        Stmt::LabeledStmt(l) => stmt_refers_to(pass, &l.stmt, obj),
+        _ => false,
+    }
+}
+
+fn call_refers_to(pass: &Pass<'_>, call: &guff::ast::CallExpr, obj: ObjectId) -> bool {
+    refers_to(pass, &call.fun, obj) || call.args.iter().any(|a| refers_to(pass, a, obj))
 }
 
 /// Reports whether two expressions denote the same non-dynamic value.

@@ -15,6 +15,7 @@
 //! - **G111** — `http.Dir("/")` directory traversal
 //! - **G112** — `http.Server` without `ReadHeaderTimeout`/`ReadTimeout` (Slowloris)
 //! - **G114** — `net/http` serve helpers without timeouts
+//! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`)
 //! - **G301** — poor directory permissions (`os.Mkdir` / `MkdirAll`; default ≤ `0o750`)
@@ -33,7 +34,7 @@
 //!
 //! DEFERRED: remaining rules (G113, G115–G118, G201–G202, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
-//! entropy / `#nosec` / `gosec:disable` / per-rule `config` map, G104 config allowlist /
+//! entropy / full `gosec:disable` block directives / per-rule `config` map, G104 config allowlist /
 //! audit mode, G107 local string-lit TryResolve, full G204 TryResolve / G102 Ident const
 //! resolution, `severity`/`confidence` filters, concurrency.
 
@@ -260,8 +261,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G203", "G204", "G301", "G302",
-    "G303", "G306", "G402", "G403",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G124", "G203", "G204", "G301",
+    "G302", "G303", "G306", "G402", "G403",
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -929,6 +930,61 @@ fn resolve_bool_const(expr: &Expr) -> Option<bool> {
     }
 }
 
+/// `pkg.Func(...)` where `pkg` is an import name (PkgName), not a method recv.
+fn is_pkg_sel_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return false;
+    };
+    let Expr::Ident(id) = sel.x.as_ref() else {
+        return false;
+    };
+    imported_pkg_path(pass, id).is_some()
+}
+
+/// True when an inline `#nosec` / `//nosec` / `gosec:disable` on the same line
+/// suppresses `rule` (e.g. `G112`). Bare `#nosec` suppresses all rules.
+fn nosec_suppresses(pass: &Pass<'_>, pos: u32, rule: &str) -> bool {
+    let position = pass.fset().position(guff::position::Pos(pos as i64));
+    let line = position.line;
+    for file in pass.files() {
+        for cg in &file.comments {
+            for c in &cg.list {
+                let cline = pass.fset().position(c.slash).line;
+                if cline != line {
+                    continue;
+                }
+                if comment_suppresses_nosec(&c.text, rule) {
+                    return true;
+                }
+            }
+        }
+    }
+    // Fallback when trailing comments were not retained on the AST File.
+    if !position.filename.is_empty() {
+        if let Ok(src) = std::fs::read_to_string(&position.filename) {
+            if line >= 1 {
+                if let Some(line_txt) = src.lines().nth((line as usize).saturating_sub(1)) {
+                    if comment_suppresses_nosec(line_txt, rule) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn comment_suppresses_nosec(text: &str, rule: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let has_nosec =
+        lower.contains("#nosec") || lower.contains("//nosec") || lower.contains("gosec:disable");
+    if !has_nosec {
+        return false;
+    }
+    // Bare `#nosec` / `#nosec G112` / `#nosec G112,G114`
+    !text.contains('G') || text.contains(rule)
+}
+
 fn check_g402_tls_field(
     field: &str,
     value: &Expr,
@@ -1052,6 +1108,181 @@ fn composite_has_timeout_field(lit: &CompositeLit) -> bool {
         }
     }
     false
+}
+
+fn is_http_cookie_type_name(name: &str) -> bool {
+    let bare = name.strip_prefix('*').unwrap_or(name);
+    bare == "net/http.Cookie"
+}
+
+const G124_WHAT: &str =
+    "http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute";
+
+/// Whether `expr` is `http.SameSiteLaxMode` or `http.SameSiteStrictMode`.
+fn is_safe_samesite(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::SelectorExpr(sel) = expr else {
+        return false;
+    };
+    if sel.sel.name != "SameSiteLaxMode" && sel.sel.name != "SameSiteStrictMode" {
+        return false;
+    }
+    matches!(
+        sel.x.as_ref(),
+        Expr::Ident(id) if imported_pkg_path(pass, id).as_deref() == Some("net/http")
+    )
+}
+
+fn is_http_cookie_type_expr(pass: &Pass<'_>, ty: &Expr) -> bool {
+    if let Some(name) = type_name_of(pass, ty) {
+        return is_http_cookie_type_name(&name);
+    }
+    match ty {
+        Expr::SelectorExpr(sel) => {
+            sel.sel.name == "Cookie"
+                && matches!(
+                    sel.x.as_ref(),
+                    Expr::Ident(id) if imported_pkg_path(pass, id).as_deref() == Some("net/http")
+                )
+        }
+        Expr::StarExpr(star) => is_http_cookie_type_expr(pass, &star.x),
+        _ => false,
+    }
+}
+
+#[derive(Default)]
+struct CookieSecurity {
+    secure_ok: bool,
+    http_only_ok: bool,
+    same_site_ok: bool,
+}
+
+impl CookieSecurity {
+    fn is_secure(&self) -> bool {
+        self.secure_ok && self.http_only_ok && self.same_site_ok
+    }
+
+    fn record_field(&mut self, pass: &Pass<'_>, field: &str, value: &Expr) {
+        match field {
+            "Secure" => {
+                self.secure_ok = resolve_bool_const(value) == Some(true);
+            }
+            "HttpOnly" => {
+                self.http_only_ok = resolve_bool_const(value) == Some(true);
+            }
+            "SameSite" => {
+                self.same_site_ok = is_safe_samesite(pass, value);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn cookie_security_from_composite(pass: &Pass<'_>, lit: &CompositeLit) -> CookieSecurity {
+    let mut sec = CookieSecurity::default();
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        let Expr::Ident(key) = kv.key.as_ref() else {
+            continue;
+        };
+        sec.record_field(pass, &key.name, &kv.value);
+    }
+    sec
+}
+
+fn check_g124_composite(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G124") {
+        return;
+    }
+    let Some(ty) = lit.ty.as_deref() else {
+        return;
+    };
+    if !is_http_cookie_type_expr(pass, ty) {
+        return;
+    }
+    if cookie_security_from_composite(pass, lit).is_secure() {
+        return;
+    }
+    pending.push((lit.lbrace.0 as u32, format!("G124: {G124_WHAT}")));
+}
+
+/// Track `*http.Cookie` parameters: SSA G124 flags params whose Secure /
+/// HttpOnly / SameSite are never set to safe values before use (gin
+/// `SetCookieData`).
+fn check_g124_cookie_params(
+    pass: &Pass<'_>,
+    enabled: &HashSet<&'static str>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if !enabled.contains("G124") {
+        return;
+    }
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::FuncDecl(func) = decl else {
+                continue;
+            };
+            let Some(body) = func.body.as_ref() else {
+                continue;
+            };
+            let Some(params) = func.ty.params.as_ref() else {
+                continue;
+            };
+            for field in &params.list {
+                let Some(ty) = field.ty.as_ref() else {
+                    continue;
+                };
+                // Prefer `*http.Cookie` (pointer receivers of the cookie value).
+                let Expr::StarExpr(star) = ty else {
+                    continue;
+                };
+                if !is_http_cookie_type_expr(pass, &star.x) {
+                    continue;
+                }
+                for name in &field.names {
+                    if name.name == "_" {
+                        continue;
+                    }
+                    let mut sec = CookieSecurity::default();
+                    collect_cookie_param_stores(pass, body, &name.name, &mut sec);
+                    if !sec.is_secure() {
+                        pending.push((name.name_pos.0 as u32, format!("G124: {G124_WHAT}")));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn collect_cookie_param_stores(
+    pass: &Pass<'_>,
+    body: &guff::ast::BlockStmt,
+    param: &str,
+    sec: &mut CookieSecurity,
+) {
+    preorder(NodeRef::BlockStmt(body), |n| {
+        if let NodeRef::AssignStmt(assign) = n {
+            for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
+                let Expr::SelectorExpr(sel) = lhs else {
+                    continue;
+                };
+                let Expr::Ident(base) = sel.x.as_ref() else {
+                    continue;
+                };
+                if base.name != param {
+                    continue;
+                }
+                sec.record_field(pass, &sel.sel.name, rhs);
+            }
+        }
+        true
+    });
 }
 
 fn check_g112_composite(
@@ -1424,6 +1655,11 @@ fn check_call(
             continue;
         }
         if rule.calls.iter().any(|(p, n)| *p == pkg && *n == name) {
+            // G114 is package-level `http.ListenAndServe` only — not
+            // `(*http.Server).ListenAndServe` (gin Run/RunTLS).
+            if rule.id == "G114" && !is_pkg_sel_call(pass, call) {
+                continue;
+            }
             pending.push((
                 call.pos().0 as u32,
                 format!("{}: {}", rule.id, rule.call_what),
@@ -1554,7 +1790,12 @@ fn check_call(
     }
 
     if enabled.contains("G107") && G107_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
-        if !call.args.is_empty() && g107_url_tainted(pass, &call.args[0]) {
+        // Only package-level `http.Get` / `http.Post` / … — not methods like
+        // `Header.Get` (gin context.go FP).
+        if is_pkg_sel_call(pass, call)
+            && !call.args.is_empty()
+            && g107_url_tainted(pass, &call.args[0])
+        {
             pending.push((call.pos().0 as u32, format!("G107: {G107_WHAT}")));
         }
     }
@@ -1620,6 +1861,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g101(pass, &enabled, &mut pending);
     check_g109(pass, &enabled, &mut pending);
     check_g110(pass, &enabled, &mut pending);
+    check_g124_cookie_params(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
@@ -1628,6 +1870,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 NodeRef::CompositeLit(lit) => {
                     check_g402_composite(pass, lit, &enabled, &mut pending);
                     check_g112_composite(pass, lit, &enabled, &mut pending);
+                    check_g124_composite(pass, lit, &enabled, &mut pending);
                 }
                 NodeRef::ExprStmt(stmt) => {
                     if let Expr::CallExpr(call) = &stmt.x {
@@ -1652,6 +1895,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     for (pos, msg) in pending {
+        let rule = msg.split(':').next().unwrap_or("");
+        if nosec_suppresses(pass, pos, rule) {
+            continue;
+        }
         pass.reportf(pos, &msg);
     }
     Ok(None)

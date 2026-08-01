@@ -60,7 +60,7 @@ impl std::fmt::Display for FormatError {
 impl std::error::Error for FormatError {}
 
 /// Options for [`Runner`].
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RunnerOptions {
     /// Print unified diffs instead of rewriting files.
     pub diff: bool,
@@ -74,6 +74,40 @@ pub struct RunnerOptions {
     pub color: bool,
     /// Persistent format-check cache (warm path). `None` → always run `-l`/format.
     pub format_cache: Option<crate::FormatCheckCache>,
+    /// Include `*_test.go` (golangci `run.tests`; default **true**).
+    ///
+    /// When false, test files are skipped during `guff run` format diagnostics
+    /// (matching `golangci-lint run` with `run.tests: false`).
+    pub include_tests: bool,
+    /// Extra build tags from `run.build-tags` (merged into [`guff_build::Context`]).
+    pub build_tags: Vec<String>,
+    /// When true, skip files whose `//go:build` lines are not satisfied
+    /// (golangci `run` format analyzers via package loader). `guff fmt` keeps
+    /// this false so inactive-tag files are still rewritten.
+    pub filter_build_constraints: bool,
+}
+
+impl Default for RunnerOptions {
+    fn default() -> Self {
+        Self {
+            diff: false,
+            stdin: false,
+            exclude_paths: Vec::new(),
+            generated: GeneratedMode::default(),
+            color: false,
+            format_cache: None,
+            include_tests: true,
+            build_tags: Vec::new(),
+            filter_build_constraints: false,
+        }
+    }
+}
+
+impl RunnerOptions {
+    /// Build context used to filter format-eligible files.
+    fn build_context(&self) -> guff_build::Context {
+        guff_build::DEFAULT.clone().with_build_tags(self.build_tags.iter())
+    }
 }
 
 /// A single formatting difference found by [`Runner::check`].
@@ -348,12 +382,18 @@ impl Runner {
         if self.is_excluded(path) {
             return Ok(Vec::new());
         }
+        if !self.opts.include_tests && is_test_go_path(path) {
+            return Ok(Vec::new());
+        }
         let input = fs::read(path).map_err(|e| FormatError::Io {
             formatter: "guff-fmt".into(),
             path: path_str.to_string(),
             source: e,
         })?;
         if is_generated(&input, self.opts.generated) {
+            return Ok(Vec::new());
+        }
+        if !self.file_matches_build(path, &input) {
             return Ok(Vec::new());
         }
         let output = self.meta.format(&path_str, &input)?;
@@ -416,6 +456,10 @@ impl Runner {
             stats.skipped += 1;
             return Ok(());
         }
+        if !self.opts.include_tests && is_test_go_path(path) {
+            stats.skipped += 1;
+            return Ok(());
+        }
 
         let input = fs::read(path).map_err(|e| FormatError::Io {
             formatter: "guff-fmt".into(),
@@ -425,6 +469,10 @@ impl Runner {
 
         // Skip generated files (`formatters.exclusions.generated`).
         if is_generated(&input, self.opts.generated) {
+            stats.skipped += 1;
+            return Ok(());
+        }
+        if !self.file_matches_build(path, &input) {
             stats.skipped += 1;
             return Ok(());
         }
@@ -476,6 +524,22 @@ impl Runner {
             .exclude_paths
             .iter()
             .any(|pat| path_matches(&s, pat))
+    }
+
+    /// Whether `path`/`src` satisfies `run.build-tags` (and GOOS/GOARCH).
+    fn file_matches_build(&self, path: &Path, src: &[u8]) -> bool {
+        if !self.opts.filter_build_constraints {
+            return true;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file.go");
+        match self.opts.build_context().match_file(name, src) {
+            Ok(ok) => ok,
+            // Malformed build lines: still format (golangci loads what it can).
+            Err(_) => true,
+        }
     }
 }
 
@@ -544,6 +608,9 @@ fn check_file_multi(
     if is_excluded_path(path, &opts.exclude_paths) {
         return Ok(Vec::new());
     }
+    if !opts.include_tests && is_test_go_path(path) {
+        return Ok(Vec::new());
+    }
     let path_str = path.to_string_lossy();
     let src = fs::read(path).map_err(|e| FormatError::Io {
         formatter: "guff-fmt".into(),
@@ -552,6 +619,18 @@ fn check_file_multi(
     })?;
     if is_generated(&src, opts.generated) {
         return Ok(Vec::new());
+    }
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file.go");
+    if opts.filter_build_constraints {
+        match opts.build_context().match_file(name, &src) {
+            Ok(false) => return Ok(Vec::new()),
+            Ok(true) => {}
+            // Malformed build lines: still format (golangci loads what it can).
+            Err(_) => {}
+        }
     }
 
     let ch = cache.map(|_| content_hash(&src));
@@ -819,6 +898,12 @@ fn is_go_path(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .is_some_and(|n| n.ends_with(".go") && !n.starts_with('.'))
+}
+
+fn is_test_go_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("_test.go"))
 }
 
 /// 1-based original-file line numbers where each change group begins.

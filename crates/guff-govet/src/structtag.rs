@@ -24,7 +24,7 @@ fn raw_tag_value(raw: &str) -> Option<String> {
 }
 
 fn unquote_tag(raw: &str) -> Option<String> {
-    if raw.len() < 2 || !raw.starts_with('"') {
+    if raw.len() < 2 || !raw.starts_with('"') || !raw.ends_with('"') {
         return None;
     }
     let inner = &raw[1..raw.len() - 1];
@@ -32,7 +32,13 @@ fn unquote_tag(raw: &str) -> Option<String> {
     let mut chars = inner.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\\' {
-            chars.next();
+            // Preserve the escaped character (Go `strconv.Unquote` / reflect tags).
+            // Dropping it turned `form:\"idx\"` into `form:idx` and false-flagged
+            // interpreted struct-tag string literals (gin binding_test.go).
+            let Some(escaped) = chars.next() else {
+                return None;
+            };
+            out.push(escaped);
             continue;
         }
         out.push(c);
@@ -169,7 +175,8 @@ fn check_field(
     }
     for key in ["json", "xml"] {
         if let Some(val) = tag_get(&tag, key) {
-            if val.is_empty() || val.starts_with(',') {
+            if val.is_empty() || val.starts_with(',') || val == "-" {
+                // Upstream go/analysis/passes/structtag skips `"-"` (ignore).
                 continue;
             }
             let tkey = TagKey {

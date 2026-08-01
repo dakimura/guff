@@ -19,6 +19,7 @@ path = "src/bin/guff-fmt-native.rs"
 similar = "2"
 rayon = "1.10"
 guff-ast = { path = "../guff-ast" }
+guff-build = { path = "../guff-build" }
 regex = "1"
 sha2 = "0.10"
 

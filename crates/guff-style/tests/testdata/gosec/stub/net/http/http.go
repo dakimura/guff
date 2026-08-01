@@ -18,6 +18,27 @@ type Server struct {
 	ReadHeaderTimeout time.Duration
 }
 
+type SameSite int
+
+const (
+	SameSiteDefaultMode SameSite = iota
+	SameSiteLaxMode
+	SameSiteStrictMode
+	SameSiteNoneMode
+)
+
+type Cookie struct {
+	Name     string
+	Value    string
+	Path     string
+	Domain   string
+	Secure   bool
+	HttpOnly bool
+	SameSite SameSite
+}
+
+func SetCookie(w ResponseWriter, cookie *Cookie) {}
+
 func (s *Server) ListenAndServe() error { return nil }
 
 type Response struct {

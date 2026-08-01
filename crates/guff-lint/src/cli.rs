@@ -381,6 +381,8 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         &args.patterns,
         args.fix,
         !args.no_cache,
+        loaded.tests,
+        build_tags.clone(),
     );
 
     let mut path_mode = loaded.path_mode;
@@ -446,6 +448,8 @@ fn build_formatter_run_config(
     patterns: &[String],
     fix: bool,
     use_format_cache: bool,
+    include_tests: bool,
+    build_tags: Vec<String>,
 ) -> Option<crate::FormatterRunConfig> {
     let enable: Vec<String> = formatters
         .enable
@@ -464,7 +468,20 @@ fn build_formatter_run_config(
 
     let mut gofumpt = formatters.gofumpt_options();
     if gofumpt.lang.is_none() {
-        gofumpt.lang = go_version.filter(|s| !s.is_empty()).map(str::to_string);
+        gofumpt.lang = go_version
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                // mvdan/gofumpt with unset -lang tracks the toolchain; empty
+                // must not become "go1" (disables 0o octal rewrite — gin
+                // `//nolint:gofumpt` on time.Date(…, 07, 01, …)).
+                let v = guff_runner::detect_go_version();
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v)
+                }
+            });
     }
     gofumpt.match_golangci = !std::env::var_os("GUFF_GOFUMPT_MATCH_GOLANGCI")
         .is_some_and(|v| v == "0");
@@ -482,6 +499,8 @@ fn build_formatter_run_config(
         fix,
         use_format_cache,
         cache_dir: None,
+        include_tests,
+        build_tags,
     })
 }
 
@@ -665,7 +684,14 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
 
     let mut gofumpt = formatters.gofumpt_options();
     if gofumpt.lang.is_none() {
-        gofumpt.lang = go_version.filter(|s| !s.is_empty());
+        gofumpt.lang = go_version.filter(|s| !s.is_empty()).or_else(|| {
+            let v = guff_runner::detect_go_version();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v)
+            }
+        });
     }
 
     let meta = MetaFormatter::new(
@@ -688,6 +714,7 @@ fn fmt_cmd(args: FmtArgs) -> Result<i32, RunError> {
             generated: formatters.exclusion_generated(),
             color,
             format_cache: None,
+            ..Default::default()
         },
     );
 

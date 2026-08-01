@@ -78,6 +78,7 @@ func bad() {
 
 	_, _ = http.Get(taintedURL)
 	_ = (&http.Server{Addr: ":8080"}).ListenAndServe()
+	_ = &http.Cookie{Name: "session", Value: "abc"}
 
 	bigValue, _ := strconv.Atoi("2147483648")
 	_ = int32(bigValue)

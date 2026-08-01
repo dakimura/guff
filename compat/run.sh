@@ -251,14 +251,14 @@ if [[ "$SMOKE" -eq 0 ]]; then
 fi
 
 # Rebuild per-target allowlists from full diffs when requested.
-# Merges with existing entries so flaky/extra keys from prior runs are kept.
+# Replaces existing entries with the current diff set (stale fixed keys drop out).
 if [[ "$UPDATE_ALLOWLIST" -eq 1 ]]; then
   python3 - "$NORMALIZE" "$MANIFEST" "$ALLOWLIST_DIR" <<'PY'
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(sys.argv[1]).parent))
-from normalize import diff_sets, issue_keys, load_issues, parse_allowlist
+from normalize import diff_sets, issue_keys, load_issues
 
 manifest = Path(sys.argv[2])
 allow_dir = Path(sys.argv[3])
@@ -271,14 +271,10 @@ header = """# Known finding-set diffs between guff and golangci-lint (R21).
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+
 """
 
-def load_existing(path: Path) -> set[str]:
-    if not path.is_file():
-        return set()
-    return {f"{e.target} {e.side} {e.key}" for e in parse_allowlist(path)}
-
-by_target: dict[str, set[str]] = {}
+by_target: dict[str, list[str]] = {}
 for raw in manifest.read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -290,33 +286,36 @@ for raw in manifest.read_text(encoding="utf-8").splitlines():
         issue_keys(load_issues(gcl_json), root),
         [],
     )
-    lines = set()
-    for k in r.guff_only:
-        lines.add(f"{name} guff-only {k}")
-    for k in r.golangci_only:
-        lines.add(f"{name} golangci-only {k}")
+    lines = [f"{name} guff-only {k}" for k in sorted(r.guff_only)]
+    lines += [f"{name} golangci-only {k}" for k in sorted(r.golangci_only)]
     by_target[name] = lines
 
 default_targets = {"fixture", "local"}
-default_lines: set[str] = set(load_existing(allow_dir / "_default.txt"))
+default_lines: list[str] = []
 for name, lines in sorted(by_target.items()):
     if name in default_targets:
-        default_lines |= lines
+        default_lines.extend(lines)
     else:
         path = allow_dir / f"{name}.txt"
-        merged = load_existing(path) | lines
-        path.write_text(
-            header + "\n" + "\n".join(sorted(merged)) + ("\n" if merged else ""),
-            encoding="utf-8",
-        )
-        print(f"Updated {path} ({len(merged)} entries)")
+        if lines:
+            path.write_text(
+                header + "\n".join(lines) + "\n",
+                encoding="utf-8",
+            )
+            print(f"Updated {path} ({len(lines)} entries)")
+        else:
+            if path.exists():
+                path.unlink()
+                print(f"Removed empty {path}")
+            else:
+                print(f"OK {name}: no diffs")
 
 default_path = allow_dir / "_default.txt"
+default_body = "\n".join(sorted(default_lines))
 default_path.write_text(
     header
-    + "\n# Fixture / local (standard.yml) known diffs.\n\n"
-    + "\n".join(sorted(default_lines))
-    + ("\n" if default_lines else ""),
+    + "# Fixture / local (standard.yml) known diffs.\n\n"
+    + (default_body + "\n" if default_body else ""),
     encoding="utf-8",
 )
 print(f"Updated {default_path} ({len(default_lines)} entries)")

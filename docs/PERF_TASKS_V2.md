@@ -3991,7 +3991,6 @@ warm では `compiled-files cache hit (2 pkgs)` → `stdlib-export 0.00s` → `l
 | `-j 1` | **byte 同一**（wall 9.0s ≫ `-jN` 3.15s。逆転なし） |
 | `--tests=false` / `GUFF_DEP_SOURCE=0` | **byte 同一** |
 | **helm**（cgo 3: `runtime/cgo` / `plugin` / client_golang） | **byte 同一**（3 findings） |
-| **mercari-globalone**（4056 pkgs、cgo 2: DataDog `go-libddwaf`） | **byte 同一**、`compiled-files 2 attached` |
 
 **その他:** peak RSS 3.70 GiB（baseline 帯 3.46〜3.7 GiB 内）。
 `cargo test -p guff-packages --lib` **46 passed**（新規 6 本）。
@@ -4160,7 +4159,7 @@ build constraints（`//go:build` / `+build` / `_GOOS_GOARCH` サフィックス�
 **等価性オラクル（これが工数の半分。先に作ること）:**
 `GUFF_NATIVE_LIST=verify` で**両方**走らせ、`DriverResponse` を正規化して diff し、
 不一致を stderr に出す（かつ `go list` の結果を採用する）。
-`regress/` のコーパス（prometheus / helm / mercari-globalone / `compat/`）で
+`regress/` のコーパス（prometheus / helm / `compat/`）で
 **diff 空**を確認してから既定オンにします。**findings ではなくパッケージグラフを直接比較すること** —
 findings は差を吸収してしまうので、オラクルとしては鈍すぎます。
 

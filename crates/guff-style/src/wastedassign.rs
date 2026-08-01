@@ -7,19 +7,21 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+use guff::ast::{AssignStmt, Expr, Stmt};
 use guff::node_mask;
-use guff::walk::NodeRef;
+use guff::walk::{expr_ref, preorder, NodeRef};
+use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, RunError, RunFn, Pass};
 use guff_ssa::function::Function;
-use guff_ssa::ids::{BlockId, InstrId};
+use guff_ssa::ids::{BlockId, FuncId, InstrId, PackageId};
 use guff_ssa::instr::{Alloc, InstrData};
 use guff_ssa::member::MemberData;
 use guff_ssa::mode::BuilderMode;
 use guff_ssa::program::Program;
 use guff_ssa::ssautil::build_package_for_analysis;
 use guff_ssa::value::Value;
-use guff_ssa::ids::{FuncId, PackageId};
+use guff_types::ObjectId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WastedReason {
@@ -81,6 +83,263 @@ fn collect_type_switch_lines(pass: &Pass<'_>) -> HashSet<i64> {
         }
     });
     lines
+}
+
+/// Locals assigned in `IfStmt.Init` and read in that same `IfStmt.Cond`
+/// (e.g. `if fi, err := os.Stat(dir); err == nil && fi.IsDir()`).
+///
+/// NaiveForm often keeps the Extract value in a register for the condition and
+/// never Loads the spilled local — SSA then looks like a wasted store.
+fn if_init_objs_used_in_cond(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    let Some(inspect) = pass.result_of::<inspect::InspectResult>(inspect::analyzer()) else {
+        return out;
+    };
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
+        let NodeRef::IfStmt(ifs) = n else {
+            return;
+        };
+        let Some(init) = ifs.init.as_deref() else {
+            return;
+        };
+        let assigned = objs_assigned_in_stmt(pass, init);
+        if assigned.is_empty() {
+            return;
+        }
+        let mut used = HashSet::new();
+        collect_used_objs(pass, &ifs.cond, &mut used);
+        for obj in assigned.intersection(&used) {
+            out.insert(*obj);
+        }
+    });
+    out
+}
+
+/// Source lines of body `i++`/`i--` on a surrounding `for`'s loop variable.
+///
+/// Those stores look unused under NaiveForm because the next read is the header
+/// (earlier in the file). Match by line — Store pos may sit on `tok_pos` or the
+/// Ident depending on builder mode.
+fn for_loop_var_body_incdec_lines(pass: &Pass<'_>) -> HashSet<i64> {
+    let mut out = HashSet::new();
+    let Some(inspect) = pass.result_of::<inspect::InspectResult>(inspect::analyzer()) else {
+        return out;
+    };
+    let fset = pass.fset();
+    inspect.preorder_typed(node_mask!(ForStmt), pass.files(), |n| {
+        let NodeRef::ForStmt(fs) = n else {
+            return;
+        };
+        let mut header = HashSet::new();
+        if let Some(init) = fs.init.as_deref() {
+            header.extend(objs_assigned_in_stmt(pass, init));
+            collect_used_objs_in_stmt(pass, init, &mut header);
+        }
+        if let Some(cond) = fs.cond.as_ref() {
+            collect_used_objs(pass, cond, &mut header);
+        }
+        if let Some(post) = fs.post.as_deref() {
+            header.extend(objs_assigned_in_stmt(pass, post));
+            collect_used_objs_in_stmt(pass, post, &mut header);
+            if let Stmt::IncDecStmt(inc) = post {
+                if let Expr::Ident(id) = unparen(&inc.x) {
+                    if let Some(obj) = object_of(pass, id) {
+                        header.insert(obj);
+                    }
+                }
+            }
+        }
+        if header.is_empty() {
+            return;
+        }
+        preorder(NodeRef::BlockStmt(&fs.body), |n| {
+            let NodeRef::IncDecStmt(inc) = n else {
+                return true;
+            };
+            let Expr::Ident(id) = unparen(&inc.x) else {
+                return true;
+            };
+            if let Some(obj) = object_of(pass, id) {
+                if header.contains(&obj) {
+                    out.insert(fset.as_ref().position(inc.tok_pos).line);
+                }
+            }
+            true
+        });
+    });
+    out
+}
+
+fn unparen(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::ParenExpr(p) => unparen(&p.x),
+        other => other,
+    }
+}
+
+fn collect_used_objs_in_stmt(pass: &Pass<'_>, stmt: &Stmt, out: &mut HashSet<ObjectId>) {
+    preorder(match stmt {
+        Stmt::AssignStmt(a) => NodeRef::AssignStmt(a),
+        Stmt::IncDecStmt(i) => NodeRef::IncDecStmt(i),
+        Stmt::ExprStmt(e) => NodeRef::ExprStmt(e),
+        Stmt::DeclStmt(d) => NodeRef::DeclStmt(d),
+        _ => return,
+    }, |n| {
+        if let NodeRef::Ident(id) = n {
+            if let Some(obj) = object_of(pass, id) {
+                out.insert(obj);
+            }
+        }
+        true
+    });
+}
+
+fn objs_assigned_in_stmt(pass: &Pass<'_>, stmt: &Stmt) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    match stmt {
+        Stmt::AssignStmt(AssignStmt { lhs, .. }) => {
+            for e in lhs {
+                if let Expr::Ident(id) = e {
+                    if let Some(obj) = object_of(pass, id) {
+                        out.insert(obj);
+                    }
+                }
+            }
+        }
+        Stmt::IncDecStmt(inc) => {
+            if let Expr::Ident(id) = unparen(&inc.x) {
+                if let Some(obj) = object_of(pass, id) {
+                    out.insert(obj);
+                }
+            }
+        }
+        Stmt::DeclStmt(d) => {
+            if let guff::ast::Decl::GenDecl(gd) = &d.decl {
+                for spec in &gd.specs {
+                    if let guff::ast::Spec::ValueSpec(vs) = spec {
+                        for name in &vs.names {
+                            if let Some(obj) = object_of(pass, name) {
+                                out.insert(obj);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+fn collect_used_objs(pass: &Pass<'_>, expr: &Expr, out: &mut HashSet<ObjectId>) {
+    preorder(expr_ref(expr), |n| {
+        if let NodeRef::Ident(id) = n {
+            if let Some(obj) = object_of(pass, id) {
+                out.insert(obj);
+            }
+        }
+        true
+    });
+}
+
+/// Whether `obj` is read after `after_pos` before being overwritten.
+///
+/// Assignment LHS of `=` is a use in `Info.Uses`, not a `Defs` entry — treat
+/// those (and IncDec) as redefinitions so `b = 1; b = 2; use(b)` stays wasted.
+fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let mut next_use: Option<u32> = None;
+    let mut next_def: Option<u32> = None;
+
+    let note_def = |pos: u32, next_def: &mut Option<u32>| {
+        if pos > after_pos {
+            *next_def = Some(next_def.map_or(pos, |d| d.min(pos)));
+        }
+    };
+    let note_use = |pos: u32, next_use: &mut Option<u32>| {
+        if pos > after_pos {
+            *next_use = Some(next_use.map_or(pos, |u| u.min(pos)));
+        }
+    };
+
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(a) => {
+                    for lhs in &a.lhs {
+                        if let Expr::Ident(id) = lhs {
+                            if object_of(pass, id) == Some(obj) {
+                                note_def(id.name_pos.0 as u32, &mut next_def);
+                            }
+                        }
+                    }
+                }
+                NodeRef::IncDecStmt(inc) => {
+                    if let Expr::Ident(id) = unparen(&inc.x) {
+                        if object_of(pass, id) == Some(obj) {
+                            let pos = id.name_pos.0 as u32;
+                            // IncDec both reads the old value and defines a new one.
+                            note_use(pos, &mut next_use);
+                            note_def(pos, &mut next_def);
+                        }
+                    }
+                }
+                NodeRef::Ident(id) => {
+                    let pos = id.name_pos.0 as u32;
+                    if pos <= after_pos || object_of(pass, id) != Some(obj) {
+                        return true;
+                    }
+                    if info.defs.get(&id.id).and_then(|d| *d) == Some(obj) {
+                        note_def(pos, &mut next_def);
+                    } else if info.uses.contains_key(&id.id) {
+                        note_use(pos, &mut next_use);
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    match (next_use, next_def) {
+        (Some(u), Some(d)) => u < d,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+/// Resolve the `ObjectId` for a NaiveForm local Alloc named `comment` near `pos`.
+fn local_obj_for_alloc(pass: &Pass<'_>, comment: &str, near_pos: u32) -> Option<ObjectId> {
+    if comment.is_empty() || comment == "." {
+        return None;
+    }
+    let info = pass.types_info()?;
+    let mut best: Option<(u32, ObjectId)> = None;
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            let NodeRef::Ident(id) = n else {
+                return true;
+            };
+            if id.name != comment {
+                return true;
+            }
+            let pos = id.name_pos.0 as u32;
+            let Some(Some(obj)) = info.defs.get(&id.id) else {
+                return true;
+            };
+            // Prefer the def at/before the store; among those, the closest.
+            if pos <= near_pos {
+                best = Some(match best {
+                    Some((bp, _)) if pos > bp => (pos, *obj),
+                    Some(other) => other,
+                    None => (pos, *obj),
+                });
+            }
+            true
+        });
+    }
+    best.map(|(_, o)| o)
 }
 
 fn op_in_locals(locals: &[InstrId], op: Value) -> bool {
@@ -175,9 +434,12 @@ fn is_next_operation_to_op_is_store(
 fn check_func(
     func: &Function,
     type_switch_lines: &HashSet<i64>,
-    fset: &guff::position::FileSet,
+    if_init_used: &HashSet<ObjectId>,
+    loop_incdec_lines: &HashSet<i64>,
+    pass: &Pass<'_>,
     out: &mut Vec<(u32, String)>,
 ) {
+    let fset = pass.fset().as_ref();
     for (bid, block) in func.live_blocks() {
         for &iid in &block.instrs {
             let InstrData::Store(_) = func.instrs.get(iid) else {
@@ -212,6 +474,9 @@ fn check_func(
             if type_switch_lines.contains(&line) {
                 continue;
             }
+            if loop_incdec_lines.contains(&line) {
+                continue;
+            }
 
             let Value::Instr(alloc_id) = op else {
                 continue;
@@ -219,8 +484,19 @@ fn check_func(
             let InstrData::Alloc(Alloc { comment, .. }) = func.instrs.get(alloc_id) else {
                 continue;
             };
+
+            let after = pos.0 as u32;
+            // AST fallback: NaiveForm often never Loads locals used via register-
+            // lifted Extracts (if-init cond, type-assert receivers, etc.).
+            if let Some(obj) = local_obj_for_alloc(pass, comment, after) {
+                if if_init_used.contains(&obj) || ast_value_is_read_before_redef(pass, obj, after)
+                {
+                    continue;
+                }
+            }
+
             if let Some(msg) = format_reason(reason, comment) {
-                out.push((pos.0 as u32, msg));
+                out.push((after, msg));
             }
         }
     }
@@ -245,11 +521,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     .map_err(|e| format!("wastedassign: {e}"))?;
 
     let type_switch_lines = collect_type_switch_lines(pass);
+    let if_init_used = if_init_objs_used_in_cond(pass);
+    let loop_incdec_lines = for_loop_var_body_incdec_lines(pass);
     let mut reports = Vec::new();
     let src_funcs = collect_src_funcs(&built.prog, built.pkg);
     for fid in src_funcs {
         let func = built.prog.functions.get(fid);
-        check_func(func, &type_switch_lines, pass.fset().as_ref(), &mut reports);
+        check_func(
+            func,
+            &type_switch_lines,
+            &if_init_used,
+            &loop_incdec_lines,
+            pass,
+            &mut reports,
+        );
     }
 
     for (pos, message) in reports {

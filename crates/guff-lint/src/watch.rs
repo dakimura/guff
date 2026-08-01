@@ -21,8 +21,8 @@ use guff_runner::IssueCache;
 
 use crate::format::print_issues_with;
 use crate::{
-    prepare_linter_run, run_format_checks, run_linters_on_graph, LintOptions, PreparedLint,
-    RunError,
+    prepare_linter_run, run_format_checks, run_format_checks_raw, run_linters_on_graph,
+    LintOptions, PreparedLint, RunError,
 };
 
 /// Exit codes / knobs for tests and scripts.
@@ -136,22 +136,28 @@ fn run_one_pass(
         .map_err(RunError::Runner)?;
 
     let tf = Instant::now();
-    let (mut issues, _) = result.issues_and_fix(false)?;
+    let mut issues = result.unfiltered_issues();
     if timing {
-        eprintln!("guff: phase issues+filter {:.2}s", tf.elapsed().as_secs_f64());
+        eprintln!("guff: phase issues+filter (pre-format) {:.2}s", tf.elapsed().as_secs_f64());
     }
-    // Drop LintResult (packages + action graph) before format so peak RSS
-    // during watch idle / format does not stack on type artifacts.
-    drop(result);
 
     if let Some(fmt_cfg) = &opts.formatters {
         let tfmt = Instant::now();
-        let fmt_issues = run_format_checks(fmt_cfg, &opts.filter)?;
+        let fmt_issues = if fmt_cfg.fix {
+            run_format_checks(fmt_cfg, &opts.filter)?
+        } else {
+            run_format_checks_raw(fmt_cfg)?
+        };
         if timing {
             eprintln!("guff: phase format_checks {:.2}s", tfmt.elapsed().as_secs_f64());
         }
         issues.extend(fmt_issues);
     }
+
+    let issues = result.filter_issues(issues);
+    // Drop LintResult (packages + action graph) after filter so peak RSS
+    // during watch idle does not stack on type artifacts.
+    drop(result);
 
     let tp = Instant::now();
     let mut out = io::stdout();

@@ -71,7 +71,10 @@ pub(crate) fn apply_file(fset: &Arc<FileSet>, file: &mut File, mut opts: Options
     simplify(file);
 
     if opts.lang_version.is_empty() {
-        opts.lang_version = "go1".into();
+        // Unset -lang: use a modern baseline so version-gated rules (0o octals
+        // since go1.13) still apply. Callers should prefer an explicit version
+        // from `run.go` / toolchain detection.
+        opts.lang_version = "go1.22".into();
     } else {
         let lang = lang_version(&opts.lang_version);
         if lang.is_empty() {

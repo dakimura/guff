@@ -16,3 +16,29 @@ func okMapPtr(a *M) {
 	}
 	(*a)["k"] = 1
 }
+
+// Multiple nil-checks on the same pointer must not overwrite each other
+// (caddy respHeaderOps: early `!= nil` use, later `== nil` return).
+type H struct{ Deferred bool }
+
+func okMultiCheck(p *H) {
+	if p != nil {
+		p.Deferred = true
+	}
+	if p == nil {
+		return
+	}
+	p.Deferred = false
+}
+
+// Short-circuit `&&` nil guards (caddy acmeIssuer.Challenges.DNS).
+type DNS struct{}
+type Challenges struct{ DNS *DNS }
+type Issuer struct{ Challenges *Challenges }
+
+func okShortCircuit(a *Issuer) *DNS {
+	if a != nil && a.Challenges != nil && a.Challenges.DNS != nil {
+		return a.Challenges.DNS
+	}
+	return nil
+}

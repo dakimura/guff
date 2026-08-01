@@ -2,10 +2,10 @@
 //!
 //! Port of `github.com/gordonklaus/ineffassign/pkg/ineffassign` control-flow graph.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use guff::ast::{
-    AssignStmt, BlockStmt, BranchStmt, Decl, Expr, ForStmt, FuncType, GenDecl, Ident, IfStmt,
+    AssignStmt, BlockStmt, BranchStmt, Decl, Expr, File, ForStmt, FuncType, GenDecl, Ident, IfStmt,
     IncDecStmt, RangeStmt, ReturnStmt, SelectStmt, Spec, Stmt, SwitchStmt, TypeSwitchStmt, ValueSpec,
 };
 use guff::token::Token;
@@ -15,9 +15,56 @@ pub fn analyze_file(
     decls: &[Decl],
     defs: &HashMap<u32, Option<ObjectId>>,
     uses: &HashMap<u32, ObjectId>,
+    package_escape_objs: &HashSet<ObjectId>,
 ) -> Vec<(u32, String)> {
-    let (roots, blocks, vars) = CfgBuilder::build_file(decls, defs, uses);
+    let (roots, blocks, vars) = CfgBuilder::build_file(decls, defs, uses, package_escape_objs);
     CfgChecker::check(&roots, &blocks, &vars)
+}
+
+/// Collect package-level `var` objects across all files in a package.
+///
+/// Upstream ineffassign never flags these from a single function CFG because
+/// they escape across functions/files; per-file analysis alone misses decls in
+/// sibling files (gin `codec/json.API`).
+pub fn package_level_var_objs(
+    files: &[File],
+    defs: &HashMap<u32, Option<ObjectId>>,
+    uses: &HashMap<u32, ObjectId>,
+) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    for file in files {
+        for decl in &file.decls {
+            let Decl::GenDecl(GenDecl {
+                tok: Some(Token::VAR),
+                specs,
+                ..
+            }) = decl
+            else {
+                continue;
+            };
+            for spec in specs {
+                let Spec::ValueSpec(ValueSpec { names, .. }) = spec else {
+                    continue;
+                };
+                for name in names {
+                    if let Some(obj) = resolve_obj_maps(defs, uses, name) {
+                        out.insert(obj);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn resolve_obj_maps(
+    defs: &HashMap<u32, Option<ObjectId>>,
+    uses: &HashMap<u32, ObjectId>,
+    id: &Ident,
+) -> Option<ObjectId> {
+    uses.get(&id.id)
+        .copied()
+        .or_else(|| defs.get(&id.id).and_then(|o| *o))
 }
 
 #[derive(Default)]
@@ -75,13 +122,18 @@ impl CfgBuilder {
         decls: &[Decl],
         defs: &HashMap<u32, Option<ObjectId>>,
         uses: &HashMap<u32, ObjectId>,
+        package_escape_objs: &HashSet<ObjectId>,
     ) -> (Vec<BlockId>, Vec<CfgBlock>, HashMap<ObjectId, VarInfo>) {
         let mut b = Self::default();
         b.defs = defs.clone();
         b.uses = uses.clone();
         // Package-level variables escape across functions (e.g. assigned in
         // init, read elsewhere). Upstream ineffassign never flags them as
-        // ineffectual from a single function's CFG.
+        // ineffectual from a single function's CFG. Include decls from sibling
+        // files via `package_escape_objs`.
+        for obj in package_escape_objs {
+            b.vars.entry(*obj).or_default().escapes = true;
+        }
         for decl in decls {
             if let Decl::GenDecl(GenDecl {
                 tok: Some(Token::VAR),

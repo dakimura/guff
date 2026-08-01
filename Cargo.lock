@@ -540,6 +540,7 @@ name = "guff-fmt"
 version = "0.1.0"
 dependencies = [
  "guff-ast",
+ "guff-build",
  "rayon",
  "regex",
  "sha2",
@@ -769,6 +770,7 @@ dependencies = [
  "guff-ssa",
  "guff-types",
  "regex",
+ "regex-syntax",
  "unicode-general-category",
  "url",
 ]

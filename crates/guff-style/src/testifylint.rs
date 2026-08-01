@@ -446,6 +446,18 @@ fn is_string_or_bytes(pass: &Pass<'_>, expr: &Expr) -> bool {
     has_string_type(pass, expr) || has_bytes_type(pass, expr)
 }
 
+/// Like [`is_string_or_bytes`], but when the expression has no type info yet
+/// (ill-typed packages), do not reject — let name/literal heuristics decide.
+///
+/// golangci 2.12's testifylint still flags `MIMEJSON`-style idents under gin
+/// even when guff's type graph is incomplete for that package.
+fn is_string_or_bytes_or_unknown(pass: &Pass<'_>, expr: &Expr) -> bool {
+    if type_of(pass, expr).is_none() {
+        return true;
+    }
+    is_string_or_bytes(pass, expr)
+}
+
 fn is_ident_with_name(expr: &Expr, name: &str) -> bool {
     matches!(unparen(expr), Expr::Ident(Ident { name: n, .. }) if n == name)
 }
@@ -543,7 +555,7 @@ fn is_json_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
     if let Expr::Ident(id) = unparen(expr) {
         if json_ident_re().is_match(&id.name)
             && !has_word_matching(&id.name, json_negative_word_re())
-            && is_string_or_bytes(pass, expr)
+            && is_string_or_bytes_or_unknown(pass, expr)
         {
             return true;
         }
@@ -560,7 +572,7 @@ fn is_yaml_style_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Expr::Ident(id) = unparen(expr) else {
         return false;
     };
-    is_string_or_bytes(pass, expr) && has_word_matching(&id.name, yaml_word_re())
+    is_string_or_bytes_or_unknown(pass, expr) && has_word_matching(&id.name, yaml_word_re())
 }
 
 fn encoded_unwrap<'a>(pass: &Pass<'_>, expr: &'a Expr) -> (&'a Expr, bool) {
@@ -940,7 +952,8 @@ fn is_unsigned(pass: &Pass<'_>, expr: &Expr) -> bool {
     )
 }
 
-fn is_typed_int_number(expr: &Expr, go_types: &[&str]) -> bool {
+/// `int64(v)` / `uint32(v)` etc. — matches upstream `isTypedIntNumber`.
+fn is_typed_int_number(expr: &Expr, v: i64, go_types: &[&str]) -> bool {
     let Expr::CallExpr(ce) = unparen(expr) else {
         return false;
     };
@@ -950,7 +963,7 @@ fn is_typed_int_number(expr: &Expr, go_types: &[&str]) -> bool {
     let Expr::Ident(id) = unparen(&ce.fun) else {
         return false;
     };
-    go_types.contains(&id.name.as_str()) && is_int_basic_lit(&ce.args[0]).is_some()
+    go_types.contains(&id.name.as_str()) && is_int_basic_lit(&ce.args[0]) == Some(v)
 }
 
 const SIGNED_INT_TYPES: &[&str] = &["int", "int8", "int16", "int32", "int64"];
@@ -958,8 +971,8 @@ const UNSIGNED_INT_TYPES: &[&str] = &["uint", "uint8", "uint16", "uint32", "uint
 
 fn is_any_zero(expr: &Expr) -> bool {
     is_zero(expr)
-        || is_typed_int_number(expr, SIGNED_INT_TYPES)
-        || is_typed_int_number(expr, UNSIGNED_INT_TYPES)
+        || is_typed_int_number(expr, 0, SIGNED_INT_TYPES)
+        || is_typed_int_number(expr, 0, UNSIGNED_INT_TYPES)
 }
 
 fn is_not_any_zero(expr: &Expr) -> bool {
@@ -967,7 +980,7 @@ fn is_not_any_zero(expr: &Expr) -> bool {
 }
 
 fn is_zero_or_signed_zero(expr: &Expr) -> bool {
-    is_zero(expr) || is_typed_int_number(expr, SIGNED_INT_TYPES)
+    is_zero(expr) || is_typed_int_number(expr, 0, SIGNED_INT_TYPES)
 }
 
 fn is_signed_not_zero(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -1852,7 +1865,7 @@ fn check_encoded_compare(pass: &Pass<'_>, call: &CallMeta<'_>, pending: &mut Vec
     }
     let (a, a_explicit_json) = encoded_unwrap(pass, &call.args[0]);
     let (b, b_explicit_json) = encoded_unwrap(pass, &call.args[1]);
-    if !is_string_or_bytes(pass, a) || !is_string_or_bytes(pass, b) {
+    if !is_string_or_bytes_or_unknown(pass, a) || !is_string_or_bytes_or_unknown(pass, b) {
         return;
     }
     let proposed = if a_explicit_json

@@ -18,6 +18,14 @@ use guff_types::ObjectId;
 
 use crate::render::render_expr;
 
+fn unparen_expr(expr: &Expr) -> &Expr {
+    let mut cur = expr;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
 fn has_use(func: &guff_ssa::function::Function, v: Value) -> bool {
     let mut seen = HashSet::new();
     has_use_rec(func, v, &mut seen)
@@ -147,6 +155,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     return;
                 }
                 if !has_use(func, v) {
+                    // Body `i--` / `i++` that feeds the next loop iteration often
+                    // lacks SSA uses under hybrid IR; AST still sees the read.
+                    if let Expr::Ident(id) = unparen_expr(&inc.x) {
+                        if let Some(obj) = object_of(pass, id) {
+                            if ast_value_is_read_before_redef(pass, obj, inc.tok_pos.0 as u32) {
+                                return;
+                            }
+                        }
+                    }
                     pending.push((
                         inc.tok_pos.0 as u32,
                         format!("this value of {} is never used", render_expr(&inc.x)),

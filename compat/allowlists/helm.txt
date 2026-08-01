@@ -6,3 +6,4 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
+helm guff-only pkg/action/upgrade_test.go:417:testifylint:contains: invalid usage of req.Contains, use req.Subset for multi elements assertion
