@@ -81,7 +81,7 @@ cargo run -p guff-lint -- run ./...
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh \
-  | sh -s -- -b ~/.local/bin v0.1.0
+  | sh -s -- -b ~/.local/bin v0.2.0
 ```
 
 Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
@@ -136,16 +136,16 @@ From the Go module root (mount the repo, set workdir):
 # Lint current module (reads .golangci.yml / .guff.yml if present)
 docker run --rm \
   -v "$PWD":/app -w /app \
-  ghcr.io/dakimura/guff:0.1.0 \
+  ghcr.io/dakimura/guff:0.2.0 \
   run ./...
 
 # Explicit config / faster preset
-docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.1.0 \
+docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.2.0 \
   run -c .golangci.yml --preset fast ./...
 ```
 
 `ENTRYPOINT` is `guff` — pass only the subcommand and args (`run …`, `linters`, `fmt …`).  
-Tags: `0.1.0`, `v0.1.0`, `0.1`, `0`, `latest` (`linux/amd64` + `linux/arm64`).
+Tags: `0.2.0`, `v0.2.0`, `0.2`, `0`, `latest` (`linux/amd64` + `linux/arm64`).
 
 Optional: cache Go modules / build cache across runs:
 
@@ -155,7 +155,7 @@ docker run --rm \
   -v "$(go env GOMODCACHE)":/go/pkg/mod \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.1.0 run ./...
+  ghcr.io/dakimura/guff:0.2.0 run ./...
 ```
 
 #### CI: GitHub Actions (recommended)
@@ -180,7 +180,7 @@ jobs:
           go-version: stable
 
       - name: guff
-        uses: dakimura/guff@v0.1.0
+        uses: dakimura/guff@v0.2.0
         with:
           # github-actions format annotates PR files in the Checks UI
           args: run --out-format=github-actions ./...
@@ -202,7 +202,7 @@ Useful inputs: `args` (default `run ./...`), `version` (default: the Action’s 
       -v "$(go env GOMODCACHE)":/go/pkg/mod \
       -v "$(go env GOCACHE)":/root/.cache/go-build \
       -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
-      ghcr.io/dakimura/guff:0.1.0 \
+      ghcr.io/dakimura/guff:0.2.0 \
       run --out-format=github-actions ./...
 ```
 

@@ -4,7 +4,7 @@ use std::process::Command;
 
 use guff_lint::{
     format_linters_listing, guff_version, parse_go_duration, partition_linters, version_banner,
-    LinterDefault, LinterSelection, DEFAULT_TIMEOUT,
+    LinterDefault, LinterSelection, DEFAULT_TIMEOUT, GOLANGCI_LINT_COMPAT,
 };
 
 fn bin() -> &'static str {
@@ -15,7 +15,9 @@ fn bin() -> &'static str {
 fn version_banner_contains_crate_version() {
     let banner = version_banner();
     assert!(banner.contains(guff_version()));
+    assert!(banner.contains(GOLANGCI_LINT_COMPAT));
     assert!(banner.starts_with("guff has version "));
+    assert!(banner.contains("golangci-lint compat"));
 }
 
 #[test]
@@ -31,6 +33,7 @@ fn cli_version_prints_banner() {
         "unexpected stdout: {stdout}"
     );
     assert!(stdout.contains(guff_version()));
+    assert!(stdout.contains(GOLANGCI_LINT_COMPAT));
 }
 
 #[test]

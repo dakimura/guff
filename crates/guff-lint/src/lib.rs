@@ -60,14 +60,23 @@ pub use settings::{
     StaticcheckSettings, VarnamelenSettings, WrapcheckSettings,
 };
 
-/// Package version (`CARGO_PKG_VERSION`), for `guff version`.
+/// golangci-lint version this release targets for config / finding-set parity.
+///
+/// guff uses its own SemVer; bump this when the compatibility pin moves.
+pub const GOLANGCI_LINT_COMPAT: &str = "2.12.2";
+
+/// Package version (`CARGO_PKG_VERSION`), for `guff version --short`.
 pub fn guff_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Default one-line version banner, matching golangci-lint's style.
+/// Default one-line version banner, matching golangci-lint's style plus compat pin.
 pub fn version_banner() -> String {
-    format!("guff has version {}", guff_version())
+    format!(
+        "guff has version {} (golangci-lint compat {})",
+        guff_version(),
+        GOLANGCI_LINT_COMPAT
+    )
 }
 
 /// Exit code when `--timeout` / `run.timeout` is exceeded (golangci-lint uses 4).

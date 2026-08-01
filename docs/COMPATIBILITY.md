@@ -4,6 +4,7 @@
 > 「どの linter・どの設定キー・どの出力フォーマットが対応済/部分/未対応か」を一覧にして、
 > guff が「golangci-lint 互換の高速 linter」を名乗る根拠を可視化します。
 >
+> - **互換ピン**: golangci-lint **2.12.2**（`guff version` / `GOLANGCI_LINT_COMPAT`）。guff 自体の SemVer とは独立。
 > - 対象: **golangci-lint v2**（linter 一覧の出典: <https://golangci-lint.run/docs/linters/> / キャプチャ 2026-07-17）。
 > - 実装の一次情報は各クレートのコードと [`DEVELOPMENT.md`](DEVELOPMENT.md) §3。細かな DEFERRED は
 >   各 analyzer のコード内 `// DEFERRED:` を参照。
