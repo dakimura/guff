@@ -17,6 +17,7 @@ pub struct Checker<'a> {
     failures: Vec<Failure>,
     gen_decl_missing: HashMap<usize, bool>,
     skip_file: bool,
+    skip_stutter: bool,
 }
 
 impl<'a> Checker<'a> {
@@ -24,11 +25,14 @@ impl<'a> Checker<'a> {
         if !is_importable_package(&pass.pkg().name) {
             return None;
         }
+        let skip_stutter =
+            crate::config::rule_has_string_option(pass, "exported", "disableStutteringCheck");
         Some(Self {
             pass,
             failures: Vec::new(),
             gen_decl_missing: HashMap::new(),
             skip_file: false,
+            skip_stutter,
         })
     }
 
@@ -61,7 +65,13 @@ impl<'a> Checker<'a> {
             .first()
             .map(|f| f.name.name.as_str())
             .unwrap_or("");
-        check_file(file, pkg, &mut self.gen_decl_missing, &mut self.failures);
+        check_file(
+            file,
+            pkg,
+            self.skip_stutter,
+            &mut self.gen_decl_missing,
+            &mut self.failures,
+        );
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -88,6 +98,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 fn check_file(
     file: &File,
     pkg: &str,
+    skip_stutter: bool,
     gen_decl_missing: &mut HashMap<usize, bool>,
     failures: &mut Vec<Failure>,
 ) {
@@ -102,7 +113,15 @@ fn check_file(
                     match spec {
                         Spec::TypeSpec(ts) => {
                             lint_type_doc(ts, g, failures);
-                            check_repetitive(pkg, &ts.name.name, "type", ts.name.name_pos.0, failures);
+                            if !skip_stutter {
+                                check_repetitive(
+                                    pkg,
+                                    &ts.name.name,
+                                    "type",
+                                    ts.name.name_pos.0,
+                                    failures,
+                                );
+                            }
                         }
                         Spec::ValueSpec(vs) => {
                             if let Some(gd) = last_gen {
@@ -115,7 +134,7 @@ fn check_file(
             }
             Decl::FuncDecl(f) => {
                 lint_func_doc(f, failures);
-                if f.recv.is_none() {
+                if f.recv.is_none() && !skip_stutter {
                     check_repetitive(pkg, &f.name.name, "func", f.name.name_pos.0, failures);
                 }
             }

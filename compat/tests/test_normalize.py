@@ -94,6 +94,36 @@ class NormalizeTests(unittest.TestCase):
             "error parsing regexp: {header} ^",
         )
 
+    def test_related_information_excluded_from_keys(self):
+        root = "/work/mod"
+        issues = [
+            {
+                "FromLinter": "staticcheck",
+                "Text": "possible nil pointer dereference",
+                "Pos": {
+                    "Filename": "/work/mod/a.go",
+                    "Line": 14,
+                    "Column": 1,
+                    "Offset": 0,
+                },
+            },
+            {
+                "FromLinter": "staticcheck",
+                "Text": "SA5011(related information): this check suggests that the pointer can be nil",
+                "Pos": {
+                    "Filename": "/work/mod/a.go",
+                    "Line": 11,
+                    "Column": 1,
+                    "Offset": 0,
+                },
+            },
+        ]
+        keys = issue_keys(issues, root)
+        self.assertEqual(
+            keys,
+            {"a.go:14:staticcheck:possible nil pointer dereference"},
+        )
+
 
 class DiffTests(unittest.TestCase):
     def test_matching_keys(self):

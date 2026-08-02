@@ -721,9 +721,10 @@ fn lostcancel_flags_discarded_cancel() {
         &[("context", &dir.join("stub/context/context.go"))],
     );
     let messages = support::run_analyzer(lostcancel_analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("cancel")));
-}
+    assert!(
+        messages.iter().filter(|m| m.contains("discarded")).count() >= 2,
+        "expected discarded-cancel in FuncDecl and FuncLit, got {messages:?}"
+    );}
 
 #[test]
 fn lostcancel_allows_deferred_cancel() {

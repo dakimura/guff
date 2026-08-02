@@ -400,7 +400,7 @@ fn check_elseif(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         else_body.lbrace.0 as u32,
-        "can replace 'else {if cond {}}' with 'else if cond {}'",
+        "elseif: can replace 'else {if cond {}}' with 'else if cond {}'",
     );
 }
 
@@ -869,7 +869,7 @@ fn check_if_else_chain(
         report(
             pending,
             stmt.if_.0 as u32,
-            "rewrite if-else to switch statement",
+            "ifElseChain: rewrite if-else to switch statement",
         );
     }
 }
@@ -1708,7 +1708,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                format!("use {pkg}.ReplaceAll method in `{name}(..., -1)`"),
+                format!("wrapperFunc: use {pkg}.ReplaceAll method in `{name}(..., -1)`"),
             );
         }
         "http.HandlerFunc"
@@ -2086,7 +2086,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             report(
                 pending,
                 comment.slash.0 as u32,
-                "`Deprecated: ` notices should be in a dedicated paragraph, separated from the rest",
+                "deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest",
             );
             return;
         }

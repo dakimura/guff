@@ -142,8 +142,19 @@ def issue_key(issue: dict, root: str) -> str:
     return f"{path}:{pos['Line']}:{linter}:{msg}"
 
 
+def is_related_information(issue: dict) -> bool:
+    """True for golangci secondary related-info rows (not primary findings).
+
+    golangci-lint sometimes emits RelatedInformation as separate Issues with
+    text like ``SA5011(related information): …``. guff attaches related info
+    on the primary diagnostic only, so those rows must not enter the set-diff.
+    """
+    text = issue.get("Text") or ""
+    return "(related information)" in text
+
+
 def issue_keys(issues: Iterable[dict], root: str) -> set[str]:
-    return {issue_key(i, root) for i in issues}
+    return {issue_key(i, root) for i in issues if not is_related_information(i)}
 
 
 @dataclass
