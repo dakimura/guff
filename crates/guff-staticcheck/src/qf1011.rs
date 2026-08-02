@@ -54,7 +54,9 @@ fn lit_default_matches_lhs(pass: &Pass<'_>, lit_kind: Token, tlhs: TypeId) -> bo
     }
 }
 
-/// `flagHelpfulTypes = true`: allow named package constants and binary/unary.
+/// `flagHelpfulTypes = true`: allow named package constants and binary/unary,
+/// but still require that omitting the type would not change the inferred type
+/// (untped int literal defaults to `int`, not `int64`).
 fn rhs_allows_redundant_flag(pass: &Pass<'_>, v: &Expr, tlhs: TypeId) -> bool {
     match v {
         Expr::BasicLit(lit) => {
@@ -76,7 +78,13 @@ fn rhs_allows_redundant_flag(pass: &Pass<'_>, v: &Expr, tlhs: TypeId) -> bool {
             }
         }
         Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
-        // flagHelpfulTypes: also flag untyped binary/unary when types identical.
+        // `+x` / `-x` keep the operand's default type (`-1` → untyped int → int).
+        Expr::UnaryExpr(u) if matches!(u.op, Token::ADD | Token::SUB) => {
+            rhs_allows_redundant_flag(pass, &u.x, tlhs)
+        }
+        // Other unaries / binaries: only when Info already typed the expr as
+        // identical to LHS *and* we are not looking at a bare untyped literal
+        // shape — conservative for non +/- unaries.
         Expr::BinaryExpr(_) | Expr::UnaryExpr(_) => true,
         _ => true,
     }

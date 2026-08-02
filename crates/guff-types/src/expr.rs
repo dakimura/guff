@@ -135,7 +135,14 @@ impl Checker {
             // propagates, so `(f())` is still a valid statement.
             Expr::ParenExpr(p) => return self.expr_internal(x, &p.x, None),
             Expr::StarExpr(st) => self.star_expr(x, st),
-            Expr::UnaryExpr(u) => self.unary(x, u),
+            // Channel receive `<-ch` is a valid statement (select case / bare
+            // ExprStmt). Go's exprInternal returns `statement` for `token.ARROW`.
+            Expr::UnaryExpr(u) => {
+                self.unary(x, u);
+                if u.op == Token::ARROW {
+                    return ExprKind::Statement;
+                }
+            }
             Expr::BinaryExpr(b) => self.binary(x, b),
             Expr::SelectorExpr(_) => self.selector(x, e, false),
             Expr::CallExpr(_) => return self.call_expr(x, e),

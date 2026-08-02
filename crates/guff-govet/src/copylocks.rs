@@ -31,7 +31,13 @@ fn lock_path_expr(
     }
     let info = pass.types_info()?;
     let tv = info.types.get(&e.id())?;
-    if tv.mode != guff_types::operand::OperandMode::Value {
+    // Upstream flags both rvalues and addressable locals (`return sg` where
+    // `sg` is Variable mode). Restricting to Value missed vault-style
+    // `return copies lock value` / call-arg hits.
+    if !matches!(
+        tv.mode,
+        guff_types::operand::OperandMode::Value | guff_types::operand::OperandMode::Variable
+    ) {
         return None;
     }
     checker.lock_path_rhs(pass, tv.typ)

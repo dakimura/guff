@@ -89,6 +89,9 @@ def normalize_path(filename: str, root: str) -> str:
 
 
 _UNUSED_PREFIX = re.compile(r"^(func|var|const|type|field|method)\s+")
+# honnef unused qualifies methods as `(*T).name` / `(T).name`; strip so bare
+# `name is unused` from older guff still collides.
+_UNUSED_METHOD_QUAL = re.compile(r"^\(\*?[\w.]+\)\.")
 _STATICCHECK_CODE = re.compile(r"^(?:SA|ST|S|QF)\d{4}:\s*")
 # golangci modernize prefixes the check name (`slicesbackward: …`); guff omits it.
 _MODERNIZE_CHECK = re.compile(r"^[a-z][a-z0-9]*:\s*")
@@ -112,9 +115,18 @@ def normalize_message(linter: str, text: str) -> str:
             return "Error return value is not checked"
     if linter == "unused":
         t = _UNUSED_PREFIX.sub("", t)
+        t = _UNUSED_METHOD_QUAL.sub("", t)
     if linter == "staticcheck":
         # golangci prefixes check codes (`QF1003: …`); guff often omits them.
         t = _STATICCHECK_CODE.sub("", t)
+        # QF1011 ("could omit type") and ST1023 ("should omit type") are the
+        # same finding with different wording; collapse so enable-set drift
+        # does not count as a mismatch.
+        t = re.sub(
+            r"^(could|should) omit type ",
+            "omit type ",
+            t,
+        )
     if linter == "modernize":
         t = _MODERNIZE_CHECK.sub("", t)
     if linter == "govet":

@@ -4,7 +4,7 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| consul | 251 | 255 | 251 | 100.0% | 98.4% | 0 |
+| consul | 255 | 255 | 255 | 100.0% | 100.0% | 0 |
 | grafana | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | containerd | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 
@@ -31,14 +31,8 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| govet | 14 | 18 | 14 | 100.0% | 77.8% |
+| govet | 18 | 18 | 18 | 100.0% | 100.0% |
 | staticcheck | 237 | 237 | 237 | 100.0% | 100.0% |
-
-### Allowed known diffs (4)
-- golangci-only: `agent/grpc-external/services/resource/write.go:206:govet:cannot inline: type parameter inference is not yet supported`
-- golangci-only: `agent/grpc-external/services/resource/write.go:207:govet:cannot inline: type parameter inference is not yet supported`
-- golangci-only: `agent/grpc-external/services/resource/write.go:212:govet:cannot inline: type parameter inference is not yet supported`
-- golangci-only: `internal/resource/resourcetest/client.go:125:govet:cannot inline: type parameter inference is not yet supported`
 
 ## grafana
 

@@ -210,21 +210,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let parent_is_selector = stack
                 .last()
                 .is_some_and(|n| matches!(n, NodeRef::SelectorExpr(_)));
-            // Upstream extractSelectors + PathEnclosingInterval never flags
-            // method-call selectors like `d.Metric.GetCounter()` — skip when
-            // this SelectorExpr is the Fun of a CallExpr. Field chains
-            // (`x := a.b.c`) and post-call segments (`f().a.b`) still run.
-            let is_call_fun = stack.last().is_some_and(|n| {
-                matches!(
-                    n,
-                    NodeRef::CallExpr(c)
+            // Match upstream extractSelectors: flag CallExpr.Fun chains like
+            // `o.Inner.M()` / `s.MetricSink.AddSample(...)`, but skip when the
+            // call continues as another selector (`d.Metric.GetCounter().GetValue()`),
+            // which prometheus + golangci leave alone.
+            let is_continued_call_fun = stack.len() >= 2
+                && matches!(
+                    stack.last(),
+                    Some(NodeRef::CallExpr(c))
                         if matches!(
                             c.fun.as_ref(),
                             Expr::SelectorExpr(s) if s.id == sel.id
                         )
                 )
-            });
-            if !parent_is_selector && !is_call_fun {
+                && matches!(stack.get(stack.len() - 2), Some(NodeRef::SelectorExpr(_)));
+            if !parent_is_selector && !is_continued_call_fun {
                 check_selector(pass, sel, &mut pending);
             }
             true

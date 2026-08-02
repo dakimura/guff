@@ -799,7 +799,16 @@ impl<'a> Builder<'a> {
             });
         }
         let pointee = guff_types::pointer_elem(&self.prog.type_arena, recv_ty);
-        let fld = crate::emit::field_of(self.prog, pointee, index);
+        let Some(fld) = crate::emit::field_of(self.prog, pointee, index) else {
+            // Incomplete hybrid info left a non-struct pointee — placeholder.
+            let typ = self.prog.basic_type(BasicKind::Invalid);
+            return Box::new(crate::lvalue::Address {
+                addr: self.invalid_zero(),
+                typ: guff_types::new_pointer(&mut self.prog.type_arena, typ),
+                pos: se.sel.name_pos,
+                expr: Some(Expr::Ident(se.sel.clone())),
+            });
+        };
         let fld_ty = fld
             .typ(&self.prog.object_arena)
             .expect("field has a type");

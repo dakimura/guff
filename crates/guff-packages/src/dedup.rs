@@ -7,25 +7,50 @@ use std::sync::Arc;
 use crate::hash::{HashMap, HashSet};
 use crate::package::Package;
 
-/// Regex equivalent: `^(.*) \[(.*)\.test\]`
-fn try_parse_test_package(pkg: &Package) -> Option<String> {
+/// True when `id` looks like `… [….test]` (any for-test / test-augmented id).
+fn is_bracket_test_id(id: &str) -> bool {
+    let Some(open) = id.find(" [") else {
+        return false;
+    };
+    let Some(close) = id.rfind(".test]") else {
+        return false;
+    };
+    close > open + 2
+}
+
+/// Same-package test variant only: `P [P.test]` (not for-test dep `Q [P.test]`).
+///
+/// Regex intent of golangci's `^(.*) \[(.*)\.test\]` plus the comment constraint
+/// that the bracket path equals the plain package — i.e. `a.go`+`a_test.go` →
+/// keep `a [a.test]`, drop plain `a`. Native list also emits `Q [P.test]` for
+/// deps recompiled into P's test binary; those must **not** suppress plain `Q`
+/// when `Q` is itself a pattern root (consul: services/resource +
+/// internal/resource), or write.go never gets analyzed.
+fn try_parse_same_package_test_variant(pkg: &Package) -> Option<String> {
     let id = &pkg.id;
     let open = id.find(" [")?;
     let close = id.rfind(".test]")?;
     if close <= open + 2 {
         return None;
     }
-    Some(id[..open].to_string())
+    let plain = &id[..open];
+    let under_test = &id[open + 2..close];
+    if under_test == plain {
+        Some(plain.to_string())
+    } else {
+        None
+    }
 }
 
-/// Removes non-test package entries when a test-augmented variant exists.
+/// Removes non-test package entries when a same-package test-augmented variant
+/// exists (`P [P.test]`).
 ///
 /// When `go/packages` loads tests, it returns both `pkg` and `pkg [pkg.test]`.
 /// Linters should analyze only the latter to avoid false unused-code warnings.
 pub fn filter_duplicate_packages(pkgs: Vec<Arc<Package>>) -> Vec<Arc<Package>> {
     let mut packages_with_tests = HashSet::default();
     for pkg in &pkgs {
-        if let Some(name) = try_parse_test_package(pkg) {
+        if let Some(name) = try_parse_same_package_test_variant(pkg) {
             packages_with_tests.insert(name);
         }
     }
@@ -33,7 +58,8 @@ pub fn filter_duplicate_packages(pkgs: Vec<Arc<Package>>) -> Vec<Arc<Package>> {
     pkgs
         .into_iter()
         .filter(|pkg| {
-            if try_parse_test_package(pkg).is_some() {
+            // Keep every bracket test id (including for-test deps `Q [P.test]`).
+            if is_bracket_test_id(&pkg.id) {
                 return true;
             }
             !packages_with_tests.contains(&pkg.pkg_path)
@@ -94,11 +120,33 @@ mod tests {
     }
 
     #[test]
-    fn try_parse_test_package_matches_golangci_pattern() {
+    fn dedup_keeps_plain_when_only_fortest_dep_variant() {
+        // Q imports P; P's tests force Q [P.test]. Plain Q is still a pattern
+        // root and must be analyzed (consul services/resource + internal/resource).
+        let pkgs = vec![
+            pkg("example.com/q", "example.com/q"),
+            pkg("example.com/q [example.com/p.test]", "example.com/q"),
+            pkg("example.com/p [example.com/p.test]", "example.com/p"),
+        ];
+        let out = filter_duplicate_packages(pkgs);
+        let ids: Vec<_> = out.iter().map(|p| p.id.as_str()).collect();
+        assert!(ids.contains(&"example.com/q"), "{ids:?}");
+        assert!(ids.contains(&"example.com/q [example.com/p.test]"), "{ids:?}");
+        assert!(ids.contains(&"example.com/p [example.com/p.test]"), "{ids:?}");
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn try_parse_same_package_test_variant_matches_golangci_intent() {
         let p = pkg("fmt [fmt.test]", "fmt");
-        assert_eq!(try_parse_test_package(&p), Some("fmt".to_string()));
+        assert_eq!(
+            try_parse_same_package_test_variant(&p),
+            Some("fmt".to_string())
+        );
+        let fortest = pkg("other [fmt.test]", "other");
+        assert_eq!(try_parse_same_package_test_variant(&fortest), None);
         let plain = pkg("fmt", "fmt");
-        assert_eq!(try_parse_test_package(&plain), None);
+        assert_eq!(try_parse_same_package_test_variant(&plain), None);
     }
 
     #[test]

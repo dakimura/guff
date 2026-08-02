@@ -822,8 +822,22 @@ impl LintResult {
     /// Positions are resolved; paths are still absolute (filters need that).
     pub fn unfiltered_issues(&self) -> Vec<Issue> {
         let mut issues = self.cached_issues.clone();
-        if let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) {
-            issues.extend(IssueFilter::collect_issues(fset, &self.run.diagnostics()));
+        // Each analyze root may share a FileSet Arc after typecheck_roots, but
+        // empty packages get a private empty FileSet. Resolve each diagnostic
+        // against the producing package's fset (`analyzer@pkg_path`) so positions
+        // from later roots are not dropped or remapped through the wrong set.
+        let mut fsets = std::collections::HashMap::<&str, &guff::position::FileSet>::new();
+        for pkg in &self.packages {
+            if let Some(fs) = pkg.fset.as_ref() {
+                fsets.insert(pkg.pkg_path.as_str(), fs);
+            }
+        }
+        for (action_id, diag) in self.run.diagnostics() {
+            let pkg_path = action_id.split('@').nth(1).unwrap_or("");
+            let Some(fset) = fsets.get(pkg_path) else {
+                continue;
+            };
+            issues.extend(IssueFilter::collect_issues(fset, &[(action_id, diag)]));
         }
         issues
     }
@@ -841,8 +855,8 @@ impl LintResult {
     /// Issues after applying the configured post-processing filter.
     pub fn issues(&self) -> Vec<Issue> {
         // Cache-restored issues carry resolved positions already. Freshly
-        // analyzed diagnostics (cache misses) are resolved against the shared
-        // `FileSet` of the type-checked packages. Both streams then go through
+        // analyzed diagnostics are resolved against each producing package's
+        // FileSet (see [`Self::unfiltered_issues`]). Both streams then go through
         // the same filter pipeline (exclude rules, //nolint, severity, limits).
         self.filter_issues(self.unfiltered_issues())
     }

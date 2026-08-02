@@ -17,7 +17,8 @@ use guff_analysis::{AnalysisResult, Analyzer, DeprecatedResult, IsDeprecated, Ru
 use guff_types::arena::{ObjectData, TypeData};
 
 use crate::stdlib_deprecations::{
-    stdlib_deprecations, Deprecation, DEPRECATED_NEVER_USE, DEPRECATED_USE_NO_LONGER,
+    stdlib_deprecations, stdlib_package_deprecation_msg, Deprecation, DEPRECATED_NEVER_USE,
+    DEPRECATED_USE_NO_LONGER,
 };
 
 fn related_pkg_path(pass: &Pass<'_>, path: &str) -> bool {
@@ -68,7 +69,9 @@ fn handle_deprecation(
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Option<String> {
     let table = stdlib_deprecations();
-    let std = table.get(deprecated_name);
+    // Table keys are unquoted (`io/ioutil`); import diagnostics pass quoted display names.
+    let table_key = deprecated_name.trim_matches('"');
+    let std = table.get(table_key).or_else(|| table.get(deprecated_name));
     if std.is_none() && is_stdlib_path(pkg_path) {
         return None;
     }
@@ -224,10 +227,12 @@ fn import_diagnostic(
     spec: &ImportSpec,
 ) -> Option<(u32, String)> {
     let info = pass.types_info()?;
+    // Explicit `import foo "path"` → defs[alias]; bare `import "path"` →
+    // implicits keyed on the ImportSpec node (not the path BasicLit).
     let imp_obj = if let Some(name) = &spec.name {
         info.defs.get(&name.id).and_then(|o| *o)
     } else {
-        info.implicits.get(&spec.path.id).copied()
+        info.implicits.get(&spec.id).copied()
     }?;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let ObjectData::PkgName(pn) = artifacts.objects.get(imp_obj) else {
@@ -238,10 +243,27 @@ fn import_diagnostic(
     if related_pkg_path(pass, path) {
         return None;
     }
-    let depr = deprs.packages.get(&pn.imported())?;
+    // Export-only stdlib deps never run `fact_deprecated`. Synthesize the
+    // package fact from the knowledge table + frozen GOROOT package docs.
+    let synthetic;
+    let depr = if let Some(d) = deprs.packages.get(&pn.imported()) {
+        d
+    } else if let Some(msg) = stdlib_package_deprecation_msg(path) {
+        if stdlib_deprecations().get(path).is_none() {
+            return None;
+        }
+        synthetic = IsDeprecated {
+            msg: msg.to_string(),
+        };
+        &synthetic
+    } else {
+        return None;
+    };
     let p = spec.path.value.trim_matches('"');
     let pos = spec.path.value_pos.0 as u32;
-    handle_deprecation(pass, deprs, depr, p, path, pos, None).map(|msg| (pos, msg))
+    // Upstream reports the quoted import path (`"io/ioutil" has been deprecated…`).
+    let quoted = format!("\"{p}\"");
+    handle_deprecation(pass, deprs, depr, &quoted, path, pos, None).map(|msg| (pos, msg))
 }
 
 fn sa1019_analyzer_impl() -> Analyzer {

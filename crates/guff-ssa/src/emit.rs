@@ -12,6 +12,7 @@ use crate::program::{value_type_of, Program};
 use crate::value::Value;
 use guff::token::Token;
 use guff::{Pos, NO_POS};
+use guff_types::arena::TypeData;
 use guff_types::{
     empty_tuple, identical, is_pointer, new_pointer, new_tuple, new_var, pointer_elem,
     signature_results, struct_field, tuple_at, tuple_len, BasicKind, ObjectData, ObjectId, TypeId,
@@ -328,11 +329,14 @@ pub fn emit_tail_call(prog: &mut Program, fid: FuncId, block: BlockId, call: Cal
 }
 
 /// field_of returns the `index`th field (a `Var` object) of the struct that
-/// `typ`'s underlying type is. (Go: `fieldOf`, restricted to the struct case;
-/// go returns nil for a non-struct, which is only reached on malformed input.)
-pub(crate) fn field_of(prog: &Program, typ: TypeId, index: usize) -> ObjectId {
+/// `typ`'s underlying type is. (Go: `fieldOf` — returns `None` for a non-struct,
+/// reached under incomplete hybrid type info rather than panicking.)
+pub(crate) fn field_of(prog: &Program, typ: TypeId, index: usize) -> Option<ObjectId> {
     let u = typ.underlying(&prog.type_arena);
-    struct_field(&prog.type_arena, u, index)
+    if !matches!(prog.type_arena.get(u), TypeData::Struct(_)) {
+        return None;
+    }
+    Some(struct_field(&prog.type_arena, u, index))
 }
 
 /// emit_field_selection emits the field selection `v.index`, returning the
@@ -352,7 +356,9 @@ pub fn emit_field_selection(
     let vt = value_type_of(prog, prog.functions.get(fid), v);
     if is_pointer(&prog.type_arena, vt) {
         let pointee = pointer_elem(&prog.type_arena, vt);
-        let fld = field_of(prog, pointee, index);
+        let Some(fld) = field_of(prog, pointee, index) else {
+            return emit_invalid_zero(prog);
+        };
         let fld_ty = fld.typ(&prog.object_arena).expect("field has a type");
         let ptr_ty = new_pointer(&mut prog.type_arena, fld_ty);
         let id = emit_with_pos(
@@ -368,7 +374,9 @@ pub fn emit_field_selection(
             emit_load(prog.functions.get_mut(fid), block, addr, fld_ty)
         }
     } else {
-        let fld = field_of(prog, vt, index);
+        let Some(fld) = field_of(prog, vt, index) else {
+            return emit_invalid_zero(prog);
+        };
         let fld_ty = fld.typ(&prog.object_arena).expect("field has a type");
         let id = emit_with_pos(
             prog.functions.get_mut(fid),
@@ -420,7 +428,9 @@ pub fn emit_implicit_selections(
         let vt = value_type_of(prog, prog.functions.get(fid), v);
         if is_pointer(&prog.type_arena, vt) {
             let pointee = pointer_elem(&prog.type_arena, vt);
-            let fld = field_of(prog, pointee, index);
+            let Some(fld) = field_of(prog, pointee, index) else {
+                return emit_invalid_zero(prog);
+            };
             let fld_ty = fld.typ(&prog.object_arena).expect("field has a type");
             let ptr_ty = new_pointer(&mut prog.type_arena, fld_ty);
             let id = emit_with_pos(
@@ -435,7 +445,9 @@ pub fn emit_implicit_selections(
                 v = emit_load(prog.functions.get_mut(fid), block, v, fld_ty);
             }
         } else {
-            let fld = field_of(prog, vt, index);
+            let Some(fld) = field_of(prog, vt, index) else {
+                return emit_invalid_zero(prog);
+            };
             let fld_ty = fld.typ(&prog.object_arena).expect("field has a type");
             let id = emit_with_pos(
                 prog.functions.get_mut(fid),
@@ -447,4 +459,10 @@ pub fn emit_implicit_selections(
         }
     }
     v
+}
+
+/// Placeholder for incomplete type info (non-struct underlying).
+fn emit_invalid_zero(prog: &mut Program) -> Value {
+    let typ = prog.basic_type(BasicKind::Invalid);
+    prog.emit_const(None, typ)
 }

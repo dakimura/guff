@@ -23,6 +23,10 @@ fn copylocks_flags_value_param() {
     let messages = support::run_analyzer(copylocks_analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
     assert!(messages.iter().any(|m| m.contains("lock")));
+    assert!(
+        messages.iter().any(|m| m.contains("return copies lock")),
+        "{messages:?}"
+    );
 }
 
 #[test]

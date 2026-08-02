@@ -210,3 +210,18 @@ pub fn stdlib_deprecations() -> &'static HashMap<&'static str, Deprecation> {
     static MAP: OnceLock<HashMap<&str, Deprecation>> = OnceLock::new();
     MAP.get_or_init(|| TABLE.iter().copied().collect())
 }
+
+/// Package-doc `Deprecated:` text for stdlib packages that are only available
+/// via export data (no AST for `fact_deprecated`). Keys must also appear in
+/// [`stdlib_deprecations`]. Frozen from GOROOT package comments.
+pub fn stdlib_package_deprecation_msg(path: &str) -> Option<&'static str> {
+    match path {
+        "io/ioutil" => Some(
+            "As of Go 1.16, the same functionality is now provided by package [io] or package [os], and those implementations should be preferred in new code. See the specific function documentation for details.",
+        ),
+        "crypto/dsa" => Some(
+            "DSA is a legacy algorithm, and modern alternatives such as Ed25519 (implemented by package crypto/ed25519) should be used instead. Keys with 1024-bit moduli (L1024N160 parameters) are cryptographically weak, while bigger keys are not widely supported. Note that FIPS 186-5 no longer approves DSA for signature generation.",
+        ),
+        _ => None,
+    }
+}

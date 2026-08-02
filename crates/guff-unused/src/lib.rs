@@ -44,6 +44,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut roots = HashSet::new();
     let mut const_groups: Vec<Vec<ObjectId>> = Vec::new();
     let mut method_recv_type: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut method_display: HashMap<ObjectId, String> = HashMap::new();
     let mut iface_method_names: HashSet<String> = HashSet::new();
 
     for file in pass.files() {
@@ -71,6 +72,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     if let Some(type_obj) = type_obj {
                                         method_recv_type.insert(*obj, type_obj);
                                     }
+                                    let ptr = matches!(ty, Expr::StarExpr(_));
+                                    let qual = if ptr {
+                                        format!("(*{}).", type_ident.name)
+                                    } else {
+                                        format!("({}).", type_ident.name)
+                                    };
+                                    method_display
+                                        .insert(*obj, format!("{qual}{}", f.name.name));
                                 }
                             }
                         }
@@ -185,7 +194,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let name = obj.name(&artifacts.objects);
         let pos = obj.pos(&artifacts.objects);
-        pending.push((pos, format!("{name} is unused")));
+        let message = method_display
+            .get(&obj)
+            .cloned()
+            .map(|d| format!("{d} is unused"))
+            .unwrap_or_else(|| format!("{name} is unused"));
+        pending.push((pos, message));
     }
 
     for (pos, message) in pending {

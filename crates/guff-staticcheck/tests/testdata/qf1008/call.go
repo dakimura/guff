@@ -12,3 +12,13 @@ func fnCall() {
 	_ = call.FunctionCallInner.F8().FunctionCallContinuedInner.F9
 	_ = call.F8().F9
 }
+
+type MethodOuter struct{ MethodInner }
+type MethodInner struct{}
+
+func (MethodInner) M() int { return 0 }
+
+func fnMethodCall() {
+	var o MethodOuter
+	_ = o.MethodInner.M()
+}
