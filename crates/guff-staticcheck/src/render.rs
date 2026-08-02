@@ -31,6 +31,24 @@ pub fn render_expr(expr: &Expr) -> String {
             s.push(')');
             s
         }
+        Expr::CompositeLit(c) => {
+            let mut s = String::new();
+            if let Some(ty) = &c.ty {
+                s.push_str(&render_expr(ty));
+            }
+            s.push('{');
+            for (i, elt) in c.elts.iter().enumerate() {
+                if i > 0 {
+                    s.push_str(", ");
+                }
+                s.push_str(&render_expr(elt));
+            }
+            s.push('}');
+            s
+        }
+        Expr::KeyValueExpr(kv) => {
+            format!("{}: {}", render_expr(&kv.key), render_expr(&kv.value))
+        }
         Expr::IndexExpr(IndexExpr { x, index, .. }) => {
             format!("{}[{}]", render_expr(x), render_expr(index))
         }

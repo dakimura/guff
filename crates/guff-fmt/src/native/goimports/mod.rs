@@ -241,6 +241,17 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
         return Ok(FormatOutcome::Formatted(src.to_vec()));
     }
 
+    // No add/delete/rename: only rewrite when in-run sort order actually
+    // changes, or multiple import decls still need merging. Otherwise keep
+    // the source bytes (blank lines, orphan `#nosec` comments, etc.) —
+    // matching system goimports when the import set is already correct.
+    if fixes.is_empty()
+        && !import_runs_need_sort(&imps, &local)
+        && !needs_import_decl_merge(&file)
+    {
+        return Ok(FormatOutcome::Formatted(src.to_vec()));
+    }
+
     let dist = reconstruct(src, &region, &imps, &local);
     let dist = strip_cr(&dist);
     if bytes_eq_strip_cr(dist.as_slice(), src) {
@@ -251,6 +262,45 @@ fn format_inner_impl(src: &[u8], opts: &NativeOptions) -> Result<FormatOutcome, 
         return Ok(FormatOutcome::Formatted(src.to_vec()));
     }
     Ok(FormatOutcome::Formatted(go_format::source(&dist)?))
+}
+
+/// True when any blank-line run's specs are not already in goimports sort order.
+fn import_runs_need_sort(imps: &[Imp], local: &str) -> bool {
+    for &(s, e) in &detect_runs(imps) {
+        let slice = &imps[s..e];
+        // Adjacent out-of-order pair ⇒ needs sort (no allocation).
+        if slice
+            .windows(2)
+            .any(|w| cmp_imp(local, &w[0], &w[1]) == Ordering::Greater)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// goimports folds every non-C `import` decl into one parenthesized block.
+fn needs_import_decl_merge(file: &guff::ast::File) -> bool {
+    let mut n = 0usize;
+    for decl in &file.decls {
+        let Decl::GenDecl(gen) = decl else {
+            break;
+        };
+        if gen.tok != Some(Token::IMPORT) {
+            break;
+        }
+        let is_c = gen
+            .specs
+            .iter()
+            .any(|s| matches!(s, Spec::ImportSpec(i) if i.path.value == C_IMPORT));
+        if !is_c {
+            n += 1;
+            if n > 1 {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn strip_cr(s: &[u8]) -> Vec<u8> {
@@ -569,7 +619,80 @@ fn collect_imps(
             });
         }
     }
+    absorb_orphan_line_comments(src, &mut imps);
     Ok(imps)
+}
+
+/// Fold free-floating `//` comments that sit on the lines after an import
+/// spec (before the next spec / blank-line gap) into that spec's `src_range`.
+///
+/// go/parser leaves these on `File.comments` rather than `ImportSpec.comment`
+/// when they are not same-line. System goimports keeps them; without this,
+/// reconstruct drops grafana-style `#nosec` notes inside the import block.
+fn absorb_orphan_line_comments(src: &[u8], imps: &mut [Imp]) {
+    for i in 0..imps.len() {
+        let Some((start, mut end)) = imps[i].src_range else {
+            continue;
+        };
+        let limit = imps
+            .get(i + 1)
+            .and_then(|n| n.src_range.map(|(s, _)| s))
+            .unwrap_or(src.len());
+        end = extend_through_line_comments(src, end, limit);
+        imps[i].src_range = Some((start, end));
+    }
+}
+
+fn extend_through_line_comments(src: &[u8], mut end: usize, limit: usize) -> usize {
+    let limit = limit.min(src.len());
+    while end < limit {
+        // Skip spaces/tabs on the current line remainder.
+        while end < limit && (src[end] == b' ' || src[end] == b'\t') {
+            end += 1;
+        }
+        if end >= limit {
+            break;
+        }
+        if src[end] == b'\r' {
+            end += 1;
+            continue;
+        }
+        if src[end] == b'\n' {
+            // Peek whether the next non-empty content is a line comment.
+            let mut j = end + 1;
+            while j < limit && (src[j] == b' ' || src[j] == b'\t') {
+                j += 1;
+            }
+            if j + 1 < limit && src[j] == b'/' && src[j + 1] == b'/' {
+                // Absorb newline + comment through end-of-line.
+                end = j + 2;
+                while end < limit && src[end] != b'\n' {
+                    if src[end] == b'\r' {
+                        end += 1;
+                        continue;
+                    }
+                    end += 1;
+                }
+                continue;
+            }
+            // Blank line or next spec — stop (keep `end` before this newline
+            // so inter-run blank detection still sees the gap).
+            break;
+        }
+        if end + 1 < limit && src[end] == b'/' && src[end + 1] == b'/' {
+            end += 2;
+            while end < limit && src[end] != b'\n' {
+                if src[end] == b'\r' {
+                    end += 1;
+                    continue;
+                }
+                end += 1;
+            }
+            continue;
+        }
+        break;
+    }
+    end
 }
 
 fn import_range(
@@ -972,5 +1095,32 @@ func F() {
             FormatOutcome::NeedsResolver => {}
             FormatOutcome::Formatted(_) => panic!("cgo file should defer to resolver"),
         }
+    }
+
+    #[test]
+    fn nosec_comment_in_import_block_stable() {
+        // Blank line after a dangling #nosec comment inside the import block
+        // (grafana externalservices_test.go). System goimports leaves this
+        // layout alone; native must too when imports are all used.
+        let src = br#"package database
+
+import (
+	"context"
+	// #nosec G505 Used only for generating a 160 bit hash, it's not used for security purposes
+
+	"errors"
+	"testing"
+)
+
+func f(ctx context.Context, t *testing.T) error {
+	_ = ctx
+	_ = t
+	return errors.New("x")
+}
+"#;
+        let out = format(src, &opts("", "externalservices_test.go")).unwrap();
+        let got = String::from_utf8(out).unwrap();
+        let want = String::from_utf8(src.to_vec()).unwrap();
+        assert_eq!(got, want, "native goimports must leave #nosec-in-import layout alone\ngot:\n{got}");
     }
 }

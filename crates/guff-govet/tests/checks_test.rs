@@ -182,6 +182,23 @@ fn inline_allows_reflect_pointer() {
 }
 
 #[test]
+fn inline_flags_exp_maps_clone_type_param_gap() {
+    let dir = support::testdata("inline_exp");
+    let stub = dir.join("stub/golang.org/x/exp/maps/maps.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/inline_exp",
+        &dir.join("bad.go"),
+        &[("golang.org/x/exp/maps", &stub)],
+    );
+    let messages = support::run_analyzer(inline_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(
+        messages[0],
+        "cannot inline: type parameter inference is not yet supported"
+    );
+}
+
+#[test]
 fn inline_flags_local_go_fix_const() {
     let dir = support::testdata("inline_local");
     let pkg = support::typecheck_pkg("example.com/govet/inline_local", &dir.join("bad.go"));

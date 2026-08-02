@@ -25,6 +25,41 @@ fn is_value_receiver(recv: &guff::ast::FieldList) -> bool {
     })
 }
 
+/// True when the receiver's type is a struct that embeds a pointer field
+/// (promoted fields of that pointer are heap-addressable through a value recv).
+fn recv_embeds_pointer(pass: &Pass<'_>, recv: &guff::ast::FieldList) -> bool {
+    let Some(ty_expr) = recv.list.first().and_then(|f| f.ty.as_ref()) else {
+        return false;
+    };
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&ty_expr.id()) else {
+        return false;
+    };
+    let u = tav.typ.underlying(&artifacts.types);
+    let guff_types::arena::TypeData::Struct(s) = artifacts.types.get(u) else {
+        return false;
+    };
+    for i in 0..s.num_fields() {
+        let field = s.field(i);
+        let guff_types::arena::ObjectData::Var(v) = artifacts.objects.get(field) else {
+            continue;
+        };
+        if !v.embedded() {
+            continue;
+        }
+        let ft = v.typ().underlying(&artifacts.types);
+        if matches!(artifacts.types.get(ft), guff_types::arena::TypeData::Pointer(_)) {
+            return true;
+        }
+    }
+    false
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -56,10 +91,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         for stmt in &body.list {
             walk_stmt(pass, stmt, recv_obj, &mut stores, &mut reads);
         }
-        for (pos, field) in stores {
-            if reads.iter().any(|f| f == "*" || f == &field) {
-                continue;
-            }
+        // Cheap reject before the rarer pointer-embed type walk: only methods
+        // with unobserved field stores need the embed check.
+        let unobserved: Vec<(u32, String)> = stores
+            .into_iter()
+            .filter(|(_, field)| !reads.iter().any(|f| f == "*" || f == field))
+            .collect();
+        if unobserved.is_empty() {
+            return;
+        }
+        // Value receiver over a struct that embeds `*T`: writes to promoted
+        // fields mutate the pointed-to value and are observable (not SA4005).
+        if recv_embeds_pointer(pass, recv) {
+            return;
+        }
+        for (pos, field) in unobserved {
             pending.push((pos, format!("ineffective assignment to field .{field}")));
         }
     });

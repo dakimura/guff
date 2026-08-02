@@ -12,22 +12,95 @@ use guff_analysis::code::{object_of, refers_to};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+fn count_assignments_to(pass: &Pass<'_>, stmt: &Stmt, obj: guff_types::arena::ObjectId) -> usize {
+    match stmt {
+        Stmt::AssignStmt(assign) => {
+            let mut n = 0usize;
+            for lhs in &assign.lhs {
+                let Expr::Ident(ident) = lhs else {
+                    continue;
+                };
+                if object_of(pass, ident) == Some(obj) {
+                    n += 1;
+                }
+            }
+            n
+        }
+        Stmt::IfStmt(i) => {
+            let mut n = 0usize;
+            if let Some(init) = &i.init {
+                n += count_assignments_to(pass, init, obj);
+            }
+            for s in &i.body.list {
+                n += count_assignments_to(pass, s, obj);
+            }
+            if let Some(else_) = &i.else_ {
+                n += count_assignments_to(pass, else_, obj);
+            }
+            n
+        }
+        Stmt::BlockStmt(b) => b
+            .list
+            .iter()
+            .map(|s| count_assignments_to(pass, s, obj))
+            .sum(),
+        Stmt::ForStmt(f) => {
+            let mut n = 0usize;
+            if let Some(init) = &f.init {
+                n += count_assignments_to(pass, init, obj);
+            }
+            if let Some(post) = &f.post {
+                n += count_assignments_to(pass, post, obj);
+            }
+            for s in &f.body.list {
+                n += count_assignments_to(pass, s, obj);
+            }
+            n
+        }
+        Stmt::RangeStmt(r) => r
+            .body
+            .list
+            .iter()
+            .map(|s| count_assignments_to(pass, s, obj))
+            .sum(),
+        Stmt::SwitchStmt(s) => {
+            let mut n = 0usize;
+            if let Some(init) = &s.init {
+                n += count_assignments_to(pass, init, obj);
+            }
+            for c in &s.body.list {
+                let Stmt::CaseClause(cc) = c else { continue };
+                for s in &cc.body {
+                    n += count_assignments_to(pass, s, obj);
+                }
+            }
+            n
+        }
+        Stmt::TypeSwitchStmt(s) => {
+            let mut n = 0usize;
+            if let Some(init) = &s.init {
+                n += count_assignments_to(pass, init, obj);
+            }
+            // assign is DeclStmt / AssignStmt on the switch
+            n += count_assignments_to(pass, &s.assign, obj);
+            for c in &s.body.list {
+                let Stmt::CaseClause(cc) = c else { continue };
+                for s in &cc.body {
+                    n += count_assignments_to(pass, s, obj);
+                }
+            }
+            n
+        }
+        _ => 0,
+    }
+}
+
 fn has_multiple_assignments(pass: &Pass<'_>, block: &BlockStmt, obj: guff_types::arena::ObjectId) -> bool {
     let mut count = 0usize;
     for stmt in &block.list {
-        let Stmt::AssignStmt(assign) = stmt else {
-            continue;
-        };
-        for lhs in &assign.lhs {
-            let Expr::Ident(ident) = lhs else {
-                continue;
-            };
-            if object_of(pass, ident) == Some(obj) {
-                count += 1;
-                if count >= 2 {
-                    return true;
-                }
-            }
+        count += count_assignments_to(pass, stmt, obj);
+        if count >= 2 {
+            return true;
         }
     }
     false

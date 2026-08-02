@@ -26,8 +26,9 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>, format_idx: usize, args_sta
 }
 
 fn check_format(format: &str, nargs: usize) -> Result<(), String> {
-    let mut want = 0usize;
-    let mut explicit = false;
+    // 1-based, matching Go's fmt explicit indices (`%[1]v`).
+    let mut next_arg = 1usize;
+    let mut max_used = 0usize;
     let bytes = format.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
@@ -43,11 +44,36 @@ fn check_format(format: &str, nargs: usize) -> Result<(), String> {
             continue;
         }
         i += 1;
+        let mut explicit_index: Option<usize> = None;
+        // Explicit index: %[n]
+        if i < bytes.len() && bytes[i] == b'[' {
+            i += 1;
+            let start = i;
+            while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
+                i += 1;
+            }
+            if i >= bytes.len() || bytes[i] != b']' || i == start {
+                return Err("couldn't parse format string".into());
+            }
+            let idx: usize = std::str::from_utf8(&bytes[start..i])
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .ok_or_else(|| "couldn't parse format string".to_string())?;
+            if idx == 0 {
+                return Err("couldn't parse format string".into());
+            }
+            explicit_index = Some(idx);
+            i += 1; // ]
+        }
         while i < bytes.len() && bytes[i] == b' ' {
             i += 1;
         }
+        // Width `*` consumes an arg.
         if i < bytes.len() && bytes[i] == b'*' {
-            want += 1;
+            let used = explicit_index.unwrap_or(next_arg);
+            max_used = max_used.max(used);
+            next_arg = used + 1;
+            explicit_index = None; // width index doesn't carry to the verb
             i += 1;
         }
         while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
@@ -56,7 +82,10 @@ fn check_format(format: &str, nargs: usize) -> Result<(), String> {
         if i < bytes.len() && bytes[i] == b'.' {
             i += 1;
             if i < bytes.len() && bytes[i] == b'*' {
-                want += 1;
+                let used = explicit_index.unwrap_or(next_arg);
+                max_used = max_used.max(used);
+                next_arg = used + 1;
+                explicit_index = None;
                 i += 1;
             }
             while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
@@ -71,11 +100,13 @@ fn check_format(format: &str, nargs: usize) -> Result<(), String> {
         if verb == '%' {
             continue;
         }
-        want += 1;
+        let used = explicit_index.unwrap_or(next_arg);
+        max_used = max_used.max(used);
+        next_arg = used + 1;
     }
-    if !explicit && want != nargs {
+    if max_used != nargs {
         return Err(format!(
-            "Printf call needs {want} args but has {nargs} args"
+            "Printf call needs {max_used} args but has {nargs} args"
         ));
     }
     Ok(())
@@ -143,5 +174,13 @@ mod tests {
     fn format_arg_count() {
         assert!(check_format("%s %d", 2).is_ok());
         assert!(check_format("%s", 2).is_err());
+        // Explicit indices reuse args (`%[1]q … %[1]q … %q` needs 2).
+        assert!(check_format(
+            r#"/explore?left={"datasource":%[1]q,"queries":[{"datasource":%[1]q,"expr":%q}],"range":{}}"#,
+            2
+        )
+        .is_ok());
+        assert!(check_format("%[2]s %[1]s", 2).is_ok());
+        assert!(check_format("%[2]s", 1).is_err());
     }
 }

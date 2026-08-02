@@ -5,27 +5,3 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
-#
-# Shrunk: nosec prev-line, G107 Ident-only, errcheck hash.Write,
-# bodyclose Cleanup/escape/synthetic, SA4014 pos + LAND/LOR render,
-# SA4019 +build-only (ignore gofmt dual //go:build).
-
-grafana guff-only pkg/components/imguploader/gcs/gcsuploader.go:230:staticcheck:ineffective assignment to field .PredefinedACL
-grafana guff-only pkg/registry/apis/datasource/converter/converter_test.go:58:staticcheck:trying to marshal unsupported type github.com/grafana/grafana/pkg/services/datasources.UpdateSecretFn, via x.UpdateSecretFn
-grafana guff-only pkg/registry/apis/datasource/converter/converter_test.go:70:staticcheck:trying to marshal unsupported type github.com/grafana/grafana/pkg/services/datasources.UpdateSecretFn, via x.UpdateSecretFn
-grafana guff-only pkg/registry/apis/provisioning/jobs/migrate/unifiedstorage_test.go:458:staticcheck:identical expressions on the left and right side of the '&&' operator
-grafana guff-only pkg/registry/apis/secret/service/consolidation.go:165:prealloc:Consider preallocating currentBatch
-grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:51:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
-grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:52:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
-grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:55:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
-grafana guff-only pkg/registry/fieldselectors/selectable_fields_utils.go:61:staticcheck:robj refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
-grafana guff-only pkg/services/accesscontrol/database/externalservices_test.go:5:goimports:File is not properly formatted
-grafana guff-only pkg/services/accesscontrol/mock/mock.go:123:staticcheck:should merge variable declaration with assignment on next line
-grafana guff-only pkg/services/ngalert/sender/notifier_ext.go:360:gosec:G104: Errors unhandled.
-grafana guff-only pkg/services/ngalert/sender/notifier_ext.go:361:gosec:G104: Errors unhandled.
-grafana guff-only pkg/services/ngalert/sender/notifier_test.go:416:gosec:G104: Errors unhandled.
-grafana guff-only pkg/services/ngalert/state/template/funcs.go:103:staticcheck:Printf call needs 3 args but has 2 args
-grafana guff-only pkg/services/ngalert/state/template/funcs.go:70:staticcheck:Printf call needs 3 args but has 2 args
-grafana guff-only pkg/tsdb/cloud-monitoring/cloudmonitoring.go:33:staticcheck:error parsing regexp: regex parse error: [-\/^$+?.()|[\]{}] ^^ error: unclosed character class
-grafana guff-only pkg/tsdb/cloud-monitoring/converter/converter.go:97:staticcheck:this value of frame.Meta is never used
-grafana guff-only pkg/tsdb/cloud-monitoring/converter/converter.go:99:staticcheck:this value of frame.Meta.Notices is never used

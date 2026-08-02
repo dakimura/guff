@@ -147,8 +147,49 @@ fn json_tag_skip(tag: &str) -> bool {
     if tag.is_empty() {
         return false;
     }
-    let name = tag.split(',').next().unwrap_or("");
+    // `Struct.tag` stores the full Go struct tag (`json:"-" db:"x"`), not the
+    // bare json name. Parse the `json` key like reflect.StructTag.Get.
+    let json = struct_tag_get(tag, "json");
+    let name = json.split(',').next().unwrap_or("");
     name == "-"
+}
+
+/// Minimal `reflect.StructTag.Get` — returns the value for `key:"value"`.
+fn struct_tag_get<'a>(tag: &'a str, key: &str) -> &'a str {
+    let mut rest = tag;
+    while !rest.is_empty() {
+        rest = rest.trim_start();
+        let Some(colon) = rest.find(':') else {
+            break;
+        };
+        let k = rest[..colon].trim();
+        rest = &rest[colon + 1..];
+        rest = rest.trim_start();
+        if !rest.starts_with('"') {
+            break;
+        }
+        let bytes = rest.as_bytes();
+        let mut i = 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'"' {
+                let val = &rest[1..i];
+                if k == key {
+                    return val;
+                }
+                rest = rest[i + 1..].trim_start();
+                break;
+            }
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+    }
+    ""
 }
 
 fn map_key_ok(arena: &TypeArena, key: TypeId) -> bool {

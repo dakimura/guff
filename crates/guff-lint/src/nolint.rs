@@ -522,6 +522,18 @@ fn expand_ranges(
     inline: &[IgnoredRange],
 ) -> Vec<IgnoredRange> {
     let mut expanded = Vec::new();
+    // golangci: a `//nolint` before the package clause covers the whole file
+    // (including blank lines / other file headers above it).
+    let pkg_line = fset.position(file.package).line;
+    let file_end_line = fset.position(file.end()).line.max(pkg_line);
+    for r in inline {
+        if r.to < pkg_line {
+            let mut er = r.clone();
+            er.is_expansion = true;
+            er.to = file_end_line;
+            expanded.push(er);
+        }
+    }
     preorder(NodeRef::File(file), |node| {
         let Some((npos, nend)) = node_span(node) else {
             return true;
@@ -654,6 +666,26 @@ mod tests {
                 ..Diagnostic::default()
             },
         }
+    }
+
+    #[test]
+    fn package_level_nolint_covers_whole_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(
+            &path,
+            "// nolint\npackage p\n\nfunc f() error { return nil }\n\nfunc g() {\n\tf()\n}\n",
+        )
+        .unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let issues = vec![issue("gosec", path.to_str().unwrap(), 7, "G104")];
+        let kept = index.filter_issues(issues, false);
+        assert!(kept.is_empty(), "{kept:?}");
     }
 
     #[test]

@@ -67,6 +67,13 @@ fn escape_non_quantifier_braces(pattern: &str) -> String {
             continue;
         }
         if in_class {
+            // Go RE2 treats `[` inside a class as a literal; Rust's parser may
+            // start a nested class and then fail on patterns like `[…|[\]{}]`.
+            if b == b'[' {
+                out.push_str(r"\[");
+                i += 1;
+                continue;
+            }
             if b == b']' {
                 in_class = false;
             }
@@ -177,8 +184,15 @@ fn soften_perl_hyphens_in_classes(pattern: &str) -> String {
             }
             continue;
         }
-        if in_class && b == b']' {
-            in_class = false;
+        if in_class {
+            if b == b'[' {
+                out.push_str(r"\[");
+                i += 1;
+                continue;
+            }
+            if b == b']' {
+                in_class = false;
+            }
         }
         out.push(b as char);
         i += 1;
@@ -258,5 +272,7 @@ mod tests {
         // Go RE2 accepts literal `{…}` and `[\w-]` — must not FP (caddy).
         assert!(validate_go_regex(r"{header\.([\w-]*)}").is_none());
         assert!(validate_go_regex(r"{re\.([\w-\.]*)}").is_none());
+        // Grafana cloud-monitoring wildcard escaper — Go accepts nested `[` in class.
+        assert!(validate_go_regex(r"[-\/^$+?.()|[\]{}]").is_none());
     }
 }

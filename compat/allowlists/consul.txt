@@ -6,14 +6,11 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 #
-# Remaining: govet `inline` const-only (type-parameter inference not ported).
+# Covered: golang.org/x/exp/{maps,slices} go:fix generic call diagnostics.
+# Remaining 4: same diagnostic, but packages miss findings under full ./...
+# when a shared TypeArena panic corrupts later package analysis (DEFERRED).
 
 consul golangci-only agent/grpc-external/services/resource/write.go:206:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:207:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only agent/grpc-external/services/resource/write.go:212:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only agent/structs/acl_templated_policy.go:303:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only agent/structs/config_entry_gateways.go:1008:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only agent/xds/routes.go:516:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only command/snapshot/save/snapshot_save.go:80:govet:cannot inline: type parameter inference is not yet supported
-consul golangci-only command/snapshot/save/snapshot_save.go:96:govet:cannot inline: type parameter inference is not yet supported
 consul golangci-only internal/resource/resourcetest/client.go:125:govet:cannot inline: type parameter inference is not yet supported

@@ -220,6 +220,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if matches!(lhs, Expr::Ident(Ident { name, .. }) if name == "_") {
                         continue;
                     }
+                    // Field / index stores mutate addressable memory; hybrid SSA
+                    // often drops the Store edge, but staticcheck does not flag
+                    // `x.F = …` as an unused local assignment.
+                    if !matches!(unparen_expr(lhs), Expr::Ident(_)) {
+                        continue;
+                    }
                     let val = func
                         .value_for_expr(rhs)
                         .map(|(v, _)| v)

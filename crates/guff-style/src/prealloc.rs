@@ -88,6 +88,53 @@ fn loop_has_early_exit(body: &[Stmt]) -> bool {
     false
 }
 
+fn loop_resets_slice(body: &[Stmt], name: &str) -> bool {
+    for stmt in body {
+        match stmt {
+            Stmt::AssignStmt(asgn) => {
+                for (lhs, rhs) in asgn.lhs.iter().zip(asgn.rhs.iter()) {
+                    let Expr::Ident(id) = lhs else {
+                        continue;
+                    };
+                    if id.name != name {
+                        continue;
+                    }
+                    // `s = nil` / `s = s[:0]` / `s = someOther` — batch is rebuilt.
+                    if matches!(rhs, Expr::Ident(r) if r.name == "nil") {
+                        return true;
+                    }
+                    if matches!(rhs, Expr::SliceExpr(_)) {
+                        return true;
+                    }
+                }
+            }
+            Stmt::IfStmt(ifs) => {
+                if loop_resets_slice(&ifs.body.list, name) {
+                    return true;
+                }
+                if let Some(else_) = &ifs.else_ {
+                    if let Stmt::BlockStmt(b) = else_.as_ref() {
+                        if loop_resets_slice(&b.list, name) {
+                            return true;
+                        }
+                    } else if let Stmt::IfStmt(_) = else_.as_ref() {
+                        if loop_resets_slice(std::slice::from_ref(else_.as_ref()), name) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            Stmt::BlockStmt(b) => {
+                if loop_resets_slice(&b.list, name) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn hints_from_loop(
     body: &[Stmt],
     decls: &[SliceDecl],
@@ -97,6 +144,11 @@ fn hints_from_loop(
     if simple && loop_has_early_exit(body) {
         return;
     }
+    // One body walk per decl name (not once per append site).
+    let resets: Vec<bool> = decls
+        .iter()
+        .map(|d| loop_resets_slice(body, &d.name))
+        .collect();
     for stmt in body {
         let Stmt::AssignStmt(asgn) = stmt else {
             continue;
@@ -115,13 +167,20 @@ fn hints_from_loop(
                 let Expr::Ident(lhs_id) = lhs else {
                     continue;
                 };
-                for decl in decls {
-                    if decl.name == lhs_id.name {
-                        pending.push((
-                            decl.pos,
-                            format!("Consider preallocating {}", decl.name),
-                        ));
+                for (decl, &resets_slice) in decls.iter().zip(resets.iter()) {
+                    if decl.name != lhs_id.name {
+                        continue;
                     }
+                    // Upstream alexkohler/prealloc effectively ignores slices that
+                    // are cleared mid-loop (`s = nil`); preallocating once at decl
+                    // does not help across batch resets (grafana consolidation).
+                    if resets_slice {
+                        continue;
+                    }
+                    pending.push((
+                        decl.pos,
+                        format!("Consider preallocating {}", decl.name),
+                    ));
                 }
             }
         }

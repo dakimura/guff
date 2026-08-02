@@ -30,6 +30,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     Ok(None)
 }
 
+fn cond_is_bare_ok(cond: &Expr, ok: &Ident) -> bool {
+    let mut cur = cond;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    matches!(cur, Expr::Ident(id) if id.name == ok.name)
+}
+
 fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     let Some(init) = ifs.init.as_deref() else {
         return;
@@ -49,9 +57,14 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     if ok.name != "ok" && object_of(pass, ok).is_some() {
         return;
     }
-    let Expr::TypeAssertExpr(TypeAssertExpr { x, .. }) = &rhs[0] else {
+    let Expr::TypeAssertExpr(TypeAssertExpr { .. }) = &rhs[0] else {
         return;
     };
+    // Upstream only flags uses in the else of `if v, ok := x.(T); ok { … } else { use v }`.
+    // `if …; !ok { … } else { use v }` is the success path — not SA9008.
+    if !cond_is_bare_ok(&ifs.cond, ok) {
+        return;
+    }
     let obj_id = object_of(pass, obj);
     let Some(else_) = &ifs.else_ else {
         return;
@@ -71,7 +84,6 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
         }
         true
     });
-    let _ = x;
 }
 
 fn sa9008_analyzer_impl() -> Analyzer {
