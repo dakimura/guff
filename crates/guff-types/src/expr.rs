@@ -560,9 +560,10 @@ impl Checker {
 
     /// Type-check a comparison (`x op y`). The result is an untyped boolean.
     ///
-    /// Simplified `Checker.comparison`: the assignability check is reduced to
-    /// `Identical` (operands have already been matched), and ordering uses an
-    /// `all_ordered` predicate.
+    /// Spec: "In any comparison, the first operand must be assignable to the
+    /// type of the second operand, or vice versa." Channel direction narrowing
+    /// (`chan T` vs `<-chan T`) relies on that assignability check — identity
+    /// alone rejects valid comparisons (vault `helper/fairshare`).
     pub(crate) fn comparison<'a>(&mut self, x: &mut Operand<'a>, y: &mut Operand<'a>, op: Token, pos: u32) {
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         let yt = y.typ.unwrap_or_else(|| self.invalid_type());
@@ -571,19 +572,22 @@ impl Checker {
             return;
         }
 
-        // Operands must be comparable to each other (post-match: identical, or
-        // one is nil and the other has nil).
+        // Nil vs typed: covered by assignable_to, but keep the explicit path
+        // for the defined-on-operands check below.
         let nil_ok =
             (x.is_nil() && has_nil(&self.types, yt)) || (y.is_nil() && has_nil(&self.types, xt));
-        if !nil_ok && !identical(&mut self.types, &self.objects, &self.packages, xt, yt) {
-            let (xs, ys) = (self.type_str(xt), self.type_str(yt));
-            self.error(
-                pos,
-                Code::MismatchedTypes,
-                format!("mismatched types {} and {}", xs, ys),
-            );
-            x.mode = OperandMode::Invalid;
-            return;
+        if !nil_ok {
+            let ok = self.assignable_to(x, yt).ok || self.assignable_to(y, xt).ok;
+            if !ok {
+                let (xs, ys) = (self.type_str(xt), self.type_str(yt));
+                self.error(
+                    pos,
+                    Code::MismatchedTypes,
+                    format!("mismatched types {} and {}", xs, ys),
+                );
+                x.mode = OperandMode::Invalid;
+                return;
+            }
         }
 
         let defined = match op {

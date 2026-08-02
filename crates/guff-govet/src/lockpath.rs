@@ -92,17 +92,34 @@ impl LockChecker {
         let objects = &artifacts.objects;
         let packages = &artifacts.packages;
 
-        if is_named_type(types, objects, packages, typ, "sync", "noCopy") {
-            return Some(vec![type_name(types, objects, packages, typ)]);
+        // Peel arrays first so `pragma.DoNotCopy` (`[0]sync.Mutex`) resolves to
+        // `sync.Mutex` — matching go/analysis/passes/copylock. Checking locks
+        // before peeling would miss that, and walking Mutex's fields after a
+        // late peel would report Go 1.26's embedded `noCopy` instead of Mutex.
+        let mut cur = typ;
+        {
+            let types = &artifacts.types;
+            loop {
+                let u = cur.underlying(types);
+                if let TypeData::Array(a) = types.get(u) {
+                    cur = a.elem();
+                    continue;
+                }
+                break;
+            }
         }
 
-        if self.is_lock_by_value(pass, typ) {
+        if is_named_type(types, objects, packages, cur, "sync", "noCopy") {
+            return Some(vec![type_name(types, objects, packages, cur)]);
+        }
+
+        if self.is_lock_by_value(pass, cur) {
             let artifacts = pass.pkg().type_artifacts.as_ref()?;
             return Some(vec![type_name(
                 &artifacts.types,
                 &artifacts.objects,
                 &artifacts.packages,
-                typ,
+                cur,
             )]);
         }
 
@@ -110,16 +127,6 @@ impl LockChecker {
         let types = &artifacts.types;
         let objects = &artifacts.objects;
         let packages = &artifacts.packages;
-
-        let mut cur = typ;
-        loop {
-            let u = cur.underlying(types);
-            if let TypeData::Array(a) = types.get(u) {
-                cur = a.elem();
-                continue;
-            }
-            break;
-        }
 
         let u = cur.underlying(types);
         if matches!(types.get(u), TypeData::Struct(_)) {

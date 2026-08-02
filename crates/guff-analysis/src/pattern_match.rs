@@ -192,6 +192,7 @@ pub fn match_pos(node: NodeRef<'_>) -> u32 {
         NodeRef::SliceExpr(e) => e.lbrack.0 as u32,
         NodeRef::UnaryExpr(e) => e.op_pos.0 as u32,
         NodeRef::TypeAssertExpr(e) => e.lparen.0 as u32,
+        NodeRef::TypeSwitchStmt(s) => s.switch.0 as u32,
         NodeRef::SelectStmt(s) => s.select_.0 as u32,
         NodeRef::BasicLit(l) => l.value_pos.0 as u32,
         NodeRef::Ident(i) => i.name_pos.0 as u32,

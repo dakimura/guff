@@ -795,3 +795,19 @@ fn flag_map_value_implements_interface_var_before_methods() {
         check.errors
     );
 }
+
+#[test]
+fn bidirectional_chan_comparable_to_recv_only() {
+    // Spec: first operand assignable to second's type, or vice versa.
+    // `chan T` is assignable to `<-chan T`, so `w != d` is valid (vault fairshare).
+    let check = check_src(
+        "package p\n\
+         type T struct{}\n\
+         func f(w <-chan T, d chan T) bool { return w != d }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}

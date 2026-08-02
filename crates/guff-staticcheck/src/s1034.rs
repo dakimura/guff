@@ -6,112 +6,99 @@ use std::sync::OnceLock;
 
 use guff::ast::{Expr, Stmt, TypeAssertExpr, TypeSwitchStmt};
 use guff::node_mask;
-use guff::walk::NodeRef;
+use guff::walk::{preorder, stmt_ref, NodeRef};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::TypeId;
 
-fn render_type(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
-    let a = pass.pkg().type_artifacts.as_ref()?;
-    Some(guff_types::typestring::type_string(
-        &a.types,
-        &a.objects,
-        &a.packages,
-        typ,
+fn type_of_expr(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
+    pass.types_info()
+        .and_then(|info| info.types.get(&expr.id()).map(|tv| tv.typ))
+}
+
+fn types_equal(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        a,
         None,
-    ))
+    ) == guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        b,
+        None,
+    )
 }
 
-fn count_redundant_assertions(
+/// Collect type assertions in `clause` that re-assert the switch tag `x` to the
+/// case type. Returns `None` when the clause also contains an unrelated type
+/// assertion (upstream skips those clauses — often for symmetry with another
+/// value asserted to the same type; vault `pkcs7_test.go`).
+fn clause_offenders(
     pass: &Pass<'_>,
-    stmt: &guff::ast::Stmt,
+    clause: &guff::ast::CaseClause,
     x: guff_types::ObjectId,
     case_typ: TypeId,
-) -> usize {
-    let mut count = 0;
-    walk_stmt(pass, stmt, x, case_typ, &mut count);
-    count
-}
-
-fn walk_stmt(
-    pass: &Pass<'_>,
-    stmt: &guff::ast::Stmt,
-    x: guff_types::ObjectId,
-    case_typ: TypeId,
-    count: &mut usize,
-) {
-    use guff::ast::Stmt;
-    match stmt {
-        Stmt::AssignStmt(a) => {
-            for e in a.lhs.iter().chain(a.rhs.iter()) {
-                walk_expr(pass, e, x, case_typ, count);
+) -> Option<usize> {
+    let mut offenders = 0usize;
+    let mut unrelated = false;
+    for stmt in &clause.body {
+        preorder(stmt_ref(stmt), |node| {
+            if unrelated {
+                return false;
             }
-        }
-        Stmt::ExprStmt(e) => walk_expr(pass, &e.x, x, case_typ, count),
-        Stmt::BlockStmt(b) => {
-            for s in &b.list {
-                walk_stmt(pass, s, x, case_typ, count);
+            let NodeRef::TypeAssertExpr(TypeAssertExpr { x: ax, ty, .. }) = node else {
+                return true;
+            };
+            let Expr::Ident(id) = ax.as_ref() else {
+                unrelated = true;
+                return false;
+            };
+            if object_of(pass, id) != Some(x) {
+                unrelated = true;
+                return false;
             }
-        }
-        _ => {}
-    }
-}
-
-fn walk_expr(
-    pass: &Pass<'_>,
-    expr: &Expr,
-    x: guff_types::ObjectId,
-    case_typ: TypeId,
-    count: &mut usize,
-) {
-    if let Expr::TypeAssertExpr(TypeAssertExpr { x: ax, ty, .. }) = expr {
-        if let (Expr::Ident(id), Some(ty)) = (&**ax, ty.as_ref()) {
-            if object_of(pass, id) == Some(x) {
-                let assert_typ = pass
-                    .types_info()
-                    .and_then(|info| info.types.get(&ty.id()).map(|tv| tv.typ));
-                if let Some(at) = assert_typ {
-                    if render_type(pass, at) == render_type(pass, case_typ) {
-                        *count += 1;
-                    }
-                }
+            let Some(ty) = ty.as_ref() else {
+                unrelated = true;
+                return false;
+            };
+            let Some(assert_typ) = type_of_expr(pass, ty) else {
+                return true;
+            };
+            if !types_equal(pass, case_typ, assert_typ) {
+                unrelated = true;
+                return false;
             }
+            offenders += 1;
+            true
+        });
+        if unrelated {
+            return None;
         }
     }
-    match expr {
-        Expr::BinaryExpr(e) => {
-            walk_expr(pass, &e.x, x, case_typ, count);
-            walk_expr(pass, &e.y, x, case_typ, count);
-        }
-        Expr::CallExpr(e) => {
-            for a in &e.args {
-                walk_expr(pass, a, x, case_typ, count);
-            }
-        }
-        _ => {}
-    }
+    Some(offenders)
 }
 
+/// Upstream only matches `switch x.(type)` (ExprStmt), not `switch y := x.(type)`.
 fn type_switch_ident<'a>(stmt: &'a TypeSwitchStmt) -> Option<&'a guff::ast::Ident> {
-    if let Stmt::AssignStmt(assign) = &*stmt.assign {
-        let Expr::TypeAssertExpr(ta) = assign.rhs.first()? else {
-            return None;
-        };
-        match &*ta.x {
-            Expr::Ident(id) => Some(id),
-            _ => None,
-        }
-    } else if let Stmt::ExprStmt(es) = &*stmt.assign {
-        let Expr::TypeAssertExpr(ta) = &es.x else {
-            return None;
-        };
-        match &*ta.x {
-            Expr::Ident(id) => Some(id),
-            _ => None,
-        }
-    } else {
-        None
+    if stmt.init.is_some() {
+        return None;
+    }
+    let Stmt::ExprStmt(es) = &*stmt.assign else {
+        return None;
+    };
+    let Expr::TypeAssertExpr(ta) = &es.x else {
+        return None;
+    };
+    match &*ta.x {
+        Expr::Ident(id) => Some(id),
+        _ => None,
     }
 }
 
@@ -126,11 +113,9 @@ fn check_type_switch(pass: &Pass<'_>, stmt: &TypeSwitchStmt) -> Option<String> {
         if clause.list.len() != 1 {
             continue;
         }
-        let case_typ = pass
-            .types_info()
-            .and_then(|info| info.types.get(&clause.list[0].id()).map(|tv| tv.typ))?;
-        for s in &clause.body {
-            offenders += count_redundant_assertions(pass, s, x, case_typ);
+        let case_typ = type_of_expr(pass, &clause.list[0])?;
+        if let Some(n) = clause_offenders(pass, clause, x, case_typ) {
+            offenders += n;
         }
     }
     if offenders > 0 {

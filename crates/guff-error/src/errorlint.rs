@@ -33,13 +33,22 @@ fn is_allowed_sentinel(pass: &Pass<'_>, e: &Expr) -> bool {
         return false;
     };
     if let Some(n) = code::selector_name(pass, sel) {
-        return matches!(
+        if matches!(
             n.as_str(),
             "io.EOF"
                 | "context.Canceled"
                 | "context.DeadlineExceeded"
                 | "database/sql.ErrNoRows"
-        );
+        ) {
+            return true;
+        }
+        // Upstream wildcards: syscall.E* and golang.org/x/sys/unix.E* may be
+        // compared with == when returned from the same packages (Errno is not
+        // wrapped). Without this, vault/prometheus `err == unix.ENOTSUP` after
+        // FcntlFstore is a false guff-only vs golangci.
+        if n.starts_with("syscall.E") || n.starts_with("golang.org/x/sys/unix.E") {
+            return true;
+        }
     }
     let Expr::Ident(pkg) = unparen(&sel.x) else {
         return false;
@@ -50,7 +59,8 @@ fn is_allowed_sentinel(pass: &Pass<'_>, e: &Expr) -> bool {
             | ("context", "Canceled")
             | ("context", "DeadlineExceeded")
             | ("sql", "ErrNoRows")
-    )
+    ) || (matches!(pkg.name.as_str(), "unix" | "syscall")
+        && sel.sel.name.starts_with('E'))
 }
 
 fn in_error_is_method(stack: &[NodeRef<'_>], pass: &Pass<'_>) -> bool {

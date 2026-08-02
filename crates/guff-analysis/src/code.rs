@@ -492,6 +492,33 @@ pub fn is_of_type_with_name(pass: &Pass<'_>, expr: &Expr, want: &str) -> bool {
     type_with_name(pass, typ, want)
 }
 
+/// Reports whether `expr`'s type is a pointer to a named type `want`
+/// (e.g. `want == "net/url.URL"` for `*url.URL`).
+///
+/// Port of `code.IsOfPointerToTypeWithName`.
+pub fn is_of_pointer_to_type_with_name(pass: &Pass<'_>, expr: &Expr, want: &str) -> bool {
+    is_of_pointer_to_type_with_name_id(pass, expr.id(), want)
+}
+
+/// Like [`is_of_pointer_to_type_with_name`] but keyed by AST node id (works for
+/// pattern bindings that yield `Ident`/`NodeRef` rather than `&Expr`).
+pub fn is_of_pointer_to_type_with_name_id(pass: &Pass<'_>, expr_id: u32, want: &str) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(typ) = info.types.get(&expr_id).map(|tv| tv.typ) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let typ = guff_types::alias::unalias_readonly(&artifacts.types, typ);
+    let guff_types::arena::TypeData::Pointer(p) = artifacts.types.get(typ) else {
+        return false;
+    };
+    type_with_name(pass, p.elem(), want)
+}
+
 /// Reports whether `typ` renders as `want` (e.g. `"context.Context"`).
 pub fn type_with_name(pass: &Pass<'_>, typ: TypeId, want: &str) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
