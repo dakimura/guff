@@ -127,10 +127,19 @@ def normalize_message(linter: str, text: str) -> str:
             "omit type ",
             t,
         )
+        # Trailing period drift on Deprecated docs (`Use X.` vs `Use X`).
+        t = t.rstrip(".")
     if linter == "modernize":
         t = _MODERNIZE_CHECK.sub("", t)
     if linter == "govet":
         t = _GOVET_PASS.sub("", t)
+        # golangci embeds the Go version that built its binary (`go1.26.2`);
+        # guff uses the local GOROOT (`go1.26.4`). Patch is noise for matching.
+        t = re.sub(
+            r"\(declared using (go1\.\d+)(?:\.\d+)+\)",
+            r"(declared using \1)",
+            t,
+        )
     return t
 
 

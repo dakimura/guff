@@ -6,7 +6,8 @@
 //! `golang.org/x/tools/go/analysis/passes/inline` (the part golangci surfaces
 //! as `Constant reflect.Ptr should be inlined`), plus the
 //! `cannot inline: type parameter inference is not yet supported` diagnostic
-//! for `golang.org/x/exp/{maps,slices}` go:fix generics (consul).
+//! for `golang.org/x/exp/{maps,slices}` go:fix generics (consul), and the
+//! go-version gate for `io/ioutil` `//go:fix inline` wrappers (#75726).
 //!
 //! Full function/alias inlining is omitted. Stdlib / exp packages are often
 //! loaded from export data (no source), so known inlinables are hardcoded in
@@ -20,14 +21,16 @@ use std::collections::HashSet;
 use std::fs;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, CommentGroup, Decl, Expr, GenDecl, Spec, ValueSpec};
+use guff::ast::{CallExpr, CommentGroup, Decl, Expr, ExprStmt, GenDecl, Spec, ValueSpec};
 use guff::parse_directive;
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, object_pkg_path};
+use guff_analysis::code::{
+    call_name, effective_file_go_version, object_pkg_path, toolchain_go_version, version_compare,
+};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, ObjectId};
@@ -272,6 +275,18 @@ fn package_imports_exp_gofix(pass: &Pass<'_>) -> bool {
     })
 }
 
+fn package_imports_ioutil(pass: &Pass<'_>) -> bool {
+    pass.pkg().imports.contains_key("io/ioutil")
+}
+
+/// `io/ioutil` funcs annotated `//go:fix inline` in GOROOT (go1.16+/1.17+).
+fn is_known_ioutil_gofix_inline(name: &str) -> bool {
+    matches!(
+        name,
+        "ReadAll" | "ReadFile" | "WriteFile" | "NopCloser" | "TempFile" | "TempDir"
+    )
+}
+
 fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     let Some(name) = call_name(pass, &call.fun) else {
         return;
@@ -287,6 +302,61 @@ fn check_exp_gofix_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
             "cannot inline: type parameter inference is not yet supported".into(),
         ));
     }
+}
+
+/// Report when inlining an `io/ioutil` go:fix wrapper would pull a newer
+/// dialect into an older caller file (upstream #75726 stopgap).
+///
+/// Skips call-as-statement sites (`ioutil.WriteFile(...);` with discarded
+/// results): golangci's inliner does not emit the version diagnostic there
+/// (vault `pkcs7/sign_test.go`), while assigned calls are reported.
+fn check_ioutil_go_version(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    stmt_calls: &HashSet<i64>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    if stmt_calls.contains(&call.lparen.0) {
+        return;
+    }
+    let fun = unparen(&call.fun);
+    let Expr::SelectorExpr(sel) = fun else {
+        return;
+    };
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
+        return;
+    };
+    let Some(pkg_path) = object_pkg_path(pass, obj) else {
+        return;
+    };
+    if pkg_path != "io/ioutil" {
+        return;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return;
+    };
+    let name = obj.name(&artifacts.objects);
+    if !is_known_ioutil_gofix_inline(name) {
+        return;
+    }
+    let pos = call.lparen.0 as u32;
+    let caller = effective_file_go_version(pass, pos);
+    let callee = toolchain_go_version();
+    if caller.is_empty() || callee.is_empty() {
+        return;
+    }
+    // versions.Before(caller, callee)
+    if version_compare(&caller, &callee) >= 0 {
+        return;
+    }
+    let display = format_expr_name(&Expr::SelectorExpr(sel.clone()));
+    pending.push((
+        pos,
+        format!("cannot inline call to {display} (declared using {callee}) into a file using {caller}"),
+    ));
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -307,9 +377,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // non-stdlib candidate appears (prometheus typically only hits reflect.Ptr).
     let mut local: Option<HashSet<ObjectId>> = None;
     let mut pending = Vec::new();
-    // Only visit CallExpr when the package imports x/exp/{maps,slices}.
-    // Otherwise every call pays `call_name` for a diagnostic that cannot fire.
-    let visit_calls = package_imports_exp_gofix(pass);
+    // Only visit CallExpr when a known call-site diagnostic can fire.
+    let visit_exp = package_imports_exp_gofix(pass);
+    let visit_ioutil = package_imports_ioutil(pass);
+    let visit_calls = visit_exp || visit_ioutil;
+
+    // CallExprs used as statements (results discarded).
+    let mut stmt_calls = HashSet::new();
+    if visit_ioutil {
+        inspect.preorder_typed(node_mask!(ExprStmt), pass.files(), |n| {
+            if let NodeRef::ExprStmt(ExprStmt { x, .. }) = n {
+                if let Expr::CallExpr(call) = unparen(x) {
+                    stmt_calls.insert(call.lparen.0);
+                }
+            }
+        });
+    }
+
     let mask = if visit_calls {
         node_mask!(CallExpr, SelectorExpr, Ident)
     } else {
@@ -318,8 +402,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     inspect.preorder_typed(mask, pass.files(), |n| {
         match n {
             NodeRef::CallExpr(call) => {
-                if visit_calls {
+                if visit_exp {
                     check_exp_gofix_call(pass, call, &mut pending);
+                }
+                if visit_ioutil {
+                    check_ioutil_go_version(pass, call, &stmt_calls, &mut pending);
                 }
             }
             NodeRef::SelectorExpr(sel) => {

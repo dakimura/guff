@@ -6,11 +6,4 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
-# DEFERRED: govet inline go-version diagnostics (5)
 # note: goplugin custom linters stripped by corpus/patch_unlimited_issues.py
-
-kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:337:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0
-kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:339:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0
-kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:341:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0
-kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:363:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.0
-kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/runtime/serializer/streaming/streaming_test.go:44:govet:cannot inline call to ioutil.NopCloser (declared using go1.26.2) into a file using go1.24.0

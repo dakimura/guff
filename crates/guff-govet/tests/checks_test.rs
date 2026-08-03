@@ -219,6 +219,30 @@ fn inline_allows_preferred_const() {
 }
 
 #[test]
+fn inline_flags_ioutil_go_version_mismatch() {
+    let dir = support::testdata("inline_ioutil");
+    let stub = dir.join("stub/io/ioutil/ioutil.go");
+    let pkg = support::with_go_version(
+        support::typecheck_with_deps(
+            "example.com/govet/inline_ioutil",
+            &dir.join("bad.go"),
+            &[("io/ioutil", &stub)],
+        ),
+        "1.24.3",
+    );
+    let messages = support::run_analyzer(inline_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(
+        messages[0].starts_with("cannot inline call to ioutil.TempDir (declared using go"),
+        "{messages:?}"
+    );
+    assert!(
+        messages[0].contains("into a file using go1.24.3"),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn errorsas_flags_non_pointer_target() {
     let dir = support::testdata("errorsas");
     let pkg = support::typecheck_pkg("example.com/govet/errorsas", &dir.join("bad.go"));

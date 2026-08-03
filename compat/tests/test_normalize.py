@@ -94,6 +94,41 @@ class NormalizeTests(unittest.TestCase):
             "error parsing regexp: {header} ^",
         )
 
+    def test_govet_declared_using_strips_patch(self):
+        self.assertEqual(
+            normalize_message(
+                "govet",
+                "inline: cannot inline call to ioutil.TempDir (declared using go1.26.4) "
+                "into a file using go1.24.3",
+            ),
+            normalize_message(
+                "govet",
+                "cannot inline call to ioutil.TempDir (declared using go1.26.2) "
+                "into a file using go1.24.3",
+            ),
+        )
+        self.assertEqual(
+            normalize_message(
+                "govet",
+                "cannot inline call to ioutil.TempDir (declared using go1.26.2) "
+                "into a file using go1.24.3",
+            ),
+            "cannot inline call to ioutil.TempDir (declared using go1.26) "
+            "into a file using go1.24.3",
+        )
+
+    def test_staticcheck_strips_trailing_period(self):
+        self.assertEqual(
+            normalize_message(
+                "staticcheck",
+                "d.started.CAS is deprecated: Use CompareAndSwap.",
+            ),
+            normalize_message(
+                "staticcheck",
+                "SA1019: d.started.CAS is deprecated: Use CompareAndSwap",
+            ),
+        )
+
     def test_related_information_excluded_from_keys(self):
         root = "/work/mod"
         issues = [

@@ -1,5 +1,7 @@
 package main
 
-import _ "example.com/old"
+import "example.com/old"
 
-func main() {}
+func main() {
+	old.Legacy()
+}

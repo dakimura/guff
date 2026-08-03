@@ -640,7 +640,8 @@ pub fn stdlib_version(pass: &Pass<'_>, pos: u32) -> String {
     }
 }
 
-fn file_go_version(pass: &Pass<'_>, pos: u32) -> String {
+/// File-level Go version from `//go:build` (empty when unset).
+pub fn file_go_version(pass: &Pass<'_>, pos: u32) -> String {
     let p = Pos(pos as i64);
     for file in pass.files() {
         if file.file_start.0 <= p.0 && p.0 <= file.file_end.0 {
@@ -655,6 +656,22 @@ fn file_go_version(pass: &Pass<'_>, pos: u32) -> String {
         }
     }
     String::new()
+}
+
+/// Effective language version for source at `pos`: file build-tag version, else
+/// the module `go` line (matches go/types `FileVersions` defaulting).
+pub fn effective_file_go_version(pass: &Pass<'_>, pos: u32) -> String {
+    let file = file_go_version(pass, pos);
+    if file.is_empty() {
+        module_go_version(pass)
+    } else {
+        file
+    }
+}
+
+/// Host toolchain version string (`go1.26.4`), memoized via GOROOT/`GOVERSION`.
+pub fn toolchain_go_version() -> String {
+    guff_packages::detect_go_version_string()
 }
 
 /// Compares two Go versions (`-1`, `0`, `1`). Invalid versions compare as equal.

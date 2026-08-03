@@ -6,43 +6,6 @@
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
-# DEFERRED: govet inline go-version diagnostics (~17)
-# DEFERRED: SA1019 third-party Deprecated facts without dep AST (~18)
 # DEFERRED: SA5011 sequential testing.TB Fatal (no sigma; golangci FP at :414)
 
-vault golangci-only helper/forwarding/util.go:15:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
-vault golangci-only helper/identity/identity.go:9:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
-vault golangci-only helper/identity/mfa/mfa.go:9:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
-vault golangci-only helper/identity/sentinel.go:109:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:111:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:22:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:24:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:66:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:68:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.
-vault golangci-only helper/identity/sentinel.go:6:staticcheck:"github.com/golang/protobuf/ptypes" is deprecated: Well-known types have specialized functionality directly injected into the generated packages for each message type. See the deprecation notice for each function for the suggested alternative.
-vault golangci-only helper/monitor/monitor.go:97:staticcheck:d.started.CAS is deprecated: Use CompareAndSwap.
-vault golangci-only helper/pgpkeys/flag_test.go:118:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:124:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:31:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:42:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:50:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:58:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:81:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:87:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:91:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pgpkeys/flag_test.go:95:govet:cannot inline call to ioutil.WriteFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pkcs7/sign_test.go:115:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pkcs7/sign_test.go:131:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pkcs7/sign_test.go:163:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/pkcs7/sign_test.go:269:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/storagepacker/storagepacker.go:15:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
-vault golangci-only helper/storagepacker/storagepacker_test.go:12:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
-vault golangci-only helper/storagepacker/storagepacker_test.go:13:staticcheck:"github.com/golang/protobuf/ptypes" is deprecated: Well-known types have specialized functionality directly injected into the generated packages for each message type. See the deprecation notice for each function for the suggested alternative.
-vault golangci-only helper/storagepacker/storagepacker_test.go:171:staticcheck:ptypes.TimestampNow is deprecated: Call the timestamppb.Now function instead.
-vault golangci-only helper/storagepacker/storagepacker_test.go:220:staticcheck:ptypes.UnmarshalAny is deprecated: Call the any.UnmarshalTo method instead.
 vault golangci-only helper/testhelpers/testhelpers.go:414:staticcheck:possible nil pointer dereference
-vault golangci-only helper/testhelpers/testhelpers.go:640:staticcheck:client.RawRequestWithContext is deprecated: RawRequestWithContext exists for historical compatibility and should not be used directly. Use client.Logical().ReadRawWithContext(...) or higher level methods instead.
-vault golangci-only helper/testhelpers/teststorage/teststorage.go:106:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/testhelpers/teststorage/teststorage.go:327:staticcheck:audit.NoopAuditFactory is deprecated: NoopAuditFactory only exists to allow legacy tests to continue working.
-vault golangci-only helper/testhelpers/teststorage/teststorage.go:75:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/testhelpers/teststorage/teststorage_reusable.go:163:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3

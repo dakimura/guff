@@ -1,4 +1,5 @@
 // Deprecated: use New instead.
 package old
 
-func Old() {}
+// Deprecated: call New.
+func Legacy() {}

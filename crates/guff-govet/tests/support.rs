@@ -172,3 +172,12 @@ pub fn run_analyzer(
         .map(|(_, d)| d.message)
         .collect()
 }
+
+/// Set the module Go version on a type-checked package (for version-gated checks).
+pub fn with_go_version(mut pkg: Arc<Package>, version: &str) -> Arc<Package> {
+    Arc::make_mut(&mut pkg).module = Some(guff_packages::Module {
+        go_version: version.to_string(),
+        ..guff_packages::Module::default()
+    });
+    pkg
+}

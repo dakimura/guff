@@ -1,11 +1,22 @@
 //! SA1019 — using a deprecated function, variable, constant or field.
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa1019`.
+//!
+//! Third-party deps are type-checked without `PARSE_COMMENTS` (function docs
+//! dropped) and fact remapping can miss package facts. When an `IsDeprecated`
+//! fact is absent for an external import, we lazily re-parse that package's
+//! sources (cached, `Deprecated:` byte-filtered) — same shape as ST1020 /
+//! govet-inline local discovery.
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::fs;
+use std::sync::{Arc, OnceLock};
 
-use guff::ast::{CompositeLit, Expr, ImportSpec, SelectorExpr};
+use guff::ast::{CompositeLit, Decl, Expr, GenDecl, ImportSpec, SelectorExpr, Spec};
 use guff::node_mask;
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
+use guff::token::Token;
 use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{
     knowledge_selector_name, object_pkg_path, stdlib_version, version_compare,
@@ -16,6 +27,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, DeprecatedResult, IsDeprecated, RunError, RunFn, Pass};
 use guff_types::arena::{ObjectData, TypeData};
 
+use crate::render::render_expr;
 use crate::stdlib_deprecations::{
     stdlib_deprecations, stdlib_package_deprecation_msg, Deprecation, DEPRECATED_NEVER_USE,
     DEPRECATED_USE_NO_LONGER,
@@ -63,15 +75,17 @@ fn handle_deprecation(
     pass: &Pass<'_>,
     deprs: &DeprecatedResult,
     depr: &IsDeprecated,
-    deprecated_name: &str,
+    // Key for `knowledge.StdlibDeprecations` (honnef `SelectorName` / import path).
+    table_key: &str,
+    // Source-rendered name for the diagnostic (honnef `report.Render`).
+    display_name: &str,
     pkg_path: &str,
     pos: u32,
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Option<String> {
     let table = stdlib_deprecations();
-    // Table keys are unquoted (`io/ioutil`); import diagnostics pass quoted display names.
-    let table_key = deprecated_name.trim_matches('"');
-    let std = table.get(table_key).or_else(|| table.get(deprecated_name));
+    let table_key = table_key.trim_matches('"');
+    let std = table.get(table_key).or_else(|| table.get(display_name));
     if std.is_none() && is_stdlib_path(pkg_path) {
         return None;
     }
@@ -87,10 +101,434 @@ fn handle_deprecation(
         return None;
     }
     if let Some(std) = std {
-        deprecation_message(deprecated_name, depr, Some(std))
+        deprecation_message(display_name, depr, Some(std))
     } else {
-        Some(format!("{deprecated_name} is deprecated: {}", depr.msg))
+        Some(format!("{display_name} is deprecated: {}", depr.msg))
     }
+}
+
+fn extract_deprecated_message(doc: &Option<guff::ast::CommentGroup>) -> Option<String> {
+    let doc = doc.as_ref()?;
+    for part in doc.text().split("\n\n") {
+        if let Some(rest) = part.strip_prefix("Deprecated: ") {
+            return Some(rest.replace('\n', " ").trim().to_string());
+        }
+    }
+    None
+}
+
+fn receiver_type_name(ty: &Expr) -> Option<&str> {
+    let mut t = ty;
+    if let Expr::StarExpr(star) = t {
+        t = &star.x;
+    }
+    match t {
+        Expr::Ident(id) => Some(id.name.as_str()),
+        Expr::IndexExpr(idx) => match &*idx.x {
+            Expr::Ident(id) => Some(id.name.as_str()),
+            _ => None,
+        },
+        Expr::IndexListExpr(idx) => match &*idx.x {
+            Expr::Ident(id) => Some(id.name.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn method_fact_key(recv_type_name: &str, method: &str) -> String {
+    format!("{recv_type_name}.{method}")
+}
+
+fn func_has_receiver(
+    types: &guff_types::arena::TypeArena,
+    objects: &guff_types::arena::ObjectArena,
+    obj: guff_types::arena::ObjectId,
+) -> bool {
+    let ObjectData::Func(f) = objects.get(obj) else {
+        return false;
+    };
+    let Some(sig) = f.typ() else {
+        return false;
+    };
+    matches!(types.get(sig), TypeData::Signature(s) if s.recv().is_some())
+}
+
+fn method_recv_base_from_sig(
+    types: &guff_types::arena::TypeArena,
+    objects: &guff_types::arena::ObjectArena,
+    obj: guff_types::arena::ObjectId,
+) -> Option<String> {
+    let ObjectData::Func(f) = objects.get(obj) else {
+        return None;
+    };
+    let sig = f.typ()?;
+    let TypeData::Signature(s) = types.get(sig) else {
+        return None;
+    };
+    let recv = s.recv()?;
+    let mut recv_typ = recv.typ(objects)?;
+    let resolved = guff_types::alias::unalias_readonly(types, recv_typ);
+    if let TypeData::Pointer(p) = types.get(resolved) {
+        recv_typ = p.elem();
+    }
+    let resolved = guff_types::alias::unalias_readonly(types, recv_typ);
+    match types.get(resolved) {
+        TypeData::Named(_) => {
+            let named = guff_types::named::named_obj(types, resolved);
+            Some(named.name(objects).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Base type name for a method receiver (`*pkg.T` / `pkg.T` → `T`).
+fn selection_recv_base_name(pass: &Pass<'_>, sel: &SelectorExpr) -> Option<String> {
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let selection = info.selections.get(&sel.id)?;
+    let mut recv = selection.recv();
+    let resolved = guff_types::alias::unalias_readonly(&artifacts.types, recv);
+    if let TypeData::Pointer(p) = artifacts.types.get(resolved) {
+        recv = p.elem();
+    }
+    let resolved = guff_types::alias::unalias_readonly(&artifacts.types, recv);
+    match artifacts.types.get(resolved) {
+        TypeData::Named(_) => {
+            let obj = guff_types::named::named_obj(&artifacts.types, resolved);
+            Some(obj.name(&artifacts.objects).to_string())
+        }
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct PkgDeprecatedFacts {
+    package: Option<String>,
+    /// Package-level funcs / vars / consts / types (no receiver).
+    objects: HashMap<String, String>,
+    /// Methods keyed by `TypeName.Method` (receiver present). Separate from
+    /// `objects` so `(*ACL).Create` does not poison `(*Namespaces).Create`.
+    methods: HashMap<String, String>,
+    /// True once PARSE_COMMENTS object/method extraction has run.
+    objects_scanned: bool,
+}
+
+#[derive(Default)]
+struct DepDeprecatedCache {
+    /// Per-pass memo; process-global store is consulted first so shared
+    /// third-party imports are not re-parsed for every root package.
+    pkgs: HashMap<String, Arc<PkgDeprecatedFacts>>,
+}
+
+fn global_dep_store() -> &'static std::sync::Mutex<HashMap<String, Arc<PkgDeprecatedFacts>>> {
+    static STORE: OnceLock<std::sync::Mutex<HashMap<String, Arc<PkgDeprecatedFacts>>>> =
+        OnceLock::new();
+    STORE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn src_has_deprecated_doc(src: &[u8]) -> bool {
+    // Match doc-comment forms only — bare `Deprecated:` in strings is common
+    // and would force expensive PARSE_COMMENTS on unrelated files.
+    const PATS: [&[u8]; 2] = [b"// Deprecated:", b"* Deprecated:"];
+    for pat in PATS {
+        if src.windows(pat.len()).any(|w| w == pat) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Package comments sit immediately above the `package` clause. Object-level
+/// `// Deprecated:` elsewhere must not force a Mode::NONE parse when we only
+/// need the package fact (e.g. golang/protobuf/proto/deprecated.go).
+fn src_has_package_deprecated_doc(src: &[u8]) -> bool {
+    let preamble = match src.windows(8).position(|w| w == b"\npackage") {
+        Some(i) => &src[..=i],
+        None => {
+            // Single-line / no leading newline before `package`.
+            if let Some(i) = src.windows(7).position(|w| w == b"package") {
+                &src[..i]
+            } else {
+                src
+            }
+        }
+    };
+    src_has_deprecated_doc(preamble)
+}
+
+/// Prefer conventional homes for package docs (`doc.go`, `{basename}.go`).
+fn prefer_package_doc_files<'a>(
+    files: &'a [std::path::PathBuf],
+    pkg_path: &str,
+) -> Vec<&'a std::path::PathBuf> {
+    let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
+    let mut paths: Vec<&std::path::PathBuf> = files
+        .iter()
+        .filter(|p| {
+            !p.file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|n| n.ends_with("_test.go"))
+        })
+        .collect();
+    paths.sort_by_key(|p| {
+        let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if n == "doc.go" {
+            0
+        } else if n == base {
+            1
+        } else {
+            2
+        }
+    });
+    paths
+}
+
+/// True when a third-party import is worth a Mode::NONE package-doc reparse.
+/// Unrestricted scans of every import dominate prometheus cold `./...` wall
+/// (~500 unique paths × file I/O). Restrict to trees that commonly ship
+/// package-level `Deprecated:` (vault weekly gap).
+fn worth_package_doc_scan(pkg_path: &str) -> bool {
+    pkg_path.starts_with("github.com/golang/protobuf/")
+}
+
+/// Third-party / nested-module packages whose object/method docs we will
+/// PARSE_COMMENTS-scan even without a package-level deprecation.
+fn worth_object_doc_scan(pkg_path: &str) -> bool {
+    worth_package_doc_scan(pkg_path)
+        || pkg_path == "go.uber.org/atomic"
+        || pkg_path == "github.com/hashicorp/vault/api"
+        || pkg_path.starts_with("github.com/hashicorp/vault/api/")
+        // Main-module package; fact remapping still drops Deprecated on some
+        // importers (vault weekly teststorage → audit.NoopAuditFactory).
+        || pkg_path == "github.com/hashicorp/vault/audit"
+        || pkg_path.starts_with("github.com/hashicorp/vault/audit/")
+}
+
+/// Deps whose sources are local replaces / nested modules / test stubs — not
+/// every in-repo package (that would reparse half of prometheus on cold wall).
+fn is_local_source_dep(pass: &Pass<'_>, pkg_path: &str) -> bool {
+    let Some(imp) = pass.pkg().imports.get(pkg_path) else {
+        return false;
+    };
+    let files = if !imp.compiled_go_files.is_empty() {
+        &imp.compiled_go_files
+    } else {
+        &imp.go_files
+    };
+    let Some(p) = files.first() else {
+        return false;
+    };
+    let s = p.to_string_lossy();
+    if s.contains("/pkg/mod/") || s.contains("/goroot/") || s.contains("/GOROOT/") {
+        return false;
+    }
+    if s.contains("/testdata/") || s.contains("/stub/") {
+        return true;
+    }
+    let Some(m) = pass.pkg().module.as_ref() else {
+        return false;
+    };
+    let mod_dir = std::path::Path::new(&m.dir);
+    let mut cur = p.parent();
+    while let Some(dir) = cur {
+        if dir == mod_dir {
+            break;
+        }
+        if !dir.starts_with(mod_dir) {
+            // Replace pointing outside the main module tree.
+            return true;
+        }
+        if dir.join("go.mod").is_file() {
+            // Nested module (e.g. vault/api).
+            return true;
+        }
+        cur = dir.parent();
+    }
+    false
+}
+
+fn store_global(pkg_path: &str, facts: Arc<PkgDeprecatedFacts>) {
+    if let Ok(mut g) = global_dep_store().lock() {
+        g.insert(pkg_path.to_string(), facts);
+    }
+}
+
+fn dep_facts<'a>(
+    pass: &Pass<'_>,
+    cache: &'a mut DepDeprecatedCache,
+    pkg_path: &str,
+    need_objects: bool,
+) -> &'a PkgDeprecatedFacts {
+    let cached_ok = cache
+        .pkgs
+        .get(pkg_path)
+        .is_some_and(|e| !need_objects || e.objects_scanned);
+    if cached_ok {
+        return cache.pkgs.get(pkg_path).expect("checked");
+    }
+
+    if let Some(shared) = global_dep_store()
+        .lock()
+        .ok()
+        .and_then(|g| g.get(pkg_path).cloned())
+    {
+        if !need_objects || shared.objects_scanned {
+            cache.pkgs.insert(pkg_path.to_string(), shared);
+            return cache.pkgs.get(pkg_path).expect("just inserted");
+        }
+    }
+
+    if is_stdlib_path(pkg_path) {
+        let empty = Arc::new(PkgDeprecatedFacts {
+            objects_scanned: true,
+            ..PkgDeprecatedFacts::default()
+        });
+        store_global(pkg_path, Arc::clone(&empty));
+        cache.pkgs.insert(pkg_path.to_string(), empty);
+        return cache.pkgs.get(pkg_path).expect("just inserted");
+    }
+
+    // Only scan (and cache globally) when this package can see the dep's
+    // sources. A miss must not poison the process-wide store — another root
+    // package may import the same path and need a real PARSE_COMMENTS scan.
+    if !pass.pkg().imports.contains_key(pkg_path) {
+        let empty = Arc::new(PkgDeprecatedFacts::default());
+        cache.pkgs.insert(pkg_path.to_string(), empty);
+        return cache.pkgs.get(pkg_path).expect("just inserted");
+    }
+
+    let scanned = Arc::new(scan_import_deprecated(pass, pkg_path, need_objects));
+    store_global(pkg_path, Arc::clone(&scanned));
+    cache.pkgs.insert(pkg_path.to_string(), scanned);
+    cache.pkgs.get(pkg_path).expect("just inserted")
+}
+
+fn scan_import_deprecated(
+    pass: &Pass<'_>,
+    pkg_path: &str,
+    need_objects: bool,
+) -> PkgDeprecatedFacts {
+    let Some(imp) = pass.pkg().imports.get(pkg_path) else {
+        // Missing from this package's import graph — do not claim a completed
+        // object scan (and callers must not poison the process-global cache).
+        return PkgDeprecatedFacts::default();
+    };
+    let files = if !imp.compiled_go_files.is_empty() {
+        &imp.compiled_go_files
+    } else {
+        &imp.go_files
+    };
+    let mut out = PkgDeprecatedFacts {
+        objects_scanned: need_objects,
+        ..PkgDeprecatedFacts::default()
+    };
+    // Package docs are retained with Mode::NONE; object docs need PARSE_COMMENTS.
+    let parse_mode = if need_objects {
+        PARSE_COMMENTS
+    } else {
+        guff::parser::Mode::NONE
+    };
+    let mut paths = prefer_package_doc_files(files, pkg_path);
+    if !need_objects {
+        // Import diagnostics only need the package doc. Restrict to the
+        // conventional homes (`doc.go`, `{basename}.go`) — walking every
+        // file of every third-party import dominates prometheus cold ./...
+        // wall. Object-level Deprecated: lives elsewhere and is handled by
+        // the gated PARSE_COMMENTS path.
+        let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
+        paths.retain(|p| {
+            let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            n == "doc.go" || n == base.as_str()
+        });
+    }
+    for path in paths {
+        let Ok(src) = fs::read(path) else {
+            continue;
+        };
+        // Package-only: preamble filter so object-level Deprecated: files are
+        // skipped cheaply. Object scan: any doc Deprecated: may matter.
+        let interesting = if need_objects {
+            src_has_deprecated_doc(&src)
+        } else {
+            src_has_package_deprecated_doc(&src)
+        };
+        if !interesting {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let fset = FileSet::new();
+        let Ok(file) = parse_file(&fset, name, &src, parse_mode) else {
+            continue;
+        };
+        if out.package.is_none() {
+            if let Some(msg) = extract_deprecated_message(&file.doc) {
+                out.package = Some(msg);
+            }
+        }
+        if !need_objects {
+            // Import diagnostics only need the package doc; stop once found.
+            if out.package.is_some() {
+                break;
+            }
+            continue;
+        }
+        for decl in &file.decls {
+            match decl {
+                Decl::FuncDecl(fd) => {
+                    if let Some(msg) = extract_deprecated_message(&fd.doc) {
+                        if let Some(recv) = fd.recv.as_ref().and_then(|r| r.list.first()) {
+                            if let Some(ty) = &recv.ty {
+                                if let Some(type_name) = receiver_type_name(ty) {
+                                    out.methods.insert(
+                                        method_fact_key(type_name, &fd.name.name),
+                                        msg,
+                                    );
+                                }
+                            }
+                        } else {
+                            out.objects.insert(fd.name.name.clone(), msg);
+                        }
+                    }
+                }
+                Decl::GenDecl(GenDecl {
+                    doc: decl_doc,
+                    tok: Some(tok),
+                    specs,
+                    ..
+                }) if matches!(tok, Token::CONST | Token::VAR | Token::TYPE) => {
+                    let decl_msg = extract_deprecated_message(decl_doc);
+                    for spec in specs {
+                        match spec {
+                            Spec::ValueSpec(vs) => {
+                                let msg = extract_deprecated_message(&vs.doc).or_else(|| {
+                                    decl_msg.clone()
+                                });
+                                if let Some(msg) = msg {
+                                    for n in &vs.names {
+                                        out.objects.insert(n.name.clone(), msg.clone());
+                                    }
+                                }
+                            }
+                            Spec::TypeSpec(ts) => {
+                                let msg = extract_deprecated_message(&ts.doc).or_else(|| {
+                                    decl_msg.clone()
+                                });
+                                if let Some(msg) = msg {
+                                    out.objects.insert(ts.name.name.clone(), msg);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -118,6 +556,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     let mut current_fn: Option<guff_types::arena::ObjectId> = None;
+    let mut dep_cache = DepDeprecatedCache::default();
 
     const WANTED: NodeMask = node_mask!(
         CompositeLit,
@@ -133,17 +572,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     .and_then(|info| info.defs.get(&f.name.id).and_then(|o| *o));
             }
             NodeRef::SelectorExpr(sel) => {
-                if let Some((pos, msg)) = selector_diagnostic(pass, &deprs, sel, current_fn) {
+                if let Some((pos, msg)) =
+                    selector_diagnostic(pass, &deprs, &mut dep_cache, sel, current_fn)
+                {
                     pending.push((pos, msg));
                 }
             }
             NodeRef::CompositeLit(lit) => {
-                for (pos, msg) in struct_lit_diagnostics(pass, &deprs, lit, current_fn) {
+                for (pos, msg) in struct_lit_diagnostics(pass, &deprs, &mut dep_cache, lit, current_fn)
+                {
                     pending.push((pos, msg));
                 }
             }
             NodeRef::ImportSpec(spec) => {
-                if let Some((pos, msg)) = import_diagnostic(pass, &deprs, spec) {
+                if let Some((pos, msg)) = import_diagnostic(pass, &deprs, &mut dep_cache, spec) {
                     pending.push((pos, msg));
                 }
             }
@@ -160,6 +602,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 fn selector_diagnostic(
     pass: &Pass<'_>,
     deprs: &DeprecatedResult,
+    dep_cache: &mut DepDeprecatedCache,
     sel: &SelectorExpr,
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Option<(u32, String)> {
@@ -169,15 +612,62 @@ fn selector_diagnostic(
     if related_pkg_path(pass, &pkg_path) {
         return None;
     }
-    let depr = deprs.objects.get(&obj)?;
-    let name = knowledge_selector_name(pass, sel);
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    // Selections mark method picks; fall back to signature recv when the
+    // selector wasn't recorded (some call shapes).
+    let is_method = info.selections.contains_key(&sel.id)
+        || func_has_receiver(&artifacts.types, &artifacts.objects, obj);
+    let synthetic;
+    let depr = if let Some(d) = deprs.objects.get(&obj) {
+        d
+    } else {
+        // Lazy PARSE_COMMENTS reparse of dep sources. Do not scan every
+        // same-module or third-party call site (prometheus cold wall). Allow:
+        // - package already known-deprecated via facts,
+        // - small third-party / nested-module allowlist,
+        // - local replace / nested go.mod / testdata stubs.
+        let obj_pkg = obj.pkg(&artifacts.objects)?;
+        let allow_lazy = deprs.packages.contains_key(&obj_pkg)
+            || worth_object_doc_scan(&pkg_path)
+            || is_local_source_dep(pass, &pkg_path);
+        if !allow_lazy {
+            return None;
+        }
+        let name = obj.name(&artifacts.objects).to_string();
+        let facts = dep_facts(pass, dep_cache, &pkg_path, true);
+        let msg = if is_method {
+            let recv = selection_recv_base_name(pass, sel).or_else(|| {
+                method_recv_base_from_sig(&artifacts.types, &artifacts.objects, obj)
+            })?;
+            facts.methods.get(&method_fact_key(&recv, &name))
+        } else {
+            facts.objects.get(&name)
+        }?
+        .clone();
+        synthetic = IsDeprecated { msg };
+        &synthetic
+    };
+    // Stdlib table keyed by SelectorName; message uses source rendering (report.Render).
+    let table_key = knowledge_selector_name(pass, sel);
+    let display = render_expr(&Expr::SelectorExpr(sel.clone()));
     let pos = sel.sel.name_pos.0 as u32;
-    handle_deprecation(pass, deprs, depr, &name, &pkg_path, pos, current_fn).map(|msg| (pos, msg))
+    handle_deprecation(
+        pass,
+        deprs,
+        depr,
+        &table_key,
+        &display,
+        &pkg_path,
+        pos,
+        current_fn,
+    )
+    .map(|msg| (pos, msg))
 }
 
 fn struct_lit_diagnostics(
     pass: &Pass<'_>,
     deprs: &DeprecatedResult,
+    dep_cache: &mut DepDeprecatedCache,
     lit: &CompositeLit,
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Vec<(u32, String)> {
@@ -214,7 +704,7 @@ fn struct_lit_diagnostics(
             sel: key.clone(),
             id: 0,
         };
-        if let Some(d) = selector_diagnostic(pass, deprs, &sel, current_fn) {
+        if let Some(d) = selector_diagnostic(pass, deprs, dep_cache, &sel, current_fn) {
             out.push(d);
         }
     }
@@ -224,6 +714,7 @@ fn struct_lit_diagnostics(
 fn import_diagnostic(
     pass: &Pass<'_>,
     deprs: &DeprecatedResult,
+    dep_cache: &mut DepDeprecatedCache,
     spec: &ImportSpec,
 ) -> Option<(u32, String)> {
     let info = pass.types_info()?;
@@ -245,6 +736,9 @@ fn import_diagnostic(
     }
     // Export-only stdlib deps never run `fact_deprecated`. Synthesize the
     // package fact from the knowledge table + frozen GOROOT package docs.
+    // Third-party: package docs survive Mode::NONE, but fact remapping can
+    // miss them — cheap Mode::NONE reparse of file docs only (not full
+    // PARSE_COMMENTS object scan).
     let synthetic;
     let depr = if let Some(d) = deprs.packages.get(&pn.imported()) {
         d
@@ -256,14 +750,22 @@ fn import_diagnostic(
             msg: msg.to_string(),
         };
         &synthetic
+    } else if worth_package_doc_scan(path) || is_local_source_dep(pass, path) {
+        // Cheap Mode::NONE package-doc reparse when fact remapping missed.
+        // Gated: unrestricted third-party import scans dominate cold ./... wall.
+        let Some(msg) = dep_facts(pass, dep_cache, path, false).package.clone() else {
+            return None;
+        };
+        synthetic = IsDeprecated { msg };
+        &synthetic
     } else {
         return None;
     };
     let p = spec.path.value.trim_matches('"');
     let pos = spec.path.value_pos.0 as u32;
-    // Upstream reports the quoted import path (`"io/ioutil" has been deprecated…`).
+    // Upstream reports the quoted import path via report.Render(spec.Path).
     let quoted = format!("\"{p}\"");
-    handle_deprecation(pass, deprs, depr, &quoted, path, pos, None).map(|msg| (pos, msg))
+    handle_deprecation(pass, deprs, depr, p, &quoted, path, pos, None).map(|msg| (pos, msg))
 }
 
 fn sa1019_analyzer_impl() -> Analyzer {
