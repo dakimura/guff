@@ -115,7 +115,7 @@ guff automatically reads:
 
 Compatibility:
 
-- ✅ 108 / 114 golangci-lint v2 linters implemented
+- ✅ 114 / 114 golangci-lint v2 linters implemented
 - ✅ Existing configurations supported
 - ✅ Multiple output formats
 - ✅ GitHub Actions annotations
@@ -299,12 +299,12 @@ guff run -c .golangci.yml .
 
 # Supported Linters
 
-guff implements most of the golangci-lint v2 ecosystem.
+guff implements the full golangci-lint v2 linter set.
 
 Current compatibility:
 
 ```
-108 / 114 linters supported
+114 / 114 linters supported
 ```
 
 Examples:
