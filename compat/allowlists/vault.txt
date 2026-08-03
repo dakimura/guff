@@ -5,7 +5,3 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
-
-# DEFERRED: SA5011 sequential testing.TB Fatal (no sigma; golangci FP at :414)
-
-vault golangci-only helper/testhelpers/testhelpers.go:414:staticcheck:possible nil pointer dereference

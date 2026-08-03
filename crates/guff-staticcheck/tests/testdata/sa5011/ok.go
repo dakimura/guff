@@ -53,6 +53,10 @@ type R struct {
 	Data map[string]interface{}
 }
 
+type Status struct {
+	Complete bool
+}
+
 type TB interface {
 	Fatal(args ...interface{})
 	Fatalf(format string, args ...interface{})
@@ -70,4 +74,17 @@ func okOrErr(t TB, resp *R, err error) {
 		t.Fatalf("bad %v %v", resp, err)
 	}
 	_ = resp.Data["x"]
+}
+
+// Concrete value method Fatal is a static call (not interface invoke); sequential
+// check stays clean (unlike testing.TB — see bad.go sequentialFatal / vault :414).
+type fataler struct{}
+
+func (fataler) Fatal(args ...interface{}) {}
+
+func okSequentialConcreteFatal(t fataler, statusResp *Status) {
+	if statusResp == nil {
+		t.Fatal("nil")
+	}
+	_ = statusResp.Complete
 }

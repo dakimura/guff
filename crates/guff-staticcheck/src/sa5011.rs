@@ -7,10 +7,12 @@
 //! sigma), we additionally suppress reports when the deref is dominated by
 //! both the nil-check and its non-nil successor (guarded use after the check).
 //!
-//! `testing.TB` Fatal/Fatalf is not noreturn in IR, so `if p == nil || … {
-//! t.Fatal(...) }; use p` leaves fallthrough edges that break dominance. We
-//! treat those soft-abort nil branches as guarded when `use` is still reachable
-//! from the non-nil successor without entering the abort block.
+//! `testing.TB` Fatal/Fatalf is not noreturn in IR, so
+//! `if p == nil || … { t.Fatal(...) }; use p` leaves fallthrough edges that
+//! break dominance. Soft-abort is applied only when the abort block is a
+//! *join* (multiple preds) — the OR/short-circuit shape — matching golangci.
+//! A plain sequential `if p == nil { t.Fatal }; use` is still reported, same
+//! as golangci's finding-set (vault `testhelpers.go:414`).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -177,7 +179,40 @@ fn is_index_addr_on_slice(
 /// True when `block` ends by calling a testing/log abort helper that upstream
 /// `ctrlflow.NoReturn` often does *not* treat as noreturn on interface
 /// receivers (`testing.TB`), so the CFG still has fallthrough edges.
+fn is_soft_abort_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Fatal" | "Fatalf" | "FailNow" | "SkipNow" | "Fatalln"
+    )
+}
+
+fn type_is_interface(prog: &Program, typ: guff_types::arena::TypeId) -> bool {
+    let under = typ.underlying(&prog.type_arena);
+    matches!(
+        prog.type_arena.get(under),
+        guff_types::arena::TypeData::Interface(_)
+    )
+}
+
+/// True when `func` takes an interface-typed parameter (e.g. `testing.TB`).
+/// Concrete `*testing.T` / `*testing.B` callees are excluded — their Fatal is
+/// noreturn-shaped for golangci, while TB is not (vault `:414`).
+fn func_has_interface_param(prog: &Program, func: &Function) -> bool {
+    for (_id, p) in func.params.iter() {
+        if type_is_interface(prog, p.typ) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Fatal/etc. in a function that receives an interface (TB). Call-site method
+/// lowering is unreliable for TB stubs (`method=None`, args[0] may be a
+/// basic arg), so gate on the enclosing function's parameter types instead.
 fn block_has_soft_abort_call(prog: &Program, func: &Function, block: BlockId) -> bool {
+    if !func_has_interface_param(prog, func) {
+        return false;
+    }
     for &iid in &func.blocks.get(block).instrs {
         let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
             continue;
@@ -185,21 +220,23 @@ fn block_has_soft_abort_call(prog: &Program, func: &Function, block: BlockId) ->
         let Some(name) = short_call_name(prog, call) else {
             continue;
         };
-        match name.as_str() {
-            "Fatal" | "Fatalf" | "FailNow" | "SkipNow" | "Fatalln" => return true,
-            _ => {}
+        if is_soft_abort_name(name.as_str()) {
+            return true;
         }
     }
     false
 }
 
-fn block_calls_soft_abort(prog: &Program, func: &Function, block: BlockId) -> bool {
-    if block_has_soft_abort_call(prog, func, block) {
-        return true;
+/// Soft-abort block for `nil_block`, following a single goto into a shared body.
+fn soft_abort_join_block(prog: &Program, func: &Function, nil_block: BlockId) -> Option<BlockId> {
+    if block_has_soft_abort_call(prog, func, nil_block) {
+        return Some(nil_block);
     }
-    // OR bodies sometimes jump to a shared abort block.
-    let succs = &func.blocks.get(block).succs;
-    succs.len() == 1 && block_has_soft_abort_call(prog, func, succs[0])
+    let succs = &func.blocks.get(nil_block).succs;
+    if succs.len() == 1 && block_has_soft_abort_call(prog, func, succs[0]) {
+        return Some(succs[0]);
+    }
+    None
 }
 
 /// Reachability from `from` to `to`, never entering `avoid`.
@@ -222,6 +259,49 @@ fn reachable_avoiding(func: &Function, from: BlockId, to: BlockId, avoid: BlockI
     false
 }
 
+/// True when control can flow from the nil successor to `deref_block`
+/// (e.g. `t.Fatal` on `testing.TB` is not noreturn, so the abort block
+/// falls through into the post-if code).
+fn nil_branch_reaches(func: &Function, check: &NilCheck, deref_block: BlockId) -> bool {
+    let Some(nil_block) = check.nil_block else {
+        return false;
+    };
+    if nil_block == deref_block {
+        return true;
+    }
+    let mut stack = vec![nil_block];
+    let mut seen = std::collections::HashSet::from([nil_block]);
+    while let Some(b) = stack.pop() {
+        for &succ in &func.blocks.get(b).succs {
+            if succ == deref_block {
+                return true;
+            }
+            if seen.insert(succ) {
+                stack.push(succ);
+            }
+        }
+    }
+    false
+}
+
+/// True when the non-nil successor itself begins another nil-check — the
+/// short-circuit `a == nil || b == nil` shape (possibly with duplicated Fatal
+/// bodies that each have a single predecessor).
+fn non_nil_continues_nil_check(func: &Function, check: &NilCheck) -> bool {
+    let Some(nn) = check.non_nil_block else {
+        return false;
+    };
+    for &iid in &func.blocks.get(nn).instrs {
+        let InstrData::If(If { cond }) = func.instrs.get(iid) else {
+            continue;
+        };
+        if nil_check_partner(func, *cond).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
 fn is_guarded_by_non_nil(
     prog: &Program,
     func: &Function,
@@ -235,22 +315,33 @@ fn is_guarded_by_non_nil(
     let non_nil = func.blocks.get(non_nil_block);
     let deref = func.blocks.get(deref_block);
 
-    if check_bb.dominates(deref)
-        && (non_nil.dominates(deref) || non_nil_block == deref_block)
-    {
-        return true;
+    let dominance_guard = check_bb.dominates(deref)
+        && (non_nil.dominates(deref) || non_nil_block == deref_block);
+    if dominance_guard {
+        // `testing.TB` Fatal is not noreturn: the nil branch falls through into
+        // the post-if block, so `non_nil_block == deref` can look guarded when
+        // both branches reach the use. Only then skip the dominance shortcut.
+        let soft_abort_fallthrough = check.eq_nil
+            && check.nil_block.is_some_and(|nb| {
+                soft_abort_join_block(prog, func, nb).is_some()
+                    && nil_branch_reaches(func, check, deref_block)
+            });
+        if !soft_abort_fallthrough {
+            return true;
+        }
     }
 
-    // `if x == nil || … { t.Fatal(...) }; use x` — soft abort leaves CFG edges
-    // from the nil branch into the merge, so the check block may not dominate
-    // `use`. If the nil branch soft-aborts and `use` is reachable from the
-    // non-nil successor without entering the nil branch, treat as guarded.
+    // OR / short-circuit: `if x == nil || … { t.Fatal(...) }; use x`.
+    // Shared abort (preds>1) or a follow-on nil-check in the non-nil arm.
     if check.eq_nil {
         if let Some(nil_block) = check.nil_block {
-            if block_calls_soft_abort(prog, func, nil_block)
-                && reachable_avoiding(func, non_nil_block, deref_block, nil_block)
-            {
-                return true;
+            if let Some(abort) = soft_abort_join_block(prog, func, nil_block) {
+                let or_shape = func.blocks.get(abort).preds.len() > 1
+                    || non_nil_continues_nil_check(func, check);
+                if or_shape && reachable_avoiding(func, non_nil_block, deref_block, nil_block)
+                {
+                    return true;
+                }
             }
         }
     }

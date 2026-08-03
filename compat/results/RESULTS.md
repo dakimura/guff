@@ -4,7 +4,7 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| vault | 160 | 161 | 160 | 100.0% | 99.4% | 0 |
+| vault | 161 | 161 | 161 | 100.0% | 100.0% | 0 |
 | kubernetes | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
@@ -33,11 +33,8 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | errcheck | 23 | 23 | 23 | 100.0% | 100.0% |
 | govet | 63 | 63 | 63 | 100.0% | 100.0% |
 | ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
-| staticcheck | 68 | 69 | 68 | 100.0% | 98.6% |
+| staticcheck | 69 | 69 | 69 | 100.0% | 100.0% |
 | unused | 4 | 4 | 4 | 100.0% | 100.0% |
-
-### Allowed known diffs (1)
-- golangci-only: `helper/testhelpers/testhelpers.go:414:staticcheck:possible nil pointer dereference`
 
 ## kubernetes
 
