@@ -18,6 +18,30 @@ func usedBetweenReassign() {
 	fmt.Print(b)
 }
 
+type storage interface{ List() int }
+
+func loadStorage(useCustom bool) (storage, error) {
+	return nil, nil
+}
+
+// If/else both assign `stor`, then shared use after merge (caddy storagefuncs).
+func okIfElseAssignThenUse(useCustom bool) (int, error) {
+	var stor storage
+	var err error
+	if useCustom {
+		stor, err = loadStorage(true)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		stor, err = loadStorage(false)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return stor.List(), nil
+}
+
 type fileInfo struct{}
 
 func (fileInfo) IsDir() bool { return true }

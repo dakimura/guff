@@ -65,6 +65,14 @@ fn expr_key(e: &Expr) -> String {
             let args = c.args.iter().map(expr_key).collect::<Vec<_>>().join(", ");
             format!("{}({args})", expr_key(&c.fun))
         }
+        Expr::TypeAssertExpr(t) => {
+            let ty = t
+                .ty
+                .as_ref()
+                .map(|e| expr_key(e))
+                .unwrap_or_else(|| "type".to_string());
+            format!("{}.({ty})", expr_key(&t.x))
+        }
         Expr::ParenExpr(p) => expr_key(&p.x),
         _ => "_".to_string(),
     }

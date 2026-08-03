@@ -4,4 +4,5 @@ import "example.com/old"
 
 func main() {
 	old.Legacy()
+	var _ old.OldClient
 }

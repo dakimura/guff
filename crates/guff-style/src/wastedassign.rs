@@ -246,15 +246,20 @@ fn collect_used_objs(pass: &Pass<'_>, expr: &Expr, out: &mut HashSet<ObjectId>) 
 ///
 /// Assignment LHS of `=` is a use in `Info.Uses`, not a `Defs` entry — treat
 /// those (and IncDec) as redefinitions so `b = 1; b = 2; use(b)` stays wasted.
+///
+/// Assignments that live in the sibling branch of an `if`/`else` that also
+/// contains `after_pos` are not redefinitions (caddy `stor, err = …` / `else {
+/// stor = … }` then shared use after the merge).
 fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
     };
+    let sibling_defs = sibling_branch_assign_positions(pass, obj, after_pos);
     let mut next_use: Option<u32> = None;
     let mut next_def: Option<u32> = None;
 
     let note_def = |pos: u32, next_def: &mut Option<u32>| {
-        if pos > after_pos {
+        if pos > after_pos && !sibling_defs.contains(&pos) {
             *next_def = Some(next_def.map_or(pos, |d| d.min(pos)));
         }
     };
@@ -307,6 +312,103 @@ fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32
         (Some(_), None) => true,
         _ => false,
     }
+}
+
+/// Positions of assigns to `obj` that sit in the sibling `if`/`else` branch of
+/// the branch containing `after_pos`.
+fn sibling_branch_assign_positions(
+    pass: &Pass<'_>,
+    obj: ObjectId,
+    after_pos: u32,
+) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    let Some(inspect) = pass.result_of::<inspect::InspectResult>(inspect::analyzer()) else {
+        return out;
+    };
+    inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |n| {
+        let NodeRef::IfStmt(ifs) = n else {
+            return;
+        };
+        let Some(else_stmt) = ifs.else_.as_deref() else {
+            return;
+        };
+        let in_then = pos_in_node(NodeRef::BlockStmt(&ifs.body), after_pos)
+            || ifs
+                .init
+                .as_deref()
+                .is_some_and(|s| pos_in_node(stmt_ref(s), after_pos));
+        let in_else = pos_in_node(stmt_ref(else_stmt), after_pos);
+        if in_then == in_else {
+            return;
+        }
+        let sibling = if in_then {
+            stmt_ref(else_stmt)
+        } else {
+            NodeRef::BlockStmt(&ifs.body)
+        };
+        collect_assign_positions(pass, sibling, obj, &mut out);
+    });
+    out
+}
+
+fn pos_in_node(root: NodeRef<'_>, pos: u32) -> bool {
+    let mut lo = u32::MAX;
+    let mut hi = 0u32;
+    preorder(root, |n| {
+        if let NodeRef::Ident(id) = n {
+            let p = id.name_pos.0 as u32;
+            lo = lo.min(p);
+            hi = hi.max(p);
+        }
+        true
+    });
+    lo != u32::MAX && pos >= lo && pos <= hi
+}
+
+fn stmt_ref(stmt: &Stmt) -> NodeRef<'_> {
+    match stmt {
+        Stmt::AssignStmt(a) => NodeRef::AssignStmt(a),
+        Stmt::BadStmt(b) => NodeRef::BadStmt(b),
+        Stmt::BlockStmt(b) => NodeRef::BlockStmt(b),
+        Stmt::BranchStmt(b) => NodeRef::BranchStmt(b),
+        Stmt::CaseClause(c) => NodeRef::CaseClause(c),
+        Stmt::CommClause(c) => NodeRef::CommClause(c),
+        Stmt::DeclStmt(d) => NodeRef::DeclStmt(d),
+        Stmt::DeferStmt(d) => NodeRef::DeferStmt(d),
+        Stmt::EmptyStmt(e) => NodeRef::EmptyStmt(e),
+        Stmt::ExprStmt(e) => NodeRef::ExprStmt(e),
+        Stmt::ForStmt(f) => NodeRef::ForStmt(f),
+        Stmt::GoStmt(g) => NodeRef::GoStmt(g),
+        Stmt::IfStmt(i) => NodeRef::IfStmt(i),
+        Stmt::IncDecStmt(i) => NodeRef::IncDecStmt(i),
+        Stmt::LabeledStmt(l) => NodeRef::LabeledStmt(l),
+        Stmt::RangeStmt(r) => NodeRef::RangeStmt(r),
+        Stmt::ReturnStmt(r) => NodeRef::ReturnStmt(r),
+        Stmt::SelectStmt(s) => NodeRef::SelectStmt(s),
+        Stmt::SendStmt(s) => NodeRef::SendStmt(s),
+        Stmt::SwitchStmt(s) => NodeRef::SwitchStmt(s),
+        Stmt::TypeSwitchStmt(s) => NodeRef::TypeSwitchStmt(s),
+    }
+}
+
+fn collect_assign_positions(
+    pass: &Pass<'_>,
+    root: NodeRef<'_>,
+    obj: ObjectId,
+    out: &mut HashSet<u32>,
+) {
+    preorder(root, |n| {
+        if let NodeRef::AssignStmt(a) = n {
+            for lhs in &a.lhs {
+                if let Expr::Ident(id) = lhs {
+                    if object_of(pass, id) == Some(obj) {
+                        out.insert(id.name_pos.0 as u32);
+                    }
+                }
+            }
+        }
+        true
+    });
 }
 
 /// Resolve the `ObjectId` for a NaiveForm local Alloc named `comment` near `pos`.

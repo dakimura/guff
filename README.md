@@ -10,22 +10,29 @@ The CLI binary is **`guff`** (crate name: `guff-lint`).
 
 Agents and CI run linters constantly. Wall-clock and peak memory dominate the feedback loop. guff keeps a single Rust process over package load → typecheck → analyzers, instead of orchestrating many Go tools.
 
-**~2.3–2.7× faster than golangci-lint** on prometheus’s own `.golangci.yml`
-(~20 analyzers + gci/gofumpt/goimports formatters), with a warm Go build cache
-and cold linter caches — the repeat local-run / warm-CI case. Hybrid dependency
-type-checking is on by default:
+**~8–17× faster than golangci-lint on cold linter caches** across the same OSS
+repos used for [finding-set compatibility](compat/) (each repo’s real
+golangci-lint **v2** config). Warm `GOCACHE`; clone / module download excluded:
 
-| Target | guff | golangci-lint | guff is |
-|--------|-----:|--------------:|--------:|
-| prometheus `./tsdb/...` | **3.2s** | 7.3s | **2.3× faster** |
-| prometheus `./...` (full) | **12.3s** | 32.9s | **2.7× faster** |
+| Target | packages | guff cold | golangci cold | guff is |
+|--------|----------|----------:|--------------:|--------:|
+| gin | `./...` | **0.38s** | 4.2s | **11× faster** |
+| caddy | `./...` | **0.99s** | 10.0s | **10× faster** |
+| helm | `./...` | **1.7s** | 22.1s | **13× faster** |
+| consul | `./...` | **6.1s** | 47.2s | **8× faster** |
+| grafana | `./pkg/...` | **23.8s** | 394.8s | **17× faster** |
+| containerd | `./pkg/...` | **0.52s** | 7.3s | **14× faster** |
+| vault | `./helper/...` | **4.5s** | 40.4s | **9× faster** |
+| kubernetes | `apimachinery/...` | **0.64s** | 6.3s | **10× faster** |
 
-Medians of 3 samples (Darwin arm64, 10-core; Go 1.26, golangci-lint 2.12.2;
-auto `-j`; warm `GOCACHE`, cold linter caches). Findings are gated identical
-run-to-run. Reproduce with [`regress/run.sh`](regress/); for the empty-`GOCACHE`
-sandbox case see [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).
+Medians of 3 samples (Darwin arm64; Go 1.26, golangci-lint 2.12.2; auto `-j`).
+Full cold/warm SCOREBOARD: [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md).
+Reproduce with `./benchmarks/run.sh --oss --tier pr,nightly,weekly`. Finding-set
+parity: `./compat/run.sh --oss --tier pr,nightly,weekly`.
 
-**Memory:** with **hybrid cold source** (default), third-party deps are type-checked from source. Peak RSS is **~7.7 GiB** on prometheus full `./...` and **~1.4 GiB** on `./tsdb/...`. Details: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md), [`regress/`](regress/).
+**Memory / prometheus gate:** hybrid cold source (default) type-checks third-party
+deps from source. Peak RSS and the prometheus own-config regression gate live
+under [`regress/`](regress/) and [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
 
 Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters are implemented. Matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 

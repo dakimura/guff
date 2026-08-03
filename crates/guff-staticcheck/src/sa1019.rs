@@ -19,7 +19,7 @@ use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{
-    knowledge_selector_name, object_pkg_path, stdlib_version, version_compare,
+    knowledge_selector_name, object_of, object_pkg_path, stdlib_version, version_compare,
 };
 use guff_analysis::passes::facts::deprecated;
 use guff_analysis::passes::facts::generated;
@@ -607,7 +607,12 @@ fn selector_diagnostic(
     current_fn: Option<guff_types::arena::ObjectId>,
 ) -> Option<(u32, String)> {
     let info = pass.types_info()?;
-    let obj = info.uses.get(&sel.sel.id).copied()?;
+    // Match go/types ObjectOf (Defs before Uses). For an embedded field
+    // `pkg.T`, Defs maps T's Ident to the field Var while Uses maps it to the
+    // TypeName — ObjectOf returns the Var, so embedding a deprecated type is
+    // not reported (honnef SA1019 parity). Named fields / signatures still
+    // resolve the type Ident via Uses → TypeName and are flagged.
+    let obj = object_of(pass, &sel.sel)?;
     let pkg_path = object_pkg_path(pass, obj)?;
     if related_pkg_path(pass, &pkg_path) {
         return None;

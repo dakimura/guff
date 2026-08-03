@@ -375,9 +375,26 @@ fn match_arg_type(pass: &Pass<'_>, verb: char, bits: u32, typ: TypeId, depth: u3
         TypeData::Chan(_) | TypeData::Signature(_) => bits & B_POINTER != 0,
         TypeData::Interface(_) | TypeData::TypeParam(_) | TypeData::Union(_) => true,
         TypeData::Struct(_) => {
-            // Promoted methods from embedded fields may make this printable;
-            // accept such structs conservatively.
-            struct_has_embedded(pass, u)
+            // Match x/tools printf: recurse into every field. Also accept
+            // structs with embedded fields whose promoted String/Error/Format
+            // methods `type_has_method` may miss.
+            if struct_has_embedded(pass, u) {
+                return true;
+            }
+            let n = guff_types::r#struct::struct_num_fields(&art.types, u);
+            if n == 0 {
+                return true;
+            }
+            for i in 0..n {
+                let f = guff_types::r#struct::struct_field(&art.types, u, i);
+                let ObjectData::Var(v) = art.objects.get(f) else {
+                    continue;
+                };
+                if !match_arg_type(pass, verb, bits, v.typ(), depth + 1) {
+                    return false;
+                }
+            }
+            true
         }
         _ => true,
     }

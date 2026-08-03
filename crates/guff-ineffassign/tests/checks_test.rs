@@ -117,3 +117,17 @@ fn ineffassign_skips_generated_files() {
     );
     assert!(support::run_analyzer(analyzer(), &pkg).is_empty());
 }
+
+#[test]
+fn ineffassign_allows_zero_init_define_overwritten() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/ineffassign/zeroinit",
+        &dir.join("zero_init_ok.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "expected no findings for zero-init := overwritten before use, got {messages:?}"
+    );
+}

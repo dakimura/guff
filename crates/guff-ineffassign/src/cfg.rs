@@ -852,9 +852,36 @@ fn ident(e: &Expr) -> Option<&Ident> {
 }
 
 fn is_zero_initializer(e: &Expr) -> bool {
+    // Match gordonklaus/ineffassign: treat a single-arg call whose fun looks
+    // like a type name as a conversion, then check the arg (no types available).
+    let e = match e {
+        Expr::CallExpr(c) if c.args.len() == 1 => {
+            let mut fun = c.fun.as_ref();
+            if let Expr::ParenExpr(p) = fun {
+                fun = p.x.as_ref();
+            }
+            if let Expr::StarExpr(s) = fun {
+                fun = s.x.as_ref();
+            }
+            match fun {
+                Expr::Ident(_)
+                | Expr::SelectorExpr(_)
+                | Expr::ArrayType(_)
+                | Expr::StructType(_)
+                | Expr::FuncType(_)
+                | Expr::InterfaceType(_)
+                | Expr::MapType(_)
+                | Expr::ChanType(_) => &c.args[0],
+                _ => return false,
+            }
+        }
+        other => other,
+    };
     match e {
         Expr::BasicLit(l) => matches!(l.value.as_str(), "0" | "0.0" | "0." | ".0" | "\"\""),
-        Expr::Ident(id) => (id.name == "false" || id.name == "nil") && id.obj.lock().unwrap().is_none(),
+        Expr::Ident(id) => {
+            (id.name == "false" || id.name == "nil") && id.obj.lock().unwrap().is_none()
+        }
         _ => false,
     }
 }

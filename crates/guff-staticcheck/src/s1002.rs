@@ -8,28 +8,11 @@ use guff::ast::{BinaryExpr, Expr};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
+use guff_analysis::code::{bool_const, is_bool_const};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn};
 use guff_analysis::Pass;
-use guff_constant::{bool_val, Kind};
 use guff_types::predicates::is_boolean;
-
-fn is_bool_const(pass: &Pass<'_>, expr: &Expr) -> Option<bool> {
-    if let Expr::BasicLit(lit) = expr {
-        return match lit.value.as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None,
-        };
-    }
-    let info = pass.types_info()?;
-    let tav = info.types.get(&expr.id())?;
-    let val = tav.val.as_ref()?;
-    if val.kind() != Kind::Bool {
-        return None;
-    }
-    Some(bool_val(val))
-}
 
 fn expr_is_bool(pass: &Pass<'_>, expr: &Expr) -> bool {
     let info = match pass.types_info() {
@@ -96,15 +79,18 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String)> {
     if expr.op != Token::EQL && expr.op != Token::NEQ {
         return None;
     }
+    // Match honnef `code.IsBoolConst`: only untyped/predeclared bool idents
+    // (`true`/`false`/aliases of those). Named bool types used as enums are
+    // intentionally skipped (false-negative bias).
     let x_const = is_bool_const(pass, &expr.x);
     let y_const = is_bool_const(pass, &expr.y);
-    if x_const.is_none() && y_const.is_none() {
+    if !x_const && !y_const {
         return None;
     }
-    let (other, val) = if let Some(v) = x_const {
-        (&expr.y, v)
+    let (other, val) = if x_const {
+        (&expr.y, bool_const(pass, &expr.x))
     } else {
-        (&expr.x, y_const?)
+        (&expr.x, bool_const(pass, &expr.y))
     };
     if !expr_is_bool(pass, other) {
         return None;

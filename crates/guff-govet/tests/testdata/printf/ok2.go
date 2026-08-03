@@ -8,6 +8,11 @@ func (S) String() string { return "s" }
 
 type MyInt int
 
+// Top-level *struct with map field — %s is valid (x/tools printf field recursion).
+type Unstructured struct {
+	Object map[string]interface{}
+}
+
 func f() {
 	fmt.Printf("%s", S{})               // Stringer
 	fmt.Printf("%s", []byte("hi"))      // []byte for %s
@@ -17,4 +22,6 @@ func f() {
 	fmt.Printf("%*d", 4, 2)             // star width
 	fmt.Printf("%v", S{})               // %v anything
 	_ = fmt.Sprintf("%s", "x")
+	u := &Unstructured{Object: map[string]interface{}{"k": "v"}}
+	fmt.Printf("%s", u)
 }

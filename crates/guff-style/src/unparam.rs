@@ -8,13 +8,14 @@
 //! Functions whose signature cannot be changed are skipped (AST approx of
 //! upstream SSA `signRequiredBy`):
 //! - package-level funcs referenced as values (not only called)
+//! - methods used as values (assigned / passed / returned, not only called)
 //! - func literals that are not immediately invoked (IIFE / `go`/`defer`)
 //!
 //! Upstream also checks unused / constant results and uses SSA for interface
 //! satisfaction, forwarded calls, and call-graph precision.
 //!
-//! DEFERRED: full SSA (`buildir`), unused/constant results, interface-method
-//! skips, generated-file skips, recursive-only uses, `paramsRequiredBy`.
+//! DEFERRED: full SSA (`buildir`), unused/constant results, generated-file
+//! skips, recursive-only uses, `paramsRequiredBy`.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -264,11 +265,55 @@ fn collect_sign_required_funcs(
     required
 }
 
+/// Methods used as values (assigned / passed / returned), not only called.
+/// Upstream unparam skips these via SSA `signRequiredBy`.
+fn collect_sign_required_methods(
+    files: &[guff::ast::File],
+    call_fun_ids: &HashSet<u32>,
+) -> HashSet<String> {
+    let mut method_names = HashSet::new();
+    let mut decl_name_ids = HashSet::new();
+    for file in files {
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            if fd.recv.is_none() {
+                continue;
+            }
+            method_names.insert(fd.name.name.clone());
+            decl_name_ids.insert(fd.name.id);
+        }
+    }
+
+    let mut required = HashSet::new();
+    for file in files {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(NodeRef::SelectorExpr(sel)) = n else {
+                return true;
+            };
+            if !method_names.contains(&sel.sel.name) {
+                return true;
+            }
+            if decl_name_ids.contains(&sel.sel.id) {
+                return true;
+            }
+            if call_fun_ids.contains(&sel.sel.id) {
+                return true;
+            }
+            required.insert(sel.sel.name.clone());
+            true
+        });
+    }
+    required
+}
+
 fn check_func_decl(
     pass: &Pass<'_>,
     fd: &FuncDecl,
     check_exported: bool,
     sign_required: &HashSet<String>,
+    sign_required_methods: &HashSet<String>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -280,8 +325,10 @@ fn check_func_decl(
     if !should_check_exported(pass, fd, check_exported) {
         return;
     }
-    // Methods keep AST checking; interface-satisfaction skips are DEFERRED.
     if fd.recv.is_none() && sign_required.contains(&fd.name.name) {
+        return;
+    }
+    if fd.recv.is_some() && sign_required_methods.contains(&fd.name.name) {
         return;
     }
     let Some(params) = &fd.ty.params else {
@@ -315,6 +362,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let files = pass.files();
     let (call_fun_ids, value_lits) = collect_call_sites(files);
     let sign_required = collect_sign_required_funcs(files, &call_fun_ids);
+    let sign_required_methods = collect_sign_required_methods(files, &call_fun_ids);
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
@@ -322,7 +370,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Decl::FuncDecl(fd) = decl else {
                 continue;
             };
-            check_func_decl(pass, fd, opts.check_exported, &sign_required, &mut pending);
+            check_func_decl(
+                pass,
+                fd,
+                opts.check_exported,
+                &sign_required,
+                &sign_required_methods,
+                &mut pending,
+            );
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(NodeRef::FuncLit(lit)) = n else {

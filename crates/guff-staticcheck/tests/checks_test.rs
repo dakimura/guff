@@ -2998,3 +2998,28 @@ fn qf1008_allows_minimal_and_non_embedded() {
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(qf1008::analyzer(), &pkg).is_empty());
 }
+
+#[test]
+fn sa4010_allows_shadowed_pairs_returned() {
+    let pkg = typecheck_rule("sa4010", "shadow_return_ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4010::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "SA4010 FP on returned append with inner pairs shadow: {messages:?}"
+    );
+}
+
+#[test]
+fn sa4010_allows_converter_style_returned_append() {
+    // Grafana converter.readLabelsOrExemplars: outer pairs appended in a
+    // labeled for/switch, with an inner `pairs :=` shadow in another case,
+    // then `return …, pairs, nil`. Must not flag SA4010.
+    let pkg = typecheck_rule("sa4010", "converter_fp.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa4010::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "SA4010 FP on converter-style returned append: {messages:?}"
+    );
+}

@@ -1920,7 +1920,8 @@ fn check_g104_call(
 
 // G104 AssignStmt / ValueSpec (`_ = err`-style) are only reported by upstream
 // gosec when global `audit` is enabled. golangci does not enable audit by
-// default, so guff matches non-audit behaviour (ExprStmt / go / defer only).
+// default, so guff matches non-audit behaviour (ExprStmt only — upstream's
+// registered node set excludes `go`/`defer`).
 // Audit mode + config allowlist remain DEFERRED.
 
 fn check_call(
@@ -2159,13 +2160,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_g124_composite(pass, lit, &enabled, &mut pending);
                 }
                 NodeRef::ExprStmt(stmt) => {
+                    // Upstream gosec G104 only visits AssignStmt + ExprStmt
+                    // (not `go`/`defer`); match that node set for parity.
                     if let Expr::CallExpr(call) = &stmt.x {
                         check_g104_call(pass, call, &enabled, &mut pending);
                     }
-                }
-                NodeRef::GoStmt(stmt) => check_g104_call(pass, &stmt.call, &enabled, &mut pending),
-                NodeRef::DeferStmt(stmt) => {
-                    check_g104_call(pass, &stmt.call, &enabled, &mut pending);
                 }
                 NodeRef::AssignStmt(stmt) => {
                     // G104 assign (`_ = f()`) is audit-mode only upstream; skip.

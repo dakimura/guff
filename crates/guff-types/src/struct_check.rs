@@ -59,7 +59,7 @@ impl Checker {
             if !f.names.is_empty() {
                 // named fields
                 for name in &f.names {
-                    self.add_field(
+                    if let Some(fld) = self.add_field(
                         &mut fields,
                         &mut tags,
                         &mut fset,
@@ -68,24 +68,33 @@ impl Checker {
                         false,
                         &tag,
                         name.pos().0 as u32,
-                    );
+                    ) {
+                        // go/types `recordDef` on the field Ident.
+                        self.record_def(name, Some(fld));
+                    }
                 }
             } else {
                 // embedded field: the field name is the type's (final) name.
                 let te = f.ty.as_ref();
                 let pos = f.ty.as_ref().map(|t| t.pos().0 as u32).unwrap_or(0);
                 match te.and_then(embedded_field_ident) {
-                    Some(name) => {
-                        self.add_field(
+                    Some(id) => {
+                        if let Some(fld) = self.add_field(
                             &mut fields,
                             &mut tags,
                             &mut fset,
-                            &name,
+                            &id.name,
                             typ,
                             true,
                             &tag,
-                            pos,
-                        );
+                            id.pos().0 as u32,
+                        ) {
+                            // go/types records Defs[typeNameIdent] = field Var so
+                            // ObjectOf prefers the field over the TypeName use.
+                            // SA1019 (and anything else using ObjectOf) relies on
+                            // this to not treat embedding as a use of a deprecated type.
+                            self.record_def(id, Some(fld));
+                        }
 
                         // spec: "An embedded type must be specified as a type
                         // name T or as a pointer to a non-interface type name
@@ -101,7 +110,16 @@ impl Checker {
                             "embedded field type has no name",
                         );
                         let inv = self.invalid_type();
-                        self.add_field(&mut fields, &mut tags, &mut fset, "_", inv, true, "", pos);
+                        let _ = self.add_field(
+                            &mut fields,
+                            &mut tags,
+                            &mut fset,
+                            "_",
+                            inv,
+                            true,
+                            "",
+                            pos,
+                        );
                     }
                 }
             }
@@ -172,6 +190,7 @@ impl Checker {
 
     /// Create a field, run the duplicate-name check, and (if accepted) append
     /// it with its tag. Equivalent to `structType`'s inner `add` closure.
+    /// Returns the field object when it was accepted into the struct.
     fn add_field(
         &mut self,
         fields: &mut Vec<ObjectId>,
@@ -182,7 +201,7 @@ impl Checker {
         embedded: bool,
         tag: &str,
         pos: u32,
-    ) {
+    ) -> Option<ObjectId> {
         let fld = new_field(&mut self.objects, name.to_string(), typ, embedded);
         fld.set_pkg(&mut self.objects, self.pkg);
         fld.set_pos(&mut self.objects, pos);
@@ -195,11 +214,12 @@ impl Checker {
                     Code::DuplicateDecl,
                     format!("{} redeclared", name),
                 );
-                return;
+                return None;
             }
         }
         fields.push(fld);
         tags.push(tag.to_string());
+        Some(fld)
     }
 }
 
@@ -207,9 +227,9 @@ impl Checker {
 ///
 /// Equivalent to `embeddedFieldIdent`. Handles `T`, `*T` (not `**T`),
 /// `pkg.T`, and the generic-instance forms `T[...]`.
-fn embedded_field_ident(e: &Expr) -> Option<String> {
+fn embedded_field_ident(e: &Expr) -> Option<&guff::ast::Ident> {
     match e {
-        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::Ident(id) => Some(id),
         Expr::StarExpr(s) => {
             // *T is valid, but **T is not.
             if matches!(&*s.x, Expr::StarExpr(_)) {
@@ -218,8 +238,9 @@ fn embedded_field_ident(e: &Expr) -> Option<String> {
                 embedded_field_ident(&s.x)
             }
         }
-        Expr::SelectorExpr(s) => Some(s.sel.name.clone()),
+        Expr::SelectorExpr(s) => Some(&s.sel),
         Expr::IndexExpr(ie) => embedded_field_ident(&ie.x),
+        Expr::IndexListExpr(ie) => embedded_field_ident(&ie.x),
         _ => None,
     }
 }

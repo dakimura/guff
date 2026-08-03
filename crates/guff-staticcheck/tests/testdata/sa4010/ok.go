@@ -19,3 +19,28 @@ func usedAppendLoop(runeCounts map[rune]int) int {
 	}
 	return len(chars)
 }
+
+func returnedAppend() ([]int, error) {
+	pairs := make([]int, 0, 10)
+	for i := 0; i < 3; i++ {
+		switch i {
+		case 1:
+			pairs, err := otherPairs()
+			if err != nil {
+				return nil, err
+			}
+			_ = pairs
+		default:
+			pairs = append(pairs, i)
+		}
+	}
+	return pairs, nil
+}
+
+func otherPairs() ([]int, error) { return nil, nil }
+
+func simpleReturnedAppend() []int {
+	s := make([]int, 0, 4)
+	s = append(s, 1)
+	return s
+}

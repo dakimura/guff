@@ -414,22 +414,30 @@ if oss:
         f"- Samples: {samples} (median)",
         "- Both tools use each repository's real golangci-lint **v2** config.",
         "- GOCACHE warm; linter caches measured cold then warm; clone/mod excluded.",
+        "- Speedup = golangci / guff for the same mode (`>1` means guff faster).",
         "",
-        "| Target | config | guff warm | golangci warm | speedup |",
-        "|--------|--------|----------:|--------------:|--------:|",
+        "| Target | config | guff cold | golangci cold | cold × | guff warm | golangci warm | warm × |",
+        "|--------|--------|----------:|--------------:|-------:|----------:|--------------:|-------:|",
     ]
     for t in targets:
         if t in ("fixture", "local"):
             continue
+        gc = med(groups.get((t, "guff", "cold"), []))
         gw = med(groups.get((t, "guff", "warm"), []))
+        cc = med(groups.get((t, "golangci-lint", "cold"), []))
         cw = med(groups.get((t, "golangci-lint", "warm"), []))
-        ok_g = all_ok((t, "guff", "warm"))
-        ok_c = all_ok((t, "golangci-lint", "warm"))
-        ratio_ok = ok_g and ok_c and gw == gw and cw == cw and gw > 0
-        speedup = (cw / gw) if ratio_ok else float("nan")
+        ok_gc = all_ok((t, "guff", "cold"))
+        ok_gw = all_ok((t, "guff", "warm"))
+        ok_cc = all_ok((t, "golangci-lint", "cold"))
+        ok_cw = all_ok((t, "golangci-lint", "warm"))
+        cold_ok = ok_gc and ok_cc and gc == gc and cc == cc and gc > 0
+        warm_ok = ok_gw and ok_cw and gw == gw and cw == cw and gw > 0
+        cold_x = (cc / gc) if cold_ok else float("nan")
+        warm_x = (cw / gw) if warm_ok else float("nan")
         cfg = short_config(configs.get(t, ""))
         sb.append(
-            f"| {t} | `{cfg}` | {fmt(gw, ok_g)} | {fmt(cw, ok_c)} | {fmtr(speedup, ratio_ok)} |"
+            f"| {t} | `{cfg}` | {fmt(gc, ok_gc)} | {fmt(cc, ok_cc)} | {fmtr(cold_x, cold_ok)} "
+            f"| {fmt(gw, ok_gw)} | {fmt(cw, ok_cw)} | {fmtr(warm_x, warm_ok)} |"
         )
     sb.append("")
     sb.append(f"Full run detail: `{Path(out).name}`")

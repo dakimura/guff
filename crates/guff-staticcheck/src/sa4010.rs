@@ -5,6 +5,9 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use guff::ast::Expr;
+use guff::position::Pos;
+use guff::walk::{expr_ref, preorder, NodeRef};
 use guff_analysis::passes::buildir;
 use guff_analysis::referrers;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -29,10 +32,18 @@ fn is_append(prog: &Program, func: &Function, iid: InstrId) -> bool {
 
 /// True when the append result is only observed by Phi / further appends
 /// (upstream `walkRefs`).
+///
+/// Upstream skips when `Referrers()` is nil. Empty referrers here are treated
+/// the same (not proof of unused). Closed Phi/append-only graphs that miss a
+/// real Return use are suppressed by [`ast_append_result_observed`].
 fn append_result_unused(prog: &Program, func: &Function, append_iid: InstrId) -> bool {
+    let refs = referrers(func, Value::Instr(append_iid));
+    if refs.is_empty() {
+        return false;
+    }
     let mut is_used = false;
     let mut visited = HashSet::new();
-    let mut stack: Vec<InstrId> = referrers(func, Value::Instr(append_iid)).to_vec();
+    let mut stack: Vec<InstrId> = refs.to_vec();
     while let Some(rid) = stack.pop() {
         if !visited.insert(rid) {
             continue;
@@ -51,7 +62,6 @@ fn append_result_unused(prog: &Program, func: &Function, append_iid: InstrId) ->
                 }
             }
             _ => {
-                // Non-value instruction (Store, Return, …) observes the slice.
                 is_used = true;
                 break;
             }
@@ -60,8 +70,6 @@ fn append_result_unused(prog: &Program, func: &Function, append_iid: InstrId) ->
     !is_used
 }
 
-/// Upstream `validateArgument`: slice arg DFG may only be Phi / Slice / Const /
-/// MakeSlice / Alloc / append.
 fn validate_argument(
     prog: &Program,
     func: &Function,
@@ -96,8 +104,6 @@ fn validate_argument(
     }
 }
 
-/// Upstream `validateReferrers`: referrers of DFG values must stay inside the
-/// local-allocation slice graph (no escaped aliases).
 fn validate_referrers(func: &Function, v: Value, seen: &mut HashSet<InstrId>) -> bool {
     for &rid in referrers(func, v) {
         if !seen.insert(rid) {
@@ -160,12 +166,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         break;
                     }
                 }
-                if ok {
-                    pending.push((
-                        func.pos(iid).0 as u32,
-                        "this result of append is never used, except maybe in other appends".into(),
-                    ));
+                if !ok {
+                    continue;
                 }
+                let pos = func.pos(iid).0 as u32;
+                if ast_append_result_observed(pass, pos) {
+                    continue;
+                }
+                pending.push((
+                    pos,
+                    "this result of append is never used, except maybe in other appends".into(),
+                ));
             }
         }
     }
@@ -173,6 +184,129 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pass.reportf(pos, msg);
     }
     Ok(None)
+}
+
+/// AST fallback when SSA misses a use of `x = append(x, …)` (e.g. switch +
+/// shadowed locals). Match the append site by **line number** (avoids FileSet
+/// absolute/relative offset mismatches), then look for a later observing use
+/// of the same name in the enclosing function.
+fn ast_append_result_observed(pass: &Pass<'_>, pos: u32) -> bool {
+    let fset = pass.fset();
+    let report_line = fset.position(Pos(pos as i64)).line;
+    if report_line == 0 {
+        return false;
+    }
+
+    for file in pass.files() {
+        let mut hit: Option<(String, u32, u32)> = None; // name, assign_pos, func_end
+        preorder(NodeRef::File(file), |n| {
+            if hit.is_some() {
+                return false;
+            }
+            let NodeRef::FuncDecl(fd) = n else {
+                return true;
+            };
+            let Some(body) = &fd.body else {
+                return true;
+            };
+            let func_end = body.rbrace.0 as u32;
+            // Walk without nested preorder (return false would abort the outer walk).
+            let mut stack = vec![NodeRef::BlockStmt(body)];
+            while let Some(node) = stack.pop() {
+                if hit.is_some() {
+                    break;
+                }
+                if let NodeRef::AssignStmt(a) = node {
+                    if a.lhs.len() == 1 && a.rhs.len() == 1 {
+                        if let Expr::CallExpr(call) = &a.rhs[0] {
+                            if let Expr::Ident(fun) = call.fun.as_ref() {
+                                if fun.name == "append" {
+                                    let call_line = fset.position(fun.name_pos).line;
+                                    if call_line == report_line {
+                                        if let Expr::Ident(lhs) = &a.lhs[0] {
+                                            if lhs.name != "_" {
+                                                hit = Some((
+                                                    lhs.name.clone(),
+                                                    lhs.name_pos.0 as u32,
+                                                    func_end,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                guff::walk::for_each_child(node, |c| stack.push(c));
+            }
+            true
+        });
+        let Some((name, assign_pos, func_end)) = hit else {
+            continue;
+        };
+
+        let mut later_defs = HashSet::new();
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::AssignStmt(a) = n {
+                for lhs in &a.lhs {
+                    if let Expr::Ident(id) = lhs {
+                        if id.name == name {
+                            let p = id.name_pos.0 as u32;
+                            if p > assign_pos && p < func_end {
+                                later_defs.insert(p);
+                            }
+                        }
+                    }
+                }
+            }
+            true
+        });
+
+        let mut ignore_pos = HashSet::new();
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CallExpr(call) = n {
+                if let Expr::Ident(fun) = call.fun.as_ref() {
+                    if fun.name == "append" {
+                        if let Some(arg0) = call.args.first() {
+                            preorder(expr_ref(arg0), |n| {
+                                if let NodeRef::Ident(id) = n {
+                                    if id.name == name {
+                                        ignore_pos.insert(id.name_pos.0 as u32);
+                                    }
+                                }
+                                true
+                            });
+                        }
+                    }
+                }
+            }
+            true
+        });
+
+        let mut observed = false;
+        preorder(NodeRef::File(file), |n| {
+            if observed {
+                return false;
+            }
+            if let NodeRef::Ident(id) = n {
+                let p = id.name_pos.0 as u32;
+                if id.name == name
+                    && p > assign_pos
+                    && p < func_end
+                    && !later_defs.contains(&p)
+                    && !ignore_pos.contains(&p)
+                {
+                    observed = true;
+                }
+            }
+            true
+        });
+        if observed {
+            return true;
+        }
+    }
+    false
 }
 
 fn sa4010_analyzer_impl() -> Analyzer {
