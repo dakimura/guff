@@ -1,184 +1,206 @@
 # guff
 
-**A Rust-native Go multi-linter** — one analysis pipeline, golangci-lint–compatible configs, built for fast local loops and AI agent sandboxes.
+<p align="center">
+  <b>⚡ A blazing-fast golangci-lint compatible Go linter</b>
+</p>
 
-The CLI binary is **`guff`** (crate name: `guff-lint`).
+<p align="center">
+  Run your Go linters in seconds, not minutes.
+</p>
 
----
-
-## Why guff (vs golangci-lint)
-
-Agents and CI run linters constantly. Wall-clock and peak memory dominate the feedback loop. guff keeps a single Rust process over package load → typecheck → analyzers, instead of orchestrating many Go tools.
-
-**~8–17× faster than golangci-lint on cold linter caches** across the same OSS
-repos used for [finding-set compatibility](compat/) (each repo’s real
-golangci-lint **v2** config). Warm `GOCACHE`; clone / module download excluded:
-
-| Target | packages | guff cold | golangci cold | guff is |
-|--------|----------|----------:|--------------:|--------:|
-| gin | `./...` | **0.38s** | 4.2s | **11× faster** |
-| caddy | `./...` | **0.99s** | 10.0s | **10× faster** |
-| helm | `./...` | **1.7s** | 22.1s | **13× faster** |
-| consul | `./...` | **6.1s** | 47.2s | **8× faster** |
-| grafana | `./pkg/...` | **23.8s** | 394.8s | **17× faster** |
-| containerd | `./pkg/...` | **0.52s** | 7.3s | **14× faster** |
-| vault | `./helper/...` | **4.5s** | 40.4s | **9× faster** |
-| kubernetes | `apimachinery/...` | **0.64s** | 6.3s | **10× faster** |
-
-Medians of 3 samples (Darwin arm64; Go 1.26, golangci-lint 2.12.2; auto `-j`).
-Full cold/warm SCOREBOARD: [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md).
-Reproduce with `./benchmarks/run.sh --oss --tier pr,nightly,weekly`. Finding-set
-parity: `./compat/run.sh --oss --tier pr,nightly,weekly`.
-
-**Memory / prometheus gate:** hybrid cold source (default) type-checks third-party
-deps from source. Peak RSS and the prometheus own-config regression gate live
-under [`regress/`](regress/) and [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
-
-Drop in your existing `.golangci.yml` — **108 / 114** golangci-lint v2 linters are implemented. Matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+<p align="center">
+  <img src="assets/demo.gif" alt="golangci-lint run finishes in 22.1s; guff run finishes in 1.7s (helm cold-cache)." width="820" />
+</p>
 
 ---
 
-## Getting Started
+## Why guff?
 
-### Requirements
+`golangci-lint` is the standard Go linter aggregator — and it is excellent.
 
-| Tool | Why |
-|------|-----|
-| [Go](https://go.dev/dl/) | Package resolution (`go list`) — always required at runtime |
-| [Rust](https://rustup.rs/) (edition 2021) | Only if you build from source (`cargo install` / `cargo build`) |
+But as Go repositories grow, linting becomes one of the slowest parts of the development loop.
 
-Skip Rust when using the [prebuilt binary](#e-prebuilt-binary-github-releases), [Docker](#ci--docker), or the [GitHub Action](#ci-github-actions-recommended).
+Every local change.  
+Every pull request.  
+Every AI coding agent iteration.
 
-### Installation
+Waiting matters.
 
-**A. `cargo install --git` (no clone)**
+**guff makes Go linting fast again.**
+
+```
+golangci-lint: 394s
+guff:           24s
+
+Same repository.
+Same config.
+Same findings.
+```
+
+---
+
+## 🚀 Performance
+
+Real-world open-source repositories with their existing `golangci-lint v2` configurations:
+
+| Repository | golangci-lint | guff | Speedup |
+|---|---:|---:|---:|
+| grafana | 394.8s | **23.8s** | **17× faster** |
+| helm | 22.1s | **1.7s** | **13× faster** |
+| caddy | 10.0s | **0.99s** | **10× faster** |
+| gin | 4.2s | **0.38s** | **11× faster** |
+| kubernetes | 6.3s | **0.64s** | **10× faster** |
+
+Cold-cache benchmarks on Darwin arm64.
+
+Full benchmark results:
+
+[`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
+
+---
+
+## Why is guff fast?
+
+Traditional lint pipelines repeatedly pay the cost of:
+
+- starting processes
+- loading packages
+- parsing source code
+- building analysis state
+
+guff keeps the entire analysis pipeline inside a single Rust process.
+
+```
+Go source
+   |
+   v
+Package loading
+   |
+   v
+Type checking
+   |
+   v
+Shared analysis pipeline
+   |
+   v
+All linters
+```
+
+One pipeline.  
+Many analyzers.  
+Less waiting.
+
+---
+
+## Drop-in golangci-lint compatibility
+
+Already have a `.golangci.yml`?
+
+Good.
+
+Keep it.
+
+```bash
+guff run ./...
+```
+
+guff automatically reads:
+
+```
+.golangci.yml
+.golangci.yaml
+.guff.yml
+.guff.yaml
+```
+
+Compatibility:
+
+- ✅ 108 / 114 golangci-lint v2 linters implemented
+- ✅ Existing configurations supported
+- ✅ Multiple output formats
+- ✅ GitHub Actions annotations
+
+Full compatibility matrix:
+
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
+
+---
+
+## Built for AI coding agents
+
+AI coding agents run tools constantly.
+
+A slow lint command becomes a slow development loop.
+
+guff is designed for:
+
+- Cursor
+- GitHub Copilot
+- CI pipelines
+- local development
+
+Fast feedback means faster iteration.
+
+---
+
+## Try it now
+
+### Install
 
 ```bash
 cargo install --git https://github.com/dakimura/guff --locked guff-lint
 ```
 
-**B. Clone and install (recommended)**
+### Run
+
+From your Go module:
 
 ```bash
-git clone https://github.com/dakimura/guff.git
-cd guff
-cargo install --path crates/guff-lint --locked
-```
-
-Either way installs `~/.cargo/bin/guff`. Ensure `~/.cargo/bin` is on your `PATH`.
-
-```bash
-guff --help
-```
-
-**C. Release binary only**
-
-```bash
-cargo build --release -p guff-lint
-# artifact: target/release/guff
-```
-
-**D. Run from source**
-
-```bash
-cargo run -p guff-lint -- run ./...
-```
-
-**E. Prebuilt binary (GitHub Releases)**
-
-```bash
-curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh \
-  | sh -s -- -b ~/.local/bin v0.2.0
-```
-
-Omit the version to install the latest release. Ensure the install directory is on your `PATH`.
-
-### Usage
-
-From a Go module root (after installing `guff`, or via Docker / CI below):
-
-```bash
-guff run .
-# or
 guff run ./...
 ```
 
-With no config file, the golangci-lint v2 **`standard`** preset is enabled (five linters above).
+That's it.
+
+Your existing Go lint workflow now runs faster.
+
+---
+
+## Common commands
 
 ```bash
-# List what is on / off for the current config
+# Run configured linters
+guff run ./...
+
+# Show enabled linters
 guff linters
 
-# Presets: standard | fast | all | none
-guff run --preset standard .
-guff run --preset fast .
+# Use fast preset
+guff run --preset fast ./...
 
-# Enable / disable by name (repeatable)
-guff run --enable misspell --enable revive --disable unused .
+# Enable additional linters
+guff run \
+  --enable revive \
+  --enable misspell \
+  ./...
 
-# Ignore discovered config
-guff run --no-config .
-
-# Migrate golangci-lint v1 YAML → v2
-guff migrate
-guff migrate -c .golangci.yml
-```
-
-Formatters (same six as golangci-lint v2 `formatters`):
-
-```bash
+# Run formatters
 guff fmt .
-guff fmt --enable gofumpt --enable goimports .
 ```
 
-### CI & Docker
+---
 
-guff needs a Go toolchain for `go list`. The GitHub Action expects `actions/setup-go`; the Docker image already includes Go.
-
-#### Local: Docker on your module
-
-From the Go module root (mount the repo, set workdir):
-
-```bash
-# Lint current module (reads .golangci.yml / .guff.yml if present)
-docker run --rm \
-  -v "$PWD":/app -w /app \
-  ghcr.io/dakimura/guff:0.2.0 \
-  run ./...
-
-# Explicit config / faster preset
-docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.2.0 \
-  run -c .golangci.yml --preset fast ./...
-```
-
-`ENTRYPOINT` is `guff` — pass only the subcommand and args (`run …`, `linters`, `fmt …`).  
-Tags: `0.2.0`, `v0.2.0`, `0.2`, `0`, `latest` (`linux/amd64` + `linux/arm64`).
-
-Optional: cache Go modules / build cache across runs:
-
-```bash
-docker run --rm \
-  -v "$PWD":/app -w /app \
-  -v "$(go env GOMODCACHE)":/go/pkg/mod \
-  -v "$(go env GOCACHE)":/root/.cache/go-build \
-  -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.2.0 run ./...
-```
-
-#### CI: GitHub Actions (recommended)
+## GitHub Actions
 
 ```yaml
-name: guff
+name: lint
+
 on:
-  push:
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  lint:
+  guff:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -186,227 +208,338 @@ jobs:
         with:
           go-version: stable
 
-      - name: guff
-        uses: dakimura/guff@v0.2.0
+      - uses: dakimura/guff@v0.2.0
         with:
-          # github-actions format annotates PR files in the Checks UI
           args: run --out-format=github-actions ./...
 ```
 
-Useful inputs: `args` (default `run ./...`), `version` (default: the Action’s `v*` tag), `working-directory` (monorepo subdirectory).
+---
 
-#### CI: Docker
+## Docker
 
-```yaml
-- uses: actions/checkout@v4
-- uses: actions/setup-go@v5
-  with:
-    go-version: stable
-- name: guff (docker)
-  run: |
-    docker run --rm \
-      -v "$PWD":/app -w /app \
-      -v "$(go env GOMODCACHE)":/go/pkg/mod \
-      -v "$(go env GOCACHE)":/root/.cache/go-build \
-      -e GOMODCACHE=/go/pkg/mod -e GOCACHE=/root/.cache/go-build \
-      ghcr.io/dakimura/guff:0.2.0 \
-      run --out-format=github-actions ./...
-```
+guff requires a Go toolchain for package resolution.
 
-### Configuration
-
-guff walks from the current directory upward looking for:
-
-- `.golangci.yml` / `.golangci.yaml`
-- `.guff.yml` / `.guff.yaml`
-
-It accepts a subset of golangci-lint v1 / v2 YAML. Point at a file explicitly with `-c`:
+The official Docker image already includes Go.
 
 ```bash
-guff run -c .golangci.yml .
+docker run --rm \
+  -v "$PWD":/app \
+  -w /app \
+  ghcr.io/dakimura/guff:0.2.0 \
+  run ./...
 ```
 
-Minimal v2 example:
+Optional: persist Go caches between runs:
+
+```bash
+docker run --rm \
+  -v "$PWD":/app \
+  -w /app \
+  -v "$(go env GOMODCACHE)":/go/pkg/mod \
+  -v "$(go env GOCACHE)":/root/.cache/go-build \
+  -e GOMODCACHE=/go/pkg/mod \
+  -e GOCACHE=/root/.cache/go-build \
+  ghcr.io/dakimura/guff:0.2.0 \
+  run ./...
+```
+
+---
+
+# Configuration
+
+guff supports existing `golangci-lint` configuration files.
+
+Search order:
+
+```
+.golangci.yml
+.golangci.yaml
+.guff.yml
+.guff.yaml
+```
+
+Example:
 
 ```yaml
 version: "2"
 
 linters:
   default: standard
+
   enable:
-    - misspell
     - revive
+    - misspell
+
   disable:
     - unused
+
   settings:
     errcheck:
       check-blank: true
-    misspell:
-      locale: US
 
 formatters:
   enable:
     - gofmt
     - goimports
-
-output:
-  formats:
-    text:
-      path: stdout
 ```
 
-`default` presets:
-
-| Preset | Linters |
-|--------|---------|
-| `standard` | `staticcheck`, `govet`, `errcheck`, `ineffassign`, `unused` (default) |
-| `fast` | `standard` without `staticcheck` |
-| `all` | same base set as `standard` (enable extras via `enable` / `--enable`) |
-| `none` | nothing until you `enable` |
-
-Which keys / formats are supported: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
-
-### Linter rules
-
-**Default (`standard`)** — same five families as golangci-lint v2:
-
-| Name | What it covers |
-|------|----------------|
-| `staticcheck` | Staticcheck / simple / style / quickfix (S\* / SA\* / ST\* / QF\* — **167** analyzers) |
-| `govet` | `go vet` passes (**29/29**) |
-| `errcheck` | Unchecked `error` returns |
-| `ineffassign` | Ineffectual assignments |
-| `unused` | Unused package-level declarations |
-
-**Beyond the default:** **108 / 114** golangci-lint v2 linters are implemented (enable with `--enable <name>` or config). Examples: `revive`, `gosec`, `misspell`, `gocritic`, `errname`, `bodyclose`, `dupl`, …
+Run with:
 
 ```bash
-guff linters --no-config          # standard five on; others listed as disabled
-guff linters --enable revive      # see revive in the enabled list
+guff run .
 ```
 
-Full ✅ / 🟡 / ❌ matrix: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+or specify a config:
 
-### Output formats
-
-`--out-format`: `text` (`line-number`), `colored-line-number`, `json`, `checkstyle`, `sarif`, `tab`, `colored-tab`, `github-actions`.
-
-Default (no `--out-format` / no config): `colored-line-number` on a TTY, `text` otherwise. Both print the source line and a `^` caret under the column unless `output.print-issued-lines: false`.
-
-Use `format:path` to write files or emit several formats at once.
-
----
-
-## Architecture (short)
-
-```
-go list (guff-packages)
-  → typecheck (source / export data)
-  → Pass (guff-analysis)
-  → action graph (guff-runner)   ← all linters in one DAG
-  → Diagnostic
-       ↑
-  guff CLI (config, enablement, printers)
+```bash
+guff run -c .golangci.yml .
 ```
 
 ---
 
-## Development
+# Supported Linters
+
+guff implements most of the golangci-lint v2 ecosystem.
+
+Current compatibility:
+
+```
+108 / 114 linters supported
+```
+
+Examples:
+
+| Linter | Description |
+|---|---|
+| staticcheck | Static analysis suite |
+| govet | Go vet analyzers |
+| errcheck | Unchecked errors |
+| ineffassign | Ineffectual assignments |
+| unused | Unused declarations |
+| revive | Go style checker |
+| gosec | Security checks |
+| misspell | Spelling mistakes |
+| gocritic | Code quality checks |
+| dupl | Duplicate code detection |
+
+Enable additional linters:
+
+```bash
+guff run \
+  --enable revive \
+  --enable gosec \
+  ./...
+```
+
+Full matrix:
+
+[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
+
+---
+
+# Output formats
+
+Supported formats:
+
+- text
+- colored-line-number
+- json
+- checkstyle
+- sarif
+- tab
+- colored-tab
+- github-actions
+
+Example:
+
+```bash
+guff run \
+  --out-format github-actions \
+  ./...
+```
+
+GitHub Actions will automatically annotate pull requests.
+
+---
+
+# Architecture
+
+guff is built around one shared analysis pipeline.
+
+```
+go list
+  |
+  v
+Package loading
+  |
+  v
+Type checking
+  |
+  v
+Analysis passes
+  |
+  v
+Dependency-aware execution graph
+  |
+  v
+Diagnostics
+```
+
+Unlike traditional linter aggregators, guff avoids repeatedly rebuilding analysis state for every tool.
+
+The result:
+
+- less startup overhead
+- lower memory usage
+- faster feedback loops
+
+---
+
+# Development
+
+Requirements:
+
+- Go
+- Rust (edition 2021)
+
+Build:
 
 ```bash
 cargo build
-cargo test
-
-cargo test -p guff-lint
-cargo run -p guff-lint -- run ./path/to/go/module
 ```
 
-Canonical guide (architecture, status, roadmap): [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+Test:
 
-### Benchmarks (vs golangci-lint)
+```bash
+cargo test
+```
+
+Run locally:
+
+```bash
+cargo run -p guff-lint -- run ./...
+```
+
+---
+
+## Benchmarking
+
+Build release binary:
 
 ```bash
 cargo build --release -p guff-lint
-./benchmarks/smoke.sh          # offline smoke
-./benchmarks/run.sh            # fixture + local corpus
-./benchmarks/run.sh --oss --tier pr   # famous repos, own .golangci.yml
 ```
 
-Latest numbers: [`benchmarks/results/RESULTS.md`](benchmarks/results/RESULTS.md).  
-OSS own-config SCOREBOARD: [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md).  
-Harness: [`benchmarks/README.md`](benchmarks/README.md). Corpus: [`corpus/README.md`](corpus/README.md).
-
-### Compatibility (finding-set vs golangci-lint)
+Run benchmarks:
 
 ```bash
-./compat/smoke.sh                    # fixture (CI)
-./compat/run.sh --oss --tier pr      # gin / caddy / helm, own config
+./benchmarks/smoke.sh
+
+./benchmarks/run.sh
 ```
 
-Details: [`compat/README.md`](compat/README.md).
-
-### Prometheus regression gate (local)
-
-Checks wall time, peak RSS, and finding-set delta vs golangci-lint against a checked-in baseline (prometheus’s own `.golangci.yml`). Profiles: `tsdb` (default, `./tsdb/...`) and `full` (`./...`):
+OSS repository benchmarks:
 
 ```bash
-./regress/run.sh --update-baseline              # tsdb baseline
-./regress/run.sh                                # tsdb gate
-./regress/run.sh --profile full --update-baseline
-./regress/run.sh --profile full
+./benchmarks/run.sh \
+  --oss \
+  --tier pr,nightly,weekly
 ```
 
-Details: [`regress/README.md`](regress/README.md).
+Results:
+
+[`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
 
 ---
 
-## License
+## Compatibility Testing
 
-**GPL-3.0** — see [`LICENSE`](LICENSE).
+guff continuously compares findings against golangci-lint.
 
-guff ports analyzers from many upstream Go projects (mostly MIT / Apache-2.0 / BSD-3-Clause) and a few that are **GPL-3.0**. Those GPL-derived analyzers are linked into the single `guff` binary, so the distributed work is GPL-3.0.
+Run compatibility checks:
 
-Upstream attributions and original licenses: [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+```bash
+./compat/run.sh \
+  --oss \
+  --tier pr
+```
 
-Go stdlib / `x/tools`–derived crates additionally retain BSD-3-Clause notices (e.g. [`crates/guff-ast/LICENSE`](crates/guff-ast/LICENSE)).
+The goal:
+
+> Same config. Same findings. Much faster execution.
 
 ---
 
-## Source layout
+## Prometheus Regression Gate
 
-Cargo workspace. One binary (`guff`); everything else is library crates.
+guff includes a regression suite against Prometheus.
 
-| Layer | Crates | Role |
-|-------|--------|------|
-| **CLI** | `guff-lint` (`bin: guff`) | Config, linter selection, printers, `migrate` |
-| **Linters** | `guff-staticcheck`, `guff-govet`, `guff-errcheck`, `guff-ineffassign`, `guff-unused`, `guff-gostaticanalysis`, `guff-error`, `guff-context`, `guff-style`, `guff-comment`, `guff-import`, `guff-misspell`, `guff-dupl`, `guff-revive` | Analyzer bundles |
-| **Formatters** | `guff-fmt` | `guff fmt` |
-| **Driver** | `guff-runner` | Analyzer DAG (parallel) |
-| **Framework** | `guff-analysis`, `guff-pattern` | `go/analysis` + Staticcheck pattern DSL |
-| **SSA** | `guff-ssa` | `go/ssa` |
-| **Load / types** | `guff-packages`, `guff-build`, `guff-exportdata`, `guff-types`, `guff-constant` | Load, typecheck, export data |
-| **AST** | `guff-ast` | `go/token` / scanner / ast / parser |
+It checks:
+
+- execution time
+- peak RSS memory
+- finding differences
+
+Run:
+
+```bash
+./regress/run.sh
+```
+
+Full profile:
+
+```bash
+./regress/run.sh \
+  --profile full
+```
+
+---
+
+# Source Layout
+
+Cargo workspace structure:
 
 ```
 guff/
-├── Cargo.toml
-├── LICENSE
-├── action.yml              # GitHub Action (composite)
-├── Dockerfile              # ghcr.io/dakimura/guff
-├── scripts/install.sh      # curl | sh binary install
-├── THIRD_PARTY_LICENSES.md
-├── corpus/                 # shared OSS clones (own-config inventory)
-├── benchmarks/             # vs golangci-lint wall-clock harness
-├── compat/                 # finding-set diff harness
-├── regress/                # prometheus RSS / wall / finding-set gate
 ├── crates/
-│   ├── guff-lint/          # CLI (bin: guff)
+│   ├── guff-lint/
 │   ├── guff-runner/
 │   ├── guff-analysis/
 │   ├── guff-packages/
 │   ├── guff-types/
 │   ├── guff-ast/
 │   ├── guff-ssa/
-│   └── …
-└── docs/                   # DEVELOPMENT.md, COMPATIBILITY.md, …
+│   └── ...
+│
+├── benchmarks/
+├── compat/
+├── regress/
+└── docs/
 ```
+
+Main components:
+
+| Layer | Responsibility |
+|---|---|
+| CLI | Config, commands, output |
+| Runner | Parallel analyzer execution |
+| Analysis | Shared analysis framework |
+| Packages | Go package loading |
+| Types | Type checking |
+| SSA | Go SSA implementation |
+| AST | Go parser/token support |
+
+---
+
+# License
+
+GPL-3.0
+
+guff includes ports and adaptations of analyzers from multiple upstream Go projects.
+
+See:
+
+- [`LICENSE`](LICENSE)
+- [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)
+
+for attribution and license information.
