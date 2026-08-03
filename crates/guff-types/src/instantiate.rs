@@ -32,9 +32,10 @@ use crate::typelists::new_type_list;
 ///
 /// Equivalent to `types2.Instantiate` minus the `validate` path.
 ///
-/// # Panics
-/// - If `targs` is empty.
-/// - If `orig` is not a generic Named/Alias/Signature.
+/// Under incomplete hybrid type info, length mismatches / empty `targs` /
+/// non-generic `orig` soft-return `orig` unchanged (same doctrine as
+/// [`crate::subst::subst_named`]) rather than panicking — SSA must not abort
+/// the whole package build.
 pub fn instantiate(
     arena: &mut TypeArena,
     oarena: &mut ObjectArena,
@@ -42,7 +43,9 @@ pub fn instantiate(
     orig: TypeId,
     targs: Vec<TypeId>,
 ) -> TypeId {
-    assert!(!targs.is_empty(), "instantiate: empty targs");
+    if targs.is_empty() {
+        return orig;
+    }
     instance(arena, oarena, ctxt, orig, targs)
 }
 
@@ -64,10 +67,8 @@ fn instance(
         K::Named => new_named_instance(arena, oarena, ctxt, orig, targs),
         K::Alias => new_alias_instance(arena, oarena, ctxt, orig, targs),
         K::Signature => new_signature_instance(arena, oarena, ctxt, orig, targs),
-        _ => panic!(
-            "instance: orig must be Named/Alias/Signature, got {:?}",
-            kind
-        ),
+        // Incomplete hybrid info / wrong kind — soft-return origin.
+        _ => orig,
     }
 }
 
@@ -77,10 +78,8 @@ fn instance(
 /// `Named.expandRHS`. The result is registered with `ctxt` so concurrent
 /// instantiations of the same `(orig, targs)` return the same TypeId.
 ///
-/// # Panics
-/// - If `orig` is not a `Named`.
-/// - If `targs.len() != orig.TypeParams().Len()` (when the origin has
-///   type parameters set).
+/// Soft-returns `orig` when `orig` is not Named or when `targs`/`tparams`
+/// lengths disagree (incomplete hybrid info — error reported elsewhere).
 pub fn new_named_instance(
     arena: &mut TypeArena,
     oarena: &mut ObjectArena,
@@ -98,16 +97,11 @@ pub fn new_named_instance(
                 .unwrap_or_default();
             (n.obj(), n.from_rhs(), tparams_list)
         }
-        other => panic!(
-            "new_named_instance: expected Named, got {:?}",
-            std::mem::discriminant(other)
-        ),
+        _ => return orig,
     };
-    assert_eq!(
-        targs.len(),
-        orig_tparams.len(),
-        "new_named_instance: targs/tparams length mismatch"
-    );
+    if targs.len() != orig_tparams.len() {
+        return orig; // mismatch — error reported elsewhere
+    }
 
     // Allocate the new Named (placeholder underlying — will fill via
     // substitution below).
@@ -177,16 +171,11 @@ pub fn new_alias_instance(
                 .unwrap_or_default();
             (a.obj(), a.rhs(), tparams_list)
         }
-        other => panic!(
-            "new_alias_instance: expected Alias, got {:?}",
-            std::mem::discriminant(other)
-        ),
+        _ => return orig,
     };
-    assert_eq!(
-        targs.len(),
-        orig_tparams.len(),
-        "new_alias_instance: targs/tparams length mismatch"
-    );
+    if targs.len() != orig_tparams.len() {
+        return orig; // mismatch — error reported elsewhere
+    }
 
     // Substitute in the RHS.
     let new_rhs = match orig_rhs {
@@ -243,16 +232,11 @@ pub fn new_signature_instance(
                 .unwrap_or_default();
             (s.recv(), s.params(), s.results(), s.variadic(), tparams)
         }
-        other => panic!(
-            "new_signature_instance: expected Signature, got {:?}",
-            std::mem::discriminant(other)
-        ),
+        _ => return orig,
     };
-    assert_eq!(
-        targs.len(),
-        tparams.len(),
-        "new_signature_instance: targs/tparams length mismatch"
-    );
+    if targs.len() != tparams.len() {
+        return orig; // mismatch — error reported elsewhere
+    }
 
     let smap = make_subst_map(&tparams, &targs);
     let new_params = match params {

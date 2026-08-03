@@ -327,6 +327,27 @@ fn instantiated_named_method_list_is_empty_chunk9_deferral() {
 }
 
 #[test]
+fn instantiate_soft_returns_orig_on_targs_tparams_mismatch() {
+    // Incomplete hybrid info can ask to instantiate a Named that has no
+    // type params (or the wrong count). Soft-return the origin instead of
+    // asserting.
+    let (mut t, table) = init_universe();
+    let mut o = ObjectArena::new();
+    let mut ctxt = Context::new();
+    let int = table[BasicKind::Int as usize];
+
+    let tn = new_type_name(&mut o, "N", None);
+    let named = new_named(&mut t, &mut o, tn, Some(int), vec![]);
+    // No type params set → length 0, but caller passes 1 targ.
+    let got = instantiate(&mut t, &mut o, &mut ctxt, named, vec![int]);
+    assert_eq!(got, named);
+
+    // Empty targs also soft-returns.
+    let got_empty = instantiate(&mut t, &mut o, &mut ctxt, named, vec![]);
+    assert_eq!(got_empty, named);
+}
+
+#[test]
 fn nested_subst_through_pointer_and_slice() {
     // smap: T → int. Type: *[]T → *[]int.
     let mut t = init_universe().0;

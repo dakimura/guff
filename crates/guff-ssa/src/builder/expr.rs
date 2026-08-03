@@ -142,9 +142,19 @@ impl<'a> Builder<'a> {
             Expr::TypeAssertExpr(ta) => {
                 // comma-ok type assertion `v, ok := x.(T)`. (Go: exprN
                 // TypeAssertExpr, via emitTypeTest with the tuple's value type.)
-                let value_ty = guff_types::tuple_at(&self.prog.type_arena, typ, 0)
-                    .typ(&self.prog.object_arena)
-                    .expect("comma-ok tuple has a value element type");
+                // Incomplete hybrid info may leave `typ` as Typ[Invalid] rather
+                // than a 2-tuple — soft-fail with a placeholder.
+                let Some(value_ty) = (match self.prog.type_arena.get(typ) {
+                    guff_types::arena::TypeData::Tuple(_) => guff_types::tuple_at(
+                        &self.prog.type_arena,
+                        typ,
+                        0,
+                    )
+                    .typ(&self.prog.object_arena),
+                    _ => None,
+                }) else {
+                    return self.invalid_zero();
+                };
                 let x = self.expr(&ta.x);
                 let fid = self.func_id;
                 let block = self.block.expect("no current block");

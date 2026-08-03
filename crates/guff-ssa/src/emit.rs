@@ -132,6 +132,10 @@ pub fn emit_store(f: &mut Function, block: BlockId, addr: Value, val: Value, pos
 /// emit_extract emits an instruction to extract the `index`th component of the
 /// tuple value `tuple`, and returns the extracted value. Its type is the
 /// `index`th element of `tuple`'s tuple type. (Go: `emitExtract`)
+///
+/// When `tuple`'s type is not a Tuple (incomplete hybrid info often leaves
+/// multi-value expressions as `Typ[Invalid]`), returns an Invalid placeholder
+/// instead of panicking — same soft-fail doctrine as [`field_of`].
 pub fn emit_extract(
     prog: &mut Program,
     fid: FuncId,
@@ -140,7 +144,9 @@ pub fn emit_extract(
     index: usize,
 ) -> Value {
     let tuple_ty = value_type_of(prog, prog.functions.get(fid), tuple);
-    let typ = tuple_elem_type(prog, tuple_ty, index);
+    let Some(typ) = tuple_elem_type(prog, tuple_ty, index) else {
+        return emit_invalid_zero(prog);
+    };
     let id = emit(
         prog.functions.get_mut(fid),
         block,
@@ -150,10 +156,14 @@ pub fn emit_extract(
 }
 
 /// The type of the `index`th element (a `Var`) of tuple type `tuple`.
-fn tuple_elem_type(prog: &Program, tuple: TypeId, index: usize) -> TypeId {
+/// Returns `None` when `tuple` is not a Tuple (incomplete hybrid info).
+fn tuple_elem_type(prog: &Program, tuple: TypeId, index: usize) -> Option<TypeId> {
+    if !matches!(prog.type_arena.get(tuple), TypeData::Tuple(_)) {
+        return None;
+    }
     let var = tuple_at(&prog.type_arena, tuple, index);
     match prog.object_arena.get(var) {
-        ObjectData::Var(v) => v.typ(),
+        ObjectData::Var(v) => Some(v.typ()),
         _ => panic!("tuple element is not a Var"),
     }
 }
@@ -307,7 +317,8 @@ pub fn emit_tail_call(prog: &mut Program, fid: FuncId, block: BlockId, call: Cal
     // one result → that result's type; several → the results tuple.
     let call_typ = match nr {
         0 => empty_tuple(&mut prog.type_arena),
-        1 => tuple_elem_type(prog, results.unwrap(), 0),
+        1 => tuple_elem_type(prog, results.unwrap(), 0)
+            .unwrap_or_else(|| prog.basic_type(BasicKind::Invalid)),
         _ => results.unwrap(),
     };
 

@@ -120,17 +120,24 @@ impl Program {
         .func_value(obj)
         .or_else(|| {
           // Method object may already be an instantiated signature on a generic
-          // receiver; fall back to the package member with the same name.
+          // receiver; fall back to the package member with the same name that
+          // is itself a method (has a receiver). Preferring any same-named
+          // function would pass spurious rtargs into create_instance.
           let name = obj.name(&self.object_arena);
           let pkg = obj.pkg(&self.object_arena)?;
           let ssa_pkg = *self.package_map.get(&pkg)?;
           self.packages.get(ssa_pkg).objects.iter().find_map(|(o, v)| {
-            if o.name(&self.object_arena) == name {
-              if let Value::Function(fid) = v {
-                Some(*fid)
-              } else {
-                None
-              }
+            if o.name(&self.object_arena) != name {
+              return None;
+            }
+            let Value::Function(fid) = v else {
+              return None;
+            };
+            let Some(fsig) = self.functions.get(*fid).signature else {
+              return None;
+            };
+            if guff_types::signature::signature_recv(&self.type_arena, fsig).is_some() {
+              Some(*fid)
             } else {
               None
             }

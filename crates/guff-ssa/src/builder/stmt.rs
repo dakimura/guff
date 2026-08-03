@@ -232,7 +232,8 @@ impl<'a> Builder<'a> {
                 ) {
                     self.range_indexed(s, x, x_ty, label);
                 } else {
-                    todo!("range over non-array pointer");
+                    // Incomplete hybrid info left a non-array pointer — soft-skip.
+                    self.range_soft_skip(s, label);
                 }
             }
             TypeData::Map(_) => self.range_iter(s, x, u, false, label),
@@ -243,11 +244,40 @@ impl<'a> Builder<'a> {
                 } else if info.contains(IS_INTEGER) || info.contains(IS_UNSIGNED) {
                     self.range_int(s, x, x_ty, label);
                 } else {
-                    panic!("cannot range over basic type");
+                    // Typ[Invalid] / other non-rangeable basic under incomplete
+                    // hybrid info — skip rather than abort the SSA build.
+                    let _ = x;
+                    self.range_soft_skip(s, label);
                 }
             }
             TypeData::Signature(_) => self.range_func(s, x, label),
-            other => todo!("unimplemented range over: {other:?}"),
+            // Incomplete Named / TypeParam / Interface / … — soft-skip.
+            _ => {
+                let _ = x;
+                self.range_soft_skip(s, label);
+            }
+        }
+    }
+
+    /// Soft-skip a range whose ranged type is incomplete or non-rangeable.
+    /// Still creates `:=` locals so later uses resolve, then continues in the
+    /// current block as if the loop never ran.
+    fn range_soft_skip(&mut self, s: &RangeStmt, label: Option<&str>) {
+        if s.tok == Some(Token::DEFINE) {
+            let want_key = s
+                .key
+                .as_ref()
+                .is_some_and(|k| !is_blank_ident(k));
+            let want_value = s
+                .value
+                .as_ref()
+                .is_some_and(|v| !is_blank_ident(v));
+            self.range_create_vars(s, want_key, want_value);
+        }
+        if let Some(name) = label {
+            // No loop blocks — label targets stay unset; break/continue of this
+            // label would already be ill-typed under incomplete info.
+            let _ = name;
         }
     }
 
@@ -499,7 +529,8 @@ impl<'a> Builder<'a> {
                     crate::emit::emit_index_addr(self.prog, self.func_id, block, x, index, ptr_ty, s.for_);
                 self.emit_load(iaddr, elem)
             }
-            other => panic!("range_indexed_value: unexpected core type {other:?}"),
+            // Incomplete hybrid info mis-routed an indexed range — placeholder.
+            _ => self.invalid_zero(),
         }
     }
 

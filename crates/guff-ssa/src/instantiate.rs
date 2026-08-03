@@ -107,7 +107,12 @@ impl Program {
         };
 
         // Compute the instance signature and (for methods) the instantiated object.
-        let (inst_object, sig) = if signature_recv(&self.type_arena, orig_sig).is_some() {
+        // Non-methods ignore rtargs (go/ssa createInstance does not assert; hybrid
+        // name-collision fallbacks can pass spurious receiver args).
+        let is_method = signature_recv(&self.type_arena, orig_sig).is_some();
+        let rtargs = if is_method { rtargs } else { &[] };
+
+        let (inst_object, sig) = if is_method {
             // Method: instantiate receiver and/or method type parameters.
             let obj = if !rtargs.is_empty() {
                 self.canon.instantiate_method(
@@ -135,10 +140,9 @@ impl Program {
             };
             (Some(obj), sig)
         } else {
-            assert!(
-                rtargs.is_empty(),
-                "create_instance: rtargs on non-method"
-            );
+            if targs.is_empty() {
+                return fn_id;
+            }
             let inst_sig = instantiate(
                 &mut self.type_arena,
                 &mut self.object_arena,

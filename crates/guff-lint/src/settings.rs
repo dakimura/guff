@@ -2587,8 +2587,19 @@ fn staticcheck_check_enabled(settings: &StaticcheckSettings, name: &str) -> bool
 }
 
 impl ReviveSettings {
+    /// True when no revive settings were customized — matches golangci-lint's
+    /// `reflect.DeepEqual(cfg, zero)` path that keeps revive's default rule set.
+    fn is_zero_like(&self) -> bool {
+        self.severity.is_none()
+            && self.rules.is_none()
+            && self.confidence.is_none()
+            && !self.ignore_generated_header
+            && !self.enable_default_rules
+            && !self.enable_all_rules
+    }
+
     pub fn to_guff_revive(&self) -> guff_revive::Settings {
-        let rules = self.rules.as_ref().map(|rules| {
+        let mapped_rules = self.rules.as_ref().map(|rules| {
             rules
                 .iter()
                 .map(|rule| guff_revive::RuleSetting {
@@ -2603,6 +2614,18 @@ impl ReviveSettings {
                 })
                 .collect()
         });
+        // golangci-lint: any non-zero revive settings without
+        // `enable-default-rules` / `enable-all-rules` / explicit `rules`
+        // starts from an empty rule set (see golinters/revive getConfig).
+        // guff previously treated `rules: None` as "golint defaults" even when
+        // confidence/severity were set, which flooded findings vs golangci.
+        let rules = match mapped_rules {
+            Some(rules) => Some(rules),
+            None if self.enable_default_rules || self.enable_all_rules || self.is_zero_like() => {
+                None
+            }
+            None => Some(Vec::new()),
+        };
         guff_revive::Settings {
             severity: self.severity.clone(),
             rules,
@@ -3588,6 +3611,53 @@ revive:
         assert!(revive.rule("enforce-map-style").is_some());
         assert_eq!(revive.rule_severity("comments-density"), Some("error"));
         assert_eq!(revive.rule_severity("enforce-map-style"), Some("warning"));
+    }
+
+    #[test]
+    fn revive_settings_without_rules_match_golangci_empty_set() {
+        // golangci-lint: any non-zero revive settings (e.g. confidence) without
+        // enable-default-rules / rules list → empty rule set.
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+revive:
+  confidence: 0.8
+  severity: error
+  enable-all-rules: false
+"#,
+        )
+        .unwrap();
+        let s = LinterSettings::from_yaml(&yaml);
+        let bag = s.to_bag();
+        let revive = bag
+            .get::<guff_revive::Settings>("revive")
+            .expect("revive settings");
+        assert!(
+            !revive.rule_enabled(
+                "unused-parameter",
+                guff_revive::DEFAULT_RULES,
+                &[]
+            ),
+            "customized revive settings must not imply default rules"
+        );
+        assert!(
+            !revive.rule_enabled("exported", guff_revive::DEFAULT_RULES, &[]),
+            "customized revive settings must not imply default rules"
+        );
+    }
+
+    #[test]
+    fn revive_settings_absent_keep_default_rules() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str("{}",).unwrap();
+        let s = LinterSettings::from_yaml(&yaml);
+        let bag = s.to_bag();
+        let revive = bag
+            .get::<guff_revive::Settings>("revive")
+            .expect("revive settings");
+        assert!(revive.rule_enabled(
+            "exported",
+            guff_revive::DEFAULT_RULES,
+            &[]
+        ));
     }
 
     #[test]

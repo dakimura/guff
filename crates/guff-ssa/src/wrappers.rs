@@ -8,7 +8,8 @@
 
 use guff_types::{
     instantiate, is_interface, is_pointer, selection_type, signature_params, signature_recv,
-    signature_results, tuple_at, tuple_len, ObjectData, ObjectId, Selection, SelectionKind, TypeId,
+    signature_results, tuple_at, tuple_len, BasicKind, ObjectData, ObjectId, Selection,
+    SelectionKind, TypeId,
 };
 
 use crate::builder::Builder;
@@ -367,7 +368,11 @@ pub fn build_instantiation_wrapper(prog: &mut Program, fid: FuncId) {
 }
 
 /// The type of the `i`th element (a `Var`) of tuple type `tuple`.
+/// Soft-returns `Typ[Invalid]` when `tuple` is not a Tuple (incomplete hybrid).
 fn tuple_elem_type(prog: &Program, tuple: TypeId, i: usize) -> TypeId {
+    if !matches!(prog.type_arena.get(tuple), guff_types::arena::TypeData::Tuple(_)) {
+        return prog.basic_type(BasicKind::Invalid);
+    }
     let var = tuple_at(&prog.type_arena, tuple, i);
     match prog.object_arena.get(var) {
         ObjectData::Var(v) => v.typ(),
