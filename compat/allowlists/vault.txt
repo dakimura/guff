@@ -8,11 +8,8 @@
 
 # DEFERRED: govet inline go-version diagnostics (~17)
 # DEFERRED: SA1019 third-party Deprecated facts without dep AST (~18)
-# DEFERRED: SA5011 OR+Fatal / sequential Fatal sigma gap (~4)
+# DEFERRED: SA5011 sequential testing.TB Fatal (no sigma; golangci FP at :414)
 
-vault guff-only helper/testhelpers/testhelpers.go:599:staticcheck:possible nil pointer dereference
-vault guff-only helper/testhelpers/testhelpers.go:827:staticcheck:possible nil pointer dereference
-vault guff-only helper/testhelpers/testhelpers.go:919:staticcheck:possible nil pointer dereference
 vault golangci-only helper/forwarding/util.go:15:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
 vault golangci-only helper/identity/identity.go:9:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
 vault golangci-only helper/identity/mfa/mfa.go:9:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.

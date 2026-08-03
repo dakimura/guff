@@ -8,16 +8,17 @@
 
 | Metric | Baseline | Measured |
 |--------|---------:|---------:|
-| wall_seconds | 1.890 | 2.140 |
-| peak_rss_bytes | 2,501,869,568 | 2,526,658,560 |
+| wall_seconds | 1.890 | 2.020 |
+| peak_rss_bytes | 2,501,869,568 | 2,510,307,328 |
 | guff_issues | 20 | 20 |
-| golangci_issues | 20 | 20 |
-| both | 20 | 20 |
-| guff_only | 0 | 0 |
+| golangci_issues | 20 | 0 |
+| both | 20 | 0 |
+| guff_only | 0 | 20 |
 | golangci_only | 0 | 0 |
 | precision | 1.0000 | 1.0000 |
 | recall | 1.0000 | 1.0000 |
 
 ## FAIL
 
-- `wall_seconds`: wall 2.140s > limit 2.040s (baseline 1.890s × 1.0 + 0.150s)
+- `guff_only`: guff_only 20 > limit 0 (baseline 0)
+- `both`: both 0 < floor 20 (baseline 20)

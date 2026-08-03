@@ -1,19 +1,10 @@
 package main
 
-func fn1() {
-	var x *int
-	_ = *x
-	if x != nil {
-		nop()
+type R struct{ Complete bool }
+
+func beforeCheck(p *R) {
+	_ = p.Complete // want
+	if p != nil {
+		_ = p
 	}
 }
-
-func fn2() {
-	var x *int
-	if x == nil {
-		nop()
-	}
-	_ = *x
-}
-
-func nop() {}

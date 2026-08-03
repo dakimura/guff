@@ -6,8 +6,6 @@ func ok() {
 	_ = *y
 }
 
-// Nil-check on a map behind a pointer must not flag the pointer deref used to
-// inspect/assign the map (prometheus Annotations pattern).
 type M map[string]int
 
 func okMapPtr(a *M) {
@@ -17,8 +15,6 @@ func okMapPtr(a *M) {
 	(*a)["k"] = 1
 }
 
-// Multiple nil-checks on the same pointer must not overwrite each other
-// (caddy respHeaderOps: early `!= nil` use, later `== nil` return).
 type H struct{ Deferred bool }
 
 func okMultiCheck(p *H) {
@@ -31,7 +27,6 @@ func okMultiCheck(p *H) {
 	p.Deferred = false
 }
 
-// Short-circuit `&&` nil guards (caddy acmeIssuer.Challenges.DNS).
 type DNS struct{}
 type Challenges struct{ DNS *DNS }
 type Issuer struct{ Challenges *Challenges }
@@ -43,8 +38,6 @@ func okShortCircuit(a *Issuer) *DNS {
 	return nil
 }
 
-// Captured err FreeVar after nil-check must not flag later Store (containerd
-// GIDFromFS pattern: gid, err = ... inside a closure that closed over err).
 func okCapturedErr() {
 	var err error
 	f := func() {
@@ -54,4 +47,27 @@ func okCapturedErr() {
 		err = nil
 	}
 	f()
+}
+
+type R struct {
+	Data map[string]interface{}
+}
+
+type TB interface {
+	Fatal(args ...interface{})
+	Fatalf(format string, args ...interface{})
+}
+
+func okOrFatal(t TB, resp *R) {
+	if resp == nil || resp.Data == nil {
+		t.Fatal("missing")
+	}
+	_ = resp.Data["config"]
+}
+
+func okOrErr(t TB, resp *R, err error) {
+	if err != nil || resp == nil {
+		t.Fatalf("bad %v %v", resp, err)
+	}
+	_ = resp.Data["x"]
 }

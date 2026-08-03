@@ -6,6 +6,11 @@
 //! different value inside the branch. When the same value is reused (no
 //! sigma), we additionally suppress reports when the deref is dominated by
 //! both the nil-check and its non-nil successor (guarded use after the check).
+//!
+//! `testing.TB` Fatal/Fatalf is not noreturn in IR, so `if p == nil || … {
+//! t.Fatal(...) }; use p` leaves fallthrough edges that break dominance. We
+//! treat those soft-abort nil branches as guarded when `use` is still reachable
+//! from the non-nil successor without entering the abort block.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -14,11 +19,12 @@ use guff::token::Token;
 use guff_analysis::callcheck::{flatten_ssa_value, is_pointer_or_interface_type, is_slice_type};
 use guff_analysis::passes::buildir;
 use guff_analysis::{
-    is_nil_const, AnalysisResult, Analyzer, Diagnostic, RelatedInformation, RunError, RunFn, Pass,
+    is_nil_const, short_call_name, AnalysisResult, Analyzer, Diagnostic, RelatedInformation,
+    RunError, RunFn, Pass,
 };
 use guff_ssa::function::Function;
 use guff_ssa::ids::{BlockId, InstrId};
-use guff_ssa::instr::{BinOp, FieldAddr, If, IndexAddr, InstrData, Store, UnOp};
+use guff_ssa::instr::{BinOp, Call, FieldAddr, If, IndexAddr, InstrData, Store, UnOp};
 use guff_ssa::program::{value_type_of, Program};
 use guff_ssa::value::Value;
 
@@ -65,7 +71,12 @@ fn ptr_keys_equal(prog: &Program, func: &Function, a: Value, b: Value) -> bool {
 struct NilCheck {
     bin_op: InstrId,
     check_block: BlockId,
+    /// Successor taken when the pointer is non-nil.
     non_nil_block: Option<BlockId>,
+    /// Successor taken when the pointer is nil (`then` of `== nil`).
+    nil_block: Option<BlockId>,
+    /// True when the check was `x == nil` (not `x != nil`).
+    eq_nil: bool,
 }
 
 fn nil_check_partner(func: &Function, cond: Value) -> Option<(InstrId, Value, Value, bool)> {
@@ -93,14 +104,14 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilC
             let Some((bin_id, x, y, eq_nil)) = nil_check_partner(func, *cond) else {
                 continue;
             };
-            let non_nil_block = if block.succs.len() >= 2 {
-                Some(if eq_nil {
-                    block.succs[1]
+            let (non_nil_block, nil_block) = if block.succs.len() >= 2 {
+                if eq_nil {
+                    (Some(block.succs[1]), Some(block.succs[0]))
                 } else {
-                    block.succs[0]
-                })
+                    (Some(block.succs[0]), Some(block.succs[1]))
+                }
             } else {
-                None
+                (None, None)
             };
             // Only pointer/interface nil-checks mark a value as maybe-nil.
             // `if *m == nil` on a `*map`/`*slice` compares the map/slice value
@@ -121,6 +132,8 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilC
                     bin_op: bin_id,
                     check_block: bid,
                     non_nil_block,
+                    nil_block,
+                    eq_nil,
                 });
             };
             if is_nil_const_operand(prog, func, x) {
@@ -161,14 +174,87 @@ fn is_index_addr_on_slice(
     is_slice_type(arena, x_typ)
 }
 
-fn is_guarded_by_non_nil(func: &Function, check: &NilCheck, deref_block: BlockId) -> bool {
+/// True when `block` ends by calling a testing/log abort helper that upstream
+/// `ctrlflow.NoReturn` often does *not* treat as noreturn on interface
+/// receivers (`testing.TB`), so the CFG still has fallthrough edges.
+fn block_has_soft_abort_call(prog: &Program, func: &Function, block: BlockId) -> bool {
+    for &iid in &func.blocks.get(block).instrs {
+        let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
+            continue;
+        };
+        let Some(name) = short_call_name(prog, call) else {
+            continue;
+        };
+        match name.as_str() {
+            "Fatal" | "Fatalf" | "FailNow" | "SkipNow" | "Fatalln" => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+fn block_calls_soft_abort(prog: &Program, func: &Function, block: BlockId) -> bool {
+    if block_has_soft_abort_call(prog, func, block) {
+        return true;
+    }
+    // OR bodies sometimes jump to a shared abort block.
+    let succs = &func.blocks.get(block).succs;
+    succs.len() == 1 && block_has_soft_abort_call(prog, func, succs[0])
+}
+
+/// Reachability from `from` to `to`, never entering `avoid`.
+fn reachable_avoiding(func: &Function, from: BlockId, to: BlockId, avoid: BlockId) -> bool {
+    if from == to {
+        return true;
+    }
+    let mut stack = vec![from];
+    let mut seen = std::collections::HashSet::from([from, avoid]);
+    while let Some(b) = stack.pop() {
+        for &succ in &func.blocks.get(b).succs {
+            if succ == to {
+                return true;
+            }
+            if seen.insert(succ) {
+                stack.push(succ);
+            }
+        }
+    }
+    false
+}
+
+fn is_guarded_by_non_nil(
+    prog: &Program,
+    func: &Function,
+    check: &NilCheck,
+    deref_block: BlockId,
+) -> bool {
     let Some(non_nil_block) = check.non_nil_block else {
         return false;
     };
     let check_bb = func.blocks.get(check.check_block);
     let non_nil = func.blocks.get(non_nil_block);
     let deref = func.blocks.get(deref_block);
-    check_bb.dominates(deref) && (non_nil.dominates(deref) || non_nil_block == deref_block)
+
+    if check_bb.dominates(deref)
+        && (non_nil.dominates(deref) || non_nil_block == deref_block)
+    {
+        return true;
+    }
+
+    // `if x == nil || … { t.Fatal(...) }; use x` — soft abort leaves CFG edges
+    // from the nil branch into the merge, so the check block may not dominate
+    // `use`. If the nil branch soft-aborts and `use` is reachable from the
+    // non-nil successor without entering the nil branch, treat as guarded.
+    if check.eq_nil {
+        if let Some(nil_block) = check.nil_block {
+            if block_calls_soft_abort(prog, func, nil_block)
+                && reachable_avoiding(func, non_nil_block, deref_block, nil_block)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// True when any recorded nil-check of this pointer guards `deref_block`.
@@ -177,10 +263,15 @@ fn is_guarded_by_non_nil(func: &Function, check: &NilCheck, deref_block: BlockId
 /// same pointer (caddy `respHeaderOps`, short-circuit `a != nil && a.F`). A
 /// single HashMap slot used to keep only the last check, so an earlier guarded
 /// deref was matched against a later check and falsely reported.
-fn any_check_guards(func: &Function, checks: &[NilCheck], deref_block: BlockId) -> bool {
+fn any_check_guards(
+    prog: &Program,
+    func: &Function,
+    checks: &[NilCheck],
+    deref_block: BlockId,
+) -> bool {
     checks
         .iter()
-        .any(|check| is_guarded_by_non_nil(func, check, deref_block))
+        .any(|check| is_guarded_by_non_nil(prog, func, check, deref_block))
 }
 
 fn lookup_maybe_nil<'a>(
@@ -192,7 +283,7 @@ fn lookup_maybe_nil<'a>(
 ) -> Option<&'a NilCheck> {
     let key = peel_load(func, ptr);
     if let Some(checks) = maybe_nil.get(&key) {
-        if any_check_guards(func, checks, deref_block) {
+        if any_check_guards(prog, func, checks, deref_block) {
             return None;
         }
         // Not guarded by any check — relate to the first (earliest) check.
@@ -206,7 +297,7 @@ fn lookup_maybe_nil<'a>(
         if !ptr_keys_equal(prog, func, k, key) {
             return None;
         }
-        if any_check_guards(func, checks, deref_block) {
+        if any_check_guards(prog, func, checks, deref_block) {
             return None;
         }
         checks.first()
