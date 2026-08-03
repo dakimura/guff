@@ -236,6 +236,9 @@ impl Checker {
         let call_e = Expr::CallExpr(call.clone());
         let mut x = Operand::invalid();
         let kind = self.call_expr(&mut x, &call_e);
+        // Go's `rawExpr` records the call into Info.Types; without this,
+        // errcheck cannot see that `defer f()` returns error (call.id lookup).
+        self.record(&x, &call_e);
         // Go's `suspendedCall`: a `go`/`defer` target must be a plain call, not
         // a conversion (which produces a value) or an expression-builtin (whose
         // result is discarded).

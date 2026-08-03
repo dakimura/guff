@@ -915,7 +915,8 @@ fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             a.tok_pos.0 as u32,
-            format!("can re-write as `{y_t}, {x_t} = {x_t}, {y_t}`"),
+            // golangci prefixes with check name: `fmt.Sprintf("%s: %s", name, text)`.
+            format!("valSwap: can re-write as `{y_t}, {x_t} = {x_t}, {y_t}`"),
         );
     }
 }

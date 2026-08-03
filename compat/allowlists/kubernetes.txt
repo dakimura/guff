@@ -7,12 +7,8 @@
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
 
 # DEFERRED: govet inline go-version diagnostics (5)
-# DEFERRED: SA9003 empty branch enabled by checks:all; golangci silent (3)
 # note: goplugin custom linters stripped by corpus/patch_unlimited_issues.py
 
-kubernetes guff-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:36:staticcheck:empty branch
-kubernetes guff-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:44:staticcheck:empty branch
-kubernetes guff-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:54:staticcheck:empty branch
 kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:337:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0
 kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:339:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0
 kubernetes golangci-only staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:341:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0

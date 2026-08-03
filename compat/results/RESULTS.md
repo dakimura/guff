@@ -4,8 +4,8 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| vault | 125 | 161 | 122 | 97.6% | 75.8% | 0 |
-| kubernetes | 3 | 5 | 0 | 0.0% | 0.0% | 0 |
+| vault | 128 | 161 | 125 | 97.7% | 77.6% | 0 |
+| kubernetes | 0 | 5 | 0 | 100.0% | 0.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -30,13 +30,13 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| errcheck | 22 | 23 | 22 | 100.0% | 95.7% |
+| errcheck | 23 | 23 | 23 | 100.0% | 100.0% |
 | govet | 46 | 63 | 46 | 100.0% | 73.0% |
 | ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
-| staticcheck | 51 | 69 | 48 | 94.1% | 69.6% |
+| staticcheck | 53 | 69 | 50 | 94.3% | 72.5% |
 | unused | 4 | 4 | 4 | 100.0% | 100.0% |
 
-### Allowed known diffs (42)
+### Allowed known diffs (39)
 - guff-only: `helper/testhelpers/testhelpers.go:599:staticcheck:possible nil pointer dereference`
 - guff-only: `helper/testhelpers/testhelpers.go:827:staticcheck:possible nil pointer dereference`
 - guff-only: `helper/testhelpers/testhelpers.go:919:staticcheck:possible nil pointer dereference`
@@ -45,19 +45,15 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 - golangci-only: `helper/identity/mfa/mfa.go:9:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.`
 - golangci-only: `helper/identity/sentinel.go:109:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.`
 - golangci-only: `helper/identity/sentinel.go:111:staticcheck:ptypes.TimestampString is deprecated: Call the ts.AsTime method instead, followed by a call to the Format method on the time.Time value.`
-- … and 34 more (see `compat/allowlists/`)
+- … and 31 more (see `compat/allowlists/`)
 
 ## kubernetes
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
 | govet | 0 | 5 | 0 | 100.0% | 0.0% |
-| staticcheck | 3 | 0 | 0 | 0.0% | 100.0% |
 
-### Allowed known diffs (8)
-- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:36:staticcheck:empty branch`
-- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:44:staticcheck:empty branch`
-- guff-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/fuzzer/valuefuzz.go:54:staticcheck:empty branch`
+### Allowed known diffs (5)
 - golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:337:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0`
 - golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:339:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0`
 - golangci-only: `staging/src/k8s.io/apimachinery/pkg/api/apitesting/roundtrip/compatibility.go:341:govet:cannot inline call to ioutil.ReadFile (declared using go1.26.2) into a file using go1.24.0`

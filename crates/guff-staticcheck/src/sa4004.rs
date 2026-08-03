@@ -4,12 +4,31 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{BranchStmt, ReturnStmt, Stmt};
+use guff::ast::{BranchStmt, Expr, ReturnStmt, Stmt};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::arena::TypeData;
+
+/// Upstream skips ranging over maps (valid "pick one element" pattern) and
+/// over function values (unknown iteration semantics).
+fn range_x_is_flaggable(pass: &Pass<'_>, x: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return true;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let Some(tav) = info.types.get(&x.id()) else {
+        return true;
+    };
+    match artifacts.types.get(tav.typ.underlying(&artifacts.types)) {
+        TypeData::Map(_) | TypeData::Signature(_) => false,
+        _ => true,
+    }
+}
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
@@ -28,7 +47,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         for stmt in body {
             let loop_body = match stmt {
                 Stmt::ForStmt(f) => &f.body.list,
-                Stmt::RangeStmt(r) => &r.body.list,
+                Stmt::RangeStmt(r) => {
+                    if !range_x_is_flaggable(pass, &r.x) {
+                        continue;
+                    }
+                    &r.body.list
+                }
                 _ => continue,
             };
             if loop_body.len() < 2 {

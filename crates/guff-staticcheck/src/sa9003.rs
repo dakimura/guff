@@ -22,14 +22,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::IfStmt(ifs) = n else {
             return;
         };
+        // Upstream: when else exists and is non-empty (or is `else if`), skip
+        // the if-body check entirely — empty `if` with a real else is intentional
+        // (e.g. `if x == nil { /* TODO */ } else { … }`).
         if let Some(else_) = ifs.else_.as_deref() {
-            if let Stmt::BlockStmt(BlockStmt { list, .. }) = else_ {
-                if list.is_empty() {
+            match else_ {
+                Stmt::BlockStmt(BlockStmt { list, .. }) if list.is_empty() => {
                     let pos = else_.pos().0 as u32;
                     if !is_generated_at(pass, pos) {
                         pending.push(pos);
                     }
                 }
+                _ => return,
             }
         }
         if ifs.body.list.is_empty() {

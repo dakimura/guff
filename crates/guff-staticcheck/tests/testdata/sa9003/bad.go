@@ -1,2 +1,7 @@
 package main
-func f(x int) { if x > 0 {} else { } }
+
+func f(x int) {
+	if x > 0 {
+	} else {
+	}
+}

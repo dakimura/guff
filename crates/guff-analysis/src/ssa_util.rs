@@ -277,10 +277,57 @@ pub fn dominates_all_returns(func: &Function, from: BlockId) -> bool {
         .all(|&ret| from_block.dominates(func.blocks.get(ret)))
 }
 
-/// Reports whether `block` is inside a natural loop (back-edge from a predecessor).
+/// Reports whether `block` is inside a natural loop.
+///
+/// Port of `honnef.co/go/tools/staticcheck/sa6000.isInLoop` +
+/// `irutil.FindLoops`: a block is in a loop iff it belongs to the natural
+/// loop of some header `h` that has a back-edge from a block `n` it
+/// dominates (`h` dominates `n`, edge `n → h`).
 pub fn is_in_loop(func: &Function, block: BlockId) -> bool {
-    let b = func.blocks.get(block);
-    b.preds
-        .iter()
-        .any(|&pred| func.blocks.get(pred).dominates(b))
+    for (h_id, h) in func.live_blocks() {
+        // Clone preds so we can re-borrow `func.blocks` while iterating.
+        let preds = h.preds.clone();
+        for n_id in preds {
+            let n = func.blocks.get(n_id);
+            if !h.dominates(n) {
+                continue;
+            }
+            // `n → h` is a back-edge; `h` is the loop header.
+            if h_id == block || n_id == block {
+                return true;
+            }
+            if n_id == h_id {
+                // Self-loop: members are just `{h}`.
+                continue;
+            }
+            if natural_loop_contains(func, n_id, h_id, block) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// True if `target` is among `allPredsBut(start, header)` — the natural-loop
+/// body collected by walking predecessors of `start` without crossing `header`.
+fn natural_loop_contains(
+    func: &Function,
+    start: BlockId,
+    header: BlockId,
+    target: BlockId,
+) -> bool {
+    let mut stack = vec![start];
+    let mut seen = std::collections::HashSet::from([start, header]);
+    while let Some(b) = stack.pop() {
+        for &pred in &func.blocks.get(b).preds {
+            if pred == header || !seen.insert(pred) {
+                continue;
+            }
+            if pred == target {
+                return true;
+            }
+            stack.push(pred);
+        }
+    }
+    false
 }

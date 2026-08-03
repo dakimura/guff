@@ -13,6 +13,24 @@ fn errcheck_flags_unchecked_error() {
 }
 
 #[test]
+fn errcheck_flags_deferred_error() {
+    let dir = support::testdata("defer");
+    let pkg = support::typecheck_pkg("example.com/errcheck/defer", &dir.join("bad.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("Error return value"), "{messages:?}");
+}
+
+#[test]
+fn errcheck_allows_deferred_checked_error() {
+    let dir = support::testdata("defer");
+    let pkg = support::typecheck_pkg("example.com/errcheck/defer/ok", &dir.join("ok.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+    assert!(support::run_analyzer(analyzer(), &pkg).is_empty());
+}
+
+#[test]
 fn errcheck_allows_checked_error() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg("example.com/errcheck/basic/ok", &dir.join("ok.go"));

@@ -9,7 +9,6 @@
 # DEFERRED: govet inline go-version diagnostics (~17)
 # DEFERRED: SA1019 third-party Deprecated facts without dep AST (~18)
 # DEFERRED: SA5011 OR+Fatal / sequential Fatal sigma gap (~4)
-# TODO: SA4010 append-only slice, SA4006 ctx overwrite, errcheck Teardown
 
 vault guff-only helper/testhelpers/testhelpers.go:599:staticcheck:possible nil pointer dereference
 vault guff-only helper/testhelpers/testhelpers.go:827:staticcheck:possible nil pointer dereference
@@ -39,14 +38,11 @@ vault golangci-only helper/pkcs7/sign_test.go:115:govet:cannot inline call to io
 vault golangci-only helper/pkcs7/sign_test.go:131:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
 vault golangci-only helper/pkcs7/sign_test.go:163:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
 vault golangci-only helper/pkcs7/sign_test.go:269:govet:cannot inline call to ioutil.TempFile (declared using go1.26.2) into a file using go1.24.3
-vault golangci-only helper/random/string_generator_test.go:803:staticcheck:this result of append is never used, except maybe in other appends
 vault golangci-only helper/storagepacker/storagepacker.go:15:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
 vault golangci-only helper/storagepacker/storagepacker_test.go:12:staticcheck:"github.com/golang/protobuf/proto" is deprecated: Use the "google.golang.org/protobuf/proto" package instead.
 vault golangci-only helper/storagepacker/storagepacker_test.go:13:staticcheck:"github.com/golang/protobuf/ptypes" is deprecated: Well-known types have specialized functionality directly injected into the generated packages for each message type. See the deprecation notice for each function for the suggested alternative.
 vault golangci-only helper/storagepacker/storagepacker_test.go:171:staticcheck:ptypes.TimestampNow is deprecated: Call the timestamppb.Now function instead.
 vault golangci-only helper/storagepacker/storagepacker_test.go:220:staticcheck:ptypes.UnmarshalAny is deprecated: Call the any.UnmarshalTo method instead.
-vault golangci-only helper/testhelpers/logical/testing.go:144:errcheck:Error return value is not checked
-vault golangci-only helper/testhelpers/mongodb/mongodbhelper.go:42:staticcheck:argument ctx is overwritten before first use
 vault golangci-only helper/testhelpers/testhelpers.go:414:staticcheck:possible nil pointer dereference
 vault golangci-only helper/testhelpers/testhelpers.go:640:staticcheck:client.RawRequestWithContext is deprecated: RawRequestWithContext exists for historical compatibility and should not be used directly. Use client.Logical().ReadRawWithContext(...) or higher level methods instead.
 vault golangci-only helper/testhelpers/teststorage/teststorage.go:106:govet:cannot inline call to ioutil.TempDir (declared using go1.26.2) into a file using go1.24.3
