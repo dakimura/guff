@@ -331,3 +331,32 @@ fn identical_ignore_tags() {
         s2
     ));
 }
+
+#[test]
+fn implements_slice_uint8_not_error() {
+    let mut u = init_universe_full();
+    let uint8 = b(&u, BasicKind::Uint8);
+    let slice = new_slice(&mut u.type_arena, uint8);
+    let err = u.error;
+    assert!(
+        !api_implements(
+            &mut u.type_arena,
+            &u.object_arena,
+            &u.package_arena,
+            slice,
+            err
+        ),
+        "[]uint8 must not implement error"
+    );
+    let ptr = guff_types::new_pointer(&mut u.type_arena, slice);
+    assert!(
+        !api_implements(
+            &mut u.type_arena,
+            &u.object_arena,
+            &u.package_arena,
+            ptr,
+            err
+        ),
+        "*[]uint8 must not implement error"
+    );
+}

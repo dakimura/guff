@@ -29,6 +29,20 @@ fn errname_allows_valid_names() {
 }
 
 #[test]
+fn errname_ignores_byte_slice_vars() {
+    // `[]byte("x")` currently typechecks as Invalid (conversion hole) without
+    // a recorded error; implements_error must not treat Invalid/*Invalid as
+    // error (Antonboom/errname would never see these as error values).
+    let dir = support::testdata("errname");
+    let pkg = support::typecheck_pkg("example.com/errname/bytes", &dir.join("bytes_only.go"));
+    let messages = support::run_analyzer(errname(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "[]byte var must not be treated as sentinel error: {messages:?}"
+    );
+}
+
+#[test]
 fn err113_flags_direct_error_comparison() {
     let dir = support::testdata("err113");
     let pkg = support::typecheck_pkg("example.com/err113", &dir.join("bad.go"));

@@ -41,6 +41,12 @@ pub fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(err) = universe_error(pass) else {
         return false;
     };
+    // Silent Invalid types (e.g. failed `[]byte("x")` conversions) must not
+    // be treated as errors. The `*T` fallback below would otherwise make
+    // `*Invalid` look like it implements `error` (errname FPs on []byte vars).
+    if !guff_types::predicates::is_valid(&artifacts.types, typ) {
+        return false;
+    }
     let mut types = artifacts.types.clone();
     if api_implements(
         &mut types,

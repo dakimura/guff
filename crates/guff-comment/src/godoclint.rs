@@ -183,8 +183,10 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                 for spec in &gen.specs {
                     match spec {
                         Spec::TypeSpec(ts) => {
-                            let doc = ts.doc.as_ref().or(parent_doc);
-                            let Some(doc) = doc else {
+                            // Upstream: only the per-spec doc is a symbol Doc;
+                            // GenDecl parent docs live in ParentDoc and are
+                            // skipped by start-with-name when Doc is empty.
+                            let Some(doc) = ts.doc.as_ref() else {
                                 continue;
                             };
                             out.push(SymbolDoc {
@@ -198,8 +200,7 @@ fn collect_symbol_docs(file: &guff::ast::File) -> Vec<SymbolDoc<'_>> {
                         }
                         Spec::ValueSpec(vs) => {
                             let multi_name = vs.names.len() > 1;
-                            let doc = vs.doc.as_ref().or(parent_doc);
-                            let Some(doc) = doc else {
+                            let Some(doc) = vs.doc.as_ref() else {
                                 continue;
                             };
                             for name in &vs.names {

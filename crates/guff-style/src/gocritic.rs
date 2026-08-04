@@ -1672,11 +1672,13 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
-    // Method-style: x.Add(-1) / x.Truncate(0)
+    // Method-style: x.Add(-1) / x.Truncate(0) — only on the concrete types
+    // upstream wrapperFunc matches (`sync.WaitGroup`, `bytes.Buffer`).
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
         if sel.sel.name == "Add"
             && call.args.len() == 1
             && (code::is_integer_literal(pass, &call.args[0], -1) || is_int_lit(&call.args[0], -1))
+            && type_is_sync_wait_group(pass, &sel.x)
         {
             report(
                 pending,
@@ -1688,6 +1690,7 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
         if sel.sel.name == "Truncate"
             && call.args.len() == 1
             && (code::is_integer_literal(pass, &call.args[0], 0) || is_int_lit(&call.args[0], 0))
+            && type_is_bytes_buffer(pass, &sel.x)
         {
             report(
                 pending,
@@ -5179,6 +5182,47 @@ fn type_is_sync_map_ptr(pass: &Pass<'_>, expr: &Expr) -> bool {
         None,
     );
     s == "*sync.Map" || (s.starts_with('*') && s.ends_with("/sync.Map"))
+}
+
+fn type_is_sync_wait_group(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let s = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    // Value or pointer receiver: sync.WaitGroup / *sync.WaitGroup.
+    s == "sync.WaitGroup"
+        || s == "*sync.WaitGroup"
+        || s.ends_with("/sync.WaitGroup")
+        || (s.starts_with('*') && s.ends_with("/sync.WaitGroup"))
+}
+
+fn type_is_bytes_buffer(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(typ) = type_of(pass, expr) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let s = type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    s == "bytes.Buffer"
+        || s == "*bytes.Buffer"
+        || s.ends_with("/bytes.Buffer")
+        || (s.starts_with('*') && s.ends_with("/bytes.Buffer"))
 }
 
 fn is_sync_map_method_call<'a>(
