@@ -1125,6 +1125,32 @@ fn embeddedstructfieldcheck_allows_sorted_with_blank_line() {
 }
 
 #[test]
+fn embeddedstructfieldcheck_empty_line_respects_field_doc() {
+    // Upstream comments-empty-line: Field.Doc must be used so a blank line
+    // between embedded and a documented regular field is accepted.
+    let pkg = support::typecheck_fixture(
+        "embeddedstructfieldcheck",
+        "example.com/embeddedstructfieldcheck/comments",
+        "comments.go",
+    );
+    let messages = support::run_analyzer(embeddedstructfieldcheck(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains("ValidStructWithSingleLineComments")
+            || (m.contains("there must be an empty line") && m.contains("time.Time") && !m.contains("version"))),
+        "valid blank+doc case must not flag: {messages:?}"
+    );
+    let spacing: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("there must be an empty line separating embedded fields"))
+        .collect();
+    assert_eq!(
+        spacing.len(),
+        2,
+        "expected two missing-blank reports (single + multi-line doc): {messages:?}"
+    );
+}
+
+#[test]
 fn embeddedstructfieldcheck_respects_settings() {
     use guff_style::EmbeddedstructfieldcheckOptions;
 

@@ -395,6 +395,24 @@ fn parse_v2_style_linter_settings() {
 }
 
 #[test]
+fn parse_funlen_negative_lines_disables_line_limit() {
+    // Traefik: `lines: -1` must not fail deserialization (previously Option<usize>
+    // rejected the whole funlen block and silently used defaults).
+    let yaml = r#"
+funlen:
+  lines: -1
+  statements: 120
+"#;
+    let value: serde_yaml::Value = serde_yaml::from_str(yaml).unwrap();
+    let settings = LinterSettings::from_yaml(&value);
+    assert_eq!(settings.funlen.lines, Some(-1));
+    assert_eq!(settings.funlen.statements, Some(120));
+    let opts = settings.funlen.to_guff_funlen();
+    assert_eq!(opts.lines, usize::MAX);
+    assert_eq!(opts.statements, 120);
+}
+
+#[test]
 fn parse_v2_style_extended_linter_settings() {
     let contents =
         fs::read_to_string(testdata_config("v2_style_settings_extended.yml")).unwrap();

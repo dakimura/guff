@@ -6,14 +6,18 @@
 //! 2. Are separated from regular fields by a blank line (`empty-line`, default true).
 //! 3. Optionally are not `sync.Mutex` / `sync.RWMutex` (`forbid-mutex`, default false).
 //!
-//! DEFERRED: SuggestedFix for missing blank line; field-doc-aware empty-line
-//! (load uses `Mode::NONE`, so `Field.doc` is unset — comment lines between
-//! embedded and regular fields may be under-counted until `PARSE_COMMENTS`).
+//! Re-parses with `PARSE_COMMENTS` because load uses `Mode::NONE` and upstream's
+//! empty-line check uses `Field.Doc.Pos()` when a doc comment precedes the first
+//! regular field (k8s CRDs, etc.).
+//!
+//! DEFERRED: SuggestedFix for missing blank line.
 
-use std::sync::OnceLock;
+use std::fs;
+use std::sync::{Arc, OnceLock};
 
-use guff::ast::{Expr, Field, StructType};
-use guff::position::FileSet;
+use guff::ast::{Expr, Field, File, StructType};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::{FileSet, Pos};
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -24,7 +28,7 @@ fn is_embedded(field: &Field) -> bool {
     field.names.is_empty()
 }
 
-fn line_of(fset: &FileSet, pos: guff::position::Pos) -> i64 {
+fn line_of(fset: &FileSet, pos: Pos) -> i64 {
     fset.position(pos).line
 }
 
@@ -54,9 +58,8 @@ fn analyze_struct(
     fset: &FileSet,
     st: &StructType,
     opts: &EmbeddedstructfieldcheckOptions,
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<(Pos, String)>,
 ) {
-    let mut first_embedded: Option<&Field> = None;
     let mut last_embedded: Option<&Field> = None;
     let mut first_regular: Option<&Field> = None;
 
@@ -73,14 +76,11 @@ fn analyze_struct(
                             Expr::SelectorExpr(se) => se.x.pos(),
                             _ => field.pos(),
                         };
-                        pending.push((pos.0 as u32, format!("{name} should not be embedded")));
+                        pending.push((pos, format!("{name} should not be embedded")));
                     }
                 }
             }
 
-            if first_embedded.is_none() {
-                first_embedded = Some(field);
-            }
             if last_embedded
                 .map(|f| f.pos().0 < field.pos().0)
                 .unwrap_or(true)
@@ -91,7 +91,7 @@ fn analyze_struct(
             if let Some(reg) = first_regular {
                 if reg.pos().0 < field.pos().0 {
                     pending.push((
-                        field.pos().0 as u32,
+                        field.pos(),
                         "embedded fields should be listed before regular fields".into(),
                     ));
                     // Upstream returns early: skip empty-line for this struct.
@@ -103,8 +103,6 @@ fn analyze_struct(
         }
     }
 
-    let _ = first_embedded;
-
     if !opts.empty_line {
         return;
     }
@@ -112,8 +110,8 @@ fn analyze_struct(
         return;
     };
 
+    // Upstream: nextLine from Field.Doc when present, else field Pos.
     let line = line_of(fset, last_emb.end());
-    // DEFERRED: when Field.doc is populated, use doc.pos() like upstream.
     let next_line = if let Some(doc) = first_reg.doc.as_ref() {
         line_of(fset, doc.pos())
     } else {
@@ -122,10 +120,30 @@ fn analyze_struct(
 
     if next_line != line + 2 {
         pending.push((
-            last_emb.pos().0 as u32,
+            last_emb.pos(),
             "there must be an empty line separating embedded fields from regular fields".into(),
         ));
     }
+}
+
+fn reparse(path: &std::path::Path) -> Option<(Arc<FileSet>, File)> {
+    let src = fs::read(path).ok()?;
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    Some((fset, file))
+}
+
+/// Map a reparsed file position onto the pass FileSet via line/column.
+fn map_pos(pass: &Pass<'_>, pass_file: &File, re_fset: &FileSet, re_pos: Pos) -> u32 {
+    let Some(ft) = pass.fset().file(pass_file.pos()) else {
+        return re_pos.0 as u32;
+    };
+    let re_p = re_fset.position(re_pos);
+    if re_p.line < 1 || re_p.line as usize > ft.line_count() {
+        return pass_file.pos().0 as u32;
+    }
+    ft.line_start(re_p.line as usize).0 as u32 + (re_p.column as u32).saturating_sub(1)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -138,15 +156,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
 
-    let fset = pass.fset().clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
-    for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
+    let paths = pass.pkg().compiled_go_files.clone();
+    let n = pass.files().len();
+
+    for i in 0..n {
+        let Some(path) = paths.get(i) else {
+            continue;
+        };
+        let Some((re_fset, parsed)) = reparse(path) else {
+            continue;
+        };
+        let pass_file = &pass.files()[i];
+        let mut local: Vec<(Pos, String)> = Vec::new();
+        preorder(NodeRef::File(&parsed), |n| {
             if let NodeRef::StructType(st) = n {
-                analyze_struct(&fset, st, &opts, &mut pending);
+                analyze_struct(&re_fset, st, &opts, &mut local);
             }
             true
         });
+        for (re_pos, message) in local {
+            pending.push((map_pos(pass, pass_file, &re_fset, re_pos), message));
+        }
     }
 
     for (pos, message) in pending {
@@ -173,7 +204,6 @@ pub fn analyzer() -> &'static Analyzer {
 mod tests {
     use super::*;
     use guff::ast::{Field, Ident, SelectorExpr, StarExpr};
-    use guff::position::Pos;
 
     #[test]
     fn detects_embedded_by_empty_names() {

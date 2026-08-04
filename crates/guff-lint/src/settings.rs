@@ -309,12 +309,16 @@ pub struct DogsledSettings {
 }
 
 /// `linters.settings.funlen` / `linters-settings.funlen`.
+///
+/// golangci accepts negative `lines` / `statements` (commonly `-1`) to disable
+/// that half of the check. Deserialize as `i64` so a lone `-1` does not fail
+/// the whole settings object (which previously silently fell back to defaults).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct FunlenSettings {
     #[serde(default)]
-    pub lines: Option<usize>,
+    pub lines: Option<i64>,
     #[serde(default)]
-    pub statements: Option<usize>,
+    pub statements: Option<i64>,
     #[serde(default, rename = "ignore-comments")]
     pub ignore_comments: Option<bool>,
 }
@@ -2718,8 +2722,17 @@ impl FunlenSettings {
     pub fn to_guff_funlen(&self) -> guff_style::FunlenOptions {
         let defaults = guff_style::FunlenOptions::default();
         guff_style::FunlenOptions {
-            lines: self.lines.unwrap_or(defaults.lines),
-            statements: self.statements.unwrap_or(defaults.statements),
+            // ≤0 disables that limit (ultraware/funlen + golangci convention).
+            lines: match self.lines {
+                Some(n) if n <= 0 => usize::MAX,
+                Some(n) => n as usize,
+                None => defaults.lines,
+            },
+            statements: match self.statements {
+                Some(n) if n <= 0 => usize::MAX,
+                Some(n) => n as usize,
+                None => defaults.statements,
+            },
             ignore_comments: self.ignore_comments.unwrap_or(defaults.ignore_comments),
         }
     }

@@ -83,7 +83,8 @@ fn check_field(field: &Field, failures: &mut Vec<Failure>) {
             failures.push(Failure {
                 rule: "struct-tag",
                 pos: tag_lit.value_pos.0 as u32,
-                message: format!("{}: {}", tag.key, msg),
+                // Upstream: `w.addFailuref(n, "%s in %s tag", msg, tagKey)`.
+                message: format!("{msg} in {} tag", tag.key),
             confidence: None,
         });
         }

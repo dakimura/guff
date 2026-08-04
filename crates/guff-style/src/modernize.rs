@@ -965,7 +965,7 @@ fn check_omitzero(pass: &Pass<'_>, field: &Field, pending: &mut Vec<Diagnostic>)
     pending.push(Diagnostic {
         pos,
         end,
-        category: String::new(),
+        category: "omitzero".into(),
         message: "Omitempty has no effect on nested struct fields".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace omitempty with omitzero (behavior change)".into(),

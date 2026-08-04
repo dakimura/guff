@@ -299,12 +299,17 @@ fn collect(
 }
 
 fn format_message(key: &str, count: usize, matching_const: Option<&str>) -> String {
+    let quoted = if key.contains('`') {
+        key.to_string()
+    } else {
+        format!("`{key}`")
+    };
     if let Some(name) = matching_const {
         format!(
-            "string `{key}` has {count} occurrences, but such constant `{name}` already exists"
+            "string {quoted} has {count} occurrences, but such constant `{name}` already exists"
         )
     } else {
-        format!("string `{key}` has {count} occurrences, make it a constant")
+        format!("string {quoted} has {count} occurrences, make it a constant")
     }
 }
 

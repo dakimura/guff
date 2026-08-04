@@ -32,11 +32,14 @@ pub fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
 }
 
 /// Collect declaration doc comments (godot default `declarations` scope).
+///
+/// Matches upstream `getDeclarationComments`: top-level `GenDecl` / `FuncDecl`
+/// docs only. Package file docs (`file.doc`) are intentionally omitted — godot's
+/// `DeclScope` does not check them (unlike `all` / `toplevel`).
+///
+/// DEFERRED: `getBlockComments` for docs inside `var (` / `const (` groups.
 pub fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     let mut out = Vec::new();
-    if let Some(doc) = &file.doc {
-        out.push(doc);
-    }
     for decl in &file.decls {
         match decl {
             Decl::GenDecl(g) => {
