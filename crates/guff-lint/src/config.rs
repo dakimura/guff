@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::{FAST_LINTER_NAMES, STANDARD_LINTER_NAMES};
+use crate::registry::{known_linter_names, FAST_LINTER_NAMES, STANDARD_LINTER_NAMES};
 
 /// Default config file names searched from the working directory upward.
 pub const CONFIG_FILE_NAMES: &[&str] = &[
@@ -72,7 +72,10 @@ impl LinterDefault {
 
     fn base_linters(self) -> &'static [&'static str] {
         match self {
-            Self::Standard | Self::All => STANDARD_LINTER_NAMES,
+            Self::Standard => STANDARD_LINTER_NAMES,
+            // `All` is resolved via `known_linter_names()` in `resolve_names`
+            // (includes module plugins); this is only a fallback.
+            Self::All => STANDARD_LINTER_NAMES,
             Self::Fast => FAST_LINTER_NAMES,
             Self::None => &[],
         }
@@ -115,12 +118,17 @@ impl LinterSelection {
 
     /// Compute the final ordered linter name list.
     pub fn resolve_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .default
-            .base_linters()
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
+        let mut names: Vec<String> = match self.default {
+            LinterDefault::All => known_linter_names()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect(),
+            other => other
+                .base_linters()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect(),
+        };
 
         let disable: HashSet<&str> = self.disable.iter().map(|s| s.as_str()).collect();
         names.retain(|n| !disable.contains(n.as_str()));
@@ -1375,6 +1383,36 @@ linters:
         let names = sel.resolve_names();
         assert!(!names.contains(&"unused".to_string()));
         assert!(names.contains(&"staticcheck".to_string()));
+    }
+
+    #[test]
+    fn v2_default_all_enables_non_standard_linters() {
+        let yaml = r#"
+version: "2"
+linters:
+  default: all
+  disable:
+    - gosec
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let names = cfg.linter_selection().resolve_names();
+        assert!(
+            names.contains(&"goconst".to_string()),
+            "default: all must enable goconst: {names:?}"
+        );
+        assert!(
+            names.contains(&"revive".to_string()),
+            "default: all must enable revive: {names:?}"
+        );
+        assert!(
+            !names.contains(&"gosec".to_string()),
+            "explicit disable must still apply: {names:?}"
+        );
+        assert!(
+            names.len() > STANDARD_LINTER_NAMES.len(),
+            "default: all must be larger than standard: {}",
+            names.len()
+        );
     }
 
     #[test]
