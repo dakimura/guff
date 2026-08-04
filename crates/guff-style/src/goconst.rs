@@ -286,12 +286,10 @@ fn collect(
                     }
                     true
                 }
-                NodeRef::ValueSpec(vs) => {
-                    for val in &vs.values {
-                        add_expr_lit(val, options, occurrences);
-                    }
-                    true
-                }
+                // Upstream has no ValueSpec occurrence path: `var x = "s"` /
+                // `const x = "s"` initializers are not counted (const names are
+                // collected separately via GenDecl CONST above). Counting them
+                // inflated occurrence totals (traefik `testScheme = "http"`).
                 _ => true,
             }
         });

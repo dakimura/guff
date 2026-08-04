@@ -2713,6 +2713,21 @@ fn goconst_ignores_direct_call_string_args_by_default() {
 }
 
 #[test]
+fn goconst_ignores_package_var_initializers() {
+    // Upstream does not count `var x = "s"` toward occurrences.
+    let pkg = support::typecheck_fixture(
+        "goconst/var_init",
+        "example.com/goconst/var_init",
+        "ok.go",
+    );
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "var initializer must not inflate count: {messages:?}"
+    );
+}
+
+#[test]
 fn goconst_allows_below_threshold() {
     let pkg = support::typecheck_fixture("goconst", "example.com/goconst/ok", "ok.go");
     assert!(support::run_analyzer(goconst(), &pkg).is_empty());

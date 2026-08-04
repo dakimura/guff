@@ -16,7 +16,7 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::TagalignOptions;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Tag {
     key: String,
     /// Full `key:"value"` string including quotes/options.
@@ -154,6 +154,7 @@ fn find_consecutive_groups<'a>(
 
 fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec<(u32, String)>) {
     let mut tags_group: Vec<Vec<Tag>> = Vec::new();
+    let mut not_sorted_group: Vec<Vec<Tag>> = Vec::new();
     let mut kept: Vec<&Field> = Vec::new();
 
     for field in fields {
@@ -167,6 +168,7 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec
         };
         match parse_struct_tags(&content) {
             Ok(mut tags) => {
+                not_sorted_group.push(tags.clone());
                 if options.sort {
                     sort_tags(&mut tags, &options.order);
                 }
@@ -200,6 +202,10 @@ fn process_group(fields: &[&Field], options: &TagalignOptions, pending: &mut Vec
             }
             parts.join("").trim_end().to_string()
         } else {
+            // Upstream sort-only: if order unchanged, ignore whitespace diffs.
+            if options.sort && not_sorted_group[i] == *tags {
+                continue;
+            }
             tags.iter()
                 .map(|t| t.raw.as_str())
                 .collect::<Vec<_>>()
