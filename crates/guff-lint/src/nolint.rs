@@ -450,7 +450,7 @@ fn nolint_pattern() -> &'static Regex {
 
 fn extract_range(
     comment: &guff::ast::Comment,
-    group: &guff::ast::CommentGroup,
+    _group: &guff::ast::CommentGroup,
     fset: &FileSet,
     pattern: &Regex,
     unknown: &mut HashSet<String>,
@@ -463,8 +463,10 @@ fn extract_range(
         return None;
     }
 
-    let pos = fset.position(group.pos());
-    let end = fset.position(group.end());
+    // Report / match on the directive comment itself, not the CommentGroup
+    // lead (godoc + `//` + `//nolint` share a group — traefik tracing_test).
+    let pos = fset.position(comment.pos());
+    let end = fset.position(comment.end());
     let build = |linters: Vec<String>| IgnoredRange {
         from: pos.line,
         to: end.line,

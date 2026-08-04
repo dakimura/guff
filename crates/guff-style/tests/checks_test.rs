@@ -2728,6 +2728,22 @@ fn goconst_ignores_package_var_initializers() {
 }
 
 #[test]
+fn goconst_filters_numeric_looking_strings_by_default_range() {
+    // golangci defaults NumberMin=NumberMax=3; ProcessResults drops any
+    // ParseInt-able string outside that range even when ParseNumbers is off.
+    let pkg = support::typecheck_fixture(
+        "goconst/numeric_str",
+        "example.com/goconst/numeric_str",
+        "ok.go",
+    );
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "numeric-looking strings outside min/max must be filtered: {messages:?}"
+    );
+}
+
+#[test]
 fn goconst_allows_below_threshold() {
     let pkg = support::typecheck_fixture("goconst", "example.com/goconst/ok", "ok.go");
     assert!(support::run_analyzer(goconst(), &pkg).is_empty());

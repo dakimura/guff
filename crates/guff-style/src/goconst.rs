@@ -92,9 +92,8 @@ fn parse_go_int(s: &str) -> Option<i64> {
 }
 
 fn passes_number_range(value: &str, options: GoconstOptions) -> bool {
-    if !options.numbers {
-        return true;
-    }
+    // Upstream applies min/max to any string that ParseInt accepts — even when
+    // ParseNumbers is false (golangci defaults min=3,max=3 drop `"443"` etc.).
     if options.number_min == 0 && options.number_max == 0 {
         return true;
     }
