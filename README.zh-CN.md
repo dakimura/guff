@@ -9,57 +9,57 @@
 </p>
 
 <p align="center">
-  <b>⚡ A blazing-fast golangci-lint compatible Go linter</b>
+  <b>⚡ 兼容 golangci-lint 的极速 Go 检查器</b>
 </p>
 
 <p align="center">
-  Run your Go linters in seconds, not minutes.
+  让 Go lint 在数秒内完成，而不是数分钟。
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="golangci-lint run finishes in 22.1s; guff run finishes in 1.7s (helm cold-cache)." width="820" />
+  <img src="assets/demo.gif" alt="golangci-lint 用时 22.1s；guff 用时 1.7s（helm，冷缓存）。" width="820" />
 </p>
 
 <p align="center">
-  <a href="docs/MIGRATION.md">Migrate in 5 minutes</a>
+  <a href="docs/MIGRATION.md">5 分钟迁移</a>
   ·
-  <a href="docs/INSTALL.md">Install / uninstall</a>
+  <a href="docs/INSTALL.md">安装 / 卸载</a>
   ·
-  <a href="docs/COMPARE.md">vs golangci-lint</a>
+  <a href="docs/COMPARE.md">对比 golangci-lint</a>
   ·
-  <a href="docs/AGENTS.md">AI agents</a>
+  <a href="docs/AGENTS.md">AI 编程代理</a>
 </p>
 
 ---
 
-## Why guff?
+## 为什么选择 guff？
 
-`golangci-lint` is the standard Go linter aggregator — and it is excellent.
+`golangci-lint` 是 Go 生态中标准的 linter 聚合器——而且非常出色。
 
-But as Go repositories grow, linting becomes one of the slowest parts of the development loop.
+但随着仓库变大，lint 往往成为开发循环中最慢的一环。
 
-Every local change.  
-Every pull request.  
-Every AI coding agent iteration.
+每次本地改动。  
+每次拉取请求。  
+每次 AI 编程代理迭代。
 
-Waiting matters.
+等待成本很高。
 
-**guff makes Go linting fast again.**
+**guff 让 Go lint 重新变快。**
 
 ```
 golangci-lint: 394s
 guff:           24s
 
-Same repository.
-Same config.
-Same findings.
+同一仓库。
+同一配置。
+同一结果。
 ```
 
 ---
 
-## 🚀 Performance
+## 🚀 性能
 
-Real-world open-source repositories with their existing `golangci-lint v2` configurations:
+在真实开源仓库上，使用其现有的 `golangci-lint v2` 配置：
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
@@ -69,24 +69,24 @@ Real-world open-source repositories with their existing `golangci-lint v2` confi
 | gin | 4.2s | **0.38s** | **11× faster** |
 | rclone | 6.3s | **0.64s** | **10× faster** |
 
-Cold-cache benchmarks on Darwin arm64.
+Darwin arm64 冷缓存基准。
 
-Full benchmark results:
+完整结果：
 
 [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
 
 ---
 
-## Why is guff fast?
+## 为什么这么快？
 
-Traditional lint pipelines repeatedly pay the cost of:
+传统 lint 流水线会反复付出：
 
-- starting processes
-- loading packages
-- parsing source code
-- building analysis state
+- 启动进程
+- 加载包
+- 解析源码
+- 构建分析状态
 
-guff keeps the entire analysis pipeline inside a single Rust process.
+guff 将整条分析流水线放在 **单个 Rust 进程** 中。
 
 ```
 Go source
@@ -104,25 +104,25 @@ Shared analysis pipeline
 All linters
 ```
 
-One pipeline.  
-Many analyzers.  
-Less waiting.
+一条流水线。  
+多个分析器。  
+更少等待。
 
 ---
 
-## Drop-in golangci-lint compatibility
+## 可直接替换的 golangci-lint 兼容性
 
-Already have a `.golangci.yml`?
+已经有 `.golangci.yml`？
 
-Good.
+很好。
 
-Keep it.
+继续用。
 
 ```bash
 guff run ./...
 ```
 
-guff automatically reads:
+guff 会自动读取：
 
 ```
 .golangci.yml
@@ -131,61 +131,61 @@ guff automatically reads:
 .guff.yaml
 ```
 
-Compatibility:
+兼容性：
 
-- ✅ 114 / 114 golangci-lint v2 linters implemented
-- ✅ Existing configurations supported
-- ✅ Multiple output formats
-- ✅ GitHub Actions annotations
+- ✅ 已实现 golangci-lint v2 的 114 / 114 个 linter
+- ✅ 支持现有配置
+- ✅ 多种输出格式
+- ✅ GitHub Actions 注解
 
-Honest comparison (including known partial gaps):
+诚实对比（含已知部分差距）：
 
 [`docs/COMPARE.md`](docs/COMPARE.md)
 
-Full compatibility matrix:
+完整兼容矩阵：
 
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
-Five-minute migration + rollback:
+五分钟迁移与回滚：
 
 [`docs/MIGRATION.md`](docs/MIGRATION.md)
 
 ---
 
-## Built for AI coding agents
+## 为 AI 编程代理而生
 
-AI coding agents run tools constantly.
+AI 编程代理会频繁调用工具。
 
-A slow lint command becomes a slow development loop.
+一次缓慢的 lint，就会拖慢整个开发循环。
 
-guff is designed for:
+guff 面向：
 
 - Cursor
 - GitHub Copilot
-- CI pipelines
-- local development
+- CI 流水线
+- 本地开发
 
-Copy-paste agent instructions: [`docs/AGENTS.md`](docs/AGENTS.md).
+可复制的代理说明：[`docs/AGENTS.md`](docs/AGENTS.md)
 
 ---
 
-## Try it now
+## 立即试用
 
-### Install (no Rust required)
+### 安装（无需 Rust）
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh | sh
 ```
 
-Installs to `~/.local/bin` by default. Then:
+默认安装到 `~/.local/bin`。然后：
 
 ```bash
 guff run ./...
 ```
 
-That's it. Your existing `.golangci.yml` works.
+就这样。现有的 `.golangci.yml` 可以直接使用。
 
-Other installers:
+其他安装方式：
 
 ```bash
 # Homebrew
@@ -193,51 +193,51 @@ brew tap dakimura/guff https://github.com/dakimura/guff
 brew install guff
 ```
 
-Docker, aqua, Actions, cargo: [`docs/INSTALL.md`](docs/INSTALL.md).
+Docker、aqua、Actions、cargo：[`docs/INSTALL.md`](docs/INSTALL.md)
 
-### Uninstall / rollback
+### 卸载 / 回滚
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/uninstall.sh | sh
 ```
 
-Configs are untouched — point CI back at golangci-lint anytime. Details: [`docs/INSTALL.md`](docs/INSTALL.md#uninstall--rollback).
+不会改动配置——随时把 CI 切回 golangci-lint。详情：[`docs/INSTALL.md`](docs/INSTALL.md#uninstall--rollback)
 
 ---
 
-## Common commands
+## 常用命令
 
 ```bash
-# Run configured linters
+# 按配置运行
 guff run ./...
 
-# Show enabled linters
+# 显示已启用的 linter
 guff linters
 
-# Use fast preset
+# 使用 fast 预设
 guff run --preset fast ./...
 
-# Enable additional linters
+# 额外启用 linter
 guff run \
   --enable revive \
   --enable misspell \
   ./...
 
-# Apply suggested fixes
+# 应用建议修复
 guff run --fix ./...
 
-# Formatters (gofmt / goimports / … from config)
+# 格式化（来自配置的 gofmt / goimports / …）
 guff fmt .
 
-# Re-lint on change (keeps analysis warm)
+# 监视变更并重新 lint（保持分析状态温热）
 guff run --watch ./...
 
-# Issues cache
+# issues 缓存
 guff cache status
 guff cache clean
 ```
 
-Editors, pre-commit, lefthook: [`docs/EDITORS.md`](docs/EDITORS.md).
+编辑器、pre-commit、lefthook：[`docs/EDITORS.md`](docs/EDITORS.md)
 
 ---
 
@@ -269,9 +269,9 @@ jobs:
 
 ## Docker
 
-guff requires a Go toolchain for package resolution.
+包解析需要 Go 工具链。
 
-The official Docker image already includes Go.
+官方 Docker 镜像已包含 Go。
 
 ```bash
 docker run --rm \
@@ -281,7 +281,7 @@ docker run --rm \
   run ./...
 ```
 
-Optional: persist Go caches between runs:
+可选：在多次运行之间持久化 Go 缓存：
 
 ```bash
 docker run --rm \
@@ -297,11 +297,11 @@ docker run --rm \
 
 ---
 
-# Configuration
+# 配置
 
-guff supports existing `golangci-lint` configuration files.
+guff 支持现有的 `golangci-lint` 配置文件。
 
-Search order:
+搜索顺序：
 
 ```
 .golangci.yml
@@ -310,7 +310,7 @@ Search order:
 .guff.yaml
 ```
 
-Example:
+示例：
 
 ```yaml
 version: "2"
@@ -335,33 +335,33 @@ formatters:
     - goimports
 ```
 
-Run with:
+运行：
 
 ```bash
 guff run .
 ```
 
-or specify a config:
+或指定配置：
 
 ```bash
 guff run -c .golangci.yml .
 ```
 
-v1 → v2: `guff migrate`.
+v1 → v2：`guff migrate`
 
 ---
 
-# Supported Linters
+# 支持的 Linter
 
-guff implements the full golangci-lint v2 linter set.
+guff 实现了完整的 golangci-lint v2 linter 集合。
 
-Current compatibility:
+当前兼容性：
 
 ```
 114 / 114 linters supported
 ```
 
-Examples:
+示例：
 
 | Linter | Description |
 |---|---|
@@ -376,7 +376,7 @@ Examples:
 | gocritic | Code quality checks |
 | dupl | Duplicate code detection |
 
-Enable additional linters:
+额外启用：
 
 ```bash
 guff run \
@@ -385,15 +385,15 @@ guff run \
   ./...
 ```
 
-Full matrix:
+完整矩阵：
 
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
 ---
 
-# Output formats
+# 输出格式
 
-Supported formats:
+支持的格式：
 
 - text
 - colored-line-number
@@ -404,7 +404,7 @@ Supported formats:
 - colored-tab
 - github-actions
 
-Example:
+示例：
 
 ```bash
 guff run \
@@ -412,13 +412,13 @@ guff run \
   ./...
 ```
 
-GitHub Actions will automatically annotate pull requests.
+GitHub Actions 会自动为拉取请求添加注解。
 
 ---
 
-# Architecture
+# 架构
 
-guff is built around one shared analysis pipeline.
+guff 围绕一条共享分析流水线构建。
 
 ```
 go list
@@ -439,36 +439,36 @@ Dependency-aware execution graph
 Diagnostics
 ```
 
-Unlike traditional lint aggregators, guff avoids repeatedly rebuilding analysis state for every tool.
+与传统 linter 聚合器不同，guff 避免为每个工具反复重建分析状态。
 
-The result:
+效果：
 
-- less startup overhead
-- lower memory usage
-- faster feedback loops
+- 更少的启动开销
+- 更低的内存占用
+- 更快的反馈循环
 
 ---
 
-# Development
+# 开发
 
-Requirements:
+依赖：
 
 - Go
-- Rust (edition 2021)
+- Rust（edition 2021）
 
-Build:
+构建：
 
 ```bash
 cargo build
 ```
 
-Test:
+测试：
 
 ```bash
 cargo test
 ```
 
-Run locally:
+本地运行：
 
 ```bash
 cargo run -p guff-lint -- run ./...
@@ -476,15 +476,15 @@ cargo run -p guff-lint -- run ./...
 
 ---
 
-## Benchmarking
+## 基准测试
 
-Build release binary:
+构建 release 二进制：
 
 ```bash
 cargo build --release -p guff-lint
 ```
 
-Run benchmarks:
+运行基准：
 
 ```bash
 ./benchmarks/smoke.sh
@@ -492,7 +492,7 @@ Run benchmarks:
 ./benchmarks/run.sh
 ```
 
-OSS repository benchmarks:
+开源仓库基准：
 
 ```bash
 ./benchmarks/run.sh \
@@ -500,17 +500,15 @@ OSS repository benchmarks:
   --tier pr,nightly,weekly
 ```
 
-Results:
+结果：
 
 [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
 
 ---
 
-## Compatibility Testing
+## 兼容性测试
 
-guff continuously compares findings against golangci-lint.
-
-Run compatibility checks:
+guff 持续将结果与 golangci-lint 对比。
 
 ```bash
 ./compat/run.sh \
@@ -518,36 +516,34 @@ Run compatibility checks:
   --tier pr
 ```
 
-Per-linter isolate (one linter enabled at a time):
+按 linter 隔离（一次只启用一个）：
 
 ```bash
 ./compat/run.sh --isolate --smoke
 ./compat/run.sh --isolate
 ```
 
-The goal:
+目标：
 
-> Same config. Same findings. Much faster execution.
+> 同一配置。同一结果。快得多的执行。
 
 ---
 
-## Prometheus Regression Gate
+## Prometheus 回归门禁
 
-guff includes a regression suite against Prometheus.
+guff 包含针对 Prometheus 的回归套件。
 
-It checks:
+检查：
 
-- execution time
-- peak RSS memory
-- finding differences
-
-Run:
+- 执行时间
+- peak RSS 内存
+- 结果差异
 
 ```bash
 ./regress/run.sh
 ```
 
-Full profile:
+完整配置：
 
 ```bash
 ./regress/run.sh \
@@ -556,9 +552,9 @@ Full profile:
 
 ---
 
-# Source Layout
+# 源码结构
 
-Cargo workspace structure:
+Cargo workspace：
 
 ```
 guff/
@@ -580,7 +576,7 @@ guff/
 └── docs/
 ```
 
-Main components:
+主要组件：
 
 | Layer | Responsibility |
 |---|---|
@@ -594,19 +590,17 @@ Main components:
 
 ---
 
-# License
+# 许可证
 
 GPL-3.0
 
-Using the `guff` CLI in CI or locally does **not** GPL your Go application. Details: [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md).
+在 CI 或本地使用 `guff` CLI **不会**让你的 Go 应用变成 GPL。详情：[`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md)
 
-Release verification / SBOM: [`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md).
+发布校验 / SBOM：[`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md)
 
-guff includes ports and adaptations of analyzers from multiple upstream Go projects.
+guff 包含来自多个上游 Go 项目的分析器移植与适配。
 
-See:
+参见：
 
 - [`LICENSE`](LICENSE)
 - [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)
-
-for attribution and license information.

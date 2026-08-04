@@ -1,0 +1,41 @@
+# aqua-registry package definition (ready to upstream or use via local registry).
+#
+# Local registry sketch (aqua.yaml):
+#   registries:
+#     - type: local
+#       name: local
+#       path: packaging/aqua
+#   packages:
+#     - name: dakimura/guff@v0.2.0
+#
+# Upstream: open a PR against aquaproj/aqua-registry with this package.
+packages:
+  - type: github_release
+    repo_owner: dakimura
+    repo_name: guff
+    description: Blazing-fast golangci-lint compatible Go linter
+    version_filter: semver(">= 0.2.0")
+    asset: guff_{{trimV .Version}}_{{.OS}}_{{.Arch}}.tar.gz
+    format: tar.gz
+    replacements:
+      amd64: amd64
+      arm64: arm64
+      darwin: darwin
+      linux: linux
+    files:
+      - name: guff
+        src: guff
+    checksum:
+      type: github_release
+      asset: "{{.Asset}}.sha256"
+      algorithm: sha256
+      file_format: raw
+      pattern:
+        checksum: ^(\b[A-Fa-f0-9]{64}\b)
+        file: ^\b[A-Fa-f0-9]{64}\b\s+(\S+)$
+    supported_envs:
+      - darwin/amd64
+      - darwin/arm64
+      - linux/amd64
+      - linux/arm64
+    rosetta2: true

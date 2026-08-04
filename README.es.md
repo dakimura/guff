@@ -9,57 +9,57 @@
 </p>
 
 <p align="center">
-  <b>⚡ A blazing-fast golangci-lint compatible Go linter</b>
+  <b>⚡ Un linter de Go ultrarrápido compatible con golangci-lint</b>
 </p>
 
 <p align="center">
-  Run your Go linters in seconds, not minutes.
+  Ejecuta tus linters de Go en segundos, no en minutos.
 </p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="golangci-lint run finishes in 22.1s; guff run finishes in 1.7s (helm cold-cache)." width="820" />
+  <img src="assets/demo.gif" alt="golangci-lint termina en 22.1s; guff termina en 1.7s (helm, caché en frío)." width="820" />
 </p>
 
 <p align="center">
-  <a href="docs/MIGRATION.md">Migrate in 5 minutes</a>
+  <a href="docs/MIGRATION.md">Migrar en 5 minutos</a>
   ·
-  <a href="docs/INSTALL.md">Install / uninstall</a>
+  <a href="docs/INSTALL.md">Instalar / desinstalar</a>
   ·
   <a href="docs/COMPARE.md">vs golangci-lint</a>
   ·
-  <a href="docs/AGENTS.md">AI agents</a>
+  <a href="docs/AGENTS.md">Agentes de IA</a>
 </p>
 
 ---
 
-## Why guff?
+## ¿Por qué guff?
 
-`golangci-lint` is the standard Go linter aggregator — and it is excellent.
+`golangci-lint` es el agregador de linters estándar en Go — y es excelente.
 
-But as Go repositories grow, linting becomes one of the slowest parts of the development loop.
+Pero a medida que crecen los repositorios, el lint se convierte en una de las partes más lentas del ciclo de desarrollo.
 
-Every local change.  
-Every pull request.  
-Every AI coding agent iteration.
+Cada cambio local.  
+Cada pull request.  
+Cada iteración de un agente de codificación con IA.
 
-Waiting matters.
+Esperar importa.
 
-**guff makes Go linting fast again.**
+**guff vuelve a hacer rápido el lint de Go.**
 
 ```
 golangci-lint: 394s
 guff:           24s
 
-Same repository.
-Same config.
-Same findings.
+Mismo repositorio.
+Misma configuración.
+Mismos hallazgos.
 ```
 
 ---
 
-## 🚀 Performance
+## 🚀 Rendimiento
 
-Real-world open-source repositories with their existing `golangci-lint v2` configurations:
+Repositorios open source reales con sus configuraciones existentes de `golangci-lint v2`:
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
@@ -69,24 +69,24 @@ Real-world open-source repositories with their existing `golangci-lint v2` confi
 | gin | 4.2s | **0.38s** | **11× faster** |
 | rclone | 6.3s | **0.64s** | **10× faster** |
 
-Cold-cache benchmarks on Darwin arm64.
+Benchmarks en frío en Darwin arm64.
 
-Full benchmark results:
+Resultados completos:
 
 [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
 
 ---
 
-## Why is guff fast?
+## ¿Por qué es rápido?
 
-Traditional lint pipelines repeatedly pay the cost of:
+Los pipelines de lint tradicionales pagan una y otra vez el costo de:
 
-- starting processes
-- loading packages
-- parsing source code
-- building analysis state
+- arrancar procesos
+- cargar paquetes
+- parsear el código fuente
+- construir el estado de análisis
 
-guff keeps the entire analysis pipeline inside a single Rust process.
+guff mantiene todo el pipeline de análisis dentro de **un solo proceso Rust**.
 
 ```
 Go source
@@ -104,25 +104,25 @@ Shared analysis pipeline
 All linters
 ```
 
-One pipeline.  
-Many analyzers.  
-Less waiting.
+Un pipeline.  
+Muchos analizadores.  
+Menos espera.
 
 ---
 
-## Drop-in golangci-lint compatibility
+## Compatibilidad drop-in con golangci-lint
 
-Already have a `.golangci.yml`?
+¿Ya tienes un `.golangci.yml`?
 
-Good.
+Perfecto.
 
-Keep it.
+Consérvalo.
 
 ```bash
 guff run ./...
 ```
 
-guff automatically reads:
+guff lee automáticamente:
 
 ```
 .golangci.yml
@@ -131,61 +131,61 @@ guff automatically reads:
 .guff.yaml
 ```
 
-Compatibility:
+Compatibilidad:
 
-- ✅ 114 / 114 golangci-lint v2 linters implemented
-- ✅ Existing configurations supported
-- ✅ Multiple output formats
-- ✅ GitHub Actions annotations
+- ✅ 114 / 114 linters de golangci-lint v2 implementados
+- ✅ Configuraciones existentes soportadas
+- ✅ Múltiples formatos de salida
+- ✅ Anotaciones de GitHub Actions
 
-Honest comparison (including known partial gaps):
+Comparación honesta (incluye lagunas parciales conocidas):
 
 [`docs/COMPARE.md`](docs/COMPARE.md)
 
-Full compatibility matrix:
+Matriz completa de compatibilidad:
 
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
-Five-minute migration + rollback:
+Migración en cinco minutos y rollback:
 
 [`docs/MIGRATION.md`](docs/MIGRATION.md)
 
 ---
 
-## Built for AI coding agents
+## Hecho para agentes de codificación con IA
 
-AI coding agents run tools constantly.
+Los agentes de IA ejecutan herramientas constantemente.
 
-A slow lint command becomes a slow development loop.
+Un comando de lint lento se convierte en un ciclo de desarrollo lento.
 
-guff is designed for:
+guff está pensado para:
 
 - Cursor
 - GitHub Copilot
-- CI pipelines
-- local development
+- pipelines de CI
+- desarrollo local
 
-Copy-paste agent instructions: [`docs/AGENTS.md`](docs/AGENTS.md).
+Instrucciones listas para copiar: [`docs/AGENTS.md`](docs/AGENTS.md)
 
 ---
 
-## Try it now
+## Pruébalo ahora
 
-### Install (no Rust required)
+### Instalar (no hace falta Rust)
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh | sh
 ```
 
-Installs to `~/.local/bin` by default. Then:
+Se instala en `~/.local/bin` por defecto. Luego:
 
 ```bash
 guff run ./...
 ```
 
-That's it. Your existing `.golangci.yml` works.
+Eso es todo. Tu `.golangci.yml` existente funciona.
 
-Other installers:
+Otros instaladores:
 
 ```bash
 # Homebrew
@@ -193,51 +193,51 @@ brew tap dakimura/guff https://github.com/dakimura/guff
 brew install guff
 ```
 
-Docker, aqua, Actions, cargo: [`docs/INSTALL.md`](docs/INSTALL.md).
+Docker, aqua, Actions, cargo: [`docs/INSTALL.md`](docs/INSTALL.md)
 
-### Uninstall / rollback
+### Desinstalar / rollback
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/uninstall.sh | sh
 ```
 
-Configs are untouched — point CI back at golangci-lint anytime. Details: [`docs/INSTALL.md`](docs/INSTALL.md#uninstall--rollback).
+Las configs no se tocan — puedes volver a golangci-lint en CI cuando quieras. Detalles: [`docs/INSTALL.md`](docs/INSTALL.md#uninstall--rollback)
 
 ---
 
-## Common commands
+## Comandos habituales
 
 ```bash
-# Run configured linters
+# Ejecutar los linters configurados
 guff run ./...
 
-# Show enabled linters
+# Mostrar linters habilitados
 guff linters
 
-# Use fast preset
+# Usar el preset fast
 guff run --preset fast ./...
 
-# Enable additional linters
+# Habilitar linters adicionales
 guff run \
   --enable revive \
   --enable misspell \
   ./...
 
-# Apply suggested fixes
+# Aplicar correcciones sugeridas
 guff run --fix ./...
 
-# Formatters (gofmt / goimports / … from config)
+# Formateadores (gofmt / goimports / … según config)
 guff fmt .
 
-# Re-lint on change (keeps analysis warm)
+# Re-lint al cambiar (mantiene el análisis en caliente)
 guff run --watch ./...
 
-# Issues cache
+# Caché de issues
 guff cache status
 guff cache clean
 ```
 
-Editors, pre-commit, lefthook: [`docs/EDITORS.md`](docs/EDITORS.md).
+Editores, pre-commit, lefthook: [`docs/EDITORS.md`](docs/EDITORS.md)
 
 ---
 
@@ -269,9 +269,9 @@ jobs:
 
 ## Docker
 
-guff requires a Go toolchain for package resolution.
+guff necesita un toolchain de Go para resolver paquetes.
 
-The official Docker image already includes Go.
+La imagen oficial de Docker ya incluye Go.
 
 ```bash
 docker run --rm \
@@ -281,7 +281,7 @@ docker run --rm \
   run ./...
 ```
 
-Optional: persist Go caches between runs:
+Opcional: persistir cachés de Go entre ejecuciones:
 
 ```bash
 docker run --rm \
@@ -297,11 +297,11 @@ docker run --rm \
 
 ---
 
-# Configuration
+# Configuración
 
-guff supports existing `golangci-lint` configuration files.
+guff admite los archivos de configuración existentes de `golangci-lint`.
 
-Search order:
+Orden de búsqueda:
 
 ```
 .golangci.yml
@@ -310,7 +310,7 @@ Search order:
 .guff.yaml
 ```
 
-Example:
+Ejemplo:
 
 ```yaml
 version: "2"
@@ -335,33 +335,33 @@ formatters:
     - goimports
 ```
 
-Run with:
+Ejecutar con:
 
 ```bash
 guff run .
 ```
 
-or specify a config:
+o indicar un config:
 
 ```bash
 guff run -c .golangci.yml .
 ```
 
-v1 → v2: `guff migrate`.
+v1 → v2: `guff migrate`
 
 ---
 
-# Supported Linters
+# Linters soportados
 
-guff implements the full golangci-lint v2 linter set.
+guff implementa el conjunto completo de linters de golangci-lint v2.
 
-Current compatibility:
+Compatibilidad actual:
 
 ```
 114 / 114 linters supported
 ```
 
-Examples:
+Ejemplos:
 
 | Linter | Description |
 |---|---|
@@ -376,7 +376,7 @@ Examples:
 | gocritic | Code quality checks |
 | dupl | Duplicate code detection |
 
-Enable additional linters:
+Habilitar linters adicionales:
 
 ```bash
 guff run \
@@ -385,15 +385,15 @@ guff run \
   ./...
 ```
 
-Full matrix:
+Matriz completa:
 
 [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md)
 
 ---
 
-# Output formats
+# Formatos de salida
 
-Supported formats:
+Formatos soportados:
 
 - text
 - colored-line-number
@@ -404,7 +404,7 @@ Supported formats:
 - colored-tab
 - github-actions
 
-Example:
+Ejemplo:
 
 ```bash
 guff run \
@@ -412,13 +412,13 @@ guff run \
   ./...
 ```
 
-GitHub Actions will automatically annotate pull requests.
+GitHub Actions anotará automáticamente los pull requests.
 
 ---
 
-# Architecture
+# Arquitectura
 
-guff is built around one shared analysis pipeline.
+guff se construye alrededor de un pipeline de análisis compartido.
 
 ```
 go list
@@ -439,36 +439,36 @@ Dependency-aware execution graph
 Diagnostics
 ```
 
-Unlike traditional lint aggregators, guff avoids repeatedly rebuilding analysis state for every tool.
+A diferencia de los agregadores tradicionales, guff evita reconstruir el estado de análisis para cada herramienta.
 
-The result:
+El resultado:
 
-- less startup overhead
-- lower memory usage
-- faster feedback loops
+- menos overhead de arranque
+- menor uso de memoria
+- bucles de feedback más rápidos
 
 ---
 
-# Development
+# Desarrollo
 
-Requirements:
+Requisitos:
 
 - Go
 - Rust (edition 2021)
 
-Build:
+Compilar:
 
 ```bash
 cargo build
 ```
 
-Test:
+Probar:
 
 ```bash
 cargo test
 ```
 
-Run locally:
+Ejecutar en local:
 
 ```bash
 cargo run -p guff-lint -- run ./...
@@ -476,15 +476,15 @@ cargo run -p guff-lint -- run ./...
 
 ---
 
-## Benchmarking
+## Benchmarks
 
-Build release binary:
+Compilar el binario release:
 
 ```bash
 cargo build --release -p guff-lint
 ```
 
-Run benchmarks:
+Ejecutar benchmarks:
 
 ```bash
 ./benchmarks/smoke.sh
@@ -492,7 +492,7 @@ Run benchmarks:
 ./benchmarks/run.sh
 ```
 
-OSS repository benchmarks:
+Benchmarks de repositorios OSS:
 
 ```bash
 ./benchmarks/run.sh \
@@ -500,17 +500,15 @@ OSS repository benchmarks:
   --tier pr,nightly,weekly
 ```
 
-Results:
+Resultados:
 
 [`benchmarks/results/SCOREBOARD.md`](benchmarks/results/SCOREBOARD.md)
 
 ---
 
-## Compatibility Testing
+## Pruebas de compatibilidad
 
-guff continuously compares findings against golangci-lint.
-
-Run compatibility checks:
+guff compara de forma continua los hallazgos con golangci-lint.
 
 ```bash
 ./compat/run.sh \
@@ -518,36 +516,34 @@ Run compatibility checks:
   --tier pr
 ```
 
-Per-linter isolate (one linter enabled at a time):
+Aislamiento por linter (uno habilitado a la vez):
 
 ```bash
 ./compat/run.sh --isolate --smoke
 ./compat/run.sh --isolate
 ```
 
-The goal:
+El objetivo:
 
-> Same config. Same findings. Much faster execution.
+> Misma config. Mismos hallazgos. Ejecución mucho más rápida.
 
 ---
 
-## Prometheus Regression Gate
+## Puerta de regresión de Prometheus
 
-guff includes a regression suite against Prometheus.
+guff incluye una suite de regresión contra Prometheus.
 
-It checks:
+Comprueba:
 
-- execution time
-- peak RSS memory
-- finding differences
-
-Run:
+- tiempo de ejecución
+- memoria peak RSS
+- diferencias de hallazgos
 
 ```bash
 ./regress/run.sh
 ```
 
-Full profile:
+Perfil completo:
 
 ```bash
 ./regress/run.sh \
@@ -556,9 +552,9 @@ Full profile:
 
 ---
 
-# Source Layout
+# Estructura del código
 
-Cargo workspace structure:
+Workspace de Cargo:
 
 ```
 guff/
@@ -580,7 +576,7 @@ guff/
 └── docs/
 ```
 
-Main components:
+Componentes principales:
 
 | Layer | Responsibility |
 |---|---|
@@ -594,19 +590,17 @@ Main components:
 
 ---
 
-# License
+# Licencia
 
 GPL-3.0
 
-Using the `guff` CLI in CI or locally does **not** GPL your Go application. Details: [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md).
+Usar el CLI `guff` en CI o en local **no** GPL-iza tu aplicación Go. Detalles: [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md)
 
-Release verification / SBOM: [`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md).
+Verificación de releases / SBOM: [`docs/SUPPLY-CHAIN.md`](docs/SUPPLY-CHAIN.md)
 
-guff includes ports and adaptations of analyzers from multiple upstream Go projects.
+guff incluye ports y adaptaciones de analizadores de varios proyectos Go upstream.
 
-See:
+Consulta:
 
 - [`LICENSE`](LICENSE)
 - [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)
-
-for attribution and license information.
