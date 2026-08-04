@@ -954,7 +954,9 @@ pub fn run_and_write_with_teardown(
     out: &mut dyn Write,
     teardown: Teardown,
 ) -> Result<i32, RunError> {
-    if opts.analyzers.is_empty() {
+    // nolintlint alone enables zero analyzers but still needs package load +
+    // unused-directive reporting (golangci parity).
+    if opts.analyzers.is_empty() && !opts.filter.report_unused_nolint {
         eprintln!("guff: no analyzers enabled (missing linter crates?)");
         return Ok(0);
     }

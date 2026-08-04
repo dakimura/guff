@@ -516,6 +516,10 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
 - **完了条件**: 一致率レポートが生成され、CI ゲートになる — 満たした。
 - **DEFERRED**: `--oss` コーパスの本格拡張、ineffassign 多報告・ST1000 既定差のパリティ。
 - **テスト**: `python3 -m unittest discover -s compat/tests` + `./compat/smoke.sh`。
+- **追記 (2026-08-03)**: per-linter **isolate** モード（`./compat/run.sh --isolate`）。
+  `linters.default: none` + 単一 `enable` で fixture を両ツール比較。OSS 交差では
+  見えない穴を塞ぐ。`compat/isolate/`（`linters.txt` / `fixtures/` / `allowlists/`）。
+  CI: `--isolate --smoke`（standard 5）。追加は fixture + `linters.txt` 1 行。
 
 #### R22. `.golangci.yml` コーパスのパース検証 ✅ 完了 (2026-07-17)
 - 実在の `.golangci.yml`（有名 OSS のもの）を集めて、**パースエラー 0** を保証するテスト。

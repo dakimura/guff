@@ -1914,7 +1914,7 @@ fn check_g104_call(
         return;
     }
     if call_returns_error(pass, call) {
-        pending.push((call.lparen.0 as u32, "G104: Errors unhandled.".to_string()));
+        pending.push((call.lparen.0 as u32, "G104: Errors unhandled".to_string()));
     }
 }
 

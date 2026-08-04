@@ -118,7 +118,7 @@ impl RowsUsage {
     fn report(&self, var_name: &str, pending: &mut Vec<(u32, String)>) {
         pending.push((
             self.next_pos,
-            format!("clickhouse {var_name}.Err() must be checked after {var_name}.Next()"),
+            format!("chrowserrcheck: clickhouse {var_name}.Err() must be checked after {var_name}.Next()"),
         ));
     }
 }
@@ -135,7 +135,7 @@ impl BatchUsage {
             pending.push((
                 self.assign_pos,
                 format!(
-                    "clickhouse Batch {var_name} must be closed defensively with defer {var_name}.Close() after successful instantiation"
+                    "chbatch: clickhouse Batch {var_name} must be closed defensively with defer {var_name}.Close() after successful instantiation"
                 ),
             ));
         }
@@ -258,7 +258,7 @@ fn handle_batch_assign(
         if name == "_" && is_batch {
             pending.push((
                 assign_pos(assign),
-                "clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer batch.Close() after successful instantiation".to_string(),
+                "chbatch: clickhouse Batch assigned to blank identifier. Connection leak. clickhouse Batch must be instantiated and closed defensively with defer batch.Close() after successful instantiation".to_string(),
             ));
             continue;
         }

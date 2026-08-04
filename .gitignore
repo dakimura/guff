@@ -25,6 +25,7 @@
 /compat/corpus/
 /compat/results/*
 !/compat/results/RESULTS.md
+!/compat/results/RESULTS.isolate.md
 !/compat/results/.gitkeep
 
 # Prometheus regress harness raw run artifacts (keep RESULTS*.md + baseline*.json)

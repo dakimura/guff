@@ -62,9 +62,9 @@ fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
     if !is_one(&assign.rhs[0]) {
         return;
     }
-    let suffix = match assign.tok {
-        Some(Token::AddAssign) => "++",
-        Some(Token::SubAssign) => "--",
+    let (op_text, suffix) = match assign.tok {
+        Some(Token::AddAssign) => ("+= 1", "++"),
+        Some(Token::SubAssign) => ("-= 1", "--"),
         _ => return,
     };
     let lhs = match &assign.lhs[0] {
@@ -74,7 +74,7 @@ fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
     failures.push(Failure {
         rule: "increment-decrement",
         pos: assign.tok_pos.0 as u32,
-        message: format!("should replace {lhs} {suffix} with {lhs}{suffix}"),
-            confidence: None,
-        });
+        message: format!("should replace {lhs} {op_text} with {lhs}{suffix}"),
+        confidence: None,
+    });
 }

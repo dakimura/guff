@@ -13,7 +13,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectId, TypeData};
 use guff_types::predicates::is_interface;
-use guff_types::typestring::type_string;
+use guff_types::typestring::{signature_string, type_string};
 use regex::Regex;
 
 use crate::util::{is_pure_error, type_of, unparen};
@@ -146,8 +146,43 @@ fn is_error_typ(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
 }
 
 fn call_sig(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
-    let name = code::call_name(pass, &call.fun)?;
-    Some(format!("{name}("))
+    // Match upstream wrapcheck: `pass.TypesInfo.ObjectOf(...).String()`
+    // e.g. `func encoding/json.Marshal(v any) ([]byte, error)`.
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let obj = match unparen(&call.fun) {
+        Expr::SelectorExpr(sel) => sel_func_obj(pass, sel)?,
+        Expr::Ident(id) => object_of_ident(pass, id)?,
+        _ => return code::call_name(pass, &call.fun).map(|n| format!("{n}(")),
+    };
+    let typ = obj.typ(&artifacts.objects)?;
+    let name = obj.name(&artifacts.objects).to_string();
+    let pkg_qual = match obj.pkg(&artifacts.objects) {
+        Some(pkg) => {
+            let path = artifacts.packages.get(pkg).path();
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("{path}.")
+            }
+        }
+        None => String::new(),
+    };
+    let qf = |pkg_id, parena: &guff_types::arena::PackageArena| {
+        parena.get(pkg_id).name().to_string()
+    };
+    let sig = match artifacts.types.get(typ) {
+        TypeData::Signature(_) => signature_string(
+            &artifacts.types,
+            &artifacts.objects,
+            &artifacts.packages,
+            typ,
+            Some(&qf),
+        ),
+        _ => "()".into(),
+    };
+    // go/types prints the `byte`/`rune` aliases; guff's Basic table uses uint8/int32.
+    let sig = sig.replace("[]uint8", "[]byte").replace("[]int32", "[]rune");
+    Some(format!("func {pkg_qual}{name}{sig}"))
 }
 
 fn object_of_ident(pass: &Pass<'_>, id: &Ident) -> Option<ObjectId> {

@@ -1,0 +1,4 @@
+# Enable decorder checks (golangci defaults leave all families disabled).
+disable-dec-order-check: false
+disable-dec-num-check: false
+disable-init-func-first-check: false

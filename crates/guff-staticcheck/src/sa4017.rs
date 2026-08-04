@@ -1,20 +1,46 @@
 //! SA4017 — discarding return value of pure function call
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa4017`.
+//! Pure stdlib names mirror `analysis/facts/purity.pureStdlib` (package funcs).
 
 use std::sync::OnceLock;
 
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-
-
 use guff_analysis::passes::buildir;
 use guff_analysis::{has_non_debug_referrer, is_call_to_any, referrers, short_call_name};
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::{Call, InstrData};
 use guff_ssa::value::Value;
 
+/// Hard-coded pure stdlib functions from honnef `purity.pureStdlib` (non-method entries).
+/// Method forms like `(time.Time).Add` are DEFERRED until SSA callee matching covers them.
 const PURE_FUNCS: &[&str] = &[
-    "strings.ToLower", "strings.ToUpper", "strings.TrimSpace",
-    "strconv.Itoa", "strconv.FormatInt",
+    "errors.New",
+    "fmt.Errorf",
+    "fmt.Sprintf",
+    "fmt.Sprint",
+    "sort.Reverse",
+    "strings.Map",
+    "strings.Repeat",
+    "strings.Replace",
+    "strings.Title",
+    "strings.ToLower",
+    "strings.ToLowerSpecial",
+    "strings.ToTitle",
+    "strings.ToTitleSpecial",
+    "strings.ToUpper",
+    "strings.ToUpperSpecial",
+    "strings.Trim",
+    "strings.TrimFunc",
+    "strings.TrimLeft",
+    "strings.TrimLeftFunc",
+    "strings.TrimPrefix",
+    "strings.TrimRight",
+    "strings.TrimRightFunc",
+    "strings.TrimSpace",
+    "strings.TrimSuffix",
+    // Extra entries historically present in guff (also pure in practice).
+    "strconv.Itoa",
+    "strconv.FormatInt",
 ];
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -26,7 +52,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
-                let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else { continue };
+                let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
+                    continue;
+                };
                 let val = Value::Instr(iid);
                 if has_non_debug_referrer(referrers(func, val), func) {
                     continue;
@@ -47,7 +75,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
     Ok(None)
 }
-
 
 fn sa4017_analyzer_impl() -> Analyzer {
     Analyzer {

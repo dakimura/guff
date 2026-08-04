@@ -101,6 +101,8 @@ fn bin_op_err_nil(
     let y_nil = is_nil_const(prog, func, SsaValue::new(*y));
     // Prefer typed-error vs nil (same as nilnesserr). Upstream also requires
     // Implements on both sides; untyped-nil consts often fail that in guff.
+    // Hint lines come from the error *value* (gostaticanalysis/nilerr
+    // getValueLineNumbers), e.g. the `err := do()` assignment — not the `!=`.
     match (x_err, y_nil, y_err, x_nil) {
         (true, true, _, _) => Some(*x),
         (_, _, true, true) => Some(*y),
@@ -224,34 +226,107 @@ fn uses_error_value(func: &Function, bid: BlockId, err_val: Value) -> bool {
     false
 }
 
-fn err_line_hint(prog: &Program, func: &Function, v: Value) -> String {
+/// Position of an SSA value for line hints (gostaticanalysis/nilerr
+/// `getValueLineNumbers`). Peels `Extract` to the defining call/tuple.
+fn value_pos(prog: &Program, func: &Function, v: Value) -> guff::Pos {
     let mut cur = v;
-    if let Value::Instr(iid) = cur {
-        if let InstrData::Extract(ex) = func.instrs.get(iid) {
-            cur = ex.tuple;
+    for _ in 0..8 {
+        let Value::Instr(iid) = cur else {
+            break;
+        };
+        match func.instrs.get(iid) {
+            InstrData::Extract(ex) => cur = ex.tuple,
+            InstrData::ChangeType(ct) => cur = ct.x,
+            InstrData::UnOp(u) if u.op == Token::MUL => cur = u.x,
+            _ => break,
         }
     }
-    let Value::Instr(iid) = cur else {
-        return "unknown".into();
-    };
-    let pos = func.pos(iid);
+    match cur {
+        Value::Instr(iid) => {
+            let pos = func.pos(iid);
+            if pos.is_valid() {
+                return pos;
+            }
+            // Alloc often carries the `err` Ident position when a Load has none.
+            if let InstrData::Alloc(_) = func.instrs.get(iid) {
+                return pos;
+            }
+            pos
+        }
+        Value::Param(pid) => {
+            let p = func.params.get(pid);
+            p.object
+                .map(|oid| guff::Pos(oid.pos(&prog.object_arena) as i64))
+                .unwrap_or(guff::NO_POS)
+        }
+        _ => guff::NO_POS,
+    }
+}
+
+fn collect_value_lines(
+    fset: &guff::position::FileSet,
+    prog: &Program,
+    func: &Function,
+    v: Value,
+    seen: &mut HashMap<Value, ()>,
+    out: &mut Vec<i64>,
+) {
+    if seen.contains_key(&v) {
+        let pos = value_pos(prog, func, v);
+        if pos.is_valid() {
+            let p = fset.position(pos);
+            if p.is_valid() {
+                out.push(p.line);
+            }
+        }
+        return;
+    }
+    seen.insert(v, ());
+
+    if let Value::Instr(iid) = v {
+        if let InstrData::Phi(phi) = func.instrs.get(iid) {
+            for edge in &phi.edges {
+                if let Some(edge) = edge {
+                    collect_value_lines(fset, prog, func, *edge, seen, out);
+                }
+            }
+            out.sort_unstable();
+            out.dedup();
+            return;
+        }
+    }
+
+    let pos = value_pos(prog, func, v);
     if !pos.is_valid() {
-        return "unknown".into();
+        return;
     }
-    if let Some(fset) = prog.fset.as_ref() {
-        let p = fset.position(pos);
-        if p.is_valid() {
-            return format!("line {}", p.line);
-        }
+    let p = fset.position(pos);
+    if p.is_valid() {
+        out.push(p.line);
     }
-    format!("pos {}", pos.0)
+}
+
+fn err_line_hint(
+    fset: &guff::position::FileSet,
+    prog: &Program,
+    func: &Function,
+    err_val: Value,
+) -> String {
+    let mut lines = Vec::new();
+    let mut seen = HashMap::new();
+    collect_value_lines(fset, prog, func, err_val, &mut seen, &mut lines);
+    match lines.as_slice() {
+        [] => "unknown".into(),
+        [one] => format!("line {one}"),
+        many => format!("lines {many:?}"),
+    }
 }
 
 fn run_func(
     prog: &Program,
     func: &Function,
     cache: &mut ErrTypeCache,
-    out: &mut Vec<(u32, String)>,
+    out: &mut Vec<(u32, Value, bool)>,
 ) {
     for (bid, block) in func.live_blocks() {
         if let Some(v) = bin_op_err_nil(prog, func, cache, bid, Token::NEQ) {
@@ -261,11 +336,8 @@ fn run_func(
             let then_b = block.succs[0];
             if let Some(pos) = is_return_nil(prog, func, cache, then_b) {
                 if !uses_error_value(func, then_b, v) {
-                    let hint = err_line_hint(prog, func, v);
-                    out.push((
-                        pos,
-                        format!("error is not nil ({hint}) but it returns nil"),
-                    ));
+                    // true => "not nil"
+                    out.push((pos, v, true));
                 }
             }
         } else if let Some(v) = bin_op_err_nil(prog, func, cache, bid, Token::EQL) {
@@ -275,11 +347,8 @@ fn run_func(
             let then_b = block.succs[0];
             if func.blocks.get(then_b).preds.len() == 1 {
                 if let Some(pos) = is_return_error(func, then_b, v) {
-                    let hint = err_line_hint(prog, func, v);
-                    out.push((
-                        pos,
-                        format!("error is nil ({hint}) but it returns error"),
-                    ));
+                    // false => "is nil"
+                    out.push((pos, v, false));
                 }
             }
         }
@@ -287,7 +356,7 @@ fn run_func(
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let mut reports = Vec::new();
+    let mut diagnostics = Vec::new();
     {
         let ir = pass
             .result_of::<buildir::BuildIrResult>(buildir::analyzer())
@@ -295,15 +364,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(mut cache) = ErrTypeCache::new(&ir.prog) else {
             return Ok(None);
         };
+        let fset = pass.fset().clone();
         for &fid in &ir.src_funcs {
             let func = ir.prog.functions.get(fid);
+            let mut reports = Vec::new();
             run_func(&ir.prog, func, &mut cache, &mut reports);
+            for (pos, err_val, not_nil) in reports {
+                if pos == 0 {
+                    continue;
+                }
+                let hint = err_line_hint(&fset, &ir.prog, func, err_val);
+                let message = if not_nil {
+                    format!("error is not nil ({hint}) but it returns nil")
+                } else {
+                    format!("error is nil ({hint}) but it returns error")
+                };
+                diagnostics.push((pos, message));
+            }
         }
     }
-    for (pos, message) in reports {
-        if pos == 0 {
-            continue;
-        }
+    for (pos, message) in diagnostics {
         pass.report(Diagnostic {
             pos,
             message,

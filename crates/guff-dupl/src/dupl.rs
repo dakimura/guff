@@ -48,11 +48,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     for issue in issues {
         let pos = line_pos(pass, &issue.from.filename, issue.from.line_start);
+        let to_name = Path::new(&issue.to.filename)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(issue.to.filename.as_str());
         let msg = format!(
-            "{}-{} lines are duplicate of {}:{}-{}",
+            "{}-{} lines are duplicate of `{}:{}-{}`",
             issue.from.line_start,
             issue.from.line_end,
-            issue.to.filename,
+            to_name,
             issue.to.line_start,
             issue.to.line_end
         );

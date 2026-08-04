@@ -154,13 +154,13 @@ fn nilerr_flags_nil_returns() {
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("error is not nil") && m.contains("returns nil")),
+            .any(|m| m.contains("error is not nil (line ") && m.contains("returns nil")),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("error is nil") && m.contains("returns error")),
+            .any(|m| m.contains("error is nil (line ") && m.contains("returns error")),
         "{messages:?}"
     );
 }

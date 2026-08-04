@@ -15,7 +15,7 @@
 //! (`Eventually` func-call / intervals), error/`Succeed`/`HaveOccurred`
 //! parity, `MatchError`, cap, type-compare, pointer compare, double-negation
 //! / `force-tonot`, assertion description, spec pollution, comment suppress
-//! directives, SuggestedFix.
+//! directives, SuggestedFix (TextEdit).
 
 use std::sync::OnceLock;
 
@@ -30,10 +30,60 @@ use crate::options::GinkgolinterOptions;
 const MSG_LEN: &str = "ginkgo-linter: wrong length assertion";
 const MSG_NIL: &str = "ginkgo-linter: wrong nil assertion";
 const MSG_BOOL: &str = "ginkgo-linter: wrong boolean assertion";
-const MSG_MISSING: &str = "ginkgo-linter: missing assertion method";
 const MSG_FOCUS: &str =
     "ginkgo-linter: Focus container found. This is used only for local debug and should not be part of the actual source code";
 
+fn with_suggestion(base: &str, suggestion: &str) -> String {
+    format!("{base}. Consider using `{suggestion}` instead")
+}
+
+fn missing_assertion_msg(actual_func: &str) -> String {
+    // Upstream wording (nunnatsa/ginkgolinter) — lists To/ToNot/NotTo even when
+    // Should/ShouldNot would also be valid assertion methods.
+    format!(
+        "ginkgo-linter: \"{actual_func}\": missing assertion method. Expected \"To()\", \"ToNot()\" or \"NotTo()\""
+    )
+}
+
+fn expr_string(e: &Expr) -> String {
+    match e {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
+        Expr::CallExpr(c) => {
+            let args: Vec<String> = c.args.iter().map(expr_string).collect();
+            format!("{}({})", expr_string(&c.fun), args.join(", "))
+        }
+        Expr::ParenExpr(p) => format!("({})", expr_string(&p.x)),
+        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
+        Expr::UnaryExpr(u) => format!("{}{}", u.op, expr_string(&u.x)),
+        Expr::BinaryExpr(b) => format!("{} {} {}", expr_string(&b.x), b.op, expr_string(&b.y)),
+        Expr::IndexExpr(i) => format!("{}[{}]", expr_string(&i.x), expr_string(&i.index)),
+        Expr::BasicLit(l) => l.value.clone(),
+        _ => "<expr>".into(),
+    }
+}
+
+fn suggest_assert(actual_func: &str, subject: &str, assert_method: &str, matcher: &str) -> String {
+    format!("{actual_func}({subject}).{assert_method}({matcher})")
+}
+
+fn len_inner(expr: &Expr) -> Option<&Expr> {
+    match expr {
+        Expr::CallExpr(c)
+            if matches!(c.fun.as_ref(), Expr::Ident(id) if id.name == "len") =>
+        {
+            c.args.first()
+        }
+        _ => None,
+    }
+}
+
+fn lit_int_value(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::BasicLit(lit) if lit.kind == Some(Token::INT) => Some(lit.value.as_str()),
+        _ => None,
+    }
+}
 fn is_ginkgo_path(path: &str) -> bool {
     matches!(
         path.trim_matches('"'),
@@ -282,24 +332,44 @@ fn check_focus(call: &CallExpr, imports: ImportInfo<'_>, pending: &mut Vec<(u32,
 }
 
 fn check_len_rule(
+    assertion: &ParsedAssertion<'_>,
     actual: &Expr,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
     pending: &mut Vec<(u32, String)>,
-    pos: u32,
 ) -> bool {
     if opts.suppress_len_assertion {
         return false;
     }
 
+    let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
     let mname = matcher_name(matcher).unwrap_or("");
 
     // Expect(len(x)).To(Equal(...)) / BeZero() / BeNumerically(...)
-    if is_len_call(actual) {
+    if let Some(inner) = len_inner(actual) {
+        let subject = expr_string(inner);
+        let push_len = |pending: &mut Vec<(u32, String)>, matcher_sug: &str| {
+            let sug = suggest_assert(assertion.actual_func, &subject, assert_method, matcher_sug);
+            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+        };
         match mname {
-            "Equal" | "BeZero" => {
-                pending.push((pos, MSG_LEN.to_string()));
+            "Equal" => {
+                if let Some(c) = matcher_call(matcher) {
+                    if let Some(arg) = c.args.first() {
+                        if is_zero_lit(arg) {
+                            push_len(pending, "BeEmpty()");
+                        } else {
+                            push_len(pending, &format!("HaveLen({})", expr_string(arg)));
+                        }
+                        return true;
+                    }
+                }
+                pending.push((assertion.pos, MSG_LEN.to_string()));
+                return true;
+            }
+            "BeZero" => {
+                push_len(pending, "BeEmpty()");
                 return true;
             }
             "BeNumerically" => {
@@ -311,15 +381,77 @@ fn check_len_rule(
                         _ => None,
                     }) {
                         let rhs_zero = c.args.get(1).map(is_zero_lit).unwrap_or(false);
-                        if matches!(op, "==" | "!=") || (matches!(op, ">" | ">=") && rhs_zero) {
-                            pending.push((pos, MSG_LEN.to_string()));
+                        if op == "==" && rhs_zero {
+                            push_len(pending, "BeEmpty()");
                             return true;
+                        }
+                        if matches!(op, ">" | ">=") && rhs_zero {
+                            let method = match assert_method {
+                                "To" => "ToNot",
+                                "Should" => "ShouldNot",
+                                other => other,
+                            };
+                            let sug = suggest_assert(
+                                assertion.actual_func,
+                                &subject,
+                                method,
+                                "BeEmpty()",
+                            );
+                            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                            return true;
+                        }
+                        if op == "!=" && rhs_zero {
+                            let method = match assert_method {
+                                "To" => "ToNot",
+                                "Should" => "ShouldNot",
+                                other => other,
+                            };
+                            let sug = suggest_assert(
+                                assertion.actual_func,
+                                &subject,
+                                method,
+                                "BeEmpty()",
+                            );
+                            pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                            return true;
+                        }
+                        if matches!(op, "==" | "!=") {
+                            if let Some(n) = c.args.get(1).and_then(lit_int_value) {
+                                if op == "==" {
+                                    push_len(pending, &format!("HaveLen({n})"));
+                                } else {
+                                    let method = match assert_method {
+                                        "To" => "ToNot",
+                                        "Should" => "ShouldNot",
+                                        other => other,
+                                    };
+                                    let sug = suggest_assert(
+                                        assertion.actual_func,
+                                        &subject,
+                                        method,
+                                        &format!("HaveLen({n})"),
+                                    );
+                                    pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                                }
+                                return true;
+                            }
                         }
                         // `>= 1` is also treated as non-empty by upstream.
                         if op == ">=" {
                             if let Some(Expr::BasicLit(lit)) = c.args.get(1) {
                                 if lit.kind == Some(Token::INT) && lit.value == "1" {
-                                    pending.push((pos, MSG_LEN.to_string()));
+                                    let method = match assert_method {
+                                        "To" => "ToNot",
+                                        "Should" => "ShouldNot",
+                                        other => other,
+                                    };
+                                    let sug = suggest_assert(
+                                        assertion.actual_func,
+                                        &subject,
+                                        method,
+                                        "BeEmpty()",
+                                    );
+                                    pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
                                     return true;
                                 }
                             }
@@ -337,7 +469,39 @@ fn check_len_rule(
             && (is_len_call(bin.x.as_ref()) || is_len_call(bin.y.as_ref()))
             && matches!(mname, "BeTrue" | "BeFalse" | "Equal")
         {
-            pending.push((pos, MSG_LEN.to_string()));
+            let (len_side, other) = if is_len_call(bin.x.as_ref()) {
+                (bin.x.as_ref(), bin.y.as_ref())
+            } else {
+                (bin.y.as_ref(), bin.x.as_ref())
+            };
+            if let Some(inner) = len_inner(len_side) {
+                let subject = expr_string(inner);
+                let matcher_sug = if is_zero_lit(other) {
+                    "BeEmpty()".to_string()
+                } else {
+                    format!("HaveLen({})", expr_string(other))
+                };
+                let use_neg = matches!(bin.op, Token::NEQ)
+                    ^ matches!(mname, "BeFalse")
+                    ^ (matches!(mname, "Equal")
+                        && matcher_call(matcher)
+                            .and_then(|c| c.args.first())
+                            .map(|a| is_bool_lit(a, false))
+                            .unwrap_or(false));
+                let method = if use_neg {
+                    match assert_method {
+                        "To" => "ToNot",
+                        "Should" => "ShouldNot",
+                        other => other,
+                    }
+                } else {
+                    assert_method
+                };
+                let sug = suggest_assert(assertion.actual_func, &subject, method, &matcher_sug);
+                pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
+                return true;
+            }
+            pending.push((assertion.pos, MSG_LEN.to_string()));
             return true;
         }
     }
@@ -346,14 +510,15 @@ fn check_len_rule(
 }
 
 fn check_havelen0(
+    assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
     pending: &mut Vec<(u32, String)>,
-    pos: u32,
 ) -> bool {
     if opts.allow_havelen_zero {
         return false;
     }
+    let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
     if matcher_name(matcher) != Some("HaveLen") {
         return false;
@@ -362,21 +527,27 @@ fn check_havelen0(
         return false;
     };
     if c.args.first().map(is_zero_lit).unwrap_or(false) {
-        pending.push((pos, MSG_LEN.to_string()));
+        let subject = assertion
+            .actual_arg
+            .map(expr_string)
+            .unwrap_or_else(|| "<expr>".into());
+        let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeEmpty()");
+        pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
         return true;
     }
     false
 }
 
 fn check_equal_nil(
+    assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
     pending: &mut Vec<(u32, String)>,
-    pos: u32,
 ) -> bool {
     if opts.suppress_nil_assertion {
         return false;
     }
+    let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
     if matcher_name(matcher) != Some("Equal") {
         return false;
@@ -385,13 +556,23 @@ fn check_equal_nil(
         return false;
     };
     if c.args.first().map(is_nil_ident).unwrap_or(false) {
-        pending.push((pos, MSG_NIL.to_string()));
+        let subject = assertion
+            .actual_arg
+            .map(expr_string)
+            .unwrap_or_else(|| "<expr>".into());
+        let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeNil()");
+        pending.push((assertion.pos, with_suggestion(MSG_NIL, &sug)));
         return true;
     }
     false
 }
 
-fn check_equal_bool(matcher: &Expr, pending: &mut Vec<(u32, String)>, pos: u32) -> bool {
+fn check_equal_bool(
+    assertion: &ParsedAssertion<'_>,
+    matcher: &Expr,
+    pending: &mut Vec<(u32, String)>,
+) -> bool {
+    let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
     if matcher_name(matcher) != Some("Equal") {
         return false;
@@ -402,23 +583,33 @@ fn check_equal_bool(matcher: &Expr, pending: &mut Vec<(u32, String)>, pos: u32) 
     let Some(arg) = c.args.first() else {
         return false;
     };
-    if is_bool_lit(arg, true) || is_bool_lit(arg, false) {
-        pending.push((pos, MSG_BOOL.to_string()));
-        return true;
-    }
-    false
+    let bool_matcher = if is_bool_lit(arg, true) {
+        "BeTrue()"
+    } else if is_bool_lit(arg, false) {
+        "BeFalse()"
+    } else {
+        return false;
+    };
+    let subject = assertion
+        .actual_arg
+        .map(expr_string)
+        .unwrap_or_else(|| "<expr>".into());
+    let sug = suggest_assert(assertion.actual_func, &subject, assert_method, bool_matcher);
+    pending.push((assertion.pos, with_suggestion(MSG_BOOL, &sug)));
+    true
 }
 
 fn check_nil_compare(
+    assertion: &ParsedAssertion<'_>,
     actual: &Expr,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
     pending: &mut Vec<(u32, String)>,
-    pos: u32,
 ) -> bool {
     if opts.suppress_nil_assertion {
         return false;
     }
+    let assert_method = assertion.assert_method.unwrap_or("Should");
     let matcher = unwrap_not(matcher);
     let mname = matcher_name(matcher).unwrap_or("");
     if !matches!(mname, "BeTrue" | "BeFalse" | "Equal") {
@@ -438,7 +629,29 @@ fn check_nil_compare(
     if is_len_call(bin.x.as_ref()) || is_len_call(bin.y.as_ref()) {
         return false;
     }
-    pending.push((pos, MSG_NIL.to_string()));
+    let subject = if is_nil_ident(bin.x.as_ref()) {
+        expr_string(bin.y.as_ref())
+    } else {
+        expr_string(bin.x.as_ref())
+    };
+    let use_neg = matches!(bin.op, Token::NEQ)
+        ^ matches!(mname, "BeFalse")
+        ^ (matches!(mname, "Equal")
+            && matcher_call(matcher)
+                .and_then(|c| c.args.first())
+                .map(|a| is_bool_lit(a, false))
+                .unwrap_or(false));
+    let method = if use_neg {
+        match assert_method {
+            "To" => "ToNot",
+            "Should" => "ShouldNot",
+            other => other,
+        }
+    } else {
+        assert_method
+    };
+    let sug = suggest_assert(assertion.actual_func, &subject, method, "BeNil()");
+    pending.push((assertion.pos, with_suggestion(MSG_NIL, &sug)));
     true
 }
 
@@ -449,7 +662,7 @@ fn check_assertion(
 ) {
     // Missing assertion: Expect(x) as a statement.
     if assertion.assert_method.is_none() {
-        pending.push((assertion.pos, MSG_MISSING.to_string()));
+        pending.push((assertion.pos, missing_assertion_msg(assertion.actual_func)));
         return;
     }
 
@@ -476,19 +689,19 @@ fn check_assertion(
     };
 
     // Order mirrors upstream: len → nil-compare → matcher-only (HaveLen0 / EqualBool / EqualNil).
-    if check_len_rule(actual, matcher, opts, pending, assertion.pos) {
+    if check_len_rule(assertion, actual, matcher, opts, pending) {
         return;
     }
-    if check_nil_compare(actual, matcher, opts, pending, assertion.pos) {
+    if check_nil_compare(assertion, actual, matcher, opts, pending) {
         return;
     }
-    if check_havelen0(matcher, opts, pending, assertion.pos) {
+    if check_havelen0(assertion, matcher, opts, pending) {
         return;
     }
-    if check_equal_bool(matcher, pending, assertion.pos) {
+    if check_equal_bool(assertion, matcher, pending) {
         return;
     }
-    let _ = check_equal_nil(matcher, opts, pending, assertion.pos);
+    let _ = check_equal_nil(assertion, matcher, opts, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

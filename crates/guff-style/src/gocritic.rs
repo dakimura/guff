@@ -455,12 +455,12 @@ fn check_single_case_switch_body(pos: u32, body: &BlockStmt, pending: &mut Vec<(
         return;
     }
     if cc.list.is_empty() {
-        report(pending, pos, "found switch with default case only");
+        report(pending, pos, "singleCaseSwitch: found switch with default case only");
     } else if cc.list.len() == 1 {
         report(
             pending,
             pos,
-            "should rewrite switch statement to if statement",
+            "singleCaseSwitch: should rewrite switch statement to if statement",
         );
     }
 }
@@ -500,13 +500,13 @@ fn check_switch_true(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             stmt.switch.0 as u32,
-            "replace 'switch $x; true {}' with 'switch $x; {}'",
+            "switchTrue: replace 'switch $x; true {}' with 'switch $x; {}'",
         );
     } else {
         report(
             pending,
             stmt.switch.0 as u32,
-            "replace 'switch true {}' with 'switch {}'",
+            "switchTrue: replace 'switch true {}' with 'switch {}'",
         );
     }
 }
@@ -525,20 +525,36 @@ fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     let pos = bin.op_pos.0 as u32;
     match bin.op {
         Token::GEQ if is_int_lit(&bin.y, 0) => {
-            report(pending, pos, "len(_) >= 0 is always true");
+            if let Some(arg) = expr_text(&call.args[0]) {
+                report(
+                    pending,
+                    pos,
+                    format!("sloppyLen: len({arg}) >= 0 is always true"),
+                );
+            } else {
+                report(pending, pos, "sloppyLen: len(_) >= 0 is always true");
+            }
         }
         Token::LSS if is_int_lit(&bin.y, 0) => {
-            report(pending, pos, "len(_) < 0 is always false");
+            if let Some(arg) = expr_text(&call.args[0]) {
+                report(
+                    pending,
+                    pos,
+                    format!("sloppyLen: len({arg}) < 0 is always false"),
+                );
+            } else {
+                report(pending, pos, "sloppyLen: len(_) < 0 is always false");
+            }
         }
         Token::LEQ if is_int_lit(&bin.y, 0) => {
             if let Some(arg) = expr_text(&call.args[0]) {
                 report(
                     pending,
                     pos,
-                    format!("len({arg}) <= 0 can be len({arg}) == 0"),
+                    format!("sloppyLen: len({arg}) <= 0 can be len({arg}) == 0"),
                 );
             } else {
-                report(pending, pos, "len(_) <= 0 can be len(_) == 0");
+                report(pending, pos, "sloppyLen: len(_) <= 0 can be len(_) == 0");
             }
         }
         _ => {}
@@ -609,7 +625,7 @@ fn check_new_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         star.star.0 as u32,
-        format!("replace `*new({arg})` with `{suggestion}`"),
+        format!("newDeref: replace `*new({arg})` with `{suggestion}`"),
     );
 }
 
@@ -1020,19 +1036,21 @@ fn check_assign_op(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
         return;
     };
     let msg = match bin.op {
-        Token::ADD if y_t == "1" => format!("replace `{x_t} = {x_t} + 1` with `{x_t}++`"),
-        Token::SUB if y_t == "1" => format!("replace `{x_t} = {x_t} - 1` with `{x_t}--`"),
-        Token::ADD => format!("replace `{x_t} = {x_t} + {y_t}` with `{x_t} += {y_t}`"),
-        Token::SUB => format!("replace `{x_t} = {x_t} - {y_t}` with `{x_t} -= {y_t}`"),
-        Token::MUL => format!("replace `{x_t} = {x_t} * {y_t}` with `{x_t} *= {y_t}`"),
-        Token::QUO => format!("replace `{x_t} = {x_t} / {y_t}` with `{x_t} /= {y_t}`"),
-        Token::REM => format!("replace `{x_t} = {x_t} % {y_t}` with `{x_t} %= {y_t}`"),
-        Token::AND => format!("replace `{x_t} = {x_t} & {y_t}` with `{x_t} &= {y_t}`"),
-        Token::OR => format!("replace `{x_t} = {x_t} | {y_t}` with `{x_t} |= {y_t}`"),
-        Token::XOR => format!("replace `{x_t} = {x_t} ^ {y_t}` with `{x_t} ^= {y_t}`"),
-        Token::SHL => format!("replace `{x_t} = {x_t} << {y_t}` with `{x_t} <<= {y_t}`"),
-        Token::SHR => format!("replace `{x_t} = {x_t} >> {y_t}` with `{x_t} >>= {y_t}`"),
-        Token::AndNot => format!("replace `{x_t} = {x_t} &^ {y_t}` with `{x_t} &^= {y_t}`"),
+        Token::ADD if y_t == "1" => format!("assignOp: replace `{x_t} = {x_t} + 1` with `{x_t}++`"),
+        Token::SUB if y_t == "1" => format!("assignOp: replace `{x_t} = {x_t} - 1` with `{x_t}--`"),
+        Token::ADD => format!("assignOp: replace `{x_t} = {x_t} + {y_t}` with `{x_t} += {y_t}`"),
+        Token::SUB => format!("assignOp: replace `{x_t} = {x_t} - {y_t}` with `{x_t} -= {y_t}`"),
+        Token::MUL => format!("assignOp: replace `{x_t} = {x_t} * {y_t}` with `{x_t} *= {y_t}`"),
+        Token::QUO => format!("assignOp: replace `{x_t} = {x_t} / {y_t}` with `{x_t} /= {y_t}`"),
+        Token::REM => format!("assignOp: replace `{x_t} = {x_t} % {y_t}` with `{x_t} %= {y_t}`"),
+        Token::AND => format!("assignOp: replace `{x_t} = {x_t} & {y_t}` with `{x_t} &= {y_t}`"),
+        Token::OR => format!("assignOp: replace `{x_t} = {x_t} | {y_t}` with `{x_t} |= {y_t}`"),
+        Token::XOR => format!("assignOp: replace `{x_t} = {x_t} ^ {y_t}` with `{x_t} ^= {y_t}`"),
+        Token::SHL => format!("assignOp: replace `{x_t} = {x_t} << {y_t}` with `{x_t} <<= {y_t}`"),
+        Token::SHR => format!("assignOp: replace `{x_t} = {x_t} >> {y_t}` with `{x_t} >>= {y_t}`"),
+        Token::AndNot => {
+            format!("assignOp: replace `{x_t} = {x_t} &^ {y_t}` with `{x_t} &^= {y_t}`")
+        }
         _ => return,
     };
     report(pending, assign.tok_pos.0 as u32, msg);
@@ -2468,7 +2486,7 @@ fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<
     report(
         pending,
         bin.op_pos.0 as u32,
-        format!("replace `{whole}` with `{suggest}`"),
+        format!("emptyStringTest: replace `{whole}` with `{suggest}`"),
     );
 }
 

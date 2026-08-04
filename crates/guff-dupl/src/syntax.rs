@@ -138,7 +138,8 @@ fn get_units_indexes(node_seq: &[usize], data: &[SyntaxNode], threshold: i32) ->
     let mut i = 0;
     while i < node_seq.len() {
         let n = &data[node_seq[i]];
-        if n.owns >= (node_seq.len() - i) as i32 - 1 {
+        // Match mibk/dupl: incomplete if owns >= remaining length (needs owns+1 slots).
+        if n.owns >= (node_seq.len() - i) as i32 {
             i += 1;
             split = true;
             continue;

@@ -327,6 +327,10 @@ impl IssueFilter {
     ///
     /// `packages` supplies source paths for `//nolint` indexing.
     pub fn apply(&self, mut issues: Vec<Issue>, packages: &[Arc<Package>]) -> Vec<Issue> {
+        // golangci attributes findings to the enabled alias name when the
+        // deprecated parent is not also enabled (e.g. enable: [gomodguard_v2]).
+        remap_enabled_alias_from_linters(&mut issues, &self.enabled_linters);
+
         // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.
         let go_cache = self.go_cache_dir.as_deref();
         issues.retain(|issue| {
@@ -690,6 +694,24 @@ pub fn issue_from_cached(
             severity: severity.to_string(),
             ..Diagnostic::default()
         },
+    }
+}
+
+/// When a deprecated linter and its alias share an analyzer, prefer the
+/// enabled alias name for `FromLinter` (golangci-lint v2 parity).
+fn remap_enabled_alias_from_linters(issues: &mut [Issue], enabled: &HashSet<String>) {
+    const PAIRS: &[(&str, &str)] = &[("gomodguard", "gomodguard_v2")];
+    if enabled.is_empty() {
+        return;
+    }
+    for &(canon, alias) in PAIRS {
+        if enabled.contains(alias) && !enabled.contains(canon) {
+            for issue in issues.iter_mut() {
+                if issue.from_linter == canon {
+                    issue.from_linter = alias.to_string();
+                }
+            }
+        }
     }
 }
 

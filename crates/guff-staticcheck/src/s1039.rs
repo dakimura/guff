@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{BasicLit, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_string, is_call_to_any};
+use guff_analysis::code::expr_to_string;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -22,19 +22,31 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
-        if !is_call_to_any(pass, call, &["fmt.Sprint", "fmt.Sprintf"]) || call.args.len() != 1 {
+        let Some(cname) = guff_analysis::code::call_name(pass, &call.fun) else {
             return;
         };
+        let short = match cname.as_str() {
+            "fmt.Sprint" => "Sprint",
+            "fmt.Sprintf" => "Sprintf",
+            _ => return,
+        };
+        if call.args.len() != 1 {
+            return;
+        }
         let Expr::BasicLit(BasicLit { .. }) = &call.args[0] else {
             return;
         };
         let Some(val) = expr_to_string(pass, &call.args[0]) else {
             return;
         };
-        if val.contains('%') {
+        // Match upstream: only Sprintf treats '%' as a possible format string.
+        if short == "Sprintf" && val.contains('%') {
             return;
         }
-        pending.push((match_pos(node), "unnecessary use of fmt.Sprint".into()));
+        pending.push((
+            match_pos(node),
+            format!("unnecessary use of fmt.{short}"),
+        ));
     });
     for (pos, message) in pending {
         pass.report_unless_generated(pos, message);

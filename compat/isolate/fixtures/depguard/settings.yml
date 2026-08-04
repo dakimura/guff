@@ -1,0 +1,6 @@
+rules:
+  main:
+    list-mode: lax
+    deny:
+      - pkg: "fmt"
+        desc: "banned for isolate"

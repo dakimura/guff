@@ -548,6 +548,12 @@ fn check_body(
                     sv.name
                 ),
             ));
+            // Upstream also flags the function exit (closing `}`) when End is
+            // missing on some path — mirrors jjti/spancheck's dual report.
+            pending.push((
+                body.rbrace.0 as u32,
+                format!("return can be reached without calling {}.End", sv.name),
+            ));
         }
         if has_error_ret && cfg.set_status_check && !u.set_status {
             pending.push((

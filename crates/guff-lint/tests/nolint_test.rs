@@ -1,6 +1,5 @@
 //! R3: `//nolint` suppresses findings; `nolintlint` reports unused directives.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -8,7 +7,7 @@ use std::sync::Arc;
 use guff_lint::{
     analyzers_for_linter, IssueFilter, LintResult, SeverityConfig, IssuesConfig, NOLINTLINT_NAME,
 };
-use guff_packages::{typecheck_package, LoadMode, Package, TypecheckEnv};
+use guff_packages::{typecheck_package, FxHashMap, LoadMode, Package, TypecheckEnv};
 use guff_runner::{run_on_packages, RunnerOptions};
 use guff_types::default_sizes;
 
@@ -30,8 +29,8 @@ fn typecheck_fixture(dir: &PathBuf, id: &str, file: &str) -> Arc<Package> {
     typecheck_package(
         &mut pkg,
         &fset,
-        &HashMap::new(),
-        &HashMap::new(),
+        &FxHashMap::default(),
+        &FxHashMap::default(),
         default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,
@@ -157,5 +156,39 @@ fn cli_honors_same_line_nolint() {
     assert!(
         !stdout.contains("errcheck"),
         "nolinted finding must not appear on stdout: {stdout}"
+    );
+}
+
+#[test]
+fn cli_nolintlint_alone_reports_unused_directive() {
+    let dir = fixture_dir("nolint_unused_bare");
+    let bin = env!("CARGO_BIN_EXE_guff");
+
+    let out = Command::new(bin)
+        .args([
+            "run",
+            "--no-config",
+            "--enable",
+            "nolintlint",
+            "--preset",
+            "none",
+            "--out-format",
+            "json",
+            "--sequential",
+            ".",
+        ])
+        .current_dir(&dir)
+        .output()
+        .expect("spawn guff");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("no analyzers enabled"),
+        "nolintlint-only must still load packages: stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("nolintlint") && stdout.contains("unused"),
+        "expected unused-directive JSON; stdout={stdout} stderr={stderr}"
     );
 }

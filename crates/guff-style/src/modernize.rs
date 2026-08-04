@@ -684,7 +684,9 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     let Some(limit_text) = expr_text(y) else {
         return;
     };
-    // Prefer `range slice` when limit is len(slice).
+    // Prefer `range slice` when limit is len(slice); otherwise range-over-int.
+    // SuggestedFix uses the concrete range operand; the diagnostic message
+    // always says "range over int" (x/tools modernize / golangci parity).
     let range_expr = if let Expr::CallExpr(call) = y.as_ref() {
         if code::is_call_to(pass, call, "len") && call.args.len() == 1 {
             expr_text(&call.args[0]).unwrap_or(limit_text.clone())
@@ -711,7 +713,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         pos,
         end,
         category: String::new(),
-        message: format!("for loop can be modernized using range over {range_expr}"),
+        message: "for loop can be modernized using range over int".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace 3-clause for with range-over-int".into(),
             text_edits: vec![TextEdit { pos, end, new_text }],

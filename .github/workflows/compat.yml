@@ -5,9 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+# Prefer finding regressions over saving a few CI minutes.
+# Full per-linter isolate is ~a few minutes locally; allow headroom on GHA.
+concurrency:
+  group: compat-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast signal: harness unit tests + tiny fixture smoke.
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -21,12 +29,11 @@ jobs:
 
       - name: Install golangci-lint
         run: |
-          # master/install.sh is stale; use the current install script.
           curl -sSfL https://golangci-lint.run/install.sh \
             | sh -s -- -b "$HOME/.local/bin" v2.12.2
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Unit-test normalize harness
+      - name: Unit-test normalize / isolate harness
         run: python3 -m unittest discover -s compat/tests -v
 
       - name: Build guff
@@ -35,8 +42,65 @@ jobs:
       - name: Compat smoke (fixture)
         run: ./compat/smoke.sh
 
+  # Thorough gate: every curated linter alone vs golangci-lint (114 targets).
+  # Catches parity holes that multi-linter OSS configs hide.
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Prefetch isolate fixture modules
+        run: |
+          set -euo pipefail
+          for d in compat/isolate/fixtures/*/; do
+            if [[ -f "$d/go.mod" ]]; then
+              (cd "$d" && go mod download) || true
+            fi
+          done
+
+      - name: Build guff
+        run: cargo build --release -p guff-lint
+
+      - name: Compat isolate (all linters)
+        run: ./compat/run.sh --isolate
+
+      - name: Upload isolate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolate-results
+          path: |
+            compat/results/RESULTS.isolate.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # OSS finding-set on the PR-tier corpus (own configs).
   oss-pr:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +111,12 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
 
       - name: Install golangci-lint
         run: |
@@ -67,3 +137,14 @@ jobs:
 
       - name: Compat OSS (pr tier, own-config)
         run: ./compat/run.sh --oss --tier pr
+
+      - name: Upload OSS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-pr-results
+          path: |
+            compat/results/RESULTS.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14

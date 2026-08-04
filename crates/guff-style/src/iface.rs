@@ -140,7 +140,7 @@ fn check_identical(pass: &Pass<'_>, decls: &[IfaceDecl], pending: &mut Vec<(u32,
         pending.push((
             pos,
             format!(
-                "interface '{name}' contains identical methods or type constraints with another interface, causing redundancy (see: {other_names})"
+                "identical: interface '{name}' contains identical methods or type constraints with another interface, causing redundancy (see: {other_names})"
             ),
         ));
     }
@@ -186,7 +186,7 @@ fn check_unused(
         pending.push((
             decl.pos,
             format!(
-                "interface '{}' is declared but not used within the package",
+                "unused: interface '{}' is declared but not used within the package",
                 decl.name
             ),
         ));

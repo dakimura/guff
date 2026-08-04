@@ -54,16 +54,23 @@ fn is_stub_body(body: &guff::ast::BlockStmt) -> bool {
     if body.list.is_empty() {
         return true;
     }
-    if body.list.len() == 1 {
-        return matches!(
-            &body.list[0],
-            Stmt::ReturnStmt(ret) if ret.results.is_empty(),
-        ) || matches!(
-            &body.list[0],
-            Stmt::ExprStmt(e) if matches!(&e.x, Expr::CallExpr(call) if is_panic_or_log_call(call))
-        );
-    }
-    false
+    // Upstream unparam treats bodies that only discard params (`_ = x`) /
+    // panic/log/empty-return as dummy implementations and skips them.
+    body.list.iter().all(|stmt| match stmt {
+        Stmt::ReturnStmt(ret) => ret.results.is_empty(),
+        Stmt::ExprStmt(e) => matches!(
+            &e.x,
+            Expr::CallExpr(call) if is_panic_or_log_call(call)
+        ),
+        Stmt::AssignStmt(asgn)
+            if asgn.tok == Some(Token::ASSIGN)
+                && asgn.lhs.len() == asgn.rhs.len()
+                && asgn.lhs.iter().all(|lhs| matches!(lhs, Expr::Ident(id) if id.name == "_")) =>
+        {
+            true
+        }
+        _ => false,
+    })
 }
 
 fn is_panic_or_log_call(call: &guff::ast::CallExpr) -> bool {

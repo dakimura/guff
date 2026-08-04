@@ -297,15 +297,15 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
     if arg.value() == canonical {
         return;
     }
-    let message = format!("use {canonical:?} instead of {:?}", arg.value());
+    let message = format!(
+        "non-canonical header {:?}, instead use: {canonical:?}",
+        arg.value()
+    );
     let suggested_fixes = match &arg {
         KeyArg::Literal { quote, .. } => {
             let new_text = format!("{quote}{canonical}{quote}");
             vec![SuggestedFix {
-                message: format!(
-                    "should be replaced {:?} with {canonical:?}",
-                    arg.value()
-                ),
+                message: format!("should replace {:?} with {canonical:?}", arg.value()),
                 text_edits: vec![TextEdit {
                     pos: arg.pos(),
                     end: arg.end(),

@@ -71,57 +71,68 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    let src = std::fs::read_to_string(&gomod_path)
+        .map_err(|e| format!("gomoddirectives: read {}: {e}", gomod_path.display()))?;
     let Some(gomod) = parse_gomod(&gomod_path) else {
         return Ok(None);
     };
 
-    let report_pos = pass
-        .files()
-        .first()
-        .map(|f| f.package.0 as u32)
-        .unwrap_or(0);
+    // Register go.mod in the analysis FileSet so reports land on the directive
+    // line (golangci/ldez also point at go.mod, not a .go file).
+    let filename = gomod_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("go.mod");
+    let gomod_file = pass.fset().add_file(filename, -1, src.len() as i64);
+    gomod_file.set_lines_for_content(src.as_bytes());
+    let line_pos = |line: u32| -> u32 {
+        let line = line.max(1) as usize;
+        let max = gomod_file.line_count().max(1);
+        let line = line.min(max);
+        gomod_file.line_start(line).0 as u32
+    };
 
-    let mut pending = Vec::new();
+    let mut pending: Vec<(u32, String)> = Vec::new();
 
     let mut uniq = HashSet::new();
     for r in &gomod.replaces {
         if let Some(reason) = check_replace(r, &opts) {
-            pending.push(reason);
+            pending.push((line_pos(r.line), reason));
             continue;
         }
         if r.old_path == r.new_path && r.old_version == r.new_version {
-            pending.push(REASON_REPLACE_IDENTICAL.to_string());
+            pending.push((line_pos(r.line), REASON_REPLACE_IDENTICAL.to_string()));
             continue;
         }
         let key = format!("{}{}", r.old_path, r.old_version);
         if !uniq.insert(key) {
-            pending.push(REASON_REPLACE_DUPLICATE.to_string());
+            pending.push((line_pos(r.line), REASON_REPLACE_DUPLICATE.to_string()));
         }
     }
 
     if !opts.retract_allow_no_explanation {
         for retract in &gomod.retracts {
             if retract.rationale.is_empty() {
-                pending.push(REASON_RETRACT.to_string());
+                pending.push((line_pos(retract.line), REASON_RETRACT.to_string()));
             }
         }
     }
 
     if opts.exclude_forbidden && !gomod.excludes.is_empty() {
-        pending.push(REASON_EXCLUDE.to_string());
+        pending.push((line_pos(1), REASON_EXCLUDE.to_string()));
     }
     if opts.toolchain_forbidden && gomod.toolchain.is_some() {
-        pending.push(REASON_TOOLCHAIN.to_string());
+        pending.push((line_pos(1), REASON_TOOLCHAIN.to_string()));
     }
     if opts.tool_forbidden && !gomod.tools.is_empty() {
-        pending.push(REASON_TOOL.to_string());
+        pending.push((line_pos(1), REASON_TOOL.to_string()));
     }
     if opts.go_debug_forbidden && !gomod.godebugs.is_empty() {
-        pending.push(REASON_GODEBUG.to_string());
+        pending.push((line_pos(1), REASON_GODEBUG.to_string()));
     }
 
-    for message in pending {
-        pass.reportf(report_pos, message);
+    for (pos, message) in pending {
+        pass.reportf(pos, message);
     }
     Ok(None)
 }

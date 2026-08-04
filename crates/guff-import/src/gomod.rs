@@ -84,7 +84,7 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
         }
 
         if let Some(block) = parse_block_header(line, "require") {
-            consume_block(&mut lines, block, |toks, ln| {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(path) = toks.first() {
                     out.requires.push((*path).to_string());
                 }
@@ -93,7 +93,7 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
             continue;
         }
         if let Some(block) = parse_block_header(line, "replace") {
-            consume_block(&mut lines, block, |toks, ln| {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(r) = parse_replace_tokens(toks, ln) {
                     out.replaces.push(r);
                 }
@@ -128,7 +128,7 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
             continue;
         }
         if let Some(block) = parse_block_header(line, "exclude") {
-            consume_block(&mut lines, block, |toks, ln| {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
                     out.excludes.push((*p).to_string());
                 }
@@ -137,7 +137,7 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
             continue;
         }
         if let Some(block) = parse_block_header(line, "tool") {
-            consume_block(&mut lines, block, |toks, ln| {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
                     out.tools.push((*p).to_string());
                 }
@@ -146,7 +146,7 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
             continue;
         }
         if let Some(block) = parse_block_header(line, "godebug") {
-            consume_block(&mut lines, block, |toks, ln| {
+            consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
                     out.godebugs.push((*p).to_string());
                 }
@@ -204,15 +204,19 @@ fn parse_block_header<'a>(line: &'a str, directive: &str) -> Option<BlockStart<'
     Some(BlockStart::Inline(tokenize(rest)))
 }
 
-fn consume_block<'a, I, F>(lines: &mut std::iter::Peekable<I>, start: BlockStart<'a>, mut f: F)
-where
+fn consume_block<'a, I, F>(
+    lines: &mut std::iter::Peekable<I>,
+    start: BlockStart<'a>,
+    inline_line: u32,
+    mut f: F,
+) where
     I: Iterator<Item = (usize, &'a str)>,
     F: FnMut(&[&str], u32),
 {
     match start {
         BlockStart::Inline(toks) => {
             if !toks.is_empty() {
-                f(&toks, 0);
+                f(&toks, inline_line);
             }
         }
         BlockStart::Open => {

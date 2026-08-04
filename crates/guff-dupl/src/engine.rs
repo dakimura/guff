@@ -175,6 +175,16 @@ mod engine_tests {
             .join("tests/testdata/dupl/bad.go");
         let issues = run(&[path.as_path()], 30).expect("run");
         assert!(!issues.is_empty(), "{issues:?}");
+        // Match mibk/dupl / golangci: whole FuncDecl spans, not inner if/for blocks.
+        assert!(
+            issues.iter().any(|i| {
+                i.from.line_start == 3
+                    && i.from.line_end == 34
+                    && i.to.line_start == 36
+                    && i.to.line_end == 67
+            }),
+            "expected FuncDecl ranges 3-34 / 36-67, got {issues:?}"
+        );
     }
 }
 

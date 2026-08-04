@@ -16,12 +16,18 @@ cargo build --release -p guff-lint
 # Default: fixture + benchmarks/local (standard.yml)
 ./compat/run.sh
 
+# Per-linter isolate (one linter enabled at a time — see isolate/)
+./compat/run.sh --isolate --smoke
+./compat/run.sh --isolate
+./compat/run.sh --isolate --linter errcheck
+
 # OSS targets from corpus/repos.json — each repo's real v2 .golangci.yml
 ./compat/run.sh --oss --tier pr
 ./compat/run.sh --oss --tier nightly
 
 # Refresh allowlists from current diffs (merges; review before committing)
 ./compat/run.sh --oss --tier pr --update-allowlist
+./compat/run.sh --isolate --update-allowlist
 ```
 
 ## Layout
@@ -33,9 +39,11 @@ cargo build --release -p guff-lint
 | `normalize.py` | JSON → keys, diff, markdown/JSON report |
 | `standard.yml` | Shared enable-set for fixture/local only |
 | `allowlists/` | Per-target accepted diffs (`_default.txt`, `<name>.txt`) |
+| `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `repos.txt` | Deprecated stub — use [`../corpus/repos.json`](../corpus/repos.json) |
-| `tests/test_normalize.py` | Harness unit tests |
+| `tests/` | Harness unit tests (`test_normalize.py`, `test_isolate.py`) |
 | `results/RESULTS.md` | Latest checked-in report snapshot |
+| `results/RESULTS.isolate.md` | Latest isolate report snapshot |
 
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 
@@ -50,3 +58,5 @@ OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
   differences; everything else must match or be allowlisted.
 - guff diagnostic paths use the full `compiled_go_files` path (not basename)
   so multi-package modules compare cleanly.
+- Isolate mode (`--isolate`) enables exactly one linter per fixture; see
+  [`isolate/README.md`](isolate/README.md).

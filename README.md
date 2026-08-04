@@ -464,6 +464,13 @@ Run compatibility checks:
   --tier pr
 ```
 
+Per-linter isolate (one linter enabled at a time):
+
+```bash
+./compat/run.sh --isolate --smoke
+./compat/run.sh --isolate
+```
+
 The goal:
 
 > Same config. Same findings. Much faster execution.

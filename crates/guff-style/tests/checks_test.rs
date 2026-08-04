@@ -1479,25 +1479,29 @@ fn canonicalheader_flags_non_canonical_keys() {
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("use \"Test-Header\" instead of \"Test-HEader\"")),
+            .any(|m| m.contains("non-canonical header \"Test-Header\"")
+                || m.contains("non-canonical header \"Test-HEader\"")),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("use \"Raw-String-Literal\" instead of \"Raw-STRING-Literal\"")),
+            .any(|m| m.contains("non-canonical header \"Raw-STRING-Literal\"")
+                || m.contains("instead use: \"Raw-String-Literal\"")),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("use \"Testheadervalue\" instead of \"testHeaderValue\"")),
+            .any(|m| m.contains("non-canonical header \"testHeaderValue\"")
+                || m.contains("instead use: \"Testheadervalue\"")),
         "{messages:?}"
     );
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("use \"ETag\" instead of \"etag\"")),
+            .any(|m| m.contains("non-canonical header \"etag\"")
+                || m.contains("instead use: \"ETag\"")),
         "{messages:?}"
     );
     assert!(messages.len() >= 8, "{messages:?}");
@@ -3419,7 +3423,7 @@ fn prealloc_flags_range_append() {
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("Consider preallocating dest")),
+            .any(|m| m.contains("Consider preallocating dest with capacity len(source)")),
         "{messages:?}"
     );
 }
@@ -4806,9 +4810,11 @@ fn testifylint_flags_common_anti_patterns() {
         messages.iter().any(|m| m.contains("expected-actual")),
         "expected-actual: {messages:?}"
     );
+    // time-compare / zero are omitted under defaults to match golangci 2.12
+    // (vendors testifylint v1.6.4 which does not ship them).
     assert!(
-        messages.iter().any(|m| m.contains("time-compare")),
-        "time-compare: {messages:?}"
+        !messages.iter().any(|m| m.starts_with("time-compare:")),
+        "time-compare should stay disabled by default: {messages:?}"
     );
     assert!(
         messages.iter().any(|m| m.contains("formatter")),
@@ -5274,14 +5280,15 @@ fn modernize_rangeint_skips_mutated_limits() {
             "mutated/addr-taken limit {bad:?} must be skipped: {messages:?}"
         );
     }
-    for good in ["n", "c", "limit", "slice"] {
-        assert!(
-            messages
-                .iter()
-                .any(|m| m.contains(&format!("range over {good}"))),
-            "safe limit {good:?} must be reported: {messages:?}"
-        );
-    }
+    // Upstream (x/tools modernize) always says "range over int".
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("range over int"))
+            .count()
+            >= 4,
+        "expected ≥4 range-over-int diagnostics: {messages:?}"
+    );
 }
 
 #[test]
@@ -6423,8 +6430,8 @@ fn unparam_flags_unused_parameters() {
         "underscore params should be skipped: {messages:?}"
     );
     assert!(
-        !messages.iter().any(|m| m.contains("stub")),
-        "stub bodies should be skipped: {messages:?}"
+        !messages.iter().any(|m| m.contains("stub") || m.contains("discardOnly")),
+        "stub / discard-only bodies should be skipped: {messages:?}"
     );
     assert!(
         !messages.iter().any(|m| m.contains("ExportedUnused")),
@@ -6565,7 +6572,7 @@ fn goheader_flags_missing_header() {
         },
     );
     assert!(
-        messages.iter().any(|m| m == "missed copyright header"),
+        messages.iter().any(|m| m == "Missed header for check"),
         "{messages:?}"
     );
 }

@@ -12,7 +12,10 @@ fn dupl_flags_duplicate_functions() {
     let pkg = support::typecheck_fixture("dupl", "example.com/dupl", "bad.go");
     let messages = run_dupl_with_threshold(&pkg, 30);
     assert!(
-        messages.iter().any(|m| m.contains("duplicate of")),
+        messages.iter().any(|m| {
+            m.contains("3-34 lines are duplicate of `bad.go:36-67`")
+                || m.contains("36-67 lines are duplicate of `bad.go:3-34`")
+        }),
         "{messages:?}"
     );
 }

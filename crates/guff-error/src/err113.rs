@@ -187,7 +187,7 @@ fn check_definition(
         call.lparen.0 as u32,
         format!(
             "do not define dynamic errors, use wrapped static errors instead: \"{}\"",
-            expr_string(&Expr::CallExpr(call.clone()))
+            expr_string(&Expr::CallExpr(call.clone())).replace('"', "\\\"")
         ),
     ));
 }

@@ -139,6 +139,7 @@ fn hints_from_loop(
     body: &[Stmt],
     decls: &[SliceDecl],
     simple: bool,
+    capacity_hint: Option<&str>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if simple && loop_has_early_exit(body) {
@@ -177,14 +178,33 @@ fn hints_from_loop(
                     if resets_slice {
                         continue;
                     }
-                    pending.push((
-                        decl.pos,
-                        format!("Consider preallocating {}", decl.name),
-                    ));
+                    let message = match capacity_hint {
+                        Some(cap) => {
+                            format!("Consider preallocating {} with capacity {cap}", decl.name)
+                        }
+                        None => format!("Consider preallocating {}", decl.name),
+                    };
+                    pending.push((decl.pos, message));
                 }
             }
         }
     }
+}
+
+/// Best-effort `len(X)` text for range/for capacity hints (alexkohler/prealloc).
+fn range_capacity_hint(x: &Expr) -> Option<String> {
+    fn path(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident(id) => Some(id.name.clone()),
+            Expr::SelectorExpr(sel) => {
+                let base = path(&sel.x)?;
+                Some(format!("{base}.{}", sel.sel.name))
+            }
+            Expr::ParenExpr(p) => path(&p.x),
+            _ => None,
+        }
+    }
+    path(x).map(|p| format!("len({p})"))
 }
 
 fn check_func_body(
@@ -199,10 +219,17 @@ fn check_func_body(
         collect_slice_vars(stmt, array_types, &mut slice_decls);
         match stmt {
             Stmt::RangeStmt(r) if options.range_loops && !slice_decls.is_empty() => {
-                hints_from_loop(&r.body.list, &slice_decls, options.simple, pending);
+                let hint = range_capacity_hint(&r.x);
+                hints_from_loop(
+                    &r.body.list,
+                    &slice_decls,
+                    options.simple,
+                    hint.as_deref(),
+                    pending,
+                );
             }
             Stmt::ForStmt(f) if options.for_loops && !slice_decls.is_empty() => {
-                hints_from_loop(&f.body.list, &slice_decls, options.simple, pending);
+                hints_from_loop(&f.body.list, &slice_decls, options.simple, None, pending);
             }
             _ => {}
         }

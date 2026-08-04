@@ -389,7 +389,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .unwrap_or(parsed.package.0 as u32);
 
         if header.is_empty() {
-            pending.push((report_pos, "missed copyright header".to_string()));
+            pending.push((report_pos, "Missed header for check".to_string()));
             continue;
         }
 
