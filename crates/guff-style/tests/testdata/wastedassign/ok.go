@@ -82,3 +82,12 @@ outer:
 	}
 	return n
 }
+
+// Integer range (Go 1.22+) uses a synthetic SSA local `rangeint.iter`.
+func okIntegerRange(n int) int {
+	sum := 0
+	for range n {
+		sum++
+	}
+	return sum
+}

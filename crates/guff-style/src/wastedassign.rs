@@ -588,13 +588,16 @@ fn check_func(
             };
 
             let after = pos.0 as u32;
+            // Only report stores to real Go locals. Synthetic NaiveForm temps
+            // (`rangeint.iter`, `complit`, …) have Alloc comments that do not
+            // map to an ObjectId — upstream wastedassign never sees them.
+            let Some(obj) = local_obj_for_alloc(pass, comment, after) else {
+                continue;
+            };
             // AST fallback: NaiveForm often never Loads locals used via register-
             // lifted Extracts (if-init cond, type-assert receivers, etc.).
-            if let Some(obj) = local_obj_for_alloc(pass, comment, after) {
-                if if_init_used.contains(&obj) || ast_value_is_read_before_redef(pass, obj, after)
-                {
-                    continue;
-                }
+            if if_init_used.contains(&obj) || ast_value_is_read_before_redef(pass, obj, after) {
+                continue;
             }
 
             if let Some(msg) = format_reason(reason, comment) {
