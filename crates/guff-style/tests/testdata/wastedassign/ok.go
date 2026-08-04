@@ -91,3 +91,15 @@ func okIntegerRange(n int) int {
 	}
 	return sum
 }
+
+// Closure captures `n` and reads it after outer assigns (traefik MinSize test).
+func okCapturedByFuncLit(min int) {
+	var n int
+	next := func() int {
+		return n
+	}
+	n = min - 1
+	_ = next()
+	n = min
+	_ = next()
+}

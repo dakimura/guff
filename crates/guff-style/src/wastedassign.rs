@@ -242,6 +242,37 @@ fn collect_used_objs(pass: &Pass<'_>, expr: &Expr, out: &mut HashSet<ObjectId>) 
     });
 }
 
+/// Locals free in a `FuncLit` / go-routine / defer body — stores look unused in
+/// the enclosing function's NaiveForm SSA, but the closure reads them later
+/// (traefik `bodySize = …; h.ServeHTTP` with `for range bodySize` in `next`).
+fn objs_captured_by_func_lits(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
+    let Some(info) = pass.types_info() else {
+        return out;
+    };
+    let Some(inspect) = pass.result_of::<inspect::InspectResult>(inspect::analyzer()) else {
+        return out;
+    };
+    inspect.preorder_typed(node_mask!(FuncLit), pass.files(), |n| {
+        let NodeRef::FuncLit(fl) = n else {
+            return;
+        };
+        preorder(NodeRef::BlockStmt(&fl.body), |n| {
+            let NodeRef::Ident(id) = n else {
+                return true;
+            };
+            // Uses of outer locals (not defs introduced inside the lit).
+            if info.uses.contains_key(&id.id) {
+                if let Some(obj) = object_of(pass, id) {
+                    out.insert(obj);
+                }
+            }
+            true
+        });
+    });
+    out
+}
+
 /// Whether `obj` is read after `after_pos` before being overwritten.
 ///
 /// Assignment LHS of `=` is a use in `Info.Uses`, not a `Defs` entry — treat
@@ -537,6 +568,7 @@ fn check_func(
     func: &Function,
     type_switch_lines: &HashSet<i64>,
     if_init_used: &HashSet<ObjectId>,
+    captured: &HashSet<ObjectId>,
     loop_incdec_lines: &HashSet<i64>,
     pass: &Pass<'_>,
     out: &mut Vec<(u32, String)>,
@@ -594,6 +626,9 @@ fn check_func(
             let Some(obj) = local_obj_for_alloc(pass, comment, after) else {
                 continue;
             };
+            if captured.contains(&obj) {
+                continue;
+            }
             // AST fallback: NaiveForm often never Loads locals used via register-
             // lifted Extracts (if-init cond, type-assert receivers, etc.).
             if if_init_used.contains(&obj) || ast_value_is_read_before_redef(pass, obj, after) {
@@ -627,6 +662,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let type_switch_lines = collect_type_switch_lines(pass);
     let if_init_used = if_init_objs_used_in_cond(pass);
+    let captured = objs_captured_by_func_lits(pass);
     let loop_incdec_lines = for_loop_var_body_incdec_lines(pass);
     let mut reports = Vec::new();
     let src_funcs = collect_src_funcs(&built.prog, built.pkg);
@@ -636,6 +672,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             func,
             &type_switch_lines,
             &if_init_used,
+            &captured,
             &loop_incdec_lines,
             pass,
             &mut reports,
