@@ -42,7 +42,7 @@ In your Go repo’s `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/dakimura/guff
-    rev: v0.2.0
+    rev: v0.3.0
     hooks:
       - id: guff
       - id: guff-fmt

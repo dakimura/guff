@@ -15,7 +15,7 @@ Install script: [`scripts/install.sh`](../scripts/install.sh) downloads the matc
 ## Verify a download
 
 ```bash
-VERSION=0.2.0
+VERSION=0.3.0
 OS=darwin   # or linux
 ARCH=arm64  # or amd64
 BASE=guff_${VERSION}_${OS}_${ARCH}.tar.gz

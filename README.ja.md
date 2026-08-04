@@ -258,7 +258,7 @@ jobs:
         with:
           go-version: stable
 
-      - uses: dakimura/guff@v0.2.0
+      - uses: dakimura/guff@v0.3.0
         with:
           args: run --out-format=github-actions ./...
 ```
@@ -275,7 +275,7 @@ jobs:
 docker run --rm \
   -v "$PWD":/app \
   -w /app \
-  ghcr.io/dakimura/guff:0.2.0 \
+  ghcr.io/dakimura/guff:0.3.0 \
   run ./...
 ```
 
@@ -289,7 +289,7 @@ docker run --rm \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod \
   -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.2.0 \
+  ghcr.io/dakimura/guff:0.3.0 \
   run ./...
 ```
 

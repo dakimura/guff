@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "guff-analysis"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-ast",
  "guff-constant",
@@ -439,14 +439,14 @@ dependencies = [
 
 [[package]]
 name = "guff-ast"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rustc-hash",
 ]
 
 [[package]]
 name = "guff-build"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-ast",
  "guff-goversion",
@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "guff-comment"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "guff-constant"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dashu",
  "guff-ast",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "guff-context"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -490,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "guff-dupl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "guff-errcheck"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "guff-error"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "guff-exportdata"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dashu",
  "guff-ast",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "guff-fmt"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-ast",
  "guff-build",
@@ -551,7 +551,7 @@ dependencies = [
 
 [[package]]
 name = "guff-golist"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-build",
  "rayon",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "guff-gostaticanalysis"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -575,15 +575,15 @@ dependencies = [
 
 [[package]]
 name = "guff-gover"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "guff-goversion"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "guff-govet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "guff-import"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "guff-ineffassign"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "guff-lint"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "guff-analysis",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "guff-misspell"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "guff-packages"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "guff-ast",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "guff-pattern"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-ast",
  "guff-constant",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "guff-plugin"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "inventory",
@@ -705,7 +705,7 @@ dependencies = [
 
 [[package]]
 name = "guff-plugin-example"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "guff-revive"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "guff-runner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "guff-analysis",
@@ -749,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "guff-ssa"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-ast",
  "guff-constant",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "guff-staticcheck"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "guff-style"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "guff-types"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bincode",
  "guff-ast",
@@ -811,11 +811,11 @@ dependencies = [
 
 [[package]]
 name = "guff-types-errors"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "guff-unused"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-analysis",
  "guff-ast",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "guff-version"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "guff-gover",
 ]

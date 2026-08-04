@@ -6,7 +6,7 @@
 #       name: local
 #       path: packaging/aqua
 #   packages:
-#     - name: dakimura/guff@v0.2.0
+#     - name: dakimura/guff@v0.3.0
 #
 # Upstream: open a PR against aquaproj/aqua-registry with this package.
 packages:

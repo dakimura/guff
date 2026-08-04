@@ -9,7 +9,7 @@ on:
       tags:
         description: Comma-separated image tags (without registry/name)
         required: true
-        default: "0.2.0,v0.2.0,0.2,0,latest"
+        default: "0.3.0,v0.3.0,0.3,0,latest"
 
 permissions:
   contents: read
