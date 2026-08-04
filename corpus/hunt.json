@@ -1,0 +1,66 @@
+[
+  {
+    "name": "cobra",
+    "url": "https://github.com/spf13/cobra.git",
+    "ref": "v1.10.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "10m"
+  },
+  {
+    "name": "go-redis",
+    "url": "https://github.com/redis/go-redis.git",
+    "ref": "v9.22.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "15m"
+  },
+  {
+    "name": "restic",
+    "url": "https://github.com/restic/restic.git",
+    "ref": "v0.19.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "nats-server",
+    "url": "https://github.com/nats-io/nats-server.git",
+    "ref": "v2.14.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "k9s",
+    "url": "https://github.com/derailed/k9s.git",
+    "ref": "v0.51.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "rclone",
+    "url": "https://github.com/rclone/rclone.git",
+    "ref": "v1.72.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "cli",
+    "url": "https://github.com/cli/cli.git",
+    "ref": "v2.83.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "traefik",
+    "url": "https://github.com/traefik/traefik.git",
+    "ref": "v3.6.8",
+    "packages": "./pkg/...",
+    "tier": "hunt",
+    "timeout": "30m"
+  }
+]

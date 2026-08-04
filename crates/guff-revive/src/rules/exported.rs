@@ -1,8 +1,18 @@
 //! `exported` — naming and commenting conventions on exported symbols.
+//!
+//! Load uses `Mode::NONE` (no `PARSE_COMMENTS`), so declaration docs after the
+//! package clause are dropped on the type-checked AST. Re-parse with comments
+//! (same pattern as `blank-imports` / ST1020) and remap positions onto the
+//! package `FileSet`.
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+use std::sync::Arc;
 
 use guff::ast::{Decl, File, FuncDecl, GenDecl, Spec, TypeSpec, ValueSpec};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -18,6 +28,8 @@ pub struct Checker<'a> {
     gen_decl_missing: HashMap<usize, bool>,
     skip_file: bool,
     skip_stutter: bool,
+    /// `PARSE_COMMENTS` reparse for the current file (docs + private FileSet).
+    comments: Option<(Arc<FileSet>, File)>,
 }
 
 impl<'a> Checker<'a> {
@@ -33,6 +45,7 @@ impl<'a> Checker<'a> {
             gen_decl_missing: HashMap::new(),
             skip_file: false,
             skip_stutter,
+            comments: None,
         })
     }
 
@@ -49,6 +62,13 @@ impl<'a> Checker<'a> {
             .compiled_go_files
             .get(fi)
             .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"));
+        self.comments = None;
+        if self.skip_file {
+            return;
+        }
+        if let Some(path) = self.pass.pkg().compiled_go_files.get(fi) {
+            self.comments = reparse_with_comments(path, self.pass.pkg().source_bytes(fi));
+        }
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
@@ -56,7 +76,7 @@ impl<'a> Checker<'a> {
             return;
         }
         // Package-level decls only (mirrors the previous `file.decls` walk).
-        let NodeRef::File(file) = n else {
+        let NodeRef::File(report) = n else {
             return;
         };
         let pkg = self
@@ -65,13 +85,29 @@ impl<'a> Checker<'a> {
             .first()
             .map(|f| f.name.name.as_str())
             .unwrap_or("");
-        check_file(
-            file,
-            pkg,
-            self.skip_stutter,
-            &mut self.gen_decl_missing,
-            &mut self.failures,
-        );
+
+        let mut batch = Vec::new();
+        if let Some((ref comments_fset, ref comments_file)) = self.comments {
+            check_file(
+                comments_file,
+                pkg,
+                self.skip_stutter,
+                &mut self.gen_decl_missing,
+                &mut batch,
+            );
+            for mut f in batch {
+                f.pos = remap_pos(self.pass, report, comments_fset, f.pos);
+                self.failures.push(f);
+            }
+        } else {
+            check_file(
+                report,
+                pkg,
+                self.skip_stutter,
+                &mut self.gen_decl_missing,
+                &mut self.failures,
+            );
+        }
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -93,6 +129,33 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         });
     }
     c.into_failures()
+}
+
+fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
+    let owned;
+    let src: &[u8] = if let Some(b) = cached {
+        b
+    } else {
+        owned = fs::read(path).ok()?;
+        &owned
+    };
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    Some((fset, file))
+}
+
+fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) -> u32 {
+    let p = comments_fset.position(guff::Pos(pos as i64));
+    let Some(ft) = pass.fset().file(report.pos()) else {
+        return pos;
+    };
+    if p.line <= 0 || p.line as usize > ft.line_count() {
+        return pos;
+    }
+    let start = ft.line_start(p.line as usize).0 as u32;
+    let col = p.column.max(1) as u32;
+    start.saturating_add(col.saturating_sub(1))
 }
 
 fn check_file(
@@ -315,5 +378,27 @@ fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut
             ),
             confidence: None,
         });
+    }
+}
+
+#[cfg(test)]
+mod doc_reparse_tests {
+    use super::*;
+    use guff::ast::Decl;
+
+    #[test]
+    fn parse_comments_keeps_const_block_doc() {
+        let src = br#"package p
+
+// Flags for the bitfield.
+const (
+	ChangeIgnoreCtime = 1 << iota
+)
+"#;
+        let fset = FileSet::new();
+        let file = parse_file(&fset, "p.go", src, PARSE_COMMENTS).unwrap();
+        let Decl::GenDecl(g) = &file.decls[0] else { panic!("not gen") };
+        assert!(g.doc.is_some(), "GenDecl.doc missing with PARSE_COMMENTS");
+        assert!(!first_comment_line(g.doc.as_ref()).is_empty());
     }
 }

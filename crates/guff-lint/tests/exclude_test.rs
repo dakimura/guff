@@ -8,7 +8,7 @@ use std::sync::Arc;
 use guff_lint::{
     analyzers_for_linter, load_config, IssueFilter, LintResult, IssuesConfig, SeverityConfig,
 };
-use guff_packages::{typecheck_package, LoadMode, Package, TypecheckEnv};
+use guff_packages::{typecheck_package, FxHashMap, LoadMode, Package, TypecheckEnv};
 use guff_runner::{run_on_packages, RunnerOptions};
 use guff_types::default_sizes;
 
@@ -36,8 +36,8 @@ fn typecheck_fixture(dir: &PathBuf, id: &str, file: &str) -> Arc<Package> {
     typecheck_package(
         &mut pkg,
         &fset,
-        &HashMap::new(),
-        &HashMap::new(),
+        &FxHashMap::default(),
+        &FxHashMap::default(),
         default_sizes(),
         &TypecheckEnv::default(),
         LoadMode::LOAD_SYNTAX,

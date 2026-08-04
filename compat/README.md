@@ -25,6 +25,10 @@ cargo build --release -p guff-lint
 ./compat/run.sh --oss --tier pr
 ./compat/run.sh --oss --tier nightly
 
+# Ad-hoc OSS bug hunt (extra repos in corpus/hunt.json; not a CI gate)
+./compat/hunt.sh
+./compat/hunt.sh --name cobra
+
 # Refresh allowlists from current diffs (merges; review before committing)
 ./compat/run.sh --oss --tier pr --update-allowlist
 ./compat/run.sh --isolate --update-allowlist

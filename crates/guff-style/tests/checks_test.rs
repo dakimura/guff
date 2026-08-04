@@ -2655,6 +2655,37 @@ fn goconst_flags_repeated_strings() {
 }
 
 #[test]
+fn goconst_flags_strings_in_call_composite_lit() {
+    // Nested CompositeLit args must still count when ignore-calls is on
+    // (golangci default). Regression from cobra OSS hunt.
+    let pkg = support::typecheck_fixture(
+        "goconst/call_composite",
+        "example.com/goconst/call_composite",
+        "bad.go",
+    );
+    let messages = support::run_analyzer(goconst(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("nested") && m.contains("3 occurrences")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn goconst_ignores_direct_call_string_args_by_default() {
+    let pkg = support::typecheck_fixture(
+        "goconst/call_direct",
+        "example.com/goconst/call_direct",
+        "ok.go",
+    );
+    assert!(
+        support::run_analyzer(goconst(), &pkg).is_empty(),
+        "direct call args should be ignored with ignore-calls default"
+    );
+}
+
+#[test]
 fn goconst_allows_below_threshold() {
     let pkg = support::typecheck_fixture("goconst", "example.com/goconst/ok", "ok.go");
     assert!(support::run_analyzer(goconst(), &pkg).is_empty());

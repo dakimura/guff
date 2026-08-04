@@ -8,9 +8,12 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::named::named_obj;
+use guff_types::alias::unalias_readonly;
+use guff_types::api_predicates::api_implements;
+use guff_types::arena::{ObjectData, TypeData};
 use guff_types::signature::{signature_params, signature_results};
 use guff_types::tuple::{tuple_at, tuple_len};
+use guff_types::{new_pointer, TypeId};
 
 struct CanonSig {
     args: &'static [&'static str],
@@ -61,6 +64,22 @@ fn type_string(pass: &Pass<'_>, typ: guff_types::TypeId) -> String {
     )
 }
 
+/// Match go/types `TypeString` with a package-name qualifier: `byte` stays
+/// `byte` (not `uint8`), so `[]byte` matches the stdmethods canon table.
+fn normalize_std_type_name(s: &str) -> String {
+    s.replace("uint8", "byte")
+}
+
+fn types_equiv(got: &str, want: &str) -> bool {
+    if got == want {
+        return true;
+    }
+    if (got == "any" || got == "interface{}") && (want == "any" || want == "interface{}") {
+        return true;
+    }
+    normalize_std_type_name(got) == normalize_std_type_name(want)
+}
+
 fn match_params(pass: &Pass<'_>, expect: &[&str], params: Option<guff_types::TypeId>, prefix: &str) -> bool {
     let artifacts = pass.pkg().type_artifacts.as_ref().expect("artifacts");
     for (i, x) in expect.iter().enumerate() {
@@ -76,10 +95,7 @@ fn match_params(pass: &Pass<'_>, expect: &[&str], params: Option<guff_types::Typ
         };
         let got = type_string(pass, t);
         let want = x.strip_prefix('=').unwrap_or(x);
-        if got != want
-            && !((got == "any" || got == "interface{}")
-                && (want == "any" || want == "interface{}"))
-        {
+        if !types_equiv(&got, want) {
             return false;
         }
     }
@@ -89,56 +105,93 @@ fn match_params(pass: &Pass<'_>, expect: &[&str], params: Option<guff_types::Typ
     true
 }
 
-fn implements_error(pass: &Pass<'_>, recv: guff_types::TypeId) -> bool {
+fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    for oid in artifacts.objects.ids() {
+        let ObjectData::TypeName(tn) = artifacts.objects.get(oid) else {
+            continue;
+        };
+        if tn.name() != "error" {
+            continue;
+        }
+        if oid.pkg(&artifacts.objects).is_some() {
+            continue;
+        }
+        return tn.typ();
+    }
+    None
+}
+
+fn implements_error(pass: &Pass<'_>, recv: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    // Check Named on the (unaliased) type itself — underlying is never Named.
-    let typ = guff_types::alias::unalias_readonly(&artifacts.types, recv);
-    if let guff_types::arena::TypeData::Named(_) = artifacts.types.get(typ) {
-        let obj = named_obj(&artifacts.types, typ);
-        return obj.name(&artifacts.objects) == "error";
+    let Some(err) = universe_error(pass) else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    let typ = unalias_readonly(&types, recv);
+    if api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        err,
+    ) {
+        return true;
     }
-    false
+    // Pointer receiver Error() methods: T may not implement error but *T does.
+    if let TypeData::Pointer(_) = types.get(typ) {
+        return false;
+    }
+    let ptr = new_pointer(&mut types, typ);
+    api_implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        ptr,
+        err,
+    )
 }
 
 fn check_method(pass: &Pass<'_>, id: &Ident, ft: &FuncType) -> Option<String> {
+    let _ = ft; // signature comes from type-checker defs (FuncType.id is often untyped)
     let canon = canonical_methods().get(id.name.as_str())?;
-    if id.name == "Unwrap" {
-        if let Some(results) = &ft.results {
-            if results.list.len() == 1 {
-                if let Some(Expr::Ident(rid)) = results.list[0].ty.as_ref() {
-                    if rid.name != "error" && rid.name != "[]error" {
-                        return Some(
-                            "method Unwrap() should have signature Unwrap() error or Unwrap() []error".into(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    let info = pass.types_info()?;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
-    let Some(sig) = info.types.get(&ft.id).map(|tv| tv.typ) else {
+    let obj = guff_analysis::code::object_of(pass, id)?;
+    let sig = obj.typ(&artifacts.objects)?;
+    // `signature_params` returns None for an empty param tuple — that is valid
+    // (e.g. Unwrap()), so only reject when `sig` is not a Signature at all.
+    if !matches!(
+        artifacts.types.get(sig),
+        guff_types::arena::TypeData::Signature(_)
+    ) {
         return None;
-    };
-    let params = signature_params(&artifacts.types, sig)?;
+    }
+    let params = signature_params(&artifacts.types, sig); // None = empty
     let results = signature_results(&artifacts.types, sig);
 
-    if id.name == "WriteTo" && tuple_len(&artifacts.types, Some(params)) > 1 {
+    // Special case: WriteTo with more than one argument — not io.WriterTo.
+    if id.name == "WriteTo" && tuple_len(&artifacts.types, params) > 1 {
         return None;
     }
+
+    // Special case: Is, As and Unwrap only apply when the receiver implements error.
+    // Interface methods have no receiver → skip (matches x/tools stdmethods).
     if matches!(id.name.as_str(), "Is" | "As" | "Unwrap") {
-        let recv = guff_types::signature::signature_recv(&artifacts.types, sig)
-            .and_then(|r| r.typ(&artifacts.objects))?;
-        if matches!(id.name.as_str(), "Is" | "As") && !implements_error(pass, recv) {
+        let Some(recv) = guff_types::signature::signature_recv(&artifacts.types, sig)
+            .and_then(|r| r.typ(&artifacts.objects))
+        else {
+            return None;
+        };
+        if !implements_error(pass, recv) {
             return None;
         }
     }
+
+    // Unwrap has two valid signatures: Unwrap() error and Unwrap() []error.
     if id.name == "Unwrap" {
-        if tuple_len(&artifacts.types, Some(params)) == 0
-            && tuple_len(&artifacts.types, results) == 1
-        {
+        if tuple_len(&artifacts.types, params) == 0 && tuple_len(&artifacts.types, results) == 1 {
             let r = tuple_at(&artifacts.types, results.unwrap(), 0);
             let tname = r.typ(&artifacts.objects).map(|t| type_string(pass, t));
             if matches!(tname.as_deref(), Some("error") | Some("[]error")) {
@@ -150,12 +203,12 @@ fn check_method(pass: &Pass<'_>, id: &Ident, ft: &FuncType) -> Option<String> {
         );
     }
 
-    if !match_params(pass, canon.args, Some(params), "=")
+    if !match_params(pass, canon.args, params, "=")
         || !match_params(pass, canon.results, results, "=")
     {
         return None;
     }
-    if !match_params(pass, canon.args, Some(params), "")
+    if !match_params(pass, canon.args, params, "")
         || !match_params(pass, canon.results, results, "")
     {
         let expect_fmt = format_canon(id.name.as_str(), canon);

@@ -238,7 +238,18 @@ fn collect(
                     }
                     false
                 }
-                NodeRef::CallExpr(_) if options.ignore_calls => false,
+                // Upstream goconst walks into CallExpr children so nested
+                // CompositeLit (e.g. f([]string{"x"})) still counts. golangci
+                // `ignore-calls` only excludes *direct* BasicLit call args
+                // (excludeTypes[Call]), matching jgautheron/goconst.
+                NodeRef::CallExpr(c) => {
+                    if !options.ignore_calls {
+                        for arg in &c.args {
+                            add_expr_lit(arg, options, occurrences);
+                        }
+                    }
+                    true
+                }
                 NodeRef::AssignStmt(a) => {
                     for rhs in &a.rhs {
                         add_expr_lit(rhs, options, occurrences);
@@ -363,14 +374,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if count < options.min_occurrences {
             continue;
         }
-        let pos = *positions.iter().min().unwrap_or(&0);
-        let filename = pass.fset().position(Pos(pos as i64)).filename;
-        let matching = if options.match_constant {
-            find_matching_const(&key, &filename, &constants)
-        } else {
-            None
-        };
-        pass.reportf(pos, &format_message(&key, count, matching.as_deref()));
+        // golangci/goconst reports the first occurrence in each file that
+        // contains the duplicated literal (package-level count, per-file
+        // diagnostics). Match that so finding-set keys align.
+        let mut first_per_file: HashMap<String, u32> = HashMap::new();
+        for &pos in positions {
+            let filename = pass.fset().position(Pos(pos as i64)).filename;
+            first_per_file
+                .entry(filename)
+                .and_modify(|p| *p = (*p).min(pos))
+                .or_insert(pos);
+        }
+        let mut report_positions: Vec<_> = first_per_file.into_values().collect();
+        report_positions.sort_unstable();
+        for pos in report_positions {
+            let filename = pass.fset().position(Pos(pos as i64)).filename;
+            let matching = if options.match_constant {
+                find_matching_const(&key, &filename, &constants)
+            } else {
+                None
+            };
+            pass.reportf(pos, &format_message(&key, count, matching.as_deref()));
+        }
     }
 
     if options.find_duplicates {
@@ -387,7 +412,9 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "Finds repeated strings that could be replaced by a constant",
         url: "https://github.com/jgautheron/goconst",
         run: run as RunFn,
-        run_despite_errors: false,
+        // AST-only (like upstream jgautheron/goconst). Still useful on
+        // packages guff typechecks imperfectly — cobra OSS hunt regression.
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })

@@ -2513,6 +2513,7 @@ fn filter_staticcheck(
     let mut allow_all = false;
     let mut enabled: HashSet<String> = HashSet::new();
     let mut disabled: HashSet<String> = HashSet::new();
+    let mut disabled_prefixes: Vec<String> = Vec::new();
 
     for c in checks {
         if c == "all" {
@@ -2520,7 +2521,12 @@ fn filter_staticcheck(
             continue;
         }
         if let Some(rest) = c.strip_prefix('-') {
-            disabled.insert(rest.to_string());
+            if let Some(prefix) = rest.strip_suffix('*') {
+                // golangci: `-QF*` / `-ST*` disable a whole family.
+                disabled_prefixes.push(prefix.to_string());
+            } else {
+                disabled.insert(rest.to_string());
+            }
         } else {
             enabled.insert(c.clone());
         }
@@ -2530,6 +2536,9 @@ fn filter_staticcheck(
         .into_iter()
         .filter(|a| {
             if disabled.contains(a.name) {
+                return false;
+            }
+            if disabled_prefixes.iter().any(|p| a.name.starts_with(p.as_str())) {
                 return false;
             }
             if allow_all {
@@ -2566,6 +2575,10 @@ fn staticcheck_check_enabled(settings: &StaticcheckSettings, name: &str) -> bool
         if let Some(rest) = c.strip_prefix('-') {
             if rest == name {
                 disabled = true;
+            } else if let Some(prefix) = rest.strip_suffix('*') {
+                if name.starts_with(prefix) {
+                    disabled = true;
+                }
             }
         } else {
             any_positive = true;
@@ -3578,6 +3591,30 @@ errcheck:
         assert!(!kept.contains(&"SA1004"));
         assert!(kept.contains(&"SA1000"));
         assert!(kept.contains(&"S1000"));
+    }
+
+    #[test]
+    fn staticcheck_checks_disable_qf_glob() {
+        // nats-server OSS hunt: checks: [all, -QF*, -ST1003, -ST1016]
+        let settings = StaticcheckSettings {
+            checks: Some(vec![
+                "all".into(),
+                "-QF*".into(),
+                "-ST1003".into(),
+                "-ST1016".into(),
+            ]),
+            ..StaticcheckSettings::default()
+        };
+        let names = ["QF1001", "QF1003", "S1000", "SA1000", "ST1003", "ST1005"];
+        let analyzers: Vec<&'static Analyzer> = names.iter().map(|n| leak_name(n)).collect();
+        let filtered = filter_staticcheck(&settings, analyzers);
+        let kept: Vec<&str> = filtered.iter().map(|a| a.name).collect();
+        assert!(!kept.contains(&"QF1001"));
+        assert!(!kept.contains(&"QF1003"));
+        assert!(!kept.contains(&"ST1003"));
+        assert!(kept.contains(&"S1000"));
+        assert!(kept.contains(&"SA1000"));
+        assert!(kept.contains(&"ST1005"));
     }
 
     #[test]

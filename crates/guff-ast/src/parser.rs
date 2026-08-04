@@ -797,12 +797,14 @@ impl Parser {
             return ParamField {
                 name: None,
                 ty: Some(self.embedded_elem(None)),
+                typed_in_source: true,
             };
         }
 
         let mut f = ParamField {
             name: None,
             ty: None,
+            typed_in_source: false,
         };
         match self.tok {
             Token::IDENT => {
@@ -823,24 +825,29 @@ impl Parser {
                     | Token::INTERFACE
                     | Token::LPAREN => {
                         f.ty = Some(self.parse_type());
+                        f.typed_in_source = true;
                     }
                     Token::LBRACK => {
                         let nm = f.name.take().unwrap();
                         let (n, t) = self.parse_array_field_or_type_instance(nm);
                         f.name = n;
                         f.ty = Some(t);
+                        f.typed_in_source = true;
                     }
                     Token::ELLIPSIS => {
                         f.ty = Some(Expr::Ellipsis(self.parse_dots_type()));
+                        f.typed_in_source = true;
                         return f;
                     }
                     Token::PERIOD => {
                         let nm = f.name.take().unwrap();
                         f.ty = Some(self.parse_qualified_ident(Some(nm)));
+                        f.typed_in_source = true;
                     }
                     Token::TILDE => {
                         if type_sets_ok {
                             f.ty = Some(self.embedded_elem(None));
+                            f.typed_in_source = true;
                             return f;
                         }
                     }
@@ -848,6 +855,7 @@ impl Parser {
                         if type_sets_ok {
                             let nm = f.name.take().unwrap();
                             f.ty = Some(self.embedded_elem(Some(Expr::Ident(nm))));
+                            f.typed_in_source = true;
                             return f;
                         }
                     }
@@ -864,9 +872,11 @@ impl Parser {
             | Token::INTERFACE
             | Token::LPAREN => {
                 f.ty = Some(self.parse_type());
+                f.typed_in_source = true;
             }
             Token::ELLIPSIS => {
                 f.ty = Some(Expr::Ellipsis(self.parse_dots_type()));
+                f.typed_in_source = true;
                 return f;
             }
             _ => {
@@ -877,6 +887,7 @@ impl Parser {
         }
         if type_sets_ok && self.tok == Token::OR && f.ty.is_some() {
             f.ty = Some(self.embedded_elem(f.ty.take()));
+            f.typed_in_source = true;
         }
         f
     }
@@ -904,6 +915,7 @@ impl Parser {
                 ParamField {
                     name: name0_opt.take(),
                     ty: Some(ty),
+                    typed_in_source: true,
                 }
             } else {
                 self.parse_param_decl(name0_opt.take(), tparams)
@@ -992,7 +1004,11 @@ impl Parser {
             }
         }
 
-        // Group consecutive params with the same type into a single Field.
+        // Group into Fields matching go/parser:
+        // - `a, b int` → one Field [a,b] int
+        // - `a int, b int` → two Fields
+        // - `x map[K]V, a, b uint` → Field[x] map + Field[a,b] uint
+        //   (untyped names after a fully-typed field start a new group)
         let mut params: Vec<Field> = Vec::new();
         if named == 0 {
             for par in list {
@@ -1009,6 +1025,7 @@ impl Parser {
         }
         let mut current_names: Vec<Ident> = Vec::new();
         let mut current_ty: Option<Expr> = None;
+        let mut group_has_explicit = false;
         let mut add = |current_names: &mut Vec<Ident>,
                        current_ty: &mut Option<Expr>,
                        out: &mut Vec<Field>| {
@@ -1016,7 +1033,7 @@ impl Parser {
                 out.push(Field {
                     doc: None,
                     names: std::mem::take(current_names),
-                    ty: current_ty.clone(),
+                    ty: current_ty.take(),
                     tag: None,
                     comment: None,
                     id: 0,
@@ -1024,16 +1041,31 @@ impl Parser {
             }
         };
         for par in list {
-            let same = match (&par.ty, &current_ty) {
-                (Some(a), Some(b)) => expr_eq_shallow(a, b),
-                _ => false,
-            };
-            if !same {
-                add(&mut current_names, &mut current_ty, &mut params);
+            if par.typed_in_source {
+                if group_has_explicit {
+                    // Previous field already had its own type (`a int, b int`).
+                    add(&mut current_names, &mut current_ty, &mut params);
+                    group_has_explicit = false;
+                }
+                // Else: pending untyped names share this type (`a, b int`).
                 current_ty = par.ty.clone();
-            }
-            if let Some(n) = par.name {
-                current_names.push(n);
+                if let Some(n) = par.name {
+                    current_names.push(n);
+                }
+                group_has_explicit = true;
+            } else {
+                if group_has_explicit {
+                    // Untyped name after a completed typed field starts a new
+                    // pending group (`x T, a, b U`).
+                    add(&mut current_names, &mut current_ty, &mut params);
+                    group_has_explicit = false;
+                }
+                if current_names.is_empty() {
+                    current_ty = par.ty.clone();
+                }
+                if let Some(n) = par.name {
+                    current_names.push(n);
+                }
             }
         }
         add(&mut current_names, &mut current_ty, &mut params);
@@ -2742,7 +2774,8 @@ impl Parser {
             rparen = self.expect(Token::RPAREN);
             self.expect_semi();
         } else {
-            let s = self.parse_spec(keyword, None);
+            // Match go/parser: attach the GenDecl lead comment to the single Spec.
+            let s = self.parse_spec(keyword, doc.clone());
             list.push(s);
         }
         GenDecl {
@@ -3129,6 +3162,11 @@ fn field_list_eq_owned(a: &FieldList, b: &FieldList) -> bool {
 struct ParamField {
     name: Option<Ident>,
     ty: Option<Expr>,
+    /// True when the type was written in source for this param (e.g. `a int`),
+    /// false when the type was only filled from a later sibling (`a, b int`).
+    /// go/parser keeps `a int, b int` as two Fields; only the shared-type form
+    /// becomes one Field with multiple names.
+    typed_in_source: bool,
 }
 
 // ====================================================================

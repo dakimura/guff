@@ -568,16 +568,19 @@ fn load_run_config(
     enable: &[String],
     disable: &[String],
 ) -> Result<LoadedRun, ConfigError> {
-    let file: Option<ConfigFile> = if no_config {
-        None
+    let (file, config_path): (Option<ConfigFile>, Option<PathBuf>) = if no_config {
+        (None, None)
     } else {
         let path = match config {
             Some(p) => Some(p.clone()),
             None => discover_config(&std::env::current_dir().unwrap_or_default()),
         };
         match path {
-            Some(p) => Some(load_config(&p)?),
-            None => None,
+            Some(p) => {
+                let cfg = load_config(&p)?;
+                (Some(cfg), Some(p))
+            }
+            None => (None, None),
         }
     };
 
@@ -613,7 +616,7 @@ fn load_run_config(
     };
 
     // --no-config: still apply empty/default filter (no path excludes from file).
-    let filter = if no_config {
+    let mut filter = if no_config {
         IssueFilter::from_config(
             &IssuesConfig {
                 exclude_use_default: false,
@@ -627,6 +630,15 @@ fn load_run_config(
     } else {
         IssueFilter::from_config(&issues, &severity)
     };
+    // golangci relative-path-mode default `cfg`: match exclusions against paths
+    // relative to the config file directory.
+    if let Some(ref p) = config_path {
+        if let Some(dir) = p.parent() {
+            filter = filter.with_path_base(dir.to_path_buf());
+        }
+    } else if let Ok(cwd) = std::env::current_dir() {
+        filter = filter.with_path_base(cwd);
+    }
 
     // Config `output.formats` / `output.format` — CLI `--out-format` overrides.
     // Empty → CLI applies TTY-aware default (golangci colored-line-number on TTY).

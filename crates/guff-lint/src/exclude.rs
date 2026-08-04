@@ -163,6 +163,11 @@ pub struct IssueFilter {
     diff_spec: Option<DiffFilterSpec>,
     /// `linters.exclusions.generated` mode (`None` → do not filter).
     generated: Option<guff_fmt::GeneratedMode>,
+    /// Base directory for path-pattern matching (golangci `relative-path-mode`,
+    /// default ≈ config-file dir). Absolute issue paths are relativized against
+    /// this before `exclusions.paths` / rule `path` regexes run — otherwise a
+    /// pattern like `.github` matches `/github.com/` in the absolute path.
+    path_base: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,6 +289,13 @@ impl IssueFilter {
         filter
     }
 
+    /// Set the directory used to relativize absolute issue paths before
+    /// matching `exclusions.paths` / rule `path` patterns (golangci cfg/gomod).
+    pub fn with_path_base(mut self, base: impl Into<PathBuf>) -> Self {
+        self.path_base = Some(base.into());
+        self
+    }
+
     /// Convert runner diagnostics into [`Issue`]s (before filtering).
     pub fn collect_issues(
         fset: &FileSet,
@@ -358,7 +370,7 @@ impl IssueFilter {
                 !self
                     .exclude_rules
                     .iter()
-                    .any(|rule| rule.matches(issue))
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
             });
             issues = idx.filter_issues(issues, true);
         } else {
@@ -366,7 +378,7 @@ impl IssueFilter {
                 !self
                     .exclude_rules
                     .iter()
-                    .any(|rule| rule.matches(issue))
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
             });
             if !packages.is_empty() {
                 let mut idx = NolintIndex::from_packages_for_issues(
@@ -454,7 +466,7 @@ impl IssueFilter {
     }
 
     fn is_excluded_by_path(&self, issue: &Issue) -> bool {
-        let path = normalize_slashes(&issue.filename);
+        let path = path_for_match(&issue.filename, self.path_base.as_deref());
         let parent = dirname_slash(path.as_ref());
 
         for re in &self.exclude_dir_res {
@@ -481,7 +493,7 @@ impl IssueFilter {
 
     fn assign_severity(&self, issue: &mut Issue) {
         for (rule, sev) in &self.severity_rules {
-            if rule.matches(issue) {
+            if rule.matches(issue, self.path_base.as_deref()) {
                 if sev != "@linter" {
                     issue.severity = sev.clone();
                 }
@@ -497,7 +509,7 @@ impl IssueFilter {
 }
 
 impl CompiledRule {
-    fn matches(&self, issue: &Issue) -> bool {
+    fn matches(&self, issue: &Issue, path_base: Option<&Path>) -> bool {
         let empty = self.linters.is_empty()
             && self.path.is_none()
             && self.path_except.is_none()
@@ -529,7 +541,7 @@ impl CompiledRule {
             }
         }
         if self.path.is_some() || self.path_except.is_some() {
-            let path = normalize_slashes(&issue.filename);
+            let path = path_for_match(&issue.filename, path_base);
             if let Some(re) = &self.path {
                 if !re.is_match(path.as_ref()) {
                     return false;
@@ -612,6 +624,101 @@ fn push_re(out: &mut Vec<Regex>, pat: &str, what: &str) {
 /// `NormalizePathInRegex` subset).
 fn normalize_path_regex(pat: &str) -> String {
     pat.replace('/', r"[/\\]")
+}
+
+/// Relativize `filename` against `base` for path-pattern matching.
+///
+/// golangci matches `exclusions.paths` against paths relative to the config /
+/// module root. Matching the absolute path lets `.github` (regex `.` = any
+/// char) hit `/github.com/` in the checkout path — a nats-server OSS hunt
+/// false negative for every finding under a `github.com/...` tree.
+///
+/// When `base` does not prefix the file (e.g. harness copies the config to a
+/// temp dir), walk up from the file looking for `go.mod` and relativize to
+/// that module root.
+fn path_for_match<'a>(filename: &'a str, base: Option<&Path>) -> Cow<'a, str> {
+    let norm = normalize_slashes(filename);
+    if let Some(base) = base {
+        if let Some(rel) = strip_base_prefix(norm.as_ref(), base) {
+            return Cow::Owned(rel);
+        }
+    }
+    if let Some(rel) = relativize_via_gomod(norm.as_ref()) {
+        return Cow::Owned(rel);
+    }
+    norm
+}
+
+fn strip_base_prefix(norm: &str, base: &Path) -> Option<String> {
+    let base_s = normalize_slashes(&base.to_string_lossy()).into_owned();
+    let base_slash = base_s.trim_end_matches('/');
+    if base_slash.is_empty() {
+        return None;
+    }
+    let prefix = format!("{base_slash}/");
+    if let Some(rel) = norm.strip_prefix(&prefix) {
+        return Some(rel.to_string());
+    }
+    if norm == base_slash {
+        return Some(String::new());
+    }
+    None
+}
+
+fn relativize_via_gomod(abs: &str) -> Option<String> {
+    let path = Path::new(abs);
+    if !path.is_absolute() {
+        return None;
+    }
+    let parent = path.parent()?;
+    // Cache module roots: path exclusion runs per-issue and must not walk
+    // the filesystem on every call (prometheus / OSS hunt scale).
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<String, Option<PathBuf>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let parent_key = normalize_slashes(&parent.to_string_lossy()).into_owned();
+    if let Ok(mut guard) = cache.lock() {
+        if let Some(cached) = guard.get(&parent_key) {
+            return cached
+                .as_ref()
+                .and_then(|root| strip_base_prefix(abs, root));
+        }
+        let mut dir = parent;
+        let found = loop {
+            if dir.join("go.mod").is_file() {
+                break Some(dir.to_path_buf());
+            }
+            match dir.parent() {
+                Some(p) => dir = p,
+                None => break None,
+            }
+        };
+        // Also remember intermediate dirs under the same root.
+        if let Some(ref root) = found {
+            let mut d = parent;
+            loop {
+                let key = normalize_slashes(&d.to_string_lossy()).into_owned();
+                guard.insert(key, Some(root.clone()));
+                if d == root.as_path() {
+                    break;
+                }
+                match d.parent() {
+                    Some(p) => d = p,
+                    None => break,
+                }
+            }
+        } else {
+            guard.insert(parent_key, None);
+        }
+        return found.as_ref().and_then(|root| strip_base_prefix(abs, root));
+    }
+    // Mutex poisoned — fall back to a one-shot walk.
+    let mut dir = parent;
+    loop {
+        if dir.join("go.mod").is_file() {
+            return strip_base_prefix(abs, dir);
+        }
+        dir = dir.parent()?;
+    }
 }
 
 /// Normalize `\` → `/` without allocating when the path already uses `/`.
@@ -992,6 +1099,63 @@ linters:
         assert_eq!(dirname_slash("/a.go"), "/");
         assert_eq!(dirname_slash("a.go"), "");
         assert_eq!(dirname_slash("pkg/a.go"), "pkg");
+    }
+
+    #[test]
+    fn path_for_match_strips_base_so_dot_github_does_not_hit_github_com() {
+        // Absolute checkout under github.com must not match exclusions.paths: .github
+        let abs = "/Users/me/src/github.com/nats-io/nats-server/server/test_test.go";
+        let base = Path::new("/Users/me/src/github.com/nats-io/nats-server");
+        let rel = path_for_match(abs, Some(base));
+        assert_eq!(rel.as_ref(), "server/test_test.go");
+        let re = Regex::new(&normalize_path_regex(".github")).unwrap();
+        assert!(
+            !re.is_match(rel.as_ref()),
+            ".github must not match relativized path {rel}"
+        );
+        // Without base, `.` matches `/` before `github.com`.
+        assert!(re.is_match(abs));
+    }
+
+    #[test]
+    fn path_for_match_falls_back_to_gomod_when_base_misses() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("github.com").join("nats-io").join("mod");
+        let server = root.join("server");
+        std::fs::create_dir_all(&server).unwrap();
+        std::fs::write(root.join("go.mod"), "module example.com/mod\n").unwrap();
+        let file = server.join("test_test.go");
+        std::fs::write(&file, "package server\n").unwrap();
+
+        // Config copied outside the module (hunt harness) — base does not prefix.
+        let rel = path_for_match(file.to_str().unwrap(), Some(Path::new("/tmp/hunt-results")));
+        assert_eq!(rel.as_ref(), "server/test_test.go");
+        let re = Regex::new(&normalize_path_regex(".github")).unwrap();
+        assert!(!re.is_match(rel.as_ref()));
+    }
+
+    #[test]
+    fn exclusions_paths_dot_github_with_path_base_keeps_server_files() {
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            exclude_dirs_use_default: Some(false),
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_files: vec![".github".into()],
+            ..IssuesConfig::default()
+        };
+        let base = PathBuf::from("/Users/me/src/github.com/nats-io/nats-server");
+        let filter =
+            IssueFilter::from_config(&issues_cfg, &SeverityConfig::default()).with_path_base(base);
+        let kept = filter.apply(
+            vec![issue(
+                "govet",
+                "/Users/me/src/github.com/nats-io/nats-server/server/test_test.go",
+                "inline: Constant reflect.Ptr should be inlined",
+            )],
+            &[],
+        );
+        assert_eq!(kept.len(), 1, "server file must not be dropped by .github");
     }
 
     #[test]

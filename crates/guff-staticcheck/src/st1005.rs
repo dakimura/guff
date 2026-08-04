@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Decl, Expr, Spec};
+use guff::ast::{CallExpr, Decl, Spec};
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_call_to_any};
@@ -19,22 +19,11 @@ fn is_test_file(path: &str) -> bool {
     path.ends_with("_test.go")
 }
 
-/// Prefer typed `CallName`; fall back to `errors.New` / `fmt.Errorf` selectors
-/// when the package is ill-typed and uses/`types_info` are incomplete.
+/// Prefer typed `CallName`. Only stdlib `errors.New` / `fmt.Errorf` count —
+/// a local package imported as `errors` (e.g. restic's `internal/errors`) must
+/// not trip ST1005 (upstream resolves via IR to the real package path).
 fn is_errors_new_or_fmt_errorf(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    if is_call_to_any(pass, call, &["errors.New", "fmt.Errorf"]) {
-        return true;
-    }
-    let Expr::SelectorExpr(sel) = &*call.fun else {
-        return false;
-    };
-    let Expr::Ident(pkg) = sel.x.as_ref() else {
-        return false;
-    };
-    matches!(
-        (pkg.name.as_str(), sel.sel.name.as_str()),
-        ("errors", "New") | ("fmt", "Errorf")
-    )
+    is_call_to_any(pass, call, &["errors.New", "fmt.Errorf"])
 }
 
 fn collect_obj_names(pass: &Pass<'_>) -> HashSet<String> {

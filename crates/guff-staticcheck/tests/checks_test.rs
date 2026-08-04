@@ -2507,6 +2507,24 @@ fn st1005_allows_ok_error_strings() {
 }
 
 #[test]
+fn st1005_ignores_non_stdlib_errors_new() {
+    let dir = support::testdata("st1005");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1005/localerrors",
+        &dir.join("local_errors.go"),
+        &[(
+            "example.com/local/errors",
+            &dir.join("stub/localerrors/errors.go"),
+        )],
+    );
+    support::assert_well_typed(&pkg);
+    assert!(
+        support::run_analyzer(st1005::analyzer(), &pkg).is_empty(),
+        "non-stdlib errors.New must not trigger ST1005"
+    );
+}
+
+#[test]
 fn st1008_flags_error_not_last() {
     let dir = support::testdata("st1008");
     let pkg = support::typecheck_file(&dir, "bad.go", "example.com/staticcheck/st1008");

@@ -611,6 +611,12 @@ fn stdmethods_flags_bad_unwrap() {
     let messages = support::run_analyzer(stdmethods_analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
     assert!(messages.iter().any(|m| m.contains("Unwrap")));
+    // Non-error receivers / interface Unwrap() T must not be flagged (x/tools parity).
+    assert_eq!(
+        messages.iter().filter(|m| m.contains("Unwrap")).count(),
+        1,
+        "expected only MyError.Unwrap FP, got {messages:?}"
+    );
 }
 
 #[test]

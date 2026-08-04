@@ -46,14 +46,29 @@ fn unquote_tag(raw: &str) -> Option<String> {
     Some(out)
 }
 
+fn quoted_value_end(s: &str) -> Option<usize> {
+    // `s` starts with `"`. Scan like reflect.StructTag / skip_value.
+    if !s.starts_with('"') {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            return Some(i + 1);
+        }
+        i += 1;
+    }
+    None
+}
+
 fn tag_get(tag: &str, key: &str) -> Option<String> {
     let mut rest = tag;
     while !rest.is_empty() {
-        if !rest.starts_with(' ') {
-            if rest.starts_with(' ') == false && rest.chars().next() != Some(' ') {
-                // skip to key
-            }
-        }
         rest = rest.trim_start();
         if rest.is_empty() {
             break;
@@ -65,10 +80,7 @@ fn tag_get(tag: &str, key: &str) -> Option<String> {
             continue;
         }
         rest = rest[colon + 1..].trim_start();
-        if !rest.starts_with('"') {
-            return None;
-        }
-        let end = rest[1..].find('"')? + 2;
+        let end = quoted_value_end(rest)?;
         let q = &rest[..end];
         let val = unquote_tag(q)?;
         let comma = val.find(',').map(|i| &val[..i]).unwrap_or(&val);
@@ -79,22 +91,10 @@ fn tag_get(tag: &str, key: &str) -> Option<String> {
 
 fn skip_value(s: &str) -> &str {
     let s = s.trim_start();
-    if !s.starts_with('"') {
-        return "";
+    match quoted_value_end(s) {
+        Some(end) => &s[end..],
+        None => "",
     }
-    let mut i = 1;
-    let bytes = s.as_bytes();
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2;
-            continue;
-        }
-        if bytes[i] == b'"' {
-            return &s[i + 1..];
-        }
-        i += 1;
-    }
-    ""
 }
 
 fn validate_struct_tag(tag: &str) -> Option<&'static str> {
@@ -117,12 +117,8 @@ fn validate_struct_tag(tag: &str) -> Option<&'static str> {
             return Some("bad syntax for struct tag key");
         }
         rest = &rest[colon + 1..];
-        if !rest.starts_with('"') {
+        let Some(end) = quoted_value_end(rest) else {
             return Some("bad syntax for struct tag value");
-        }
-        let end = match rest[1..].find('"') {
-            Some(i) => i + 2,
-            None => return Some("bad syntax for struct tag value"),
         };
         let q = &rest[..end];
         if unquote_tag(q).is_none() {
