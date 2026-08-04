@@ -70,7 +70,13 @@ fn get_lines(
 ) -> usize {
     let start_line = fset.position(func_pos(f)).line;
     let end_line = fset.position(func_end(f)).line;
-    let line_count = end_line.saturating_sub(start_line).saturating_sub(1) as usize;
+    // Line is i64; do not use saturating_sub(1) on zero (that yields -1 → usize::MAX).
+    // ultraware/funlen counts lines strictly between the signature and closing brace.
+    let line_count = if end_line > start_line + 1 {
+        (end_line - start_line - 1) as usize
+    } else {
+        0
+    };
 
     if !ignore_comments {
         return line_count;

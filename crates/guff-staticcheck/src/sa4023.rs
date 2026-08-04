@@ -1,6 +1,13 @@
 //! SA4023 — impossible comparison of interface value with untyped nil.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa4023` (simplified; defers nilness analysis).
+//! Port of `honnef.co/go/tools/staticcheck/sa4023` (simplified; defers
+//! nilness/typedness analysis of call results).
+//!
+//! The IR path mirrors honnef's `MakeInterface` case. An AST fallback covers
+//! the same pattern while SSA `MakeInterface` emission is incomplete: an
+//! interface variable assigned from a concrete pointer, then compared to nil.
+//! The fallback only considers assignments that appear *before* the comparison
+//! so later concrete writes (e.g. go-redis `Manager.Listener`) are not FPs.
 
 use std::sync::OnceLock;
 
@@ -24,7 +31,7 @@ fn is_interface_type(prog: &guff_ssa::program::Program, typ: guff_types::TypeId)
     )
 }
 
-fn is_typed_nil_pointer(pass: &Pass<'_>, id: &Ident) -> bool {
+fn is_concrete_pointer(pass: &Pass<'_>, id: &Ident) -> bool {
     let Some(info) = pass.types_info() else {
         return false;
     };
@@ -40,7 +47,26 @@ fn is_typed_nil_pointer(pass: &Pass<'_>, id: &Ident) -> bool {
     )
 }
 
-fn interface_from_typed_nil(pass: &Pass<'_>, id: &Ident) -> bool {
+/// True if `id` was assigned a concrete pointer value before `before_pos`.
+///
+/// Matches by types object identity (not bare name) so a later write to a
+/// different `listener` in another function cannot poison the comparison.
+fn interface_from_concrete_pointer_before(
+    pass: &Pass<'_>,
+    id: &Ident,
+    before_pos: u32,
+) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(target) = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).copied().flatten())
+    else {
+        return false;
+    };
     let Some(inspect) = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .cloned()
@@ -55,14 +81,27 @@ fn interface_from_typed_nil(pass: &Pass<'_>, id: &Ident) -> bool {
         let Some(Expr::Ident(lhs_id)) = lhs.first() else {
             return;
         };
-        if lhs_id.name != id.name {
+        let Some(lhs_obj) = info
+            .defs
+            .get(&lhs_id.id)
+            .copied()
+            .flatten()
+            .or_else(|| info.uses.get(&lhs_id.id).copied())
+        else {
+            return;
+        };
+        if lhs_obj != target {
+            return;
+        }
+        // Only assignments that textually precede the comparison can feed it.
+        if lhs_id.name_pos.0 as u32 >= before_pos {
             return;
         }
         let Some(rhs) = rhs.first() else {
             return;
         };
         if let Expr::Ident(rhs_id) = rhs {
-            if is_typed_nil_pointer(pass, rhs_id) {
+            if is_concrete_pointer(pass, rhs_id) {
                 found = true;
             }
         }
@@ -102,11 +141,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let x = callcheck::flatten_ssa_value(func, *x);
                 if let Value::Instr(xid) = x {
                     if matches!(func.instrs.get(xid), InstrData::MakeInterface(_)) {
+                        // Match honnef's short diagnostic (related info omitted).
                         pending.push((
                             func.pos(iid).0 as u32,
-                            format!(
-                                "this comparison is {qualifier} true; the lhs of the comparison has been assigned a concretely typed value"
-                            ),
+                            format!("this comparison is {qualifier} true"),
                         ));
                     }
                 }
@@ -145,13 +183,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         ) {
             return;
         }
-        if interface_from_typed_nil(pass, id) {
+        if interface_from_concrete_pointer_before(pass, id, bin.op_pos.0 as u32) {
             let qualifier = if bin.op == Token::EQL { "never" } else { "always" };
             pending.push((
                 bin.op_pos.0 as u32,
-                format!(
-                    "this comparison is {qualifier} true; the lhs of the comparison has been assigned a concretely typed value"
-                ),
+                format!("this comparison is {qualifier} true"),
             ));
         }
     });

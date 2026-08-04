@@ -26,3 +26,10 @@ func BadNames() {
 	var Id int
 	_ = Id
 }
+
+// empty-block: Go 1.22+ for-range without vars (restic indexmap_test).
+func emptyRange(m map[int]int) {
+	for range m {
+	}
+}
+

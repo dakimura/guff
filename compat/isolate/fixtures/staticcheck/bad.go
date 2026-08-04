@@ -23,3 +23,11 @@ func UsedSprintf() string {
 func NilLen(s []int) bool {
 	return s != nil && len(s) != 0
 }
+
+// SA4023: typed nil stored in interface, then compared to nil
+func TypedNilIface() bool {
+	var p *int
+	var i any
+	i = p
+	return i == nil
+}

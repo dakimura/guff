@@ -18,3 +18,9 @@ func Bad() {
 	o := 15
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = a, b, c, d, e, f, g, h, i, j, k, l, m, n, o
 }
+
+// Short / empty bodies must not be flagged (regression: i64 underflow → usize::MAX).
+func OneLine() string { return "ok" }
+
+func Empty() {}
+

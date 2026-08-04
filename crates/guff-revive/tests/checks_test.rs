@@ -16,6 +16,7 @@ fn revive_flags_default_rule_violations() {
         "redefines-builtin-id:",
         "receiver-naming:",
         "range:",
+        "empty-block:",
         "errorf:",
         "error-return:",
         "var-declaration:",

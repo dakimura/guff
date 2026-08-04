@@ -377,13 +377,18 @@ impl NolintIndex {
     }
 }
 
-/// True when every analyzer for `lint` has `run_despite_errors: false`, so the
-/// runner skips the linter on ill-typed packages.
+/// True when the runner may skip type-sensitive analyzers for `lint` on
+/// ill-typed packages.
+///
+/// Multi-check linters such as staticcheck mix `run_despite_errors` flags. If
+/// *any* analyzer refuses ill-typed packages, unmatched `//nolint:<lint>`
+/// directives are not unused — the finding they suppress may simply have been
+/// skipped (cobra SA1029, restic QF1001, …).
 fn linter_skipped_on_ill_typed(lint: &str) -> bool {
     let Some(analyzers) = analyzers_for_linter(lint) else {
         return false;
     };
-    !analyzers.is_empty() && analyzers.iter().all(|a| !a.run_despite_errors)
+    !analyzers.is_empty() && analyzers.iter().any(|a| !a.run_despite_errors)
 }
 
 fn unused_issue(
@@ -801,6 +806,32 @@ mod tests {
         assert!(
             kept.is_empty(),
             "expected no unused for skipped-on-ill_typed errcheck, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn unused_skipped_for_ill_typed_staticcheck_despite_mixed_flags() {
+        // staticcheck mixes run_despite_errors; unmatched //nolint:staticcheck on
+        // ill-typed packages must not be reported as unused (cobra SA1029).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(
+            &path,
+            "package p\n\nfunc F() {\n\t_ = 1 //nolint:staticcheck\n}\n",
+        )
+        .unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ill_typed: true,
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        index.set_enabled_linters(["nolintlint".into(), "staticcheck".into()]);
+        let kept = index.filter_issues(Vec::new(), true);
+        assert!(
+            kept.is_empty(),
+            "expected no unused for staticcheck on ill_typed, got {kept:?}"
         );
     }
 }

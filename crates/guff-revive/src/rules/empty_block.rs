@@ -54,18 +54,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 fn check_range(r: &RangeStmt, failures: &mut Vec<Failure>) {
+    // Upstream revive flags every empty range body (including `for range x {}`).
     if !r.body.list.is_empty() {
-        return;
-    }
-    if r.key.is_none() && r.value.is_none() {
         return;
     }
     failures.push(Failure {
         rule: "empty-block",
         pos: r.for_.0 as u32,
         message: MESSAGE.into(),
-            confidence: None,
-        });
+        confidence: None,
+    });
 }
 
 fn check_block(b: &BlockStmt, ignore: &[*const BlockStmt], failures: &mut Vec<Failure>) {
