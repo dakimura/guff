@@ -75,6 +75,34 @@ fn revive_blank_imports_flags_only_first_of_unjustified_group() {
 }
 
 #[test]
+fn revive_package_comments_accepts_sibling_file_doc() {
+    let pkg = support::typecheck_fixture_dir(
+        "revive",
+        "sibling_ok",
+        "example.com/revive/sibling_ok",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("package-comments")),
+        "package comment on sibling file must silence: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_exported_skips_methods_on_private_receivers() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/private_receiver_ok",
+        "private_receiver_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("exported:")),
+        "private receivers / common methods must be silent: {messages:?}"
+    );
+}
+
+#[test]
 fn revive_analyzer_graph_is_valid() {
     validate(&[revive()]).expect("valid analyzer graph");
 }

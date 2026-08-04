@@ -128,6 +128,68 @@ pub fn typecheck_fixture(name: &str, pkg_id: &str, file: &str) -> Arc<Package> {
     typecheck_with_deps(pkg_id, &dir.join(file), &stub_refs)
 }
 
+/// Type-check every `*.go` file in `tests/testdata/<name>/<subdir>/` as one package.
+pub fn typecheck_fixture_dir(name: &str, subdir: &str, pkg_id: &str) -> Arc<Package> {
+    let dir = testdata(name).join(subdir);
+    let stubs = collect_stubs(&testdata(name));
+    let mut go_files: Vec<PathBuf> = fs::read_dir(&dir)
+        .expect("read fixture dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("go"))
+        .collect();
+    go_files.sort();
+    assert!(!go_files.is_empty(), "no go files in {}", dir.display());
+
+    let fset = FileSet::new();
+    let parse_mode = Mode::NONE; // match production load (docs via rule reparse)
+    let mut syntax = Vec::new();
+    for path in &go_files {
+        let src = fs::read(path).expect("read fixture");
+        let name = path.file_name().and_then(|s| s.to_str()).expect("name");
+        syntax.push(parse_file(&fset, name, &src, parse_mode).expect("parse"));
+    }
+
+    let mut check = Checker::new(Config::default());
+    for (import_path, dep_path) in &stubs {
+        let src = fs::read(dep_path).expect("read dependency source");
+        let name = dep_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("dep file name");
+        let file = parse_file(&fset, name, &src, parse_mode | PARSE_COMMENTS).expect("parse dep");
+        check.add_dependency_source(import_path, vec![file]);
+    }
+    check.check_files(syntax.clone());
+
+    let pkg_name = syntax[0].name.name.clone();
+    Arc::new(Package {
+        id: pkg_id.into(),
+        pkg_path: pkg_id.into(),
+        name: pkg_name.into(),
+        dir,
+        compiled_go_files: go_files.clone(),
+        go_files,
+        syntax,
+        fset: Some(fset),
+        types: Some(check.pkg),
+        types_info: Some(std::sync::Arc::new(check.info.clone())),
+        type_artifacts: Some(TypecheckArtifacts {
+            type_pkg: check.pkg,
+            types: check.types,
+            objects: check.objects,
+            scopes: check.scopes,
+            packages: check.packages,
+            info: std::sync::Arc::new(check.info),
+        }),
+        ill_typed: !check.errors.is_empty(),
+        errors: Vec::new(),
+        imports: HashMap::new(),
+        types_sizes: Some(default_sizes()),
+        ..Package::default()
+    })
+}
+
 pub fn run_analyzer(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

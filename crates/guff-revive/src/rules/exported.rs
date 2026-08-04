@@ -28,6 +28,8 @@ pub struct Checker<'a> {
     gen_decl_missing: HashMap<usize, bool>,
     skip_file: bool,
     skip_stutter: bool,
+    /// When false (upstream default), skip exported methods on unexported receivers.
+    check_private_receivers: bool,
     /// `PARSE_COMMENTS` reparse for the current file (docs + private FileSet).
     comments: Option<(Arc<FileSet>, File)>,
 }
@@ -39,12 +41,17 @@ impl<'a> Checker<'a> {
         }
         let skip_stutter =
             crate::config::rule_has_string_option(pass, "exported", "disableStutteringCheck");
+        // Upstream default: PrivateReceivers=true (skip methods on unexported
+        // receivers). `checkPrivateReceivers` disables that skip.
+        let check_private_receivers =
+            crate::config::rule_has_string_option(pass, "exported", "checkPrivateReceivers");
         Some(Self {
             pass,
             failures: Vec::new(),
             gen_decl_missing: HashMap::new(),
             skip_file: false,
             skip_stutter,
+            check_private_receivers,
             comments: None,
         })
     }
@@ -92,6 +99,7 @@ impl<'a> Checker<'a> {
                 comments_file,
                 pkg,
                 self.skip_stutter,
+                self.check_private_receivers,
                 &mut self.gen_decl_missing,
                 &mut batch,
             );
@@ -104,6 +112,7 @@ impl<'a> Checker<'a> {
                 report,
                 pkg,
                 self.skip_stutter,
+                self.check_private_receivers,
                 &mut self.gen_decl_missing,
                 &mut self.failures,
             );
@@ -158,10 +167,14 @@ fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) 
     start.saturating_add(col.saturating_sub(1))
 }
 
+/// Methods that commonly implement std interfaces — upstream skips them.
+const COMMON_METHODS: &[&str] = &["Error", "Read", "ServeHTTP", "String", "Write", "Unwrap"];
+
 fn check_file(
     file: &File,
     pkg: &str,
     skip_stutter: bool,
+    check_private_receivers: bool,
     gen_decl_missing: &mut HashMap<usize, bool>,
     failures: &mut Vec<Failure>,
 ) {
@@ -196,7 +209,7 @@ fn check_file(
                 }
             }
             Decl::FuncDecl(f) => {
-                lint_func_doc(f, failures);
+                lint_func_doc(f, check_private_receivers, failures);
                 if f.recv.is_none() && !skip_stutter {
                     check_repetitive(pkg, &f.name.name, "func", f.name.name_pos.0, failures);
                 }
@@ -206,11 +219,33 @@ fn check_file(
     }
 }
 
-fn lint_func_doc(f: &FuncDecl, failures: &mut Vec<Failure>) {
+fn must_check_method(f: &FuncDecl, check_private_receivers: bool) -> bool {
+    let recv = f
+        .recv
+        .as_ref()
+        .and_then(|r| r.list.first())
+        .and_then(|fld| fld.ty.as_ref())
+        .map(receiver_type_key)
+        .unwrap_or_default();
+    // Strip pointer star for export check (upstream `typeparams.ReceiverType`).
+    let recv_name = recv.trim_start_matches('*');
+    if !guff::ast::ast_is_exported(recv_name) && !check_private_receivers {
+        return false;
+    }
+    if COMMON_METHODS.contains(&f.name.name.as_str()) {
+        return false;
+    }
+    true
+}
+
+fn lint_func_doc(f: &FuncDecl, check_private_receivers: bool, failures: &mut Vec<Failure>) {
     if !f.name.is_exported() {
         return;
     }
     let (kind, name) = if f.recv.is_some() {
+        if !must_check_method(f, check_private_receivers) {
+            return;
+        }
         let recv = f
             .recv
             .as_ref()
