@@ -2,12 +2,20 @@
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa4017`.
 //! Pure stdlib names mirror `analysis/facts/purity.pureStdlib` (package funcs).
+//!
+//! Upstream does not flag `_ = pure()` / `x := pure()` — only calls whose
+//! results are unused as expression statements (no assignment). guff's blank
+//! `LValue::store` is a no-op (like go/ssa), so SSA referrers alone would
+//! still report blank-assigns; we skip CallExprs that appear as assign RHS.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use guff::ast::Expr;
+use guff::walk::{preorder, NodeRef};
 use guff_analysis::passes::buildir;
 use guff_analysis::{has_non_debug_referrer, is_call_to_any, referrers, short_call_name};
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Call, InstrData};
 use guff_ssa::value::Value;
 
@@ -43,10 +51,37 @@ const PURE_FUNCS: &[&str] = &[
     "strconv.FormatInt",
 ];
 
+fn call_pos(expr: &Expr) -> Option<u32> {
+    match expr {
+        Expr::CallExpr(c) => Some(c.lparen.0 as u32),
+        Expr::ParenExpr(p) => call_pos(&p.x),
+        _ => None,
+    }
+}
+
+/// Positions of CallExprs that are (part of) an assignment RHS — not ExprStmt discards.
+fn assigned_call_positions(pass: &Pass<'_>) -> HashSet<u32> {
+    let mut out = HashSet::new();
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::AssignStmt(a) = n {
+                for r in &a.rhs {
+                    if let Some(pos) = call_pos(r) {
+                        out.insert(pos);
+                    }
+                }
+            }
+            true
+        });
+    }
+    out
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let ir = pass
         .result_of::<buildir::BuildIrResult>(buildir::analyzer())
         .ok_or_else(|| "SA4017 requires buildir analyzer".to_string())?;
+    let assigned = assigned_call_positions(pass);
     let mut pending = Vec::new();
     for &fid in &ir.src_funcs {
         let func = ir.prog.functions.get(fid);
@@ -59,12 +94,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 if has_non_debug_referrer(referrers(func, val), func) {
                     continue;
                 }
+                let pos = func.pos(iid).0 as u32;
+                if assigned.contains(&pos) {
+                    continue;
+                }
                 if !is_call_to_any(&ir.prog, call, PURE_FUNCS) {
                     continue;
                 }
                 let name = short_call_name(&ir.prog, call).unwrap_or_default();
                 pending.push((
-                    func.pos(iid).0 as u32,
+                    pos,
                     format!("{name} doesn't have side effects and its return value is ignored"),
                 ));
             }
