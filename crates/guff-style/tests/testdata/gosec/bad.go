@@ -90,6 +90,10 @@ func bad() {
 	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
 		return os.Remove(path)
 	})
+
+	if envPath := os.Getenv("GUFF_GOSEC_G703"); envPath != "" {
+		_, _ = os.OpenFile(envPath, os.O_RDONLY, 0)
+	}
 }
 
 func returnsErr() error { return nil }

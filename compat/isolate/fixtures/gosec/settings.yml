@@ -1,0 +1,3 @@
+# G304 remains DEFERRED; isolate fixture exercises G703 (and other shipped rules).
+excludes:
+  - G304

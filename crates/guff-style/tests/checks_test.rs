@@ -55,6 +55,7 @@ fn gosec_flags_weak_crypto_rand_unsafe_and_blocklist_imports() {
         "G505:",
         "G506:",
         "G507:",
+        "G703:",
     ] {
         assert!(
             messages.iter().any(|m| m.contains(needle)),

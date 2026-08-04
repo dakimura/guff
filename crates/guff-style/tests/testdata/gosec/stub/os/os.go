@@ -17,3 +17,8 @@ func Create(name string) (*File, error)                              { return ni
 func TempDir() string                                                { return "/tmp" }
 func Remove(name string) error                                       { return nil }
 func RemoveAll(path string) error                                    { return nil }
+func Getenv(key string) string                                       { return "" }
+func ReadFile(name string) ([]byte, error)                           { return nil, nil }
+
+const O_RDONLY = 0
+

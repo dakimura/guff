@@ -12,7 +12,15 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     }
     let mut failures = Vec::new();
     let mut warned_missing = false;
-    for file in pass.files() {
+    let paths = &pass.pkg().compiled_go_files;
+    for (i, file) in pass.files().iter().enumerate() {
+        // Upstream revive skips `*_test.go` entirely (`lint.File.IsTest`).
+        if paths
+            .get(i)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"))
+        {
+            continue;
+        }
         check_file(file, &pass.pkg().name, &mut failures, &mut warned_missing);
     }
     failures

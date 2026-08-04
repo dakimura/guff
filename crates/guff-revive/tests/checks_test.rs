@@ -43,6 +43,38 @@ fn revive_allows_clean_code() {
 }
 
 #[test]
+fn revive_blank_imports_allows_justified_contiguous_group() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/blank_group_ok",
+        "blank_group_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("blank-imports")),
+        "justified blank-import group must be silent: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_blank_imports_flags_only_first_of_unjustified_group() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/blank_group_bad",
+        "blank_group_bad.go",
+    );
+    let messages: Vec<_> = support::run_analyzer(revive(), &pkg)
+        .into_iter()
+        .filter(|m| m.contains("blank-imports"))
+        .collect();
+    assert_eq!(
+        messages.len(),
+        1,
+        "contiguous unjustified blank imports report once: {messages:?}"
+    );
+}
+
+#[test]
 fn revive_analyzer_graph_is_valid() {
     validate(&[revive()]).expect("valid analyzer graph");
 }

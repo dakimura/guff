@@ -31,14 +31,16 @@
 //! - **G405** — weak encryption (`crypto/des` / `crypto/rc4`)
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
+//! - **G703** — path traversal via env/args/`ReadFile` into file-path sinks
+//!   (local-assign approx of upstream SSA taint; full taint engine DEFERRED)
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
 //! DEFERRED: remaining rules (G113, G115–G118, G201–G202, G304–G305, G307
-//! config-gated, G402 MinVersion/CipherSuites, G601, SSA analyzers), G101 zxcvbn
-//! entropy / full `gosec:disable` block directives / per-rule `config` map,
-//! G104 audit mode + config allowlist extensions, G107 local string-lit
-//! TryResolve, full G204 TryResolve / G102 Ident const resolution,
+//! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
+//! G101 zxcvbn entropy / full `gosec:disable` block directives / per-rule
+//! `config` map, G104 audit mode + config allowlist extensions, G107 local
+//! string-lit TryResolve, full G204 TryResolve / G102 Ident const resolution,
 //! `severity`/`confidence` filters, concurrency.
 
 use std::collections::HashSet;
@@ -270,7 +272,38 @@ const RULES: &[RuleDef] = &[
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
     "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G122", "G124", "G203", "G204",
-    "G301", "G302", "G303", "G306", "G402", "G403",
+    "G301", "G302", "G303", "G306", "G402", "G403", "G703",
+];
+
+const G703_WHAT: &str = "Path traversal via taint analysis";
+
+/// Function sources that always produce tainted path data (gosec PathTraversal).
+const G703_SOURCE_FUNCS: &[(&str, &str)] = &[
+    ("os", "Getenv"),
+    ("os", "ReadFile"),
+];
+
+/// Path sinks from gosec G703 (path argument is index 0 unless noted).
+const G703_SINKS: &[(&str, &str)] = &[
+    ("os", "Open"),
+    ("os", "OpenFile"),
+    ("os", "Create"),
+    ("os", "ReadFile"),
+    ("os", "WriteFile"),
+    ("os", "Remove"),
+    ("os", "RemoveAll"),
+    ("os", "Rename"),
+    ("os", "Mkdir"),
+    ("os", "MkdirAll"),
+    ("os", "Stat"),
+    ("os", "Lstat"),
+    ("os", "Chmod"),
+    ("os", "Chown"),
+    ("io/ioutil", "ReadFile"),
+    ("io/ioutil", "WriteFile"),
+    ("io/ioutil", "ReadDir"),
+    ("path/filepath", "Walk"),
+    ("path/filepath", "WalkDir"),
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -1701,6 +1734,136 @@ fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
     }
 }
 
+fn is_g703_source_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(call) => resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
+            G703_SOURCE_FUNCS
+                .iter()
+                .any(|(p, n)| *p == pkg && *n == name)
+        }),
+        // os.Args[i] / os.Args
+        Expr::IndexExpr(idx) => is_g703_args_expr(pass, idx.x.as_ref()),
+        Expr::SliceExpr(sl) => is_g703_args_expr(pass, sl.x.as_ref()),
+        _ => is_g703_args_expr(pass, expr),
+    }
+}
+
+fn is_g703_args_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Expr::SelectorExpr(sel) = expr else {
+        return false;
+    };
+    if sel.sel.name != "Args" {
+        return false;
+    }
+    let Expr::Ident(pkg) = sel.x.as_ref() else {
+        return false;
+    };
+    imported_pkg_path(pass, pkg).as_deref() == Some("os")
+}
+
+fn collect_g703_tainted_from_assign(
+    pass: &Pass<'_>,
+    assign: &AssignStmt,
+    tainted: &mut HashSet<ObjectId>,
+) {
+    for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
+        if !is_g703_source_expr(pass, rhs) {
+            continue;
+        }
+        let Expr::Ident(id) = lhs else {
+            continue;
+        };
+        if id.name == "_" {
+            continue;
+        }
+        if let Some(obj) = object_of(pass, id) {
+            tainted.insert(obj);
+        }
+    }
+}
+
+fn collect_g703_tainted_from_valuespec(
+    pass: &Pass<'_>,
+    vs: &guff::ast::ValueSpec,
+    tainted: &mut HashSet<ObjectId>,
+) {
+    if vs.values.is_empty() {
+        return;
+    }
+    for (name, val) in vs.names.iter().zip(vs.values.iter()) {
+        if name.name == "_" || !is_g703_source_expr(pass, val) {
+            continue;
+        }
+        if let Some(obj) = object_of(pass, name) {
+            tainted.insert(obj);
+        }
+    }
+}
+
+fn path_arg_is_g703_tainted(
+    pass: &Pass<'_>,
+    arg: &Expr,
+    tainted: &HashSet<ObjectId>,
+) -> bool {
+    if is_g703_source_expr(pass, arg) {
+        return true;
+    }
+    let Expr::Ident(id) = arg else {
+        return false;
+    };
+    object_of(pass, id).is_some_and(|obj| tainted.contains(&obj))
+}
+
+fn check_g703_sink_call(
+    pass: &Pass<'_>,
+    call: &CallExpr,
+    tainted: &HashSet<ObjectId>,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+        return;
+    };
+    if !G703_SINKS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        return;
+    }
+    let Some(path_arg) = call.args.first() else {
+        return;
+    };
+    if path_arg_is_g703_tainted(pass, path_arg, tainted) {
+        pending.push((
+            call.pos().0 as u32,
+            format!("G703: {G703_WHAT}"),
+        ));
+    }
+}
+
+fn check_g703(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+    if !enabled.contains("G703") {
+        return;
+    }
+    let mut tainted: HashSet<ObjectId> = HashSet::new();
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::AssignStmt(a) => collect_g703_tainted_from_assign(pass, a, &mut tainted),
+                NodeRef::ValueSpec(vs) => {
+                    collect_g703_tainted_from_valuespec(pass, vs, &mut tainted)
+                }
+                _ => {}
+            }
+            true
+        });
+    }
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CallExpr(c) = n {
+                check_g703_sink_call(pass, c, &tainted, pending);
+            }
+            true
+        });
+    }
+}
+
 fn is_g110_reader_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
     if resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
         G110_READER_CALLS
@@ -2149,6 +2312,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g109(pass, &enabled, &mut pending);
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
+    check_g703(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {

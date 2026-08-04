@@ -156,6 +156,16 @@ while IFS=$'\t' read -r name url ref packages timeout config_override; do
 
   run_config="$RUN_DIR/${name}.config.yml"
   python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"
+  # golangci resolves ${base-path} relative to the config file location. The
+  # patched copy lives under results/, so rewrite to the repo root (rclone
+  # ruleguard `${base-path}/bin/rules.go`, etc.).
+  python3 - "$run_config" "$dir" <<'PY'
+import pathlib, sys
+cfg, root = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).resolve()
+text = cfg.read_text(encoding="utf-8")
+if "${base-path}" in text:
+    cfg.write_text(text.replace("${base-path}", str(root)), encoding="utf-8")
+PY
 
   guff_json="$RUN_DIR/${name}.guff.json"
   gcl_json="$RUN_DIR/${name}.golangci.json"

@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use guff::ast::{Decl, File, ImportSpec, Spec};
 use guff::parser::{parse_file, PARSE_COMMENTS};
@@ -38,17 +39,19 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         // a private FileSet would assign unrelated offsets and diagnostics would
         // map onto the wrong source files after JSON formatting.
         if let Some(path) = paths.get(i) {
-            if let Some(with_comments) = reparse_with_comments(path, pass.pkg().source_bytes(i)) {
-                check_file(file, &with_comments, &mut failures);
+            if let Some((cfset, with_comments)) =
+                reparse_with_comments(path, pass.pkg().source_bytes(i))
+            {
+                check_file(file, &with_comments, &cfset, pass.fset(), &mut failures);
                 continue;
             }
         }
-        check_file(file, file, &mut failures);
+        check_file(file, file, pass.fset(), pass.fset(), &mut failures);
     }
     failures
 }
 
-fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<File> {
+fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
     let owned;
     let src: &[u8] = if let Some(b) = cached {
         b
@@ -58,7 +61,8 @@ fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<File> {
     };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    parse_file(&fset, name, src, PARSE_COMMENTS).ok()
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    Some((fset, file))
 }
 
 fn import_specs(file: &File) -> Vec<&ImportSpec> {
@@ -76,7 +80,13 @@ fn import_specs(file: &File) -> Vec<&ImportSpec> {
         .collect()
 }
 
-fn check_file(report: &File, comments: &File, failures: &mut Vec<Failure>) {
+fn check_file(
+    report: &File,
+    comments: &File,
+    comments_fset: &FileSet,
+    package_fset: &FileSet,
+    failures: &mut Vec<Failure>,
+) {
     let report_imports = import_specs(report);
     let comment_imports = import_specs(comments);
     if report_imports.len() != comment_imports.len()
@@ -87,7 +97,7 @@ fn check_file(report: &File, comments: &File, failures: &mut Vec<Failure>) {
     {
         // Shape mismatch between the type-checked AST and the comment reparse;
         // fall back to the shared FileSet tree only (may miss comments).
-        check_file(report, report, failures);
+        check_file(report, report, package_fset, package_fset, failures);
         return;
     }
 
@@ -99,8 +109,9 @@ fn check_file(report: &File, comments: &File, failures: &mut Vec<Failure>) {
 
         if i > 0 {
             let prev = comment_imports[i - 1];
-            let prev_line = prev.path.pos().0;
-            let line = comment_imp.path.pos().0;
+            // Upstream compares file line numbers, not raw Pos byte offsets.
+            let prev_line = comments_fset.position(prev.path.pos()).line;
+            let line = comments_fset.position(comment_imp.path.pos()).line;
             let prev_blank = prev.name.as_ref().is_some_and(is_blank);
             let prev_not_embed = prev.path.value != "\"embed\"";
             if prev_blank && prev_not_embed && line == prev_line + 1 {

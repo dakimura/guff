@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"math/rand"
 	"net/http"
+	"os"
 )
 
 func BadHash() {
@@ -16,4 +17,10 @@ func BadRand() {
 
 func BadHTTP() {
 	http.ListenAndServe(":8080", nil) // G114-ish bind
+}
+
+func BadPathTraversal() {
+	if path := os.Getenv("DEBUG_FILE"); path != "" {
+		_, _ = os.OpenFile(path, 0, 0) // G703
+	}
 }
