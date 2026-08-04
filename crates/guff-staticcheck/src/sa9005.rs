@@ -10,15 +10,44 @@ use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, TypeData};
+use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::object::is_exported;
+use guff_types::TypeId;
 
-fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize) {
+fn has_method(ctx: &CallContext<'_>, typ: TypeId, name: &str) -> bool {
+    let mut types = ctx.prog.type_arena.clone();
+    match lookup_field_or_method(
+        &mut types,
+        &ctx.prog.object_arena,
+        &ctx.prog.package_arena,
+        typ,
+        true,
+        None,
+        name,
+    ) {
+        LookupResult::Found { obj, .. } => {
+            matches!(ctx.prog.object_arena.get(obj), ObjectData::Func(_))
+        }
+        _ => false,
+    }
+}
+
+fn has_custom_marshaling(ctx: &CallContext<'_>, typ: TypeId, meths: &[&str]) -> bool {
+    meths.iter().any(|m| has_method(ctx, typ, m))
+}
+
+fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize, meths: &[&str]) {
     let Some(arg) = call.args.get_mut(arg_idx) else {
         return;
     };
     let typ = callcheck::ssa_value_type(ctx.prog, ctx.caller, arg.value);
     let arena = &ctx.prog.type_arena;
     let objects = &ctx.prog.object_arena;
+    // Custom marshaling (MarshalJSON / …) lives on the named type / pointer
+    // method set — check before looking at struct fields (upstream SA9005).
+    if has_custom_marshaling(ctx, typ, meths) {
+        return;
+    }
     let u = unalias_readonly(arena, typ).underlying(arena);
     let TypeData::Struct(s) = arena.get(u) else {
         return;
@@ -41,28 +70,44 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>, arg_idx: usize) {
     ));
 }
 
-fn check0(call: &mut Call<'_>, ctx: &CallContext<'_>) {
-    check_marshal(call, ctx, 0);
+fn check_json0(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 0, &["MarshalJSON", "MarshalText"]);
 }
 
-fn check1(call: &mut Call<'_>, ctx: &CallContext<'_>) {
-    check_marshal(call, ctx, 1);
+fn check_xml0(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 0, &["MarshalXML", "MarshalText"]);
+}
+
+fn check_json_unmarshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 1, &["UnmarshalJSON", "UnmarshalText"]);
+}
+
+fn check_xml_unmarshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 1, &["UnmarshalXML", "UnmarshalText"]);
+}
+
+fn check_json_decode(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 0, &["UnmarshalJSON", "UnmarshalText"]);
+}
+
+fn check_xml_decode(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    check_marshal(call, ctx, 0, &["UnmarshalXML", "UnmarshalText"]);
 }
 
 fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
     static RULES: OnceLock<HashMap<&'static str, callcheck::CheckFn>> = OnceLock::new();
     RULES.get_or_init(|| {
         HashMap::from([
-            ("encoding/json.Marshal", check0 as callcheck::CheckFn),
-            ("encoding/json.MarshalIndent", check0 as callcheck::CheckFn),
-            ("encoding/xml.Marshal", check0 as callcheck::CheckFn),
-            ("encoding/xml.MarshalIndent", check0 as callcheck::CheckFn),
-            ("(*encoding/json.Encoder).Encode", check0 as callcheck::CheckFn),
-            ("(*encoding/xml.Encoder).Encode", check0 as callcheck::CheckFn),
-            ("encoding/json.Unmarshal", check1 as callcheck::CheckFn),
-            ("encoding/xml.Unmarshal", check1 as callcheck::CheckFn),
-            ("(*encoding/json.Decoder).Decode", check0 as callcheck::CheckFn),
-            ("(*encoding/xml.Decoder).Decode", check0 as callcheck::CheckFn),
+            ("encoding/json.Marshal", check_json0 as callcheck::CheckFn),
+            ("encoding/json.MarshalIndent", check_json0 as callcheck::CheckFn),
+            ("encoding/xml.Marshal", check_xml0 as callcheck::CheckFn),
+            ("encoding/xml.MarshalIndent", check_xml0 as callcheck::CheckFn),
+            ("(*encoding/json.Encoder).Encode", check_json0 as callcheck::CheckFn),
+            ("(*encoding/xml.Encoder).Encode", check_xml0 as callcheck::CheckFn),
+            ("encoding/json.Unmarshal", check_json_unmarshal as callcheck::CheckFn),
+            ("encoding/xml.Unmarshal", check_xml_unmarshal as callcheck::CheckFn),
+            ("(*encoding/json.Decoder).Decode", check_json_decode as callcheck::CheckFn),
+            ("(*encoding/xml.Decoder).Decode", check_xml_decode as callcheck::CheckFn),
         ])
     })
 }

@@ -1,6 +1,6 @@
 //! Render Go expressions as source-like strings for diagnostic suggestions.
 
-use guff::ast::{CallExpr, Expr, IndexExpr, SelectorExpr, StarExpr};
+use guff::ast::{CallExpr, Expr, IndexExpr, SelectorExpr, StarExpr, TypeAssertExpr};
 use guff::token::Token;
 
 /// Render an expression for use in diagnostic messages.
@@ -53,6 +53,12 @@ pub fn render_expr(expr: &Expr) -> String {
             format!("{}[{}]", render_expr(x), render_expr(index))
         }
         Expr::StarExpr(StarExpr { x, .. }) => format!("*{}", render_expr(x)),
+        // Without this, `a.(T).M() == b.(U).M()` collapses to identical
+        // `"<expr>.M()"` strings and SA4000 false-positives (traefik).
+        Expr::TypeAssertExpr(TypeAssertExpr { x, ty, .. }) => match ty {
+            Some(t) => format!("{}.({})", render_expr(x), render_expr(t)),
+            None => format!("{}.(type)", render_expr(x)),
+        },
         _ => "<expr>".to_string(),
     }
 }

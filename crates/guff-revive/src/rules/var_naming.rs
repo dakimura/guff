@@ -23,6 +23,16 @@ use crate::util::{is_blank, unparen};
 
 const KNOWN_EXCEPTIONS: &[&str] = &["LastInsertId", "kWh"];
 
+fn is_cgo_generated_name(name: &str) -> bool {
+    name.starts_with("_cgo")
+        || name.starts_with("__cgo")
+        || name.starts_with("_Cfunc_")
+        || name.starts_with("_Ctype_")
+        || name.starts_with("_C2func_")
+        || name.starts_with("_cgoexp_")
+        || name == "runtime_throw"
+}
+
 struct Options {
     allowlist: Vec<String>,
     blocklist: Vec<String>,
@@ -256,6 +266,12 @@ fn check_field_list(
 
 fn check(id: &guff::ast::Ident, thing: &str, opts: &Options, failures: &mut Vec<Failure>) {
     if is_blank(id) || KNOWN_EXCEPTIONS.contains(&id.name.as_str()) {
+        return;
+    }
+    // cgo-generated names (`_cgoexp_…`, `runtime_throw`, …) — positions often
+    // remap onto the original `import "C"` file, so generated-file exclusion
+    // alone does not drop them.
+    if is_cgo_generated_name(&id.name) {
         return;
     }
     // #851 upperCaseConst support

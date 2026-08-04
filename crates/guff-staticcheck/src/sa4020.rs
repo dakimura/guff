@@ -11,6 +11,7 @@ use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::TypeData;
+use guff_types::check_lookup::implements;
 use guff_types::typestring::type_string;
 
 fn subsumes_safe(pass: &Pass<'_>, iface: guff_types::TypeId, concrete: guff_types::TypeId) -> bool {
@@ -21,8 +22,18 @@ fn subsumes_safe(pass: &Pass<'_>, iface: guff_types::TypeId, concrete: guff_type
     if !matches!(artifacts.types.get(iface_u), TypeData::Interface(_)) {
         return false;
     }
-    let mut checker = guff_types::Checker::new(guff_types::Config::default());
-    checker.implements_bool(concrete, iface)
+    // Must use the package type arena — a fresh Checker only has the universe
+    // (~34 types) and panics on package TypeIds (rclone SA4020).
+    let mut types = artifacts.types.clone();
+    implements(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        concrete,
+        iface,
+        false,
+    )
+    .is_ok()
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

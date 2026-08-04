@@ -60,6 +60,41 @@ fn file_build_tags_from_ast(file: &guff::ast::File) -> Vec<String> {
     tags
 }
 
+/// Three-valued build-tag evaluation: custom tags are [`Tri::Unknown`] so
+/// `!noselfupdate` does not make every GOOS comparison look impossible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tri {
+    True,
+    False,
+    Unknown,
+}
+
+impl Tri {
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Tri::False, _) | (_, Tri::False) => Tri::False,
+            (Tri::True, Tri::True) => Tri::True,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Tri::True, _) | (_, Tri::True) => Tri::True,
+            (Tri::False, Tri::False) => Tri::False,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn not(self) -> Self {
+        match self {
+            Tri::True => Tri::False,
+            Tri::False => Tri::True,
+            Tri::Unknown => Tri::Unknown,
+        }
+    }
+}
+
 /// True when no (GOOS, GOARCH) pair that builds this file has `runtime.GOOS == goos`.
 fn goos_impossible(tags: &[String], goos: &str) -> bool {
     if tags.is_empty() {
@@ -67,9 +102,10 @@ fn goos_impossible(tags: &[String], goos: &str) -> bool {
     }
     // Multiple `//go:build` / `// +build` lines are AND-combined.
     let expr = tags.join(" && ");
+    // Impossible only if the constraint is definitely false for every arch.
     !KNOWN_GOARCH
         .iter()
-        .any(|arch| eval_constraint(&expr, Some(goos), Some(arch)))
+        .any(|arch| eval_constraint(&expr, Some(goos), Some(arch)) != Tri::False)
 }
 
 /// True when no (GOOS, GOARCH) pair that builds this file has `runtime.GOARCH == goarch`.
@@ -80,16 +116,14 @@ fn goarch_impossible(tags: &[String], goarch: &str) -> bool {
     let expr = tags.join(" && ");
     !KNOWN_GOOS
         .iter()
-        .any(|os| eval_constraint(&expr, Some(os), Some(goarch)))
+        .any(|os| eval_constraint(&expr, Some(os), Some(goarch)) != Tri::False)
 }
 
 /// Evaluate a `//go:build` expression under a fixed GOOS/GOARCH.
 ///
-/// Non-OS/non-ARCH identifiers (e.g. `cgo`, custom tags) are treated as true so
-/// we only flag comparisons that are impossible for every interpretation of
-/// those tags — matching staticcheck's "never equal" wording without a full
-/// tag-space search.
-fn eval_constraint(expr: &str, goos: Option<&str>, goarch: Option<&str>) -> bool {
+/// Non-OS/non-ARCH identifiers (e.g. `cgo`, custom tags) are [`Tri::Unknown`]
+/// so negations like `!noselfupdate` stay satisfiable for every GOOS.
+fn eval_constraint(expr: &str, goos: Option<&str>, goarch: Option<&str>) -> Tri {
     let mut p = Parser {
         s: expr.as_bytes(),
         i: 0,
@@ -97,11 +131,11 @@ fn eval_constraint(expr: &str, goos: Option<&str>, goarch: Option<&str>) -> bool
         goarch,
     };
     let Ok(v) = p.parse_or() else {
-        return true; // malformed → don't flag
+        return Tri::True; // malformed → don't flag
     };
     p.skip_ws();
     if p.i != p.s.len() {
-        return true;
+        return Tri::True;
     }
     v
 }
@@ -120,37 +154,37 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_or(&mut self) -> Result<bool, ()> {
+    fn parse_or(&mut self) -> Result<Tri, ()> {
         let mut v = self.parse_and()?;
         loop {
             self.skip_ws();
             if self.s.get(self.i..).is_some_and(|s| s.starts_with(b"||")) {
                 self.i += 2;
-                v = self.parse_and()? || v;
+                v = v.or(self.parse_and()?);
             } else {
                 return Ok(v);
             }
         }
     }
 
-    fn parse_and(&mut self) -> Result<bool, ()> {
+    fn parse_and(&mut self) -> Result<Tri, ()> {
         let mut v = self.parse_unary()?;
         loop {
             self.skip_ws();
             if self.s.get(self.i..).is_some_and(|s| s.starts_with(b"&&")) {
                 self.i += 2;
-                v = self.parse_unary()? && v;
+                v = v.and(self.parse_unary()?);
             } else {
                 return Ok(v);
             }
         }
     }
 
-    fn parse_unary(&mut self) -> Result<bool, ()> {
+    fn parse_unary(&mut self) -> Result<Tri, ()> {
         self.skip_ws();
         if self.s.get(self.i) == Some(&b'!') {
             self.i += 1;
-            return Ok(!self.parse_unary()?);
+            return Ok(self.parse_unary()?.not());
         }
         if self.s.get(self.i) == Some(&b'(') {
             self.i += 1;
@@ -165,7 +199,7 @@ impl<'a> Parser<'a> {
         self.parse_ident()
     }
 
-    fn parse_ident(&mut self) -> Result<bool, ()> {
+    fn parse_ident(&mut self) -> Result<Tri, ()> {
         self.skip_ws();
         let start = self.i;
         while self.i < self.s.len()
@@ -182,18 +216,33 @@ impl<'a> Parser<'a> {
         Ok(self.eval_tag(name))
     }
 
-    fn eval_tag(&self, name: &str) -> bool {
+    fn eval_tag(&self, name: &str) -> Tri {
         if name == "unix" {
-            return self.goos.is_some_and(|os| os != "windows" && os != "plan9");
+            return if self
+                .goos
+                .is_some_and(|os| os != "windows" && os != "plan9")
+            {
+                Tri::True
+            } else {
+                Tri::False
+            };
         }
         if KNOWN_GOOS.contains(&name) {
-            return self.goos == Some(name);
+            return if self.goos == Some(name) {
+                Tri::True
+            } else {
+                Tri::False
+            };
         }
         if KNOWN_GOARCH.contains(&name) {
-            return self.goarch == Some(name);
+            return if self.goarch == Some(name) {
+                Tri::True
+            } else {
+                Tri::False
+            };
         }
-        // Unknown / custom tags: assume satisfiable.
-        true
+        // Unknown / custom tags: neither force true nor false.
+        Tri::Unknown
     }
 }
 

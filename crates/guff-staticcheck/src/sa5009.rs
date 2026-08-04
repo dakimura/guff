@@ -65,7 +65,8 @@ fn check_format(format: &str, nargs: usize) -> Result<(), String> {
             explicit_index = Some(idx);
             i += 1; // ]
         }
-        while i < bytes.len() && bytes[i] == b' ' {
+        // Printf flags: # 0 + - ' ' (must skip before width `*`).
+        while i < bytes.len() && matches!(bytes[i], b'#' | b'0' | b'+' | b'-' | b' ') {
             i += 1;
         }
         // Width `*` consumes an arg.
@@ -182,5 +183,8 @@ mod tests {
         .is_ok());
         assert!(check_format("%[2]s %[1]s", 2).is_ok());
         assert!(check_format("%[2]s", 1).is_err());
+        // Width `*` after flags (`%-*s`) consumes an extra arg.
+        assert!(check_format("%-*s %-*s %s\n", 5).is_ok());
+        assert!(check_format("%-*s", 1).is_err());
     }
 }

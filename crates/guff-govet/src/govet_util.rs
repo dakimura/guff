@@ -322,12 +322,13 @@ pub fn field_idents(field: &Field) -> &[Ident] {
 }
 
 pub fn file_go_version_before(pass: &Pass<'_>, threshold: &str) -> bool {
+    // Empty `File.go_version` means "use the module go line", not "pre-1.22".
+    let module = code::module_go_version(pass);
     for file in pass.files() {
         let v = file.go_version.trim();
-        if v.is_empty() {
-            return true;
-        }
-        let fv = if v.starts_with("go") {
+        let fv = if v.is_empty() {
+            module.clone()
+        } else if v.starts_with("go") {
             v.to_string()
         } else {
             format!("go{v}")

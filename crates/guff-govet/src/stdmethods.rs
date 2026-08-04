@@ -77,7 +77,22 @@ fn types_equiv(got: &str, want: &str) -> bool {
     if (got == "any" || got == "interface{}") && (want == "any" || want == "interface{}") {
         return true;
     }
+    // Predeclared aliases: rune≡int32, byte≡uint8 (go vet stdmethods).
+    if is_rune_alias(got) && is_rune_alias(want) {
+        return true;
+    }
+    if is_byte_alias(got) && is_byte_alias(want) {
+        return true;
+    }
     normalize_std_type_name(got) == normalize_std_type_name(want)
+}
+
+fn is_rune_alias(s: &str) -> bool {
+    s == "rune" || s == "int32"
+}
+
+fn is_byte_alias(s: &str) -> bool {
+    s == "byte" || s == "uint8"
 }
 
 fn match_params(pass: &Pass<'_>, expect: &[&str], params: Option<guff_types::TypeId>, prefix: &str) -> bool {

@@ -364,9 +364,9 @@ impl Visitor<'_, '_> {
             &artifacts.packages,
             obj,
         ));
-        // Receiver expression type: `h.Write` with `h hash.Hash` must match
-        // default exclude `(hash.Hash).Write` even when the method object is
-        // the embedded `io.Writer.Write` (displays as `io.Write`).
+        // Receiver expression type + embedded-interface walk (kisielk
+        // `walkThroughEmbeddedInterfaces`): `h.Write` with `h hash.Hash64`
+        // must also match default exclude `(hash.Hash).Write`.
         if let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) {
             if let Some(info) = self.pass.types_info() {
                 if let Some(tav) = info.types.get(&sel.x.id()) {
@@ -374,15 +374,30 @@ impl Visitor<'_, '_> {
                     if let guff_types::arena::TypeData::Pointer(p) = artifacts.types.get(ty) {
                         ty = guff_types::alias::unalias_readonly(&artifacts.types, p.elem());
                     }
-                    let recv_str = guff_types::typestring::type_string(
+                    push_iface_method_names(
                         &artifacts.types,
                         &artifacts.objects,
                         &artifacts.packages,
                         ty,
-                        None,
+                        &sel.sel.name,
+                        &mut names,
                     );
-                    if !recv_str.is_empty() {
-                        names.push(format!("({recv_str}).{}", sel.sel.name));
+                }
+                // Selection-based walk when the method was reached via struct
+                // embedding of an interface (kisielk Index path).
+                if let Some(selection) = info.selections.get(&sel.id) {
+                    if let Some(more) = walk_embedded_iface_names(
+                        &artifacts.types,
+                        &artifacts.objects,
+                        &artifacts.packages,
+                        selection,
+                        &sel.sel.name,
+                    ) {
+                        for n in more {
+                            if !names.contains(&n) {
+                                names.push(n);
+                            }
+                        }
                     }
                 }
             }
@@ -471,6 +486,81 @@ fn base_call_expr(fun: &Expr) -> &Expr {
             Expr::ParenExpr(ParenExpr { x, .. }) => x,
             _ => return cur,
         };
+    }
+}
+
+/// Collect `(Iface).Method` names for `ty` and every embedded interface
+/// (kisielk-style). Covers `hash.Hash64` → `(hash.Hash).Write`.
+fn push_iface_method_names(
+    types: &guff_types::TypeArena,
+    objects: &guff_types::ObjectArena,
+    packages: &guff_types::PackageArena,
+    ty: TypeId,
+    method: &str,
+    names: &mut Vec<String>,
+) {
+    let ty = guff_types::alias::unalias_readonly(types, ty);
+    let underlying = ty.underlying(types);
+    let embeddeds: Vec<TypeId> = match types.get(underlying) {
+        TypeData::Interface(iface) => (0..iface.num_embeddeds())
+            .map(|i| iface.embedded_type(i))
+            .collect(),
+        _ => return,
+    };
+    let recv_str = guff_types::typestring::type_string(types, objects, packages, ty, None);
+    if !recv_str.is_empty() {
+        let n = format!("({recv_str}).{method}");
+        if !names.contains(&n) {
+            names.push(n);
+        }
+    }
+    for emb in embeddeds {
+        push_iface_method_names(types, objects, packages, emb, method, names);
+    }
+}
+
+/// Selection Index walk + embedded-interface descent (kisielk
+/// `walkThroughEmbeddedInterfaces`).
+fn walk_embedded_iface_names(
+    types: &guff_types::TypeArena,
+    objects: &guff_types::ObjectArena,
+    packages: &guff_types::PackageArena,
+    selection: &guff_types::selection::Selection,
+    method: &str,
+) -> Option<Vec<String>> {
+    if !matches!(objects.get(selection.obj()), ObjectData::Func(_)) {
+        return None;
+    }
+
+    let mut current = selection.recv();
+    let index = selection.index();
+    if index.len() > 1 {
+        for &field_index in &index[..index.len() - 1] {
+            current = guff_types::alias::unalias_readonly(types, current);
+            if let TypeData::Pointer(p) = types.get(current) {
+                current = guff_types::alias::unalias_readonly(types, p.elem());
+            }
+            current = current.underlying(types);
+            let TypeData::Struct(s) = types.get(current) else {
+                return None;
+            };
+            let field = s.field(field_index as usize);
+            current = field.typ(objects)?;
+        }
+    }
+
+    current = guff_types::alias::unalias_readonly(types, current);
+    let underlying = current.underlying(types);
+    if !matches!(types.get(underlying), TypeData::Interface(_)) {
+        return None;
+    }
+
+    let mut out = Vec::new();
+    push_iface_method_names(types, objects, packages, current, method, &mut out);
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
     }
 }
 

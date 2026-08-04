@@ -115,16 +115,19 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilC
             } else {
                 (None, None)
             };
-            // Only pointer/interface nil-checks mark a value as maybe-nil.
+            // Only pointer nil-checks mark a value as maybe-nil for deref.
             // `if *m == nil` on a `*map`/`*slice` compares the map/slice value
             // (not the pointer) — do not peel that load, or later `*m = …` is
             // falsely reported (prometheus `(*Annotations).Add` / `Merge`).
-            // When the compared value *is* a pointer/interface, peel loads so
-            // Alloc'd locals (`var x *T`) unify across distinct load instrs.
+            // Same for `if *perr == nil` on `perr *error` (interface load).
+            // When the compared value *is* a pointer, peel loads so Alloc'd
+            // locals (`var x *T`) unify across distinct load instrs.
             let consider = |prog: &Program, func: &Function, v: Value| -> Option<Value> {
                 let v = flatten_ssa_value(func, v);
                 let typ = value_type_of(prog, func, v);
-                if !is_pointer_or_interface_type(&prog.type_arena, typ) {
+                let u = guff_types::alias::unalias_readonly(&prog.type_arena, typ)
+                    .underlying(&prog.type_arena);
+                if !matches!(prog.type_arena.get(u), guff_types::arena::TypeData::Pointer(_)) {
                     return None;
                 }
                 Some(peel_load(func, v))

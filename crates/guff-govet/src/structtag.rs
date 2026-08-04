@@ -113,7 +113,7 @@ fn validate_struct_tag(tag: &str) -> Option<&'static str> {
             _ => return Some("bad syntax for struct tag pair"),
         };
         let key = &rest[..colon];
-        if key.is_empty() || key.bytes().any(|b| b <= b' ' || b == b':' || b == b'"') {
+        if key.is_empty() || key.bytes().any(|b| b <= b' ' || b == b':' || b == b'"' || b == 0x7f) {
             return Some("bad syntax for struct tag key");
         }
         rest = &rest[colon + 1..];
@@ -121,19 +121,56 @@ fn validate_struct_tag(tag: &str) -> Option<&'static str> {
             return Some("bad syntax for struct tag value");
         };
         let q = &rest[..end];
-        if unquote_tag(q).is_none() {
+        let Some(value) = unquote_tag(q) else {
             return Some("bad syntax for struct tag value");
-        }
-        if (key == "json" || key == "xml" || key == "asn1")
-            && q.contains(' ')
-            && !q.contains("\\ ")
-        {
-            return Some("suspicious space in struct tag value");
+        };
+        if let Some(err) = check_tag_spaces(key, &value) {
+            return Some(err);
         }
         rest = &rest[end..];
         n += 1;
     }
     None
+}
+
+/// Upstream `checkTagSpaces` for json/xml/asn1 (go/analysis/passes/structtag).
+fn check_tag_spaces(key: &str, value: &str) -> Option<&'static str> {
+    match key {
+        "xml" => {
+            // Leading/trailing space, or more than one space, is suspicious.
+            if value.trim() != value || value.bytes().filter(|&b| b == b' ').count() > 1 {
+                return Some("suspicious space in struct tag value");
+            }
+            let Some(comma) = value.find(',') else {
+                return None;
+            };
+            if comma > 0 && value.as_bytes()[comma - 1] == b' ' {
+                return Some("suspicious space in struct tag value");
+            }
+            // Options after the name must not contain spaces.
+            if value[comma + 1..].contains(' ') {
+                return Some("suspicious space in struct tag value");
+            }
+            None
+        }
+        "json" => {
+            // JSON allows spaces in the name; only flag spaces in options.
+            let Some(comma) = value.find(',') else {
+                return None;
+            };
+            if value[comma + 1..].contains(' ') {
+                return Some("suspicious space in struct tag value");
+            }
+            None
+        }
+        "asn1" => {
+            if value.contains(' ') {
+                return Some("suspicious space in struct tag value");
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 fn field_exported(name: &str) -> bool {

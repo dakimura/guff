@@ -67,8 +67,8 @@ use std::sync::{Arc, OnceLock};
 use guff::ast::{
     AssignStmt, BasicLit, BinaryExpr, BlockStmt, CallExpr, ChanDir, CommentGroup, CompositeLit,
     Decl, DeferStmt, Expr, Field, FieldList, File, ForStmt, FuncDecl, FuncLit, FuncType, Ident,
-    IfStmt, ImportSpec, IndexExpr, LabeledStmt, RangeStmt, ReturnStmt, SliceExpr, Spec, StarExpr,
-    Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
+    IfStmt, ImportSpec, IndexExpr, LabeledStmt, RangeStmt, ReturnStmt, SelectorExpr, SliceExpr,
+    Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
 };
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::{FileSet, Pos, NO_POS};
@@ -1517,6 +1517,11 @@ fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)
     let Expr::CallExpr(call) = &ret.results[0] else {
         return;
     };
+    // Upstream `qualifiedName`: only simple `pkg.Func` / `ident` / `recv.Method`
+    // where recv is an Ident — skip `LoadedData().HasSection` etc.
+    if !is_simple_unlambda_callable(&call.fun) {
+        return;
+    }
     let Some(callable) = call_qualified_name(call).or_else(|| expr_text(&call.fun)) else {
         return;
     };
@@ -1601,6 +1606,77 @@ fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)
         fl.ty.func.0 as u32,
         format!("replace `{lit_text}` with `{callable}`"),
     );
+}
+
+/// Upstream unlambda only handles simple callables (`fn`, `pkg.Fn`, `x.Method`
+/// with Ident receiver) — not `LoadedData().HasSection`.
+fn is_simple_unlambda_callable(fun: &Expr) -> bool {
+    let fun = unparen_expr(fun);
+    match fun {
+        Expr::Ident(_) => true,
+        Expr::SelectorExpr(sel) => matches!(unparen_expr(&sel.x), Expr::Ident(_)),
+        _ => false,
+    }
+}
+
+fn unparen_expr(e: &Expr) -> &Expr {
+    let mut cur = e;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
+/// go-critic underef with default `skipRecvDeref: true`.
+fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, String)>) {
+    if is_ptr_recv_method_call(pass, sel) {
+        return;
+    }
+    let Expr::ParenExpr(paren) = sel.x.as_ref() else {
+        return;
+    };
+    let Expr::StarExpr(star) = paren.x.as_ref() else {
+        return;
+    };
+    let Some(inner) = expr_text(&star.x) else {
+        return;
+    };
+    report(
+        pending,
+        sel.sel.pos().0 as u32,
+        format!(
+            "could simplify (*{inner}).{} to {inner}.{}",
+            sel.sel.name, sel.sel.name
+        ),
+    );
+}
+
+/// True when `sel` is a method with a pointer receiver (go-critic
+/// `isPtrRecvMethodCall`).
+fn is_ptr_recv_method_call(pass: &Pass<'_>, sel: &SelectorExpr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj) = info.uses.get(&sel.sel.id).copied() else {
+        return false;
+    };
+    let ObjectData::Func(f) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    let Some(sig) = f.typ() else {
+        return false;
+    };
+    let Some(recv) = guff_types::signature::signature_recv(&artifacts.types, sig) else {
+        return false;
+    };
+    let Some(recv_ty) = recv.typ(&artifacts.objects) else {
+        return false;
+    };
+    let u = recv_ty.underlying(&artifacts.types);
+    matches!(artifacts.types.get(u), TypeData::Pointer(_))
 }
 
 /// Upstream unlambda: skip if `Fun` contains a `Var` whose underlying type is
@@ -7034,14 +7110,6 @@ fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
 
 // badLock / externalErrorReassign / uncheckedInlineErr / boolExprSimplify ------
 
-fn unparen_expr(e: &Expr) -> &Expr {
-    let mut cur = e;
-    while let Expr::ParenExpr(p) = cur {
-        cur = &p.x;
-    }
-    cur
-}
-
 fn mutex_method_call(call: &CallExpr) -> Option<(&Expr, &str)> {
     if !call.args.is_empty() {
         return None;
@@ -7991,20 +8059,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::SelectorExpr(sel) if enabled(&set, "underef") => {
-                    if let Expr::ParenExpr(paren) = sel.x.as_ref() {
-                        if let Expr::StarExpr(star) = paren.x.as_ref() {
-                            if let Some(inner) = expr_text(&star.x) {
-                                report(
-                                    &mut pending,
-                                    sel.sel.pos().0 as u32,
-                                    format!(
-                                        "could simplify (*{inner}).{} to {inner}.{}",
-                                        sel.sel.name, sel.sel.name
-                                    ),
-                                );
-                            }
-                        }
-                    }
+                    check_underef(pass, sel, &mut pending);
                 }
                 NodeRef::TypeAssertExpr(a) if enabled(&set, "sloppyTypeAssert") => {
                     check_sloppy_type_assert(pass, a, &mut pending);

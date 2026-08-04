@@ -9,6 +9,7 @@ use guff::ast::{
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
@@ -77,6 +78,66 @@ fn is_pointer_sel(pass: &Pass<'_>, e: &Expr) -> bool {
         .is_some_and(|s| s.kind() == SelectionKind::FieldVal && s.indirect())
 }
 
+/// Upstream `getRootIdent`: peel Index/Selector; pointer-indirected selectors
+/// are not a safe local copy.
+fn get_root_ident<'a>(pass: &Pass<'_>, mut node: &'a Expr) -> Option<&'a Ident> {
+    loop {
+        match unparen(node) {
+            Expr::Ident(id) => return Some(id),
+            Expr::IndexExpr(i) => node = &i.x,
+            Expr::SelectorExpr(sel) => {
+                if is_pointer_sel(pass, node) {
+                    return None;
+                }
+                node = &sel.x;
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn enclosing_span(n: NodeRef<'_>) -> Option<(u32, u32)> {
+    match n {
+        NodeRef::ForStmt(ForStmt { for_, body, .. }) => {
+            Some((for_.0 as u32, body.end().0 as u32))
+        }
+        NodeRef::RangeStmt(RangeStmt { for_, body, .. }) => {
+            Some((for_.0 as u32, body.end().0 as u32))
+        }
+        NodeRef::FuncLit(FuncLit { ty, body, .. }) => {
+            Some((ty.pos().0 as u32, body.end().0 as u32))
+        }
+        NodeRef::FuncDecl(FuncDecl {
+            ty,
+            body: Some(body),
+            ..
+        }) => Some((ty.pos().0 as u32, body.end().0 as u32)),
+        _ => None,
+    }
+}
+
+/// Upstream `isWithinLoop`: lhs object's parent scope lies inside `node`.
+/// Locals like `var tracingCtx context.Context` assigned with `=` are OK.
+fn is_defined_within(pass: &Pass<'_>, exp: &Expr, node: NodeRef<'_>) -> bool {
+    let Some((npos, nend)) = enclosing_span(node) else {
+        return false;
+    };
+    let Some(lhs) = get_root_ident(pass, exp) else {
+        return false;
+    };
+    let Some(obj) = code::object_of(pass, lhs) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(scope) = obj.parent(&artifacts.objects) else {
+        return false;
+    };
+    let s = artifacts.scopes.get(scope);
+    s.pos() >= npos && s.end() <= nend
+}
+
 fn get_stmt_list(stmt: &Stmt) -> Option<&[Stmt]> {
     match stmt {
         Stmt::BlockStmt(b) => Some(&b.list),
@@ -92,11 +153,12 @@ fn get_stmt_list(stmt: &Stmt) -> Option<&[Stmt]> {
 fn find_nested_context<'a>(
     pass: &Pass<'_>,
     stmts: &'a [Stmt],
+    enclosing: NodeRef<'_>,
 ) -> Option<&'a AssignStmt> {
     let mut reset: HashSet<String> = HashSet::new();
     for stmt in stmts {
         if let Some(list) = get_stmt_list(stmt) {
-            if let Some(found) = find_nested_context(pass, list) {
+            if let Some(found) = find_nested_context(pass, list, enclosing) {
                 return Some(found);
             }
         }
@@ -122,10 +184,13 @@ fn find_nested_context<'a>(
         if !name.is_empty() && reset.contains(&name) {
             continue;
         }
-        // Pointer root / within-loop local copies: report pointers;
-        // skip complex within-loop analysis (DEFERRED subtlety).
+        // Pointer roots are always reported (upstream).
         if is_pointer_sel(pass, &assign.lhs[0]) {
             return Some(assign);
+        }
+        // Locals defined inside this For/FuncLit/FuncDecl may be reassigned.
+        if is_defined_within(pass, &assign.lhs[0], enclosing) {
+            continue;
         }
         return Some(assign);
     }
@@ -163,7 +228,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(body) = body_of(n) else {
                 return true;
             };
-            let Some(assign) = find_nested_context(pass, &body.list) else {
+            let Some(assign) = find_nested_context(pass, &body.list, n) else {
                 return true;
             };
             let category = category_for(n);

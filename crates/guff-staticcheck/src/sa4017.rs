@@ -59,17 +59,35 @@ fn call_pos(expr: &Expr) -> Option<u32> {
     }
 }
 
-/// Positions of CallExprs that are (part of) an assignment RHS — not ExprStmt discards.
+/// Positions of CallExprs that are (part of) an assignment RHS or return
+/// value — not ExprStmt discards.
 fn assigned_call_positions(pass: &Pass<'_>) -> HashSet<u32> {
     let mut out = HashSet::new();
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
-            if let NodeRef::AssignStmt(a) = n {
-                for r in &a.rhs {
-                    if let Some(pos) = call_pos(r) {
-                        out.insert(pos);
+            match n {
+                NodeRef::AssignStmt(a) => {
+                    for r in &a.rhs {
+                        if let Some(pos) = call_pos(r) {
+                            out.insert(pos);
+                        }
                     }
                 }
+                NodeRef::ReturnStmt(r) => {
+                    for e in &r.results {
+                        if let Some(pos) = call_pos(e) {
+                            out.insert(pos);
+                        }
+                    }
+                }
+                NodeRef::ValueSpec(vs) => {
+                    for v in &vs.values {
+                        if let Some(pos) = call_pos(v) {
+                            out.insert(pos);
+                        }
+                    }
+                }
+                _ => {}
             }
             true
         });
