@@ -103,6 +103,20 @@ fn revive_exported_skips_methods_on_private_receivers() {
 }
 
 #[test]
+fn revive_exported_skips_sort_interface_methods() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/sortable_ok",
+        "sortable_ok.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    assert!(
+        messages.iter().all(|m| !m.contains("exported:")),
+        "sort.Interface Len/Less/Swap must be silent: {messages:?}"
+    );
+}
+
+#[test]
 fn revive_analyzer_graph_is_valid() {
     validate(&[revive()]).expect("valid analyzer graph");
 }

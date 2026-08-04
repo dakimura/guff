@@ -5,12 +5,12 @@
 //! (same pattern as `blank-imports` / ST1020) and remap positions onto the
 //! package `FileSet`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use guff::ast::{Decl, File, FuncDecl, GenDecl, Spec, TypeSpec, ValueSpec};
+use guff::ast::{Decl, Expr, FieldList, File, FuncDecl, FuncType, GenDecl, Spec, TypeSpec, ValueSpec};
 use guff::parser::{parse_file, PARSE_COMMENTS};
 use guff::position::FileSet;
 use guff::token::Token;
@@ -30,6 +30,8 @@ pub struct Checker<'a> {
     skip_stutter: bool,
     /// When false (upstream default), skip exported methods on unexported receivers.
     check_private_receivers: bool,
+    /// Receiver type keys that implement `sort.Interface` (Len+Less+Swap).
+    sortable: HashSet<String>,
     /// `PARSE_COMMENTS` reparse for the current file (docs + private FileSet).
     comments: Option<(Arc<FileSet>, File)>,
 }
@@ -52,6 +54,7 @@ impl<'a> Checker<'a> {
             skip_file: false,
             skip_stutter,
             check_private_receivers,
+            sortable: scan_sortable(pass.files()),
             comments: None,
         })
     }
@@ -100,6 +103,7 @@ impl<'a> Checker<'a> {
                 pkg,
                 self.skip_stutter,
                 self.check_private_receivers,
+                &self.sortable,
                 &mut self.gen_decl_missing,
                 &mut batch,
             );
@@ -113,6 +117,7 @@ impl<'a> Checker<'a> {
                 pkg,
                 self.skip_stutter,
                 self.check_private_receivers,
+                &self.sortable,
                 &mut self.gen_decl_missing,
                 &mut self.failures,
             );
@@ -170,11 +175,99 @@ fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) 
 /// Methods that commonly implement std interfaces — upstream skips them.
 const COMMON_METHODS: &[&str] = &["Error", "Read", "ServeHTTP", "String", "Write", "Unwrap"];
 
+const BF_LEN: u8 = 1 << 0;
+const BF_LESS: u8 = 1 << 1;
+const BF_SWAP: u8 = 1 << 2;
+const BF_SORTABLE: u8 = BF_LEN | BF_LESS | BF_SWAP;
+
+fn scan_sortable(files: &[File]) -> HashSet<String> {
+    let mut flags: HashMap<String, u8> = HashMap::new();
+    for file in files {
+        for decl in &file.decls {
+            let Decl::FuncDecl(f) = decl else {
+                continue;
+            };
+            if f.recv.as_ref().is_none_or(|r| r.list.is_empty()) {
+                continue;
+            }
+            let recv = f
+                .recv
+                .as_ref()
+                .and_then(|r| r.list.first())
+                .and_then(|fld| fld.ty.as_ref())
+                .map(receiver_type_key)
+                .unwrap_or_default();
+            if let Some(bit) = sortable_method_flag(f) {
+                *flags.entry(recv).or_default() |= bit;
+            }
+        }
+    }
+    flags
+        .into_iter()
+        .filter_map(|(recv, ms)| (ms == BF_SORTABLE).then_some(recv))
+        .collect()
+}
+
+fn sortable_method_flag(f: &FuncDecl) -> Option<u8> {
+    match f.name.name.as_str() {
+        "Len" if func_signature_is(f, &[], &["int"]) => Some(BF_LEN),
+        "Less" if func_signature_is(f, &["int", "int"], &["bool"]) => Some(BF_LESS),
+        "Swap" if func_signature_is(f, &["int", "int"], &[]) => Some(BF_SWAP),
+        _ => None,
+    }
+}
+
+fn func_signature_is(f: &FuncDecl, want_params: &[&str], want_results: &[&str]) -> bool {
+    let FuncType {
+        params, results, ..
+    } = &f.ty;
+    let got_params = field_type_names(params.as_ref());
+    let got_results = field_type_names(results.as_ref());
+    got_params.len() == want_params.len()
+        && got_params.iter().zip(want_params).all(|(a, b)| a == b)
+        && got_results.len() == want_results.len()
+        && got_results.iter().zip(want_results).all(|(a, b)| a == b)
+}
+
+fn field_type_names(fields: Option<&FieldList>) -> Vec<String> {
+    let Some(fields) = fields else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for field in &fields.list {
+        let Some(ty) = field.ty.as_ref() else {
+            continue;
+        };
+        let name = ast_type_name(ty).to_string();
+        let n = if field.names.is_empty() {
+            1
+        } else {
+            field.names.len()
+        };
+        for _ in 0..n {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+fn ast_type_name(ty: &Expr) -> &str {
+    match ty {
+        Expr::Ident(id) => id.name.as_str(),
+        Expr::StarExpr(s) => match s.x.as_ref() {
+            Expr::Ident(id) => id.name.as_str(),
+            _ => "",
+        },
+        _ => "",
+    }
+}
+
 fn check_file(
     file: &File,
     pkg: &str,
     skip_stutter: bool,
     check_private_receivers: bool,
+    sortable: &HashSet<String>,
     gen_decl_missing: &mut HashMap<usize, bool>,
     failures: &mut Vec<Failure>,
 ) {
@@ -209,7 +302,7 @@ fn check_file(
                 }
             }
             Decl::FuncDecl(f) => {
-                lint_func_doc(f, check_private_receivers, failures);
+                lint_func_doc(f, check_private_receivers, sortable, failures);
                 if f.recv.is_none() && !skip_stutter {
                     check_repetitive(pkg, &f.name.name, "func", f.name.name_pos.0, failures);
                 }
@@ -219,7 +312,11 @@ fn check_file(
     }
 }
 
-fn must_check_method(f: &FuncDecl, check_private_receivers: bool) -> bool {
+fn must_check_method(
+    f: &FuncDecl,
+    check_private_receivers: bool,
+    sortable: &HashSet<String>,
+) -> bool {
     let recv = f
         .recv
         .as_ref()
@@ -235,15 +332,23 @@ fn must_check_method(f: &FuncDecl, check_private_receivers: bool) -> bool {
     if COMMON_METHODS.contains(&f.name.name.as_str()) {
         return false;
     }
+    if matches!(f.name.name.as_str(), "Len" | "Less" | "Swap") && sortable.contains(&recv) {
+        return false;
+    }
     true
 }
 
-fn lint_func_doc(f: &FuncDecl, check_private_receivers: bool, failures: &mut Vec<Failure>) {
+fn lint_func_doc(
+    f: &FuncDecl,
+    check_private_receivers: bool,
+    sortable: &HashSet<String>,
+    failures: &mut Vec<Failure>,
+) {
     if !f.name.is_exported() {
         return;
     }
     let (kind, name) = if f.recv.is_some() {
-        if !must_check_method(f, check_private_receivers) {
+        if !must_check_method(f, check_private_receivers, sortable) {
             return;
         }
         let recv = f
