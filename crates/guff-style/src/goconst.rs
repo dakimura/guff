@@ -419,16 +419,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if count < options.min_occurrences {
             continue;
         }
-        // golangci/goconst reports the first occurrence in each file that
-        // contains the duplicated literal (package-level count, per-file
-        // diagnostics). Match that so finding-set keys align.
+        // jgautheron/goconst v1.10.0 (golangci 2.12.x) emits the first
+        // *encounter* per file (AST walk / append order), not the minimum
+        // byte offset. Nested composite lits are visited after parent
+        // KeyValue BasicLit values, so `e: "fred"` wins over
+        // `ObjectMeta{Name: "fred"}` on an earlier line.
         let mut first_per_file: HashMap<String, u32> = HashMap::new();
         for &pos in positions {
             let filename = pass.fset().position(Pos(pos as i64)).filename;
-            first_per_file
-                .entry(filename)
-                .and_modify(|p| *p = (*p).min(pos))
-                .or_insert(pos);
+            first_per_file.entry(filename).or_insert(pos);
         }
         let mut report_positions: Vec<_> = first_per_file.into_values().collect();
         report_positions.sort_unstable();
