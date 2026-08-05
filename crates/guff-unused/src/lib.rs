@@ -137,6 +137,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                         roots.insert(*obj);
                                     } else {
                                         candidates.insert(*obj);
+                                    }
+                                    // honnef unused (10.1): const groups include
+                                    // every non-blank name. If any member is
+                                    // used, the whole group is marked used.
+                                    if *tok == Some(Token::CONST) {
                                         decl_group.push(*obj);
                                     }
                                 }

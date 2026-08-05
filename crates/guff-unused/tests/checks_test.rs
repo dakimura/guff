@@ -36,6 +36,17 @@ fn unused_const_group_marks_siblings_used() {
 }
 
 #[test]
+fn unused_const_group_with_exported_marks_unexported_siblings() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/const_exported",
+        &dir.join("const_group_exported_ok.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
 fn unused_flags_method_on_used_type() {
     let dir = support::testdata("basic");
     let pkg = support::typecheck_pkg("example.com/unused/method", &dir.join("method_bad.go"));
