@@ -907,6 +907,10 @@ pub struct GocriticSettings {
     pub enabled_checks: Vec<String>,
     #[serde(default, rename = "disabled-checks")]
     pub disabled_checks: Vec<String>,
+    #[serde(default, rename = "enabled-tags")]
+    pub enabled_tags: Vec<String>,
+    #[serde(default, rename = "disabled-tags")]
+    pub disabled_tags: Vec<String>,
 }
 
 /// One `forbidigo.forbid` entry (string or `{pattern,msg,pkg}`).
@@ -3301,6 +3305,8 @@ impl GocriticSettings {
             disable_all: self.disable_all,
             enabled_checks: self.enabled_checks.clone(),
             disabled_checks: self.disabled_checks.clone(),
+            enabled_tags: self.enabled_tags.clone(),
+            disabled_tags: self.disabled_tags.clone(),
         }
     }
 }

@@ -42,7 +42,8 @@
 //! - batch 17 (enable-all extra): `regexpSimplify`
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
-//! (prometheus-style `enable-all` + `disabled-checks` works).
+//! / `enabled-tags` / `disabled-tags` (prometheus-style `enable-all` +
+//! `disabled-checks` works; cli-style `disabled-tags: [style]` too).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host),
 //! regexpSimplify Go-only spellings (`[][]`) / full quasilyte/regex Value parity,
@@ -228,6 +229,39 @@ fn is_implemented(name: &str) -> bool {
     DEFAULT_CHECKS.contains(&name) || ENABLE_ALL_EXTRA_CHECKS.contains(&name)
 }
 
+/// go-critic tags for implemented checkers (from CheckerInfo.Tags / `//doc:tags`).
+/// Untagged checks are never removed by `disabled-tags` alone.
+fn check_tags(name: &str) -> &'static [&'static str] {
+    match name {
+        // Style (default + enable-all)
+        "boolExprSimplify" | "builtinShadow" | "captLocal" | "commentFormatting"
+        | "commentedOutImport" | "defaultCaseOrder" | "docStub" | "dupImport" | "elseif"
+        | "emptyFallthrough" | "emptyStringTest" | "hexLiteral" | "ifElseChain"
+        | "importShadow" | "initClause" | "methodExprCall" | "nestingReduce" | "newDeref"
+        | "octalLiteral" | "paramTypeCombine" | "ptrToRefParam" | "regexpMust"
+        | "regexpSimplify" | "singleCaseSwitch" | "switchTrue" | "todoCommentWithoutDetail"
+        | "tooManyResultsChecker" | "typeAssertChain" | "typeDefFirst" | "typeSwitchVar"
+        | "typeUnparen" | "underef" | "unlabelStmt" | "unlambda" | "unnamedResult"
+        | "unnecessaryBlock" | "unslice" | "valSwap" | "whyNoLint" | "wrapperFunc"
+        | "assignOp" | "yodaStyleExpr" => &["style"],
+
+        // Diagnostic
+        "appendAssign" | "argOrder" | "badCall" | "badCond" | "badRegexp"
+        | "builtinShadowDecl" | "caseOrder" | "codegenComment" | "commentedOutCode"
+        | "deferInLoop" | "deprecatedComment" | "dupBranchBody" | "dupCase" | "dupOption"
+        | "dupSubExpr" | "evalOrder" | "exitAfterDefer" | "filepathJoin" | "flagDeref"
+        | "flagName" | "mapKey" | "nilValReturn" | "offBy1" | "rangeAppendAll"
+        | "regexpPattern" | "sloppyLen" | "sloppyReassign" | "sloppyTypeAssert" | "sortSlice"
+        | "sqlQuery" | "truncateCmp" | "unnecessaryDefer" | "weakCond" => &["diagnostic"],
+
+        // Performance
+        "appendCombine" | "hugeParam" | "indexAlloc" | "preferFprint" | "rangeExprCopy"
+        | "rangeValCopy" | "stringXbytes" => &["performance"],
+
+        _ => &[],
+    }
+}
+
 fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
     let mut set: HashSet<String> = if opts.enable_all {
         implemented_checks().map(|s| s.to_string()).collect()
@@ -242,6 +276,38 @@ fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
     for name in &opts.disabled_checks {
         set.remove(name);
     }
+
+    let enabled_tags: HashSet<String> = opts
+        .enabled_tags
+        .iter()
+        .map(|t| t.to_ascii_lowercase())
+        .collect();
+    let disabled_tags: HashSet<String> = opts
+        .disabled_tags
+        .iter()
+        .map(|t| t.to_ascii_lowercase())
+        .collect();
+
+    if !enabled_tags.is_empty() || !disabled_tags.is_empty() {
+        set.retain(|name| {
+            let tags = check_tags(name);
+            if !enabled_tags.is_empty() {
+                // Explicit enabled-tags: keep checks that carry any enabled tag
+                // (or were named in enabled-checks — already inserted above).
+                if opts.enabled_checks.iter().any(|c| c == name) {
+                    return true;
+                }
+                if !tags.iter().any(|t| enabled_tags.contains(*t)) {
+                    return false;
+                }
+            }
+            if tags.iter().any(|t| disabled_tags.contains(*t)) {
+                return false;
+            }
+            true
+        });
+    }
+
     // Only keep implemented names (unknown / deferred names are ignored).
     set.retain(|n| is_implemented(n));
     set

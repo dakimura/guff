@@ -724,6 +724,8 @@ pub struct ModernizeOptions {
 /// - `enable-all` → all implemented checks
 /// - `disable-all` → none (then `enabled-checks`)
 /// - `enabled-checks` / `disabled-checks` add/remove names
+/// - `enabled-tags` / `disabled-tags` filter by go-critic tags (`style`,
+///   `diagnostic`, `performance`, `experimental`, `opinionated`)
 ///
 /// Unknown / deferred check names are accepted so prometheus-style configs
 /// that disable unimplemented checks still parse.
@@ -733,6 +735,8 @@ pub struct GocriticOptions {
     pub disable_all: bool,
     pub enabled_checks: Vec<String>,
     pub disabled_checks: Vec<String>,
+    pub enabled_tags: Vec<String>,
+    pub disabled_tags: Vec<String>,
 }
 
 /// One forbidigo pattern (`linters.settings.forbidigo.forbid` entry).

@@ -6018,6 +6018,46 @@ fn gocritic_disabled_checks_are_skipped() {
 }
 
 #[test]
+fn gocritic_disabled_tags_style_skips_if_else_chain() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic", "bad.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            disabled_tags: vec!["style".into()],
+            ..GocriticOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("rewrite if-else to switch")),
+        "ifElseChain is style-tagged; disabled-tags:style must suppress it: {messages:?}"
+    );
+    // Diagnostic-tagged checks remain on.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains("append result not assigned")),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn gocritic_enable_all_extras() {
     use std::sync::Arc;
 
