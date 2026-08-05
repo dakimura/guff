@@ -45,7 +45,9 @@ fn make_analyzer(run: RunFn) -> Analyzer {
         doc: "check that errors returned by functions are handled",
         url: "https://github.com/kisielk/errcheck",
         run,
-        run_despite_errors: false,
+        // Partial type info is still enough to see error results; skipping on
+        // ill-typed packages drops real findings (k9s view OSS hunt).
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     }

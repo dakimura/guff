@@ -622,7 +622,7 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "intrange is a linter to find places where for loops could make use of an integer range.",
         url: "https://github.com/ckaznocha/intrange",
         run: run as RunFn,
-        run_despite_errors: false,
+        run_despite_errors: true,
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })

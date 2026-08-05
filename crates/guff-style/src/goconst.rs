@@ -5,8 +5,8 @@
 //! `match-constant=true`, `find-duplicates=false`, `ignore-calls=true`,
 //! `numbers=false`, `min=3`, `max=3`.
 //!
-//! DEFERRED: `ignore-strings` / `ignore-functions`, `eval-const-expressions`,
-//! and remaining settings keys.
+//! DEFERRED: `ignore-functions`, `eval-const-expressions`, and remaining
+//! settings keys.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -17,6 +17,7 @@ use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use regex::Regex;
 
 use crate::options::GoconstOptions;
 
@@ -81,6 +82,33 @@ fn passes_min_len(value: &str, min_len: usize) -> bool {
     !value.is_empty() && value.chars().count() >= min_len
 }
 
+/// Join ignore patterns with OR, wrapping each in `(...)` like upstream
+/// `NewWithIgnorePatterns`. Invalid patterns are skipped.
+fn compile_ignore_strings(patterns: &[String]) -> Option<Regex> {
+    if patterns.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for p in patterns {
+        if p.is_empty() {
+            continue;
+        }
+        // Validate each pattern individually so one bad entry doesn't drop all.
+        if Regex::new(p).is_err() {
+            continue;
+        }
+        parts.push(format!("({p})"));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Regex::new(&parts.join("|")).ok()
+}
+
+fn is_ignored_string(value: &str, ignore: Option<&Regex>) -> bool {
+    ignore.is_some_and(|re| re.is_match(value))
+}
+
 fn parse_go_int(s: &str) -> Option<i64> {
     if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         return i64::from_str_radix(rest, 16).ok();
@@ -91,7 +119,7 @@ fn parse_go_int(s: &str) -> Option<i64> {
     s.parse::<i64>().ok()
 }
 
-fn passes_number_range(value: &str, options: GoconstOptions) -> bool {
+fn passes_number_range(value: &str, options: &GoconstOptions) -> bool {
     // Upstream applies min/max to any string that ParseInt accepts — even when
     // ParseNumbers is false (golangci defaults min=3,max=3 drop `"443"` etc.).
     if options.number_min == 0 && options.number_max == 0 {
@@ -111,7 +139,8 @@ fn passes_number_range(value: &str, options: GoconstOptions) -> bool {
 
 fn add_literal(
     lit: &BasicLit,
-    options: GoconstOptions,
+    options: &GoconstOptions,
+    ignore: Option<&Regex>,
     occurrences: &mut HashMap<String, Vec<u32>>,
 ) {
     if !is_supported_lit(lit, options.numbers) {
@@ -126,6 +155,9 @@ fn add_literal(
     if !passes_number_range(&key, options) {
         return;
     }
+    if is_ignored_string(&key, ignore) {
+        return;
+    }
     occurrences
         .entry(key)
         .or_default()
@@ -134,18 +166,19 @@ fn add_literal(
 
 fn add_expr_lit(
     expr: &Expr,
-    options: GoconstOptions,
+    options: &GoconstOptions,
+    ignore: Option<&Regex>,
     occurrences: &mut HashMap<String, Vec<u32>>,
 ) {
     if let Expr::BasicLit(lit) = expr {
-        add_literal(lit, options, occurrences);
+        add_literal(lit, options, ignore, occurrences);
     }
 }
 
 fn collect_constants_from_gendecl(
     g: &GenDecl,
     filename: &str,
-    options: GoconstOptions,
+    options: &GoconstOptions,
     constants: &mut HashMap<String, Vec<ConstEntry>>,
 ) {
     for spec in &g.specs {
@@ -207,7 +240,8 @@ fn find_matching_const(
 
 fn collect(
     pass: &Pass<'_>,
-    options: GoconstOptions,
+    options: &GoconstOptions,
+    ignore: Option<&Regex>,
     occurrences: &mut HashMap<String, Vec<u32>>,
     constants: &mut HashMap<String, Vec<ConstEntry>>,
 ) {
@@ -244,41 +278,43 @@ fn collect(
                 NodeRef::CallExpr(c) => {
                     if !options.ignore_calls {
                         for arg in &c.args {
-                            add_expr_lit(arg, options, occurrences);
+                            add_expr_lit(arg, options, ignore, occurrences);
                         }
                     }
                     true
                 }
                 NodeRef::AssignStmt(a) => {
                     for rhs in &a.rhs {
-                        add_expr_lit(rhs, options, occurrences);
+                        add_expr_lit(rhs, options, ignore, occurrences);
                     }
                     true
                 }
                 NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
-                    add_expr_lit(&b.x, options, occurrences);
-                    add_expr_lit(&b.y, options, occurrences);
+                    add_expr_lit(&b.x, options, ignore, occurrences);
+                    add_expr_lit(&b.y, options, ignore, occurrences);
                     true
                 }
                 NodeRef::CaseClause(c) => {
                     for item in &c.list {
-                        add_expr_lit(item, options, occurrences);
+                        add_expr_lit(item, options, ignore, occurrences);
                     }
                     true
                 }
                 NodeRef::ReturnStmt(r) => {
                     for item in &r.results {
-                        add_expr_lit(item, options, occurrences);
+                        add_expr_lit(item, options, ignore, occurrences);
                     }
                     true
                 }
                 NodeRef::CompositeLit(cl) => {
                     for elt in &cl.elts {
                         match elt {
-                            Expr::BasicLit(lit) => add_literal(lit, options, occurrences),
+                            Expr::BasicLit(lit) => {
+                                add_literal(lit, options, ignore, occurrences)
+                            }
                             Expr::KeyValueExpr(kv) => {
-                                add_expr_lit(&kv.key, options, occurrences);
-                                add_expr_lit(&kv.value, options, occurrences);
+                                add_expr_lit(&kv.key, options, ignore, occurrences);
+                                add_expr_lit(&kv.value, options, ignore, occurrences);
                             }
                             _ => {}
                         }
@@ -361,12 +397,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let options = pass
         .settings::<GoconstOptions>("goconst")
-        .copied()
+        .cloned()
         .unwrap_or_default();
+    let ignore = compile_ignore_strings(&options.ignore_strings);
 
     let mut occurrences: HashMap<String, Vec<u32>> = HashMap::new();
     let mut constants: HashMap<String, Vec<ConstEntry>> = HashMap::new();
-    collect(pass, options, &mut occurrences, &mut constants);
+    collect(
+        pass,
+        &options,
+        ignore.as_ref(),
+        &mut occurrences,
+        &mut constants,
+    );
 
     let mut keys: Vec<_> = occurrences.keys().cloned().collect();
     keys.sort();

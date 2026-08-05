@@ -308,7 +308,7 @@ impl Default for PerfsprintOptions {
 }
 
 /// `linters.settings.goconst` / `linters-settings.goconst`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GoconstOptions {
     pub min_len: usize,
     pub min_occurrences: usize,
@@ -325,6 +325,8 @@ pub struct GoconstOptions {
     pub number_min: i64,
     /// golangci `max` (only when `numbers` is true).
     pub number_max: i64,
+    /// golangci `ignore-string-values` (regex patterns; OR-joined like upstream).
+    pub ignore_strings: Vec<String>,
 }
 
 impl Default for GoconstOptions {
@@ -339,6 +341,7 @@ impl Default for GoconstOptions {
             numbers: false,
             number_min: 3,
             number_max: 3,
+            ignore_strings: Vec::new(),
         }
     }
 }

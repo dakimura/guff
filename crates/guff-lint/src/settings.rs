@@ -478,6 +478,12 @@ pub struct GoconstSettings {
     pub numbers: Option<bool>,
     pub min: Option<i64>,
     pub max: Option<i64>,
+    /// Regex patterns for strings to ignore (golangci `ignore-string-values`).
+    #[serde(default, rename = "ignore-string-values")]
+    pub ignore_string_values: Vec<String>,
+    /// Deprecated single-pattern form; merged into [`Self::ignore_string_values`].
+    #[serde(default, rename = "ignore-strings")]
+    pub ignore_strings: Option<String>,
 }
 
 /// `linters.settings.copyloopvar` / `linters-settings.copyloopvar`.
@@ -2900,6 +2906,13 @@ impl PerfsprintSettings {
 impl GoconstSettings {
     pub fn to_guff_goconst(&self) -> guff_style::GoconstOptions {
         let defaults = guff_style::GoconstOptions::default();
+        let mut ignore_strings = self.ignore_string_values.clone();
+        // golangci migrates deprecated `ignore-strings` into the list form.
+        if let Some(legacy) = self.ignore_strings.as_ref() {
+            if !legacy.is_empty() && !ignore_strings.iter().any(|p| p == legacy) {
+                ignore_strings.push(legacy.clone());
+            }
+        }
         guff_style::GoconstOptions {
             min_len: self.min_len.unwrap_or(defaults.min_len),
             min_occurrences: self.min_occurrences.unwrap_or(defaults.min_occurrences),
@@ -2910,6 +2923,7 @@ impl GoconstSettings {
             numbers: self.numbers.unwrap_or(defaults.numbers),
             number_min: self.min.unwrap_or(defaults.number_min),
             number_max: self.max.unwrap_or(defaults.number_max),
+            ignore_strings,
         }
     }
 }

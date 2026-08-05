@@ -14,8 +14,6 @@
 //!
 //! - **Type-parameter arguments** (Go's `underIs` / `sliceElem`-over-typeset
 //!   branches) are reduced to the operand's underlying type.
-//! - **`append([]byte, str...)`** string special case is not handled.
-//! - **`copy([]byte, str)`** string special case is not handled.
 //! - `hasCallOrRecv` tracking is omitted, so `len`/`cap` of an array is always
 //!   treated as a constant (Go also makes it constant when there is no call /
 //!   receive — the common case).
@@ -950,8 +948,8 @@ impl Checker {
         &mut self,
         x: &mut Operand<'a>,
         call: &'a CallExpr,
-        _args: &[Operand<'a>],
-        _nargs: usize,
+        args: &[Operand<'a>],
+        nargs: usize,
     ) -> bool {
         // The first argument must be a slice; E is its element type.
         let s_typ = x.typ.unwrap_or_else(|| self.invalid_type());
@@ -967,7 +965,31 @@ impl Checker {
                 return false;
             }
         };
-        // DEFERRED: append([]byte, str...) string special case.
+
+        // Special case: append([]byte, string...) appends the string's bytes.
+        // go/types: nargs==2 && dots, first assignable to []byte, second is string.
+        let uint8 = self.basic(BasicKind::Uint8);
+        let byte_slice = new_slice(&mut self.types, uint8);
+        if nargs == 2 && crate::util::has_dots(call) {
+            let y = &args[1];
+            let y_typ = y.typ.unwrap_or_else(|| self.invalid_type());
+            let y_under = y_typ.underlying(&self.types);
+            if is_string(&self.types, y_under) && self.assignable_to(x, byte_slice).ok {
+                let s_param = crate::object::var::new_param(&mut self.objects, "", s_typ);
+                // Variadic last param is the string type itself (not []string),
+                // matching go/types Signature special case for append.
+                let rest_param = crate::object::var::new_param(&mut self.objects, "", y_typ);
+                let params = crate::tuple::new_tuple(&mut self.types, &[s_param, rest_param]);
+                let result_var = crate::object::var::new_param(&mut self.objects, "", s_typ);
+                let results = crate::tuple::new_tuple(&mut self.types, &[result_var]);
+                let sig =
+                    new_signature_type(&mut self.types, None, &[], &[], params, results, true);
+                self.arguments(call, sig);
+                x.mode = OperandMode::Value;
+                x.typ = Some(s_typ);
+                return true;
+            }
+        }
 
         // Build a custom variadic signature `func(s S, rest ...E) S` and run
         // it through the ordinary argument checker.

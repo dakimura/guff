@@ -668,16 +668,29 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
         if matches!(lhs, Expr::IndexExpr(_)) && !matches!(&call.args[0], Expr::IndexExpr(_)) {
             continue;
         }
-        let first = match &call.args[0] {
-            Expr::SliceExpr(s) => s.x.as_ref(),
-            other => other,
-        };
-        if !exprs_equal(lhs, first) {
-            report(
-                pending,
-                call.fun.pos().0 as u32,
-                "append result not assigned to the same slice",
-            );
+        // Upstream go-critic only compares when the append base is an Ident,
+        // SelectorExpr, IndexExpr, or SliceExpr — not CompositeLit / CallExpr
+        // (e.g. `options := append([]string{""}, …)` is intentional).
+        match &call.args[0] {
+            Expr::SliceExpr(s) => {
+                if !exprs_equal(lhs, s.x.as_ref()) {
+                    report(
+                        pending,
+                        call.fun.pos().0 as u32,
+                        "append result not assigned to the same slice",
+                    );
+                }
+            }
+            Expr::IndexExpr(_) | Expr::Ident(_) | Expr::SelectorExpr(_) => {
+                if !exprs_equal(lhs, &call.args[0]) {
+                    report(
+                        pending,
+                        call.fun.pos().0 as u32,
+                        "append result not assigned to the same slice",
+                    );
+                }
+            }
+            _ => {}
         }
     }
 }

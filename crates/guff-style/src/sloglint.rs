@@ -14,6 +14,7 @@
 use std::sync::OnceLock;
 
 use guff::ast::{BasicLit, CallExpr, CompositeLit, Expr, FieldList, FuncType, Ident};
+use guff::scope::{ObjDecl, ObjKind};
 use guff::token::Token;
 use guff::walk::{self, NodeRef, Visitor};
 use guff_analysis::code;
@@ -175,8 +176,28 @@ fn is_group_call(pass: &Pass<'_>, expr: &Expr) -> bool {
     )
 }
 
+/// Resolve a log key name the way upstream sloglint does: only string
+/// literals and same-package const idents (via AST `Ident.obj`). Cross-package
+/// selectors like `slogs.ColName` intentionally yield `None`, so
+/// `key-naming-case` / allowed / forbidden checks skip them.
 fn key_name(pass: &Pass<'_>, key: &Expr) -> Option<String> {
-    code::expr_to_string(pass, key)
+    match key {
+        Expr::BasicLit(_) => code::expr_to_string(pass, key),
+        Expr::Ident(id) => {
+            let obj = id.obj.lock().ok()?.clone()?;
+            if obj.kind != ObjKind::Con {
+                return None;
+            }
+            let ObjDecl::ValueSpec(vs) = &obj.decl else {
+                return None;
+            };
+            // Upstream always takes Values[0] (TODO for multi-value specs).
+            vs.values
+                .first()
+                .and_then(|v| code::expr_to_string(pass, v))
+        }
+        _ => None,
+    }
 }
 
 fn is_const_key(pass: &Pass<'_>, key: &Expr) -> bool {
