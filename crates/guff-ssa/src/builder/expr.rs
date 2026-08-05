@@ -517,13 +517,20 @@ impl<'a> Builder<'a> {
 
         let typ = self.type_of(e.id);
         let block = self.block.expect("no current block");
-        let id = crate::emit::emit(self.func_mut(), block, InstrData::Slice(crate::instr::Slice {
-            x,
-            low,
-            high,
-            max,
-            typ,
-        }));
+        // Match IndexExpr: record `[` so analyzers (e.g. gosec G602) can report
+        // slice-bounds findings at the slice expression site.
+        let id = crate::emit::emit_with_pos(
+            self.func_mut(),
+            block,
+            InstrData::Slice(crate::instr::Slice {
+                x,
+                low,
+                high,
+                max,
+                typ,
+            }),
+            e.lbrack,
+        );
         Value::Instr(id)
     }
 

@@ -131,6 +131,7 @@ mod iotamixing;
 mod grouper;
 mod ireturn;
 mod gosec;
+mod gosec_g602;
 mod tagliatelle;
 mod reassign;
 mod recvcheck;

@@ -24,3 +24,8 @@ func BadPathTraversal() {
 		_, _ = os.OpenFile(path, 0, 0) // G703
 	}
 }
+
+func BadSliceBounds() {
+	s := make([]byte, 0)
+	_ = s[:3] // G602
+}

@@ -31,8 +31,10 @@
 //! - **G405** — weak encryption (`crypto/des` / `crypto/rc4`)
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
-//! - **G703** — path traversal via env/args/`ReadFile` into file-path sinks
-//!   (local-assign approx of upstream SSA taint; full taint engine DEFERRED)
+//! - **G602** — slice index / bounds out of range (SSA; see `gosec_g602`)
+//! - **G703** — path traversal via env/args/`ReadFile` into sinks (all args,
+//!   matching empty `CheckArgs`; local-assign approx of SSA taint; full engine
+//!   + sanitizers DEFERRED)
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
@@ -272,7 +274,7 @@ const RULES: &[RuleDef] = &[
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
     "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G122", "G124", "G203", "G204",
-    "G301", "G302", "G303", "G306", "G402", "G403", "G703",
+    "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
 ];
 
 const G703_WHAT: &str = "Path traversal via taint analysis";
@@ -1837,10 +1839,14 @@ fn check_g703_sink_call(
     if !G703_SINKS.iter().any(|(p, n)| *p == pkg && *n == name) {
         return;
     }
-    let Some(path_arg) = call.args.first() else {
-        return;
-    };
-    if path_arg_is_g703_tainted(pass, path_arg, tainted) {
+    // Upstream PathTraversal sinks omit CheckArgs ⇒ every argument is checked
+    // (e.g. `WriteFile(path, dataFromReadFile, …)` fires on the content arg).
+    // ServeFile / ServeFileFS use explicit indices; we only list all-args sinks.
+    if call
+        .args
+        .iter()
+        .any(|a| path_arg_is_g703_tainted(pass, a, tainted))
+    {
         pending.push((
             call.pos().0 as u32,
             format!("G703: {G703_WHAT}"),
@@ -2324,6 +2330,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g703(pass, &enabled, &mut pending);
+    crate::gosec_g602::check_g602(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
