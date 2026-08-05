@@ -172,9 +172,10 @@ fn parse_import_path_spec(data: &[u8]) -> Option<&str> {
 
 fn skip_import_spec(mut data: &[u8]) -> &[u8] {
     data = skip_space_and_comments(data);
-    if data.starts_with(b"import") {
-        return data;
-    }
+    // Do not treat identifiers that merely *start with* `import` (e.g. `importCmd`)
+    // as the `import` keyword — that failed to advance and spun forever while
+    // `parse_go_file_info` pushed the same path on every iteration (cli
+    // `pkg/cmd/alias` OOM).
     if data.first() == Some(&b'"') {
         if let Some(i) = data[1..].iter().position(|&b| b == b'"') {
             return &data[i + 2..];

@@ -38,3 +38,24 @@ import (
     let info = parse_go_file_info(src).unwrap();
     assert_eq!(info.imports, vec!["fmt", "strings", "os"]);
 }
+
+#[test]
+fn parse_import_alias_starting_with_import() {
+    // Regression: `importCmd` must not be mistaken for the `import` keyword
+    // (guff-build skip_import_spec; cli pkg/cmd/alias OOM).
+    let src = br#"package alias
+
+import (
+	importCmd "github.com/cli/cli/v2/pkg/cmd/alias/imports"
+	"fmt"
+)
+"#;
+    let info = parse_go_file_info(src).unwrap();
+    assert_eq!(
+        info.imports,
+        vec![
+            "github.com/cli/cli/v2/pkg/cmd/alias/imports",
+            "fmt"
+        ]
+    );
+}
