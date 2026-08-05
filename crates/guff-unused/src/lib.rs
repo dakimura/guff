@@ -213,21 +213,37 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     Ok(None)
 }
 
-pub fn analyzer() -> &'static Analyzer {
-    static A: OnceLock<Analyzer> = OnceLock::new();
-    A.get_or_init(|| Analyzer {
+fn make_analyzer(run_despite_errors: bool) -> Analyzer {
+    Analyzer {
         name: "unused",
         doc: "check for unused package-level declarations",
         url: "https://pkg.go.dev/honnef.co/go/tools/unused",
         run: run as RunFn,
-        // Partial types still let unused see live refs; skipping on
-        // ill_typed packages drops real nolintlint hits (restic `sys` field).
-        run_despite_errors: true,
+        run_despite_errors,
         requires: vec![generated::analyzer()],
         fact_types: vec![],
-    })
+    }
+}
+
+/// Default: skip ill-typed packages (matches honnef when types fail, and
+/// avoids FP + wall cost on guff false-`ill_typed` packages).
+pub fn analyzer() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(|| make_analyzer(false))
+}
+
+/// When `nolintlint` is also enabled, run on ill-typed packages so partial
+/// type info can still mark live refs (restic `sys` field) and nolintlint
+/// can report truly unused `//nolint:unused` directives.
+pub fn analyzer_despite_errors() -> &'static Analyzer {
+    static A: OnceLock<Analyzer> = OnceLock::new();
+    A.get_or_init(|| make_analyzer(true))
 }
 
 pub fn analyzers() -> Vec<&'static Analyzer> {
     vec![analyzer()]
+}
+
+pub fn analyzers_despite_errors() -> Vec<&'static Analyzer> {
+    vec![analyzer_despite_errors()]
 }

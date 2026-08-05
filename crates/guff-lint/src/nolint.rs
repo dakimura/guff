@@ -349,7 +349,7 @@ impl NolintIndex {
                         // packages never see those files, so their directives
                         // stay unmatched — that is not an unused-nolintlint hit.
                         if self.ill_typed_files.contains(filename)
-                            && linter_skipped_on_ill_typed(lint)
+                            && linter_skipped_on_ill_typed(&self.enabled_linters, lint)
                         {
                             continue;
                         }
@@ -384,7 +384,13 @@ impl NolintIndex {
 /// *any* analyzer refuses ill-typed packages, unmatched `//nolint:<lint>`
 /// directives are not unused — the finding they suppress may simply have been
 /// skipped (cobra SA1029, restic QF1001, …).
-fn linter_skipped_on_ill_typed(lint: &str) -> bool {
+///
+/// `unused` is registered with `run_despite_errors` when `nolintlint` is also
+/// enabled (see [`crate::registry::resolve_linters_with_settings`]).
+fn linter_skipped_on_ill_typed(enabled: &HashSet<String>, lint: &str) -> bool {
+    if lint == "unused" && enabled.contains("nolintlint") {
+        return false;
+    }
     let Some(analyzers) = analyzers_for_linter(lint) else {
         return false;
     };

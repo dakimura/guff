@@ -520,12 +520,27 @@ pub fn resolve_linters_with_settings(
     settings: &LinterSettings,
     on_unknown: &mut dyn FnMut(&str),
 ) -> Vec<&'static Analyzer> {
+    // unused + nolintlint: run unused despite type errors so live refs on
+    // false-`ill_typed` packages still suppress `//nolint:unused` (restic).
+    // Without nolintlint, skip ill_typed — faster and avoids unused FPs when
+    // guff's checker is stricter than go/types (prometheus tsdb/web).
+    let unused_despite_errors = names.iter().any(|n| n == "unused")
+        && names.iter().any(|n| n == "nolintlint")
+        && !settings.nolintlint.allow_unused;
+
     let mut out = Vec::new();
     let mut seen = HashMap::<&str, ()>::new();
     for name in names {
-        let Some(analyzers) = analyzers_for_linter_with_settings(name, settings) else {
-            on_unknown(name);
-            continue;
+        let analyzers = if name == "unused" && unused_despite_errors {
+            guff_unused::analyzers_despite_errors()
+        } else {
+            match analyzers_for_linter_with_settings(name, settings) {
+                Some(a) => a,
+                None => {
+                    on_unknown(name);
+                    continue;
+                }
+            }
         };
         for a in analyzers {
             if seen.insert(a.name, ()).is_none() {
@@ -630,6 +645,42 @@ mod tests {
         let analyzers = standard_analyzers();
         assert!(!analyzers.is_empty());
         assert!(analyzers.iter().any(|a| a.name == "SA1004"));
+    }
+
+    #[test]
+    fn unused_despite_errors_only_with_nolintlint() {
+        let settings = LinterSettings::default();
+        let alone = resolve_linters_with_settings(
+            &["unused".into()],
+            &settings,
+            &mut |_| {},
+        );
+        let u = alone.iter().find(|a| a.name == "unused").expect("unused");
+        assert!(!u.run_despite_errors);
+
+        let with_nolint = resolve_linters_with_settings(
+            &["unused".into(), "nolintlint".into()],
+            &settings,
+            &mut |_| {},
+        );
+        let u = with_nolint
+            .iter()
+            .find(|a| a.name == "unused")
+            .expect("unused");
+        assert!(u.run_despite_errors);
+
+        let mut allow = LinterSettings::default();
+        allow.nolintlint.allow_unused = true;
+        let allow_unused = resolve_linters_with_settings(
+            &["unused".into(), "nolintlint".into()],
+            &allow,
+            &mut |_| {},
+        );
+        let u = allow_unused
+            .iter()
+            .find(|a| a.name == "unused")
+            .expect("unused");
+        assert!(!u.run_despite_errors);
     }
 
     #[test]
