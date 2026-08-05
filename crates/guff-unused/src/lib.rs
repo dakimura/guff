@@ -215,7 +215,9 @@ pub fn analyzer() -> &'static Analyzer {
         doc: "check for unused package-level declarations",
         url: "https://pkg.go.dev/honnef.co/go/tools/unused",
         run: run as RunFn,
-        run_despite_errors: false,
+        // Partial types still let unused see live refs; skipping on
+        // ill_typed packages drops real nolintlint hits (restic `sys` field).
+        run_despite_errors: true,
         requires: vec![generated::analyzer()],
         fact_types: vec![],
     })

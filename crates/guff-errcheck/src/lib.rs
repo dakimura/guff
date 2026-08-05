@@ -20,7 +20,7 @@ use guff_types::api_predicates::api_implements;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::operand::OperandMode;
-use guff_types::{new_pointer, TypeId};
+use guff_types::TypeId;
 
 use expreq::unparen;
 
@@ -602,8 +602,10 @@ fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
 
 /// True when `typ` is (or implements) the predeclared `error` interface.
 ///
-/// kisielk/errcheck checks `types.Implements` / assignability to `error`, not
-/// only the named type `error` — gin's `*Error` must count.
+/// Matches kisielk/errcheck: `types.Implements(t, errorType)` only — no `*T`
+/// fallback. Pointer-typed returns like `*gin.Error` still match because the
+/// call's result type is already a pointer. Value types that only have
+/// pointer-receiver `Error()` do not implement `error` in go/types either.
 fn is_error_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     if type_with_name(pass, typ, "error") {
         return true;
@@ -622,21 +624,11 @@ fn is_error_type(pass: &Pass<'_>, typ: TypeId) -> bool {
         return false;
     };
     let mut types = artifacts.types.clone();
-    if api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        err,
-    ) {
-        return true;
-    }
-    let ptr = new_pointer(&mut types, typ);
     api_implements(
         &mut types,
         &artifacts.objects,
         &artifacts.packages,
-        ptr,
+        typ,
         err,
     )
 }

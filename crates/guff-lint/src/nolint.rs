@@ -795,7 +795,7 @@ mod tests {
     fn unused_skipped_for_ill_typed_type_sensitive_linter() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("f.go");
-        std::fs::write(&path, "package p\n\nvar x int //nolint:errcheck\n").unwrap();
+        std::fs::write(&path, "package p\n\nvar x int //nolint:ineffassign\n").unwrap();
 
         let pkg = Package {
             compiled_go_files: vec![path.clone()],
@@ -803,11 +803,11 @@ mod tests {
             ..Package::default()
         };
         let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
-        index.set_enabled_linters(["nolintlint".into(), "errcheck".into()]);
+        index.set_enabled_linters(["nolintlint".into(), "ineffassign".into()]);
         let kept = index.filter_issues(Vec::new(), true);
         assert!(
             kept.is_empty(),
-            "expected no unused for skipped-on-ill_typed errcheck, got {kept:?}"
+            "expected no unused for skipped-on-ill_typed ineffassign, got {kept:?}"
         );
     }
 

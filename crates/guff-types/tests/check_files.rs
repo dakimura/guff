@@ -811,3 +811,52 @@ fn bidirectional_chan_comparable_to_recv_only() {
         check.errors
     );
 }
+
+#[test]
+fn embedded_struct_and_iface_implements_composed_interface() {
+    // restic internal/fs: *readerFile embeds io.ReadCloser + fakeFile and must
+    // satisfy File (which embeds io.Reader + io.Closer).
+    let check = check_src(
+        r#"
+package p
+
+type Reader interface { Read(p []byte) (int, error) }
+type Closer interface { Close() error }
+type ReadCloser interface {
+	Reader
+	Closer
+}
+
+type File interface {
+	MakeReadable() error
+	Reader
+	Closer
+	Stat() (string, error)
+}
+
+type fakeFile struct{ name string }
+
+func (f fakeFile) MakeReadable() error { return nil }
+func (f fakeFile) Read(_ []byte) (int, error) { return 0, nil }
+func (f fakeFile) Close() error { return nil }
+func (f fakeFile) Stat() (string, error) { return f.name, nil }
+
+var _ File = fakeFile{}
+
+type readerFile struct {
+	ReadCloser
+	fakeFile
+}
+
+func (r *readerFile) Read(p []byte) (int, error) { return r.ReadCloser.Read(p) }
+func (r *readerFile) Close() error { return r.ReadCloser.Close() }
+
+var _ File = &readerFile{}
+"#,
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}

@@ -74,6 +74,18 @@ fn errcheck_assert_mode_allows_checked_assertions() {
 }
 
 #[test]
+fn errcheck_ignores_discarded_named_array_id() {
+    // restic OSS hunt: discarded `restic.ID` must not be treated as error.
+    let dir = support::testdata("named_id");
+    let pkg = support::typecheck_pkg("example.com/errcheck/named_id", &dir.join("ok.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+    assert!(
+        support::run_analyzer(analyzer(), &pkg).is_empty(),
+        "discarded ID return must not flag"
+    );
+}
+
+#[test]
 fn errcheck_exclude_functions_skips_listed_symbols() {
     use std::sync::Arc;
 
