@@ -1808,10 +1808,21 @@ fn path_arg_is_g703_tainted(
     if is_g703_source_expr(pass, arg) {
         return true;
     }
-    let Expr::Ident(id) = arg else {
-        return false;
-    };
-    object_of(pass, id).is_some_and(|obj| tainted.contains(&obj))
+    match arg {
+        Expr::Ident(id) => object_of(pass, id).is_some_and(|obj| tainted.contains(&obj)),
+        // gosec PathTraversal follows taint through path-building helpers
+        // (e.g. `os.Stat(config.SkinFileFromName(os.Getenv(...)))`).
+        Expr::CallExpr(call) => call
+            .args
+            .iter()
+            .any(|a| path_arg_is_g703_tainted(pass, a, tainted)),
+        Expr::BinaryExpr(b) if b.op == Token::ADD => {
+            path_arg_is_g703_tainted(pass, &b.x, tainted)
+                || path_arg_is_g703_tainted(pass, &b.y, tainted)
+        }
+        Expr::ParenExpr(p) => path_arg_is_g703_tainted(pass, &p.x, tainted),
+        _ => false,
+    }
 }
 
 fn check_g703_sink_call(
