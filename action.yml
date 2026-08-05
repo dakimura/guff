@@ -5,7 +5,7 @@ author: dakimura
 inputs:
   version:
     description: >
-      guff release version (e.g. v0.3.0) or latest.
+      guff release version (e.g. v0.4.0) or latest.
       When left as latest and this Action is pinned to a v* tag, that tag is used.
     required: false
     default: latest
