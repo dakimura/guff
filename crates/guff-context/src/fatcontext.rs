@@ -4,8 +4,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BlockStmt, CallExpr, Expr, ForStmt, FuncDecl, FuncLit, Ident, RangeStmt,
-    SelectorExpr, Stmt,
+    AssignStmt, BlockStmt, CallExpr, Expr, ForStmt, FuncLit, Ident, RangeStmt, SelectorExpr, Stmt,
 };
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -107,11 +106,6 @@ fn enclosing_span(n: NodeRef<'_>) -> Option<(u32, u32)> {
         NodeRef::FuncLit(FuncLit { ty, body, .. }) => {
             Some((ty.pos().0 as u32, body.end().0 as u32))
         }
-        NodeRef::FuncDecl(FuncDecl {
-            ty,
-            body: Some(body),
-            ..
-        }) => Some((ty.pos().0 as u32, body.end().0 as u32)),
         _ => None,
     }
 }
@@ -184,9 +178,11 @@ fn find_nested_context<'a>(
         if !name.is_empty() && reset.contains(&name) {
             continue;
         }
-        // Pointer roots are always reported (upstream).
+        // Upstream `check-struct-pointers` defaults to false, so a field on a
+        // pointer receiver is not a nested context. guff has no wiring for
+        // that setting yet, so follow the default.
         if is_pointer_sel(pass, &assign.lhs[0]) {
-            return Some(assign);
+            continue;
         }
         // Locals defined inside this For/FuncLit/FuncDecl may be reassigned.
         if is_defined_within(pass, &assign.lhs[0], enclosing) {
@@ -197,14 +193,14 @@ fn find_nested_context<'a>(
     None
 }
 
+/// Upstream filters on ForStmt / RangeStmt / FuncLit only. Including FuncDecl
+/// reports every `mw.ctx, mw.cancel = context.WithCancel(...)` written in a
+/// plain method as a nested context.
 fn body_of(n: NodeRef<'_>) -> Option<&BlockStmt> {
     match n {
         NodeRef::ForStmt(ForStmt { body, .. }) => Some(body),
         NodeRef::RangeStmt(RangeStmt { body, .. }) => Some(body),
         NodeRef::FuncLit(FuncLit { body, .. }) => Some(body),
-        NodeRef::FuncDecl(FuncDecl {
-            body: Some(body), ..
-        }) => Some(body),
         _ => None,
     }
 }
@@ -212,7 +208,7 @@ fn body_of(n: NodeRef<'_>) -> Option<&BlockStmt> {
 fn category_for(n: NodeRef<'_>) -> &'static str {
     match n {
         NodeRef::ForStmt(_) | NodeRef::RangeStmt(_) => CATEGORY_IN_LOOP,
-        NodeRef::FuncLit(_) | NodeRef::FuncDecl(_) => CATEGORY_IN_FUNC_LIT,
+        NodeRef::FuncLit(_) => CATEGORY_IN_FUNC_LIT,
         _ => CATEGORY_IN_LOOP,
     }
 }
