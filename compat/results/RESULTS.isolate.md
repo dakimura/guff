@@ -6,7 +6,7 @@
 | isolate-ineffassign | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-unused | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-govet | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-staticcheck | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| isolate-staticcheck | 11 | 11 | 10 | 90.9% | 90.9% | 0 |
 | isolate-misspell | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-dogsled | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-nakedret | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -18,7 +18,7 @@
 | isolate-godox | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nlreturn | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-prealloc | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
-| isolate-goconst | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-goconst | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-usestdlibvars | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | isolate-goprintffuncname | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-nestif | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -82,8 +82,8 @@
 | isolate-contextcheck | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | isolate-wsl | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-revive | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
-| isolate-gosec | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| isolate-revive | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
+| isolate-gosec | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-unparam | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-dupl | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-grouper | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -147,7 +147,11 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| staticcheck | 5 | 5 | 5 | 100.0% | 100.0% |
+| staticcheck | 11 | 11 | 10 | 90.9% | 90.9% |
+
+### Allowed known diffs (2)
+- guff-only: `bad.go:81:staticcheck:possible nil pointer dereference`
+- golangci-only: `bad.go:72:staticcheck:could remove embedded field "meta" from selector`
 
 ## isolate-misspell
 
@@ -218,7 +222,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| goconst | 1 | 1 | 1 | 100.0% | 100.0% |
+| goconst | 2 | 2 | 2 | 100.0% | 100.0% |
 
 ## isolate-usestdlibvars
 
@@ -595,13 +599,13 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| revive | 5 | 5 | 5 | 100.0% | 100.0% |
+| revive | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-gosec
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gosec | 5 | 5 | 5 | 100.0% | 100.0% |
+| gosec | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-unparam
 
