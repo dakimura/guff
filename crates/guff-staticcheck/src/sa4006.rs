@@ -2,7 +2,8 @@
 //!
 //! Port of `honnef.co/go/tools/staticcheck/sa4006` (simplified; defers goyacc/generated filtering).
 
-use std::collections::HashSet;
+use std::cell::OnceCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident, Stmt};
@@ -39,8 +40,7 @@ fn has_use_rec(
     if !seen.insert(v) {
         return false; // cyclic Phi chain (seen under incomplete hybrid SSA)
     }
-    let refs = filter_debug(guff_analysis::referrers(func, v), func);
-    for &rid in &refs {
+    for &rid in guff_analysis::referrers(func, v) {
         match func.instrs.get(rid) {
             InstrData::Phi(_) => {
                 if has_use_rec(func, Value::Instr(rid), seen) {
@@ -57,49 +57,78 @@ fn has_use_rec(
     false
 }
 
-/// Whether `obj` is read after `after_pos` before being redefined.
+/// Sorted positions of every ident that uses or defines each object.
 ///
-/// Hybrid SSA sometimes drops receiver/arg loads (e.g. `renderer.Run(...)`
-/// after `renderer, err := ...`), producing SA4006 false positives. An AST
-/// use of the same object between this assign and the next def means the
-/// value was read — suppress the report. A later use only after an intervening
-/// def still counts as unused (classic overwrite pattern).
-fn ast_value_is_read_before_redef(pass: &Pass<'_>, obj: ObjectId, after_pos: u32) -> bool {
-    let Some(info) = pass.types_info() else {
-        return false;
-    };
-    let mut next_use: Option<u32> = None;
-    let mut next_def: Option<u32> = None;
-    for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
-            let NodeRef::Ident(id) = n else {
-                return true;
-            };
-            let pos = id.name_pos.0 as u32;
-            if pos <= after_pos {
-                return true;
-            }
-            if object_of(pass, id) != Some(obj) {
-                return true;
-            }
-            if info.uses.contains_key(&id.id) {
-                next_use = Some(next_use.map_or(pos, |u| u.min(pos)));
-            }
-            if info.defs.get(&id.id).and_then(|d| *d) == Some(obj) {
-                next_def = Some(next_def.map_or(pos, |d| d.min(pos)));
-            }
-            true
-        });
+/// [`IdentIndex::value_is_read_before_redef`] is asked about one object at a
+/// time, but the answer needs the whole package; walking the files per question
+/// is quadratic in package size. One walk up front answers all of them.
+#[derive(Default)]
+struct IdentIndex {
+    uses: HashMap<ObjectId, Vec<u32>>,
+    defs: HashMap<ObjectId, Vec<u32>>,
+}
+
+impl IdentIndex {
+    fn build(pass: &Pass<'_>) -> Self {
+        let mut idx = Self::default();
+        let Some(info) = pass.types_info() else {
+            return idx;
+        };
+        for file in pass.files() {
+            preorder(NodeRef::File(file), |n| {
+                let NodeRef::Ident(id) = n else {
+                    return true;
+                };
+                let Some(obj) = object_of(pass, id) else {
+                    return true;
+                };
+                let pos = id.name_pos.0 as u32;
+                if info.uses.contains_key(&id.id) {
+                    idx.uses.entry(obj).or_default().push(pos);
+                }
+                if info.defs.get(&id.id).and_then(|d| *d) == Some(obj) {
+                    idx.defs.entry(obj).or_default().push(pos);
+                }
+                true
+            });
+        }
+        // Preorder is source order within a file, but files are independent.
+        for v in idx.uses.values_mut() {
+            v.sort_unstable();
+        }
+        for v in idx.defs.values_mut() {
+            v.sort_unstable();
+        }
+        idx
     }
-    match (next_use, next_def) {
-        (Some(u), Some(d)) => u < d,
-        (Some(_), None) => true,
-        _ => false,
+
+    fn first_after(map: &HashMap<ObjectId, Vec<u32>>, obj: ObjectId, pos: u32) -> Option<u32> {
+        let v = map.get(&obj)?;
+        v.get(v.partition_point(|&p| p <= pos)).copied()
+    }
+
+    /// Whether `obj` is read after `after_pos` before being redefined.
+    ///
+    /// Hybrid SSA sometimes drops receiver/arg loads (e.g. `renderer.Run(...)`
+    /// after `renderer, err := ...`), producing SA4006 false positives. An AST
+    /// use of the same object between this assign and the next def means the
+    /// value was read — suppress the report. A later use only after an
+    /// intervening def still counts as unused (classic overwrite pattern).
+    fn value_is_read_before_redef(&self, obj: ObjectId, after_pos: u32) -> bool {
+        match (
+            Self::first_after(&self.uses, obj, after_pos),
+            Self::first_after(&self.defs, obj, after_pos),
+        ) {
+            (Some(u), Some(d)) => u < d,
+            (Some(_), None) => true,
+            _ => false,
+        }
     }
 }
 
 fn ssa_unused_but_ast_read(
     pass: &Pass<'_>,
+    idents: &IdentIndex,
     lhs: &Expr,
     assign_pos: u32,
 ) -> bool {
@@ -109,7 +138,7 @@ fn ssa_unused_but_ast_read(
     let Some(obj) = object_of(pass, id) else {
         return false;
     };
-    ast_value_is_read_before_redef(pass, obj, assign_pos)
+    idents.value_is_read_before_redef(obj, assign_pos)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -134,6 +163,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
+    let exprs = ir.expr_values();
+    // Only candidates that SSA already believes are unused consult it, and most
+    // packages have none — build the walk-wide index on the first question.
+    let idents: OnceCell<IdentIndex> = OnceCell::new();
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(IncDecStmt, AssignStmt), pass.files(), |node| {
         match node {
@@ -141,16 +174,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 if for_post_incs.contains(&(inc.tok_pos.0 as u32)) {
                     return;
                 }
-                let func = ir.src_funcs.iter().find_map(|&fid| {
-                    let f = ir.prog.functions.get(fid);
-                    f.value_for_expr(&inc.x).map(|_| f)
-                });
-                let Some(func) = func else {
+                let Some(ev) = exprs.get(&inc.x) else {
                     return;
                 };
-                let Some((v, _)) = func.value_for_expr(&inc.x) else {
-                    return;
-                };
+                let func = ir.prog.functions.get(ev.func);
+                let v = ev.value;
                 if matches!(v, Value::Const(_)) {
                     return;
                 }
@@ -159,7 +187,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     // lacks SSA uses under hybrid IR; AST still sees the read.
                     if let Expr::Ident(id) = unparen_expr(&inc.x) {
                         if let Some(obj) = object_of(pass, id) {
-                            if ast_value_is_read_before_redef(pass, obj, inc.tok_pos.0 as u32) {
+                            let idx = idents.get_or_init(|| IdentIndex::build(pass));
+                            if idx.value_is_read_before_redef(obj, inc.tok_pos.0 as u32) {
                                 return;
                             }
                         }
@@ -171,20 +200,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
             }
             NodeRef::AssignStmt(assign) => {
-                let func = ir.src_funcs.iter().find_map(|&fid| {
-                    let f = ir.prog.functions.get(fid);
-                    assign
-                        .rhs
-                        .first()
-                        .and_then(|e| f.value_for_expr(e))
-                        .or_else(|| assign.lhs.first().and_then(|e| f.value_for_expr(e)))
-                        .map(|_| f)
-                });
-                let Some(func) = func else {
+                // Upstream picks the first `src_funcs` entry that resolves the
+                // first rhs or, failing that, the first lhs — i.e. the lower of
+                // the two `src_funcs` positions.
+                let fid = [assign.rhs.first(), assign.lhs.first()]
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| exprs.get(e))
+                    .min_by_key(|ev| ev.order)
+                    .map(|ev| ev.func);
+                let Some(fid) = fid else {
                     return;
                 };
+                let func = ir.prog.functions.get(fid);
                 if assign.lhs.len() > 1 && assign.rhs.len() == 1 {
-                    if let Some((v, _)) = func.value_for_expr(&assign.rhs[0]) {
+                    if let Some((v, _)) = exprs.value_in(&ir.prog, fid, &assign.rhs[0]) {
                         for rid in filter_debug(referrers(func, v), func) {
                             if let InstrData::Extract(Extract { index, .. }) = func.instrs.get(rid)
                             {
@@ -195,6 +225,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 if !has_use(func, Value::Instr(rid)) {
                                     if ssa_unused_but_ast_read(
                                         pass,
+                                        idents.get_or_init(|| IdentIndex::build(pass)),
                                         lhs,
                                         assign.tok_pos.0 as u32,
                                     ) {
@@ -226,12 +257,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if !matches!(unparen_expr(lhs), Expr::Ident(_)) {
                         continue;
                     }
-                    let val = func
-                        .value_for_expr(rhs)
+                    let val = exprs
+                        .value_in(&ir.prog, fid, rhs)
                         .map(|(v, _)| v)
                         .or_else(|| {
                             if assign.tok != Some(Token::ASSIGN) {
-                                func.value_for_expr(lhs).map(|(v, _)| v)
+                                exprs.value_in(&ir.prog, fid, lhs).map(|(v, _)| v)
                             } else {
                                 None
                             }
@@ -243,7 +274,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         continue;
                     }
                     if !has_use(func, v) {
-                        if ssa_unused_but_ast_read(pass, lhs, assign.tok_pos.0 as u32) {
+                        if ssa_unused_but_ast_read(
+                            pass,
+                            idents.get_or_init(|| IdentIndex::build(pass)),
+                            lhs,
+                            assign.tok_pos.0 as u32,
+                        ) {
                             continue;
                         }
                         pending.push((

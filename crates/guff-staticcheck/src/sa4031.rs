@@ -54,25 +54,14 @@ fn is_nil_expr(expr: &Expr) -> bool {
     matches!(expr, Expr::Ident(id) if id.name == "nil")
 }
 
-fn lhs_is_never_nil(
-    pass: &Pass<'_>,
-    ir: &guff_analysis::passes::buildir::BuildIrResult,
-    lhs: &Expr,
-) -> bool {
+fn lhs_is_never_nil(ir: &guff_analysis::passes::buildir::BuildIrResult, lhs: &Expr) -> bool {
     if ast_never_nil_lhs(lhs) {
         return true;
     }
-    let func = ir.src_funcs.iter().find_map(|&fid| {
-        let f = ir.prog.functions.get(fid);
-        f.value_for_expr(lhs).map(|_| f)
-    });
-    let Some(func) = func else {
+    let Some(ev) = ir.expr_values().get(lhs) else {
         return false;
     };
-    let Some((v, is_addr)) = func.value_for_expr(lhs) else {
-        return false;
-    };
-    !is_addr && never_nil(func, v)
+    !ev.is_addr && never_nil(ir.prog.functions.get(ev.func), ev.value)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -128,7 +117,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(lhs) = m.state.get("lhs").and_then(|v| v.as_expr()) else {
             return;
         };
-        if !lhs_is_never_nil(pass, ir, lhs) {
+        if !lhs_is_never_nil(ir, lhs) {
             return;
         }
         let op = m

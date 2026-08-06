@@ -299,6 +299,91 @@ impl Function {
     }
 }
 
+/// Where a source expression's SSA value lives.
+#[derive(Copy, Clone, Debug)]
+pub struct ExprValue {
+    /// The function holding the `DebugRef`.
+    pub func: FuncId,
+    /// Position of `func` in the `src_funcs` slice the index was built from,
+    /// so callers can reproduce "first function that resolves any of these
+    /// expressions" without re-scanning.
+    pub order: u32,
+    pub value: Value,
+    pub is_addr: bool,
+}
+
+/// Expression node id → SSA value across one package's `src_funcs`.
+///
+/// [`Function::value_for_expr`] scans every instruction of the function, and
+/// its callers wrap it in a `find_map` over `src_funcs`, so resolving one
+/// expression costs a walk of the whole package IR. Doing that per assignment
+/// (SA4006) is quadratic: on prometheus's `promql` and `tsdb/agent` it was the
+/// single largest analyzer cost. One scan up front makes each lookup O(log n).
+#[derive(Clone)]
+pub struct ExprValueIndex {
+    /// Sorted by expr id; for a repeated id only the first occurrence in
+    /// (`src_funcs` order, block order, instruction order) is kept, which is
+    /// what the `find_map` + `value_for_expr` pair returned.
+    entries: Vec<(u32, ExprValue)>,
+}
+
+impl ExprValueIndex {
+    pub fn build(prog: &Program, src_funcs: &[FuncId]) -> Self {
+        let mut entries: Vec<(u32, ExprValue)> = Vec::new();
+        for (order, &fid) in src_funcs.iter().enumerate() {
+            let f = prog.functions.get(fid);
+            for (_, block) in f.blocks.iter() {
+                for &instr_id in &block.instrs {
+                    let InstrData::DebugRef(dr) = f.instrs.get(instr_id) else {
+                        continue;
+                    };
+                    if dr.expr_id == 0 {
+                        continue;
+                    }
+                    entries.push((
+                        dr.expr_id,
+                        ExprValue {
+                            func: fid,
+                            order: order as u32,
+                            value: dr.x,
+                            is_addr: dr.is_addr,
+                        },
+                    ));
+                }
+            }
+        }
+        // Stable sort keeps scan order within an id, so dedup retains the first.
+        entries.sort_by_key(|(id, _)| *id);
+        entries.dedup_by_key(|(id, _)| *id);
+        entries.shrink_to_fit();
+        Self { entries }
+    }
+
+    /// The first `src_funcs` entry holding a value for `e`.
+    pub fn get(&self, e: &Expr) -> Option<ExprValue> {
+        let target = unparen(e).id();
+        if target == 0 {
+            return None;
+        }
+        self.entries
+            .binary_search_by_key(&target, |(id, _)| *id)
+            .ok()
+            .map(|i| self.entries[i].1)
+    }
+
+    /// [`Function::value_for_expr`] for a known function. Served from the index
+    /// when `func` is the first holder of `e` (the case for every expression of
+    /// a statement, since a statement lives in one function body); otherwise
+    /// falls back to the scan so a doubly-built body still answers correctly.
+    pub fn value_in(&self, prog: &Program, func: FuncId, e: &Expr) -> Option<(Value, bool)> {
+        match self.get(e) {
+            Some(ev) if ev.func == func => Some((ev.value, ev.is_addr)),
+            Some(_) => prog.functions.get(func).value_for_expr(e),
+            None => None,
+        }
+    }
+}
+
 /// unparen strips any enclosing parentheses from an expression.
 /// (Go: `ast.Unparen`)
 fn unparen(e: &Expr) -> &Expr {

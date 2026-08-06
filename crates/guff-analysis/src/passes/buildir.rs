@@ -10,6 +10,7 @@ use guff_ssa::ids::FuncId;
 use guff_ssa::mode::BuilderMode;
 use guff_ssa::program::Program;
 use guff_ssa::ids::PackageId;
+use guff_ssa::source::ExprValueIndex;
 use guff_ssa::ssautil::build_package_for_analysis;
 use guff_types::PackageId as TypePackageId;
 
@@ -26,6 +27,33 @@ pub struct BuildIrResult {
     pub pkg: PackageId,
     pub type_pkg: TypePackageId,
     pub src_funcs: Vec<FuncId>,
+    /// Built on first use; only SA4006 / SA4031 resolve source expressions.
+    expr_values: OnceLock<ExprValueIndex>,
+}
+
+impl BuildIrResult {
+    pub fn new(
+        prog: Arc<Program>,
+        pkg: PackageId,
+        type_pkg: TypePackageId,
+        src_funcs: Vec<FuncId>,
+    ) -> Self {
+        Self {
+            prog,
+            pkg,
+            type_pkg,
+            src_funcs,
+            expr_values: OnceLock::new(),
+        }
+    }
+
+    /// Expression → SSA value index over [`Self::src_funcs`]. Shared by every
+    /// analyzer that runs on this package, since the runner hands them all the
+    /// same `Arc<BuildIrResult>`.
+    pub fn expr_values(&self) -> &ExprValueIndex {
+        self.expr_values
+            .get_or_init(|| ExprValueIndex::build(&self.prog, &self.src_funcs))
+    }
 }
 
 // SSA results are immutable after construction. The type-checker arenas behind
@@ -176,12 +204,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .copied()
         .unwrap_or(true);
     let src_funcs = collect_src_funcs(&built.prog, built.pkg, include_methods);
-    Ok(Some(Box::new(BuildIrResult {
-        prog: Arc::new(built.prog),
-        pkg: built.pkg,
-        type_pkg: built.type_pkg,
+    Ok(Some(Box::new(BuildIrResult::new(
+        Arc::new(built.prog),
+        built.pkg,
+        built.type_pkg,
         src_funcs,
-    })))
+    ))))
 }
 
 /// One-shot SSA incremental size sample (PERF_TASKS_V2 C-8). Shared type-arena
