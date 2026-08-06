@@ -15,9 +15,9 @@
 //!   returns `true` for a generic-function operand so the caller runs
 //!   [`Checker::func_inst`]. Generic *type* instantiation `T[int]` in a pure
 //!   expression position still invalidates (types go through `typexpr`).
-//! - **Type-parameter operands** — Go's `Interface`/`underIs` branch (indexing
-//!   or slicing a value of type-parameter type) is omitted; only concrete
-//!   string/array/pointer-to-array/slice/map operands are handled.
+//! - **Type-parameter operands** are handled by [`Checker::index_type_param`]
+//!   and [`Checker::slice_common_under`] (Go's `Interface`/`underIs` branch):
+//!   every type in the type set must be indexable/sliceable the same way.
 //! - Constant string indexing computes the length from the value, but the
 //!   3-index-slice-of-string and constant-string-length niceties match Go.
 //! - `record` / `hasCallOrRecv` are omitted (Info recording deferred, §18b).
@@ -33,10 +33,11 @@ use crate::check::Checker;
 use crate::map::{map_elem, map_key};
 use crate::operand::{Operand, OperandMode};
 use crate::pointer::pointer_elem;
-use crate::predicates::{is_integer, is_string, is_valid};
+use crate::predicates::{is_integer, is_string, is_type_param, is_valid};
 use crate::slice::{new_slice, slice_elem};
 
 /// The element/length classification of an indexable operand's underlying type.
+#[derive(Clone, Copy)]
 enum Indexable {
     /// A string — indexing yields a `byte` value.
     Str,
@@ -52,7 +53,234 @@ enum Indexable {
     None,
 }
 
+/// Classify `under` (an already-underlying type) as an indexable operand.
+fn classify_indexable(types: &crate::arena::TypeArena, under: TypeId) -> Indexable {
+    match types.get(under) {
+        TypeData::Basic(_) if is_string(types, under) => Indexable::Str,
+        TypeData::Array(_) => Indexable::Array(array_elem(types, under), array_len(types, under)),
+        TypeData::Pointer(_) => {
+            let base = pointer_elem(types, under);
+            let base_u = base.underlying(types);
+            if matches!(types.get(base_u), TypeData::Array(_)) {
+                Indexable::PtrArray(array_elem(types, base_u), array_len(types, base_u))
+            } else {
+                Indexable::None
+            }
+        }
+        TypeData::Slice(_) => Indexable::Slice(slice_elem(types, under)),
+        TypeData::Map(_) => Indexable::Map(map_key(types, under), map_elem(types, under)),
+        _ => Indexable::None,
+    }
+}
+
 impl Checker {
+    /// Index a value whose type is a type parameter: every type in the type set
+    /// must be indexable, all element types must be identical, and either all
+    /// or none of them must be maps (with identical key types).
+    ///
+    /// Equivalent to the `*Interface` / `underIs` branch of `Checker.indexExpr`.
+    /// Returns `false` like the ordinary path (never a generic func inst).
+    fn index_type_param<'a>(
+        &mut self,
+        x: &mut Operand<'a>,
+        e: &'a IndexExpr,
+        t: TypeId,
+    ) -> bool {
+        let byte_t = self.basic(BasicKind::Uint8);
+        let mut unders: Vec<Option<TypeId>> = Vec::new();
+        crate::under::all(&mut self.types, &self.objects, &self.packages, t, |_, u| {
+            unders.push(u);
+            true
+        });
+
+        let mut length: i64 = -1;
+        let mut key: Option<TypeId> = None;
+        let mut elem: Option<TypeId> = None;
+        // Result mode for the non-map case; a string element, or an array in a
+        // non-addressable operand, downgrades it to a plain value.
+        let mut mode = OperandMode::Variable;
+        let mut ok = !unders.is_empty();
+
+        for u in unders {
+            let Some(u) = u else {
+                ok = false;
+                break;
+            };
+            let (l, k, el) = match classify_indexable(&self.types, u) {
+                Indexable::Str => {
+                    mode = OperandMode::Value;
+                    (-1, None, Some(byte_t))
+                }
+                Indexable::Array(el, l) => {
+                    if x.mode != OperandMode::Variable {
+                        mode = OperandMode::Value;
+                    }
+                    (l, None, Some(el))
+                }
+                Indexable::PtrArray(el, l) => (l, None, Some(el)),
+                Indexable::Slice(el) => (-1, None, Some(el)),
+                Indexable::Map(k, el) => (-1, Some(k), Some(el)),
+                Indexable::None => (-1, None, None),
+            };
+            let Some(el) = el else {
+                ok = false;
+                break;
+            };
+            match elem {
+                None => {
+                    length = l;
+                    key = k;
+                    elem = Some(el);
+                }
+                Some(prev_elem) => {
+                    // Maps may not be mixed with anything else, and their key
+                    // types must agree.
+                    let keys_match = match (key, k) {
+                        (None, None) => true,
+                        (Some(a), Some(b)) => {
+                            crate::predicates::identical(
+                                &mut self.types,
+                                &self.objects,
+                                &self.packages,
+                                a,
+                                b,
+                            )
+                        }
+                        _ => false,
+                    };
+                    if !keys_match
+                        || !crate::predicates::identical(
+                            &mut self.types,
+                            &self.objects,
+                            &self.packages,
+                            prev_elem,
+                            el,
+                        )
+                    {
+                        ok = false;
+                        break;
+                    }
+                    // Track the minimal array length across the type set.
+                    if l >= 0 && (length < 0 || l < length) {
+                        length = l;
+                    }
+                }
+            }
+        }
+
+        let elem = match (ok, elem) {
+            (true, Some(el)) => el,
+            _ => {
+                let xs = self.operand_str(x);
+                self.error(
+                    e.x.pos().0 as u32,
+                    Code::NonSliceableOperand,
+                    format!("cannot index {}", xs),
+                );
+                self.use1(&e.index);
+                x.mode = OperandMode::Invalid;
+                x.typ = Some(self.invalid_type());
+                return false;
+            }
+        };
+
+        if let Some(key) = key {
+            let mut k = Operand::invalid();
+            self.expr(&mut k, &e.index);
+            self.assignment(&mut k, Some(key), "map index");
+            // OK to continue even if indexing failed — the element type is known.
+            x.mode = OperandMode::MapIndex;
+            x.typ = Some(elem);
+            return false;
+        }
+
+        x.mode = mode;
+        x.typ = Some(elem);
+        self.index(&e.index, length);
+        false
+    }
+
+    /// The common underlying type shared by every type in a type parameter's
+    /// type set, for the purpose of slicing. Strings are normalised to
+    /// `[]byte` so a `~string | ~[]byte` constraint is sliceable; if any term
+    /// was a string the result is `string` again (Go's `hasString` fixup).
+    ///
+    /// Returns `None` (after reporting) when the type set is empty or its
+    /// members disagree.
+    fn slice_common_under(
+        &mut self,
+        x: &Operand<'_>,
+        e: &SliceExpr,
+        t: TypeId,
+    ) -> Option<TypeId> {
+        let byte_slice = {
+            let byte_t = self.basic(BasicKind::Uint8);
+            new_slice(&mut self.types, byte_t)
+        };
+        let mut pairs: Vec<Option<TypeId>> = Vec::new();
+        crate::under::all(&mut self.types, &self.objects, &self.packages, t, |_, u| {
+            pairs.push(u);
+            true
+        });
+
+        let mut cu: Option<TypeId> = None;
+        let mut has_string = false;
+        for u in pairs {
+            let mut u = match u {
+                Some(u) => u,
+                None => {
+                    let xs = self.operand_str(x);
+                    self.error(
+                        e.x.pos().0 as u32,
+                        Code::NonSliceableOperand,
+                        format!("cannot slice {}: no specific type in its type set", xs),
+                    );
+                    return None;
+                }
+            };
+            if is_string(&self.types, u) {
+                u = byte_slice;
+                has_string = true;
+            }
+            match cu {
+                None => cu = Some(u),
+                Some(prev) => {
+                    if !crate::predicates::identical(
+                        &mut self.types,
+                        &self.objects,
+                        &self.packages,
+                        prev,
+                        u,
+                    ) {
+                        let xs = self.operand_str(x);
+                        self.error(
+                            e.x.pos().0 as u32,
+                            Code::NonSliceableOperand,
+                            format!("cannot slice {}: types in its type set have different underlying types", xs),
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+
+        if cu.is_none() {
+            let xs = self.operand_str(x);
+            self.error(
+                e.x.pos().0 as u32,
+                Code::NonSliceableOperand,
+                format!("cannot slice {}: no specific type in its type set", xs),
+            );
+            return None;
+        }
+        if has_string {
+            // Proceed with the string type; a type parameter is always typed,
+            // so this never turns an untyped string typed.
+            return Some(self.basic(BasicKind::String));
+        }
+        cu
+    }
+
     /// Type-check an index expression `x[i]`, recording the result in `x`.
     ///
     /// Returns `true` (without mutating `x`) when the operand is a generic
@@ -90,32 +318,15 @@ impl Checker {
         let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
         let under = xtyp.underlying(&self.types);
 
+        // A value of type-parameter type is indexable when *every* type in its
+        // type set is, and they agree on the element (and, for maps, the key)
+        // type — `func Head[S ~[]E, E any](s S) E { return s[0] }`.
+        if is_type_param(&self.types, xtyp) {
+            return self.index_type_param(x, e, xtyp);
+        }
+
         // Classify the operand's underlying type (snapshot before mutating).
-        let kind = match self.types.get(under) {
-            TypeData::Basic(_) if is_string(&self.types, under) => Indexable::Str,
-            TypeData::Array(_) => Indexable::Array(
-                array_elem(&self.types, under),
-                array_len(&self.types, under),
-            ),
-            TypeData::Pointer(_) => {
-                let base = pointer_elem(&self.types, under);
-                let base_u = base.underlying(&self.types);
-                if matches!(self.types.get(base_u), TypeData::Array(_)) {
-                    Indexable::PtrArray(
-                        array_elem(&self.types, base_u),
-                        array_len(&self.types, base_u),
-                    )
-                } else {
-                    Indexable::None
-                }
-            }
-            TypeData::Slice(_) => Indexable::Slice(slice_elem(&self.types, under)),
-            TypeData::Map(_) => {
-                Indexable::Map(map_key(&self.types, under), map_elem(&self.types, under))
-            }
-            // DEFERRED: Interface/type-parameter operands (underIs branch).
-            _ => Indexable::None,
-        };
+        let kind = classify_indexable(&self.types, under);
 
         let mut length: i64 = -1;
         match kind {
@@ -195,9 +406,22 @@ impl Checker {
         }
 
         let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
-        // DEFERRED: typeset iteration over type parameters — use the underlying
-        // type directly.
-        let cu = xtyp.underlying(&self.types);
+        // For a type-parameter operand every type in the type set must share
+        // one underlying type — `func Tail[S ~[]E, E any](s S) S { return s[1:] }`.
+        // The result type stays the type parameter itself, so only `cu` differs
+        // from the ordinary path.
+        let cu = if is_type_param(&self.types, xtyp) {
+            match self.slice_common_under(x, e, xtyp) {
+                Some(cu) => cu,
+                None => {
+                    x.mode = OperandMode::Invalid;
+                    x.typ = Some(self.invalid_type());
+                    return;
+                }
+            }
+        } else {
+            xtyp.underlying(&self.types)
+        };
 
         let mut valid = false;
         let mut length: i64 = -1;

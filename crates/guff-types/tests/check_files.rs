@@ -860,3 +860,203 @@ var _ File = &readerFile{}
         check.errors
     );
 }
+
+// ----------------------------------------------------------------------------
+// R26 — false "ill-typed" packages found on a large real-world corpus.
+
+/// A method body may name the *receiver's* type parameters. `func_body` builds
+/// a fresh scope, so they have to be re-declared into it (Go reuses the
+/// signature's own scope, which `collectRecv` already declared them into).
+#[test]
+fn method_body_sees_receiver_type_params() {
+    let check = check_src(
+        "package p\n\
+         type Loader[T any] struct{ def *T }\n\
+         func (l *Loader[T]) New() *T { v := new(T); return v }\n\
+         func (l *Loader[T]) Zero() T { var z T; return z }\n\
+         type Box[K comparable, R any] struct{ m map[K]R }\n\
+         func (b *Box[K, R]) Make() []R { return make([]R, 0) }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+/// An interface's type set must not be computed while an embedded named type
+/// is still mid-declaration: the methods promoted through it would be lost and
+/// the (cached) result would never be recomputed.
+#[test]
+fn embedded_interface_methods_are_promoted_across_declaration_cycles() {
+    let check = check_src(
+        "package p\n\
+         type Descriptor interface { FullName() string; Parent() Descriptor }\n\
+         type isMethod interface { ProtoType(MethodDescriptor) }\n\
+         type MethodDescriptor interface { Descriptor; Streaming() bool; isMethod }\n\
+         func use(md MethodDescriptor) string { return md.FullName() }\n\
+         func widen(md MethodDescriptor) Descriptor { return md }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+/// A conversion whose target is written as a bare type literal is still a
+/// conversion — it used to leave the operand invalid, which was swallowed
+/// silently (no type recorded for the node, no diagnostics).
+#[test]
+fn conversions_to_type_literals_are_checked() {
+    let check = check_src(
+        "package p\n\
+         type R interface{ Resolve() string }\n\
+         func a(s string) []byte { return []byte(s) }\n\
+         func b(m map[string]int) map[string]int { return map[string]int(m) }\n\
+         func c(f func()) func() { return (func())(f) }\n\
+         func d(x int) (R, bool) { r, ok := interface{}(x).(R); return r, ok }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    // ... and the conversion's type is now known, so a bad use is reported.
+    let bad = check_src("package p\nfunc a(s string) { var z int = []byte(s); _ = z }\n");
+    assert!(
+        bad.errors.iter().any(|e| e.msg.contains("[]uint8")),
+        "expected a type error mentioning []uint8, got: {:?}",
+        bad.errors
+    );
+}
+
+/// Calling, indexing and slicing a value whose type is a type parameter uses
+/// the common underlying type of its type set.
+#[test]
+fn type_param_operands_use_the_common_underlying_type() {
+    let check = check_src(
+        "package p\n\
+         type Conn interface{ Do() }\n\
+         func New[T any, F func(Conn) T](fn F, c Conn) T { return fn(c) }\n\
+         func Head[S ~[]E, E any](s S) E { return s[0] }\n\
+         func Tail[S ~[]E, E any](s S) S { return s[1:] }\n\
+         func Get[M ~map[K]V, K comparable, V any](m M, k K) (V, bool) { v, ok := m[k]; return v, ok }\n\
+         func Idx[S ~string](s S) byte { return s[0] }\n\
+         func Cut[S ~string](s S) S { return s[1:] }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    // A type set whose members are not indexable in the same way is rejected.
+    let bad = check_src(
+        "package p\nfunc f[T ~[]int | ~map[string]int](t T) int { return t[0] }\n",
+    );
+    assert!(
+        bad.errors.iter().any(|e| e.msg.contains("cannot index")),
+        "expected 'cannot index', got: {:?}",
+        bad.errors
+    );
+}
+
+/// go1.26 `new(expr)`: `new` accepts a value as well as a type.
+#[test]
+fn new_accepts_a_value_argument() {
+    let check = check_src(
+        "package p\n\
+         type S struct{ Name string }\n\
+         func a(s S) *string { return new(s.Name) }\n\
+         func b() *bool { return new(true) }\n\
+         func c() *int { return new(int) }\n\
+         func d() *int { x := 3; return new(x) }\n\
+         func e() *[]int { return new([]int) }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    // `new` of a non-value is still an error, and the probe that classifies the
+    // argument must not leave its "is not a type" diagnostic behind.
+    let bad = check_src("package p\nfunc f() { _ = new(nil) }\n");
+    assert!(
+        !bad.errors.is_empty(),
+        "new(nil) should be rejected"
+    );
+    assert!(
+        !bad.errors.iter().any(|e| e.msg.contains("is not a type")),
+        "the type probe leaked a diagnostic: {:?}",
+        bad.errors
+    );
+}
+
+/// An array length may be any constant expression, not just an integer
+/// literal — `const n = 20; type t struct{ a [n]byte }`.
+#[test]
+fn array_length_accepts_constant_expressions() {
+    let check = check_src(
+        "package p\n\
+         const m = 20\n\
+         type k struct{ pcs [m]uintptr }\n\
+         func f(x k) []uintptr { return x.pcs[:] }\n\
+         func g() []uintptr { var a [2 * 10]uintptr; return a[:] }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    for (src, want) in [
+        ("package p\nconst m = -1\nvar a [m]int\n", "invalid array length"),
+        ("package p\nvar v = 3\nvar a [v]int\n", "invalid array length"),
+        (
+            "package p\nconst m = \"x\"\nvar a [m]int\n",
+            "must be integer",
+        ),
+    ] {
+        let bad = check_src(src);
+        assert!(
+            bad.errors.iter().any(|e| e.msg.contains(want)),
+            "expected {want:?} for {src:?}, got: {:?}",
+            bad.errors
+        );
+    }
+}
+
+/// A lone multi-valued argument is spread across the parameters:
+/// `f(g())` where `g` returns exactly what `f` takes.
+#[test]
+fn single_multi_valued_argument_is_spread() {
+    let check = check_src(
+        "package p\n\
+         func pair() (int, string) { return 0, \"\" }\n\
+         func take(a int, b string) {}\n\
+         func f() { take(pair()) }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+
+    // The spread values are still assignment-checked against the parameters.
+    let bad = check_src(
+        "package p\n\
+         func pair() (int, string) { return 0, \"\" }\n\
+         func take(a int, b int) {}\n\
+         func f() { take(pair()) }\n",
+    );
+    assert!(
+        bad.errors
+            .iter()
+            .any(|e| e.msg.contains("cannot use string value as int value")),
+        "expected a per-value assignment error, got: {:?}",
+        bad.errors
+    );
+}

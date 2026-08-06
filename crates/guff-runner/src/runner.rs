@@ -216,8 +216,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
+            &crate::hash::HashMap::default(),
+            &crate::hash::HashMap::default(),
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,

@@ -78,9 +78,17 @@ impl Checker {
         }
 
         let iface = new_interface_type(&mut self.types, methods, embeddeds);
-        // Compute the type set now so any errors surface here (Go defers this
-        // with `later`; we compute eagerly since we run serially).
-        interface_compute_typeset(&mut self.types, &self.objects, &self.packages, iface);
+        // Compute the type set in a delayed action, exactly like Go's
+        // `Checker.interfaceType`. Computing it here instead would cache a
+        // method set built from embedded named types whose underlying is not
+        // resolved yet — every interface declared while we are still inside
+        // another interface's declaration cycle would silently lose the
+        // methods promoted from its embedded interfaces. The type set is also
+        // computed lazily on demand (lookup, assignability), so nothing
+        // depends on it being ready before the delayed queue drains.
+        self.later(move |check| {
+            interface_compute_typeset(&mut check.types, &check.objects, &check.packages, iface);
+        });
         iface
     }
 

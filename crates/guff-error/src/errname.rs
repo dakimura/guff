@@ -120,6 +120,13 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, pending: &mut Vec<(u32, Str
 }
 
 fn check_type_spec(pass: &Pass<'_>, ts: &TypeSpec, pending: &mut Vec<(u32, String)>) {
+    // Upstream only inspects concrete type declarations. An interface that
+    // happens to include `Error() string` (`type AttrsGetter interface {
+    // Error() string; Attrs() []slog.Attr }`) names a contract, not an error
+    // type, and is never reported.
+    if matches!(&ts.ty, Expr::InterfaceType(_)) {
+        return;
+    }
     let Some(typ) = object_type(pass, &ts.name) else {
         return;
     };

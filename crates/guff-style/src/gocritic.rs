@@ -43,15 +43,17 @@
 //!
 //! Settings: `enable-all` / `disable-all` / `enabled-checks` / `disabled-checks`
 //! / `enabled-tags` / `disabled-tags` (prometheus-style `enable-all` +
-//! `disabled-checks` works; cli-style `disabled-tags: [style]` too).
+//! `disabled-checks` works; cli-style `disabled-tags: [style]` too), plus the
+//! per-check params in [`GocriticCheckSettings`](crate::GocriticCheckSettings).
 //!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host),
 //! regexpSimplify Go-only spellings (`[][]`) / full quasilyte/regex Value parity,
 //! boolExprSimplify SkipChilds (nested dual-report) / SideEffectFree full parity,
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
-//! per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam sizeThreshold,
-//! nestingReduce bodyWidth, truncateCmp skipArchDependent, unnamedResult checkExported,
-//! tooManyResultsChecker maxResults),
+//! remaining per-check `settings` params (rangeExprCopy/rangeValCopy/hugeParam
+//! sizeThreshold, nestingReduce bodyWidth, truncateCmp skipArchDependent; wired:
+//! tooManyResultsChecker maxResults, ifElseChain minThreshold, unnamedResult
+//! checkExported),
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
@@ -945,6 +947,7 @@ fn count_if_else_len(stmt: &IfStmt) -> i32 {
 
 fn check_if_else_chain(
     stmt: &IfStmt,
+    min_threshold: usize,
     visited: &mut HashSet<u32>,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -959,8 +962,8 @@ fn check_if_else_chain(
         }
         cur = next;
     }
-    // minThreshold default = 2
-    if count_if_else_len(stmt) >= 2 {
+    // `count_if_else_len` is non-negative by construction (0 on give-up).
+    if usize::try_from(count_if_else_len(stmt)).unwrap_or(0) >= min_threshold {
         report(
             pending,
             stmt.if_.0 as u32,
@@ -6568,7 +6571,12 @@ fn result_num_fields(results: &FieldList) -> usize {
     n
 }
 
-fn check_unnamed_result(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Vec<(u32, String)>) {
+    // Upstream: `if c.checkExported && !ast.IsExported(name) { return }` — the
+    // param *narrows* the check to exported funcs rather than adding them.
+    if check_exported && !is_exported(&f.name.name) {
+        return;
+    }
     // checkExported default false → only exported funcs (upstream inverted naming:
     // checkExported=false means skip unexported... wait:
     // `if c.checkExported && !ast.IsExported` → return
@@ -6785,7 +6793,6 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32,
 // --- batch 14: ptrToRefParam / tooManyResultsChecker / evalOrder /
 // unlabelStmt / returnAfterHttpError / exposedSyncMutex --------------------
 
-const TOO_MANY_RESULTS_MAX: usize = 5;
 
 fn is_ref_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -6851,16 +6858,16 @@ fn check_ptr_to_ref_param(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u32,
     check_ptr_to_ref_param_fields(pass, f.ty.results.as_ref(), pending);
 }
 
-fn check_too_many_results(f: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_too_many_results(f: &FuncDecl, max_results: usize, pending: &mut Vec<(u32, String)>) {
     let Some(results) = &f.ty.results else {
         return;
     };
-    if result_num_fields(results) > TOO_MANY_RESULTS_MAX {
+    if result_num_fields(results) > max_results {
         report(
             pending,
             f.name.pos().0 as u32,
             format!(
-                "function has more than {TOO_MANY_RESULTS_MAX} results, consider to simplify the function"
+                "function has more than {max_results} results, consider to simplify the function"
             ),
         );
     }
@@ -7765,6 +7772,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .cloned()
         .unwrap_or_default();
     let set = enabled_set(&options);
+    let params = options.check_settings.clone();
 
     let mut pending = Vec::new();
     let mut if_else_visited = HashSet::new();
@@ -7845,7 +7853,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "ifElseChain") {
                         let key = s as *const _ as usize;
                         if if_else_ptr.insert(key, ()).is_none() {
-                            check_if_else_chain(s, &mut if_else_visited, &mut pending);
+                            check_if_else_chain(
+                                s,
+                                params.if_else_chain_min_threshold,
+                                &mut if_else_visited,
+                                &mut pending,
+                            );
                         }
                     }
                     if enabled(&set, "nilValReturn") {
@@ -8042,7 +8055,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_param_type_combine(pass, f, &mut pending);
                     }
                     if enabled(&set, "unnamedResult") {
-                        check_unnamed_result(f, &mut pending);
+                        check_unnamed_result(
+                            f,
+                            params.unnamed_result_check_exported,
+                            &mut pending,
+                        );
                     }
                     if enabled(&set, "hugeParam") {
                         check_huge_param(pass, f, &mut pending);
@@ -8051,7 +8068,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_ptr_to_ref_param(pass, f, &mut pending);
                     }
                     if enabled(&set, "tooManyResultsChecker") {
-                        check_too_many_results(f, &mut pending);
+                        check_too_many_results(f, params.too_many_results_max, &mut pending);
                     }
                 }
                 NodeRef::ReturnStmt(r) if enabled(&set, "evalOrder") => {

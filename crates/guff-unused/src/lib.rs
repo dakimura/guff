@@ -11,7 +11,8 @@ use guff::token::Token;
 use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::facts::generated;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::arena::ObjectId;
+use guff_types::arena::{ObjectArena, ObjectId, TypeArena, TypeData};
+use guff_types::{pointer_elem, signature_recv};
 
 fn is_exported(name: &str) -> bool {
     name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
@@ -25,6 +26,28 @@ fn recv_type_ident(ty: &Expr) -> Option<&Ident> {
         Expr::IndexExpr(i) => recv_type_ident(&i.x),
         Expr::IndexListExpr(i) => recv_type_ident(&i.x),
         Expr::ParenExpr(p) => recv_type_ident(&p.x),
+        _ => None,
+    }
+}
+
+/// Name of a method object's receiver base type — `streamer` for
+/// `func (s *streamer[T]) nextBatch()`. `None` for non-methods.
+fn method_recv_base_name(
+    types: &TypeArena,
+    objects: &ObjectArena,
+    obj: ObjectId,
+) -> Option<String> {
+    let sig = obj.typ(objects)?;
+    if !matches!(types.get(sig), TypeData::Signature(_)) {
+        return None;
+    }
+    let recv = signature_recv(types, sig)?;
+    let mut t = recv.typ(objects)?;
+    if matches!(types.get(t), TypeData::Pointer(_)) {
+        t = pointer_elem(types, t);
+    }
+    match types.get(t) {
+        TypeData::Named(n) => Some(n.obj().name(objects).to_string()),
         _ => None,
     }
 }
@@ -159,8 +182,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     let mut used = roots;
+    // Calls through an *instantiated* generic receiver (`streamer[T].nextBatch`)
+    // record the substituted method copy in `Uses`, which is a different
+    // ObjectId from the declaration. `Func` has no `Origin()` to map it back
+    // (R18 DEFERRED), so remember (receiver type name, method name) too.
+    let mut used_methods: HashSet<(String, String)> = HashSet::new();
     for obj in info.uses.values() {
         used.insert(*obj);
+        if let Some(recv) = method_recv_base_name(&artifacts.types, &artifacts.objects, *obj) {
+            used_methods.insert((recv, obj.name(&artifacts.objects).to_string()));
+        }
     }
 
     for group in const_groups {
@@ -188,6 +219,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let name = method.name(&artifacts.objects);
         if iface_method_names.contains(name) {
+            used.insert(*method);
+        }
+    }
+
+    // Second pass over the same map, this time matching the instantiated-method
+    // uses collected above.
+    for (method, recv_ty) in &method_recv_type {
+        if !candidates.contains(method) {
+            continue;
+        }
+        let key = (
+            recv_ty.name(&artifacts.objects).to_string(),
+            method.name(&artifacts.objects).to_string(),
+        );
+        if used_methods.contains(&key) {
             used.insert(*method);
         }
     }

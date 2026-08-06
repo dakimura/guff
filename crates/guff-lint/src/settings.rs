@@ -126,7 +126,7 @@ pub struct ErrcheckSettings {
     #[serde(default, rename = "disable-default-exclusions")]
     pub disable_default_exclusions: bool,
     /// Additional function/method symbols to exclude (kisielk exclude file format).
-    #[serde(default, rename = "exclude-functions")]
+    #[serde(default, rename = "exclude-functions", deserialize_with = "string_or_seq")]
     pub exclude_functions: Vec<String>,
     // DEFERRED (R4 follow-up): verbose.
 }
@@ -138,9 +138,9 @@ pub struct GovetSettings {
     pub enable_all: bool,
     #[serde(default, rename = "disable-all")]
     pub disable_all: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub enable: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
 }
 
@@ -239,7 +239,7 @@ pub struct MisspellSettings {
     #[serde(default)]
     pub locale: Option<String>,
     /// golangci v1 `ignore-words`; v2 renamed to `ignore-rules` (both accepted).
-    #[serde(default, rename = "ignore-words", alias = "ignore-rules")]
+    #[serde(default, rename = "ignore-words", alias = "ignore-rules", deserialize_with = "string_or_seq")]
     pub ignore_words: Vec<String>,
     #[serde(default, rename = "extra-words")]
     pub extra_words: Vec<MisspellExtraWordSetting>,
@@ -362,7 +362,7 @@ pub struct NlreturnSettings {
 /// `linters.settings.predeclared` / `linters-settings.predeclared`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct PredeclaredSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub ignore: Vec<String>,
     #[serde(default, rename = "q", alias = "qualified-name")]
     pub qualified: Option<bool>,
@@ -382,11 +382,11 @@ pub struct WhitespaceSettings {
 pub struct MndSettings {
     #[serde(default)]
     pub checks: Option<Vec<String>>,
-    #[serde(default, rename = "ignored-numbers")]
+    #[serde(default, rename = "ignored-numbers", deserialize_with = "string_or_seq")]
     pub ignored_numbers: Vec<String>,
-    #[serde(default, rename = "ignored-files")]
+    #[serde(default, rename = "ignored-files", deserialize_with = "string_or_seq")]
     pub ignored_files: Vec<String>,
-    #[serde(default, rename = "ignored-functions")]
+    #[serde(default, rename = "ignored-functions", deserialize_with = "string_or_seq")]
     pub ignored_functions: Vec<String>,
 }
 
@@ -408,7 +408,7 @@ pub struct TagalignSettings {
     pub align: Option<bool>,
     #[serde(default)]
     pub sort: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub order: Vec<String>,
     #[serde(default)]
     pub strict: Option<bool>,
@@ -425,9 +425,9 @@ pub struct WslSettings {
     pub allow_assign_and_anything: Option<bool>,
     #[serde(default, rename = "allow-multiline-assign")]
     pub allow_multiline_assign: Option<bool>,
-    #[serde(default, rename = "allow-cuddle-with-calls")]
+    #[serde(default, rename = "allow-cuddle-with-calls", deserialize_with = "string_or_seq")]
     pub allow_cuddle_with_calls: Vec<String>,
-    #[serde(default, rename = "allow-cuddle-with-rhs")]
+    #[serde(default, rename = "allow-cuddle-with-rhs", deserialize_with = "string_or_seq")]
     pub allow_cuddle_with_rhs: Vec<String>,
 }
 
@@ -479,7 +479,7 @@ pub struct GoconstSettings {
     pub min: Option<i64>,
     pub max: Option<i64>,
     /// Regex patterns for strings to ignore (golangci `ignore-string-values`).
-    #[serde(default, rename = "ignore-string-values")]
+    #[serde(default, rename = "ignore-string-values", deserialize_with = "string_or_seq")]
     pub ignore_string_values: Vec<String>,
     /// Deprecated single-pattern form; merged into [`Self::ignore_string_values`].
     #[serde(default, rename = "ignore-strings")]
@@ -505,13 +505,13 @@ pub struct UnconvertSettings {
 /// `linters.settings.exhaustruct` / `linters-settings.exhaustruct`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ExhaustructSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub include: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub exclude: Vec<String>,
     #[serde(default, rename = "allow-empty")]
     pub allow_empty: Option<bool>,
-    #[serde(default, rename = "allow-empty-rx")]
+    #[serde(default, rename = "allow-empty-rx", deserialize_with = "string_or_seq")]
     pub allow_empty_rx: Vec<String>,
     #[serde(default, rename = "allow-empty-returns")]
     pub allow_empty_returns: Option<bool>,
@@ -523,7 +523,7 @@ pub struct ExhaustructSettings {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ExhaustiveSettings {
     /// Program elements to check: `switch` and/or `map` (default `[switch]`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub check: Vec<String>,
     #[serde(default, rename = "default-signifies-exhaustive")]
     pub default_signifies_exhaustive: Option<bool>,
@@ -575,7 +575,7 @@ pub struct LoggercheckSettings {
     pub require_string_key: bool,
     #[serde(default, rename = "no-printf-like")]
     pub no_printf_like: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub rules: Vec<String>,
 }
 
@@ -615,9 +615,9 @@ pub struct SloglintSettings {
     pub no_raw_keys: bool,
     #[serde(default, rename = "key-naming-case")]
     pub key_naming_case: Option<String>,
-    #[serde(default, rename = "allowed-keys")]
+    #[serde(default, rename = "allowed-keys", deserialize_with = "string_or_seq")]
     pub allowed_keys: Vec<String>,
-    #[serde(default, rename = "forbidden-keys")]
+    #[serde(default, rename = "forbidden-keys", deserialize_with = "string_or_seq")]
     pub forbidden_keys: Vec<String>,
     #[serde(default, rename = "args-on-sep-lines")]
     pub args_on_sep_lines: bool,
@@ -721,9 +721,9 @@ pub struct TestifylintSettings {
     pub enable_all: bool,
     #[serde(default, rename = "disable-all")]
     pub disable_all: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub enable: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
     #[serde(default, rename = "bool-compare")]
     pub bool_compare: TestifylintBoolCompareSettings,
@@ -809,13 +809,13 @@ pub struct ErrchkjsonSettings {
 pub struct WrapcheckSettings {
     #[serde(default, rename = "ignore-sigs")]
     pub ignore_sigs: Option<Vec<String>>,
-    #[serde(default, rename = "extra-ignore-sigs")]
+    #[serde(default, rename = "extra-ignore-sigs", deserialize_with = "string_or_seq")]
     pub extra_ignore_sigs: Vec<String>,
-    #[serde(default, rename = "ignore-sig-regexps")]
+    #[serde(default, rename = "ignore-sig-regexps", deserialize_with = "string_or_seq")]
     pub ignore_sig_regexps: Vec<String>,
-    #[serde(default, rename = "ignore-package-globs")]
+    #[serde(default, rename = "ignore-package-globs", deserialize_with = "string_or_seq")]
     pub ignore_package_globs: Vec<String>,
-    #[serde(default, rename = "ignore-interface-regexps")]
+    #[serde(default, rename = "ignore-interface-regexps", deserialize_with = "string_or_seq")]
     pub ignore_interface_regexps: Vec<String>,
     #[serde(default, rename = "report-internal-errors")]
     pub report_internal_errors: bool,
@@ -826,7 +826,7 @@ pub struct WrapcheckSettings {
 /// `database/sql` is always checked; `packages` lists additional import paths.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct RowserrcheckSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub packages: Vec<String>,
 }
 
@@ -846,7 +846,7 @@ pub struct BodycloseSettings {
 pub struct GodotSettings {
     #[serde(default)]
     pub scope: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub exclude: Vec<String>,
     #[serde(default)]
     pub period: Option<bool>,
@@ -859,16 +859,16 @@ pub struct GodotSettings {
 /// Empty `keywords` → golangci defaults (`TODO` / `BUG` / `FIXME`).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct GodoxSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub keywords: Vec<String>,
 }
 
 /// `linters.settings.dupword` / `linters-settings.dupword`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct DupwordSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub keywords: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub ignore: Vec<String>,
     #[serde(default, rename = "comments-only")]
     pub comments_only: Option<bool>,
@@ -882,9 +882,9 @@ pub struct DupwordSettings {
 pub struct GodoclintSettings {
     #[serde(default, rename = "default")]
     pub default_set: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub enable: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
 }
 
@@ -892,7 +892,7 @@ pub struct GodoclintSettings {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ModernizeSettings {
     /// Checker names to disable (golangci-lint compatible).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
 }
 
@@ -903,14 +903,18 @@ pub struct GocriticSettings {
     pub enable_all: bool,
     #[serde(default, rename = "disable-all")]
     pub disable_all: bool,
-    #[serde(default, rename = "enabled-checks")]
+    #[serde(default, rename = "enabled-checks", deserialize_with = "string_or_seq")]
     pub enabled_checks: Vec<String>,
-    #[serde(default, rename = "disabled-checks")]
+    #[serde(default, rename = "disabled-checks", deserialize_with = "string_or_seq")]
     pub disabled_checks: Vec<String>,
-    #[serde(default, rename = "enabled-tags")]
+    #[serde(default, rename = "enabled-tags", deserialize_with = "string_or_seq")]
     pub enabled_tags: Vec<String>,
-    #[serde(default, rename = "disabled-tags")]
+    #[serde(default, rename = "disabled-tags", deserialize_with = "string_or_seq")]
     pub disabled_tags: Vec<String>,
+    /// Per-check parameters (`gocritic.settings.<check>.<param>`). Kept raw
+    /// because each check declares its own param names and types.
+    #[serde(default)]
+    pub settings: Option<serde_yaml::Value>,
 }
 
 /// One `forbidigo.forbid` entry (string or `{pattern,msg,pkg}`).
@@ -969,9 +973,9 @@ pub struct ImportasAliasSetting {
 pub struct GosmopolitanSettings {
     #[serde(default, rename = "allow-time-local")]
     pub allow_time_local: bool,
-    #[serde(default, rename = "escape-hatches")]
+    #[serde(default, rename = "escape-hatches", deserialize_with = "string_or_seq")]
     pub escape_hatches: Vec<String>,
-    #[serde(default, rename = "watch-for-scripts")]
+    #[serde(default, rename = "watch-for-scripts", deserialize_with = "string_or_seq")]
     pub watch_for_scripts: Vec<String>,
 }
 
@@ -1023,7 +1027,7 @@ impl GoheaderSettings {
 /// `linters.settings.asasalint` / `linters-settings.asasalint`.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct AsasalintSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub exclude: Vec<String>,
     /// golangci default `true`. When false, only `exclude` patterns apply.
     #[serde(default = "default_true", rename = "use-builtin-exclusions")]
@@ -1045,7 +1049,7 @@ impl Default for AsasalintSettings {
 /// Non-empty → joined as `^(p1|p2|…)$` (golangci-lint compat).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct ReassignSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub patterns: Vec<String>,
 }
 
@@ -1057,7 +1061,7 @@ pub struct ReassignSettings {
 pub struct RecvcheckSettings {
     #[serde(default, rename = "disable-builtin")]
     pub disable_builtin: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub exclusions: Vec<String>,
 }
 
@@ -1251,9 +1255,9 @@ pub struct VarnamelenSettings {
     pub ignore_map_index_ok: bool,
     #[serde(default, rename = "ignore-chan-recv-ok")]
     pub ignore_chan_recv_ok: bool,
-    #[serde(default, rename = "ignore-names")]
+    #[serde(default, rename = "ignore-names", deserialize_with = "string_or_seq")]
     pub ignore_names: Vec<String>,
-    #[serde(default, rename = "ignore-decls")]
+    #[serde(default, rename = "ignore-decls", deserialize_with = "string_or_seq")]
     pub ignore_decls: Vec<String>,
 }
 
@@ -1333,7 +1337,7 @@ pub struct UnqueryvetSettings {
     #[serde(default = "default_true", rename = "check-subqueries")]
     pub check_subqueries: bool,
     /// Empty → upstream defaults (`COUNT(*)`, system catalogs, …).
-    #[serde(default, rename = "allowed-patterns")]
+    #[serde(default, rename = "allowed-patterns", deserialize_with = "string_or_seq")]
     pub allowed_patterns: Vec<String>,
 }
 
@@ -1364,7 +1368,7 @@ pub struct PromlinterSettings {
     #[serde(default)]
     pub strict: bool,
     /// Disable named promlint checks (`Help`, `Counter`, `CamelCase`, …).
-    #[serde(default, rename = "disabled-linters")]
+    #[serde(default, rename = "disabled-linters", deserialize_with = "string_or_seq")]
     pub disabled_linters: Vec<String>,
 }
 
@@ -1447,9 +1451,9 @@ pub struct WslV5Settings {
     /// Preset: `all` / `none` / `default` / empty.
     #[serde(default)]
     pub default: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub enable: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
 }
 
@@ -1506,7 +1510,7 @@ pub struct TestpackageSettings {
     #[serde(default = "default_testpackage_skip_regexp", rename = "skip-regexp")]
     pub skip_regexp: String,
     /// Package names that may appear in `*_test.go` without a `_test` suffix.
-    #[serde(default = "default_testpackage_allow_packages", rename = "allow-packages")]
+    #[serde(default = "default_testpackage_allow_packages", rename = "allow-packages", deserialize_with = "string_or_seq")]
     pub allow_packages: Vec<String>,
 }
 
@@ -1554,7 +1558,7 @@ pub struct TagliatelleCaseSettings {
     pub extended_rules: std::collections::HashMap<String, TagliatelleExtendedRuleSettings>,
     #[serde(default, rename = "use-field-name")]
     pub use_field_name: bool,
-    #[serde(default, rename = "ignored-fields")]
+    #[serde(default, rename = "ignored-fields", deserialize_with = "string_or_seq")]
     pub ignored_fields: Vec<String>,
     // DEFERRED: overrides (package radix tree).
 }
@@ -1589,7 +1593,7 @@ impl TagliatelleSettings {
 /// Golangci-lint defaults disable the three check families.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct DecorderSettings {
-    #[serde(default = "default_dec_order", rename = "dec-order")]
+    #[serde(default = "default_dec_order", rename = "dec-order", deserialize_with = "string_or_seq")]
     pub dec_order: Vec<String>,
     #[serde(default, rename = "ignore-underscore-vars")]
     pub ignore_underscore_vars: bool,
@@ -1709,9 +1713,9 @@ impl GrouperSettings {
 /// Default (both empty): allow `anon` / `error` / `empty` / `stdlib`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct IreturnSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub allow: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub reject: Vec<String>,
 }
 
@@ -1725,20 +1729,81 @@ impl IreturnSettings {
 }
 
 /// `linters.settings.gosec` / `linters-settings.gosec`.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct GosecSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub includes: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub excludes: Vec<String>,
-    // DEFERRED: severity / confidence / config / concurrency.
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub confidence: String,
+    /// Per-rule `config` map. Only the `G101` sub-map is interpreted; the rest
+    /// (`G301`, `global`, …) is DEFERRED.
+    #[serde(default)]
+    pub config: Option<serde_yaml::Value>,
+    // DEFERRED: concurrency.
+}
+
+/// Read one key out of a `config.<rule>` sub-map.
+///
+/// Upstream gosec takes the numeric G101 knobs as **strings** and keeps the
+/// default when `strconv` fails; YAML that writes them unquoted still parses
+/// here, which is strictly more forgiving and never changes a valid config.
+fn gosec_config_key<'a>(
+    config: &'a serde_yaml::Value,
+    rule: &str,
+    key: &str,
+) -> Option<&'a serde_yaml::Value> {
+    config
+        .get(serde_yaml::Value::String(rule.to_string()))?
+        .get(serde_yaml::Value::String(key.to_string()))
+}
+
+fn gosec_config_f64(config: &serde_yaml::Value, rule: &str, key: &str) -> Option<f64> {
+    let v = gosec_config_key(config, rule, key)?;
+    v.as_f64().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+fn gosec_config_usize(config: &serde_yaml::Value, rule: &str, key: &str) -> Option<usize> {
+    let v = gosec_config_key(config, rule, key)?;
+    v.as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .or_else(|| v.as_str()?.trim().parse().ok())
 }
 
 impl GosecSettings {
     pub fn to_guff_gosec(&self) -> guff_style::GosecOptions {
+        let mut g101 = guff_style::G101Options::default();
+        if let Some(config) = &self.config {
+            if let Some(p) = gosec_config_key(config, "G101", "pattern").and_then(|v| v.as_str()) {
+                g101.pattern = p.to_string();
+            }
+            if let Some(b) =
+                gosec_config_key(config, "G101", "ignore_entropy").and_then(|v| v.as_bool())
+            {
+                g101.ignore_entropy = b;
+            }
+            if let Some(n) = gosec_config_f64(config, "G101", "entropy_threshold") {
+                g101.entropy_threshold = n;
+            }
+            if let Some(n) = gosec_config_f64(config, "G101", "per_char_threshold") {
+                g101.per_char_threshold = n;
+            }
+            if let Some(n) = gosec_config_usize(config, "G101", "truncate") {
+                g101.truncate = n;
+            }
+            if let Some(n) = gosec_config_usize(config, "G101", "min_entropy_length") {
+                g101.min_entropy_length = n;
+            }
+        }
         guff_style::GosecOptions {
             includes: self.includes.clone(),
             excludes: self.excludes.clone(),
+            severity: self.severity.clone(),
+            confidence: self.confidence.clone(),
+            g101,
         }
     }
 }
@@ -1782,7 +1847,7 @@ pub struct ThelperSettings {
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct IfaceUnusedSettings {
     /// Exact package paths to skip (golangci `settings.unused.exclude`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub exclude: Vec<String>,
 }
 
@@ -1798,7 +1863,7 @@ pub struct IfaceNestedSettings {
 /// Empty `enable` → golangci default (`identical` only).
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 pub struct IfaceSettings {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub enable: Vec<String>,
     #[serde(default)]
     pub settings: IfaceNestedSettings,
@@ -1845,9 +1910,9 @@ pub struct DepguardSettings {
 pub struct DepguardRuleSetting {
     #[serde(default, rename = "list-mode")]
     pub list_mode: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub files: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string_or_seq")]
     pub allow: Vec<String>,
     #[serde(default)]
     pub deny: Vec<DepguardDenySetting>,
@@ -1870,7 +1935,7 @@ pub struct DepguardDenySetting {
 pub struct GomoddirectivesSettings {
     #[serde(default, rename = "replace-local")]
     pub replace_local: bool,
-    #[serde(default, rename = "replace-allow-list")]
+    #[serde(default, rename = "replace-allow-list", deserialize_with = "string_or_seq")]
     pub replace_allow_list: Vec<String>,
     #[serde(default, rename = "retract-allow-no-explanation")]
     pub retract_allow_no_explanation: bool,
@@ -1893,6 +1958,82 @@ pub struct GomodguardSettings {
     pub local_replace_directives: bool,
 }
 
+/// Deserialize one `linters.settings.<name>` block, reporting failures.
+///
+/// A malformed block used to fall back to defaults silently, which is the
+/// worst outcome available: guff lints with settings the user did not ask for
+/// and reports findings they cannot explain from their config. golangci-lint
+/// fails the run outright; guff keeps going so one bad block cannot take down
+/// the whole lint, but the fallback is never silent.
+fn parse_settings<T: serde::de::DeserializeOwned>(
+    name: &str,
+    value: &serde_yaml::Value,
+) -> Option<T> {
+    match serde_yaml::from_value::<T>(value.clone()) {
+        Ok(parsed) => Some(parsed),
+        Err(err) => {
+            eprintln!(
+                "guff: ignoring linters.settings.{name} ({err}); \
+                 falling back to that linter's defaults"
+            );
+            None
+        }
+    }
+}
+
+/// Read one `gocritic.settings.<check>.<param>` value.
+///
+/// go-critic parses params through `linter.CheckerParams`, which coerces
+/// strings, so both `maxResults: 10` and `maxResults: "10"` are accepted.
+fn gocritic_param<'a>(
+    settings: &'a serde_yaml::Value,
+    check: &str,
+    param: &str,
+) -> Option<&'a serde_yaml::Value> {
+    settings
+        .get(serde_yaml::Value::String(check.to_string()))?
+        .get(serde_yaml::Value::String(param.to_string()))
+}
+
+fn gocritic_param_usize(settings: &serde_yaml::Value, check: &str, param: &str) -> Option<usize> {
+    let v = gocritic_param(settings, check, param)?;
+    v.as_u64()
+        .and_then(|n| usize::try_from(n).ok())
+        .or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+fn gocritic_param_bool(settings: &serde_yaml::Value, check: &str, param: &str) -> Option<bool> {
+    let v = gocritic_param(settings, check, param)?;
+    v.as_bool().or_else(|| v.as_str()?.trim().parse().ok())
+}
+
+/// Accept either a bare string or a list of strings.
+///
+/// golangci-lint decodes its config with mapstructure's `WeaklyTypedInput`, so
+/// `ignore-string-values: foo.+` and `ignore-string-values: [foo.+]` are the
+/// same config there. Without this, the scalar form fails to deserialize and
+/// (via [`parse_settings`]) discards *every* setting for that linter — the
+/// visible symptom is unrelated options like `ignore-calls` reverting to their
+/// defaults.
+pub(crate) fn string_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+
+    Ok(match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
+}
+
 impl LinterSettings {
     /// Parse from v2 `linters.settings` or v1 `linters-settings` YAML mapping.
     pub fn from_yaml(value: &serde_yaml::Value) -> Self {
@@ -1901,228 +2042,228 @@ impl LinterSettings {
         };
         let mut out = Self::default();
         if let Some(v) = map.get(serde_yaml::Value::String("errcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ErrcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ErrcheckSettings>("errcheck", v) {
                 out.errcheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("govet".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GovetSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GovetSettings>("govet", v) {
                 out.govet = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("staticcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<StaticcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<StaticcheckSettings>("staticcheck", v) {
                 out.staticcheck = s;
             }
         }
         // golangci v1 / many OSS configs put ST* keys under `stylecheck`.
         if let Some(v) = map.get(serde_yaml::Value::String("stylecheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<StaticcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<StaticcheckSettings>("stylecheck", v) {
                 out.staticcheck.merge_stylecheck(s);
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("revive".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ReviveSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ReviveSettings>("revive", v) {
                 out.revive = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("dupl".into())) {
-            if let Ok(s) = serde_yaml::from_value::<DuplSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<DuplSettings>("dupl", v) {
                 out.dupl = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("misspell".into())) {
-            if let Ok(s) = serde_yaml::from_value::<MisspellSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<MisspellSettings>("misspell", v) {
                 out.misspell = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gocyclo".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GocycloSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GocycloSettings>("gocyclo", v) {
                 out.gocyclo = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("maintidx".into())) {
-            if let Ok(s) = serde_yaml::from_value::<MaintidxSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<MaintidxSettings>("maintidx", v) {
                 out.maintidx = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gocognit".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GocognitSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GocognitSettings>("gocognit", v) {
                 out.gocognit = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("nestif".into())) {
-            if let Ok(s) = serde_yaml::from_value::<NestifSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<NestifSettings>("nestif", v) {
                 out.nestif = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("dogsled".into())) {
-            if let Ok(s) = serde_yaml::from_value::<DogsledSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<DogsledSettings>("dogsled", v) {
                 out.dogsled = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("funlen".into())) {
-            if let Ok(s) = serde_yaml::from_value::<FunlenSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<FunlenSettings>("funlen", v) {
                 out.funlen = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("cyclop".into())) {
-            if let Ok(s) = serde_yaml::from_value::<CyclopSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<CyclopSettings>("cyclop", v) {
                 out.cyclop = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("lll".into())) {
-            if let Ok(s) = serde_yaml::from_value::<LllSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<LllSettings>("lll", v) {
                 out.lll = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("nakedret".into())) {
-            if let Ok(s) = serde_yaml::from_value::<NakedretSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<NakedretSettings>("nakedret", v) {
                 out.nakedret = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("nlreturn".into())) {
-            if let Ok(s) = serde_yaml::from_value::<NlreturnSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<NlreturnSettings>("nlreturn", v) {
                 out.nlreturn = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("predeclared".into())) {
-            if let Ok(s) = serde_yaml::from_value::<PredeclaredSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<PredeclaredSettings>("predeclared", v) {
                 out.predeclared = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("whitespace".into())) {
-            if let Ok(s) = serde_yaml::from_value::<WhitespaceSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<WhitespaceSettings>("whitespace", v) {
                 out.whitespace = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("mnd".into())) {
-            if let Ok(s) = serde_yaml::from_value::<MndSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<MndSettings>("mnd", v) {
                 out.mnd = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("prealloc".into())) {
-            if let Ok(s) = serde_yaml::from_value::<PreallocSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<PreallocSettings>("prealloc", v) {
                 out.prealloc = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("tagalign".into())) {
-            if let Ok(s) = serde_yaml::from_value::<TagalignSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<TagalignSettings>("tagalign", v) {
                 out.tagalign = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("wsl".into())) {
-            if let Ok(s) = serde_yaml::from_value::<WslSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<WslSettings>("wsl", v) {
                 out.wsl = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("perfsprint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<PerfsprintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<PerfsprintSettings>("perfsprint", v) {
                 out.perfsprint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("goconst".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GoconstSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GoconstSettings>("goconst", v) {
                 out.goconst = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("copyloopvar".into())) {
-            if let Ok(s) = serde_yaml::from_value::<CopyloopvarSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<CopyloopvarSettings>("copyloopvar", v) {
                 out.copyloopvar = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("usetesting".into())) {
-            if let Ok(s) = serde_yaml::from_value::<UsetestingSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<UsetestingSettings>("usetesting", v) {
                 out.usetesting = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("usestdlibvars".into())) {
-            if let Ok(s) = serde_yaml::from_value::<UsestdlibvarsSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<UsestdlibvarsSettings>("usestdlibvars", v) {
                 out.usestdlibvars = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("unconvert".into())) {
-            if let Ok(s) = serde_yaml::from_value::<UnconvertSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<UnconvertSettings>("unconvert", v) {
                 out.unconvert = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustruct".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ExhaustructSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ExhaustructSettings>("exhaustruct", v) {
                 out.exhaustruct = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("exhaustive".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ExhaustiveSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ExhaustiveSettings>("exhaustive", v) {
                 out.exhaustive = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("musttag".into())) {
-            if let Ok(s) = serde_yaml::from_value::<MusttagSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<MusttagSettings>("musttag", v) {
                 out.musttag = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("loggercheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<LoggercheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<LoggercheckSettings>("loggercheck", v) {
                 out.loggercheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("sloglint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<SloglintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<SloglintSettings>("sloglint", v) {
                 out.sloglint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("testifylint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<TestifylintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<TestifylintSettings>("testifylint", v) {
                 out.testifylint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("errchkjson".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ErrchkjsonSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ErrchkjsonSettings>("errchkjson", v) {
                 out.errchkjson = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("wrapcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<WrapcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<WrapcheckSettings>("wrapcheck", v) {
                 out.wrapcheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("rowserrcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<RowserrcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<RowserrcheckSettings>("rowserrcheck", v) {
                 out.rowserrcheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("bodyclose".into())) {
-            if let Ok(s) = serde_yaml::from_value::<BodycloseSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<BodycloseSettings>("bodyclose", v) {
                 out.bodyclose = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("godot".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GodotSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GodotSettings>("godot", v) {
                 out.godot = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("godox".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GodoxSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GodoxSettings>("godox", v) {
                 out.godox = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("dupword".into())) {
-            if let Ok(s) = serde_yaml::from_value::<DupwordSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<DupwordSettings>("dupword", v) {
                 out.dupword = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("godoclint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GodoclintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GodoclintSettings>("godoclint", v) {
                 out.godoclint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("depguard".into())) {
-            if let Ok(s) = serde_yaml::from_value::<DepguardSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<DepguardSettings>("depguard", v) {
                 out.depguard = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gomoddirectives".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GomoddirectivesSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GomoddirectivesSettings>("gomoddirectives", v) {
                 out.gomoddirectives = s;
             }
         }
@@ -2134,167 +2275,167 @@ impl LinterSettings {
             merge_gomodguard_v2(&mut out.gomodguard, v);
         }
         if let Some(v) = map.get(serde_yaml::Value::String("modernize".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ModernizeSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ModernizeSettings>("modernize", v) {
                 out.modernize = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gocritic".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GocriticSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GocriticSettings>("gocritic", v) {
                 out.gocritic = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("forbidigo".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ForbidigoSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ForbidigoSettings>("forbidigo", v) {
                 out.forbidigo = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("bidichk".into())) {
-            if let Ok(s) = serde_yaml::from_value::<BidichkSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<BidichkSettings>("bidichk", v) {
                 out.bidichk = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gosmopolitan".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GosmopolitanSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GosmopolitanSettings>("gosmopolitan", v) {
                 out.gosmopolitan = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("goheader".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GoheaderSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GoheaderSettings>("goheader", v) {
                 out.goheader = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("asasalint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<AsasalintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<AsasalintSettings>("asasalint", v) {
                 out.asasalint = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("reassign".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ReassignSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ReassignSettings>("reassign", v) {
                 out.reassign = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("recvcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<RecvcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<RecvcheckSettings>("recvcheck", v) {
                 out.recvcheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("thelper".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ThelperSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ThelperSettings>("thelper", v) {
                 out.thelper = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("iface".into())) {
-            if let Ok(s) = serde_yaml::from_value::<IfaceSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<IfaceSettings>("iface", v) {
                 out.iface = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("importas".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ImportasSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ImportasSettings>("importas", v) {
                 out.importas = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("interfacebloat".into())) {
-            if let Ok(s) = serde_yaml::from_value::<InterfacebloatSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<InterfacebloatSettings>("interfacebloat", v) {
                 out.interfacebloat = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("embeddedstructfieldcheck".into())) {
-            if let Ok(s) = serde_yaml::from_value::<EmbeddedstructfieldcheckSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<EmbeddedstructfieldcheckSettings>("embeddedstructfieldcheck", v) {
                 out.embeddedstructfieldcheck = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gochecksumtype".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GochecksumtypeSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GochecksumtypeSettings>("gochecksumtype", v) {
                 out.gochecksumtype = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("inamedparam".into())) {
-            if let Ok(s) = serde_yaml::from_value::<InamedparamSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<InamedparamSettings>("inamedparam", v) {
                 out.inamedparam = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("nonamedreturns".into())) {
-            if let Ok(s) = serde_yaml::from_value::<NonamedreturnsSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<NonamedreturnsSettings>("nonamedreturns", v) {
                 out.nonamedreturns = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("funcorder".into())) {
-            if let Ok(s) = serde_yaml::from_value::<FuncorderSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<FuncorderSettings>("funcorder", v) {
                 out.funcorder = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("varnamelen".into())) {
-            if let Ok(s) = serde_yaml::from_value::<VarnamelenSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<VarnamelenSettings>("varnamelen", v) {
                 out.varnamelen = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("unparam".into())) {
-            if let Ok(s) = serde_yaml::from_value::<UnparamSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<UnparamSettings>("unparam", v) {
                 out.unparam = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("unqueryvet".into())) {
-            if let Ok(s) = serde_yaml::from_value::<UnqueryvetSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<UnqueryvetSettings>("unqueryvet", v) {
                 out.unqueryvet = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("promlinter".into())) {
-            if let Ok(s) = serde_yaml::from_value::<PromlinterSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<PromlinterSettings>("promlinter", v) {
                 out.promlinter = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("ginkgolinter".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GinkgolinterSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GinkgolinterSettings>("ginkgolinter", v) {
                 out.ginkgolinter = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("wsl_v5".into())) {
-            if let Ok(s) = serde_yaml::from_value::<WslV5Settings>(v.clone()) {
+            if let Some(s) = parse_settings::<WslV5Settings>("wsl_v5", v) {
                 out.wsl_v5 = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("paralleltest".into())) {
-            if let Ok(s) = serde_yaml::from_value::<ParalleltestSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<ParalleltestSettings>("paralleltest", v) {
                 out.paralleltest = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("testpackage".into())) {
-            if let Ok(s) = serde_yaml::from_value::<TestpackageSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<TestpackageSettings>("testpackage", v) {
                 out.testpackage = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("tagliatelle".into())) {
-            if let Ok(s) = serde_yaml::from_value::<TagliatelleSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<TagliatelleSettings>("tagliatelle", v) {
                 out.tagliatelle = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("decorder".into())) {
-            if let Ok(s) = serde_yaml::from_value::<DecorderSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<DecorderSettings>("decorder", v) {
                 out.decorder = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("iotamixing".into())) {
-            if let Ok(s) = serde_yaml::from_value::<IotamixingSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<IotamixingSettings>("iotamixing", v) {
                 out.iotamixing = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("grouper".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GrouperSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GrouperSettings>("grouper", v) {
                 out.grouper = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("ireturn".into())) {
-            if let Ok(s) = serde_yaml::from_value::<IreturnSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<IreturnSettings>("ireturn", v) {
                 out.ireturn = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("gosec".into())) {
-            if let Ok(s) = serde_yaml::from_value::<GosecSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<GosecSettings>("gosec", v) {
                 out.gosec = s;
             }
         }
         if let Some(v) = map.get(serde_yaml::Value::String("nolintlint".into())) {
-            if let Ok(s) = serde_yaml::from_value::<NolintlintSettings>(v.clone()) {
+            if let Some(s) = parse_settings::<NolintlintSettings>("nolintlint", v) {
                 out.nolintlint = s;
             }
         }
@@ -3300,6 +3441,18 @@ impl ModernizeSettings {
 
 impl GocriticSettings {
     pub fn to_guff_gocritic(&self) -> guff_style::GocriticOptions {
+        let mut check_settings = guff_style::GocriticCheckSettings::default();
+        if let Some(settings) = &self.settings {
+            if let Some(n) = gocritic_param_usize(settings, "tooManyResultsChecker", "maxResults") {
+                check_settings.too_many_results_max = n;
+            }
+            if let Some(n) = gocritic_param_usize(settings, "ifElseChain", "minThreshold") {
+                check_settings.if_else_chain_min_threshold = n;
+            }
+            if let Some(b) = gocritic_param_bool(settings, "unnamedResult", "checkExported") {
+                check_settings.unnamed_result_check_exported = b;
+            }
+        }
         guff_style::GocriticOptions {
             enable_all: self.enable_all,
             disable_all: self.disable_all,
@@ -3307,6 +3460,7 @@ impl GocriticSettings {
             disabled_checks: self.disabled_checks.clone(),
             enabled_tags: self.enabled_tags.clone(),
             disabled_tags: self.disabled_tags.clone(),
+            check_settings,
         }
     }
 }

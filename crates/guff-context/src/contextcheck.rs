@@ -29,7 +29,7 @@ use guff_ssa::value::Value;
 use guff_types::alias::unalias_readonly;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::predicates::identical;
-use guff_types::signature::{signature_params, signature_results};
+use guff_types::signature::{signature_params, signature_recv, signature_results};
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::TypeId;
 use guff_types::PackageId as TypePackageId;
@@ -433,6 +433,29 @@ impl<'a> Runner<'a> {
             .is_some_and(|n| n == "context.Background" || n == "context.TODO")
     }
 
+    /// Is this call a `Context()` **method** call (i.e. `r.Context()`)?
+    ///
+    /// Mirrors upstream's `f.Name() == ctxName && f.Signature.Recv() != nil`,
+    /// covering both the static form (concrete receiver such as
+    /// `*http.Request`) and the invoke form (interface method).
+    fn is_recv_context_call(&self, common: &CallCommon) -> bool {
+        if let Some(method) = common.method {
+            return method.name(&self.prog.object_arena) == CTX_NAME;
+        }
+        // Resolve through the type-checker object rather than the SSA function:
+        // `(*http.Request).Context` lives in an external package, so its body is
+        // never built and `self.prog.functions` has no entry for it.
+        let Some(obj) = resolve_call_target(common, self.prog) else {
+            return false;
+        };
+        if obj.name(&self.prog.object_arena) != CTX_NAME {
+            return false;
+        }
+        obj.typ(&self.prog.object_arena)
+            .and_then(|sig| signature_recv(&self.prog.type_arena, sig))
+            .is_some()
+    }
+
     fn callee_func(&self, func: &Function, iid: InstrId) -> Option<FuncId> {
         // Match upstream `getFunction`: CallInstruction static callees and
         // MakeClosure's anonymous function (needed to chase closure bodies that
@@ -525,10 +548,14 @@ impl<'a> Runner<'a> {
                 if tp & CTX_OUT == 0 {
                     return;
                 }
-                if let Some(method) = common.method {
-                    if method.name(&self.prog.object_arena) == CTX_NAME {
-                        rets.push(Value::Instr(iid));
-                    }
+                // Upstream `getHttpReqCtx` resolves the callee *function* and
+                // accepts it when `f.Name() == "Context"` and the signature has
+                // a receiver. `(*http.Request).Context` is a concrete method, so
+                // it is a static call with `Method == nil` — matching only on
+                // `common.method` missed every plain `ctx := r.Context()` and
+                // flagged the canonical http.HandlerFunc body.
+                if self.is_recv_context_call(common) {
+                    rets.push(Value::Instr(iid));
                 }
             }
             InstrData::UnOp(_) | InstrData::Phi(_) | InstrData::Extract(_) => {

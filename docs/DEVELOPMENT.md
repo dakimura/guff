@@ -111,6 +111,9 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 ## 3. 現在の状況（正直なスナップショット）
 
 > 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）— R25.1（アリーナフットプリント、layered CoW で export seed を全 pkg 共有、**83s→11.9s / peak 56GB→5.8GB**）・R25.2（位置破損 = 決定論的 u32 オーバーフロー。fake export-data ファイルを実サイズ化して共有 fset の Pos 空間を u32 内に収め、依存ファイルへの誤マップ **226→0**・診断 234→2671）完了。残: §8 R25 の DEFERRED（隔離済み非致命 panic・govet unreachable の順序依存・R25.3 go list cold）。
+> 2026-08-07: R26.1（型検査の誤検出 8 件。大規模モノレポで `ill_typed` **13 → 0** パッケージ、
+> prometheus でも **14 → 8**）・R26.2（SA1019 の外部モジュール deprecation、golangci-only **11 → 0**）完了。
+> 残: §8 R26.3（gosec G115 未実装ほか guff-only 17 件）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -550,6 +553,107 @@ A〜G に分解し、各タスク（R番号）に「目的 / なぜ必要 / ど�
     README からもリンク。差分の実測は R21 の `compat/` で継続。
 - **完了条件**: linter・設定キー・出力フォーマットの対応表を公開 — 満たした。
 - **DEFERRED**: 表の自動生成（レジストリからの照合テスト）、上流 linter 追加の定期同期。
+
+#### R26. 大規模 private モノレポ実測で見つかった残り差分（2026-08-07）
+
+非公開の Go モノレポ（約 1,900 パッケージ）で `guff run ./...` と
+`golangci-lint run ./...` を突き合わせた結果。コーパスは非公開なので**再現手順ではなく
+症状と根本原因だけ**を残す（回帰テストは各クレートの `tests/` に落としてある）。
+リポジトリ実設定（`new-from-merge-base` あり）では **5 vs 5 / 差分 0**。
+`new-from-merge-base` を外した全量比較の推移:
+
+| 時点 | guff | golangci | both | guff-only | golangci-only |
+|------|-----:|---------:|-----:|----------:|--------------:|
+| 着手前 | — | — | — | — | 差分 160 |
+| 前セッション終了時 | 67 | 60 | 49 | 18 | 11 |
+| **本セッション終了時** | **77** | **60** | **60** | **17** | **0** |
+
+> 計測時の注意: 設定の `exclusions.rules` は `^tools/` のような**相対パス**で書かれている。
+> golangci-lint を `--path-mode abs` で走らせるとこれらが一切マッチせず、guff だけが
+> 除外を守って「golangci-only が 200 件超」に見える。両ツールとも既定の相対パスで
+> 走らせること（`compat/` ハーネスの `--path-mode abs` は path ルールを持たない
+> `standard.yml` 専用）。
+
+修正済み（前セッション）:
+
+| 症状 | 根本原因 |
+|------|----------|
+| gosec 46 件の guff-only | `severity` / `confidence` フィルタ未実装 + `config.G101.pattern` 未反映 |
+| 設定を変えても結果が変わらない | issues cache の salt が `SettingsBag` の**キーだけ**を指紋化していた |
+| goconst の設定が丸ごと無視 | `ignore-string-values: foo.+`（スカラー）で linter の設定ブロック全体が捨てられていた。golangci は mapstructure の `WeaklyTypedInput` で受理する |
+| gocritic 4 件 | `tooManyResultsChecker.maxResults` / `ifElseChain.minThreshold` / `unnamedResult.checkExported` 未配線 |
+| contextcheck 29 件 | `(*http.Request).Context` は具象メソッド（静的呼び出し、`Method == nil`）なので `common.method` だけでは一致しない |
+| misspell 5 件 | `//nolint` の抑止範囲が CommentGroup 全体ではなくディレクティブ行だけだった |
+| funlen 1 件 | 本番の型検査は `PARSE_COMMENTS` なしなので `ignore-comments` が引く対象を持たなかった |
+| sloglint | import ゲートが直接 import だけを見ていた。`*slog.Logger` は他パッケージから渡ってくる |
+
+import ゲートを推移閉包に広げた際、素朴に毎回グラフを歩くと prometheus `full` で
+wall が **+10%**（2.28s → 2.50s、ゲート FAIL）になった。訪問ノードを全てメモ化して
+1 パス O(V+E) にしたところ **2.25s** まで戻り（メモ化なしの main より速い）、
+peak RSS も 2.909GB（baseline 2.933GB）で PASS。
+
+##### R26.1 型検査の誤検出をゼロに（`ill_typed` 13 → 0 パッケージ）✅
+
+`ill_typed` なパッケージは `run_despite_errors` でない analyzer が丸ごとスキップされる
+ので、**発見が黙って落ちる**。`GUFF_DEBUG_ILL_TYPED=1` で該当パッケージと型エラーが出る
+（エラー位置はパッケージ自身の `FileSet` を通して `file:line:col` に解決して出す。共有
+位置空間の生オフセットのままでは追えない）。潰した 8 件:
+
+| 症状 | 根本原因 | 直した場所 |
+|------|----------|-----------|
+| 外部パッケージの埋め込みインタフェース経由のメソッド昇格が消える（`protoreflect.MethodDescriptor has no field or method FullName`） | interface の type set を**宣言時に即時計算**していた。埋め込み Named の underlying が未解決のままメソッド集合を確定し、`tset` にキャッシュするので二度と直らない。Go は `check.later` で遅延する | `interface_check.rs` |
+| ジェネリック型のメソッド本体で `undefined: T`（`new(T)` / `var x T` / `make([]T, 0)`） | `func_body` が新しいスコープを作り直すのに、**receiver の型パラメータ**を再宣言していなかった（Go は `collectRecv` が宣言した signature 自身のスコープを body に流用する） | `stmt.rs` |
+| `row.Status is not a type` / `sql.NullString.String is not a type` / `true is not a type` | go1.26 の **`new(expr)` 値形式**が未実装で、引数を常に型として解釈していた | `builtins.rs` |
+| 型リテラル構文の変換が**丸ごと無視**される（`[]byte(s)` / `map[k]v(m)` / `interface{}(x)` / `struct{…}(v)`） | `call_expr` が `expr_or_type` を `ParenExpr` にしか使わず、他の型リテラルは `expr` が invalid にして黙って握り潰していた。型が記録されないので診断も出ない | `call.rs` |
+| 型パラメータ値の呼び出し / 添字 / スライスが全滅（`cannot call non-function (of type F)` / `cannot index s` / `cannot slice s`） | 型集合の共通 underlying（`commonUnder` / `underIs`）を見ずに `underlying()` を直接使っていた | `call.rs`, `index.rs` |
+| `[maxDepth]uintptr` のような**定数長配列**が invalid 型になる | `array_length` が整数リテラルしか評価しなかった（`// DEFERRED (chunk 25)`）。invalid が伝播して「struct フィールドをスライスできない」等になる | `typexpr.rs` |
+| `const m = "x"` を配列長にすると **lint worker が panic** | `to_int` / `to_float` が非数値で `panic!`。Go の `constant.ToInt` は unknown を返す | `guff-constant/convert.rs` |
+| `mux.Handle(newHandler(x))` が `not enough arguments in call` | 多値を返す単一引数の**展開**（Go の `exprList` / `multiExpr`）が未実装 | `call.rs` |
+
+副作用として prometheus でも `ill_typed` が **14 → 8** に減り、`unused` の既存の誤検出が
+表に出た（インスタンス化されたジェネリック receiver 経由のメソッド呼び出しは `Uses` に
+**置換後のコピー**が入るので、宣言側の `ObjectId` と一致しない）。`Func` に `Origin()` が
+無い（R18 DEFERRED）ため、`(receiver 型名, メソッド名)` で突き合わせて解消。
+
+##### R26.2 SA1019 が外部モジュール由来の deprecation を検出する ✅
+
+`deprecated` fact はソースから解析したパッケージでしか採れず、export data から読んだ依存には
+doc コメントが無い。依存ソースの遅延 `PARSE_COMMENTS` 走査自体は実装済みだったが、
+**ハードコードされた許可リスト**（`go.uber.org/atomic` など）でしか有効にならず、それ以外の
+サードパーティは素通りしていた。stdlib 以外の依存すべてに一般化。
+
+コストが call サイト数ではなく**依存パッケージ数**で抑えられているのが前提:
+`dep_facts` がプロセス全体でメモ化し、各ファイルはパースする前に `Deprecated:` の
+バイト列プローブで弾かれる。prometheus `full` の wall は実測で有意差なし。
+
+これで golangci-only が **11 → 0**（SA1019 4 件と、それを抑止する `//nolint:staticcheck` が
+unused 判定されていた nolintlint 6 件を含む）。
+
+##### R26.3 残り（未着手）
+
+guff-only 17 件。内訳と、なぜ guff だけが出すのか:
+
+1. **gosec G115（整数オーバーフロー変換）が未実装** — `int32(nanos)` 等。golangci 側では
+   出るので `//nolint:gosec` が置かれており、guff ではその directive が unused 扱いになる
+   （nolintlint 4 件として顕在化）。素朴に実装すると誤検出だらけになるので、
+   上流の範囲解析（定数・`len()`・アーキ依存幅）まで含めて移植する必要がある。
+2. **SA1019 の取りこぼしが残る** — 依存モジュールによっては doc 走査でも拾えていない
+   （nolintlint 6 件として顕在化）。
+3. **exhaustive** — enum メンバが依存パッケージ由来のときに列挙しきれていない
+   （nolintlint 2 件として顕在化）。
+4. nolintlint 自身の `//nolint:ireturn,nolintlint` 1 件。
+5. **rowserrcheck / sqlclosecheck の AST 近似**が上流 SSA 版より広く報告する（各 1 件）。
+6. gocritic「コメントアウトされたコード」/ protogetter 各 1 件。
+
+（13 + 4 = 17。errname は本セッションで解消 — 上流は interface 宣言を検査しない。
+`Error() string` を含む interface は「エラー型」ではなく契約なので対象外。）
+
+**性能ゲートについて**: `./regress/run.sh --profile full` は finding-set が
+`both=20 / guff_only=0 / golangci_only=0` で PASS するが、`wall_seconds` は本セッションの
+計測機では baseline（2.330s）を満たせなかった（2.54s）。同じ計測で **clean HEAD が
+2.71–3.10s** だったので**本変更による劣化ではなく計測機の状態**。`--update-baseline` は
+していない。peak RSS は 2.93GB → 3.09GB で許容内 — prometheus でも `ill_typed` が
+14 → 8 に減り、6 パッケージ分の解析が新たに走るようになった分。
 
 ---
 

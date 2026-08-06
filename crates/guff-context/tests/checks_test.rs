@@ -218,6 +218,28 @@ fn contextcheck_flags_noncapturing_closure_return() {
 }
 
 #[test]
+fn contextcheck_accepts_http_request_context() {
+    // `(*http.Request).Context` is a concrete method, so SSA emits a static
+    // call with no interface method. Matching only on the invoke-mode method
+    // made guff flag every canonical http.HandlerFunc body.
+    let dir = support::testdata("contextcheck_httphandler");
+    let pkg = support::typecheck_pkg("example.com/contextcheck/http/ok", &dir.join("ok.go"));
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn contextcheck_still_flags_background_in_http_handler() {
+    let dir = support::testdata("contextcheck_httphandler");
+    let pkg = support::typecheck_pkg("example.com/contextcheck/http/bad", &dir.join("bad.go"));
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("Non-inherited new context")),
+        "context.Background() in a handler is still a finding: {messages:?}"
+    );
+}
+
+#[test]
 fn contextcheck_allows_inherited_context() {
     let dir = support::testdata("contextcheck");
     let pkg = support::typecheck_pkg("example.com/contextcheck/ok", &dir.join("ok.go"));

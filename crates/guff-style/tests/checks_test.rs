@@ -72,6 +72,104 @@ fn gosec_allows_strong_crypto() {
 }
 
 #[test]
+fn gosec_severity_and_confidence_filter_findings() {
+    use guff_style::GosecOptions;
+
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/scores", "scores.go");
+
+    let run = |opts: GosecOptions| {
+        let mut bag = SettingsBag::new();
+        bag.insert("gosec", opts);
+        support::run_analyzer_with_settings(
+            gosec(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+    };
+
+    let unfiltered = run(GosecOptions::default());
+    assert!(
+        unfiltered.iter().any(|m| m.contains("G101:")),
+        "default (no threshold) should report G101: {unfiltered:?}"
+    );
+    assert!(
+        unfiltered.iter().any(|m| m.contains("G401:")),
+        "default should report G401: {unfiltered:?}"
+    );
+
+    // G101 is Low confidence, G401 is High — `confidence: medium` keeps only G401.
+    let medium = run(GosecOptions {
+        confidence: "medium".into(),
+        ..Default::default()
+    });
+    assert!(
+        !medium.iter().any(|m| m.contains("G101:")),
+        "confidence=medium should drop Low-confidence G101: {medium:?}"
+    );
+    assert!(
+        medium.iter().any(|m| m.contains("G401:")),
+        "confidence=medium should keep High-confidence G401: {medium:?}"
+    );
+
+    // G401 is Medium severity, G101 is High — `severity: high` keeps only G101.
+    let high_sev = run(GosecOptions {
+        severity: "high".into(),
+        ..Default::default()
+    });
+    assert!(
+        high_sev.iter().any(|m| m.contains("G101:")),
+        "severity=high should keep High-severity G101: {high_sev:?}"
+    );
+    assert!(
+        !high_sev.iter().any(|m| m.contains("G401:")),
+        "severity=high should drop Medium-severity G401: {high_sev:?}"
+    );
+
+    // An unrecognized threshold disables filtering (upstream `convertToScore` → -1).
+    let bogus = run(GosecOptions {
+        confidence: "bogus".into(),
+        ..Default::default()
+    });
+    assert!(
+        bogus.iter().any(|m| m.contains("G101:")),
+        "unknown confidence must not filter: {bogus:?}"
+    );
+}
+
+#[test]
+fn gosec_g101_pattern_override_replaces_default_names() {
+    use guff_style::{G101Options, GosecOptions};
+
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/scores2", "scores.go");
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gosec",
+        GosecOptions {
+            g101: G101Options {
+                pattern: "(?i)example".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gosec(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    let g101: Vec<&String> = messages.iter().filter(|m| m.contains("G101:")).collect();
+    // Only `exampleValue` matches `(?i)example`; the `...Password...` const no
+    // longer does, because `pattern` replaces the default name list.
+    assert_eq!(g101.len(), 1, "expected exactly one G101: {messages:?}");
+}
+
+#[test]
 fn gosec_respects_includes_excludes() {
     use guff_style::GosecOptions;
 
@@ -91,7 +189,7 @@ fn gosec_respects_includes_excludes() {
         "gosec",
         GosecOptions {
             includes: vec!["G501".into()],
-            excludes: vec![],
+            ..Default::default()
         },
     );
     let only_import = support::run_analyzer_with_settings(
@@ -115,8 +213,8 @@ fn gosec_respects_includes_excludes() {
     bag.insert(
         "gosec",
         GosecOptions {
-            includes: vec![],
             excludes: vec!["G501".into()],
+            ..Default::default()
         },
     );
     let no_import = support::run_analyzer_with_settings(
@@ -3644,6 +3742,63 @@ fn dogsled_respects_max_blank_identifiers_setting() {
     assert!(
         messages.is_empty(),
         "max-blank-identifiers=4 should suppress bad.go: {messages:?}"
+    );
+}
+
+#[test]
+fn funlen_ignore_comments_subtracts_comment_lines() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::FunlenOptions;
+
+    // The production typecheck parses without comments, so this only passes
+    // if funlen re-parses the file to see them.
+    let pkg = support::typecheck_fixture("funlen", "example.com/funlen/comments", "comments.go");
+
+    let run = |opts: FunlenOptions| {
+        let mut bag = SettingsBag::new();
+        bag.insert("funlen", opts);
+        support::run_analyzer_with_settings(
+            funlen(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+    };
+
+    // 36 body lines, 12 of them comments → 24 with ignore-comments.
+    let counted = run(FunlenOptions {
+        lines: 30,
+        statements: 200,
+        ignore_comments: false,
+    });
+    assert!(
+        counted.iter().any(|m| m.contains("(36 > 30)")),
+        "without ignore-comments all 36 lines count: {counted:?}"
+    );
+
+    let ignored = run(FunlenOptions {
+        lines: 30,
+        statements: 200,
+        ignore_comments: true,
+    });
+    assert!(
+        ignored.is_empty(),
+        "ignore-comments should drop the 12 comment lines to 24: {ignored:?}"
+    );
+
+    let ignored_tight = run(FunlenOptions {
+        lines: 20,
+        statements: 200,
+        ignore_comments: true,
+    });
+    assert!(
+        ignored_tight.iter().any(|m| m.contains("(24 > 20)")),
+        "expected the comment-subtracted count: {ignored_tight:?}"
     );
 }
 

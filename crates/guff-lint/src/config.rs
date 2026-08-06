@@ -916,6 +916,16 @@ impl ConfigFile {
         }
     }
 
+    /// Deterministic one-line rendering of [`Self::linter_settings_raw`],
+    /// for the issues-cache salt.
+    ///
+    /// Mappings are emitted in sorted-key order so the same config always
+    /// produces the same string — `serde_yaml::Mapping` preserves insertion
+    /// order, but the salt must not depend on how the user ordered their YAML.
+    pub fn linter_settings_fingerprint(&self) -> String {
+        canonical_yaml(self.linter_settings_raw())
+    }
+
     pub fn is_v1(&self) -> bool {
         matches!(self, Self::V1(_))
     }
@@ -1141,6 +1151,67 @@ fn default_exclude_patterns_for_presets() -> &'static [PresetExcludePattern] {
         },
     ];
     PATTERNS
+}
+
+/// Render a YAML value with mapping keys in sorted order.
+///
+/// Used for the issues-cache salt, so the only requirements are determinism
+/// and injectivity-in-practice; the output is never parsed back.
+fn canonical_yaml(value: &serde_yaml::Value) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    fn write(out: &mut String, value: &serde_yaml::Value) {
+        match value {
+            serde_yaml::Value::Null => out.push_str("~"),
+            serde_yaml::Value::Bool(b) => {
+                let _ = write!(out, "{b}");
+            }
+            serde_yaml::Value::Number(n) => {
+                let _ = write!(out, "{n}");
+            }
+            serde_yaml::Value::String(s) => {
+                let _ = write!(out, "{s:?}");
+            }
+            serde_yaml::Value::Sequence(items) => {
+                out.push('[');
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    write(out, item);
+                }
+                out.push(']');
+            }
+            serde_yaml::Value::Mapping(map) => {
+                let mut entries: Vec<(String, &serde_yaml::Value)> = map
+                    .iter()
+                    .map(|(k, v)| {
+                        let mut key = String::new();
+                        write(&mut key, k);
+                        (key, v)
+                    })
+                    .collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                out.push('{');
+                for (i, (key, val)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(key);
+                    out.push(':');
+                    write(out, val);
+                }
+                out.push('}');
+            }
+            serde_yaml::Value::Tagged(tagged) => {
+                let _ = write!(out, "{}", tagged.tag);
+                write(out, &tagged.value);
+            }
+        }
+    }
+    write(&mut out, value);
+    out
 }
 
 fn preset_linters(presets: &[String]) -> Vec<String> {
@@ -1695,5 +1766,50 @@ formatters:
     fn cli_override_default() {
         let sel = LinterSelection::default().with_cli_overrides(Some(LinterDefault::None), &[], &[]);
         assert!(sel.resolve_names().is_empty());
+    }
+
+    #[test]
+    fn settings_fingerprint_tracks_values_not_just_linter_names() {
+        // The issues cache salts on this string. Two configs that enable the
+        // same linter with different settings must not collide, or `guff run`
+        // replays stale diagnostics after a config edit.
+        let a = parse_config_str(
+            "version: \"2\"\nlinters:\n  settings:\n    gosec:\n      confidence: low\n",
+        )
+        .unwrap();
+        let b = parse_config_str(
+            "version: \"2\"\nlinters:\n  settings:\n    gosec:\n      confidence: medium\n",
+        )
+        .unwrap();
+        assert_ne!(
+            a.linter_settings_fingerprint(),
+            b.linter_settings_fingerprint()
+        );
+    }
+
+    #[test]
+    fn settings_fingerprint_ignores_yaml_key_order() {
+        let a = parse_config_str(
+            "version: \"2\"\nlinters:\n  settings:\n    gosec:\n      severity: high\n      confidence: low\n",
+        )
+        .unwrap();
+        let b = parse_config_str(
+            "version: \"2\"\nlinters:\n  settings:\n    gosec:\n      confidence: low\n      severity: high\n",
+        )
+        .unwrap();
+        assert_eq!(
+            a.linter_settings_fingerprint(),
+            b.linter_settings_fingerprint()
+        );
+    }
+
+    #[test]
+    fn canonical_yaml_sorts_nested_mappings() {
+        let v: serde_yaml::Value =
+            serde_yaml::from_str("b: 1\na:\n  z: [3, 1]\n  y: true\n").unwrap();
+        assert_eq!(
+            canonical_yaml(&v),
+            "{\"a\":{\"y\":true,\"z\":[3,1]},\"b\":1}"
+        );
     }
 }

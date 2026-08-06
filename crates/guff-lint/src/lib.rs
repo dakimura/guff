@@ -116,6 +116,15 @@ pub struct LintOptions {
     pub filter: IssueFilter,
     /// Per-linter settings (`linters.settings` / `linters-settings`).
     pub settings: std::sync::Arc<SettingsBag>,
+    /// Canonical fingerprint of the raw `linters.settings` YAML, used in the
+    /// issues-cache salt.
+    ///
+    /// [`SettingsBag`] is type-erased, so its `Debug` can only name the keys —
+    /// fingerprinting that alone made every settings *value* invisible to the
+    /// cache, and `guff run` served stale diagnostics after a config edit.
+    /// Empty means "no linter settings" (or a caller that never set it), which
+    /// simply salts as the empty string.
+    pub settings_fingerprint: String,
     /// Whole-run timeout. [`Duration::ZERO`] / `None` means no timeout.
     pub timeout: Option<Duration>,
     /// Requested concurrency (`-j` / `run.concurrency`).
@@ -334,6 +343,7 @@ impl LintOptions {
             issues_exit_code: 1,
             build_tags: Vec::new(),
             tests: false,
+            settings_fingerprint: String::new(),
             filter: IssueFilter::default(),
             settings: std::sync::Arc::new(SettingsBag::default()),
             timeout: Some(Duration::from_secs(60)),
@@ -784,10 +794,12 @@ fn open_issue_cache(opts: &LintOptions) -> Option<IssueCache> {
     };
     let mut names: Vec<&str> = opts.analyzers.iter().map(|a| a.name).collect();
     names.sort_unstable();
-    let mut settings_fp = format!("keys={:?}", opts.settings);
-    if let Some(ec) = opts.settings.get::<guff_errcheck::Options>("errcheck") {
-        settings_fp.push_str(&format!(" errcheck={ec:?}"));
-    }
+    // Keys alone are not enough: two runs that enable the same linters with
+    // different settings must not share cache entries.
+    let settings_fp = format!(
+        "keys={:?} raw={}",
+        opts.settings, opts.settings_fingerprint
+    );
     let salt = build_salt(
         guff_version(),
         &names,

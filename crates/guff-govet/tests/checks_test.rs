@@ -520,7 +520,13 @@ fn ifaceassert_allows_compatible_interfaces() {
 #[test]
 fn loopclosure_flags_captured_loop_var() {
     let dir = support::testdata("loopclosure");
-    let pkg = support::typecheck_pkg("example.com/govet/loopclosure", &dir.join("bad.go"));
+    // loopclosure only reports before Go 1.22 (per-iteration loop variables).
+    // Pin the module version so the check does not depend on whatever Go
+    // toolchain happens to be installed.
+    let pkg = support::with_go_version(
+        support::typecheck_pkg("example.com/govet/loopclosure", &dir.join("bad.go")),
+        "1.21",
+    );
     let messages = support::run_analyzer(loopclosure_analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
     assert!(messages.iter().any(|m| m.contains("loop variable")));

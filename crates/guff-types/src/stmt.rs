@@ -466,6 +466,18 @@ impl Checker {
 
         // Declare the type parameters (so the body can reference them), then
         // the receiver, parameters, and named results.
+        //
+        // Receiver type parameters count too: in `func (l *Loader[T]) f()` the
+        // body may name `T` (`new(T)`, `var x T`, `make([]T, 0)`). Go keeps the
+        // signature's own scope — the one `collectRecv` declared them into —
+        // and reuses it as the body scope; we build a fresh scope here, so they
+        // have to be re-inserted explicitly or the body sees `undefined: T`.
+        for tp in self.signature_recv_type_param_objs(sig) {
+            let name = tp.name(&self.objects).to_string();
+            if name != "_" && !name.is_empty() {
+                scope_insert(&mut self.scopes, &mut self.objects, fscope, tp);
+            }
+        }
         for tp in self.signature_type_param_objs(sig) {
             let name = tp.name(&self.objects).to_string();
             if name != "_" && !name.is_empty() {
@@ -575,6 +587,20 @@ impl Checker {
         let mut out = Vec::new();
         if let TypeData::Signature(s) = self.types.get(sig) {
             if let Some(tps) = s.type_params() {
+                for &tp in tps.list() {
+                    out.push(crate::typeparam::type_param_obj(&self.types, tp));
+                }
+            }
+        }
+        out
+    }
+
+    /// The `TypeName` objects of the signature's *receiver* type parameters
+    /// (`func (l *Loader[T]) ...` → `T`), in declaration order.
+    fn signature_recv_type_param_objs(&self, sig: TypeId) -> Vec<ObjectId> {
+        let mut out = Vec::new();
+        if let TypeData::Signature(s) = self.types.get(sig) {
+            if let Some(tps) = s.recv_type_params() {
                 for &tp in tps.list() {
                     out.push(crate::typeparam::type_param_obj(&self.types, tp));
                 }

@@ -737,6 +737,34 @@ pub struct GocriticOptions {
     pub disabled_checks: Vec<String>,
     pub enabled_tags: Vec<String>,
     pub disabled_tags: Vec<String>,
+    /// `linters.settings.gocritic.settings` — per-check parameters.
+    pub check_settings: GocriticCheckSettings,
+}
+
+/// Per-check parameters from `linters.settings.gocritic.settings`.
+///
+/// Only the checks whose parameters guff honours are listed; the remaining
+/// go-critic params (`hugeParam.sizeThreshold`, `nestingReduce.bodyWidth`,
+/// `truncateCmp.skipArchDependent`, …) are still DEFERRED. Defaults come from
+/// each checker's `linter.CheckerParams` in go-critic v0.14.4.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GocriticCheckSettings {
+    /// `tooManyResultsChecker.maxResults` — warn above this result count.
+    pub too_many_results_max: usize,
+    /// `ifElseChain.minThreshold` — if-else blocks needed to trigger.
+    pub if_else_chain_min_threshold: usize,
+    /// `unnamedResult.checkExported` — when true, only exported funcs are checked.
+    pub unnamed_result_check_exported: bool,
+}
+
+impl Default for GocriticCheckSettings {
+    fn default() -> Self {
+        Self {
+            too_many_results_max: 5,
+            if_else_chain_min_threshold: 2,
+            unnamed_result_check_exported: false,
+        }
+    }
 }
 
 /// One forbidigo pattern (`linters.settings.forbidigo.forbid` entry).
@@ -979,13 +1007,56 @@ pub struct IreturnOptions {
 ///
 /// `includes` / `excludes` filter by rule id (`G101`, `G501`, …). Empty
 /// `includes` means all implemented rules; `excludes` removes from that set.
-/// `severity` / `confidence` / `config` / concurrency are DEFERRED.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `severity` / `confidence` drop findings scoring below the threshold
+/// (golangci `filterIssues`: `i.Severity >= severity && i.Confidence >= confidence`).
+/// Concurrency and the non-G101 parts of `config` are DEFERRED.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GosecOptions {
     /// Only run these rule ids (golangci `includes`).
     pub includes: Vec<String>,
     /// Skip these rule ids (golangci `excludes`).
     pub excludes: Vec<String>,
+    /// Minimum severity to report: `""` / `"low"` / `"medium"` / `"high"`.
+    /// Empty or unrecognized means no filtering (golangci `convertToScore`).
+    pub severity: String,
+    /// Minimum confidence to report; same spelling as [`Self::severity`].
+    pub confidence: String,
+    /// `config.G101` knobs.
+    pub g101: G101Options,
+}
+
+/// `linters.settings.gosec.config.G101` — hardcoded-credentials tuning.
+///
+/// Mirrors upstream `rules.NewHardcodedCredentials`. Upstream reads the
+/// numeric knobs as **strings** and silently keeps the default when the value
+/// does not parse; we do the same at the settings layer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct G101Options {
+    /// Variable-name regex marking a credential (upstream `pattern`).
+    pub pattern: String,
+    /// Skip the entropy gate entirely (upstream `ignore_entropy`).
+    pub ignore_entropy: bool,
+    /// Shannon-entropy × length threshold (upstream `entropy_threshold`).
+    pub entropy_threshold: f64,
+    /// Per-character entropy threshold (upstream `per_char_threshold`).
+    pub per_char_threshold: f64,
+    /// Prefix length the entropy is computed over (upstream `truncate`).
+    pub truncate: usize,
+    /// Values shorter than this skip the entropy check (upstream `min_entropy_length`).
+    pub min_entropy_length: usize,
+}
+
+impl Default for G101Options {
+    fn default() -> Self {
+        Self {
+            pattern: r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred".to_string(),
+            ignore_entropy: false,
+            entropy_threshold: 80.0,
+            per_char_threshold: 3.0,
+            truncate: 16,
+            min_entropy_length: 8,
+        }
+    }
 }
 
 /// `linters.settings.nonamedreturns` / `linters-settings.nonamedreturns`.

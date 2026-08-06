@@ -368,10 +368,6 @@ const G203_WHAT: &str = "The used method does not auto-escape HTML. This can pot
 const G101_WHAT: &str = "Potential hardcoded credentials";
 /// Upstream default: `(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred`
 const G101_NAME_PATTERN: &str = r"(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred";
-const G101_ENTROPY_THRESHOLD: f64 = 80.0;
-const G101_PER_CHAR_THRESHOLD: f64 = 3.0;
-const G101_TRUNCATE: usize = 16;
-const G101_MIN_ENTROPY_LENGTH: usize = 8;
 
 struct SecretPattern {
     name: &'static str,
@@ -517,6 +513,87 @@ const G204_CALLS: &[(&str, &str)] = &[
 ];
 
 const G102_CALLS: &[(&str, &str)] = &[("net", "Listen"), ("crypto/tls", "Listen")];
+
+/// gosec `issue.Score` (`Low = iota`, `Medium`, `High`) — ordered, so
+/// golangci's `i.Severity >= severity` comparison is a plain `>=`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Score {
+    Low,
+    Medium,
+    High,
+}
+
+/// golangci-lint `convertToScore`: `""`/`"low"` → Low, and anything
+/// unrecognized disables the filter (upstream returns `-1`, which every score
+/// compares `>=` against).
+fn threshold_score(s: &str) -> Option<Score> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "" | "low" => Some(Score::Low),
+        "medium" => Some(Score::Medium),
+        "high" => Some(Score::High),
+        _ => None,
+    }
+}
+
+/// `(severity, confidence)` per rule id, from gosec v2.26.1 rule metadata.
+///
+/// Only rules guff implements are listed; unknown ids fall back to `Low/Low`
+/// so a new rule is never silently filtered out before it has a row here.
+const RULE_SCORES: &[(&str, Score, Score)] = &[
+    ("G101", Score::High, Score::Low),
+    ("G102", Score::Medium, Score::High),
+    ("G103", Score::Low, Score::High),
+    ("G104", Score::Low, Score::High),
+    ("G106", Score::Medium, Score::High),
+    ("G107", Score::Medium, Score::Medium),
+    ("G108", Score::High, Score::High),
+    ("G109", Score::High, Score::Medium),
+    ("G110", Score::Medium, Score::Medium),
+    ("G111", Score::Medium, Score::Medium),
+    ("G112", Score::Medium, Score::Low),
+    ("G114", Score::Medium, Score::High),
+    ("G122", Score::High, Score::Medium),
+    ("G124", Score::Medium, Score::High),
+    ("G203", Score::Medium, Score::Low),
+    ("G204", Score::Medium, Score::High),
+    ("G301", Score::Medium, Score::High),
+    ("G302", Score::Medium, Score::High),
+    ("G303", Score::Medium, Score::High),
+    ("G306", Score::Medium, Score::High),
+    ("G401", Score::Medium, Score::High),
+    // G402 is message-dependent; see `issue_scores`.
+    ("G402", Score::High, Score::High),
+    ("G403", Score::Medium, Score::High),
+    ("G404", Score::High, Score::Medium),
+    ("G405", Score::Medium, Score::High),
+    ("G406", Score::Medium, Score::High),
+    ("G501", Score::Medium, Score::High),
+    ("G502", Score::Medium, Score::High),
+    ("G503", Score::Medium, Score::High),
+    ("G504", Score::Medium, Score::High),
+    ("G505", Score::Medium, Score::High),
+    ("G506", Score::Medium, Score::High),
+    ("G507", Score::Medium, Score::High),
+    ("G602", Score::Low, Score::High),
+    ("G703", Score::Medium, Score::High),
+];
+
+/// Severity/confidence for one finding.
+///
+/// Upstream attaches these per `NewIssue` call, not per rule, so the few rules
+/// that grade their own findings need the message to disambiguate. G402 is the
+/// only such rule guff implements: a definite `InsecureSkipVerify set to true`
+/// is High/High, while the `may be set to true` variant drops to High/Low.
+fn issue_scores(rule: &str, msg: &str) -> (Score, Score) {
+    if rule == "G402" && msg.contains("may be set to true") {
+        return (Score::High, Score::Low);
+    }
+    RULE_SCORES
+        .iter()
+        .find(|(id, _, _)| *id == rule)
+        .map(|(_, sev, conf)| (*sev, *conf))
+        .unwrap_or((Score::Low, Score::Low))
+}
 
 fn enabled_rules(opts: &GosecOptions) -> HashSet<&'static str> {
     let mut ids: HashSet<&'static str> = RULES.iter().map(|r| r.id).collect();
@@ -729,9 +806,65 @@ fn object_of(pass: &Pass<'_>, ident: &Ident) -> Option<ObjectId> {
     info.uses.get(&ident.id).copied()
 }
 
-fn g101_name_pattern() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(G101_NAME_PATTERN).expect("G101 name pattern"))
+/// G101 tuning resolved for one run (`linters.settings.gosec.config.G101`).
+///
+/// Holds the compiled name pattern so the regex is built once per package
+/// rather than per candidate identifier.
+struct G101Rt {
+    name_pattern: Regex,
+    ignore_entropy: bool,
+    entropy_threshold: f64,
+    per_char_threshold: f64,
+    truncate: usize,
+    min_entropy_length: usize,
+}
+
+impl G101Rt {
+    fn new(opts: &crate::options::G101Options) -> Self {
+        // An invalid user pattern falls back to the upstream default rather
+        // than killing the run; upstream would panic in `regexp.MustCompile`,
+        // but a linter that still reports the other 30 rules is more useful.
+        let name_pattern = Regex::new(&opts.pattern)
+            .unwrap_or_else(|_| Regex::new(G101_NAME_PATTERN).expect("G101 default name pattern"));
+        Self {
+            name_pattern,
+            ignore_entropy: opts.ignore_entropy,
+            entropy_threshold: opts.entropy_threshold,
+            per_char_threshold: opts.per_char_threshold,
+            truncate: opts.truncate,
+            min_entropy_length: opts.min_entropy_length,
+        }
+    }
+
+    fn cred_name_match(&self, name: &str) -> bool {
+        self.name_pattern.is_match(name)
+    }
+
+    /// Upstream gates every G101 report on `ignoreEntropy || isHighEntropyString`.
+    fn entropy_ok(&self, s: &str) -> bool {
+        self.ignore_entropy || self.is_high_entropy_string(s)
+    }
+
+    fn is_high_entropy_string(&self, s: &str) -> bool {
+        if s.len() < self.min_entropy_length {
+            return false;
+        }
+        let (total, per_char) = shannon_entropy_total(s, self.truncate);
+        total >= self.entropy_threshold
+            || (total >= self.entropy_threshold / 2.0 && per_char >= self.per_char_threshold)
+    }
+
+    fn is_secret_pattern(&self, s: &str) -> Option<&'static str> {
+        if s.len() < self.min_entropy_length {
+            return None;
+        }
+        for (i, re) in g101_secret_regexes().iter().enumerate() {
+            if re.1.is_match(s) {
+                return Some(G101_SECRET_PATTERNS[i].name);
+            }
+        }
+        None
+    }
 }
 
 fn g101_secret_regexes() -> &'static [(String, Regex)] {
@@ -749,12 +882,12 @@ fn g101_secret_regexes() -> &'static [(String, Regex)] {
     })
 }
 
-/// Shannon entropy × length over a truncated prefix.
+/// Shannon entropy × length over a `truncate`-byte prefix.
 /// Approximates gosec's zxcvbn thresholds (DEFERRED: true zxcvbn parity).
-fn shannon_entropy_total(s: &str) -> (f64, f64) {
-    let truncated = if s.len() > G101_TRUNCATE {
+fn shannon_entropy_total(s: &str, truncate: usize) -> (f64, f64) {
+    let truncated = if s.len() > truncate {
         // Truncate on a char boundary — secrets may contain multi-byte UTF-8.
-        let mut end = G101_TRUNCATE;
+        let mut end = truncate;
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
@@ -780,31 +913,6 @@ fn shannon_entropy_total(s: &str) -> (f64, f64) {
     (h * n, h)
 }
 
-fn is_high_entropy_string(s: &str) -> bool {
-    if s.len() < G101_MIN_ENTROPY_LENGTH {
-        return false;
-    }
-    let (total, per_char) = shannon_entropy_total(s);
-    total >= G101_ENTROPY_THRESHOLD
-        || (total >= G101_ENTROPY_THRESHOLD / 2.0 && per_char >= G101_PER_CHAR_THRESHOLD)
-}
-
-fn is_secret_pattern(s: &str) -> Option<&'static str> {
-    if s.len() < G101_MIN_ENTROPY_LENGTH {
-        return None;
-    }
-    for (i, re) in g101_secret_regexes().iter().enumerate() {
-        if re.1.is_match(s) {
-            return Some(G101_SECRET_PATTERNS[i].name);
-        }
-    }
-    None
-}
-
-fn cred_name_match(name: &str) -> bool {
-    g101_name_pattern().is_match(name)
-}
-
 fn report_g101(pending: &mut Vec<(u32, String)>, pos: u32, pattern_name: Option<&str>) {
     let msg = match pattern_name {
         Some(p) => format!("G101: {G101_WHAT}: {p}"),
@@ -814,18 +922,19 @@ fn report_g101(pending: &mut Vec<(u32, String)>, pos: u32, pattern_name: Option<
 }
 
 fn check_cred_value(
+    rt: &G101Rt,
     pending: &mut Vec<(u32, String)>,
     pos: u32,
     name_matched: bool,
     value: &str,
 ) -> bool {
     if name_matched {
-        if is_high_entropy_string(value) {
+        if rt.entropy_ok(value) {
             report_g101(pending, pos, None);
             return true;
         }
-    } else if is_high_entropy_string(value) {
-        if let Some(pattern) = is_secret_pattern(value) {
+    } else if rt.entropy_ok(value) {
+        if let Some(pattern) = rt.is_secret_pattern(value) {
             report_g101(pending, pos, Some(pattern));
             return true;
         }
@@ -833,16 +942,16 @@ fn check_cred_value(
     false
 }
 
-fn check_g101_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     for lhs in &assign.lhs {
         let Expr::Ident(ident) = lhs else {
             continue;
         };
-        let name_matched = cred_name_match(&ident.name);
+        let name_matched = rt.cred_name_match(&ident.name);
         if name_matched {
             for rhs in &assign.rhs {
                 if let Some(val) = string_lit_from_expr(rhs) {
-                    if check_cred_value(pending, assign.tok_pos.0 as u32, true, &val) {
+                    if check_cred_value(rt, pending, assign.tok_pos.0 as u32, true, &val) {
                         return;
                     }
                 }
@@ -850,7 +959,7 @@ fn check_g101_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
         }
         for rhs in &assign.rhs {
             if let Some(val) = string_lit_from_expr(rhs) {
-                if check_cred_value(pending, assign.tok_pos.0 as u32, false, &val) {
+                if check_cred_value(rt, pending, assign.tok_pos.0 as u32, false, &val) {
                     return;
                 }
             }
@@ -858,10 +967,10 @@ fn check_g101_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn check_g101_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
+fn check_g101_value_spec(rt: &G101Rt, spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
     let pos = spec.names.first().map(|n| n.pos().0 as u32).unwrap_or(0);
     for (index, ident) in spec.names.iter().enumerate() {
-        if !cred_name_match(&ident.name) || spec.values.is_empty() {
+        if !rt.cred_name_match(&ident.name) || spec.values.is_empty() {
             continue;
         }
         let idx = if index < spec.values.len() {
@@ -870,21 +979,21 @@ fn check_g101_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
             spec.values.len() - 1
         };
         if let Some(val) = string_lit_from_expr(&spec.values[idx]) {
-            if check_cred_value(pending, pos, true, &val) {
+            if check_cred_value(rt, pending, pos, true, &val) {
                 return;
             }
         }
     }
     for value in &spec.values {
         if let Some(val) = string_lit_from_expr(value) {
-            if check_cred_value(pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, false, &val) {
                 return;
             }
         }
     }
 }
 
-fn check_g101_equality(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
+fn check_g101_equality(rt: &G101Rt, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     if bin.op != Token::EQL && bin.op != Token::NEQ {
         return;
     }
@@ -896,9 +1005,9 @@ fn check_g101_equality(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
         _ => (None, bin.y.as_ref()),
     };
     if let Some(ident) = ident {
-        if cred_name_match(&ident.name) {
+        if rt.cred_name_match(&ident.name) {
             if let Some(val) = string_lit_from_expr(value_node) {
-                if check_cred_value(pending, pos, true, &val) {
+                if check_cred_value(rt, pending, pos, true, &val) {
                     return;
                 }
             }
@@ -912,14 +1021,14 @@ fn check_g101_equality(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     };
     if let Some(lit) = lit {
         if let Some(val) = unquote_string_lit(&lit.value) {
-            if check_cred_value(pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, false, &val) {
                 return;
             }
         }
     }
 }
 
-fn check_g101_composite(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+fn check_g101_composite(rt: &G101Rt, lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
     let pos = lit.lbrace.0 as u32;
     for elt in &lit.elts {
         let Expr::KeyValueExpr(kv) = elt else {
@@ -927,41 +1036,47 @@ fn check_g101_composite(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
         };
         let mut matched_key = false;
         if let Expr::Ident(id) = kv.key.as_ref() {
-            if cred_name_match(&id.name) {
+            if rt.cred_name_match(&id.name) {
                 matched_key = true;
             }
         }
         if let Some(key_str) = string_lit_from_expr(kv.key.as_ref()) {
-            if cred_name_match(&key_str) {
+            if rt.cred_name_match(&key_str) {
                 matched_key = true;
             }
         }
         if matched_key {
             if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
-                if check_cred_value(pending, pos, true, &val) {
+                if check_cred_value(rt, pending, pos, true, &val) {
                     return;
                 }
             }
         }
         if let Some(val) = string_lit_from_expr(kv.value.as_ref()) {
-            if check_cred_value(pending, pos, false, &val) {
+            if check_cred_value(rt, pending, pos, false, &val) {
                 return;
             }
         }
     }
 }
 
-fn check_g101(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+fn check_g101(
+    pass: &Pass<'_>,
+    enabled: &HashSet<&'static str>,
+    opts: &GosecOptions,
+    pending: &mut Vec<(u32, String)>,
+) {
     if !enabled.contains("G101") {
         return;
     }
+    let rt = G101Rt::new(&opts.g101);
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             match n {
-                NodeRef::AssignStmt(a) => check_g101_assign(a, pending),
-                NodeRef::ValueSpec(v) => check_g101_value_spec(v, pending),
-                NodeRef::BinaryExpr(b) => check_g101_equality(b, pending),
-                NodeRef::CompositeLit(c) => check_g101_composite(c, pending),
+                NodeRef::AssignStmt(a) => check_g101_assign(&rt, a, pending),
+                NodeRef::ValueSpec(v) => check_g101_value_spec(&rt, v, pending),
+                NodeRef::BinaryExpr(b) => check_g101_equality(&rt, b, pending),
+                NodeRef::CompositeLit(c) => check_g101_composite(&rt, c, pending),
                 _ => {}
             }
             true
@@ -2325,7 +2440,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     check_imports(pass, &enabled, &mut pending);
-    check_g101(pass, &enabled, &mut pending);
+    check_g101(pass, &enabled, &opts, &mut pending);
     check_g109(pass, &enabled, &mut pending);
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
@@ -2358,9 +2473,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         });
     }
 
+    let min_severity = threshold_score(&opts.severity);
+    let min_confidence = threshold_score(&opts.confidence);
     for (pos, msg) in pending {
         let rule = msg.split(':').next().unwrap_or("");
         if nosec_suppresses(pass, pos, rule) {
+            continue;
+        }
+        let (severity, confidence) = issue_scores(rule, &msg);
+        if min_severity.is_some_and(|min| severity < min)
+            || min_confidence.is_some_and(|min| confidence < min)
+        {
             continue;
         }
         pass.reportf(pos, &msg);
@@ -2392,7 +2515,7 @@ mod tests {
     fn includes_filters_rules() {
         let opts = GosecOptions {
             includes: vec!["G501".into()],
-            excludes: vec![],
+            ..Default::default()
         };
         let e = enabled_rules(&opts);
         assert!(e.contains("G501"));
@@ -2407,7 +2530,6 @@ mod tests {
     #[test]
     fn excludes_removes_rules() {
         let opts = GosecOptions {
-            includes: vec![],
             excludes: vec![
                 "G501".into(),
                 "G505".into(),
@@ -2415,6 +2537,7 @@ mod tests {
                 "G101".into(),
                 "G104".into(),
             ],
+            ..Default::default()
         };
         let e = enabled_rules(&opts);
         assert!(!e.contains("G501"));
@@ -2445,20 +2568,88 @@ mod tests {
 
     #[test]
     fn g101_entropy_flags_hex_password_not_secret() {
-        assert!(is_high_entropy_string(
-            "f62e5bcda4fae4f82370da0c6f20697b8f8447ef"
-        ));
-        assert!(!is_high_entropy_string("secret"));
-        assert!(cred_name_match("password"));
-        assert!(cred_name_match("apiKey"));
-        assert!(!cred_name_match("username"));
+        let rt = G101Rt::new(&crate::options::G101Options::default());
+        assert!(rt.is_high_entropy_string("f62e5bcda4fae4f82370da0c6f20697b8f8447ef"));
+        assert!(!rt.is_high_entropy_string("secret"));
+        assert!(rt.cred_name_match("password"));
+        assert!(rt.cred_name_match("apiKey"));
+        assert!(!rt.cred_name_match("username"));
         assert_eq!(
-            is_secret_pattern("AKIAI44QH8DHBEXAMPLE"),
+            rt.is_secret_pattern("AKIAI44QH8DHBEXAMPLE"),
             Some("AWS API Key")
         );
         assert_eq!(
-            is_secret_pattern("ghp_iR54dhCYg9Tfmoywi9xLmmKZrrnAw438BYh3"),
+            rt.is_secret_pattern("ghp_iR54dhCYg9Tfmoywi9xLmmKZrrnAw438BYh3"),
             Some("GitHub personal access token")
+        );
+    }
+
+    #[test]
+    fn g101_config_overrides_name_pattern() {
+        let opts = crate::options::G101Options {
+            pattern: "(?i)example".into(),
+            ..Default::default()
+        };
+        let rt = G101Rt::new(&opts);
+        // `pattern` replaces the default list outright — upstream assigns, not appends.
+        assert!(rt.cred_name_match("exampleToken"));
+        assert!(!rt.cred_name_match("password"));
+    }
+
+    #[test]
+    fn g101_ignore_entropy_skips_the_gate() {
+        let low_entropy = "aaaaaaaaaaaaaaaa";
+        let strict = G101Rt::new(&crate::options::G101Options::default());
+        assert!(!strict.entropy_ok(low_entropy));
+        let relaxed = G101Rt::new(&crate::options::G101Options {
+            ignore_entropy: true,
+            ..Default::default()
+        });
+        assert!(relaxed.entropy_ok(low_entropy));
+    }
+
+    #[test]
+    fn g101_entropy_threshold_is_configurable() {
+        let value = "f62e5bcda4fae4f82370da0c6f20697b8f8447ef";
+        assert!(G101Rt::new(&crate::options::G101Options::default()).is_high_entropy_string(value));
+        let strict = G101Rt::new(&crate::options::G101Options {
+            entropy_threshold: 1_000.0,
+            per_char_threshold: 100.0,
+            ..Default::default()
+        });
+        assert!(!strict.is_high_entropy_string(value));
+    }
+
+    #[test]
+    fn threshold_score_matches_golangci_convert_to_score() {
+        assert_eq!(threshold_score(""), Some(Score::Low));
+        assert_eq!(threshold_score("low"), Some(Score::Low));
+        assert_eq!(threshold_score("MEDIUM"), Some(Score::Medium));
+        assert_eq!(threshold_score("high"), Some(Score::High));
+        // Upstream returns -1 for anything else, which never filters.
+        assert_eq!(threshold_score("bogus"), None);
+    }
+
+    #[test]
+    fn issue_scores_match_upstream_metadata() {
+        // G101 is High severity but only Low confidence, so `confidence: medium`
+        // drops every hardcoded-credential finding.
+        assert_eq!(issue_scores("G101", "G101: x"), (Score::High, Score::Low));
+        assert_eq!(issue_scores("G112", "G112: x"), (Score::Medium, Score::Low));
+        assert_eq!(issue_scores("G104", "G104: x"), (Score::Low, Score::High));
+        // Unknown ids stay at Low/Low so a new rule is never filtered by default.
+        assert_eq!(issue_scores("G999", "G999: x"), (Score::Low, Score::Low));
+    }
+
+    #[test]
+    fn g402_confidence_depends_on_the_message() {
+        assert_eq!(
+            issue_scores("G402", "G402: TLS InsecureSkipVerify set to true."),
+            (Score::High, Score::High)
+        );
+        assert_eq!(
+            issue_scores("G402", "G402: TLS InsecureSkipVerify may be set to true."),
+            (Score::High, Score::Low)
         );
     }
 

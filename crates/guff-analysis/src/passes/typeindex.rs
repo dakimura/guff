@@ -336,11 +336,14 @@ mod tests {
             ..Package::default()
         };
         let fset = FileSet::new();
+        // Let inference pick the driver's hasher rather than naming it here.
+        let export_paths = Default::default();
+        let dep_graph = Default::default();
         typecheck_package(
             &mut pkg,
             &fset,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
+            &export_paths,
+            &dep_graph,
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,

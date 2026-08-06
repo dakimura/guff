@@ -184,13 +184,13 @@ impl Checker {
 
     /// Evaluate an array-length expression to a non-negative `i64`.
     ///
-    /// **Chunk-21b scope**: only integer literals are supported; any other
-    /// expression form needs `Checker.expr` (chunk 25) and is DEFERRED
-    /// (returns `None` without an error). A literal that is non-integer or
-    /// negative reports `InvalidArrayLen`.
+    /// Integer literals are folded directly; any other form is type-checked as
+    /// a constant expression, so `const n = 20; type t [n]byte` works. A
+    /// non-constant, non-integer, negative or unrepresentable length reports
+    /// `InvalidArrayLen` and yields `None` (an invalid array type).
     ///
-    /// Equivalent to the literal slice of `Checker.arrayLength`.
-    fn array_length(&mut self, e: &Expr) -> Option<i64> {
+    /// Equivalent to `Checker.arrayLength`.
+    fn array_length<'a>(&mut self, e: &'a Expr) -> Option<i64> {
         match e {
             Expr::BasicLit(lit) if lit.kind == Some(Token::INT) => {
                 let val = to_int(make_from_literal(&lit.value, Token::INT, 0));
@@ -208,8 +208,81 @@ impl Checker {
                 );
                 None
             }
-            // DEFERRED (chunk 25): non-literal constant length expressions.
-            _ => None,
+            _ => {
+                // An identifier length must name a constant. Go checks this up
+                // front so that `type T [P]int` (a parameterized declaration
+                // with a missing constraint) is reported as a bad array length
+                // rather than as a mysterious non-constant expression.
+                if let Expr::Ident(name) = e {
+                    match self.lookup(name.name.as_str()) {
+                        None => {
+                            self.error(
+                                e.pos().0 as u32,
+                                Code::UndeclaredName,
+                                format!("undefined: {}", name.name),
+                            );
+                            return None;
+                        }
+                        Some(obj) => {
+                            if !matches!(self.objects.get(obj), ObjectData::Const(_)) {
+                                self.error(
+                                    e.pos().0 as u32,
+                                    Code::InvalidArrayLen,
+                                    format!("invalid array length {}", name.name),
+                                );
+                                return None;
+                            }
+                        }
+                    }
+                }
+
+                let mut x = Operand::invalid();
+                self.expr(&mut x, e);
+                if x.mode != OperandMode::Constant {
+                    if x.mode != OperandMode::Invalid {
+                        let xs = self.operand_str(&x);
+                        self.error(
+                            e.pos().0 as u32,
+                            Code::InvalidArrayLen,
+                            format!("array length {} must be constant", xs),
+                        );
+                    }
+                    return None;
+                }
+
+                let typ = x.typ.unwrap_or_else(|| self.invalid_type());
+                let is_int = crate::predicates::is_integer(&self.types, typ);
+                if crate::predicates::is_untyped(&self.types, typ) || is_int {
+                    if let Some(v) = &x.val {
+                        let val = to_int(v.clone());
+                        if val.kind() == Kind::Int {
+                            let int_t = self.basic(crate::basic::BasicKind::Int);
+                            if crate::check_expr_const::representable_const(
+                                &self.types,
+                                &val,
+                                int_t,
+                            )
+                            .is_some()
+                            {
+                                if let (n, true) = int64_val(&val) {
+                                    if n >= 0 {
+                                        return Some(n);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let xs = self.operand_str(&x);
+                let msg = if is_int {
+                    format!("invalid array length {}", xs)
+                } else {
+                    format!("array length {} must be integer", xs)
+                };
+                self.error(e.pos().0 as u32, Code::InvalidArrayLen, msg);
+                None
+            }
         }
     }
 

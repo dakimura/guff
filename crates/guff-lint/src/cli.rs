@@ -427,6 +427,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         tests: loaded.tests,
         filter,
         settings: std::sync::Arc::new(bag),
+        settings_fingerprint: loaded.settings_fingerprint.clone(),
         timeout,
         concurrency,
         out_formats,
@@ -553,6 +554,8 @@ struct LoadedRun {
     build_tags: Vec<String>,
     tests: bool,
     linter_settings: LinterSettings,
+    /// Canonical fingerprint of the raw linter-settings YAML (cache salt).
+    settings_fingerprint: String,
     timeout: Option<String>,
     concurrency: Option<usize>,
     /// Empty means "use CLI/TTY default" ([`default_stdout_format`]).
@@ -601,13 +604,14 @@ fn load_run_config(
 
     let selection = base.with_cli_overrides(cli_default, enable, disable);
 
-    let (issues, severity, run, output, linter_settings) = match &file {
+    let (issues, severity, run, output, linter_settings, settings_fingerprint) = match &file {
         Some(c) => (
             c.effective_issues(),
             c.severity().clone(),
             c.run().clone(),
             c.output().clone(),
             LinterSettings::from_yaml(c.linter_settings_raw()),
+            c.linter_settings_fingerprint(),
         ),
         None => (
             IssuesConfig::default(),
@@ -615,6 +619,7 @@ fn load_run_config(
             Default::default(),
             Default::default(),
             LinterSettings::default(),
+            String::new(),
         ),
     };
 
@@ -662,6 +667,7 @@ fn load_run_config(
     Ok(LoadedRun {
         selection,
         filter,
+        settings_fingerprint,
         build_tags: run.build_tags,
         // golangci-lint default for `run.tests` is true (analyze `*_test.go`).
         tests: run.tests.unwrap_or(true),

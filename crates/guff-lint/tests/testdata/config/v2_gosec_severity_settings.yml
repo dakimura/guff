@@ -1,0 +1,17 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      severity: medium
+      confidence: medium
+      config:
+        G101:
+          pattern: (?i)example
+          ignore_entropy: true
+          entropy_threshold: "60.0"
+          per_char_threshold: "2.5"
+          truncate: "32"
+          min_entropy_length: "4"

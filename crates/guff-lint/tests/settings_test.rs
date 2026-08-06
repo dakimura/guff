@@ -1510,6 +1510,78 @@ fn parse_v2_gosec_settings() {
 }
 
 #[test]
+fn parse_v2_gosec_severity_and_g101_config() {
+    let contents = fs::read_to_string(testdata_config("v2_gosec_severity_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.gosec.severity, "medium");
+    assert_eq!(settings.gosec.confidence, "medium");
+    let bag = settings.to_bag();
+    let opts = bag
+        .get::<guff_style::GosecOptions>("gosec")
+        .expect("gosec options");
+    assert_eq!(opts.severity, "medium");
+    assert_eq!(opts.confidence, "medium");
+    // Upstream reads the numeric G101 knobs as strings; quoted YAML must parse.
+    assert_eq!(opts.g101.pattern, "(?i)example");
+    assert!(opts.g101.ignore_entropy);
+    assert!((opts.g101.entropy_threshold - 60.0).abs() < f64::EPSILON);
+    assert!((opts.g101.per_char_threshold - 2.5).abs() < f64::EPSILON);
+    assert_eq!(opts.g101.truncate, 32);
+    assert_eq!(opts.g101.min_entropy_length, 4);
+}
+
+#[test]
+fn gosec_g101_config_absent_keeps_upstream_defaults() {
+    let contents = fs::read_to_string(testdata_config("v2_gosec_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    let opts = settings.gosec.to_guff_gosec();
+    assert_eq!(opts.severity, "");
+    assert_eq!(opts.confidence, "");
+    assert_eq!(opts.g101, guff_style::G101Options::default());
+}
+
+#[test]
+fn parse_v2_gocritic_per_check_settings() {
+    let contents = fs::read_to_string(testdata_config("v2_gocritic_check_settings.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    let opts = settings.gocritic.to_guff_gocritic();
+    assert_eq!(opts.check_settings.too_many_results_max, 10);
+    assert_eq!(opts.check_settings.if_else_chain_min_threshold, 4);
+    assert!(opts.check_settings.unnamed_result_check_exported);
+}
+
+#[test]
+fn gocritic_without_settings_keeps_go_critic_defaults() {
+    let settings = LinterSettings::from_yaml(&serde_yaml::Value::Null);
+    let opts = settings.gocritic.to_guff_gocritic();
+    assert_eq!(
+        opts.check_settings,
+        guff_style::GocriticCheckSettings::default()
+    );
+    assert_eq!(opts.check_settings.too_many_results_max, 5);
+    assert_eq!(opts.check_settings.if_else_chain_min_threshold, 2);
+    assert!(!opts.check_settings.unnamed_result_check_exported);
+}
+
+#[test]
+fn scalar_string_list_does_not_discard_the_whole_settings_block() {
+    // golangci-lint decodes with mapstructure's WeaklyTypedInput, so a bare
+    // string is a one-element list. Rejecting it used to drop every sibling
+    // key too — `ignore-calls: false` silently reverted to the default `true`.
+    let contents = fs::read_to_string(testdata_config("v2_goconst_scalar_ignore.yml")).unwrap();
+    let cfg = parse_config_str(&contents).unwrap();
+    let settings = LinterSettings::from_yaml(cfg.linter_settings_raw());
+    assert_eq!(settings.goconst.ignore_string_values, vec!["foo.+".to_string()]);
+    assert_eq!(settings.goconst.ignore_calls, Some(false));
+    let opts = settings.goconst.to_guff_goconst();
+    assert!(!opts.ignore_calls);
+    assert_eq!(opts.ignore_strings, vec!["foo.+".to_string()]);
+}
+
+#[test]
 fn parse_v2_thelper_settings() {
     let contents = fs::read_to_string(testdata_config("v2_thelper_settings.yml")).unwrap();
     let cfg = parse_config_str(&contents).unwrap();

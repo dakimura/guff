@@ -35,6 +35,7 @@ use crate::selection::SelectionKind;
 use crate::signature::new_signature_type;
 use crate::slice::slice_elem;
 use crate::tuple::{new_tuple, tuple_at, tuple_len};
+use crate::under::common_under;
 
 impl Checker {
     /// Type-check a call expression `fun(args...)`, recording the result in `x`.
@@ -108,8 +109,17 @@ impl Checker {
                 }
             }
             _ => {
-                // Conversions use parenthesized type syntax: `(*T)(x)`.
-                if matches!(call.fun.as_ref(), Expr::ParenExpr(_)) {
+                // A conversion's operand may be written as a parenthesized type
+                // (`(*T)(x)`) or as a bare type literal (`[]byte(s)`,
+                // `map[string]int(m)`, `interface{}(v)`, `struct{...}(v)`,
+                // `chan int(c)`, `func()(f)`). None of those forms are
+                // expressions, so `expr` would leave the operand invalid — and
+                // an invalid function operand is swallowed silently below,
+                // which used to drop the whole conversion (no type recorded, no
+                // diagnostics). Route every syntactic type form through
+                // `expr_or_type`; anything else is evaluated as a value, so a
+                // non-type operand still gets its normal error.
+                if is_type_syntax(call.fun.as_ref()) {
                     self.expr_or_type(x, &call.fun);
                 } else {
                     self.expr(x, &call.fun);
@@ -188,9 +198,21 @@ impl Checker {
 
         // Ordinary function/method call.
         let ftyp = x.typ.unwrap_or_else(|| self.invalid_type());
-        // DEFERRED: type-parameter callee (commonUnder over the type set). We
-        // take the underlying type directly, which covers the common case.
-        let under = ftyp.underlying(&self.types);
+        // If the callee's type is a type parameter, every type in its type set
+        // must share one underlying type and that type must be a signature —
+        // `func New[T any, F func(Conn) T](fn F, c Conn) T { return fn(c) }`.
+        // `commonUnder` collapses the type set to that signature; for every
+        // other callee it is just the underlying type.
+        let under = {
+            let (u, _err) = common_under(
+                &mut self.types,
+                &self.objects,
+                &self.packages,
+                ftyp,
+                None,
+            );
+            u.unwrap_or_else(|| ftyp.underlying(&self.types))
+        };
         let sig = match self.types.get(under) {
             TypeData::Signature(_) => under,
             _ => {
@@ -394,6 +416,30 @@ impl Checker {
             self.expr(&mut op, a);
             args.push(op);
         }
+
+        // A lone multi-valued argument is spread across the parameters:
+        // `mux.Handle(newHandler(x))` where `newHandler` returns
+        // `(string, http.Handler)`. Go does this in `exprList`/`multiExpr`;
+        // without it the call looks like it has one argument too few.
+        if args.len() == 1 && !ddd {
+            if let Some(t) = args[0].typ {
+                if matches!(self.types.get(t), TypeData::Tuple(_)) {
+                    let n = tuple_len(&self.types, Some(t));
+                    let src = args[0].expr;
+                    let mut spread = Vec::with_capacity(n);
+                    for i in 0..n {
+                        let v = tuple_at(&self.types, t, i);
+                        let mut op = Operand::invalid();
+                        op.mode = OperandMode::Value;
+                        op.typ = v.typ(&self.objects);
+                        op.expr = src;
+                        spread.push(op);
+                    }
+                    args = spread;
+                }
+            }
+        }
+        let nargs = args.len();
 
         // `...` is only valid in a call to a variadic function.
         if ddd && !variadic {
@@ -1112,4 +1158,26 @@ impl Checker {
             },
         }
     }
+}
+
+/// Reports whether `e` is a syntactic *type* form — one that can only ever
+/// denote a type, never a value.
+///
+/// Used to decide how a call's function operand is evaluated: these forms have
+/// no expression semantics, so they must go through `typ`. `Expr::FuncType` is
+/// safe here because the parser produces `Expr::FuncLit` for `func() { ... }`;
+/// a bare `func(...)` signature in expression position is only ever a
+/// conversion target. `StarExpr` is deliberately excluded: `*T(x)` parses as
+/// `*(T(x))`, so a pointer conversion always arrives parenthesised.
+fn is_type_syntax(e: &Expr) -> bool {
+    matches!(
+        e,
+        Expr::ParenExpr(_)
+            | Expr::ArrayType(_)
+            | Expr::StructType(_)
+            | Expr::FuncType(_)
+            | Expr::InterfaceType(_)
+            | Expr::MapType(_)
+            | Expr::ChanType(_)
+    )
 }

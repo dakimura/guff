@@ -262,8 +262,23 @@ impl Action {
                         self.package.pkg_path,
                         self.package.errors.len()
                     );
+                    // Resolve each error's position through the package's own
+                    // FileSet — the raw offsets are into the shared position
+                    // space and are useless on their own.
+                    let fset = self.package.fset.clone();
                     for e in self.package.errors.iter().take(20) {
-                        eprintln!("  {:?}", e);
+                        let at = match (&fset, e.pos.parse::<i64>()) {
+                            (Some(fs), Ok(off)) => {
+                                let p = fs.position(guff::position::Pos(off));
+                                if p.filename.is_empty() {
+                                    e.pos.clone()
+                                } else {
+                                    format!("{}:{}:{}", p.filename, p.line, p.column)
+                                }
+                            }
+                            _ => e.pos.clone(),
+                        };
+                        eprintln!("  {at}: {} ({:?})", e.msg, e.kind);
                     }
                 }
             }
@@ -578,9 +593,12 @@ pub fn analyze_with_settings(
     // Import-gate skip/keep counters (debug only). Keys are analyzer names.
     let mut gate_skip: HashMap<&'static str, usize> = HashMap::default();
     let mut gate_keep: HashMap<&'static str, usize> = HashMap::default();
+    // One memo for the whole pass: the transitive-import queries below are
+    // repeated for every (analyzer, package) pair.
+    let mut dep_memo = DepMemo::default();
     for &analyzer in analyzers {
         for pkg in packages {
-            if !analyzer_applies_to_package(analyzer, pkg) {
+            if !analyzer_applies_to_package(analyzer, pkg, &mut dep_memo) {
                 *gate_skip.entry(analyzer.name).or_default() += 1;
                 continue;
             }
@@ -702,7 +720,7 @@ fn analyzer_schedules_import_facts(analyzer: &Analyzer, settings: &SettingsBag) 
 /// Import-gated skips must preserve findings: only omit analyzers that cannot
 /// produce diagnostics without a given import. `buildir` is *not* gated here —
 /// many staticcheck SA checks require it regardless of testify.
-fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
+fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package, memo: &mut DepMemo) -> bool {
     match analyzer.name {
         "testifylint" => package_imports_prefix(package, "github.com/stretchr/testify"),
         // exptostd only rewrites `golang.org/x/exp/{maps,slices,constraints}`.
@@ -711,10 +729,16 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
                 || package_imports_prefix(package, "golang.org/x/exp/slices")
                 || package_imports_prefix(package, "golang.org/x/exp/constraints")
         }
-        // sloglint / govet slog only inspect `log/slog` APIs.
-        "sloglint" | "slog" => package_imports_prefix(package, "log/slog"),
-        // loggercheck only fires on kitlog / klog / logr / slog / zap call sites.
-        "loggercheck" => package_has_loggercheck_import(package),
+        // sloglint / govet slog inspect `log/slog` APIs, but a `*slog.Logger`
+        // handle is routinely built by a helper package and passed in, so the
+        // call site's own file need not import `log/slog`. Gate on the
+        // transitive closure — an http interceptor that calls
+        // `logging.FromContext(ctx).WarnContext(...)` has no direct import.
+        "sloglint" | "slog" => package_depends_on_prefix(package, "log/slog", memo),
+        // loggercheck only fires on kitlog / klog / logr / slog / zap call
+        // sites; same handle-passed-in caveat as sloglint.
+        "loggercheck" => package_has_loggercheck_import(package, memo),
+        "zerologlint" => package_depends_on_prefix(package, "github.com/rs/zerolog", memo),
         // fatcontext / lostcancel / SA1012 / SA1029 only look at `context` APIs.
         "fatcontext" | "lostcancel" | "SA1012" | "SA1029" => {
             package_imports_prefix(package, "context")
@@ -744,7 +768,6 @@ fn analyzer_applies_to_package(analyzer: &Analyzer, package: &Package) -> bool {
                 || package_imports_prefix(package, "encoding/base32")
         }
         "durationcheck" => package_imports_prefix(package, "time"),
-        "zerologlint" => package_imports_prefix(package, "github.com/rs/zerolog"),
         "ginkgolinter" => {
             package_imports_prefix(package, "github.com/onsi/ginkgo")
                 || package_imports_prefix(package, "github.com/onsi/gomega")
@@ -780,13 +803,91 @@ fn report_import_gate(
     eprintln!("guff:   {name} schedule keep={k} skip={s} ({reason})");
 }
 
-fn package_has_loggercheck_import(package: &Package) -> bool {
-    package_imports_prefix(package, "github.com/go-kit/log")
-        || package_imports_prefix(package, "github.com/go-kit/kit/log")
-        || package_imports_prefix(package, "k8s.io/klog")
-        || package_imports_prefix(package, "github.com/go-logr/logr")
-        || package_imports_prefix(package, "log/slog")
-        || package_imports_prefix(package, "go.uber.org/zap")
+fn package_has_loggercheck_import(package: &Package, memo: &mut DepMemo) -> bool {
+    [
+        "github.com/go-kit/log",
+        "github.com/go-kit/kit/log",
+        "k8s.io/klog",
+        "github.com/go-logr/logr",
+        "log/slog",
+        "go.uber.org/zap",
+    ]
+    .iter()
+    .any(|prefix| package_depends_on_prefix(package, prefix, memo))
+}
+
+/// True when `prefix` is in the package's **transitive** dependency closure.
+///
+/// Needed for linters whose subject is a *value* (a logger handle) that another
+/// package can construct and hand over: gating those on a direct import
+/// silently drops findings, which [`analyzer_applies_to_package`]'s contract
+/// forbids.
+///
+/// `go list`'s precomputed `deps` is only populated under `NEED_DEPS`, so fall
+/// back to walking the `imports` graph. Nodes are shared `Arc<Package>`s and the
+/// visited set is keyed by id, so each walk is linear in the closure size.
+fn import_path_matches(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Memo for [`package_depends_on_prefix`], shared across one scheduling pass.
+///
+/// Keyed by node address rather than `Package::id` because synthetic packages
+/// (tests, stubs) share an empty id. Entries are only valid while the package
+/// graph they were computed from is alive, which is the whole scheduling pass.
+#[derive(Default)]
+pub(crate) struct DepMemo {
+    reaches: HashMap<(usize, &'static str), bool>,
+}
+
+/// True when `prefix` is in the package's **transitive** dependency closure.
+///
+/// Needed for linters whose subject is a *value* (a logger handle) that another
+/// package can construct and hand over: gating those on a direct import
+/// silently drops findings, which [`analyzer_applies_to_package`]'s contract
+/// forbids.
+///
+/// `go list`'s precomputed `deps` is only populated under `NEED_DEPS`, so this
+/// falls back to walking the `imports` graph. Every visited node is memoized,
+/// making a full scheduling pass O(V + E) instead of O(V x closure) — without
+/// the memo this cost ~10% wall on the prometheus `full` regress profile.
+fn package_depends_on_prefix(package: &Package, prefix: &'static str, memo: &mut DepMemo) -> bool {
+    fn reaches(
+        pkg: &Package,
+        prefix: &'static str,
+        memo: &mut DepMemo,
+        on_stack: &mut HashSet<usize>,
+    ) -> bool {
+        let key = (std::ptr::from_ref(pkg) as usize, prefix);
+        if let Some(&hit) = memo.reaches.get(&key) {
+            return hit;
+        }
+        // Go import graphs are acyclic; guard anyway so a malformed graph
+        // cannot spin forever.
+        if !on_stack.insert(key.0) {
+            return false;
+        }
+        let mut found = pkg.deps.iter().any(|p| import_path_matches(p, prefix));
+        if !found {
+            for (path, dep) in &pkg.imports {
+                if import_path_matches(path, prefix) || reaches(dep, prefix, memo, on_stack) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        on_stack.remove(&key.0);
+        memo.reaches.insert(key, found);
+        found
+    }
+
+    if package_imports_prefix(package, prefix) {
+        return true;
+    }
+    reaches(package, prefix, memo, &mut HashSet::default())
 }
 
 /// True when `package.imports` contains `prefix` or a subpath of it.
@@ -1058,8 +1159,8 @@ mod tests {
         typecheck_package(
             &mut pkg,
             &fset,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
+            &crate::hash::HashMap::default(),
+            &crate::hash::HashMap::default(),
             default_sizes(),
             &TypecheckEnv::default(),
             LoadMode::LOAD_SYNTAX,
@@ -1118,13 +1219,13 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         let mut with_testify = Package::default();
         with_testify.imports.insert(
             "github.com/stretchr/testify/assert".into(),
             Arc::new(Package::default()),
         );
-        assert!(analyzer_applies_to_package(&analyzer, &with_testify));
+        assert!(analyzer_applies_to_package(&analyzer, &with_testify, &mut DepMemo::default()));
     }
 
     #[test]
@@ -1139,20 +1240,20 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         // Unrelated x/exp subpackage must not keep the analyzer.
         let mut with_other = Package::default();
         with_other.imports.insert(
             "golang.org/x/exp/slog".into(),
             Arc::new(Package::default()),
         );
-        assert!(!analyzer_applies_to_package(&analyzer, &with_other));
+        assert!(!analyzer_applies_to_package(&analyzer, &with_other, &mut DepMemo::default()));
         let mut with_maps = Package::default();
         with_maps.imports.insert(
             "golang.org/x/exp/maps".into(),
             Arc::new(Package::default()),
         );
-        assert!(analyzer_applies_to_package(&analyzer, &with_maps));
+        assert!(analyzer_applies_to_package(&analyzer, &with_maps, &mut DepMemo::default()));
     }
 
     #[test]
@@ -1167,12 +1268,12 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         let mut with_slog = Package::default();
         with_slog
             .imports
             .insert("log/slog".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&analyzer, &with_slog));
+        assert!(analyzer_applies_to_package(&analyzer, &with_slog, &mut DepMemo::default()));
     }
 
     #[test]
@@ -1187,18 +1288,18 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         let mut with_zap = Package::default();
         with_zap.imports.insert(
             "go.uber.org/zap".into(),
             Arc::new(Package::default()),
         );
-        assert!(analyzer_applies_to_package(&analyzer, &with_zap));
+        assert!(analyzer_applies_to_package(&analyzer, &with_zap, &mut DepMemo::default()));
         let mut with_slog = Package::default();
         with_slog
             .imports
             .insert("log/slog".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&analyzer, &with_slog));
+        assert!(analyzer_applies_to_package(&analyzer, &with_slog, &mut DepMemo::default()));
     }
 
     #[test]
@@ -1213,12 +1314,12 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         let mut with_ctx = Package::default();
         with_ctx
             .imports
             .insert("context".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&analyzer, &with_ctx));
+        assert!(analyzer_applies_to_package(&analyzer, &with_ctx, &mut DepMemo::default()));
     }
 
     #[test]
@@ -1233,12 +1334,59 @@ mod tests {
             fact_types: vec![],
         };
         let pkg = Package::default();
-        assert!(!analyzer_applies_to_package(&analyzer, &pkg));
+        assert!(!analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()));
         let mut with_ctx = Package::default();
         with_ctx
             .imports
             .insert("context".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&analyzer, &with_ctx));
+        assert!(analyzer_applies_to_package(&analyzer, &with_ctx, &mut DepMemo::default()));
+    }
+
+    #[test]
+    fn logger_gates_accept_transitive_dependencies() {
+        // A `*slog.Logger` is usually built by a helper package and handed to
+        // the call site, which then never imports `log/slog` itself. Gating on
+        // the direct import silently dropped every sloglint finding in an
+        // http-interceptor package observed in the wild.
+        for name in ["sloglint", "slog", "loggercheck"] {
+            let analyzer = Analyzer {
+                name,
+                doc: "",
+                url: "",
+                run: |_p| Ok(None),
+                run_despite_errors: false,
+                requires: vec![],
+                fact_types: vec![],
+            };
+
+            let mut unrelated = Package::default();
+            unrelated
+                .imports
+                .insert("fmt".into(), Arc::new(Package::default()));
+            unrelated.deps = vec!["fmt".into()];
+            assert!(
+                !analyzer_applies_to_package(&analyzer, &unrelated, &mut DepMemo::default()),
+                "{name} should still skip packages with no slog anywhere"
+            );
+
+            // Direct import: kept, as before.
+            let mut direct = Package::default();
+            direct
+                .imports
+                .insert("log/slog".into(), Arc::new(Package::default()));
+            assert!(analyzer_applies_to_package(&analyzer, &direct, &mut DepMemo::default()), "{name}");
+
+            // Only transitive: must now be kept too.
+            let mut transitive = Package::default();
+            transitive
+                .imports
+                .insert("example.com/app/logging".into(), Arc::new(Package::default()));
+            transitive.deps = vec!["example.com/app/logging".into(), "log/slog".into()];
+            assert!(
+                analyzer_applies_to_package(&analyzer, &transitive, &mut DepMemo::default()),
+                "{name} must run when log/slog is only a transitive dep"
+            );
+        }
     }
 
     #[test]
@@ -1274,14 +1422,14 @@ mod tests {
             };
             let pkg = Package::default();
             assert!(
-                !analyzer_applies_to_package(&analyzer, &pkg),
+                !analyzer_applies_to_package(&analyzer, &pkg, &mut DepMemo::default()),
                 "{name} should skip without {import}"
             );
             let mut with = Package::default();
             with.imports
                 .insert(import.into(), Arc::new(Package::default()));
             assert!(
-                analyzer_applies_to_package(&analyzer, &with),
+                analyzer_applies_to_package(&analyzer, &with, &mut DepMemo::default()),
                 "{name} should keep with {import}"
             );
         }
@@ -1294,12 +1442,12 @@ mod tests {
             requires: vec![],
             fact_types: vec![],
         };
-        assert!(!analyzer_applies_to_package(&unmarshal, &Package::default()));
+        assert!(!analyzer_applies_to_package(&unmarshal, &Package::default(), &mut DepMemo::default()));
         let mut with_json = Package::default();
         with_json
             .imports
             .insert("encoding/json".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&unmarshal, &with_json));
+        assert!(analyzer_applies_to_package(&unmarshal, &with_json, &mut DepMemo::default()));
         let cgocall = Analyzer {
             name: "cgocall",
             doc: "",
@@ -1309,11 +1457,11 @@ mod tests {
             requires: vec![],
             fact_types: vec![],
         };
-        assert!(!analyzer_applies_to_package(&cgocall, &Package::default()));
+        assert!(!analyzer_applies_to_package(&cgocall, &Package::default(), &mut DepMemo::default()));
         let mut with_c = Package::default();
         with_c
             .imports
             .insert("C".into(), Arc::new(Package::default()));
-        assert!(analyzer_applies_to_package(&cgocall, &with_c));
+        assert!(analyzer_applies_to_package(&cgocall, &with_c, &mut DepMemo::default()));
     }
 }

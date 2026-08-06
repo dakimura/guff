@@ -25,8 +25,14 @@ pub const NOLINTLINT_NAME: &str = "nolintlint";
 /// One `//nolint` coverage range (possibly AST-expanded).
 #[derive(Debug, Clone)]
 struct IgnoredRange {
+    /// First line the directive suppresses (the whole enclosing comment group).
     from: i64,
+    /// Last line the directive suppresses.
     to: i64,
+    /// Line the directive comment itself is on, used when reporting an unused
+    /// directive. This is not `from`: a `//nolint` at the end of a godoc block
+    /// suppresses the whole block but must still be reported on its own line.
+    report_line: i64,
     col: i64,
     /// Empty = all linters (except nolintlint itself).
     linters: Vec<String>,
@@ -288,7 +294,7 @@ impl NolintIndex {
                 continue;
             }
             for ir in ranges {
-                let key = (filename.clone(), ir.from, ir.col, ir.comment_text.clone());
+                let key = (filename.clone(), ir.report_line, ir.col, ir.comment_text.clone());
                 if ir.linters.is_empty() {
                     if !ir.matched.is_empty() {
                         used_keys.insert(key);
@@ -298,7 +304,7 @@ impl NolintIndex {
                         if ir.matched.contains_key(lint) {
                             used_keys.insert((
                                 filename.clone(),
-                                ir.from,
+                                ir.report_line,
                                 ir.col,
                                 format!("{}\0{lint}", ir.comment_text),
                             ));
@@ -316,7 +322,7 @@ impl NolintIndex {
                 if ir.is_expansion {
                     continue;
                 }
-                let key = (filename.clone(), ir.from, ir.col, ir.comment_text.clone());
+                let key = (filename.clone(), ir.report_line, ir.col, ir.comment_text.clone());
                 if !seen.insert(key.clone()) {
                     continue;
                 }
@@ -324,7 +330,7 @@ impl NolintIndex {
                     if ir.matched.is_empty() && !used_keys.contains(&key) {
                         out.push(unused_issue(
                             filename,
-                            ir.from,
+                            ir.report_line,
                             ir.col,
                             &ir.comment_text,
                             None,
@@ -355,7 +361,7 @@ impl NolintIndex {
                         }
                         let lint_key = (
                             filename.clone(),
-                            ir.from,
+                            ir.report_line,
                             ir.col,
                             format!("{}\0{lint}", ir.comment_text),
                         );
@@ -364,7 +370,7 @@ impl NolintIndex {
                         }
                         out.push(unused_issue(
                             filename,
-                            ir.from,
+                            ir.report_line,
                             ir.col,
                             &ir.comment_text,
                             Some(lint),
@@ -456,7 +462,7 @@ fn nolint_pattern() -> &'static Regex {
 
 fn extract_range(
     comment: &guff::ast::Comment,
-    _group: &guff::ast::CommentGroup,
+    group: &guff::ast::CommentGroup,
     fset: &FileSet,
     pattern: &Regex,
     unknown: &mut HashSet<String>,
@@ -469,13 +475,18 @@ fn extract_range(
         return None;
     }
 
-    // Report / match on the directive comment itself, not the CommentGroup
-    // lead (godoc + `//` + `//nolint` share a group — traefik tracing_test).
+    // golangci `extractInlineRangeFromComment` builds the suppression range
+    // from the enclosing CommentGroup, so a `//nolint` on the last line of a
+    // godoc block covers the whole block — e.g. package docs that spell
+    // "cancelled" to match a proto enum silence misspell this way.
+    // The directive's own position is kept separately for unused reporting.
     let pos = fset.position(comment.pos());
-    let end = fset.position(comment.end());
+    let group_pos = fset.position(group.pos());
+    let group_end = fset.position(group.end());
     let build = |linters: Vec<String>| IgnoredRange {
-        from: pos.line,
-        to: end.line,
+        from: group_pos.line,
+        to: group_end.line,
+        report_line: pos.line,
         col: pos.column,
         linters,
         matched: HashMap::new(),
@@ -739,6 +750,60 @@ mod tests {
         let issues = vec![issue("errcheck", path.to_str().unwrap(), 5, "unchecked")];
         let kept = index.filter_issues(issues, false);
         assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    #[test]
+    fn nolint_covers_the_whole_enclosing_comment_group() {
+        // golangci builds the suppression range from the CommentGroup, so a
+        // `//nolint` on the last line of a doc comment also covers the prose
+        // above it (a real-world case: silencing misspell on package docs
+        // that spell "cancelled" to match a proto enum).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(
+            &path,
+            "// Package p documents the cancelled status.\n             // Another line mentioning cancelled again.\n             //\n             //nolint:misspell // matches the proto enum.\n             package p\n",
+        )
+        .unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let file = path.to_str().unwrap();
+        let issues = vec![
+            issue("misspell", file, 1, "`cancelled` is a misspelling"),
+            issue("misspell", file, 2, "`cancelled` is a misspelling"),
+        ];
+        let kept = index.filter_issues(issues, false);
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    #[test]
+    fn unused_directive_is_reported_on_its_own_line_not_the_group_start() {
+        // The suppression range starts at the comment group, but an unused
+        // directive must still be reported where the user wrote it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(
+            &path,
+            "package p\n\n             // Doc line one.\n             // Doc line two.\n             //nolint:errcheck // nothing to suppress here.\n             var x int\n",
+        )
+        .unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let kept = index.filter_issues(Vec::new(), true);
+        let unused: Vec<&Issue> = kept
+            .iter()
+            .filter(|i| i.from_linter == NOLINTLINT_NAME)
+            .collect();
+        assert_eq!(unused.len(), 1, "{kept:?}");
+        assert_eq!(unused[0].line, 5, "should report the directive line: {kept:?}");
     }
 
     #[test]

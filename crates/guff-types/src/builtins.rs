@@ -20,8 +20,9 @@
 //! - `recordBuiltinType` is a no-op. `verifyVersionf` version gates
 //!   (clear/min/max → go1.21, unsafe.Add/Slice → go1.17,
 //!   unsafe.SliceData/String/StringData → go1.20) are applied at the dispatch
-//!   site in [`Checker::builtin`]. The `new(expr)` value form (go1.26) gate is
-//!   still deferred.
+//!   site in [`Checker::builtin`]; the `new(expr)` value form (go1.26) is gated
+//!   inside `builtin_new`, which only reaches the gate once the argument itself
+//!   checks out (Go reports the version error last, too).
 
 use guff::ast::{CallExpr, Expr};
 use guff::token::Token;
@@ -44,7 +45,7 @@ use crate::signature::new_signature_type;
 use crate::sizes::{default_sizes, Sizes};
 use crate::slice::{new_slice, slice_elem};
 use crate::under::common_under;
-use crate::version::{go1_17, go1_20, go1_21};
+use crate::version::{go1_17, go1_20, go1_21, go1_26};
 
 impl Checker {
     /// Type-check a call to built-in `id`, recording the result in `x`.
@@ -116,8 +117,8 @@ impl Checker {
         // handler and ignores the result; we do them up-front at the dispatch
         // site since `call`/`id` are both in scope. Equivalent builtins.go
         // gates: clear/min/max → go1.21, unsafe.Add/Slice → go1.17,
-        // unsafe.SliceData/String/StringData → go1.20. (`new(expr)` value form
-        // → go1.26 is still deferred.)
+        // unsafe.SliceData/String/StringData → go1.20. (`new(expr)` → go1.26 is
+        // gated in `builtin_new`, after the argument has been checked.)
         let fpos = call.fun.pos().0 as u32;
         match id {
             BuiltinId::Clear => {
@@ -881,17 +882,64 @@ impl Checker {
     }
 
     /// `new(T)` — yields a `*T`.
-    fn builtin_new(&mut self, x: &mut Operand, call: &CallExpr) -> bool {
-        // DEFERRED: the go1.26 `new(expr)` value form — we treat the argument
-        // strictly as a type (the overwhelmingly common case).
-        let t = self.typ(&call.args[0]);
-        if !is_valid(&self.types, t) {
+    fn builtin_new<'a>(&mut self, x: &mut Operand<'a>, call: &'a CallExpr) -> bool {
+        let arg = &call.args[0];
+
+        // `new` takes either a type (`new(T)`) or, since go1.26, a value
+        // (`new(x)` allocates a *T initialised to x). Go distinguishes the two
+        // with `exprOrType`; our `expr` cannot evaluate composite type syntax
+        // (`[]int`, `map[k]v`, `struct{...}`), so probe the argument as a type
+        // first and roll back the "is not a type" diagnostics that probe emits
+        // when it turns out to be a value.
+        let mark = self.errors.len();
+        let t = self.typ(arg);
+        if is_valid(&self.types, t) {
+            x.mode = OperandMode::Value;
+            x.typ = Some(crate::pointer::new_pointer(&mut self.types, t));
+            return true;
+        }
+        self.errors.truncate(mark);
+
+        // new(expr): the operand's type is the allocated type.
+        self.expr(x, arg);
+        if x.mode == OperandMode::Invalid {
+            x.typ = Some(self.invalid_type());
+            return false;
+        }
+        if matches!(
+            x.mode,
+            OperandMode::NoValue | OperandMode::Builtin | OperandMode::TypeExpr
+        ) {
+            let xs = self.operand_str(x);
+            let msg = match x.mode {
+                OperandMode::NoValue => format!("{} used as value", xs),
+                _ => format!("invalid argument: {} is not an expression", xs),
+            };
+            self.error(arg.pos().0 as u32, Code::NotAnExpr, msg);
             x.mode = OperandMode::Invalid;
             x.typ = Some(self.invalid_type());
             return false;
         }
+        // An untyped operand takes its default type; this also rejects
+        // untyped nil and constant overflow (Go: `check.assignment(x, nil, ..)`).
+        let untyped = x
+            .typ
+            .map(|t| crate::predicates::is_untyped(&self.types, t))
+            .unwrap_or(false);
+        if untyped {
+            self.assignment(x, None, "argument to new");
+            if x.mode == OperandMode::Invalid {
+                x.typ = Some(self.invalid_type());
+                return false;
+            }
+        }
+        // Report the version error only once the argument itself checks out,
+        // matching Go's ordering.
+        self.verify_versionf(call.fun.pos().0 as u32, &go1_26(), "new(expr)");
+
+        let elem = x.typ.unwrap_or_else(|| self.invalid_type());
         x.mode = OperandMode::Value;
-        x.typ = Some(crate::pointer::new_pointer(&mut self.types, t));
+        x.typ = Some(crate::pointer::new_pointer(&mut self.types, elem));
         true
     }
 

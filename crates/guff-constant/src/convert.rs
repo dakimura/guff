@@ -211,8 +211,11 @@ pub fn to_int(x: Value) -> Value {
             }
             Value::Unknown
         }
-        Value::Unknown => Value::Unknown,
-        other => panic!("{:?} not numeric", other),
+        // `constant.ToInt` returns unknown for anything non-numeric (Bool,
+        // String) rather than panicking — an array length like
+        // `const n = "x"; type t [n]int` reaches here and must be reported as a
+        // type error, not crash the checker.
+        _ => Value::Unknown,
     }
 }
 
@@ -237,8 +240,8 @@ pub fn to_float(x: Value) -> Value {
             }
             Value::Unknown
         }
-        Value::Unknown => Value::Unknown,
-        other => panic!("{:?} not numeric", other),
+        // As in `constant.ToFloat`, non-numeric values convert to unknown.
+        _ => Value::Unknown,
     }
 }
 

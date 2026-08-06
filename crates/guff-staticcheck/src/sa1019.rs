@@ -284,25 +284,29 @@ fn prefer_package_doc_files<'a>(
     paths
 }
 
-/// True when a third-party import is worth a Mode::NONE package-doc reparse.
-/// Unrestricted scans of every import dominate prometheus cold `./...` wall
-/// (~500 unique paths × file I/O). Restrict to trees that commonly ship
-/// package-level `Deprecated:` (vault weekly gap).
+/// Packages whose *file* docs we reparse (Mode::NONE) to recover a
+/// package-level `Deprecated:` that facts did not carry over. Only the
+/// conventional homes (`doc.go`, `{basename}.go`) are read, and each is
+/// rejected by a byte-level probe before parsing.
 fn worth_package_doc_scan(pkg_path: &str) -> bool {
-    pkg_path.starts_with("github.com/golang/protobuf/")
+    !is_stdlib_path(pkg_path)
 }
 
 /// Third-party / nested-module packages whose object/method docs we will
 /// PARSE_COMMENTS-scan even without a package-level deprecation.
+///
+/// `Deprecated` facts only reach us for packages analysed from source. A
+/// dependency read from export data carries no doc comments at all, so every
+/// `Deprecated:` in a third-party module is invisible without this scan —
+/// which used to be an allowlist of the handful of modules we had happened to
+/// hit. The stdlib is excluded because it is covered by the
+/// [`stdlib_deprecations`] table.
+///
+/// The scan is affordable because it is bounded by dependency *packages*, not
+/// call sites: `dep_facts` memoises each package process-wide, and each file is
+/// rejected by a byte-level `Deprecated:` probe before it is ever parsed.
 fn worth_object_doc_scan(pkg_path: &str) -> bool {
-    worth_package_doc_scan(pkg_path)
-        || pkg_path == "go.uber.org/atomic"
-        || pkg_path == "github.com/hashicorp/vault/api"
-        || pkg_path.starts_with("github.com/hashicorp/vault/api/")
-        // Main-module package; fact remapping still drops Deprecated on some
-        // importers (vault weekly teststorage → audit.NoopAuditFactory).
-        || pkg_path == "github.com/hashicorp/vault/audit"
-        || pkg_path.starts_with("github.com/hashicorp/vault/audit/")
+    !is_stdlib_path(pkg_path)
 }
 
 /// Deps whose sources are local replaces / nested modules / test stubs — not
