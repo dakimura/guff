@@ -7,7 +7,7 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{Decl, Expr, Spec};
+use guff::ast::{Decl, Expr, Ident, Spec};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
@@ -17,8 +17,8 @@ use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::BasicKind;
-use guff_types::predicates::identical;
+use guff_types::basic::{lookup_basic, BasicKind};
+use guff_types::predicates::{identical, is_untyped};
 use guff_types::typestring::type_string;
 use guff_types::TypeId;
 
@@ -43,6 +43,52 @@ fn is_basic_kind(pass: &Pass<'_>, typ: TypeId, kind: BasicKind) -> bool {
     matches!(artifacts.types.get(typ), TypeData::Basic(b) if b.kind() == kind)
 }
 
+/// Default type of an untyped basic kind (Go's `types.Default`).
+fn default_of_untyped(pass: &Pass<'_>, untyped: TypeId) -> Option<TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let TypeData::Basic(b) = artifacts.types.get(untyped) else {
+        return Some(untyped);
+    };
+    let typed = match b.kind() {
+        BasicKind::UntypedBool => BasicKind::Bool,
+        BasicKind::UntypedInt => BasicKind::Int,
+        BasicKind::UntypedRune => BasicKind::Int32,
+        BasicKind::UntypedFloat => BasicKind::Float64,
+        BasicKind::UntypedComplex => BasicKind::Complex128,
+        BasicKind::UntypedString => BasicKind::String,
+        _ => return Some(untyped),
+    };
+    lookup_basic(&artifacts.types, typed)
+}
+
+/// A constant reference is recorded with the type the declaration converted it
+/// to, so `var ts int64 = math.MaxInt64` looks redundant even though dropping
+/// the `int64` would infer `int`. Compare against the type the constant has on
+/// its own instead.
+fn const_keeps_lhs_type(pass: &Pass<'_>, ident: &Ident, tlhs: TypeId) -> bool {
+    let Some(obj) = object_of(pass, ident) else {
+        return true;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Const(_)) {
+        return true;
+    }
+    let Some(typ) = obj.typ(&artifacts.objects) else {
+        return true;
+    };
+    let own = if is_untyped(&artifacts.types, typ) {
+        match default_of_untyped(pass, typ) {
+            Some(def) => def,
+            None => return false,
+        }
+    } else {
+        typ
+    };
+    types_identical(pass, tlhs, own)
+}
+
 fn lit_default_matches_lhs(pass: &Pass<'_>, lit_kind: Token, tlhs: TypeId) -> bool {
     match lit_kind {
         Token::INT => is_basic_kind(pass, tlhs, BasicKind::Int),
@@ -65,18 +111,10 @@ fn rhs_allows_redundant_flag(pass: &Pass<'_>, v: &Expr, tlhs: TypeId) -> bool {
             };
             lit_default_matches_lhs(pass, kind, tlhs)
         }
-        Expr::Ident(id) => {
-            let Some(obj) = object_of(pass, id) else {
-                return true;
-            };
-            let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-                return false;
-            };
-            match artifacts.objects.get(obj) {
-                ObjectData::Const(_) => true, // named + predeclared both OK when helpful
-                _ => true,
-            }
-        }
+        // Named and predeclared constants are both fine when helpful, as long
+        // as the inferred type would not change.
+        Expr::Ident(id) => const_keeps_lhs_type(pass, id, tlhs),
+        Expr::SelectorExpr(se) => const_keeps_lhs_type(pass, &se.sel, tlhs),
         Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
         // `+x` / `-x` keep the operand's default type (`-1` → untyped int → int).
         Expr::UnaryExpr(u) if matches!(u.op, Token::ADD | Token::SUB) => {

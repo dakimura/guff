@@ -132,12 +132,23 @@ fn rhs_allows_redundant_flag(pass: &Pass<'_>, v: &Expr, tlhs: TypeId) -> bool {
                 obj.pkg(&artifacts.objects).is_none()
             }
             Expr::ParenExpr(p) => rhs_allows_redundant_flag(pass, &p.x, tlhs),
+            // A qualified name always belongs to a package, so it is never
+            // predeclared.
             _ => false,
         }
     } else {
         match v {
             Expr::Ident(id) => {
                 let Some(obj) = object_of(pass, id) else {
+                    return true;
+                };
+                match artifacts.objects.get(obj) {
+                    ObjectData::Const(_) => obj.pkg(&artifacts.objects).is_none(),
+                    _ => true,
+                }
+            }
+            Expr::SelectorExpr(se) => {
+                let Some(obj) = object_of(pass, &se.sel) else {
                     return true;
                 };
                 match artifacts.objects.get(obj) {
