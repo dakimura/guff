@@ -44,11 +44,73 @@ Shared knobs (override profile defaults):
 | `REGRESS_PACKAGES` | profile default | Override package set without changing profile files |
 
 Cold `GOCACHE` + high concurrency historically peaked **>40GB**. With a warm
-system cache and hybrid default, `full` currently gates at **~57s / ~10.7 GiB**
-peak (`baseline.full.json`) after dropping double-held dependency ASTs in the
-hybrid seed. Further memory reduction is still desirable on 24GB laptops; the
-profile exists so we can gate regressions while chasing it.
+system cache and hybrid default, `full` currently gates at **~2.33s / ~2.73 GiB**
+peak (`baseline.full.json`). Further memory reduction is still desirable on 24GB
+laptops; the profile exists so we can gate regressions while chasing it.
 `REGRESS_ISOLATE_GOCACHE=1` is available but **not** recommended under 64GB RAM.
+
+### Baseline history (`full`)
+
+| Date | wall | peak RSS | Why |
+|------|-----:|---------:|-----|
+| — | 1.890s | 2,501,869,568 | **Invalid.** Measured while 57 of prometheus's 118 packages were ill-typed and therefore skipped by every analyzer without `run_despite_errors`. |
+| 2026-08 | 2.330s | 2,932,523,008 | First baseline measured with the whole corpus actually analyzed. |
+
+The old number was not a faster guff. `dep_graph` was keyed by package id, so
+after `filter_duplicate_packages` renamed a package to `P [P.test]` its
+dependents could not resolve `P` and were type-checked ahead of it. The
+resulting `Invalid` types marked 57 packages ill-typed, and analyzers silently
+skipped them. Keying the graph by import path (`import_path_dep_graph`) made 43
+of those packages well-typed, so the analysis suite now runs on roughly a third
+more code — the whole `+0.44s / +431 MB` is that extra work, not new overhead.
+Per-package seed and type-arena sizes were measured as unchanged across the two
+keyings.
+
+Roughly 0.15s of the increase was clawed back first by removing quadratic
+lookups in SA4006 / SA4031 (`ExprValueIndex`, `IdentIndex`); the remainder is
+spread evenly over ~40 analyzers with no remaining hotspot, so it was accepted
+rather than optimized further.
+
+**The `compat` block was never rebaselined**, and it did not have to be. Correct
+type info also exposed four pre-existing analyzer false positives (QF1008 ×2,
+S1021, SA5011), so the run reported `guff_only=4` against a baseline that still
+said `0`; the gate was left failing on purpose rather than accepting them. All
+four are now fixed and `guff_only` is back to `0` against the unchanged block:
+
+| FP | Upstream behaviour guff was missing |
+|----|------------------------------------|
+| **QF1008** ×2 (`discovery/kubernetes/endpointslice_test.go:364,365`) | `extractSelectors` resolves the enclosing path to the file and bails unless the *outermost* `SelectorExpr` on it is the visited one, so a selector nested anywhere inside another selector's operand — here `k8sDiscoveryTest{afterStart: func() { obj.ObjectMeta.Labels = nil }}.Run(t)` — is skipped. guff only checked the immediate parent. |
+| **S1021** (`discovery/kubernetes/kubernetes.go:707`) | `hasMultipleAssignments` is a full `ast.Inspect` of the block; guff's hand-rolled statement walker did not descend into `select`, so it missed the second `err = f()` in `retryOnError` and offered a merge that changes behaviour. Report position also moved to the `var` keyword, as upstream reports on the `DeclStmt`. |
+| **SA5011** (`web/web_test.go:738`) | honnef's `ir` is SSI: `if resp != nil { … }` gives the branch successor a sigma node and the join below a phi, so a later `resp.StatusCode` is a *different* `ir.Value` than the one `maybeNil` recorded. guff's SSA has no sigma nodes, so `sigma_shadows` now reconstructs which derefs that renaming hides. |
+
+Chasing those exposed two QF1008 false *negatives*, fixed with them:
+
+- `pkg: None` was passed to `lookup_field_or_method`, so **unexported** embedded
+  fields never resolved (`r.meta.Labels` was silently missed). This was the
+  `golangci-only` entry in `compat/isolate/allowlists/isolate-staticcheck.txt`.
+- Only the last segment of a chain interrupted by a call or index was checked,
+  missing e.g. `call.Inner.F8().ContinuedInner.F9`'s first segment. golangci-lint's
+  default `issues.uniq-by-line: true` hides the second finding on such a line,
+  which is why comparing raw output made the miss look intentional — verify
+  staticcheck ports against `uniq-by-line: false`.
+
+With both allowlist entries gone, `isolate-staticcheck` is
+`guff=11 golangci=11 both=11 P=R=100%`. Known remaining SA5011 gap (not on this
+corpus, so it does not move the gate): a deref after `if p == nil { … }` whose nil
+branch never mentions `p` is upstream-reportable but suppressed by guff's
+`dominance_guard` heuristic.
+
+The three fixes are wall- and RSS-neutral. Measured by interleaving pre- and
+post-fix binaries (`GUFF_BIN=… --skip-golangci`, 4 rounds each, first round
+discarded as cold): before `2.32 / 2.25 / 2.23s`, after `2.27 / 2.26 / 2.26s`,
+peak RSS within 10 MB. `sigma_shadows` walks each nil-check successor's dominator
+subtree once per check in `collect_maybe_nil` rather than per deref, so it cannot
+go quadratic on functions with many checks.
+
+> A single measurement on a busy host read `2.47s` — inside the 0.15s epsilon but
+> only just. `PERF_GUARD` (load > ncpu/4) catches the worst of it; anything within
+> ~0.2s of the limit still deserves an interleaved A/B before it is called a
+> regression.
 
 ## Prerequisites
 
@@ -119,6 +181,10 @@ Default (in `baseline.json` → `tolerances`):
 
 Improvements always pass. Package-set / SHA drift warns but does not fail — re-run
 `--update-baseline` when intentional.
+
+`--update-baseline` rewrites the `compat` block too, so it accepts whatever
+`guff_only` the run reported. Use it for perf/corpus drift only; for a finding-set
+change, edit the block by hand so the acceptance is visible in the diff.
 
 ## Env
 
