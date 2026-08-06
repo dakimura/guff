@@ -4,8 +4,10 @@
 //!
 //! Upstream relies on SSA sigma nodes so that `if x != nil { *x }` uses a
 //! different value inside the branch. When the same value is reused (no
-//! sigma), we additionally suppress reports when the deref is dominated by
-//! both the nil-check and its non-nil successor (guarded use after the check).
+//! sigma), `sigma_shadows` reconstructs which derefs upstream's renaming would
+//! have hidden, and we additionally suppress reports when the deref is dominated
+//! by both the nil-check and its non-nil successor (guarded use after the
+//! check).
 //!
 //! `testing.TB` Fatal/Fatalf is not noreturn in IR, so
 //! `if p == nil || … { t.Fatal(...) }; use p` leaves fallthrough edges that
@@ -79,6 +81,10 @@ struct NilCheck {
     nil_block: Option<BlockId>,
     /// True when the check was `x == nil` (not `x != nil`).
     eq_nil: bool,
+    /// Successors upstream's IR would have given a *surviving* sigma node, so
+    /// everything they reach reads a renamed value. Computed once per check —
+    /// see [`sigma_shadows`].
+    sigma_succs: Vec<BlockId>,
 }
 
 fn nil_check_partner(func: &Function, cond: Value) -> Option<(InstrId, Value, Value, bool)> {
@@ -133,12 +139,22 @@ fn collect_maybe_nil(prog: &Program, func: &Function) -> HashMap<Value, Vec<NilC
                 Some(peel_load(func, v))
             };
             let push = |maybe_nil: &mut HashMap<Value, Vec<NilCheck>>, key: Value| {
+                let sigma_succs = [non_nil_block, nil_block]
+                    .into_iter()
+                    .flatten()
+                    // A sigma can only be placed where the branch is the only
+                    // way in, and only survives if the region below uses the
+                    // value.
+                    .filter(|&s| func.blocks.get(s).preds.len() == 1)
+                    .filter(|&s| region_uses_value(func, s, key))
+                    .collect();
                 maybe_nil.entry(key).or_default().push(NilCheck {
                     bin_op: bin_id,
                     check_block: bid,
                     non_nil_block,
                     nil_block,
                     eq_nil,
+                    sigma_succs,
                 });
             };
             if is_nil_const_operand(prog, func, x) {
@@ -242,6 +258,84 @@ fn soft_abort_join_block(prog: &Program, func: &Function, nil_block: BlockId) ->
     None
 }
 
+/// Forward CFG reachability.
+fn reaches(func: &Function, from: BlockId, to: BlockId) -> bool {
+    if from == to {
+        return true;
+    }
+    let mut stack = vec![from];
+    let mut seen = std::collections::HashSet::from([from]);
+    while let Some(b) = stack.pop() {
+        for &succ in &func.blocks.get(b).succs {
+            if succ == to {
+                return true;
+            }
+            if seen.insert(succ) {
+                stack.push(succ);
+            }
+        }
+    }
+    false
+}
+
+/// True when `key` is an operand of any instruction in the dominator subtree
+/// rooted at `root` — i.e. a sigma node defined on entry to `root` would have a
+/// use and therefore survive dead-value pruning.
+fn region_uses_value(func: &Function, root: BlockId, key: Value) -> bool {
+    let mut stack = vec![root];
+    let mut seen = std::collections::HashSet::from([root]);
+    while let Some(b) = stack.pop() {
+        let block = func.blocks.get(b);
+        for &iid in &block.instrs {
+            let mut used = false;
+            func.instrs.get(iid).for_each_operand(|v| {
+                if peel_load(func, *v) == key {
+                    used = true;
+                }
+            });
+            if used {
+                return true;
+            }
+        }
+        for &child in &block.dom.children {
+            if seen.insert(child) {
+                stack.push(child);
+            }
+        }
+    }
+    false
+}
+
+/// True when upstream's IR would have renamed the pointer before `deref_block`,
+/// so `maybeNil` — keyed on the *pre-branch* value — could not match the deref.
+///
+/// honnef's `ir` is SSI: an `If` inserts a sigma node for each value in the
+/// condition at the head of every successor that the branch is the sole
+/// predecessor of, and joins below get a phi merging the sigmas. A deref reading
+/// a sigma or phi is a different `ir.Value` than the `BinOp` operand, so it is
+/// never reported. Unused sigmas are pruned and the resulting phi folds back to
+/// the original value, which is why upstream still reports
+/// `if p == nil { log("bad") }; *p` — a nil branch that never mentions `p`.
+///
+/// guff's SSA has no sigma nodes, so derive the same shadowing from the CFG.
+/// `check.sigma_succs` is precomputed in [`collect_maybe_nil`].
+fn sigma_shadows(func: &Function, check: &NilCheck, deref_block: BlockId) -> bool {
+    // A deref the branch does not dominate is reached without crossing it.
+    if check.check_block == deref_block || check.sigma_succs.is_empty() {
+        return false;
+    }
+    let check_bb = func.blocks.get(check.check_block);
+    let deref_bb = func.blocks.get(deref_block);
+    if !check_bb.dominates(deref_bb) {
+        return false;
+    }
+    check.sigma_succs.iter().any(|&succ| {
+        succ == deref_block
+            || func.blocks.get(succ).dominates(deref_bb)
+            || reaches(func, succ, deref_block)
+    })
+}
+
 /// Reachability from `from` to `to`, never entering `avoid`.
 fn reachable_avoiding(func: &Function, from: BlockId, to: BlockId, avoid: BlockId) -> bool {
     if from == to {
@@ -311,6 +405,9 @@ fn is_guarded_by_non_nil(
     check: &NilCheck,
     deref_block: BlockId,
 ) -> bool {
+    if sigma_shadows(func, check, deref_block) {
+        return true;
+    }
     let Some(non_nil_block) = check.non_nil_block else {
         return false;
     };

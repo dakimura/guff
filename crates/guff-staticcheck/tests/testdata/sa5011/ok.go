@@ -88,3 +88,20 @@ func okSequentialConcreteFatal(t fataler, statusResp *Status) {
 	}
 	_ = statusResp.Complete
 }
+
+type Response struct{ StatusCode int }
+
+func get() (*Response, error) { return nil, nil }
+
+func cleanup(*Response) {}
+
+// prometheus web/web_test.go:738. The `if resp != nil` body uses resp, so
+// upstream's IR keeps its sigma node and the join below reads a phi — a value
+// the nil check was never recorded against.
+func okNilCheckThenShortCircuitDeref() bool {
+	resp, err := get()
+	if resp != nil {
+		cleanup(resp)
+	}
+	return err == nil && resp.StatusCode == 200
+}

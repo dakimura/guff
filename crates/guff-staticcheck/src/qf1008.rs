@@ -3,13 +3,20 @@
 //! Port of `honnef.co/go/tools/quickfix/qf1008`.
 //!
 //! Handles uninterrupted selector chains (`a.b.c`) and chains interrupted by
-//! calls/indexes (`a.b.c().d.e`) by checking each continuous segment whose
-//! root is a `SelectorExpr` whose parent is not another `SelectorExpr`.
+//! calls/indexes (`a.b.c().d.e`) by checking every continuous segment of the
+//! chain.
+//!
+//! Upstream calls `astutil.PathEnclosingInterval(file, expr.Pos(), expr.Pos())`
+//! and bails when the *outermost* `SelectorExpr` on that path is not the visited
+//! expression. The path spans the whole enclosing chain, so a selector nested
+//! anywhere inside another selector — including across statement and function
+//! boundaries, as in `T{f: func() { x.Emb.F = nil }}.Run()` — is skipped. We get
+//! the same result by pruning the subtree of every chain root we visit.
 
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, Ident, SelectorExpr};
-use guff::walk::{preorder_stack, NodeRef};
+use guff::walk::{inspect as walk_inspect, NodeRef};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
@@ -20,15 +27,73 @@ use guff_types::arena::ObjectData;
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::TypeId;
 
-fn flatten_selector(expr: &SelectorExpr) -> (&Expr, Vec<&Ident>) {
-    let mut fields = vec![&expr.sel];
-    let mut cur = &*expr.x;
-    while let Expr::SelectorExpr(s) = cur {
-        fields.push(&s.sel);
-        cur = &*s.x;
+/// One continuous run of selectors in a chain: the expression it starts from
+/// and the field identifiers applied to it, left to right.
+struct Segment<'a> {
+    x: &'a Expr,
+    fields: Vec<&'a Ident>,
+}
+
+/// The leftmost sub-expression starting at the same offset as `e` — i.e. the
+/// single child `PathEnclosingInterval` descends into for a zero-width interval
+/// at `e.Pos()`. `ParenExpr`, `StarExpr` and friends open with their own token,
+/// so the spine ends there.
+fn spine_child(e: &Expr) -> Option<&Expr> {
+    let child: &Expr = match e {
+        Expr::SelectorExpr(s) => &s.x,
+        Expr::CallExpr(c) => &c.fun,
+        Expr::IndexExpr(i) => &i.x,
+        Expr::IndexListExpr(i) => &i.x,
+        Expr::SliceExpr(s) => &s.x,
+        Expr::TypeAssertExpr(t) => &t.x,
+        Expr::BinaryExpr(b) => &b.x,
+        _ => return None,
+    };
+    (child.pos() == e.pos()).then_some(child)
+}
+
+/// Upstream `extractSelectors`: split the chain rooted at `expr` into the
+/// continuous selector runs separated by calls, indexes and the like, so
+/// `a.b.c().d.e` yields `[a.b.c, d.e]`.
+fn extract_selectors(expr: &SelectorExpr) -> Vec<Segment<'_>> {
+    // Walk the leftmost spine outermost → innermost.
+    let mut spine: Vec<Option<&SelectorExpr>> = vec![Some(expr)];
+    let mut cur: Option<&Expr> = Some(&expr.x);
+    while let Some(e) = cur {
+        match e {
+            Expr::SelectorExpr(s) => {
+                spine.push(Some(s));
+                cur = Some(&s.x);
+            }
+            other => {
+                spine.push(None);
+                cur = spine_child(other);
+            }
+        }
     }
-    fields.reverse();
-    (cur, fields)
+
+    // Group innermost → outermost, the order upstream walks the enclosing path.
+    let mut out: Vec<Segment<'_>> = Vec::new();
+    let mut in_chain = false;
+    for el in spine.iter().rev() {
+        match el {
+            Some(sel) => {
+                if !in_chain {
+                    in_chain = true;
+                    out.push(Segment {
+                        x: &sel.x,
+                        fields: Vec::new(),
+                    });
+                }
+                out.last_mut()
+                    .expect("in_chain implies a segment")
+                    .fields
+                    .push(&sel.sel);
+            }
+            None => in_chain = false,
+        }
+    }
+    out
 }
 
 fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
@@ -41,15 +106,24 @@ fn check_selector(pass: &Pass<'_>, expr: &SelectorExpr, pending: &mut Vec<(u32, 
     if !matches!(&*expr.x, Expr::SelectorExpr(_)) {
         return;
     }
+    for segment in extract_selectors(expr) {
+        check_segment(pass, segment.x, &segment.fields, pending);
+    }
+}
 
+fn check_segment(
+    pass: &Pass<'_>,
+    base_expr: &Expr,
+    fields: &[&Ident],
+    pending: &mut Vec<(u32, u32, String)>,
+) {
+    if fields.len() < 2 {
+        return;
+    }
     let artifacts = match pass.pkg().type_artifacts.as_ref() {
         Some(a) => a,
         None => return,
     };
-    let (base_expr, fields) = flatten_selector(expr);
-    if fields.len() < 2 {
-        return;
-    }
 
     let Some(mut base) = expr_type(pass, base_expr) else {
         return;
@@ -73,7 +147,7 @@ fn check_selector(pass: &Pass<'_>, expr: &SelectorExpr, pending: &mut Vec<(u32, 
             &artifacts.packages,
             base,
             true,
-            None,
+            Some(artifacts.type_pkg),
             &hop1.name,
         );
         let LookupResult::Found {
@@ -106,7 +180,7 @@ fn check_selector(pass: &Pass<'_>, expr: &SelectorExpr, pending: &mut Vec<(u32, 
             &artifacts.packages,
             base,
             true,
-            None,
+            Some(artifacts.type_pkg),
             &hop2.name,
         );
         let LookupResult::Found {
@@ -150,7 +224,7 @@ fn check_selector(pass: &Pass<'_>, expr: &SelectorExpr, pending: &mut Vec<(u32, 
             &artifacts.packages,
             left_ty,
             true,
-            None,
+            Some(artifacts.type_pkg),
             &hop2.name,
         );
         let LookupResult::Found {
@@ -198,36 +272,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "QF1008 requires inspect analyzer".to_string())?;
 
     let mut pending = Vec::new();
-    // Only process the root of each uninterrupted selector chain (parent is
-    // not a SelectorExpr). That yields separate segments around calls/indexes,
-    // matching upstream `extractSelectors`.
+    // Every node below a `SelectorExpr` has that selector as an ancestor, so
+    // upstream's "outermost selector on the enclosing path must be me" test
+    // fails for all of them. Pruning the subtree of each chain root we visit is
+    // the same filter, and it also gives each root the whole chain to split.
     for file in pass.files() {
-        let mut stack = Vec::new();
-        preorder_stack(NodeRef::File(file), &mut stack, |node, stack| {
-            let NodeRef::SelectorExpr(sel) = node else {
+        walk_inspect(NodeRef::File(file), |node| {
+            let Some(NodeRef::SelectorExpr(sel)) = node else {
                 return true;
             };
-            let parent_is_selector = stack
-                .last()
-                .is_some_and(|n| matches!(n, NodeRef::SelectorExpr(_)));
-            // Match upstream extractSelectors: flag CallExpr.Fun chains like
-            // `o.Inner.M()` / `s.MetricSink.AddSample(...)`, but skip when the
-            // call continues as another selector (`d.Metric.GetCounter().GetValue()`),
-            // which prometheus + golangci leave alone.
-            let is_continued_call_fun = stack.len() >= 2
-                && matches!(
-                    stack.last(),
-                    Some(NodeRef::CallExpr(c))
-                        if matches!(
-                            c.fun.as_ref(),
-                            Expr::SelectorExpr(s) if s.id == sel.id
-                        )
-                )
-                && matches!(stack.get(stack.len() - 2), Some(NodeRef::SelectorExpr(_)));
-            if !parent_is_selector && !is_continued_call_fun {
-                check_selector(pass, sel, &mut pending);
-            }
-            true
+            check_selector(pass, sel, &mut pending);
+            false
         });
     }
 

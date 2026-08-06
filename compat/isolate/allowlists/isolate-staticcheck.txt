@@ -2,20 +2,9 @@
 # Format: <target> <guff-only|golangci-only> <normalized-key>
 # target = isolate-<linter>
 #
-# Prefer fixing guff over growing this list. Both entries below are DEFERRED
-# with a known cause; the fixture keeps them reproducible.
+# Prefer fixing guff over growing this list.
 #
-# SA5011: guff reports a deref that is only reached once `err == nil`, after an
-# `if resp != nil` block. golangci reports no SA5011 for this shape — nor for
-# the documented `fmt.Println(*x); if x == nil` example — so its trigger is
-# narrower than "compared to nil and dereferenced elsewhere". It does fire on
-# vault (see crates/guff-staticcheck/src/sa5011.rs), so the check is live;
-# the boundary still needs to be pinned down.
-isolate-staticcheck guff-only bad.go:81:staticcheck:possible nil pointer dereference
-#
-# QF1008: guff misses an embedded field declared in the same package, for both
-# pointer and value bases and in both read and assign position, while reporting
-# it for fields promoted from imported packages (prometheus endpointslice_test).
-# Suspected cause is the embedded flag not being set on struct fields that are
-# type-checked from source rather than decoded from export data.
-isolate-staticcheck golangci-only bad.go:72:staticcheck:could remove embedded field "meta" from selector
+# The former SA5011 guff-only and QF1008 golangci-only entries are fixed:
+# SA5011 now reconstructs the sigma/phi renaming that hides a deref reached only
+# after an `if p != nil` block, and QF1008 passes the current package to
+# `lookup_field_or_method` so unexported embedded fields resolve.

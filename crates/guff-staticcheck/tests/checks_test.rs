@@ -2991,11 +2991,13 @@ fn qf1008_flags_interrupted_call_chain() {
     let pkg = support::typecheck_file(&dir, "call.go", "example.com/staticcheck/qf1008/call");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
-    // Continued call `….F8().….F9`: first CallExpr.Fun segment skipped; second
-    // segment still flags. Leaf call `o.MethodInner.M()` is flagged.
+    // `call.FunctionCallInner.F8().FunctionCallContinuedInner.F9` splits into two
+    // segments and upstream flags both (golangci-lint's default
+    // `issues.uniq-by-line` is what hides the second one in its output).
+    // Leaf call `o.MethodInner.M()` is flagged too.
     assert!(
-        !messages.iter().any(|m| m.contains("FunctionCallInner")),
-        "continued CallExpr.Fun should not flag FunctionCallInner: {messages:?}"
+        messages.iter().any(|m| m.contains("FunctionCallInner")),
+        "{messages:?}"
     );
     assert!(
         messages
@@ -3007,6 +3009,18 @@ fn qf1008_flags_interrupted_call_chain() {
         messages.iter().any(|m| m.contains("MethodInner")),
         "{messages:?}"
     );
+}
+
+#[test]
+fn qf1008_skips_selectors_enclosed_by_another_selector() {
+    let dir = support::testdata("qf1008");
+    let pkg = support::typecheck_file(&dir, "nested.go", "example.com/staticcheck/qf1008/nested");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1008::analyzer(), &pkg);
+    // golangci-lint 2.12 with `uniq-by-line: false` reports exactly two here:
+    // the outer `sink(…).NestedInner.F1` and the one in `fnNotNested`. The two
+    // enclosed by a `harness{…}.Run` selector are skipped.
+    assert_eq!(messages.len(), 2, "{messages:?}");
 }
 
 #[test]

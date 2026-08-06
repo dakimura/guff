@@ -6,7 +6,7 @@
 | isolate-ineffassign | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-unused | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-govet | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-staticcheck | 11 | 11 | 10 | 90.9% | 90.9% | 0 |
+| isolate-staticcheck | 11 | 11 | 11 | 100.0% | 100.0% | 0 |
 | isolate-misspell | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-dogsled | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-nakedret | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -147,11 +147,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| staticcheck | 11 | 11 | 10 | 90.9% | 90.9% |
-
-### Allowed known diffs (2)
-- guff-only: `bad.go:81:staticcheck:possible nil pointer dereference`
-- golangci-only: `bad.go:72:staticcheck:could remove embedded field "meta" from selector`
+| staticcheck | 11 | 11 | 11 | 100.0% | 100.0% |
 
 ## isolate-misspell
 
