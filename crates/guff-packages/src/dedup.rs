@@ -88,6 +88,28 @@ pub fn package_for_import_path<'a>(
     by_id.values().find(|p| p.pkg_path == path)
 }
 
+/// Import-path → deps graph for hybrid seed ordering.
+///
+/// Seed waves / `dep_load_order` look up by **import path** (from `Package.deps`
+/// and `imports`). Package ids are often `P [P.test]` after
+/// [`filter_duplicate_packages`], so an id-keyed map misses those edges and
+/// typechecks `P` before its imports — embedded field types become Invalid
+/// (cli `api.HTTPError` / govet errorsas FPs under multi-root load).
+///
+/// Prefer plain `id == pkg_path` deps when both plain and test-variant exist.
+pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, Vec<String>> {
+    let mut dep_graph = HashMap::default();
+    for pkg in by_id.values() {
+        let key = pkg.pkg_path.clone();
+        if pkg.id == pkg.pkg_path {
+            dep_graph.insert(key, pkg.deps.clone());
+        } else {
+            dep_graph.entry(key).or_insert_with(|| pkg.deps.clone());
+        }
+    }
+    dep_graph
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +197,50 @@ mod tests {
         by_id.insert(survivor.id.clone(), Arc::clone(&survivor));
         let got = package_for_import_path(&by_id, "example.com/foo").unwrap();
         assert_eq!(got.id, survivor.id);
+    }
+
+    #[test]
+    fn import_path_dep_graph_resolves_test_variant_survivor() {
+        let lib = Arc::new(Package {
+            id: "example.com/lib [example.com/lib.test]".into(),
+            pkg_path: "example.com/lib".into(),
+            deps: vec!["example.com/ext".into()],
+            ..Package::default()
+        });
+        let mut by_id = HashMap::default();
+        by_id.insert(lib.id.clone(), Arc::clone(&lib));
+
+        let graph = import_path_dep_graph(&by_id);
+        assert_eq!(
+            graph.get("example.com/lib"),
+            Some(&vec!["example.com/ext".to_string()]),
+            "seed must see lib→ext after plain lib was dropped for lib [lib.test]"
+        );
+        assert!(graph.get(&lib.id).is_none());
+    }
+
+    #[test]
+    fn import_path_dep_graph_prefers_plain_over_fortest_variant() {
+        let plain = Arc::new(Package {
+            id: "example.com/q".into(),
+            pkg_path: "example.com/q".into(),
+            deps: vec!["example.com/a".into()],
+            ..Package::default()
+        });
+        let fortest = Arc::new(Package {
+            id: "example.com/q [example.com/p.test]".into(),
+            pkg_path: "example.com/q".into(),
+            deps: vec!["example.com/b".into()],
+            ..Package::default()
+        });
+        let mut by_id = HashMap::default();
+        by_id.insert(plain.id.clone(), Arc::clone(&plain));
+        by_id.insert(fortest.id.clone(), Arc::clone(&fortest));
+
+        let graph = import_path_dep_graph(&by_id);
+        assert_eq!(
+            graph.get("example.com/q"),
+            Some(&vec!["example.com/a".to_string()]),
+        );
     }
 }

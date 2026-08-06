@@ -155,10 +155,7 @@ pub fn typecheck_packages(
     let sizes = env.sizes();
 
     let export_paths = collect_export_paths(by_id);
-    let dep_graph: HashMap<String, Vec<String>> = by_id
-        .iter()
-        .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
-        .collect();
+    let dep_graph = crate::dedup::import_path_dep_graph(by_id);
 
     let mut targets: Vec<String> = if mode.contains(LoadMode::NEED_DEPS) {
         by_id.keys().cloned().collect()
@@ -243,10 +240,7 @@ pub fn typecheck_roots_with_prebuilt_seed(
     };
     let sizes = env.sizes();
     let export_paths = collect_export_paths(&by_id);
-    let dep_graph: HashMap<String, Vec<String>> = by_id
-        .iter()
-        .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
-        .collect();
+    let dep_graph = crate::dedup::import_path_dep_graph(&by_id);
 
     let dbg = crate::debug::enabled();
     let acct = crate::debug::detailed();

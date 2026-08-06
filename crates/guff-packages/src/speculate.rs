@@ -275,10 +275,7 @@ pub fn start_seed_speculation(
         .spawn(move || {
             let fset = FileSet::new();
             let export_paths = collect_existing_exports(&by_id);
-            let dep_graph: HashMap<String, Vec<String>> = by_id
-                .iter()
-                .map(|(id, pkg)| (id.clone(), pkg.deps.clone()))
-                .collect();
+            let dep_graph = crate::dedup::import_path_dep_graph(&by_id);
             let seed =
                 typecheck::build_source_seed_for_speculate(
                     &targets,
