@@ -28,6 +28,9 @@
 !/compat/results/RESULTS.isolate.md
 !/compat/results/.gitkeep
 
+# Golden cases are materialized from their canonical sources on every run.
+/compat/golden/.work/
+
 # Prometheus regress harness raw run artifacts (keep RESULTS*.md + baseline*.json)
 /regress/results/*
 !/regress/results/RESULTS.md

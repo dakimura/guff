@@ -33,13 +33,23 @@ cargo build --release -p guff-lint
 ./compat/run.sh --oss --tier pr --update-allowlist
 ./compat/run.sh --isolate --update-allowlist
 
+# Check-level golden gate (exact match incl. column/severity, no allowlist)
+./compat/golden/run.sh
+./compat/golden/regen.sh gocritic
+
+# Do both tools analyze the same .go files? (build tags / tests / vendor)
+./compat/filesets.sh --tier pr
+./compat/filesets.sh --isolate
+
 # Check-level coverage ledger — which checks have never fired in any test?
 ./compat/coverage.py all
 ```
 
-> **これらのゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
-> isolate は 114 linter で合計 178 findings しか比較しておらず、548 check のうち 222 は
-> どのテストでも一度も発火していません。改善計画は
+> **`run.sh` 系のゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
+> isolate は 114 linter で合計 178 findings しか比較しておらず、キーは column も severity も
+> 見ていません。548 check のうち 133 は今なおどのテストでも一度も発火していません。
+> これを check 単位で潰していくのが `golden/` で、最初のケース（gocritic）は
+> 載せた時点で 44 件のバグを出しました。改善計画は
 > [`../docs/COMPAT-HARDENING.md`](../docs/COMPAT-HARDENING.md)、現状値は
 > [`../docs/COVERAGE.md`](../docs/COVERAGE.md)。
 
@@ -53,6 +63,10 @@ cargo build --release -p guff-lint
 | `standard.yml` | Shared enable-set for fixture/local only |
 | `allowlists/` | Per-target accepted diffs (`_default.txt`, `<name>.txt`) |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
+| `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |
+| `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |
+| `baselines/` | Ill-typed package counts per target (panics are never baselined) |
+| `filesets.py` / `filesets.sh` | Do both tools analyze the same `.go` files? |
 | `repos.txt` | Deprecated stub — use [`../corpus/repos.json`](../corpus/repos.json) |
 | `tests/` | Harness unit tests (`test_normalize.py`, `test_isolate.py`) |
 | `results/RESULTS.md` | Latest checked-in report snapshot |
@@ -75,6 +89,15 @@ OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
   so multi-package modules compare cleanly.
 - Isolate mode (`--isolate`) enables exactly one linter per fixture; see
   [`isolate/README.md`](isolate/README.md).
+- `run.sh` also gates two failures that never reach the set-diff, because the
+  findings were never produced: a panicking analyzer unwinds its worker, and an
+  ill-typed package is skipped whole. Panics always fail; ill-typed counts may
+  shrink but not grow (`health.py`, `baselines/health.json`). Both were found
+  passing at P = R = 100% on all eight OSS targets.
+- `filesets.sh` compares the *input*: it runs both tools with a `goheader`
+  template that cannot match, so each reports once per analyzed file. Blind
+  spot: goheader ignores files whose first comment is a `//go:` directive, so
+  those are invisible to the probe on both sides.
 
 ## OSS finding-set fixes (2026-08)
 

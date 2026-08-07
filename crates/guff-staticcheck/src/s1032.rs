@@ -12,7 +12,14 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn is_permissible_sort(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    let Expr::CallExpr(typeconv) = &call.args[0] else {
+    // `sort.Sort()` with no arguments only parses in code that does not
+    // type-check, but analyzers still see it — indexing here panicked the
+    // worker on helm and kubernetes, silently dropping S1032 for the whole
+    // package.
+    let Some(arg0) = call.args.first() else {
+        return true;
+    };
+    let Expr::CallExpr(typeconv) = arg0 else {
         return true;
     };
     let Expr::SelectorExpr(sel) = &*typeconv.fun else {

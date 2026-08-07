@@ -42,6 +42,12 @@ jobs:
       - name: Compat smoke (fixture)
         run: ./compat/smoke.sh
 
+      # Check-level goldens: exact match on path:line:col:linter:severity:text,
+      # no normalization and no allowlist. Runs guff only — the golden already
+      # holds golangci-lint's answer — so it is cheap enough for the fast job.
+      - name: Golden gate (check-level)
+        run: ./compat/golden/run.sh
+
   # Thorough gate: every curated linter alone vs golangci-lint (114 targets).
   # Catches parity holes that multi-linter OSS configs hide.
   isolate:
@@ -85,6 +91,12 @@ jobs:
 
       - name: Compat isolate (all linters)
         run: ./compat/run.sh --isolate
+
+      # Do both tools feed their linters the same .go files? Build tags, tests,
+      # vendor and generated handling decide the *input*, and a disagreement
+      # there shows up as a finding diff somewhere else — or nowhere at all.
+      - name: File-set gate (isolate fixtures)
+        run: ./compat/filesets.sh --isolate
 
       - name: Upload isolate report
         if: always()
@@ -135,8 +147,12 @@ jobs:
           restore-keys: |
             corpus-pr-
 
+      # Also gates worker panics and ill-typed package counts (compat/health.py).
       - name: Compat OSS (pr tier, own-config)
         run: ./compat/run.sh --oss --tier pr
+
+      - name: File-set gate (pr tier)
+        run: ./compat/filesets.sh --tier pr
 
       - name: Upload OSS report
         if: always()

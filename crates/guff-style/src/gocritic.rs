@@ -519,6 +519,22 @@ fn checker_of(msg: &str) -> &str {
     msg.split_once(": ").map_or(msg, |(name, _)| name)
 }
 
+/// Position of an assignment *statement*, for checkers that warn on the whole
+/// statement rather than on one of its operands.
+///
+/// go-critic passes an `ast.Node` to `ctx.Warn`, and `ast.AssignStmt.Pos()` is
+/// the first LHS operand — not the `=` / `:=` token. Reporting `tok_pos` lands
+/// a few columns to the right of upstream, which the finding-set gates never
+/// saw because their key ignores columns (COMPAT-HARDENING §1).
+fn assign_pos(assign: &AssignStmt) -> u32 {
+    assign
+        .lhs
+        .first()
+        .map(|e| e.pos())
+        .unwrap_or(assign.tok_pos)
+        .0 as u32
+}
+
 fn check_elseif(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
     let Some(Stmt::BlockStmt(else_body)) = stmt.else_.as_deref() else {
         return;
@@ -671,7 +687,7 @@ fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     if fun_name != "len" || call.args.len() != 1 {
         return;
     }
-    let pos = bin.op_pos.0 as u32;
+    let pos = bin.x.pos().0 as u32;
     match bin.op {
         Token::GEQ if is_int_lit(&bin.y, 0) => {
             if let Some(arg) = expr_text(&call.args[0]) {
@@ -748,7 +764,7 @@ fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, Str
     };
     report(
         pending,
-        slice.lbrack.0 as u32,
+        slice.x.pos().0 as u32,
         "unslice",
         format!("could simplify {x}[:] to {x}"),
     );
@@ -1115,7 +1131,7 @@ fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
         };
         report(
             pending,
-            a.tok_pos.0 as u32,
+            assign_pos(a),
             "valSwap",
             format!("can re-write as `{y_t}, {x_t} = {x_t}, {y_t}`"),
         );
@@ -1243,7 +1259,7 @@ fn check_assign_op(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
         }
         _ => return,
     };
-    report(pending, assign.tok_pos.0 as u32, "assignOp", msg);
+    report(pending, assign_pos(assign), "assignOp", msg);
 }
 
 fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
@@ -1287,7 +1303,7 @@ fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
         let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(...)"));
         report(
             pending,
-            call.args[1].pos().0 as u32,
+            call.fun.pos().0 as u32,
             "dupArg",
             format!("suspicious duplicated args in {whole}"),
         );
@@ -1399,7 +1415,7 @@ fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     // upstream skips floats with side-effect-free check; we keep AST equality.
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "dupSubExpr",
         format!(
             "suspicious identical LHS and RHS for `{}` operator",
@@ -1543,7 +1559,7 @@ fn check_off_by1(index: &IndexExpr, pending: &mut Vec<(u32, String)>) {
     };
     report(
         pending,
-        index.lbrack.0 as u32,
+        index.x.pos().0 as u32,
         "offBy1",
         format!("index expr always panics; maybe you wanted {x}[len({x})-1]?"),
     );
@@ -1633,7 +1649,7 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
         let text = expr_text(&Expr::BinaryExpr(bin.clone())).unwrap_or_else(|| "cond".into());
         report(
             pending,
-            bin.op_pos.0 as u32,
+            bin.x.pos().0 as u32,
             "badCond",
             format!("`{text}` condition is suspicious"),
         );
@@ -1651,7 +1667,7 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
             let text = expr_text(&Expr::BinaryExpr(bin.clone())).unwrap_or_else(|| "cond".into());
             report(
                 pending,
-                bin.op_pos.0 as u32,
+                bin.x.pos().0 as u32,
                 "badCond",
                 format!("`{text}` condition is always false"),
             );
@@ -1812,7 +1828,12 @@ fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)
             _ => return,
         }
     }
-    let Some(lit_text) = expr_text(&Expr::FuncLit(fl.clone()))
+    // Upstream renders the literal with `astfmt`, i.e. the real source text:
+    // `func(s string) string { return strings.TrimSpace(s) }`. `expr_text` has
+    // no case for a func literal's body, so it has to go through go/printer.
+    let lit = Expr::FuncLit(fl.clone());
+    let Some(lit_text) = node_text(pass, &lit)
+        .or_else(|| expr_text(&lit))
         .or_else(|| Some(format!("func(...) {{ return {callable}(...) }}")))
     else {
         return;
@@ -1860,7 +1881,7 @@ fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, St
     };
     report(
         pending,
-        sel.sel.pos().0 as u32,
+        sel.x.pos().0 as u32,
         "underef",
         format!(
             "could simplify (*{inner}).{} to {inner}.{}",
@@ -2249,7 +2270,7 @@ fn check_sloppy_type_assert(
         if types_identical(pass, to_type, from_type) {
             report(
                 pending,
-                assert.lparen.0 as u32,
+                assert.x.pos().0 as u32,
                 "sloppyTypeAssert",
                 "type assertion from/to types are identical",
             );
@@ -2262,7 +2283,7 @@ fn check_sloppy_type_assert(
     if types_identical(pass, to_tav.typ, from_type) {
         report(
             pending,
-            assert.lparen.0 as u32,
+            assert.x.pos().0 as u32,
             "sloppyTypeAssert",
             "type assertion from/to types are identical",
         );
@@ -2471,14 +2492,6 @@ fn reparse_with_comments(path: &Path) -> Option<(Arc<FileSet>, File)> {
     Some((fset, file))
 }
 
-fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
-    let ft = fset.file(file_pos)?;
-    if line < 1 || line as usize > ft.line_count() {
-        return None;
-    }
-    Some(ft.line_start(line as usize).0 as u32)
-}
-
 fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     let mut out = Vec::new();
     if let Some(doc) = &file.doc {
@@ -2540,8 +2553,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 check_codegen_comment(doc, &mut local);
                 for (pos, msg) in local {
                     // pos is from reparse fset; remap via line.
-                    let line = re_fset.position(Pos(pos as i64)).line;
-                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                         pending.push((mapped, msg));
                     }
                 }
@@ -2553,8 +2566,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 let mut local = Vec::new();
                 check_comment_formatting(cg, &mut local);
                 for (pos, msg) in local {
-                    let line = re_fset.position(Pos(pos as i64)).line;
-                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                         pending.push((mapped, msg));
                     }
                 }
@@ -2567,8 +2580,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 let mut local = Vec::new();
                 check_deprecated_comment(doc, &mut local);
                 for (pos, msg) in local {
-                    let line = re_fset.position(Pos(pos as i64)).line;
-                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                         pending.push((mapped, msg));
                     }
                 }
@@ -2579,8 +2592,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             let mut local = Vec::new();
             check_commented_out_code(&parsed, &mut local);
             for (pos, msg) in local {
-                let line = re_fset.position(Pos(pos as i64)).line;
-                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                     pending.push((mapped, msg));
                 }
             }
@@ -2590,8 +2603,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             let mut local = Vec::new();
             check_commented_out_import(&parsed, &mut local);
             for (pos, msg) in local {
-                let line = re_fset.position(Pos(pos as i64)).line;
-                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                     pending.push((mapped, msg));
                 }
             }
@@ -2602,8 +2615,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 let mut local = Vec::new();
                 check_todo_comment_without_detail(cg, &mut local);
                 for (pos, msg) in local {
-                    let line = re_fset.position(Pos(pos as i64)).line;
-                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                         pending.push((mapped, msg));
                     }
                 }
@@ -2614,8 +2627,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             let mut local = Vec::new();
             check_doc_stub(&parsed, &mut local);
             for (pos, msg) in local {
-                let line = re_fset.position(Pos(pos as i64)).line;
-                if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                     pending.push((mapped, msg));
                 }
             }
@@ -2626,8 +2639,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 let mut local = Vec::new();
                 check_why_no_lint(cg, &mut local);
                 for (pos, msg) in local {
-                    let line = re_fset.position(Pos(pos as i64)).line;
-                    if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
+                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
+                        .map(|p| p.0 as u32) {
                         pending.push((mapped, msg));
                     }
                 }
@@ -2823,7 +2836,7 @@ fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<
     };
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "emptyStringTest",
         format!("replace `{whole}` with `{suggest}`"),
     );
@@ -2949,7 +2962,7 @@ fn check_yoda_style(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     let op = if bin.op == Token::EQL { "==" } else { "!=" };
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "yodaStyleExpr",
         format!("consider to change order in expression to {y_t} {op} {x_t}"),
     );
@@ -3246,9 +3259,15 @@ fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String
             msg.push_str(&format!(" {line}"));
         }
         for imp in import_list {
+            // `ast.ImportSpec.Pos()` is the alias when there is one, so an
+            // aliased duplicate reports on the alias, not on the path literal.
+            let pos = imp
+                .name
+                .as_ref()
+                .map_or(imp.path.value_pos, |name| name.pos());
             report(
                 pending,
-                imp.path.value_pos.0 as u32,
+                pos.0 as u32,
                 "dupImport",
                 msg.clone(),
             );
@@ -3555,7 +3574,7 @@ fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, St
     let whole = format!("{x_t} {} {y_t}", bin.op.as_str());
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "weakCond",
         format!("suspicious `{whole}`; nil check may not be enough, check for len"),
     );
@@ -3993,7 +4012,7 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
         };
         report(
             pending,
-            bin.op_pos.0 as u32,
+            bin.x.pos().0 as u32,
             "sortSlice",
             format!("cmp func must use {slice_t} slice in comparison"),
         );
@@ -4001,7 +4020,7 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     if contains_index_ident(&bin.x, &jvar.name) && contains_index_ident(&bin.y, &ivar.name) {
         report(
             pending,
-            bin.op_pos.0 as u32,
+            bin.x.pos().0 as u32,
             "sortSlice",
             format!(
                 "unusual order of {{{},{}}} params in comparison",
@@ -4178,14 +4197,14 @@ fn check_sql_query(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32,
     if type_has_exec_method(pass, recv_ty) {
         report(
             pending,
-            sel.sel.pos().0 as u32,
+            sel.x.pos().0 as u32,
             "sqlQuery",
             format!("use {recv_t}.Exec() if returned result is not needed"),
         );
     } else {
         report(
             pending,
-            sel.sel.pos().0 as u32,
+            sel.x.pos().0 as u32,
             "sqlQuery",
             "ignoring Query() rows result may lead to a connection leak",
         );
@@ -4594,8 +4613,11 @@ fn check_doc_stub(file: &File, pending: &mut Vec<(u32, String)>) {
     for decl in &file.decls {
         match decl {
             Decl::FuncDecl(f) => {
+                // Upstream warns on the declaration node: `ast.FuncDecl.Pos()`
+                // is the `func` keyword. (`ast.TypeSpec.Pos()` below is the
+                // name, so the two arms legitimately differ.)
                 visit_doc_stub(
-                    f.name.pos().0 as u32,
+                    f.ty.pos().0 as u32,
                     &f.name.name,
                     f.doc.as_ref(),
                     false,
@@ -4772,7 +4794,7 @@ fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     };
     report(
         pending,
-        assign.tok_pos.0 as u32,
+        assign_pos(assign),
         "sloppyReassign",
         format!(
             "re-assignment to `{}` can be replaced with `{} := {rhs}`",
@@ -4908,7 +4930,7 @@ fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
     }
     report(
         pending,
-        call.args[nil_idx].pos().0 as u32,
+        call.fun.pos().0 as u32,
         "httpNoBody",
         "http.NoBody should be preferred to the nil request body",
     );
@@ -4935,7 +4957,7 @@ fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(
     };
     report(
         pending,
-        ix.lbrack.0 as u32,
+        ix.x.pos().0 as u32,
         "preferDecodeRune",
         format!("consider replacing []rune({s_t})[0] with utf8.DecodeRuneInString({s_t})"),
     );
@@ -5067,7 +5089,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                     if let Some(s_t) = node_text(pass, s) {
                         report(
                             pending,
-                            call.args[1].pos().0 as u32,
+                            call.fun.pos().0 as u32,
                             "stringXbytes",
                             format!("can simplify `[]byte({s_t})` to `{s_t}`"),
                         );
@@ -5145,7 +5167,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                         if let Some(b_t) = node_text(pass, b) {
                             report(
                                 pending,
-                                bin.op_pos.0 as u32,
+                                bin.x.pos().0 as u32,
                                 "stringXbytes",
                                 format!("suggestion: len({b_t}) {op} 0"),
                             );
@@ -5166,7 +5188,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                         if let (Some(x_t), Some(y_t)) = (node_text(pass, x), node_text(pass, y)) {
                             report(
                                 pending,
-                                bin.op_pos.0 as u32,
+                                bin.x.pos().0 as u32,
                                 "stringXbytes",
                                 format!("suggestion: {bang}bytes.Equal({x_t}, {y_t})"),
                             );
@@ -5228,7 +5250,7 @@ fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut V
     };
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "preferFilepathJoin",
         format!("filepath.Join({x_t}, {y_t}) should be preferred to the {whole}"),
     );
@@ -5265,7 +5287,7 @@ fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u
     // Every arm is `Suggest`-only upstream.
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "stringsCompare",
         format!("suggestion: {suggest}"),
     );
@@ -5337,7 +5359,7 @@ fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u3
     };
     report(
         pending,
-        call.fun.pos().0 as u32,
+        assign_pos(assign),
         "badSorting",
         format!("suspicious {needle} usage, maybe {suggest} was intended?"),
     );
@@ -5554,6 +5576,12 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
     );
 }
 
+/// `preferStringWriter` overlaps `preferFprint` on `Write([]byte(fmt.Sprint*))`
+/// and `io.WriteString(w, fmt.Sprint*)`: upstream runs both checkers and emits
+/// both warnings. Which one the user ends up seeing is decided later, by
+/// `issues.uniq-by-line` keeping the first finding on the line — and only when
+/// that option is on. Suppressing here instead would drop the finding outright
+/// under `uniq-by-line: false`.
 fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     // $w.Write([]byte($s)) where $w implements StringWriter
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
@@ -5562,10 +5590,7 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Ve
             && call.args.len() == 1
         {
             if let Some(s) = is_byte_slice_conv(&call.args[0]) {
-                // PreferFprint already covers Write([]byte(fmt.Sprint*)) — skip those.
-                if is_fmt_sprint_call(pass, s).is_none()
-                    && implements_string_writer_arity(pass, &sel.x)
-                {
+                if implements_string_writer_arity(pass, &sel.x) {
                     let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
                     let s_t = node_text(pass, s).unwrap_or_else(|| "s".into());
                     let whole = call_text(pass, call).unwrap_or_default();
@@ -5589,10 +5614,6 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Ve
         return;
     }
     if call.args.len() != 2 {
-        return;
-    }
-    // PreferFprint covers io.WriteString(w, fmt.Sprint*) — skip those.
-    if is_fmt_sprint_call(pass, &call.args[1]).is_some() {
         return;
     }
     if !implements_string_writer_arity(pass, &call.args[0]) {
@@ -5727,7 +5748,7 @@ fn check_sync_map_load_and_delete(
         let m_t = expr_text(m).unwrap_or_else(|| "m".into());
         report(
             pending,
-            asgn.tok_pos.0 as u32,
+            assign_pos(asgn),
             "syncMapLoadAndDelete",
             format!("use {m_t}.LoadAndDelete to perform load+delete operations atomically"),
         );
@@ -5959,7 +5980,7 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
     };
     report(
         pending,
-        bin.op_pos.0 as u32,
+        bin.x.pos().0 as u32,
         "equalFold",
         format!("consider replacing with {suggest}"),
     );
@@ -6104,7 +6125,7 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
                 let t = expr_text(recv).unwrap_or_else(|| "t".into());
                 report(
                     pending,
-                    bin.op_pos.0 as u32,
+                    bin.x.pos().0 as u32,
                     "timeExprSimplify",
                     format!("use {t}.UnixMilli() instead of {whole}"),
                 );
@@ -6116,7 +6137,7 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
                 let t = expr_text(recv).unwrap_or_else(|| "t".into());
                 report(
                     pending,
-                    bin.op_pos.0 as u32,
+                    bin.x.pos().0 as u32,
                     "timeExprSimplify",
                     format!("use {t}.UnixMicro() instead of {whole}"),
                 );
@@ -7262,7 +7283,7 @@ fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, S
                     let call_text = expr_text(other).unwrap_or_else(|| "call".into());
                     report(
                         pending,
-                        call.lparen.0 as u32,
+                        call.fun.pos().0 as u32,
                         "evalOrder",
                         format!("may want to evaluate {call_text} before the return statement"),
                     );
@@ -7272,7 +7293,7 @@ fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, S
                 let call_text = expr_text(other).unwrap_or_else(|| "call".into());
                 report(
                     pending,
-                    call.lparen.0 as u32,
+                    call.fun.pos().0 as u32,
                     "evalOrder",
                     format!("may want to evaluate {call_text} before the return statement"),
                 );
@@ -7687,7 +7708,7 @@ fn check_external_error_reassign(
     }
     report(
         pending,
-        assign.tok_pos.0 as u32,
+        assign_pos(assign),
         "externalErrorReassign",
         "suspicious reassignment of error from another package",
     );
@@ -8062,8 +8083,24 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
     }
 }
 
-fn check_bool_expr_simplify(pass: &Pass<'_>, expr: &Expr, pending: &mut Vec<(u32, String)>) {
+/// `reported_end` is the end offset of the last expression this checker warned
+/// about, and suppresses reports on that expression's operands.
+///
+/// Upstream simplifies an expression *recursively* and warns once, on the
+/// outermost node — `(a >= b+1) && x` is reported as `(a > b) && x`, not as a
+/// warning on the outer expression plus a second one on `a >= b+1`. The walk is
+/// pre-order, so any expression starting before the last reported expression
+/// ends is one of its operands.
+fn check_bool_expr_simplify(
+    pass: &Pass<'_>,
+    expr: &Expr,
+    reported_end: &mut u32,
+    pending: &mut Vec<(u32, String)>,
+) {
     if !matches!(expr, Expr::UnaryExpr(_) | Expr::BinaryExpr(_)) {
+        return;
+    }
+    if (expr.pos().0 as u32) < *reported_end {
         return;
     }
     let Some(typ) = type_of(pass, expr) else {
@@ -8088,6 +8125,7 @@ fn check_bool_expr_simplify(pass: &Pass<'_>, expr: &Expr, pending: &mut Vec<(u32
     // does not. `simplified` is built as a string by the rewriter above, hence
     // the guard still compares the two `expr_text` renderings.
     let orig = node_text(pass, expr).unwrap_or(orig);
+    *reported_end = expr.end().0 as u32;
     report(
         pending,
         expr.pos().0 as u32,
@@ -8113,6 +8151,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // Track pointer identity for if-else via id; also use a map for id==0 cases.
     let mut if_else_ptr: HashMap<usize, ()> = HashMap::new();
     let mut type_assert_visited: HashSet<usize> = HashSet::new();
+    // End offset of the last expression `boolExprSimplify` reported — see
+    // [`check_bool_expr_simplify`].
+    let mut bool_expr_reported_end: u32 = 0;
 
     for file in pass.files() {
         if enabled(&set, "valSwap") {
@@ -8313,11 +8354,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_time_expr_simplify(pass, b, &mut pending);
                     }
                     if enabled(&set, "boolExprSimplify") {
-                        check_bool_expr_simplify(pass, &Expr::BinaryExpr(b.clone()), &mut pending);
+                        check_bool_expr_simplify(
+                            pass,
+                            &Expr::BinaryExpr(b.clone()),
+                            &mut bool_expr_reported_end,
+                            &mut pending,
+                        );
                     }
                 }
                 NodeRef::UnaryExpr(u) if enabled(&set, "boolExprSimplify") => {
-                    check_bool_expr_simplify(pass, &Expr::UnaryExpr(u.clone()), &mut pending);
+                    check_bool_expr_simplify(
+                        pass,
+                        &Expr::UnaryExpr(u.clone()),
+                        &mut bool_expr_reported_end,
+                        &mut pending,
+                    );
                 }
                 NodeRef::BasicLit(lit) => {
                     if enabled(&set, "octalLiteral") {

@@ -203,6 +203,8 @@ def _scan_json(path: str) -> collections.Counter:
 
 def _source_of(json_path: str) -> str:
     base = os.path.basename(json_path)
+    if base.startswith("golden-"):
+        return "golden"
     if base.startswith("isolate-"):
         return "isolate"
     if os.sep + "regress" + os.sep in json_path:
@@ -282,7 +284,7 @@ def build_observed(inventory: dict, previous: dict | None = None) -> dict:
 # report
 # --------------------------------------------------------------------------
 
-RUNTIME_SOURCES = ("isolate", "oss", "regress")
+RUNTIME_SOURCES = ("golden", "isolate", "oss", "regress")
 
 
 def render_report(inventory: dict, observed: dict) -> str:
@@ -319,7 +321,7 @@ def render_report(inventory: dict, observed: dict) -> str:
     w("| 状態 | 意味 | 件数 | 割合 |")
     w("|------|------|-----:|-----:|")
     for key, label in (
-        ("fired", "isolate / OSS / regress の実行で発火した"),
+        ("fired", "golden / isolate / OSS / regress の実行で発火した"),
         ("unit-only", "Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし）"),
         ("never", "**どこでも発火していない**"),
     ):

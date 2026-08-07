@@ -9,6 +9,7 @@
 #   ./compat/run.sh --isolate --smoke    # smoke-tier isolate only (CI)
 #   ./compat/run.sh --isolate --linter errcheck
 #   ./compat/run.sh --update-allowlist   # rewrite allowlists from current diffs
+#   ./compat/run.sh --update-baseline    # re-record ill-typed baselines
 #
 # OSS targets use each checkout's real golangci-lint v2 config (via corpus/).
 # Fixture / local keep compat/standard.yml.
@@ -29,6 +30,8 @@ ALLOWLIST_DIR="$COMPAT_DIR/allowlists"
 ALLOWLIST_LEGACY="$COMPAT_DIR/allowlist.txt"
 RESULTS_DIR="$COMPAT_DIR/results"
 NORMALIZE="$COMPAT_DIR/normalize.py"
+HEALTH="$COMPAT_DIR/health.py"
+HEALTH_BASELINE="$COMPAT_DIR/baselines/health.json"
 PREPARE="$ROOT/corpus/prepare.sh"
 PATCH_UNLIMITED="$ROOT/corpus/patch_unlimited_issues.py"
 ISOLATE_DIR="$COMPAT_DIR/isolate"
@@ -42,6 +45,7 @@ SMOKE=0
 OSS=0
 ISOLATE=0
 UPDATE_ALLOWLIST=0
+UPDATE_BASELINE=0
 TIER="pr"
 LINTER_FILTER=""
 
@@ -51,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --oss) OSS=1; shift ;;
     --isolate) ISOLATE=1; shift ;;
     --update-allowlist) UPDATE_ALLOWLIST=1; shift ;;
+    --update-baseline) UPDATE_BASELINE=1; shift ;;
     --linter)
       LINTER_FILTER="$2"
       shift 2
@@ -121,6 +126,7 @@ fi
 command -v go >/dev/null 2>&1 || die "go not found"
 command -v python3 >/dev/null 2>&1 || die "python3 not found"
 [[ -f "$NORMALIZE" ]] || die "missing $NORMALIZE"
+[[ -f "$HEALTH" ]] || die "missing $HEALTH"
 [[ -f "$CONFIG_STANDARD" ]] || die "missing $CONFIG_STANDARD"
 [[ -d "$ALLOWLIST_DIR" ]] || die "missing $ALLOWLIST_DIR"
 
@@ -179,10 +185,13 @@ run_target() {
     python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"
   fi
 
+  # GUFF_DEBUG_ILL_TYPED makes guff name the packages every analyzer skipped;
+  # health.py reads them (and any panic) back out of stderr.
   # shellcheck disable=SC2086
   (
     cd "$dir"
     env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
+      "GUFF_DEBUG_ILL_TYPED=1" \
       "$GUFF" run \
       -c "$run_config" \
       --out-format json \
@@ -221,6 +230,16 @@ run_target() {
   rm -rf "$guff_cache" "$gcl_cache"
   printf '%s\t%s\t%s\t%s\n' "$name" "$dir" "$guff_json" "$gcl_json" >>"$MANIFEST"
 
+  # Silent recall losses: a panicking analyzer drops its findings, and an
+  # ill-typed package is skipped whole. Neither shows up in the set-diff.
+  local health_args=(check --target "$name" --stderr "$RUN_DIR/${name}.guff.stderr")
+  if [[ "$UPDATE_BASELINE" -eq 1 ]]; then
+    health_args+=(--update)
+  fi
+  if ! python3 "$HEALTH" "${health_args[@]}"; then
+    HEALTH_FAILED=$((HEALTH_FAILED + 1))
+  fi
+
   local allow_args=(--allowlist-dir "$ACTIVE_ALLOWLIST_DIR")
   if [[ -n "$ACTIVE_ALLOWLIST_LEGACY" && -f "$ACTIVE_ALLOWLIST_LEGACY" ]]; then
     allow_args+=(--allowlist "$ACTIVE_ALLOWLIST_LEGACY")
@@ -253,6 +272,7 @@ PY
 }
 
 FAILED_TARGETS=0
+HEALTH_FAILED=0
 
 run_isolate_targets() {
   [[ -f "$ISOLATE_LINTERS" ]] || die "missing $ISOLATE_LINTERS"
@@ -466,6 +486,12 @@ fi
 
 if [[ "$FAILED_TARGETS" -gt 0 ]]; then
   echo "FAIL: $FAILED_TARGETS target(s) failed to run" >&2
+  exit 1
+fi
+
+if [[ "$HEALTH_FAILED" -gt 0 && "$UPDATE_BASELINE" -eq 0 ]]; then
+  echo "FAIL: $HEALTH_FAILED target(s) failed the panic / ill-typed gate" >&2
+  echo "See compat/health.py; baselines live in $HEALTH_BASELINE" >&2
   exit 1
 fi
 

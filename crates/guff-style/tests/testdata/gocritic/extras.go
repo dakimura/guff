@@ -518,3 +518,7 @@ func boolExprSimplifyExtra(x, y bool, a, b int) {
 	_ = a > 10 && a < 12
 	_ = a < 11 || a > 11
 }
+
+func unlambdaExtra() {
+	_ = func(s string) string { return strings.TrimSpace(s) }
+}

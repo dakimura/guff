@@ -4,7 +4,7 @@
 //! Staticcheck checks.
 
 use guff::ast::{is_generated, BasicLit, CallExpr, Expr, Ident, SelectorExpr};
-use guff::position::Pos;
+use guff::position::{FileSet, Pos};
 use guff_constant::{bool_val, int64_val, string_val, Kind};
 use guff_types::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData};
 use guff_types::basic::BasicKind;
@@ -783,6 +783,34 @@ fn unquote_go_string(lit: &str) -> String {
         }
     }
     out
+}
+
+/// Translate a position from a re-parsed file's [`FileSet`] into the analysis
+/// one.
+///
+/// Checks that need comments have to re-parse, because the analysis AST drops
+/// them. A re-parse gets a fresh `FileSet`, so its positions are offsets into a
+/// *different* position space — reporting one directly lands wherever that
+/// offset happens to fall in the shared space, typically some unrelated file in
+/// GOROOT. Mapping by line alone is the other half of the trap: it snaps every
+/// finding to column 1.
+///
+/// `file_pos` is any position inside the analysis file being reported on
+/// (`pass.files()[i].pos()`). Returns `None` when the line does not exist in the
+/// analysis file, which means the two parses disagree and the caller should
+/// drop the finding rather than guess.
+pub fn remap_reparsed_pos(
+    fset: &FileSet,
+    file_pos: Pos,
+    reparsed_fset: &FileSet,
+    pos: Pos,
+) -> Option<Pos> {
+    let p = reparsed_fset.position(pos);
+    let ft = fset.file(file_pos)?;
+    if p.line < 1 || p.line as usize > ft.line_count() {
+        return None;
+    }
+    Some(Pos(ft.line_start(p.line as usize).0 + (p.column - 1).max(0)))
 }
 
 #[cfg(test)]

@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Ill-typed package counts per compat target (COMPAT-HARDENING Phase 1).",
+    "A package that fails type checking is skipped whole by every analyzer",
+    "without run_despite_errors, so its findings silently become 0.",
+    "Counts may shrink freely; growth fails the gate. Targets absent here",
+    "are gated strictly at 0. Panics are never baselined \u2014 they always fail.",
+    "Re-record with: ./compat/run.sh --oss --tier <t> --update-baseline"
+  ],
+  "targets": {
+    "caddy": {
+      "ill_typed": 2
+    },
+    "consul": {
+      "ill_typed": 14
+    },
+    "gin": {
+      "ill_typed": 2
+    },
+    "grafana": {
+      "ill_typed": 30
+    },
+    "helm": {
+      "ill_typed": 2
+    },
+    "kubernetes": {
+      "ill_typed": 10
+    }
+  }
+}

@@ -8,9 +8,9 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | isolate / OSS / regress の実行で発火した | 206 | 37.6% |
-| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 120 | 21.9% |
-| `never` | **どこでも発火していない** | 222 | 40.5% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 304 | 55.5% |
+| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 111 | 20.3% |
+| `never` | **どこでも発火していない** | 133 | 24.3% |
 | — | **合計** | **548** | 100.0% |
 
 ## linter 別
@@ -56,7 +56,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | gochecksumtype | 1 | 1 | 0 | 0 |
 | gocognit | 1 | 1 | 0 | 0 |
 | goconst | 1 | 1 | 0 | 0 |
-| gocritic | 107 | 8 | 9 | 90 |
+| gocritic | 107 | 106 | 0 | 1 |
 | gocyclo | 1 | 1 | 0 | 0 |
 | godoclint | 1 | 1 | 0 | 0 |
 | godot | 1 | 1 | 0 | 0 |
@@ -138,9 +138,9 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | wsl_v5 | 1 | 1 | 0 | 0 |
 | zerologlint | 1 | 1 | 0 | 0 |
 
-## 一度も発火していない check（222 件）
+## 一度も発火していない check（133 件）
 
-- **gocritic** (90): `gocritic/appendAssign`, `gocritic/appendCombine`, `gocritic/argOrder`, `gocritic/badCond`, `gocritic/badLock`, `gocritic/badRegexp`, `gocritic/badSorting`, `gocritic/badSyncOnceFunc`, `gocritic/boolExprSimplify`, `gocritic/builtinShadow`, `gocritic/builtinShadowDecl`, `gocritic/captLocal`, `gocritic/caseOrder`, `gocritic/codegenComment`, `gocritic/commentFormatting`, `gocritic/commentedOutCode`, `gocritic/commentedOutImport`, `gocritic/defaultCaseOrder`, `gocritic/deferInLoop`, `gocritic/deferUnlambda`, `gocritic/deprecatedComment`, `gocritic/docStub`, `gocritic/dupBranchBody`, `gocritic/dupCase`, `gocritic/dupImport`, `gocritic/dupOption`, `gocritic/dupSubExpr`, `gocritic/dynamicFmtString`, `gocritic/elseif`, `gocritic/emptyDecl`, `gocritic/emptyFallthrough`, `gocritic/equalFold`, `gocritic/evalOrder`, `gocritic/exposedSyncMutex`, `gocritic/externalErrorReassign`, `gocritic/filepathJoin`, `gocritic/flagName`, `gocritic/hexLiteral`, `gocritic/httpNoBody`, `gocritic/hugeParam`, `gocritic/importShadow`, `gocritic/indexAlloc`, `gocritic/initClause`, `gocritic/mapKey`, `gocritic/methodExprCall`, `gocritic/nestingReduce`, `gocritic/nilValReturn`, `gocritic/octalLiteral`, `gocritic/offBy1`, `gocritic/paramTypeCombine`, `gocritic/preferDecodeRune`, `gocritic/preferFilepathJoin`, `gocritic/preferWriteByte`, `gocritic/ptrToRefParam`, `gocritic/rangeAppendAll`, `gocritic/rangeExprCopy`, `gocritic/rangeValCopy`, `gocritic/redundantSprint`, `gocritic/regexpMust`, `gocritic/regexpPattern`, `gocritic/regexpSimplify`, `gocritic/returnAfterHttpError`, `gocritic/sliceClear`, `gocritic/sloppyReassign`, `gocritic/sloppyTypeAssert`, `gocritic/sortSlice`, `gocritic/sprintfQuotedString`, `gocritic/sqlQuery`, `gocritic/syncMapLoadAndDelete`, `gocritic/timeExprSimplify`, `gocritic/todoCommentWithoutDetail`, `gocritic/tooManyResultsChecker`, `gocritic/truncateCmp`, `gocritic/typeAssertChain`, `gocritic/typeDefFirst`, `gocritic/typeSwitchVar`, `gocritic/typeUnparen`, `gocritic/uncheckedInlineErr`, `gocritic/underef`, `gocritic/unlabelStmt`, `gocritic/unlambda`, `gocritic/unnamedResult`, `gocritic/unnecessaryBlock`, `gocritic/unnecessaryDefer`, `gocritic/unslice`, `gocritic/valSwap`, `gocritic/weakCond`, `gocritic/whyNoLint`, `gocritic/yodaStyleExpr`, `gocritic/zeroByteRepeat`
+- **gocritic** (1): `gocritic/whyNoLint`
 - **govet** (16): `govet/buildtag`, `govet/cgocall`, `govet/defers`, `govet/directive`, `govet/framepointer`, `govet/httpresponse`, `govet/ifaceassert`, `govet/nilfunc`, `govet/shift`, `govet/sigchanyzer`, `govet/stringintconv`, `govet/testpass`, `govet/timeformat`, `govet/unmarshal`, `govet/unsafeptr`, `govet/unusedresult`
 - **revive** (1): `revive/time-naming`
 - **staticcheck** (114): `QF1004`, `QF1005`, `QF1007`, `QF1009`, `S1001`, `S1004`, `S1005`, `S1006`, `S1008`, `S1010`, `S1011`, `S1016`, `S1017`, `S1018`, `S1019`, `S1020`, `S1023`, `S1025`, `S1029`, `S1030`, `S1031`, `S1032`, `S1033`, `S1035`, `S1036`, `S1037`, `S1038`, `S1040`, `SA1001`, `SA1002`, `SA1003`, `SA1004`, `SA1005`, `SA1006`, `SA1007`, `SA1008`, `SA1010`, `SA1011`, `SA1013`, `SA1014`, `SA1015`, `SA1016`, `SA1017`, `SA1018`, `SA1020`, `SA1021`, `SA1023`, `SA1024`, `SA1025`, `SA1027`, `SA1028`, `SA1029`, `SA1030`, `SA1031`, `SA1032`, `SA2000`, `SA2001`, `SA2002`, `SA2003`, `SA3000`, `SA3001`, `SA4001`, `SA4003`, `SA4008`, `SA4011`, `SA4012`, `SA4013`, `SA4015`, `SA4016`, `SA4018`, `SA4020`, `SA4021`, `SA4022`, `SA4024`, `SA4025`, `SA4026`, `SA4028`, `SA4029`, `SA4030`, `SA4031`, `SA5000`, `SA5001`, `SA5002`, `SA5003`, `SA5004`, `SA5005`, `SA5007`, `SA5008`, `SA5010`, `SA6001`, `SA6002`, `SA6003`, `SA6005`, `SA6006`, `SA9001`, `SA9002`, `SA9004`, `SA9006`, `SA9007`, `SA9009`, `SA9010`, `ST1000`, `ST1001`, `ST1003`, `ST1008`, `ST1011`, `ST1012`, `ST1015`, `ST1016`, `ST1017`, `ST1018`, `ST1020`, `ST1021`, `ST1022`
@@ -148,7 +148,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'isolate': 5705, 'oss': 580, 'regress': 1492}`
+- 走査した実行アーティファクト: `{'golden': 9, 'isolate': 5915, 'oss': 593, 'regress': 1492}`
 - インベントリ: 548 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

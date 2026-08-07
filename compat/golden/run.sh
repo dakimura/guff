@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# compat/golden/run.sh — check-level golden gate (COMPAT-HARDENING Phase 3).
+#
+# Usage:
+#   ./compat/golden/run.sh                 # check every case against its golden
+#   ./compat/golden/run.sh --case gocritic # one case
+#   ./compat/golden/run.sh --regen         # regenerate goldens from golangci-lint
+#
+# The gate compares guff's findings to `cases/<name>/expected.golden` with
+# **no normalization**, on `path:line:col:linter:severity:text`. There is no
+# allowlist: a diff is either a guff bug to fix or a reviewed regeneration.
+#
+# Env: GUFF_BIN / GOLANGCI_LINT_BIN
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GOLDEN_DIR="$ROOT/compat/golden"
+CASES_DIR="$GOLDEN_DIR/cases"
+GOLDEN_PY="$GOLDEN_DIR/golden.py"
+HEALTH="$ROOT/compat/health.py"
+WORK_ROOT="$GOLDEN_DIR/.work"
+RESULTS_DIR="$ROOT/compat/results"
+
+REGEN=0
+CASE_FILTER=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --regen) REGEN=1; shift ;;
+    --case) CASE_FILTER="$2"; shift 2 ;;
+    --case=*) CASE_FILTER="${1#*=}"; shift ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+die() { echo "error: $*" >&2; exit 1; }
+
+resolve_guff() {
+  if [[ -n "${GUFF_BIN:-}" ]]; then echo "$GUFF_BIN"
+  elif [[ -x "$ROOT/target/release/guff" ]]; then echo "$ROOT/target/release/guff"
+  elif command -v guff >/dev/null 2>&1; then command -v guff
+  else die "guff not found; build with: cargo build --release -p guff-lint"
+  fi
+}
+
+GUFF="$(resolve_guff)"
+command -v go >/dev/null 2>&1 || die "go not found"
+command -v python3 >/dev/null 2>&1 || die "python3 not found"
+[[ -f "$GOLDEN_PY" ]] || die "missing $GOLDEN_PY"
+[[ -f "$HEALTH" ]] || die "missing $HEALTH"
+
+GOLANGCI="${GOLANGCI_LINT_BIN:-$(command -v golangci-lint 2>/dev/null || true)}"
+if [[ "$REGEN" -eq 1 && -z "$GOLANGCI" ]]; then
+  die "--regen needs golangci-lint on PATH (set GOLANGCI_LINT_BIN)"
+fi
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_DIR="$RESULTS_DIR/golden-$STAMP"
+mkdir -p "$RUN_DIR" "$WORK_ROOT"
+
+GCL_VER="unknown"
+if [[ -n "$GOLANGCI" ]]; then
+  GCL_VER="$("$GOLANGCI" version --short 2>/dev/null || echo unknown)"
+fi
+
+echo "guff golden gate (COMPAT-HARDENING Phase 3)"
+echo "  guff:     $("$GUFF" version --short 2>/dev/null || echo unknown) ($GUFF)"
+echo "  golangci: $GCL_VER"
+echo "  mode:     $([[ "$REGEN" -eq 1 ]] && echo regenerate || echo check)"
+echo "  results:  $RUN_DIR"
+echo
+
+# Materialize a case into $WORK_ROOT/<name>: go.mod + the sources listed in
+# sources.txt, copied from their canonical location in the repo.
+materialize() {
+  local name="$1" case_dir="$2" work="$3"
+  rm -rf "$work"
+  mkdir -p "$work"
+  cp "$case_dir/go.mod" "$work/go.mod"
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    local line dest src
+    line="${raw%%#*}"
+    line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -z "$line" ]] && continue
+    # shellcheck disable=SC2086
+    set -- $line
+    dest="$1"; src="$2"
+    [[ -f "$ROOT/$src" ]] || die "$name: missing source $src"
+    mkdir -p "$(dirname "$work/$dest")"
+    cp "$ROOT/$src" "$work/$dest"
+  done <"$case_dir/sources.txt"
+}
+
+FAILED=0
+SELECTED=0
+
+for case_dir in "$CASES_DIR"/*/; do
+  name="$(basename "$case_dir")"
+  [[ -n "$CASE_FILTER" && "$name" != "$CASE_FILTER" ]] && continue
+  [[ -f "$case_dir/config.yml" ]] || die "$name: missing config.yml"
+  [[ -f "$case_dir/sources.txt" ]] || die "$name: missing sources.txt"
+  [[ -f "$case_dir/go.mod" ]] || die "$name: missing go.mod"
+  SELECTED=$((SELECTED + 1))
+
+  work="$WORK_ROOT/$name"
+  materialize "$name" "$case_dir" "$work"
+  golden="$case_dir/expected.golden"
+
+  if [[ "$REGEN" -eq 1 ]]; then
+    gcl_json="$RUN_DIR/golden-$name.golangci.json"
+    gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-golden-gcl.XXXXXX")"
+    (
+      cd "$work"
+      env "GOLANGCI_LINT_CACHE=$gcl_cache" \
+        "$GOLANGCI" run \
+        -c "$case_dir/config.yml" \
+        --output.json.path=stdout \
+        --path-mode abs \
+        --issues-exit-code 0 \
+        --max-issues-per-linter=0 \
+        --max-same-issues=0 \
+        --allow-parallel-runners \
+        ./...
+    ) >"$gcl_json" 2>"$RUN_DIR/golden-$name.golangci.stderr" || {
+      echo "golangci-lint failed for $name; see $RUN_DIR/golden-$name.golangci.stderr" >&2
+      cat "$RUN_DIR/golden-$name.golangci.stderr" >&2 || true
+      rm -rf "$gcl_cache"
+      FAILED=$((FAILED + 1))
+      continue
+    }
+    rm -rf "$gcl_cache"
+    python3 "$GOLDEN_PY" write \
+      --case "$name" \
+      --root "$work" \
+      --golangci "$gcl_json" \
+      --tool-version "$GCL_VER" \
+      -o "$golden"
+    continue
+  fi
+
+  [[ -f "$golden" ]] || die "$name: missing $golden (run with --regen)"
+
+  guff_json="$RUN_DIR/golden-$name.guff.json"
+  guff_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-golden-guff.XXXXXX")"
+  (
+    cd "$work"
+    env "GUFF_CACHE=$guff_cache" \
+      "GUFF_DEBUG_ILL_TYPED=1" \
+      "$GUFF" run \
+      -c "$case_dir/config.yml" \
+      --out-format json \
+      --issues-exit-code 0 \
+      --no-cache \
+      ./...
+  ) >"$guff_json" 2>"$RUN_DIR/golden-$name.guff.stderr" || {
+    echo "guff failed for $name; see $RUN_DIR/golden-$name.guff.stderr" >&2
+    cat "$RUN_DIR/golden-$name.guff.stderr" >&2 || true
+    rm -rf "$guff_cache"
+    FAILED=$((FAILED + 1))
+    continue
+  }
+  rm -rf "$guff_cache"
+
+  # A worker panic or a skipped ill-typed package leaves findings silently
+  # short, which an exact golden match would then bless (COMPAT-HARDENING
+  # Phase 1). Golden cases are hand-written and must be clean: no baseline.
+  if ! python3 "$HEALTH" check \
+    --target "golden-$name" \
+    --stderr "$RUN_DIR/golden-$name.guff.stderr"; then
+    FAILED=$((FAILED + 1))
+  fi
+
+  python3 "$GOLDEN_PY" check \
+    --case "$name" \
+    --root "$work" \
+    --guff "$guff_json" \
+    --golden "$golden" || FAILED=$((FAILED + 1))
+done
+
+if [[ -n "$CASE_FILTER" && "$SELECTED" -eq 0 ]]; then
+  die "case '$CASE_FILTER' not found under $CASES_DIR"
+fi
+if [[ "$SELECTED" -eq 0 ]]; then
+  die "no cases found under $CASES_DIR"
+fi
+
+echo
+if [[ "$REGEN" -eq 1 ]]; then
+  echo "Regenerated $SELECTED case(s). Review the diff before committing."
+  [[ "$FAILED" -gt 0 ]] && { echo "FAIL: $FAILED case(s) failed to run" >&2; exit 1; }
+  exit 0
+fi
+
+if [[ "$FAILED" -gt 0 ]]; then
+  echo "FAIL: $FAILED/$SELECTED case(s) differ from golden" >&2
+  echo "Fix guff, or regenerate with ./compat/golden/run.sh --regen after review." >&2
+  exit 1
+fi
+echo "OK: $SELECTED case(s) match golden exactly"
