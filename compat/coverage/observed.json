@@ -1,312 +1,319 @@
 {
   "fire_counts": {
+    "G101": 8,
     "G103": 8,
-    "G104": 367,
-    "G107": 44,
-    "G114": 60,
-    "G122": 25,
-    "G124": 51,
-    "G401": 66,
-    "G402": 10,
-    "G404": 60,
-    "G501": 66,
+    "G104": 384,
+    "G107": 45,
+    "G110": 2,
+    "G114": 63,
+    "G122": 30,
+    "G124": 61,
+    "G204": 1,
+    "G306": 63,
+    "G401": 69,
+    "G402": 11,
+    "G404": 65,
+    "G501": 69,
     "G505": 4,
-    "G602": 34,
-    "G703": 82,
+    "G602": 39,
+    "G703": 90,
     "QF1001": 1,
     "QF1002": 7,
-    "QF1003": 7130,
-    "QF1006": 46,
-    "QF1008": 586,
+    "QF1003": 8066,
+    "QF1006": 50,
+    "QF1008": 637,
     "QF1010": 2,
-    "QF1011": 63,
-    "QF1012": 5833,
-    "S1000": 43,
-    "S1002": 52,
-    "S1003": 86,
+    "QF1011": 69,
+    "QF1012": 6781,
+    "S1000": 47,
+    "S1002": 56,
+    "S1003": 89,
     "S1007": 4,
-    "S1009": 118,
-    "S1012": 92,
-    "S1021": 255,
-    "S1024": 49,
-    "S1028": 49,
+    "S1009": 125,
+    "S1012": 100,
+    "S1021": 269,
+    "S1024": 53,
+    "S1028": 53,
     "S1034": 8,
-    "S1039": 165,
+    "S1039": 171,
     "SA1000": 268,
-    "SA1012": 147,
-    "SA1019": 1082,
+    "SA1012": 159,
+    "SA1019": 1198,
     "SA1026": 11,
     "SA4000": 12,
     "SA4004": 1,
     "SA4005": 6,
     "SA4006": 60,
-    "SA4009": 42,
-    "SA4010": 39,
+    "SA4009": 46,
+    "SA4010": 43,
     "SA4014": 2,
-    "SA4017": 88,
+    "SA4017": 91,
     "SA4019": 12,
-    "SA4023": 69,
+    "SA4023": 72,
     "SA4027": 6,
     "SA4032": 63,
     "SA5009": 17,
-    "SA5011": 347,
+    "SA5011": 351,
     "SA5012": 22,
     "SA6000": 4,
     "SA9003": 16,
     "SA9005": 16,
     "SA9008": 32,
-    "ST1005": 310,
-    "ST1006": 147,
-    "ST1019": 98,
-    "ST1023": 58,
-    "arangolint": 51,
-    "asasalint": 55,
-    "asciicheck": 70,
-    "bidichk": 53,
-    "bodyclose": 124,
-    "canonicalheader": 55,
-    "clickhouselint": 51,
-    "containedctx": 53,
-    "contextcheck": 6,
-    "copyloopvar": 112,
-    "cyclop": 53,
-    "decorder": 174,
-    "depguard": 52,
-    "dogsled": 61,
-    "dupl": 112,
-    "dupword": 133,
-    "durationcheck": 58,
-    "embeddedstructfieldcheck": 110,
-    "err113": 54,
-    "errcheck": 3167,
-    "errchkjson": 52,
-    "errname": 128,
-    "errorlint": 57,
-    "exhaustive": 53,
-    "exhaustruct": 53,
-    "exptostd": 102,
-    "fatcontext": 92,
-    "forbidigo": 73,
-    "forcetypeassert": 53,
-    "funcorder": 53,
-    "funlen": 276,
+    "ST1005": 334,
+    "ST1006": 159,
+    "ST1019": 106,
+    "ST1023": 62,
+    "arangolint": 54,
+    "asasalint": 58,
+    "asciicheck": 73,
+    "bidichk": 56,
+    "bodyclose": 129,
+    "canonicalheader": 70,
+    "clickhouselint": 54,
+    "containedctx": 82,
+    "contextcheck": 11,
+    "copyloopvar": 118,
+    "cyclop": 438,
+    "decorder": 183,
+    "depguard": 900,
+    "dogsled": 76,
+    "dupl": 204,
+    "dupword": 145,
+    "durationcheck": 61,
+    "embeddedstructfieldcheck": 162,
+    "err113": 1209,
+    "errcheck": 3558,
+    "errchkjson": 59,
+    "errname": 142,
+    "errorlint": 88,
+    "exhaustive": 56,
+    "exhaustruct": 3227,
+    "exptostd": 108,
+    "fatcontext": 95,
+    "forbidigo": 131,
+    "forcetypeassert": 390,
+    "funcorder": 169,
+    "funlen": 686,
     "gci": 82,
-    "ginkgolinter": 304,
-    "gocheckcompilerdirectives": 102,
-    "gochecknoglobals": 58,
-    "gochecknoinits": 58,
-    "gochecksumtype": 51,
-    "gocognit": 53,
-    "goconst": 14666,
-    "gocritic/appendAssign": 9,
-    "gocritic/appendCombine": 9,
-    "gocritic/argOrder": 9,
-    "gocritic/assignOp": 84,
-    "gocritic/badCall": 33,
-    "gocritic/badCond": 18,
-    "gocritic/badLock": 54,
-    "gocritic/badRegexp": 27,
-    "gocritic/badSorting": 9,
-    "gocritic/badSyncOnceFunc": 18,
-    "gocritic/boolExprSimplify": 93,
-    "gocritic/builtinShadow": 9,
-    "gocritic/builtinShadowDecl": 9,
-    "gocritic/captLocal": 18,
-    "gocritic/caseOrder": 9,
-    "gocritic/codegenComment": 9,
-    "gocritic/commentFormatting": 9,
-    "gocritic/commentedOutCode": 9,
-    "gocritic/commentedOutImport": 9,
-    "gocritic/defaultCaseOrder": 9,
-    "gocritic/deferInLoop": 9,
-    "gocritic/deferUnlambda": 9,
-    "gocritic/deprecatedComment": 9,
-    "gocritic/docStub": 9,
-    "gocritic/dupArg": 9,
-    "gocritic/dupBranchBody": 9,
-    "gocritic/dupCase": 9,
-    "gocritic/dupImport": 18,
-    "gocritic/dupOption": 9,
-    "gocritic/dupSubExpr": 9,
-    "gocritic/dynamicFmtString": 18,
-    "gocritic/elseif": 9,
-    "gocritic/emptyDecl": 27,
-    "gocritic/emptyFallthrough": 9,
-    "gocritic/emptyStringTest": 84,
-    "gocritic/equalFold": 27,
-    "gocritic/evalOrder": 9,
-    "gocritic/exitAfterDefer": 9,
-    "gocritic/exposedSyncMutex": 18,
-    "gocritic/externalErrorReassign": 9,
-    "gocritic/filepathJoin": 9,
-    "gocritic/flagDeref": 9,
-    "gocritic/flagName": 9,
-    "gocritic/hexLiteral": 18,
-    "gocritic/httpNoBody": 18,
-    "gocritic/hugeParam": 9,
-    "gocritic/ifElseChain": 30,
-    "gocritic/importShadow": 9,
-    "gocritic/indexAlloc": 9,
-    "gocritic/initClause": 9,
-    "gocritic/mapKey": 9,
-    "gocritic/methodExprCall": 9,
-    "gocritic/nestingReduce": 9,
-    "gocritic/newDeref": 68,
-    "gocritic/nilValReturn": 9,
-    "gocritic/octalLiteral": 9,
-    "gocritic/offBy1": 9,
-    "gocritic/paramTypeCombine": 9,
-    "gocritic/preferDecodeRune": 9,
-    "gocritic/preferFilepathJoin": 9,
-    "gocritic/preferFprint": 27,
-    "gocritic/preferStringWriter": 30,
-    "gocritic/preferWriteByte": 9,
-    "gocritic/ptrToRefParam": 18,
-    "gocritic/rangeAppendAll": 9,
-    "gocritic/rangeExprCopy": 9,
-    "gocritic/rangeValCopy": 9,
-    "gocritic/redundantSprint": 36,
-    "gocritic/regexpMust": 9,
-    "gocritic/regexpPattern": 9,
-    "gocritic/regexpSimplify": 36,
-    "gocritic/returnAfterHttpError": 9,
-    "gocritic/singleCaseSwitch": 79,
-    "gocritic/sliceClear": 9,
-    "gocritic/sloppyLen": 86,
-    "gocritic/sloppyReassign": 9,
-    "gocritic/sloppyTypeAssert": 9,
-    "gocritic/sortSlice": 9,
-    "gocritic/sprintfQuotedString": 9,
-    "gocritic/sqlQuery": 18,
-    "gocritic/stringConcatSimplify": 27,
-    "gocritic/stringXbytes": 27,
-    "gocritic/stringsCompare": 18,
-    "gocritic/switchTrue": 68,
-    "gocritic/syncMapLoadAndDelete": 9,
-    "gocritic/timeExprSimplify": 18,
-    "gocritic/todoCommentWithoutDetail": 9,
-    "gocritic/tooManyResultsChecker": 9,
-    "gocritic/truncateCmp": 9,
-    "gocritic/typeAssertChain": 9,
-    "gocritic/typeDefFirst": 9,
-    "gocritic/typeSwitchVar": 9,
-    "gocritic/typeUnparen": 9,
-    "gocritic/uncheckedInlineErr": 9,
-    "gocritic/underef": 9,
-    "gocritic/unlabelStmt": 18,
-    "gocritic/unlambda": 4,
-    "gocritic/unnamedResult": 27,
-    "gocritic/unnecessaryBlock": 9,
-    "gocritic/unnecessaryDefer": 9,
-    "gocritic/unslice": 9,
-    "gocritic/valSwap": 9,
-    "gocritic/weakCond": 9,
-    "gocritic/wrapperFunc": 9,
-    "gocritic/yodaStyleExpr": 18,
-    "gocritic/zeroByteRepeat": 9,
-    "gocyclo": 53,
-    "godoclint": 72,
-    "godot": 62,
-    "godox": 116,
+    "ginkgolinter": 322,
+    "gocheckcompilerdirectives": 108,
+    "gochecknoglobals": 400,
+    "gochecknoinits": 156,
+    "gochecksumtype": 54,
+    "gocognit": 180,
+    "goconst": 16011,
+    "gocritic/appendAssign": 17,
+    "gocritic/appendCombine": 15,
+    "gocritic/argOrder": 16,
+    "gocritic/assignOp": 468,
+    "gocritic/badCall": 69,
+    "gocritic/badCond": 30,
+    "gocritic/badLock": 90,
+    "gocritic/badRegexp": 45,
+    "gocritic/badSorting": 15,
+    "gocritic/badSyncOnceFunc": 30,
+    "gocritic/boolExprSimplify": 153,
+    "gocritic/builtinShadow": 15,
+    "gocritic/builtinShadowDecl": 15,
+    "gocritic/captLocal": 30,
+    "gocritic/caseOrder": 15,
+    "gocritic/codegenComment": 15,
+    "gocritic/commentFormatting": 21,
+    "gocritic/commentedOutCode": 15,
+    "gocritic/commentedOutImport": 15,
+    "gocritic/defaultCaseOrder": 15,
+    "gocritic/deferInLoop": 15,
+    "gocritic/deferUnlambda": 15,
+    "gocritic/deprecatedComment": 17,
+    "gocritic/docStub": 15,
+    "gocritic/dupArg": 15,
+    "gocritic/dupBranchBody": 15,
+    "gocritic/dupCase": 15,
+    "gocritic/dupImport": 30,
+    "gocritic/dupOption": 15,
+    "gocritic/dupSubExpr": 15,
+    "gocritic/dynamicFmtString": 30,
+    "gocritic/elseif": 22,
+    "gocritic/emptyDecl": 45,
+    "gocritic/emptyFallthrough": 15,
+    "gocritic/emptyStringTest": 99,
+    "gocritic/equalFold": 45,
+    "gocritic/evalOrder": 15,
+    "gocritic/exitAfterDefer": 15,
+    "gocritic/exposedSyncMutex": 30,
+    "gocritic/externalErrorReassign": 15,
+    "gocritic/filepathJoin": 15,
+    "gocritic/flagDeref": 15,
+    "gocritic/flagName": 15,
+    "gocritic/hexLiteral": 30,
+    "gocritic/httpNoBody": 30,
+    "gocritic/hugeParam": 15,
+    "gocritic/ifElseChain": 132,
+    "gocritic/importShadow": 15,
+    "gocritic/indexAlloc": 15,
+    "gocritic/initClause": 15,
+    "gocritic/mapKey": 15,
+    "gocritic/methodExprCall": 15,
+    "gocritic/nestingReduce": 15,
+    "gocritic/newDeref": 77,
+    "gocritic/nilValReturn": 15,
+    "gocritic/octalLiteral": 15,
+    "gocritic/offBy1": 15,
+    "gocritic/paramTypeCombine": 15,
+    "gocritic/preferDecodeRune": 15,
+    "gocritic/preferFilepathJoin": 15,
+    "gocritic/preferFprint": 45,
+    "gocritic/preferStringWriter": 54,
+    "gocritic/preferWriteByte": 15,
+    "gocritic/ptrToRefParam": 30,
+    "gocritic/rangeAppendAll": 15,
+    "gocritic/rangeExprCopy": 15,
+    "gocritic/rangeValCopy": 15,
+    "gocritic/redundantSprint": 60,
+    "gocritic/regexpMust": 15,
+    "gocritic/regexpPattern": 15,
+    "gocritic/regexpSimplify": 60,
+    "gocritic/returnAfterHttpError": 15,
+    "gocritic/singleCaseSwitch": 99,
+    "gocritic/sliceClear": 15,
+    "gocritic/sloppyLen": 108,
+    "gocritic/sloppyReassign": 15,
+    "gocritic/sloppyTypeAssert": 15,
+    "gocritic/sortSlice": 15,
+    "gocritic/sprintfQuotedString": 15,
+    "gocritic/sqlQuery": 30,
+    "gocritic/stringConcatSimplify": 45,
+    "gocritic/stringXbytes": 45,
+    "gocritic/stringsCompare": 30,
+    "gocritic/switchTrue": 77,
+    "gocritic/syncMapLoadAndDelete": 15,
+    "gocritic/timeExprSimplify": 30,
+    "gocritic/todoCommentWithoutDetail": 15,
+    "gocritic/tooManyResultsChecker": 15,
+    "gocritic/truncateCmp": 15,
+    "gocritic/typeAssertChain": 15,
+    "gocritic/typeDefFirst": 15,
+    "gocritic/typeSwitchVar": 15,
+    "gocritic/typeUnparen": 15,
+    "gocritic/uncheckedInlineErr": 15,
+    "gocritic/underef": 16,
+    "gocritic/unlabelStmt": 30,
+    "gocritic/unlambda": 10,
+    "gocritic/unnamedResult": 45,
+    "gocritic/unnecessaryBlock": 15,
+    "gocritic/unnecessaryDefer": 15,
+    "gocritic/unslice": 17,
+    "gocritic/valSwap": 15,
+    "gocritic/weakCond": 15,
+    "gocritic/wrapperFunc": 15,
+    "gocritic/yodaStyleExpr": 30,
+    "gocritic/zeroByteRepeat": 15,
+    "gocyclo": 87,
+    "godoclint": 110,
+    "godot": 672,
+    "godox": 247,
     "gofmt": 420,
     "gofumpt": 42271,
-    "goheader": 52,
+    "goheader": 9729,
     "goimports": 18,
-    "gomoddirectives": 53,
-    "gomodguard": 54,
-    "gomodguard_v2": 47,
-    "goprintffuncname": 58,
-    "gosmopolitan": 102,
-    "govet/atomic": 69,
+    "gomoddirectives": 56,
+    "gomodguard": 57,
+    "gomodguard_v2": 50,
+    "goprintffuncname": 61,
+    "gosmopolitan": 108,
+    "govet/atomic": 72,
     "govet/bools": 5,
-    "govet/composites": 1323,
-    "govet/copylocks": 818,
+    "govet/composites": 1431,
+    "govet/copylocks": 886,
     "govet/errorsas": 113,
-    "govet/inline": 4610,
+    "govet/inline": 4809,
     "govet/loopclosure": 7,
-    "govet/lostcancel": 41,
-    "govet/printf": 57,
+    "govet/lostcancel": 45,
+    "govet/printf": 60,
     "govet/stdmethods": 18,
     "govet/structtag": 1053,
-    "govet/unreachable": 52,
-    "grouper": 232,
+    "govet/unreachable": 55,
+    "grouper": 244,
     "iface": 18,
-    "importas": 51,
-    "inamedparam": 102,
-    "ineffassign": 3658,
-    "interfacebloat": 56,
-    "intrange": 73,
-    "iotamixing": 53,
-    "ireturn": 53,
-    "lll": 58,
-    "loggercheck": 52,
-    "maintidx": 9,
-    "makezero": 53,
-    "mirror": 21,
-    "misspell": 325,
-    "mnd": 159,
-    "modernize": 18083,
+    "importas": 54,
+    "inamedparam": 127,
+    "ineffassign": 3838,
+    "interfacebloat": 61,
+    "intrange": 101,
+    "iotamixing": 56,
+    "ireturn": 188,
+    "lll": 1063,
+    "loggercheck": 55,
+    "maintidx": 38,
+    "makezero": 56,
+    "mirror": 26,
+    "misspell": 337,
+    "mnd": 715,
+    "modernize": 18118,
     "musttag": 7,
-    "nakedret": 61,
-    "nestif": 58,
-    "nilerr": 83,
-    "nilnesserr": 52,
-    "nilnil": 56,
-    "nlreturn": 70,
-    "noctx": 53,
-    "noinlineerr": 53,
-    "nolintlint": 546,
-    "nonamedreturns": 66,
-    "nosprintfhostport": 56,
-    "paralleltest": 52,
-    "perfsprint": 101,
-    "prealloc": 23,
-    "predeclared": 106,
-    "promlinter": 51,
-    "protogetter": 102,
-    "reassign": 53,
-    "recvcheck": 56,
+    "nakedret": 64,
+    "nestif": 193,
+    "nilerr": 107,
+    "nilnesserr": 55,
+    "nilnil": 89,
+    "nlreturn": 2617,
+    "noctx": 115,
+    "noinlineerr": 1244,
+    "nolintlint": 580,
+    "nonamedreturns": 146,
+    "nosprintfhostport": 59,
+    "paralleltest": 1418,
+    "perfsprint": 254,
+    "prealloc": 44,
+    "predeclared": 114,
+    "promlinter": 54,
+    "protogetter": 108,
+    "reassign": 56,
+    "recvcheck": 146,
     "revive/blank-imports": 447,
     "revive/comment-spacings": 18,
     "revive/context-keys-type": 358,
-    "revive/empty-block": 51,
+    "revive/empty-block": 56,
     "revive/error-strings": 8,
-    "revive/exported": 1775,
-    "revive/increment-decrement": 67,
-    "revive/indent-error-flow": 118,
-    "revive/package-comments": 505,
-    "revive/receiver-naming": 3380,
+    "revive/exported": 2038,
+    "revive/increment-decrement": 70,
+    "revive/indent-error-flow": 120,
+    "revive/package-comments": 523,
+    "revive/receiver-naming": 3398,
+    "revive/redefines-builtin-id": 5,
     "revive/struct-tag": 72,
     "revive/unexported-return": 556,
+    "revive/unused-parameter": 78,
     "revive/var-declaration": 178,
-    "revive/var-naming": 93,
-    "rowserrcheck": 52,
+    "revive/var-naming": 111,
+    "rowserrcheck": 55,
     "sloglint": 51,
-    "spancheck": 103,
-    "sqlclosecheck": 52,
-    "tagalign": 171,
-    "tagliatelle": 60,
-    "testableexamples": 51,
-    "testifylint": 337,
-    "testpackage": 52,
-    "thelper": 58,
-    "tparallel": 52,
-    "unconvert": 58,
-    "unparam": 335,
-    "unqueryvet": 51,
-    "unused": 3477,
-    "usestdlibvars": 24,
-    "usetesting": 52,
-    "varnamelen": 7,
-    "wastedassign": 478,
-    "whitespace": 696,
-    "wrapcheck": 57,
-    "wsl": 150,
-    "wsl_v5": 140,
-    "zerologlint": 51
+    "spancheck": 109,
+    "sqlclosecheck": 55,
+    "tagalign": 231,
+    "tagliatelle": 276,
+    "testableexamples": 54,
+    "testifylint": 346,
+    "testpackage": 272,
+    "thelper": 65,
+    "tparallel": 60,
+    "unconvert": 71,
+    "unparam": 338,
+    "unqueryvet": 54,
+    "unused": 3674,
+    "usestdlibvars": 32,
+    "usetesting": 55,
+    "varnamelen": 1633,
+    "wastedassign": 497,
+    "whitespace": 875,
+    "wrapcheck": 1783,
+    "wsl": 11388,
+    "wsl_v5": 11562,
+    "zerologlint": 54
   },
   "observed": {
     "G101": [
+      "oss",
       "unit"
     ],
     "G102": [
@@ -335,6 +342,7 @@
       "unit"
     ],
     "G110": [
+      "oss",
       "unit"
     ],
     "G111": [
@@ -359,6 +367,7 @@
       "unit"
     ],
     "G204": [
+      "oss",
       "unit"
     ],
     "G301": [
@@ -371,6 +380,7 @@
       "unit"
     ],
     "G306": [
+      "oss",
       "unit"
     ],
     "G401": [
@@ -386,6 +396,7 @@
     ],
     "G404": [
       "isolate",
+      "oss",
       "unit"
     ],
     "G405": [
@@ -596,34 +607,41 @@
       "oss"
     ],
     "canonicalheader": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "clickhouselint": [
       "isolate"
     ],
     "containedctx": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "contextcheck": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "copyloopvar": [
       "isolate"
     ],
     "cyclop": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "decorder": [
       "isolate"
     ],
     "depguard": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "dogsled": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "dupl": [
       "isolate",
+      "oss",
       "unit"
     ],
     "dupword": [
@@ -638,7 +656,8 @@
       "oss"
     ],
     "err113": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "errcheck": [
       "isolate",
@@ -647,7 +666,8 @@
       "unit"
     ],
     "errchkjson": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "errname": [
       "isolate",
@@ -655,6 +675,7 @@
     ],
     "errorlint": [
       "isolate",
+      "oss",
       "regress"
     ],
     "exhaustive": [
@@ -662,7 +683,8 @@
       "unit"
     ],
     "exhaustruct": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "exptostd": [
       "isolate"
@@ -677,10 +699,12 @@
       "oss"
     ],
     "forcetypeassert": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "funcorder": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "funlen": [
       "isolate",
@@ -698,29 +722,34 @@
       "isolate"
     ],
     "gochecknoglobals": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "gochecknoinits": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "gochecksumtype": [
       "isolate"
     ],
     "gocognit": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "goconst": [
       "isolate",
       "oss"
     ],
     "gocritic/appendAssign": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/appendCombine": [
       "golden"
     ],
     "gocritic/argOrder": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/assignOp": [
       "golden",
@@ -729,7 +758,8 @@
     ],
     "gocritic/badCall": [
       "golden",
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "gocritic/badCond": [
       "golden"
@@ -765,7 +795,8 @@
       "golden"
     ],
     "gocritic/commentFormatting": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/commentedOutCode": [
       "golden"
@@ -783,7 +814,8 @@
       "golden"
     ],
     "gocritic/deprecatedComment": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/docStub": [
       "golden"
@@ -811,7 +843,8 @@
       "golden"
     ],
     "gocritic/elseif": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/emptyDecl": [
       "golden"
@@ -950,7 +983,8 @@
     ],
     "gocritic/sloppyLen": [
       "golden",
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "gocritic/sloppyReassign": [
       "golden"
@@ -1014,7 +1048,8 @@
       "golden"
     ],
     "gocritic/underef": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/unlabelStmt": [
       "golden"
@@ -1032,7 +1067,8 @@
       "golden"
     ],
     "gocritic/unslice": [
-      "golden"
+      "golden",
+      "oss"
     ],
     "gocritic/valSwap": [
       "golden"
@@ -1051,7 +1087,8 @@
       "golden"
     ],
     "gocyclo": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "godoclint": [
       "isolate",
@@ -1062,7 +1099,8 @@
       "oss"
     ],
     "godox": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "gofmt": [
       "oss",
@@ -1074,7 +1112,9 @@
       "unit"
     ],
     "goheader": [
-      "isolate"
+      "golden",
+      "isolate",
+      "oss"
     ],
     "goimports": [
       "oss",
@@ -1155,7 +1195,8 @@
       "isolate"
     ],
     "inamedparam": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "ineffassign": [
       "isolate",
@@ -1164,7 +1205,8 @@
       "unit"
     ],
     "interfacebloat": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "intrange": [
       "isolate",
@@ -1174,22 +1216,26 @@
       "isolate"
     ],
     "ireturn": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "lll": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "loggercheck": [
       "isolate"
     ],
     "maintidx": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "makezero": [
       "isolate"
     ],
     "mirror": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "misspell": [
       "isolate",
@@ -1197,7 +1243,8 @@
       "unit"
     ],
     "mnd": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "modernize": [
       "isolate",
@@ -1211,7 +1258,8 @@
       "isolate"
     ],
     "nestif": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "nilerr": [
       "isolate",
@@ -1221,16 +1269,20 @@
       "isolate"
     ],
     "nilnil": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "nlreturn": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "noctx": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "noinlineerr": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "nolintlint": [
       "isolate",
@@ -1238,23 +1290,27 @@
       "unit"
     ],
     "nonamedreturns": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "nosprintfhostport": [
       "isolate"
     ],
     "paralleltest": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "perfsprint": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "prealloc": [
       "isolate",
       "oss"
     ],
     "predeclared": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "promlinter": [
       "isolate"
@@ -1266,7 +1322,8 @@
       "isolate"
     ],
     "recvcheck": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "revive/add-constant": [
       "unit"
@@ -1342,6 +1399,7 @@
     ],
     "revive/empty-block": [
       "isolate",
+      "oss",
       "unit"
     ],
     "revive/empty-lines": [
@@ -1437,6 +1495,7 @@
       "unit"
     ],
     "revive/indent-error-flow": [
+      "oss",
       "regress",
       "unit"
     ],
@@ -1485,10 +1544,12 @@
       "unit"
     ],
     "revive/receiver-naming": [
+      "oss",
       "regress",
       "unit"
     ],
     "revive/redefines-builtin-id": [
+      "oss",
       "unit"
     ],
     "revive/redundant-import-alias": [
@@ -1548,6 +1609,7 @@
       "unit"
     ],
     "revive/unused-parameter": [
+      "oss",
       "unit"
     ],
     "revive/unused-receiver": [
@@ -1601,7 +1663,8 @@
       "oss"
     ],
     "tagliatelle": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "testableexamples": [
       "isolate"
@@ -1612,17 +1675,21 @@
       "regress"
     ],
     "testpackage": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "thelper": [
       "isolate",
+      "oss",
       "unit"
     ],
     "tparallel": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "unconvert": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "unparam": [
       "isolate",
@@ -1638,13 +1705,15 @@
       "unit"
     ],
     "usestdlibvars": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "usetesting": [
       "isolate"
     ],
     "varnamelen": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "wastedassign": [
       "isolate",
@@ -1652,26 +1721,30 @@
     ],
     "whitespace": [
       "isolate",
+      "oss",
       "regress",
       "unit"
     ],
     "wrapcheck": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "wsl": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "wsl_v5": [
-      "isolate"
+      "isolate",
+      "oss"
     ],
     "zerologlint": [
       "isolate"
     ]
   },
   "scanned_artifacts": {
-    "golden": 9,
-    "isolate": 5915,
-    "oss": 593,
+    "golden": 19,
+    "isolate": 6461,
+    "oss": 662,
     "regress": 1492
   }
 }

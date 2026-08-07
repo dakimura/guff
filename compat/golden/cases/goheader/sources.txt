@@ -1,0 +1,25 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name> <repo-relative-source-path>
+#
+# The golden tier does NOT keep its own copy of these files: it points at the
+# fixture the Rust unit tests already use, so the two can never drift.
+#
+# Each file isolates one branch of the matcher. Where the expected position
+# looks wrong, it is: upstream mixes header-relative lines with whole-file byte
+# offsets, so `offset_header.go` reports off its own line. That is the
+# behaviour under test, not a bug in the fixture.
+bad.go             crates/guff-style/tests/testdata/goheader/bad.go
+ok.go              crates/guff-style/tests/testdata/goheader/ok.go
+mismatch.go        crates/guff-style/tests/testdata/goheader/mismatch.go
+text_mismatch.go   crates/guff-style/tests/testdata/goheader/text_mismatch.go
+line2_mismatch.go  crates/guff-style/tests/testdata/goheader/line2_mismatch.go
+too_long.go        crates/guff-style/tests/testdata/goheader/too_long.go
+too_short.go       crates/guff-style/tests/testdata/goheader/too_short.go
+block.go           crates/guff-style/tests/testdata/goheader/block.go
+block_mismatch.go  crates/guff-style/tests/testdata/goheader/block_mismatch.go
+star_block.go      crates/guff-style/tests/testdata/goheader/star_block.go
+directive.go       crates/guff-style/tests/testdata/goheader/directive.go
+empty_block.go     crates/guff-style/tests/testdata/goheader/empty_block.go
+offset_header.go   crates/guff-style/tests/testdata/goheader/offset_header.go
+regexp_ok.go       crates/guff-style/tests/testdata/goheader/regexp_ok.go
+regexp_bad.go      crates/guff-style/tests/testdata/goheader/regexp_bad.go

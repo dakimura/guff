@@ -1,0 +1,5 @@
+/* */
+
+package goheader
+
+func EmptyBlock() {}

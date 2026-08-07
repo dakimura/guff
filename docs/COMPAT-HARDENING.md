@@ -150,14 +150,49 @@ goheader は「最初のコメントが `//go:` ディレクティブのファ�
 両ツールが同じ規則でスキップするため比較は成立するが、その集合の中での差異は見えない。
 強化するなら `go list` の出力を第三の集合として突き合わせる。
 
-### Phase 2 — `linters.default: all` tier の追加 `[未着手]`
+### Phase 2 — `linters.default: all` tier の追加 `[ハーネス完成 2026-08-07 / 差分の解消は未着手]`
 
 現行 OSS tier は各リポの実 config を使うため 7 linter しか動いていない。
 **同じ 8 リポに全 linter 有効の tier を追加**するだけで、手書き fixture では絶対に出ない
 実コードの形が 114 linter 全部にぶつかる。既存ハーネスの引数追加で済む、最もコスパの良い一手。
 
-**Done when**: `./compat/run.sh --oss --tier pr --all-linters` が動き、
-差分が allowlist ではなく guff 側の修正で解消されている。
+**ハーネス**: `./compat/run.sh --oss --tier pr --all-linters`（`compat/all_linters.py`）。
+リポの `run` / `linters.exclusions` / `linters.settings` は残し、`linters.enable` / `disable` だけを
+`default: all` で置き換える。allowlist は専用ツリー `compat/allowlists-all/`（**空**）。
+発見用の tier の差分を OSS の allowlist に混ぜると、通常の OSS ゲートの許容範囲が黙って広がるため。
+
+**初回実測（2026-08-07, pr tier）**
+
+| target | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| gin | 2671 | 3778 | 1195 | 44.7% | 31.6% |
+| caddy | 17149 | 12058 | 8671 | 50.6% | 71.9% |
+| helm | 22311 | 16295 | 13774 | 61.7% | 84.5% |
+
+recall 側（golangci にしか無い）の linter 別上位:
+wrapcheck 1614 / wsl_v5 1067 / varnamelen 834 / wsl 819 / nlreturn 758 / paralleltest 588 /
+exhaustruct 506 / godot 370 / err113 307 / lll 171。
+**いずれも今まで 11 行の isolate fixture 1 件でしか比較されていなかった linter**。
+§1 の診断がそのまま裏付けられた形。この差分の解消が Phase 2 の本体で、量から見て複数セッション必要。
+
+**初回実行で即出たバグ（godox の worker panic）**
+
+`crates/guff-comment/src/godox.rs:44` が caddy で 2 回 panic していた。
+`line[..kw.len()]` が **UTF-8 の文字境界でない位置**で `&str` を切っていたため
+（`// If ≠0 then …` は byte 4 が `≠` の内側、`// ⚠️ Template functions…` も同様）。
+上流は `bytes.EqualFold(kw, sComment[0:lkw])` と **[]byte** で比較しており境界の概念が無い。
+バイト比較に直すのが移植として正しく、同時に panic も消える。
+
+同じ「非 ASCII コメント」系でもう 1 件。メッセージの切り詰め `&trimmed[..40]` も
+**バイト**で切っていたが、上流の `fmt.Sprintf("%.40s...", sComment)` は
+条件が**バイト長 > 40**、切り詰めが **rune 40 個**という混在で、
+65 byte / 25 rune の行は 1 文字も削られないのに `...` だけ付く。golangci-lint 2.12.2 で確認済み。
+
+修正後 caddy を godox 単独で回して **66/66 P=R=100%**（panic 0）。
+**panic していた間、そのワーカーの findings は丸ごと落ちていた** = §1 が言う「差分に出ない失敗」。
+godox は caddy の実 config では有効化されていないので、`default: all` tier でしか踏めなかった。
+
+**Done when**: 上表の差分が allowlist ではなく guff 側の修正で解消されている。
 
 ### Phase 3 — ゴールデン差分の産業化 `[進行中: gocritic 完了 2026-08-07]`（最大の投資・最大の効果）
 
@@ -181,6 +216,10 @@ goheader は「最初のコメントが `//go:` ディレクティブのファ�
 5. **gosec** — `unit-only` 22 件。同上。
 6. 単一 check linter — ほぼ `fired` 済みだが、比較しているのは 1 件だけ（§1）。
    negative 例の追加と column / severity の比較追加が主眼。
+   **goheader は完了 2026-08-07**（§4）。`fired` 件数は 1 のまま動かないが、
+   比較していたのは「1 ファイルに 1 件出ること」だけで、位置もメッセージ本文も
+   見ていなかった。golden 化して初めて 9 種のバグが出た。
+   **単一 check linter の `fired` は「検証済み」を意味しない**という実例。
 
 **Done when**: Phase 0 が挙げた全 check に fixture + golden があり、CI 必須ゲートになっている。
 進捗は `docs/COVERAGE.md` の `never` / `unit-only` 件数で測る。
@@ -229,16 +268,21 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | Phase | 内容 | コスト | 状態 | 最終更新 |
 |:-----:|------|:------:|------|----------|
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
-| 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化 | 2026-08-07 |
-| 2 | `default: all` tier | 小 | 未着手 | — |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — ハーネス完成 + gocritic 完了。次は staticcheck | 2026-08-07 |
+| 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
+| 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — ハーネス完成 + gocritic / goheader 完了。次は staticcheck | 2026-08-07 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-07）: 548 checks 中 `never` **133** / `unit-only` 111 / `fired` 304。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-07）: 548 checks 中 `never` **133** / `unit-only` 105 / `fired` 310。
 （計画策定時: `never` 222 / `unit-only` 120 / `fired` 206）
+
+`unit-only` が 111 → 105 に減ったのは Phase 2 の初回実行の効果（gosec 13→17、revive 14→16）。
+**手書き fixture では撃てなかった check が、実コードでは 1 回回すだけで発火する**という
+Phase 2 の主張がそのまま数字に出ている。`never` 133 は staticcheck / gocritic 由来なので
+Phase 3 待ち。
 
 ---
 
@@ -358,6 +402,8 @@ guff 側にデバッグ用の出力を足すより、両ツールを同じ土俵
    その offset にたまたま居たファイル＝GOROOT のどこかを指していた。
    **gocritic のコメント系で直したのと同じバグ**（あちらは行だけ写して column 1 に張り付く版）。
    共通ヘルパ `guff_analysis::code::remap_reparsed_pos` に括り出して両方から使うようにした。
+   （後日補足: goheader は 2026-08-07 のマッチャ移植でこのヘルパを使わなくなった。
+   上流は位置を**ファイル自身の行**から組み立てるので remap が要らない。現在の利用者は gocritic のみ。）
 2. **`//go:build` で始まるファイルに誤検出していた** — 上流は「`package` より前の**最初の**
    コメントグループ」をヘッダとし、`ast.CommentGroup.Text` がディレクティブを落とすので
    `//go:build` だけのグループは空になり、そのファイルは検査しない。
@@ -380,7 +426,104 @@ guff 側にデバッグ用の出力を足すより、両ツールを同じ土俵
    現在の `match_header` はヘッダ全体を 1 個の正規表現で見るので位置の概念がない。
    テンプレートとヘッダを並べて読む reader への書き換えが要る（prealloc 移植と同規模）。
    **これが済むまで goheader の golden ケースは作れない**。
+   → **完了 2026-08-07**（次節）。
 2. Phase 2（`default: all` tier）→ Phase 3 の staticcheck。
+
+### 2026-08-07 — goheader の位置つきマッチャ移植と golden 化
+
+**やったこと**
+
+Phase 1 の残件だった goheader のマッチャを、上流 **go-header v0.5.0**
+（`go version -m $(which golangci-lint)` で確認した、golangci-lint 2.12.2 が pin している
+まさにそのバージョン）と golangci 側ラッパ `pkg/golinters/goheader` の両方から移植した。
+
+これまでの `match_header` は「ヘッダ全体を 1 個の正規表現にして `is_match`」だった。
+上流はテンプレートとヘッダを **1 バイトずつ並べて読み進め**、食い違ったバイトで止まる。
+したがって出せるメッセージは 1 種類ではなく 6 種類ある:
+
+| 条件 | メッセージ |
+|---|---|
+| バイト不一致 | `Actual: <ヘッダ行の残り>\nExpected:<テンプレート行の残り>` |
+| ヘッダが余る | `Unexpected string: <ヘッダの残り>` |
+| テンプレートが余る | `Missed string: <テンプレートの残り>` |
+| const 値の不一致 | `Expected:<値>, Actual: <ヘッダ行の残り>` |
+| regexp 値の不一致 | `Pattern <re> doesn't match.` |
+| ヘッダ無し／空 | `Missed header for check` |
+
+**位置の出どころ**（これが一番の落とし穴）
+
+ラッパは `LineStart(loc.Line + 1) + (loc.Position - offset)` という**生のバイトオフセット**を作る。
+`loc` は**ヘッダ内**の座標なのに `LineStart` は**ファイル全体**の行を引く。2 つの座標系が混ざっており、
+さらに `loc.Position` にはコメントマーカ分の下駄（`//` なら +4、`/* */` なら +1）が乗ったまま、
+ラッパが `//` のときだけ 1 を引き戻す。差し引き **`//` は +4、ブロックは +2** がキャレットのズレとして残る。
+結果として **1 行目から始まらないヘッダは自分の行から外れた位置に報告される**
+（`offset_header.go`: ヘッダは 3 行目なのに `LineStart(1) + 16` を経由して 3:17）。
+上流の挙動なので、そのまま再現した。
+
+この計算は同時に**上流の build ディレクティブ除けでもある**: 位置を持たない issue は
+`Location{0,0}` に落ち、`//` ヘッダでは `0 - 1 < 0` になって**捨てられる**。
+Phase 1 で「`//go:build` のみのファイルを報告しない」を結果として合わせていたが、
+機構はこれだった（guff は `header.is_empty()` で `continue` していた）。
+今回どちらの経路も上流と同じ形にした。
+
+**移植中に出た guff 側のバグ**（すべて上流に実際に食わせて確認。推測なし）
+
+| # | 内容 |
+|---|------|
+| 1 | メッセージと位置が丸ごと違う（`template doesn't match` 1 種のみ・常にヘッダ先頭） |
+| 2 | `{{ .YEAR }}` の dot を剥がしていた。上流 v0.5.0 は剥がさないので `.year` は**未定義値**（`Template has unknown value: .year`）。しかも `//` ヘッダではその issue 自体が上記の `< 0` で捨てられ、**ブロックコメントのファイルにだけ出る** |
+| 3 | `migrate_old_config`（`{{ YEAR }}` → `{{ .YEAR }}`、`{{ SOME VALUE }}` → `{{ .SOME_VALUE }}`）は v0.5.0 に**存在しない**変換。上流は名前を小文字化・trim するだけで空白も保つ（`{{ SOME VALUE }}` は `some value` を引く）。削除 |
+| 4 | 組み込み値名を `YEAR_RANGE` / `year_range` としていた。上流は **`year-range`**（ハイフン）。`YEAR_RANGE` は未定義値 |
+| 5 | inline template を `trim()` していた。上流は**逐語**で使う（`template-path` から読んだときだけ TrimSpace）。末尾改行は `Missed string: \n` として出る |
+| 6 | `/* * … */` の star block の `*` を剥がしていた。上流は剥がさないので `Actual: * Copyright …` になる |
+| 7 | 空のブロックコメント（`/* */`）を skip していた。上流は `Missed header for check` を 1:1 で報告する（`//` の空ヘッダとは違い、こちらは捨てられない） |
+| 8 | regexp 値をテンプレート全体の正規表現に埋め込んでいた。上流の `RegexpValue.Read` は**非アンカー**で、残りのどこかにある最初のマッチを探し**その末尾までカーソルを進める**（任意のテキストを読み飛ばせる）。また旧実装は `is_match` だったのでヘッダ先頭の余分なテキストも通していた |
+| 9 | `mod-year` / `mod-year-range` が未定義だった。上流は毎回この 2 つを登録する |
+
+上流の rune / byte の非対称（`ConstValue.Read` は値の**rune**を回しつつ `Peek` は**バイト**を返すので、
+非 ASCII を含む const 値は決してマッチしない）も含めて再現した。
+
+**恒久的な差分（1 件）**: `mod-year` / `mod-year-range` を guff はファイルの **mtime** から取る。
+上流は `git log` のコミット日時を優先し、失敗時のみ mtime に落ちる。ファイルごとに git を
+起動するコストが見合わないため。git チェックアウト内では値が食い違いうるので、
+**golden fixture ではこの 2 つを使わない**こと。
+
+**golden ケース**
+
+`compat/golden/cases/goheader/` を新設。fixture は Rust 単体テストと同じ
+`crates/guff-style/tests/testdata/goheader/` を指す（golden tier の規約どおり case は fixture を
+所有しない）。上の 6 メッセージ全部と、ブロックコメント／star block／ディレクティブのみ／
+空ブロック／行 1 以外から始まるヘッダ／regexp 値の成否を 15 ファイルで撃ち分ける。
+
+- `./compat/golden/run.sh --case goheader` → **11/11 完全一致**（正規化なし・allowlist なし）。
+- 既存ゲートに退行なし: gocritic golden 164/164、`cargo test -p guff-style` 402 件
+  （lib 117 + 統合 285）、isolate-goheader P=R=100%、file-set ゲート 114 target 一致。
+
+なお `compat/filesets.sh` の file-set プローブは goheader を使うので、この移植で
+メッセージは変わったが**プローブの成立条件（1 ファイル 1 報告）は変わらない**。
+`//go:build` のみのファイルが写らないという §Phase 1 の盲点もそのまま（機構が同じなので）。
+
+**次にやること**
+
+Phase 2（`default: all` tier）→ Phase 3 の staticcheck 114 件。
+
+### 2026-08-07 — Phase 2 ハーネスと godox の panic
+
+**やったこと**
+
+`./compat/run.sh --oss --tier pr --all-linters` を追加（§2 Phase 2 に実測値と設計）。
+初回実行で **godox の worker panic 2 件**（非 ASCII コメントでの `&str` 境界外スライス）と、
+同じ系統の切り詰めバグ（バイト vs rune）が出た。どちらも修正し、
+caddy を godox 単独で回して 66/66 P=R=100%。
+
+**次にやること**
+
+1. Phase 2 の差分解消。recall 側の上位 10 linter（wrapcheck / wsl_v5 / varnamelen / wsl /
+   nlreturn / paralleltest / exhaustruct / godot / err113 / lll）で 7000 件超を占めるので、
+   **linter を 1 つ選んで golden ケース化 → 潰す**を繰り返すのが筋。
+   precision 側（guff にしか無い）も caddy / helm では guff の方が多いので、
+   偽陽性の調査も要る。
+2. Phase 3 の staticcheck（`never` 114 件）。
 
 ---
 

@@ -5,6 +5,7 @@
 #   ./compat/run.sh              # fixture + benchmarks/local (standard.yml)
 #   ./compat/run.sh --smoke      # fixture only (CI gate)
 #   ./compat/run.sh --oss --tier pr
+#   ./compat/run.sh --oss --tier pr --all-linters   # every linter, real code
 #   ./compat/run.sh --isolate            # all curated per-linter isolate targets
 #   ./compat/run.sh --isolate --smoke    # smoke-tier isolate only (CI)
 #   ./compat/run.sh --isolate --linter errcheck
@@ -34,11 +35,13 @@ HEALTH="$COMPAT_DIR/health.py"
 HEALTH_BASELINE="$COMPAT_DIR/baselines/health.json"
 PREPARE="$ROOT/corpus/prepare.sh"
 PATCH_UNLIMITED="$ROOT/corpus/patch_unlimited_issues.py"
+ALL_LINTERS_PY="$COMPAT_DIR/all_linters.py"
 ISOLATE_DIR="$COMPAT_DIR/isolate"
 ISOLATE_LINTERS="$ISOLATE_DIR/linters.txt"
 ISOLATE_MAKE_CONFIG="$ISOLATE_DIR/make_config.py"
 ISOLATE_FIXTURES="$ISOLATE_DIR/fixtures"
 ISOLATE_ALLOWLIST_DIR="$ISOLATE_DIR/allowlists"
+ALL_LINTERS_ALLOWLIST_DIR="$COMPAT_DIR/allowlists-all"
 mkdir -p "$RESULTS_DIR" "$ALLOWLIST_DIR" "$ISOLATE_ALLOWLIST_DIR"
 
 SMOKE=0
@@ -46,6 +49,7 @@ OSS=0
 ISOLATE=0
 UPDATE_ALLOWLIST=0
 UPDATE_BASELINE=0
+ALL_LINTERS=0
 TIER="pr"
 LINTER_FILTER=""
 
@@ -54,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --smoke) SMOKE=1; shift ;;
     --oss) OSS=1; shift ;;
     --isolate) ISOLATE=1; shift ;;
+    --all-linters) ALL_LINTERS=1; shift ;;
     --update-allowlist) UPDATE_ALLOWLIST=1; shift ;;
     --update-baseline) UPDATE_BASELINE=1; shift ;;
     --linter)
@@ -90,6 +95,9 @@ if [[ "$ISOLATE" -eq 1 && "$OSS" -eq 1 ]]; then
 fi
 if [[ -n "$LINTER_FILTER" && "$ISOLATE" -eq 0 ]]; then
   die "--linter requires --isolate"
+fi
+if [[ "$ALL_LINTERS" -eq 1 && "$OSS" -eq 0 ]]; then
+  die "--all-linters requires --oss"
 fi
 
 resolve_guff() {
@@ -133,7 +141,15 @@ command -v python3 >/dev/null 2>&1 || die "python3 not found"
 # Isolate runs use a dedicated allowlist tree so OSS/_default entries stay separate.
 ACTIVE_ALLOWLIST_DIR="$ALLOWLIST_DIR"
 ACTIVE_ALLOWLIST_LEGACY="$ALLOWLIST_LEGACY"
-if [[ "$ISOLATE" -eq 1 ]]; then
+if [[ "$ALL_LINTERS" -eq 1 ]]; then
+  # The `default: all` tier is a discovery run: its diffs are the work, and
+  # folding them into the OSS allowlist would silently widen what the normal
+  # OSS gate tolerates. Give it its own tree, empty until entries are argued
+  # for individually.
+  ACTIVE_ALLOWLIST_DIR="$ALL_LINTERS_ALLOWLIST_DIR"
+  ACTIVE_ALLOWLIST_LEGACY=""
+  mkdir -p "$ACTIVE_ALLOWLIST_DIR"
+elif [[ "$ISOLATE" -eq 1 ]]; then
   ACTIVE_ALLOWLIST_DIR="$ISOLATE_ALLOWLIST_DIR"
   ACTIVE_ALLOWLIST_LEGACY=""
 fi
@@ -179,7 +195,17 @@ run_target() {
   # Force unlimited issue caps so max-same-issues truncation cannot rotate keys.
   # standard.yml and isolate configs already set max-*-issues: 0.
   run_config="$RUN_DIR/${name}.config.yml"
-  if [[ "$config" == "$CONFIG_STANDARD" || "$ISOLATE" -eq 1 ]]; then
+  if [[ "$ALL_LINTERS" -eq 1 ]]; then
+    # Phase 2: same repo, same run/exclusions/settings, but every linter on.
+    # Rebuilt from the source config rather than patched, since the whole
+    # `linters:` block is replaced. Targets with no config of their own get a
+    # bare `default: all`.
+    local all_args=(-o "$run_config")
+    if [[ -n "$config" ]]; then
+      all_args+=(--source "$config")
+    fi
+    python3 "$ALL_LINTERS_PY" "${all_args[@]}"
+  elif [[ "$config" == "$CONFIG_STANDARD" || "$ISOLATE" -eq 1 ]]; then
     cp "$config" "$run_config"
   else
     python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"

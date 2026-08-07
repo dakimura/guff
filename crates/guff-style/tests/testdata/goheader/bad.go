@@ -1,3 +1,3 @@
 package goheader
 
-func f() {}
+func Bad() {}

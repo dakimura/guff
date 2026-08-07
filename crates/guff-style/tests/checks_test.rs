@@ -6969,8 +6969,12 @@ fn goheader_flags_mismatching_header() {
             ..RunnerOptions::default()
         },
     );
+    // golangci-lint 2.12.2 on this fixture:
+    //   mismatch.go:1:14: Expected:2020, Actual: 2019 Wrong Corp
     assert!(
-        messages.iter().any(|m| m == "template doesn't match"),
+        messages
+            .iter()
+            .any(|m| m == "Expected:2020, Actual: 2019 Wrong Corp"),
         "{messages:?}"
     );
 }

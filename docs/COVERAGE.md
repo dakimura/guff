@@ -8,8 +8,8 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 304 | 55.5% |
-| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 111 | 20.3% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 310 | 56.6% |
+| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 105 | 19.2% |
 | `never` | **どこでも発火していない** | 133 | 24.3% |
 | — | **合計** | **548** | 100.0% |
 
@@ -70,7 +70,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | gomodguard | 1 | 1 | 0 | 0 |
 | gomodguard_v2 | 1 | 1 | 0 | 0 |
 | goprintffuncname | 1 | 1 | 0 | 0 |
-| gosec | 35 | 13 | 22 | 0 |
+| gosec | 35 | 17 | 18 | 0 |
 | gosmopolitan | 1 | 1 | 0 | 0 |
 | govet | 30 | 12 | 2 | 16 |
 | grouper | 1 | 1 | 0 | 0 |
@@ -110,7 +110,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | protogetter | 1 | 1 | 0 | 0 |
 | reassign | 1 | 1 | 0 | 0 |
 | recvcheck | 1 | 1 | 0 | 0 |
-| revive | 100 | 14 | 85 | 1 |
+| revive | 100 | 16 | 83 | 1 |
 | rowserrcheck | 1 | 1 | 0 | 0 |
 | sloglint | 1 | 1 | 0 | 0 |
 | spancheck | 1 | 1 | 0 | 0 |
@@ -148,7 +148,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 9, 'isolate': 5915, 'oss': 593, 'regress': 1492}`
+- 走査した実行アーティファクト: `{'golden': 19, 'isolate': 6461, 'oss': 662, 'regress': 1492}`
 - インベントリ: 548 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

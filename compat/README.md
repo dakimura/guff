@@ -25,6 +25,9 @@ cargo build --release -p guff-lint
 ./compat/run.sh --oss --tier pr
 ./compat/run.sh --oss --tier nightly
 
+# Same repos, but every linter enabled (discovery tier — expect diffs)
+./compat/run.sh --oss --tier pr --all-linters
+
 # Ad-hoc OSS bug hunt (extra repos in corpus/hunt.json; not a CI gate)
 ./compat/hunt.sh
 ./compat/hunt.sh --name cobra
@@ -62,6 +65,7 @@ cargo build --release -p guff-lint
 | `normalize.py` | JSON → keys, diff, markdown/JSON report |
 | `standard.yml` | Shared enable-set for fixture/local only |
 | `allowlists/` | Per-target accepted diffs (`_default.txt`, `<name>.txt`) |
+| `all_linters.py` / `allowlists-all/` | `--all-linters` config rewrite + its own (empty) allowlist |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |
 | `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |

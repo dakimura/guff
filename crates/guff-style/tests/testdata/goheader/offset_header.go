@@ -1,6 +1,8 @@
-// Copyright 2020 Example Corp
+
+
+// Copyright 2020 Wrong Corp
 // SPDX-License-Identifier: Apache-2.0
 
 package goheader
 
-func OK() {}
+func OffsetHeader() {}

@@ -1,6 +1,6 @@
-// Copyright 2019 Wrong Corp
+// Copyright 2020 Example Corp
 // SPDX-License-Identifier: MIT
 
 package goheader
 
-func Mismatch() {}
+func RegexpOK() {}

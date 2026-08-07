@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goheader
+# Produced by running golangci-lint on compat/golden/cases/goheader/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:1:1:goheader::Missed header for check
+block_mismatch.go:2:12:goheader::Actual: ce-Identifier: Apache-2.0\nExpected:se-Identifier: {{ LICENSE }}
+empty_block.go:1:1:goheader::Missed header for check
+line2_mismatch.go:2:14:goheader::Actual: ce-Identifier: Apache-2.0\nExpected:se-Identifier: {{ LICENSE }}
+mismatch.go:1:14:goheader::Expected:2020, Actual: 2019 Wrong Corp
+offset_header.go:3:17:goheader::Expected:Example Corp, Actual: Wrong Corp
+regexp_bad.go:2:29:goheader::Pattern (Apache-2\\.0|MIT) doesn't match.
+star_block.go:1:2:goheader::Actual: * Copyright 2020 Example Corp\nExpected:Copyright {{ YEAR }} {{ COMPANY }}
+text_mismatch.go:1:19:goheader::Expected:Example Corp, Actual: Wrong Corp
+too_long.go:2:39:goheader::Unexpected string: \nExtra trailing line.
+too_short.go:1:19:goheader::Expected:Example Corp, Actual: Example
