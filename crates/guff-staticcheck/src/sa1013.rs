@@ -27,7 +27,7 @@ fn check_seek_call(pass: &Pass<'_>, call: &CallExpr) -> Option<u32> {
     if !is_io_seek_whence(pass, &call.args[0]) {
         return None;
     }
-    Some(call.lparen.0 as u32)
+    Some(call.fun.pos().0 as u32)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

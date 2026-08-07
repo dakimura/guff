@@ -72,7 +72,7 @@ fn check_printf_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
         return;
     }
     pending.push((
-        call.lparen.0 as u32,
+        call.fun.pos().0 as u32,
         "printf-style function with dynamic format string and no further arguments should use print-style function instead"
             .into(),
     ));

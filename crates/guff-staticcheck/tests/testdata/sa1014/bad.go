@@ -1,11 +1,14 @@
 package main
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"io"
+)
 
 func main() {
 	var v map[string]any
 	var i1 any = v
-	var r any
+	var r io.Reader
 	var data []byte
 	json.Unmarshal(data, v)
 	json.Unmarshal(data, i1)

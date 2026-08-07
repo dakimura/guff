@@ -1,0 +1,116 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-qf
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-qf/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+qf1001/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1001/bad/bad.go:8:6:staticcheck::QF1001: could apply De Morgan's law
+qf1001/bad/bad.go:9:6:staticcheck::QF1001: could apply De Morgan's law
+qf1001/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1002/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1002/bad/bad.go:7:2:staticcheck::QF1002: could use tagged switch on x
+qf1002/bad/bad.go:12:2:staticcheck::QF1002: could use tagged switch on x
+qf1002/bad/bad.go:18:2:staticcheck::QF1002: could use tagged switch on a
+qf1002/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1003/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1003/bad/bad.go:7:2:staticcheck::QF1003: could use tagged switch on x
+qf1003/bad/bad.go:8:9:staticcheck::SA9003: empty branch
+qf1003/bad/bad.go:11:2:staticcheck::QF1003: could use tagged switch on x
+qf1003/bad/bad.go:12:9:staticcheck::SA9003: empty branch
+qf1003/bad/bad.go:13:9:staticcheck::SA9003: empty branch
+qf1003/bad/bad.go:16:2:staticcheck::QF1003: could use tagged switch on a
+qf1003/bad/bad.go:17:9:staticcheck::SA9003: empty branch
+qf1003/bad/bad.go:21:3:staticcheck::QF1003: could use tagged switch on x
+qf1003/bad/bad.go:22:10:staticcheck::SA9003: empty branch
+qf1003/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1003/ok/ok.go:7:9:staticcheck::SA9003: empty branch
+qf1003/ok/ok.go:10:2:staticcheck::SA9003: empty branch
+qf1004/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1004/bad/bad.go:9:2:staticcheck::QF1004: could use strings.ReplaceAll instead
+qf1004/bad/bad.go:9:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+qf1004/bad/bad.go:10:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+qf1004/bad/bad.go:10:30:staticcheck::SA1018: calling strings.Replace with n == 0 will return no results, did you mean -1?
+qf1004/bad/bad.go:11:2:staticcheck::QF1004: could use strings.Split instead
+qf1004/bad/bad.go:12:2:staticcheck::QF1004: could use strings.SplitAfter instead
+qf1004/bad/bad.go:13:2:staticcheck::QF1004: could use bytes.ReplaceAll instead
+qf1004/bad/bad.go:14:2:staticcheck::QF1004: could use bytes.Split instead
+qf1004/bad/bad.go:15:2:staticcheck::QF1004: could use bytes.SplitAfter instead
+qf1004/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1004/ok/ok.go:9:2:staticcheck::SA4017: ReplaceAll doesn't have side effects and its return value is ignored
+qf1004/ok/ok.go:10:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+qf1004/renamed/renamed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1004/renamed/renamed.go:9:2:staticcheck::QF1004: could use strings.ReplaceAll instead
+qf1004/renamed/renamed.go:9:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
+qf1004/renamed/renamed.go:10:2:staticcheck::QF1004: could use bytes.ReplaceAll instead
+qf1005/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1005/bad/bad.go:7:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:8:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:9:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:10:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:11:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/bad/bad.go:12:6:staticcheck::QF1005: could expand call to math.Pow
+qf1005/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1006/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1006/bad/bad.go:10:3:staticcheck::QF1006: could lift into loop condition
+qf1006/bad/bad.go:16:3:staticcheck::QF1006: could lift into loop condition
+qf1006/bad/bad.go:22:3:staticcheck::QF1006: could lift into loop condition
+qf1006/bad/bad.go:28:3:staticcheck::QF1006: could lift into loop condition
+qf1006/bad/bad.go:34:3:staticcheck::QF1006: could lift into loop condition
+qf1006/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1007/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1007/bad/bad.go:9:2:staticcheck::QF1007: could merge conditional assignment into variable declaration
+qf1007/bad/bad.go:14:2:staticcheck::QF1007: could merge conditional assignment into variable declaration
+qf1007/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1008/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1008/bad/bad.go:8:12:staticcheck::QF1008: could remove embedded field "BasicInner" from selector
+qf1008/call/call.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1008/call/call.go:12:11:staticcheck::QF1008: could remove embedded field "FunctionCallInner" from selector
+qf1008/call/call.go:12:34:staticcheck::QF1008: could remove embedded field "FunctionCallContinuedInner" from selector
+qf1008/call/call.go:23:8:staticcheck::QF1008: could remove embedded field "MethodInner" from selector
+qf1008/nested/nested.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1008/nested/nested.go:31:29:staticcheck::QF1008: could remove embedded field "NestedInner" from selector
+qf1008/nested/nested.go:43:10:staticcheck::QF1008: could remove embedded field "NestedInner" from selector
+qf1008/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1009/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1009/bad/bad.go:10:2:staticcheck::SA9003: empty branch
+qf1009/bad/bad.go:10:5:staticcheck::QF1009: probably want to use time.Time.Equal instead
+qf1009/bad/bad.go:12:2:staticcheck::SA9003: empty branch
+qf1009/bad/bad.go:12:5:staticcheck::QF1009: probably want to use time.Time.Equal instead
+qf1009/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1009/ok/ok.go:7:2:staticcheck::SA9003: empty branch
+qf1009/ok/ok.go:7:5:staticcheck::SA4017: Equal doesn't have side effects and its return value is ignored
+qf1009/ok/ok.go:10:2:staticcheck::SA9003: empty branch
+qf1009/ok/ok.go:10:5:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+qf1010/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1010/bad/bad.go:11:15:staticcheck::QF1010: could convert argument to string
+qf1010/bad/bad.go:11:22:staticcheck::QF1010: could convert argument to string
+qf1010/bad/bad.go:11:34:staticcheck::QF1010: could convert argument to string
+qf1010/bad/bad.go:12:21:staticcheck::QF1010: could convert argument to string
+qf1010/bad/bad.go:12:28:staticcheck::QF1010: could convert argument to string
+qf1010/bad/bad.go:12:40:staticcheck::QF1010: could convert argument to string
+qf1010/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1011/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1011/bad/bad.go:13:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:14:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:15:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:15:8:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:18:8:staticcheck::QF1011: could omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:18:8:staticcheck::ST1023: should omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:19:8:staticcheck::QF1011: could omit type string from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:19:8:staticcheck::ST1023: should omit type string from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:20:8:staticcheck::QF1011: could omit type MyInt from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:20:8:staticcheck::ST1023: should omit type MyInt from declaration; it will be inferred from the right-hand side
+qf1011/bad/bad.go:21:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1011/ok/ok.go:7:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+qf1012/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1012/bad/bad.go:17:2:staticcheck::QF1012: Use fmt.Fprint(...) instead of Write([]byte(fmt.Sprint(...)))
+qf1012/bad/bad.go:18:2:staticcheck::QF1012: Use fmt.Fprintf(...) instead of Write([]byte(fmt.Sprintf(...)))
+qf1012/bad/bad.go:19:2:staticcheck::QF1012: Use fmt.Fprintln(...) instead of Write([]byte(fmt.Sprintln(...)))
+qf1012/bad/bad.go:26:2:staticcheck::QF1012: Use fmt.Fprint(...) instead of WriteString(fmt.Sprint(...))
+qf1012/bad/bad.go:27:2:staticcheck::QF1012: Use fmt.Fprintf(...) instead of WriteString(fmt.Sprintf(...))
+qf1012/bad/bad.go:28:2:staticcheck::QF1012: Use fmt.Fprintln(...) instead of WriteString(fmt.Sprintln(...))
+qf1012/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment

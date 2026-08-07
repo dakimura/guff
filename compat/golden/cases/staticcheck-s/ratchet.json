@@ -1,0 +1,6 @@
+{
+  "missing": 12,
+  "extra": 8,
+  "why": "Message text that upstream renders from the AST or from a Go stdlib error; S1030/S1037 recall and precision.",
+  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+}

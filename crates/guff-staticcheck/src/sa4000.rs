@@ -104,8 +104,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             Token::GEQ => ">=",
             _ => "?",
         };
+        // Upstream reports the BinaryExpr node, whose Pos() is the left
+        // operand's start — not the operator.
         pending.push((
-            op.op_pos.0 as u32,
+            op.x.pos().0 as u32,
             format!("identical expressions on the left and right side of the '{op_str}' operator"),
         ));
     });

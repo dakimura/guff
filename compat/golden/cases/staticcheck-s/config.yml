@@ -1,0 +1,31 @@
+# Golden case: staticcheck's S fixtures, every check enabled.
+#
+# S#### is the simplification family (upstream gosimple, folded into
+# staticcheck in golangci-lint v2).
+#
+# `checks: [all]` turns on the six ST checks golangci-lint leaves off by
+# default. The point of this tier is to reach checks no other gate executes, and
+# a fixture written for one check routinely trips another — those cross hits are
+# compared here too, which is where precision bugs surface.
+#
+# uniq-by-line must stay off: SA and S checks land on the same line constantly,
+# and collapsing them would hide whichever one guff gets wrong.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

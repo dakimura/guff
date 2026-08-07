@@ -86,7 +86,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 prev_end,
                 last.end().0 as u32,
                 replacement.clone(),
-                format!("could use {replacement} instead"),
+                // The message names the canonical function; only the fix uses
+                // the file's own import alias. Verified against
+                // golangci-lint 2.12.2 with `import s "strings"`.
+                format!("could use {to} instead"),
             ));
             true
         });

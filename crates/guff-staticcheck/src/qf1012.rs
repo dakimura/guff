@@ -248,8 +248,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
-        let matched = match_write_bytes_sprintf(pass, call)
-            .or_else(|| match_write_string_sprintf(pass, call));
+        // Upstream renders the argument as written, so the `[]byte(...)`
+        // conversion of the Write form stays in the message; WriteString has
+        // none. Track which matcher fired rather than dropping it.
+        let (matched, byte_conv) = match match_write_bytes_sprintf(pass, call) {
+            Some(m) => (Some(m), true),
+            None => (match_write_string_sprintf(pass, call), false),
+        };
         let Some((recv, fprint, write_method, args)) = matched else {
             return;
         };
@@ -262,9 +267,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         };
         // Match upstream / golangci phrasing exactly (compat finding-set keys).
         let sprint = fprint_to_sprint(fprint);
-        let msg = format!(
-            "Use fmt.{fprint}(...) instead of {write_method}(fmt.{sprint}(...))"
-        );
+        let inner = format!("fmt.{sprint}(...)");
+        let arg = if byte_conv {
+            format!("[]byte({inner})")
+        } else {
+            inner
+        };
+        let msg = format!("Use fmt.{fprint}(...) instead of {write_method}({arg})");
         pending.push((
             call.pos().0 as u32,
             call.end().0 as u32,

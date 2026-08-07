@@ -155,7 +155,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let kind = kind_label(has_format, has_control, false);
                 let esc = quote_rune_escape(inv.r);
                 let msg = format!(
-                    "string literal contains the Unicode {kind} character U+{:04X}, consider using the \"{esc}\" escape sequence instead",
+                    "string literal contains the Unicode {kind} character U+{:04X}, consider using the '{esc}' escape sequence instead",
                     inv.r as u32
                 );
                 let rune_len = inv.r.len_utf8() as u32;

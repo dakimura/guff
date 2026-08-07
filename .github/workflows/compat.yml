@@ -45,6 +45,8 @@ jobs:
       # Check-level goldens: exact match on path:line:col:linter:severity:text,
       # no normalization and no allowlist. Runs guff only — the golden already
       # holds golangci-lint's answer — so it is cheap enough for the fast job.
+      # A case still being brought to zero carries a ratchet.json: its diff is
+      # printed in full and the step fails if the count grows (compat/golden/README.md).
       - name: Golden gate (check-level)
         run: ./compat/golden/run.sh
 

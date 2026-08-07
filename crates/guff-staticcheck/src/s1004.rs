@@ -10,6 +10,7 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, is_integer_literal};
 use guff_analysis::passes::inspect;
+use crate::render::render_expr;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn check_compare(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<String> {
@@ -27,9 +28,16 @@ fn check_compare(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<String> {
         Token::EQL => "",
         _ => return None,
     };
-    Some(format!(
-        "should use {prefix}bytes.Equal(...) instead of bytes.Compare(...) == 0"
-    ))
+    // Upstream renders the rewritten call, so the message carries the real
+    // arguments. The package is always spelled `bytes` even when the file
+    // imports it under an alias (verified against golangci-lint 2.12.2).
+    let args = call
+        .args
+        .iter()
+        .map(render_expr)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("should use {prefix}bytes.Equal({args}) instead"))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -49,7 +57,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(msg) = check_compare(pass, expr) {
-            pending.push((expr.op_pos.0 as u32, msg));
+            pending.push((expr.x.pos().0 as u32, msg));
         }
     });
     for (pos, message) in pending {

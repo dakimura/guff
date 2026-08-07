@@ -1,0 +1,156 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-st
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-st/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+local/errors/errors.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1000/bad_form/bad_form.go:1:1:staticcheck::ST1000: package comment should be of the form "Package pkg..."
+st1000/bad_missing/bad_missing.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1001/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1001/bad/bad.go:3:8:staticcheck::ST1001: should not use dot imports
+st1001/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1003/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1003/bad/bad.go:3:5:staticcheck::ST1003: should not use underscores in Go names; var abc_def should be abcDef
+st1003/bad/bad.go:4:5:staticcheck::ST1003: should not use ALL_CAPS in Go names; use CamelCase instead
+st1003/bad/bad.go:8:6:staticcheck::ST1003: should not use underscores in Go names; func fn_1 should be fn1
+st1003/bad/bad.go:10:6:staticcheck::ST1003: func fnId should be fnID
+st1003/bad/bad.go:13:6:staticcheck::ST1003: should not use underscores in Go names; var a_b should be aB
+st1003/bad/bad.go:14:6:staticcheck::ST1003: should not use underscores in Go names; range var e_f should be eF
+st1003/bad/bad.go:20:6:staticcheck::ST1003: should not use underscores in Go names; type my_type should be myType
+st1003/bad/bad.go:21:2:staticcheck::ST1003: should not use underscores in Go names; struct field bad_field should be badField
+st1003/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1003/pkg_mixed/pkg_mixed.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1003/pkg_mixed/pkg_mixed.go:1:9:staticcheck::ST1003: should not use MixedCaps in package name; MixedCaps should be mixedcaps
+st1003/pkg_underscore/pkg_underscore.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1003/pkg_underscore/pkg_underscore.go:1:9:staticcheck::ST1003: should not use underscores in package names
+st1005/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1005/bad/bad.go:6:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:7:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:7:2:staticcheck::ST1005: error strings should not be capitalized
+st1005/bad/bad.go:8:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:8:2:staticcheck::ST1005: error strings should not end with punctuation or newlines
+st1005/bad/bad.go:9:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:10:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:11:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:12:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:13:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:19:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/bad/bad.go:23:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/local_errors/local_errors.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1005/local_errors/local_errors.go:7:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/local_errors/local_errors.go:8:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1005/ok/ok.go:6:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/ok/ok.go:7:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1005/ok/ok.go:8:2:staticcheck::SA4017: New doesn't have side effects and its return value is ignored
+st1006/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1006/bad/bad.go:5:13:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "self", 1x "this", 1x "x")
+st1006/bad/bad.go:7:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
+st1006/bad/bad.go:8:7:staticcheck::ST1006: receiver name should be a reflection of its identity; don't use generic names such as "this" or "self"
+st1006/bad/bad.go:9:7:staticcheck::ST1006: receiver name should be a reflection of its identity; don't use generic names such as "this" or "self"
+st1006/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1008/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1008/bad/bad.go:3:13:staticcheck::ST1008: error should be returned as the last argument
+st1008/bad/bad.go:4:16:staticcheck::ST1008: error should be returned as the last argument
+st1008/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1011/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1011/bad/bad.go:8:2:staticcheck::ST1011: var BMillis is of type time.Duration; don't use unit-specific suffix "Millis"
+st1011/bad/bad.go:11:16:staticcheck::ST1011: var cMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/bad/bad.go:13:6:staticcheck::ST1011: var xMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/bad/bad.go:14:9:staticcheck::ST1011: var yMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/bad/bad.go:15:6:staticcheck::ST1011: var zMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/bad/bad.go:16:2:staticcheck::ST1011: var aMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/bad/bad.go:18:8:staticcheck::ST1011: var bMS is of type time.Duration; don't use unit-specific suffix "MS"
+st1011/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1012/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1012/bad/bad.go:9:2:staticcheck::ST1012: error var foo should have name of the form errFoo
+st1012/bad/bad.go:11:2:staticcheck::ST1012: error var abc should have name of the form errFoo
+st1012/bad/bad.go:15:5:staticcheck::ST1012: error var wrong should have name of the form errFoo
+st1012/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1013/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1013/bad/bad.go:6:22:staticcheck::ST1013: should use constant http.StatusVariantAlsoNegotiates instead of numeric literal 506
+st1013/bad/bad.go:7:30:staticcheck::ST1013: should use constant http.StatusVariantAlsoNegotiates instead of numeric literal 506
+st1013/bad/bad.go:8:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/bad/bad.go:8:18:staticcheck::ST1013: should use constant http.StatusVariantAlsoNegotiates instead of numeric literal 506
+st1013/bad/bad.go:9:27:staticcheck::ST1013: should use constant http.StatusVariantAlsoNegotiates instead of numeric literal 506
+st1013/bad/bad.go:11:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/bad/bad.go:12:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/bad/bad.go:13:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1013/ok/ok.go:7:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/ok/ok.go:8:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/ok/ok.go:9:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1013/ok/ok.go:10:2:staticcheck::SA4017: StatusText doesn't have side effects and its return value is ignored
+st1015/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1015/bad/bad.go:6:2:staticcheck::ST1015: default case should be first or last in switch statement
+st1015/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1016/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1016/bad/bad.go:5:13:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "self", 1x "y", 2x "x")
+st1016/bad/bad.go:9:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
+st1016/bad/bad.go:10:7:staticcheck::ST1006: receiver name should be a reflection of its identity; don't use generic names such as "this" or "self"
+st1016/bad/bad.go:14:15:staticcheck::ST1016: methods on the same type should have the same receiver name (seen 1x "bar", 1x "meow")
+st1016/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1016/ok/ok.go:8:7:staticcheck::ST1006: receiver name should not be an underscore, omit the name if it is unused
+st1017/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1017/bad/bad.go:4:2:staticcheck::SA9003: empty branch
+st1017/bad/bad.go:4:5:staticcheck::ST1017: don't use Yoda conditions
+st1017/bad/bad.go:6:2:staticcheck::SA9003: empty branch
+st1017/bad/bad.go:6:5:staticcheck::ST1017: don't use Yoda conditions
+st1017/bad/bad.go:8:2:staticcheck::SA9003: empty branch
+st1017/bad/bad.go:10:2:staticcheck::SA9003: empty branch
+st1017/bad/bad.go:10:5:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+st1017/bad/bad.go:13:2:staticcheck::SA9003: empty branch
+st1017/bad/bad.go:13:5:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+st1017/bad/bad.go:13:17:staticcheck::ST1017: don't use Yoda conditions
+st1017/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1017/ok/ok.go:4:2:staticcheck::SA9003: empty branch
+st1017/ok/ok.go:6:2:staticcheck::SA9003: empty branch
+st1017/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+st1017/ok/ok.go:10:2:staticcheck::SA9003: empty branch
+st1017/ok/ok.go:10:5:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+st1017/ok/ok.go:12:2:staticcheck::SA9003: empty branch
+st1018/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1018/bad/bad.go:4:6:staticcheck::ST1018: string literal contains the Unicode control character U+0007, consider using the '\\a' escape sequence instead
+st1018/bad/bad.go:5:6:staticcheck::ST1018: string literal contains Unicode control characters, consider using escape sequences instead
+st1018/bad/bad.go:9:6:staticcheck::ST1018: string literal contains the Unicode format character U+200B, consider using the '\\u200b' escape sequence instead
+st1018/bad/bad.go:11:6:staticcheck::ST1018: string literal contains the Unicode control character U+0007, consider using the '\\a' escape sequence instead
+st1018/bad/bad.go:12:6:staticcheck::ST1018: string literal contains Unicode format and control characters, consider using escape sequences instead
+st1018/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1019/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1019/bad/bad.go:4:2:staticcheck::ST1019: package "fmt" is being imported more than once
+st1019/bad/bad.go:8:2:staticcheck::ST1019: package "os" is being imported more than once
+st1019/bad/bad.go:15:2:staticcheck::ST1019: package "strconv" is being imported more than once
+st1019/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1020/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1020/bad/bad.go:9:1:staticcheck::ST1020: comment on exported function Bar should be of the form "Bar ..."
+st1020/bad/bad.go:20:1:staticcheck::ST1020: comment on exported method Bar should be of the form "Bar ..."
+st1020/bad/bad.go:39:1:staticcheck::ST1020: comment on exported function F3 should be of the form "F3 ..."
+st1020/bad/bad.go:46:1:staticcheck::ST1020: comment on exported function F6 should be of the form "F6 ..."
+st1020/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1021/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1021/bad/bad.go:6:1:staticcheck::ST1021: comment on exported type T2 should be of the form "T2 ..." (with optional leading article)
+st1021/bad/bad.go:13:2:staticcheck::ST1021: comment on exported type T4 should be of the form "T4 ..." (with optional leading article)
+st1021/bad/bad.go:40:1:staticcheck::ST1021: comment on exported type T14 should be of the form "T14 ..." (with optional leading article)
+st1021/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1022/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1022/bad/bad.go:6:1:staticcheck::ST1022: comment on exported var B should be of the form "B ..."
+st1022/bad/bad.go:12:1:staticcheck::ST1022: comment on exported const D should be of the form "D ..."
+st1022/bad/bad.go:32:1:staticcheck::ST1022: comment on exported var I should be of the form "I ..."
+st1022/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1023/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1023/bad/bad.go:13:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:14:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:15:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:15:8:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:18:8:staticcheck::QF1011: could omit type bool from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:18:8:staticcheck::ST1023: should omit type bool from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:19:8:staticcheck::QF1011: could omit type string from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:19:8:staticcheck::ST1023: should omit type string from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:20:8:staticcheck::QF1011: could omit type MyInt from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:20:8:staticcheck::ST1023: should omit type MyInt from declaration; it will be inferred from the right-hand side
+st1023/bad/bad.go:21:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+st1023/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+st1023/ok/ok.go:7:2:staticcheck::S1021: should merge variable declaration with assignment on next line

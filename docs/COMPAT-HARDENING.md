@@ -270,19 +270,18 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — ハーネス完成 + gocritic / goheader 完了。次は staticcheck | 2026-08-07 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 161 check をゲート化（ratchet 付き。残差分 70） | 2026-08-08 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-07）: 548 checks 中 `never` **133** / `unit-only` 105 / `fired` 310。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-08）: 548 checks 中 `never` **23** / `unit-only` 104 / `fired` 421。
 （計画策定時: `never` 222 / `unit-only` 120 / `fired` 206）
 
-`unit-only` が 111 → 105 に減ったのは Phase 2 の初回実行の効果（gosec 13→17、revive 14→16）。
-**手書き fixture では撃てなかった check が、実コードでは 1 回回すだけで発火する**という
-Phase 2 の主張がそのまま数字に出ている。`never` 133 は staticcheck / gocritic 由来なので
-Phase 3 待ち。
+`never` の 23 件は govet 16 / staticcheck 4 / gocritic 1（`whyNoLint`、§6）/ revive 1 / swaggo 1。
+**残りは実質 govet だけ**になった。`unit-only` 104 のうち 83 は revive で、こちらは
+「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
 
 ---
 
@@ -524,6 +523,118 @@ caddy を godox 単独で回して 66/66 P=R=100%。
    precision 側（guff にしか無い）も caddy / helm では guff の方が多いので、
    偽陽性の調査も要る。
 2. Phase 3 の staticcheck（`never` 114 件）。
+
+### 2026-08-08 — staticcheck 161 check のゴールデン化（Phase 3）
+
+**やったこと**
+
+`compat/golden/cases/staticcheck-{sa,s,st,qf}` を新設し、**staticcheck 161 check 全部**を
+ゴールデンゲートに載せた。gocritic と同じく fixture は新規に書いていない:
+`crates/guff-staticcheck/tests/testdata/<check>/` が既に check ごとの
+`bad.go` / `ok.go` を持っていたので、`sources.txt` がそれを指すだけで済んだ。
+Rust テストは各ファイルを**単独のパッケージ**として型検査するので、golden 側も
+`<check>/<stem>/` と 1 ファイル 1 ディレクトリに materialize している。
+config は `staticcheck.checks: [all]`（既定で off の ST 6 件も含む）。
+
+**fixture が実 stdlib では通らなかった（7 ファイル）**
+
+単体テストの stub は `binary.Write(w any, ...)` のように引数を `any` で持っていたため、
+`var w any` を渡す fixture が通っていた。実 toolchain は `io.Writer` を要求して落ちる。
+sa1003 / sa1014 / sa1020 / s1021 / sa4018 を実際の型に直し、stub にも `io` を足した。
+**単体テストの stub が緩いと fixture が現実の Go から乖離する**という一般則の実例。
+
+さらに sa9009 の `ok.go` は `//go:noinline` を `package` の前に置いていた（＝ misplaced
+compiler directive）。golangci-lint は**パッケージが 1 つでもコンパイルに失敗すると
+他の linter の出力を丸ごと落とす**ので、この 1 ファイルのせいで sa ケースの
+ゴールデンが 1 件だけになっていた。ゴールデン生成時は `typecheck` finding の混入を疑うこと。
+
+**初回の突合: 506 件中 333 件しか一致しなかった（差分 173/160）**
+
+| 種別 | 件数 | 内容 |
+|------|-----:|------|
+| column | 103 | 内側のトークンを報告していた（演算子・`(`・`=`・セレクタ名） |
+| メッセージ本文 | 約 25 | プレースホルダを出していた／型名を完全修飾していた／Go の stdlib エラー文言と違う |
+| recall / precision | 残り | SA4017 の purity 推論、S1030 の未検出、S1037 / SA9010 の誤検出 など |
+
+**column 103 件のうち 67 件は共通の 1 箇所だった。**
+`guff_analysis::pattern_match::match_pos`（「マッチしたノードの診断位置」を返す共有ヘルパ、
+**38 の check が使用**）が `BinaryExpr → OpPos` / `CallExpr → Lparen` /
+`AssignStmt → TokPos` を返していた。上流 honnef の `report.Report` はノードを受け取って
+`node.Pos()` を使う。`guff_ast::commentmap::node_pos`（Go の `ast.Node.Pos()` 相当が既に実装済み）に
+委譲するだけで 67 件が一致した。gocritic の `remap_pos` と同じ「共有ヘルパ 1 箇所の欠陥が
+数十 check に波及」パターン。
+
+個別に直したもの: SA4000 / SA4003 / SA4008 / S1002 / S1003 / S1004 / S1009（BinaryExpr →
+左辺の開始）、SA1006 / SA1013 / S1032（CallExpr → callee の開始）、SA1016（引数式の開始）、
+SA4017（IR が call 命令に lparen を刻むので `lparen → CallExpr.Pos()` の写像を作った）、
+ST1016（最初のメソッドの**名前**）、ST1019（ImportSpec の開始＝別名があれば別名）、ST1008（名前付きフィールドは**最後の名前**、無名なら型）、
+ST1020 / ST1021 / ST1022（**行だけの写像で column 1 に張り付いていた**。
+`remap_reparsed_pos` に差し替え。ST1020 / ST1022 は fixture が column 1 の
+doc コメントしか持っていなかったので**差分に出ていなかっただけ**）。
+
+**メッセージ本文（上流の挙動はすべてスクラッチモジュールで確認。推測なし）**
+
+| check | 直した内容 |
+|---|---|
+| QF1011 / ST1023 | 型ではなく**型の式**を描画する。`import t "time"` で `var d t.Duration` は `t.Duration` と出る（実測） |
+| QF1004 | メッセージは正典名（`strings.ReplaceAll`）、**suggested fix だけが別名**（`s.ReplaceAll`）。単体テストが逆を assert していた |
+| QF1012 | `[]byte(...)` の変換を残す |
+| S1004 | `bytes.Equal(a, b)` と実引数を描画。別名 import でも `bytes` と綴る（実測） |
+| S1011 | `x = append(x, y...)` と実識別子 |
+| S1020 | `when ok is true, i can't be nil` と実識別子 |
+| S1001 | `copy(to, from)`（上流は固定文言。実識別子ではない） |
+| S1016 | 型名を**現パッケージ相対**で描画（`render::type_string_rel` を追加） |
+| ST1018 | エスケープ列の引用符を `'` に |
+| SA9002 | 8 進数を Go の `0NNN` 形式に（Rust の `{:#o}` は `0oNNN`） |
+| S1003 | `render_expr` が型式（ArrayType / MapType / ChanType / Ellipsis / SliceExpr）を `<expr>` に落としていた。`[]byte("x")` が出せるようにした |
+
+**型検査器の実バグ**（golden の ill-typed ゲートが発見）
+
+`(*T).Foo(nil)` — **ポインタ受信者のメソッド式**を `invalid indirect of T (Type)` で
+拒否していた。`Checker::star_expr` が `*x` を常に間接参照として扱い、
+オペランドが型のとき `*T` が**ポインタ型**になる分岐（go/types `exprInternal` の
+`typexpr` ケース）を持っていなかった。`(*bytes.Buffer).WriteString` のような形は実コードにも出る。
+
+**残差分 70 件と ratchet**
+
+残りは重い 3 クラス:
+
+1. **SA4017 の purity**（missing の大半）— 上流は `analysis/facts/purity` で
+   依存パッケージまで含めて純粋性を**推論**する。guff は `pureStdlib` の固定リストしか持たない。
+   `time.Parse` / `http.StatusText` / ユーザ定義の `errors.New` などが撃てない。
+2. **Go stdlib のエラー文言** — SA1000（`regexp/syntax`）/ SA1001（`text/template`）/
+   SA1002（`time` のレイアウト解析）/ SA1007（`net/url`）/ SA5009（printf）。
+   guff は Rust の `regex` クレート等のエラーをそのまま出している。移植が要る。
+3. 個別の recall / precision — S1030、S1037、SA9010、
+   `st1005` の無名レシーバメソッド内で SA4017 が撃てない件。
+
+これらは**このセッションでは終わらない**が、CI を赤のままにも、allowlist で消したくもない。
+`cases/<name>/ratchet.json`（`missing` / `extra` の上限）を導入した:
+**差分は 1 件残らず今まで通り印字される**。抑止は一切していない。件数が**増えたら fail**、
+減ったら「baseline を下げろ」と促すだけ。`compat/baselines/health.json` と同じ ratchet 方式で、
+0/0 に到達したらファイルごと削除する（残っていると fail する）。
+
+**結果**
+
+- 台帳: staticcheck `fired` 46 → **157** / `never` 114 → **4**。
+  全体 `never` 133 → **23**（govet 16 / staticcheck 4 / gocritic 1 / revive 1 / swaggo 1）、
+  `fired` 310 → **421**（76.8%）。
+- golden ゲート: gocritic 164/164、goheader 11/11、staticcheck 436/506（ratchet 内。ST ファミリは
+  `extra` 0 まで到達し、残るのは SA4017 由来の missing のみ）。
+- 既存ゲートに退行なし（workspace テスト、isolate、OSS）。
+
+**次にやること**
+
+1. staticcheck の ratchet を 0 に落とす。順番は SA4017 の purity 推論（missing の最大塊）→
+   stdlib エラー文言の移植 → 個別 recall。
+2. **govet の `never` 16 件**。これで `never` はほぼ 0 になる。
+3. **revive の `unit-only` 83 件**。fixture は既にあるが、`stub/dot` のように
+   実 Go では解決できない import path を使っているものがあり、
+   golden 化には fixture 側の import path を（Rust 側の `collect_stubs` と整合する形で）
+   モジュール解決可能な名前に直す必要がある。
+4. `guff-revive/src/rules/{exported,package_comments}.rs` と
+   `guff-style/src/lll.rs` にも **行だけの位置写像**が残っている（ST1020 系と同じ潜在バグ）。
+   revive を golden 化すれば自動的に露見する。
 
 ---
 

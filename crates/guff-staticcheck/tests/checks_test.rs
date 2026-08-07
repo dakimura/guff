@@ -572,10 +572,11 @@ fn sa1007_allows_valid_urls() {
 fn sa1014_flags_non_pointer_unmarshal_targets() {
     let dir = support::testdata("sa1014");
     let json_stub = dir.join("stub/encoding/json/json.go");
+    let io_stub = dir.join("stub/io/io.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1014",
         &dir.join("bad.go"),
-        &[("encoding/json", &json_stub)],
+        &[("encoding/json", &json_stub), ("io", &io_stub)],
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1014::analyzer(), &pkg);
@@ -591,10 +592,11 @@ fn sa1014_flags_non_pointer_unmarshal_targets() {
 fn sa1014_allows_pointer_unmarshal_targets() {
     let dir = support::testdata("sa1014");
     let json_stub = dir.join("stub/encoding/json/json.go");
+    let io_stub = dir.join("stub/io/io.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1014/ok",
         &dir.join("ok.go"),
-        &[("encoding/json", &json_stub)],
+        &[("encoding/json", &json_stub), ("io", &io_stub)],
     );
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(sa1014::analyzer(), &pkg).is_empty());
@@ -861,10 +863,11 @@ fn sa1030_allows_valid_strconv_arguments() {
 fn sa1003_flags_unsupported_binary_write_types() {
     let dir = support::testdata("sa1003");
     let binary_stub = dir.join("stub/encoding/binary/binary.go");
+    let io_stub = dir.join("stub/io/io.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1003",
         &dir.join("bad.go"),
-        &[("encoding/binary", &binary_stub)],
+        &[("encoding/binary", &binary_stub), ("io", &io_stub)],
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa1003::analyzer(), &pkg);
@@ -880,10 +883,11 @@ fn sa1003_flags_unsupported_binary_write_types() {
 fn sa1003_allows_supported_binary_write_types() {
     let dir = support::testdata("sa1003");
     let binary_stub = dir.join("stub/encoding/binary/binary.go");
+    let io_stub = dir.join("stub/io/io.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1003/ok",
         &dir.join("ok.go"),
-        &[("encoding/binary", &binary_stub)],
+        &[("encoding/binary", &binary_stub), ("io", &io_stub)],
     );
     support::assert_well_typed(&pkg);
     assert!(support::run_analyzer(sa1003::analyzer(), &pkg).is_empty());
@@ -1043,7 +1047,7 @@ fn s1001_flags_bad_patterns() {
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1001::analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("copy()")));
+    assert!(messages.iter().any(|m| m.contains("copy(to, from)")));
 }
 
 #[test]
@@ -1153,7 +1157,7 @@ fn s1011_flags_bad_patterns() {
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1011::analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("append(lhs, x...)")));
+    assert!(messages.iter().any(|m| m.contains("x = append(x, y...)")));
 }
 
 #[test]
@@ -2814,10 +2818,20 @@ fn qf1004_uses_renamed_import_in_suggested_fix() {
         ],
     );
     support::assert_well_typed(&pkg);
-    let messages = support::run_analyzer(qf1004::analyzer(), &pkg);
-    assert_eq!(messages.len(), 2, "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("s.ReplaceAll")));
-    assert!(messages.iter().any(|m| m.contains("b.ReplaceAll")));
+    // The message names the canonical function; only the suggested fix uses
+    // the file's own alias (upstream behaviour, checked against golangci-lint).
+    let diags = support::run_analyzer_diagnostics(qf1004::analyzer(), &pkg);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    assert!(diags.iter().any(|d| d.message.contains("strings.ReplaceAll")));
+    assert!(diags.iter().any(|d| d.message.contains("bytes.ReplaceAll")));
+    let fixes: Vec<String> = diags
+        .iter()
+        .flat_map(|d| d.suggested_fixes.iter())
+        .flat_map(|f| f.text_edits.iter())
+        .map(|e| e.new_text.clone())
+        .collect();
+    assert!(fixes.iter().any(|t| t.contains("s.ReplaceAll")), "{fixes:?}");
+    assert!(fixes.iter().any(|t| t.contains("b.ReplaceAll")), "{fixes:?}");
 }
 
 #[test]

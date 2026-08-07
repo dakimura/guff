@@ -39,6 +39,7 @@ cargo build --release -p guff-lint
 | `cases/<name>/go.mod` | Module for the materialized case |
 | `cases/<name>/sources.txt` | Go files to materialize, and where they live |
 | `cases/<name>/expected.golden` | Generated — do not hand-edit |
+| `cases/<name>/ratchet.json` | Optional: diff ceiling for a case still being brought to zero |
 | `.work/<name>/` | Materialized module (gitignored) |
 
 ## No allowlist
@@ -52,6 +53,24 @@ Regeneration is `golangci-lint` output verbatim — nobody writes an expected
 value by hand, so no assumption about upstream can smuggle itself in. When you
 are unsure what upstream does in some corner, do not reason about it: write the
 corner into a scratch module, run golangci-lint on it, and read the answer.
+
+### Ratchet (a case on its way to zero)
+
+Landing a large case — staticcheck arrived with 506 findings and 173 of them
+differing — would otherwise mean either holding the case out of the repo until
+every diff is fixed, or leaving CI red. A case may therefore carry a
+`ratchet.json`:
+
+```json
+{ "missing": 43, "extra": 47, "why": "...", "target": "0/0 — see docs/COMPAT-HARDENING.md" }
+```
+
+This is **not** an allowlist. Nothing is suppressed: every differing finding is
+still printed on every run, exactly as before. The only thing the file changes
+is the exit code, and only while the counts do not grow. Either count going up
+fails the gate, and so does leaving the file behind once the case reaches 0/0.
+`why` must name the classes of diff that remain, so the file cannot quietly
+become permanent.
 
 ## Cases do not own their fixtures
 
@@ -93,3 +112,18 @@ first time. It matched 119/163 findings. The 44 that did not were all real:
 Comment-based checkers were a single shared defect: those checks run on a
 re-parse (the analysis AST drops comments) and their positions were mapped back
 by **line only**, snapping every finding to column 1.
+
+## What the staticcheck cases found
+
+`cases/staticcheck-{sa,s,st,qf}` put all 161 staticcheck checks under the gate.
+506 findings, 333 matching. Of the 173 that did not:
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Column | 103 | Inner tokens again — and 67 of them came from **one** helper, `match_pos`, which 38 checks call for their diagnostic position and which returned `BinaryExpr.OpPos` / `CallExpr.Lparen` / `AssignStmt.TokPos` where upstream uses `node.Pos()`. |
+| Message text | ~25 | Placeholders (`copy()`, `<expr>`, `append(lhs, x...)`) where upstream renders the real source, fully-qualified type names where upstream is package-relative, and Rust-flavoured formatting (`0o644`, `"\a"`). |
+| Recall / precision | rest | SA4017's purity list vs upstream's cross-package purity **inference**, plus a handful of individual checks. |
+
+The gate's ill-typed guard also caught a type-checker bug: `(*T).Foo` — a method
+expression on a pointer receiver — was rejected as "invalid indirect of T
+(Type)", because `star_expr` had no branch for an operand that denotes a type.

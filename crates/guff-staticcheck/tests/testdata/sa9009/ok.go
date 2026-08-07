@@ -1,3 +1,4 @@
-//go:noinline
 package main
+
+//go:noinline
 func f() {}

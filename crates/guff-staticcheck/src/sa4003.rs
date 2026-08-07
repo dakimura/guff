@@ -40,7 +40,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some((tname, unsigned)) = is_unsigned(pass, &bin.x) else { return };
         if !unsigned { return; }
         let is_zero = |e: &Expr| is_integer_literal(pass, e, 0);
-        let pos = bin.op_pos.0 as u32;
+        let pos = bin.x.pos().0 as u32;
         match bin.op {
             Token::LSS if is_zero(&bin.y) => pending.push((pos, format!("no value of type {tname} is less than 0"))),
             Token::GTR if is_zero(&bin.x) => pending.push((pos, format!("no value of type {tname} is less than 0"))),

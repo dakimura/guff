@@ -1,0 +1,90 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-s
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-s/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+s1000/bad/bad.go:4:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1001/bad/bad.go:4:2:staticcheck::S1001: should use copy(to, from) instead of a loop
+s1002/bad/bad.go:4:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to x
+s1002/bad/bad.go:7:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to !x
+s1002/ok/ok.go:12:1:staticcheck::ST1021: comment on exported type TokenSource should be of the form "TokenSource ..." (with optional leading article)
+s1003/bad/bad.go:9:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:9:5:staticcheck::S1003: should use strings.Contains(s, "x") instead
+s1003/bad/bad.go:11:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:11:5:staticcheck::S1003: should use !strings.Contains(s, "x") instead
+s1003/bad/bad.go:13:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:13:5:staticcheck::S1003: should use strings.ContainsRune(s, 'x') instead
+s1003/bad/bad.go:15:2:staticcheck::SA9003: empty branch
+s1003/bad/bad.go:15:5:staticcheck::S1003: should use bytes.Contains(b, []byte("x")) instead
+s1003/ok/ok.go:6:2:staticcheck::SA9003: empty branch
+s1003/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+s1004/bad/bad.go:6:9:staticcheck::S1004: should use bytes.Equal(a, b) instead
+s1005/bad/bad.go:4:2:staticcheck::S1005: unnecessary assignment to the blank identifier
+s1006/bad/bad.go:4:2:staticcheck::S1006: should use for {} instead of for true {}
+s1006/bad/bad.go:4:2:staticcheck::SA5002: loop condition never changes or has a race condition
+s1006/bad/bad.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1006/bad/bad.go:9:2:staticcheck::S1006: should use for {} instead of for true {}
+s1006/ok/ok.go:4:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1006/ok/ok.go:9:2:staticcheck::SA5002: loop condition never changes or has a race condition
+s1006/ok/ok.go:9:2:staticcheck::SA5002: this loop will spin, using 100% CPU
+s1007/bad/bad.go:5:34:staticcheck::S1007: should use raw string (`...`) with regexp.Compile to avoid having to escape twice
+s1008/bad/bad.go:7:2:staticcheck::S1008: should use 'return x' instead of 'if x { return true }; return false'
+s1008/bad/bad.go:14:2:staticcheck::S1008: should use 'return !fn()' instead of 'if fn() { return false }; return true'
+s1008/bad/bad.go:21:2:staticcheck::S1008: should use 'return x <= 0' instead of 'if x > 0 { return false }; return true'
+s1008/bad/bad.go:28:2:staticcheck::S1008: should use 'return !x' instead of 'if x { return false }; return true'
+s1008/bad/bad.go:35:2:staticcheck::S1008: should use 'return len(x) == 0' instead of 'if len(x) > 0 { return false }; return true'
+s1009/bad/bad.go:7:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:7:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/bad/bad.go:9:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:9:5:staticcheck::S1009: should omit nil check; len() for nil slices is defined as zero
+s1009/bad/bad.go:11:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:11:5:staticcheck::S1009: should omit nil check; len() for nil maps is defined as zero
+s1009/bad/bad.go:13:2:staticcheck::SA9003: empty branch
+s1009/bad/bad.go:13:5:staticcheck::S1009: should omit nil check; len() for nil channels is defined as zero
+s1009/ok/ok.go:6:2:staticcheck::SA9003: empty branch
+s1009/ok/ok.go:8:2:staticcheck::SA9003: empty branch
+s1010/bad/bad.go:3:36:staticcheck::S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
+s1011/bad/bad.go:4:2:staticcheck::S1011: should replace loop with x = append(x, y...)
+s1011/ok/ok.go:3:22:staticcheck::SA4006: this value of x is never used
+s1012/bad/bad.go:5:44:staticcheck::S1012: should use time.Since instead of time.Now().Sub
+s1016/bad/bad.go:7:9:staticcheck::S1016: should convert x (type T1) to T2 instead of using struct literal
+s1016/ok/ok.go:13:1:staticcheck::ST1020: comment on exported method Copy should be of the form "Copy ..."
+s1017/bad/bad.go:6:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
+s1017/bad/bad.go:9:2:staticcheck::S1017: should replace this if statement with an unconditional strings.TrimPrefix
+s1017/bad/bad.go:10:3:staticcheck::SA4006: this value of s is never used
+s1017/ok/ok.go:7:3:staticcheck::SA4006: this value of s is never used
+s1017/ok/ok.go:7:3:staticcheck::SA4018: self-assignment of s to s
+s1018/bad/bad.go:4:2:staticcheck::S1018: should use copy() instead of loop for sliding slice elements
+s1019/bad/bad.go:3:31:staticcheck::S1019: should use make(chan int) instead
+s1020/bad/bad.go:4:2:staticcheck::S1020: when ok is true, i can't be nil
+s1020/bad/bad.go:4:2:staticcheck::SA9003: empty branch
+s1020/ok/ok.go:3:25:staticcheck::SA9003: empty branch
+s1020/ok/ok.go:3:28:staticcheck::SA4006: this value of ok is never used
+s1021/bad/bad.go:4:2:staticcheck::S1021: should merge variable declaration with assignment on next line
+s1023/bad/bad.go:7:3:staticcheck::S1023: redundant break statement
+s1023/bad/bad.go:9:2:staticcheck::S1023: redundant return statement
+s1023/bad/bad.go:14:3:staticcheck::S1023: redundant return statement
+s1024/bad/bad.go:5:44:staticcheck::S1024: should use time.Until instead of t.Sub(time.Now())
+s1025/bad/bad.go:5:34:staticcheck::S1025: the argument is already a string, there's no need to use fmt.Sprintf
+s1028/bad/bad.go:5:25:staticcheck::S1028: should use fmt.Errorf(...) instead of errors.New(fmt.Sprintf(...))
+s1028/bad/bad.go:5:36:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1029/bad/bad.go:4:2:staticcheck::S1029: should range over string, not []rune(string)
+s1029/bad/bad.go:4:2:staticcheck::SA6003: should range over string, not []rune(string)
+s1029/bad/bad.go:10:2:staticcheck::S1029: should range over string, not []rune(string)
+s1029/bad/bad.go:10:2:staticcheck::SA6003: should range over string, not []rune(string)
+s1030/bad/bad.go:5:42:staticcheck::S1030: should use buf.String() instead of string(buf.Bytes())
+s1031/bad/bad.go:4:2:staticcheck::S1031: unnecessary nil check around range
+s1032/bad/bad.go:6:2:staticcheck::S1032: should use sort.Ints(...) instead of sort.Sort(sort.IntSlice(...))
+s1032/bad/bad.go:10:2:staticcheck::S1032: should use sort.Strings(...) instead of sort.Sort(sort.StringSlice(...))
+s1033/bad/bad.go:4:2:staticcheck::S1033: unnecessary guard around call to delete
+s1034/bad/bad.go:4:9:staticcheck::S1034: assigning the result of this type assertion to a variable (switch i := i.(type)) could eliminate type assertions in switch cases
+s1035/bad/bad.go:5:31:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Set is redundant
+s1036/bad/bad.go:4:2:staticcheck::S1036: unnecessary guard around map access
+s1037/bad/bad.go:6:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
+s1038/bad/bad.go:5:12:staticcheck::S1038: should use fmt.Printf instead of fmt.Print(fmt.Sprintf(...))
+s1038/bad/bad.go:5:22:staticcheck::S1039: unnecessary use of fmt.Sprintf
+s1039/bad/bad.go:5:16:staticcheck::S1039: unnecessary use of fmt.Sprint
+s1040/bad/bad.go:3:29:staticcheck::S1040: type assertion to the same type: i already has type interface{}

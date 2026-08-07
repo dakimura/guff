@@ -64,10 +64,15 @@ fn check_results(pass: &Pass<'_>, ft: &FuncType, pending: &mut Vec<(u32, String)
 
     for i in (0..rets.len() - 1).rev() {
         if is_basic_named(pass, rets[i].1, "error") {
-            let pos = match &rets[i].0.ty {
-                Some(Expr::Ident(id)) => id.pos().0 as u32,
-                Some(e) => e.pos().0 as u32,
-                None => continue,
+            // Upstream reports the field's *last* name when it has names, and
+            // the type otherwise: `(a, b error, c int)` reports on `b`, while
+            // `(error, int)` reports on `error`. Verified against
+            // golangci-lint 2.12.2 with `(a, b, c error, d int)` -> `c`.
+            let field = rets[i].0;
+            let pos = match (field.names.last(), &field.ty) {
+                (Some(name), _) => name.pos().0 as u32,
+                (None, Some(e)) => e.pos().0 as u32,
+                (None, None) => continue,
             };
             pending.push((
                 pos,

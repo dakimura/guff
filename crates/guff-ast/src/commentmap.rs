@@ -88,7 +88,12 @@ pub fn node_ptr(n: NodeRef<'_>) -> usize {
 
 /// Source-order pos/end helpers — `NodeRef::pos`/`NodeRef::end` aren't
 /// defined on the enum yet, so we compute them by variant here.
-fn node_pos(n: NodeRef<'_>) -> crate::position::Pos {
+///
+/// This is Go's `ast.Node.Pos()`: the first byte of the node's own source
+/// text. Diagnostics need it because upstream reports the node, so a checker
+/// that reports an inner token (the operator, the `(`) lands in the wrong
+/// column.
+pub fn node_pos(n: NodeRef<'_>) -> crate::position::Pos {
     match n {
         NodeRef::Comment(c) => c.pos(),
         NodeRef::CommentGroup(c) => c.pos(),

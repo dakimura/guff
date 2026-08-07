@@ -210,6 +210,33 @@ pub fn run_analyzer(
     )
 }
 
+/// Run an analyzer and return whole diagnostics (message *and* suggested fix).
+///
+/// Needed where the message and the fix deliberately differ — QF1004 names the
+/// canonical function in the message but the file's own import alias in the fix.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    use guff_runner::{run_on_packages, RunnerOptions};
+
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 /// Like [`run_analyzer`] but with custom [`guff_runner::RunnerOptions`] (settings bag).
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,

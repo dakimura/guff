@@ -41,7 +41,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             }
             let first = specs[0];
-            let pos = first.path.value_pos.0 as u32;
+            // ImportSpec.Pos() is the local name when there is one, so
+            // `_ "strconv"` reports on the `_`, not on the path literal.
+            let pos = first
+                .name
+                .as_ref()
+                .map(|n| n.pos().0 as u32)
+                .unwrap_or(first.path.value_pos.0 as u32);
             if is_generated_at(pass, pos) {
                 continue;
             }

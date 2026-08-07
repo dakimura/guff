@@ -19,8 +19,9 @@ use guff_analysis::{
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::{lookup_basic, BasicKind};
 use guff_types::predicates::{identical, is_untyped};
-use guff_types::typestring::type_string;
 use guff_types::TypeId;
+
+use crate::render::render_expr;
 
 fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -166,18 +167,11 @@ fn check_gen_decl(pass: &Pass<'_>, gen: &guff::ast::GenDecl, pending: &mut Vec<(
                 continue 'spec;
             }
         }
-        let typ_s = {
-            let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-                continue;
-            };
-            type_string(
-                &artifacts.types,
-                &artifacts.objects,
-                &artifacts.packages,
-                tlhs,
-                None,
-            )
-        };
+        // Upstream renders the type *expression* (honnef `report.Render`), not
+        // the type: with `import t "time"`, `var d t.Duration` reports
+        // `t.Duration`, and a local type reports its bare name. Verified
+        // against golangci-lint 2.12.2.
+        let typ_s = render_expr(ty_expr);
         pending.push((
             ty_expr.pos().0 as u32,
             ty_expr.end().0 as u32,

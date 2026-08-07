@@ -196,10 +196,20 @@ impl Checker {
         ExprKind::Expression
     }
 
-    /// Type-check a pointer dereference `*x`.
+    /// Type-check a pointer dereference `*x` — or the pointer *type* `*T`.
+    ///
+    /// When the operand denotes a type, `*T` is the pointer type — that is how
+    /// a method expression on a pointer receiver (`(*T).Foo`) is spelled.
+    /// Without this branch the type case fell through to the indirection path
+    /// and was rejected outright with "invalid indirect of T (Type)".
     fn star_expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a StarExpr) {
         self.expr(x, &e.x);
         if x.mode == OperandMode::Invalid {
+            return;
+        }
+        if x.mode == OperandMode::TypeExpr {
+            let elem = x.typ.unwrap_or_else(|| self.invalid_type());
+            x.typ = Some(crate::pointer::new_pointer(&mut self.types, elem));
             return;
         }
         let addressable = x.mode == OperandMode::Variable;

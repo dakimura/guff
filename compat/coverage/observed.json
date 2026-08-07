@@ -17,52 +17,163 @@
     "G505": 4,
     "G602": 39,
     "G703": 90,
-    "QF1001": 1,
-    "QF1002": 7,
-    "QF1003": 8066,
-    "QF1006": 50,
-    "QF1008": 637,
-    "QF1010": 2,
-    "QF1011": 69,
-    "QF1012": 6781,
-    "S1000": 47,
-    "S1002": 56,
-    "S1003": 89,
-    "S1007": 4,
-    "S1009": 125,
-    "S1012": 100,
-    "S1021": 269,
-    "S1024": 53,
-    "S1028": 53,
-    "S1034": 8,
-    "S1039": 171,
-    "SA1000": 268,
-    "SA1012": 159,
-    "SA1019": 1198,
-    "SA1026": 11,
-    "SA4000": 12,
-    "SA4004": 1,
-    "SA4005": 6,
-    "SA4006": 60,
-    "SA4009": 46,
-    "SA4010": 43,
-    "SA4014": 2,
-    "SA4017": 91,
+    "QF1001": 35,
+    "QF1002": 58,
+    "QF1003": 8168,
+    "QF1004": 153,
+    "QF1005": 102,
+    "QF1006": 135,
+    "QF1007": 34,
+    "QF1008": 740,
+    "QF1009": 34,
+    "QF1010": 104,
+    "QF1011": 326,
+    "QF1012": 6883,
+    "S1000": 81,
+    "S1001": 17,
+    "S1002": 90,
+    "S1003": 158,
+    "S1004": 17,
+    "S1005": 34,
+    "S1006": 34,
+    "S1007": 21,
+    "S1008": 85,
+    "S1009": 194,
+    "S1010": 17,
+    "S1011": 17,
+    "S1012": 117,
+    "S1016": 17,
+    "S1017": 34,
+    "S1018": 17,
+    "S1019": 17,
+    "S1020": 17,
+    "S1021": 339,
+    "S1023": 51,
+    "S1024": 70,
+    "S1025": 17,
+    "S1028": 70,
+    "S1029": 51,
+    "S1031": 17,
+    "S1032": 34,
+    "S1033": 17,
+    "S1034": 25,
+    "S1035": 17,
+    "S1036": 17,
+    "S1037": 17,
+    "S1038": 17,
+    "S1039": 224,
+    "S1040": 17,
+    "SA1000": 319,
+    "SA1001": 17,
+    "SA1002": 34,
+    "SA1003": 51,
+    "SA1004": 34,
+    "SA1005": 17,
+    "SA1006": 17,
+    "SA1007": 17,
+    "SA1008": 34,
+    "SA1010": 34,
+    "SA1012": 176,
+    "SA1013": 17,
+    "SA1014": 51,
+    "SA1015": 17,
+    "SA1016": 34,
+    "SA1017": 17,
+    "SA1018": 51,
+    "SA1019": 1232,
+    "SA1020": 51,
+    "SA1021": 17,
+    "SA1023": 17,
+    "SA1024": 51,
+    "SA1025": 17,
+    "SA1026": 62,
+    "SA1028": 51,
+    "SA1029": 68,
+    "SA1030": 102,
+    "SA1031": 136,
+    "SA1032": 17,
+    "SA2000": 17,
+    "SA2001": 17,
+    "SA2002": 17,
+    "SA2003": 17,
+    "SA3001": 17,
+    "SA4000": 131,
+    "SA4001": 32,
+    "SA4003": 34,
+    "SA4004": 18,
+    "SA4005": 23,
+    "SA4006": 94,
+    "SA4008": 17,
+    "SA4009": 80,
+    "SA4010": 60,
+    "SA4011": 17,
+    "SA4012": 17,
+    "SA4013": 17,
+    "SA4014": 19,
+    "SA4015": 17,
+    "SA4016": 17,
+    "SA4017": 619,
+    "SA4018": 34,
     "SA4019": 12,
-    "SA4023": 72,
-    "SA4027": 6,
+    "SA4020": 17,
+    "SA4021": 17,
+    "SA4022": 34,
+    "SA4023": 90,
+    "SA4024": 17,
+    "SA4025": 17,
+    "SA4026": 17,
+    "SA4027": 23,
+    "SA4028": 17,
+    "SA4029": 34,
+    "SA4030": 17,
+    "SA4031": 17,
     "SA4032": 63,
-    "SA5009": 17,
-    "SA5011": 351,
-    "SA5012": 22,
-    "SA6000": 4,
-    "SA9003": 16,
-    "SA9005": 16,
-    "SA9008": 32,
-    "ST1005": 334,
-    "ST1006": 159,
-    "ST1019": 106,
-    "ST1023": 62,
+    "SA5000": 17,
+    "SA5001": 17,
+    "SA5002": 102,
+    "SA5003": 17,
+    "SA5004": 17,
+    "SA5005": 17,
+    "SA5007": 17,
+    "SA5008": 17,
+    "SA5009": 34,
+    "SA5010": 17,
+    "SA5011": 385,
+    "SA5012": 39,
+    "SA6000": 21,
+    "SA6001": 17,
+    "SA6002": 17,
+    "SA6003": 51,
+    "SA6005": 17,
+    "SA6006": 17,
+    "SA9001": 17,
+    "SA9002": 17,
+    "SA9003": 728,
+    "SA9004": 17,
+    "SA9005": 33,
+    "SA9006": 17,
+    "SA9007": 17,
+    "SA9008": 49,
+    "SA9009": 34,
+    "SA9010": 17,
+    "ST1000": 1207,
+    "ST1001": 17,
+    "ST1003": 170,
+    "ST1005": 368,
+    "ST1006": 261,
+    "ST1008": 34,
+    "ST1011": 119,
+    "ST1012": 51,
+    "ST1013": 68,
+    "ST1015": 17,
+    "ST1016": 51,
+    "ST1017": 51,
+    "ST1018": 85,
+    "ST1019": 157,
+    "ST1020": 85,
+    "ST1021": 119,
+    "ST1022": 51,
+    "ST1023": 215,
     "arangolint": 54,
     "asasalint": 58,
     "asciicheck": 73,
@@ -102,119 +213,119 @@
     "gochecksumtype": 54,
     "gocognit": 180,
     "goconst": 16011,
-    "gocritic/appendAssign": 17,
-    "gocritic/appendCombine": 15,
-    "gocritic/argOrder": 16,
-    "gocritic/assignOp": 468,
-    "gocritic/badCall": 69,
-    "gocritic/badCond": 30,
-    "gocritic/badLock": 90,
-    "gocritic/badRegexp": 45,
-    "gocritic/badSorting": 15,
-    "gocritic/badSyncOnceFunc": 30,
-    "gocritic/boolExprSimplify": 153,
-    "gocritic/builtinShadow": 15,
-    "gocritic/builtinShadowDecl": 15,
-    "gocritic/captLocal": 30,
-    "gocritic/caseOrder": 15,
-    "gocritic/codegenComment": 15,
-    "gocritic/commentFormatting": 21,
-    "gocritic/commentedOutCode": 15,
-    "gocritic/commentedOutImport": 15,
-    "gocritic/defaultCaseOrder": 15,
-    "gocritic/deferInLoop": 15,
-    "gocritic/deferUnlambda": 15,
-    "gocritic/deprecatedComment": 17,
-    "gocritic/docStub": 15,
-    "gocritic/dupArg": 15,
-    "gocritic/dupBranchBody": 15,
-    "gocritic/dupCase": 15,
-    "gocritic/dupImport": 30,
-    "gocritic/dupOption": 15,
-    "gocritic/dupSubExpr": 15,
-    "gocritic/dynamicFmtString": 30,
-    "gocritic/elseif": 22,
-    "gocritic/emptyDecl": 45,
-    "gocritic/emptyFallthrough": 15,
-    "gocritic/emptyStringTest": 99,
-    "gocritic/equalFold": 45,
-    "gocritic/evalOrder": 15,
-    "gocritic/exitAfterDefer": 15,
-    "gocritic/exposedSyncMutex": 30,
-    "gocritic/externalErrorReassign": 15,
-    "gocritic/filepathJoin": 15,
-    "gocritic/flagDeref": 15,
-    "gocritic/flagName": 15,
-    "gocritic/hexLiteral": 30,
-    "gocritic/httpNoBody": 30,
-    "gocritic/hugeParam": 15,
-    "gocritic/ifElseChain": 132,
-    "gocritic/importShadow": 15,
-    "gocritic/indexAlloc": 15,
-    "gocritic/initClause": 15,
-    "gocritic/mapKey": 15,
-    "gocritic/methodExprCall": 15,
-    "gocritic/nestingReduce": 15,
-    "gocritic/newDeref": 77,
-    "gocritic/nilValReturn": 15,
-    "gocritic/octalLiteral": 15,
-    "gocritic/offBy1": 15,
-    "gocritic/paramTypeCombine": 15,
-    "gocritic/preferDecodeRune": 15,
-    "gocritic/preferFilepathJoin": 15,
-    "gocritic/preferFprint": 45,
-    "gocritic/preferStringWriter": 54,
-    "gocritic/preferWriteByte": 15,
-    "gocritic/ptrToRefParam": 30,
-    "gocritic/rangeAppendAll": 15,
-    "gocritic/rangeExprCopy": 15,
-    "gocritic/rangeValCopy": 15,
-    "gocritic/redundantSprint": 60,
-    "gocritic/regexpMust": 15,
-    "gocritic/regexpPattern": 15,
-    "gocritic/regexpSimplify": 60,
-    "gocritic/returnAfterHttpError": 15,
-    "gocritic/singleCaseSwitch": 99,
-    "gocritic/sliceClear": 15,
-    "gocritic/sloppyLen": 108,
-    "gocritic/sloppyReassign": 15,
-    "gocritic/sloppyTypeAssert": 15,
-    "gocritic/sortSlice": 15,
-    "gocritic/sprintfQuotedString": 15,
-    "gocritic/sqlQuery": 30,
-    "gocritic/stringConcatSimplify": 45,
-    "gocritic/stringXbytes": 45,
-    "gocritic/stringsCompare": 30,
-    "gocritic/switchTrue": 77,
-    "gocritic/syncMapLoadAndDelete": 15,
-    "gocritic/timeExprSimplify": 30,
-    "gocritic/todoCommentWithoutDetail": 15,
-    "gocritic/tooManyResultsChecker": 15,
-    "gocritic/truncateCmp": 15,
-    "gocritic/typeAssertChain": 15,
-    "gocritic/typeDefFirst": 15,
-    "gocritic/typeSwitchVar": 15,
-    "gocritic/typeUnparen": 15,
-    "gocritic/uncheckedInlineErr": 15,
-    "gocritic/underef": 16,
-    "gocritic/unlabelStmt": 30,
-    "gocritic/unlambda": 10,
-    "gocritic/unnamedResult": 45,
-    "gocritic/unnecessaryBlock": 15,
-    "gocritic/unnecessaryDefer": 15,
-    "gocritic/unslice": 17,
-    "gocritic/valSwap": 15,
-    "gocritic/weakCond": 15,
-    "gocritic/wrapperFunc": 15,
-    "gocritic/yodaStyleExpr": 30,
-    "gocritic/zeroByteRepeat": 15,
+    "gocritic/appendAssign": 31,
+    "gocritic/appendCombine": 29,
+    "gocritic/argOrder": 30,
+    "gocritic/assignOp": 496,
+    "gocritic/badCall": 111,
+    "gocritic/badCond": 58,
+    "gocritic/badLock": 174,
+    "gocritic/badRegexp": 87,
+    "gocritic/badSorting": 29,
+    "gocritic/badSyncOnceFunc": 58,
+    "gocritic/boolExprSimplify": 293,
+    "gocritic/builtinShadow": 29,
+    "gocritic/builtinShadowDecl": 29,
+    "gocritic/captLocal": 58,
+    "gocritic/caseOrder": 29,
+    "gocritic/codegenComment": 29,
+    "gocritic/commentFormatting": 35,
+    "gocritic/commentedOutCode": 29,
+    "gocritic/commentedOutImport": 29,
+    "gocritic/defaultCaseOrder": 29,
+    "gocritic/deferInLoop": 29,
+    "gocritic/deferUnlambda": 29,
+    "gocritic/deprecatedComment": 31,
+    "gocritic/docStub": 29,
+    "gocritic/dupArg": 29,
+    "gocritic/dupBranchBody": 29,
+    "gocritic/dupCase": 29,
+    "gocritic/dupImport": 58,
+    "gocritic/dupOption": 29,
+    "gocritic/dupSubExpr": 29,
+    "gocritic/dynamicFmtString": 58,
+    "gocritic/elseif": 36,
+    "gocritic/emptyDecl": 87,
+    "gocritic/emptyFallthrough": 29,
+    "gocritic/emptyStringTest": 127,
+    "gocritic/equalFold": 87,
+    "gocritic/evalOrder": 29,
+    "gocritic/exitAfterDefer": 29,
+    "gocritic/exposedSyncMutex": 58,
+    "gocritic/externalErrorReassign": 29,
+    "gocritic/filepathJoin": 29,
+    "gocritic/flagDeref": 29,
+    "gocritic/flagName": 29,
+    "gocritic/hexLiteral": 58,
+    "gocritic/httpNoBody": 58,
+    "gocritic/hugeParam": 29,
+    "gocritic/ifElseChain": 146,
+    "gocritic/importShadow": 29,
+    "gocritic/indexAlloc": 29,
+    "gocritic/initClause": 29,
+    "gocritic/mapKey": 29,
+    "gocritic/methodExprCall": 29,
+    "gocritic/nestingReduce": 29,
+    "gocritic/newDeref": 91,
+    "gocritic/nilValReturn": 29,
+    "gocritic/octalLiteral": 29,
+    "gocritic/offBy1": 29,
+    "gocritic/paramTypeCombine": 29,
+    "gocritic/preferDecodeRune": 29,
+    "gocritic/preferFilepathJoin": 29,
+    "gocritic/preferFprint": 87,
+    "gocritic/preferStringWriter": 110,
+    "gocritic/preferWriteByte": 29,
+    "gocritic/ptrToRefParam": 58,
+    "gocritic/rangeAppendAll": 29,
+    "gocritic/rangeExprCopy": 29,
+    "gocritic/rangeValCopy": 29,
+    "gocritic/redundantSprint": 116,
+    "gocritic/regexpMust": 29,
+    "gocritic/regexpPattern": 29,
+    "gocritic/regexpSimplify": 116,
+    "gocritic/returnAfterHttpError": 29,
+    "gocritic/singleCaseSwitch": 127,
+    "gocritic/sliceClear": 29,
+    "gocritic/sloppyLen": 150,
+    "gocritic/sloppyReassign": 29,
+    "gocritic/sloppyTypeAssert": 29,
+    "gocritic/sortSlice": 29,
+    "gocritic/sprintfQuotedString": 29,
+    "gocritic/sqlQuery": 58,
+    "gocritic/stringConcatSimplify": 87,
+    "gocritic/stringXbytes": 87,
+    "gocritic/stringsCompare": 58,
+    "gocritic/switchTrue": 91,
+    "gocritic/syncMapLoadAndDelete": 29,
+    "gocritic/timeExprSimplify": 58,
+    "gocritic/todoCommentWithoutDetail": 29,
+    "gocritic/tooManyResultsChecker": 29,
+    "gocritic/truncateCmp": 29,
+    "gocritic/typeAssertChain": 29,
+    "gocritic/typeDefFirst": 29,
+    "gocritic/typeSwitchVar": 29,
+    "gocritic/typeUnparen": 29,
+    "gocritic/uncheckedInlineErr": 29,
+    "gocritic/underef": 30,
+    "gocritic/unlabelStmt": 58,
+    "gocritic/unlambda": 24,
+    "gocritic/unnamedResult": 87,
+    "gocritic/unnecessaryBlock": 29,
+    "gocritic/unnecessaryDefer": 29,
+    "gocritic/unslice": 31,
+    "gocritic/valSwap": 29,
+    "gocritic/weakCond": 29,
+    "gocritic/wrapperFunc": 29,
+    "gocritic/yodaStyleExpr": 58,
+    "gocritic/zeroByteRepeat": 29,
     "gocyclo": 87,
     "godoclint": 110,
     "godot": 672,
     "godox": 247,
     "gofmt": 420,
     "gofumpt": 42271,
-    "goheader": 9729,
+    "goheader": 9894,
     "goimports": 18,
     "gomoddirectives": 56,
     "gomodguard": 57,
@@ -438,154 +549,529 @@
       "unit"
     ],
     "QF1001": [
+      "golden",
       "oss"
     ],
     "QF1002": [
+      "golden",
       "oss"
     ],
     "QF1003": [
+      "golden",
       "oss"
+    ],
+    "QF1004": [
+      "golden"
+    ],
+    "QF1005": [
+      "golden"
     ],
     "QF1006": [
+      "golden",
       "oss"
     ],
+    "QF1007": [
+      "golden"
+    ],
     "QF1008": [
+      "golden",
       "isolate",
       "oss",
       "regress"
     ],
+    "QF1009": [
+      "golden"
+    ],
     "QF1010": [
+      "golden",
       "oss"
     ],
     "QF1011": [
+      "golden",
       "isolate",
       "oss"
     ],
     "QF1012": [
+      "golden",
       "oss"
     ],
     "S1000": [
+      "golden",
       "oss"
     ],
+    "S1001": [
+      "golden"
+    ],
     "S1002": [
+      "golden",
       "oss"
     ],
     "S1003": [
+      "golden",
       "isolate"
     ],
+    "S1004": [
+      "golden"
+    ],
+    "S1005": [
+      "golden"
+    ],
+    "S1006": [
+      "golden"
+    ],
     "S1007": [
+      "golden",
       "oss"
     ],
+    "S1008": [
+      "golden"
+    ],
     "S1009": [
+      "golden",
       "isolate",
       "oss"
     ],
+    "S1010": [
+      "golden"
+    ],
+    "S1011": [
+      "golden"
+    ],
     "S1012": [
+      "golden",
       "oss"
     ],
+    "S1016": [
+      "golden"
+    ],
+    "S1017": [
+      "golden"
+    ],
+    "S1018": [
+      "golden"
+    ],
+    "S1019": [
+      "golden"
+    ],
+    "S1020": [
+      "golden"
+    ],
     "S1021": [
+      "golden",
       "isolate",
       "oss",
       "regress"
     ],
+    "S1023": [
+      "golden"
+    ],
     "S1024": [
+      "golden",
       "oss"
+    ],
+    "S1025": [
+      "golden"
     ],
     "S1028": [
+      "golden",
       "oss"
+    ],
+    "S1029": [
+      "golden"
+    ],
+    "S1031": [
+      "golden"
+    ],
+    "S1032": [
+      "golden"
+    ],
+    "S1033": [
+      "golden"
     ],
     "S1034": [
+      "golden",
       "oss"
+    ],
+    "S1035": [
+      "golden"
+    ],
+    "S1036": [
+      "golden"
+    ],
+    "S1037": [
+      "golden"
+    ],
+    "S1038": [
+      "golden"
     ],
     "S1039": [
+      "golden",
       "isolate"
     ],
+    "S1040": [
+      "golden"
+    ],
     "SA1000": [
+      "golden",
       "oss"
+    ],
+    "SA1001": [
+      "golden"
+    ],
+    "SA1002": [
+      "golden"
+    ],
+    "SA1003": [
+      "golden"
+    ],
+    "SA1004": [
+      "golden"
+    ],
+    "SA1005": [
+      "golden"
+    ],
+    "SA1006": [
+      "golden"
+    ],
+    "SA1007": [
+      "golden"
+    ],
+    "SA1008": [
+      "golden"
+    ],
+    "SA1010": [
+      "golden"
     ],
     "SA1012": [
+      "golden",
       "oss"
+    ],
+    "SA1013": [
+      "golden"
+    ],
+    "SA1014": [
+      "golden"
+    ],
+    "SA1015": [
+      "golden"
+    ],
+    "SA1016": [
+      "golden"
+    ],
+    "SA1017": [
+      "golden"
+    ],
+    "SA1018": [
+      "golden"
     ],
     "SA1019": [
+      "golden",
       "oss"
+    ],
+    "SA1020": [
+      "golden"
+    ],
+    "SA1021": [
+      "golden"
+    ],
+    "SA1023": [
+      "golden"
+    ],
+    "SA1024": [
+      "golden"
+    ],
+    "SA1025": [
+      "golden"
     ],
     "SA1026": [
+      "golden",
       "oss"
+    ],
+    "SA1028": [
+      "golden"
+    ],
+    "SA1029": [
+      "golden"
+    ],
+    "SA1030": [
+      "golden"
+    ],
+    "SA1031": [
+      "golden"
+    ],
+    "SA1032": [
+      "golden"
+    ],
+    "SA2000": [
+      "golden"
+    ],
+    "SA2001": [
+      "golden"
+    ],
+    "SA2002": [
+      "golden"
+    ],
+    "SA2003": [
+      "golden"
+    ],
+    "SA3001": [
+      "golden"
     ],
     "SA4000": [
+      "golden",
       "oss"
     ],
+    "SA4001": [
+      "golden"
+    ],
+    "SA4003": [
+      "golden"
+    ],
     "SA4004": [
+      "golden",
       "oss"
     ],
     "SA4005": [
+      "golden",
       "oss"
     ],
     "SA4006": [
+      "golden",
       "oss"
     ],
+    "SA4008": [
+      "golden"
+    ],
     "SA4009": [
+      "golden",
       "oss"
     ],
     "SA4010": [
+      "golden",
       "oss"
+    ],
+    "SA4011": [
+      "golden"
+    ],
+    "SA4012": [
+      "golden"
+    ],
+    "SA4013": [
+      "golden"
     ],
     "SA4014": [
+      "golden",
       "oss"
     ],
+    "SA4015": [
+      "golden"
+    ],
+    "SA4016": [
+      "golden"
+    ],
     "SA4017": [
+      "golden",
       "isolate",
       "oss"
+    ],
+    "SA4018": [
+      "golden"
     ],
     "SA4019": [
       "oss"
     ],
+    "SA4020": [
+      "golden"
+    ],
+    "SA4021": [
+      "golden"
+    ],
+    "SA4022": [
+      "golden"
+    ],
     "SA4023": [
+      "golden",
       "isolate",
       "oss"
     ],
+    "SA4024": [
+      "golden"
+    ],
+    "SA4025": [
+      "golden"
+    ],
+    "SA4026": [
+      "golden"
+    ],
     "SA4027": [
+      "golden",
       "oss"
+    ],
+    "SA4028": [
+      "golden"
+    ],
+    "SA4029": [
+      "golden"
+    ],
+    "SA4030": [
+      "golden"
+    ],
+    "SA4031": [
+      "golden"
     ],
     "SA4032": [
       "oss"
     ],
+    "SA5000": [
+      "golden"
+    ],
+    "SA5001": [
+      "golden"
+    ],
+    "SA5002": [
+      "golden"
+    ],
+    "SA5003": [
+      "golden"
+    ],
+    "SA5004": [
+      "golden"
+    ],
+    "SA5005": [
+      "golden"
+    ],
+    "SA5007": [
+      "golden"
+    ],
+    "SA5008": [
+      "golden"
+    ],
     "SA5009": [
+      "golden",
       "oss"
     ],
+    "SA5010": [
+      "golden"
+    ],
     "SA5011": [
+      "golden",
       "isolate",
       "oss",
       "regress"
     ],
     "SA5012": [
+      "golden",
       "oss"
     ],
     "SA6000": [
+      "golden",
       "oss"
+    ],
+    "SA6001": [
+      "golden"
+    ],
+    "SA6002": [
+      "golden"
+    ],
+    "SA6003": [
+      "golden"
+    ],
+    "SA6005": [
+      "golden"
+    ],
+    "SA6006": [
+      "golden"
+    ],
+    "SA9001": [
+      "golden"
+    ],
+    "SA9002": [
+      "golden"
     ],
     "SA9003": [
+      "golden",
       "oss"
+    ],
+    "SA9004": [
+      "golden"
     ],
     "SA9005": [
+      "golden",
       "oss"
+    ],
+    "SA9006": [
+      "golden"
+    ],
+    "SA9007": [
+      "golden"
     ],
     "SA9008": [
+      "golden",
       "oss"
     ],
+    "SA9009": [
+      "golden"
+    ],
+    "SA9010": [
+      "golden"
+    ],
+    "ST1000": [
+      "golden"
+    ],
+    "ST1001": [
+      "golden"
+    ],
+    "ST1003": [
+      "golden"
+    ],
     "ST1005": [
+      "golden",
       "oss"
     ],
     "ST1006": [
+      "golden",
       "oss"
+    ],
+    "ST1008": [
+      "golden"
+    ],
+    "ST1011": [
+      "golden"
+    ],
+    "ST1012": [
+      "golden"
     ],
     "ST1013": [
+      "golden",
       "unit"
     ],
+    "ST1015": [
+      "golden"
+    ],
+    "ST1016": [
+      "golden"
+    ],
+    "ST1017": [
+      "golden"
+    ],
+    "ST1018": [
+      "golden"
+    ],
     "ST1019": [
+      "golden",
       "oss"
     ],
+    "ST1020": [
+      "golden"
+    ],
+    "ST1021": [
+      "golden"
+    ],
+    "ST1022": [
+      "golden"
+    ],
     "ST1023": [
+      "golden",
       "isolate",
       "oss",
       "regress"
@@ -1742,8 +2228,8 @@
     ]
   },
   "scanned_artifacts": {
-    "golden": 19,
-    "isolate": 6461,
+    "golden": 116,
+    "isolate": 6462,
     "oss": 662,
     "regress": 1492
   }

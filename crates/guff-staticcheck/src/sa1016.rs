@@ -100,12 +100,7 @@ fn render_signal(pass: &Pass<'_>, expr: &Expr) -> String {
 }
 
 fn expr_pos(expr: &Expr) -> u32 {
-    match expr {
-        Expr::SelectorExpr(sel) => sel.sel.name_pos.0 as u32,
-        Expr::Ident(id) => id.name_pos.0 as u32,
-        Expr::CallExpr(call) => call.lparen.0 as u32,
-        _ => 0,
-    }
+    expr.pos().0 as u32
 }
 
 fn sa1016_analyzer_impl() -> Analyzer {

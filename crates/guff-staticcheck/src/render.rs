@@ -2,6 +2,32 @@
 
 use guff::ast::{CallExpr, Expr, IndexExpr, SelectorExpr, StarExpr, TypeAssertExpr};
 use guff::token::Token;
+use guff_analysis::Pass;
+use guff_types::TypeId;
+
+/// Render `typ` the way upstream does in messages: qualified by import path,
+/// except for types declared in the package under analysis, which appear bare.
+///
+/// This is `types.TypeString(typ, types.RelativeTo(pass.Pkg))`. Passing a nil
+/// qualifier instead prints `example.com/pkg.T` where upstream prints `T`.
+pub fn type_string_rel(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let this = pass.pkg().types;
+    let qf = |pkg: guff_types::PackageId, parena: &guff_types::arena::PackageArena| -> String {
+        if Some(pkg) == this {
+            String::new()
+        } else {
+            parena.get(pkg).path().to_string()
+        }
+    };
+    Some(guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        Some(&qf),
+    ))
+}
 
 /// Render an expression for use in diagnostic messages.
 pub fn render_expr(expr: &Expr) -> String {
@@ -58,6 +84,42 @@ pub fn render_expr(expr: &Expr) -> String {
         Expr::TypeAssertExpr(TypeAssertExpr { x, ty, .. }) => match ty {
             Some(t) => format!("{}.({})", render_expr(x), render_expr(t)),
             None => format!("{}.(type)", render_expr(x)),
+        },
+        Expr::SliceExpr(s) => {
+            let part = |e: &Option<Box<Expr>>| e.as_ref().map(|e| render_expr(e)).unwrap_or_default();
+            if s.slice3 {
+                format!(
+                    "{}[{}:{}:{}]",
+                    render_expr(&s.x),
+                    part(&s.low),
+                    part(&s.high),
+                    part(&s.max)
+                )
+            } else {
+                format!("{}[{}:{}]", render_expr(&s.x), part(&s.low), part(&s.high))
+            }
+        }
+        // Type expressions. Without these a conversion renders as `<expr>(x)`
+        // — S1003 said `bytes.Contains(b, <expr>("x"))` where upstream says
+        // `[]byte("x")`.
+        Expr::ArrayType(a) => match &a.len {
+            Some(len) => format!("[{}]{}", render_expr(len), render_expr(&a.elt)),
+            None => format!("[]{}", render_expr(&a.elt)),
+        },
+        Expr::MapType(m) => format!("map[{}]{}", render_expr(&m.key), render_expr(&m.value)),
+        Expr::ChanType(c) => {
+            let value = render_expr(&c.value);
+            if c.dir == guff::ast::ChanDir::SEND {
+                format!("chan<- {value}")
+            } else if c.dir == guff::ast::ChanDir::RECV {
+                format!("<-chan {value}")
+            } else {
+                format!("chan {value}")
+            }
+        }
+        Expr::Ellipsis(e) => match &e.elt {
+            Some(elt) => format!("...{}", render_expr(elt)),
+            None => "...".to_string(),
         },
         _ => "<expr>".to_string(),
     }

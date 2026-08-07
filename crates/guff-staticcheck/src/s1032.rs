@@ -80,7 +80,7 @@ fn check_body(pass: &Pass<'_>, body: &guff::ast::BlockStmt) -> Vec<(u32, String)
             continue;
         }
         if let Some(msg) = check_sort_call(pass, call) {
-            errors.push((call.lparen.0 as u32, msg));
+            errors.push((call.fun.pos().0 as u32, msg));
         }
     }
     if permissible {

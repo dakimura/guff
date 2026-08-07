@@ -139,8 +139,8 @@ fn check_composite_lit(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
     let ident_name = src_obj.name(&artifacts.objects).to_string();
     Some(format!(
         "should convert {ident_name} (type {}) to {} instead of using struct literal",
-        render_type(pass, src_named)?,
-        render_type(pass, dst_named)?
+        crate::render::type_string_rel(pass, src_named)?,
+        crate::render::type_string_rel(pass, dst_named)?
     ))
 }
 

@@ -1,0 +1,79 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name> <repo-relative-source-path>
+#
+# The golden tier does NOT keep its own copy of these files: it points at the
+# fixture the Rust unit tests already use, so the two can never drift.
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here (`<check>/<stem>/`). Keeping two files in one
+# directory would merge them into one package and redeclare their identifiers.
+s1000/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1000/bad.go
+s1000/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1000/ok.go
+s1001/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1001/bad.go
+s1001/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1001/ok.go
+s1002/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1002/bad.go
+s1002/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1002/ok.go
+s1003/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1003/bad.go
+s1003/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1003/ok.go
+s1004/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1004/bad.go
+s1004/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1004/ok.go
+s1005/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1005/bad.go
+s1005/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1005/ok.go
+s1006/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1006/bad.go
+s1006/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1006/ok.go
+s1007/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1007/bad.go
+s1007/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1007/ok.go
+s1008/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1008/bad.go
+s1008/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1008/ok.go
+s1009/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1009/bad.go
+s1009/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1009/ok.go
+s1010/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1010/bad.go
+s1010/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1010/ok.go
+s1011/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1011/bad.go
+s1011/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1011/ok.go
+s1012/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1012/bad.go
+s1012/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1012/ok.go
+s1016/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1016/bad.go
+s1016/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1016/ok.go
+s1017/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1017/bad.go
+s1017/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1017/ok.go
+s1018/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1018/bad.go
+s1018/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1018/ok.go
+s1019/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1019/bad.go
+s1019/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1019/ok.go
+s1020/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1020/bad.go
+s1020/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1020/ok.go
+s1021/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1021/bad.go
+s1021/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1021/ok.go
+s1023/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1023/bad.go
+s1023/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1023/ok.go
+s1024/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1024/bad.go
+s1024/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1024/ok.go
+s1025/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1025/bad.go
+s1025/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1025/ok.go
+s1028/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1028/bad.go
+s1028/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1028/ok.go
+s1029/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1029/bad.go
+s1029/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1029/ok.go
+s1030/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1030/bad.go
+s1030/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1030/ok.go
+s1031/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1031/bad.go
+s1031/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1031/ok.go
+s1032/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1032/bad.go
+s1032/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1032/ok.go
+s1033/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1033/bad.go
+s1033/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1033/ok.go
+s1034/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1034/bad.go
+s1034/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1034/ok.go
+s1035/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1035/bad.go
+s1035/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1035/ok.go
+s1036/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1036/bad.go
+s1036/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1036/ok.go
+s1037/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1037/bad.go
+s1037/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1037/ok.go
+s1038/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1038/bad.go
+s1038/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1038/ok.go
+s1039/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1039/bad.go
+s1039/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1039/ok.go
+s1040/bad/bad.go  crates/guff-staticcheck/tests/testdata/s1040/bad.go
+s1040/ok/ok.go    crates/guff-staticcheck/tests/testdata/s1040/ok.go

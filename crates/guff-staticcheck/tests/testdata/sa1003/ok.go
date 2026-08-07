@@ -1,6 +1,9 @@
 package main
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"io"
+)
 
 type Payload struct {
 	A int32
@@ -9,6 +12,6 @@ type Payload struct {
 
 func main() {
 	var order binary.ByteOrder
-	var w any
+	var w io.Writer
 	binary.Write(w, order, Payload{A: 1, B: 2})
 }

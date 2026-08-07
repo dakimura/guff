@@ -1,0 +1,36 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name> <repo-relative-source-path>
+#
+# The golden tier does NOT keep its own copy of these files: it points at the
+# fixture the Rust unit tests already use, so the two can never drift.
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here (`<check>/<stem>/`). Keeping two files in one
+# directory would merge them into one package and redeclare their identifiers.
+qf1001/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1001/bad.go
+qf1001/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1001/ok.go
+qf1002/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1002/bad.go
+qf1002/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1002/ok.go
+qf1003/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1003/bad.go
+qf1003/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1003/ok.go
+qf1004/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1004/bad.go
+qf1004/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1004/ok.go
+qf1004/renamed/renamed.go  crates/guff-staticcheck/tests/testdata/qf1004/renamed.go
+qf1005/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1005/bad.go
+qf1005/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1005/ok.go
+qf1006/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1006/bad.go
+qf1006/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1006/ok.go
+qf1007/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1007/bad.go
+qf1007/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1007/ok.go
+qf1008/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1008/bad.go
+qf1008/call/call.go        crates/guff-staticcheck/tests/testdata/qf1008/call.go
+qf1008/nested/nested.go    crates/guff-staticcheck/tests/testdata/qf1008/nested.go
+qf1008/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1008/ok.go
+qf1009/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1009/bad.go
+qf1009/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1009/ok.go
+qf1010/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1010/bad.go
+qf1010/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1010/ok.go
+qf1011/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1011/bad.go
+qf1011/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1011/ok.go
+qf1012/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1012/bad.go
+qf1012/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1012/ok.go

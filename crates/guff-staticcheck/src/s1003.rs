@@ -82,7 +82,7 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String)> {
     }
 
     Some((
-        expr.op_pos.0 as u32,
+        expr.x.pos().0 as u32,
         format!(
             "should use {} instead",
             render_expr(&replacement_expr)

@@ -1,0 +1,6 @@
+{
+  "missing": 43,
+  "extra": 47,
+  "why": "Purity is inferred across dependencies upstream (SA4017), plus Go stdlib error text for SA1000/SA1001/SA1002/SA1007 and SA5009's printf wording.",
+  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+}

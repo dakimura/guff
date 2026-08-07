@@ -179,24 +179,13 @@ mod tests {
 }
 
 /// Returns the diagnostic position for a matched node.
+///
+/// This is the node's own `Pos()`, which is what upstream reports: honnef's
+/// `report.Report` takes the node and uses `node.Pos()`. An earlier version
+/// returned the *inner* token instead (`BinaryExpr.OpPos`, `CallExpr.Lparen`,
+/// `AssignStmt.TokPos`, …), which put every finding from the 38 checks that
+/// call this helper in the wrong column — invisible to any gate that does not
+/// compare columns.
 pub fn match_pos(node: NodeRef<'_>) -> u32 {
-    use guff::walk::NodeRef;
-    match node {
-        NodeRef::BinaryExpr(e) => e.op_pos.0 as u32,
-        NodeRef::CallExpr(e) => e.lparen.0 as u32,
-        NodeRef::AssignStmt(s) => s.tok_pos.0 as u32,
-        NodeRef::RangeStmt(s) => s.for_.0 as u32,
-        NodeRef::ForStmt(s) => s.for_.0 as u32,
-        NodeRef::IfStmt(s) => s.if_.0 as u32,
-        NodeRef::ReturnStmt(s) => s.return_.0 as u32,
-        NodeRef::SliceExpr(e) => e.lbrack.0 as u32,
-        NodeRef::UnaryExpr(e) => e.op_pos.0 as u32,
-        NodeRef::TypeAssertExpr(e) => e.lparen.0 as u32,
-        NodeRef::TypeSwitchStmt(s) => s.switch.0 as u32,
-        NodeRef::SelectStmt(s) => s.select_.0 as u32,
-        NodeRef::BasicLit(l) => l.value_pos.0 as u32,
-        NodeRef::Ident(i) => i.name_pos.0 as u32,
-        NodeRef::CompositeLit(c) => c.lbrace.0 as u32,
-        _ => 0,
-    }
+    guff::commentmap::node_pos(node).0 as u32
 }

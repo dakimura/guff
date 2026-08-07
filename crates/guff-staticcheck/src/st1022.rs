@@ -9,9 +9,9 @@ use std::sync::{Arc, OnceLock};
 
 use guff::ast::{CommentGroup, Decl, File, Spec};
 use guff::parser::{parse_file, PARSE_COMMENTS};
-use guff::position::FileSet;
+use guff::position::{FileSet, Pos};
 use guff::token::Token;
-use guff_analysis::code::is_in_test_at;
+use guff_analysis::code::{is_in_test_at, remap_reparsed_pos};
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 fn is_exported(name: &str) -> bool {
@@ -27,12 +27,12 @@ fn doc_text(doc: &CommentGroup) -> Option<String> {
     }
 }
 
-fn line_pos(pass: &Pass<'_>, file: &File, line: i64) -> Option<u32> {
-    let ft = pass.fset().file(file.pos())?;
-    if line <= 0 || line as usize > ft.line_count() {
-        return None;
-    }
-    Some(ft.line_start(line as usize).0 as u32)
+/// Map a position from the comment re-parse back into the analysis FileSet.
+///
+/// Mapping by line alone pins every finding to column 1 — the defect the
+/// gocritic comment checkers had. `remap_reparsed_pos` carries the column.
+fn doc_pos(pass: &Pass<'_>, file: &File, re_fset: &FileSet, pos: Pos) -> Option<u32> {
+    remap_reparsed_pos(pass.fset(), file.pos(), re_fset, pos).map(|p| p.0 as u32)
 }
 
 fn reparse(path: &std::path::Path) -> Option<(Arc<FileSet>, File)> {
@@ -100,8 +100,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             } else {
                 "var"
             };
-            let line = re_fset.position(doc.pos()).line;
-            let Some(mapped) = line_pos(pass, orig, line) else {
+            let Some(mapped) = doc_pos(pass, orig, &re_fset, doc.pos()) else {
                 continue;
             };
             pending.push((

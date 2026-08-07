@@ -10,6 +10,7 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, object_of, refers_to};
 use guff_analysis::passes::inspect;
+use crate::render::render_expr;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::TypeId;
 
@@ -46,7 +47,7 @@ fn is_append_to_lhs(pass: &Pass<'_>, call: &CallExpr, lhs: &Expr) -> bool {
     is_call_to(pass, call, "append") && call.args.len() == 2 && same_expr(pass, &call.args[0], lhs)
 }
 
-fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<()> {
+fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<(String, String)> {
     let key = rs.key.as_ref().and_then(|e| match e {
         Expr::Ident(id) => Some(id),
         _ => None,
@@ -169,7 +170,9 @@ fn check_append_loop(pass: &Pass<'_>, rs: &RangeStmt) -> Option<()> {
     if render_type(pass, src) != render_type(pass, dst) {
         return None;
     }
-    Some(())
+    // Upstream renders the rewritten statement, so the message carries the
+    // real identifiers: `x = append(x, y...)`, not a placeholder.
+    Some((render_expr(lhs), render_expr(x)))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -183,10 +186,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::RangeStmt(rs) = node else {
             return;
         };
-        if check_append_loop(pass, rs).is_some() {
+        if let Some((dst, src)) = check_append_loop(pass, rs) {
             pending.push((
                 match_pos(node),
-                "should replace loop with append(lhs, x...)".into(),
+                format!("should replace loop with {dst} = append({dst}, {src}...)"),
             ));
         }
     });

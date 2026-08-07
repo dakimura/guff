@@ -155,7 +155,7 @@ fn check_copy_loop(
     if src_arr && dst_arr && render_type(pass, tsrc) == render_type(pass, tdst) {
         Some("should copy arrays using assignment instead of using a loop")
     } else {
-        Some("should use copy() instead of a loop")
+        Some("should use copy(to, from) instead of a loop")
     }
 }
 

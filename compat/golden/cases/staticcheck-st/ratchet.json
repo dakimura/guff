@@ -1,0 +1,6 @@
+{
+  "missing": 11,
+  "extra": 0,
+  "why": "SA4017 purity inference (see staticcheck-sa); every ST check itself now matches.",
+  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+}

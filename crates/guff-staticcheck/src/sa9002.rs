@@ -31,7 +31,7 @@ fn check_lit(pass: &Pass<'_>, lit: &BasicLit) -> Option<(u32, String)> {
     let n: i64 = v.parse().ok()?;
     Some((
         lit.value_pos.0 as u32,
-        format!("file mode '{v}' evaluates to {n:#o}; did you mean '0{v}'?"),
+        format!("file mode '{v}' evaluates to 0{n:o}; did you mean '0{v}'?"),
     ))
 }
 

@@ -10,6 +10,7 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_nil;
 use guff_analysis::passes::inspect;
+use crate::render::render_expr;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn type_assert_init(init: &Stmt) -> Option<(&Ident, &TypeAssertExpr)> {
@@ -59,40 +60,42 @@ fn is_redundant_nil_cond(pass: &Pass<'_>, cond: &Expr, ok: &Ident, assert_expr: 
     }
 }
 
-fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
+fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<String> {
     let init = ifs.init.as_deref().and_then(type_assert_init);
-    let Some((ok, ta)) = init else {
-        return false;
-    };
-    is_redundant_nil_cond(pass, &ifs.cond, ok, &ta.x)
+    let (ok, ta) = init?;
+    if !is_redundant_nil_cond(pass, &ifs.cond, ok, &ta.x) {
+        return None;
+    }
+    Some(render_expr(&ta.x))
 }
 
-fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
+fn check_nested_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<String> {
     if ifs.init.is_some() {
-        return false;
+        return None;
     }
     let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = &ifs.cond else {
-        return false;
+        return None;
     };
     if *op != Token::NEQ || !is_nil(pass, y) {
-        return false;
+        return None;
     };
     let Expr::Ident(lhs) = &**x else {
-        return false;
+        return None;
     };
     if ifs.body.list.len() != 1 {
-        return false;
+        return None;
     };
     let Stmt::IfStmt(inner) = &ifs.body.list[0] else {
-        return false;
+        return None;
     };
-    let Some((ok, ta)) = inner.init.as_deref().and_then(type_assert_init) else {
-        return false;
-    };
+    let (ok, ta) = inner.init.as_deref().and_then(type_assert_init)?;
     if ta.x.id() != lhs.id() && !matches!((&*ta.x, &**x), (Expr::Ident(a), Expr::Ident(b)) if a.name == b.name) {
-        return false;
+        return None;
     }
-    matches!(&inner.cond, Expr::Ident(id) if id.name == ok.name)
+    if !matches!(&inner.cond, Expr::Ident(id) if id.name == ok.name) {
+        return None;
+    }
+    Some(render_expr(&ta.x))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -101,14 +104,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1020 requires inspect analyzer".to_string())?
         .clone();
 
-    let msg = "when ok is true, the asserted value can't be nil";
     let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder_typed(node_mask!(IfStmt), pass.files(), |node| {
         let NodeRef::IfStmt(ifs) = node else {
             return;
         };
-        if check_if(pass, ifs) || check_nested_if(pass, ifs) {
-            pending.push((match_pos(node), msg.into()));
+        // Upstream names the asserted expression rather than describing it.
+        if let Some(value) = check_if(pass, ifs).or_else(|| check_nested_if(pass, ifs)) {
+            pending.push((
+                match_pos(node),
+                format!("when ok is true, {value} can't be nil"),
+            ));
         }
     });
     for (pos, message) in pending {

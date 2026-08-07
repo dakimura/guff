@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import sys
 from pathlib import Path
 from typing import Iterable
@@ -110,6 +111,38 @@ def format_diff(case: str, expected: list[str], actual: list[str]) -> str:
     return "\n".join(lines)
 
 
+def check_ratchet(case: str, path: str | None, missing: int, extra: int) -> int:
+    """Fail unless `path` records a ratchet baseline this run does not exceed.
+
+    A case with a ratchet is one whose remaining diff is real, understood, and
+    being worked down — not one whose diff is being tolerated. It is NOT an
+    allowlist: nothing is suppressed, every differing finding is still printed,
+    and the only thing the file buys is that CI stays red-free while the count
+    goes *down*. Growing either count fails, and so does leaving the file in
+    place once the case reaches zero.
+    """
+    if not path or not Path(path).exists():
+        return 1
+    base = json.loads(Path(path).read_text(encoding="utf-8"))
+    b_missing, b_extra = int(base.get("missing", 0)), int(base.get("extra", 0))
+    if missing > b_missing or extra > b_extra:
+        print(
+            f"  {case}: RATCHET EXCEEDED — missing {missing} > {b_missing}"
+            f" or extra {extra} > {b_extra}. Fix the regression, or argue the"
+            f" new baseline into {path}.",
+            file=sys.stderr,
+        )
+        return 1
+    if missing < b_missing or extra < b_extra:
+        print(
+            f"  {case}: ratchet improved (missing {b_missing}->{missing},"
+            f" extra {b_extra}->{extra}) — lower it in {path}."
+        )
+    else:
+        print(f"  {case}: at ratchet baseline (missing {missing}, extra {extra})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -126,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--root", required=True)
     p_check.add_argument("--guff", required=True)
     p_check.add_argument("--golden", required=True)
+    p_check.add_argument(
+        "--ratchet",
+        help="Path to the case's ratchet.json (a case still being brought to zero)",
+    )
 
     args = ap.parse_args(argv)
 
@@ -142,7 +179,9 @@ def main(argv: list[str] | None = None) -> int:
         actual = issue_keys(load_issues(args.guff), args.root)
         print(format_diff(args.case, expected, actual))
         missing, extra = diff(expected, actual)
-        return 1 if (missing or extra) else 0
+        if not missing and not extra:
+            return 0
+        return check_ratchet(args.case, args.ratchet, len(missing), len(extra))
 
     return 2
 

@@ -97,7 +97,7 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String)> {
     }
     let simplified = simplified_condition(expr.op, val, other);
     Some((
-        expr.op_pos.0 as u32,
+        expr.x.pos().0 as u32,
         format!(
             "should omit comparison to bool constant, can be simplified to {simplified}"
         ),

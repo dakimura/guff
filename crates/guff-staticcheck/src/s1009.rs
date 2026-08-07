@@ -153,7 +153,7 @@ fn check_binary(pass: &Pass<'_>, outer: &BinaryExpr) -> Option<(u32, String)> {
 
     let nil_type = nil_check_type(pass, &inner.x)?;
     Some((
-        outer.op_pos.0 as u32,
+        outer.x.pos().0 as u32,
         format!("should omit nil check; len() for {nil_type} is defined as zero"),
     ))
 }

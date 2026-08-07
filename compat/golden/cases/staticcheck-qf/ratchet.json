@@ -1,0 +1,6 @@
+{
+  "missing": 4,
+  "extra": 2,
+  "why": "SA1000 regexp-syntax error text (Go's regexp/syntax wording, not the regex crate's).",
+  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+}

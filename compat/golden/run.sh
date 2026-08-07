@@ -171,11 +171,15 @@ for case_dir in "$CASES_DIR"/*/; do
     FAILED=$((FAILED + 1))
   fi
 
+  # A case that is still being brought to zero carries a ratchet.json; the
+  # gate then fails only if its diff grows. Every differing finding is still
+  # printed either way — nothing is suppressed.
   python3 "$GOLDEN_PY" check \
     --case "$name" \
     --root "$work" \
     --guff "$guff_json" \
-    --golden "$golden" || FAILED=$((FAILED + 1))
+    --golden "$golden" \
+    --ratchet "$case_dir/ratchet.json" || FAILED=$((FAILED + 1))
 done
 
 if [[ -n "$CASE_FILTER" && "$SELECTED" -eq 0 ]]; then

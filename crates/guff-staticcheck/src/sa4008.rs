@@ -67,7 +67,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if cond_var_never_incremented(pass, loop_) {
             if let Some(Expr::BinaryExpr(cond)) = loop_.cond.as_ref() {
                 pending.push((
-                    cond.op_pos.0 as u32,
+                    cond.x.pos().0 as u32,
                     "variable in loop condition never changes".into(),
                 ));
             }

@@ -64,7 +64,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         }
 
-        let entry = by_type.entry(type_name).or_insert_with(|| (pos, BTreeMap::new()));
+        // Upstream reports the first method's *name*, not its receiver.
+        let report_pos = fd.name.pos().0 as u32;
+        let entry = by_type
+            .entry(type_name)
+            .or_insert_with(|| (report_pos, BTreeMap::new()));
         *entry.1.entry(recv_name.to_string()).or_insert(0) += 1;
     });
 
