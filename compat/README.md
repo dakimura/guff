@@ -32,7 +32,16 @@ cargo build --release -p guff-lint
 # Refresh allowlists from current diffs (merges; review before committing)
 ./compat/run.sh --oss --tier pr --update-allowlist
 ./compat/run.sh --isolate --update-allowlist
+
+# Check-level coverage ledger — which checks have never fired in any test?
+./compat/coverage.py all
 ```
+
+> **これらのゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
+> isolate は 114 linter で合計 178 findings しか比較しておらず、548 check のうち 222 は
+> どのテストでも一度も発火していません。改善計画は
+> [`../docs/COMPAT-HARDENING.md`](../docs/COMPAT-HARDENING.md)、現状値は
+> [`../docs/COVERAGE.md`](../docs/COVERAGE.md)。
 
 ## Layout
 
@@ -48,6 +57,8 @@ cargo build --release -p guff-lint
 | `tests/` | Harness unit tests (`test_normalize.py`, `test_isolate.py`) |
 | `results/RESULTS.md` | Latest checked-in report snapshot |
 | `results/RESULTS.isolate.md` | Latest isolate report snapshot |
+| `coverage.py` | Check-level coverage ledger → [`../docs/COVERAGE.md`](../docs/COVERAGE.md) |
+| `coverage/` | Ledger data (`inventory.json` / `observed.json`, committed) |
 
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 

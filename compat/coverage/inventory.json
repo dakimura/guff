@@ -1,0 +1,2985 @@
+{
+  "checks": [
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G101",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G102",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G103",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G104",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G106",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G107",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G108",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G109",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G110",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G111",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G112",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G114",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G122",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G124",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G203",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G204",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G301",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G302",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G303",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G306",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G401",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G402",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G403",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G404",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G405",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G406",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G501",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G502",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G503",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G504",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G505",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G506",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G507",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G602",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G703",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1001.rs",
+      "id": "QF1001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1002.rs",
+      "id": "QF1002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1003.rs",
+      "id": "QF1003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1004.rs",
+      "id": "QF1004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1005.rs",
+      "id": "QF1005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1006.rs",
+      "id": "QF1006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1007.rs",
+      "id": "QF1007",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1008.rs",
+      "id": "QF1008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1009.rs",
+      "id": "QF1009",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1010.rs",
+      "id": "QF1010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1011.rs",
+      "id": "QF1011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/qf1012.rs",
+      "id": "QF1012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1000.rs",
+      "id": "S1000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1001.rs",
+      "id": "S1001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1002.rs",
+      "id": "S1002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1003.rs",
+      "id": "S1003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1004.rs",
+      "id": "S1004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1005.rs",
+      "id": "S1005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1006.rs",
+      "id": "S1006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1007.rs",
+      "id": "S1007",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1008.rs",
+      "id": "S1008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1009.rs",
+      "id": "S1009",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1010.rs",
+      "id": "S1010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1011.rs",
+      "id": "S1011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1012.rs",
+      "id": "S1012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1016.rs",
+      "id": "S1016",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1017.rs",
+      "id": "S1017",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1018.rs",
+      "id": "S1018",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1019.rs",
+      "id": "S1019",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1020.rs",
+      "id": "S1020",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1021.rs",
+      "id": "S1021",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1023.rs",
+      "id": "S1023",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1024.rs",
+      "id": "S1024",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1025.rs",
+      "id": "S1025",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1028.rs",
+      "id": "S1028",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1029.rs",
+      "id": "S1029",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1030.rs",
+      "id": "S1030",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1031.rs",
+      "id": "S1031",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1032.rs",
+      "id": "S1032",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1033.rs",
+      "id": "S1033",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1034.rs",
+      "id": "S1034",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1035.rs",
+      "id": "S1035",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1036.rs",
+      "id": "S1036",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1037.rs",
+      "id": "S1037",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1038.rs",
+      "id": "S1038",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1039.rs",
+      "id": "S1039",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/s1040.rs",
+      "id": "S1040",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1000.rs",
+      "id": "SA1000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1001.rs",
+      "id": "SA1001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1002.rs",
+      "id": "SA1002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1003.rs",
+      "id": "SA1003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1004.rs",
+      "id": "SA1004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1005.rs",
+      "id": "SA1005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1006.rs",
+      "id": "SA1006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1007.rs",
+      "id": "SA1007",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1008.rs",
+      "id": "SA1008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1010.rs",
+      "id": "SA1010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1011.rs",
+      "id": "SA1011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1012.rs",
+      "id": "SA1012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1013.rs",
+      "id": "SA1013",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1014.rs",
+      "id": "SA1014",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1015.rs",
+      "id": "SA1015",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1016.rs",
+      "id": "SA1016",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1017.rs",
+      "id": "SA1017",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1018.rs",
+      "id": "SA1018",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1019.rs",
+      "id": "SA1019",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1020.rs",
+      "id": "SA1020",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1021.rs",
+      "id": "SA1021",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1023.rs",
+      "id": "SA1023",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1024.rs",
+      "id": "SA1024",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1025.rs",
+      "id": "SA1025",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1026.rs",
+      "id": "SA1026",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1027.rs",
+      "id": "SA1027",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1028.rs",
+      "id": "SA1028",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1029.rs",
+      "id": "SA1029",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1030.rs",
+      "id": "SA1030",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1031.rs",
+      "id": "SA1031",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa1032.rs",
+      "id": "SA1032",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa2000.rs",
+      "id": "SA2000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa2001.rs",
+      "id": "SA2001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa2002.rs",
+      "id": "SA2002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa2003.rs",
+      "id": "SA2003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa3000.rs",
+      "id": "SA3000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa3001.rs",
+      "id": "SA3001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4000.rs",
+      "id": "SA4000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4001.rs",
+      "id": "SA4001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4003.rs",
+      "id": "SA4003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4004.rs",
+      "id": "SA4004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4005.rs",
+      "id": "SA4005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4006.rs",
+      "id": "SA4006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4008.rs",
+      "id": "SA4008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4009.rs",
+      "id": "SA4009",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4010.rs",
+      "id": "SA4010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4011.rs",
+      "id": "SA4011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4012.rs",
+      "id": "SA4012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4013.rs",
+      "id": "SA4013",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4014.rs",
+      "id": "SA4014",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4015.rs",
+      "id": "SA4015",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4016.rs",
+      "id": "SA4016",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4017.rs",
+      "id": "SA4017",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4018.rs",
+      "id": "SA4018",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4019.rs",
+      "id": "SA4019",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4020.rs",
+      "id": "SA4020",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4021.rs",
+      "id": "SA4021",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4022.rs",
+      "id": "SA4022",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4023.rs",
+      "id": "SA4023",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4024.rs",
+      "id": "SA4024",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4025.rs",
+      "id": "SA4025",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4026.rs",
+      "id": "SA4026",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4027.rs",
+      "id": "SA4027",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4028.rs",
+      "id": "SA4028",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4029.rs",
+      "id": "SA4029",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4030.rs",
+      "id": "SA4030",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4031.rs",
+      "id": "SA4031",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa4032.rs",
+      "id": "SA4032",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5000.rs",
+      "id": "SA5000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5001.rs",
+      "id": "SA5001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5002.rs",
+      "id": "SA5002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5003.rs",
+      "id": "SA5003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5004.rs",
+      "id": "SA5004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5005.rs",
+      "id": "SA5005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5007.rs",
+      "id": "SA5007",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5008.rs",
+      "id": "SA5008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5009.rs",
+      "id": "SA5009",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5010.rs",
+      "id": "SA5010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5011.rs",
+      "id": "SA5011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa5012.rs",
+      "id": "SA5012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6000.rs",
+      "id": "SA6000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6001.rs",
+      "id": "SA6001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6002.rs",
+      "id": "SA6002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6003.rs",
+      "id": "SA6003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6005.rs",
+      "id": "SA6005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa6006.rs",
+      "id": "SA6006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9001.rs",
+      "id": "SA9001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9002.rs",
+      "id": "SA9002",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9003.rs",
+      "id": "SA9003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9004.rs",
+      "id": "SA9004",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9005.rs",
+      "id": "SA9005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9006.rs",
+      "id": "SA9006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9007.rs",
+      "id": "SA9007",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9008.rs",
+      "id": "SA9008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9009.rs",
+      "id": "SA9009",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/sa9010.rs",
+      "id": "SA9010",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1000.rs",
+      "id": "ST1000",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1001.rs",
+      "id": "ST1001",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1003.rs",
+      "id": "ST1003",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1005.rs",
+      "id": "ST1005",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1006.rs",
+      "id": "ST1006",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1008.rs",
+      "id": "ST1008",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1011.rs",
+      "id": "ST1011",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1012.rs",
+      "id": "ST1012",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1013.rs",
+      "id": "ST1013",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1015.rs",
+      "id": "ST1015",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1016.rs",
+      "id": "ST1016",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1017.rs",
+      "id": "ST1017",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1018.rs",
+      "id": "ST1018",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1019.rs",
+      "id": "ST1019",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1020.rs",
+      "id": "ST1020",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1021.rs",
+      "id": "ST1021",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1022.rs",
+      "id": "ST1022",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff-staticcheck/src/st1023.rs",
+      "id": "ST1023",
+      "linter": "staticcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "arangolint",
+      "linter": "arangolint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "asasalint",
+      "linter": "asasalint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "asciicheck",
+      "linter": "asciicheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "bidichk",
+      "linter": "bidichk"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "bodyclose",
+      "linter": "bodyclose"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "canonicalheader",
+      "linter": "canonicalheader"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "clickhouselint",
+      "linter": "clickhouselint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "containedctx",
+      "linter": "containedctx"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "contextcheck",
+      "linter": "contextcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "copyloopvar",
+      "linter": "copyloopvar"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "cyclop",
+      "linter": "cyclop"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "decorder",
+      "linter": "decorder"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "depguard",
+      "linter": "depguard"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "dogsled",
+      "linter": "dogsled"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "dupl",
+      "linter": "dupl"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "dupword",
+      "linter": "dupword"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "durationcheck",
+      "linter": "durationcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "embeddedstructfieldcheck",
+      "linter": "embeddedstructfieldcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "err113",
+      "linter": "err113"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "errcheck",
+      "linter": "errcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "errchkjson",
+      "linter": "errchkjson"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "errname",
+      "linter": "errname"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "errorlint",
+      "linter": "errorlint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "exhaustive",
+      "linter": "exhaustive"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "exhaustruct",
+      "linter": "exhaustruct"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "exptostd",
+      "linter": "exptostd"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "fatcontext",
+      "linter": "fatcontext"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "forbidigo",
+      "linter": "forbidigo"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "forcetypeassert",
+      "linter": "forcetypeassert"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "funcorder",
+      "linter": "funcorder"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "funlen",
+      "linter": "funlen"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "gci",
+      "linter": "gci"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "ginkgolinter",
+      "linter": "ginkgolinter"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gocheckcompilerdirectives",
+      "linter": "gocheckcompilerdirectives"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gochecknoglobals",
+      "linter": "gochecknoglobals"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gochecknoinits",
+      "linter": "gochecknoinits"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gochecksumtype",
+      "linter": "gochecksumtype"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gocognit",
+      "linter": "gocognit"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "goconst",
+      "linter": "goconst"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/appendAssign",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/appendCombine",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/argOrder",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/assignOp",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badCall",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badCond",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badLock",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badRegexp",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badSorting",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/badSyncOnceFunc",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/boolExprSimplify",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/builtinShadow",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/builtinShadowDecl",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/captLocal",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/caseOrder",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/codegenComment",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/commentFormatting",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/commentedOutCode",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/commentedOutImport",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/defaultCaseOrder",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/deferInLoop",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/deferUnlambda",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/deprecatedComment",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/docStub",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupArg",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupBranchBody",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupCase",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupImport",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupOption",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dupSubExpr",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/dynamicFmtString",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/elseif",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/emptyDecl",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/emptyFallthrough",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/emptyStringTest",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/equalFold",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/evalOrder",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/exitAfterDefer",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/exposedSyncMutex",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/externalErrorReassign",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/filepathJoin",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/flagDeref",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/flagName",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/hexLiteral",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/httpNoBody",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/hugeParam",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/ifElseChain",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/importShadow",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/indexAlloc",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/initClause",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/mapKey",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/methodExprCall",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/nestingReduce",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/newDeref",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/nilValReturn",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/octalLiteral",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/offBy1",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/paramTypeCombine",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/preferDecodeRune",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/preferFilepathJoin",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/preferFprint",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/preferStringWriter",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/preferWriteByte",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/ptrToRefParam",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/rangeAppendAll",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/rangeExprCopy",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/rangeValCopy",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/redundantSprint",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/regexpMust",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/regexpPattern",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/regexpSimplify",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/returnAfterHttpError",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/singleCaseSwitch",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sliceClear",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sloppyLen",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sloppyReassign",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sloppyTypeAssert",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sortSlice",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sprintfQuotedString",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/sqlQuery",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/stringConcatSimplify",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/stringXbytes",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/stringsCompare",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/switchTrue",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/syncMapLoadAndDelete",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/timeExprSimplify",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/todoCommentWithoutDetail",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/tooManyResultsChecker",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/truncateCmp",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/typeAssertChain",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/typeDefFirst",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/typeSwitchVar",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/typeUnparen",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/uncheckedInlineErr",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/underef",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unlabelStmt",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unlambda",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unnamedResult",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unnecessaryBlock",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unnecessaryDefer",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/unslice",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/valSwap",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/weakCond",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/whyNoLint",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/wrapperFunc",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/yodaStyleExpr",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff-style/src/gocritic.rs",
+      "id": "gocritic/zeroByteRepeat",
+      "linter": "gocritic"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gocyclo",
+      "linter": "gocyclo"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "godoclint",
+      "linter": "godoclint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "godot",
+      "linter": "godot"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "godox",
+      "linter": "godox"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "gofmt",
+      "linter": "gofmt"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "gofumpt",
+      "linter": "gofumpt"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "goheader",
+      "linter": "goheader"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "goimports",
+      "linter": "goimports"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "golines",
+      "linter": "golines"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gomoddirectives",
+      "linter": "gomoddirectives"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gomodguard",
+      "linter": "gomodguard"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gomodguard_v2",
+      "linter": "gomodguard_v2"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "goprintffuncname",
+      "linter": "goprintffuncname"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "gosmopolitan",
+      "linter": "gosmopolitan"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/assign",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/atomic",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/bools",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/buildtag",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/cgocall",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/composites",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/copylocks",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/defers",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/directive",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/errorsas",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/framepointer",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/httpresponse",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/ifaceassert",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/inline",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/loopclosure",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/lostcancel",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/nilfunc",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/printf",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/shift",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/sigchanyzer",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/slog",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/stdmethods",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/stringintconv",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/structtag",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/testpass",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/timeformat",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/unmarshal",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/unreachable",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/unsafeptr",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/lib.rs",
+      "id": "govet/unusedresult",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "grouper",
+      "linter": "grouper"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "iface",
+      "linter": "iface"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "importas",
+      "linter": "importas"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "inamedparam",
+      "linter": "inamedparam"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "ineffassign",
+      "linter": "ineffassign"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "interfacebloat",
+      "linter": "interfacebloat"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "intrange",
+      "linter": "intrange"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "iotamixing",
+      "linter": "iotamixing"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "ireturn",
+      "linter": "ireturn"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "lll",
+      "linter": "lll"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "loggercheck",
+      "linter": "loggercheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "maintidx",
+      "linter": "maintidx"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "makezero",
+      "linter": "makezero"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "mirror",
+      "linter": "mirror"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "misspell",
+      "linter": "misspell"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "mnd",
+      "linter": "mnd"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "modernize",
+      "linter": "modernize"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "musttag",
+      "linter": "musttag"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nakedret",
+      "linter": "nakedret"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nestif",
+      "linter": "nestif"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nilerr",
+      "linter": "nilerr"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nilnesserr",
+      "linter": "nilnesserr"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nilnil",
+      "linter": "nilnil"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nlreturn",
+      "linter": "nlreturn"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "noctx",
+      "linter": "noctx"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "noinlineerr",
+      "linter": "noinlineerr"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nolintlint",
+      "linter": "nolintlint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nonamedreturns",
+      "linter": "nonamedreturns"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "nosprintfhostport",
+      "linter": "nosprintfhostport"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "paralleltest",
+      "linter": "paralleltest"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "perfsprint",
+      "linter": "perfsprint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "prealloc",
+      "linter": "prealloc"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "predeclared",
+      "linter": "predeclared"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "promlinter",
+      "linter": "promlinter"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "protogetter",
+      "linter": "protogetter"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "reassign",
+      "linter": "reassign"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "recvcheck",
+      "linter": "recvcheck"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/add_constant.rs",
+      "id": "revive/add-constant",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/argument_limit.rs",
+      "id": "revive/argument-limit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/atomic.rs",
+      "id": "revive/atomic",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/banned_characters.rs",
+      "id": "revive/banned-characters",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/bare_return.rs",
+      "id": "revive/bare-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/blank_imports.rs",
+      "id": "revive/blank-imports",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/bool_literal_in_expr.rs",
+      "id": "revive/bool-literal-in-expr",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/call_to_gc.rs",
+      "id": "revive/call-to-gc",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/cognitive_complexity.rs",
+      "id": "revive/cognitive-complexity",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/comment_spacings.rs",
+      "id": "revive/comment-spacings",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/comments_density.rs",
+      "id": "revive/comments-density",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/confusing_naming.rs",
+      "id": "revive/confusing-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/confusing_results.rs",
+      "id": "revive/confusing-results",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/constant_logical_expr.rs",
+      "id": "revive/constant-logical-expr",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/context_as_argument.rs",
+      "id": "revive/context-as-argument",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/context_keys_type.rs",
+      "id": "revive/context-keys-type",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/cyclomatic.rs",
+      "id": "revive/cyclomatic",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/datarace.rs",
+      "id": "revive/datarace",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/deep_exit.rs",
+      "id": "revive/deep-exit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/defer.rs",
+      "id": "revive/defer",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/dot_imports.rs",
+      "id": "revive/dot-imports",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/duplicated_imports.rs",
+      "id": "revive/duplicated-imports",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/early_return.rs",
+      "id": "revive/early-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/empty_block.rs",
+      "id": "revive/empty-block",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/empty_lines.rs",
+      "id": "revive/empty-lines",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/enforce_map_style.rs",
+      "id": "revive/enforce-map-style",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/enforce_repeated_arg_type_style.rs",
+      "id": "revive/enforce-repeated-arg-type-style",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/enforce_slice_style.rs",
+      "id": "revive/enforce-slice-style",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/enforce_switch_style.rs",
+      "id": "revive/enforce-switch-style",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/epoch_naming.rs",
+      "id": "revive/epoch-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/error_naming.rs",
+      "id": "revive/error-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/error_return.rs",
+      "id": "revive/error-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/error_strings.rs",
+      "id": "revive/error-strings",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/errorf.rs",
+      "id": "revive/errorf",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/exported.rs",
+      "id": "revive/exported",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/file_header.rs",
+      "id": "revive/file-header",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/file_length_limit.rs",
+      "id": "revive/file-length-limit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/filename_format.rs",
+      "id": "revive/filename-format",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/flag_parameter.rs",
+      "id": "revive/flag-parameter",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/forbidden_call_in_wg_go.rs",
+      "id": "revive/forbidden-call-in-wg-go",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/function_length.rs",
+      "id": "revive/function-length",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/function_result_limit.rs",
+      "id": "revive/function-result-limit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/get_return.rs",
+      "id": "revive/get-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/identical_branches.rs",
+      "id": "revive/identical-branches",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/identical_ifelseif_branches.rs",
+      "id": "revive/identical-ifelseif-branches",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/identical_ifelseif_conditions.rs",
+      "id": "revive/identical-ifelseif-conditions",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/identical_switch_branches.rs",
+      "id": "revive/identical-switch-branches",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/identical_switch_conditions.rs",
+      "id": "revive/identical-switch-conditions",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/if_return.rs",
+      "id": "revive/if-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/import_alias_naming.rs",
+      "id": "revive/import-alias-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/import_shadowing.rs",
+      "id": "revive/import-shadowing",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/imports_blocklist.rs",
+      "id": "revive/imports-blocklist",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/increment_decrement.rs",
+      "id": "revive/increment-decrement",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/indent_error_flow.rs",
+      "id": "revive/indent-error-flow",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/inefficient_map_lookup.rs",
+      "id": "revive/inefficient-map-lookup",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/line_length_limit.rs",
+      "id": "revive/line-length-limit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/max_control_nesting.rs",
+      "id": "revive/max-control-nesting",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/modifies_parameter.rs",
+      "id": "revive/modifies-parameter",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/modifies_value_receiver.rs",
+      "id": "revive/modifies-value-receiver",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/multiline_if_init.rs",
+      "id": "revive/multiline-if-init",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/nested_structs.rs",
+      "id": "revive/nested-structs",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/optimize_operands_order.rs",
+      "id": "revive/optimize-operands-order",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/package_comments.rs",
+      "id": "revive/package-comments",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/package_directory_mismatch.rs",
+      "id": "revive/package-directory-mismatch",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/package_naming.rs",
+      "id": "revive/package-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/range.rs",
+      "id": "revive/range",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/range_val_address.rs",
+      "id": "revive/range-val-address",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/range_val_in_closure.rs",
+      "id": "revive/range-val-in-closure",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/receiver_naming.rs",
+      "id": "revive/receiver-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/redefines_builtin_id.rs",
+      "id": "revive/redefines-builtin-id",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/redundant_import_alias.rs",
+      "id": "revive/redundant-import-alias",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/redundant_test_main_exit.rs",
+      "id": "revive/redundant-test-main-exit",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/string_format.rs",
+      "id": "revive/string-format",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/string_of_int.rs",
+      "id": "revive/string-of-int",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/struct_tag.rs",
+      "id": "revive/struct-tag",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/superfluous_else.rs",
+      "id": "revive/superfluous-else",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/time_date.rs",
+      "id": "revive/time-date",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/time_equal.rs",
+      "id": "revive/time-equal",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/time_naming.rs",
+      "id": "revive/time-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unchecked_type_assertion.rs",
+      "id": "revive/unchecked-type-assertion",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unconditional_recursion.rs",
+      "id": "revive/unconditional-recursion",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unexported_naming.rs",
+      "id": "revive/unexported-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unexported_return.rs",
+      "id": "revive/unexported-return",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unhandled_error.rs",
+      "id": "revive/unhandled-error",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unnecessary_format.rs",
+      "id": "revive/unnecessary-format",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unnecessary_if.rs",
+      "id": "revive/unnecessary-if",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unnecessary_stmt.rs",
+      "id": "revive/unnecessary-stmt",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unreachable_code.rs",
+      "id": "revive/unreachable-code",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unsecure_url_scheme.rs",
+      "id": "revive/unsecure-url-scheme",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unused_parameter.rs",
+      "id": "revive/unused-parameter",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/unused_receiver.rs",
+      "id": "revive/unused-receiver",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/use_any.rs",
+      "id": "revive/use-any",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/use_errors_new.rs",
+      "id": "revive/use-errors-new",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/use_fmt_print.rs",
+      "id": "revive/use-fmt-print",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/use_slices_sort.rs",
+      "id": "revive/use-slices-sort",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/useless_break.rs",
+      "id": "revive/useless-break",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/useless_fallthrough.rs",
+      "id": "revive/useless-fallthrough",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/var_declaration.rs",
+      "id": "revive/var-declaration",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/var_naming.rs",
+      "id": "revive/var-naming",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff-revive/src/rules/waitgroup_by_value.rs",
+      "id": "revive/waitgroup-by-value",
+      "linter": "revive"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "rowserrcheck",
+      "linter": "rowserrcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "sloglint",
+      "linter": "sloglint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "spancheck",
+      "linter": "spancheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "sqlclosecheck",
+      "linter": "sqlclosecheck"
+    },
+    {
+      "declared_in": "formatters",
+      "id": "swaggo",
+      "linter": "swaggo"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "tagalign",
+      "linter": "tagalign"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "tagliatelle",
+      "linter": "tagliatelle"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "testableexamples",
+      "linter": "testableexamples"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "testifylint",
+      "linter": "testifylint"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "testpackage",
+      "linter": "testpackage"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "thelper",
+      "linter": "thelper"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "tparallel",
+      "linter": "tparallel"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "unconvert",
+      "linter": "unconvert"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "unparam",
+      "linter": "unparam"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "unqueryvet",
+      "linter": "unqueryvet"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "unused",
+      "linter": "unused"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "usestdlibvars",
+      "linter": "usestdlibvars"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "usetesting",
+      "linter": "usetesting"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "varnamelen",
+      "linter": "varnamelen"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "wastedassign",
+      "linter": "wastedassign"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "whitespace",
+      "linter": "whitespace"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "wrapcheck",
+      "linter": "wrapcheck"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "wsl",
+      "linter": "wsl"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "wsl_v5",
+      "linter": "wsl_v5"
+    },
+    {
+      "declared_in": "guff linters",
+      "id": "zerologlint",
+      "linter": "zerologlint"
+    }
+  ],
+  "counts": {
+    "by_linter": {
+      "arangolint": 1,
+      "asasalint": 1,
+      "asciicheck": 1,
+      "bidichk": 1,
+      "bodyclose": 1,
+      "canonicalheader": 1,
+      "clickhouselint": 1,
+      "containedctx": 1,
+      "contextcheck": 1,
+      "copyloopvar": 1,
+      "cyclop": 1,
+      "decorder": 1,
+      "depguard": 1,
+      "dogsled": 1,
+      "dupl": 1,
+      "dupword": 1,
+      "durationcheck": 1,
+      "embeddedstructfieldcheck": 1,
+      "err113": 1,
+      "errcheck": 1,
+      "errchkjson": 1,
+      "errname": 1,
+      "errorlint": 1,
+      "exhaustive": 1,
+      "exhaustruct": 1,
+      "exptostd": 1,
+      "fatcontext": 1,
+      "forbidigo": 1,
+      "forcetypeassert": 1,
+      "funcorder": 1,
+      "funlen": 1,
+      "gci": 1,
+      "ginkgolinter": 1,
+      "gocheckcompilerdirectives": 1,
+      "gochecknoglobals": 1,
+      "gochecknoinits": 1,
+      "gochecksumtype": 1,
+      "gocognit": 1,
+      "goconst": 1,
+      "gocritic": 107,
+      "gocyclo": 1,
+      "godoclint": 1,
+      "godot": 1,
+      "godox": 1,
+      "gofmt": 1,
+      "gofumpt": 1,
+      "goheader": 1,
+      "goimports": 1,
+      "golines": 1,
+      "gomoddirectives": 1,
+      "gomodguard": 1,
+      "gomodguard_v2": 1,
+      "goprintffuncname": 1,
+      "gosec": 35,
+      "gosmopolitan": 1,
+      "govet": 30,
+      "grouper": 1,
+      "iface": 1,
+      "importas": 1,
+      "inamedparam": 1,
+      "ineffassign": 1,
+      "interfacebloat": 1,
+      "intrange": 1,
+      "iotamixing": 1,
+      "ireturn": 1,
+      "lll": 1,
+      "loggercheck": 1,
+      "maintidx": 1,
+      "makezero": 1,
+      "mirror": 1,
+      "misspell": 1,
+      "mnd": 1,
+      "modernize": 1,
+      "musttag": 1,
+      "nakedret": 1,
+      "nestif": 1,
+      "nilerr": 1,
+      "nilnesserr": 1,
+      "nilnil": 1,
+      "nlreturn": 1,
+      "noctx": 1,
+      "noinlineerr": 1,
+      "nolintlint": 1,
+      "nonamedreturns": 1,
+      "nosprintfhostport": 1,
+      "paralleltest": 1,
+      "perfsprint": 1,
+      "prealloc": 1,
+      "predeclared": 1,
+      "promlinter": 1,
+      "protogetter": 1,
+      "reassign": 1,
+      "recvcheck": 1,
+      "revive": 100,
+      "rowserrcheck": 1,
+      "sloglint": 1,
+      "spancheck": 1,
+      "sqlclosecheck": 1,
+      "staticcheck": 161,
+      "swaggo": 1,
+      "tagalign": 1,
+      "tagliatelle": 1,
+      "testableexamples": 1,
+      "testifylint": 1,
+      "testpackage": 1,
+      "thelper": 1,
+      "tparallel": 1,
+      "unconvert": 1,
+      "unparam": 1,
+      "unqueryvet": 1,
+      "unused": 1,
+      "usestdlibvars": 1,
+      "usetesting": 1,
+      "varnamelen": 1,
+      "wastedassign": 1,
+      "whitespace": 1,
+      "wrapcheck": 1,
+      "wsl": 1,
+      "wsl_v5": 1,
+      "zerologlint": 1
+    },
+    "total": 548
+  },
+  "linters": [
+    "arangolint",
+    "asasalint",
+    "asciicheck",
+    "bidichk",
+    "bodyclose",
+    "canonicalheader",
+    "clickhouselint",
+    "containedctx",
+    "contextcheck",
+    "copyloopvar",
+    "cyclop",
+    "decorder",
+    "depguard",
+    "dogsled",
+    "dupl",
+    "dupword",
+    "durationcheck",
+    "embeddedstructfieldcheck",
+    "err113",
+    "errcheck",
+    "errchkjson",
+    "errname",
+    "errorlint",
+    "exhaustive",
+    "exhaustruct",
+    "exptostd",
+    "fatcontext",
+    "forbidigo",
+    "forcetypeassert",
+    "funcorder",
+    "funlen",
+    "ginkgolinter",
+    "gocheckcompilerdirectives",
+    "gochecknoglobals",
+    "gochecknoinits",
+    "gochecksumtype",
+    "gocognit",
+    "goconst",
+    "gocritic",
+    "gocyclo",
+    "godoclint",
+    "godot",
+    "godox",
+    "goheader",
+    "gomoddirectives",
+    "gomodguard",
+    "gomodguard_v2",
+    "goprintffuncname",
+    "gosec",
+    "gosmopolitan",
+    "govet",
+    "grouper",
+    "iface",
+    "importas",
+    "inamedparam",
+    "ineffassign",
+    "interfacebloat",
+    "intrange",
+    "iotamixing",
+    "ireturn",
+    "lll",
+    "loggercheck",
+    "maintidx",
+    "makezero",
+    "mirror",
+    "misspell",
+    "mnd",
+    "modernize",
+    "musttag",
+    "nakedret",
+    "nestif",
+    "nilerr",
+    "nilnesserr",
+    "nilnil",
+    "nlreturn",
+    "noctx",
+    "noinlineerr",
+    "nolintlint",
+    "nonamedreturns",
+    "nosprintfhostport",
+    "paralleltest",
+    "perfsprint",
+    "prealloc",
+    "predeclared",
+    "promlinter",
+    "protogetter",
+    "reassign",
+    "recvcheck",
+    "revive",
+    "rowserrcheck",
+    "sloglint",
+    "spancheck",
+    "sqlclosecheck",
+    "staticcheck",
+    "tagalign",
+    "tagliatelle",
+    "testableexamples",
+    "testifylint",
+    "testpackage",
+    "thelper",
+    "tparallel",
+    "unconvert",
+    "unparam",
+    "unqueryvet",
+    "unused",
+    "usestdlibvars",
+    "usetesting",
+    "varnamelen",
+    "wastedassign",
+    "whitespace",
+    "wrapcheck",
+    "wsl",
+    "wsl_v5",
+    "zerologlint"
+  ]
+}
