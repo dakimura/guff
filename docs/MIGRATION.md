@@ -53,12 +53,12 @@ Replace the golangci Action (or binary install) with:
   with:
     go-version: stable
 
-- uses: dakimura/guff@v0.4.0
+- uses: dakimura/guff@v0.4.1
   with:
     args: run --out-format=github-actions ./...
 ```
 
-Or Docker: `ghcr.io/dakimura/guff:0.4.0`.
+Or Docker: `ghcr.io/dakimura/guff:0.4.1`.
 
 Run both tools in parallel for one release cycle if you want a safety net.
 

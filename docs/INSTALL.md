@@ -19,7 +19,7 @@ Pin a version:
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh \
-  | sh -s -- -b ~/.local/bin v0.4.0
+  | sh -s -- -b ~/.local/bin v0.4.1
 ```
 
 ## Homebrew
@@ -52,7 +52,7 @@ registries:
     ref: v4.430.0 # use a tag that includes dakimura/guff
 
 packages:
-  - name: dakimura/guff@v0.4.0
+  - name: dakimura/guff@v0.4.1
 ```
 
 ```bash
@@ -65,7 +65,7 @@ Prefer the curl installer or Homebrew until aqua-registry carries guff. Example 
 
 ```bash
 curl -sSfL https://raw.githubusercontent.com/dakimura/guff/main/scripts/install.sh \
-  | sh -s -- -b "$HOME/.local/bin" v0.4.0
+  | sh -s -- -b "$HOME/.local/bin" v0.4.1
 ```
 
 CI should use the GitHub Action or Docker image so local mise/aqua drift does not affect gates.
@@ -77,7 +77,7 @@ CI should use the GitHub Action or Docker image so local mise/aqua drift does no
   with:
     go-version: stable
 
-- uses: dakimura/guff@v0.4.0
+- uses: dakimura/guff@v0.4.1
   with:
     args: run --out-format=github-actions ./...
 ```
@@ -85,7 +85,7 @@ CI should use the GitHub Action or Docker image so local mise/aqua drift does no
 ## Docker
 
 ```bash
-docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.4.0 run ./...
+docker run --rm -v "$PWD":/app -w /app ghcr.io/dakimura/guff:0.4.1 run ./...
 ```
 
 ## cargo (from source)
@@ -103,9 +103,9 @@ Release assets: <https://github.com/dakimura/guff/releases>
 ```bash
 # example: darwin arm64
 curl -fsSL -o guff.tgz \
-  https://github.com/dakimura/guff/releases/download/v0.4.0/guff_0.4.0_darwin_arm64.tar.gz
+  https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_arm64.tar.gz
 curl -fsSL -o guff.tgz.sha256 \
-  https://github.com/dakimura/guff/releases/download/v0.4.0/guff_0.4.0_darwin_arm64.tar.gz.sha256
+  https://github.com/dakimura/guff/releases/download/v0.4.1/guff_0.4.1_darwin_arm64.tar.gz.sha256
 shasum -a 256 -c guff.tgz.sha256
 tar -xzf guff.tgz
 install -m 755 guff ~/.local/bin/guff
