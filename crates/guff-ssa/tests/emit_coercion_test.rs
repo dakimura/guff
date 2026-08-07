@@ -69,7 +69,7 @@ fn test_emit_extract() {
         &mut prog,
         fid,
         block,
-        CallCommon { value: callee, method: None, args: vec![] },
+        CallCommon { value: callee, method: None, args: vec![], ellipsis: false },
         tuple_ty,
     );
 
@@ -139,7 +139,7 @@ fn test_emit_call() {
         &mut prog,
         fid,
         block,
-        CallCommon { value: callee, method: None, args: vec![] },
+        CallCommon { value: callee, method: None, args: vec![], ellipsis: false },
         int_ty,
     );
     assert_eq!(result_type(&prog, fid, v), int_ty);

@@ -234,13 +234,18 @@ fn scan_directive(format: &str, start: usize) -> (Scan, usize) {
 /// Enough to recognise `fmt.Formatter` (`Format`), `fmt.Stringer` (`String`)
 /// and `error` (`Error`) for the common case; unwraps a single pointer. This
 /// deliberately errs toward accepting (avoiding false positives).
+///
+/// Aliases are unwrapped on both sides of the pointer: a method set is a
+/// property of the aliased type, so `os.FileMode` (= `io/fs.FileMode`) has to
+/// find `String` just as `fs.FileMode` does. Missing this reported
+/// `%s has arg mode of wrong type os.FileMode`.
 fn type_has_method(pass: &Pass<'_>, typ: TypeId, name: &str) -> bool {
     let Some(art) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
-    let mut t = typ;
+    let mut t = unalias_readonly(&art.types, typ);
     if let TypeData::Pointer(p) = art.types.get(t) {
-        t = p.elem();
+        t = unalias_readonly(&art.types, p.elem());
     }
     if let TypeData::Named(n) = art.types.get(t) {
         for i in 0..n.num_methods() {
@@ -519,6 +524,11 @@ fn check_one(
     let pos = call.lparen.0 as u32;
     let first_arg = fmt_idx + 1;
     let nargs = call.args.len();
+    // `f(format, args...)` — the operands are whatever the slice holds, so the
+    // last argument stands in for an unknown number of them. Upstream's
+    // `argCanBeChecked` bails out silently on the final argument of such a
+    // call, and skips the leftover-argument check as well.
+    let ellipsis = call.ellipsis.is_valid();
 
     let mut arg_num = first_arg;
     let mut max_arg_num = first_arg;
@@ -550,6 +560,9 @@ fn check_one(
 
         // `*` width/precision each consume an integer operand.
         for _ in 0..dir.stars {
+            if ellipsis && arg_num + 1 >= nargs {
+                return;
+            }
             if arg_num >= nargs {
                 out.push((
                     pos,
@@ -573,6 +586,9 @@ fn check_one(
 
         // Every non-`%` verb consumes exactly one operand, even an unknown one
         // (matching go vet), so counts stay consistent.
+        if ellipsis && arg_num + 1 >= nargs {
+            return;
+        }
         if arg_num >= nargs {
             out.push((
                 pos,
@@ -620,6 +636,10 @@ fn check_one(
         }
     }
 
+    // Dotdotdot is hard: the trailing slice may supply the missing operands.
+    if ellipsis && max_arg_num + 1 >= nargs {
+        return;
+    }
     // Too many arguments (only meaningful without explicit indexes).
     if !any_index && max_arg_num < nargs {
         let expect = max_arg_num - first_arg;

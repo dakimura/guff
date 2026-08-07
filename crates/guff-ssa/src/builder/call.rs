@@ -5,7 +5,7 @@
 use crate::builder::{unparen, Builder};
 use crate::methods::recv_type;
 use crate::value::Value;
-use crate::instr::{Call, CallCommon, InstrData, MakeChan, MakeMap, MakeSlice};
+use crate::instr::{Call, CallCommon, InstrData, MakeChan, MakeMap, MakeSlice, Panic};
 use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff_constant::make_int64;
 use guff_types::arena::TypeData;
@@ -14,6 +14,7 @@ use guff_types::{is_interface, is_pointer, SelectionKind};
 
 impl<'a> Builder<'a> {
     pub(crate) fn set_call(&mut self, e: &CallExpr, c: &mut CallCommon) {
+        c.ellipsis = e.ellipsis.is_valid();
         self.set_call_func(e, c);
         for arg in &e.args {
             c.args.push(self.expr(arg));
@@ -106,11 +107,16 @@ impl<'a> Builder<'a> {
             value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),
             method: None,
             args: Vec::new(),
+            ellipsis: e.ellipsis.is_valid(),
         };
         self.set_call_func(e, &mut c);
 
         if self.is_make_builtin(c.value) {
             return self.emit_make(e);
+        }
+
+        if self.is_builtin_named(c.value, "panic") {
+            return self.emit_panic(e);
         }
 
         for arg in &e.args {
@@ -158,11 +164,44 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn is_make_builtin(&self, fun: Value) -> bool {
+    fn is_builtin_named(&self, fun: Value, name: &str) -> bool {
         let Value::Builtin(bid) = fun else {
             return false;
         };
-        self.prog.builtins.get(bid).name == "make"
+        self.prog.builtins.get(bid).name == name
+    }
+
+    fn is_make_builtin(&self, fun: Value) -> bool {
+        self.is_builtin_named(fun, "make")
+    }
+
+    /// Lowers `panic(x)` to the `Panic` block terminator followed by an
+    /// unreachable block, as go/ssa's `builder.builtin` does.
+    ///
+    /// Emitting it as an ordinary call instead left a fallthrough edge out of
+    /// the panicking block, so `if p == nil { panic(…) }; p.F` had a join with
+    /// two predecessors and the non-nil successor no longer dominated the
+    /// deref — SA5011 then reported the guarded use (consul
+    /// `internal/resource/sort.go`).
+    fn emit_panic(&mut self, e: &CallExpr) -> Value {
+        let x = match e.args.first() {
+            Some(arg) => self.expr(arg),
+            None => self.invalid_zero(),
+        };
+        let block = self.block.expect("no current block");
+        crate::emit::emit_with_pos(
+            self.func_mut(),
+            block,
+            InstrData::Panic(Panic { x }),
+            e.lparen,
+        );
+        let unreachable = self.new_basic_block("unreachable".to_string());
+        self.set_block(Some(unreachable));
+        // go/ssa returns vFalse here: any non-nil value will do, and a const
+        // keeps `expr` from recording a DebugRef for the discarded result.
+        let bool_ty = self.prog.basic_type(BasicKind::Bool);
+        self.prog
+            .emit_const(Some(guff_constant::Value::Bool(false)), bool_ty)
     }
 
     /// Lowers `make(T, …)` to `MakeSlice` / `MakeMap` / `MakeChan`. (Go:

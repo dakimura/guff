@@ -562,6 +562,7 @@ impl<'a> Builder<'a> {
                     value: len_fn,
                     method: None,
                     args: vec![x],
+                    ellipsis: false,
                 },
                 typ: int_ty,
             }),
@@ -659,6 +660,7 @@ impl<'a> Builder<'a> {
             value: crate::value::Value::Builtin(unsafe { std::mem::transmute(1u32) }),
             method: None,
             args: Vec::new(),
+            ellipsis: false,
         };
         self.set_call(&s.call, &mut c);
         let block = self.block.expect("no current block");
@@ -675,6 +677,7 @@ impl<'a> Builder<'a> {
             value: crate::value::Value::Builtin(unsafe { std::mem::transmute(1u32) }),
             method: None,
             args: Vec::new(),
+            ellipsis: false,
         };
         self.set_call(&s.call, &mut c);
         let block = self.block.expect("no current block");

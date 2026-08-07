@@ -166,6 +166,7 @@ pub fn build_wrapper(prog: &mut Program, fid: FuncId) {
         value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),
         method: None,
         args: Vec::new(),
+        ellipsis: false,
     };
 
     if !is_interface(&prog.type_arena, rt) {
@@ -210,6 +211,7 @@ pub fn build_bound(prog: &mut Program, fid: FuncId) {
         value: Value::Builtin(unsafe { std::mem::transmute(1u32) }),
         method: None,
         args: Vec::new(),
+        ellipsis: false,
     };
 
     if !is_interface(&prog.type_arena, rt) {
@@ -336,7 +338,7 @@ pub fn build_instantiation_wrapper(prog: &mut Program, fid: FuncId) {
         prog,
         fid,
         entry,
-        CallCommon { value: Value::Function(orig), method: None, args },
+        CallCommon { value: Value::Function(orig), method: None, args, ellipsis: false },
         call_typ,
     );
 

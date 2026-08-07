@@ -56,7 +56,7 @@ fn test_emit_tail_call_single() {
     let (mut prog, fid, block, rts) = setup_with_results(&[BasicKind::Int]);
     let int_ty = rts[0];
     let callee = dummy_callee(&mut prog, int_ty);
-    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![] });
+    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![], ellipsis: false });
 
     // The block holds: a Call (typed int) followed by a Return of that call.
     let instrs: Vec<_> = prog.functions.get(fid).blocks.get(block).instrs.clone();
@@ -79,7 +79,7 @@ fn test_emit_tail_call_void() {
     // The callee's own type is irrelevant here (emit_tail_call never reads it).
     let bool_ty = prog.basic_type(BasicKind::Bool);
     let callee = dummy_callee(&mut prog, bool_ty);
-    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![] });
+    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![], ellipsis: false });
 
     // The block holds exactly: a void Call followed by a resultless Return.
     let instrs: Vec<_> = prog.functions.get(fid).blocks.get(block).instrs.clone();
@@ -112,7 +112,7 @@ fn test_emit_tail_call_multi() {
     let (mut prog, fid, block, rts) = setup_with_results(&[BasicKind::Int, BasicKind::String]);
     let int_ty = rts[0];
     let callee = dummy_callee(&mut prog, int_ty);
-    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![] });
+    emit_tail_call(&mut prog, fid, block, CallCommon { value: callee, method: None, args: vec![], ellipsis: false });
 
     let text = disassemble_function(prog.functions.get(fid), &prog);
     assert!(text.contains("extract "), "expected extracts:\n{text}");

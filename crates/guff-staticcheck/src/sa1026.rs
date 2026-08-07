@@ -29,21 +29,16 @@ fn check_marshal(call: &mut Call<'_>, ctx: &CallContext<'_>) {
 fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
     static RULES: OnceLock<HashMap<&'static str, callcheck::CheckFn>> = OnceLock::new();
     RULES.get_or_init(|| {
+        // Upstream's rule table is exactly these four. `MarshalIndent` is not
+        // on it — checking it too made consul's
+        // `json.MarshalIndent(bound, …)` a guff-only finding.
         HashMap::from([
             ("encoding/json.Marshal", check_marshal as callcheck::CheckFn),
-            (
-                "encoding/json.MarshalIndent",
-                check_marshal as callcheck::CheckFn,
-            ),
             (
                 "(*encoding/json.Encoder).Encode",
                 check_marshal as callcheck::CheckFn,
             ),
             ("encoding/xml.Marshal", check_marshal as callcheck::CheckFn),
-            (
-                "encoding/xml.MarshalIndent",
-                check_marshal as callcheck::CheckFn,
-            ),
             (
                 "(*encoding/xml.Encoder).Encode",
                 check_marshal as callcheck::CheckFn,

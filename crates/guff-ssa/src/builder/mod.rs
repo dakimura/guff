@@ -265,6 +265,7 @@ pub fn build_package_init(prog: &mut Program, pkg_id: PackageId, files: &[File])
                 value: Value::Function(ifid),
                 method: None,
                 args: Vec::new(),
+                ellipsis: false,
             },
             typ: empty_tuple,
         }));

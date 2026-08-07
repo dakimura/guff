@@ -10,6 +10,12 @@ use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn check(call: &mut Call<'_>, ctx: &CallContext<'_>, format_idx: usize, args_start: usize) {
+    // `Printf(format, args...)` passes the operands on as an opaque slice, so
+    // their number is unknown. Upstream bails out of `checkPrintfCall` when
+    // `irutil.Vararg` cannot recover the individual arguments.
+    if call.common.ellipsis {
+        return;
+    }
     let Some(fmt_arg) = call.args.get(format_idx) else {
         return;
     };

@@ -128,12 +128,39 @@ fn print_args<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<&'a [Expr]> {
     }
     // (*log.Logger).Print* methods
     if let Expr::SelectorExpr(sel) = &*call.fun {
-        if LOGGER_METHODS.contains(&sel.sel.name.as_str()) && is_method_val(pass, sel, &sel.sel.name)
+        if LOGGER_METHODS.contains(&sel.sel.name.as_str())
+            && is_method_val(pass, sel, &sel.sel.name)
+            && is_log_logger(pass, &sel.x)
         {
             return Some(&call.args);
         }
     }
     None
+}
+
+/// Upstream's pattern names the receiver too — `(*log.Logger).Fatal`, not any
+/// `Fatal`. Matching on the method name alone flagged `(*testing.B).Fatal`
+/// (kubernetes `quantity_test.go`).
+fn is_log_logger(pass: &Pass<'_>, recv: &Expr) -> bool {
+    let Some(typ) = expr_type(pass, recv) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut t = unalias_readonly(&artifacts.types, typ);
+    if let TypeData::Pointer(p) = artifacts.types.get(t) {
+        t = unalias_readonly(&artifacts.types, p.elem());
+    }
+    if !matches!(artifacts.types.get(t), TypeData::Named(_)) {
+        return false;
+    }
+    let obj = guff_types::named::named_obj(&artifacts.types, t);
+    if obj.name(&artifacts.objects) != "Logger" {
+        return false;
+    }
+    obj.pkg(&artifacts.objects)
+        .is_some_and(|p| artifacts.packages.get(p).path() == "log")
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

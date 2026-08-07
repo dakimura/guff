@@ -399,6 +399,63 @@ fn non_nil_continues_nil_check(func: &Function, check: &NilCheck) -> bool {
     false
 }
 
+/// Nearest common dominator of two blocks, or `None` if they share none.
+fn common_dominator(func: &Function, a: BlockId, b: BlockId) -> Option<BlockId> {
+    let mut ancestors = std::collections::HashSet::new();
+    let mut cur = Some(a);
+    while let Some(c) = cur {
+        ancestors.insert(c);
+        cur = func.blocks.get(c).idom();
+    }
+    let mut cur = Some(b);
+    while let Some(c) = cur {
+        if ancestors.contains(&c) {
+            return Some(c);
+        }
+        cur = func.blocks.get(c).idom();
+    }
+    None
+}
+
+/// True when the check and the deref sit in *different* successor regions of the
+/// conditional branch that separates them.
+///
+/// upstream's IR is SSI, so a branch renames every live value in each successor
+/// it is the sole predecessor of, and the sigma survives wherever the region
+/// below uses the value. Both regions use this pointer by construction — one
+/// compares it, the other dereferences it — so both sigmas survive and the two
+/// occurrences are *different* `ir.Value`s. SA5011 is a pure value-identity
+/// check, so upstream cannot report across such a split.
+///
+/// grafana `influxql/converter.ReadInfluxQLStyleResult` is the shape: `rsp` is
+/// dereferenced in one switch case and nil-checked in a later one.
+fn separated_by_branch(func: &Function, check_block: BlockId, deref_block: BlockId) -> bool {
+    if check_block == deref_block {
+        return false;
+    }
+    let Some(p) = common_dominator(func, check_block, deref_block) else {
+        return false;
+    };
+    if p == check_block || p == deref_block {
+        return false;
+    }
+    let pb = func.blocks.get(p);
+    if pb.succs.len() < 2 {
+        return false;
+    }
+    let region = |b: BlockId| -> Option<BlockId> {
+        let target = func.blocks.get(b);
+        pb.succs
+            .iter()
+            .copied()
+            .find(|&s| s == b || func.blocks.get(s).dominates(target))
+    };
+    match (region(check_block), region(deref_block)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    }
+}
+
 fn is_guarded_by_non_nil(
     prog: &Program,
     func: &Function,
@@ -406,6 +463,9 @@ fn is_guarded_by_non_nil(
     deref_block: BlockId,
 ) -> bool {
     if sigma_shadows(func, check, deref_block) {
+        return true;
+    }
+    if separated_by_branch(func, check.check_block, deref_block) {
         return true;
     }
     let Some(non_nil_block) = check.non_nil_block else {

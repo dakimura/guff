@@ -141,6 +141,7 @@ impl<'a> Builder<'a> {
                     value: x,
                     method: None,
                     args: vec![closure],
+                    ellipsis: false,
                 },
                 typ: void_ty,
             }),

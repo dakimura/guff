@@ -82,7 +82,9 @@ pub struct CfgBuilder {
     continues: BranchStack,
     /// `goto` edges keyed by label **name** (guff has no Label ObjectId).
     gotos: HashMap<String, Branch>,
-    label_stmt: Option<(ObjectId, u32)>,
+    /// Label of the statement currently being walked, by name. Labels are not
+    /// in `defs`/`uses`, so the name is the only key available.
+    label_stmt: Option<String>,
     defs: HashMap<u32, Option<ObjectId>>,
     uses: HashMap<u32, ObjectId>,
 }
@@ -114,7 +116,8 @@ struct BranchStack(Vec<Branch>);
 
 #[derive(Default)]
 struct Branch {
-    label: Option<ObjectId>,
+    /// Name of the label this loop/switch carries, if any.
+    label: Option<String>,
     srcs: Vec<BlockId>,
     dst: Option<BlockId>,
 }
@@ -250,14 +253,7 @@ impl CfgBuilder {
                 let parents = self.block.map(|b| vec![b]).unwrap_or_default();
                 let dst = self.new_block_from(&parents);
                 self.goto_set_destination(s.label.name.clone(), dst);
-                if let Some(obj) = self.resolve_obj(&s.label) {
-                    self.label_stmt = Some((obj, s.stmt.pos().0 as u32));
-                } else {
-                    // Label idents are not in defs/uses; still track name for
-                    // labeled break/continue via a synthetic absence — only
-                    // unlabeled break/continue use stmt_label today.
-                    self.label_stmt = None;
-                }
+                self.label_stmt = Some(s.label.name.clone());
                 self.walk_stmt(&s.stmt);
                 self.label_stmt = None;
             }
@@ -294,8 +290,10 @@ impl CfgBuilder {
     }
 
     fn walk_for(&mut self, s: &ForStmt) {
-        let lbl = self.stmt_label();
-        let brek_idx = self.breaks.push(lbl);
+        // The label belongs to this loop only: clear it so loops nested in the
+        // body do not also claim it and swallow `continue <label>`.
+        let lbl = self.take_stmt_label();
+        let brek_idx = self.breaks.push(lbl.clone());
         let continu_idx = self.continues.push(lbl);
         if let Some(init) = &s.init {
             self.walk_stmt(init);
@@ -326,8 +324,8 @@ impl CfgBuilder {
     }
 
     fn walk_range(&mut self, s: &RangeStmt) {
-        let lbl = self.stmt_label();
-        let brek_idx = self.breaks.push(lbl);
+        let lbl = self.take_stmt_label();
+        let brek_idx = self.breaks.push(lbl.clone());
         let continu_idx = self.continues.push(lbl);
         self.walk_expr(&s.x);
         let pre = self.new_block_from(&[self.block.unwrap()]);
@@ -686,8 +684,8 @@ impl CfgBuilder {
         }
     }
 
-    fn stmt_label(&self) -> Option<ObjectId> {
-        self.label_stmt.map(|(obj, _)| obj)
+    fn take_stmt_label(&mut self) -> Option<String> {
+        self.label_stmt.take()
     }
 
     fn goto_add_source(&mut self, name: String, src: BlockId) {
@@ -727,7 +725,7 @@ impl CfgBuilder {
 }
 
 impl BranchStack {
-    fn push(&mut self, label: Option<ObjectId>) -> usize {
+    fn push(&mut self, label: Option<String>) -> usize {
         self.0.push(Branch {
             label,
             ..Default::default()
@@ -739,8 +737,23 @@ impl BranchStack {
         self.0.pop();
     }
 
-    fn index_for(&self, _label: Option<&Ident>) -> usize {
-        self.0.len().saturating_sub(1)
+    /// Innermost enclosing branch target for `break`/`continue`.
+    ///
+    /// A labelled branch must resolve to the loop carrying that label, not the
+    /// innermost one: `continue walk` from a nested loop jumps to the outer
+    /// header, where the values assigned just before it are read (grafana
+    /// `pipeline/tree.getValue`, which this reported as ineffectual).
+    fn index_for(&self, label: Option<&Ident>) -> usize {
+        let last = self.0.len().saturating_sub(1);
+        let Some(label) = label else {
+            return last;
+        };
+        for (i, br) in self.0.iter().enumerate().rev() {
+            if br.label.as_deref() == Some(label.name.as_str()) {
+                return i;
+            }
+        }
+        last
     }
 
     fn set_destination(&mut self, idx: usize, dst: BlockId, blocks: &mut [CfgBlock]) {

@@ -251,15 +251,53 @@ fn collect_reads_node(
     }
 }
 
+/// True when `expr` is of pointer type.
+fn is_pointer_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tav) = info.types.get(&expr.id()) else {
+        return false;
+    };
+    let u = tav.typ.underlying(&artifacts.types);
+    matches!(
+        artifacts.types.get(u),
+        guff_types::arena::TypeData::Pointer(_)
+    )
+}
+
+/// True when `expr` designates storage inside the receiver's *own copy*: the
+/// receiver identifier, or a chain of field selections through value structs.
+///
+/// Anything else — a pointer field, an index, a call — leaves the copy, so a
+/// write through it is observable. `refers_to` only asks whether the receiver
+/// appears somewhere in the subtree, which made
+/// `func (s Series) SetLabels(l Labels) { s.Frame.Fields[0].Labels = l }` look
+/// like a store to `s` even though `s.Frame` is a `*Frame` (grafana
+/// `pkg/expr/mathexp`).
+fn is_recv_value_path(pass: &Pass<'_>, expr: &Expr, recv_obj: guff_types::ObjectId) -> bool {
+    match expr {
+        Expr::Ident(id) => object_of(pass, id) == Some(recv_obj),
+        Expr::ParenExpr(p) => is_recv_value_path(pass, &p.x, recv_obj),
+        Expr::SelectorExpr(SelectorExpr { x, .. }) => {
+            is_recv_value_path(pass, x, recv_obj) && !is_pointer_expr(pass, x)
+        }
+        _ => false,
+    }
+}
+
 fn selector_field_on(
     pass: &Pass<'_>,
     expr: &Expr,
     recv_obj: guff_types::ObjectId,
 ) -> Option<(u32, String)> {
-    let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = expr else {
+    let Expr::SelectorExpr(SelectorExpr { sel, .. }) = expr else {
         return None;
     };
-    if !refers_to(pass, x, recv_obj) {
+    if !is_recv_value_path(pass, expr, recv_obj) {
         return None;
     }
     Some((sel.name_pos.0 as u32, sel.name.clone()))

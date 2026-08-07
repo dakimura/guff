@@ -103,6 +103,7 @@ fn test_all_functions_follows_function_operand() {
                 value: Value::Function(callee),
                 method: None,
                 args: vec![],
+                ellipsis: false,
             },
             typ: int_ty,
         }));

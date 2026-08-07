@@ -80,6 +80,12 @@ pub struct CallCommon {
     /// `CallCommon.Method`.)
     pub method: Option<ObjectId>,
     pub args: Vec<Value>,
+    /// The call spread a slice into the variadic parameter (`f(a, xs...)`).
+    ///
+    /// go/ssa records this implicitly by packing non-spread variadic arguments
+    /// into a fresh slice; guff passes them through individually, so the flag
+    /// is what tells an analyzer that the operand count is unknown.
+    pub ellipsis: bool,
 }
 #[derive(Debug)]
 pub struct Call {

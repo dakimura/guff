@@ -1210,12 +1210,20 @@ fn stmt_text(stmt: &Stmt) -> Option<String> {
         Stmt::IfStmt(i) => {
             let cond = expr_text(&i.cond)?;
             let body = block_text(&i.body)?;
+            // The init statement is part of the comparison: dropping it made
+            // `if err := f(a); err != nil {…}` and `if err := f(b); err != nil
+            // {…}` render identically, so `dupBranchBody` reported branches
+            // that differ only in the call (kubernetes `wsstream/stream.go`).
+            let init = match &i.init {
+                Some(s) => format!("{} ", stmt_text(s)?),
+                None => String::new(),
+            };
             match &i.else_ {
                 Some(e) => {
                     let else_t = stmt_text(e)?;
-                    Some(format!("if {cond} {body} else {else_t}"))
+                    Some(format!("if {init}{cond} {body} else {else_t}"))
                 }
-                None => Some(format!("if {cond} {body}")),
+                None => Some(format!("if {init}{cond} {body}")),
             }
         }
         Stmt::DeferStmt(d) => call_qualified_name(&d.call)
@@ -1249,7 +1257,7 @@ fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             stmt.if_.0 as u32,
-            "both branches in if statement have same body",
+            "dupBranchBody: both branches in if statement have same body",
         );
     }
 }
@@ -2227,7 +2235,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             report(
                 pending,
                 comment.slash.0 as u32,
-                format!("use `Deprecated: ` (note the casing) instead of `{prefix}`"),
+                format!("deprecatedComment: use `Deprecated: ` (note the casing) instead of `{prefix}`"),
             );
             return;
         }
@@ -2235,7 +2243,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             report(
                 pending,
                 comment.slash.0 as u32,
-                "use `:` instead of `,` in `Deprecated, `",
+                "deprecatedComment: use `:` instead of `,` in `Deprecated, `",
             );
             return;
         }
@@ -2246,7 +2254,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
                 report(
                     pending,
                     comment.slash.0 as u32,
-                    "the proper format is `Deprecated: `",
+                    "deprecatedComment: the proper format is `Deprecated: `",
                 );
                 return;
             }
@@ -2257,7 +2265,7 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
                 report(
                     pending,
                     comment.slash.0 as u32,
-                    format!("typo in `{word}`; should be `Deprecated`"),
+                    format!("deprecatedComment: typo in `{word}`; should be `Deprecated`"),
                 );
                 return;
             }
@@ -4458,7 +4466,7 @@ fn visit_doc_stub(
         report(
             pending,
             pos,
-            "silencing go lint doc-comment warnings is unadvised",
+            "deprecatedComment: silencing go lint doc-comment warnings is unadvised",
         );
     }
 }

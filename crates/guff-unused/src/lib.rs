@@ -62,6 +62,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         None => return Ok(None),
     };
 
+    let fset = pass.fset().clone();
     let pkg_name = pass.pkg().name.as_str();
     let mut candidates = HashSet::new();
     let mut roots = HashSet::new();
@@ -128,8 +129,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if !kind {
                         continue;
                     }
-                    let mut decl_group = Vec::new();
+                    // honnef groups const specs by `astutil.GroupSpecs`: a spec
+                    // joins the previous group only when it starts on the line
+                    // right after the previous spec ends. A doc comment or a
+                    // blank line starts a new group, so
+                    // `const ( bucketCount = 256; /*doc*/ Exported = "…" )`
+                    // does not let the exported member keep `bucketCount` alive
+                    // (vault `helper/storagepacker`).
+                    let mut decl_group: Vec<ObjectId> = Vec::new();
+                    let mut prev_end_line: Option<i64> = None;
                     for spec in specs {
+                        if *tok == Some(Token::CONST) {
+                            let start_line = fset.position_for(spec.pos(), false).line;
+                            let adjacent = prev_end_line == Some(start_line - 1);
+                            if !adjacent && decl_group.len() > 1 {
+                                const_groups.push(std::mem::take(&mut decl_group));
+                            } else if !adjacent {
+                                decl_group.clear();
+                            }
+                            prev_end_line = Some(fset.position_for(spec.end(), false).line);
+                        }
                         match spec {
                             Spec::TypeSpec(TypeSpec { name, ty, .. }) => {
                                 let Some(Some(obj)) = info.defs.get(&name.id) else {

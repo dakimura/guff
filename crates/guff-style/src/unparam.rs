@@ -50,37 +50,124 @@ fn func_display_name(fd: &FuncDecl) -> String {
     fd.name.name.clone()
 }
 
+/// AST stand-in for upstream's `dummyImpl`: a function whose entry block
+/// "almost immediately panics, throws or returns constants only".
+///
+/// Upstream walks the SSA entry block and stops at the first `Return`/`Panic`,
+/// so `func f(p *T) error { return nil }` is a stub and its parameters are
+/// never reported — consul's `validateURLRewrite` / `validateHeaderFilter`.
+/// Anything that would appear as a `BinOp` operand (`return used + 1`) or as a
+/// non-harmless `Call` instruction (`n := compute(s)`) disqualifies it, which is
+/// why `example - unused is unused` is still reported.
 fn is_stub_body(body: &guff::ast::BlockStmt) -> bool {
     if body.list.is_empty() {
         return true;
     }
-    // Upstream unparam treats bodies that only discard params (`_ = x`) /
-    // panic/log/empty-return as dummy implementations and skips them.
-    body.list.iter().all(|stmt| match stmt {
-        Stmt::ReturnStmt(ret) => ret.results.is_empty(),
-        Stmt::ExprStmt(e) => matches!(
-            &e.x,
-            Expr::CallExpr(call) if is_panic_or_log_call(call)
-        ),
-        Stmt::AssignStmt(asgn)
-            if asgn.tok == Some(Token::ASSIGN)
-                && asgn.lhs.len() == asgn.rhs.len()
-                && asgn.lhs.iter().all(|lhs| matches!(lhs, Expr::Ident(id) if id.name == "_")) =>
-        {
-            true
+    for stmt in &body.list {
+        match stmt {
+            Stmt::ReturnStmt(ret) => {
+                return ret.results.iter().all(harmless_expr);
+            }
+            Stmt::ExprStmt(e) => {
+                if matches!(&e.x, Expr::CallExpr(call) if is_panic_call(call)) {
+                    return true;
+                }
+                if !harmless_expr(&e.x) {
+                    return false;
+                }
+            }
+            Stmt::AssignStmt(asgn) => {
+                if !asgn.rhs.iter().all(harmless_expr) {
+                    return false;
+                }
+            }
+            Stmt::DeclStmt(_) | Stmt::EmptyStmt(_) => {}
+            // Any control flow ends the entry block without reaching a
+            // terminator we accept.
+            _ => return false,
         }
-        _ => false,
-    })
+    }
+    // Falling off the end of a body with no results is an implicit `return`.
+    true
 }
 
-fn is_panic_or_log_call(call: &guff::ast::CallExpr) -> bool {
-    let Expr::Ident(id) = &*call.fun else {
-        return false;
+fn is_panic_call(call: &guff::ast::CallExpr) -> bool {
+    matches!(&*call.fun, Expr::Ident(id) if id.name == "panic")
+}
+
+/// `rxHarmlessCall`: `(?i)\b(log(ger)?|errors)\b|\bf?print|errorf?$`.
+fn is_harmless_call_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    let word_at = |hay: &str, needle: &str| -> bool {
+        hay.match_indices(needle).any(|(i, _)| {
+            let before_ok = i == 0 || !is_word_byte(hay.as_bytes()[i - 1]);
+            let j = i + needle.len();
+            let after_ok = j == hay.len() || !is_word_byte(hay.as_bytes()[j]);
+            before_ok && after_ok
+        })
     };
-    matches!(
-        id.name.as_str(),
-        "panic" | "print" | "println" | "log" | "logf" | "logln"
-    )
+    if word_at(&lower, "log") || word_at(&lower, "logger") || word_at(&lower, "errors") {
+        return true;
+    }
+    // `\bf?print`
+    if lower.match_indices("print").any(|(i, _)| {
+        let start = if i > 0 && lower.as_bytes()[i - 1] == b'f' {
+            i - 1
+        } else {
+            i
+        };
+        start == 0 || !is_word_byte(lower.as_bytes()[start - 1])
+    }) {
+        return true;
+    }
+    lower.ends_with("error") || lower.ends_with("errorf")
+}
+
+fn is_word_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+fn callee_name(call: &guff::ast::CallExpr) -> String {
+    fn name(e: &Expr) -> String {
+        match e {
+            Expr::Ident(id) => id.name.clone(),
+            Expr::SelectorExpr(s) => format!("{}.{}", name(&s.x), s.sel.name),
+            Expr::ParenExpr(p) => name(&p.x),
+            _ => String::new(),
+        }
+    }
+    name(&call.fun)
+}
+
+/// True when the expression would not put a disqualifying instruction in the
+/// entry block: no arithmetic (`BinOp`), and no call other than the
+/// panic/log/print/error family upstream allows.
+fn harmless_expr(e: &Expr) -> bool {
+    match e {
+        Expr::BinaryExpr(_) => false,
+        Expr::CallExpr(call) => {
+            if !is_panic_call(call) && !is_harmless_call_name(&callee_name(call)) {
+                return false;
+            }
+            call.args.iter().all(harmless_expr)
+        }
+        Expr::ParenExpr(p) => harmless_expr(&p.x),
+        Expr::UnaryExpr(u) => harmless_expr(&u.x),
+        Expr::StarExpr(s) => harmless_expr(&s.x),
+        Expr::SelectorExpr(s) => harmless_expr(&s.x),
+        Expr::IndexExpr(i) => harmless_expr(&i.x) && harmless_expr(&i.index),
+        Expr::SliceExpr(s) => {
+            harmless_expr(&s.x)
+                && [&s.low, &s.high, &s.max]
+                    .into_iter()
+                    .flatten()
+                    .all(|e| harmless_expr(e))
+        }
+        Expr::CompositeLit(c) => c.elts.iter().all(harmless_expr),
+        Expr::KeyValueExpr(kv) => harmless_expr(&kv.value),
+        Expr::TypeAssertExpr(t) => harmless_expr(&t.x),
+        _ => true,
+    }
 }
 
 fn intentional_keep(body: &guff::ast::BlockStmt, param: &str) -> bool {
