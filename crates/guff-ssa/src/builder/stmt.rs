@@ -588,6 +588,21 @@ impl<'a> Builder<'a> {
         panic!("builtin {id:?} not found in object arena");
     }
 
+    /// [`chan_elem`], tolerant of an operand that is not a channel.
+    ///
+    /// go/ssa can assume the type-checker typed every receive, but guff also
+    /// builds SSA for packages whose checker info is incomplete, where a
+    /// receive operand can come back Invalid. Panicking here unwinds the worker
+    /// thread and drops every finding for the package, so fall back to Invalid
+    /// the same way [`Builder::type_of`] does.
+    fn chan_elem_or_invalid(&mut self, t: TypeId) -> TypeId {
+        if matches!(self.prog.type_arena.get(t), TypeData::Chan(_)) {
+            chan_elem(&self.prog.type_arena, t)
+        } else {
+            self.prog.basic_type(BasicKind::Invalid)
+        }
+    }
+
     /// range_chan emits the header for a loop that receives from channel `x`
     /// until it is closed. (Go: `builder.rangeChan`)
     fn range_chan(
@@ -597,7 +612,7 @@ impl<'a> Builder<'a> {
         u: guff_types::TypeId,
         label: Option<&str>,
     ) {
-        let elem = chan_elem(&self.prog.type_arena, u);
+        let elem = self.chan_elem_or_invalid(u);
         let bool_ty = self.prog.basic_type(BasicKind::Bool);
         let want_key = s
             .key
@@ -723,7 +738,7 @@ impl<'a> Builder<'a> {
         let ch = self.expr(&s.chan_);
         let ch_ty = self.type_of_value(ch);
         let core = ch_ty.underlying(&self.prog.type_arena);
-        let elem = chan_elem(&self.prog.type_arena, core);
+        let elem = self.chan_elem_or_invalid(core);
         let x = self.expr(&s.value);
         let block = self.block.expect("no current block");
         let x = crate::emit::emit_type_coercion(self.prog, self.func_id, block, x, elem);
@@ -1008,7 +1023,7 @@ impl<'a> Builder<'a> {
                     let ch = self.expr(&send.chan_);
                     let ch_ty = self.type_of_value(ch);
                     let core = ch_ty.underlying(&self.prog.type_arena);
-                    let elem = chan_elem(&self.prog.type_arena, core);
+                    let elem = self.chan_elem_or_invalid(core);
                     let block = self.block.expect("no current block");
                     let val = self.expr(&send.value);
                     let val =
@@ -1049,7 +1064,7 @@ impl<'a> Builder<'a> {
             if st.dir == ChanDir::RecvOnly {
                 let ch_ty = self.type_of_value(st.chan);
                 let core = ch_ty.underlying(&self.prog.type_arena);
-                let elem = chan_elem(&self.prog.type_arena, core);
+                let elem = self.chan_elem_or_invalid(core);
                 vars.push(new_var(&mut self.prog.object_arena, "", elem));
             }
         }

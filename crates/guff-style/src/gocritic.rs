@@ -46,7 +46,18 @@
 //! `disabled-checks` works; cli-style `disabled-tags: [style]` too), plus the
 //! per-check params in [`GocriticCheckSettings`](crate::GocriticCheckSettings).
 //!
+//! Messages are emitted through [`report`], which prefixes the checker name the
+//! way golangci-lint's wrapper does (`fmt.Sprintf("%s: %s", …)`). The prefix is
+//! not cosmetic: a target's own `exclusions.rules` regexes match against it, so
+//! a message missing it can only ever be a guff-only finding. Nodes embedded in
+//! a message go through [`node_text`] (go/printer), not [`expr_text`], because
+//! upstream interpolates them with `astfmt`. The full 104-checker fixture in
+//! `tests/testdata/gocritic/` was diffed message-for-message against
+//! golangci-lint 2.12 with `gocritic.enable-all`.
+//!
 //! DEFERRED: remaining enable-all extras (`ruleguard` DSL host),
+//! wrapperFunc's `strings.Map` / `bytes.Map` / `draw.DrawMask` /
+//! `strings.Index(…) >= 0` / `strings.Cut` arms,
 //! regexpSimplify Go-only spellings (`[][]`) / full quasilyte/regex Value parity,
 //! boolExprSimplify SkipChilds (nested dual-report) / SideEffectFree full parity,
 //! badRegexp dangling-anchor / flag edge-case full parity with quasilyte/regex,
@@ -236,25 +247,57 @@ fn is_implemented(name: &str) -> bool {
 fn check_tags(name: &str) -> &'static [&'static str] {
     match name {
         // Style (default + enable-all)
-        "boolExprSimplify" | "builtinShadow" | "captLocal" | "commentFormatting"
-        | "commentedOutImport" | "defaultCaseOrder" | "docStub" | "dupImport" | "elseif"
-        | "emptyFallthrough" | "emptyStringTest" | "hexLiteral" | "ifElseChain"
-        | "importShadow" | "initClause" | "methodExprCall" | "nestingReduce" | "newDeref"
-        | "octalLiteral" | "paramTypeCombine" | "ptrToRefParam" | "regexpMust"
-        | "regexpSimplify" | "singleCaseSwitch" | "switchTrue" | "todoCommentWithoutDetail"
-        | "tooManyResultsChecker" | "typeAssertChain" | "typeDefFirst" | "typeSwitchVar"
-        | "typeUnparen" | "underef" | "unlabelStmt" | "unlambda" | "unnamedResult"
-        | "unnecessaryBlock" | "unslice" | "valSwap" | "whyNoLint" | "wrapperFunc"
-        | "assignOp" | "yodaStyleExpr" => &["style"],
+        "boolExprSimplify"
+        | "builtinShadow"
+        | "captLocal"
+        | "commentFormatting"
+        | "commentedOutImport"
+        | "defaultCaseOrder"
+        | "docStub"
+        | "dupImport"
+        | "elseif"
+        | "emptyFallthrough"
+        | "emptyStringTest"
+        | "hexLiteral"
+        | "ifElseChain"
+        | "importShadow"
+        | "initClause"
+        | "methodExprCall"
+        | "nestingReduce"
+        | "newDeref"
+        | "octalLiteral"
+        | "paramTypeCombine"
+        | "ptrToRefParam"
+        | "regexpMust"
+        | "regexpSimplify"
+        | "singleCaseSwitch"
+        | "switchTrue"
+        | "todoCommentWithoutDetail"
+        | "tooManyResultsChecker"
+        | "typeAssertChain"
+        | "typeDefFirst"
+        | "typeSwitchVar"
+        | "typeUnparen"
+        | "underef"
+        | "unlabelStmt"
+        | "unlambda"
+        | "unnamedResult"
+        | "unnecessaryBlock"
+        | "unslice"
+        | "valSwap"
+        | "whyNoLint"
+        | "wrapperFunc"
+        | "assignOp"
+        | "yodaStyleExpr" => &["style"],
 
         // Diagnostic
-        "appendAssign" | "argOrder" | "badCall" | "badCond" | "badRegexp"
-        | "builtinShadowDecl" | "caseOrder" | "codegenComment" | "commentedOutCode"
-        | "deferInLoop" | "deprecatedComment" | "dupBranchBody" | "dupCase" | "dupOption"
-        | "dupSubExpr" | "evalOrder" | "exitAfterDefer" | "filepathJoin" | "flagDeref"
-        | "flagName" | "mapKey" | "nilValReturn" | "offBy1" | "rangeAppendAll"
-        | "regexpPattern" | "sloppyLen" | "sloppyReassign" | "sloppyTypeAssert" | "sortSlice"
-        | "sqlQuery" | "truncateCmp" | "unnecessaryDefer" | "weakCond" => &["diagnostic"],
+        "appendAssign" | "argOrder" | "badCall" | "badCond" | "badRegexp" | "builtinShadowDecl"
+        | "caseOrder" | "codegenComment" | "commentedOutCode" | "deferInLoop"
+        | "deprecatedComment" | "dupBranchBody" | "dupCase" | "dupOption" | "dupSubExpr"
+        | "evalOrder" | "exitAfterDefer" | "filepathJoin" | "flagDeref" | "flagName" | "mapKey"
+        | "nilValReturn" | "offBy1" | "rangeAppendAll" | "regexpPattern" | "sloppyLen"
+        | "sloppyReassign" | "sloppyTypeAssert" | "sortSlice" | "sqlQuery" | "truncateCmp"
+        | "unnecessaryDefer" | "weakCond" => &["diagnostic"],
 
         // Performance
         "appendCombine" | "hugeParam" | "indexAlloc" | "preferFprint" | "rangeExprCopy"
@@ -317,6 +360,32 @@ fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
 
 fn enabled(set: &HashSet<String>, name: &str) -> bool {
     set.contains(name)
+}
+
+/// Render `expr` the way go-critic embeds nodes in its warnings.
+///
+/// Upstream messages interpolate AST nodes through `astfmt`, which is
+/// `go/printer` over the real `token.FileSet`; the ruleguard rules spell the
+/// same thing `$$` (whole match) or `$x` (a captured operand). [`expr_text`] is
+/// a hand-rolled approximation that renders `f(a, b)` as `f(...)` and puts
+/// blanks around every binary operator, so any message that embeds a node must
+/// go through here instead to stay byte-identical with upstream.
+fn node_text(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).ok()?;
+    String::from_utf8(buf).ok()
+}
+
+fn node_text_stmt(pass: &Pass<'_>, stmt: &Stmt) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Stmt(stmt)).ok()?;
+    String::from_utf8(buf).ok()
+}
+
+/// [`node_text`] for a call the checker only holds as a `&CallExpr`. This is
+/// what the ruleguard rules spell `$$` when the matched pattern is a call.
+fn call_text(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    node_text(pass, &Expr::CallExpr(call.clone()))
 }
 
 fn expr_text(expr: &Expr) -> Option<String> {
@@ -392,12 +461,8 @@ fn exprs_equal(a: &Expr, b: &Expr) -> bool {
             x.sel.name == y.sel.name && exprs_equal(&x.x, &y.x)
         }
         (Expr::StarExpr(x), Expr::StarExpr(y)) => exprs_equal(&x.x, &y.x),
-        (Expr::StarExpr(x), Expr::UnaryExpr(y)) if y.op == Token::MUL => {
-            exprs_equal(&x.x, &y.x)
-        }
-        (Expr::UnaryExpr(x), Expr::StarExpr(y)) if x.op == Token::MUL => {
-            exprs_equal(&x.x, &y.x)
-        }
+        (Expr::StarExpr(x), Expr::UnaryExpr(y)) if y.op == Token::MUL => exprs_equal(&x.x, &y.x),
+        (Expr::UnaryExpr(x), Expr::StarExpr(y)) if x.op == Token::MUL => exprs_equal(&x.x, &y.x),
         (Expr::ParenExpr(x), Expr::ParenExpr(y)) => exprs_equal(&x.x, &y.x),
         (Expr::IndexExpr(x), Expr::IndexExpr(y)) => {
             exprs_equal(&x.x, &y.x) && exprs_equal(&x.index, &y.index)
@@ -411,10 +476,8 @@ fn exprs_equal(a: &Expr, b: &Expr) -> bool {
                     .all(|(a, b)| exprs_equal(a, b))
         }
         (Expr::UnaryExpr(x), Expr::UnaryExpr(y)) => {
-            matches!(
-                x.op,
-                Token::NOT | Token::AND | Token::MUL | Token::SUB
-            ) && x.op == y.op
+            matches!(x.op, Token::NOT | Token::AND | Token::MUL | Token::SUB)
+                && x.op == y.op
                 && exprs_equal(&x.x, &y.x)
         }
         (Expr::BinaryExpr(x), Expr::BinaryExpr(y)) => {
@@ -444,8 +507,16 @@ fn is_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
 }
 
-fn report(pending: &mut Vec<(u32, String)>, pos: u32, msg: impl Into<String>) {
-    pending.push((pos, msg.into()));
+/// Emit a finding. golangci-lint's gocritic wrapper renders every warning as
+/// `fmt.Sprintf("%s: %s", checkerName, warning)`, so the checker name is part
+/// of the message the user — and any `exclusions.rules` regex — sees.
+fn report(pending: &mut Vec<(u32, String)>, pos: u32, checker: &str, msg: impl Into<String>) {
+    pending.push((pos, format!("{checker}: {}", msg.into())));
+}
+
+/// The checker name [`report`] prefixed onto a pending message.
+fn checker_of(msg: &str) -> &str {
+    msg.split_once(": ").map_or(msg, |(name, _)| name)
 }
 
 fn check_elseif(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
@@ -468,7 +539,8 @@ fn check_elseif(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         else_body.lbrace.0 as u32,
-        "elseif: can replace 'else {if cond {}}' with 'else if cond {}'",
+        "elseif",
+        "can replace 'else {if cond {}}' with 'else if cond {}'",
     );
 }
 
@@ -523,12 +595,18 @@ fn check_single_case_switch_body(pos: u32, body: &BlockStmt, pending: &mut Vec<(
         return;
     }
     if cc.list.is_empty() {
-        report(pending, pos, "singleCaseSwitch: found switch with default case only");
+        report(
+            pending,
+            pos,
+            "singleCaseSwitch",
+            "found switch with default case only",
+        );
     } else if cc.list.len() == 1 {
         report(
             pending,
             pos,
-            "singleCaseSwitch: should rewrite switch statement to if statement",
+            "singleCaseSwitch",
+            "should rewrite switch statement to if statement",
         );
     }
 }
@@ -551,6 +629,7 @@ fn check_default_case_order(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>)
             report(
                 pending,
                 cc.case.0 as u32,
+                "defaultCaseOrder",
                 "consider to make `default` case as first or as last case",
             );
         }
@@ -568,13 +647,15 @@ fn check_switch_true(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             stmt.switch.0 as u32,
-            "switchTrue: replace 'switch $x; true {}' with 'switch $x; {}'",
+            "switchTrue",
+            "replace 'switch $x; true {}' with 'switch $x; {}'",
         );
     } else {
         report(
             pending,
             stmt.switch.0 as u32,
-            "switchTrue: replace 'switch true {}' with 'switch {}'",
+            "switchTrue",
+            "replace 'switch true {}' with 'switch {}'",
         );
     }
 }
@@ -597,10 +678,11 @@ fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos,
-                    format!("sloppyLen: len({arg}) >= 0 is always true"),
+                    "sloppyLen",
+                    format!("len({arg}) >= 0 is always true"),
                 );
             } else {
-                report(pending, pos, "sloppyLen: len(_) >= 0 is always true");
+                report(pending, pos, "sloppyLen", "len(_) >= 0 is always true");
             }
         }
         Token::LSS if is_int_lit(&bin.y, 0) => {
@@ -608,10 +690,11 @@ fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos,
-                    format!("sloppyLen: len({arg}) < 0 is always false"),
+                    "sloppyLen",
+                    format!("len({arg}) < 0 is always false"),
                 );
             } else {
-                report(pending, pos, "sloppyLen: len(_) < 0 is always false");
+                report(pending, pos, "sloppyLen", "len(_) < 0 is always false");
             }
         }
         Token::LEQ if is_int_lit(&bin.y, 0) => {
@@ -619,10 +702,11 @@ fn check_sloppy_len(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos,
-                    format!("sloppyLen: len({arg}) <= 0 can be len({arg}) == 0"),
+                    "sloppyLen",
+                    format!("len({arg}) <= 0 can be len({arg}) == 0"),
                 );
             } else {
-                report(pending, pos, "sloppyLen: len(_) <= 0 can be len(_) == 0");
+                report(pending, pos, "sloppyLen", "len(_) <= 0 can be len(_) == 0");
             }
         }
         _ => {}
@@ -665,6 +749,7 @@ fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, Str
     report(
         pending,
         slice.lbrack.0 as u32,
+        "unslice",
         format!("could simplify {x}[:] to {x}"),
     );
 }
@@ -693,7 +778,8 @@ fn check_new_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         star.star.0 as u32,
-        format!("newDeref: replace `*new({arg})` with `{suggestion}`"),
+        "newDeref",
+        format!("replace `*new({arg})` with `{suggestion}`"),
     );
 }
 
@@ -745,6 +831,7 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
                     report(
                         pending,
                         call.fun.pos().0 as u32,
+                        "appendAssign",
                         "append result not assigned to the same slice",
                     );
                 }
@@ -754,6 +841,7 @@ fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
                     report(
                         pending,
                         call.fun.pos().0 as u32,
+                        "appendAssign",
                         "append result not assigned to the same slice",
                     );
                 }
@@ -777,6 +865,7 @@ fn check_dup_case_switch(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     x.pos().0 as u32,
+                    "dupCase",
                     format!("'case {text}' is duplicated"),
                 );
             }
@@ -794,6 +883,7 @@ fn check_capt_local_fields(fields: &Option<FieldList>, pending: &mut Vec<(u32, S
                 report(
                     pending,
                     name.pos().0 as u32,
+                    "captLocal",
                     format!("`{}' should not be capitalized", name.name),
                 );
             }
@@ -811,14 +901,27 @@ fn call_qualified_name(call: &CallExpr) -> Option<String> {
     expr_text(&call.fun)
 }
 
-fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
+fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
     let Some(body) = &func.body else {
         return;
     };
     let mut defer_pos: Option<(u32, String)> = None;
     let mut found = false;
 
+    /// Upstream renders the whole `defer` statement with `astfmt.Sprint`, but
+    /// collapses a function literal to `func(…){...}(...)` so the warning stays
+    /// on one line.
+    fn defer_label(pass: &Pass<'_>, stmt: &Stmt, d: &DeferStmt) -> String {
+        if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
+            let sig =
+                node_text(pass, &Expr::FuncType(fl.ty.clone())).unwrap_or_else(|| "func()".into());
+            return format!("defer {sig}{{...}}(...)");
+        }
+        node_text_stmt(pass, stmt).unwrap_or_else(|| "defer ...".into())
+    }
+
     fn walk(
+        pass: &Pass<'_>,
         stmts: &[Stmt],
         defer_pos: &mut Option<(u32, String)>,
         found: &mut bool,
@@ -831,10 +934,7 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
         for s in stmts {
             match s {
                 Stmt::DeferStmt(d) => {
-                    let label = call_qualified_name(&d.call)
-                        .map(|n| format!("defer {n}(...)"))
-                        .unwrap_or_else(|| "defer ...".into());
-                    *defer_pos = Some((d.defer_.0 as u32, label));
+                    *defer_pos = Some((d.defer_.0 as u32, defer_label(pass, s, d)));
                 }
                 Stmt::ExprStmt(e) => {
                     if let Expr::CallExpr(call) = &e.x {
@@ -842,7 +942,7 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
                     }
                 }
                 Stmt::IfStmt(i) => {
-                    walk(&i.body.list, defer_pos, found, pending, false);
+                    walk(pass, &i.body.list, defer_pos, found, pending, false);
                     if !*found {
                         if let Some(e) = &i.else_ {
                             // Don't treat else-branch exits as after defer when
@@ -852,9 +952,10 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
                             }
                             match e.as_ref() {
                                 Stmt::BlockStmt(b) => {
-                                    walk(&b.list, defer_pos, found, pending, true)
+                                    walk(pass, &b.list, defer_pos, found, pending, true)
                                 }
                                 Stmt::IfStmt(_) => walk(
+                                    pass,
                                     std::slice::from_ref(e.as_ref()),
                                     defer_pos,
                                     found,
@@ -866,13 +967,13 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
                         }
                     }
                 }
-                Stmt::BlockStmt(b) => walk(&b.list, defer_pos, found, pending, in_else),
-                Stmt::ForStmt(f) => walk(&f.body.list, defer_pos, found, pending, false),
-                Stmt::RangeStmt(r) => walk(&r.body.list, defer_pos, found, pending, false),
+                Stmt::BlockStmt(b) => walk(pass, &b.list, defer_pos, found, pending, in_else),
+                Stmt::ForStmt(f) => walk(pass, &f.body.list, defer_pos, found, pending, false),
+                Stmt::RangeStmt(r) => walk(pass, &r.body.list, defer_pos, found, pending, false),
                 Stmt::SwitchStmt(sw) => {
                     for c in &sw.body.list {
                         if let Stmt::CaseClause(cc) = c {
-                            walk(&cc.body, defer_pos, found, pending, false);
+                            walk(pass, &cc.body, defer_pos, found, pending, false);
                         }
                     }
                 }
@@ -914,13 +1015,14 @@ fn check_exit_after_defer(func: &FuncDecl, pending: &mut Vec<(u32, String)>) {
             report(
                 pending,
                 call.fun.pos().0 as u32,
+                "exitAfterDefer",
                 format!("{name} will exit, and `{defer_label}` will not run"),
             );
             *found = true;
         }
     }
 
-    walk(&body.list, &mut defer_pos, &mut found, pending, false);
+    walk(pass, &body.list, &mut defer_pos, &mut found, pending, false);
 }
 
 fn count_if_else_len(stmt: &IfStmt) -> i32 {
@@ -967,7 +1069,8 @@ fn check_if_else_chain(
         report(
             pending,
             stmt.if_.0 as u32,
-            "ifElseChain: rewrite if-else to switch statement",
+            "ifElseChain",
+            "rewrite if-else to switch statement",
         );
     }
 }
@@ -1013,13 +1116,13 @@ fn check_val_swap(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             a.tok_pos.0 as u32,
-            // golangci prefixes with check name: `fmt.Sprintf("%s: %s", name, text)`.
-            format!("valSwap: can re-write as `{y_t}, {x_t} = {x_t}, {y_t}`"),
+            "valSwap",
+            format!("can re-write as `{y_t}, {x_t} = {x_t}, {y_t}`"),
         );
     }
 }
 
-fn check_flag_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
+fn check_flag_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     let Expr::CallExpr(call) = star.x.as_ref() else {
         return;
     };
@@ -1037,12 +1140,14 @@ fn check_flag_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
         "flag.Uint64" => "flag.Uint64Var",
         _ => return,
     };
+    // Upstream interpolates the whole deref expression, arguments included.
+    let whole =
+        node_text(pass, &Expr::StarExpr(star.clone())).unwrap_or_else(|| format!("*{name}(...)"));
     report(
         pending,
         star.star.0 as u32,
-        format!(
-            "immediate deref in *{name}(...) is most likely an error; consider using {suggest}"
-        ),
+        "flagDeref",
+        format!("immediate deref in {whole} is most likely an error; consider using {suggest}"),
     );
 }
 
@@ -1056,6 +1161,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
         report(
             pending,
             call.fun.pos().0 as u32,
+            "badCall",
             "no-op append call, probably missing arguments",
         );
     }
@@ -1072,6 +1178,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
             report(
                 pending,
                 call.fun.pos().0 as u32,
+                "badCall",
                 "suspicious Join on 1 argument",
             );
         }
@@ -1084,6 +1191,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
                     report(
                         pending,
                         arg.pos().0 as u32,
+                        "badCall",
                         "suspicious arg 0, probably meant -1",
                     );
                 }
@@ -1118,24 +1226,24 @@ fn check_assign_op(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
         return;
     };
     let msg = match bin.op {
-        Token::ADD if y_t == "1" => format!("assignOp: replace `{x_t} = {x_t} + 1` with `{x_t}++`"),
-        Token::SUB if y_t == "1" => format!("assignOp: replace `{x_t} = {x_t} - 1` with `{x_t}--`"),
-        Token::ADD => format!("assignOp: replace `{x_t} = {x_t} + {y_t}` with `{x_t} += {y_t}`"),
-        Token::SUB => format!("assignOp: replace `{x_t} = {x_t} - {y_t}` with `{x_t} -= {y_t}`"),
-        Token::MUL => format!("assignOp: replace `{x_t} = {x_t} * {y_t}` with `{x_t} *= {y_t}`"),
-        Token::QUO => format!("assignOp: replace `{x_t} = {x_t} / {y_t}` with `{x_t} /= {y_t}`"),
-        Token::REM => format!("assignOp: replace `{x_t} = {x_t} % {y_t}` with `{x_t} %= {y_t}`"),
-        Token::AND => format!("assignOp: replace `{x_t} = {x_t} & {y_t}` with `{x_t} &= {y_t}`"),
-        Token::OR => format!("assignOp: replace `{x_t} = {x_t} | {y_t}` with `{x_t} |= {y_t}`"),
-        Token::XOR => format!("assignOp: replace `{x_t} = {x_t} ^ {y_t}` with `{x_t} ^= {y_t}`"),
-        Token::SHL => format!("assignOp: replace `{x_t} = {x_t} << {y_t}` with `{x_t} <<= {y_t}`"),
-        Token::SHR => format!("assignOp: replace `{x_t} = {x_t} >> {y_t}` with `{x_t} >>= {y_t}`"),
+        Token::ADD if y_t == "1" => format!("replace `{x_t} = {x_t} + 1` with `{x_t}++`"),
+        Token::SUB if y_t == "1" => format!("replace `{x_t} = {x_t} - 1` with `{x_t}--`"),
+        Token::ADD => format!("replace `{x_t} = {x_t} + {y_t}` with `{x_t} += {y_t}`"),
+        Token::SUB => format!("replace `{x_t} = {x_t} - {y_t}` with `{x_t} -= {y_t}`"),
+        Token::MUL => format!("replace `{x_t} = {x_t} * {y_t}` with `{x_t} *= {y_t}`"),
+        Token::QUO => format!("replace `{x_t} = {x_t} / {y_t}` with `{x_t} /= {y_t}`"),
+        Token::REM => format!("replace `{x_t} = {x_t} % {y_t}` with `{x_t} %= {y_t}`"),
+        Token::AND => format!("replace `{x_t} = {x_t} & {y_t}` with `{x_t} &= {y_t}`"),
+        Token::OR => format!("replace `{x_t} = {x_t} | {y_t}` with `{x_t} |= {y_t}`"),
+        Token::XOR => format!("replace `{x_t} = {x_t} ^ {y_t}` with `{x_t} ^= {y_t}`"),
+        Token::SHL => format!("replace `{x_t} = {x_t} << {y_t}` with `{x_t} <<= {y_t}`"),
+        Token::SHR => format!("replace `{x_t} = {x_t} >> {y_t}` with `{x_t} >>= {y_t}`"),
         Token::AndNot => {
-            format!("assignOp: replace `{x_t} = {x_t} &^ {y_t}` with `{x_t} &^= {y_t}`")
+            format!("replace `{x_t} = {x_t} &^ {y_t}` with `{x_t} &^= {y_t}`")
         }
         _ => return,
     };
-    report(pending, assign.tok_pos.0 as u32, msg);
+    report(pending, assign.tok_pos.0 as u32, "assignOp", msg);
 }
 
 fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
@@ -1176,10 +1284,12 @@ fn check_dup_arg(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
     }
     // Most of these take (a, b) as first two args.
     if exprs_equal(&call.args[0], &call.args[1]) {
+        let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(...)"));
         report(
             pending,
             call.args[1].pos().0 as u32,
-            "suspicious duplicated args in call",
+            "dupArg",
+            format!("suspicious duplicated args in {whole}"),
         );
     }
 }
@@ -1257,7 +1367,8 @@ fn check_dup_branch_body(stmt: &IfStmt, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             stmt.if_.0 as u32,
-            "dupBranchBody: both branches in if statement have same body",
+            "dupBranchBody",
+            "both branches in if statement have same body",
         );
     }
 }
@@ -1289,6 +1400,7 @@ fn check_dup_sub_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         bin.op_pos.0 as u32,
+        "dupSubExpr",
         format!(
             "suspicious identical LHS and RHS for `{}` operator",
             bin.op.as_str()
@@ -1336,23 +1448,26 @@ fn check_flag_name(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Str
     };
     let pos = call.fun.pos().0 as u32;
     if flag.is_empty() {
-        report(pending, pos, "empty flag name");
+        report(pending, pos, "flagName", "empty flag name");
     } else if flag.starts_with('-') {
         report(
             pending,
             pos,
+            "flagName",
             format!("flag name {flag:?} should not start with a hyphen"),
         );
     } else if flag.contains('=') {
         report(
             pending,
             pos,
+            "flagName",
             format!("flag name {flag:?} should not contain '='"),
         );
     } else if flag.contains(' ') {
         report(
             pending,
             pos,
+            "flagName",
             format!("flag name {flag:?} contains whitespace"),
         );
     }
@@ -1393,13 +1508,19 @@ fn check_map_key(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     kv.key.pos().0 as u32,
+                    "mapKey",
                     format!("suspicious duplicate {text} key"),
                 );
             }
         }
     }
     if let Some((pos, key)) = whitespace_key {
-        report(pending, pos, format!("suspicious whitespace in {key} key"));
+        report(
+            pending,
+            pos,
+            "mapKey",
+            format!("suspicious whitespace in {key} key"),
+        );
     }
 }
 
@@ -1423,6 +1544,7 @@ fn check_off_by1(index: &IndexExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         index.lbrack.0 as u32,
+        "offBy1",
         format!("index expr always panics; maybe you wanted {x}[len({x})-1]?"),
     );
 }
@@ -1483,6 +1605,7 @@ fn check_type_switch_var(stmt: &TypeSwitchStmt, pending: &mut Vec<(u32, String)>
         report(
             pending,
             stmt.switch.0 as u32,
+            "typeSwitchVar",
             format!("{count} {msg} can benefit from type switch with assignment"),
         );
     }
@@ -1511,6 +1634,7 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             bin.op_pos.0 as u32,
+            "badCond",
             format!("`{text}` condition is suspicious"),
         );
         return;
@@ -1528,6 +1652,7 @@ fn check_bad_cond_expr(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
             report(
                 pending,
                 bin.op_pos.0 as u32,
+                "badCond",
                 format!("`{text}` condition is always false"),
             );
         }
@@ -1590,6 +1715,7 @@ fn check_bad_cond_for(stmt: &guff::ast::ForStmt, pending: &mut Vec<(u32, String)
     report(
         pending,
         stmt.for_.0 as u32,
+        "badCond",
         format!("`{cond_t}` in loop; probably meant `{suggest}`?"),
     );
 }
@@ -1694,6 +1820,7 @@ fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)
     report(
         pending,
         fl.ty.func.0 as u32,
+        "unlambda",
         format!("replace `{lit_text}` with `{callable}`"),
     );
 }
@@ -1734,6 +1861,7 @@ fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, St
     report(
         pending,
         sel.sel.pos().0 as u32,
+        "underef",
         format!(
             "could simplify (*{inner}).{} to {inner}.{}",
             sel.sel.name, sel.sel.name
@@ -1830,8 +1958,24 @@ fn check_regexp_must(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
     report(
         pending,
         call.fun.pos().0 as u32,
+        "regexpMust",
         format!("for const patterns like {pat_s:?}, use {suggest}"),
     );
+}
+
+/// The upstream `bytes.SplitN` rule is `bytes.SplitN(b, []byte("."), -1)`:
+/// `b` and `"."` are written without `$`, so ruleguard matches them literally.
+fn is_bytes_splitn_literal_form(call: &CallExpr) -> bool {
+    if call.args.len() != 3 {
+        return false;
+    }
+    if !matches!(&call.args[0], Expr::Ident(id) if id.name == "b") {
+        return false;
+    }
+    let Some(inner) = is_byte_slice_conv(&call.args[1]) else {
+        return false;
+    };
+    matches!(inner, Expr::BasicLit(lit) if lit.value == "\".\"")
 }
 
 fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
@@ -1846,10 +1990,12 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
             && (code::is_integer_literal(pass, &call.args[0], -1) || is_int_lit(&call.args[0], -1))
             && type_is_sync_wait_group(pass, &sel.x)
         {
+            let whole = call_text(pass, call).unwrap_or_else(|| "Add(-1)".into());
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                "use WaitGroup.Done method in `Add(-1)`",
+                "wrapperFunc",
+                format!("use WaitGroup.Done method in `{whole}`"),
             );
             return;
         }
@@ -1858,29 +2004,37 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
             && (code::is_integer_literal(pass, &call.args[0], 0) || is_int_lit(&call.args[0], 0))
             && type_is_bytes_buffer(pass, &sel.x)
         {
+            let whole = call_text(pass, call).unwrap_or_else(|| "Truncate(0)".into());
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                "use Buffer.Reset method in `Truncate(0)`",
+                "wrapperFunc",
+                format!("use Buffer.Reset method in `{whole}`"),
             );
             return;
         }
     }
     match name.as_str() {
+        // `strings.SplitN($_, $_, -1)` is a general pattern upstream, but the
+        // bytes twin is written `bytes.SplitN(b, []byte("."), -1)` — literal
+        // identifiers, so it only ever fires on that exact spelling.
         "strings.SplitN" | "bytes.SplitN"
             if call.args.len() >= 3
                 && (code::is_integer_literal(pass, &call.args[2], -1)
-                    || is_int_lit(&call.args[2], -1)) =>
+                    || is_int_lit(&call.args[2], -1))
+                && (name == "strings.SplitN" || is_bytes_splitn_literal_form(call)) =>
         {
             let pkg = if name.starts_with("bytes") {
                 "bytes"
             } else {
                 "strings"
             };
+            let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(..., -1)"));
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                format!("use {pkg}.Split method in `{name}(..., -1)`"),
+                "wrapperFunc",
+                format!("use {pkg}.Split method in `{whole}`"),
             );
         }
         "strings.Replace" | "bytes.Replace"
@@ -1893,10 +2047,12 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
             } else {
                 "strings"
             };
+            let whole = call_text(pass, call).unwrap_or_else(|| format!("{name}(..., -1)"));
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                format!("wrapperFunc: use {pkg}.ReplaceAll method in `{name}(..., -1)`"),
+                "wrapperFunc",
+                format!("use {pkg}.ReplaceAll method in `{whole}`"),
             );
         }
         "http.HandlerFunc"
@@ -1906,10 +2062,13 @@ fn check_wrapper_func(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
                     Some("http.NotFound")
                 ) =>
         {
+            let whole =
+                call_text(pass, call).unwrap_or_else(|| "http.HandlerFunc(http.NotFound)".into());
             report(
                 pending,
                 call.fun.pos().0 as u32,
-                "use http.NotFoundHandler method in `http.HandlerFunc(http.NotFound)`",
+                "wrapperFunc",
+                format!("use http.NotFoundHandler method in `{whole}`"),
             );
         }
         _ => {}
@@ -1977,6 +2136,7 @@ fn check_arg_order(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Str
     report(
         pending,
         call.fun.pos().0 as u32,
+        "argOrder",
         format!("{lit_t} and {s_t} arguments order looks reversed"),
     );
 }
@@ -2033,6 +2193,7 @@ fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Vec<(u
                 report(
                     pending,
                     cc.case.0 as u32,
+                    "caseOrder",
                     format!("type is not defined {concrete}"),
                 );
                 return;
@@ -2043,6 +2204,7 @@ fn check_case_order(pass: &Pass<'_>, stmt: &TypeSwitchStmt, pending: &mut Vec<(u
                     report(
                         pending,
                         cc.case.0 as u32,
+                        "caseOrder",
                         format!(
                             "case {concrete} must go before the {} case",
                             iface.node_text
@@ -2088,6 +2250,7 @@ fn check_sloppy_type_assert(
             report(
                 pending,
                 assert.lparen.0 as u32,
+                "sloppyTypeAssert",
                 "type assertion from/to types are identical",
             );
         }
@@ -2100,6 +2263,7 @@ fn check_sloppy_type_assert(
         report(
             pending,
             assert.lparen.0 as u32,
+            "sloppyTypeAssert",
             "type assertion from/to types are identical",
         );
     }
@@ -2155,7 +2319,8 @@ fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>)
         for p in COMMENT_FMT_PARTS {
             // Prefixes are ASCII; compare via bytes so a multi-byte char in
             // `text` cannot panic on a mid-codepoint slice (`text[..p.len()]`).
-            if text.len() >= p.len() && text.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes())
+            if text.len() >= p.len()
+                && text.as_bytes()[..p.len()].eq_ignore_ascii_case(p.as_bytes())
             {
                 continue 'outer;
             }
@@ -2176,6 +2341,7 @@ fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>)
         report(
             pending,
             comment.slash.0 as u32,
+            "commentFormatting",
             "put a space between `//` and comment text",
         );
         return;
@@ -2235,7 +2401,8 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             report(
                 pending,
                 comment.slash.0 as u32,
-                format!("deprecatedComment: use `Deprecated: ` (note the casing) instead of `{prefix}`"),
+                "deprecatedComment",
+                format!("use `Deprecated: ` (note the casing) instead of `{prefix}`"),
             );
             return;
         }
@@ -2243,7 +2410,8 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
             report(
                 pending,
                 comment.slash.0 as u32,
-                "deprecatedComment: use `:` instead of `,` in `Deprecated, `",
+                "deprecatedComment",
+                "use `:` instead of `,` in `Deprecated, `",
             );
             return;
         }
@@ -2254,7 +2422,8 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
                 report(
                     pending,
                     comment.slash.0 as u32,
-                    "deprecatedComment: the proper format is `Deprecated: `",
+                    "deprecatedComment",
+                    "the proper format is `Deprecated: `",
                 );
                 return;
             }
@@ -2265,17 +2434,14 @@ fn check_deprecated_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>
                 report(
                     pending,
                     comment.slash.0 as u32,
-                    format!("deprecatedComment: typo in `{word}`; should be `Deprecated`"),
+                    "deprecatedComment",
+                    format!("typo in `{word}`; should be `Deprecated`"),
                 );
                 return;
             }
         }
         if l.starts_with(DEPRECATED_PREFIX) && !prev.is_empty() {
-            report(
-                pending,
-                comment.slash.0 as u32,
-                "deprecatedComment: `Deprecated: ` notices should be in a dedicated paragraph, separated from the rest",
-            );
+            report(pending, comment.slash.0 as u32, "deprecatedComment", "`Deprecated: ` notices should be in a dedicated paragraph, separated from the rest");
             return;
         }
         prev = l.to_string();
@@ -2289,6 +2455,7 @@ fn check_codegen_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
             report(
                 pending,
                 comment.slash.0 as u32,
+                "codegenComment",
                 "comment should match `Code generated .* DO NOT EDIT.` regexp",
             );
             return;
@@ -2375,7 +2542,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                     // pos is from reparse fset; remap via line.
                     let line = re_fset.position(Pos(pos as i64)).line;
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                        report(pending, mapped, msg);
+                        pending.push((mapped, msg));
                     }
                 }
             }
@@ -2388,7 +2555,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for (pos, msg) in local {
                     let line = re_fset.position(Pos(pos as i64)).line;
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                        report(pending, mapped, msg);
+                        pending.push((mapped, msg));
                     }
                 }
             }
@@ -2402,7 +2569,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for (pos, msg) in local {
                     let line = re_fset.position(Pos(pos as i64)).line;
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                        report(pending, mapped, msg);
+                        pending.push((mapped, msg));
                     }
                 }
             }
@@ -2414,7 +2581,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             for (pos, msg) in local {
                 let line = re_fset.position(Pos(pos as i64)).line;
                 if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                    report(pending, mapped, msg);
+                    pending.push((mapped, msg));
                 }
             }
         }
@@ -2425,7 +2592,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             for (pos, msg) in local {
                 let line = re_fset.position(Pos(pos as i64)).line;
                 if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                    report(pending, mapped, msg);
+                    pending.push((mapped, msg));
                 }
             }
         }
@@ -2437,7 +2604,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for (pos, msg) in local {
                     let line = re_fset.position(Pos(pos as i64)).line;
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                        report(pending, mapped, msg);
+                        pending.push((mapped, msg));
                     }
                 }
             }
@@ -2449,7 +2616,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
             for (pos, msg) in local {
                 let line = re_fset.position(Pos(pos as i64)).line;
                 if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                    report(pending, mapped, msg);
+                    pending.push((mapped, msg));
                 }
             }
         }
@@ -2461,7 +2628,7 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
                 for (pos, msg) in local {
                     let line = re_fset.position(Pos(pos as i64)).line;
                     if let Some(mapped) = line_pos(pass.fset(), file.pos(), line) {
-                        report(pending, mapped, msg);
+                        pending.push((mapped, msg));
                     }
                 }
             }
@@ -2497,6 +2664,7 @@ fn check_commented_out_import(file: &File, pending: &mut Vec<(u32, String)>) {
                     report(
                         pending,
                         comment.slash.0 as u32,
+                        "commentedOutImport",
                         format!("remove commented-out \"{path}\" import"),
                     );
                 }
@@ -2596,6 +2764,7 @@ fn check_commented_out_code(file: &File, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             cg.pos().0 as u32,
+            "commentedOutCode",
             "may want to remove commented-out code",
         );
     }
@@ -2655,7 +2824,8 @@ fn check_empty_string_test(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<
     report(
         pending,
         bin.op_pos.0 as u32,
-        format!("emptyStringTest: replace `{whole}` with `{suggest}`"),
+        "emptyStringTest",
+        format!("replace `{whole}` with `{suggest}`"),
     );
 }
 
@@ -2674,12 +2844,14 @@ fn check_empty_fallthrough(stmt: &SwitchStmt, pending: &mut Vec<(u32, String)>) 
                         report(
                             pending,
                             bs.tok_pos.0 as u32,
+                            "emptyFallthrough",
                             "remove empty case containing only fallthrough to default case",
                         );
                     } else if !cc.list.is_empty() {
                         report(
                             pending,
                             bs.tok_pos.0 as u32,
+                            "emptyFallthrough",
                             "replace empty case containing only fallthrough with expression list",
                         );
                     }
@@ -2702,7 +2874,7 @@ fn check_empty_decl(g: &guff::ast::GenDecl, pending: &mut Vec<(u32, String)>) {
         Some(Token::TYPE) => "empty type() block",
         _ => return,
     };
-    report(pending, g.tok_pos.0 as u32, msg);
+    report(pending, g.tok_pos.0 as u32, "emptyDecl", msg);
 }
 
 fn check_octal_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
@@ -2721,6 +2893,7 @@ fn check_octal_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         lit.pos().0 as u32,
+        "octalLiteral",
         format!("use new octal literal style, 0o{}", &v[1..]),
     );
 }
@@ -2749,6 +2922,7 @@ fn check_nil_val_return(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut Vec<(u32, 
             report(
                 pending,
                 ret.return_.0 as u32,
+                "nilValReturn",
                 format!("returned expr is always nil; replace {val} with nil"),
             );
             break;
@@ -2776,6 +2950,7 @@ fn check_yoda_style(bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         bin.op_pos.0 as u32,
+        "yodaStyleExpr",
         format!("consider to change order in expression to {y_t} {op} {x_t}"),
     );
 }
@@ -2870,6 +3045,7 @@ fn check_defer_unlambda(pass: &Pass<'_>, d: &DeferStmt, pending: &mut Vec<(u32, 
     report(
         pending,
         d.defer_.0 as u32,
+        "deferUnlambda",
         format!("can rewrite as `{rewrite}`"),
     );
 }
@@ -2888,6 +3064,7 @@ fn check_init_clause(name: &str, init: Option<&Stmt>, pos: u32, pending: &mut Ve
     report(
         pending,
         pos,
+        "initClause",
         format!("consider to move `{clause}` before {name}"),
     );
 }
@@ -2942,11 +3119,12 @@ fn is_builtin_name(name: &str) -> bool {
     )
 }
 
-fn warn_builtin_shadow(ident: &Ident, pending: &mut Vec<(u32, String)>) {
+fn warn_builtin_shadow(ident: &Ident, checker: &str, pending: &mut Vec<(u32, String)>) {
     if is_builtin_name(&ident.name) {
         report(
             pending,
             ident.pos().0 as u32,
+            checker,
             format!("shadowing of predeclared identifier: {}", ident.name),
         );
     }
@@ -2958,7 +3136,7 @@ fn check_builtin_shadow_fields(fields: Option<&FieldList>, pending: &mut Vec<(u3
     };
     for field in &fl.list {
         for name in &field.names {
-            warn_builtin_shadow(name, pending);
+            warn_builtin_shadow(name, "builtinShadow", pending);
         }
     }
 }
@@ -2980,14 +3158,14 @@ fn check_builtin_shadow_assign(pass: &Pass<'_>, a: &AssignStmt, pending: &mut Ve
             continue;
         };
         if is_def_ident(pass, id) {
-            warn_builtin_shadow(id, pending);
+            warn_builtin_shadow(id, "builtinShadow", pending);
         }
     }
 }
 
 fn check_builtin_shadow_value_spec(spec: &ValueSpec, pending: &mut Vec<(u32, String)>) {
     for name in &spec.names {
-        warn_builtin_shadow(name, pending);
+        warn_builtin_shadow(name, "builtinShadow", pending);
     }
 }
 
@@ -3020,17 +3198,19 @@ fn check_builtin_shadow_func(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u
 fn check_builtin_shadow_decl(decl: &Decl, pending: &mut Vec<(u32, String)>) {
     match decl {
         Decl::FuncDecl(f) if f.recv.is_none() => {
-            warn_builtin_shadow(&f.name, pending);
+            warn_builtin_shadow(&f.name, "builtinShadowDecl", pending);
         }
         Decl::GenDecl(g) => {
             for spec in &g.specs {
                 match spec {
                     Spec::ValueSpec(vs) => {
                         for name in &vs.names {
-                            warn_builtin_shadow(name, pending);
+                            warn_builtin_shadow(name, "builtinShadowDecl", pending);
                         }
                     }
-                    Spec::TypeSpec(ts) => warn_builtin_shadow(&ts.name, pending),
+                    Spec::TypeSpec(ts) => {
+                        warn_builtin_shadow(&ts.name, "builtinShadowDecl", pending)
+                    }
                     Spec::ImportSpec(_) => {}
                 }
             }
@@ -3066,7 +3246,12 @@ fn check_dup_import(pass: &Pass<'_>, file: &File, pending: &mut Vec<(u32, String
             msg.push_str(&format!(" {line}"));
         }
         for imp in import_list {
-            report(pending, imp.path.value_pos.0 as u32, msg.clone());
+            report(
+                pending,
+                imp.path.value_pos.0 as u32,
+                "dupImport",
+                msg.clone(),
+            );
         }
     }
 }
@@ -3092,6 +3277,7 @@ fn check_filepath_join(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
             report(
                 pending,
                 lit.value_pos.0 as u32,
+                "filepathJoin",
                 format!("{text} contains a path separator"),
             );
         }
@@ -3251,6 +3437,7 @@ fn check_param_type_combine(pass: &Pass<'_>, f: &FuncDecl, pending: &mut Vec<(u3
     report(
         pending,
         f.ty.pos().0 as u32,
+        "paramTypeCombine",
         format!("{before} could be replaced with {after}"),
     );
 }
@@ -3293,6 +3480,7 @@ fn check_range_append_all(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u3
             report(
                 pending,
                 from.pos().0 as u32,
+                "rangeAppendAll",
                 format!("append all `{}` data while range it", from.name),
             );
         }
@@ -3368,6 +3556,7 @@ fn check_weak_cond(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, St
     report(
         pending,
         bin.op_pos.0 as u32,
+        "weakCond",
         format!("suspicious `{whole}`; nil check may not be enough, check for len"),
     );
 }
@@ -3441,6 +3630,7 @@ fn check_dup_option(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
             report(
                 pending,
                 arg.pos().0 as u32,
+                "dupOption",
                 format!("function argument `{code}` is duplicated"),
             );
         }
@@ -3484,6 +3674,7 @@ fn check_method_expr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     report(
         pending,
         call.fun.pos().0 as u32,
+        "methodExprCall",
         format!(
             "consider to change `{fun_t}` to `{recv_t}.{}`",
             sel.sel.name
@@ -3529,6 +3720,7 @@ fn check_range_expr_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32
     report(
         pending,
         rs.for_.0 as u32,
+        "rangeExprCopy",
         format!("copy of {x_t} ({size} bytes) can be avoided with &{x_t}"),
     );
 }
@@ -3568,6 +3760,7 @@ fn check_regexp_pattern(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32
         report(
             pending,
             call.args[0].pos().0 as u32,
+            "regexpPattern",
             format!("'.{domain}' should probably be '\\.{domain}'"),
         );
     }
@@ -3594,7 +3787,7 @@ fn check_bad_regexp(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
     };
     let pos = call.args[0].pos().0 as u32;
     for msg in gocritic_bad_regexp::check_pattern(&pat) {
-        report(pending, pos, msg);
+        report(pending, pos, "badRegexp", msg);
     }
 }
 
@@ -3621,6 +3814,7 @@ fn check_regexp_simplify(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u3
         report(
             pending,
             call.args[0].pos().0 as u32,
+            "regexpSimplify",
             format!("can re-write `{pat}` as `{simplified}`"),
         );
     }
@@ -3800,6 +3994,7 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
         report(
             pending,
             bin.op_pos.0 as u32,
+            "sortSlice",
             format!("cmp func must use {slice_t} slice in comparison"),
         );
     }
@@ -3807,6 +4002,7 @@ fn check_sort_slice(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, St
         report(
             pending,
             bin.op_pos.0 as u32,
+            "sortSlice",
             format!(
                 "unusual order of {{{},{}}} params in comparison",
                 ivar.name, jvar.name
@@ -3983,12 +4179,14 @@ fn check_sql_query(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32,
         report(
             pending,
             sel.sel.pos().0 as u32,
+            "sqlQuery",
             format!("use {recv_t}.Exec() if returned result is not needed"),
         );
     } else {
         report(
             pending,
             sel.sel.pos().0 as u32,
+            "sqlQuery",
             "ignoring Query() rows result may lead to a connection leak",
         );
     }
@@ -4066,6 +4264,7 @@ fn check_type_assert_chain(
         report(
             pending,
             stmt.if_.0 as u32,
+            "typeAssertChain",
             "rewrite if-else to type switch statement",
         );
     }
@@ -4196,6 +4395,7 @@ fn check_truncate_cmp_side(
     report(
         pending,
         cast_expr.pos().0 as u32,
+        "truncateCmp",
         format!(
             "truncation in comparison {}->{} bit; cast the other operand to {suggest} instead",
             xsize * 8,
@@ -4241,6 +4441,7 @@ fn check_type_def_first(file: &File, pending: &mut Vec<(u32, String)>) {
                         report(
                             pending,
                             g.tok_pos.0 as u32,
+                            "typeDefFirst",
                             format!(
                                 "definition of type '{}' should appear before its methods",
                                 ts.name.name
@@ -4268,6 +4469,7 @@ fn walk_defer_in_loop_stmts(stmts: &[Stmt], in_for: bool, pending: &mut Vec<(u32
                 report(
                     pending,
                     d.defer_.0 as u32,
+                    "deferInLoop",
                     "Possible resource leak, 'defer' is called in the 'for' loop",
                 );
             }
@@ -4325,6 +4527,7 @@ fn check_hex_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             lit.pos().0 as u32,
+            "hexLiteral",
             format!("prefer 0x over 0X, s/{}/{suggest}/", lit.value),
         );
         return;
@@ -4339,6 +4542,7 @@ fn check_hex_literal(lit: &BasicLit, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             lit.pos().0 as u32,
+            "hexLiteral",
             "don't mix hex literal letter digits casing",
         );
     }
@@ -4358,6 +4562,7 @@ fn check_nesting_reduce_for(body: &BlockStmt, pending: &mut Vec<(u32, String)>) 
         report(
             pending,
             ifs.if_.0 as u32,
+            "nestingReduce",
             "invert if cond, replace body with `continue`, move old body after the statement",
         );
     }
@@ -4373,6 +4578,7 @@ fn check_todo_comment_without_detail(cg: &CommentGroup, pending: &mut Vec<(u32, 
             report(
                 pending,
                 c.pos().0 as u32,
+                "todoCommentWithoutDetail",
                 "may want to add detail/assignee to this TODO/FIXME/BUG comment",
             );
             break;
@@ -4466,7 +4672,8 @@ fn visit_doc_stub(
         report(
             pending,
             pos,
-            "deprecatedComment: silencing go lint doc-comment warnings is unadvised",
+            "docStub",
+            "silencing go lint doc-comment warnings is unadvised",
         );
     }
 }
@@ -4495,6 +4702,7 @@ fn check_unnecessary_block_in_list(stmts: &[Stmt], pending: &mut Vec<(u32, Strin
                 report(
                     pending,
                     b.lbrace.0 as u32,
+                    "unnecessaryBlock",
                     "block doesn't have definitions, can be simply deleted",
                 );
             }
@@ -4508,6 +4716,7 @@ fn check_unnecessary_block_case(body: &[Stmt], pending: &mut Vec<(u32, String)>)
             report(
                 pending,
                 b.lbrace.0 as u32,
+                "unnecessaryBlock",
                 "case statement doesn't require a block statement",
             );
             return;
@@ -4564,6 +4773,7 @@ fn check_sloppy_reassign(ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         assign.tok_pos.0 as u32,
+        "sloppyReassign",
         format!(
             "re-assignment to `{}` can be replaced with `{} := {rhs}`",
             re_assigned.name, re_assigned.name
@@ -4699,6 +4909,7 @@ fn check_http_no_body(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, 
     report(
         pending,
         call.args[nil_idx].pos().0 as u32,
+        "httpNoBody",
         "http.NoBody should be preferred to the nil request body",
     );
 }
@@ -4725,6 +4936,7 @@ fn check_prefer_decode_rune(pass: &Pass<'_>, ix: &IndexExpr, pending: &mut Vec<(
     report(
         pending,
         ix.lbrack.0 as u32,
+        "preferDecodeRune",
         format!("consider replacing []rune({s_t})[0] with utf8.DecodeRuneInString({s_t})"),
     );
 }
@@ -4805,6 +5017,7 @@ fn check_prefer_write_byte(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
     report(
         pending,
         call.fun.pos().0 as u32,
+        "preferWriteByte",
         format!("consider writing single byte rune {rune} with {receiver}.WriteByte({rune})"),
     );
 }
@@ -4822,16 +5035,21 @@ fn check_index_alloc(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
     let Some(x) = is_string_conv(&call.args[0]) else {
         return;
     };
-    let Some(x_t) = expr_text(x) else {
+    let Some(x_t) = node_text(pass, x) else {
         return;
     };
-    let Some(y_t) = expr_text(&call.args[1]) else {
+    let Some(y_t) = node_text(pass, &call.args[1]) else {
+        return;
+    };
+    // `Report("consider replacing $$ with bytes.Index($x, []byte($y))")`.
+    let Some(whole) = call_text(pass, call) else {
         return;
     };
     report(
         pending,
         call.fun.pos().0 as u32,
-        format!("consider replacing $$ with bytes.Index({x_t}, []byte({y_t}))"),
+        "indexAlloc",
+        format!("consider replacing {whole} with bytes.Index({x_t}, []byte({y_t}))"),
     );
 }
 
@@ -4844,12 +5062,16 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                 _ => false,
             };
             if is_copy && call.args.len() == 2 {
-                if let Some(_s) = is_byte_slice_conv(&call.args[1]) {
-                    report(
-                        pending,
-                        call.args[1].pos().0 as u32,
-                        "can simplify `[]byte($s)` to `$s`",
-                    );
+                if let Some(s) = is_byte_slice_conv(&call.args[1]) {
+                    // Report("can simplify `[]byte($s)` to `$s`")
+                    if let Some(s_t) = node_text(pass, s) {
+                        report(
+                            pending,
+                            call.args[1].pos().0 as u32,
+                            "stringXbytes",
+                            format!("can simplify `[]byte({s_t})` to `{s_t}`"),
+                        );
+                    }
                 }
             }
             // len(string(b))
@@ -4860,11 +5082,16 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                     if is_byte_slice_typed(pass, b)
                         || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
                     {
-                        report(
-                            pending,
-                            call.fun.pos().0 as u32,
-                            "can replace `len(string($b))` with `len($b)`",
-                        );
+                        // Suggest(`len($b)`), no Report — golangci renders a
+                        // suggestion-only rule as `suggestion: <replacement>`.
+                        if let Some(b_t) = node_text(pass, b) {
+                            report(
+                                pending,
+                                call.fun.pos().0 as u32,
+                                "stringXbytes",
+                                format!("suggestion: len({b_t})"),
+                            );
+                        }
                     }
                 }
             }
@@ -4877,19 +5104,30 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                     "Match" | "FindIndex" | "FindAllIndex"
                 ) && !call.args.is_empty()
                 {
-                    if let Some(_s) = is_byte_slice_conv(&call.args[0]) {
+                    if let Some(s) = is_byte_slice_conv(&call.args[0]) {
                         if is_stdlib_regexp_recv(pass, &sel.x) {
-                            let suggest = match sel.sel.name.as_str() {
+                            let method = match sel.sel.name.as_str() {
                                 "Match" => "MatchString",
                                 "FindIndex" => "FindStringIndex",
                                 "FindAllIndex" => "FindAllStringIndex",
                                 _ => unreachable!(),
                             };
-                            report(
-                                pending,
-                                call.args[0].pos().0 as u32,
-                                format!("can replace `[]byte($s)` arg with `{suggest}`"),
-                            );
+                            // Suggest(`$re.<method>($s)`) — FindAllIndex also
+                            // carries the trailing `$n` operand.
+                            let rest: Option<Vec<String>> =
+                                call.args[1..].iter().map(|a| node_text(pass, a)).collect();
+                            if let (Some(re_t), Some(s_t), Some(rest)) =
+                                (node_text(pass, &sel.x), node_text(pass, s), rest)
+                            {
+                                let mut args = vec![s_t];
+                                args.extend(rest);
+                                report(
+                                    pending,
+                                    call.args[0].pos().0 as u32,
+                                    "stringXbytes",
+                                    format!("suggestion: {re_t}.{method}({})", args.join(", ")),
+                                );
+                            }
                         }
                     }
                 }
@@ -4903,11 +5141,15 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                         || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
                     {
                         let op = if bin.op == Token::EQL { "==" } else { "!=" };
-                        report(
-                            pending,
-                            bin.op_pos.0 as u32,
-                            format!("can replace `string($b) {op} \"\"` with `len($b) {op} 0`"),
-                        );
+                        // Suggest(`len($b) == 0`) / Suggest(`len($b) != 0`).
+                        if let Some(b_t) = node_text(pass, b) {
+                            report(
+                                pending,
+                                bin.op_pos.0 as u32,
+                                "stringXbytes",
+                                format!("suggestion: len({b_t}) {op} 0"),
+                            );
+                        }
                     }
                 }
             }
@@ -4919,16 +5161,16 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                         && (is_byte_slice_typed(pass, y)
                             || matches!(y, Expr::Ident(_) | Expr::SelectorExpr(_)));
                     if both_bytes {
-                        let suggest = if bin.op == Token::EQL {
-                            "bytes.Equal($x, $y)"
-                        } else {
-                            "!bytes.Equal($x, $y)"
-                        };
-                        report(
-                            pending,
-                            bin.op_pos.0 as u32,
-                            format!("can replace string conversions with `{suggest}`"),
-                        );
+                        // Suggest(`bytes.Equal($x, $y)`) / `!bytes.Equal(...)`.
+                        let bang = if bin.op == Token::EQL { "" } else { "!" };
+                        if let (Some(x_t), Some(y_t)) = (node_text(pass, x), node_text(pass, y)) {
+                            report(
+                                pending,
+                                bin.op_pos.0 as u32,
+                                "stringXbytes",
+                                format!("suggestion: {bang}bytes.Equal({x_t}, {y_t})"),
+                            );
+                        }
                     }
                 }
             }
@@ -4974,16 +5216,21 @@ fn check_prefer_filepath_join(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut V
     {
         return;
     }
-    let Some(x_t) = expr_text(&left.x) else {
+    let Some(x_t) = node_text(pass, &left.x) else {
         return;
     };
-    let Some(y_t) = expr_text(&bin.y) else {
+    let Some(y_t) = node_text(pass, &bin.y) else {
+        return;
+    };
+    // Report("filepath.Join($x, $y) should be preferred to the $$").
+    let Some(whole) = node_text(pass, &Expr::BinaryExpr(bin.clone())) else {
         return;
     };
     report(
         pending,
         bin.op_pos.0 as u32,
-        format!("filepath.Join({x_t}, {y_t}) should be preferred to the $$"),
+        "preferFilepathJoin",
+        format!("filepath.Join({x_t}, {y_t}) should be preferred to the {whole}"),
     );
 }
 
@@ -5001,10 +5248,10 @@ fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u
     if call.args.len() != 2 {
         return;
     }
-    let Some(s1) = expr_text(&call.args[0]) else {
+    let Some(s1) = node_text(pass, &call.args[0]) else {
         return;
     };
-    let Some(s2) = expr_text(&call.args[1]) else {
+    let Some(s2) = node_text(pass, &call.args[1]) else {
         return;
     };
     let suggest = match bin.op {
@@ -5015,10 +5262,12 @@ fn check_strings_compare(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u
         Token::GTR if is_int_lit(&bin.y, 0) => format!("{s1} > {s2}"),
         _ => return,
     };
+    // Every arm is `Suggest`-only upstream.
     report(
         pending,
         bin.op_pos.0 as u32,
-        format!("can replace `strings.Compare` with `{suggest}`"),
+        "stringsCompare",
+        format!("suggestion: {suggest}"),
     );
 }
 
@@ -5056,6 +5305,7 @@ fn check_zero_byte_repeat(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     report(
         pending,
         call.fun.pos().0 as u32,
+        "zeroByteRepeat",
         format!("avoid bytes.Repeat([]byte{{0}}, {n}); consider using make([]byte, {n}) instead"),
     );
 }
@@ -5088,6 +5338,7 @@ fn check_bad_sorting(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u3
     report(
         pending,
         call.fun.pos().0 as u32,
+        "badSorting",
         format!("suspicious {needle} usage, maybe {suggest} was intended?"),
     );
 }
@@ -5154,6 +5405,7 @@ fn check_slice_clear(fs: &ForStmt, pending: &mut Vec<(u32, String)>) {
     report(
         pending,
         fs.for_.0 as u32,
+        "sliceClear",
         "rewrite as for-range so compiler can recognize this pattern",
     );
 }
@@ -5219,6 +5471,16 @@ fn is_fmt_sprint_call<'a>(pass: &Pass<'_>, expr: &'a Expr) -> Option<(&'static s
     Some((fprint, &inner.args))
 }
 
+/// Render the `$args` capture of the `fmt.Sprint*` operand — upstream splices
+/// the variadic match straight into `fmt.Fprint*($w, $args)`, so an empty
+/// capture really does leave a dangling `, `.
+fn fprint_args(pass: &Pass<'_>, args: &[Expr]) -> String {
+    args.iter()
+        .map(|a| node_text(pass, a).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     // $w.Write([]byte(fmt.Sprint*(...)))
     if let Expr::SelectorExpr(sel) = call.fun.as_ref() {
@@ -5227,13 +5489,17 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
             && call.args.len() == 1
         {
             if let Some(inner_s) = is_byte_slice_conv(&call.args[0]) {
-                if let Some((fprint, _)) = is_fmt_sprint_call(pass, inner_s) {
+                if let Some((fprint, args)) = is_fmt_sprint_call(pass, inner_s) {
                     if implements_writer_arity(pass, &sel.x) {
+                        // Report("fmt.Fprint*($w, $args) should be preferred to the $$").
                         let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
+                        let args = fprint_args(pass, args);
+                        let whole = call_text(pass, call).unwrap_or_default();
                         report(
                             pending,
                             call.fun.pos().0 as u32,
-                            format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+                            "preferFprint",
+                            format!("fmt.{fprint}({w}, {args}) should be preferred to the {whole}"),
                         );
                         return;
                     }
@@ -5245,15 +5511,18 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
             && code::is_method_val(pass, sel, "WriteString")
             && call.args.len() == 1
         {
-            if let Some((fprint, _)) = is_fmt_sprint_call(pass, &call.args[0]) {
+            if let Some((fprint, args)) = is_fmt_sprint_call(pass, &call.args[0]) {
                 if implements_string_writer_arity(pass, &sel.x)
                     && implements_writer_arity(pass, &sel.x)
                 {
+                    // Suggest-only rule: `suggestion: fmt.Fprint*($w, $args)`.
                     let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
+                    let args = fprint_args(pass, args);
                     report(
                         pending,
                         call.fun.pos().0 as u32,
-                        format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+                        "preferFprint",
+                        format!("suggestion: fmt.{fprint}({w}, {args})"),
                     );
                     return;
                 }
@@ -5271,14 +5540,17 @@ fn check_prefer_fprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32,
     if call.args.len() != 2 {
         return;
     }
-    let Some((fprint, _)) = is_fmt_sprint_call(pass, &call.args[1]) else {
+    let Some((fprint, args)) = is_fmt_sprint_call(pass, &call.args[1]) else {
         return;
     };
+    // Suggest-only rule: `suggestion: fmt.Fprint*($w, $args)`.
     let w = expr_text(&call.args[0]).unwrap_or_else(|| "w".into());
+    let args = fprint_args(pass, args);
     report(
         pending,
         call.fun.pos().0 as u32,
-        format!("fmt.{fprint}({w}, ...) should be preferred to the $$"),
+        "preferFprint",
+        format!("suggestion: fmt.{fprint}({w}, {args})"),
     );
 }
 
@@ -5295,11 +5567,13 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Ve
                     && implements_string_writer_arity(pass, &sel.x)
                 {
                     let w = expr_text(&sel.x).unwrap_or_else(|| "w".into());
-                    let s_t = expr_text(s).unwrap_or_else(|| "s".into());
+                    let s_t = node_text(pass, s).unwrap_or_else(|| "s".into());
+                    let whole = call_text(pass, call).unwrap_or_default();
                     report(
                         pending,
                         call.fun.pos().0 as u32,
-                        format!("{w}.WriteString({s_t}) should be preferred to the $$"),
+                        "preferStringWriter",
+                        format!("{w}.WriteString({s_t}) should be preferred to the {whole}"),
                     );
                     return;
                 }
@@ -5325,11 +5599,13 @@ fn check_prefer_string_writer(pass: &Pass<'_>, call: &CallExpr, pending: &mut Ve
         return;
     }
     let w = expr_text(&call.args[0]).unwrap_or_else(|| "w".into());
-    let s = expr_text(&call.args[1]).unwrap_or_else(|| "s".into());
+    let s = node_text(pass, &call.args[1]).unwrap_or_else(|| "s".into());
+    let whole = call_text(pass, call).unwrap_or_default();
     report(
         pending,
         call.fun.pos().0 as u32,
-        format!("{w}.WriteString({s}) should be preferred to the $$"),
+        "preferStringWriter",
+        format!("{w}.WriteString({s}) should be preferred to the {whole}"),
     );
 }
 
@@ -5364,11 +5640,10 @@ fn type_is_sync_wait_group(pass: &Pass<'_>, expr: &Expr) -> bool {
         typ,
         None,
     );
-    // Value or pointer receiver: sync.WaitGroup / *sync.WaitGroup.
-    s == "sync.WaitGroup"
-        || s == "*sync.WaitGroup"
-        || s.ends_with("/sync.WaitGroup")
-        || (s.starts_with('*') && s.ends_with("/sync.WaitGroup"))
+    // `Where(m["wg"].Type.Is("sync.WaitGroup"))` is an exact type match: a
+    // `*sync.WaitGroup` receiver does not match, and upstream really does skip
+    // it (the overwhelmingly common spelling).
+    s == "sync.WaitGroup" || s.ends_with("/sync.WaitGroup")
 }
 
 fn type_is_bytes_buffer(pass: &Pass<'_>, expr: &Expr) -> bool {
@@ -5385,10 +5660,9 @@ fn type_is_bytes_buffer(pass: &Pass<'_>, expr: &Expr) -> bool {
         typ,
         None,
     );
-    s == "bytes.Buffer"
-        || s == "*bytes.Buffer"
-        || s.ends_with("/bytes.Buffer")
-        || (s.starts_with('*') && s.ends_with("/bytes.Buffer"))
+    // Exact match, as with [`type_is_sync_wait_group`]: upstream's
+    // `Where(m["buf"].Type.Is("bytes.Buffer"))` does not match `*bytes.Buffer`.
+    s == "bytes.Buffer" || s.ends_with("/bytes.Buffer")
 }
 
 fn is_sync_map_method_call<'a>(
@@ -5454,6 +5728,7 @@ fn check_sync_map_load_and_delete(
         report(
             pending,
             asgn.tok_pos.0 as u32,
+            "syncMapLoadAndDelete",
             format!("use {m_t}.LoadAndDelete to perform load+delete operations atomically"),
         );
     }
@@ -5472,11 +5747,14 @@ fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<
     let arg = &call.args[0];
     // fmt.Errorf($f($*args))
     if let Expr::CallExpr(inner) = arg {
-        let f_t = expr_text(&inner.fun).unwrap_or_else(|| "f".into());
+        // Report(`use errors.New($f($*args)) or fmt.Errorf("%s", $f($*args)) instead`)
+        // — `$f($*args)` is the whole inner call, argument list included.
+        let inner_t = call_text(pass, inner).unwrap_or_else(|| "f()".into());
         report(
             pending,
             call.fun.pos().0 as u32,
-            format!("use errors.New({f_t}(...)) or fmt.Errorf(\"%s\", {f_t}(...)) instead"),
+            "dynamicFmtString",
+            format!("use errors.New({inner_t}) or fmt.Errorf(\"%s\", {inner_t}) instead"),
         );
         return;
     }
@@ -5484,10 +5762,11 @@ fn check_dynamic_fmt_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<
     if is_const_expr(pass, arg) {
         return;
     }
-    let f_t = expr_text(arg).unwrap_or_else(|| "f".into());
+    let f_t = node_text(pass, arg).unwrap_or_else(|| "f".into());
     report(
         pending,
         call.fun.pos().0 as u32,
+        "dynamicFmtString",
         format!("use errors.New({f_t}) or fmt.Errorf(\"%s\", {f_t}) instead"),
     );
 }
@@ -5529,21 +5808,25 @@ fn check_string_concat_simplify(
     let empty_glue = matches!(glue, Expr::BasicLit(lit) if lit.value == "\"\"");
     let suggest = match elts {
         [x, y] if empty_glue => {
-            let (Some(x_t), Some(y_t)) = (expr_text(x), expr_text(y)) else {
+            let (Some(x_t), Some(y_t)) = (node_text(pass, x), node_text(pass, y)) else {
                 return;
             };
             format!("{x_t} + {y_t}")
         }
         [x, y, z] if empty_glue => {
-            let (Some(x_t), Some(y_t), Some(z_t)) = (expr_text(x), expr_text(y), expr_text(z))
+            let (Some(x_t), Some(y_t), Some(z_t)) =
+                (node_text(pass, x), node_text(pass, y), node_text(pass, z))
             else {
                 return;
             };
             format!("{x_t} + {y_t} + {z_t}")
         }
         [x, y] => {
-            let (Some(x_t), Some(y_t), Some(g_t)) = (expr_text(x), expr_text(y), expr_text(glue))
-            else {
+            let (Some(x_t), Some(y_t), Some(g_t)) = (
+                node_text(pass, x),
+                node_text(pass, y),
+                node_text(pass, glue),
+            ) else {
                 return;
             };
             format!("{x_t} + {g_t} + {y_t}")
@@ -5553,7 +5836,9 @@ fn check_string_concat_simplify(
     report(
         pending,
         call.fun.pos().0 as u32,
-        format!("can simplify `strings.Join` to `{suggest}`"),
+        "stringConcatSimplify",
+        // Every arm is `Suggest`-only upstream.
+        format!("suggestion: {suggest}"),
     );
 }
 
@@ -5580,6 +5865,7 @@ fn check_bad_sync_once_func_call(
     report(
         pending,
         call.fun.pos().0 as u32,
+        "badSyncOnceFunc",
         format!(
             "possible sync.OnceFunc misuse, consider to assign sync.OnceFunc({x_t}) to a variable"
         ),
@@ -5609,6 +5895,7 @@ fn check_bad_sync_once_func_stmts(
         report(
             pending,
             call.fun.pos().0 as u32,
+            "badSyncOnceFunc",
             format!("possible sync.OnceFunc misuse, sync.OnceFunc({x_t}) result is not used"),
         );
     }
@@ -5673,6 +5960,7 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
     report(
         pending,
         bin.op_pos.0 as u32,
+        "equalFold",
         format!("consider replacing with {suggest}"),
     );
 }
@@ -5723,6 +6011,7 @@ fn check_equal_fold_bytes(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
     report(
         pending,
         call.fun.pos().0 as u32,
+        "equalFold",
         format!("consider replacing with bytes.EqualFold({xt}, {yt})"),
     );
 }
@@ -5746,18 +6035,16 @@ fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut V
     }
     let quoted_pct_s = Regex::new(r#"^`.*"%s".*`$"#).unwrap();
     let escaped_pct_s = Regex::new(r#"^".*\\"%s\\".*"$"#).unwrap();
-    let backquoted_pct_s = Regex::new(r#"^".*`%s`.*"$"#).unwrap();
+    // The `%#q` / backquoted arm is unreachable upstream: it is a second
+    // `m.Match("fmt.Sprintf($s, $*_)")` with the *same* syntax pattern as the
+    // first, and ruleguard keeps only one rule per pattern. Verified against
+    // golangci-lint 2.12 — `fmt.Sprintf("foo `+"`%s`"+` bar", s)` reports nothing.
     if quoted_pct_s.is_match(v) || escaped_pct_s.is_match(v) {
         report(
             pending,
             call.fun.pos().0 as u32,
+            "sprintfQuotedString",
             r#"use %q instead of "%s" for quoted strings"#,
-        );
-    } else if backquoted_pct_s.is_match(v) {
-        report(
-            pending,
-            call.fun.pos().0 as u32,
-            r#"use %#q instead of "`%s`" for backquoted strings"#,
         );
     }
 }
@@ -5818,6 +6105,7 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
                 report(
                     pending,
                     bin.op_pos.0 as u32,
+                    "timeExprSimplify",
                     format!("use {t}.UnixMilli() instead of {whole}"),
                 );
             }
@@ -5829,6 +6117,7 @@ fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
                 report(
                     pending,
                     bin.op_pos.0 as u32,
+                    "timeExprSimplify",
                     format!("use {t}.UnixMicro() instead of {whole}"),
                 );
             }
@@ -5877,6 +6166,7 @@ fn check_append_combine(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos,
+                    "appendCombine",
                     format!("can combine chain of {chain} appends into one"),
                 );
             }
@@ -5949,6 +6239,7 @@ fn check_defer_before_return(
         report(
             pending,
             d.defer_.0 as u32,
+            "unnecessaryDefer",
             format!("{summary} is placed just before return"),
         );
     }
@@ -5987,6 +6278,7 @@ fn walk_unnecessary_defer_stmt(pass: &Pass<'_>, stmt: &Stmt, pending: &mut Vec<(
                                 report(
                                     pending,
                                     d.defer_.0 as u32,
+                                    "unnecessaryDefer",
                                     format!("{summary} is placed just before return"),
                                 );
                             }
@@ -6124,6 +6416,7 @@ fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
         report(
             pending,
             call.fun.pos().0 as u32,
+            "redundantSprint",
             format!("{arg_t} is already string"),
         );
         return;
@@ -6132,6 +6425,7 @@ fn check_redundant_sprint(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u
         report(
             pending,
             call.fun.pos().0 as u32,
+            "redundantSprint",
             format!("use {arg_t}.String() instead"),
         );
     }
@@ -6186,12 +6480,14 @@ fn warn_import_shadow(
         report(
             pending,
             id.pos().0 as u32,
+            "importShadow",
             format!("shadow of imported package '{}'", id.name),
         );
     } else {
         report(
             pending,
             id.pos().0 as u32,
+            "importShadow",
             format!("shadow of imported from '{}' package '{}'", path, id.name),
         );
     }
@@ -6437,6 +6733,7 @@ fn check_type_unparen_compare(e: &Expr, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             e.pos().0 as u32,
+            "typeUnparen",
             format!("could simplify {before} to {after}"),
         );
     }
@@ -6449,6 +6746,7 @@ fn check_type_unparen_root(e: &Expr, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     p.lparen.0 as u32,
+                    "typeUnparen",
                     "could simplify (struct{...}) to struct{...}",
                 );
             }
@@ -6456,6 +6754,7 @@ fn check_type_unparen_root(e: &Expr, pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     p.lparen.0 as u32,
+                    "typeUnparen",
                     "could simplify (interface{...}) to interface{...}",
                 );
             }
@@ -6622,7 +6921,8 @@ fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Vec<(u
         if !cond {
             report(
                 pending,
-                f.name.pos().0 as u32,
+                f.ty.func.0 as u32,
+                "unnamedResult",
                 "consider giving a name to these results",
             );
         }
@@ -6638,7 +6938,8 @@ fn check_unnamed_result(f: &FuncDecl, check_exported: bool, pending: &mut Vec<(u
         if !cond {
             report(
                 pending,
-                f.name.pos().0 as u32,
+                f.ty.func.0 as u32,
+                "unnamedResult",
                 "consider giving a name to these results",
             );
             return;
@@ -6663,6 +6964,7 @@ fn check_why_no_lint(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
             report(
                 pending,
                 cg.pos().0 as u32,
+                "whyNoLint",
                 "include an explanation for nolint directive",
             );
             return;
@@ -6732,6 +7034,7 @@ fn check_huge_param_fields(
                 report(
                     pending,
                     id.pos().0 as u32,
+                    "hugeParam",
                     format!(
                         "{} is heavy ({size} bytes); consider passing it by pointer",
                         id.name
@@ -6793,6 +7096,7 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32,
         report(
             pending,
             rs.for_.0 as u32,
+            "rangeValCopy",
             format!("each iteration copies {size} bytes (consider pointers or indexing)"),
         );
     }
@@ -6800,7 +7104,6 @@ fn check_range_val_copy(pass: &Pass<'_>, rs: &RangeStmt, pending: &mut Vec<(u32,
 
 // --- batch 14: ptrToRefParam / tooManyResultsChecker / evalOrder /
 // unlabelStmt / returnAfterHttpError / exposedSyncMutex --------------------
-
 
 fn is_ref_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -6847,6 +7150,7 @@ fn check_ptr_to_ref_param_fields(
             report(
                 pending,
                 f.pos().0 as u32,
+                "ptrToRefParam",
                 format!("consider to make non-pointer type for `{ty_text}`"),
             );
         } else {
@@ -6854,6 +7158,7 @@ fn check_ptr_to_ref_param_fields(
                 report(
                     pending,
                     id.pos().0 as u32,
+                    "ptrToRefParam",
                     format!("consider `{}' to be of non-pointer type", id.name),
                 );
             }
@@ -6873,7 +7178,8 @@ fn check_too_many_results(f: &FuncDecl, max_results: usize, pending: &mut Vec<(u
     if result_num_fields(results) > max_results {
         report(
             pending,
-            f.name.pos().0 as u32,
+            f.ty.func.0 as u32,
+            "tooManyResultsChecker",
             format!(
                 "function has more than {max_results} results, consider to simplify the function"
             ),
@@ -6957,6 +7263,7 @@ fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, S
                     report(
                         pending,
                         call.lparen.0 as u32,
+                        "evalOrder",
                         format!("may want to evaluate {call_text} before the return statement"),
                     );
                 }
@@ -6966,6 +7273,7 @@ fn check_eval_order(pass: &Pass<'_>, ret: &ReturnStmt, pending: &mut Vec<(u32, S
                 report(
                     pending,
                     call.lparen.0 as u32,
+                    "evalOrder",
                     format!("may want to evaluate {call_text} before the return statement"),
                 );
             }
@@ -7085,6 +7393,7 @@ fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
         report(
             pending,
             labeled.label.pos().0 as u32,
+            "unlabelStmt",
             format!("label {name} is redundant"),
         );
         return;
@@ -7104,7 +7413,12 @@ fn check_unlabel_stmt(labeled: &LabeledStmt, pending: &mut Vec<(u32, String)>) {
         return;
     };
     if let Some(pos) = find_labeled_continue(inner_body, name) {
-        report(pending, pos, format!("change `continue {name}` to `break`"));
+        report(
+            pending,
+            pos,
+            "unlabelStmt",
+            format!("change `continue {name}` to `break`"),
+        );
     }
 }
 
@@ -7143,6 +7457,7 @@ fn check_return_after_http_error(pass: &Pass<'_>, stmt: &IfStmt, pending: &mut V
     report(
         pending,
         call.args[0].pos().0 as u32,
+        "returnAfterHttpError",
         "Possibly return is missed after the http.Error call",
     );
 }
@@ -7177,26 +7492,32 @@ fn check_exposed_sync_mutex(file: &File, pending: &mut Vec<(u32, String)>) {
         if g.tok != Some(Token::TYPE) {
             continue;
         }
-        for spec in &g.specs {
-            let Spec::TypeSpec(ts) = spec else {
-                continue;
-            };
-            if !is_exported(&ts.name.name) {
-                continue;
+        // The rules are written as `m.Match("type $x struct { …; sync.Mutex; … }")`,
+        // which is a whole *declaration* pattern: it only matches a single-spec
+        // `type` decl, and it reports at the `type` keyword — not at the field.
+        let [Spec::TypeSpec(ts)] = g.specs.as_slice() else {
+            continue;
+        };
+        if !is_exported(&ts.name.name) {
+            continue;
+        }
+        let Expr::StructType(st) = &ts.ty else {
+            continue;
+        };
+        for field in &st.fields.list {
+            if !field.names.is_empty() {
+                continue; // only embedded fields
             }
-            let Expr::StructType(st) = &ts.ty else {
+            let Some(ty) = &field.ty else {
                 continue;
             };
-            for field in &st.fields.list {
-                if !field.names.is_empty() {
-                    continue; // only embedded fields
-                }
-                let Some(ty) = &field.ty else {
-                    continue;
-                };
-                if let Some(text) = sync_mutex_embed_text(ty) {
-                    report(pending, field.pos().0 as u32, format!("don't embed {text}"));
-                }
+            if let Some(text) = sync_mutex_embed_text(ty) {
+                report(
+                    pending,
+                    g.tok_pos.0 as u32,
+                    "exposedSyncMutex",
+                    format!("don't embed {text}"),
+                );
             }
         }
     }
@@ -7254,6 +7575,7 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos2,
+                    "badLock",
                     "defer is missing, mutex is unlocked immediately",
                 );
             }
@@ -7261,6 +7583,7 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos2,
+                    "badLock",
                     "suspicious unlock, maybe Unlock was intended?",
                 );
             }
@@ -7268,6 +7591,7 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos2,
+                    "badLock",
                     "suspicious unlock, maybe RUnlock was intended?",
                 );
             }
@@ -7275,6 +7599,7 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos2,
+                    "badLock",
                     format!("maybe defer {mu_t}.Unlock() was intended?"),
                 );
             }
@@ -7282,6 +7607,7 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
                 report(
                     pending,
                     pos2,
+                    "badLock",
                     format!("maybe defer {mu_t}.RUnlock() was intended?"),
                 );
             }
@@ -7362,6 +7688,7 @@ fn check_external_error_reassign(
     report(
         pending,
         assign.tok_pos.0 as u32,
+        "externalErrorReassign",
         "suspicious reassignment of error from another package",
     );
 }
@@ -7382,11 +7709,7 @@ fn ident_type(pass: &Pass<'_>, id: &Ident) -> Option<TypeId> {
     info.types.get(&id.id).map(|tav| tav.typ)
 }
 
-fn check_unchecked_inline_err(
-    pass: &Pass<'_>,
-    ifs: &IfStmt,
-    pending: &mut Vec<(u32, String)>,
-) {
+fn check_unchecked_inline_err(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     let Some(Stmt::AssignStmt(init)) = ifs.init.as_deref() else {
         return;
     };
@@ -7438,6 +7761,7 @@ fn check_unchecked_inline_err(
     report(
         pending,
         err_id.pos().0 as u32,
+        "uncheckedInlineErr",
         format!(
             "{} error is unchecked, maybe intended to check it instead of {}",
             err_id.name, err2_id.name
@@ -7476,12 +7800,7 @@ fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
         Expr::BinaryExpr(b) => {
             if matches!(
                 b.op,
-                Token::EQL
-                    | Token::NEQ
-                    | Token::LSS
-                    | Token::GTR
-                    | Token::LEQ
-                    | Token::GEQ
+                Token::EQL | Token::NEQ | Token::LSS | Token::GTR | Token::LEQ | Token::GEQ
             ) {
                 if type_of(pass, &b.x).is_some_and(|t| type_has_float(pass, t))
                     || type_of(pass, &b.y).is_some_and(|t| type_has_float(pass, t))
@@ -7666,10 +7985,10 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
                             return Some(format!("{lx} {neg} {ly}"));
                         }
                     } else if let Some(neg) = negate_cmp_op(cmp.op) {
-                        let lx = simplify_bool_expr(&cmp.x, has_floats)
-                            .or_else(|| expr_text(&cmp.x))?;
-                        let ly = simplify_bool_expr(&cmp.y, has_floats)
-                            .or_else(|| expr_text(&cmp.y))?;
+                        let lx =
+                            simplify_bool_expr(&cmp.x, has_floats).or_else(|| expr_text(&cmp.x))?;
+                        let ly =
+                            simplify_bool_expr(&cmp.y, has_floats).or_else(|| expr_text(&cmp.y))?;
                         return Some(format!("{lx} {neg} {ly}"));
                     }
                 }
@@ -7690,10 +8009,10 @@ fn simplify_bool_expr(expr: &Expr, has_floats: bool) -> Option<String> {
                 let ry = unparen_expr(&b.y);
                 if let (Expr::UnaryExpr(nx), Expr::UnaryExpr(ny)) = (lx, ry) {
                     if nx.op == Token::NOT && ny.op == Token::NOT {
-                        let x = simplify_bool_expr(&nx.x, has_floats)
-                            .or_else(|| expr_text(&nx.x))?;
-                        let y = simplify_bool_expr(&ny.x, has_floats)
-                            .or_else(|| expr_text(&ny.x))?;
+                        let x =
+                            simplify_bool_expr(&nx.x, has_floats).or_else(|| expr_text(&nx.x))?;
+                        let y =
+                            simplify_bool_expr(&ny.x, has_floats).or_else(|| expr_text(&ny.x))?;
                         return Some(format!("{x} == {y}"));
                     }
                 }
@@ -7763,9 +8082,16 @@ fn check_bool_expr_simplify(pass: &Pass<'_>, expr: &Expr, pending: &mut Vec<(u32
     if simplified == orig {
         return;
     }
+    // The "before" half of the message is the untouched source expression, so
+    // render it through go/printer: gofmt drops the blanks around a nested
+    // higher-precedence operator (`a < b+1`, not `a < b + 1`) and [`expr_text`]
+    // does not. `simplified` is built as a string by the rewriter above, hence
+    // the guard still compares the two `expr_text` renderings.
+    let orig = node_text(pass, expr).unwrap_or(orig);
     report(
         pending,
         expr.pos().0 as u32,
+        "boolExprSimplify",
         format!("can simplify `{orig}` to `{simplified}`"),
     );
 }
@@ -8029,7 +8355,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_new_deref(s, &mut pending);
                     }
                     if enabled(&set, "flagDeref") {
-                        check_flag_deref(s, &mut pending);
+                        check_flag_deref(pass, s, &mut pending);
                     }
                 }
                 NodeRef::AssignStmt(a) => {
@@ -8054,7 +8380,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_capt_local(f, &mut pending);
                     }
                     if enabled(&set, "exitAfterDefer") {
-                        check_exit_after_defer(f, &mut pending);
+                        check_exit_after_defer(pass, f, &mut pending);
                     }
                     if enabled(&set, "builtinShadow") {
                         check_builtin_shadow_func(pass, f, &mut pending);
@@ -8063,11 +8389,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_param_type_combine(pass, f, &mut pending);
                     }
                     if enabled(&set, "unnamedResult") {
-                        check_unnamed_result(
-                            f,
-                            params.unnamed_result_check_exported,
-                            &mut pending,
-                        );
+                        check_unnamed_result(f, params.unnamed_result_check_exported, &mut pending);
                     }
                     if enabled(&set, "hugeParam") {
                         check_huge_param(pass, f, &mut pending);
@@ -8214,6 +8536,30 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     }
 
     run_comment_checks(pass, &set, &mut pending);
+
+    // go-critic runs one checker at a time, in checker-name order, so its
+    // warnings reach golangci-lint grouped by checker. That order is load
+    // bearing: `issues.uniq-by-line` (on by default) keeps only the *first*
+    // gocritic issue per source line, so when two checkers fire on one line the
+    // alphabetically earlier name wins — `tooManyResultsChecker` over
+    // `unnamedResult`, `preferFprint` over `preferStringWriter`. guff walks
+    // every checker in a single pass, so the tiebreak has to be restored here.
+    //
+    // Sorting by (line, checker) rather than by checker alone picks the same
+    // winner per line while leaving the emitted order in source order — grouping
+    // a file's findings by checker would be the faithful *pipeline* order, but
+    // golangci-lint sorts before display and guff does not. Within one checker
+    // the sort is stable, so walk order decides (two `captLocal` names on one
+    // line keep their left-to-right order, as upstream does).
+    let line_of = |pos: u32| {
+        let p = pass.fset().position(Pos(pos as i64));
+        (p.filename, p.line)
+    };
+    pending.sort_by(|a, b| {
+        line_of(a.0)
+            .cmp(&line_of(b.0))
+            .then_with(|| checker_of(&a.1).cmp(checker_of(&b.1)))
+    });
 
     for (pos, message) in pending {
         pass.reportf(pos, message);

@@ -265,7 +265,11 @@ impl<'a> Builder<'a> {
             .iter()
             .map(|(_, fv)| fv.outer)
             .collect();
-        let typ = sig.expect("function literal has a signature type");
+        // A literal with no recorded type means the checker left this node
+        // untyped (hybrid source-checking on a package with errors). Fall back
+        // to Invalid rather than aborting the build, as `type_of` does — a
+        // panic here unwinds a worker and takes the package's findings with it.
+        let typ = sig.unwrap_or_else(|| self.prog.basic_type(BasicKind::Invalid));
         let block = self.block.expect("no current block");
         let iid = crate::emit::emit(
             self.func_mut(),

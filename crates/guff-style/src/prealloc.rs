@@ -15,10 +15,6 @@
 //! rendered with go/printer's binary-operator spacing rules so the message text
 //! matches golangci-lint's.
 //!
-//! DEFERRED: upstream's `forLoopCount` (trip count of a three-clause `for`).
-//! `for-loops` is off by default and no corpus config turns it on; with it on,
-//! guff reports those loops without a capacity instead of computing one. This
-//! matches the behaviour of the analyzer this file replaced.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -44,13 +40,14 @@ enum Op {
     Add,
     Sub,
     Mul,
+    Quo,
 }
 
 impl Op {
     fn prec(self) -> u8 {
         match self {
             Op::Add | Op::Sub => 4,
-            Op::Mul => 5,
+            Op::Mul | Op::Quo => 5,
         }
     }
 
@@ -59,6 +56,7 @@ impl Op {
             Op::Add => "+",
             Op::Sub => "-",
             Op::Mul => "*",
+            Op::Quo => "/",
         }
     }
 }
@@ -85,6 +83,9 @@ enum Cap {
     Bin(Rc<Cap>, Op, Rc<Cap>),
     Neg(Rc<Cap>),
     Len(Rc<Cap>),
+    /// `min(…)` / `max(…)`, built by [`for_loop_upper_bound`] when a three-clause
+    /// loop bounds its counter with `&&` / `||`.
+    Call(&'static str, Vec<Cap>),
 }
 
 impl Cap {
@@ -103,6 +104,7 @@ impl Cap {
             Cap::Leaf(l) => l.refs.contains(name),
             Cap::Bin(x, _, y) => x.refs_name(name) || y.refs_name(name),
             Cap::Neg(x) | Cap::Len(x) => x.refs_name(name),
+            Cap::Call(_, args) => args.iter().any(|a| a.refs_name(name)),
         }
     }
 
@@ -112,6 +114,7 @@ impl Cap {
             Cap::Leaf(l) => texts.iter().any(|t| l.subs.contains(t)),
             Cap::Bin(x, _, y) => x.mentions_any(texts) || y.mentions_any(texts),
             Cap::Neg(x) | Cap::Len(x) => x.mentions_any(texts),
+            Cap::Call(_, args) => args.iter().any(|a| a.mentions_any(texts)),
         }
     }
 }
@@ -167,6 +170,42 @@ fn sub_cap(x: Option<Cap>, y: Option<Cap>) -> Option<Cap> {
     add_cap(x, Some(neg))
 }
 
+/// `incIntExpr`.
+fn inc_cap(x: Option<Cap>) -> Option<Cap> {
+    let x = x?;
+    if let Some(n) = x.int_value() {
+        return cap_int(n + 1);
+    }
+    if let Cap::Bin(lhs, Op::Sub, rhs) = &x {
+        if rhs.int_value() == Some(1) {
+            return Some((**lhs).clone());
+        }
+    }
+    Some(Cap::Bin(Rc::new(x), Op::Add, Rc::new(Cap::Int(1))))
+}
+
+/// `divIntExpr`. The `bool` is upstream's `rounded` flag: an integer division
+/// that may truncate, so the caller adds one to the capacity.
+fn div_cap(x: Option<Cap>, y: Option<Cap>) -> (Option<Cap>, bool) {
+    let (Some(x), Some(y)) = (x, y) else {
+        return (None, false);
+    };
+    let (xi, yi) = (x.int_value(), y.int_value());
+    if let (Some(a), Some(b)) = (xi, yi) {
+        if b == 0 {
+            return (None, false);
+        }
+        return (cap_int(a / b), a % b != 0);
+    }
+    if yi == Some(0) {
+        return (None, false);
+    }
+    if xi == Some(0) || yi == Some(1) {
+        return (Some(x), false);
+    }
+    (Some(Cap::Bin(Rc::new(x), Op::Quo, Rc::new(y))), true)
+}
+
 /// `mulIntExpr`.
 fn mul_cap(x: Option<Cap>, y: Option<Cap>) -> Option<Cap> {
     let (x, y) = (x?, y?);
@@ -207,6 +246,9 @@ fn cap_eq(a: &Cap, b: &Cap) -> bool {
                         && cap_eq(ay, bx)))
         }
         (Cap::Neg(x), Cap::Neg(y)) | (Cap::Len(x), Cap::Len(y)) => cap_eq(x, y),
+        (Cap::Call(af, ax), Cap::Call(bf, bx)) => {
+            af == bf && ax.len() == bx.len() && ax.iter().zip(bx).all(|(a, b)| cap_eq(a, b))
+        }
         _ => false,
     }
 }
@@ -266,6 +308,17 @@ fn render1(cap: &Cap, prec1: u8, depth: u32, out: &mut String) {
         Cap::Len(x) => {
             out.push_str("len(");
             render1(x, 0, 1, out);
+            out.push(')');
+        }
+        Cap::Call(fun, args) => {
+            out.push_str(fun);
+            out.push('(');
+            for (i, a) in args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                render1(a, 0, 1, out);
+            }
             out.push(')');
         }
         Cap::Neg(x) => {
@@ -613,6 +666,98 @@ fn expr_mentions_any(e: &Expr, texts: &[String]) -> bool {
     texts.iter().any(|t| subs.contains(t))
 }
 
+fn is_ident_named(e: &Expr, name: &str) -> bool {
+    matches!(e, Expr::Ident(id) if id.name == name)
+}
+
+/// `hasAny` over a statement — used for the `init` clause of a three-clause
+/// `for`, which upstream walks as a whole node.
+fn stmt_mentions_any(stmt: &Stmt, texts: &[String]) -> bool {
+    if texts.is_empty() {
+        return false;
+    }
+    match stmt {
+        Stmt::AssignStmt(a) => a
+            .lhs
+            .iter()
+            .chain(&a.rhs)
+            .any(|e| expr_mentions_any(e, texts)),
+        Stmt::ExprStmt(e) => expr_mentions_any(&e.x, texts),
+        Stmt::IncDecStmt(i) => expr_mentions_any(&i.x, texts),
+        Stmt::DeclStmt(d) => {
+            let Decl::GenDecl(g) = &d.decl else {
+                return false;
+            };
+            g.specs.iter().any(|spec| match spec {
+                Spec::ValueSpec(v) => v.values.iter().any(|e| expr_mentions_any(e, texts)),
+                _ => false,
+            })
+        }
+        _ => false,
+    }
+}
+
+/// `forLoopUpperBound` — pull the bound on `name` out of a `for` condition,
+/// together with the comparison operator *as seen from the counter* (an operand
+/// on the right flips it). `&&` / `||` over two bounds with the same operator
+/// fold into `min(…)` / `max(…)`.
+fn for_loop_upper_bound(e: &Expr, name: &str) -> (Option<Cap>, Option<Token>) {
+    let Expr::BinaryExpr(bin) = e else {
+        return (None, None);
+    };
+    match bin.op {
+        Token::LAND | Token::LOR => {
+            let (Some(x_cap), Some(x_op)) = for_loop_upper_bound(&bin.x, name) else {
+                return (None, None);
+            };
+            let (Some(y_cap), Some(y_op)) = for_loop_upper_bound(&bin.y, name) else {
+                return (None, None);
+            };
+            if x_op != y_op {
+                return (None, None);
+            }
+            let fun = if bin.op == Token::LAND { "min" } else { "max" };
+            // Flatten a nested fold instead of nesting `min(min(a, b), c)`.
+            if let Cap::Call(f, mut args) = x_cap.clone() {
+                if f == fun {
+                    args.push(y_cap);
+                    return (Some(Cap::Call(fun, args)), Some(x_op));
+                }
+            }
+            if let Cap::Call(f, mut args) = y_cap.clone() {
+                if f == fun {
+                    args.push(x_cap);
+                    return (Some(Cap::Call(fun, args)), Some(y_op));
+                }
+            }
+            (Some(Cap::Call(fun, vec![x_cap, y_cap])), Some(x_op))
+        }
+        Token::LSS | Token::GTR | Token::LEQ | Token::GEQ | Token::NEQ => {
+            if is_ident_named(&bin.x, name) {
+                if has_call(&bin.y) {
+                    return (None, None);
+                }
+                return (Some(leaf(&bin.y)), Some(bin.op));
+            }
+            if is_ident_named(&bin.y, name) {
+                if has_call(&bin.x) {
+                    return (None, None);
+                }
+                let op = match bin.op {
+                    Token::LSS => Token::GTR,
+                    Token::GTR => Token::LSS,
+                    Token::LEQ => Token::GEQ,
+                    Token::GEQ => Token::LEQ,
+                    other => other,
+                };
+                return (Some(leaf(&bin.x)), Some(op));
+            }
+            (None, None)
+        }
+        _ => (None, None),
+    }
+}
+
 fn is_append_call(c: &CallExpr) -> bool {
     matches!(unparen(&c.fun), Expr::Ident(id) if id.name == "append")
 }
@@ -728,7 +873,9 @@ impl<'a, 'p> Visitor<'a, 'p> {
             let mut cap_expr = self.decls[i].len_expr.clone();
             let mut any = false;
             for j in append_idx..self.appends.len() {
-                let Some(app) = &self.appends[j] else { continue };
+                let Some(app) = &self.appends[j] else {
+                    continue;
+                };
                 if app.index != i {
                     continue;
                 }
@@ -1146,26 +1293,26 @@ impl<'a, 'p> Visitor<'a, 'p> {
             }
             let mut prev: Option<usize> = None;
             for j in (append_idx..self.appends.len()).rev() {
-                let Some(app) = &self.appends[j] else { continue };
+                let Some(app) = &self.appends[j] else {
+                    continue;
+                };
                 if app.index != i {
                     continue;
                 }
                 match prev {
-                    None => {
-                        match loop_count.as_ref() {
-                            None => {
-                                if let Some(a) = self.appends[j].as_mut() {
-                                    a.count = None;
-                                }
-                            }
-                            Some(lc) => {
-                                if lc.refs_name(&self.decls[i].name) {
-                                    self.decls[i].exclude = true;
-                                    break;
-                                }
+                    None => match loop_count.as_ref() {
+                        None => {
+                            if let Some(a) = self.appends[j].as_mut() {
+                                a.count = None;
                             }
                         }
-                    }
+                        Some(lc) => {
+                            if lc.refs_name(&self.decls[i].name) {
+                                self.decls[i].exclude = true;
+                                break;
+                            }
+                        }
+                    },
                     Some(p) => {
                         let merged = add_cap(
                             self.appends[j].as_ref().and_then(|a| a.count.clone()),
@@ -1189,6 +1336,119 @@ impl<'a, 'p> Visitor<'a, 'p> {
                 }
             }
         }
+    }
+
+    /// `forLoopCount` — the trip count of a three-clause `for`, or `None` when
+    /// it cannot be derived. The `bool` is upstream's second return value:
+    /// `false` means "give up on this loop entirely" (exclude every slice
+    /// appended inside it), while `true` with a `None` count means "the count is
+    /// indeterminate", which downgrades the appends to a capacity-less report.
+    fn for_loop_count(&self, s: &ForStmt) -> (Option<Cap>, bool) {
+        let (Some(init), Some(cond), Some(post)) = (&s.init, &s.cond, &s.post) else {
+            return (None, false);
+        };
+        if stmt_mentions_any(init, &self.loop_vars) || expr_mentions_any(cond, &self.loop_vars) {
+            return (None, false);
+        }
+        let Stmt::AssignStmt(init_assign) = init.as_ref() else {
+            return (None, true);
+        };
+        if init_assign.lhs.len() != init_assign.rhs.len() {
+            return (None, true);
+        }
+
+        for (i, lhs) in init_assign.lhs.iter().enumerate() {
+            let Expr::Ident(counter) = lhs else {
+                continue;
+            };
+            let name = counter.name.as_str();
+
+            // Recover the per-iteration step from the post statement, and
+            // whether the loop counts down.
+            let mut reverse = false;
+            let mut step: Option<Cap> = None;
+            match post.as_ref() {
+                Stmt::IncDecStmt(inc) => {
+                    if is_ident_named(&inc.x, name) {
+                        reverse = inc.tok == Token::DEC;
+                        step = Some(Cap::Int(1));
+                    }
+                }
+                Stmt::AssignStmt(a) => {
+                    if a.lhs.len() != a.rhs.len() {
+                        return (None, true);
+                    }
+                    for (j, l) in a.lhs.iter().enumerate() {
+                        if !is_ident_named(l, name) {
+                            continue;
+                        }
+                        match a.tok {
+                            Some(Token::AddAssign) | Some(Token::SubAssign) => {
+                                step = Some(leaf(&a.rhs[j]));
+                                reverse = a.tok == Some(Token::SubAssign);
+                            }
+                            Some(Token::ASSIGN) => {
+                                let Expr::BinaryExpr(b) = &a.rhs[j] else {
+                                    return (None, false);
+                                };
+                                // Upstream compares the *assignment* token to
+                                // `token.SUB` here, which is never true — so
+                                // only `i = i + k` shapes are recognised, and
+                                // `reverse` stays false.
+                                if b.op == Token::ADD {
+                                    if is_ident_named(&b.x, name) {
+                                        step = Some(leaf(&b.y));
+                                    } else if is_ident_named(&b.y, name) {
+                                        step = Some(leaf(&b.x));
+                                    }
+                                }
+                            }
+                            _ => return (None, false),
+                        }
+                        if step.is_some() {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            let Some(step) = step else {
+                continue;
+            };
+
+            let lower_expr = &init_assign.rhs[i];
+            if has_call(lower_expr) {
+                continue;
+            }
+            let mut lower = Some(leaf(lower_expr));
+
+            let (mut upper, op) = for_loop_upper_bound(cond, name);
+            if !reverse {
+                if matches!(op, Some(Token::GTR) | Some(Token::GEQ)) {
+                    return (None, false);
+                }
+            } else {
+                if matches!(op, Some(Token::LSS) | Some(Token::LEQ)) {
+                    return (None, false);
+                }
+                std::mem::swap(&mut lower, &mut upper);
+            }
+            if matches!(op, Some(Token::LEQ) | Some(Token::GEQ)) {
+                upper = inc_cap(upper);
+            }
+
+            let (count, rounded) = div_cap(sub_cap(upper, lower), Some(step));
+            let count = if rounded {
+                // Extra capacity in case a non-unit step rounds down.
+                inc_cap(count)
+            } else {
+                count
+            };
+            return (count, true);
+        }
+
+        (None, true)
     }
 
     fn walk_for(&mut self, s: &ForStmt) {
@@ -1219,12 +1479,15 @@ impl<'a, 'p> Visitor<'a, 'p> {
         self.level += 1;
         self.loop_vars.truncate(vars_idx);
 
-        let exclude =
+        let mut exclude =
             !self.options.for_loops || self.has_return || self.has_goto || self.has_branch;
-        // `for-loops` is off by default; without an ported `forLoopCount` the
-        // loop trip count is treated as indeterminate, which upstream renders
-        // as a message without a capacity.
-        self.finish_loop(append_idx, exclude, None);
+        let mut loop_count = None;
+        if !exclude {
+            let (count, ok) = self.for_loop_count(s);
+            loop_count = count;
+            exclude = !ok;
+        }
+        self.finish_loop(append_idx, exclude, loop_count);
         self.has_branch = had_branch;
     }
 

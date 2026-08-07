@@ -133,7 +133,16 @@ impl Checker {
             // Type inference doesn't go past parentheses (go.dev/issue/29316),
             // so the composite-literal `hint` is dropped here. The inner kind
             // propagates, so `(f())` is still a valid statement.
-            Expr::ParenExpr(p) => return self.expr_internal(x, &p.x, None),
+            //
+            // This recurses through `raw_expr`, not `expr_internal`, exactly as
+            // Go does — the inner node needs its own `Info.Types` entry. Going
+            // straight to `expr_internal` records only the `ParenExpr`, and a
+            // consumer that looks the inner node up by itself finds nothing:
+            // `(func(input bool) *bool { return &input })(false)` left the SSA
+            // builder with a signature-less function literal, whose parameters
+            // then could not be declared, so `input` looked like a captured
+            // free variable.
+            Expr::ParenExpr(p) => return self.raw_expr(x, &p.x, None),
             Expr::StarExpr(st) => self.star_expr(x, st),
             // Channel receive `<-ch` is a valid statement (select case / bare
             // ExprStmt). Go's exprInternal returns `statement` for `token.ARROW`.

@@ -4312,6 +4312,56 @@ fn mnd_respects_disabled_argument_check() {
 }
 
 #[test]
+fn prealloc_for_loops_computes_trip_counts() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::PreallocOptions;
+
+    let pkg =
+        support::typecheck_fixture("prealloc", "example.com/prealloc/forloops", "forloops.go");
+    // `for-loops` is off by default, so nothing here is reported.
+    assert!(
+        support::run_analyzer(prealloc(), &pkg).is_empty(),
+        "three-clause loops must be silent with for-loops off"
+    );
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "prealloc",
+        PreallocOptions {
+            for_loops: true,
+            ..PreallocOptions::default()
+        },
+    );
+    let mut messages = support::run_analyzer_with_settings(
+        prealloc(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    messages.sort();
+    // Verbatim golangci-lint 2.12 output for this file with `for-loops: true`.
+    let mut want = vec![
+        "Consider preallocating out with capacity n",
+        "Consider preallocating out with capacity n + 1",
+        "Consider preallocating out with capacity n",
+        "Consider preallocating out with capacity n/2 + 1",
+        "Consider preallocating out with capacity n/k + 1",
+        "Consider preallocating out with capacity min(a, b, c)",
+        "Consider preallocating out with capacity max(n, m)",
+        "Consider preallocating out with capacity n",
+        "Consider preallocating out with capacity 3 * n",
+        "Consider preallocating out",
+    ];
+    want.sort();
+    assert_eq!(messages, want);
+}
+
+#[test]
 fn prealloc_respects_range_loops_off() {
     use std::sync::Arc;
 
@@ -6080,16 +6130,16 @@ fn gocritic_flags_common_patterns() {
         "append result not assigned",
         "is duplicated",
         "should not be capitalized",
-        "will exit",
+        "exitAfterDefer: log.Fatal will exit, and `defer os.Remove(name)` will not run",
         "rewrite if-else to switch",
         "can re-write as",
-        "flag.BoolVar",
+        "flagDeref: immediate deref in *flag.Bool(\"b\", false, \"docs\")",
         "no-op append",
         "suspicious Join",
         "probably meant -1",
         "x++",
         "x *=",
-        "duplicated args",
+        "dupArg: suspicious duplicated args in strings.Contains(a, a)",
         "both branches in if statement have same body",
         "identical LHS and RHS",
         "contains whitespace",
@@ -6100,8 +6150,7 @@ fn gocritic_flags_common_patterns() {
         "condition is suspicious",
         "replace `",
         "MustCompile",
-        "WaitGroup.Done",
-        "strings.Split method",
+        "wrapperFunc: use strings.Split method in `strings.SplitN(s, \",\", -1)`",
         "arguments order looks reversed",
         "must go before the",
         "Code generated .* DO NOT EDIT",
@@ -6282,31 +6331,30 @@ fn gocritic_enable_all_extras() {
         "utf8.DecodeRuneInString",
         "consider writing single byte rune '\\n' with w.WriteByte('\\n')",
         "bytes.Index(",
-        "can simplify `[]byte($s)` to `$s`",
-        "can replace `string($b) == \"\"`",
-        "can replace `len(string($b))`",
+        "stringXbytes: can simplify `[]byte(s)` to `s`",
+        "stringXbytes: suggestion: len(b) == 0",
+        "stringXbytes: suggestion: len(b)",
         "filepath.Join(",
-        "can replace `strings.Compare`",
+        "stringsCompare: suggestion: a == b",
         "avoid bytes.Repeat",
         "suspicious sort.StringSlice usage",
         "rewrite as for-range so compiler can recognize",
-        "fmt.Fprint(w, ...) should be preferred",
-        "fmt.Fprintf(w, ...) should be preferred",
-        "fmt.Fprintln(w, ...) should be preferred",
-        "w.WriteString(s) should be preferred",
+        "preferFprint: fmt.Fprint(w, x) should be preferred to the w.Write([]byte(fmt.Sprint(x)))",
+        "preferFprint: suggestion: fmt.Fprintf(w, \"%d\", x)",
+        "preferFprint: suggestion: fmt.Fprintln(w, x)",
+        "preferStringWriter: w.WriteString(s) should be preferred to the w.Write([]byte(s))",
         "use m.LoadAndDelete to perform load+delete",
         "use errors.New(msg) or fmt.Errorf",
-        "use errors.New(f(...)) or fmt.Errorf",
-        "can simplify `strings.Join` to `x + y`",
-        "can simplify `strings.Join` to `x + y + z`",
-        "can simplify `strings.Join` to `x + glue + y`",
+        "use errors.New(f()) or fmt.Errorf",
+        "stringConcatSimplify: suggestion: x + y",
+        "stringConcatSimplify: suggestion: x + y + z",
+        "stringConcatSimplify: suggestion: x + glue + y",
         "sync.OnceFunc(f) result is not used",
         "consider to assign sync.OnceFunc(f) to a variable",
         "consider replacing with strings.EqualFold(x, y)",
         "consider replacing with !strings.EqualFold(x, y)",
         "consider replacing with bytes.EqualFold(xb, yb)",
         "use %q instead of \"%s\" for quoted strings",
-        "use %#q instead of \"`%s`\" for backquoted strings",
         "use t.UnixMilli() instead of",
         "use tp.UnixMicro() instead of",
         "can combine chain of 2 appends into one",
@@ -6340,10 +6388,10 @@ fn gocritic_enable_all_extras() {
         "can simplify `!(a >= b)` to `a < b`",
         "can simplify `!x == !y` to `x == y`",
         "can simplify `a > b || a == b` to `a >= b`",
-        "can simplify `a < b + 1` to `a <= b`",
-        "can simplify `a + 1 > b` to `a >= b`",
-        "can simplify `a >= b + 1` to `a > b`",
-        "can simplify `!(a >= b + 1)` to `a <= b`",
+        "can simplify `a < b+1` to `a <= b`",
+        "can simplify `a+1 > b` to `a >= b`",
+        "can simplify `a >= b+1` to `a > b`",
+        "can simplify `!(a >= b+1)` to `a <= b`",
         "can simplify `a > 10 && a < 12` to `a == 11`",
         "can simplify `a < 11 || a > 11` to `a != 11`",
         "can re-write `[0-9]+` as `\\d+`",
