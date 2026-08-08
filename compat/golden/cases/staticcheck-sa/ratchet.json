@@ -1,6 +1,6 @@
 {
-  "missing": 43,
-  "extra": 47,
-  "why": "Purity is inferred across dependencies upstream (SA4017), plus Go stdlib error text for SA1000/SA1001/SA1002/SA1007 and SA5009's printf wording.",
-  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+  "missing": 25,
+  "extra": 27,
+  "why": "Go stdlib error text (SA1000 regexp/syntax, SA1001 text/template, SA1002 time layouts, SA1007 net/url, SA5009 printf); cross-package purity inference for SA4017; a handful of individual position/precision bugs (SA1005/SA1011/SA1019/SA1023/SA2000/SA4005/SA4012/SA4015/SA4020/SA4021/SA4031/SA5001/SA5004/SA5005/SA5009/SA5010/SA5011/SA5012/SA9004/SA9008).",
+  "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

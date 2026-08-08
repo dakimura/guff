@@ -126,7 +126,11 @@ sa4016/bad/bad.go:4:8:staticcheck::QF1011: could omit type int from declaration;
 sa4016/bad/bad.go:4:8:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
 sa4016/bad/bad.go:5:6:staticcheck::SA4016: x & 0 always equals 0
 sa4016/ok/ok.go:2:19:staticcheck::SA4000: identical expressions on the left and right side of the '&' operator
-sa4017/bad/bad.go:5:15:staticcheck::SA4017: ToLower doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:20:2:staticcheck::SA4017: ToLower doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:21:2:staticcheck::SA4017: add doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:22:2:staticcheck::SA4017: double doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:23:2:staticcheck::SA4017: trimmed doesn't have side effects and its return value is ignored
+sa4017/bad/bad.go:24:2:staticcheck::SA4017: norm doesn't have side effects and its return value is ignored
 sa4018/bad/bad.go:2:23:staticcheck::SA4018: self-assignment of x to x
 sa4020/bad/bad.go:9:2:staticcheck::SA4020: unreachable case clause: any will always match before example.com/sa4020/bad.T
 sa4021/bad/bad.go:4:5:staticcheck::SA4006: this value of s is never used

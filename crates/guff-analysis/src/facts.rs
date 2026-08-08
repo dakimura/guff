@@ -164,6 +164,7 @@ pub fn ensure_builtin_fact_decoders() {
     ONCE.call_once(|| {
         register_fact_decoder("StringFact", decode_string_fact);
         crate::passes::facts::deprecated::register_deprecated_fact_decoder();
+        crate::passes::facts::purity::register_purity_fact_decoder();
     });
 }
 

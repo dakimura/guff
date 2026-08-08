@@ -886,11 +886,6 @@
       "linter": "staticcheck"
     },
     {
-      "declared_in": "guff-staticcheck/src/sa9010.rs",
-      "id": "SA9010",
-      "linter": "staticcheck"
-    },
-    {
       "declared_in": "guff-staticcheck/src/st1000.rs",
       "id": "ST1000",
       "linter": "staticcheck"
@@ -2841,7 +2836,7 @@
       "sloglint": 1,
       "spancheck": 1,
       "sqlclosecheck": 1,
-      "staticcheck": 161,
+      "staticcheck": 160,
       "swaggo": 1,
       "tagalign": 1,
       "tagliatelle": 1,
@@ -2864,7 +2859,7 @@
       "wsl_v5": 1,
       "zerologlint": 1
     },
-    "total": 548
+    "total": 547
   },
   "linters": [
     "arangolint",

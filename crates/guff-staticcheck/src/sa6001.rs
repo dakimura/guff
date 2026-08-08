@@ -4,7 +4,7 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, CallExpr, Expr, Ident, IndexExpr, Stmt};
+use guff::ast::{AssignStmt, CallExpr, Expr, Ident, IndexExpr};
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::object_of;
@@ -104,7 +104,15 @@ fn check_assign(pass: &Pass<'_>, assign: &AssignStmt) -> Option<u32> {
         }
     });
     if map_lookups >= 2 && only_maps {
-        Some(assign.tok_pos.0 as u32)
+        // Upstream reports the conversion instruction, whose source node is the
+        // `string(key)` call — not the `:=`.
+        Some(
+            assign
+                .rhs
+                .first()
+                .map(|e| e.pos().0 as u32)
+                .unwrap_or(assign.tok_pos.0 as u32),
+        )
     } else {
         None
     }

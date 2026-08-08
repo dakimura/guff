@@ -257,8 +257,19 @@ fn emit_report(pass: &mut Pass<'_>, report: PendingReport) {
             diags.push((arg_pos, msg));
         }
     }
+    // Upstream reports the call *instruction*, and honnef's IR gives every
+    // instruction the AST node it came from: `Instruction.Pos()` is
+    // `Source().Pos()`. For a plain call that node is the `ast.CallExpr`, whose
+    // position is the start of the callee expression — not the `(` that
+    // guff-ssa stamps (go/ssa's convention, which honnef deliberately dropped).
+    // `defer` / `go` already agree, because there the source node is the
+    // statement and both spellings start at the keyword.
+    let call_pos = match (kind, ast_call) {
+        (CallSiteKind::Call, Some(ce)) => ce.pos().0 as u32,
+        _ => pos.0 as u32,
+    };
     for msg in call_msgs {
-        diags.push((pos.0 as u32, msg));
+        diags.push((call_pos, msg));
     }
     for (diag_pos, msg) in diags {
         pass.reportf(diag_pos, msg);

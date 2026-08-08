@@ -28,9 +28,10 @@ pub use passes::facts::deprecated::{DeprecatedResult, IsDeprecated};
 pub use passes::typeindex::Index as TypeIndex;
 pub use pattern_match::{entry_mask, match_env, match_pattern, match_pos, matches};
 pub use ssa_util::{
-    append_modifies_param, block_control, closure_fn_in, dominates_all_returns, each_call,
-    filter_debug, has_non_debug_referrer, is_call_to, is_call_to_any, is_in_loop, is_nil_const,
-    param_value, referrers, short_call_name, store_modifies_param, terminates, walk_dominated,
+    append_modifies_param, block_control, call_node_starts, call_object, closure_fn_in, dominates_all_returns,
+    each_call, filter_debug, has_non_debug_referrer, is_call_to, is_call_to_any, is_in_loop,
+    is_nil_const, param_value, referrers, short_call_name, store_modifies_param, terminates,
+    walk_dominated,
 };
 pub use analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
 pub use diagnostic::{Diagnostic, RelatedInformation, SuggestedFix, TextEdit};

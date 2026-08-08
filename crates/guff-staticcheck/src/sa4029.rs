@@ -9,8 +9,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
-use guff::ast::{CallExpr, Expr, Ident};
-use guff::node_mask;
+use guff::ast::{CallExpr, Expr};
 use guff::walk::NodeRef;
 use guff_analysis::code::selector_name;
 
@@ -68,24 +67,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pending.push((match_pos(node), format!("{typ} is a type, not a function, and {rhs} doesn't sort your values; consider using sort.{alt} instead")));
         true
     });
-    inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
-        let NodeRef::AssignStmt(assign) = node else { return };
-        let Some(rhs) = assign.rhs.first() else { return };
-        let Some(name) = conversion_name(pass, rhs) else { return };
-        let Some((typ, alt)) = slice_sort_type(&name) else { return };
-        let Expr::Ident(target) = &assign.lhs[0] else { return };
-        let info = pass.types_info().unwrap();
-        let artifacts = pass.pkg().type_artifacts.as_ref().unwrap();
-        let Some(tav) = info.types.get(&target.id) else { return };
-        if !matches!(artifacts.types.get(tav.typ.underlying(&artifacts.types)), TypeData::Slice(_)) {
-            return;
-        }
-        let rhs = render_expr(rhs);
-        pending.push((
-            assign.tok_pos.0 as u32,
-            format!("{typ} is a type, not a function, and {rhs} doesn't sort your values; consider using sort.{alt} instead"),
-        ));
-    });
+    // Upstream is the pattern and nothing else — see the note in sa4022 about
+    // the duplicate hand-rolled walk this used to carry (reported again at
+    // `tok_pos`, hidden by `issues.uniq-by-line`).
     for (pos, msg) in pending { pass.reportf(pos, msg); }
     Ok(None)
 }

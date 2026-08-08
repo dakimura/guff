@@ -270,17 +270,22 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 161 check をゲート化（ratchet 付き。残差分 70） | 2026-08-08 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 49 / extra 36） | 2026-08-08 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-08）: 548 checks 中 `never` **23** / `unit-only` 104 / `fired` 421。
-（計画策定時: `never` 222 / `unit-only` 120 / `fired` 206）
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-08）: **547** checks 中 `never` **23** / `unit-only` 104 / `fired` 420。
+（計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
-`never` の 23 件は govet 16 / staticcheck 4 / gocritic 1（`whyNoLint`、§6）/ revive 1 / swaggo 1。
-**残りは実質 govet だけ**になった。`unit-only` 104 のうち 83 は revive で、こちらは
+母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
+2026-08-08 の 2 本目のエントリ）。これで Phase 0 が残していた「staticcheck 161 モジュール」の内訳が確定し、
+guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装している**状態になった。
+
+`never` の 23 件は govet 16 / staticcheck 4（`S1030` / `SA1011` / `SA1027` / `SA3000`）/
+gocritic 1（`whyNoLint`、§6）/ revive 1（`time-naming`）/ swaggo 1。
+**残りは実質 govet だけ**。`unit-only` 104 のうち 83 は revive で、こちらは
 「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
 
 ---
@@ -636,6 +641,195 @@ doc コメントしか持っていなかったので**差分に出ていなか�
    `guff-style/src/lll.rs` にも **行だけの位置写像**が残っている（ST1020 系と同じ潜在バグ）。
    revive を golden 化すれば自動的に露見する。
 
+### 2026-08-08 — SA4017 の purity、二重報告、IR 位置写像（Phase 3 続き）
+
+**やったこと**
+
+前節の ratchet（missing 70 / extra 57）を **missing 49 / extra 36** まで下げた。
+着手前に残差分を機械的に分類し直したのが効いた。
+
+**解消した 42 件の内訳**（差分件数 = missing + extra）:
+
+| クラス | 件数 |
+|--------|-----:|
+| 命令／ノードの**位置写像**（go/ssa の内側トークン vs honnef の `Source().Pos()`） | 30 |
+| SA4017 の purity（`pureStdlib` 表の移植 + SrcFuncs のメソッド） | 8 |
+| **同一 finding の二重報告**（`uniq-by-line` が隠していた） | 3 |
+| 上流に存在しない SA9010 の削除 | 1 |
+
+**残っている 85 件の内訳**:
+
+| クラス | 件数 | 備考 |
+|--------|-----:|------|
+| Go stdlib のエラー文言（SA1000/1001/1002/1007/5009） | 15 | 次にやること 1 |
+| SA4017 の**跨ぎパッケージ** purity 推論 | 11 | §7（構造上の非互換） |
+| 残る位置／文言／precision | 59 | 次にやること 2 |
+
+前セッションが `why` に書いた 2 クラス（purity・stdlib 文言）は、実測すると
+**残差分の 3 割弱**にすぎなかった。最大のクラスは位置写像で、これは前セッションが
+AST 側で直したのと同じ欠陥の **IR 側**だった。
+
+#### 1. SA4017 — purity を独立した fact analyzer として移植
+
+`crates/guff-analysis/src/passes/facts/purity.rs` を新設し、上流
+`honnef.co/go/tools@v0.7.0`（`go version -m $(which golangci-lint)` で確認した
+2.12.2 の pin）の `analysis/facts/purity` を移植した。SA4017 が持っていた
+26 名の固定リストは**両方向に間違っていた**:
+
+- `strconv.Itoa` / `strconv.FormatInt` は上流の `pureStdlib` に**無い**
+  （sa1030 の fixture で 2 件の誤検出になっていた）。
+- 逆に `time.Now` / `time.Parse` / `time.ParseInLocation` / `time.Unix{,Milli,Micro}` /
+  `(*net/http.Request).WithContext` と **`(time.Time)` の 40 メソッド**が抜けていた。
+  guff のコメントは method 形式を「SSA callee matching が対応するまで DEFERRED」と
+  していたが、`code::type_func_name` は既に `types.Func.FullName()` と同じ
+  `(time.Time).Equal` を返すので、単に**表に足すだけ**で撃てた。
+
+さらに上流の**推論**（`check` の再帰）も移植した: stub でない・返り値がある・
+全パラメータが basic（basic のみからなる struct を含む）・block がある・
+`Select`/`Send`/`Go`/`Panic` を含まない・`Store`/`FieldAddr`/`Load` が
+stack addr のみ・`Alloc` が heap でない・呼ぶ先が `len`/`cap` か再帰的に pure、
+という条件。honnef の IR は `*ir.Load` を持つが guff-ssa は go/ssa と同じ
+`UnOp(MUL)` なので、そこだけ読み替えている。
+
+**この推論が上流と一致するかを golden で証明するために fixture を書き足した。**
+`sa4017/bad.go` に「推論で pure になる 4 形」（basic 引数の計算関数、それを呼ぶ関数、
+`strings.TrimSpace` を呼ぶ関数、basic だけの struct を受ける関数）、
+`sa4017/ok.go` に「pure にならない 5 形」（定数 return だけの stub、返り値なし、
+非 basic 引数、副作用のある呼び出し、panic）を置いてゴールデンを再生成した。
+golangci-lint は bad の 4 件を撃ち ok の 5 件を撃たず、**guff も完全に一致**した。
+推測ではなく上流の実測で裏付けた形。
+
+**跨ぎパッケージの推論は再現できない**（§7 に新設）。上流は依存パッケージにも
+analyzer を走らせて fact を伝播するが、guff は root パッケージの関数本体しか
+IR 化しない。`net/http.StatusText` / `strings.ReplaceAll` /
+ユーザ定義パッケージの `errors.New` が該当し、残 12 件の missing はこれ。
+
+#### 2. `buildir` の SrcFuncs にメソッドが入っていなかった
+
+`st1005/bad.go:23` の `errors.New` だけ撃てない件の正体。`guff-lint/src/cli.rs` が
+`buildir_src_methods` を **contextcheck が有効なときだけ true** にしていたため、
+既定では `SrcFuncs` が package-level 関数だけになり、`func (T) Read()` の中身を
+**src_funcs を回す 20 以上の analyzer 全部が見ていなかった**。
+上流の `buildssa`/`buildir` は常にメソッドを含む。
+
+**まず既定を true に戻したが、これは prometheus の regress ゲートを落とす。**
+`./regress/run.sh --profile full` で `guff_only` 0 → **6**（`scrape/scrape.go:1709-1711` と
+`scrape/scrape_append_v2.go:213-215` の SA5011）。cli.rs のコメントが警告していたとおりだが、
+**原因は書かれていなかった**ので調べた:
+
+> SA5011 は `if x == nil` の被演算子を `maybeNil[value]` に入れ、deref 命令の
+> オペランドが**その IR 値そのもの**かどうかで報告する。honnef の `ir` は **SSI 形式**で
+> **σ ノード**を持つため、`if cached { _ = ce.ref }` の中の `ce` は後段の
+> `if ce != nil` の `ce` とは**別の値**になり一致しない。上流のコメントは
+> 「sigma を通して情報を伝播しないので分岐内の偽陽性を避けられる」と明言している。
+> **guff-ssa は go/ssa 移植なので σ ノードが無い**。したがって同じ値として一致し、撃ってしまう。
+
+つまりこれは「メソッドを見せた副作用」ではなく、**メソッドを見せた瞬間に露出する
+SA5011 の既存の precision バグ**（メソッドが解析対象外だったので今まで見えなかっただけ）。
+σ ノードの導入は guff-ssa の構造変更なのでこのセッションでは扱えない。
+
+そこで **`BuildIrResult::src_funcs_with_methods()`** を追加した。`prog` は既に
+パッケージの全関数（メソッド含む）を持っているので、**SSA を再構築せずリストを
+差し替えるだけ**（gosec G602 / wastedassign が private に SSA を作り直しているのとは違う）。
+SA4017 だけがこれを使う。共有設定は元に戻したので SA5011 は影響を受けない。
+regress ゲートは green、golden は `st1005/bad.go:23` を含めて維持。
+
+**残る債務**: src_funcs を回す他の analyzer は依然メソッドを見ていない。
+「見せると SA5011 が誤検出する」がブロッカーなので、**σ ノード相当の手当てが
+SA5011 に入るまで解けない**。§7 に記録した。
+
+#### 3. SA9010 は**上流に存在しないチェックだった**
+
+guff の 161 check を上流 v0.7.0 の check 集合と機械的に突合した:
+
+```
+$ comm -23 guff_checks.txt upstream_checks.txt
+SA9010
+$ comm -13 guff_checks.txt upstream_checks.txt      # (空)
+```
+
+**guff は上流の 160 check をちょうど実装し、その上に SA9010 を 1 個発明していた。**
+honnef の v0.5.1 / v0.6.1 / v0.7.0 いずれにも `SA9010` の文字列は 1 つも無い。
+`checks: [all]` で撃つ以上その findings は全件 guff 固有 = 誤検出なので、
+モジュールごと削除した。Phase 0 が残していた「161 モジュール vs 167 記載」の
+食い違いのうち、モジュール側の 1 件はこれで説明がついた。
+
+#### 4. 同一 finding の二重報告 — `uniq-by-line` が隠していたクラス
+
+golden tier は `issues.uniq-by-line: false` なので、**同じ行に 2 回報告する**バグが
+初めて可視化された。3 件あり、いずれも既定の `uniq-by-line: true` では
+1 件に潰れるため既存ゲートでは原理的に見えなかった。
+
+| check | 内容 |
+|---|---|
+| SA4022 / SA4029 | 上流の pattern と**同じ形を探す手書きの `preorder_typed` 走査**が併存し、pattern 側（正しい位置）と手書き側（`op_pos` / `tok_pos`）の 2 回報告していた。上流は pattern だけ。手書き側を削除 |
+| SA9009 | `File.Doc` と各 FuncDecl の `Doc` を `File.Comments` に**足して**走査していた。Doc は Comments の一部なので doc コメント内のディレクティブが 2 回出る。上流は `f.Comments` のみ |
+
+同型（pattern + 手書き走査の併存）が他に無いかは HEAD 全体を機械的に走査して確認した
+（staticcheck 161 ファイル中この 2 つだけ）。
+
+#### 5. IR 命令の位置写像 — go/ssa と honnef の構造的な差
+
+残差分の最大クラス（38 件）。**honnef の `ir` は全命令に AST ノードを持たせ
+`Instruction.Pos()` を `Source().Pos()` と定義している**のに対し、guff-ssa は
+go/ssa 準拠で内側のトークン（call なら `(`、binop なら演算子、map 更新なら `[`）を
+刻む。したがって IR を報告する check は上流より 1 トークン右に出ていた。
+
+前セッションが AST 側（`match_pos` → `node_pos`）で直したのと**同じ欠陥の IR 側**。
+共有ヘルパ `guff_analysis::call_node_starts`（`(` / `[` → ノード開始の写像）を追加し、
+さらに `callcheck::emit_report` を直した。**`callcheck` は共有フレームワークなので
+1 箇所で SA1021 / SA1032 / SA6000 ほかが一斉に直る**（gocritic の `remap_pos`、
+staticcheck の `match_pos` に続く 3 例目の「共有ヘルパ 1 箇所」パターン）。
+
+個別に直したもの: SA1015 / SA1025 / SA4010 / SA5007 / SA9007（call ノード開始）、
+SA5000（`m[k]` の `[` → `m`）、SA3001 / SA4018（AssignStmt の開始）、
+SA4016 / SA4023（BinaryExpr の開始＝左辺）、SA6001（`:=` ではなく `string(key)` 変換ノード）。
+
+**結果**
+
+- golden: gocritic 164/164、goheader 11/11、
+  staticcheck **461/510**（前回 436/506）。ratchet は
+  sa 43/47→**25/27**、s 12/8→**11/7**、st 11/0→**10/0**、qf 4/2→**3/2**。
+- 台帳は §3 を参照。
+- `cargo test --workspace` 2958 件 green。
+- **prometheus regress ゲート**（`./regress/run.sh --profile full`）: **PASS**。
+  `guff_only` 0 / `golangci_only` 0 / P=R=100%。ただし
+  **wall 2.330s → 2.450s（許容 2.480s）、peak RSS 2.73GiB → 2.87GiB** の増が残る。
+  purity analyzer が全パッケージで IR を 1 周するぶん。許容内だが**余裕は 0.03s しかない**ので、
+  次に何か足すときは必ず `--profile full` を回すこと。
+
+  途中で入れた無駄は取り除いてある: `is_pure_stdlib` は
+  パッケージパスで足切りしてから名前を組み立てる（全関数で `String` を作らない）、
+  `call_node_starts` の AST 走査は **findings が出たときだけ**行う（SA1015 / SA1025 /
+  SA4010 / SA5000 / SA5007）、SA4017 は既存の走査に相乗りする。
+  これで初回計測の 3.04s → 2.45s。
+
+**次にやること**
+
+1. **Go stdlib のエラー文言**（残差分の次の塊、15 件）。SA1000 は Go の
+   `regexp/syntax` のエラーコード（`missing closing ): \`foo(\``）、
+   SA1001 は `text/template`（`template: :1: bad character U+007D '}'`）、
+   SA1002 は `time` のレイアウト解析（`cannot parse "" as "4"`、
+   かつ `not-a-layout` は**エラーにならない**ので撃ってはいけない）、
+   SA1007 は `net/url`（`missing protocol scheme`）、
+   SA5009 は printf（`Printf format %s reads arg #1, but call has only 0 args`）。
+2. 残る個別の位置／文言／precision。**新たに判明した誤検出**（golden に対応する
+   golangci-lint の findings が 1 件も無いもの）: SA4015（`math.Ceil(1)` の
+   untyped 定数を「converted integer」と見なす）、SA9004（値を持つ const も
+   「最初の const だけ型がある」と見なす）、SA4031 / SA5005 / SA9008 / SA4006。
+   いずれも上流に食わせて 0 件であることを確認済み。
+3. **govet の `never` 16 件**（前節から未着手）。
+4. **revive の `unit-only` 83 件**と、`guff-revive/src/rules/{exported,package_comments}.rs`
+   `guff-style/src/lll.rs` の行だけの位置写像（前節から未着手）。
+   fixture の `import . "dot"` / `import BadAlias "example.com/badalias"` は、
+   `tests/support.rs` の `collect_stubs` が `stub/` 配下の相対パスから import path を
+   導出するので、**stub を `stub/example.com/<name>/` に置き直せば**単体テストと
+   golden の両方で解決できる（`stub/{fmt,os,context,...}` は stdlib の影なので動かさない。
+   golden 側は sources.txt で materialize しなければ本物の stdlib が使われる）。
+5. **SA5011 に σ 相当の手当て**（§7）。これが入るまで `buildir` の SrcFuncs に
+   既定でメソッドを入れられず、src_funcs を回す 20 以上の analyzer の
+   静かな recall 損失が残る。**優先度は高い**（見えない損失なので）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -667,3 +861,67 @@ doc コメントしか持っていなかったので**差分に出ていなか�
 | check | 理由 |
 |-------|------|
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
+
+---
+
+## 7. アーキテクチャの違いで再現できないもの
+
+§6 が「上流に食わせても観測できない」なら、こちらは「観測はできるが guff の
+構造上そのままでは再現できない」。**allowlist ではなく、代償を明記した設計判断**として記録する。
+
+### 依存パッケージを跨ぐ purity 推論（SA4017）
+
+上流の `analysis/facts/purity` は**解析するすべてのパッケージ**（stdlib を含む依存も）で
+関数本体を見て純粋性を推論し、object fact として伝播する。`pureStdlib` の表は
+`check` の内部でしか参照されないので、`strings.TrimSpace` が pure なのは
+「表に載っているから」ではなく「`strings` パッケージを解析したときに fact が
+書き出されたから」である。
+
+guff は **root パッケージの関数本体しか IR 化しない**
+（`ssautil::load::build_package_for_analysis` は依存にはメンバの殻しか作らない）。
+依存の body が無いので推論しようがない。したがって guff は表を**呼び出し側でも**
+引く形に読み替えている（`purity::PurityResult::is_pure`）。表に載っている名前については
+上流の推論も同じ表で短絡するので**結果は完全に一致する**。
+
+一致しないのは、**上流が跨ぎで推論した**純粋性だけ:
+
+| 例 | 上流が pure と判定する理由 |
+|---|---|
+| `strings.ReplaceAll` | 本体が `strings.Replace`（表にある）を呼ぶだけ |
+| `net/http.StatusText` | 本体が定数を返す switch のみ |
+| ユーザ定義パッケージの `errors.New` 相当 | 同上、同一モジュール内の依存を解析して fact 化 |
+
+現在の golden の missing 12 件がこれ。解消するには依存パッケージにも SSA を
+構築して analyzer を走らせる必要があり、prometheus 規模では peak RSS / 実行時間の
+桁が変わる。**やるなら Phase 5（コーパス多様化）とセットで性能を測ってからにすること。**
+
+### SA5011 の σ（sigma）ノード — と、そこから波及する SrcFuncs のメソッド
+
+honnef の `go/ir` は **SSI 形式**で、条件分岐のたびに値を σ ノードで分割する。
+SA5011 はこれに全面的に依存していて、`if x == nil` の被演算子を `maybeNil` に登録し、
+deref 命令のオペランドが**その IR 値と同一か**だけを見る（上流のコメント曰く
+「極めて素朴な検査。phi も sigma も情報を伝播しない」）。σ があるおかげで
+
+```go
+if cached { _ = ce.ref }   // ここの ce は σ 値
+…
+if ce != nil { … }         // こちらは別の値 → 一致しない → 報告しない
+```
+
+という形が**自動的に偽陽性にならない**。**guff-ssa は go/ssa 移植なので σ ノードが無い**。
+同じ形で `ce` が単一の値になり、guff は撃ってしまう。prometheus の
+`scrape/scrape.go:1709-1711` ほか計 6 件がこれ（2026-08-08 §4）。
+
+波及として、**`buildir` の `SrcFuncs` に既定でメソッドを入れられない**。
+上流は常に入れるが、入れた瞬間にこの SA5011 偽陽性がメソッド本体から噴き出して
+regress ゲートが落ちる。現状は
+`BuildIrResult::src_funcs_with_methods()` で**チェック単位のオプトイン**にしてある
+（SA4017 のみ）。**src_funcs を回す他の 20 以上の analyzer はメソッドを見ていない
+＝ 静かな recall 損失が残っている。** 解くには SA5011 に σ 相当の手当て
+（分岐をまたぐ値の区別）を入れるのが先。
+
+### `mod-year` / `mod-year-range`（goheader）
+
+§4（2026-08-07）に既出。上流は `git log` のコミット日時を優先し、guff は
+ファイルの mtime を使う。ファイルごとに git を起動するコストが見合わないため。
+**golden fixture ではこの 2 つの値を使わない。**

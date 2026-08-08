@@ -4,24 +4,17 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{CommentGroup, Decl, File};
+use guff::ast::{CommentGroup, File};
 use guff::position::Pos;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+/// Upstream walks `File.Comments` and nothing else. `File.Doc` and each
+/// declaration's `Doc` are *views into* that same list, so adding them reported
+/// every directive in a doc comment a second time. `issues.uniq-by-line` (on by
+/// default) merged the pair, which kept it out of every gate but the golden
+/// tier, where uniq-by-line is off.
 fn comment_groups(file: &File) -> Vec<&CommentGroup> {
-    let mut groups = Vec::new();
-    if let Some(doc) = &file.doc {
-        groups.push(doc);
-    }
-    groups.extend(file.comments.iter());
-    for decl in &file.decls {
-        if let Decl::FuncDecl(fd) = decl {
-            if let Some(doc) = &fd.doc {
-                groups.push(doc);
-            }
-        }
-    }
-    groups
+    file.comments.iter().collect()
 }
 
 fn check_comment_text(pass: &Pass<'_>, slash: u32, text: &str, pending: &mut Vec<(u32, String)>) {

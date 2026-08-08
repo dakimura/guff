@@ -4,7 +4,7 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Expr, SelectorExpr};
+use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{is_call_to, is_call_to_any};
@@ -17,7 +17,8 @@ fn check_remove_all(pass: &Pass<'_>, call: &CallExpr) -> Option<(u32, String)> {
     }
     match &call.args[0] {
         Expr::CallExpr(inner) if is_call_to(pass, inner, "os.TempDir") => Some((
-            call.lparen.0 as u32,
+            // Upstream reports the call node, i.e. the start of `os.RemoveAll`.
+            call.pos().0 as u32,
             "this call to os.RemoveAll deletes the user's entire temporary directory, not a subdirectory therein".into(),
         )),
         Expr::CallExpr(inner) if is_call_to_any(pass, inner, &["os.UserCacheDir", "os.UserConfigDir", "os.UserHomeDir"]) => {
@@ -28,7 +29,7 @@ fn check_remove_all(pass: &Pass<'_>, call: &CallExpr) -> Option<(u32, String)> {
                 _ => return None,
             };
             Some((
-                call.lparen.0 as u32,
+                call.pos().0 as u32,
                 format!("this call to os.RemoveAll deletes the user's entire {kind} directory, not a subdirectory therein"),
             ))
         }

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff::ast::Expr;
@@ -34,7 +34,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let rl = render_expr(lhs);
             let rr = render_expr(rhs);
             if rl == rr {
-                pending.push((assign.tok_pos.0 as u32, format!("self-assignment of {rr} to {rl}")));
+                // Upstream reports the AssignStmt node — the start of its
+                // first LHS operand, not the `=`.
+                pending.push((match_pos(node), format!("self-assignment of {rr} to {rl}")));
             }
         }
     });

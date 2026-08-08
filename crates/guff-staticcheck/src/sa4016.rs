@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
 use guff::ast::Expr;
@@ -49,7 +49,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             Token::OR | Token::XOR => format!("{rendered} always equals {}", render_expr(&bin.x)),
             _ => return,
         };
-        pending.push((bin.op_pos.0 as u32, msg));
+        // Upstream reports the BinaryExpr node; its position is the start of
+        // the left operand, not the operator.
+        pending.push((match_pos(node), msg));
     });
     for (pos, msg) in pending { pass.reportf(pos, msg); }
     Ok(None)

@@ -31,8 +31,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
     }
+    // Remap only if we have findings: `call_node_starts` walks the AST.
+    let call_starts = (!reports.is_empty())
+        .then(|| guff_analysis::call_node_starts(pass))
+        .unwrap_or_default();
     for pos in reports {
-        pass.reportf(pos, MSG);
+        pass.reportf(call_starts.get(&pos).copied().unwrap_or(pos), MSG);
     }
     Ok(None)
 }

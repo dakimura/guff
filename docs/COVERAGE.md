@@ -8,10 +8,10 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 421 | 76.8% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 420 | 76.8% |
 | `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 104 | 19.0% |
 | `never` | **どこでも発火していない** | 23 | 4.2% |
-| — | **合計** | **548** | 100.0% |
+| — | **合計** | **547** | 100.0% |
 
 ## linter 別
 
@@ -115,7 +115,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | sloglint | 1 | 1 | 0 | 0 |
 | spancheck | 1 | 1 | 0 | 0 |
 | sqlclosecheck | 1 | 1 | 0 | 0 |
-| staticcheck | 161 | 157 | 0 | 4 |
+| staticcheck | 160 | 156 | 0 | 4 |
 | swaggo | 1 | 0 | 0 | 1 |
 | tagalign | 1 | 1 | 0 | 0 |
 | tagliatelle | 1 | 1 | 0 | 0 |
@@ -148,7 +148,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 116, 'isolate': 6462, 'oss': 662, 'regress': 1492}`
-- インベントリ: 548 checks / 114 linters
+- 走査した実行アーティファクト: `{'golden': 181, 'isolate': 6462, 'oss': 662, 'regress': 1492}`
+- インベントリ: 547 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

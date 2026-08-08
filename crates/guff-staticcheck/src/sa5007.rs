@@ -5,8 +5,7 @@
 use std::sync::OnceLock;
 
 use guff_analysis::passes::buildir;
-use guff_analysis::{dominates_all_returns, each_call, is_call_to, AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_ssa::ids::BlockId;
+use guff_analysis::{dominates_all_returns, each_call, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::InstrData;
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -34,8 +33,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             });
         }
     }
+    // Remap only if we have findings: `call_node_starts` walks the AST.
+    let call_starts = (!reports.is_empty())
+        .then(|| guff_analysis::call_node_starts(pass))
+        .unwrap_or_default();
     for pos in reports {
-        pass.reportf(pos, "infinite recursive call");
+        pass.reportf(
+            call_starts.get(&pos).copied().unwrap_or(pos),
+            "infinite recursive call",
+        );
     }
     Ok(None)
 }

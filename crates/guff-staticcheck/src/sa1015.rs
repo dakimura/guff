@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use guff_analysis::code::{is_in_test_at, is_main_like, stdlib_version, version_compare};
 use guff_analysis::passes::buildir::{self, BuildIrResult};
-use guff_analysis::{each_call, is_call_to as ssa_is_call_to, terminates};
+use guff_analysis::{call_node_starts, each_call, is_call_to as ssa_is_call_to, terminates};
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::function::Function;
 
@@ -55,8 +55,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         });
     }
+    // Remap only if we have findings: `call_node_starts` walks the AST.
+    let call_starts = (!pending.is_empty())
+        .then(|| call_node_starts(pass))
+        .unwrap_or_default();
     for pos in pending {
-        pass.reportf(pos, MSG);
+        pass.reportf(call_starts.get(&pos).copied().unwrap_or(pos), MSG);
     }
     Ok(None)
 }

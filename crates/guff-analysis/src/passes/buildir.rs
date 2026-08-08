@@ -29,6 +29,8 @@ pub struct BuildIrResult {
     pub src_funcs: Vec<FuncId>,
     /// Built on first use; only SA4006 / SA4031 resolve source expressions.
     expr_values: OnceLock<ExprValueIndex>,
+    /// Built on first use — see [`Self::src_funcs_with_methods`].
+    src_funcs_all: OnceLock<Vec<FuncId>>,
 }
 
 impl BuildIrResult {
@@ -44,7 +46,26 @@ impl BuildIrResult {
             type_pkg,
             src_funcs,
             expr_values: OnceLock::new(),
+            src_funcs_all: OnceLock::new(),
         }
+    }
+
+    /// `SrcFuncs` as go/ssa's `buildssa` and honnef's `buildir` define it: every
+    /// named function declared in the package, **methods included**.
+    ///
+    /// [`Self::src_funcs`] honours the `buildir_src_methods` setting, which
+    /// guff-lint turns off outside contextcheck runs — not for correctness but
+    /// because SA5011 over-reports once method bodies are visible (guff-ssa is a
+    /// go/ssa port and has no σ-nodes, so SA5011's value-identity test matches
+    /// across branches where honnef's SSI form would not; see
+    /// `docs/COMPAT-HARDENING.md` §7). A check that needs upstream's SrcFuncs
+    /// and does not have that precision gap should use this instead.
+    ///
+    /// No SSA is rebuilt: `prog` already holds every function in the package,
+    /// so this is a filter over the arena the pass already owns.
+    pub fn src_funcs_with_methods(&self) -> &[FuncId] {
+        self.src_funcs_all
+            .get_or_init(|| collect_src_funcs_with_methods(&self.prog, self.pkg))
     }
 
     /// Expression → SSA value index over [`Self::src_funcs`]. Shared by every

@@ -19,8 +19,8 @@ use guff_analysis::callcheck;
 use guff_analysis::code::is_nil;
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::is_nil_const;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_ssa::instr::{BinOp, InstrData, MakeInterface};
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_ssa::instr::{BinOp, InstrData};
 use guff_ssa::value::Value;
 use guff_types::arena::TypeData;
 
@@ -185,8 +185,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         if interface_from_concrete_pointer_before(pass, id, bin.op_pos.0 as u32) {
             let qualifier = if bin.op == Token::EQL { "never" } else { "always" };
+            // Upstream reports the BinOp node; its position is the start of
+            // the left operand, not the operator.
             pending.push((
-                bin.op_pos.0 as u32,
+                match_pos(node),
                 format!("this comparison is {qualifier} true"),
             ));
         }

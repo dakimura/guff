@@ -10,7 +10,7 @@ use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_of_type_with_name;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 use crate::render::render_expr;
 
@@ -37,8 +37,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !is_of_type_with_name(pass, x, "*testing.B") {
             return;
         }
+        // Upstream reports the AssignStmt node, not the selector's name.
         pending.push((
-            sel.name_pos.0 as u32,
+            match_pos(node),
             format!("should not assign to {}", render_expr(&lhs[0])),
         ));
     });

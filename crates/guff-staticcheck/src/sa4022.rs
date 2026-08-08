@@ -4,10 +4,6 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{BinaryExpr, Expr, UnaryExpr};
-use guff::node_mask;
-use guff::token::Token;
-use guff::walk::NodeRef;
 use guff_pattern::{must_parse, Pattern};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
@@ -18,41 +14,20 @@ fn pat() -> &'static Pattern {
     PAT.get_or_init(|| must_parse(r#"(BinaryExpr (UnaryExpr "&" _) (Or "==" "!=") (Or nil (Ident "nil")))"#))
 }
 
-fn is_addr_nil_compare(bin: &BinaryExpr) -> bool {
-    if !matches!(bin.op, Token::EQL | Token::NEQ) {
-        return false;
-    }
-    let check = |x: &Expr, y: &Expr| {
-        matches!(x, Expr::UnaryExpr(UnaryExpr { op: Token::AND, .. })) && is_nil_expr(y)
-    };
-    check(&bin.x, &bin.y) || check(&bin.y, &bin.x)
-}
-
-fn is_nil_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::Ident(id) if id.name == "nil")
-}
-
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4022 requires inspect analyzer".to_string())?
         .clone();
     let mut pending: Vec<(u32, String)> = Vec::new();
+    // Upstream is the pattern and nothing else. guff also carried a hand-rolled
+    // BinaryExpr walk that matched the same shape and reported it a second time
+    // at `op_pos`, so every finding appeared twice — once correctly and once on
+    // the operator. `issues.uniq-by-line` (on by default) collapsed the pair,
+    // which is why no gate saw it until the golden tier turned that off.
     matches(pass, &inspect, pat(), |node, _| {
         pending.push((match_pos(node), "the address of a variable cannot be nil".into()));
         true
-    });
-    inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
-        let NodeRef::BinaryExpr(bin) = node else {
-            return;
-        };
-        if !is_addr_nil_compare(bin) {
-            return;
-        }
-        pending.push((
-            bin.op_pos.0 as u32,
-            "the address of a variable cannot be nil".into(),
-        ));
     });
     for (pos, msg) in pending {
         pass.reportf(pos, msg);

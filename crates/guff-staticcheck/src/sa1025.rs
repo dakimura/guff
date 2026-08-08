@@ -81,8 +81,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         pending
     };
+    // Remap only if we have findings: `call_node_starts` walks the AST.
+    let call_starts = (!pending.is_empty())
+        .then(|| guff_analysis::call_node_starts(pass))
+        .unwrap_or_default();
     for (pos, msg) in pending {
-        pass.reportf(pos, msg);
+        pass.reportf(call_starts.get(&pos).copied().unwrap_or(pos), msg);
     }
     Ok(None)
 }

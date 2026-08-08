@@ -174,7 +174,6 @@ pub mod sa9006;
 pub mod sa9007;
 pub mod sa9008;
 pub mod sa9009;
-pub mod sa9010;
 
 /// All ported Staticcheck/simple analyzers.
 pub fn analyzers() -> Vec<&'static guff_analysis::Analyzer> {
@@ -340,6 +339,5 @@ pub fn analyzers() -> Vec<&'static guff_analysis::Analyzer> {
         sa9007::analyzer(),
         sa9008::analyzer(),
         sa9009::analyzer(),
-        sa9010::analyzer(),
     ]
 }

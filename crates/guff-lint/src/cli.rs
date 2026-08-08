@@ -412,9 +412,13 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     // contextcheck needs (1) same-module fact typecheck, (2) methods in SrcFuncs,
     // (3) SSA on ill-typed packages. Each costs peak RSS on large corpora, so
     // enable only when that analyzer is in the run.
-    // nilerr/nilnesserr walk methods via a *private* collect (like gosec G602) —
-    // flipping shared `buildir_src_methods` regresses SA5011 / fatcontext on
-    // prometheus (guff-only).
+    //
+    // `buildir_src_methods` is NOT merely a cost knob: turning it on globally
+    // makes SA5011 report 6 false positives on prometheus, because guff-ssa is a
+    // go/ssa port with no σ-nodes and SA5011 tests IR value identity (see
+    // docs/COMPAT-HARDENING.md §7). Checks that need upstream's SrcFuncs and do
+    // not have that gap call `BuildIrResult::src_funcs_with_methods()` instead —
+    // same SSA program, different function list, no rebuild.
     let need_ctx = crate::analyzers_need_same_module_fact_packages(&analyzers);
     bag.insert("buildir_src_methods", need_ctx);
     bag.insert("buildir_despite_errors", need_ctx);

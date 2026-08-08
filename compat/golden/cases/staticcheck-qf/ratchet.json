@@ -1,6 +1,6 @@
 {
-  "missing": 4,
+  "missing": 3,
   "extra": 2,
-  "why": "SA1000 regexp-syntax error text (Go's regexp/syntax wording, not the regex crate's).",
-  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+  "why": "QF1007 reports the AssignStmt node upstream, not the `=`; SA4017 needs cross-package purity inference for strings.ReplaceAll.",
+  "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

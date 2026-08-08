@@ -1,6 +1,6 @@
 {
-  "missing": 12,
-  "extra": 8,
-  "why": "Message text that upstream renders from the AST or from a Go stdlib error; S1030/S1037 recall and precision.",
-  "target": "0/0 \u2014 see docs/COMPAT-HARDENING.md \u00a74 (2026-08-08) for the remaining classes."
+  "missing": 11,
+  "extra": 7,
+  "why": "Message text rendered from the AST upstream, plus S1010/S1016/S1019/S1030/S1034/S1035/S1037/S1040 recall and precision.",
+  "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }
