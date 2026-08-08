@@ -1,6 +1,7 @@
 //! SA5009 — invalid Printf call.
 //!
-//! Simplified port of `honnef.co/go/tools/staticcheck/sa5009`.
+//! Port of `honnef.co/go/tools/staticcheck/sa5009`, including its
+//! `honnef.co/go/tools/printf` format-string grammar.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -31,89 +32,210 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>, format_idx: usize, args_sta
     }
 }
 
-fn check_format(format: &str, nargs: usize) -> Result<(), String> {
-    // 1-based, matching Go's fmt explicit indices (`%[1]v`).
-    let mut next_arg = 1usize;
-    let mut max_used = 0usize;
-    let bytes = format.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'%' {
-            i += 1;
-            continue;
-        }
-        if i + 1 >= bytes.len() {
-            break;
-        }
-        if bytes[i + 1] == b'%' {
-            i += 2;
-            continue;
-        }
-        i += 1;
-        let mut explicit_index: Option<usize> = None;
-        // Explicit index: %[n]
-        if i < bytes.len() && bytes[i] == b'[' {
-            i += 1;
-            let start = i;
-            while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
-                i += 1;
-            }
-            if i >= bytes.len() || bytes[i] != b']' || i == start {
-                return Err("couldn't parse format string".into());
-            }
-            let idx: usize = std::str::from_utf8(&bytes[start..i])
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| "couldn't parse format string".to_string())?;
-            if idx == 0 {
-                return Err("couldn't parse format string".into());
-            }
-            explicit_index = Some(idx);
-            i += 1; // ]
-        }
-        // Printf flags: # 0 + - ' ' (must skip before width `*`).
-        while i < bytes.len() && matches!(bytes[i], b'#' | b'0' | b'+' | b'-' | b' ') {
-            i += 1;
-        }
-        // Width `*` consumes an arg.
-        if i < bytes.len() && bytes[i] == b'*' {
-            let used = explicit_index.unwrap_or(next_arg);
-            max_used = max_used.max(used);
-            next_arg = used + 1;
-            explicit_index = None; // width index doesn't carry to the verb
-            i += 1;
-        }
-        while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
-            i += 1;
-        }
-        if i < bytes.len() && bytes[i] == b'.' {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'*' {
-                let used = explicit_index.unwrap_or(next_arg);
-                max_used = max_used.max(used);
-                next_arg = used + 1;
-                explicit_index = None;
-                i += 1;
-            }
-            while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
-                i += 1;
-            }
-        }
-        if i >= bytes.len() {
-            return Err("couldn't parse format string".into());
-        }
-        let verb = bytes[i] as char;
-        i += 1;
-        if verb == '%' {
-            continue;
-        }
-        let used = explicit_index.unwrap_or(next_arg);
-        max_used = max_used.max(used);
-        next_arg = used + 1;
+/// One parsed verb of a format string. Port of `printf.Verb`.
+struct Verb {
+    letter: char,
+    width: Argument,
+    precision: Argument,
+    /// Which value in the argument list the verb uses. `-1` denotes the next
+    /// argument, values > 0 denote explicit arguments, and `0` denotes that no
+    /// argument is consumed — which is the case for `%%`.
+    value: i64,
+    raw: String,
+}
+
+/// Port of `printf.Argument`. Only `Star` carries information the check uses;
+/// `Default` / `Zero` / `Literal` all mean "consumes no argument".
+enum Argument {
+    Other,
+    Star { index: i64 },
+}
+
+/// `honnef.co/go/tools/printf`'s grammar, verbatim. Go's regexp and Rust's
+/// `regex` both resolve alternations leftmost-first, so the submatch numbering
+/// upstream relies on carries over unchanged.
+fn verb_re() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        const FLAGS: &str = r"([+#0 -]*)";
+        const VERB: &str = r"([a-zA-Z%])";
+        const INDEX: &str = r"(?:\[([0-9]+)\])";
+        // star = `((` + index + `)?\*)`
+        let star = format!(r"(({INDEX})?\*)");
+        // width = `(?:([0-9]+)|` + star + `)`
+        let width = format!(r"(?:([0-9]+)|{star})");
+        let precision = format!(r"(?:([0-9]+)|{star})");
+        let width_and_precision = format!(r"(?:(?:{width})?(?:(\.)(?:{precision})?)?)");
+        regex::Regex::new(&format!(
+            r"^%{FLAGS}{width_and_precision}?{INDEX}?{VERB}"
+        ))
+        .expect("printf verb grammar")
+    })
+}
+
+fn atoi(s: &str) -> i64 {
+    s.parse().unwrap_or(0)
+}
+
+/// Port of `printf.ParseVerb`. Returns the verb and how many bytes it consumed.
+fn parse_verb(f: &str) -> Option<(Verb, usize)> {
+    // Submatch numbers from upstream's `ParseVerb` constants.
+    const WIDTH: usize = 2;
+    const WIDTH_STAR: usize = 3;
+    const WIDTH_INDEX: usize = 5;
+    const DOT: usize = 6;
+    const PREC: usize = 7;
+    const PREC_STAR: usize = 8;
+    const PREC_INDEX: usize = 10;
+    const VERB_INDEX: usize = 11;
+    const VERB: usize = 12;
+
+    if f.len() < 2 {
+        return None;
     }
-    if max_used != nargs {
+    let m = verb_re().captures(f)?;
+    let g = |i: usize| m.get(i).map(|x| x.as_str()).unwrap_or("");
+
+    let star = |whole: usize, index: usize| {
+        if g(whole).is_empty() {
+            Argument::Other
+        } else if g(index).is_empty() {
+            Argument::Star { index: -1 }
+        } else {
+            Argument::Star {
+                index: atoi(g(index)),
+            }
+        }
+    };
+
+    let width = if !g(WIDTH).is_empty() {
+        Argument::Other
+    } else {
+        star(WIDTH_STAR, WIDTH_INDEX)
+    };
+    let precision = if g(DOT).is_empty() || !g(PREC).is_empty() {
+        Argument::Other
+    } else {
+        star(PREC_STAR, PREC_INDEX)
+    };
+
+    let letter = g(VERB).chars().next()?;
+    let value = if g(VERB) == "%" {
+        0
+    } else if !g(VERB_INDEX).is_empty() {
+        atoi(g(VERB_INDEX))
+    } else {
+        -1
+    };
+
+    let raw = m.get(0)?.as_str().to_string();
+    let n = raw.len();
+    Some((
+        Verb {
+            letter,
+            width,
+            precision,
+            value,
+            raw,
+        },
+        n,
+    ))
+}
+
+/// Port of `printf.Parse`, keeping only the verbs (literal runs carry nothing
+/// the check needs). `Err(())` is upstream's `ErrInvalid`.
+fn parse_format(format: &str) -> Result<Vec<Verb>, ()> {
+    let mut out = Vec::new();
+    let mut f = format;
+    while !f.is_empty() {
+        if f.as_bytes()[0] == b'%' {
+            let (v, n) = parse_verb(f).ok_or(())?;
+            f = &f[n..];
+            out.push(v);
+        } else {
+            match f.find('%') {
+                Some(n) => f = &f[n..],
+                None => break,
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Port of the argument-counting half of `sa5009.checkImpl`.
+///
+/// The other half — `checkType`, which reports `has arg #N of wrong type T` —
+/// needs upstream's verb/type compatibility table and is not ported; guff stays
+/// silent where upstream would name a type mismatch (docs/COMPAT-HARDENING.md).
+fn check_format(format: &str, nargs: usize) -> Result<(), String> {
+    let Ok(verbs) = parse_format(format) else {
+        return Err("couldn't parse format string".into());
+    };
+    let nargs = nargs as i64;
+    let mut ptr: i64 = 1;
+    let mut has_explicit = false;
+
+    // Upstream reports at most one problem per format string: getting an index
+    // wrong invalidates every implicit index after it.
+    for verb in &verbs {
+        for star in [&verb.width, &verb.precision] {
+            let Argument::Star { index } = *star else {
+                continue;
+            };
+            let idx = if index == -1 {
+                let idx = ptr;
+                ptr += 1;
+                idx
+            } else {
+                has_explicit = true;
+                ptr = index + 1;
+                index
+            };
+            if idx == 0 {
+                return Err(format!(
+                    "Printf format {} reads invalid arg 0; indices are 1-based",
+                    verb.raw
+                ));
+            }
+            if idx > nargs {
+                return Err(format!(
+                    "Printf format {} reads arg #{idx}, but call has only {nargs} args",
+                    verb.raw
+                ));
+            }
+        }
+
+        let mut off = ptr;
+        if verb.value != -1 {
+            // Note that `%%` parses as value 0, so a format containing one
+            // suppresses the trailing too-many-arguments check below. That is
+            // upstream's behaviour, verified against golangci-lint 2.12.2.
+            has_explicit = true;
+            off = verb.value;
+        }
+        if off > nargs {
+            return Err(format!(
+                "Printf format {} reads arg #{off}, but call has only {nargs} args",
+                verb.raw
+            ));
+        } else if verb.value == 0 && verb.letter != '%' {
+            return Err(format!(
+                "Printf format {} reads invalid arg 0; indices are 1-based",
+                verb.raw
+            ));
+        }
+
+        match verb.value {
+            -1 => ptr += 1,
+            0 => {}
+            v => ptr = v + 1,
+        }
+    }
+
+    if !has_explicit && ptr <= nargs {
         return Err(format!(
-            "Printf call needs {max_used} args but has {nargs} args"
+            "Printf call needs {} args but has {nargs} args",
+            ptr - 1
         ));
     }
     Ok(())
@@ -192,5 +314,45 @@ mod tests {
         // Width `*` after flags (`%-*s`) consumes an extra arg.
         assert!(check_format("%-*s %-*s %s\n", 5).is_ok());
         assert!(check_format("%-*s", 1).is_err());
+    }
+
+    /// Every string here was read off golangci-lint 2.12.2 on a scratch module,
+    /// not derived from upstream's source.
+    #[test]
+    fn format_messages_match_upstream() {
+        let err = |f: &str, n: usize| check_format(f, n).unwrap_err();
+        // Too few arguments names the verb and the index it wanted.
+        assert_eq!(
+            err("%s %d", 0),
+            "Printf format %s reads arg #1, but call has only 0 args"
+        );
+        assert_eq!(
+            err("%[2]s", 1),
+            "Printf format %[2]s reads arg #2, but call has only 1 args"
+        );
+        // A `*` width consumes an argument before the verb does.
+        assert_eq!(
+            err("%*d", 1),
+            "Printf format %*d reads arg #2, but call has only 1 args"
+        );
+        assert_eq!(
+            err("%[0]d", 1),
+            "Printf format %[0]d reads invalid arg 0; indices are 1-based"
+        );
+        // Too many arguments is the only case that uses the "needs" wording.
+        assert_eq!(err("hello", 1), "Printf call needs 0 args but has 1 args");
+        assert_eq!(
+            err("%-*s %s", 4),
+            "Printf call needs 3 args but has 4 args"
+        );
+        // A lone `%`, or one followed by a non-verb, fails the grammar.
+        assert_eq!(err("%", 0), "couldn't parse format string");
+        assert_eq!(err("%!", 0), "couldn't parse format string");
+        // `%%` parses with Value == 0, which trips upstream's `hasExplicit`
+        // flag and so suppresses the trailing too-many-arguments check for the
+        // whole format string. Verified against golangci-lint, which reports
+        // nothing for either of these.
+        assert!(check_format("%%", 1).is_ok());
+        assert!(check_format("%v %%", 2).is_ok());
     }
 }

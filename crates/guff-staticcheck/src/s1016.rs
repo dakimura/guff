@@ -196,7 +196,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             }
             if let Some(msg) = check_composite_lit(pass, lit) {
-                pending.push((lit.lbrace.0 as u32, msg));
+                // Upstream reports the composite literal node, whose position
+                // is the start of its type — not the `{`.
+                let pos = lit
+                    .ty
+                    .as_ref()
+                    .map(|t| t.pos().0 as u32)
+                    .unwrap_or(lit.lbrace.0 as u32);
+                pending.push((pos, msg));
             }
             true
         });

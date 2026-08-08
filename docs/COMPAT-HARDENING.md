@@ -270,7 +270,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 49 / extra 36） | 2026-08-08 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 29 / extra 18） | 2026-08-09 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
@@ -287,6 +287,12 @@ guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装
 gocritic 1（`whyNoLint`、§6）/ revive 1（`time-naming`）/ swaggo 1。
 **残りは実質 govet だけ**。`unit-only` 104 のうち 83 は revive で、こちらは
 「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
+
+**この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
+2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
+**台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 29 / extra 18）と
+OSS / isolate ゲートの側にある。
 
 ---
 
@@ -830,6 +836,374 @@ SA4016 / SA4023（BinaryExpr の開始＝左辺）、SA6001（`:=` ではなく 
    既定でメソッドを入れられず、src_funcs を回す 20 以上の analyzer の
    静かな recall 損失が残る。**優先度は高い**（見えない損失なので）。
 
+### 2026-08-08 — SA4006 の再建と、位置／文言の残りを一掃（Phase 3 続き）
+
+**やったこと**
+
+ratchet を **missing 49 / extra 36 → missing 30 / extra 19** に下げた。
+着手前に残差分を「位置」「文言」「recall/precision」で分類し、安い順に潰した。
+
+| クラス | 解消した差分数 |
+|--------|-----:|
+| 報告ノードの取り違え（内側トークン／別ノード） | 14 |
+| メッセージ本文（プレースホルダ・過剰修飾・実式の未描画） | 12 |
+| SA4006 の recall / precision（下記） | 9 |
+| 位置が丸ごと落ちていた（`:0:0`） | 2 |
+
+#### 1. guff-ssa が BinOp / TypeAssert に位置を刻んでいなかった
+
+SA4012 と SA5010 が **`:0:0`**、つまりファイル名すら無い状態で報告していた。
+`builder::expr` の `binary_expr` / `type_assert_expr` が `emit`（位置なし）を
+使っており、go/ssa が渡す `e.OpPos` / `e.Lparen` を落としていた。
+go/ssa 準拠に直したうえで、共有ヘルパ `call_node_starts` に
+BinaryExpr（`op_pos` → 左辺の開始）と TypeAssertExpr（`lparen` → 被演算子の開始）の
+写像を足した。**gocritic の `remap_pos`、staticcheck の `match_pos`、
+`callcheck::emit_report` に続く「共有ヘルパ 1 箇所」パターンの 4 例目。**
+
+`crates/guff-ssa/tests/pos_test.rs` は「binop は位置なしで emit される」と
+**旧挙動を固定していた**ので、正しい期待値（`+` の行）に直した。
+
+#### 2. 上流の報告ノード / 文言（すべてスクラッチモジュールで実測。推測なし）
+
+| check | 直した内容 |
+|---|---|
+| SA1005 | 呼び出しではなく**引数**を報告 |
+| SA2000 | `wg.Add` ではなく**呼び出し式全体** `wgs[0].Add(2 + 1)` を描画し、call ノードを報告 |
+| SA4005 | レシーバの**型名**を出す（`field T.X`）。ジェネリックは `G[K]` ではなく `G`。位置はセレクタの開始 |
+| SA5001 | 解決済みオブジェクトではなく**ソース式**（`fn1()` / `rc.Close()`）を描画 |
+| SA5004 | `select` ではなく空の `default` 節を報告 |
+| SA5010 | 2 つのインタフェース名は `RelativeTo(pass.Pkg)` で**パッケージ相対**、メソッドのシグネチャは**完全修飾**のまま（実測で非対称を確認） |
+| SA5012 | 可変長引数を責めるので**最初の可変長実引数**を報告し、`variadic argument` を前置（`f(a,b,c)` と `f(s...)` の両方で確認） |
+| S1010 | スライス式ではなく冗長な**高位式** `len(s)` を報告 |
+| S1016 | `{` ではなく複合リテラルの開始 |
+| S1019 | `make(T)` ではなく**実型を描画**（`make(chan int)`）。位置は size 引数 |
+| S1034 | `switch` ではなくガード `i.(type)` |
+| S1035 | `'key'` を引用し所属メソッドを付ける（`of (net/http.Header).Set`）。位置は冗長な引数 |
+| S1040 | 被演算子と型を描画（`i already has type interface{}`）。位置は被演算子の開始 |
+| QF1007 | RHS ではなく宣言文を報告（fix の編集範囲は RHS のまま） |
+
+#### 3. SA4006 は**共通ケースを丸ごと取りこぼしていた**
+
+`c := a; c = b; _ = c` という教科書どおりの形で **1 件も撃てていなかった**。
+原因は FP 抑止ヒューリスティック `IdentIndex` の分類ミス:
+go/types は `x = v` の `x` を **`Uses` に入れる**（`Defs` に入るのは `:=` と宣言だけ）。
+これを「後で読まれている」と解釈していたため、**あらゆる上書きが抑止されていた**。
+上流と一致した golden の SA4006 は 0 件で、7 件が missing だった。
+
+同時に上流の走査対象そのものを合わせた:
+
+- 上流は **`*ast.AssignStmt` しか歩かない**。`n++` は `*ast.IncDecStmt` なので
+  `func f(n int) { n++ }` は**報告しない**。guff の IncDecStmt 分岐を削除。
+- 判定するのは**右辺の値だけ**（`ValueForExpr(rhs)`）。`n += 1` は定数 `1` に
+  なるので撃たない。左辺へフォールバックしていた分岐を削除。
+- 報告位置は `=` / `:=` ではなく**代入ノードの開始**。
+  `if _, ok := i.(int)` は `ok` の話でも **`_` の位置**に出る。
+- `MySlice(y)`（ChangeType）や interface へのボクシング（MakeInterface）は
+  **値の貼り替えにすぎないので撃たない**が、`string(b)`（Convert）は撃つ。
+  4 形を並べて実測で確定させた。
+
+**抑止を緩めた瞬間に OSS で 4 件の FP が出た**（caddy 2 / helm 2）。すべて同じ形で、
+**分岐の片方での代入を、合流後に読んでいる**もの:
+
+```go
+loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+if len(settings.KubeConfig) > 0 {
+    loadingRules = &clientcmd.ClientConfigLoadingRules{…}
+}
+// ここで読む — if を通らない経路では最初の値が生きている
+```
+
+位置の前後関係だけでは制御フローが見えない。そこで「後続の代入を上書きと
+みなすのは**同じ文リストにあるとき（直線コード）だけ**」に制限した。
+さらに prometheus で 1 件出た FP は**ループの後退辺**で、代入より
+**ソース上は手前**にある読みが値を使っていた（`tsdb/chunks/chunks.go:190`）。
+囲むループ本体のどこかに読みがあれば生きているとみなす規則を足して解消。
+
+**fixture が上流と食い違っていた。** `sa4006/bad.go` の 3 つの `// want` は
+**どれも golangci-lint が撃たない形**だった（`n++` / `n += 1` / 定数の上書き）。
+上流が実際に撃つ 4 形に置き換え、撃たない形は理由付きで `ok.go` に移した。
+単体テストは「bad は空でない」としか見ていなかったので**この食い違いを
+何年でも隠せた**。golden 化して初めて出た。
+
+#### 4. 残った差分（30 / 19）
+
+| クラス | 件数 | 備考 |
+|--------|-----:|------|
+| Go stdlib のエラー文言（SA1000/1001/1002/1007/5009） | 15 | 次にやること 1 |
+| SA4017 の跨ぎパッケージ purity | 11 | §7（構造上の非互換） |
+| SA5011 の σ ノード | 1 | §7 |
+| SA4006 の interface ボクシング | 1 | 下記 |
+| 残る位置／文言／precision | 21 | 次にやること 2 |
+
+**新たに判明した構造的な穴**: guff-ssa の `MakeInterface` は
+**オペランドを持たない空構造体**（`pub struct MakeInterface {}`）。
+そのためボクシングは referrer の辺を作らず、`i = n` の `n` が未使用に見える。
+上流に合わせる分岐はコードに置いてあるが**現状は発火しえない**。
+SA4006 の FP 1 件がこれで、`sa4006/ok.go` に fixture として残してある。
+
+**結果**
+
+- golden: gocritic 164/164、goheader 11/11、staticcheck **447/496**
+  （sa 179/177 の 161 一致、s 79、st 138、qf 107）。
+  ratchet は sa 25/27→**16/18**、s 11/7→**3/1**、st 10/0→**10/0**、qf 3/2→**1/0**。
+- 台帳は変化なし（`never` 23 / `unit-only` 104 / `fired` 420）。
+  SA4006 は元から `fired` だったので、**この種の「撃ってはいるが共通ケースを
+  落としている」欠陥は COVERAGE.md の数字には出ない**。golden だけが見つけられる。
+- `cargo test --workspace` 2958 件 green。
+- isolate 114 target / file-set 3 target いずれも一致。
+- OSS pr tier: caddy・helm は P=R=100%。**fixture / local / gin の 3 target は
+  このセッション前から赤**（SA4017 の purity FP: `mayErr0` / `rawStrToBytes`）。
+  stash して HEAD で測り直し、**本セッションの変更とは無関係**であることを確認済み。
+  → 次にやること 3。
+- **prometheus regress ゲート**: PASS（`guff_only` 0 / `golangci_only` 0 / P=R=100%）。
+  wall **2.330s → 2.460s（許容 2.480s）**、peak RSS 2.93→3.07GiB。
+  **余裕は 0.02s しかない。** 静かなマシンでないと計測自体が揺れる
+  （負荷がかかった状態では 2.80s まで出た）。次に何か足すときは
+  `PERF_GUARD` を通してから測ること。
+
+**次にやること**
+
+1. **Go stdlib のエラー文言**（残差分の最大塊、15 件）。前セッションから未着手。
+   SA1000 は `regexp/syntax`、SA1001 は `text/template`、SA1002 は `time` の
+   レイアウト解析（`not-a-layout` は**エラーにならない**ので撃ってはいけない
+   — guff は今も撃っている）、SA1007 は `net/url`、SA5009 は printf
+   （`Printf format %s reads arg #1, but call has only 0 args`）。
+2. 残る位置／文言／precision 21 件。誤検出は SA4015 / SA4031 / SA5005 /
+   SA9004 / SA9008（上流に食わせて 0 件であることを確認済み）、
+   recall は SA1011 2 件 / S1030 / SA6001、位置・文言は SA1019（末尾に**空白**が付く）/
+   SA1023 / SA4020 / S1037。
+3. **OSS pr tier の SA4017 FP**（fixture / local / gin）。purity 推論が
+   `mayErr0` / `rawStrToBytes` を pure と誤判定している。**セッション開始時点で
+   既に赤**なので、まずここを緑に戻すのが筋。
+4. **govet の `never` 16 件**（2 セッション連続で未着手）。
+5. **revive の `unit-only` 83 件**と、`guff-revive/src/rules/{exported,package_comments}.rs`
+   `guff-style/src/lll.rs` の行だけの位置写像。
+6. **SA5011 の σ 相当の手当て**（§7）。src_funcs の静かな recall 損失を解くのに必要。
+
+### 2026-08-09 — `uniq-by-line` の比較キー、SA4017 のベンチ除け、SA5009 の printf 文法
+
+**やったこと**
+
+前セッションが「SA4017 の purity FP」として残した**赤い OSS ゲート（fixture / local / gin）を
+緑に戻した**。ただし原因は purity ではなく、**まったく別の 2 つのバグ**だった。
+「差分の原因を推測せずに測る」を守った結果、診断名の方が間違っていたことが分かった形。
+
+#### 1. `issues.uniq-by-line` の比較キーに linter が入っていた（fixture / local）
+
+`exclude.rs` の uniq フィルタは `(file, line, linter)` で数えていた。上流
+（`pkg/result/processors/uniq_by_line.go`）は **`(file, line)` だけ**で数える。
+1 行から出る issue は run 全体で高々 1 件、という意味だった。
+
+そのため `mayErr0()` のように **errcheck と staticcheck の SA4017 が同じ行に出る**形で
+guff だけが 2 件報告していた。fixture 2 件 / local 12 件の「guff にしか無い SA4017」は
+全部これで、purity は何も間違っていなかった。
+
+**どちらが残るか**も上流の挙動として確定させた。golangci は
+`GetOptimizedLinters` で linter を**名前順にソート**し、`Runner.Run` がその順に
+issues を append するので、processors が見る時点で**リストは linter 名でグループ化**されている。
+`uniq-by-line` はその**先頭**を残す。スクラッチモジュールで確認:
+
+| 同じ行に出る linter | 残るもの |
+|---|---|
+| errcheck / staticcheck | errcheck |
+| godot / lll | godot |
+| govet / staticcheck | govet |
+| ineffassign / staticcheck / wastedassign | ineffassign |
+
+guff の診断は analyzer×package のグラフ順に出るので、`apply()` の先頭で
+**linter 名による安定ソート**を入れた。`max-same-issues` も同じ順序に依存するので、
+uniq の直前ではなくパイプライン先頭に置くのが上流と同じ形になる。
+副産物として、guff の出力順（guff は最後に位置ソートをしない）も上流に近づいた。
+
+#### 2. SA4017 に上流のベンチマーク除けが無かった（gin）
+
+`internal/bytesconv/bytesconv_test.go:116` の `rawStrToBytes` は本物の残差分だった。
+上流 `sa4017.go` は
+
+```go
+if code.IsInTest(pass, fn) {
+    for param := range fn.Signature.Params().Variables() {
+        if typeutil.IsPointerToTypeWithName(param.Type(), "testing.B") {
+            continue fnLoop
+        }
+    }
+}
+```
+
+つまり **`_test.go` の中で `*testing.B` を取る関数は丸ごと飛ばす**。`BenchmarkFoo` という
+名前で照合しないのは、ベンチが実作業をヘルパに投げることがあるため（上流のコメント）。
+純粋関数の返り値を捨てるのは、まさに計測のためにやることなので理に適っている。
+`fmt_test` パッケージでの `fmt.Sprintf` という上流唯一のハードコード例外も併せて移植した。
+
+スクラッチで 4 形（`BenchmarkX` / `TestX` / `*testing.B` を取るヘルパ / 取らないヘルパ）を
+並べ、上流と**完全一致**することを確認済み。
+
+golden fixture は**足していない**。`sa4017/` に `_test.go` を置くと、Rust 側は
+`sa_check_bad_ok!`（`bad.go` / `ok.go` 固定）の外になり `testing` の stub も要る一方、
+golden 側は「テストファイルだけのディレクトリ」を作ることになるため。
+**この挙動は gin（OSS pr tier の常設ゲート）が押さえている** — `rawStrToBytes` が
+まさにこの形なので、退行すれば gin が赤くなる。
+
+#### 3. SA5009 — honnef の `printf` 文法を移植
+
+golden の残差分。guff は `Printf call needs N args but has M args` の**1 種類しか出せず**、
+上流は 4 種類を撃ち分ける。上流の `checkImpl` を読んで移植した:
+
+| 条件 | メッセージ |
+|---|---|
+| 引数が足りない | `Printf format %s reads arg #1, but call has only 0 args` |
+| 引数が余る | `Printf call needs 0 args but has 1 args` |
+| `%[0]d` | `Printf format %[0]d reads invalid arg 0; indices are 1-based` |
+| 文法違反（`%` 単独、`%!`） | `couldn't parse format string` |
+
+`honnef.co/go/tools/printf` の文法は正規表現 1 本（`^%flags widthAndPrecision? index? verb`）で、
+Go の regexp も Rust の `regex` も **leftmost-first** なので部分マッチ番号がそのまま通る。
+guff の旧実装は `%` の直後で `[n]` を読んでいたが、上流の文法では index は
+**flags / width / precision の後・verb の直前**にある。
+
+**実測で分かった上流の癖**: `%%` は `Verb.Value == 0` にパースされ、`if verb.Value != -1`
+の分岐に入るので **`hasExplicit = true` が立つ**。これは末尾の「引数が余る」検査を
+丸ごと抑止するため、**`fmt.Printf("%v %%", 1, 2)` は上流では何も報告されない**。
+guff はここで報告していた。11 形のスクラッチのうち 10 形が完全一致し、
+残る 1 形は下記の未移植部分。
+
+**未移植（意図的）**: `checkType`（`Printf format %s has arg #1 of wrong type int`）。
+verb と型の対応表・Stringer/error/Formatter 判定・要素への再帰が要る別物で、
+今回の文言修正とは独立している。移植前も後も guff はこの診断を出さない。
+
+#### 4. nightly tier が腐っていた — 前セッションの SA4006 が 3 件の誤検出を持ち込んでいた
+
+**pr tier だけを回していると足りない。** 今回はじめて `--tier pr,nightly` を回したところ
+consul と grafana が赤で、原因を切り分けるために 3 通り測った:
+
+| 測定対象 | consul | grafana |
+|---|---:|---:|
+| **HEAD（stash 全部）** | 261 / 255（extra **6**） | 0 / 0 ✅ |
+| HEAD + 前セッションの未コミット分 | 263 / 255（extra **8**） | 1 / 0 ❌ |
+| 上 + 本セッションの 3 変更 | 263 / 255（extra **8**、同じ） | 1 / 0（同じ） |
+| **上 + 下記の SA4006 修正（現在）** | 261 / 255（extra **6**） | 0 / 0 ✅ |
+
+読み取れること 2 つ:
+
+1. **前セッションの SA4006 再建は nightly で 3 件の誤検出を新たに出していた**
+   （consul `internal/protohcl/unmarshal_test.go:598,600`、grafana
+   `evaluator_test.go:432`）。前セッションは pr tier しか回していないので気付けなかった。
+   **未コミットのまま放置すればそのまま入っていた。**
+2. 本セッションの変更は consul / grafana の差分を 1 件も動かしていない
+   （`uniq-by-line` も SA4017 のベンチ除けも findings を**減らす**方向にしか働かないので、
+   これは事前の予測どおり）。
+
+**誤検出の正体**: `IdentIndex` が「上書きされる前に読まれたか」を
+**ident の位置の大小**で判定していた。しかし Go は**右辺を先に評価する**ので
+
+```go
+decoder := u.bodyDecoder(file.Body)
+decoder = decoder.SkipFields("type_url")   // 読んでから上書きする
+```
+
+では、上書き先の ident（列 2）が読み（列 12）より**左**にあるだけで、
+値は生きている。`defs` に積む位置を ident ではなく**代入文の末尾**に変え、
+右辺の読みが必ず手前に来るようにした。`c, extra := c.skip("a"), 2` のように
+`:=` の一部が新変数な形（このとき `c` は Def ではなく代入対象）も同じ経路で直る。
+
+上流に 4 形（連鎖上書き・`:=` 連鎖・古典的な上書き・読まない呼び出しでの上書き）を
+食わせて**完全一致**を確認し、`sa4006/ok.go` に fixture として追加してゴールデンに載せた。
+
+**残る consul の 6 件は HEAD 由来**（本セッション以前からの既存差分）:
+SA5011 1（§7 の σ ノード）/ SA9008 2（golden の ratchet にも載っている precision）/
+govet `lostcancel` 2 / unparam 1。**nightly tier は誰のループにも入っていないので、
+いつからこうなのか分からない。** `compat/results/RESULTS.md`（コミット済み）は
+consul を P=R=100% と表示しているので、少なくともその記録より後に劣化している。
+→ 次にやること 3。
+
+#### 開発時の落とし穴（記録）
+
+guff の永続 issue キャッシュの salt は `guff_version()` を使う（上流も
+version が空でなければ同じ）。**バージョンを上げずにコードを直すとスクラッチ検証が
+古い結果を読む**。`compat/` の各ゲートは毎回 `mktemp -d` した空キャッシュ + `--no-cache`
+で走るので影響を受けないが、**手で回すときは `--no-cache` を付けること**。
+
+**結果**
+
+- `./compat/run.sh`: fixture **6→4 件で P=R=100%**、local **120→108 件で P=R=100%**（どちらも赤→緑）。
+- `./compat/run.sh --oss --tier pr`: gin / caddy / helm **すべて P=R=100%**（gin が赤→緑）。
+  これで **OSS pr tier は 5 target 全部が緑**。
+- `--tier pr,nightly`: grafana / containerd も緑。**consul だけ extra 6 で赤**だが、
+  これは HEAD 由来の既存差分（上記 §4）。前セッションが持ち込んでいた 3 件は解消済み。
+- golden: gocritic 164/164、goheader 11/11。staticcheck は 4 ケース合計で
+  **golden 515 件中 486 件一致**（内訳は `sa` 162/177・`st` 138/148・`qf` 107/108・`s` 79/82。
+  guff 側の件数は sa 179・st 138・qf 107・s 80）。
+  ratchet は sa 16/18 → **15/17**、s / st / qf は据え置き。
+  （過去のセッションログの「NNN/MMM」は数え方が揃っていないので、以後は
+  ケースごとの `match/golden` を書くこと。）
+- 台帳（`docs/COVERAGE.md`）の件数は変化なし（547 / `never` 23 / `unit-only` 104 / `fired` 420）。
+  **この 3 件はどれも `fired` 済みの check の欠陥**で、2026-08-08 の SA4006 と同じく
+  **`never` / `unit-only` の数字には出ない種類**。
+  ついでに、削除済みの `SA9010` が「インベントリ外の check ID」として COVERAGE.md に
+  残っていたのを潰した（台帳は累積式なので、モジュールを消しても古い実行アーティファクト由来の
+  記録が残る）。`observed.json` から当該キーを落として `report` を再生成した。
+  **`observe --reset` はしていない** — 今回回していないターゲットで発火した記録まで捨ててしまうため。
+- isolate **114 target すべて一致**（`uniq-by-line` は 1 linter だけを有効にする tier なので、
+  今回の変更で挙動が変わりうる場所だったが、影響なし）。
+- `cargo test --workspace` **2960 件 green**。
+- **regress ゲート（`--profile full`）は正しさ緑・wall 時間赤。**
+  `guff_only` 0 / `golangci_only` 0 / P=R=100% だが wall が上限 2.480s を超える。
+  本セッションの変更が原因かを A/B で切り分けた（バイナリを 2 本焼いて `GUFF_BIN` で交互に 3 往復。
+  環境ドリフトを打ち消すため base→mine→base→… の順）:
+
+  | ラウンド | base（本セッションの 3 変更を stash） | mine |
+  |---|---:|---:|
+  | 1 | 2.550s | 2.540s |
+  | 2 | 2.540s | 2.550s |
+  | 3 | 2.530s | 2.570s |
+  | 平均 | **2.540s** | **2.553s** |
+
+  差は **+0.013s（0.5%）で、ラウンド 1 では mine の方が速い**（順位が入れ替わる＝ノイズ）。
+  **本セッションの変更は性能中立。** そして **base 自身が 2.53〜2.55s で既に上限超え**なので、
+  この赤は本セッション以前からのもの。単発測定のばらつきも大きく（同一バイナリで 2.58〜2.99s）、
+  **残り余裕 0.02s のこのゲートはこのマシンでは判定不能**。
+  → ベースライン 2.330s を測ったマシンとの差か、前セッションの purity analyzer 由来
+  （前セッションは 2.460s / 上限 2.480s と記録）。**ベースラインの取り直しか、
+  purity の実行コスト削減のどちらかが要る。** → 次にやること 0。
+- 単体テストを 2 箇所締めた。`sa5009_flags_invalid_printf` は
+  `contains("Printf")` しか見ておらず、**間違った文言を何年でも通せた**ので
+  文字列全体を固定した。`exclude.rs` には `uniq-by-line` の
+  (file, line) キーを固定するテストを足した。
+
+**次にやること**
+
+0. **regress の wall ゲートを判定可能な状態に戻す**（上記のとおり base で既に赤）。
+   ベースライン 2.330s は現在のマシンでは再現しない。まず静かな環境で base を複数回測り、
+   ベースラインを取り直すか、purity analyzer の全パッケージ IR 走査を削るか決める。
+   **これが赤のままだと以降のセッションが性能退行を検出できない。**
+1. **Go stdlib のエラー文言の残り 4 件**。今回 SA5009 を片付けたので残りはこれだけになった。
+   4 つとも**共通の構造**を持つ: guff は Go の parser を移植せず **Rust の crate で近似**しており、
+   受理する集合もエラー文言も違う。近似の継ぎ足しでは埋まらないので、順に移植するしかない。
+
+   | check | 現状 | 必要な移植 |
+   |---|---|---|
+   | SA1002 | `go_time_layout_self_parse` という手書きヒューリスティック | Go `time` の `nextStdChunk` + `parse`。上流は `time.Parse(s, s)` を**実際に呼んで `err.Error()` をそのまま出す**だけなので、これが唯一の正解。`"12345"` は `cannot parse "" as "4"`（`getnum` が 2 桁読むため month=12 / day=34 / hour=5 とずれて minute で尽きる）。**`"not-a-layout"` は std chunk を 1 つも含まないので上流はエラーにしない — guff は今も撃っている（FP）** |
+   | SA1000 | `regex_syntax` crate + Go 風に「軟化」する前処理 | Go `regexp/syntax` の parser。文言は `error parsing regexp: missing closing ): \`foo(\`` |
+   | SA1001 | 独自 | Go `text/template` の lexer/parser。文言は `template: :1: bad character U+007D '}'` |
+   | SA1007 | `url` crate + `if s == ":"` のハードコード | Go `net/url` の `parse`。文言は `parse ":": missing protocol scheme` |
+
+   **SA1002 が最優先**。他の 3 つは文言違い（両側とも撃つ）だが、SA1002 だけは
+   **撃ってはいけないものを撃っている**＝ユーザーに見える誤検出だから。
+2. 残る位置／文言／precision（誤検出は SA4015 / SA4031 / SA5005 / SA9004 / SA9008、
+   recall は SA1011 2 件 / S1030 / SA6001、位置・文言は SA1019 / SA1023 / SA4020 / S1037）。
+3. **consul の残 6 件**（HEAD 由来。§4 の 4 番目を参照）。内訳は
+   SA5011 1 / SA9008 2 / govet `lostcancel` 2 / unparam 1。
+   SA5011 と SA9008 は既知（§7 と golden の ratchet）だが、
+   **govet `lostcancel` 2 件と unparam 1 件はどこにも記録がない** ので、まずここを読むこと。
+   あわせて **nightly tier を毎セッション回す**（pr tier だけでは今回のような
+   誤検出を持ち込んだまま気付けない）。`--tier pr,nightly` で 3 分程度。
+4. **govet の `never` 16 件**（3 セッション連続で未着手）。gocritic / goheader と同じ
+   「既存 fixture を golden に載せるだけ」の安い手のはずで、`never` を 23 → 7 に落とせる。
+5. **revive の `unit-only` 83 件**と、`guff-revive/src/rules/{exported,package_comments}.rs`
+   `guff-style/src/lll.rs` の行だけの位置写像。
+6. **SA5011 の σ 相当の手当て**（§7）。src_funcs の静かな recall 損失を解くのに必要。
+   consul の 1 件もこれ。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -919,6 +1293,24 @@ regress ゲートが落ちる。現状は
 （SA4017 のみ）。**src_funcs を回す他の 20 以上の analyzer はメソッドを見ていない
 ＝ 静かな recall 損失が残っている。** 解くには SA5011 に σ 相当の手当て
 （分岐をまたぐ値の区別）を入れるのが先。
+
+### `MakeInterface` がオペランドを持たない（SA4006）
+
+guff-ssa の `MakeInterface` は **空構造体** (`pub struct MakeInterface {}`) で、
+ボクシングされる値を保持しない。go/ssa の `MakeInterface` は `X` を持ち、
+その値の referrer になる。したがって
+
+```go
+var i interface{} = 1
+_ = i
+i = n          // 上流は撃たない（n の referrer に MakeInterface がある）
+```
+
+で guff は `n` を未使用とみなして SA4006 を撃つ。上流に合わせる分岐は
+`sa4006.rs` に置いてあるが、命令がオペランドを持たない以上**発火しえない**。
+解くには guff-ssa 側で `MakeInterface { x: Value }` に変えて referrer を
+張る必要があり、SSA の構造変更なので単独セッションの範囲に収まらない。
+現状の差分は golden の extra 1 件（`sa4006/ok.go`）。
 
 ### `mod-year` / `mod-year-range`（goheader）
 

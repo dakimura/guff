@@ -107,6 +107,11 @@ sa4003/bad/bad.go:4:9:staticcheck::SA4003: no value of type uint is less than 0
 sa4003/bad/bad.go:5:9:staticcheck::SA4003: no value of type uint is less than 0
 sa4004/bad/bad.go:8:3:staticcheck::SA4004: the surrounding loop is unconditionally terminated
 sa4005/bad/bad.go:6:2:staticcheck::SA4005: ineffective assignment to field T.X
+sa4006/bad/bad.go:11:2:staticcheck::SA4006: this value of n is never used
+sa4006/bad/bad.go:17:2:staticcheck::SA4006: this value of f is never used
+sa4006/bad/bad.go:23:2:staticcheck::SA4006: this value of x is never used
+sa4006/bad/bad.go:29:2:staticcheck::SA4006: this value of s is never used
+sa4006/bad/bad.go:29:6:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa4008/bad/bad.go:5:15:staticcheck::SA4008: variable in loop condition never changes
 sa4009/bad/bad.go:3:8:staticcheck::SA4009: argument arg is overwritten before first use
 sa4009/bad/bad.go:8:18:staticcheck::SA4009: argument ctx is overwritten before first use

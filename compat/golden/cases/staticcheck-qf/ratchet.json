@@ -1,6 +1,6 @@
 {
-  "missing": 3,
-  "extra": 2,
-  "why": "QF1007 reports the AssignStmt node upstream, not the `=`; SA4017 needs cross-package purity inference for strings.ReplaceAll.",
+  "missing": 1,
+  "extra": 0,
+  "why": "SA4017 needs cross-package purity inference for strings.ReplaceAll (docs/COMPAT-HARDENING.md §7); every QF check itself matches.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

@@ -105,8 +105,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if recv_embeds_pointer(pass, recv) {
             return;
         }
+        // Upstream names the receiver's type: `ineffective assignment to field
+        // T.X`. Generic receivers print the bare object name (`G`, not `G[K]`)
+        // — verified against golangci-lint 2.12.2.
+        let recv_type = recv
+            .list
+            .first()
+            .and_then(|f| f.ty.as_ref())
+            .and_then(recv_type_name)
+            .unwrap_or_default();
         for (pos, field) in unobserved {
-            pending.push((pos, format!("ineffective assignment to field .{field}")));
+            pending.push((pos, format!("ineffective assignment to field {recv_type}.{field}")));
         }
     });
 
@@ -289,6 +298,17 @@ fn is_recv_value_path(pass: &Pass<'_>, expr: &Expr, recv_obj: guff_types::Object
     }
 }
 
+/// Name of a receiver's type, stripping any type-parameter list: `T` from `T`,
+/// `G` from `G[K]` and from `G[K, V]`.
+fn recv_type_name(ty: &Expr) -> Option<String> {
+    match ty {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::IndexExpr(ix) => recv_type_name(&ix.x),
+        Expr::IndexListExpr(ix) => recv_type_name(&ix.x),
+        _ => None,
+    }
+}
+
 fn selector_field_on(
     pass: &Pass<'_>,
     expr: &Expr,
@@ -300,7 +320,9 @@ fn selector_field_on(
     if !is_recv_value_path(pass, expr, recv_obj) {
         return None;
     }
-    Some((sel.name_pos.0 as u32, sel.name.clone()))
+    // Upstream reports the selector node, whose position is the start of `x` —
+    // not the field name.
+    Some((expr.pos().0 as u32, sel.name.clone()))
 }
 
 fn sa4005_analyzer_impl() -> Analyzer {

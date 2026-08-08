@@ -23,7 +23,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder_typed(entry_mask(pat()), pass.files(), |node| {
         if match_pattern(pass, pat(), node).is_some() {
-            pending.push((match_pos(node), "should omit second index in slice, s[a:len(s)] is identical to s[a:]".into()));
+            // Upstream reports the redundant high expression (`len(s)`), not
+            // the slice expression it sits in.
+            let pos = match node {
+                guff::walk::NodeRef::SliceExpr(s) => s
+                    .high
+                    .as_ref()
+                    .map(|h| h.pos().0 as u32)
+                    .unwrap_or_else(|| match_pos(node)),
+                _ => match_pos(node),
+            };
+            pending.push((pos, "should omit second index in slice, s[a:len(s)] is identical to s[a:]".into()));
         }
     });
     for (pos, message) in pending {

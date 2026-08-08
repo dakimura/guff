@@ -39,8 +39,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
     }
+    // Upstream reports the `*ir.BinOp`, whose `Source()` is the BinaryExpr, so
+    // the finding lands on the start of the left operand rather than on the
+    // operator guff-ssa stamps. Remap only if we have findings: the helper
+    // walks the AST.
+    let starts = (!pending.is_empty())
+        .then(|| guff_analysis::call_node_starts(pass))
+        .unwrap_or_default();
     for (pos, msg) in pending {
-        pass.reportf(pos, msg);
+        pass.reportf(starts.get(&pos).copied().unwrap_or(pos), msg);
     }
     Ok(None)
 }

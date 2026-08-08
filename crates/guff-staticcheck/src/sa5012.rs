@@ -15,19 +15,24 @@ fn check_new_replacer(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     if call.args.len() == 1 {
         if let Some(n) = composite_lit_len(ctx, call.args[0].value) {
             if n % 2 != 0 {
-                call.args[0].invalid(format!(
-                    "argument \"oldnew\" is expected to have even number of elements, but has {n} elements"
-                ));
+                call.args[0].invalid(odd_msg(n));
             }
         }
         return;
     }
     if call.args.len() % 2 != 0 {
-        call.invalid(format!(
-            "argument \"oldnew\" is expected to have even number of elements, but has {} elements",
-            call.args.len()
-        ));
+        let n = call.args.len();
+        // Upstream blames the *variadic parameter*, so the finding lands on the
+        // first variadic argument (`"a"` in `NewReplacer("a", "b", "c")`, `s` in
+        // `NewReplacer(s...)`) rather than on the call. Verified against
+        // golangci-lint 2.12.2 for both spellings and for 3- and 5-element
+        // calls.
+        call.args[0].invalid(odd_msg(n));
     }
+}
+
+fn odd_msg(n: usize) -> String {
+    format!("variadic argument \"oldnew\" is expected to have even number of elements, but has {n} elements")
 }
 
 fn composite_lit_len(ctx: &CallContext<'_>, value: callcheck::SsaValue) -> Option<usize> {

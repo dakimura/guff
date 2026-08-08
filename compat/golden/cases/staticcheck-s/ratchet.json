@@ -1,6 +1,6 @@
 {
-  "missing": 11,
-  "extra": 7,
-  "why": "Message text rendered from the AST upstream, plus S1010/S1016/S1019/S1030/S1034/S1035/S1037/S1040 recall and precision.",
+  "missing": 3,
+  "extra": 1,
+  "why": "S1030 recall; S1037 precision; two SA4006 findings upstream reaches through IR block optimization (an empty `if` body drops the reference to its condition) that guff-ssa keeps.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

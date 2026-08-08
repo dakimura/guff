@@ -22,6 +22,16 @@ fn is_canonical_header_key_arg(arg: &Expr) -> bool {
     )
 }
 
+/// Fully-qualified type of a method call's receiver expression
+/// (`net/http.Header`), as upstream prints it inside `(…)`.
+fn recv_type_string(pass: &Pass<'_>, x: &Expr) -> Option<String> {
+    let typ = pass.types_info()?.types.get(&x.id())?.typ;
+    let a = pass.pkg().type_artifacts.as_ref()?;
+    Some(guff_types::typestring::type_string(
+        &a.types, &a.objects, &a.packages, typ, None,
+    ))
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
@@ -33,18 +43,33 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
-        let Expr::SelectorExpr(SelectorExpr { sel, .. }) = &*call.fun else {
+        let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = &*call.fun else {
             return;
         };
         if !HEADER_METHODS.contains(&sel.name.as_str()) {
             return;
         }
-        if call.args.first().is_some_and(is_canonical_header_key_arg) {
-            pending.push((
-                match_pos(node),
-                "calling net/http.CanonicalHeaderKey on the key argument is redundant".into(),
-            ));
+        let Some(arg) = call.args.first() else {
+            return;
+        };
+        if !is_canonical_header_key_arg(arg) {
+            return;
         }
+        // Upstream quotes the parameter name and names the method it belongs
+        // to — `on the 'key' argument of (net/http.Header).Set` — and reports
+        // the redundant argument, not the enclosing call. Verified against
+        // golangci-lint 2.12.2 for Add / Get / Set, including
+        // `r.Header.Get(...)`.
+        let Some(recv) = recv_type_string(pass, x) else {
+            return;
+        };
+        pending.push((
+            arg.pos().0 as u32,
+            format!(
+                "calling net/http.CanonicalHeaderKey on the 'key' argument of ({recv}).{} is redundant",
+                sel.name
+            ),
+        ));
     });
     for (pos, message) in pending {
         pass.report_unless_generated(pos, message);

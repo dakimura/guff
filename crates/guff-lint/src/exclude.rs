@@ -343,6 +343,15 @@ impl IssueFilter {
         // deprecated parent is not also enabled (e.g. enable: [gomodguard_v2]).
         remap_enabled_alias_from_linters(&mut issues, &self.enabled_linters);
 
+        // golangci runs linters in name order (`GetOptimizedLinters` sorts, and
+        // `Runner.Run` appends each linter's issues in turn), so by the time the
+        // processors see the slice it is grouped by linter name. That order is
+        // observable: `uniq-by-line` keeps the *first* issue on a line whatever
+        // linter produced it, and `max-same-issues` keeps the first N. guff
+        // produces diagnostics in analyzer×package graph order instead, so sort
+        // here — stably, to leave each linter's own order alone.
+        issues.sort_by(|a, b| a.from_linter.cmp(&b.from_linter));
+
         // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.
         let go_cache = self.go_cache_dir.as_deref();
         issues.retain(|issue| {
@@ -422,15 +431,14 @@ impl IssueFilter {
         }
 
         if self.uniq_by_line {
+            // golangci's `UniqByLine` counts per (file, line) only — not per
+            // linter, and not per column. One line yields at most one issue in
+            // the whole run, and the survivor is whichever arrived first (see
+            // the sort at the top of `apply`). Keying on the linter as well used
+            // to let, say, errcheck and staticcheck's SA4017 both report the
+            // same ignored call.
             let mut seen = std::collections::HashSet::new();
-            issues.retain(|issue| {
-                let key = (
-                    issue.filename.clone(),
-                    issue.line,
-                    issue.from_linter.clone(),
-                );
-                seen.insert(key)
-            });
+            issues.retain(|issue| seen.insert((issue.filename.clone(), issue.line)));
         }
 
         if self.max_issues_per_linter > 0 {
@@ -850,6 +858,16 @@ pub fn process_diagnostics(
 mod tests {
     use super::*;
 
+    /// Like [`issue`], but on an explicit line. `uniq-by-line` keys on
+    /// (file, line) alone, so a test that wants two issues to survive in the
+    /// same file has to put them on different lines.
+    fn issue_at(linter: &str, file: &str, line: i64, text: &str) -> Issue {
+        Issue {
+            line,
+            ..issue(linter, file, text)
+        }
+    }
+
     fn issue(linter: &str, file: &str, text: &str) -> Issue {
         Issue {
             from_linter: linter.into(),
@@ -926,15 +944,39 @@ mod tests {
         let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
         let kept = filter.apply(
             vec![
-                issue("errcheck", "a.go", "one"),
-                issue("errcheck", "a.go", "two"),
-                issue("govet", "a.go", "three"),
+                issue_at("errcheck", "a.go", 1, "one"),
+                issue_at("errcheck", "a.go", 2, "two"),
+                issue_at("govet", "a.go", 3, "three"),
             ],
             &[],
         );
         assert_eq!(kept.len(), 2);
         assert_eq!(kept[0].text, "one");
         assert_eq!(kept[1].from_linter, "govet");
+    }
+
+    #[test]
+    fn uniq_by_line_keeps_one_issue_per_line_across_linters() {
+        // golangci's UniqByLine counts per (file, line) — not per linter and not
+        // per column — and keeps whichever issue arrived first. Linters run in
+        // name order there, so errcheck beats staticcheck on a shared line. This
+        // is what hides SA4017 on a call errcheck already flagged.
+        let filter =
+            IssueFilter::from_config(&IssuesConfig::default(), &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("staticcheck", "a.go", 7, "SA4017: mayErr doesn't have side effects"),
+                issue_at("errcheck", "a.go", 7, "Error return value is not checked"),
+                issue_at("errcheck", "a.go", 8, "Error return value is not checked"),
+                issue_at("staticcheck", "b.go", 7, "SA4017: mayErr doesn't have side effects"),
+            ],
+            &[],
+        );
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0].from_linter, "errcheck");
+        assert_eq!(kept[0].line, 7);
+        assert_eq!(kept[1].line, 8);
+        assert_eq!(kept[2].filename, "b.go");
     }
 
     #[test]
@@ -975,8 +1017,8 @@ mod tests {
         let filter = IssueFilter::from_config(&issues_cfg, &severity);
         let kept = filter.apply(
             vec![
-                issue("errcheck", "a.go", "x"),
-                issue("govet", "a.go", "y"),
+                issue_at("errcheck", "a.go", 1, "x"),
+                issue_at("govet", "a.go", 2, "y"),
             ],
             &[],
         );

@@ -60,18 +60,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if wrong.is_empty() {
                         continue;
                     }
-                    let left_s = render_type(
-                        arena,
-                        &ir.prog.object_arena,
-                        &ir.prog.package_arena,
-                        left,
-                    );
-                    let right_s = render_type(
-                        arena,
-                        &ir.prog.object_arena,
-                        &ir.prog.package_arena,
-                        *assert_type,
-                    );
+                    // The two interface names are rendered with
+                    // `types.RelativeTo(pass.Pkg)` — local types appear bare —
+                    // but the method signatures below keep the nil qualifier
+                    // and stay fully qualified. Verified against
+                    // golangci-lint 2.12.2 with a local type in the signature.
+                    let left_s = crate::render::type_string_rel(pass, left).unwrap_or_else(|| {
+                        render_type(arena, &ir.prog.object_arena, &ir.prog.package_arena, left)
+                    });
+                    let right_s = crate::render::type_string_rel(pass, *assert_type)
+                        .unwrap_or_else(|| {
+                            render_type(
+                                arena,
+                                &ir.prog.object_arena,
+                                &ir.prog.package_arena,
+                                *assert_type,
+                            )
+                        });
                     let mut msg = format!(
                         "impossible type assertion; {left_s} and {right_s} contradict each other:"
                     );
@@ -88,8 +93,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
     }
+    // Upstream reports the `*ir.TypeAssert`, whose `Source()` is the
+    // TypeAssertExpr, so the finding lands on the start of the asserted operand
+    // rather than on the `(` of `.(T)` that guff-ssa stamps.
+    let starts = (!reports.is_empty())
+        .then(|| guff_analysis::call_node_starts(pass))
+        .unwrap_or_default();
     for (pos, msg) in reports {
-        pass.reportf(pos, msg);
+        pass.reportf(starts.get(&pos).copied().unwrap_or(pos), msg);
     }
     Ok(None)
 }

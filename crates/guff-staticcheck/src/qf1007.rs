@@ -26,6 +26,10 @@ use guff_types::ObjectId;
 
 use crate::render::render_expr;
 
+/// `(stmt_pos, stmt_end, rhs_pos, rhs_end, if_pos, if_end, replacement)`: the
+/// declaration statement upstream reports, plus the two ranges the fix edits.
+type PendingMerge = (u32, u32, u32, u32, u32, u32, String);
+
 fn bool_lit(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::Ident(id) if id.name == "true" => Some(true),
@@ -90,7 +94,7 @@ fn if_assign_bool<'a>(
     ))
 }
 
-fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, u32, u32, u32, String)>) {
+fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<PendingMerge>) {
     let stmts = &body.list;
     if stmts.len() < 2 {
         return;
@@ -110,7 +114,17 @@ fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, u32, u3
         } else {
             render_expr(cond)
         };
-        pending.push((rhs_pos, rhs_end, if_pos, if_end, replacement));
+        // Upstream reports the declaration statement; the edits still target
+        // the RHS and the `if` that is folded into it.
+        pending.push((
+            stmts[i].pos().0 as u32,
+            stmts[i].end().0 as u32,
+            rhs_pos,
+            rhs_end,
+            if_pos,
+            if_end,
+            replacement,
+        ));
     }
 }
 
@@ -129,7 +143,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "QF1007 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, u32, u32, u32, String)> = Vec::new();
+    let mut pending: Vec<PendingMerge> = Vec::new();
     inspect.preorder_typed(node_mask!(FuncDecl, FuncLit), pass.files(), |node| {
         match node {
             NodeRef::FuncDecl(FuncDecl { body: Some(body), .. }) => {
@@ -142,10 +156,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     });
 
-    for (rhs_pos, rhs_end, if_pos, if_end, replacement) in pending {
+    for (stmt_pos, stmt_end, rhs_pos, rhs_end, if_pos, if_end, replacement) in pending {
         pass.report(Diagnostic {
-            pos: rhs_pos,
-            end: rhs_end,
+            pos: stmt_pos,
+            end: stmt_end,
             message: "could merge conditional assignment into variable declaration".into(),
             suggested_fixes: vec![SuggestedFix {
                 message: "Merge conditional assignment into variable declaration".into(),

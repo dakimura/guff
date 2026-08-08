@@ -76,10 +76,17 @@ fn test_instruction_positions() {
     assert_eq!(store_line, Some(3), "store from `x = x + 1` should map to line 3");
     assert_eq!(return_line, Some(4), "return should map to line 4");
 
-    // An instruction the builder emits without a position reports NO_POS.
+    // go/ssa's `builder.binop` passes `e.OpPos` to `emitArith`, which sets it on
+    // the instruction, so a BinOp carries the operator's position.
     let binop_id = f.instrs.iter().find_map(|(id, d)| match d {
         InstrData::BinOp(_) => Some(id),
         _ => None,
     }).expect("expected a binop (x + 1) instruction");
-    assert!(!f.pos(binop_id).is_valid(), "binop is emitted without a position");
+    let binop_pos = f.pos(binop_id);
+    assert!(binop_pos.is_valid(), "binop should carry the operator position");
+    assert_eq!(
+        fset.position(binop_pos).line,
+        3,
+        "the `+` of `x = x + 1` is on line 3"
+    );
 }

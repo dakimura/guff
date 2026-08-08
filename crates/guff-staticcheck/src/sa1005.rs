@@ -8,7 +8,7 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::code::{expr_to_string, is_call_to};
 use guff_analysis::passes::inspect;
-use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn looks_like_shell_command(val: &str) -> bool {
     val.contains(' ') && !val.contains('\\') && !val.contains('/')
@@ -37,8 +37,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !looks_like_shell_command(&val) {
             return;
         }
+        // Upstream reports the offending argument, not the call.
         pending.push((
-            match_pos(node),
+            arg1.pos().0 as u32,
             "first argument to exec.Command looks like a shell command, but a program name or path are expected"
                 .into(),
         ));

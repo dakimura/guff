@@ -55,9 +55,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if is_interface(&artifacts.types, t1) && render_type(pass, t1) == render_type(pass, t2) {
+            // Upstream names the operand and its type — `i already has type
+            // interface{}`, `e already has type error` — and reports the
+            // assertion node, whose position is the start of the operand.
+            let operand = crate::render::render_expr(&expr.x);
+            let Some(typ) = render_type(pass, t2) else {
+                return;
+            };
             pending.push((
-                expr.lparen.0 as u32,
-                "type assertion to the same type: value already has that interface type".into(),
+                expr.x.pos().0 as u32,
+                format!("type assertion to the same type: {operand} already has type {typ}"),
             ));
         }
     });

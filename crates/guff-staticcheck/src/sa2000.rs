@@ -52,9 +52,12 @@ fn check_go_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Strin
     let Some(add_call) = find_waitgroup_add_in_body(pass, &body.list) else {
         return;
     };
-    let rendered = render_expr(&add_call.fun);
+    // Upstream renders the whole `Add` call and reports the call node, not the
+    // callee alone at the `(`: `wgs[0].Add(2 + 1)`, verified against
+    // golangci-lint 2.12.2.
+    let rendered = render_expr(&Expr::CallExpr(add_call.clone()));
     pending.push((
-        add_call.lparen.0 as u32,
+        add_call.pos().0 as u32,
         format!("should call {rendered} before starting the goroutine to avoid a race"),
     ));
 }

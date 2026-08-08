@@ -244,7 +244,8 @@ pub fn call_object(prog: &Program, common: &CallCommon) -> Option<ObjectId> {
 /// node honnef's IR records as that instruction's `Source()`.
 ///
 /// guff-ssa follows go/ssa, where an instruction's position is an inner token:
-/// `Call.Pos()` is the `Lparen`, a map update's is the `[`. honnef's IR — which
+/// `Call.Pos()` is the `Lparen`, a map update's is the `[`, a `BinOp`'s is the
+/// operator, and a `TypeAssert`'s is the `(` of `.(T)`. honnef's IR — which
 /// every staticcheck port models — instead keeps the AST node on the
 /// instruction and defines `Pos()` as `Source().Pos()`, so findings land on the
 /// start of the callee expression or of the indexed operand. A check that
@@ -265,6 +266,14 @@ pub fn call_node_starts(pass: &crate::pass::Pass<'_>) -> std::collections::HashM
                 }
                 NodeRef::IndexExpr(ix) => {
                     starts.insert(ix.lbrack.0 as u32, ix.x.pos().0 as u32);
+                }
+                // Go: `BinaryExpr.Pos()` and `TypeAssertExpr.Pos()` are both
+                // `X.Pos()`.
+                NodeRef::BinaryExpr(b) => {
+                    starts.insert(b.op_pos.0 as u32, b.x.pos().0 as u32);
+                }
+                NodeRef::TypeAssertExpr(ta) => {
+                    starts.insert(ta.lparen.0 as u32, ta.x.pos().0 as u32);
                 }
                 _ => {}
             }

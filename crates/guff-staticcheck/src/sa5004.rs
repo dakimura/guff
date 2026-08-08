@@ -18,12 +18,14 @@ fn check_for_select(pass: &Pass<'_>, fs: &ForStmt, pending: &mut Vec<(u32, Strin
         return;
     };
     for clause in &sel.body.list {
-        let Stmt::CommClause(CommClause { comm, body, .. }) = clause else {
+        let Stmt::CommClause(CommClause { case, comm, body, .. }) = clause else {
             continue;
         };
         if comm.is_none() && body.is_empty() {
+            // Upstream reports the empty `default` clause itself, not the
+            // enclosing `select`.
             pending.push((
-                sel.select_.0 as u32,
+                case.0 as u32,
                 "should not have an empty default case in a for+select loop; the loop will spin"
                     .into(),
             ));

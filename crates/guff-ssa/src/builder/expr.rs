@@ -417,12 +417,15 @@ impl<'a> Builder<'a> {
             .unwrap_or_else(|| crate::program::value_type_of(self.prog, self.func(), x));
         
         let block = self.block.expect("no current block");
-        let id = crate::emit::emit(self.func_mut(), block, InstrData::BinOp(crate::instr::BinOp {
+        // go/ssa's `builder.binop` passes `e.OpPos` down to `emitArith`, which
+        // calls `v.setPos(pos)`. Checks that report a BinOp map it back to the
+        // BinaryExpr with `guff_analysis::call_node_starts`.
+        let id = crate::emit::emit_with_pos(self.func_mut(), block, InstrData::BinOp(crate::instr::BinOp {
             op: bin.op,
             x,
             y,
             typ,
-        }));
+        }), bin.op_pos);
         Value::Instr(id)
     }
 
@@ -549,13 +552,16 @@ impl<'a> Builder<'a> {
         };
 
         let block = self.block.expect("no current block");
-        let id = crate::emit::emit(self.func_mut(), block, InstrData::TypeAssert(crate::instr::TypeAssert {
+        // go/ssa's `builder.expr0` passes `e.Lparen` to `emitTypeAssert`, which
+        // sets it on the instruction. Checks map it back to the
+        // TypeAssertExpr with `guff_analysis::call_node_starts`.
+        let id = crate::emit::emit_with_pos(self.func_mut(), block, InstrData::TypeAssert(crate::instr::TypeAssert {
             x,
             assert_type,
             comma_ok: false,
             // single-value form: the result type is the asserted type
             typ: assert_type,
-        }));
+        }), e.lparen);
         Value::Instr(id)
     }
 

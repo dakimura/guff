@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{BlockStmt, CallExpr, DeferStmt, Expr, SelectorExpr, Stmt};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, object_of, type_with_name};
+use guff_analysis::code::{object_of, type_with_name};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::signature::signature_results;
@@ -88,10 +88,12 @@ fn check_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<(u32, Strin
         if sel.sel.name != "Close" {
             continue;
         }
-        let fun = call_name(pass, &call.fun).unwrap_or_else(|| "?".into());
-        let defer_call = call_name(pass, &def_call.fun)
-            .map(|n| format!("{n}()"))
-            .unwrap_or_else(|| "Close()".into());
+        // Upstream renders the *source expressions* — `fn1()` and `rc.Close()`
+        // — not the resolved objects, which would print
+        // `example.com/pkg.fn1()` and `io.Close()`. Verified against
+        // golangci-lint 2.12.2.
+        let fun = crate::render::render_expr(&call.fun);
+        let defer_call = crate::render::render_expr(&Expr::CallExpr(def_call.clone()));
         pending.push((
             defer_.0 as u32,
             format!("should check error returned from {fun}() before deferring {defer_call}"),

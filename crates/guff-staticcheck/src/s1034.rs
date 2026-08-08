@@ -140,7 +140,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(msg) = check_type_switch(pass, stmt) {
-            pending.push((match_pos(node), msg));
+            // Upstream reports the guard (`i.(type)`), not the `switch` keyword.
+            pending.push((stmt.assign.pos().0 as u32, msg));
         }
     });
 

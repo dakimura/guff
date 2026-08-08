@@ -24,6 +24,18 @@ fn is_chan_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     matches!(types.get(typ.underlying(types)), TypeData::Chan(Chan { .. }))
 }
 
+/// Renders the `make` call upstream suggests: the same call with its final
+/// argument dropped — `make(chan int)` for `make(chan int, 0)`, `make([]int, 0)`
+/// for `make([]int, 0, 0)`. Verified against golangci-lint 2.12.2, which also
+/// reports both shapes on `args[1]`.
+fn suggested_make(call: &CallExpr) -> String {
+    let kept: Vec<String> = call.args[..call.args.len() - 1]
+        .iter()
+        .map(crate::render::render_expr)
+        .collect();
+    format!("should use make({}) instead", kept.join(", "))
+}
+
 fn check_make(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
     if call_name(pass, &call.fun)? != "make" {
         return None;
@@ -31,13 +43,13 @@ fn check_make(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
     if call.args.len() == 2 && is_integer_literal(pass, &call.args[1], 0) {
         let typ = type_of_expr(pass, &call.args[0])?;
         if is_chan_type(pass, typ) {
-            return Some("should use make(T) instead of make(T, 0)".into());
+            return Some(suggested_make(call));
         }
     }
     if call.args.len() == 3
         && same_non_dynamic(pass, &call.args[1], &call.args[2])
     {
-        return Some("should use make(T, size) instead of make(T, size, size)".into());
+        return Some(suggested_make(call));
     }
     None
 }
@@ -54,7 +66,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(msg) = check_make(pass, call) {
-            pending.push((call.lparen.0 as u32, msg));
+            // Upstream reports the size argument, not the call.
+            let pos = call.args.get(1).map(|a| a.pos().0 as u32).unwrap_or(call.lparen.0 as u32);
+            pending.push((pos, msg));
         }
     });
 
