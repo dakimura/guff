@@ -10,6 +10,8 @@
 //! - package-level funcs referenced as values (not only called)
 //! - methods used as values (assigned / passed / returned, not only called)
 //! - func literals that are not immediately invoked (IIFE / `go`/`defer`)
+//! - methods whose name and parameter/result types match a method declared by
+//!   an interface in this package ([`collect_interface_methods`])
 //!
 //! Upstream also checks unused / constant results and uses SSA for interface
 //! satisfaction, forwarded calls, and call-graph precision.
@@ -359,6 +361,121 @@ fn collect_sign_required_funcs(
     required
 }
 
+/// Renders a type expression as a comparison key. Parameter names are left out
+/// and `any` is spelled `interface{}`, so an interface method and the method
+/// implementing it compare equal however either was written.
+fn type_key(e: &Expr) -> String {
+    match e {
+        Expr::Ident(id) => {
+            if id.name == "any" {
+                "interface{}".to_string()
+            } else {
+                id.name.clone()
+            }
+        }
+        Expr::SelectorExpr(s) => format!("{}.{}", type_key(&s.x), s.sel.name),
+        Expr::StarExpr(s) => format!("*{}", type_key(&s.x)),
+        Expr::ParenExpr(p) => type_key(&p.x),
+        Expr::Ellipsis(e) => match &e.elt {
+            Some(elt) => format!("...{}", type_key(elt)),
+            None => "...".to_string(),
+        },
+        Expr::ArrayType(a) => match &a.len {
+            Some(len) => format!("[{}]{}", type_key(len), type_key(&a.elt)),
+            None => format!("[]{}", type_key(&a.elt)),
+        },
+        Expr::MapType(m) => format!("map[{}]{}", type_key(&m.key), type_key(&m.value)),
+        Expr::ChanType(c) => {
+            let arrow = if c.dir == guff::ast::ChanDir::SEND {
+                "chan<-"
+            } else if c.dir == guff::ast::ChanDir::RECV {
+                "<-chan"
+            } else {
+                "chan"
+            };
+            format!("{arrow} {}", type_key(&c.value))
+        }
+        Expr::FuncType(f) => format!("func{}", signature_key(f)),
+        Expr::InterfaceType(i) => format!("interface{{{}}}", field_keys(&i.methods.list).join(";")),
+        Expr::StructType(s) => format!("struct{{{}}}", field_keys(&s.fields.list).join(";")),
+        Expr::IndexExpr(i) => format!("{}[{}]", type_key(&i.x), type_key(&i.index)),
+        Expr::IndexListExpr(i) => format!(
+            "{}[{}]",
+            type_key(&i.x),
+            i.indices.iter().map(type_key).collect::<Vec<_>>().join(",")
+        ),
+        Expr::BasicLit(b) => b.value.clone(),
+        // Anything else cannot appear in a signature that guff can compare;
+        // an opaque key keeps it from matching another unrenderable type.
+        other => format!("?{}", other.pos().0),
+    }
+}
+
+/// Field types, one entry per declared name (`a, b string` counts twice) so a
+/// grouped parameter list compares equal to a spelled-out one.
+fn field_keys(fields: &[guff::ast::Field]) -> Vec<String> {
+    let mut out = Vec::new();
+    for field in fields {
+        let key = match &field.ty {
+            Some(ty) => type_key(ty),
+            None => "?".to_string(),
+        };
+        for _ in 0..field.names.len().max(1) {
+            out.push(key.clone());
+        }
+    }
+    out
+}
+
+fn signature_key(ty: &guff::ast::FuncType) -> String {
+    let params = ty
+        .params
+        .as_ref()
+        .map(|p| field_keys(&p.list))
+        .unwrap_or_default();
+    let results = ty
+        .results
+        .as_ref()
+        .map(|r| field_keys(&r.list))
+        .unwrap_or_default();
+    format!("({}) ({})", params.join(","), results.join(","))
+}
+
+fn method_key(name: &str, ty: &guff::ast::FuncType) -> String {
+    format!("{name}{}", signature_key(ty))
+}
+
+/// Methods declared by an interface type in this package.
+///
+/// A method that satisfies an interface cannot have its signature changed, so
+/// upstream never reports its parameters. Upstream learns this from SSA: every
+/// `MakeInterface` marks the methods of the concrete type that the interface
+/// requires. guff has no such conversion record, so it matches an interface
+/// method by name and signature instead. That is wider than upstream in one
+/// direction (an interface nothing is ever converted to still suppresses a
+/// report) and narrower in another (an interface declared in another package is
+/// not visible here).
+fn collect_interface_methods(files: &[guff::ast::File]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for file in files {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(NodeRef::InterfaceType(it)) = n else {
+                return true;
+            };
+            for field in &it.methods.list {
+                let Some(Expr::FuncType(ft)) = field.ty.as_ref() else {
+                    continue; // embedded interface, not a method
+                };
+                for name in &field.names {
+                    out.insert(method_key(&name.name, ft));
+                }
+            }
+            true
+        });
+    }
+    out
+}
+
 /// Methods used as values (assigned / passed / returned), not only called.
 /// Upstream unparam skips these via SSA `signRequiredBy`.
 fn collect_sign_required_methods(
@@ -408,6 +525,7 @@ fn check_func_decl(
     check_exported: bool,
     sign_required: &HashSet<String>,
     sign_required_methods: &HashSet<String>,
+    interface_methods: &HashSet<String>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -423,6 +541,9 @@ fn check_func_decl(
         return;
     }
     if fd.recv.is_some() && sign_required_methods.contains(&fd.name.name) {
+        return;
+    }
+    if fd.recv.is_some() && interface_methods.contains(&method_key(&fd.name.name, &fd.ty)) {
         return;
     }
     let Some(params) = &fd.ty.params else {
@@ -457,6 +578,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let (call_fun_ids, value_lits) = collect_call_sites(files);
     let sign_required = collect_sign_required_funcs(files, &call_fun_ids);
     let sign_required_methods = collect_sign_required_methods(files, &call_fun_ids);
+    let interface_methods = collect_interface_methods(files);
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
@@ -470,6 +592,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 opts.check_exported,
                 &sign_required,
                 &sign_required_methods,
+                &interface_methods,
                 &mut pending,
             );
         }

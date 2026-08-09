@@ -5,6 +5,8 @@
 #   ./compat/run.sh              # fixture + benchmarks/local (standard.yml)
 #   ./compat/run.sh --smoke      # fixture only (CI gate)
 #   ./compat/run.sh --oss --tier pr
+#   ./compat/run.sh --oss --tier pr,nightly         # what every session must run
+#   ./compat/run.sh --oss --name consul             # one OSS target (fast iteration)
 #   ./compat/run.sh --oss --tier pr --all-linters   # every linter, real code
 #   ./compat/run.sh --isolate            # all curated per-linter isolate targets
 #   ./compat/run.sh --isolate --smoke    # smoke-tier isolate only (CI)
@@ -52,6 +54,7 @@ UPDATE_BASELINE=0
 ALL_LINTERS=0
 TIER="pr"
 LINTER_FILTER=""
+NAME_FILTER=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -77,8 +80,16 @@ while [[ $# -gt 0 ]]; do
       TIER="${1#*=}"
       shift
       ;;
+    --name)
+      NAME_FILTER="$2"
+      shift 2
+      ;;
+    --name=*)
+      NAME_FILTER="${1#*=}"
+      shift
+      ;;
     -h|--help)
-      sed -n '2,22p' "$0"
+      sed -n '2,24p' "$0"
       exit 0
       ;;
     *)
@@ -98,6 +109,9 @@ if [[ -n "$LINTER_FILTER" && "$ISOLATE" -eq 0 ]]; then
 fi
 if [[ "$ALL_LINTERS" -eq 1 && "$OSS" -eq 0 ]]; then
   die "--all-linters requires --oss"
+fi
+if [[ -n "$NAME_FILTER" && "$OSS" -eq 0 ]]; then
+  die "--name requires --oss (isolate mode uses --linter)"
 fi
 
 resolve_guff() {
@@ -363,17 +377,33 @@ run_isolate_targets() {
 if [[ "$ISOLATE" -eq 1 ]]; then
   run_isolate_targets
 else
-  run_target "fixture" "$ROOT/benchmarks/fixture" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
+  # --name is single-target iteration on one OSS repo; the fixture/local pair is
+  # the default gate's job, not this one's.
+  if [[ -z "$NAME_FILTER" ]]; then
+    run_target "fixture" "$ROOT/benchmarks/fixture" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
 
-  if [[ "$SMOKE" -eq 0 ]]; then
-    run_target "local" "$ROOT/benchmarks/local" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
+    if [[ "$SMOKE" -eq 0 ]]; then
+      run_target "local" "$ROOT/benchmarks/local" "$CONFIG_STANDARD" "./..." "5m" || FAILED_TARGETS=$((FAILED_TARGETS + 1))
+    fi
   fi
 
   if [[ "$OSS" -eq 1 ]]; then
     [[ -x "$PREPARE" ]] || die "missing $PREPARE"
-    echo "Preparing OSS corpus (tier=$TIER)..."
     prep_list="$(mktemp "${TMPDIR:-/tmp}/guff-compat-prep.XXXXXX")"
-    "$PREPARE" --tier "$TIER" >"$prep_list"
+    prep_args=()
+    if [[ -n "$NAME_FILTER" ]]; then
+      # A name names exactly one repo; its tier is whatever repos.json says.
+      echo "Preparing OSS corpus (name=$NAME_FILTER)..."
+      prep_args+=(--tier all --name "$NAME_FILTER")
+    else
+      echo "Preparing OSS corpus (tier=$TIER)..."
+      prep_args+=(--tier "$TIER")
+    fi
+    "$PREPARE" "${prep_args[@]}" >"$prep_list"
+    if [[ ! -s "$prep_list" ]]; then
+      rm -f "$prep_list"
+      die "no OSS targets selected (name='$NAME_FILTER' tier='$TIER')"
+    fi
     while IFS=$'\t' read -r name dir config packages timeout tier; do
       [[ -z "${name:-}" ]] && continue
       if ! run_target "$name" "$dir" "$config" "$packages" "$timeout"; then
@@ -402,7 +432,9 @@ if [[ "$ISOLATE" -eq 1 ]]; then
   RESULT_SNAPSHOT="$RESULTS_DIR/RESULTS.isolate.md"
 fi
 # Snapshot non-smoke multi-target runs, and all isolate runs (incl. isolate --smoke).
-if [[ "$ISOLATE" -eq 1 || "$SMOKE" -eq 0 ]]; then
+# A --name run covers one target, so it must not overwrite the committed
+# whole-corpus snapshot with a one-line report.
+if [[ -z "$NAME_FILTER" ]] && [[ "$ISOLATE" -eq 1 || "$SMOKE" -eq 0 ]]; then
   cp "$REPORT" "$RESULT_SNAPSHOT"
 fi
 

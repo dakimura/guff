@@ -1,0 +1,27 @@
+# Golden case: govet's lostcancel.
+#
+# lostcancel is the one govet analyzer whose answer depends on control flow, and
+# guff has no CFG: it walks the statement tree instead (see
+# crates/guff-govet/src/lostcancel.rs). This case pins that walk against
+# upstream's CFG search, including which return statement is named and where the
+# report lands when a function falls off its end.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      enable:
+        - lostcancel
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Both reports of a pair are wanted, and the pair can share a line.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

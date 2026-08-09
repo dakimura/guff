@@ -754,7 +754,10 @@ fn lostcancel_flags_discarded_cancel() {
     let pkg = support::typecheck_with_deps(
         "example.com/govet/lostcancel",
         &dir.join("bad.go"),
-        &[("context", &dir.join("stub/context/context.go"))],
+        &[
+            ("context", &dir.join("stub/context/context.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
     );
     let messages = support::run_analyzer(lostcancel_analyzer(), &pkg);
     assert!(
@@ -762,13 +765,63 @@ fn lostcancel_flags_discarded_cancel() {
         "expected discarded-cancel in FuncDecl and FuncLit, got {messages:?}"
     );}
 
+/// The path shapes in `paths.go`. Positions and wording are pinned against
+/// golangci-lint by `compat/golden/cases/govet-lostcancel`; this test guards the
+/// shape of the answer (which functions, how many reports, whose name is in the
+/// message) without needing golangci-lint on PATH.
+#[test]
+fn lostcancel_reports_uncovered_paths() {
+    let dir = support::testdata("lostcancel");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/lostcancel/paths",
+        &dir.join("paths.go"),
+        &[
+            ("context", &dir.join("stub/context/context.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    let messages = support::run_analyzer(lostcancel_analyzer(), &pkg);
+
+    let not_all_paths = messages
+        .iter()
+        .filter(|m| m.ends_with("function is not used on all paths (possible context leak)"))
+        .count();
+    let reachable_return = messages
+        .iter()
+        .filter(|m| m.starts_with("this return statement may be reached without using the "))
+        .count();
+    let discarded = messages.iter().filter(|m| m.contains("discarded")).count();
+
+    // 12 `leak*` functions report a pair, `leakDiscarded` reports once.
+    assert_eq!(not_all_paths, 12, "{messages:#?}");
+    assert_eq!(reachable_return, 12, "{messages:#?}");
+    assert_eq!(discarded, 1, "{messages:#?}");
+    assert_eq!(messages.len(), 25, "{messages:#?}");
+
+    // The variable's own name goes into both messages, not a literal "cancel".
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "the kill function is not used on all paths (possible context leak)"),
+        "{messages:#?}"
+    );
+    assert!(
+        messages.iter().any(|m| m
+            .starts_with("this return statement may be reached without using the kill var defined on line ")),
+        "{messages:#?}"
+    );
+}
+
 #[test]
 fn lostcancel_allows_deferred_cancel() {
     let dir = support::testdata("lostcancel");
     let pkg = support::typecheck_with_deps(
         "example.com/govet/lostcancel/ok",
         &dir.join("ok.go"),
-        &[("context", &dir.join("stub/context/context.go"))],
+        &[
+            ("context", &dir.join("stub/context/context.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
     );
     assert!(support::run_analyzer(lostcancel_analyzer(), &pkg).is_empty());
 }

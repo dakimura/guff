@@ -529,13 +529,13 @@ impl<'a> Printer<'a> {
         // cached — need interior mutability; use cell-like update via raw
         // We can't mutate through &self; use a simplified uncached path for
         // &self callers and cached for &mut self.
-        self.fset.position_for(pos, false).line
+        self.fset.line_for(pos, false)
     }
 
     pub(crate) fn line_for_mut(&mut self, pos: Pos) -> i64 {
         if pos != self.cached_pos {
             self.cached_pos = pos;
-            self.cached_line = self.fset.position_for(pos, false).line;
+            self.cached_line = self.fset.line_for(pos, false);
         }
         self.cached_line
     }

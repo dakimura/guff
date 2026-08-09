@@ -285,7 +285,7 @@ impl File {
     }
 
     pub fn line(&self, p: Pos) -> i64 {
-        self.position(p).line
+        self.line_for(p, true)
     }
 
     fn unpack(&self, offset: i64, adjusted: bool) -> (String, i64, i64) {
@@ -316,6 +316,33 @@ impl File {
             }
         }
         (filename, line, column)
+    }
+
+    /// Line of `p`, without materializing a [`Position`].
+    ///
+    /// [`File::position_for`] clones the file name into the `Position` it
+    /// returns. The printer asks for a line per node it lays out, so on a run
+    /// with a formatter enabled that clone is a heap allocation per query and
+    /// nothing reads it. Same answer as `position_for(p, adjusted).line`.
+    pub fn line_for(&self, p: Pos, adjusted: bool) -> i64 {
+        if p == NO_POS {
+            return 0;
+        }
+        let offset = self.fix_offset(p.0 - self.base);
+        let m = self.mutable.lock().unwrap();
+        let i = search_ints(&m.lines, offset);
+        let mut line = if i >= 0 { (i + 1) as i64 } else { 0 };
+        if adjusted && !m.infos.is_empty() {
+            let j = search_line_infos(&m.infos, offset);
+            if j >= 0 {
+                let alt = &m.infos[j as usize];
+                let k = search_ints(&m.lines, alt.offset);
+                if k >= 0 {
+                    line = alt.line + (line - (k + 1) as i64);
+                }
+            }
+        }
+        line
     }
 
     fn position_internal(&self, p: Pos, adjusted: bool) -> Position {
@@ -523,6 +550,18 @@ impl FileSet {
     /// Position of `p` with line-directive adjustments applied.
     pub fn position(&self, p: Pos) -> Position {
         self.position_for(p, true)
+    }
+
+    /// Line of `p`, without materializing a [`Position`] — see
+    /// [`File::line_for`].
+    pub fn line_for(&self, p: Pos, adjusted: bool) -> i64 {
+        if p == NO_POS {
+            return 0;
+        }
+        match self.file_internal(p) {
+            Some(f) => f.line_for(p, adjusted),
+            None => 0,
+        }
     }
 
     /// Internal: read-locked access to (base, tree-snapshot) for serialize.

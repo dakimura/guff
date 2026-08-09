@@ -313,9 +313,16 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_object(&mut self, o: &PObject, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
+        // Upstream's `Object.Match` delegates to `Ident`, so **only** a bare
+        // identifier binds — `r.buf` does not. Note the asymmetry with
+        // [`Self::match_object_id`]: recalling an already-bound object *does*
+        // accept a selector, comparing the object of its `Sel`
+        // (`pattern/match.go`, the `types.Object` arm of `match`). Accepting a
+        // selector here too made `(SliceExpr x@(Object _) low (CallExpr
+        // (Builtin "len") [x]) nil)` fire on `r.buf[i:len(r.buf)]`, which
+        // upstream S1010 leaves alone (prometheus `tsdb/wlog/live_reader.go`).
         let id = match node {
             NodeRef::Ident(i) => i,
-            NodeRef::SelectorExpr(sel) => &sel.sel,
             _ => return None,
         };
         // The node must denote an object (Go's `Object` pattern).

@@ -89,7 +89,7 @@ pub fn sort_imports(fset: &Arc<FileSet>, f: &mut File) {
 }
 
 fn line_at(fset: &Arc<FileSet>, pos: Pos) -> i64 {
-    fset.position_for(pos, false).line
+    fset.line_for(pos, false)
 }
 
 fn import_path(s: &Spec) -> String {

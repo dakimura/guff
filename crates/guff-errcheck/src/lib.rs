@@ -4,7 +4,8 @@
 
 mod excludes;
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
@@ -128,6 +129,7 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
         opts: &opts,
         pending: &mut pending,
         skip_assert_positions: HashSet::new(),
+        error_types: RefCell::default(),
     };
 
     const WANTED: NodeMask = node_mask!(
@@ -162,6 +164,28 @@ struct Visitor<'a, 'b> {
     opts: &'a Options,
     pending: &'a mut Vec<(u32, String)>,
     skip_assert_positions: HashSet<u32>,
+    /// Answers to "does this type implement `error`?", which every unchecked
+    /// call asks about its result type.
+    ///
+    /// Both halves of that answer used to be recomputed per call: finding the
+    /// predeclared `error` scans the whole object arena, and the mutable
+    /// interface lookup needs a `TypeArena` clone. On Prometheus's `./tsdb/...`
+    /// the pair was ~4.6% of guff's CPU samples — errcheck's single hottest
+    /// frame. Result types repeat heavily (`error`, `int`, `[]byte`, one
+    /// package's own types), so a `TypeId` memo answers almost every query.
+    error_types: RefCell<ErrorTypes>,
+}
+
+/// Lazily built cache behind [`Visitor::error_types`].
+#[derive(Default)]
+struct ErrorTypes {
+    /// `None` until looked up; `Some(None)` when the package has no universe
+    /// `error` (nothing then implements it).
+    universe_error: Option<Option<TypeId>>,
+    /// One arena copy for the whole run, for the queries the read-only probe
+    /// cannot answer. Appends land in its overlay and never touch the package's.
+    scratch: Option<guff_types::arena::TypeArena>,
+    memo: HashMap<TypeId, bool>,
 }
 
 impl Visitor<'_, '_> {
@@ -464,7 +488,77 @@ impl Visitor<'_, '_> {
         ) {
             return vec![false];
         }
-        result_type_errors(self.pass, tav.typ)
+        self.result_type_errors(tav.typ)
+    }
+
+    fn result_type_errors(&self, typ: TypeId) -> Vec<bool> {
+        let artifacts = match self.pass.pkg().type_artifacts.as_ref() {
+            Some(a) => a,
+            None => return vec![false],
+        };
+        match artifacts.types.get(typ) {
+            guff_types::arena::TypeData::Tuple(t) => (0..t.len())
+                .map(|i| {
+                    t.at(i)
+                        .typ(&artifacts.objects)
+                        .is_some_and(|rt| self.is_error_type(rt))
+                })
+                .collect(),
+            _ => vec![self.is_error_type(typ)],
+        }
+    }
+
+    /// True when `typ` is (or implements) the predeclared `error` interface.
+    ///
+    /// Matches kisielk/errcheck: `types.Implements(t, errorType)` only — no `*T`
+    /// fallback. Pointer-typed returns like `*gin.Error` still match because the
+    /// call's result type is already a pointer. Value types that only have
+    /// pointer-receiver `Error()` do not implement `error` in go/types either.
+    fn is_error_type(&self, typ: TypeId) -> bool {
+        if let Some(hit) = self.error_types.borrow().memo.get(&typ) {
+            return *hit;
+        }
+        let answer = self.compute_is_error_type(typ);
+        self.error_types.borrow_mut().memo.insert(typ, answer);
+        answer
+    }
+
+    /// The uncached body of [`Self::is_error_type`]. Every step here is priced
+    /// per distinct type, not per call: `type_with_name` renders the whole type
+    /// to a `String`, `universe_error` scans the object arena, and
+    /// `api_implements` needs a mutable arena.
+    fn compute_is_error_type(&self, typ: TypeId) -> bool {
+        if type_with_name(self.pass, typ, "error") {
+            return true;
+        }
+        let Some(artifacts) = self.pass.pkg().type_artifacts.as_ref() else {
+            return false;
+        };
+        // Typ[Invalid] is used for NoValue / broken types — never an error value.
+        if matches!(
+            artifacts.types.get(typ),
+            TypeData::Basic(b) if b.kind() == BasicKind::Invalid
+        ) {
+            return false;
+        }
+
+        let cache = &mut *self.error_types.borrow_mut();
+        let err = *cache
+            .universe_error
+            .get_or_insert_with(|| universe_error(self.pass));
+        let Some(err) = err else {
+            return false;
+        };
+        let scratch = cache
+            .scratch
+            .get_or_insert_with(|| artifacts.types.clone());
+        api_implements(
+            scratch,
+            &artifacts.objects,
+            &artifacts.packages,
+            typ,
+            err,
+        )
     }
 
     fn call_returns_error(&self, call: &CallExpr) -> bool {
@@ -566,23 +660,10 @@ fn walk_embedded_iface_names(
     }
 }
 
-fn result_type_errors(pass: &Pass<'_>, typ: TypeId) -> Vec<bool> {
-    let artifacts = match pass.pkg().type_artifacts.as_ref() {
-        Some(a) => a,
-        None => return vec![false],
-    };
-    match artifacts.types.get(typ) {
-        guff_types::arena::TypeData::Tuple(t) => (0..t.len())
-            .map(|i| {
-                t.at(i)
-                    .typ(&artifacts.objects)
-                    .is_some_and(|rt| is_error_type(pass, rt))
-            })
-            .collect(),
-        _ => vec![is_error_type(pass, typ)],
-    }
-}
-
+/// The predeclared `error` interface.
+///
+/// A full scan of the object arena, so callers must cache the result — see
+/// [`ErrorTypes`].
 fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     for oid in artifacts.objects.ids() {
@@ -598,39 +679,6 @@ fn universe_error(pass: &Pass<'_>) -> Option<TypeId> {
         return tn.typ();
     }
     None
-}
-
-/// True when `typ` is (or implements) the predeclared `error` interface.
-///
-/// Matches kisielk/errcheck: `types.Implements(t, errorType)` only — no `*T`
-/// fallback. Pointer-typed returns like `*gin.Error` still match because the
-/// call's result type is already a pointer. Value types that only have
-/// pointer-receiver `Error()` do not implement `error` in go/types either.
-fn is_error_type(pass: &Pass<'_>, typ: TypeId) -> bool {
-    if type_with_name(pass, typ, "error") {
-        return true;
-    }
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return false;
-    };
-    // Typ[Invalid] is used for NoValue / broken types — never an error value.
-    if matches!(
-        artifacts.types.get(typ),
-        TypeData::Basic(b) if b.kind() == BasicKind::Invalid
-    ) {
-        return false;
-    }
-    let Some(err) = universe_error(pass) else {
-        return false;
-    };
-    let mut types = artifacts.types.clone();
-    api_implements(
-        &mut types,
-        &artifacts.objects,
-        &artifacts.packages,
-        typ,
-        err,
-    )
 }
 
 pub fn analyzer() -> &'static Analyzer {

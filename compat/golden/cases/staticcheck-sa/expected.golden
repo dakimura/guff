@@ -182,4 +182,6 @@ sa9003/bad/bad.go:5:9:staticcheck::SA9003: empty branch
 sa9005/bad/bad.go:4:28:staticcheck::SA9005: struct type 'example.com/sa9005/bad.t' doesn't have any exported fields, nor custom marshaling
 sa9006/bad/bad.go:2:30:staticcheck::SA9006: shifting 8-bit value by 8 bits will always clear it
 sa9007/bad/bad.go:3:12:staticcheck::SA9007: this call to os.RemoveAll deletes the user's entire temporary directory, not a subdirectory therein
+sa9008/bad/bad.go:10:20:staticcheck::SA9008: x refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+sa9008/bad/bad.go:23:28:staticcheck::SA9008: err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
 sa9009/bad/bad.go:1:1:staticcheck::SA9009: ineffectual compiler directive due to extraneous space: "//  go:noinline"

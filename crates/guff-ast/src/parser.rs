@@ -200,7 +200,9 @@ impl Parser {
     }
 
     fn line_for(&self, pos: Pos) -> i64 {
-        self.file.position_for(pos, false).line
+        // `line_for` skips the filename clone `position_for` would make; the
+        // parser asks for a line per comment group.
+        self.file.line_for(pos, false)
     }
 
     // ---- comment/scanner plumbing ---------------------------------

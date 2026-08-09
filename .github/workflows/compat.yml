@@ -166,3 +166,74 @@ jobs:
             compat/results/*/REPORT.md
           if-no-files-found: ignore
           retention-days: 14
+
+  # OSS finding-set on the nightly-tier corpus (consul / grafana / containerd).
+  #
+  # These three repos carry most of the corpus's real findings — 255 of consul's
+  # own are compared here — and for a while nothing ran them on a schedule
+  # anyone read. A regression could sit in main undated: `compat/results/RESULTS.md`
+  # showed consul at P=R=100% while HEAD had six extra findings, and there was no
+  # way to tell which commit had introduced them (docs/COMPAT-HARDENING.md §4,
+  # 2026-08-09). Running the tier on every push to main is what makes a
+  # regression attributable to a commit.
+  #
+  # Not run on pull requests: the tier takes ~3 minutes locally and much longer
+  # on a cold GHA corpus cache, and a regression caught on the merge commit is
+  # still dated to the day. Run it locally before pushing:
+  #   ./compat/run.sh --oss --tier pr,nightly
+  oss-nightly:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://golangci-lint.run/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build guff
+        run: cargo build --release -p guff-lint
+
+      - name: Cache OSS corpus clones
+        uses: actions/cache@v4
+        with:
+          path: corpus/cache
+          key: corpus-nightly-${{ hashFiles('corpus/repos.json') }}
+          restore-keys: |
+            corpus-nightly-
+            corpus-pr-
+
+      # Also gates worker panics and ill-typed package counts (compat/health.py).
+      - name: Compat OSS (nightly tier, own-config)
+        run: ./compat/run.sh --oss --tier nightly
+
+      - name: File-set gate (nightly tier)
+        run: ./compat/filesets.sh --tier nightly
+
+      - name: Upload OSS report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-nightly-results
+          path: |
+            compat/results/RESULTS.md
+            compat/results/*/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 14

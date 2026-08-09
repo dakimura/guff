@@ -270,7 +270,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 29 / extra 18） | 2026-08-09 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / govet-lostcancel 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 29 / extra 17） | 2026-08-09 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
@@ -291,8 +291,14 @@ gocritic 1（`whyNoLint`、§6）/ revive 1（`time-naming`）/ swaggo 1。
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
 **台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
-「一致している」ではない。一致の指標は golden の ratchet（現在 missing 29 / extra 18）と
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 29 / extra 17）と
 OSS / isolate ゲートの側にある。
+
+**`fired` ですらない罠**もある。2026-08-09（2 本目）の `lostcancel` は
+「not used on all paths」の arm が**走査の死角でだけ発火する**状態で、
+`fired` 済み・isolate 緑・golden 未搭載だった。つまり
+**「撃っている」ことすら「正しい条件で撃っている」の証拠にならない**。
+check 単位で golden に載せる（Phase 3）以外にこれを見つける方法は無い。
 
 ---
 
@@ -1206,6 +1212,296 @@ version が空でなければ同じ）。**バージョンを上げずにコー�
 
 ---
 
+### 2026-08-09（2 本目）— consul の残 6 件を潰し、nightly tier を CI ゲートにした
+
+**やったこと**
+
+前セッションの「次にやること 3」（consul の HEAD 由来 6 件。うち govet `lostcancel` 2 と
+unparam 1 は**どこにも記録がなかった**）から着手した。3 件とも guff のバグで、
+**うち 2 つは「その check が構造的に壊れている」ことの症状**だった。
+
+#### 1. lostcancel の「not used on all paths」は**発火条件が反転していた**
+
+consul の 2 件（`leader_connect_ca.go:1588` / `server.go:1133`）はどちらも
+
+```go
+} else if commonCfg.CSRMaxConcurrent > 0 {
+    ctx, cancel := context.WithTimeout(context.Background(), csrLimitWait)
+    defer cancel()          // ← 直後に defer している。誤検出
+```
+
+という形で、**`else if` の本体**にある。旧実装の「使われているか」判定は
+`walk_stmts` / `walk_stmt` で本体を歩いていたが、`walk_stmt` は `BlockStmt` しか
+再帰せず **`else if`（`Stmt::IfStmt`）に入らなかった**。一方 def を集める側
+（`collect_cancel_from_else`）は `else if` に入る。つまり
+
+- def は見つかる
+- その def を含む文が「使用箇所の走査」からは見えない
+
+**そして旧実装は def 文の `cancel` ident 自身を「使用」として数えていた**
+（`id.id == cancel.cancel_id`）。したがって
+**「def 文が見える」＝必ず used ＝ 決して報告しない**、
+**「def 文が見えない」＝ used=false ＝ 報告する**。
+つまりこの arm は**走査の死角でだけ発火する純粋な誤検出装置**で、
+教科書どおりの本物のリーク（`if b { cancel() }` の後に `return`）は
+**1 件も報告できていなかった**。isolate の govet fixture は discarded 形しか
+持っていないので、この反転は 3 つのゲートすべてを通り抜けていた。
+
+上流（`golang.org/x/tools@v0.46.0`）は `ctrlflow` の CFG を DFS で辿り、
+v を参照するブロックを枝刈りして最初に到達した return ブロックを報告する。
+guff に CFG は無いので、**文木の上で同じ探索を書き直した**（`scan_seq` の
+`Scan::{Bad,Blocked,Fell}` が「return に到達 / 上流の枝刈りに相当 / 次の文へ」）。
+スクラッチ 3 ファイル 25 形を golangci-lint 2.12.2 に食わせて**位置・列・文言まで完全一致**。
+実測で分かった上流の挙動（すべて推測ではなく計測）:
+
+| 形 | 上流 |
+|---|---|
+| 参照が 1 本の分岐にしかない | **報告**（def 文 + その分岐を通らない return の 2 件） |
+| 報告位置 | 1 件目は `AssignStmt` / **`ValueSpec`**（`var ctx, cancel = …` は `var` ではなく `ctx` の列）、2 件目は return 文 |
+| 文言 | `the <変数名> function is not used on all paths …` — **"cancel" リテラルではなく変数名** |
+| `if`/`else` の両方が cancel する | 報告しない（ブロック枝刈りで後続に到達できない） |
+| `default` のある switch で全 clause が cancel する | 報告しない |
+| `default` の無い switch | **報告**（switch を素通りする経路がある） |
+| 条件式の中での参照（`if cancel != nil && b`） | 報告しない（def ブロックの残りに含まれる） |
+| `return` を持たない関数 | **報告**。2 件目は**関数の閉じ括弧**（CFG の synthetic return） |
+| 末尾が `panic()` | 報告しない（return に到達しない） |
+| named result への代入 + 裸の `return` | 報告しない（裸 return は named result の使用） |
+| 関数外で宣言された変数への代入 | 報告しない（`funcScope.Contains`） |
+| `main` パッケージの `main` | 解析しない |
+
+修正後、guff は**上流が出す 2 件目のメッセージ**
+（`this return statement may be reached without using the X var defined on line N`）
+も出すようになった。旧実装はこれを一切持っていなかったので、
+**1 件も報告できていなかった arm の recall がそのまま増えている**。
+
+初回の修正で consul に**新しい誤検出 3 件**が出た。`for { select { … } }` の中の
+def で「継続を辿り切った＝関数末尾の synthetic return に到達」と扱ったせいで、
+**条件のない `for` から抜ける経路は無い**のに閉じ括弧を報告していた。
+継続の連鎖を無条件ループで打ち切るようにして解消（`child_seqs` の `escapes`）。
+**pr tier だけ回していたら 3 件とも見えなかった** — nightly を毎回回す理由がこれ。
+
+#### 2. unparam — interface を満たすメソッドを除外していなかった
+
+consul の `(*mockCAServerDelegate).forwardDC - dc is unused` は、同じパッケージの
+`caServerDelegate` interface が `forwardDC(method, dc string, …)` を宣言しているので
+**シグネチャを変えられない**。上流 unparam は SSA の `MakeInterface` から
+「この具体型のどのメソッドが interface に要求されているか」を集めて除外する。
+
+スクラッチで上流の粒度を確定させた:
+
+| 形 | 上流 |
+|---|---|
+| interface を宣言し、その interface へ変換もしている | 除外 |
+| 同じシグネチャだが**メソッド名が違う** | **報告**（＝シグネチャ文字列だけの一致ではない） |
+| 同じシグネチャの**普通の関数** | 報告 |
+| 宣言済み func 型と一致 | 報告 |
+| interface が同名同シグネチャのメソッドを宣言しているが**変換が存在しない** | **報告** |
+
+guff には変換の記録が無いので、**パッケージ内の interface 型が宣言するメソッドと
+名前＋パラメータ／結果型で一致したら除外**する近似を入れた（`collect_interface_methods`）。
+上流より広い方向（変換の無い interface でも抑止する）と狭い方向（他パッケージの
+interface は見えない）の両方にズレるので、モジュール doc に明記した。
+**OSS 8 target / isolate 114 target で recall の減少は 0 件**。
+
+#### 3. SA9008 — 上流のパターンは「**シャドウしている ident 自身**」を assert する形だけ
+
+残る 2 件（`event_endpoint_test.go:115` / `http_test.go:1728`）を読むために
+上流実装（`honnef.co/go/tools@v0.7.0/staticcheck/sa9008`）を読んだところ、
+パターンが
+
+```
+(IfStmt (AssignStmt [obj@(Ident _) ok@(Ident _)] ":=" assert@(TypeAssertExpr obj _)) ok _ elseBranch)
+```
+
+で、**`TypeAssertExpr` の被 assert 式が左辺 1 個目と同じ ident**（`pattern` の
+再束縛は位置と Object を無視した名前比較）であることを要求している。
+guff はこれを見ていなかったので `if v, ok := x.(int); ok { … } else { use v }` を
+報告していた（上流は報告しない）。`:=` トークンの確認も抜けていた。両方入れた。
+
+**fixture `sa9008/bad.go` 自身が「上流が報告しない形」だった** — golden の extra 1 件は
+これが原因。fixture をシャドウ形に直し、`ok.go` に「名前が違う形」「`=` の形」を追加した。
+
+consul の 2 件は**この修正では消えない**（`if err, ok := err.(HTTPError)` は同名なので
+パターンには当たる）。上流が黙る理由は残る IR 検証（`irfn.ValueForExpr` +
+`irutil.Flatten(v) != shadoweeIR`）で、guff は移植していない。最小再現を計測で切り分けた:
+
+```go
+// 報告される
+func v4(xs []int) string {
+    for range xs {
+        err := mk()
+        if err, ok := err.(HTTPError); ok { return "a" } else { return fmt.Sprint(err) }
+    }
+    return ""
+}
+// 報告されない ← consul と同じ形
+func w1(t *testing.T) {
+    for _, v := range rows {
+        err := check(v.ip)
+        if err != nil {
+            if err, ok := err.(HTTPError); ok { t.Log(err.StatusCode) } else { t.Fatalf("%v", err) }
+        }
+    }
+}
+```
+
+**ループの中で、さらに `if` でネストした assert だと上流は黙る**（ループを外すと報告する）。
+IR 値が assert の結果そのものでなくなる（back edge 越しの Phi が疑わしい）ためと見られる。
+→ 次にやること 2。
+
+#### 4. nightly tier を CI ゲートにした（＝次の劣化に日付が付くようにした）
+
+`--tier nightly` は `showcase.yml` の日次 cron にしかなく、**赤くなっても誰も読んでいなかった**。
+`compat.yml` に **`oss-nightly` ジョブ**を追加し、**main への push ごとに**
+consul / grafana / containerd を回す（PR では回さない: コールドな GHA コーパスで 30 分かかる。
+代わりに push 前にローカルで `--tier pr,nightly`）。
+
+**恒久的に赤いゲートは何も日付を付けられない**ので、残る consul 3 件
+（SA5011 1 / SA9008 2）を理由と日付つきで `compat/allowlists/consul.txt` に記録した（§5 参照）。
+これで **4 件目が出たら落ちる**。
+
+あわせて `run.sh --name <target>` を追加した（1 target だけを回す。tier を跨いでも指定できる。
+fixture / local の暖機は省く）。切り分け中は consul 1 本を 40 秒で回せる。
+
+#### 5. regress の tsdb ゲートも赤だった — 原因は `pattern` の `Object` が広すぎたこと
+
+nightly と同じ話が regress にもあった。`./regress/run.sh`（既定の tsdb プロファイル）は
+**`guff_only` 1 で赤**で、`regress/baseline.json` は 0 と記録している。前セッションは
+`--profile full` しか回していないので気付いていない。
+
+```
++guff tsdb/wlog/live_reader.go:125:42 S1010: should omit second index in slice, s[a:len(s)] is identical to s[a:]
+```
+
+対象コードは `r.rdr.Read(r.buf[r.writeIndex:len(r.buf)])`。上流のパターンは
+
+```
+(SliceExpr x@(Object _) low (CallExpr (Builtin "len") [x]) nil)
+```
+
+で、`Object` は `pattern/match.go` で **`Ident` に委譲**している（`match(m, Ident(obj), node)`）。
+つまり**裸の識別子しか束縛しない** — `r.buf` は当たらない。
+guff の `match_object` は `NodeRef::SelectorExpr` も受けて `sel.sel` の Object を束縛していたので、
+`r.buf[i:len(r.buf)]` に発火していた。
+
+**上流は束縛と再束縛で非対称**なのが罠だった: すでに束縛済みの `types.Object` と
+ノードを比べる経路（`match` の `types.Object` arm）は
+**`*ast.Ident` と `*ast.SelectorExpr` の両方を受ける**（後者は `r.Sel` の Object を比較）。
+したがって直すのは初回束縛だけで、`match_object_id` はそのままが正しい。
+`(Object …)` は多くの check が使う共有部品なので、golden 7 / isolate 114 / OSS 8 の
+全ゲートで recall の減少が無いことを確認した。
+
+修正後 **regress tsdb は PASS**（`guff_only` 0 / P=R=100%）。
+
+#### 6. 速度: errcheck の `is_error_type` が呼び出しごとに arena を走査＋複製していた
+
+guff の強みは速さなので、`samply` で prometheus `./tsdb/...` を実測した
+（`--profile profiling`。`release` は `strip = true` で記号が無い）。
+guff プロセスの self サンプル上位は平坦（最大 4.6%）で、単一のホットスポットは無い。
+そのトップが **`guff_errcheck::is_error_type` 4.6%** だった。中身は 1 呼び出しごとに:
+
+1. `universe_error()` — **object arena の全走査**で組み込み `error` を探す
+2. `artifacts.types.clone()` — `api_implements` が `&mut TypeArena` を要るための複製
+
+これを未チェック呼び出しの**結果型ごとに**やっていた。`Visitor` に
+(a) `error` の TypeId、(b) run 全体で 1 つの scratch arena、(c) `TypeId → bool` のメモ
+を持たせた（`lockpath.rs` が既に使っている scratch パターンと同じ）。
+
+2 番目に重かった `position::File::position_internal` 4.0% は、呼び元がほぼ
+**printer**（gofmt / gofumpt フォーマッタ）だった。printer は 1 ノードごとに行番号を聞くのに
+`position_for()` が返す `Position` は**ファイル名の String を毎回複製**していて、誰も読まない。
+`File::line_for` / `FileSet::line_for` を足して printer / parser / import から使うようにした。
+
+結果型は繰り返し出てくる（`error`、`int`、`[]byte`、そのパッケージ自身の型）ので、
+`TypeId → bool` のメモが**ほぼ全部の問い合わせを吸収する**。
+メモは `type_with_name`（型全体を `String` に描画して `"error"` と比較する）より
+**手前**に置くこと — これも呼び出しごとに払っていた。
+
+**A/B 実測**（同一マシン、`perf-guard.sh` PASS、バイナリ 2 本を交互に。
+`prometheus/.golangci.yml`、`--no-cache`、warm GOCACHE。
+`GUFF_DEBUG_CACHE=2` で phase 内訳も同時に取得）:
+
+| 対象 | base | mine | 差 |
+|---|---:|---:|---:|
+| `./tsdb/...` wall | 0.57 / 0.57 / 0.57 / 0.58 s | 0.53 / 0.53 / 0.53 / 0.52 s | **−0.045s（−8%）** |
+| `./tsdb/...` `analyze` phase | 0.20 / 0.19 / 0.20 / 0.19 s | 0.15 / 0.15 / 0.15 / 0.15 s | **−0.045s（−24%）** |
+| `./...` wall | 1.81 / 1.89 s | 1.77 / 1.87 s | −0.03s |
+| `./...` `analyze` phase | 0.88 / 0.90 s | 0.85 / 0.86 s | −0.035s |
+
+**wall の減り分はそのまま `analyze` phase の減り分**（tsdb でどちらも −0.045s）。
+`load_graph` / `typecheck_roots` は動いていない（0.19s / 0.26s のまま）。
+**findings は両ワークロードで完全一致**（tsdb は S1010 の誤検出 1 件が消える分だけ 5→4、
+それ以外は bit 単位で同じ。full は 20/20 完全一致）。
+再プロファイルすると guff の self サンプルは 2454 → 2018（**−18%**）で、
+`is_error_type` はトップから消えた。行番号側は割り当てが減っただけで、
+単独では測れる差にならなかった（正直に言えば −0.045s はほぼ errcheck の分）。
+`./...` で wall がほとんど動かないのは、そちらでは guff の外側が支配的だから
+（tsdb のプロファイルでも**サンプルの 24% は `go` プロセス** = `go list` と export data 生成）。
+**`--profile full` の wall 赤（2.610s > 上限 2.480s、正しさは 20/20 緑）はそこにある。**
+
+**副産物: `docs/PERF_TASKS_V2.md` §1.3-post2 の「地図」が古い。** あの表は `analyze` を
+**0.37s** と書いているが、同じコマンドの実測は **0.85〜0.90s**（`./...`、cold）。
+2026-07-30 以降に増えた check の分だけ育っており、
+**「analyze はもう小さい / C-4 の期待値も消滅」は現在は成り立たない**。
+あの節に日付つきで追記した。→ 次にやること 0。
+
+#### 7. golden に govet-lostcancel ケースを追加
+
+`compat/golden/cases/govet-lostcancel` は上の 25 形の fixture
+（`crates/guff-govet/tests/testdata/lostcancel/paths.go`）を指し、**25/25 完全一致**。
+これは「次にやること 4（govet の never 16 件）」の最初の一手でもある
+（`lostcancel` は govet で唯一 CFG に依存する analyzer なので、
+既存 fixture を載せるだけでは足りず、本体を書き直す必要があった）。
+Rust 単体テストも `paths.go` を使う（golden と同じバイト列）。
+context stub に `CancelFunc` / `WithTimeout` / `WithDeadline`、time stub を追加した。
+
+**結果**
+
+- `./compat/run.sh --oss --name consul`: **guff=258 golangci=255 → allowlist 3 件で緑**
+  （修正前は extra 6）。
+- `--tier pr,nightly`: gin / caddy / helm / grafana / containerd **すべて P=R=100%**、
+  consul は allowlist 3 件のみ。**OSS 8 target すべて緑**。
+- isolate **114 target すべて一致**。fixture / local も P=R=100%。
+- golden: **7 ケース**（gocritic 164/164、goheader 11/11、**govet-lostcancel 25/25**、
+  staticcheck-{sa,s,st,qf}）。staticcheck-sa の ratchet は
+  **extra 17 → 16**（SA9008 の 1 件が消えた。missing 15 は据え置き）。
+  `sa9008/bad.go` を書き直したので golden を再生成した（新しい 2 件はどちらも一致）。
+- weekly tier（vault / kubernetes）も回した: **vault 161/161・kubernetes 5/5 で P=R=100%**、
+  panic 0。`compat/results/RESULTS.md` は 3 tier 全部（**OSS 8 + fixture + local = 10 target**）の
+  スナップショットに戻してある（直前のコミットは weekly の 2 行を含みつつ consul を
+  100% と表示していた）。
+- **regress tsdb: FAIL → PASS**（`guff_only` 1 → 0）。
+  `--profile full` は正しさ 20/20 緑・wall 2.610s で**赤のまま**（上限 2.480s）。
+- `cargo test --workspace` green。
+- 速度: prometheus `./tsdb/...` で **0.57s → 0.53s（−0.045s / −8%）**。findings は
+  S1010 の誤検出 1 件が消える分以外は完全一致。
+- 台帳（`docs/COVERAGE.md`）の件数は変化なし（547 / `never` 23 / `unit-only` 104 / `fired` 420）。
+  **今回の 5 件の欠陥はどれも `fired` 済み check のもの**で、台帳の数字を 1 も動かさない。
+  ついでに、削除済み `SA9010` が古い実行アーティファクト経由で「インベントリ外の check ID」
+  として復活していたので、また落とした（`observe` は累積式なので、
+  ローカルに古い `compat/results/` が残っているマシンでは毎回復活する）。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲート**（前セッションの 0 番がそのまま残っている）。
+   本セッションで analyzer 側は速くなったが**この数字は動かない**（§4 の 6 番: `./...` は
+   `go list` / export data 生成が支配的）。**まず `go` 側と guff 側の内訳を測ること** —
+   そこを見ずにベースラインを取り直すのも analyzer を最適化するのも当て推量になる。
+   tsdb プロファイルでは `go` プロセスがサンプルの 24% を占めていた。
+1. **Go stdlib のエラー文言 4 件**（SA1002 / SA1000 / SA1001 / SA1007）。
+   前セッションの 1 番のまま。**SA1002 が最優先**（撃ってはいけないものを撃っている）。
+2. **SA9008 の IR 検証**（上の最小再現 `w1` vs `v4`）。consul の残 2 件と
+   staticcheck-sa golden の extra 1 件が同じ原因。
+   `ValueForExpr` 相当が無いので、まず「ループ内 + ネストした if」で上流が黙る
+   本当の条件を IR ダンプで確定させること。**推測で近似すると recall を失う**。
+3. **SA5011 の σ 相当**（§7）。consul の残 1 件。
+4. **govet の `never` 16 件**（`lostcancel` は元から `fired` だったので**減っていない** —
+   golden に載せたことと台帳の数字は別の話）。golden ケースの作り方は
+   `govet-lostcancel` を雛形にできる。
+5. **revive の `unit-only` 83 件**と位置写像（前セッションの 5 番のまま）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -1220,6 +1516,21 @@ version が空でなければ同じ）。**バージョンを上げずにコー�
 | 5 | staticcheck | Deprecated 文の末尾ピリオド有無 | 未調査 |
 | 6 | modernize | チェック名 prefix | 未調査 |
 | 7 | govet | pass 名 prefix / `(declared using go1.X.Y)` のパッチバージョン | 意図的（環境差） |
+
+### 明示的な allowlist（`compat/allowlists/`）
+
+上の表は「正規化が黙って消しているもの」。こちらは**ファイルに書いてある**もの。
+`--update-allowlist` はファイルのコメントを消してしまうので、**理由はここが正典**。
+
+| 対象 | 件数 | key | 理由 | 記録日 |
+|------|-----:|-----|------|--------|
+| consul | 1 | `agent/consul/catalog_endpoint.go:280` SA5011 | 上流 IR の σ ノードによる分岐内の値の絞り込みが guff に無い（§7）。誤検出。 | 2026-08-09 |
+| consul | 2 | `agent/event_endpoint_test.go:115` / `agent/http_test.go:1728` SA9008 | 上流の IR 検証（`ValueForExpr` + `irutil.Flatten`）未移植。パターン自体は一致済み。誤検出。§4 の 2026-08-09（2 本目）に最小再現。 | 2026-08-09 |
+
+これ以外の allowlist ファイルは**すべてヘッダのみ（0 件）**。3 件を記録したのは
+`oss-nightly` を CI ゲートにするため — 恒久的に赤いゲートは次の劣化に日付を付けられない。
+**この 3 件を消すのが Phase 3 の残タスク（次にやること 2 / 3）**であり、
+消えたらこの節ごと削ること。
 
 加えて、`issue_key` が **column / severity / SuggestedFix を比較していない**（§1）。
 うち **column と severity は golden tier（`compat/golden/`）が比較するようになった**が、

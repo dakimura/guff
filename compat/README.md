@@ -24,6 +24,8 @@ cargo build --release -p guff-lint
 # OSS targets from corpus/repos.json — each repo's real v2 .golangci.yml
 ./compat/run.sh --oss --tier pr
 ./compat/run.sh --oss --tier nightly
+./compat/run.sh --oss --tier pr,nightly   # run this before every push (~3 min)
+./compat/run.sh --oss --name consul       # one target, no fixture/local warm-up
 
 # Same repos, but every linter enabled (discovery tier — expect diffs)
 ./compat/run.sh --oss --tier pr --all-linters
@@ -79,6 +81,24 @@ cargo build --release -p guff-lint
 | `coverage/` | Ledger data (`inventory.json` / `observed.json`, committed) |
 
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
+
+## Which tiers run where
+
+| Gate | Trigger | Targets |
+|------|---------|---------|
+| `smoke` (+ golden) | every PR and push | fixture, 7 golden cases |
+| `isolate` | every PR and push | 114 per-linter fixtures |
+| `oss-pr` | every PR and push | gin, caddy, helm |
+| `oss-nightly` | **push to main only** | consul, grafana, containerd |
+
+`oss-nightly` exists because the nightly tier used to run nowhere anyone read.
+consul carries 255 of the corpus's compared findings, and on 2026-08-09 it was
+found with six extra findings that `results/RESULTS.md` had been reporting as
+`P = R = 100%` — with no way to date them. A tier that runs on every push to
+main dates the next one to a commit.
+
+The tier is not on pull requests (cold GHA corpus, ~30 min), so **run it locally
+before pushing**: `./compat/run.sh --oss --tier pr,nightly`.
 
 ## Notes
 

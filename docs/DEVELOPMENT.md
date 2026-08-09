@@ -215,6 +215,28 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 5. `guff-lint` レジストリに登録。
 6. **§3 の状況表と §8 の該当タスクを更新**（チェックを付ける / 完了メモ）。
 
+#### 4.3.1 コミット前に回すゲート（省略しない）
+
+```bash
+cargo build --release -p guff-lint
+cargo test --workspace
+./compat/golden/run.sh                       # check 単位・列まで厳密
+./compat/run.sh                              # fixture + local
+./compat/run.sh --isolate                    # 114 linter
+./compat/run.sh --oss --tier pr,nightly      # ★ nightly も回す（約 3 分）
+./regress/run.sh                             # 既定は tsdb プロファイル
+```
+
+**`--tier pr` だけで済ませないこと。** nightly の 3 リポ（consul / grafana / containerd）が
+コーパスの findings の大半を持っている。実際に 2026-08-09 のセッションは、pr tier だけを
+回していた前セッションが持ち込んだ誤検出 3 件を nightly で見つけている。
+同じ理由で **`regress/run.sh` は既定（tsdb）と `--profile full` の両方**を回す
+（tsdb だけが赤い S1010 誤検出を抱えていた実例が §8 にある）。
+1 target だけ切り分けたいときは `./compat/run.sh --oss --name consul`（約 40 秒）。
+
+CI 側の対応は [`compat/README.md`](../compat/README.md) の「Which tiers run where」。
+`oss-nightly` は **main への push でのみ**走るので、**PR の前にローカルで回すのが本番**。
+
 ---
 
 ## 5. 新しい analyzer（linter）の追加手順
@@ -654,6 +676,17 @@ guff-only 17 件。内訳と、なぜ guff だけが出すのか:
 2.71–3.10s** だったので**本変更による劣化ではなく計測機の状態**。`--update-baseline` は
 していない。peak RSS は 2.93GB → 3.09GB で許容内 — prometheus でも `ill_typed` が
 14 → 8 に減り、6 パッケージ分の解析が新たに走るようになった分。
+
+**追記 (2026-08-09) — 既定の tsdb プロファイルも見ること。** `--profile full` だけを回して
+いたので、**既定（tsdb）が `guff_only` 1 で赤いまま何セッションも気付かれていなかった**:
+`r.buf[i:len(r.buf)]` に S1010 が誤発火していた（`guff-pattern` の `Object` が
+`SelectorExpr` も束縛していた。上流は `Ident` のみ）。修正して tsdb は PASS。
+`--profile full` の wall は依然赤（2.610s > 上限 2.480s、正しさは 20/20 緑）。
+同セッションで errcheck の `is_error_type` を run 単位のメモに変え
+`analyze` phase を **0.19〜0.20s → 0.15s**（tsdb）縮めたが、`./...` の wall は
+`go list` と型検査が支配的なのでこの赤は動かない。詳細と phase 内訳は
+[`COMPAT-HARDENING.md`](COMPAT-HARDENING.md) §4 の 2026-08-09（2 本目）と
+[`PERF_TASKS_V2.md`](PERF_TASKS_V2.md) §1.3-post2 の追記。
 
 ---
 

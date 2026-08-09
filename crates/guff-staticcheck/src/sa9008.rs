@@ -1,11 +1,23 @@
 //! SA9008 — else branch of a type assertion reads the wrong value.
 //!
 //! Simplified port of `honnef.co/go/tools/staticcheck/sa9008`.
+//!
+//! Upstream's pattern is
+//! `(IfStmt (AssignStmt [obj ok] ":=" (TypeAssertExpr obj _)) ok _ elseBranch)`:
+//! the asserted expression is the identifier being shadowed, so only
+//! `if x, ok := x.(T)` qualifies.
+//!
+//! DEFERRED: the IR verification upstream runs on each read in the else branch
+//! (`irfn.ValueForExpr` + `irutil.Flatten`), which drops reads whose IR value is
+//! no longer the type-assert result. Without it guff reports a shape upstream
+//! stays quiet about — an assert nested inside an `if` inside a loop
+//! (docs/COMPAT-HARDENING.md §4, 2026-08-09, has the minimal reproduction).
 
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, IfStmt, Ident, Stmt, TypeAssertExpr};
 use guff::node_mask;
+use guff::token::Token;
 use guff::walk::{NodeRef, preorder, stmt_ref};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
@@ -42,9 +54,13 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     let Some(init) = ifs.init.as_deref() else {
         return;
     };
-    let Stmt::AssignStmt(AssignStmt { lhs, rhs, .. }) = init else {
+    let Stmt::AssignStmt(AssignStmt { lhs, rhs, tok, .. }) = init else {
         return;
     };
+    // Upstream's pattern spells the operator: `[obj ok] ":=" assert`.
+    if *tok != Some(Token::DEFINE) {
+        return;
+    }
     if lhs.len() != 2 {
         return;
     };
@@ -57,11 +73,26 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt, pending: &mut Vec<(u32, String)>) {
     if ok.name != "ok" && object_of(pass, ok).is_some() {
         return;
     }
-    let Expr::TypeAssertExpr(TypeAssertExpr { .. }) = &rhs[0] else {
+    let Expr::TypeAssertExpr(TypeAssertExpr { x, .. }) = &rhs[0] else {
         return;
     };
-    // Upstream only flags uses in the else of `if v, ok := x.(T); ok { … } else { use v }`.
-    // `if …; !ok { … } else { use v }` is the success path — not SA9008.
+    // Upstream asserts the *shadowed* identifier itself — its pattern is
+    // `assert@(TypeAssertExpr obj _)`, with `obj` recalled from the left-hand
+    // side and compared by name. `if v, ok := x.(T); ok { … } else { use v }`
+    // shadows nothing, so reading `v` in the else is not this check's business,
+    // however zero-valued it is.
+    let mut asserted = x.as_ref();
+    while let Expr::ParenExpr(p) = asserted {
+        asserted = &p.x;
+    }
+    let Expr::Ident(asserted) = asserted else {
+        return;
+    };
+    if asserted.name != obj.name {
+        return;
+    }
+    // Upstream only flags uses in the else of `if x, ok := x.(T); ok { … }`.
+    // `if …; !ok { … } else { use x }` is the success path — not SA9008.
     if !cond_is_bare_ok(&ifs.cond, ok) {
         return;
     }

@@ -5,3 +5,29 @@
 #
 # Prefer fixing guff over growing this list. Entries here are accepted
 # mismatches (message phrasing, enable-set gaps, known DEFERRED).
+#
+# WARNING: `--update-allowlist` rewrites this file from the current diff and
+# drops the comments below. The rationale for every entry is kept in
+# docs/COMPAT-HARDENING.md §5, which is the copy to read and to update.
+#
+# Why these three are here at all (2026-08-09): the nightly tier had no CI job,
+# so consul's diff went undated — RESULTS.md claimed P=R=100% while HEAD had six
+# extra findings and nothing said since when. `.github/workflows/compat.yml`
+# now runs the tier on every push to main, and a gate that is permanently red
+# cannot date anything. These three are recorded so that the fourth fails.
+# Keys are pinned to consul v1.21.5 (corpus/repos.json), so the line numbers
+# are stable until that ref moves.
+
+# SA5011 — guff reports a nil dereference upstream does not. Upstream's IR has
+# σ (sigma) nodes that refine a value along a branch; guff's does not, so the
+# nil-checked branch does not narrow the pointer. docs/COMPAT-HARDENING.md §7.
+consul guff-only agent/consul/catalog_endpoint.go:280:staticcheck:possible nil pointer dereference
+
+# SA9008 ×2 — `if err, ok := err.(HTTPError); ok { … } else { … err … }` inside a
+# range loop. guff's pattern now matches upstream's exactly (2026-08-09), and
+# upstream *does* report this shape outside a loop; what suppresses it here is
+# the IR verification guff has not ported — upstream drops the read when its IR
+# value is not the type-assert result. docs/COMPAT-HARDENING.md §5 carries the
+# minimal reproduction. Also the remaining `extra` in the staticcheck-sa golden.
+consul guff-only agent/event_endpoint_test.go:115:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
+consul guff-only agent/http_test.go:1728:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted
