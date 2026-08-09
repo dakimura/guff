@@ -5,6 +5,7 @@
 //! other `go/analysis` pass.
 
 mod fakejson;
+pub mod gostd;
 mod render;
 mod structtag;
 mod stdlib_deprecations;

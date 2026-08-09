@@ -48,6 +48,9 @@ cargo build --release -p guff-lint
 
 # Check-level coverage ledger — which checks have never fired in any test?
 ./compat/coverage.py all
+
+# Go-stdlib ground truth for the checks that just call the stdlib (SA100x)
+./compat/oracles/regen.sh
 ```
 
 > **`run.sh` 系のゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
@@ -70,6 +73,7 @@ cargo build --release -p guff-lint
 | `all_linters.py` / `allowlists-all/` | `--all-linters` config rewrite + its own (empty) allowlist |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |
+| `oracles/` | Go-stdlib ground truth for the `gostd` ports ([README](oracles/README.md)) |
 | `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |
 | `baselines/` | Ill-typed package counts per target (panics are never baselined) |
 | `filesets.py` / `filesets.sh` | Do both tools analyze the same `.go` files? |

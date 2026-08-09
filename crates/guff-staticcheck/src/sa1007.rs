@@ -9,31 +9,31 @@ use guff_analysis::callcheck::{self, Call, CallContext};
 use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+use crate::gostd;
+
 fn check_parse(call: &mut Call<'_>, ctx: &CallContext<'_>) {
-    let Some(arg) = call.args.get(0) else {
+    let Some(arg) = call.args.first() else {
         return;
     };
     let Some(s) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
         return;
     };
-    if let Some(err) = validate_url(&s) {
-        call.args[0].invalid(format!("{s:?} is not a valid URL: {err}"));
+    if let Some(msg) = report_for(&s) {
+        call.args[0].invalid(msg);
     }
 }
 
-/// Validates a URL string, approximating Go `net/url.Parse` (see SC-D09).
-pub(crate) fn validate_url(s: &str) -> Option<String> {
-    if s == ":" {
-        return Some("parse \":\": invalid port \":\" after host".into());
-    }
-    if s.contains("://") {
-        return url::Url::parse(s).err().map(|e| e.to_string());
-    }
-  // Go accepts opaque references without a scheme (e.g. "foobar").
-    if !s.contains(':') && !s.starts_with('/') {
-        return None;
-    }
-    url::Url::parse(s).err().map(|e| e.to_string())
+/// Upstream's whole check body: `url.Parse(s)`, reported as
+/// `fmt.Sprintf("%q is not a valid URL: %s", s, err)`.
+///
+/// `%q` is `strconv.Quote`, not Rust's `{:?}` — the two differ on the single
+/// quote and on every non-printable rune.
+fn report_for(s: &str) -> Option<String> {
+    let err = gostd::url::parse(s).err()?;
+    Some(format!(
+        "{} is not a valid URL: {err}",
+        gostd::strconv::quote(s)
+    ))
 }
 
 fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
@@ -80,10 +80,18 @@ mod tests {
         assert!(validate(&[analyzer()]).is_ok());
     }
 
+    /// Expectations are golangci-lint's own output; the exhaustive differential
+    /// against `url.Parse` lives in `tests/gostd_url.rs`.
     #[test]
     fn url_validation_smoke() {
-        assert!(validate_url(":").is_some());
-        assert!(validate_url("foobar").is_none());
-        assert!(validate_url("https://golang.org").is_none());
+        assert_eq!(
+            report_for(":").as_deref(),
+            Some(r#"":" is not a valid URL: parse ":": missing protocol scheme"#),
+        );
+        // Go accepts a relative reference and an opaque scheme:path; the
+        // WHATWG parser behind Rust's `url` crate rejects both.
+        assert_eq!(report_for("foobar"), None);
+        assert_eq!(report_for("mailto:a@b.c"), None);
+        assert_eq!(report_for("https://golang.org"), None);
     }
 }

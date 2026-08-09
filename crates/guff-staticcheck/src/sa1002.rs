@@ -9,57 +9,33 @@ use guff_analysis::callcheck::{self, Call, CallContext};
 use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+use crate::gostd;
+
 fn check(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let Some(arg) = call.args.first() else {
         return;
     };
-    let Some(mut layout) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
+    let Some(layout) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
         return;
     };
-    layout = layout.replace('_', " ");
-    layout = layout.replace('Z', "-");
     if let Some(msg) = validate_go_time_layout(&layout) {
         call.args[0].invalid(msg);
     }
 }
 
-/// Mirrors `time.Parse(layout, layout)` from Go (see go-tools SA1002).
+/// The whole of upstream's check body: substitute, `time.Parse(s, s)`, report
+/// `err.Error()` verbatim.
+///
+/// `_` and `Z` are rewritten first because neither element can parse the text it
+/// formats (`_2` pads with a space, `Z07:00` prints a bare `Z` for UTC), so a
+/// reference layout containing them would otherwise be reported as invalid.
+/// With the port in [`gostd::time`] doing the parsing, a layout is invalid
+/// exactly when Go says so, worded exactly as Go words it.
 fn validate_go_time_layout(layout: &str) -> Option<String> {
-    if go_time_layout_self_parse(layout).is_ok() {
-        return None;
-    }
-    Some(format!("parsing time {layout:?} as {layout:?}"))
-}
-
-fn go_time_layout_self_parse(layout: &str) -> Result<(), ()> {
-    if layout.is_empty() {
-        return Err(());
-    }
-    if layout.chars().all(|c| c.is_ascii_digit()) {
-        return if matches!(
-            layout,
-            "1" | "2" | "3" | "4" | "5" | "01" | "02" | "03" | "04" | "05" | "06" | "15" | "2006"
-        ) {
-            Ok(())
-        } else {
-            Err(())
-        };
-    }
-
-    const TOKENS: &[&str] = &[
-        "2006", "06", "January", "Jan", "Monday", "Mon", "01", "1", "02", "2", "_2", "15", "03",
-        "3", "04", "4", "05", "5", "MST", "PM", "pm", "Z07", "-07", "002", "__2", "Kitchen",
-        "RFC3339",
-    ];
-    if TOKENS.iter().any(|t| layout.contains(t)) {
-        return Ok(());
-    }
-    if layout.contains(':') || layout.contains('-') || layout.contains('/') {
-        if layout.contains('0') || layout.contains('1') || layout.contains('2') {
-            return Ok(());
-        }
-    }
-    Err(())
+    let layout = layout.replace('_', " ").replace('Z', "-");
+    gostd::time::parse(&layout, &layout)
+        .err()
+        .map(|e| e.to_string())
 }
 
 fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
@@ -106,10 +82,33 @@ mod tests {
         assert!(validate(&[analyzer()]).is_ok());
     }
 
+    /// Ground truth: `time.Parse(s, s)` after SA1002's own substitutions, run
+    /// through Go. The exhaustive differential lives in `tests/gostd_time.rs`.
     #[test]
     fn layout_validation_matches_go_smoke_cases() {
-        assert!(validate_go_time_layout("12345").is_some());
-        assert!(validate_go_time_layout("2006").is_none());
-        assert!(validate_go_time_layout("2006-01-02").is_none());
+        assert_eq!(
+            validate_go_time_layout("12345").as_deref(),
+            Some(r#"parsing time "12345" as "12345": cannot parse "" as "4""#),
+        );
+        assert_eq!(validate_go_time_layout("2006"), None);
+        assert_eq!(validate_go_time_layout("2006-01-02"), None);
+    }
+
+    /// A layout with no std element at all is a literal that parses itself, so
+    /// upstream stays silent. The pre-port heuristic reported it — a false
+    /// positive on any string that merely looked unlike a date.
+    #[test]
+    fn layout_without_std_elements_is_silent() {
+        assert_eq!(validate_go_time_layout("not-a-layout"), None);
+        assert_eq!(validate_go_time_layout("hello"), None);
+        assert_eq!(validate_go_time_layout(""), None);
+    }
+
+    /// The `_`→` ` and `Z`→`-` substitutions run before Parse, so `Z07:00`
+    /// reaches it as `-07:00` and `_2` as ` 2`.
+    #[test]
+    fn substitutions_run_before_parse() {
+        assert_eq!(validate_go_time_layout("Z07:00"), None);
+        assert_eq!(validate_go_time_layout("2006-01-02T15:04:05Z07:00"), None);
     }
 }

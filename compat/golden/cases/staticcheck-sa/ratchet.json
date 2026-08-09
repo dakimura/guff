@@ -1,6 +1,6 @@
 {
-  "missing": 15,
-  "extra": 16,
-  "why": "Go stdlib error text (SA1000 regexp/syntax, SA1001 text/template, SA1002 time layouts, SA1007 net/url — each currently approximated with a Rust crate instead of a port of Go's parser); SA5011 needs sigma nodes (§7); SA4006 boxing into an interface (guff-ssa's MakeInterface carries no operand); SA1011/SA6001 recall; SA1019/SA1023/SA4020 position and text; SA4015/SA4031/SA5005/SA9004 precision. SA9008's pattern now matches upstream exactly; what remains there is its IR verification (docs/COMPAT-HARDENING.md §4, 2026-08-09).",
+  "missing": 13,
+  "extra": 13,
+  "why": "Go stdlib error text (SA1000 regexp/syntax, SA1001 text/template — still approximated with a Rust crate instead of a port of Go's parser; SA1002 and SA1007 are done, see crates/guff-staticcheck/src/gostd/); SA5011 needs sigma nodes (§7); SA4006 boxing into an interface (guff-ssa's MakeInterface carries no operand); SA1011/SA6001 recall; SA1019/SA1023/SA4020 position and text; SA4015/SA4031/SA5005/SA9004 precision. SA9008's pattern now matches upstream exactly; what remains there is its IR verification (docs/COMPAT-HARDENING.md §4, 2026-08-09).",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-09) for the remaining classes."
 }

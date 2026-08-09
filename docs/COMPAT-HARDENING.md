@@ -270,7 +270,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / govet-lostcancel 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 29 / extra 17） | 2026-08-09 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / govet-lostcancel 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 27 / extra 14）。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-09 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
@@ -291,8 +291,10 @@ gocritic 1（`whyNoLint`、§6）/ revive 1（`time-naming`）/ swaggo 1。
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
 **台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
-「一致している」ではない。一致の指標は golden の ratchet（現在 missing 29 / extra 17）と
-OSS / isolate ゲートの側にある。
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 27 / extra 14）と
+OSS / isolate ゲートの側にある。2026-08-09（3 本目）の SA1002 も同じ形で、
+**`fired` 済み・isolate 緑のまま `time.Parse("not-a-layout", …)` を撃ち続けていた**
+（上流は撃たない）。
 
 **`fired` ですらない罠**もある。2026-08-09（2 本目）の `lostcancel` は
 「not used on all paths」の arm が**走査の死角でだけ発火する**状態で、
@@ -1499,6 +1501,147 @@ context stub に `CancelFunc` / `WithTimeout` / `WithDeadline`、time stub を�
    golden に載せたことと台帳の数字は別の話）。golden ケースの作り方は
    `govet-lostcancel` を雛形にできる。
 5. **revive の `unit-only` 83 件**と位置写像（前セッションの 5 番のまま）。
+
+---
+
+### 2026-08-09（3 本目）— SA1002 / SA1007 を「近似」から Go stdlib の移植に置き換えた
+
+前セッションの「次にやること 1」（Go stdlib のエラー文言 4 件）のうち **SA1002 と SA1007 を完了**。
+SA1000 / SA1001 は未着手（見積もりは下の「次にやること」）。
+staticcheck-sa の ratchet は **missing 15 / extra 16 → missing 13 / extra 13**。
+
+#### 0. 方法 — stdlib オラクルを常設した（`compat/oracles/`）
+
+SA1000 / SA1001 / SA1002 / SA1007 / SA5009 の上流実装は、**定数を stdlib に渡して
+`err.Error()` をそのまま出すだけ**である。したがって「チェックを移植する」とは
+「**パーサを移植する**」ことに等しい。Rust の crate で近似すると必ず 2 か所ずれる:
+
+1. **受理する集合が違う** → 上流が黙るものを撃つ（FP）／撃つものを黙る（FN）
+2. **文言が違う** → 判定が一致していても golden は落ちる
+
+そして「移植した」が「近似より正しい」と言えるのは、**それを検証したときだけ**。
+そのために `compat/oracles/` を作った: Go プログラムが**本物の stdlib**を決定論的な
+コーパスに掛けて `<入力>\t<hex>\t<結果>` を吐き、Rust 側は同じコーパスを自分の移植に流して
+**全行一致**を要求する。期待値は 1 つも手書きしない（`compat/golden/` と同じ規則）。
+使い方と Go バージョンの結び付き（下記 3 番）は [`../compat/oracles/README.md`](../compat/oracles/README.md)。
+
+| オラクル | 出力 | 検証対象 | 行数 |
+|---|---|---|---:|
+| `gotime` | `tests/testdata/gostd/time_parse.tsv` | `gostd::time`（SA1002） | 10,028 |
+| `gourl` | `tests/testdata/gostd/url_parse.tsv` | `gostd::url` / `gostd::netip`（SA1007） | 6,441 |
+| `goquote` | `tests/testdata/gostd/quote.tsv` | `gostd::strconv` | 739 |
+| `goquote-table` | `src/gostd/isprint_table.rs`（生成コード） | `gostd::strconv::is_print` | 720 |
+
+#### 1. SA1002 — `go_time_layout_self_parse` を捨て、`time.Parse` を移植した
+
+旧実装は「既知トークンを `contains` で探す」ヒューリスティックで、**文言も出していなかった**
+（`parsing time "X" as "X"` で止まり、`: cannot parse "" as "4"` が丸ごと欠けていた）。
+`crates/guff-staticcheck/src/gostd/time.rs` に `nextStdChunk` / `skip` / `getnum` / `getnum3` /
+`lookup` / `parseNanoseconds` / `parseTimeZone` / `quote` と `parse` のエラー経路を移植。
+`Date()` 以降（ゾーン検索・時刻の構築）は SA1002 が見ないので落とした。
+
+**この 1 件が FP の実体だった**: `time.Parse("not-a-layout", …)` は std 要素を 1 つも含まない
+＝自分自身を literal として食い尽くすので、**上流は成功する**。guff は撃っていた。
+`"hello"` や `"yyyy-mm-dd"` も同じクラスで、旧ヒューリスティックはこれを全部撃っていた。
+
+fixture も差し替えた。旧 `bad.go` は `"12345"` と `"not-a-layout"` の 2 件で、後者は
+そもそも上流が撃たないものだった。いまは `time.Parse` が返しうる **2 つのエラー形**
+（フィールドが入力を使い果たす／範囲外）を `"12345"` / `"1234"` / `"123456"` で押さえ、
+`ok.go` に「literal だから通る」ケースを移した。
+
+#### 2. SA1007 — `url` crate を捨て、`net/url.Parse` を移植した
+
+旧実装は `url::Url::parse` ＋ `if s == ":"` のハードコードだった。`url` crate は
+**WHATWG URL 仕様**であって Go の読む RFC 3986 ではないので、`foobar` と `mailto:a@b.c`
+（Go は両方受理）を弾く。旧コードの `if !s.contains(':') && !s.starts_with('/')` は
+その一部を場当たりに避けていただけで、網羅されていなかった。
+
+移植したもの: `gostd/url.rs`（`Parse` / `parse` / `getScheme` / `parseAuthority` /
+`parseHost` / `unescape` / `shouldEscape` / `validOptionalPort` / `validUserinfo`）、
+`gostd/netip.rs`（`ParseAddr` / `parseIPv4Fields` / `parseIPv6` — `parseHost` が
+IP-literal に対して呼び、そのエラー文をそのまま包むため）、`gostd/strconv.rs`
+（`Quote` / `IsPrint` — `net/url` のエラーは全部 `%q` を通る）。
+`url` crate は依存から外した。
+
+`shouldEscape` は Go 1.26 では生成テーブルだが、`gen_encoding_table.go` に
+**リファレンス実装がそのまま残っている**のでそちらを移植した（テーブルの再生成は不要）。
+
+fixture は 9 つのエラークラス（missing protocol scheme / first path segment cannot contain
+colon / invalid port / invalid URL escape / invalid character in host / missing ']' /
+invalid IP-literal / ParseAddr の各種 / invalid userinfo）を 1 件ずつ持つ形に書き直し、
+**9/9 完全一致**。`checks_test.rs` の `contains("is not a valid URL")` は
+**staticcheck 側のラッパーしか見ておらず、中身の `net/url` エラー（＝ crate 由来で
+何とも一致していなかった部分）を素通しにしていた**ので、文字列全体を固定した。
+
+#### 3. `IsPrint` は Unicode バージョンに固定されている（crate では代替できない）
+
+`strconv.Quote` の `\u` 判定は `unicode.IsPrint`。これを `unicode-general-category` crate の
+カテゴリ（L/M/N/P/S ＋ ASCII space）で再現しようとすると、**Go 1.26 と crate 1.x の間で
+5,812 コードポイントが食い違う** — Go は自分のテーブルが固定された Unicode バージョンで
+答えるので、それ以降に割り当てられた文字を crate は printable と言い、Go は言わない。
+Go の `strconv` 自身が生成テーブルを持っているのはこの理由なので、guff も
+**Go のテーブルのコピー**を持つことにした（`goquote-table` が生成、720 レンジ）。
+検証は `quote.tsv` 側で、**全 rune について** `is_print` を Go の答えと突き合わせている。
+
+#### 4. `urlstrictcolons` — 正しさが golangci-lint の go.mod に依存している
+
+Go 1.26 は http/https のホストで「ポート区切りは**最初**のコロン」に変えた
+（go.dev/issue/75223）。従来は**最後**のコロンで、`http://h1:5432,h2:5433/db` が通る。
+切り替えは `urlstrictcolons` godebug で、**その既定値はメインモジュールの go directive
+から決まる**。つまり `url.Parse` の挙動は golangci-lint 自身の go.mod 次第で、
+**v2.12.2 は `go 1.25.0`** ＝ 従来（最後のコロン）。実測で確認した:
+
+| oracle の go directive | `http://h1:5432:5433/` |
+|---|---|
+| 1.24 / 1.25.0 | 通る |
+| 1.26 | `invalid port ":5432:5433" after host` |
+
+`compat/oracles/gourl/go.mod` を `go 1.25.0` に固定し、理由をコメントに書いた。
+**golangci-lint が go directive を上げたら、ここも上げて golden が動くのを見ること。**
+
+**結果**
+
+- golden: **7 ケース全部**が gate 通過。staticcheck-sa の ratchet は
+  **missing 15 / extra 16 → missing 13 / extra 13**（SA1002 で 1/2、SA1007 で 1/1 減）。
+  fixture を増やしたので golden の総数は 179 → 194 に増えている。
+- isolate **114 target すべて一致**。
+- OSS `--tier pr,nightly`: 6 target すべて据え置き（下の「結果」参照）。
+- `cargo test --workspace` green。新規テスト: `tests/gostd_time.rs`（10,028 行）、
+  `tests/gostd_url.rs`（6,441 URL ＋ 全 rune の `is_print` ＋ quote 29 ケース）。
+  この 2 本は `.github/workflows/compat.yml` の `golden` ジョブに載せた。
+  **ついでに見つかった穴**: CI は `cargo build` しかしておらず、**`cargo test` を
+  どのジョブも回していない**（`config-corpus.yml` の 1 テストだけが例外）。
+  つまり Rust 側の 2,800 テストは**ローカルでしか守られていない**。
+  今回は新しい差分テスト 2 本だけを速いジョブに載せて済ませた
+  （`cargo test --workspace` はコンパイルだけで数分かかるため）。
+  **全体をどう CI に載せるかは未決 — 次にやること 6。**
+- 台帳（`docs/COVERAGE.md`）の件数は変化なし。SA1002 / SA1007 はどちらも元から `fired`
+  だった — **`fired` は「一度でも突合された」であって「一致している」ではない**という
+  §3 の注意書きの、また別の実例。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲート**（3 セッション連続で残っている）。
+1. **SA1000（`regexp/syntax`）と SA1001（`text/template`）**。残る stdlib 移植はこの 2 つ。
+   どちらも SA1002 / SA1007 より**一桁大きい**ので、腰を据えて取ること:
+   - SA1000 は `regexp/syntax/parse.go` ≒ 2,000 行（文字クラス、Unicode script/property、
+     perl クラス、repeat count、flags）。文言は `error parsing regexp: <ErrorCode>: \`<Expr>\``
+     で、**`Expr` が「どの部分文字列を指すか」まで一致させる必要がある**。golden 3/3。
+   - SA1001 は `text/template` の lexer ＋ parser ≒ 1,400 行。ただし**上流は
+     `strings.Contains(err, "unexpected") || strings.Contains(err, "bad character")` で
+     絞っている**ので、その 2 クラスを出す経路だけで足りる可能性がある。まず
+     `text/template` のどのエラーがこの 2 語を含むか列挙してから見積もること。golden 1/1。
+   - 進め方は本セッションと同じで良い: `compat/oracles/` に `goregexp` / `gotemplate` を足し、
+     コーパスを決めて tsv を吐かせ、**移植前に**受理集合の差分を測る。
+2. **SA9008 の IR 検証**（前セッションの 2 番のまま）。consul の残 2 件と
+   staticcheck-sa golden の extra 1 件が同じ原因。
+3. **SA5011 の σ 相当**（§7）。consul の残 1 件。
+4. **govet の `never` 16 件**（4 セッション連続で未着手）。`govet-lostcancel` が雛形。
+5. **revive の `unit-only` 83 件**と位置写像。
+6. **`cargo test --workspace` を CI に載せる**（上の「結果」参照）。
+   別ジョブにして `Swatinem/rust-cache` を効かせるのが素直だが、
+   **まず GHA での実測時間を測ってから**決めること。
+   これが無い限り、Rust 側のテストを何本足しても「ローカルでだけ緑」のままになる。
 
 ---
 

@@ -456,9 +456,18 @@ fn sa1002_flags_invalid_parse_layouts() {
     );
     support::assert_well_typed(&pkg);
 
+    // Upstream reports `err.Error()` verbatim, so pin the whole string: a
+    // `contains("parsing time")` assertion would pass on any wording.
+    // Expectations are Go's own output for `time.Parse(s, s)`.
     let messages = support::run_analyzer(sa1002::analyzer(), &pkg);
-    assert!(messages.len() >= 2, "{messages:?}");
-    assert!(messages.iter().all(|m| m.contains("parsing time")));
+    assert_eq!(
+        messages,
+        vec![
+            r#"parsing time "12345" as "12345": cannot parse "" as "4""#.to_string(),
+            r#"parsing time "1234" as "1234": cannot parse "" as "3""#.to_string(),
+            r#"parsing time "123456": hour out of range"#.to_string(),
+        ],
+    );
 }
 
 #[test]
@@ -550,9 +559,25 @@ fn sa1007_flags_invalid_urls() {
         &[("net/url", &url_stub)],
     );
     support::assert_well_typed(&pkg);
+    // Pin the whole message: `contains("is not a valid URL")` only checks
+    // staticcheck's own wrapper, never the `net/url` error inside it — which
+    // is the part that used to come from a Rust crate and match nothing.
+    // Expectations are golangci-lint 2.12.2's output (compat/golden).
     let messages = support::run_analyzer(sa1007::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().all(|m| m.contains("is not a valid URL")));
+    assert_eq!(
+        messages,
+        vec![
+            r#"":" is not a valid URL: parse ":": missing protocol scheme"#.to_string(),
+            r#""cache_object:foo/bar" is not a valid URL: parse "cache_object:foo/bar": first path segment in URL cannot contain colon"#.to_string(),
+            r#""http://host:port/" is not a valid URL: parse "http://host:port/": invalid port ":port" after host"#.to_string(),
+            r#""http://host/%zz" is not a valid URL: parse "http://host/%zz": invalid URL escape "%zz""#.to_string(),
+            r#""http://h|st/" is not a valid URL: parse "http://h|st/": invalid character "|" in host name"#.to_string(),
+            r#""http://[::1/" is not a valid URL: parse "http://[::1/": missing ']' in host"#.to_string(),
+            r#""http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal"#.to_string(),
+            r#""http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")"#.to_string(),
+            r#""http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo"#.to_string(),
+        ],
+    );
 }
 
 #[test]

@@ -21,7 +21,6 @@ guff-ssa = { path = "../guff-ssa" }
 regex = "1"
 regex-syntax = "0.8"
 unicode-general-category = "1"
-url = "2"
 
 [dev-dependencies]
 guff-ast = { path = "../guff-ast" }

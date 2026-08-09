@@ -12,11 +12,18 @@ sa1000/bad/bad.go:6:17:staticcheck::SA1000: error parsing regexp: missing closin
 sa1000/bad/bad.go:7:21:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
 sa1000/bad/bad.go:8:21:staticcheck::SA1000: error parsing regexp: missing closing ]: `[`
 sa1001/bad/bad.go:8:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
-sa1002/bad/bad.go:6:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
-sa1002/bad/bad.go:6:13:staticcheck::SA1002: parsing time "12345" as "12345": cannot parse "" as "4"
-sa1002/bad/bad.go:7:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:8:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:8:13:staticcheck::SA1002: parsing time "12345" as "12345": cannot parse "" as "4"
+sa1002/bad/bad.go:9:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:9:13:staticcheck::SA1002: parsing time "1234" as "1234": cannot parse "" as "3"
+sa1002/bad/bad.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:10:13:staticcheck::SA1002: parsing time "123456": hour out of range
 sa1002/ok/ok.go:6:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1002/ok/ok.go:7:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:11:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:13:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/ok/ok.go:14:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1003/bad/bad.go:19:25:staticcheck::SA1003: value of type int cannot be used with binary.Write
 sa1003/bad/bad.go:20:25:staticcheck::SA1003: value of type example.com/sa1003/bad.HasInt cannot be used with binary.Write
 sa1003/bad/bad.go:21:25:staticcheck::SA1003: value of type example.com/sa1003/bad.HasString cannot be used with binary.Write
@@ -24,7 +31,15 @@ sa1004/bad/bad.go:6:13:staticcheck::SA1004: sleeping for 1 nanoseconds is probab
 sa1004/bad/bad.go:7:13:staticcheck::SA1004: sleeping for 42 nanoseconds is probably a bug; be explicit if it isn't
 sa1005/bad/bad.go:6:15:staticcheck::SA1005: first argument to exec.Command looks like a shell command, but a program name or path are expected
 sa1006/bad/bad.go:6:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
-sa1007/bad/bad.go:6:12:staticcheck::SA1007: ":" is not a valid URL: parse ":": missing protocol scheme
+sa1007/bad/bad.go:7:12:staticcheck::SA1007: ":" is not a valid URL: parse ":": missing protocol scheme
+sa1007/bad/bad.go:8:12:staticcheck::SA1007: "cache_object:foo/bar" is not a valid URL: parse "cache_object:foo/bar": first path segment in URL cannot contain colon
+sa1007/bad/bad.go:9:12:staticcheck::SA1007: "http://host:port/" is not a valid URL: parse "http://host:port/": invalid port ":port" after host
+sa1007/bad/bad.go:10:12:staticcheck::SA1007: "http://host/%zz" is not a valid URL: parse "http://host/%zz": invalid URL escape "%zz"
+sa1007/bad/bad.go:11:12:staticcheck::SA1007: "http://h|st/" is not a valid URL: parse "http://h|st/": invalid character "|" in host name
+sa1007/bad/bad.go:12:12:staticcheck::SA1007: "http://[::1/" is not a valid URL: parse "http://[::1/": missing ']' in host
+sa1007/bad/bad.go:13:12:staticcheck::SA1007: "http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal
+sa1007/bad/bad.go:14:12:staticcheck::SA1007: "http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")
+sa1007/bad/bad.go:15:12:staticcheck::SA1007: "http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo
 sa1008/bad/bad.go:7:6:staticcheck::SA1008: keys in http.Header are canonicalized, "foo" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1008/bad/bad.go:9:6:staticcheck::SA1008: keys in http.Header are canonicalized, "etag" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1010/bad/bad.go:8:19:staticcheck::SA1010: calling a FindAll method with n == 0 will return no results, did you mean -1?
