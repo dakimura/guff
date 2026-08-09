@@ -1,6 +1,6 @@
 package ok
 
-import "other"
+import "example.com/govet/composites/other"
 
 func ok() {
 	_ = other.Config{Err: nil}

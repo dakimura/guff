@@ -3,7 +3,6 @@
 mod assign;
 mod atomic;
 mod bools;
-mod buildconstraint;
 mod buildtag;
 mod cgocall;
 mod composites;

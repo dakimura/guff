@@ -1,5 +1,0 @@
-# Source files materialized into the case work dir before each run.
-# Format: <dest-name> <repo-relative-source-path>
-#
-# The fixture lives with the Rust unit tests so the two cannot drift.
-paths.go  crates/guff-govet/tests/testdata/lostcancel/paths.go

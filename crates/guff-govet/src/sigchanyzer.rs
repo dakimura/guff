@@ -2,9 +2,9 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, CallExpr, Expr, Ident, Spec, ValueSpec};
+use guff::ast::{AssignStmt, CallExpr, Expr, Ident, ValueSpec};
 use guff::node_mask;
-use guff::walk::NodeRef;
+use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -39,51 +39,63 @@ fn code_pkg_path(
     Some(packages.get(pkg).path().to_string())
 }
 
+/// Upstream `findDecl`: the right-hand side that declares `id`.
+///
+/// Upstream reaches it through `ast.Object` identity (`arg.Obj.Decl`); guff's
+/// equivalent is the type checker's object id, so the search matches on
+/// `Info.Defs` instead. The previous version compared the *use* ident's node id
+/// against the *declaration* ident's node id — two different nodes, so it never
+/// matched — and its function-body branch sat inside a `let ... else continue`
+/// for `GenDecl`, making it unreachable. Between them, the `Ident` arm of
+/// sigchanyzer never fired at all.
 fn find_decl_rhs<'a>(pass: &'a Pass<'_>, id: &Ident) -> Option<&'a Expr> {
+    let info = pass.types_info()?;
+    let target = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).copied().flatten())?;
+
+    let defines = |name: &Ident| info.defs.get(&name.id).copied().flatten() == Some(target);
+
+    let mut found: Option<&Expr> = None;
     for file in pass.files() {
-        for decl in &file.decls {
-            let guff::ast::Decl::GenDecl(gd) = decl else {
-                continue;
-            };
-            for spec in &gd.specs {
-                if let Spec::ValueSpec(ValueSpec { names, values, .. }) = spec {
-                    for (i, name) in names.iter().enumerate() {
-                        if name.id == id.id {
-                            return values.get(i);
+        walk::inspect(NodeRef::File(file), |n| {
+            if found.is_some() {
+                return false;
+            }
+            match n {
+                Some(NodeRef::AssignStmt(AssignStmt { lhs, rhs, .. })) => {
+                    if lhs.len() == rhs.len() {
+                        for (l, r) in lhs.iter().zip(rhs) {
+                            if let Expr::Ident(li) = unparen(l) {
+                                if defines(li) {
+                                    found = Some(r);
+                                    return false;
+                                }
+                            }
                         }
                     }
                 }
-            }
-            if let guff::ast::Decl::FuncDecl(f) = decl {
-                if let Some(body) = &f.body {
-                    if let Some(rhs) = find_in_stmts(&body.list, id) {
-                        return Some(rhs);
+                Some(NodeRef::ValueSpec(ValueSpec { names, values, .. })) => {
+                    if names.len() == values.len() {
+                        for (name, v) in names.iter().zip(values) {
+                            if defines(name) {
+                                found = Some(v);
+                                return false;
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
+            true
+        });
+        if found.is_some() {
+            break;
         }
     }
-    None
-}
-
-fn find_in_stmts<'a>(stmts: &'a [guff::ast::Stmt], id: &Ident) -> Option<&'a Expr> {
-    for stmt in stmts {
-        if let guff::ast::Stmt::AssignStmt(AssignStmt { lhs, rhs, .. }) = stmt {
-            for (l, r) in lhs.iter().zip(rhs) {
-                if let Expr::Ident(li) = unparen(l) {
-                    if li.id == id.id {
-                        return Some(r);
-                    }
-                }
-            }
-        }
-        if let guff::ast::Stmt::BlockStmt(b) = stmt {
-            if let Some(rhs) = find_in_stmts(&b.list, id) {
-                return Some(rhs);
-            }
-        }
-    }
-    None
+    found
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -108,11 +120,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 _ => None,
             }),
             Some(Expr::CallExpr(c)) => {
-                if is_builtin_named(pass, &c.fun, "make") && c.args.len() == 1 {
-                    Some(c)
-                } else {
-                    None
+                // Only `signal.Notify(make(chan os.Signal), os.Interrupt)` is
+                // exempt: upstream deliberately does not report a channel
+                // created inline by `make`, and conservatively treats every
+                // other call as not safe (golang/go#45043). The condition was
+                // inverted here, so the one exempt form was the only one
+                // reported.
+                if is_builtin_named(pass, &c.fun, "make") {
+                    return;
                 }
+                Some(c)
             }
             _ => None,
         };

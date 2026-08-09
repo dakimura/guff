@@ -6,5 +6,6 @@ import (
 )
 
 func f() {
-	signal.Notify(make(chan os.Signal), os.Interrupt)
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt)
 }

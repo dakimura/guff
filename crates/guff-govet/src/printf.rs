@@ -512,6 +512,91 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     Ok(None)
 }
 
+/// `astutil.PosInStringLiteral`: the source position within a string literal
+/// that corresponds to `offset` in the *decoded* string it denotes.
+///
+/// printf reports at the `%v` substring, not at the call, so every diagnostic
+/// that names a directive has to walk the raw literal and account for escape
+/// sequences (`"\\t%d"` puts `%` at raw offset 3 but decoded offset 1).
+fn pos_in_string_literal(lit: &guff::ast::BasicLit, offset: usize) -> Option<u32> {
+    let raw = lit.value.as_bytes();
+    if raw.len() < 2 {
+        return None;
+    }
+    let quote = raw[0];
+    if quote != b'"' && quote != b'`' {
+        return None;
+    }
+    let body = &raw[1..raw.len() - 1];
+    // Raw strings have no escapes, so decoded offset == raw offset.
+    if quote == b'`' {
+        return (offset <= body.len()).then(|| lit.value_pos.0 as u32 + 1 + offset as u32);
+    }
+
+    let mut raw_i = 0usize;
+    let mut dec_i = 0usize;
+    while dec_i < offset && raw_i < body.len() {
+        let (raw_len, dec_len) = escape_lengths(&body[raw_i..])?;
+        raw_i += raw_len;
+        dec_i += dec_len;
+    }
+    // A directive never starts mid-rune, so landing past the target means the
+    // literal did not decode the way the caller believes.
+    (dec_i == offset).then(|| lit.value_pos.0 as u32 + 1 + raw_i as u32)
+}
+
+/// `(raw bytes consumed, decoded bytes produced)` for the character at the
+/// start of `b` inside a double-quoted Go string literal.
+///
+/// The decoded lengths here must agree with what
+/// `guff_analysis::code::expr_to_string` actually produced, since the offset
+/// being mapped is an index into that string. `printf/escapes.go` in the golden
+/// case is what holds the two in step — it is how the decoder's own escape bug
+/// was found.
+fn escape_lengths(b: &[u8]) -> Option<(usize, usize)> {
+    if b[0] != b'\\' {
+        // A UTF-8 rune occupies the same number of bytes either way.
+        let n = match b[0] {
+            0x00..=0x7f => 1,
+            0xc0..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf7 => 4,
+            _ => return None,
+        };
+        return (n <= b.len()).then_some((n, n));
+    }
+    let c = *b.get(1)?;
+    Some(match c {
+        b'a' | b'b' | b'f' | b'n' | b'r' | b't' | b'v' | b'\\' | b'\'' | b'"' => (2, 1),
+        b'x' => (4, 1),
+        b'0'..=b'7' => (4, 1),
+        // \u and \U decode to a rune, whose UTF-8 length is what the decoded
+        // string actually holds.
+        b'u' | b'U' => {
+            let (n, digits) = if c == b'u' { (6, 4) } else { (10, 8) };
+            if b.len() < n {
+                return None;
+            }
+            let hex = std::str::from_utf8(&b[2..2 + digits]).ok()?;
+            let cp = u32::from_str_radix(hex, 16).ok()?;
+            (n, char::from_u32(cp)?.len_utf8())
+        }
+        _ => return None,
+    })
+}
+
+/// `opRange`: the position of a directive within the format string, falling
+/// back to the whole format argument when it is not a literal (a named
+/// constant, say) or when the offset cannot be mapped.
+fn op_pos(format_arg: &Expr, offset: usize) -> u32 {
+    if let Expr::BasicLit(lit) = format_arg {
+        if let Some(pos) = pos_in_string_literal(lit, offset) {
+            return pos;
+        }
+    }
+    format_arg.pos().0 as u32
+}
+
 fn check_one(
     pass: &Pass<'_>,
     call: &CallExpr,
@@ -521,7 +606,10 @@ fn check_one(
     format: &str,
     out: &mut Vec<(u32, String)>,
 ) {
-    let pos = call.lparen.0 as u32;
+    // Upstream reports the leftover-argument case with ReportRangef(call, ...),
+    // i.e. at the callee. Everything else is reported at its directive.
+    let call_pos = call.fun.pos().0 as u32;
+    let format_arg = &call.args[fmt_idx];
     let first_arg = fmt_idx + 1;
     let nargs = call.args.len();
     // `f(format, args...)` — the operands are whatever the slice holds, so the
@@ -541,12 +629,16 @@ fn check_one(
             i += 1;
             continue;
         }
+        let op_start = i;
         let (scan, next) = scan_directive(format, i + 1);
         i = next;
+        // Position of the "%v" substring inside the literal.
+        let pos = op_pos(format_arg, op_start);
         let dir = match scan {
             Scan::Literal => continue,
             Scan::Error(msg) => {
-                out.push((pos, format!("{name} {msg}")));
+                // ReportRangef(formatArg, "%s %s", name, err).
+                out.push((format_arg.pos().0 as u32, format!("{name} {msg}")));
                 continue;
             }
             Scan::Directive(d) => d,
@@ -624,7 +716,7 @@ fn check_one(
         if let Some(typ) = expr_type(pass, arg) {
             if !match_arg_type(pass, dir.verb, bits, typ, 0) {
                 out.push((
-                    arg.pos().0 as u32,
+                    pos,
                     format!(
                         "{name} format {} has arg {} of wrong type {}",
                         dir.text,
@@ -645,7 +737,7 @@ fn check_one(
         let expect = max_arg_num - first_arg;
         let got = nargs - first_arg;
         out.push((
-            pos,
+            call_pos,
             format!(
                 "{name} call needs {expect} arg{} but has {got} arg{}",
                 plural(expect),

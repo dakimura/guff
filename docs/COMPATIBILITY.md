@@ -76,7 +76,7 @@
 | goprintffuncname | ✅ | |
 | gosec | 🟡 | 主要ルール対応。G113 / G115–G118 / G201–G202 / G304–G305 / G307 / G601 等は DEFERRED |
 | gosmopolitan | ✅ | |
-| govet | ✅ | 29/29 pass。printf は引数個数・型照合まで `go vet` 一致 |
+| govet | 🟡 | 上流 46 pass のうち **30 を実装**。printf は引数個数・型照合まで `go vet` 一致。28 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。未実装: appends / asmdecl / atomicalign / deepequalerrors / fieldalignment / findcall / hostport / httpmux / nilness / reflectvaluecompare / shadow / sortslice / stdversion / testinggoroutine / unusedwrite / waitgroup |
 | grouper | ✅ | |
 | iface | ✅ | |
 | importas | ✅ | |

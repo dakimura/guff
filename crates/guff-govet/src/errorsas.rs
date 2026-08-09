@@ -128,7 +128,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         }
         if let Some(msg) = check_as_target(pass, &call.args[1]) {
-            pending.push((call.lparen.0 as u32, msg.to_string()));
+            // ReportRangef(call, ...) starts at the call, not at the paren.
+            pending.push((call.fun.pos().0 as u32, msg.to_string()));
         }
     });
 

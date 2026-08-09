@@ -1,6 +1,6 @@
 package bad
 
-import "other"
+import "example.com/govet/composites/other"
 
 func bad() {
 	_ = other.Config{nil}

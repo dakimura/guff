@@ -1,4 +1,4 @@
-package main
+package inlineexp
 
 import "golang.org/x/exp/maps"
 

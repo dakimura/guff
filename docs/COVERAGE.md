@@ -8,9 +8,9 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 420 | 76.8% |
-| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 104 | 19.0% |
-| `never` | **どこでも発火していない** | 23 | 4.2% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 436 | 79.7% |
+| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 102 | 18.6% |
+| `never` | **どこでも発火していない** | 9 | 1.6% |
 | — | **合計** | **547** | 100.0% |
 
 ## linter 別
@@ -72,7 +72,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | goprintffuncname | 1 | 1 | 0 | 0 |
 | gosec | 35 | 17 | 18 | 0 |
 | gosmopolitan | 1 | 1 | 0 | 0 |
-| govet | 30 | 12 | 2 | 16 |
+| govet | 30 | 28 | 0 | 2 |
 | grouper | 1 | 1 | 0 | 0 |
 | iface | 1 | 1 | 0 | 0 |
 | importas | 1 | 1 | 0 | 0 |
@@ -138,17 +138,24 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | wsl_v5 | 1 | 1 | 0 | 0 |
 | zerologlint | 1 | 1 | 0 | 0 |
 
-## 一度も発火していない check（23 件）
+## 一度も発火していない check（9 件）
 
 - **gocritic** (1): `gocritic/whyNoLint`
-- **govet** (16): `govet/buildtag`, `govet/cgocall`, `govet/defers`, `govet/directive`, `govet/framepointer`, `govet/httpresponse`, `govet/ifaceassert`, `govet/nilfunc`, `govet/shift`, `govet/sigchanyzer`, `govet/stringintconv`, `govet/testpass`, `govet/timeformat`, `govet/unmarshal`, `govet/unsafeptr`, `govet/unusedresult`
+- **govet** (2): `govet/cgocall`, `govet/framepointer`
 - **revive** (1): `revive/time-naming`
 - **staticcheck** (4): `S1030`, `SA1011`, `SA1027`, `SA3000`
 - **swaggo** (1): `swaggo`
 
+## インベントリ外の check ID（1 件）
+
+実行結果には出たが、インベントリ抽出が拾えていない ID。抽出器のバグか、
+guff が宣言していない名前を描画している。
+
+`SA9010`
+
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 297, 'isolate': 6777, 'oss': 727, 'regress': 1523}`
+- 走査した実行アーティファクト: `{'golden': 391, 'isolate': 7094, 'oss': 774, 'regress': 1529}`
 - インベントリ: 547 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

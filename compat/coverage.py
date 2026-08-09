@@ -133,8 +133,24 @@ def build_inventory() -> dict:
     m = re.search(r"pub fn analyzers\(\)[^{]*\{\s*vec!\[(.*?)\]\s*\}", gv, re.S)
     if not m:
         raise SystemExit("coverage: cannot parse guff-govet analyzers()")
+    # The module name is not always the analyzer name (`testpass` declares the
+    # `tests` analyzer), and observation recovers the id from the message
+    # prefix, which is the *analyzer* name. Taking the module name here made
+    # `govet/testpass` unobservable by construction — a permanent phantom in
+    # the `never` column. Read the declared name out of each module instead.
     for pass_name in re.findall(r"(\w+)::analyzer\(\)", m.group(1)):
-        add(f"govet/{pass_name}", "govet", "guff-govet/src/lib.rs")
+        src = os.path.join(ROOT, "crates", "guff-govet", "src", f"{pass_name}.rs")
+        name = pass_name
+        try:
+            decl = open(src, encoding="utf-8").read()
+        except OSError:
+            decl = ""
+        # Anchor on the `Analyzer { ... }` literal: other structs in these
+        # modules have a `name` field too (bools' `BoolOp` is called "or").
+        nm = re.search(r'Analyzer\s*\{[^}]*?\bname:\s*"([\w.-]+)"', decl, re.S)
+        if nm:
+            name = nm.group(1)
+        add(f"govet/{name}", "govet", f"guff-govet/src/{pass_name}.rs")
 
     # --- every other linter contributes exactly one check -------------------
     linters = _guff_linters()

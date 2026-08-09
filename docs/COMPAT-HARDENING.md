@@ -270,23 +270,30 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / govet-lostcancel 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 27 / extra 14）。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-09 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 23 / extra 13）。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-09 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-08）: **547** checks 中 `never` **23** / `unit-only` 104 / `fired` 420。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-09）: **547** checks 中 `never` **9** / `unit-only` 102 / `fired` 436。
 （計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
 母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
 2026-08-08 の 2 本目のエントリ）。これで Phase 0 が残していた「staticcheck 161 モジュール」の内訳が確定し、
 guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装している**状態になった。
 
-`never` の 23 件は govet 16 / staticcheck 4（`S1030` / `SA1011` / `SA1027` / `SA3000`）/
-gocritic 1（`whyNoLint`、§6）/ revive 1（`time-naming`）/ swaggo 1。
-**残りは実質 govet だけ**。`unit-only` 104 のうち 83 は revive で、こちらは
+`never` の 9 件は staticcheck 4（`S1030` / `SA1011` / `SA1027` / `SA3000`）/
+govet 2（`cgocall` / `framepointer` — どちらも §6）/ gocritic 1（`whyNoLint`、§6）/
+revive 1（`time-naming`）/ swaggo 1。**うち 3 件は §6「恒久的に観測できない」側**なので、
+潰せる `never` は実質 6 件しか残っていない。`unit-only` 102 のうち 83 は revive で、こちらは
 「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
+
+なお 2026-08-09（4 本目）まで govet は 16 件が `never` に見えていたが、そのうち 1 件
+（`govet/testpass`）は**台帳側のバグ**だった: inventory は Rust の**モジュール名**を採り、
+observe は**メッセージ接頭辞＝analyzer 名**（`tests`）で照合していたため、
+この ID は構造的に一度も観測されえなかった。`compat/coverage.py` が
+`Analyzer { name: "…" }` を読むように直してある。**台帳自身も検証対象**という実例。
 
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
@@ -1643,6 +1650,191 @@ Go 1.26 は http/https のホストで「ポート区切りは**最初**のコ�
    **まず GHA での実測時間を測ってから**決めること。
    これが無い限り、Rust 側のテストを何本足しても「ローカルでだけ緑」のままになる。
 
+### 2026-08-09（4 本目）— govet 28 pass をゴールデン化（`never` 23 → 9）
+
+**やったこと**
+
+前セッションの「次にやること 4」（4 セッション連続で持ち越されていた govet の `never` 16 件）を消化した。
+`compat/golden/cases/govet/` を新設し、既存の `govet-lostcancel` ケースを**そこに畳み込んだ**
+（`lostcancel/paths.go` の 27 件は 1 行も変わっていないことを diff で確認済み）。
+gocritic と同じく fixture は新規に書いていない — `crates/guff-govet/tests/testdata/<pass>/` が
+既に pass ごとの `bad.go` / `ok.go` を持っていたので、`sources.txt` がそれを指すだけで済んだ。
+
+**ゲートに載せた瞬間に 17 件の差分が出て、全部が実バグだった**（fixture を足して更に 3 件）。
+
+| 種別 | 件数 | 内容 |
+|------|-----:|------|
+| 報告位置 | 11 | 内側のトークン（`(` / `{` / 演算子）を報告していた |
+| メッセージ本文 | 2 | `bools` が Token の Debug 名、`slog` が callee 名を落としていた |
+| recall | 3+3 | `buildtag` / `directive` が package 節より後のコメントを**原理的に見られなかった** |
+| precision | 1 | `sigchanyzer` の条件が**反転**していた |
+| 文字列デコード | 1 | 共有ヘルパ `unquote_go_string` が `\xHH` / 8 進 / `\a` などを**壊して**いた（下記 5） |
+
+#### 1. `bools` — `split` が上流と逆順だった
+
+上流 `split` は `a || b || c` を **`[c, b, a]`** で返す（doc comment に明記されている）。
+`checkRedundant` はその順に走るので、重複の報告は**左側**に落ちる。guff は順方向に
+畳んでいたため右側に落ちていた。`checkSuspect` も同じ順序に依存していて、
+`suspect or: a != 1 || a != 2` の**引数の並び**がこれで決まる。
+
+同時に 2 つ直した:
+
+- メッセージが `true LOR true` だった（`{:?}` で Token を出していた）。上流は `op.tok` の
+  `String()`＝`||`。`Token::as_str()` が既にあるので `{}` にするだけ。
+- 重複判定と表示に構造キー（`(a EQL 1)` 形式）を使っていた。上流は `astutil.Format`
+  ＝ `go/printer` 出力を**キーにも本文にも**使う。`guff::printer::fprint` に差し替えた。
+  fixture が `true || true` しか持っていなかったので**差分に出ていなかっただけ**。
+- `split` が畳んだ `BinaryExpr` を `seen` に記録していなかった。`a || a || a` で
+  外側と内側の両方から報告して 3 件になる（上流は 2 件）。
+
+`no_effects` も `typesinternal.NoEffects` の写しに置き換えた（旧実装は Ident /
+BasicLit / SelectorExpr と単純な比較しか通さない過剰に保守的な近似だった）。
+
+#### 2. `buildtag` — 解析 AST にコメントが無い
+
+`// +build` の「misplaced」系は定義上すべて **package 節より後の**コメントの話だが、
+guff の parser は `PARSE_COMMENTS` を付けないと**最初の宣言より後のコメントを捨てる**
+（`parser.rs` の `next0`）。したがって guff の buildtag は該当のコメントを**一度も見ていなかった**。
+gocritic のコメント系と同じ扱い（`PARSE_COMMENTS` で再パース＋`remap_reparsed_pos`）に直した。
+
+ついでに `guff-govet/src/buildconstraint.rs`（手書きの近似）を削除し、
+**既に存在していた** `guff::constraint`（`go/build/constraint` の完全移植）に載せ替えた。
+近似の側には 2 つの誤りがあった:
+
+- `is_plus_build_line` が `starts_with("// +build")` だったので **`// +buildlinux` を
+  正当な +build 行として受理**し、`possible malformed +build comment` を出せなかった。
+- `is_go_build_line` が `// go:build`（空白入り）も受理していた。上流の
+  `constraint.IsGoBuild` は受理しない。
+
+さらに未実装だった `finish()` の相互検証（`+build lines do not match //go:build condition`）と
+`checkOtherFile`（`.s` などの非 Go ファイル）を移植した。
+
+**上流の "malformed //go:build line (space between // and go:build)" は Go ソースから
+到達不能**である。`comment()` が `strings.Contains(text, "//go:build")` で分岐するので、
+空白入りの `// go:build` はそもそも `goBuildLine` に届かない。fixture
+（`buildtag/spaced.go`）を negative 例として置いて、golangci-lint が実際に何も出さないことを
+ゴールデンで固定した。
+
+#### 2b. `directive` — 同じ欠陥の 2 例目
+
+`buildtag` を直したあとに `//go:debug` を package 節の後ろに置いた fixture を足したら、
+**同じ理由で** guff が黙った（解析 AST にそのコメントが無い）。同じ手当て（再パース＋remap）を入れ、
+ついでに未実装だった 2 つを移植した:
+
+- `invalid space %#q in %s directive` — 動詞の直後の空白が `' '` / `'\t'` / `'\n'` **以外**の
+  `unicode.IsSpace` だと報告する。guff は `split_whitespace()` で動詞を切っていたので
+  区別自体を持っていなかった。`%#q` の描画は実測で確定させた（`'\v'` / `' '`）。
+- `nonGoFile`（`.s` などの非 Go ファイル）。
+
+**この 2 つは「同じ根の欠陥が複数の analyzer に散っている」典型**なので、
+コメントを見る analyzer を今後追加・移植するときは、まず
+「解析 AST にそのコメントは載っているか」を疑うこと。現在この再パースを持つのは
+gocritic（コメント系）/ goheader / buildtag / directive / inline。
+
+#### 3. `sigchanyzer` — 条件が反転し、`findDecl` が動いていなかった
+
+上流は
+
+```go
+case *ast.CallExpr:
+    // Only signal.Notify(make(chan os.Signal), os.Interrupt) is safe,
+    // conservatively treat others as not safe, see golang/go#45043
+    if isBuiltinMake(pass.TypesInfo, arg) {
+        return
+    }
+```
+
+と、**`make` を直接渡す形だけを免除**する。guff はその形**だけを報告**していた。
+そして本来報告すべき `c := make(chan os.Signal); signal.Notify(c, …)` は
+`find_decl_rhs` が壊れていて出せなかった:
+
+1. 関数本体を走査する分岐が `let ... GenDecl(gd) = decl else { continue }` の**配下**にあり、
+   到達不能だった。
+2. 宣言の探索が**使用側 Ident の node id と宣言側 Ident の node id** を比較していた。
+   別ノードなので決して一致しない。上流は `ast.Object` の同一性を使う。guff での対応物は
+   型検査器の `ObjectId` なので `Info.Defs` で照合するように書き直した。
+
+つまり `Ident` の腕は**一度も発火していなかった**。4 形（`:=` / `var` / 直接 `make` /
+関数呼び出し）を実際に golangci-lint に食わせて確定させ、4 形とも一致することを確認した。
+
+#### 4. 報告位置 11 件
+
+上流はすべて `ReportRangef(node, …)`＝ノード自身の開始位置。
+`composites`（`{` → CompositeLit）/ `defers`・`errorsas`・`unusedresult`（`(` → callee）/
+`nilfunc`（演算子 → 左辺）。gocritic・staticcheck で潰したのと同じクラスの 3 回目。
+
+`printf` だけは別物で、上流は **`%v` という部分文字列の位置**を報告する
+（`opRange` → `astutil.RangeInStringLiteral`）。デコード済み文字列でのオフセットを
+リテラル**ソース**の位置へ写す必要があるので、エスケープ列を数える
+`pos_in_string_literal` を移植した。`"\t%d"` は `%` がデコード後 1 バイト目・
+ソース 3 バイト目にある。`call needs N args` だけは `ReportRangef(call, …)` なので callee のまま。
+
+#### 5. その位置写像が、共有ヘルパの文字列デコードのバグを暴いた
+
+移植した位置写像を実際に踏ませるため `printf/escapes.go` を足したところ、
+`fmt.Printf("\x41\101%z", 1)` だけ位置が合わなかった。原因は printf 側ではなく
+**`guff_analysis::code::unquote_go_string`**（`expr_to_string` 経由で **約 40 か所**が使う共有ヘルパ）で、
+
+```rust
+other => other,   // ← バックスラッシュを捨てて次の 1 文字をそのまま積む
+```
+
+つまり `\n` `\t` `\"` `\\` の 4 つしか知らず、**`"\x41"` は `x41`、`"\101"` は `101`、
+`"\a"` は `a`、`"\u00e9"` は `u00e9`** にデコードされていた。**値も長さも間違っている**。
+Go のエスケープ全種（`\a\b\f\n\r\t\v\\\'\"` / `\xHH` / `\OOO` / `\uHHHH` / `\UHHHHHHHH`）を
+バイト列として組み立てる形に直した（`\xHH` と `\OOO` は**バイト**であって rune ではない）。
+
+**これは printf 固有の欠陥ではない。** 文字列定数の値を見るチェックすべてに効く。
+それでも既存のどのゲートにも出ていなかったのは、**比較しているのがメッセージ本文と行だけ**
+だったからで、`%v` の**列**を要求して初めて長さの食い違いが観測可能になった。
+§1 が「column を一切比較していない」と書いた穴の、3 回目の実例。
+
+**fixture 側で見つかったもの**
+
+実 toolchain では 2 ファイルがコンパイルできなかった（stub 型検査は通っていた）:
+`assign/ok.go` の `declared and not used: x`、`inline_exp/bad.go` の
+`package main` に `func main` が無い。**stub が緩いと fixture が現実の Go から乖離する**
+という 2026-08-08 と同じ一般則。`composites` の `import "other"` は
+モジュール内で解決できる名前に直した。
+
+**golden に載せられないもの**（`sources.txt` に理由を明記）
+
+| 対象 | 理由 |
+|---|---|
+| `cgocall` | `import "C"` に cgo と C コンパイラが要る |
+| `framepointer` | `build.Default.GOARCH` で分岐する＝arm64 の開発機と amd64 の runner でゴールデンが変わる |
+| `inline_exp` | `golang.org/x/exp` の解決に第 2 モジュール＋`replace` が要る |
+| `inline_ioutil` | メッセージに Go のバージョンが入る（`declared using go1.26.2`）。§5 の 7 番と同じ環境差 |
+| `buildtag/bad.go` | `//go:build` 2 行は**ロードエラー**なので golangci-lint は typecheck 失敗を出して他の finding を全部落とす |
+
+前 2 者は台帳の `never` に残る（§6 に追記）。
+
+**結果**
+
+- golden: `govet` **74/74 完全一致・ratchet なし**。7 ケース全部が gate 通過。
+- 台帳: govet `never` 16 → **2** / `unit-only` 2 → **0**。
+  全体 `never` 23 → **9**、`fired` 420 → **436**（79.7%）。
+- `compat/coverage.py` の govet ID 抽出を修正（§3 参照）。
+- `docs/COMPATIBILITY.md` の govet 行は「29/29 pass」と書いてあったが、上流は 46 pass で
+  guff は 30。未実装 16 個を列挙する形に直した。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲート**（4 セッション連続で残っている）。
+1. **SA1000（`regexp/syntax`）と SA1001（`text/template`）**。前セッションの見積もりのまま。
+2. **SA9008 の IR 検証** / 3. **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+3. **revive の `unit-only` 83 件**。fixture はあるが `stub/dot` のように実 Go では
+   解決できない import path があるので、`composites` でやったのと同じ手当てが要る。
+   `guff-revive/src/rules/{exported,package_comments}.rs` と `guff-style/src/lll.rs` の
+   **行だけの位置写像**もここで露見するはず。
+4. **`cargo test --workspace` を CI に載せる**（前セッションの 6 番のまま）。
+5. govet の未実装 16 pass（`nilness` / `shadow` / `testinggoroutine` あたりは実コードで
+   よく効く）。載せるときは `compat/golden/cases/govet/config.yml` の `enable` に足すこと。
+6. `buildtag` / `directive` の **`pass.IgnoredFiles`**（build constraint で除外された `.go`）。
+   上流は除外ファイルも再パースして検査する。`pass.ignored_files()` は既にあるので配線するだけだが、
+   **golangci-lint 側が本当に同じ集合を渡しているかを確かめる fixture が無い**まま入れると
+   OSS で偽陽性になりうるので、先に確かめること。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -1689,6 +1881,8 @@ Go 1.26 は http/https のホストで「ポート区切りは**最初**のコ�
 | check | 理由 |
 |-------|------|
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
+| `govet/framepointer` | 報告するアセンブリ命令を `build.Default.GOARCH`（＝ホストの GOARCH）で選ぶ。ゴールデンは 1 台で生成して全台で照合するので、arm64 の開発機と amd64 の runner で必ず食い違う。**ゴールデンに載せるには golden ランナーにケース単位の環境変数（`GOARCH`）を渡す仕組みが要る** — 入れれば解ける、という意味で §7 寄りの制約。 |
+| `govet/cgocall` | `import "C"` を含むファイルが要る。cgo と C コンパイラを CI ゲートの前提にしたくない。単体テストでのみ検証可能。 |
 
 ---
 

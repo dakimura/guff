@@ -10,8 +10,6 @@
 | consul | 258 | 255 | 255 | 98.8% | 100.0% | 0 |
 | grafana | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | containerd | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| vault | 161 | 161 | 161 | 100.0% | 100.0% | 0 |
-| kubernetes | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -72,19 +70,3 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
 | gosec | 1 | 1 | 1 | 100.0% | 100.0% |
-
-## vault
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| errcheck | 23 | 23 | 23 | 100.0% | 100.0% |
-| govet | 63 | 63 | 63 | 100.0% | 100.0% |
-| ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
-| staticcheck | 69 | 69 | 69 | 100.0% | 100.0% |
-| unused | 4 | 4 | 4 | 100.0% | 100.0% |
-
-## kubernetes
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| govet | 5 | 5 | 5 | 100.0% | 100.0% |

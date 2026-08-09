@@ -1,0 +1,104 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name> <repo-relative-source-path>
+#
+# The golden tier keeps no copy of these files: it points at the fixtures the
+# Rust unit tests already use, so the two can never drift.
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here (`<analyzer>/<stem>/`). Two files in one
+# directory would merge into one package and redeclare their identifiers.
+#
+# Not carried here, with the reason each one cannot be gated:
+#
+#   cgocall/*        `import "C"` needs cgo and a C toolchain in CI.
+#   framepointer/*   the analyzer keys off `build.Default.GOARCH`, so the
+#                    golden would differ between an arm64 dev machine and an
+#                    amd64 runner.
+#   inline_exp/*     imports golang.org/x/exp, which would need a second module
+#                    and a `replace` directive in the case go.mod.
+#   inline_ioutil/*  the message embeds the Go version that declared the callee
+#                    ("declared using go1.26.2"), which differs between
+#                    golangci-lint's own toolchain and the local one.
+#   buildtag/bad.go  two //go:build lines are a load error ("multiple //go:build
+#                    comments"), so golangci-lint reports a typecheck failure
+#                    and drops every other finding in the run.
+#
+# composites' fixture imports a sibling package; it is materialized at the path
+# its import resolves to.
+composites/other/config.go                         crates/guff-govet/tests/testdata/composites/stub/other/config.go
+assign/bad/bad.go                                  crates/guff-govet/tests/testdata/assign/bad.go
+assign/ok/ok.go                                    crates/guff-govet/tests/testdata/assign/ok.go
+atomic/bad/bad.go                                  crates/guff-govet/tests/testdata/atomic/bad.go
+atomic/ok/ok.go                                    crates/guff-govet/tests/testdata/atomic/ok.go
+bools_sel/main/main.go                             crates/guff-govet/tests/testdata/bools_sel/main.go
+bools/bad/bad.go                                   crates/guff-govet/tests/testdata/bools/bad.go
+bools/ok/ok.go                                     crates/guff-govet/tests/testdata/bools/ok.go
+buildtag/double_negative/double_negative.go        crates/guff-govet/tests/testdata/buildtag/double_negative.go
+buildtag/malformed_plus/malformed_plus.go          crates/guff-govet/tests/testdata/buildtag/malformed_plus.go
+buildtag/mismatch/mismatch.go                      crates/guff-govet/tests/testdata/buildtag/mismatch.go
+buildtag/misplaced_plus/misplaced_plus.go          crates/guff-govet/tests/testdata/buildtag/misplaced_plus.go
+buildtag/non_alphanumeric/non_alphanumeric.go      crates/guff-govet/tests/testdata/buildtag/non_alphanumeric.go
+buildtag/ok/ok.go                                  crates/guff-govet/tests/testdata/buildtag/ok.go
+buildtag/spaced/spaced.go                          crates/guff-govet/tests/testdata/buildtag/spaced.go
+composites/bad/bad.go                              crates/guff-govet/tests/testdata/composites/bad.go
+composites/ok/ok.go                                crates/guff-govet/tests/testdata/composites/ok.go
+copylocks/bad/bad.go                               crates/guff-govet/tests/testdata/copylocks/bad.go
+copylocks/ok/ok.go                                 crates/guff-govet/tests/testdata/copylocks/ok.go
+defers/bad/bad.go                                  crates/guff-govet/tests/testdata/defers/bad.go
+defers/ok/ok.go                                    crates/guff-govet/tests/testdata/defers/ok.go
+directive/after_package/after_package.go           crates/guff-govet/tests/testdata/directive/after_package.go
+directive/bad/bad.go                               crates/guff-govet/tests/testdata/directive/bad.go
+directive/invalid_space_nbsp/invalid_space_nbsp.go crates/guff-govet/tests/testdata/directive/invalid_space_nbsp.go
+directive/invalid_space/invalid_space.go           crates/guff-govet/tests/testdata/directive/invalid_space.go
+directive/ok/ok.go                                 crates/guff-govet/tests/testdata/directive/ok.go
+errorsas/bad/bad.go                                crates/guff-govet/tests/testdata/errorsas/bad.go
+errorsas/concrete_bad/concrete_bad.go              crates/guff-govet/tests/testdata/errorsas/concrete_bad.go
+errorsas/concrete_ok/concrete_ok.go                crates/guff-govet/tests/testdata/errorsas/concrete_ok.go
+errorsas/ok/ok.go                                  crates/guff-govet/tests/testdata/errorsas/ok.go
+httpresponse/bad/bad.go                            crates/guff-govet/tests/testdata/httpresponse/bad.go
+httpresponse/ok/ok.go                              crates/guff-govet/tests/testdata/httpresponse/ok.go
+ifaceassert/bad/bad.go                             crates/guff-govet/tests/testdata/ifaceassert/bad.go
+ifaceassert/ok/ok.go                               crates/guff-govet/tests/testdata/ifaceassert/ok.go
+inline_local/bad/bad.go                            crates/guff-govet/tests/testdata/inline_local/bad.go
+inline_local/ok/ok.go                              crates/guff-govet/tests/testdata/inline_local/ok.go
+inline/bad/bad.go                                  crates/guff-govet/tests/testdata/inline/bad.go
+inline/ok/ok.go                                    crates/guff-govet/tests/testdata/inline/ok.go
+loopclosure/bad/bad.go                             crates/guff-govet/tests/testdata/loopclosure/bad.go
+loopclosure/ok/ok.go                               crates/guff-govet/tests/testdata/loopclosure/ok.go
+lostcancel/bad/bad.go                              crates/guff-govet/tests/testdata/lostcancel/bad.go
+lostcancel/ok/ok.go                                crates/guff-govet/tests/testdata/lostcancel/ok.go
+lostcancel/paths/paths.go                          crates/guff-govet/tests/testdata/lostcancel/paths.go
+nilfunc/bad/bad.go                                 crates/guff-govet/tests/testdata/nilfunc/bad.go
+nilfunc/ok/ok.go                                   crates/guff-govet/tests/testdata/nilfunc/ok.go
+printf/argcount/argcount.go                        crates/guff-govet/tests/testdata/printf/argcount.go
+printf/escapes/escapes.go                          crates/guff-govet/tests/testdata/printf/escapes.go
+printf/bad/bad.go                                  crates/guff-govet/tests/testdata/printf/bad.go
+printf/ok/ok.go                                    crates/guff-govet/tests/testdata/printf/ok.go
+printf/ok2/ok2.go                                  crates/guff-govet/tests/testdata/printf/ok2.go
+printf/wrongtype/wrongtype.go                      crates/guff-govet/tests/testdata/printf/wrongtype.go
+shift/bad/bad.go                                   crates/guff-govet/tests/testdata/shift/bad.go
+shift/ok/ok.go                                     crates/guff-govet/tests/testdata/shift/ok.go
+sigchanyzer/bad/bad.go                             crates/guff-govet/tests/testdata/sigchanyzer/bad.go
+sigchanyzer/inline_make/inline_make.go             crates/guff-govet/tests/testdata/sigchanyzer/inline_make.go
+sigchanyzer/ok/ok.go                               crates/guff-govet/tests/testdata/sigchanyzer/ok.go
+slog/attr_ok/attr_ok.go                            crates/guff-govet/tests/testdata/slog/attr_ok.go
+slog/bad/bad.go                                    crates/guff-govet/tests/testdata/slog/bad.go
+slog/ok/ok.go                                      crates/guff-govet/tests/testdata/slog/ok.go
+stdmethods/bad/bad.go                              crates/guff-govet/tests/testdata/stdmethods/bad.go
+stdmethods/ok/ok.go                                crates/guff-govet/tests/testdata/stdmethods/ok.go
+stringintconv/bad/bad.go                           crates/guff-govet/tests/testdata/stringintconv/bad.go
+stringintconv/ok/ok.go                             crates/guff-govet/tests/testdata/stringintconv/ok.go
+structtag/bad/bad.go                               crates/guff-govet/tests/testdata/structtag/bad.go
+structtag/ok/ok.go                                 crates/guff-govet/tests/testdata/structtag/ok.go
+tests/bad_test/bad_test.go                         crates/guff-govet/tests/testdata/tests/bad_test.go
+tests/ok_test/ok_test.go                           crates/guff-govet/tests/testdata/tests/ok_test.go
+timeformat/bad/bad.go                              crates/guff-govet/tests/testdata/timeformat/bad.go
+timeformat/ok/ok.go                                crates/guff-govet/tests/testdata/timeformat/ok.go
+unmarshal/bad/bad.go                               crates/guff-govet/tests/testdata/unmarshal/bad.go
+unmarshal/ok/ok.go                                 crates/guff-govet/tests/testdata/unmarshal/ok.go
+unreachable/bad/bad.go                             crates/guff-govet/tests/testdata/unreachable/bad.go
+unreachable/ok/ok.go                               crates/guff-govet/tests/testdata/unreachable/ok.go
+unsafeptr/bad/bad.go                               crates/guff-govet/tests/testdata/unsafeptr/bad.go
+unsafeptr/ok/ok.go                                 crates/guff-govet/tests/testdata/unsafeptr/ok.go
+unusedresult/bad/bad.go                            crates/guff-govet/tests/testdata/unusedresult/bad.go
+unusedresult/ok/ok.go                              crates/guff-govet/tests/testdata/unusedresult/ok.go

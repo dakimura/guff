@@ -47,7 +47,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(name) = is_must_use_call(&call.fun) {
-            pending.push((call.lparen.0 as u32, format!("result of {name} call not used")));
+            // RangeOf(call.Pos(), call.Lparen): the range starts at the
+            // callee, not at the paren.
+            pending.push((call.fun.pos().0 as u32, format!("result of {name} call not used")));
         }
     });
 

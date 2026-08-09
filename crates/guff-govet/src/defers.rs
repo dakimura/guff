@@ -74,8 +74,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
 fn walk_defer_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
     if is_time_since(pass, &call.fun) {
+        // Upstream reports at v.Pos() (the callee), not at the paren.
         pending.push((
-            call.lparen.0 as u32,
+            call.fun.pos().0 as u32,
             "call to time.Since is not deferred".into(),
         ));
     }

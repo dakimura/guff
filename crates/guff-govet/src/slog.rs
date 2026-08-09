@@ -25,6 +25,26 @@ fn is_attr_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
     is_type_named(pass, typ, "log/slog", "Attr")
 }
 
+/// Upstream `shortName`: `<pkg>.<Recv>.<Name>`, e.g. `slog.Info` or
+/// `slog.Logger.Info`. The message embeds this, not a fixed "slog".
+fn short_name(pass: &Pass<'_>, obj: guff_types::ObjectId) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let pkg = obj.pkg(&artifacts.objects)?;
+    let pkg_name = artifacts.packages.get(pkg).name().to_string();
+    let name = obj.name(&artifacts.objects).to_string();
+    let recv = obj
+        .typ(&artifacts.objects)
+        .and_then(|sig| guff_types::signature::signature_recv(&artifacts.types, sig))
+        .and_then(|r| r.typ(&artifacts.objects))
+        .map(|t| {
+            let (t, _) = guff_types::lookup::deref(&artifacts.types, t);
+            let named = guff_types::named::named_obj(&artifacts.types, t);
+            format!("{}.", named.name(&artifacts.objects))
+        })
+        .unwrap_or_default();
+    Some(format!("{pkg_name}.{recv}{name}"))
+}
+
 fn kv_func_skip_args(pass: &Pass<'_>, obj: guff_types::ObjectId) -> Option<usize> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let ObjectData::Func(_) = artifacts.objects.get(obj) else {
@@ -132,9 +152,10 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr) -> Option<(u32, String)> {
         }
     }
     if pos == PosKind::Value {
+        let name = short_name(pass, obj)?;
         return Some((
             call.pos().0 as u32,
-            "call to slog missing a final value".into(),
+            format!("call to {name} missing a final value"),
         ));
     }
     None

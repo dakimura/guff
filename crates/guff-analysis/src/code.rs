@@ -760,29 +760,96 @@ fn unquote_go_string(lit: &str) -> String {
     if let Some(inner) = lit.strip_prefix('`').and_then(|s| s.strip_suffix('`')) {
         return inner.to_string();
     }
-    let mut out = String::new();
-    let mut chars = lit.chars();
-    if chars.next() != Some('"') {
+    let bytes = lit.as_bytes();
+    if bytes.first() != Some(&b'"') {
         return lit.to_string();
     }
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(next) = chars.next() {
-                out.push(match next {
-                    'n' => '\n',
-                    't' => '\t',
-                    '"' => '"',
-                    '\\' => '\\',
-                    other => other,
-                });
-            }
-        } else if c == '"' {
+    // Go's escape set, byte for byte. The previous version handled only
+    // `\n`, `\t`, `\"` and `\\` and dropped the backslash from everything
+    // else, so `"\x41"` decoded to `x41` and `"\101"` to `101` — a silent
+    // corruption of every string constant that uses a byte or unicode escape,
+    // shared by ~40 call sites through `expr_to_string`.
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 1;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c == b'"' {
             break;
-        } else {
+        }
+        if c != b'\\' {
             out.push(c);
+            i += 1;
+            continue;
+        }
+        let Some(&esc) = bytes.get(i + 1) else { break };
+        i += 2;
+        let simple = match esc {
+            b'a' => Some(0x07),
+            b'b' => Some(0x08),
+            b'f' => Some(0x0c),
+            b'n' => Some(b'\n'),
+            b'r' => Some(b'\r'),
+            b't' => Some(b'\t'),
+            b'v' => Some(0x0b),
+            b'\\' => Some(b'\\'),
+            b'\'' => Some(b'\''),
+            b'"' => Some(b'"'),
+            _ => None,
+        };
+        if let Some(b) = simple {
+            out.push(b);
+            continue;
+        }
+        // `\xHH` and `\OOO` denote a single *byte*, which is why the result is
+        // assembled as bytes: a Go string may hold invalid UTF-8.
+        let hex = |n: usize, out: &mut Vec<u8>, i: &mut usize| -> bool {
+            let Some(digits) = bytes.get(*i..*i + n).and_then(|d| std::str::from_utf8(d).ok())
+            else {
+                return false;
+            };
+            let Ok(v) = u32::from_str_radix(digits, 16) else {
+                return false;
+            };
+            *i += n;
+            match n {
+                2 => out.push(v as u8),
+                _ => match char::from_u32(v) {
+                    Some(ch) => out.extend_from_slice(ch.encode_utf8(&mut [0u8; 4]).as_bytes()),
+                    None => return false,
+                },
+            }
+            true
+        };
+        let ok = match esc {
+            b'x' => hex(2, &mut out, &mut i),
+            b'u' => hex(4, &mut out, &mut i),
+            b'U' => hex(8, &mut out, &mut i),
+            // `\OOO` is exactly three octal digits, the first of which was
+            // already consumed as `esc`.
+            b'0'..=b'7' => match bytes
+                .get(i - 1..i + 2)
+                .and_then(|d| std::str::from_utf8(d).ok())
+                .and_then(|d| u8::from_str_radix(d, 8).ok())
+            {
+                Some(v) => {
+                    out.push(v);
+                    i += 2;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        };
+        if !ok {
+            // Not a valid escape: the literal did not come from the Go parser.
+            // Keep the character so the result stays close to the source.
+            out.push(esc);
         }
     }
-    out
+    match String::from_utf8(out) {
+        Ok(s) => s,
+        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+    }
 }
 
 /// Translate a position from a re-parsed file's [`FileSet`] into the analysis
@@ -821,5 +888,21 @@ mod tests {
     fn unquote_handles_double_and_backtick_strings() {
         assert_eq!(unquote_go_string("\"hello\""), "hello");
         assert_eq!(unquote_go_string("`raw`"), "raw");
+    }
+
+    /// Every escape Go's scanner accepts. The old decoder only knew four of
+    /// them and dropped the backslash from the rest, so `"\\x41"` came back as
+    /// `x41` — wrong value *and* wrong length, which is how printf's column
+    /// mapping caught it.
+    #[test]
+    fn unquote_decodes_every_go_escape() {
+        assert_eq!(unquote_go_string(r#""\a\b\f\n\r\t\v""#), "\u{7}\u{8}\u{c}\n\r\t\u{b}");
+        assert_eq!(unquote_go_string(r#""\\ \" \'""#), "\\ \" '");
+        assert_eq!(unquote_go_string(r#""\x41\x42""#), "AB");
+        assert_eq!(unquote_go_string(r#""\101\102""#), "AB");
+        assert_eq!(unquote_go_string(r#""\u00e9""#), "\u{e9}");
+        assert_eq!(unquote_go_string(r#""\U0001F600""#), "\u{1f600}");
+        // Raw strings keep their backslashes verbatim.
+        assert_eq!(unquote_go_string("`\\x41`"), "\\x41");
     }
 }

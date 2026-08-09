@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use guff::ast::{CompositeLit, Expr};
+use guff::commentmap;
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
@@ -161,7 +162,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(message) = check_literal(pass, lit) {
-            pending.push((lit.lbrace.0 as u32, message));
+            // Upstream reports at cl.Pos() (the literal's type, when it has
+            // one), not at its opening brace.
+            pending.push((commentmap::node_pos(NodeRef::CompositeLit(lit)).0 as u32, message));
         }
     });
 

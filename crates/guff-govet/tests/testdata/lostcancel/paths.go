@@ -2,7 +2,7 @@
 //
 // Every `leak*` function is reported twice by upstream (at the defining
 // statement and at the return statement the search reaches); every `ok*`
-// function is silent. The golden case `compat/golden/cases/govet-lostcancel`
+// function is silent. The golden case `compat/golden/cases/govet`
 // pins the positions and the wording against golangci-lint.
 package p
 

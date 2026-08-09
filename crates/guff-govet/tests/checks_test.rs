@@ -386,7 +386,7 @@ fn composites_flags_unkeyed_imported_struct() {
     let pkg = support::typecheck_with_deps(
         "example.com/govet/composites",
         &dir.join("bad.go"),
-        &[("other", &stub)],
+        &[("example.com/govet/composites/other", &stub)],
     );
     let messages = support::run_analyzer(composites_analyzer(), &pkg);
     assert_eq!(messages.len(), 1, "{messages:?}");
@@ -400,7 +400,7 @@ fn composites_allows_keyed_imported_struct() {
     let pkg = support::typecheck_with_deps(
         "example.com/govet/composites/ok",
         &dir.join("ok.go"),
-        &[("other", &stub)],
+        &[("example.com/govet/composites/other", &stub)],
     );
     assert!(support::run_analyzer(composites_analyzer(), &pkg).is_empty());
 }
@@ -553,6 +553,23 @@ fn sigchanyzer_flags_unbuffered_notify() {
     let messages = support::run_analyzer(sigchanyzer_analyzer(), &pkg);
     assert!(!messages.is_empty(), "{messages:?}");
     assert!(messages.iter().any(|m| m.contains("signal.Notify")));
+}
+
+/// `signal.Notify(make(chan os.Signal), ...)` is the one shape upstream
+/// exempts (golang/go#45043); the condition used to be inverted, so this was
+/// the only shape guff reported.
+#[test]
+fn sigchanyzer_allows_inline_make() {
+    let dir = support::testdata("sigchanyzer");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/sigchanyzer/inlinemake",
+        &dir.join("inline_make.go"),
+        &[
+            ("os/signal", &dir.join("stub/os/signal/signal.go")),
+            ("os", &dir.join("stub/os/os.go")),
+        ],
+    );
+    assert!(support::run_analyzer(sigchanyzer_analyzer(), &pkg).is_empty());
 }
 
 #[test]
@@ -766,7 +783,7 @@ fn lostcancel_flags_discarded_cancel() {
     );}
 
 /// The path shapes in `paths.go`. Positions and wording are pinned against
-/// golangci-lint by `compat/golden/cases/govet-lostcancel`; this test guards the
+/// golangci-lint by `compat/golden/cases/govet`; this test guards the
 /// shape of the answer (which functions, how many reports, whose name is in the
 /// message) without needing golangci-lint on PATH.
 #[test]

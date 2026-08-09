@@ -1,0 +1,82 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet
+# Produced by running golangci-lint on compat/golden/cases/govet/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+assign/bad/bad.go:5:2:govet::assign: self-assignment of x
+atomic/bad/bad.go:7:2:govet::atomic: direct assignment to atomic value
+bools/bad/bad.go:4:9:govet::bools: redundant or: true || true
+bools_sel/main/main.go:17:9:govet::bools: redundant and: c.a == 0 && c.a == 0
+buildtag/double_negative/double_negative.go:2:1:govet::buildtag: invalid double negative in build constraint: !!nope
+buildtag/malformed_plus/malformed_plus.go:1:1:govet::buildtag: possible malformed +build comment
+buildtag/mismatch/mismatch.go:2:1:govet::buildtag: +build lines do not match //go:build condition
+buildtag/misplaced_plus/misplaced_plus.go:8:1:govet::buildtag: misplaced +build comment
+buildtag/non_alphanumeric/non_alphanumeric.go:2:1:govet::buildtag: invalid non-alphanumeric build constraint: @foo
+composites/bad/bad.go:6:6:govet::composites: example.com/govet/composites/other.Config struct literal uses unkeyed fields
+copylocks/bad/bad.go:5:12:govet::copylocks: bad passes lock by value: sync.Mutex
+copylocks/bad/bad.go:6:6:govet::copylocks: assignment copies lock value to _: sync.Mutex
+copylocks/bad/bad.go:15:9:govet::copylocks: return copies lock value: example.com/govet/copylocks/bad.Gen contains sync.Mutex
+defers/bad/bad.go:7:8:govet::defers: call to time.Since is not deferred
+directive/after_package/after_package.go:7:1:govet::directive: //go:debug directive only valid before package declaration
+directive/bad/bad.go:1:1:govet::directive: //go:debug directive only valid in package main or test
+directive/invalid_space/invalid_space.go:6:1:govet::directive: invalid space '\\v' in //go:generate directive
+directive/invalid_space_nbsp/invalid_space_nbsp.go:3:1:govet::directive: invalid space '\\u00a0' in //go:generate directive
+errorsas/bad/bad.go:8:2:govet::errorsas: second argument to errors.As should not be *error
+errorsas/concrete_bad/concrete_bad.go:12:2:govet::errorsas: second argument to errors.As must be a non-nil pointer to either a type that implements error, or to any interface type
+httpresponse/bad/bad.go:7:8:govet::httpresponse: using resp before checking for errors
+ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
+inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
+inline_local/bad/bad.go:9:9:govet::inline: Constant Legacy should be inlined
+lostcancel/bad/bad.go:6:5:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/bad/bad.go:11:8:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/paths/paths.go:163:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:168:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 163
+lostcancel/paths/paths.go:173:7:govet::lostcancel: the cancel function returned by context.WithCancel should be called, not discarded, to avoid a context leak
+lostcancel/paths/paths.go:179:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:182:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 179
+lostcancel/paths/paths.go:190:2:govet::lostcancel: the kill function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:195:2:govet::lostcancel: this return statement may be reached without using the kill var defined on line 190
+lostcancel/paths/paths.go:200:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:206:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 200
+lostcancel/paths/paths.go:212:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:215:4:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 212
+lostcancel/paths/paths.go:225:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:230:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 225
+lostcancel/paths/paths.go:238:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:243:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 238
+lostcancel/paths/paths.go:249:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:254:1:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 249
+lostcancel/paths/paths.go:258:6:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:263:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 258
+lostcancel/paths/paths.go:268:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:272:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 268
+lostcancel/paths/paths.go:277:2:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:280:3:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 277
+lostcancel/paths/paths.go:292:3:govet::lostcancel: the cancel function is not used on all paths (possible context leak)
+lostcancel/paths/paths.go:298:2:govet::lostcancel: this return statement may be reached without using the cancel var defined on line 292
+nilfunc/bad/bad.go:6:6:govet::nilfunc: comparison of function f == nil is always false
+printf/argcount/argcount.go:6:17:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
+printf/argcount/argcount.go:7:2:govet::printf: fmt.Printf call needs 1 arg but has 2 args
+printf/bad/bad.go:6:14:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:9:16:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:10:18:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:11:22:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:12:18:govet::printf: fmt.Printf format %z has unknown verb z
+printf/wrongtype/wrongtype.go:6:14:govet::printf: fmt.Printf format %d has arg "str" of wrong type string
+printf/wrongtype/wrongtype.go:7:14:govet::printf: fmt.Printf format %s has arg 42 of wrong type int
+printf/wrongtype/wrongtype.go:8:14:govet::printf: fmt.Printf format %t has arg 5 of wrong type int
+shift/bad/bad.go:5:6:govet::shift: x (8 bits) too small for shift of 8
+sigchanyzer/bad/bad.go:10:2:govet::sigchanyzer: misuse of unbuffered os.Signal channel as argument to signal.Notify
+slog/bad/bad.go:6:2:govet::slog: call to slog.Info missing a final value
+stdmethods/bad/bad.go:7:16:govet::stdmethods: method Unwrap() should have signature Unwrap() error or Unwrap() []error
+stringintconv/bad/bad.go:4:6:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
+structtag/bad/bad.go:4:2:govet::structtag: struct field x has json tag but is not exported
+tests/bad_test/bad_test.go:5:6:govet::tests: Testbad has malformed name: first letter after 'Test' must not be lowercase
+timeformat/bad/bad.go:6:21:govet::timeformat: 2006-02-01 should be 2006-01-02
+unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer as second argument
+unreachable/bad/bad.go:5:2:govet::unreachable: unreachable code
+unsafeptr/bad/bad.go:7:6:govet::unsafeptr: possible misuse of unsafe.Pointer
+unusedresult/bad/bad.go:6:2:govet::unusedresult: result of errors.New call not used

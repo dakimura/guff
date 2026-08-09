@@ -127,3 +127,38 @@ by **line only**, snapping every finding to column 1.
 The gate's ill-typed guard also caught a type-checker bug: `(*T).Foo` — a method
 expression on a pointer receiver — was rejected as "invalid indirect of T
 (Type)", because `star_expr` had no branch for an operand that denotes a type.
+
+## What the govet case found
+
+`cases/govet` put 28 of guff's 30 govet analyzers under the gate (cgocall and
+framepointer cannot be gated — see the reasons in its `sources.txt`). 67
+findings, 50 matching. All 17 that did not were real, and three more fixtures
+added afterwards found three more:
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Position | 11 | Inner tokens for the third time: `{` for a composite literal, `(` for a call, the operator for a comparison. `printf` was its own case — upstream reports at the `%v` **substring inside the format string**, which means mapping a decoded-string offset back through escape sequences to a source position. |
+| Message text | 2 | `bools` printed the token's Rust `Debug` name (`true LOR true`), and keyed its duplicate detection on a structural string rather than `go/printer` output. `slog` dropped the callee from `call to slog.Info missing a final value`. |
+| Recall | 3+3 | `buildtag` could not see any comment after the `package` clause: the analysis AST drops them unless the file is parsed with `PARSE_COMMENTS`. Every "misplaced" diagnostic is by definition about such a comment, so that arm had never fired. `directive` turned out to have the same defect, plus two unimplemented reports (`invalid space` and non-Go files). |
+| Precision | 1 | `sigchanyzer`'s condition was inverted — it reported only the inline-`make` form that upstream deliberately exempts, and its `findDecl` equivalent compared the *use* ident's node id against the *declaration* ident's, so the arm that should fire never did. |
+
+Two of these are worth generalizing:
+
+* `bools` depends on upstream's `split` returning a `||`/`&&` chain in **reverse**
+  source order. That single ordering decides which duplicate is reported and in
+  which order the two operands appear in a `suspect` message.
+* `buildtag` had a hand-rolled `go/build/constraint` approximation next to a
+  complete port of the real thing in `guff::constraint`. The approximation
+  accepted `// +buildlinux` as a `+build` line, which silently disabled the
+  malformed-comment report.
+* The `%v`-position mapping, added so printf could report where upstream does,
+  immediately found a defect one level down: `code::unquote_go_string` — reached
+  by ~40 call sites through `expr_to_string` — knew only `\n`, `\t`, `\"` and
+  `\\`, and dropped the backslash from every other escape. `"\x41"` decoded to
+  `x41`. Wrong value *and* wrong length; only demanding the column made the
+  length observable.
+* The missing-comments defect is shared, not local: any analyzer that reads
+  comments has to re-parse with `PARSE_COMMENTS` and map positions back. The
+  ones that do today are gocritic's comment checkers, goheader, buildtag,
+  directive and inline. Check that first when a comment-reading analyzer is
+  silent.

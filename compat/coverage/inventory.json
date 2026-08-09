@@ -1776,152 +1776,152 @@
       "linter": "gosmopolitan"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/assign.rs",
       "id": "govet/assign",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/atomic.rs",
       "id": "govet/atomic",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/bools.rs",
       "id": "govet/bools",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/buildtag.rs",
       "id": "govet/buildtag",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/cgocall.rs",
       "id": "govet/cgocall",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/composites.rs",
       "id": "govet/composites",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/copylocks.rs",
       "id": "govet/copylocks",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/defers.rs",
       "id": "govet/defers",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/directive.rs",
       "id": "govet/directive",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/errorsas.rs",
       "id": "govet/errorsas",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/framepointer.rs",
       "id": "govet/framepointer",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/httpresponse.rs",
       "id": "govet/httpresponse",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/ifaceassert.rs",
       "id": "govet/ifaceassert",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/inline.rs",
       "id": "govet/inline",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/loopclosure.rs",
       "id": "govet/loopclosure",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/lostcancel.rs",
       "id": "govet/lostcancel",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/nilfunc.rs",
       "id": "govet/nilfunc",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/printf.rs",
       "id": "govet/printf",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/shift.rs",
       "id": "govet/shift",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/sigchanyzer.rs",
       "id": "govet/sigchanyzer",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/slog.rs",
       "id": "govet/slog",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/stdmethods.rs",
       "id": "govet/stdmethods",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/stringintconv.rs",
       "id": "govet/stringintconv",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/structtag.rs",
       "id": "govet/structtag",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
-      "id": "govet/testpass",
+      "declared_in": "guff-govet/src/testpass.rs",
+      "id": "govet/tests",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/timeformat.rs",
       "id": "govet/timeformat",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/unmarshal.rs",
       "id": "govet/unmarshal",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/unreachable.rs",
       "id": "govet/unreachable",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/unsafeptr.rs",
       "id": "govet/unsafeptr",
       "linter": "govet"
     },
     {
-      "declared_in": "guff-govet/src/lib.rs",
+      "declared_in": "guff-govet/src/unusedresult.rs",
       "id": "govet/unusedresult",
       "linter": "govet"
     },

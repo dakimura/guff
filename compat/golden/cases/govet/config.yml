@@ -1,0 +1,67 @@
+# Golden case: govet.
+#
+# Every analyzer guff implements is named explicitly rather than using
+# `enable-all`, because golangci-lint 2.12.2 ships 46 govet analyzers and guff
+# implements 30 of them. `enable-all` would fill the golden with findings from
+# the 16 guff does not have, turning a known and deliberate scope decision into
+# a permanent golden diff. Adding an analyzer to guff means adding it here.
+#
+# `disable-all: true` is what makes the list exhaustive: without it golangci
+# unions the list with its own default-on set.
+#
+# lostcancel is the one govet analyzer whose answer depends on control flow,
+# and guff has no CFG: it walks the statement tree instead (see
+# crates/guff-govet/src/lostcancel.rs). lostcancel/paths.go pins that walk
+# against upstream's CFG search, including which return statement is named and
+# where the report lands when a function falls off its end.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - assign
+        - atomic
+        - bools
+        - buildtag
+        - cgocall
+        - composites
+        - copylocks
+        - defers
+        - directive
+        - errorsas
+        - framepointer
+        - httpresponse
+        - ifaceassert
+        - inline
+        - loopclosure
+        - lostcancel
+        - nilfunc
+        - printf
+        - shift
+        - sigchanyzer
+        - slog
+        - stdmethods
+        - stringintconv
+        - structtag
+        - tests
+        - timeformat
+        - unmarshal
+        - unreachable
+        - unsafeptr
+        - unusedresult
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Both reports of a lostcancel pair are wanted, and the pair can share a line.
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  # tests/ is a package of _test.go files only.
+  tests: true

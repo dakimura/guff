@@ -62,7 +62,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         if let Some(message) = check_comparison(pass, e) {
-            pending.push((e.op_pos.0 as u32, message));
+            // ReportRangef(e, ...) starts at the comparison's left operand,
+            // not at the operator.
+            pending.push((e.x.pos().0 as u32, message));
         }
     });
 
