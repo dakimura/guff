@@ -11,7 +11,18 @@ old/old.go:6:1:staticcheck::ST1021: comment on exported type OldClient should be
 sa1000/bad/bad.go:6:17:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
 sa1000/bad/bad.go:7:21:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
 sa1000/bad/bad.go:8:21:staticcheck::SA1000: error parsing regexp: missing closing ]: `[`
-sa1001/bad/bad.go:8:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
+sa1001/bad/bad.go:11:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
+sa1001/bad/bad.go:12:25:staticcheck::SA1001: template: :1: bad character U+002B '+'
+sa1001/bad/bad.go:13:25:staticcheck::SA1001: template: :1: unexpected right paren
+sa1001/bad/bad.go:14:25:staticcheck::SA1001: template: :1: unexpected EOF
+sa1001/bad/bad.go:15:25:staticcheck::SA1001: template: :1: unexpected {{end}}
+sa1001/bad/bad.go:16:25:staticcheck::SA1001: template: :1: unexpected "," in command
+sa1001/bad/bad.go:17:25:staticcheck::SA1001: template: :1: unexpected . after term "true"
+sa1001/bad/bad.go:18:25:staticcheck::SA1001: template: :1: unexpected "1" in template clause
+sa1001/bad/bad.go:19:25:staticcheck::SA1001: template: :1: unexpected ".3" in operand
+sa1001/bad/bad.go:20:25:staticcheck::SA1001: template: :1: unexpected {{else}} in define clause
+sa1001/bad/bad.go:22:25:staticcheck::SA1001: template: :2: unexpected {{end}}
+sa1001/bad/bad.go:25:29:staticcheck::SA1001: template: :1: unexpected {{end}}
 sa1002/bad/bad.go:8:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1002/bad/bad.go:8:13:staticcheck::SA1002: parsing time "12345" as "12345": cannot parse "" as "4"
 sa1002/bad/bad.go:9:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored

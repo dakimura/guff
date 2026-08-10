@@ -1614,15 +1614,38 @@ fn s1040_allows_ok_patterns() {
 fn sa1001_flags_invalid_template() {
     let dir = support::testdata("sa1001");
     let tmpl_stub = dir.join("stub/text/template/template.go");
+    let html_stub = dir.join("stub/html/template/template.go");
     let pkg = support::typecheck_with_deps(
         "example.com/staticcheck/sa1001",
         &dir.join("bad.go"),
-        &[("text/template", &tmpl_stub)],
+        &[
+            ("text/template", &tmpl_stub),
+            ("html/template", &html_stub),
+        ],
     );
     support::assert_well_typed(&pkg);
+    // Pin the whole message: `contains("unexpected")` passed for years against
+    // a brace counter that got the wording, the position and the reported set
+    // wrong. Expectations are golangci-lint 2.12.2's output (compat/golden),
+    // and the parser behind them is gated by tests/gostd_template.rs.
     let messages = support::run_analyzer(sa1001::analyzer(), &pkg);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("unexpected"));
+    assert_eq!(
+        messages,
+        vec![
+            r#"template: :1: bad character U+007D '}'"#.to_string(),
+            r#"template: :1: bad character U+002B '+'"#.to_string(),
+            r#"template: :1: unexpected right paren"#.to_string(),
+            r#"template: :1: unexpected EOF"#.to_string(),
+            r#"template: :1: unexpected {{end}}"#.to_string(),
+            r#"template: :1: unexpected "," in command"#.to_string(),
+            r#"template: :1: unexpected . after term "true""#.to_string(),
+            r#"template: :1: unexpected "1" in template clause"#.to_string(),
+            r#"template: :1: unexpected ".3" in operand"#.to_string(),
+            r#"template: :1: unexpected {{else}} in define clause"#.to_string(),
+            r#"template: :2: unexpected {{end}}"#.to_string(),
+            r#"template: :1: unexpected {{end}}"#.to_string(),
+        ],
+    );
 }
 
 #[test]

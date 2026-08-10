@@ -270,7 +270,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 27 / extra 14）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-10 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 26 / extra 13）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。stdlib 移植は SA1001 / SA1002 / SA1007 完了・**残るは SA1000 のみ** | 2026-08-10 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
@@ -301,7 +301,7 @@ observe は**メッセージ接頭辞＝analyzer 名**（`tests`）で照合し�
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
 **台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
-「一致している」ではない。一致の指標は golden の ratchet（現在 missing 27 / extra 14）と
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 26 / extra 13）と
 OSS / isolate ゲートの側にある。2026-08-09（3 本目）の SA1002 も同じ形で、
 **`fired` 済み・isolate 緑のまま `time.Parse("not-a-layout", …)` を撃ち続けていた**
 （上流は撃たない）。
@@ -2130,6 +2130,111 @@ wall も、ベースラインとの絶対比較ではなくバイナリ 2 本の
    今回 walk を直したときに判明。Phase 4 の材料。
 7. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
 
+### 2026-08-10（3 本目）— SA1001 を brace 数えから `text/template` の移植に置き換えた
+
+**やったこと**
+
+前セッションの「次にやること 2」のうち **SA1001 を完了**。stdlib 近似で残るのは
+**SA1000（`regexp/syntax`）1 つだけ**になった。staticcheck-sa の ratchet は
+**missing 13 / extra 13 → 12 / 12**。
+
+#### 0. 旧実装は 3 方向すべてに間違っていた
+
+`sa1001.rs` の `validate_text_template` は `{{` と `}}` を数えるだけの 40 行で、
+上流が `template.New("").Parse(s)` を呼んで `err.Error()` をそのまま出すのに対し:
+
+| 方向 | 実測 |
+|---|---|
+| **文言** | 唯一検出できる形でも `template: {{.Name}} : unexpected "}" in operand` と出していた。上流は `template: :1: bad character U+007D '}'`。**parse 名と行番号が入る位置にテンプレート本文を差し込んでいた** |
+| **recall** | 報告対象の形は 12 種あるが、**検出できていたのは 1 種**（波括弧の不均衡）だけ |
+| **precision** | `{{`（`unclosed action`）を報告していた。**上流は報告しない**（後述の whitelist 外）。新 fixture の `ok.go:21` で旧バイナリが実際に撃つのを確認した |
+
+#### 1. この族に固有の罠 — 「whitelist は parse エラーの部分集合」
+
+上流は `strings.Contains(err, "unexpected") || strings.Contains(err, "bad character")` の
+2 クラスだけ報告する。したがって**「Go と違う場所で止まる」ことも同じくバグ**になる:
+Go が `illegal number syntax` で止まるところを歩き続ければ、その先の `unexpected` が
+**上流には存在しない finding** として出る。SA1002 / SA1007 には無かった形で、
+これがあるので**コーパスは報告対象の 2 クラスではなく全メッセージを突き合わせる**。
+`ok.go` にも「whitelist 外のエラーで落ちるテンプレート」を 8 本置いた。
+
+#### 2. オラクル `compat/oracles/gotemplate`
+
+`bodies × wrappers` の格子 + 単発形で **2,013 テンプレート**。うち **1,345 がエラー**で
+**78 種の異なるメッセージ**に届き、**561 行が報告対象の 2 クラス**に落ちる。
+行の形は他のオラクルと 2 点違う（README に記載）:
+
+- 行頭にセクション名（`letter` / `digit` / `parse`）。rune テーブルを同じファイルに載せるため。
+- `parse` 行は **4 列目に `html/template` のエラー**。SA1001 はレシーバの出どころ次第で
+  どちらの `Parse` も呼ぶので、テストは**全行で両者の一致を主張する**。
+  2,013 行すべてで一致した ＝ **1 つの移植で両方を賄えることを推測ではなく実測で確定**させた。
+
+#### 3. 移植したもの
+
+| モジュール | 中身 |
+|---|---|
+| `gostd/template.rs` | `text/template/parse` の lexer（14 状態）＋ parser。エラー経路のみ。ノードは**エラー文言が要る分だけ**持つ（term の描画と `IsEmptyTree`） |
+| `gostd/fmt.rs` | `fmt.Sscan` の complex 経路。`newNumber` は complex 定数を `fmt.Sscan` に渡すので、`{{0x1+2i}}` は `strconv.ParseFloat: parsing "0x1": invalid syntax`、`{{0b1+1i}}` は `syntax error scanning complex number` になる |
+| `gostd/strconv.rs`（追加） | `Unquote` / `UnquoteChar` / `ParseUint` / `ParseInt` / `ParseFloat`。数値は**値が一切表に出ない**（surface するのは `integer overflow` と `illegal number syntax` の 2 文言だけ）ので、必要なのは受理集合と overflow 境界 |
+| `gostd/unicode.rs` + `unicode_table.rs`（生成） | `unicode.IsLetter` / `IsDigit` |
+
+**`IsLetter` / `IsDigit` を crate で済ませられない理由は `IsPrint` と同じ**。
+Go は自分のテーブルが固定された Unicode バージョンで答えるので、識別子・フィールド・変数の
+**終端位置**（＝ `bad character` を出すかどうかの境界）がずれる。`goquote-table` と同じ形で
+Go から生成し、**全 rune で** Go の答えと突き合わせている。
+
+**位置づけの細かい罠を 1 つ**: `item.String` の切り詰めは
+**条件がバイト長 > 10、切り詰めが rune 10 個**。2026-08-07 の godox と同じ非対称で、
+`fmt` の `%.10q` は rune で切るが `len()` はバイトを数える。コーパスに
+11 バイト・4 rune のトークンを入れて撃たせてある。
+
+#### 4. コーパスが原理的に捕まえられなかったもの — 再帰の深さ
+
+**このセッションで唯一、オラクルでは出ず自分で探しに行って見つけた欠陥。**
+移植は再帰下降なので、深いネストは Rust の固定長スタックを食い尽くす。実測すると
+**2 MiB スタックの release ビルドで括弧 1,000 段が abort**した。Go は goroutine
+スタックが伸びるので 10 万段でも parse する。手書きのテンプレートはそんな形をしていないので
+**コーパスにこの行は永遠に現れない** — オラクルという方法自体の盲点で、§7 に記録した。
+`MAX_RECURSION = 250` で打ち切り、2 MiB スレッドで 10 万段を回すテストを常設した。
+
+#### 5. fixture の建て直し
+
+旧 `bad.go` は 1 件・`ok.go` は 1 件だった。上流が報告する **12 形すべて**（`bad character` 2 /
+`unexpected` 10。行番号が第 2 行になる形と、`html/template` 側の arm を含む）と、
+上の「whitelist 外で落ちる」8 本 + 正常 6 本を `ok.go` に置いた。
+`checks_test.rs` の `assert!(messages[0].contains("unexpected"))` は
+**brace 数えでも通っていた**ので、SA1007 と同じくメッセージ全文を固定した。
+
+**結果**
+
+- golden 8 ケースすべて緑。staticcheck-sa は **205/205 中 193 一致**（ratchet 12/12）で、
+  SA1001 の diff は **missing 1 / extra 1 → 0 / 0**。ok.go の 8 本は 1 件も撃たない。
+- 新テスト `tests/gostd_template.rs`（2,013 テンプレート ＋ 全 rune の `is_letter` / `is_digit` ＋ 再帰の深さ）。
+  `.github/workflows/compat.yml` の `golden` ジョブに追加。
+- `cargo test --workspace` **2,981 件緑**、isolate **114 target 一致**、
+  OSS `--tier pr,nightly` 8 target すべて据え置き、`./compat/run.sh` 2 target 一致。
+- **台帳（`docs/COVERAGE.md`）の件数は変化なし**（517 / 21 / 9）。SA1001 は元から `fired` で、
+  §3 が繰り返し書いているとおり **`fired` は「一致している」を意味しない**。
+  今回動いたのは ratchet の側だけである。
+- regress は tsdb / full の**両プロファイルとも PASS**。`--profile full` は **8 セッションぶり**で（wall 2.420s ≤ 上限 2.480s、
+  `guff_only` / `golangci_only` ともに 0）。ただしこれは**このマシンが空いていたから**で、
+  同じバイナリの 1 回目は負荷の下で 2.850s だった。**wall ゲートの赤が退行を意味しない**という
+  §4 の 2026-08-10（2 本目）の観察の裏返しの実例で、ベースライン取り直しの必要は変わらない。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲートのベースライン取り直し**（8 セッション連続）。
+   手順は 2026-08-10（2 本目）の §7。
+1. **SA1000（`regexp/syntax`）** — stdlib 近似の最後の 1 つ。`regexp/syntax/parse.go` ≒ 2,000 行で
+   SA1001 より一桁大きい。文言は ``error parsing regexp: <ErrorCode>: `<Expr>` `` で、
+   **`Expr` がどの部分文字列を指すかまで一致させる**必要がある。進め方は本セッションと同じ:
+   `compat/oracles/goregexp` を足し、**移植前に**受理集合の差分を測る。golden 3/3。
+2. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+3. **`cargo test --workspace` を CI に載せる**（5 セッション連続で未着手）。
+4. govet の未実装 16 pass。
+5. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+6. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -2211,6 +2316,27 @@ revive のバージョンを上げるときに再確認すること。
 
 §6 が「上流に食わせても観測できない」なら、こちらは「観測はできるが guff の
 構造上そのままでは再現できない」。**allowlist ではなく、代償を明記した設計判断**として記録する。
+
+### 再帰の深さ — goroutine スタックは伸びる（SA1001）`[記録 2026-08-10]`
+
+`gostd::template` は再帰下降パーサで、Rust のスレッドスタックは**固定長**。
+Go は goroutine スタックが伸びるので `{{if}}` を 10 万段ネストしても普通に parse する
+（上流が深さを制限しているのは**括弧付きパイプラインだけ**で、値は 10000）。
+
+実測: 1 段あたり release で約 1 KiB / debug で約 4 KiB。**制限を入れる前は
+2 MiB スタックの release ビルドで括弧 1,000 段が abort した**。guff の lint ワーカーは
+8 MiB だが、深さは入力次第でいくらでも増えるので上限が無ければいつか踏む。
+そして踏んだときの結果は**プロセス abort** — Phase 1 が「差分に出ない失敗」として
+常時 fail 扱いにしている worker panic より更に悪い。
+
+そこで `MAX_RECURSION = 250` で打ち切る。超えたときは
+`guff: template nesting exceeds guff's recursion limit` を返す ——
+**このモジュールが出す唯一の「Go には存在しない文字列」**であり、
+`unexpected` も `bad character` も含まないので **SA1001 は黙る**。
+代償は「250 段より深いテンプレートで上流が撃つ finding を撃たない」ことだが、
+実在のテンプレートは 1 桁段しかネストしない。
+`tests/gostd_template.rs` が **2 MiB スレッド（本番の 1/4）で 10 万段**を回して
+abort しないことを固定している。
 
 ### 依存パッケージを跨ぐ purity 推論（SA4017）
 

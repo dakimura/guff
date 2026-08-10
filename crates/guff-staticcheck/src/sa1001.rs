@@ -11,6 +11,8 @@ use guff_analysis::code::{expr_to_string, is_call_to_any};
 use guff_analysis::passes::{inspect, typeindex};
 use guff_analysis::{matches, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
+use crate::gostd;
+
 static PAT: OnceLock<Pattern> = OnceLock::new();
 
 fn pat() -> &'static Pattern {
@@ -19,43 +21,6 @@ fn pat() -> &'static Pattern {
             r#"(CallExpr (Symbol (Or "(*text/template.Template).Parse" "(*html/template.Template).Parse")) [s])"#,
         )
     })
-}
-
-fn validate_text_template(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'{' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            let start = i;
-            i += 2;
-            let mut depth = 1usize;
-            while i < bytes.len() {
-                if i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'{' {
-                    depth += 1;
-                    i += 2;
-                    continue;
-                }
-                if i + 1 < bytes.len() && bytes[i] == b'}' && bytes[i + 1] == b'}' {
-                    depth -= 1;
-                    i += 2;
-                    if depth == 0 {
-                        break;
-                    }
-                    continue;
-                }
-                i += 1;
-            }
-            if depth != 0 {
-                return Some(format!(
-                    "template: {}: unexpected \"}}\" in operand",
-                    &s[..start.min(s.len())]
-                ));
-            }
-            continue;
-        }
-        i += 1;
-    }
-    None
 }
 
 fn parse_from_new(pass: &Pass<'_>, call: &CallExpr) -> bool {
@@ -96,7 +61,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(s) = expr_to_string(pass, s_expr) else {
             return true;
         };
-        let Some(err) = validate_text_template(&s) else {
+        // Upstream calls text/template (or html/template, which returns the
+        // same errors) and prints err.Error() verbatim, whitelisting only these
+        // two classes; gostd::template is the port of that parser.
+        let Err(err) = gostd::template::parse(&s) else {
             return true;
         };
         if err.contains("unexpected") || err.contains("bad character") {
@@ -140,9 +108,15 @@ mod tests {
         assert!(validate(&[analyzer()]).is_ok());
     }
 
+    /// The parser itself is gated by `tests/gostd_template.rs` against Go;
+    /// this only pins the wiring — which errors reach a report.
     #[test]
-    fn detects_unclosed_action() {
-        assert!(validate_text_template("{{.Name}} {{.LastName").is_some());
-        assert!(validate_text_template("{{.Name}}").is_none());
+    fn reports_only_the_whitelisted_error_classes() {
+        let err = gostd::template::parse("{{.Name}} {{.LastName}").unwrap_err();
+        assert_eq!(err, "template: :1: bad character U+007D '}'");
+        assert!(gostd::template::parse("{{.Name}}").is_ok());
+        // An error outside the two classes: upstream stays silent on it.
+        let quiet = gostd::template::parse("{{undefined}}").unwrap_err();
+        assert!(!quiet.contains("unexpected") && !quiet.contains("bad character"));
     }
 }

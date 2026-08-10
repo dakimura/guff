@@ -28,7 +28,17 @@ differently, so even an agreeing verdict fails the golden gate. The SA1002
 heuristic reported `time.Parse("not-a-layout", …)`, which Go parses fine, for as
 long as it existed; `url::Url` rejects `foobar` and `mailto:a@b.c`, which Go
 accepts, so SA1007 carried hand-written exceptions for shapes nobody had
-enumerated.
+enumerated. SA1001 counted braces: it reported one message
+(`unexpected "}" in operand`, with the text before the action spliced in where
+the parse name goes) for the one shape it recognised, and was silent on the
+eleven other shapes that reach a reported message.
+
+A second trap only this family has: the two whitelisted classes are a *subset*
+of the parse errors. Stopping at a different error than Go does is therefore
+also a bug — walk past the `illegal number syntax` Go stops at and the next
+`unexpected` becomes a finding upstream never makes. That is why the corpora
+compare **every** message, not the reported ones, and why the negative fixtures
+carry templates that fail outside the whitelist.
 
 A port is only worth more than the approximation if it is *verified* to be one.
 That is what these oracles are for: the Rust side replays the same corpus and
@@ -43,16 +53,19 @@ same rule [`../golden`](../golden/README.md) follows.
 | `gourl` | `crates/guff-staticcheck/tests/testdata/gostd/url_parse.tsv` | `gostd::url`, `gostd::netip` (SA1007) |
 | `goquote` | `crates/guff-staticcheck/tests/testdata/gostd/quote.tsv` | `gostd::strconv` |
 | `goquote-table` | `crates/guff-staticcheck/src/gostd/isprint_table.rs` | `gostd::strconv::is_print` |
+| `gotemplate` | `crates/guff-staticcheck/tests/testdata/gostd/template_parse.tsv` | `gostd::template`, `gostd::fmt` (SA1001) |
+| `gotemplate-table` | `crates/guff-staticcheck/src/gostd/unicode_table.rs` | `gostd::unicode` |
 
 The Rust side is `crates/guff-staticcheck/tests/gostd_*.rs`.
 
-`goquote-table` is the one output that is source rather than testdata.
-`strconv.IsPrint` is pinned to the Unicode version Go's own tables carry, and a
-Rust category crate on any other version disagrees on every code point assigned
-in between — 5812 of them between Go 1.26 and `unicode-general-category` 1.x.
-Go's `strconv` ships a generated table for the same reason, so guff keeps a copy
-of Go's rather than deriving one. `quote.tsv` is what gates it: the test checks
-`is_print` for **every** rune against Go's answer.
+The two `-table` oracles are the outputs that are source rather than testdata.
+`strconv.IsPrint`, `unicode.IsLetter` and `unicode.IsDigit` are pinned to the
+Unicode version Go's own tables carry, and a Rust category crate on any other
+version disagrees on every code point assigned in between — 5812 of them between
+Go 1.26 and `unicode-general-category` 1.x. Go's `strconv` ships a generated
+table for the same reason, so guff keeps a copy of Go's rather than deriving one.
+The tsv of the same name is what gates each: the tests check the predicate for
+**every** rune against Go's answer.
 
 ## Format
 
@@ -67,6 +80,13 @@ replays, because an input may hold bytes that are not valid UTF-8. The third
 needs no encoding: every message goes through `strconv.Quote` or `time.quote`,
 so it can never contain a tab or a newline — and `gourl` fails loudly if one
 ever does.
+
+`gotemplate` deviates twice, for reasons its package comment gives: rows carry a
+leading section name (`letter` / `digit` / `parse`), because the rune tables ride
+along in the same file, and a `parse` row carries a **fourth** column — the
+`html/template` error beside the `text/template` one. SA1001 calls whichever
+package the receiver came from, so the test asserts on every row that the two
+agree, which is what lets one port serve both.
 
 ## Go version, and what pins it
 
