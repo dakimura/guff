@@ -54,8 +54,8 @@ fn check_block(block: &BlockStmt, failures: &mut Vec<Failure>) {
                 rule: "if-return",
                 pos: if_stmt.if_.0 as u32,
                 message: msg,
-            confidence: None,
-        });
+                ..Failure::default()
+            });
         }
     }
 }

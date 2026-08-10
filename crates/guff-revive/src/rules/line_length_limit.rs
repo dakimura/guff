@@ -43,14 +43,14 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             if line_number == 0 || line_number > ft.line_count() {
                 continue;
             }
-            failures.push(Failure {
-                rule: "line-length-limit",
-                pos: ft.line_start(line_number).0 as u32,
-                message: format!(
-                    "line is {char_count} characters, out of limit {MAX_LINE_LENGTH}"
-                ),
-            confidence: None,
-        });
+            failures.push(Failure::at_column(
+                "line-length-limit",
+                ft.line_start(line_number).0 as u32,
+                // Upstream reports `token.Position{Line: l, Column: 0}` —
+                // the whole line is at fault, so no column is meaningful.
+                0,
+                format!("line is {char_count} characters, out of limit {MAX_LINE_LENGTH}"),
+            ));
         }
     }
     failures

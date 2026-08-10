@@ -316,6 +316,12 @@ pub struct CachedDiagnostic {
     pub url: String,
     #[serde(default)]
     pub severity: String,
+    /// Set when the analyzer reported a column its offset cannot express (see
+    /// [`Diagnostic::column`]). `column` above already holds the final value;
+    /// this is kept so rehydrating a `Diagnostic` reproduces the override
+    /// rather than letting the offset win a second time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_override: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -582,6 +588,7 @@ impl IssueCache {
                     url: cd.url,
                     suggested_fixes: Vec::new(),
                     related: Vec::new(),
+                    column: cd.column_override,
                 },
             ));
         }
@@ -610,6 +617,7 @@ impl IssueCache {
             } else {
                 (String::new(), 0, 0, 0)
             };
+            let column = diag.column.map_or(column, i64::from);
             let end_offset = if diag.end != 0 {
                 fset.position(guff::Pos(diag.end as i64)).offset
             } else {
@@ -626,6 +634,7 @@ impl IssueCache {
                 message: diag.message.clone(),
                 url: diag.url.clone(),
                 severity: diag.severity.clone(),
+                column_override: diag.column,
             });
         }
         let entry = CachedEntry {

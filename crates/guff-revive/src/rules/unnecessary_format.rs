@@ -122,6 +122,6 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
             "unnecessary use of formatting function \"{func_name}\", you can replace it with {}",
             spec.alternative
         ),
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }

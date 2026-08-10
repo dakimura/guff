@@ -62,8 +62,8 @@ fn check_chain(pass: &Pass<'_>, start: &IfStmt, failures: &mut Vec<Failure>) {
                     message: format!(
                         "\"if...else if\" chain with identical conditions (lines {prev} and {line})"
                     ),
-            confidence: None,
-        });
+                    ..Failure::default()
+                });
             } else {
                 conditions.insert(hash, line);
             }

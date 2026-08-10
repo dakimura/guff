@@ -67,11 +67,13 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     }
     failures.push(Failure {
         rule: "context-keys-type",
-        pos: call.args[1].pos().0 as u32,
+        // Upstream's node is the whole `context.WithValue(...)` call, not the
+        // key argument.
+        pos: call.pos().0 as u32,
         message: format!(
             "should not use basic type {} as key in context.WithValue",
             crate::util::type_string(pass, typ)
         ),
-        confidence: None,
+        ..Failure::default()
     });
 }

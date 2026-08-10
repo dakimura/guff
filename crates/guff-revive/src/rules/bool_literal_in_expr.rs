@@ -76,6 +76,6 @@ fn check_binary(expr: &BinaryExpr, failures: &mut Vec<Failure>) {
         rule: "bool-literal-in-expr",
         pos: expr.x.pos().0 as u32,
         message,
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }

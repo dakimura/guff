@@ -78,7 +78,7 @@ fn check_switch(sw: &SwitchStmt, failures: &mut Vec<Failure>) {
             rule: "useless-fallthrough",
             pos: case.body[0].pos().0 as u32,
             message: r#"this "fallthrough" can be removed by consolidating this case clause with the next one"#.into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

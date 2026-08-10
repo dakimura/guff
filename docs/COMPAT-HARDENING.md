@@ -270,18 +270,21 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check をゲート化（ratchet 付き。残差分 missing 23 / extra 13）。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-09 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 27 / extra 14）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。stdlib 移植は SA1002 / SA1007 完了・SA1000 / SA1001 が残り | 2026-08-10 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-09）: **547** checks 中 `never` **9** / `unit-only` 102 / `fired` 436。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-10）: **547** checks 中 `never` **9** / `unit-only` **21** / `fired` **517（94.5%）**。
 （計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
 母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
 2026-08-08 の 2 本目のエントリ）。これで Phase 0 が残していた「staticcheck 161 モジュール」の内訳が確定し、
 guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装している**状態になった。
+
+`unit-only` が 102 → 21 に落ちたのは 2026-08-10 の revive ゴールデン化（83 件）による。
+残る 21 件の内訳は gosec 18 / revive 2 / golines 1。
 
 `never` の 9 件は staticcheck 4（`S1030` / `SA1011` / `SA1027` / `SA3000`）/
 govet 2（`cgocall` / `framepointer` — どちらも §6）/ gocritic 1（`whyNoLint`、§6）/
@@ -1835,6 +1838,298 @@ Go のエスケープ全種（`\a\b\f\n\r\t\v\\\'\"` / `\xHH` / `\OOO` / `\uHHHH
    **golangci-lint 側が本当に同じ集合を渡しているかを確かめる fixture が無い**まま入れると
    OSS で偽陽性になりうるので、先に確かめること。
 
+### 2026-08-10 — revive 99 rule をゴールデン化（`unit-only` 102 → 21）
+
+**やったこと**
+
+7 セッション持ち越されていた「revive の `unit-only` 83 件」を消化した。
+`compat/golden/cases/revive/` を新設し、guff が実装する 100 rule のうち **99 を明示的に有効化**して
+ゲートに載せた（`enable-all-rules` は使わない。理由は govet ケースと同じ）。fixture は新規に
+書いていない — `crates/guff-revive/tests/testdata/revive/` を `sources.txt` が指すだけ。
+
+**載せる前に fixture 側で 2 つ直した**
+
+1. `stub/dot` と `stub/badalias` を `stub/example.com/revive/{dot,badalias}` へ移動し、
+   fixture の import path をモジュールで解決できる名前にした。前セッションが予告していた作業。
+   ついでに `example.com/badalias` を import しながら stub が `badalias` として登録されていた
+   （＝ Rust 側でも解決できていなかった）ズレも消えた。
+2. `extended_bad_test.go` を `extended/util/` から**独立したディレクトリ**へ出した。
+   上流の `package-naming` は `alreadyCheckedNames.AddIfAbsent(fileDir)` で
+   **ディレクトリ単位にメモ化**するが、revive はパッケージ内のファイルを**並行に**lint するので、
+   どのファイルがメモを取るかは**レース**になる。3 ファイルのパッケージで実測すると
+   3 連続の実行で報告先ファイルが変わった。1 ディレクトリ 1 ファイルにして初めてゴールデンが
+   再現可能になる（regen を 3 回回して同一を確認済み）。
+
+**91 rule が発火し、ゲートに載せた瞬間に 187 件の差分**（283 件中 188 一致）。**現在 288 件中 276 一致**。
+
+| 種別 | 件数 | 内容 |
+|------|-----:|------|
+| **worker panic** | 1 | `inefficient_map_lookup.rs:63` が `for range m {}`（key なし）で `expect("range key")`。**そのワーカーの findings が丸ごと落ちていた**ので bad.go の 43 件が全部消えていた |
+| 報告位置 | 約 45 | 4 回目の同じクラス。ただし今回は**逆向き**が多い（guff が名前、上流が宣言の頭） |
+| precision | 30 | 大半は `unhandled-error`（下記）と `unexported-naming` |
+| メッセージ本文 | 約 20 | 書式・型の描画・上流の言い回し |
+| 設定引数の形 | 8 | 下記 |
+
+#### 1. `unhandled-error` — 上流は importer が壊れているので**他パッケージへの呼び出しを見ていない**
+
+guff は `fmt.Print` / `errors.New` に 22 件撃っていた。上流は**0 件**。原因は revive の型検査:
+
+```go
+config := &types.Config{ Error: func(error) {}, Importer: importer.Default() }
+```
+
+`importer.Default()` は **gc の export data importer** で、いまの Go では stdlib の `.a` を
+見つけられない。したがって import は全部 invalid になり、`w.pkg.TypeOf(fCall)` は
+`errors.New(…)` に対して `error` でも tuple でもない invalid を返す → 黙る。
+**同じパッケージ内で宣言された関数の呼び出しだけが上流に見えている。**
+
+guff は全プログラムの型情報を持っているので、この境界を**手で引き直す**必要がある
+(`callee_is_local`)。上流の挙動を fixture で固定するため
+`extended_bad.go` に「同一パッケージの `func localError() error` を文として呼ぶ」形を足した
+（メッセージの描画も上流の `funcName` に合わせた: selector なら `FullName()` から
+`(`・`)`・`*` を除去、それ以外は `go/printer` 出力＝裸の識別子）。
+
+**この「上流の型情報が届かない」クラスは他の rule にも残っている**
+（`time-equal` / `epoch-naming` / `range-val-address` の extra がこれ）。ratchet の `why` に列挙した。
+
+#### 2. `function-length` — 上流の `return nil` は `continue` の書き損じ
+
+```go
+emptyBody := body == nil || len(body.List) == 0
+if emptyBody { return nil }
+```
+
+`Apply` はファイル単位なので、**空の関数が 1 つあるとそのファイルの function-length が全部黙る**
+（しかも収集済みの failure ごと捨てる）。`extended_bad.go` は上の方に `func badWaitGroup(...) {}`
+を持つので上流は 1 件も出さない。上流がそう振る舞う以上そのまま移植した。
+なお guff はこの rule を shared_walk のノード走査でも回していたため、
+ファイル単位の判断ができるよう `on_file` へ移した。
+
+#### 3. 設定引数の形が上流と違い、**書ける config では rule が黙っていた**
+
+| rule | 上流 | guff（修正前） |
+|---|---|---|
+| `imports-blocklist` | 引数は**平坦な文字列の並び** | 引数 0 が**リスト**であることを要求 |
+| `banned-characters` | 同上 | 同上 |
+| `file-length-limit` | `[{ max: 350 }]` の**k,v マップ** | 引数 0 が**整数** |
+
+上流は逆の形を **error にして起動を止める**ので、ユーザーが実際に書ける config は
+guff 側で 1 件も効いていなかった（＝ rule が存在しないのと同じ）。
+`imports-blocklist` の 6 件はこれ。**Phase 4（設定セマンティクス）の前哨**にあたる欠陥で、
+golden tier が config を実際に食わせて初めて出た。
+
+#### 4. `comments-density` — 解析 AST にコメントが無い、の 6 例目
+
+guff は全ファイルを「コメント 0 行」と数えていた（doc コメントだけが AST に残るため）。
+`PARSE_COMMENTS` で再パースする形に直した。§4（2026-08-09 4 本目）が
+「コメントを見る analyzer はまずこれを疑え」と書いたとおりの再発。
+書式も `%2.f%%`（幅 2）に合わせた — `density of  0%` と空白が 1 つ多い。
+
+#### 5. `unexported-naming` — 上流はパッケージレベルを見ない
+
+上流が辿るのは FuncDecl / FuncLit の引数・結果、`:=`、そして**関数本体の中の** `DeclStmt` だけ。
+guff は `ValueSpec` を全部見ていたのでパッケージレベルの const / var まで
+「the symbol X is **local**」と報告していた（7 件）。上流の `gd.Specs[0]` しか見ない癖も再現した。
+
+#### 6. `multiline-if-init` は**ピン先の revive に存在しない**
+
+revive **v1.15.0**（golangci-lint 2.12.2 の pin）には無く、master にだけある rule。
+config に書くと golangci-lint は `cannot find rule: multiline-if-init` で**起動に失敗する**。
+つまり guff の `enable-all-rules: true` は上流が出しえない findings を出していた。
+`config::AHEAD_OF_PIN_RULES` を新設して `all_rules()`（＝ enable-all の集合）から外した。
+明示的に名前を書けば動くのは据え置き。**上流が revive を上げたらここへ戻すこと。**
+
+**結果**
+
+- golden: revive **276/288**（ratchet missing 12 / extra 22）。他 7 ケースは据え置きで緑。
+- 台帳: revive `unit-only` 83 → **2** / `fired` 16 → **97**。
+  全体 `unit-only` 102 → **21**、`fired` 436 → **517（94.5%）**、`never` 9 は変わらず。
+- isolate 114 target すべて一致。`cargo test -p guff-revive` 緑。
+- `compat/golden/run.sh` の `sources.txt` パーサを 2 スペース以上区切りに変えた
+  （`bad file.go` のように**ファイル名に空白がある** fixture があるため）。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲート**（5 セッション連続で残っている）。
+1. **revive の ratchet を 0 に**。残りのクラスは `cases/revive/ratchet.json` の `why` に列挙してある。
+   最初の一手は **column 0 の表現**（`line-length-limit` / `file-length-limit` は
+   `token.Position{Column: 0}` を手で組む）。`Diagnostic` に列の上書きを持たせる必要があり、
+   guff-analysis の API 変更になるので、他に column 0 を使う上流 rule が無いか先に調べること。
+2. **SA1000（`regexp/syntax`）と SA1001（`text/template`）** — 見積もりは 2026-08-09（3 本目）のまま。
+3. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+4. **`cargo test --workspace` を CI に載せる**（3 セッション連続で未着手）。
+5. govet の未実装 16 pass。
+6. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
+### 2026-08-10（2 本目）— revive の ratchet を 34 → 4 に落とし、上流ソースを一次資料にした
+
+**やったこと**
+
+前セッションが残した 34 件（missing 12 / extra 22）を **4 件（missing 1 / extra 3）**まで潰した。
+残り 4 件は全部**同じ 1 クラス**で、しかもポーティングではなく**製品判断**の問題（後述）。
+
+**方法が変わった**: revive v1.15.0 の**ソースが手元にある**ことに気付いた
+（`$(go env GOMODCACHE)/github.com/mgechev/revive@v1.15.0/rule/*.go`）。
+golangci-lint 2.12.2 がピンしている当のバージョンそのもの。
+**推測してから golden で確かめる**のではなく、**先に上流を読んでから直す**形に切り替えたら、
+1 件ずつではなくクラス単位で落ちるようになった。以降のセッションもまずここを読むこと。
+
+| クラス | 件数 | 中身 |
+|---|---:|---|
+| column 0 | 12 | `line-length-limit` / `file-length-limit` |
+| confidence の未移植 | 4 | 下記 |
+| `enforce-repeated-arg-type-style` | 5 | 報告ノードと results の名前ガード |
+| Go 1.22 ゲートの欠落 | 2 | `range-val-in-closure` / `range-val-address` |
+| 解析 AST にコメントが無い | 3 | `comment-spacings` / `empty-lines` |
+| その他（`empty-lines` の報告ノード、`add-constant` の walk、`package-naming` の `_test`、
+`time-date` の表記法、`exported` の doc 判定） | 6 | |
+
+#### 1. column 0 — `Diagnostic` に列の上書きを足した
+
+上流の `line-length-limit` / `file-length-limit` は `token.Pos` から位置を導かず
+`token.Position{Line: …, Column: 0}` を**手で組む**。オフセットは 1 始まりなので、
+column 0 はどんな `Pos` からも出てこない。`guff_analysis::Diagnostic` に
+`column: Option<u32>` を足し、`guff-lint/src/exclude.rs` の `collect_issues` と
+`guff-runner/src/cache.rs` の put/get の 2 箇所（＝位置を解決する全箇所）で反映する。
+キャッシュ側は `CachedDiagnostic.column_override` を持たせて往復で保存する。
+前セッションの宿題「他に column 0 を使う上流 rule が無いか調べる」の答えは
+**8 ケースの golden 全体で revive のこの 2 rule だけ**（`grep ':0:' cases/*/expected.golden`）。
+
+`file-length-limit` は行も違った（上流は**最終行**、guff は package 節）。
+
+#### 2. confidence が 1 rule も移植されていなかった
+
+上流は報告地点ごとに `Confidence:` を書き、golangci は `revive.confidence`（既定 0.8）
+未満を捨てる。guff は `Failure::confidence()` に exported / var-declaration の
+2 例外があるだけで、**残りは全部 1.0** だった。v1.15.0 の `rule/` にある 1.0 未満の
+26 箇所を全部 `failure.rs` の表に写した。既定閾値で効くのは 2 つ:
+
+- `optimize-operands-order` = **0.3** — ユーザーに一度も届かない rule だった
+- `modifies-parameter` = **0.5** — 同上
+
+残りの 0.8 / 0.9 は既定では通るが、**ユーザーが `confidence` を動かした瞬間に差が出る**。
+`empty-block` だけは 2 箇所が**同じ文言**で 0.9 と 1 に分かれるので、
+メッセージからは復元できず報告地点で渡している。
+
+なお `crates/guff-revive` の単体テストは「rule が撃つこと」の確認なので、
+`extended_test_settings()` の閾値を 0（既定 0.8 ではなく）にして 0.3 / 0.5 の rule も
+撃たせ続けている。**既定 config で何が見えるかは golden tier の担当**。
+
+#### 3. `enforce-repeated-arg-type-style` — 報告ノードは「前の」フィールド
+
+上流の `Node` は `prevType`、つまり**省略される側**である直前フィールドの型。
+guff は繰り返した側に付けていた。さらに results の分岐にだけ
+`field.Names != nil` のガードがあり、`func f() (int, int, int)` は
+（名前が無いので型を落としようがなく）**上流は撃たない**。params 側にこのガードは無い。
+
+#### 4. Go 1.22 ゲート — `range-val-in-closure` と `range-val-address`
+
+どちらも冒頭に `if file.Pkg.IsAtLeastGoVersion(lint.Go122) { return }` がある。
+1.22 以降はループ変数が毎回別物なので、捕捉もアドレス取得もバグではない。
+guff は両方とも無条件に撃っていた。`util::go_version_at_least(pass, 1, 22)` は
+`datarace` が既に使っていたものをそのまま使う。
+**前セッションの ratchet はこの 2 件を「importer 盲目」と誤分類していた** — 実際は無関係。
+
+#### 5. コメントが解析 AST に無い、の 7 例目と 8 例目
+
+`comment-spacings` は `file.comments` を舐めるだけなので、**本番で 1 件も撃っていなかった**
+（doc コメントすら `file.comments` には入らない）。`empty-lines` も同じ理由で
+「ブロック先頭のコメント」が見えず false positive を出していた。
+両方 `PARSE_COMMENTS` 再パースに寄せた。
+
+このパターンは 4 つの rule に**同一の private コピー**があったので、
+`util::reparse_with_comments` 1 本にまとめた。再パースは**私有 `FileSet`** を持つため
+位置がそのままでは使えない。`comment-spacings` は報告位置がコメント自身なので、
+バイトオフセットを橋にして写す `util::map_reparsed_pos` を足した。
+
+#### 6. 残りの単発
+
+- `empty-lines`: 上流は start / end の**どちらも `Node: block`**。末尾の指摘も開き括弧に出る。
+- `add-constant`: 上流は `CallExpr` を見たら**自前で引数だけ調べて `return nil`**、
+  つまり呼び出しの部分木に降りない。`go func() { result = 1 }()` の `1` は上流には見えない。
+- `package-naming`: `_test` を剥がすのは**規約チェック（下線 / MixedCaps）だけ**。
+  bad-name の照合は**フルの名前**を小文字化する。`util_test` は `util` ではない。
+- `time-date`: 10 進以外の表記（8 進 / 16 進 / 2 進 / float / 指数 / `1_0`）を
+  guff は**黙って捨てていた**。上流はここで
+  「use decimal digits for time.Date … 」を出す。`parseDecimalInteger` を移植した。
+- `exported`: 上流の `checkGoDocStatus` は OK / Missing / CaseMismatch /
+  FirstLetterMismatch / **Unexpected** の 5 値。guff は「大文字小文字違いの前方一致」
+  しか見ておらず、**名前に全く触れていないコメント（Unexpected）を見逃していた**。
+  5 値と `correctionHint` を移植し、報告位置も上流に合わせて doc コメントに変えた。
+
+**残り 4 件 — 「追従しない」で決着 `[決定 2026-08-10]`**
+
+`context-keys-type`（文言）/ `time-equal` / `epoch-naming`（どちらも extra）。
+根っこは 1 つで、revive は `types.Config{Importer: importer.Default()}` で型検査する。
+`importer.Default()` は gc の export data importer で、いまの Go には `.a` が無いので
+**import は全部 invalid になる**。よって「別パッケージで宣言された型」を要る rule は
+上流では全部黙る。guff は全プログラムの型情報を持つので正しく答えてしまう。
+
+0 にするには上流の欠陥をわざと再現して真陽性を捨てることになり、
+`time-equal` / `epoch-naming` が**丸ごと死ぬ**。**真陽性を優先し、互換性の方を捨てる**と決めた。
+詳細と `unhandled-error` だけ例外にしてある理由は §6 に書いた。
+**ratchet の 1/3 は到達目標ではなく固定の床**で、これ以外の差分が増えたらバグ。
+
+#### 7. regress ゲートが `comment-spacings` の偽陽性 10 件と性能退行を捕まえた
+
+**このセッションで唯一、golden では出ず regress で出た欠陥。**
+prometheus は `comment-spacings` を有効にしているので、死んでいた rule を生き返らせた瞬間に
+`guff_only` が 0 → **10** に増えた。中身は全部 `/* … */` の**単一行ブロックコメント**:
+
+```go
+0xEF53: "EXT4_SUPER_MAGIC", /* May also be EXT2_SUPER_MAGIC. */
+```
+
+上流は「`/*` で始まり 3 文字目が改行」なら抜け、**そのあと改行でなくてもスペース/タブ判定を
+行/ブロックの区別なく適用する**。guff は 2 番目の判定を `else if` に置いていたため、
+ブロックコメントには一度も適用されなかった。ついでに allowList も直した:
+上流の許容は**引数由来のリスト**と `directiveCommentRE`
+（`^//(line |extern |export |[a-z0-9]+:[a-z0-9])`）だけで、guff が持っていた
+`//nolint`（コロン無し）/ `//sys ` / `//#nosec` のハードコードは**上流には無い**。
+
+**性能**: 同じ regress が wall の退行も出した。prometheus `./...` を A/B（順序をローテーション
+した paired 比較）で測ると **base 比 +0.059s（+3.1%）**。原因は再パースで、
+`comment-spacings` を config から外すと差が +0.016s まで落ちる。2 手打った:
+
+| 手 | 中身 | 効果 |
+|---|---|---|
+| 再パースのキャッシュ | `util::reparse_with_comments` をパッケージ単位でメモ化。**6 rule が同じファイルを個別に再パースしていた**（prometheus では blank-imports / exported / comment-spacings の 3 つが同時に有効） | +0.059 → +0.027s |
+| スキャナ化 | `comment-spacings` はコメント本文しか要らないので AST を作らない。`util::scan_comments` が `SCAN_COMMENTS` で 1 回走査し、位置は pass の `FileSet` に写して返す | +0.027 → **−0.011s（base より速い）** |
+
+最終形は 8 ペアの paired 比較で **7/8 で base より速い**（median −0.011s）。
+死んでいた rule を生き返らせた**うえで**base より速くなったのは、キャッシュが
+base も払っていた重複再パース（blank-imports と exported）を消したから。
+
+**教訓**: `--profile full` は wall ゲートが赤で「判定不能」と 6 セッション書かれていたが、
+**`guff_only` の方は生きていて、golden が通した欠陥を捕まえた**。
+wall も、ベースラインとの絶対比較ではなくバイナリ 2 本の paired 比較にすれば十分に判定可能。
+
+**結果**
+
+- golden: revive **287/288**（ratchet missing 1 / extra 3）。他 7 ケースは据え置きで緑。
+- regress `--profile full`: `guff_only` 0 / `golangci_only` 0 / P=R=100%。
+  wall はベースライン 2.330s に対し 2.53s で**赤のままだが、これは 6 セッション前からの
+  マシン差**（base バイナリも同じマシンで 2.50〜2.53s）。本セッションの変更は base より速い。
+- isolate 114 target すべて一致。`cargo test --workspace` 緑。
+- `Failure` に `..Failure::default()` を導入（142 箇所）。以後フィールド追加で
+  全報告地点を触らずに済む。`Diagnostic` 側も同様に 36 箇所を関数更新構文に寄せた。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲートのベースライン取り直し**（7 セッション連続）。
+   絶対値の赤はマシン差なので、**base バイナリとの paired 比較**（順序ローテーション、
+   8 ペア）を回せば退行は判定できる、というのが今回の実測。手順は §4 の本エントリに書いた。
+   ベースラインをこのマシンで測り直すか、ゲートを paired 比較に作り替えるか。
+1. ~~revive の残り 4 件の方針決め~~ → **決着（§6）。追従しない。ratchet 1/3 が恒久的な床。**
+2. **SA1000（`regexp/syntax`）と SA1001（`text/template`）** — 見積もりは 2026-08-09（3 本目）のまま。
+3. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+4. **`cargo test --workspace` を CI に載せる**（4 セッション連続で未着手）。
+   このセッションでローカルは緑を確認済み。
+5. govet の未実装 16 pass。
+6. **`add-constant` が config を一切読まない**（`allowList` / `maxLitCount` / `ignoreFuncs`）。
+   今回 walk を直したときに判明。Phase 4 の材料。
+7. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -1883,6 +2178,32 @@ Go のエスケープ全種（`\a\b\f\n\r\t\v\\\'\"` / `\xHH` / `\OOO` / `\uHHHH
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
 | `govet/framepointer` | 報告するアセンブリ命令を `build.Default.GOARCH`（＝ホストの GOARCH）で選ぶ。ゴールデンは 1 台で生成して全台で照合するので、arm64 の開発機と amd64 の runner で必ず食い違う。**ゴールデンに載せるには golden ランナーにケース単位の環境変数（`GOARCH`）を渡す仕組みが要る** — 入れれば解ける、という意味で §7 寄りの制約。 |
 | `govet/cgocall` | `import "C"` を含むファイルが要る。cgo と C コンパイラを CI ゲートの前提にしたくない。単体テストでのみ検証可能。 |
+
+### 意図的な非互換: revive の importer 盲目には追従しない `[決定 2026-08-10]`
+
+**方針: 真陽性は捨てない。この 3 件は恒久的な差分として据え置く。**
+
+revive は `types.Config{Importer: importer.Default()}` で型検査する。
+`importer.Default()` は gc の export data importer で、いまの Go には `.a` が無いため
+**import が全部 invalid に落ちる**。したがって「別パッケージで宣言された型」を要する
+rule は上流では**常に黙る**。guff は全プログラムの型情報を持つので正しく答えてしまう。
+
+| golden の差分 | 上流が黙る理由 |
+|---|---|
+| `time-equal`（extra, `extended_bad.go:73`） | `TypeOf(x)` が `time.Time` かを見るが invalid が返る |
+| `epoch-naming`（extra, `extended_bad.go:428`） | 同上（`t.Unix()` のレシーバ型） |
+| `context-keys-type`（missing/extra の対, `bad.go:65`） | `context.WithValue` のシグネチャが解決できず、untyped 定数が `string` に defaulting されない。文言が `untyped string` と `string` で割れる |
+
+**追従すると `time-equal` と `epoch-naming` が丸ごと死ぬ。** どちらも実在のバグを指す rule
+なので、上流の欠陥を再現するために真陽性を捨てるのは割に合わないと判断した。
+`cases/revive/ratchet.json` の 1/3 は**到達目標ではなく固定の床**であり、
+**これ以外の差分が 1 件でも増えたらそれはバグ**。
+
+`unhandled-error` だけは例外的に上流に合わせてある（`callee_is_local`、
+§4 の 2026-08-10 1 本目）。あちらは上流が 0 件・guff が 22 件で、
+**差が大きすぎて golden ケース全体のノイズになる**ためで、方針が違うわけではない。
+上流が importer を直したら（`go/packages` へ移行するなど）この節ごと消えるので、
+revive のバージョンを上げるときに再確認すること。
 
 ---
 

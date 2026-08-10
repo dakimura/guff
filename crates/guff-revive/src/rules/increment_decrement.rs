@@ -73,8 +73,13 @@ fn check_assign(assign: &AssignStmt, failures: &mut Vec<Failure>) {
     };
     failures.push(Failure {
         rule: "increment-decrement",
-        pos: assign.tok_pos.0 as u32,
+        // Upstream's node is the `*ast.AssignStmt`, which starts at its LHS.
+        pos: assign
+            .lhs
+            .first()
+            .map(|e| e.pos().0)
+            .unwrap_or(assign.tok_pos.0) as u32,
         message: format!("should replace {lhs} {op_text} with {lhs}{suffix}"),
-        confidence: None,
+        ..Failure::default()
     });
 }

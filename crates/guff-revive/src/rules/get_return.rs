@@ -33,12 +33,12 @@ impl Checker {
         }
         self.failures.push(Failure {
             rule: "get-return",
-            pos: f.name.name_pos.0 as u32,
+            pos: f.ty.func.0 as u32,
             message: format!(
                 "function '{}' seems to be a getter but it does not return any result",
                 f.name.name
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 

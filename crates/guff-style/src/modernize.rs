@@ -206,6 +206,7 @@ fn check_any(pass: &Pass<'_>, iface: &InterfaceType, pending: &mut Vec<Diagnosti
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -233,6 +234,7 @@ fn check_plusbuild(file: &File, pending: &mut Vec<Diagnostic>) {
                     related: Vec::new(),
                     url: String::new(),
                     severity: String::new(),
+                    ..Diagnostic::default()
                 });
                 break;
             }
@@ -316,6 +318,7 @@ fn check_forvar(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Diagn
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -721,6 +724,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -818,6 +822,7 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -914,6 +919,7 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -978,6 +984,7 @@ fn check_omitzero(pass: &Pass<'_>, field: &Field, pending: &mut Vec<Diagnostic>)
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -1040,6 +1047,7 @@ fn check_slicessort(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -1139,6 +1147,7 @@ fn check_slicesdelete(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -1252,6 +1261,7 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
                                     related: Vec::new(),
                                     url: String::new(),
                                     severity: String::new(),
+                                    ..Diagnostic::default()
                                 });
                                 return;
                             }
@@ -1340,6 +1350,7 @@ fn check_stringscutprefix(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<D
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -1624,6 +1635,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                 related: Vec::new(),
                                 url: String::new(),
                                 severity: String::new(),
+                                ..Diagnostic::default()
                             });
                             continue;
                         }
@@ -1655,6 +1667,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                 related: Vec::new(),
                 url: String::new(),
                 severity: String::new(),
+                ..Diagnostic::default()
             });
             continue;
         }
@@ -1712,6 +1725,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                                 related: Vec::new(),
                                                 url: String::new(),
                                                 severity: String::new(),
+                                                ..Diagnostic::default()
                                             });
                                             continue;
                                         }
@@ -1755,6 +1769,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -1861,6 +1876,7 @@ fn check_mapsloop(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<Dia
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -1920,6 +1936,7 @@ fn check_stringsseq(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<D
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -2060,6 +2077,7 @@ fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagn
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -2258,6 +2276,7 @@ fn check_slicesbackward(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<D
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -2434,6 +2453,7 @@ fn check_reflecttypeassert(
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -2517,6 +2537,7 @@ fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diag
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -2594,6 +2615,7 @@ fn check_reflecttypefor_elem(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -2737,6 +2759,7 @@ fn check_testingcontext_block(
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -2982,6 +3005,7 @@ fn check_bloop_for(
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -3027,6 +3051,7 @@ fn check_bloop_range(
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -3142,6 +3167,7 @@ fn check_unsafefuncs(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnos
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -3224,6 +3250,7 @@ fn check_importcomment(
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -3318,6 +3345,7 @@ fn check_stringscut(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<Diag
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -3597,6 +3625,7 @@ fn export_newexpr_decls(
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -3645,6 +3674,7 @@ fn check_newexpr_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagno
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -3969,6 +3999,7 @@ fn check_errorsastype(
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -4615,6 +4646,7 @@ fn check_stringsbuilder(pass: &Pass<'_>, file: &File, pending: &mut Vec<Diagnost
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }
@@ -5022,6 +5054,7 @@ fn check_stditerators_for(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -5097,6 +5130,7 @@ fn check_stditerators_range(
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
+        ..Diagnostic::default()
     });
 }
 
@@ -5518,6 +5552,7 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
             related: Vec::new(),
             url: String::new(),
             severity: String::new(),
+            ..Diagnostic::default()
         });
     }
 }

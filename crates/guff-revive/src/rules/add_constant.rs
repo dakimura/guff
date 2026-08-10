@@ -33,20 +33,53 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            if matches!(n, Some(NodeRef::GenDecl(_))) {
-                return false;
+            match n {
+                Some(NodeRef::GenDecl(_)) => false, // skip declarations
+                // Upstream handles a call itself and returns nil: only the
+                // call's own literal arguments are checked, and the subtree is
+                // not walked at all. So a literal inside a func literal passed
+                // to `go f()`, or inside `f(x + 1)`, is never reported.
+                Some(NodeRef::CallExpr(call)) => {
+                    check_call(call, &struct_tags, &mut failures, &mut str_counts);
+                    false
+                }
+                Some(NodeRef::BasicLit(lit)) => {
+                    if !struct_tags.contains(&lit.pos().0) {
+                        check_lit(lit, &mut failures, &mut str_counts);
+                    }
+                    true
+                }
+                _ => true,
             }
-            let Some(NodeRef::BasicLit(lit)) = n else {
-                return true;
-            };
-            if struct_tags.contains(&lit.pos().0) {
-                return true;
-            }
-            check_lit(lit, &mut failures, &mut str_counts);
-            true
         });
     }
     failures
+}
+
+/// Upstream `checkFunc`: direct `BasicLit` arguments are checked, direct
+/// `CallExpr` arguments recurse, and every other argument shape is ignored.
+///
+/// The `ignoreFuncs` option, which would skip a call by name here, is not
+/// implemented — guff's add-constant reads no configuration yet.
+fn check_call(
+    call: &guff::ast::CallExpr,
+    struct_tags: &HashSet<i64>,
+    failures: &mut Vec<Failure>,
+    str_counts: &mut HashMap<String, usize>,
+) {
+    for arg in &call.args {
+        match arg {
+            guff::ast::Expr::CallExpr(inner) => {
+                check_call(inner, struct_tags, failures, str_counts);
+            }
+            guff::ast::Expr::BasicLit(lit) => {
+                if !struct_tags.contains(&lit.pos().0) {
+                    check_lit(lit, failures, str_counts);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn check_lit(lit: &BasicLit, failures: &mut Vec<Failure>, str_counts: &mut HashMap<String, usize>) {
@@ -59,8 +92,8 @@ fn check_lit(lit: &BasicLit, failures: &mut Vec<Failure>, str_counts: &mut HashM
                     "avoid magic numbers like '{}', create a named constant for it",
                     lit.value
                 ),
-            confidence: None,
-        });
+                ..Failure::default()
+            });
         }
         Some(Token::STRING) => check_str_lit(lit, failures, str_counts),
         _ => {}
@@ -91,7 +124,7 @@ fn check_str_lit(
                 "string literal {value} appears, at least, {count} times, create a named constant for it",
                 count = *count
             ),
-            confidence: None,
+            ..Failure::default()
         });
         *count = IGNORED;
     }

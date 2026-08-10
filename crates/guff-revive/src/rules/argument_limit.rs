@@ -27,11 +27,11 @@ impl Checker {
         if num_params > MAX_ARGUMENTS {
             self.failures.push(Failure {
                 rule: "argument-limit",
-                pos: f.name.name_pos.0 as u32,
+                pos: f.ty.func.0 as u32,
                 message: format!(
                     "maximum number of arguments per function exceeded; max {MAX_ARGUMENTS} but got {num_params}"
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

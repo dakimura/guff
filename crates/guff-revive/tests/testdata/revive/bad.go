@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-import . "dot"
+import . "example.com/revive/dot"
 
 import _ "os"
 

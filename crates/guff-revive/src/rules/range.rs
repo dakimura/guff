@@ -72,6 +72,6 @@ fn check_range(rs: &RangeStmt, failures: &mut Vec<Failure>) {
         message: format!(
             "should omit 2nd value from range; this loop is equivalent to `for {key} {tok} range ...`"
         ),
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }

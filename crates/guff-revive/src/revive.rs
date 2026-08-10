@@ -27,7 +27,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "revive requires inspect analyzer".to_string())?;
 
     let settings = config::effective_settings(pass);
-    for failure in rules::run_enabled_rules(pass) {
+    // Rules that read comments share one PARSE_COMMENTS reparse per file; the
+    // cache is scoped to this package so its ASTs are dropped with it.
+    crate::util::clear_reparse_cache();
+    let failures = rules::run_enabled_rules(pass);
+    crate::util::clear_reparse_cache();
+    for failure in failures {
         if failure.confidence() < settings.confidence_threshold() {
             continue;
         }
@@ -38,6 +43,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             pos: failure.pos,
             message: failure.format(),
             severity: config::rule_severity(pass, failure.rule),
+            column: failure.column,
             ..Diagnostic::default()
         });
     }

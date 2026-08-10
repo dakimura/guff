@@ -52,6 +52,8 @@ impl BranchKind {
             Self::Continue => "a continue statement",
             Self::Break => "a break statement",
             Self::Goto => "a goto statement",
+            // Panic / Exit never reach here: `Branch::long_string` renders them
+            // from the call name (upstream `Branch.LongString`).
             Self::Panic => "a function call that panics",
             Self::Exit => "a function call that exits the program",
         }
@@ -62,6 +64,10 @@ impl BranchKind {
 struct Branch {
     kind: BranchKind,
     has_decls: bool,
+    /// Name of the function called at the end of the branch, for `Panic` and
+    /// `Exit`. Upstream's `Branch.Call` — both its `String` and `LongString`
+    /// render it, so `panic()` and `os.Exit()` do not share a message.
+    call: Option<String>,
 }
 
 impl Branch {
@@ -77,8 +83,20 @@ impl Branch {
             BranchKind::Continue => "{ ... continue }".into(),
             BranchKind::Break => "{ ... break }".into(),
             BranchKind::Goto => "{ ... goto }".into(),
-            BranchKind::Panic => "{ ... panic() }".into(),
-            BranchKind::Exit => "{ ... os.Exit() }".into(),
+            BranchKind::Panic | BranchKind::Exit => {
+                format!("{{ ... {}() }}", self.call.as_deref().unwrap_or("panic"))
+            }
+        }
+    }
+
+    /// Upstream `Branch.LongString`: `call to <fn> function` for the two kinds
+    /// that carry a call, the bare kind name otherwise.
+    fn long_string(&self) -> String {
+        match self.kind {
+            BranchKind::Panic | BranchKind::Exit => {
+                format!("call to {} function", self.call.as_deref().unwrap_or("panic"))
+            }
+            kind => kind.long_string().to_string(),
         }
     }
 
@@ -271,11 +289,13 @@ fn visit_block(
             if_branch: Branch {
                 kind: BranchKind::Empty,
                 has_decls: false,
+                call: None,
             },
             has_else: false,
             else_branch: Branch {
                 kind: BranchKind::Empty,
                 has_decls: false,
+                call: None,
             },
             has_initializer: false,
             has_prior_non_deviating: false,
@@ -321,6 +341,7 @@ fn visit_if(
     chain.else_branch = Branch {
         kind: BranchKind::Empty,
         has_decls: false,
+        call: None,
     };
 
     let Some(else_stmt) = &if_stmt.else_ else {
@@ -336,7 +357,7 @@ fn visit_if(
                     rule,
                     pos: if_stmt.if_.0 as u32,
                     message,
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
         }
@@ -370,9 +391,18 @@ fn visit_if(
                 }
                 failures.push(Failure {
                     rule,
-                    pos: if_stmt.if_.0 as u32,
+                    // Upstream's ifelse framework lets each rule pick a target:
+                    // early-return points at the `if`, indent-error-flow and
+                    // superfluous-else point at the *else* (`ifelse.TargetElse`).
+                    // Go's AST has no position for the `else` keyword, so the
+                    // else branch's own Pos() — its `{` — is what gets reported.
+                    pos: if target_else(rule) {
+                        else_block.lbrace.0 as u32
+                    } else {
+                        if_stmt.if_.0 as u32
+                    },
                     message,
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
         }
@@ -380,11 +410,18 @@ fn visit_if(
     }
 }
 
+/// Rules whose failure is attached to the else branch rather than the `if`
+/// (`ifelse.TargetElse` upstream).
+fn target_else(rule: &str) -> bool {
+    matches!(rule, "indent-error-flow" | "superfluous-else")
+}
+
 fn block_branch(block: &BlockStmt) -> Branch {
     if block.list.is_empty() {
         return Branch {
             kind: BranchKind::Empty,
             has_decls: false,
+            call: None,
         };
     }
     let mut branch = stmt_branch(block.list.last().expect("non-empty"));
@@ -405,6 +442,7 @@ fn stmt_branch(stmt: &Stmt) -> Branch {
         Stmt::ReturnStmt(_) => Branch {
             kind: BranchKind::Return,
             has_decls: false,
+            call: None,
         },
         Stmt::BranchStmt(b) => Branch {
             kind: match b.tok {
@@ -414,52 +452,62 @@ fn stmt_branch(stmt: &Stmt) -> Branch {
                 _ => BranchKind::Regular,
             },
             has_decls: false,
+            call: None,
         },
         Stmt::BlockStmt(b) => block_branch(b),
         Stmt::ExprStmt(e) => {
-            if let Some(kind) = deviating_call(&e.x) {
+            if let Some((kind, call)) = deviating_call(&e.x) {
                 Branch {
                     kind,
                     has_decls: false,
+                    call: Some(call),
                 }
             } else {
                 Branch {
                     kind: BranchKind::Regular,
                     has_decls: false,
+                    call: None,
                 }
             }
         }
         Stmt::EmptyStmt(_) => Branch {
             kind: BranchKind::Empty,
             has_decls: false,
+            call: None,
         },
         Stmt::LabeledStmt(l) => stmt_branch(&l.stmt),
         _ => Branch {
             kind: BranchKind::Regular,
             has_decls: false,
+            call: None,
         },
     }
 }
 
-fn deviating_call(expr: &Expr) -> Option<BranchKind> {
+/// The deviating call ending a branch, with the name upstream renders in the
+/// message (`panic`, `os.Exit`, `log.Fatalf`, …).
+fn deviating_call(expr: &Expr) -> Option<(BranchKind, String)> {
     let Expr::CallExpr(CallExpr { fun, .. }) = unparen(expr) else {
         return None;
     };
     match unparen(fun) {
-        Expr::Ident(id) if id.name == "panic" => Some(BranchKind::Panic),
+        Expr::Ident(id) if id.name == "panic" => Some((BranchKind::Panic, "panic".into())),
         Expr::SelectorExpr(sel) => {
             let pkg = match unparen(&sel.x) {
                 Expr::Ident(id) => id.name.as_str(),
                 _ => return None,
             };
+            let name = format!("{pkg}.{}", sel.sel.name);
             match (pkg, sel.sel.name.as_str()) {
-                ("os", "Exit") => Some(BranchKind::Exit),
+                ("os", "Exit") => Some((BranchKind::Exit, name)),
                 ("log", "Fatal" | "Fatalf" | "Fatalln" | "Panic" | "Panicf" | "Panicln") => {
-                    Some(if matches!(sel.sel.name.as_str(), "Fatal" | "Fatalf" | "Fatalln") {
-                        BranchKind::Exit
-                    } else {
-                        BranchKind::Panic
-                    })
+                    let kind =
+                        if matches!(sel.sel.name.as_str(), "Fatal" | "Fatalf" | "Fatalln") {
+                            BranchKind::Exit
+                        } else {
+                            BranchKind::Panic
+                        };
+                    Some((kind, name))
                 }
                 _ => None,
             }
@@ -499,7 +547,7 @@ fn check_superfluous_else(chain: &Chain, args: Args) -> Option<String> {
     }
     Some(format!(
         "if block ends with {}, so drop this else and outdent its block",
-        chain.if_branch.kind.long_string()
+        chain.if_branch.long_string()
     ))
 }
 

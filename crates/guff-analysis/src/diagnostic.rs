@@ -18,6 +18,14 @@ pub struct Diagnostic {
     pub message: String,
     /// Optional severity from the linter (`warning`, `error`, …). Empty when unset.
     pub severity: String,
+    /// Column to report, overriding the one `pos` resolves to.
+    ///
+    /// Not part of `analysis.Diagnostic`: it exists because some upstream
+    /// linters build a `token.Position` by hand instead of deriving it from a
+    /// `token.Pos`, and so can report a column a byte offset cannot express.
+    /// revive's `line-length-limit` and `file-length-limit` are the instances —
+    /// both set `Column: 0`, which no offset resolves to (offsets are 1-based).
+    pub column: Option<u32>,
     /// Optional link to additional documentation.
     pub url: String,
     /// Optional quick fixes for the diagnostic.

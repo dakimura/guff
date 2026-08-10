@@ -1,5 +1,5 @@
 # Source files materialized into the case work dir before each run.
-# Format: <dest-name> <repo-relative-source-path>
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
 #
 # The golden tier does NOT keep its own copy of these files: it points at the
 # fixture the Rust unit tests already use, so the two can never drift.

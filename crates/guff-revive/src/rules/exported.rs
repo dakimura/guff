@@ -20,6 +20,7 @@ use guff_analysis::Pass;
 use crate::failure::Failure;
 use crate::util::{
     first_comment_line, has_prefix_insensitive, is_importable_package, receiver_type_key,
+    reparse_with_comments, Reparsed,
 };
 
 pub struct Checker<'a> {
@@ -33,7 +34,7 @@ pub struct Checker<'a> {
     /// Receiver type keys that implement `sort.Interface` (Len+Less+Swap).
     sortable: HashSet<String>,
     /// `PARSE_COMMENTS` reparse for the current file (docs + private FileSet).
-    comments: Option<(Arc<FileSet>, File)>,
+    comments: Option<Arc<Reparsed>>,
 }
 
 impl<'a> Checker<'a> {
@@ -97,9 +98,9 @@ impl<'a> Checker<'a> {
             .unwrap_or("");
 
         let mut batch = Vec::new();
-        if let Some((ref comments_fset, ref comments_file)) = self.comments {
+        if let Some(rp) = &self.comments {
             check_file(
-                comments_file,
+                &rp.file,
                 pkg,
                 self.skip_stutter,
                 self.check_private_receivers,
@@ -108,7 +109,7 @@ impl<'a> Checker<'a> {
                 &mut batch,
             );
             for mut f in batch {
-                f.pos = remap_pos(self.pass, report, comments_fset, f.pos);
+                f.pos = remap_pos(self.pass, report, &rp.fset, f.pos);
                 self.failures.push(f);
             }
         } else {
@@ -145,19 +146,6 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     c.into_failures()
 }
 
-fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
-    let owned;
-    let src: &[u8] = if let Some(b) = cached {
-        b
-    } else {
-        owned = fs::read(path).ok()?;
-        &owned
-    };
-    let name = path.file_name()?.to_str()?;
-    let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
-    Some((fset, file))
-}
 
 fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) -> u32 {
     let p = comments_fset.position(guff::Pos(pos as i64));
@@ -363,27 +351,94 @@ fn lint_func_doc(
         ("function", f.name.name.clone())
     };
     let first = first_comment_line(f.doc.as_ref());
-    if first.is_empty() {
-        failures.push(Failure {
-            rule: "exported",
-            pos: f.name.name_pos.0 as u32,
-            message: format!("exported {kind} {name} should have comment or be unexported"),
-            confidence: None,
-        });
-        return;
+    let status = check_go_doc_status(&first, &f.name.name);
+    match status {
+        GoDocStatus::Ok => return,
+        GoDocStatus::Missing => {
+            failures.push(Failure::with_confidence(
+                "exported",
+                f.ty.func.0 as u32,
+                format!("exported {kind} {name} should have comment or be unexported"),
+                status.confidence(),
+            ));
+            return;
+        }
+        _ => {}
     }
-    let expected = format!("{} ", f.name.name);
-    if !first.starts_with(&expected) && has_prefix_insensitive(&first, &expected) {
-        failures.push(Failure {
-            rule: "exported",
-            pos: f.doc.as_ref().map(|d| d.pos().0).unwrap_or(f.name.name_pos.0) as u32,
-            message: format!(
-                r#"comment on exported {kind} {name} should be of the form "{} ...""#,
-                f.name.name
-            ),
-            confidence: None,
-        });
+    failures.push(Failure::with_confidence(
+        "exported",
+        f.doc.as_ref().map(|d| d.pos().0).unwrap_or(f.name.name_pos.0) as u32,
+        format!(
+            r#"comment on exported {kind} {name} should be of the form "{} ..."{}"#,
+            f.name.name,
+            status.correction_hint(&first)
+        ),
+        status.confidence(),
+    ));
+}
+
+/// How a doc comment relates to the name it documents (upstream
+/// `exportedGoDocStatus`).
+#[derive(Clone, Copy, PartialEq)]
+enum GoDocStatus {
+    Ok,
+    Missing,
+    CaseMismatch,
+    FirstLetterMismatch,
+    /// The comment simply does not begin with the name. guff used to treat
+    /// this as fine, so a doc comment that talks about something else was
+    /// never reported.
+    Unexpected,
+}
+
+impl GoDocStatus {
+    fn confidence(self) -> f64 {
+        if self == GoDocStatus::Unexpected {
+            0.8
+        } else {
+            1.0
+        }
     }
+
+    /// Suffix appended to the "should be of the form" message. Only the two
+    /// mismatch statuses carry one.
+    fn correction_hint(self, first_comment_line: &str) -> String {
+        let first_word = first_comment_line.split(' ').next().unwrap_or("");
+        match self {
+            GoDocStatus::CaseMismatch => {
+                format!(r#" by using its correct casing, not "{first_word} ...""#)
+            }
+            GoDocStatus::FirstLetterMismatch => {
+                format!(r#" to match its exported status, not "{first_word} ...""#)
+            }
+            _ => String::new(),
+        }
+    }
+}
+
+fn strip_first_rune(s: &str) -> &str {
+    match s.chars().next() {
+        Some(c) => &s[c.len_utf8()..],
+        None => s,
+    }
+}
+
+fn check_go_doc_status(first_comment_line: &str, name: &str) -> GoDocStatus {
+    if first_comment_line.is_empty() {
+        return GoDocStatus::Missing;
+    }
+    let expected = format!("{} ", name.trim());
+    if first_comment_line.starts_with(&expected) {
+        return GoDocStatus::Ok;
+    }
+    if !has_prefix_insensitive(first_comment_line, &expected) {
+        return GoDocStatus::Unexpected;
+    }
+    if strip_first_rune(first_comment_line).starts_with(strip_first_rune(&expected)) {
+        // Only the first character differs: "sendJSON" became "SendJSON".
+        return GoDocStatus::FirstLetterMismatch;
+    }
+    GoDocStatus::CaseMismatch
 }
 
 fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
@@ -404,22 +459,43 @@ fn lint_type_doc(ts: &TypeSpec, gd: &GenDecl, failures: &mut Vec<Failure>) {
                 "exported type {} should have comment or be unexported",
                 ts.name.name
             ),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
-    let expected = ts.name.name.clone();
-    if !first.starts_with(&expected) && has_prefix_insensitive(&first, &format!("{expected} ")) {
-        failures.push(Failure {
-            rule: "exported",
-            pos: doc.map(|d| d.pos().0).unwrap_or(ts.name.name_pos.0) as u32,
-            message: format!(
-                r#"comment on exported type {} should be of the form "{} ..." (with optional leading article)"#,
-                ts.name.name, ts.name.name
-            ),
-            confidence: None,
-        });
+    // A leading article is allowed: "A Foo is ..." documents Foo. When one is
+    // present the expected prefix grows to include it, and the hint below
+    // quotes the comment with the article already removed.
+    const ARTICLES: [&str; 4] = ["A", "An", "The", "This"];
+    let mut expected_prefix = ts.name.name.clone();
+    let mut hint_line = first.clone();
+    for article in ARTICLES {
+        if ts.name.name == article {
+            continue;
+        }
+        if let Some(rest) = hint_line.strip_prefix(&format!("{article} ")) {
+            expected_prefix = format!("{article} {}", ts.name.name);
+            hint_line = rest.to_string();
+            break;
+        }
     }
+    // Upstream re-reads the doc here, so the match is against the *unstripped*
+    // comment and the article-extended prefix.
+    let status = check_go_doc_status(&first, &expected_prefix);
+    if status == GoDocStatus::Ok {
+        return;
+    }
+    failures.push(Failure::with_confidence(
+        "exported",
+        doc.map(|d| d.pos().0).unwrap_or(ts.name.name_pos.0) as u32,
+        format!(
+            r#"comment on exported type {} should be of the form "{} ..." (with optional leading article){}"#,
+            ts.name.name,
+            ts.name.name,
+            status.correction_hint(&hint_line)
+        ),
+        status.confidence(),
+    ));
 }
 
 fn lint_value_spec(
@@ -440,7 +516,7 @@ fn lint_value_spec(
                     rule: "exported",
                     pos: name.name_pos.0 as u32,
                     message: format!("exported {kind} {} should have its own declaration", name.name),
-                    confidence: None,
+                    ..Failure::default()
                 });
                 return;
             }
@@ -471,7 +547,7 @@ fn lint_value_spec(
                 "exported {kind} {} should have comment{block} or be unexported",
                 name.name
             ),
-            confidence: None,
+            ..Failure::default()
         });
         gen_decl_missing.insert(key, true);
         return;
@@ -479,23 +555,27 @@ fn lint_value_spec(
     if !gd_first.is_empty() && gd.lparen.is_valid() {
         return;
     }
-    let doc_line = if !vs_first.is_empty() {
-        vs_first
+    let (doc, doc_line) = if !vs_first.is_empty() {
+        (vs.doc.as_ref(), vs_first)
     } else {
-        gd_first
+        (gd.doc.as_ref(), gd_first)
     };
-    if !doc_line.starts_with(&name.name) && has_prefix_insensitive(&doc_line, &format!("{} ", name.name))
-    {
-        failures.push(Failure {
-            rule: "exported",
-            pos: name.name_pos.0 as u32,
-            message: format!(
-                r#"comment on exported {kind} {} should be of the form "{} ...""#,
-                name.name, name.name
-            ),
-            confidence: None,
-        });
+    let status = check_go_doc_status(&doc_line, &name.name);
+    if status == GoDocStatus::Ok {
+        return;
     }
+    failures.push(Failure::with_confidence(
+        "exported",
+        // Upstream blames the doc comment, not the name.
+        doc.map(|d| d.pos().0).unwrap_or(name.name_pos.0) as u32,
+        format!(
+            r#"comment on exported {kind} {} should be of the form "{} ..."{}"#,
+            name.name,
+            name.name,
+            status.correction_hint(&doc_line)
+        ),
+        status.confidence(),
+    ));
 }
 
 fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut Vec<Failure>) {
@@ -516,7 +596,7 @@ fn check_repetitive(pkg: &str, name: &str, thing: &str, pos: i64, failures: &mut
             message: format!(
                 "{thing} name will be used as {pkg}.{name} by other packages, and that stutters; consider calling this {rem}"
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

@@ -2,4 +2,4 @@
 
 package revivetest
 
-import . "dot"
+import . "example.com/revive/dot"

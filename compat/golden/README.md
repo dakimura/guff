@@ -28,6 +28,29 @@ cargo build --release -p guff-lint
 ./compat/golden/regen.sh gocritic
 ```
 
+## Read the upstream source before you guess
+
+The linters golangci-lint pins are **already on this machine**, as source, at
+the exact version being compared against:
+
+```bash
+ls "$(go env GOMODCACHE)/github.com/mgechev/revive@v1.15.0/rule/"
+ls "$(go env GOMODCACHE)/honnef.co/go/tools@v0.7.0/"
+ls "$(go env GOMODCACHE)/github.com/go-critic/go-critic@"*/checkers/
+```
+
+A golden diff tells you *that* guff disagrees; it rarely tells you *why*, and a
+diff read on its own invites plausible-but-wrong theories. Reading the ~80 lines
+of upstream that produced the line turns "these two findings are off by five
+columns" into "the failure node is `prevType`, not the field that repeats it",
+which fixes the class rather than the instance.
+
+Measured on the 2026-08-10 revive pass: 34 diffs, read one at a time, had been
+filed as roughly a dozen separate problems. Read against the source they were
+six classes, four of them one-line fixes, and one of the previous session's
+diagnoses ("upstream's importer is blind") turned out to be a plain missing
+`IsAtLeastGoVersion(Go122)` guard.
+
 ## Layout
 
 | Path | Role |
@@ -162,3 +185,62 @@ Two of these are worth generalizing:
   ones that do today are gocritic's comment checkers, goheader, buildtag,
   directive and inline. Check that first when a comment-reading analyzer is
   silent.
+
+## What the revive case found
+
+`cases/revive` put 99 of guff's 100 revive rules under the gate (the hundredth,
+`multiline-if-init`, does not exist in the revive version golangci-lint 2.12.2
+pins — see below). 283 findings, 188 matching; 276/288 today.
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Worker panic | 1 | `inefficient-map-lookup` did `range.key.expect("range key")`, and `for range m {}` has no key. The panic took that worker's whole file with it — 43 findings vanished with the gate reporting only their absence. |
+| Position | ~45 | The recurring class for the fourth time, mostly *mirrored*: guff reported the declaration's **name** where upstream reports the node (`func` keyword, `(` of a parameter list, `{` of an else branch, the import spec's local name). |
+| Precision | 30 | `unhandled-error` (22) and `unexported-naming` (7), both below. |
+| Message text | ~20 | Format verbs (`%2.f%%`), type rendering, and upstream's own wording. |
+| Config arguments | 8 | Below. |
+
+Three are worth generalizing:
+
+* **`unhandled-error` is limited by upstream's own type-checker, not by its
+  rule.** revive type-checks with `types.Config{Importer: importer.Default()}`
+  — the gc export-data importer, which resolves nothing on a modern toolchain.
+  Every import is invalid, so `pkg.TypeOf(call)` cannot see that
+  `errors.New(…)` returns an `error`, and the rule is silent for any callee
+  from another package. guff has real type information for the whole program,
+  so it reports a superset unless it puts that boundary back by hand. The same
+  blindness is behind the remaining `time-equal` / `epoch-naming` /
+  `range-val-address` diffs. **When a type-driven revive rule seems to
+  under-report upstream, check whether the answer needs an import.**
+* **Config argument shapes decide whether a rule runs at all.**
+  `imports-blocklist` and `banned-characters` take flat string arguments and
+  `file-length-limit` takes a `{max: N}` map; guff wanted a nested list and a
+  bare int. Upstream *errors out* on the shapes guff accepted, so no config a
+  user could actually write reached those rules — they were silently off. Only
+  a tier that feeds a real config to both tools can see this.
+* **Upstream bugs are part of the contract.** `function-length` does
+  `if emptyBody { return nil }` inside a per-file `Apply`, so a single
+  `func f() {}` silences the rule for everything below it *and* discards what
+  it already found. It reads like a slip for `continue`; it is what 2.12.2
+  ships, so guff reproduces it (and the fixture that exercises the rule needs a
+  file of its own).
+
+Two things about the case's own shape are worth keeping in mind when adding
+fixtures here:
+
+* **One file per directory.** `package-naming` memoizes per directory
+  (`alreadyCheckedNames.AddIfAbsent(fileDir)`) while revive lints a package's
+  files concurrently, so in a multi-file package *which* file claims the memo
+  is a race — measured: three consecutive runs of a three-file package reported
+  three different files. Positions are only reproducible with one file per
+  directory.
+* **Probe with a fresh `GOLANGCI_LINT_CACHE`.** Half a session went into a
+  behaviour difference that was a stale cache entry. `run.sh --regen` already
+  uses a fresh cache; ad-hoc `golangci-lint run` invocations do not.
+
+`multiline-if-init` exists on revive's master branch but not in v1.15.0, which
+rejects the name (`cannot find rule: multiline-if-init`). guff's
+`enable-all-rules: true` was therefore a superset of upstream's; the rule now
+lives in `config::AHEAD_OF_PIN_RULES`, outside the enable-all set but still
+runnable when named explicitly.
+

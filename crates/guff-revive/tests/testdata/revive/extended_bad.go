@@ -13,8 +13,8 @@ import (
 
 import "os"
 import "os"
-import dot "dot"
-import BadAlias "example.com/badalias"
+import dot "example.com/revive/dot"
+import BadAlias "example.com/revive/badalias"
 
 var counter int64
 
@@ -112,6 +112,16 @@ func badTimeDate() time.Time {
 
 func badUnhandledError() {
 	errors.New("x")
+}
+
+// localError is called for its error and ignored below. The callee has to live
+// in this package: revive type-checks with an importer that resolves nothing,
+// so it cannot see that errors.New above returns an error at all, and reports
+// only calls it can type (see crates/guff-revive/src/rules/unhandled_error.rs).
+func localError() error { return nil }
+
+func badUnhandledLocalError() {
+	localError()
 }
 
 type badStructTag struct {

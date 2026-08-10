@@ -103,7 +103,7 @@ fn check_file(pass: &Pass<'_>, file: &File, failures: &mut Vec<Failure>) {
                         "var {} is of type {}; don't use unit-specific suffix {:?}",
                         name.name, type_str, suffix
                     ),
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
         }

@@ -7,7 +7,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::line_of;
+use crate::util::{line_of, reparse_with_comments};
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -25,7 +25,28 @@ impl<'a> Checker<'a> {
     }
 
     pub fn on_file(&mut self, file: &File) {
-        self.comment_lines = comment_lines(self.pass, file);
+        // Upstream reads `file.CommentMap()`, which covers every comment in the
+        // file. The analysis AST is parsed without comments, so a comment inside
+        // a block is absent there and the block looks like it opens on a blank
+        // line — a false "extra empty line at the start of a block".
+        let fi = self
+            .pass
+            .files()
+            .iter()
+            .position(|f| std::ptr::eq(f, file))
+            .unwrap_or(0);
+        let reparsed = self
+            .pass
+            .pkg()
+            .compiled_go_files
+            .get(fi)
+            .and_then(|path| reparse_with_comments(path, self.pass.pkg().source_bytes(fi)));
+        self.comment_lines = match &reparsed {
+            Some(rp) => comment_lines(&rp.file, |pos| {
+                rp.fset.position(guff::position::Pos(pos)).line.max(0) as usize
+            }),
+            None => comment_lines(file, |pos| line_of(self.pass, pos)),
+        };
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
@@ -54,14 +75,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     c.into_failures()
 }
 
-fn comment_lines(pass: &Pass<'_>, file: &File) -> HashSet<usize> {
+/// Lines covered by a comment. `line` resolves a position in `file`'s own
+/// `FileSet`, which is the reparse's, not the pass's.
+fn comment_lines(file: &File, line: impl Fn(i64) -> usize) -> HashSet<usize> {
     let mut lines = HashSet::new();
     for group in &file.comments {
         for comment in &group.list {
-            let start = line_of(pass, comment.slash.0);
-            let end = line_of(pass, comment.end().0);
-            for line in start..=end {
-                lines.insert(line);
+            let start = line(comment.slash.0);
+            let end = line(comment.end().0);
+            for l in start..=end {
+                lines.insert(l);
             }
         }
     }
@@ -87,7 +110,7 @@ fn check_block(
             rule: "empty-lines",
             pos: block.lbrace.0 as u32,
             message: "extra empty line at the start of a block".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 
@@ -99,9 +122,11 @@ fn check_block(
     if !last_is_stmt && !last_is_comment {
         failures.push(Failure {
             rule: "empty-lines",
-            pos: block.rbrace.0 as u32,
+            // Upstream's failure node is the block for both checks, so even the
+            // end-of-block finding is reported at the opening brace.
+            pos: block.lbrace.0 as u32,
             message: "extra empty line at the end of a block".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

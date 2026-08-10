@@ -5,7 +5,14 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::unparen;
+use crate::util::{go_version_at_least, unparen};
+
+/// Upstream bails out on `file.Pkg.IsAtLeastGoVersion(lint.Go122)`: since Go
+/// 1.22 each iteration gets its own copy of the loop variable, so capturing it
+/// is no longer a bug.
+pub fn applies(pass: &Pass<'_>) -> bool {
+    !go_version_at_least(pass, 1, 22)
+}
 
 pub struct Checker {
     failures: Vec<Failure>,
@@ -37,6 +44,9 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    if !applies(pass) {
+        return Vec::new();
+    }
     let mut c = Checker::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
@@ -110,7 +120,7 @@ fn check_loop(last: Option<&Stmt>, vars: Vec<String>, failures: &mut Vec<Failure
                 rule: "range-val-in-closure",
                 pos: name_pos.0 as u32,
                 message: format!("loop variable {name} captured by func literal"),
-                confidence: None,
+                ..Failure::default()
             });
             return false;
         }

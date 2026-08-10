@@ -40,7 +40,7 @@ impl Checker {
                 rule: "enforce-switch-style",
                 pos,
                 message: "switch must have a default case clause".into(),
-                confidence: None,
+                ..Failure::default()
             });
             return;
         }
@@ -49,7 +49,7 @@ impl Checker {
                 rule: "enforce-switch-style",
                 pos: default_clause.unwrap().case.0 as u32,
                 message: "default case clause must be the last one".into(),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

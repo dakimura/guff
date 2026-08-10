@@ -161,7 +161,6 @@ fn revive_flags_extended_rule_violations() {
             "unnecessary-if:",
             "defer:",
             "flag-parameter:",
-            "function-length:",
             "function-result-limit:",
             "use-any:",
             "use-fmt-print:",
@@ -178,7 +177,12 @@ fn revive_flags_extended_rule_violations() {
             "unexported-naming:",
             "empty-lines:",
             "optimize-operands-order:",
-            "range-val-in-closure:",
+            // range-val-in-closure and range-val-address are absent on purpose:
+            // upstream returns early for packages on Go 1.22+, where each
+            // iteration already gets its own copy of the loop variable, so
+            // neither capturing it nor taking its address is a bug any more.
+            // guff does the same. The fixture has no module, which reads as
+            // "new enough".
             "confusing-results:",
             "confusing-naming:",
             "imports-blocklist:",
@@ -188,7 +192,6 @@ fn revive_flags_extended_rule_violations() {
             "useless-break:",
             "useless-fallthrough:",
             "modifies-value-receiver:",
-            "range-val-address:",
             "unsecure-url-scheme:",
             "banned-characters:",
             "file-length-limit:",
@@ -210,6 +213,45 @@ fn revive_flags_extended_rule_violations() {
                 "missing {needle} in {messages:?}"
             );
         }
+    });
+}
+
+#[test]
+fn revive_flags_function_length() {
+    // Not part of the extended_bad.go sweep: upstream's function-length bails
+    // out of a whole file once it meets an empty-bodied function, and
+    // extended_bad.go has one near the top. This fixture has none.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/funclen",
+            "function_length_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("function-length: maximum number of statements")),
+            "missing function-length in {messages:?}"
+        );
+    });
+}
+
+#[test]
+fn revive_function_length_is_silenced_by_an_empty_body() {
+    // The upstream quirk itself: one `func f() {}` above the long function and
+    // the rule reports nothing for the file.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        assert!(
+            messages.iter().all(|m| !m.contains("function-length:")),
+            "function-length must be silent after an empty body: {messages:?}"
+        );
     });
 }
 

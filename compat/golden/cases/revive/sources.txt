@@ -1,0 +1,57 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy of these files: it points at the fixtures the
+# Rust unit tests already use, so the two can never drift.
+#
+# The Rust tests type-check each fixture file as a package of its own, so every
+# file gets its own directory here. Where several fixtures share a package
+# name, the directory is nested (<slot>/<package>/) so that the directory's
+# base name still equals the package name — otherwise package-directory-mismatch
+# would fire on nearly every file and drown the rest of the case.
+#
+# badfile/ is the deliberate exception: `bad file.go` declares `package util`
+# in a directory named badfile, which is what makes it a package-directory-
+# mismatch fixture as well as the filename-format one.
+#
+# dot/ and badalias/ are the two stub packages the fixtures import. The other
+# stubs under tests/testdata/revive/stub/ shadow the standard library for the
+# Rust type-checker; here the real standard library is on hand, so they are not
+# carried over.
+dot/dot.go                                  crates/guff-revive/tests/testdata/revive/stub/example.com/revive/dot/dot.go
+badalias/badalias.go                        crates/guff-revive/tests/testdata/revive/stub/example.com/revive/badalias/badalias.go
+
+bad/revivetest/bad.go                       crates/guff-revive/tests/testdata/revive/bad.go
+ok/revivetest/ok.go                         crates/guff-revive/tests/testdata/revive/ok.go
+ctxallow/revivetest/context_allow.go        crates/guff-revive/tests/testdata/revive/context_allow.go
+generated/revivetest/generated_bad.go       crates/guff-revive/tests/testdata/revive/generated_bad.go
+scope/revivetest/preserve_scope.go          crates/guff-revive/tests/testdata/revive/preserve_scope.go
+
+blankgroupbad/blank_group_bad.go            crates/guff-revive/tests/testdata/revive/blank_group_bad.go
+blankgroupok/blank_group_ok.go              crates/guff-revive/tests/testdata/revive/blank_group_ok.go
+privatereceiverok/private_receiver_ok.go    crates/guff-revive/tests/testdata/revive/private_receiver_ok.go
+sortableok/sortable_ok.go                   crates/guff-revive/tests/testdata/revive/sortable_ok.go
+footest/stutter_bad.go                      crates/guff-revive/tests/testdata/revive/stutter_bad.go
+funclen/function_length_bad.go              crates/guff-revive/tests/testdata/revive/function_length_bad.go
+
+fixtures/var_naming_lists.go                crates/guff-revive/tests/testdata/revive/var_naming_lists.go
+fixtures/var_naming_skip_initialism.go      crates/guff-revive/tests/testdata/revive/var_naming_skip_initialism.go
+fixtures/var_naming_upper_case_const.go     crates/guff-revive/tests/testdata/revive/var_naming_upper_case_const.go
+
+extended/util/extended_bad.go               crates/guff-revive/tests/testdata/revive/extended_bad.go
+extended/ok/extended_ok.go                  crates/guff-revive/tests/testdata/revive/extended_ok.go
+
+# extended_bad_test.go is an external test package (`util_test`), and it gets a
+# directory of its own rather than sitting next to extended_bad.go. Upstream's
+# package-naming rule memoizes per directory (`alreadyCheckedNames.AddIfAbsent`)
+# and revive lints a package's files concurrently, so in a multi-file directory
+# *which* file wins the memo — and therefore whether the package name checked is
+# "util" or "util_test" — is a race. Measured on revive v1.15.0: a three-file
+# package reported at a different file on three consecutive runs. One file per
+# directory is what makes this case's positions reproducible.
+utiltest/extended_bad_test.go               crates/guff-revive/tests/testdata/revive/extended_bad_test.go
+
+siblingok/siblingok.go                      crates/guff-revive/tests/testdata/revive/sibling_ok/siblingok.go
+siblingok/helper.go                         crates/guff-revive/tests/testdata/revive/sibling_ok/helper.go
+
+badfile/bad file.go                         crates/guff-revive/tests/testdata/revive/bad file.go

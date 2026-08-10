@@ -56,7 +56,7 @@ impl Checker {
                     "method receiver '{}' is not referenced in method's body, consider removing or renaming it as _",
                     recv_name.name
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

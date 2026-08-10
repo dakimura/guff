@@ -25,8 +25,8 @@ impl Checker {
                             rule: "use-errors-new",
                             pos: call.fun.pos().0 as u32,
                             message: "replace fmt.Errorf by errors.New".into(),
-                    confidence: None,
-                });
+                            ..Failure::default()
+                        });
                     }
     }
 

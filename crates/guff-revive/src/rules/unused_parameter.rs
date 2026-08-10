@@ -89,7 +89,7 @@ fn check_func(
                 message: format!(
                     "parameter '{name}' seems to be unused, consider removing or renaming it as _"
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

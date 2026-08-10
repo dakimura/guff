@@ -33,7 +33,7 @@ impl Checker {
                     rule: "banned-characters",
                     pos: id.name_pos.0 as u32,
                     message: format!("banned character found: {ch}"),
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
         }

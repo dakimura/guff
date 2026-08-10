@@ -15,7 +15,8 @@ use guff::position::FileSet;
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{first_comment_line, has_prefix_insensitive, is_test_package};
+use crate::util::Reparsed;
+use crate::util::{first_comment_line, has_prefix_insensitive, is_test_package, reparse_with_comments};
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     if is_test_package(&pass.pkg().name) {
@@ -23,7 +24,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     }
 
     let paths = &pass.pkg().compiled_go_files;
-    let mut files: Vec<(usize, Arc<FileSet>, File)> = Vec::new();
+    let mut files: Vec<(usize, Arc<Reparsed>)> = Vec::new();
     for (i, report) in pass.files().iter().enumerate() {
         if paths
             .get(i)
@@ -34,11 +35,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        if let Some((fset, file)) = reparse_with_comments(path, pass.pkg().source_bytes(i)) {
-            files.push((i, fset, file));
-        } else {
+        match reparse_with_comments(path, pass.pkg().source_bytes(i)) {
+            Some(rp) => files.push((i, rp)),
             // Fall back to the type-checked AST (docs likely missing).
-            files.push((i, Arc::clone(pass.fset()), report.clone()));
+            None => files.push((
+                i,
+                Arc::new(Reparsed {
+                    fset: Arc::clone(pass.fset()),
+                    file: report.clone(),
+                }),
+            )),
         }
     }
     if files.is_empty() {
@@ -50,12 +56,12 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let mut failures = Vec::new();
 
     // Detached / form checks are per-file (upstream walks each file).
-    for (fi, comments_fset, file) in &files {
+    for (fi, rp) in &files {
         check_file_shape(
             pass,
             *fi,
-            file,
-            comments_fset,
+            &rp.file,
+            &rp.fset,
             pkg_name,
             &prefix,
             &mut failures,
@@ -63,26 +69,29 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     }
 
     // Missing package comment: once per package, only if no file has a doc.
-    if files.iter().any(|(_, _, f)| !is_empty_doc(f.doc.as_ref())) {
+    if files.iter().any(|(_, rp)| !is_empty_doc(rp.file.doc.as_ref())) {
         return failures;
     }
 
     // Prefer doc.go, then $package.go, then lexicographically first file.
     let report_idx = pick_missing_comment_file(&files, pkg_name);
-    let Some((fi, comments_fset, file)) = files.iter().find(|(i, _, _)| *i == report_idx) else {
+    let Some((fi, rp)) = files.iter().find(|(i, _)| *i == report_idx) else {
         return failures;
     };
     let report = &pass.files()[*fi];
     failures.push(Failure {
         rule: "package-comments",
-        pos: remap_pos(pass, report, comments_fset, file.name.name_pos.0 as u32),
+        // Upstream reports the whole package clause (`file.AST.Name` is wrapped in
+        // a failure whose node is the file), which lands on the `package` keyword,
+        // not on the package name.
+        pos: remap_pos(pass, report, &rp.fset, rp.file.package.0 as u32),
         message: "should have a package comment".into(),
-        confidence: None,
+        ..Failure::default()
     });
     failures
 }
 
-fn pick_missing_comment_file(files: &[(usize, Arc<FileSet>, File)], pkg_name: &str) -> usize {
+fn pick_missing_comment_file(files: &[(usize, Arc<Reparsed>)], pkg_name: &str) -> usize {
     let path_name = |i: usize, f: &File| -> String {
         // Prefer basename from the FileSet when available; else package name.
         let _ = f;
@@ -91,9 +100,10 @@ fn pick_missing_comment_file(files: &[(usize, Arc<FileSet>, File)], pkg_name: &s
     let mut doc_go: Option<usize> = None;
     let mut package_go: Option<usize> = None;
     let mut first: Option<(String, usize)> = None;
-    for (fi, fset, file) in files {
-        let name = fset
-            .file(file.pos())
+    for (fi, rp) in files {
+        let name = rp
+            .fset
+            .file(rp.file.pos())
             .map(|ft| {
                 Path::new(ft.name())
                     .file_name()
@@ -102,7 +112,7 @@ fn pick_missing_comment_file(files: &[(usize, Arc<FileSet>, File)], pkg_name: &s
                     .to_string()
             })
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| path_name(*fi, file));
+            .unwrap_or_else(|| path_name(*fi, &rp.file));
         if name == "doc.go" {
             doc_go = Some(*fi);
         }
@@ -137,7 +147,7 @@ fn check_file_shape(
             rule: "package-comments",
             pos: remap_pos(pass, report, comments_fset, detached),
             message: "package comment is detached; there should be no blank lines between it and the package statement".into(),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
@@ -162,24 +172,11 @@ fn check_file_shape(
             rule: "package-comments",
             pos: remap_pos(pass, report, comments_fset, pos),
             message: format!(r#"package comment should be of the form "{prefix}...""#),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }
 
-fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
-    let owned;
-    let src: &[u8] = if let Some(b) = cached {
-        b
-    } else {
-        owned = fs::read(path).ok()?;
-        &owned
-    };
-    let name = path.file_name()?.to_str()?;
-    let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
-    Some((fset, file))
-}
 
 fn remap_pos(pass: &Pass<'_>, report: &File, comments_fset: &FileSet, pos: u32) -> u32 {
     // When comments_fset is the package FileSet, positions already match.

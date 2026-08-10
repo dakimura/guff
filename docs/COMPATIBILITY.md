@@ -114,7 +114,7 @@
 | protogetter | ✅ | |
 | reassign | ✅ | |
 | recvcheck | ✅ | |
-| revive | 🟡 | golint-default 23 + extended 77 = 100 rules。未実装 rule あり |
+| revive | 🟡 | golint-default 23 + extended 76 = **99 rules**（`multiline-if-init` は上流 v1.15.0 に無いため `enable-all-rules` の集合外）。未実装 rule あり。99 rule を `compat/golden/cases/revive/` で有効化し、うち 91 が実際に発火して位置・メッセージまで突合済み |
 | rowserrcheck | 🟡 | AST 近似。SSA 完全パリティは DEFERRED |
 | sloglint | ✅ | |
 | spancheck | 🟡 | AST 近似（`defer End` / 関数内 `End`）。x/tools ctrlflow 完全パリティは DEFERRED |
@@ -234,6 +234,15 @@ exhaustivestruct / exportloopref / ifshort / nosnakecase / tenv / execinquery）
 | キャッシュ | ✅ | パッケージ単位の issues 永続キャッシュ。facts 永続化は DEFERRED（→ R24） |
 | 並列実行 | ✅ | action DAG を rayon で並列。型チェックも並列 |
 | プリセット | 🟡 | `standard` / `fast` / `all` / `none`（`standard`==`all`） |
+
+### 意図的に一致させていない差分
+
+上流の欠陥に追従すると**真陽性を捨てることになる**ため、guff の方が多く報告する箇所。
+
+| 対象 | 差 | 理由 |
+|------|----|------|
+| revive `time-equal` / `epoch-naming` | guff は報告し、golangci-lint は報告しない | revive は `importer.Default()`（gc の export data importer）で型検査するが、いまの Go には `.a` が無いので import が全部 invalid になる。`time.Time` かどうかを判定する rule は上流では常に黙る。詳細は [`COMPAT-HARDENING.md`](COMPAT-HARDENING.md) §6 |
+| revive `context-keys-type` | 文言が `string` / 上流は `untyped string` | 同じ原因。上流は `context.WithValue` のシグネチャを解決できず、untyped 定数が defaulting されない |
 
 ---
 

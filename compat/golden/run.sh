@@ -83,9 +83,14 @@ materialize() {
     line="${raw%%#*}"
     line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [[ -z "$line" ]] && continue
-    # shellcheck disable=SC2086
-    set -- $line
-    dest="$1"; src="$2"
+    # The two columns are separated by a run of two or more spaces, not by a
+    # single one: either path may itself contain a space (revive's
+    # filename-format fixture is literally named "bad file.go").
+    if [[ "$line" =~ ^(.*[^[:space:]])[[:space:]][[:space:]]+(.+)$ ]]; then
+      dest="${BASH_REMATCH[1]}"; src="${BASH_REMATCH[2]}"
+    else
+      die "$name: sources.txt needs two or more spaces between the columns: $raw"
+    fi
     [[ -f "$ROOT/$src" ]] || die "$name: missing source $src"
     mkdir -p "$(dirname "$work/$dest")"
     cp "$ROOT/$src" "$work/$dest"

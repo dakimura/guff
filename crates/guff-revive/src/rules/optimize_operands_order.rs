@@ -46,8 +46,8 @@ impl Checker {
                             expr_fmt(&Expr::BinaryExpr(bin.clone())),
                             expr_fmt(&swapped)
                         ),
-                    confidence: None,
-                });
+                        ..Failure::default()
+                    });
     }
 
     pub fn into_failures(self) -> Vec<Failure> {

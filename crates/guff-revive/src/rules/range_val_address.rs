@@ -8,7 +8,13 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{type_string, unparen};
+use crate::util::{go_version_at_least, type_string, unparen};
+
+/// Upstream returns early for Go 1.22+ packages: from that release each
+/// iteration has its own copy of the range value, so its address differs.
+pub fn applies(pass: &Pass<'_>) -> bool {
+    !go_version_at_least(pass, 1, 22)
+}
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -57,6 +63,9 @@ impl<'a> Checker<'a> {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
+    if !applies(pass) {
+        return Vec::new();
+    }
     let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {

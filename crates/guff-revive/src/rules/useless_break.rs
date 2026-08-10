@@ -79,6 +79,6 @@ fn inspect_case_body(body: &[Stmt], in_loop: bool, failures: &mut Vec<Failure>) 
         rule: "useless-break",
         pos: last.pos().0 as u32,
         message: msg,
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }

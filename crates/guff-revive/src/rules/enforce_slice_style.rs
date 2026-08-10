@@ -46,9 +46,16 @@ impl Checker {
                     };
                     self.failures.push(Failure {
                         rule: "enforce-slice-style",
-                        pos: lit.lbrace.0 as u32,
+                        // A composite literal's Pos() is its *type*, which is where
+                        // upstream points: `map[string]int{}` reports at `map`,
+                        // not at the brace.
+                        pos: lit
+                            .ty
+                            .as_ref()
+                            .map(|t| t.pos().0)
+                            .unwrap_or(lit.lbrace.0) as u32,
                         message: message.into(),
-                        confidence: None,
+                        ..Failure::default()
                     });
                 }
             }
@@ -85,7 +92,7 @@ impl Checker {
                     rule: "enforce-slice-style",
                     pos: call.args[0].pos().0 as u32,
                     message: message.into(),
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
             _ => {}

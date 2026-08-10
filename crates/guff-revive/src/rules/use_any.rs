@@ -25,8 +25,8 @@ impl Checker {
                         rule: "use-any",
                         pos: it.interface_.0 as u32,
                         message: "since Go 1.18 'interface{}' can be replaced by 'any'".into(),
-                    confidence: None,
-                });
+                        ..Failure::default()
+                    });
     }
 
     pub fn into_failures(self) -> Vec<Failure> {

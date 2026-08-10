@@ -4,6 +4,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::import_spec_pos;
 
 pub struct Checker {
     failures: Vec<Failure>,
@@ -27,9 +28,9 @@ impl Checker {
         if alias.name == pkg_name {
             self.failures.push(Failure {
                 rule: "redundant-import-alias",
-                pos: imp.path.pos().0 as u32,
+                pos: import_spec_pos(imp),
                 message: format!("Import alias {:?} is redundant", alias.name),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

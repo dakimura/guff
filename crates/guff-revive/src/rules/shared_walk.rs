@@ -93,7 +93,7 @@ struct SharedFileRules<'a> {
     time_date: Option<time_date::Checker>,
     time_equal: Option<time_equal::Checker<'a>>,
     time_naming: Option<time_naming::Checker<'a>>,
-    unchecked_type_assertion: Option<unchecked_type_assertion::Checker>,
+    unchecked_type_assertion: Option<unchecked_type_assertion::Checker<'a>>,
     unexported_naming: Option<unexported_naming::Checker>,
     unexported_return: Option<unexported_return::Checker<'a>>,
     unhandled_error: Option<unhandled_error::Checker<'a>>,
@@ -210,10 +210,11 @@ impl<'a> SharedFileRules<'a> {
                 .then(optimize_operands_order::Checker::new),
             package_naming: enabled("package-naming").then(package_naming::Checker::new),
             range: enabled("range").then(range::Checker::new),
-            range_val_address: enabled("range-val-address")
+            range_val_address: (enabled("range-val-address") && range_val_address::applies(pass))
                 .then(|| range_val_address::Checker::new(pass)),
-            range_val_in_closure: enabled("range-val-in-closure")
-                .then(range_val_in_closure::Checker::new),
+            range_val_in_closure: (enabled("range-val-in-closure")
+                && range_val_in_closure::applies(pass))
+            .then(range_val_in_closure::Checker::new),
             receiver_naming: enabled("receiver-naming").then(receiver_naming::Checker::new),
             redefines_builtin_id: enabled("redefines-builtin-id")
                 .then(redefines_builtin_id::Checker::new),
@@ -231,7 +232,7 @@ impl<'a> SharedFileRules<'a> {
             time_equal: enabled("time-equal").then(|| time_equal::Checker::new(pass)),
             time_naming: enabled("time-naming").then(|| time_naming::Checker::new(pass)),
             unchecked_type_assertion: enabled("unchecked-type-assertion")
-                .then(unchecked_type_assertion::Checker::new),
+                .then(|| unchecked_type_assertion::Checker::new(pass)),
             unexported_naming: enabled("unexported-naming").then(unexported_naming::Checker::new),
             unexported_return: enabled("unexported-return")
                 .then(|| unexported_return::Checker::try_new(pass))
@@ -357,6 +358,9 @@ impl<'a> SharedFileRules<'a> {
             c.on_file(file);
         }
         if let Some(c) = &mut self.exported {
+            c.on_file(file);
+        }
+        if let Some(c) = &mut self.function_length {
             c.on_file(file);
         }
         if let Some(c) = &mut self.receiver_naming {

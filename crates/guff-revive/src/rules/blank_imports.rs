@@ -11,6 +11,7 @@ use guff::token::Token;
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::{import_spec_pos, reparse_with_comments};
 use crate::util::is_blank;
 
 const MESSAGE: &str =
@@ -39,10 +40,8 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         // a private FileSet would assign unrelated offsets and diagnostics would
         // map onto the wrong source files after JSON formatting.
         if let Some(path) = paths.get(i) {
-            if let Some((cfset, with_comments)) =
-                reparse_with_comments(path, pass.pkg().source_bytes(i))
-            {
-                check_file(file, &with_comments, &cfset, pass.fset(), &mut failures);
+            if let Some(rp) = reparse_with_comments(path, pass.pkg().source_bytes(i)) {
+                check_file(file, &rp.file, &rp.fset, pass.fset(), &mut failures);
                 continue;
             }
         }
@@ -51,19 +50,6 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     failures
 }
 
-fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
-    let owned;
-    let src: &[u8] = if let Some(b) = cached {
-        b
-    } else {
-        owned = fs::read(path).ok()?;
-        &owned
-    };
-    let name = path.file_name()?.to_str()?;
-    let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
-    Some((fset, file))
-}
 
 fn import_specs(file: &File) -> Vec<&ImportSpec> {
     file.decls
@@ -126,7 +112,7 @@ fn check_file(
         if comment_imp.doc.is_none() && comment_imp.comment.is_none() {
             failures.push(Failure::new(
                 "blank-imports",
-                report_imp.path.pos().0 as u32,
+                import_spec_pos(report_imp),
                 MESSAGE,
             ));
         }

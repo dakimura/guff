@@ -58,9 +58,9 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
         if r.ty.as_ref().is_some_and(|t| is_error_ident_type(t)) {
             failures.push(Failure {
                 rule: "error-return",
-                pos: f.name.name_pos.0 as u32,
+                pos: f.ty.func.0 as u32,
                 message: "error should be the last type when returning multiple items".into(),
-                confidence: None,
+                ..Failure::default()
             });
             break;
         }

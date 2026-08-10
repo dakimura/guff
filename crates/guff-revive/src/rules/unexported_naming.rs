@@ -1,6 +1,6 @@
 //! `unexported-naming` — warn when local symbols use exported (uppercase) names.
 
-use guff::ast::{AssignStmt, Decl, Expr, File, Ident};
+use guff::ast::{AssignStmt, Decl, Expr, File, Ident, Spec};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
@@ -36,7 +36,18 @@ impl Checker {
                 lint_fields(&f.ty.results, &mut self.failures);
             }
             NodeRef::AssignStmt(a) => lint_assign(a, &mut self.failures),
-            NodeRef::ValueSpec(vs) => {
+            // Upstream only reaches value declarations through `*ast.DeclStmt`,
+            // i.e. `var`/`const` *inside a function body*: package-level ones are
+            // the exported API and are none of this rule's business. It also looks
+            // at `gd.Specs[0]` alone, so `var ( A = 1; B = 2 )` in a body reports A
+            // and stays quiet about B.
+            NodeRef::DeclStmt(ds) => {
+                let Decl::GenDecl(gd) = &ds.decl else {
+                    return;
+                };
+                let Some(Spec::ValueSpec(vs)) = gd.specs.first() else {
+                    return;
+                };
                 for id in &vs.names {
                     lint_ident(id, &mut self.failures);
                 }
@@ -95,7 +106,7 @@ fn lint_ident(id: &Ident, failures: &mut Vec<Failure>) {
                 "the symbol {} is local, its name should start with a lowercase letter",
                 id.name
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

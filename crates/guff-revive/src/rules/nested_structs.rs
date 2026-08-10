@@ -53,8 +53,8 @@ fn check_field_type(ty: &Expr, failures: &mut Vec<Failure>) {
                 rule: "nested-structs",
                 pos: st.struct_.0 as u32,
                 message: "no nested structs are allowed".into(),
-            confidence: None,
-        });
+                ..Failure::default()
+            });
         }
         Expr::ArrayType(ArrayType { elt, .. }) => {
             if matches!(unparen(elt), Expr::StructType(_)) {
@@ -62,8 +62,8 @@ fn check_field_type(ty: &Expr, failures: &mut Vec<Failure>) {
                     rule: "nested-structs",
                     pos: elt.pos().0 as u32,
                     message: "no nested structs are allowed".into(),
-            confidence: None,
-        });
+                    ..Failure::default()
+                });
             }
         }
         _ => {}

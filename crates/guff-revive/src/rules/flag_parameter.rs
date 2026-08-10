@@ -27,6 +27,7 @@ impl Checker {
         let Some(body) = &f.body else {
             return;
         };
+        let params_pos = f.ty.params.as_ref().map(|p| p.opening.0 as u32);
         let bool_params = collect_bool_params(f);
         if bool_params.is_empty() {
             return;
@@ -36,13 +37,17 @@ impl Checker {
                 return true;
             };
             if let Some(name) = cond_uses_bool_param(&if_stmt.cond, &bool_params) {
+                // Upstream reports the function's *parameter list*, whose
+                // Pos() is the opening parenthesis — not the flag parameter
+                // itself and not the `if` that reads it.
+                let pos = params_pos.unwrap_or(if_stmt.if_.0 as u32);
                 self.failures.push(Failure {
                     rule: "flag-parameter",
-                    pos: if_stmt.if_.0 as u32,
+                    pos,
                     message: format!(
                         "parameter '{name}' seems to be a control flag, avoid control coupling"
                     ),
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
             true

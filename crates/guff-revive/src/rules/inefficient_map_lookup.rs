@@ -60,7 +60,11 @@ fn analyze_block(pass: &Pass<'_>, block: &BlockStmt, failures: &mut Vec<Failure>
         let Stmt::RangeStmt(range) = stmt else {
             continue;
         };
-        let Expr::Ident(key) = unparen(range.key.as_ref().expect("range key")) else {
+        // `for range m {}` has no key at all; there is nothing to look up.
+        let Some(key_expr) = range.key.as_ref() else {
+            continue;
+        };
+        let Expr::Ident(key) = unparen(key_expr) else {
             continue;
         };
         let has_value = range
@@ -83,7 +87,7 @@ fn analyze_block(pass: &Pass<'_>, block: &BlockStmt, failures: &mut Vec<Failure>
                 rule: "inefficient-map-lookup",
                 pos: range.for_.0 as u32,
                 message: "inefficient lookup of map key".into(),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

@@ -96,6 +96,6 @@ fn check_call(
         message: format!(
             "avoid using built-in function \"{builtin}\", replace it by \"fmt.F{builtin}(os.Stderr, {args})\""
         ),
-        confidence: None,
+        ..Failure::default()
     });
 }

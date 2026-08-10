@@ -1,0 +1,296 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive
+# Produced by running golangci-lint on compat/golden/cases/revive/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/revivetest/bad.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 42 code lines) but expected a minimum of 10%
+bad/revivetest/bad.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+bad/revivetest/bad.go:1:1:revive:warning:package-comments: should have a package comment
+bad/revivetest/bad.go:10:8:revive:warning:dot-imports: should not use dot imports
+bad/revivetest/bad.go:12:8:revive:warning:blank-imports: a blank import should be only in a main or test package, or have a comment justifying it
+bad/revivetest/bad.go:12:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+bad/revivetest/bad.go:16:5:revive:warning:error-naming: error var badError should have name of the form errFoo
+bad/revivetest/bad.go:18:5:revive:warning:error-naming: error var wrongName should have name of the form errFoo
+bad/revivetest/bad.go:20:5:revive:warning:var-naming: var httpUrl should be httpURL
+bad/revivetest/bad.go:24:1:revive:warning:receiver-naming: receiver name should be a reflection of its identity; don't use generic names such as "this" or "self"
+bad/revivetest/bad.go:24:7:revive:warning:unused-receiver: method receiver 'self' is not referenced in method's body, consider removing or renaming it as _
+bad/revivetest/bad.go:26:7:revive:warning:unused-receiver: method receiver 'w' is not referenced in method's body, consider removing or renaming it as _
+bad/revivetest/bad.go:29:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+bad/revivetest/bad.go:30:2:revive:warning:increment-decrement: should replace i += 1 with i++
+bad/revivetest/bad.go:30:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:34:2:revive:warning:empty-block: this block is empty, you can remove it
+bad/revivetest/bad.go:39:9:revive:warning:range: should omit 2nd value from range; this loop is equivalent to `for k := range ...`
+bad/revivetest/bad.go:45:2:revive:warning:redefines-builtin-id: redefinition of the built-in function len
+bad/revivetest/bad.go:45:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:55:9:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
+bad/revivetest/bad.go:55:9:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+bad/revivetest/bad.go:55:20:revive:warning:error-strings: error strings should not be capitalized or end with punctuation or a newline
+bad/revivetest/bad.go:58:1:revive:warning:error-return: error should be the last type when returning multiple items
+bad/revivetest/bad.go:59:14:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+bad/revivetest/bad.go:62:17:revive:warning:unused-parameter: parameter 'x' seems to be unused, consider removing or renaming it as _
+bad/revivetest/bad.go:62:24:revive:warning:context-as-argument: context.Context should be the first parameter of a function
+bad/revivetest/bad.go:62:24:revive:warning:unused-parameter: parameter 'ctx' seems to be unused, consider removing or renaming it as _
+bad/revivetest/bad.go:65:6:revive:warning:context-keys-type: should not use basic type untyped string as key in context.WithValue
+bad/revivetest/bad.go:65:53:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:69:14:revive:warning:var-declaration: should drop = 0 from declaration of var n; it is the zero value
+bad/revivetest/bad.go:73:19:revive:warning:var-declaration: should drop = 0 from declaration of var zeroVar; it is the zero value
+bad/revivetest/bad.go:76:9:revive:warning:errorf: should replace errors.New(fmt.Sprintf(...)) with fmt.Errorf(...)
+bad/revivetest/bad.go:76:40:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:81:1:revive:warning:exported: exported function ExportedUnexported should have comment or be unexported
+bad/revivetest/bad.go:81:27:revive:warning:unexported-return: exported func ExportedUnexported returns unexported type revivetest.unexported, which can be annoying to use
+bad/revivetest/bad.go:85:18:revive:warning:unused-parameter: parameter 'x' seems to be unused, consider removing or renaming it as _
+bad/revivetest/bad.go:88:2:revive:warning:unreachable-code: unreachable code after this statement
+bad/revivetest/bad.go:89:2:revive:warning:use-fmt-print: avoid using built-in function "println", replace it by "fmt.Fprintln(os.Stderr, "dead")"
+bad/revivetest/bad.go:94:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+bad/revivetest/bad.go:95:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+bad/revivetest/bad.go:96:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+bad/revivetest/bad.go:103:9:revive:warning:superfluous-else: if block ends with call to panic function, so drop this else and outdent its block
+bad/revivetest/bad.go:104:3:revive:warning:use-fmt-print: avoid using built-in function "println", replace it by "fmt.Fprintln(os.Stderr, "y")"
+badalias/badalias.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+badalias/badalias.go:1:1:revive:warning:package-comments: should have a package comment
+badalias/badalias.go:3:5:revive:warning:exported: exported var X should have comment or be unexported
+badfile/bad file.go:1:1:revive:warning:package-comments: package comment should be of the form "Package util ..."
+badfile/bad file.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+badfile/bad file.go:2:9:revive:warning:filename-format: Filename bad file.go is not of the format ^[_A-Za-z0-9][_A-Za-z0-9-]*\\.go$.
+badfile/bad file.go:2:9:revive:warning:package-directory-mismatch: package name "util" does not match directory name "badfile"
+badfile/bad file.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
+blankgroupbad/blank_group_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+blankgroupbad/blank_group_bad.go:5:2:revive:warning:blank-imports: a blank import should be only in a main or test package, or have a comment justifying it
+blankgroupbad/blank_group_bad.go:6:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+blankgroupok/blank_group_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+blankgroupok/blank_group_ok.go:5:0:revive:warning:line-length-limit: line is 82 characters, out of limit 80
+blankgroupok/blank_group_ok.go:7:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+ctxallow/revivetest/context_allow.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+ctxallow/revivetest/context_allow.go:1:1:revive:warning:package-comments: should have a package comment
+ctxallow/revivetest/context_allow.go:9:33:revive:warning:context-as-argument: context.Context should be the first parameter of a function
+ctxallow/revivetest/context_allow.go:15:35:revive:warning:context-as-argument: context.Context should be the first parameter of a function
+ctxallow/revivetest/context_allow.go:21:22:revive:warning:context-as-argument: context.Context should be the first parameter of a function
+dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
+dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
+extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  2% (6 comment lines for 249 code lines) but expected a minimum of 10%
+extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
+extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+extended/util/extended_bad.go:15:8:revive:warning:duplicated-imports: Package "os" already imported
+extended/util/extended_bad.go:15:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+extended/util/extended_bad.go:16:8:revive:warning:redundant-import-alias: Import alias "dot" is redundant
+extended/util/extended_bad.go:17:8:revive:warning:import-alias-naming: import name (BadAlias) must match the regular expression: ^[a-z][a-z0-9]{0,}$
+extended/util/extended_bad.go:22:2:revive:warning:atomic: direct assignment to atomic value
+extended/util/extended_bad.go:22:38:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:26:2:revive:warning:bare-return: avoid using bare returns, please add return expressions
+extended/util/extended_bad.go:30:9:revive:warning:bool-literal-in-expr: Boolean expression seems to always evaluate to true
+extended/util/extended_bad.go:34:2:revive:warning:call-to-gc: explicit call to the garbage collector
+extended/util/extended_bad.go:37:1:revive:warning:cognitive-complexity: function badComplexity has cognitive complexity 55 (> max enabled 7)
+extended/util/extended_bad.go:37:1:revive:warning:cyclomatic: function badComplexity has cyclomatic complexity 11 (> max enabled 10)
+extended/util/extended_bad.go:38:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:39:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:40:11:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:41:12:revive:warning:add-constant: avoid magic numbers like '3', create a named constant for it
+extended/util/extended_bad.go:42:13:revive:warning:add-constant: avoid magic numbers like '4', create a named constant for it
+extended/util/extended_bad.go:43:7:revive:warning:max-control-nesting: control flow nesting exceeds 5
+extended/util/extended_bad.go:43:14:revive:warning:add-constant: avoid magic numbers like '5', create a named constant for it
+extended/util/extended_bad.go:44:15:revive:warning:add-constant: avoid magic numbers like '6', create a named constant for it
+extended/util/extended_bad.go:45:16:revive:warning:add-constant: avoid magic numbers like '7', create a named constant for it
+extended/util/extended_bad.go:46:17:revive:warning:add-constant: avoid magic numbers like '8', create a named constant for it
+extended/util/extended_bad.go:47:18:revive:warning:add-constant: avoid magic numbers like '9', create a named constant for it
+extended/util/extended_bad.go:59:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:63:9:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
+extended/util/extended_bad.go:63:9:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+extended/util/extended_bad.go:66:19:revive:warning:unused-parameter: parameter 'wg' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:66:19:revive:warning:waitgroup-by-value: sync.WaitGroup passed by value, the function will get a copy of the original one
+extended/util/extended_bad.go:69:9:revive:warning:string-of-int: dubious conversion of an integer into a string, use strconv.Itoa
+extended/util/extended_bad.go:69:16:revive:warning:add-constant: avoid magic numbers like '42', create a named constant for it
+extended/util/extended_bad.go:77:9:revive:warning:unchecked-type-assertion: type cast result is unchecked in v.(int) - type assertion will panic if not matched
+extended/util/extended_bad.go:81:10:revive:warning:unchecked-type-assertion: type cast result is unchecked in v.(int) - type assertion result ignored
+extended/util/extended_bad.go:86:2:revive:warning:unconditional-recursion: unconditional recursive call
+extended/util/extended_bad.go:90:2:revive:warning:if-return: redundant if ...; err != nil check, just return error instead.
+extended/util/extended_bad.go:97:2:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Printf", you can replace it with "fmt.Print" or "fmt.Println"
+extended/util/extended_bad.go:101:2:revive:warning:import-shadowing: The name 'fmt' shadows an import name
+extended/util/extended_bad.go:101:9:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:106:9:revive:warning:constant-logical-expr: expression always evaluates to true
+extended/util/extended_bad.go:110:19:revive:warning:add-constant: avoid magic numbers like '2023', create a named constant for it
+extended/util/extended_bad.go:110:25:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:110:25:revive:warning:time-date: time.Date month argument should not be zero
+extended/util/extended_bad.go:110:28:revive:warning:add-constant: avoid magic numbers like '15', create a named constant for it
+extended/util/extended_bad.go:110:32:revive:warning:add-constant: avoid magic numbers like '25', create a named constant for it
+extended/util/extended_bad.go:110:32:revive:warning:time-date: time.Date hour argument should be between 0 and 23: 25
+extended/util/extended_bad.go:110:36:revive:warning:add-constant: avoid magic numbers like '70', create a named constant for it
+extended/util/extended_bad.go:110:36:revive:warning:time-date: time.Date minute argument should be between 0 and 59: 70
+extended/util/extended_bad.go:110:40:revive:warning:add-constant: avoid magic numbers like '61', create a named constant for it
+extended/util/extended_bad.go:110:40:revive:warning:time-date: time.Date second argument should be between 0 and 60: 61
+extended/util/extended_bad.go:110:44:revive:warning:add-constant: avoid magic numbers like '1e9', create a named constant for it
+extended/util/extended_bad.go:110:44:revive:warning:time-date: use decimal digits for time.Date nanosecond argument: exponential notation found: use 1000000000 instead of 1e9
+extended/util/extended_bad.go:110:49:revive:warning:time-date: time.Date timezone argument cannot be nil, it would panic on runtime
+extended/util/extended_bad.go:124:2:revive:warning:unhandled-error: Unhandled error in call to function localError
+extended/util/extended_bad.go:128:2:revive:warning:struct-tag: tag on not-exported field name
+extended/util/extended_bad.go:128:14:revive:warning:struct-tag: unknown option "unknownopt" in json tag
+extended/util/extended_bad.go:129:2:revive:warning:struct-tag: tag on not-exported field private
+extended/util/extended_bad.go:133:2:revive:warning:unnecessary-stmt: omit unnecessary return statement
+extended/util/extended_bad.go:136:1:revive:warning:argument-limit: maximum number of arguments per function exceeded; max 8 but got 9
+extended/util/extended_bad.go:136:18:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:21:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:24:revive:warning:unused-parameter: parameter 'c' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:27:revive:warning:unused-parameter: parameter 'd' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:30:revive:warning:unused-parameter: parameter 'e' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:33:revive:warning:unused-parameter: parameter 'f' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:36:revive:warning:unused-parameter: parameter 'g' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:39:revive:warning:unused-parameter: parameter 'h' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:136:42:revive:warning:unused-parameter: parameter 'i' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:139:6:revive:warning:add-constant: avoid magic numbers like '42', create a named constant for it
+extended/util/extended_bad.go:142:6:revive:warning:add-constant: string literal "repeat" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:146:2:revive:warning:early-return: if c { ... } else { ... return } can be simplified to if !c { ... return } ...
+extended/util/extended_bad.go:146:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:154:2:revive:warning:deep-exit: calls to os.Exit only in main() or init() functions
+extended/util/extended_bad.go:154:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:157:1:revive:warning:exported: exported function GetValue should have comment or be unexported
+extended/util/extended_bad.go:157:1:revive:warning:get-return: function 'GetValue' seems to be a getter but it does not return any result
+extended/util/extended_bad.go:159:22:revive:warning:flag-parameter: parameter 'flag' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:160:2:revive:warning:unnecessary-if: replace this conditional by: return flag
+extended/util/extended_bad.go:162:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+extended/util/extended_bad.go:168:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:168:18:revive:warning:add-constant: avoid magic numbers like '10', create a named constant for it
+extended/util/extended_bad.go:169:3:revive:warning:defer: prefer not to defer inside loops
+extended/util/extended_bad.go:171:2:revive:warning:defer: recover must be called inside a deferred function
+extended/util/extended_bad.go:175:22:revive:warning:flag-parameter: parameter 'enabled' seems to be a control flag, avoid control coupling
+extended/util/extended_bad.go:181:1:revive:warning:function-result-limit: maximum number of return results per function exceeded; max 3 but got 4
+extended/util/extended_bad.go:181:33:revive:warning:confusing-results: unnamed results of the same type may be confusing, consider using named results
+extended/util/extended_bad.go:182:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:182:12:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:182:15:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:182:18:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:185:16:revive:warning:unused-parameter: parameter 'v' seems to be unused, consider removing or renaming it as _
+extended/util/extended_bad.go:185:18:revive:warning:use-any: since Go 1.18 'interface{}' can be replaced by 'any'
+extended/util/extended_bad.go:188:2:revive:warning:use-fmt-print: avoid using built-in function "print", replace it by "fmt.Fprint(os.Stderr, "hello")"
+extended/util/extended_bad.go:193:7:revive:warning:unused-receiver: method receiver 'r' is not referenced in method's body, consider removing or renaming it as _
+extended/util/extended_bad.go:194:12:revive:warning:add-constant: string literal "x" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:198:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:202:2:revive:warning:identical-branches: both branches of the if are identical
+extended/util/extended_bad.go:202:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:210:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:210:12:revive:warning:identical-ifelseif-branches: "if...else if" chain with identical branches (lines 210 and 212)
+extended/util/extended_bad.go:211:13:revive:warning:add-constant: string literal "same" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:212:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:218:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:220:9:revive:warning:identical-ifelseif-conditions: "if...else if" chain with identical conditions (lines 218 and 220)
+extended/util/extended_bad.go:220:16:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:226:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:226:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 227 and 229)
+extended/util/extended_bad.go:227:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:229:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:235:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:238:2:revive:warning:identical-switch-conditions: case clause at line 236 has the same condition
+extended/util/extended_bad.go:243:0:revive:warning:line-length-limit: line is 101 characters, out of limit 80
+extended/util/extended_bad.go:245:1:revive:warning:cognitive-complexity: function badMaxControlNesting has cognitive complexity 21 (> max enabled 7)
+extended/util/extended_bad.go:251:7:revive:warning:max-control-nesting: control flow nesting exceeds 5
+extended/util/extended_bad.go:262:8:revive:warning:nested-structs: no nested structs are allowed
+extended/util/extended_bad.go:266:2:revive:warning:unexported-naming: the symbol ExportedLocal is local, its name should start with a lowercase letter
+extended/util/extended_bad.go:266:19:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:270:22:revive:warning:empty-lines: extra empty line at the end of a block
+extended/util/extended_bad.go:270:22:revive:warning:empty-lines: extra empty line at the start of a block
+extended/util/extended_bad.go:285:23:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:290:34:revive:warning:confusing-results: unnamed results of the same type may be confusing, consider using named results
+extended/util/extended_bad.go:291:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:291:12:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:358:1:revive:warning:comment-spacings: no space between comment delimiter and comment text
+extended/util/extended_bad.go:359:14:revive:warning:unsecure-url-scheme: prefer secure protocol https over http in "http://example.com/path"
+extended/util/extended_bad.go:363:7:revive:warning:unused-receiver: method receiver 'c' is not referenced in method's body, consider removing or renaming it as _
+extended/util/extended_bad.go:364:7:revive:warning:unused-receiver: method receiver 'c' is not referenced in method's body, consider removing or renaming it as _
+extended/util/extended_bad.go:364:26:revive:warning:confusing-naming: Method 'foo' differs only by capitalization to method 'Foo' in the same source file
+extended/util/extended_bad.go:368:2:revive:warning:confusing-naming: Field 'foo' differs only by capitalization to other field in the struct type confusingFields
+extended/util/extended_bad.go:373:34:revive:warning:modifies-value-receiver: suspicious assignment to a by-value method receiver
+extended/util/extended_bad.go:373:40:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:376:11:revive:warning:unnecessary-stmt: switch with only one case can be replaced by an if-then
+extended/util/extended_bad.go:377:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:378:13:revive:warning:add-constant: string literal "a" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:379:3:revive:warning:unnecessary-stmt: omit unnecessary break at the end of case clause
+extended/util/extended_bad.go:379:3:revive:warning:useless-break: useless break in case clause
+extended/util/extended_bad.go:384:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:385:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:386:3:revive:warning:useless-fallthrough: this "fallthrough" can be removed by consolidating this case clause with the next one
+extended/util/extended_bad.go:387:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:388:13:revive:warning:add-constant: string literal "b" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:393:2:revive:warning:inefficient-map-lookup: inefficient lookup of map key
+extended/util/extended_bad.go:401:14:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:401:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:411:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:412:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:418:16:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:418:19:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:419:2:revive:warning:use-slices-sort: replace sort.Ints by slices.Sort
+extended/util/extended_bad.go:423:14:revive:warning:string-format: string must be ok
+extended/util/extended_bad.go:432:5:revive:warning:banned-characters: banned character found: K
+extended/util/extended_bad.go:434:21:revive:warning:enforce-map-style: use make(map[type]type) instead of map[type]type{}
+extended/util/extended_bad.go:436:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
+extended/util/extended_bad.go:440:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
+extended/util/extended_bad.go:445:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
+extended/util/extended_bad.go:454:0:revive:warning:file-length-limit: file length is 454 lines, which exceeds the limit of 350
+fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
+fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID
+fixtures/var_naming_lists.go:7:2:revive:warning:var-naming: var customVm should be customVM
+fixtures/var_naming_skip_initialism.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+fixtures/var_naming_skip_initialism.go:6:7:revive:warning:exported: exported const HttpRes should have comment or be unexported
+fixtures/var_naming_skip_initialism.go:6:7:revive:warning:var-naming: const HttpRes should be HTTPRes
+fixtures/var_naming_skip_initialism.go:8:6:revive:warning:var-naming: func readJson should be readJSON
+fixtures/var_naming_skip_initialism.go:12:6:revive:warning:exported: exported type SshConfig should have comment or be unexported
+fixtures/var_naming_skip_initialism.go:12:6:revive:warning:var-naming: type SshConfig should be SSHConfig
+fixtures/var_naming_upper_case_const.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+fixtures/var_naming_upper_case_const.go:5:7:revive:warning:exported: exported const SOME_CONST_2 should have comment or be unexported
+fixtures/var_naming_upper_case_const.go:5:7:revive:warning:var-naming: don't use ALL_CAPS in Go names; use CamelCase
+fixtures/var_naming_upper_case_const.go:6:7:revive:warning:var-naming: don't use ALL_CAPS in Go names; use CamelCase
+fixtures/var_naming_upper_case_const.go:9:2:revive:warning:exported: exported const SOME_CONST_3 should have comment (or a comment on this block) or be unexported
+fixtures/var_naming_upper_case_const.go:9:2:revive:warning:var-naming: don't use ALL_CAPS in Go names; use CamelCase
+fixtures/var_naming_upper_case_const.go:10:2:revive:warning:var-naming: don't use ALL_CAPS in Go names; use CamelCase
+fixtures/var_naming_upper_case_const.go:14:1:revive:warning:exported: comment on exported var BAD_VAR_NAME should be of the form "BAD_VAR_NAME ..."
+fixtures/var_naming_upper_case_const.go:15:5:revive:warning:var-naming: don't use ALL_CAPS in Go names; use CamelCase
+footest/stutter_bad.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+footest/stutter_bad.go:1:1:revive:warning:package-comments: should have a package comment
+footest/stutter_bad.go:4:6:revive:warning:exported: func name will be used as footest.FootestRun by other packages, and that stutters; consider calling this Run
+funclen/function_length_bad.go:7:1:revive:warning:file-header: the file doesn't have an appropriate header
+funclen/function_length_bad.go:9:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 53
+funclen/function_length_bad.go:10:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ok/revivetest/ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+ok/revivetest/ok.go:16:7:revive:warning:unused-receiver: method receiver 'w' is not referenced in method's body, consider removing or renaming it as _
+ok/revivetest/ok.go:19:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ok/revivetest/ok.go:36:9:revive:warning:unnecessary-format: unnecessary use of formatting function "fmt.Errorf", you can replace it with "errors.New"
+ok/revivetest/ok.go:36:9:revive:warning:use-errors-new: replace fmt.Errorf by errors.New
+ok/revivetest/ok.go:40:9:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ok/revivetest/ok.go:51:53:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+ok/revivetest/ok.go:55:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+ok/revivetest/ok.go:60:28:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+ok/revivetest/ok.go:72:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+ok/revivetest/ok.go:76:0:revive:warning:line-length-limit: line is 81 characters, out of limit 80
+ok/revivetest/ok.go:77:7:revive:warning:unused-receiver: method receiver 'e' is not referenced in method's body, consider removing or renaming it as _
+ok/revivetest/ok.go:89:2:revive:warning:use-fmt-print: avoid using built-in function "println", replace it by "fmt.Fprintln(os.Stderr, "ok")"
+ok/revivetest/ok.go:94:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+ok/revivetest/ok.go:96:9:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+privatereceiverok/private_receiver_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+privatereceiverok/private_receiver_ok.go:6:7:revive:warning:unused-receiver: method receiver 'r' is not referenced in method's body, consider removing or renaming it as _
+privatereceiverok/private_receiver_ok.go:6:29:revive:warning:unused-parameter: parameter 'p' seems to be unused, consider removing or renaming it as _
+privatereceiverok/private_receiver_ok.go:6:61:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+privatereceiverok/private_receiver_ok.go:7:7:revive:warning:unused-receiver: method receiver 'r' is not referenced in method's body, consider removing or renaming it as _
+privatereceiverok/private_receiver_ok.go:13:7:revive:warning:unused-receiver: method receiver 'p' is not referenced in method's body, consider removing or renaming it as _
+scope/revivetest/preserve_scope.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+scope/revivetest/preserve_scope.go:1:1:revive:warning:package-comments: should have a package comment
+scope/revivetest/preserve_scope.go:3:0:revive:warning:line-length-limit: line is 83 characters, out of limit 80
+scope/revivetest/preserve_scope.go:5:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+scope/revivetest/preserve_scope.go:8:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block (move short variable declaration to its own line if necessary)
+scope/revivetest/preserve_scope.go:9:8:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+scope/revivetest/preserve_scope.go:15:0:revive:warning:line-length-limit: line is 87 characters, out of limit 80
+scope/revivetest/preserve_scope.go:16:19:revive:warning:flag-parameter: parameter 'flag' seems to be a control flag, avoid control coupling
+scope/revivetest/preserve_scope.go:18:10:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+scope/revivetest/preserve_scope.go:19:9:revive:warning:indent-error-flow: if block ends with a return statement, so drop this else and outdent its block
+scope/revivetest/preserve_scope.go:20:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+siblingok/helper.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 1 code lines) but expected a minimum of 10%
+siblingok/helper.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+siblingok/siblingok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+sortableok/sortable_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+utiltest/extended_bad_test.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 3 code lines) but expected a minimum of 10%
+utiltest/extended_bad_test.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+utiltest/extended_bad_test.go:4:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+utiltest/extended_bad_test.go:9:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
+utiltest/extended_bad_test.go:12:22:revive:warning:unused-parameter: parameter 't' seems to be unused, consider removing or renaming it as _

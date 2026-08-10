@@ -44,7 +44,7 @@ impl Checker {
                     alias.name,
                     self.allow.as_str()
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

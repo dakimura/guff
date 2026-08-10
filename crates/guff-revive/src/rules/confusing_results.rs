@@ -41,7 +41,7 @@ impl Checker {
                     rule: "confusing-results",
                     pos: field.pos().0 as u32,
                     message: "unnamed results of the same type may be confusing, consider using named results".into(),
-                    confidence: None,
+                    ..Failure::default()
                 });
                 break;
             }

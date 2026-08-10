@@ -92,7 +92,7 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
                 f.name.name,
                 type_string(pass, typ)
             ),
-            confidence: None,
+            ..Failure::default()
         });
         break;
     }

@@ -87,10 +87,13 @@ fn check_func(
     failures: &mut Vec<Failure>,
 ) {
     if let Some(params) = &f.ty.params {
-        check_fields(&params.list, arg_style, "argument", failures);
+        check_fields(&params.list, arg_style, "argument", false, failures);
     }
     if let Some(results) = &f.ty.results {
-        check_fields(&results.list, ret_style, "return", failures);
+        // Upstream's results branch carries an extra `field.Names != nil`
+        // guard that its params branch does not: `func f() (int, int)` cannot
+        // drop a type, since there is no name to attach the shared one to.
+        check_fields(&results.list, ret_style, "return", true, failures);
     }
 }
 
@@ -98,6 +101,7 @@ fn check_fields(
     fields: &[guff::ast::Field],
     style: RepeatedTypeStyle,
     kind: &str,
+    require_names: bool,
     failures: &mut Vec<Failure>,
 ) {
     match style {
@@ -109,22 +113,30 @@ fn check_fields(
                         rule: "enforce-repeated-arg-type-style",
                         pos: field.pos().0 as u32,
                         message: format!("{kind} types should not be omitted"),
-                        confidence: None,
+                        ..Failure::default()
                     });
                 }
             }
         }
         RepeatedTypeStyle::Short => {
-            let mut prev = None;
+            // Upstream's failure node is `prevType` — the type expression of
+            // the *preceding* field, which is the one that would be dropped —
+            // not the field that repeats it.
+            let mut prev: Option<(String, u32)> = None;
             for field in fields {
-                let current = field.ty.as_ref().map(expr_string);
-                if let (Some(prev_ty), Some(cur_ty)) = (prev.as_ref(), current.as_ref()) {
-                    if prev_ty == cur_ty {
+                let current = field
+                    .ty
+                    .as_ref()
+                    .map(|ty| (expr_string(ty), ty.pos().0 as u32));
+                if let (Some((prev_ty, prev_pos)), Some((cur_ty, _))) =
+                    (prev.as_ref(), current.as_ref())
+                {
+                    if prev_ty == cur_ty && !(require_names && field.names.is_empty()) {
                         failures.push(Failure {
                             rule: "enforce-repeated-arg-type-style",
-                            pos: field.pos().0 as u32,
-                            message: format!("repeated {kind} type \"{cur_ty}\" can be omitted"),
-                            confidence: None,
+                            pos: *prev_pos,
+                            message: format!("repeated {kind} type \"{prev_ty}\" can be omitted"),
+                            ..Failure::default()
                         });
                     }
                 }

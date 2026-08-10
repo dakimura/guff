@@ -79,7 +79,7 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
             rule: "time-date",
             pos: tz.pos().0 as u32,
             message: "time.Date timezone argument cannot be nil, it would panic on runtime".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 
@@ -91,9 +91,15 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
         let Some(bl) = check_arg_sign(arg, field, failures) else {
             continue;
         };
-        let Ok(parsed) = parse_decimal_integer(bl) else {
+        let (parsed, notation) = parse_decimal_integer(bl);
+        if let Some(notation) = notation {
+            // Everything that is not a plain decimal integer is reported here
+            // and skips the range checks below. guff used to swallow all of
+            // them, so an octal / hex / float / exponential argument produced
+            // no finding at all.
+            report_notation(arg, bl, field, parsed, notation, failures);
             continue;
-        };
+        }
 
         match field {
             TimeDateArg::Year => year = parsed,
@@ -104,17 +110,18 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                         rule: "time-date",
                         pos: arg.pos().0 as u32,
                         message: "time.Date month argument should not be zero".into(),
-            confidence: None,
-        });
+                        ..Failure::default()
+                    });
                 } else if !(1..=12).contains(&parsed) {
                     failures.push(Failure {
                         rule: "time-date",
                         pos: arg.pos().0 as u32,
                         message: format!(
-                            "time.Date month argument should be between 1 and 12, got {parsed}"
+                            "time.Date month argument should be between 1 and 12: {}",
+                            gofmt_arg(arg)
                         ),
-            confidence: None,
-        });
+                        ..Failure::default()
+                    });
                 }
             }
             TimeDateArg::Day => {
@@ -123,8 +130,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                         rule: "time-date",
                         pos: arg.pos().0 as u32,
                         message: "time.Date day argument should not be zero".into(),
-            confidence: None,
-        });
+                        ..Failure::default()
+                    });
                 } else {
                     let max = days_in_month(year, month);
                     if parsed > max {
@@ -134,8 +141,8 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
                             message: format!(
                                 "time.Date day argument {parsed} exceeds days in month ({max})"
                             ),
-            confidence: None,
-        });
+                            ..Failure::default()
+                        });
                     }
                 }
             }
@@ -160,15 +167,28 @@ fn check_bounds(
         failures.push(Failure {
             rule: "time-date",
             pos: arg.pos().0 as u32,
+            // Upstream ends with `: %s` filled by `astutils.GoFmt(arg)` — the
+            // argument as written, not the parsed value — so a literal spelled
+            // `0x19` prints as `0x19`.
             message: format!(
-                "time.Date {} argument should be between {} and {}, got {}",
+                "time.Date {} argument should be between {} and {}: {}",
                 field_name(field),
                 min,
                 max,
-                parsed
+                gofmt_arg(arg)
             ),
-            confidence: None,
+            ..Failure::default()
         });
+    }
+}
+
+/// The argument as written. `checkArgSign` only ever reaches a basic literal or
+/// a signed one, so this covers everything upstream can print here.
+fn gofmt_arg(arg: &Expr) -> String {
+    match arg {
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::UnaryExpr(u) => format!("{}{}", u.op.as_str(), gofmt_arg(&u.x)),
+        _ => String::new(),
     }
 }
 
@@ -210,7 +230,7 @@ fn check_arg_sign<'a>(
                 "time.Date {} argument is negative",
                 field_name(field)
             ),
-            confidence: None,
+            ..Failure::default()
         }),
         Token::ADD => failures.push(Failure {
             rule: "time-date",
@@ -219,7 +239,7 @@ fn check_arg_sign<'a>(
                 "time.Date {} argument contains a useless plus sign",
                 field_name(field)
             ),
-            confidence: None,
+            ..Failure::default()
         }),
         _ => {}
     }
@@ -240,22 +260,143 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-fn parse_decimal_integer(bl: &BasicLit) -> Result<i64, ()> {
-    let raw = bl.value.as_str();
+/// Why a `time.Date` argument is not a plain decimal integer. The text is the
+/// `error` upstream constructs, which lands verbatim in the message.
+#[derive(Clone, Copy, PartialEq)]
+enum Notation {
+    Octal,
+    OctalWithZero,
+    OctalWithPaddingZeroes,
+    Hexadecimal,
+    Binary,
+    Float,
+    Exponential,
+    Alternative,
+    /// Upstream only logs these and reports nothing.
+    Invalid,
+}
+
+impl Notation {
+    fn text(self) -> &'static str {
+        match self {
+            Notation::Octal => "octal notation",
+            Notation::OctalWithZero => "octal notation with leading zero",
+            Notation::OctalWithPaddingZeroes => "octal notation with padding zeroes",
+            Notation::Hexadecimal => "hexadecimal notation",
+            Notation::Binary => "binary notation",
+            Notation::Float => "float literal",
+            Notation::Exponential => "exponential notation",
+            Notation::Alternative => "alternative notation",
+            Notation::Invalid => "invalid notation",
+        }
+    }
+}
+
+fn report_notation(
+    arg: &Expr,
+    bl: &BasicLit,
+    field: TimeDateArg,
+    parsed: i64,
+    notation: Notation,
+    failures: &mut Vec<Failure>,
+) {
+    if notation == Notation::Invalid {
+        return;
+    }
+    let replaced = parsed.to_string();
+    let mut instructions = format!("use {replaced} instead of {}", gofmt_arg(arg));
+    let confidence = match notation {
+        // People may well write 00..07 on purpose.
+        Notation::OctalWithZero => 0.5,
+        // 000123456 — is that 123456 or 42798? A clear mistake either way.
+        Notation::OctalWithPaddingZeroes => {
+            let stripped = match bl.value.trim_start_matches('0') {
+                "" => "0",
+                s => s,
+            };
+            if stripped != replaced {
+                instructions = format!(
+                    "choose between {stripped} and {replaced} (decimal value of {stripped} octal value)"
+                );
+            }
+            1.0
+        }
+        _ => 0.8,
+    };
+    failures.push(Failure::with_confidence(
+        "time-date",
+        arg.pos().0 as u32,
+        format!(
+            "use decimal digits for time.Date {} argument: {} found: {instructions}",
+            field_name(field),
+            notation.text(),
+        ),
+        confidence,
+    ));
+}
+
+/// Port of upstream `parseDecimalInteger`: the value plus, when the literal is
+/// not written as a plain decimal, which notation it used instead.
+fn parse_decimal_integer(bl: &BasicLit) -> (i64, Option<Notation>) {
+    let raw = bl.value.to_ascii_lowercase();
     if raw == "0" {
-        return Ok(0);
+        return (0, None);
     }
-    if bl.kind == Some(Token::FLOAT) {
-        return Err(());
+    match bl.kind {
+        Some(Token::FLOAT) => {
+            let Ok(value) = raw.parse::<f64>() else {
+                return (0, Some(Notation::Invalid));
+            };
+            let notation = if raw.contains('e') {
+                Notation::Exponential
+            } else {
+                Notation::Float
+            };
+            return (value as i64, Some(notation));
+        }
+        Some(Token::INT) => {}
+        _ => return (0, Some(Notation::Invalid)),
     }
-    if bl.kind != Some(Token::INT) {
-        return Err(());
+
+    // Upstream parses with base 0, which accepts every Go integer form.
+    let Some(value) = parse_int_base0(&raw) else {
+        return (0, Some(Notation::Invalid));
+    };
+    if raw.starts_with("0b") {
+        return (value, Some(Notation::Binary));
     }
-    if raw.starts_with("0x") || raw.starts_with("0b") || raw.starts_with("0o") {
-        return Err(());
+    if raw.starts_with("0x") {
+        return (value, Some(Notation::Hexadecimal));
     }
-    if raw.starts_with('0') && raw.len() > 1 {
-        return Err(());
+    if raw.starts_with('0') {
+        // Catches "0o" octal as well as the bare leading zero.
+        if matches!(raw.as_str(), "00" | "01" | "02" | "03" | "04" | "05" | "06" | "07") {
+            return (value, Some(Notation::OctalWithZero));
+        }
+        if raw.starts_with("00") {
+            return (value, Some(Notation::OctalWithPaddingZeroes));
+        }
+        return (value, Some(Notation::Octal));
     }
-    raw.parse::<i64>().map_err(|_| ())
+    // Round-trips through decimal? If not it was written some other way (1_0).
+    if value.to_string() != raw {
+        return (value, Some(Notation::Alternative));
+    }
+    (value, None)
+}
+
+/// `strconv.ParseInt(s, 0, 64)` — base inferred from the prefix, `_` allowed.
+fn parse_int_base0(s: &str) -> Option<i64> {
+    let t: String = s.chars().filter(|c| *c != '_').collect();
+    if let Some(rest) = t.strip_prefix("0x") {
+        i64::from_str_radix(rest, 16).ok()
+    } else if let Some(rest) = t.strip_prefix("0b") {
+        i64::from_str_radix(rest, 2).ok()
+    } else if let Some(rest) = t.strip_prefix("0o") {
+        i64::from_str_radix(rest, 8).ok()
+    } else if t.len() > 1 && t.starts_with('0') {
+        i64::from_str_radix(&t[1..], 8).ok()
+    } else {
+        t.parse::<i64>().ok()
+    }
 }

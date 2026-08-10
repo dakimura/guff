@@ -56,13 +56,13 @@ impl Checker {
         self.failures.push(Failure {
             rule: "unsecure-url-scheme",
             pos: lit.value_pos.0 as u32,
+            // `lit.value` is the literal *source*, quotes included, so `{:?}`
+            // quoted it a second time and escaped the inner quotes.
             message: format!(
-                "prefer secure protocol {}s over {} in {:?}",
-                scheme,
-                scheme,
-                lit.value
+                "prefer secure protocol {}s over {} in {}",
+                scheme, scheme, lit.value
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 

@@ -25,8 +25,8 @@ impl Checker {
                             rule: "call-to-gc",
                             pos: call.fun.pos().0 as u32,
                             message: "explicit call to the garbage collector".into(),
-                    confidence: None,
-                });
+                            ..Failure::default()
+                        });
                     }
     }
 

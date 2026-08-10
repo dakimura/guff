@@ -39,11 +39,11 @@ impl Checker {
         if num > MAX_RESULTS {
             self.failures.push(Failure {
                 rule: "function-result-limit",
-                pos: f.name.name_pos.0 as u32,
+                pos: f.ty.func.0 as u32,
                 message: format!(
                     "maximum number of return results per function exceeded; max {MAX_RESULTS} but got {num}"
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

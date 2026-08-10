@@ -1,8 +1,17 @@
 //! Shared helpers for revive rules.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
 use guff::ast::{
-    BasicLit, BinaryExpr, CallExpr, Expr, Ident, IndexExpr, SelectorExpr, StarExpr, UnaryExpr,
+    BasicLit, BinaryExpr, CallExpr, Expr, File, Ident, IndexExpr, SelectorExpr, StarExpr, UnaryExpr,
 };
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
+use guff::scanner::{Scanner, SCAN_COMMENTS};
 use guff::token::Token;
 use guff_analysis::Pass;
 use guff_types::arena::TypeData;
@@ -121,17 +130,28 @@ pub fn has_prefix_insensitive(s: &str, prefix: &str) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(&b))
 }
 
+/// Render `typ` the way a revive message does.
+///
+/// Upstream formats types with `%s`, i.e. `types.Type.String()`. Its packages
+/// were type-checked by revive itself with the package *name* as the import
+/// path (`lint.Package.TypeCheck` hands `config.Check` the name off the first
+/// file), so the qualifier a user sees is `revivetest.unexported`, never the
+/// module-relative `example.com/…/revivetest.unexported` that guff's real
+/// import paths would otherwise produce.
 pub fn type_string(pass: &Pass<'_>, typ: TypeId) -> String {
     pass.pkg()
         .type_artifacts
         .as_ref()
         .map(|a| {
+            let qf = |pkg: guff_types::PackageId,
+                      parena: &guff_types::arena::PackageArena|
+             -> String { parena.get(pkg).name().to_string() };
             guff_types::typestring::type_string(
                 &a.types,
                 &a.objects,
                 &a.packages,
                 typ,
-                None,
+                Some(&qf),
             )
         })
         .unwrap_or_else(|| "<type>".into())
@@ -255,6 +275,146 @@ pub fn is_bool_type_expr(expr: &Expr) -> bool {
     matches!(unparen(expr), Expr::Ident(Ident { name, .. }) if name == "bool")
 }
 
+/// A `PARSE_COMMENTS` reparse of one file, in its own private [`FileSet`].
+///
+/// Positions belong to `fset`, not to `pass.fset()`. Line numbers agree because
+/// the bytes are the same, but a `Pos` does not: to report at one of these, map
+/// it with [`map_reparsed_pos`].
+pub struct Reparsed {
+    pub fset: Arc<FileSet>,
+    pub file: File,
+}
+
+thread_local! {
+    /// Reparses for the package currently being linted, keyed by path.
+    static REPARSE_CACHE: RefCell<HashMap<PathBuf, Option<Arc<Reparsed>>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Re-parse `path` with `PARSE_COMMENTS`, reusing the result within a package.
+///
+/// The analysis load runs with `Mode::NONE`, so the shared AST keeps only the
+/// comments the parser attaches as docs — a comment inside a function body is
+/// simply not there. Six rules need a reparse to see them (package-comments,
+/// blank-imports, exported, comments-density, empty-lines, comment-spacings)
+/// and each one that forgot silently under-reported.
+///
+/// They used to hold a private copy of this function each, so enabling *n* of
+/// them parsed every file *n* times. Measured on prometheus `./...`, the
+/// reparse for comment-spacings alone cost ~0.06s of a ~1.8s run; the cache
+/// pays that once no matter how many rules ask.
+pub fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<Arc<Reparsed>> {
+    if let Some(hit) = REPARSE_CACHE.with(|c| c.borrow().get(path).cloned()) {
+        return hit;
+    }
+    let parsed = parse_with_comments(path, cached).map(Arc::new);
+    REPARSE_CACHE.with(|c| {
+        c.borrow_mut().insert(path.to_path_buf(), parsed.clone());
+    });
+    parsed
+}
+
+fn parse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<Reparsed> {
+    let owned;
+    let src: &[u8] = if let Some(b) = cached {
+        b
+    } else {
+        owned = fs::read(path).ok()?;
+        &owned
+    };
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    Some(Reparsed { fset, file })
+}
+
+/// Drop the reparse cache. Called around each revive run so the ASTs of a
+/// finished package do not outlive it.
+pub fn clear_reparse_cache() {
+    REPARSE_CACHE.with(|c| c.borrow_mut().clear());
+}
+
+/// One comment, with its position already in `pass.fset()`.
+pub struct ScannedComment {
+    pub pos: u32,
+    pub text: String,
+}
+
+/// Every comment in file `index`, obtained by scanning rather than parsing.
+///
+/// A rule that only reads comment *text* does not need an AST, and building one
+/// is most of the cost: on prometheus `./...` the full `PARSE_COMMENTS` reparse
+/// this replaces cost ~0.06s of a ~1.9s run. The scanner walks the bytes once
+/// and allocates only the comments themselves.
+///
+/// Comments arrive in source order, matching the order upstream sees when it
+/// walks `file.AST.Comments`.
+pub fn scan_comments(pass: &Pass<'_>, index: usize) -> Option<Vec<ScannedComment>> {
+    let pkg = pass.pkg();
+    let path = pkg.compiled_go_files.get(index)?;
+    let owned;
+    let src: &[u8] = match pkg.source_bytes(index) {
+        Some(b) => b,
+        None => {
+            owned = fs::read(path).ok()?;
+            &owned
+        }
+    };
+
+    // Scan against a private File so the shared FileSet's line table is not
+    // touched, then convert each offset into the pass's position space.
+    let scratch = FileSet::new();
+    let sfile = scratch.add_file(
+        path.file_name()?.to_str()?,
+        scratch.base(),
+        src.len() as i64,
+    );
+    let target = pass.fset().file(pass.files().get(index)?.pos())?;
+
+    let mut s: Scanner<'_> = Scanner::new();
+    s.init(Arc::clone(&sfile), src, None, SCAN_COMMENTS);
+    let mut out = Vec::new();
+    loop {
+        let (pos, tok, lit) = s.scan();
+        match tok {
+            Token::EOF => break,
+            Token::COMMENT => {
+                let offset = sfile.offset(pos);
+                if offset < 0 || offset > target.size() {
+                    continue;
+                }
+                out.push(ScannedComment {
+                    pos: target.pos(offset).0 as u32,
+                    text: lit.into_owned(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+/// Translate a position from a [`reparse_with_comments`] `FileSet` into the
+/// pass's, so a comment found only in the reparse can still be reported.
+///
+/// Both parses cover the same bytes, so the byte offset is the bridge; the
+/// `Pos` values themselves belong to different `FileSet`s and are not
+/// comparable. `file` is the pass's AST for the same file.
+pub fn map_reparsed_pos(
+    pass: &Pass<'_>,
+    file: &File,
+    reparsed_fset: &FileSet,
+    pos: i64,
+) -> Option<u32> {
+    let from = reparsed_fset.file(guff::position::Pos(pos))?;
+    let to = pass.fset().file(file.pos())?;
+    let offset = from.offset(guff::position::Pos(pos));
+    if offset < 0 || offset > to.size() {
+        return None;
+    }
+    Some(to.pos(offset).0 as u32)
+}
+
 pub fn line_of(pass: &Pass<'_>, pos: i64) -> usize {
     pass.fset()
         .position(guff::position::Pos(pos))
@@ -308,4 +468,17 @@ pub fn expr_string(e: &Expr) -> String {
         Expr::InterfaceType(_) => "interface{}".into(),
         _ => "<type>".into(),
     }
+}
+
+/// Start of an import spec: the local name when the import has one (`.`, `_`,
+/// or an alias), the path otherwise.
+///
+/// This is `ast.ImportSpec.Pos()`, the node every upstream import rule attaches
+/// its failure to. Reporting the path instead puts the caret two columns right
+/// of where golangci-lint points for `import _ "os"`.
+pub fn import_spec_pos(imp: &guff::ast::ImportSpec) -> u32 {
+    imp.name
+        .as_ref()
+        .map(|n| n.name_pos.0)
+        .unwrap_or(imp.path.pos().0) as u32
 }

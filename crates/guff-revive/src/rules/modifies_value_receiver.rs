@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
                             rule: "modifies-value-receiver",
                             pos: assign.lhs.first().map(|e| e.pos().0).unwrap_or(0) as u32,
                             message: "suspicious assignment to a by-value method receiver".into(),
-                            confidence: None,
+                            ..Failure::default()
                         });
                     }
                 }
@@ -73,7 +73,7 @@ impl<'a> Checker<'a> {
                             rule: "modifies-value-receiver",
                             pos: inc.x.pos().0 as u32,
                             message: "suspicious assignment to a by-value method receiver".into(),
-                            confidence: None,
+                            ..Failure::default()
                         });
                     }
                 }

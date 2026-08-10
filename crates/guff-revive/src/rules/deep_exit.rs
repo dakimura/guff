@@ -59,7 +59,7 @@ impl Checker {
                     rule: "deep-exit",
                     pos: call.fun.pos().0 as u32,
                     message: msg,
-                    confidence: None,
+                    ..Failure::default()
                 });
             }
             true

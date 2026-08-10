@@ -1,5 +1,5 @@
 # Source files materialized into the case work dir before each run.
-# Format: <dest-name> <repo-relative-source-path>
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
 #
 # The golden tier keeps no copy of these files: it points at the fixtures the
 # Rust unit tests already use, so the two can never drift.
@@ -48,7 +48,7 @@ defers/bad/bad.go                                  crates/guff-govet/tests/testd
 defers/ok/ok.go                                    crates/guff-govet/tests/testdata/defers/ok.go
 directive/after_package/after_package.go           crates/guff-govet/tests/testdata/directive/after_package.go
 directive/bad/bad.go                               crates/guff-govet/tests/testdata/directive/bad.go
-directive/invalid_space_nbsp/invalid_space_nbsp.go crates/guff-govet/tests/testdata/directive/invalid_space_nbsp.go
+directive/invalid_space_nbsp/invalid_space_nbsp.go  crates/guff-govet/tests/testdata/directive/invalid_space_nbsp.go
 directive/invalid_space/invalid_space.go           crates/guff-govet/tests/testdata/directive/invalid_space.go
 directive/ok/ok.go                                 crates/guff-govet/tests/testdata/directive/ok.go
 errorsas/bad/bad.go                                crates/guff-govet/tests/testdata/errorsas/bad.go

@@ -58,12 +58,15 @@ fn check_range(r: &RangeStmt, failures: &mut Vec<Failure>) {
     if !r.body.list.is_empty() {
         return;
     }
-    failures.push(Failure {
-        rule: "empty-block",
-        pos: r.for_.0 as u32,
-        message: MESSAGE.into(),
-        confidence: None,
-    });
+    // Both empty-block sites report the same text, so the confidence cannot be
+    // recovered from the message: the range arm is 0.9 upstream, the plain
+    // block arm below is 1.
+    failures.push(Failure::with_confidence(
+        "empty-block",
+        r.for_.0 as u32,
+        MESSAGE,
+        0.9,
+    ));
 }
 
 fn check_block(b: &BlockStmt, ignore: &[*const BlockStmt], failures: &mut Vec<Failure>) {
@@ -76,7 +79,7 @@ fn check_block(b: &BlockStmt, ignore: &[*const BlockStmt], failures: &mut Vec<Fa
             rule: "empty-block",
             pos: b.lbrace.0 as u32,
             message: MESSAGE.into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

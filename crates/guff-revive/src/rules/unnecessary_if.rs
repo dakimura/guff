@@ -28,7 +28,7 @@ impl Checker {
                 rule: "unnecessary-if",
                 pos: if_stmt.if_.0 as u32,
                 message: msg,
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

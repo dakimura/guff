@@ -6,6 +6,7 @@ use regex::Regex;
 
 use crate::config;
 use crate::failure::Failure;
+use crate::util::import_spec_pos;
 
 pub struct Checker {
     patterns: Vec<Regex>,
@@ -39,9 +40,9 @@ impl Checker {
         if self.patterns.iter().any(|re| re.is_match(path)) {
             self.failures.push(Failure {
                 rule: "imports-blocklist",
-                pos: imp.path.pos().0 as u32,
+                pos: import_spec_pos(imp),
                 message: format!("should not use the following blocklisted import: {path}"),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

@@ -21,15 +21,15 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             if c > MAX_COMPLEXITY {
                 failures.push(Failure {
                     rule: "cognitive-complexity",
-                    pos: f.name.name_pos.0 as u32,
+                    pos: f.ty.func.0 as u32,
                     message: format!(
                         "function {} has cognitive complexity {} (> max enabled {})",
                         func_name(f),
                         c,
                         MAX_COMPLEXITY
                     ),
-            confidence: None,
-        });
+                    ..Failure::default()
+                });
             }
         }
     }

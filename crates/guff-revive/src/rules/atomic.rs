@@ -93,8 +93,8 @@ fn check_assign(pass: &Pass<'_>, assign: &AssignStmt, failures: &mut Vec<Failure
                 rule: "atomic",
                 pos: left.pos().0 as u32,
                 message: "direct assignment to atomic value".into(),
-            confidence: None,
-        });
+                ..Failure::default()
+            });
         }
     }
 }

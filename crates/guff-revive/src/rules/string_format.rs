@@ -62,7 +62,7 @@ impl Checker {
                         rule: "string-format",
                         pos: lit.value_pos.0 as u32,
                         message: rule.message.clone(),
-                        confidence: None,
+                        ..Failure::default()
                     });
                 }
             }

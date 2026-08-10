@@ -66,6 +66,6 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr, failures: &mut Vec<Failure>)
             expr_string(&expr.y),
             op
         ),
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }

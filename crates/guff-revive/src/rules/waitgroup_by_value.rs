@@ -54,9 +54,15 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
         if is_pkg_dot_type(ty, "sync", "WaitGroup") {
             failures.push(Failure {
                 rule: "waitgroup-by-value",
-                pos: ty.pos().0 as u32,
+                // Upstream's node is the `*ast.Field`, which starts at the
+                // parameter name when there is one.
+                pos: field
+                    .names
+                    .first()
+                    .map(|n| n.name_pos.0)
+                    .unwrap_or(ty.pos().0) as u32,
                 message: "sync.WaitGroup passed by value, the function will get a copy of the original one".into(),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

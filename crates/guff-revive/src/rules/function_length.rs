@@ -1,6 +1,6 @@
 //! `function-length` — warn on functions exceeding statement/line limits (50/75 default).
 
-use guff::ast::{BlockStmt, Expr, FuncDecl, FuncLit, Stmt};
+use guff::ast::{BlockStmt, Expr, File, FuncDecl, FuncLit, Stmt};
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
@@ -22,12 +22,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub fn visit(&mut self, n: NodeRef<'_>) {
-        let NodeRef::FuncDecl(f) = n else {
-            return;
-        };
-        check_func(self.pass, f, &mut self.failures);
+    /// This rule is file-scoped, not node-scoped: one empty-bodied function
+    /// silences the whole file (see [`check_file`]), which a node-at-a-time
+    /// visitor cannot express. All the work happens here.
+    pub fn on_file(&mut self, file: &File) {
+        check_file(self.pass, file, &mut self.failures);
     }
+
+    pub fn visit(&mut self, _n: NodeRef<'_>) {}
 
     pub fn into_failures(self) -> Vec<Failure> {
         self.failures
@@ -35,45 +37,71 @@ impl<'a> Checker<'a> {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new(pass);
+    let mut out = Vec::new();
     for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            if let Some(n) = n {
-                c.visit(n);
-            }
-            true
-        });
+        check_file(pass, file, &mut out);
     }
-    c.into_failures()
+    out
+}
+
+fn check_file(pass: &Pass<'_>, file: &File, out: &mut Vec<Failure>) {
+    {
+        // Upstream walks `file.AST.Decls` itself and bails out of the *whole
+        // file* on the first function with an empty body:
+        //
+        //     emptyBody := body == nil || len(body.List) == 0
+        //     if emptyBody { return nil }
+        //
+        // `return nil` rather than `continue`, inside `Apply`, which runs per
+        // file — so one `func f() {}` silences function-length for every
+        // function below it *and discards the failures already collected*.
+        // It reads like a slip for `continue`, but it is what golangci-lint
+        // 2.12.2 ships, and reproducing it is the whole point of this tier:
+        // extended_bad.go has empty-bodied functions near the top, so upstream
+        // reports nothing there at all.
+        let mut per_file = Vec::new();
+        let mut aborted = false;
+        for decl in &file.decls {
+            let guff::ast::Decl::FuncDecl(f) = decl else {
+                continue;
+            };
+            let empty_body = f.body.as_ref().is_none_or(|b| b.list.is_empty());
+            if empty_body {
+                aborted = true;
+                break;
+            }
+            check_func(pass, f, &mut per_file);
+        }
+        if !aborted {
+            out.append(&mut per_file);
+        }
+    }
 }
 
 fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
     let Some(body) = &f.body else {
         return;
     };
-    if body.list.is_empty() {
-        return;
-    }
     let stmt_count = count_stmts(&body.list);
     if stmt_count > MAX_STMTS {
         failures.push(Failure {
             rule: "function-length",
-            pos: f.name.name_pos.0 as u32,
+            pos: f.ty.func.0 as u32,
             message: format!(
                 "maximum number of statements per function exceeded; max {MAX_STMTS} but got {stmt_count}"
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
     let line_count = count_lines(pass, body);
     if line_count > MAX_LINES {
         failures.push(Failure {
             rule: "function-length",
-            pos: f.name.name_pos.0 as u32,
+            pos: f.ty.func.0 as u32,
             message: format!(
                 "maximum number of lines per function exceeded; max {MAX_LINES} but got {line_count}"
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

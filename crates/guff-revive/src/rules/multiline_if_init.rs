@@ -55,7 +55,7 @@ fn check_if_init(pass: &Pass<'_>, if_stmt: &IfStmt, failures: &mut Vec<Failure>)
             rule: "multiline-if-init",
             pos: if_stmt.if_.0 as u32,
             message: "if-init statement should not span multiple lines".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

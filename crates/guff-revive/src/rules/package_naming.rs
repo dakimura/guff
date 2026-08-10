@@ -70,7 +70,7 @@ fn check_pkg_name(pkg_name: &str, pos: u32, failures: &mut Vec<Failure>) {
             rule: "package-naming",
             pos,
             message: format!("don't use package name {pkg_name:?} that contains an underscore"),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
@@ -79,12 +79,15 @@ fn check_pkg_name(pkg_name: &str, pos: u32, failures: &mut Vec<Failure>) {
             rule: "package-naming",
             pos,
             message: format!("don't use package name {pkg_name:?} that contains MixedCaps"),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
 
-    let lower = without_test.to_ascii_lowercase();
+    // Only the convention checks above look past the `_test` suffix; upstream
+    // lowercases the *full* name for the lookups below, so an external test
+    // package `util_test` is not the bad name `util`.
+    let lower = pkg_name.to_ascii_lowercase();
     if BAD_NAMES.contains(&lower.as_str()) {
         failures.push(Failure {
             rule: "package-naming",
@@ -92,7 +95,7 @@ fn check_pkg_name(pkg_name: &str, pos: u32, failures: &mut Vec<Failure>) {
             message: format!(
                 "don't use {pkg_name:?} because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names"
             ),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
@@ -104,7 +107,7 @@ fn check_pkg_name(pkg_name: &str, pos: u32, failures: &mut Vec<Failure>) {
             message: format!(
                 "don't use {pkg_name:?} because it conflicts with common Go standard library package {std_path:?}"
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

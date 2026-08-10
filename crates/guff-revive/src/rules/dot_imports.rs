@@ -4,6 +4,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::import_spec_pos;
 
 pub struct Checker {
     failures: Vec<Failure>,
@@ -24,9 +25,9 @@ impl Checker {
         if is_dot {
             self.failures.push(Failure {
                 rule: "dot-imports",
-                pos: imp.path.pos().0 as u32,
+                pos: import_spec_pos(imp),
                 message: "should not use dot imports".into(),
-                confidence: None,
+                ..Failure::default()
             });
         }
     }

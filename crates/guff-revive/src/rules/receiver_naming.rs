@@ -66,7 +66,9 @@ fn check_method(
     let Some(name) = field.names.first() else {
         return;
     };
-    let pos = name.name_pos.0 as u32;
+    // Upstream's failures carry the FuncDecl, so every receiver-naming report
+    // lands on the `func` keyword rather than on the receiver name.
+    let pos = f.ty.func.0 as u32;
 
     if is_blank(name) {
         failures.push(Failure {
@@ -74,8 +76,8 @@ fn check_method(
             pos,
             message: "receiver name should not be an underscore, omit the name if it is unused"
                 .into(),
-            confidence: None,
-        });
+                ..Failure::default()
+            });
         return;
     }
 
@@ -84,7 +86,7 @@ fn check_method(
             rule: "receiver-naming",
             pos,
             message: "receiver name should be a reflection of its identity; don't use generic names such as \"this\" or \"self\"".into(),
-            confidence: None,
+            ..Failure::default()
         });
         return;
     }
@@ -102,7 +104,7 @@ fn check_method(
                     "receiver name {} should be consistent with previous receiver name {} for {}",
                     name.name, prev, recv_type
                 ),
-                confidence: None,
+                ..Failure::default()
             });
         }
         return;

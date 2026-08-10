@@ -76,11 +76,13 @@ fn check_chain(pass: &Pass<'_>, start: &IfStmt, failures: &mut Vec<Failure>) {
         let _ = has_complex_condition;
         failures.push(Failure {
             rule: "identical-ifelseif-branches",
-            pos: start.if_.0 as u32,
+            // Upstream's node is the *branch*, i.e. the if statement's block,
+            // whose Pos() is its opening brace.
+            pos: start.body.lbrace.0 as u32,
             message: format!(
                 "\"if...else if\" chain with identical branches (lines {a} and {b})"
             ),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

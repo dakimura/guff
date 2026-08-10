@@ -563,6 +563,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             url: String::new(),
             suggested_fixes: p.fixes,
             related: Vec::new(),
+            ..Diagnostic::default()
         });
     }
     Ok(None)

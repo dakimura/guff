@@ -73,7 +73,7 @@ fn check_func(f: &FuncDecl, failures: &mut Vec<Failure>) {
             rule: "unnecessary-stmt",
             pos: ret.return_.0 as u32,
             message: "omit unnecessary return statement".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }
@@ -89,7 +89,7 @@ fn check_switch_body(body: &BlockStmt, failures: &mut Vec<Failure>) {
         rule: "unnecessary-stmt",
         pos: body.lbrace.0 as u32,
         message: "switch with only one case can be replaced by an if-then".into(),
-        confidence: None,
+        ..Failure::default()
     });
 }
 
@@ -108,7 +108,7 @@ fn check_case_clause(c: &CaseClause, failures: &mut Vec<Failure>) {
             rule: "unnecessary-stmt",
             pos: branch.tok_pos.0 as u32,
             message: "omit unnecessary break at the end of case clause".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

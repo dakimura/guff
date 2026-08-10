@@ -62,12 +62,12 @@ fn visit_block(
                         rule: "defer",
                         pos: ret.return_.0 as u32,
                         message: "return in a defer function has no effect".into(),
-                        confidence: None,
+                        ..Failure::default()
                     });
                 }
             }
             Stmt::DeferStmt(d) => {
-                check_defer(&d.call, in_loop, failures);
+                check_defer(d, &d.call, in_loop, failures);
                 visit_deferred_call(&d.call, in_loop, failures);
             }
             Stmt::ExprStmt(e) => {
@@ -106,29 +106,37 @@ fn visit_deferred_expr(expr: &Expr, in_loop: bool, failures: &mut Vec<Failure>) 
     }
 }
 
-fn check_defer(call: &CallExpr, in_loop: bool, failures: &mut Vec<Failure>) {
+/// Upstream's failures carry the `*ast.DeferStmt`, so every report lands on the
+/// `defer` keyword rather than on the callee inside it.
+fn check_defer(
+    stmt: &guff::ast::DeferStmt,
+    call: &CallExpr,
+    in_loop: bool,
+    failures: &mut Vec<Failure>,
+) {
+    let pos = stmt.defer_.0 as u32;
     if is_ident(&call.fun, "recover") {
         failures.push(Failure {
             rule: "defer",
-            pos: call.fun.pos().0 as u32,
+            pos,
             message: "recover must be called inside a deferred function, this is executing recover immediately".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
     if in_loop {
         failures.push(Failure {
             rule: "defer",
-            pos: call.fun.pos().0 as u32,
+            pos,
             message: "prefer not to defer inside loops".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
     if matches!(unparen(&call.fun), Expr::CallExpr(_)) {
         failures.push(Failure {
             rule: "defer",
-            pos: call.fun.pos().0 as u32,
+            pos,
             message: "prefer not to defer chains of function calls".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }
@@ -142,14 +150,14 @@ fn check_recover_call(call: &CallExpr, in_defer: bool, func_lit_depth: u8, failu
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "recover must be called inside a deferred function".into(),
-            confidence: None,
+            ..Failure::default()
         });
     } else if func_lit_depth == 0 {
         failures.push(Failure {
             rule: "defer",
             pos: call.fun.pos().0 as u32,
             message: "recover must be called inside a deferred function, this is executing recover immediately".into(),
-            confidence: None,
+            ..Failure::default()
         });
     }
 }

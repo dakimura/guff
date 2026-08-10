@@ -102,7 +102,7 @@ fn check_func(f: &FuncDecl, allow_types: &HashSet<String>, failures: &mut Vec<Fa
                 rule: "context-as-argument",
                 pos: field.pos().0 as u32,
                 message: "context.Context should be the first parameter of a function".into(),
-                confidence: None,
+                ..Failure::default()
             });
             break;
         }

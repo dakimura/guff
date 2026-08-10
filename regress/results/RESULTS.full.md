@@ -8,8 +8,8 @@
 
 | Metric | Baseline | Measured |
 |--------|---------:|---------:|
-| wall_seconds | 2.330 | 2.610 |
-| peak_rss_bytes | 2,932,523,008 | 3,084,763,136 |
+| wall_seconds | 2.330 | 2.530 |
+| peak_rss_bytes | 2,932,523,008 | 3,101,540,352 |
 | guff_issues | 20 | 20 |
 | golangci_issues | 20 | 20 |
 | both | 20 | 20 |
@@ -20,4 +20,4 @@
 
 ## FAIL
 
-- `wall_seconds`: wall 2.610s > limit 2.480s (baseline 2.330s × 1.0 + 0.150s)
+- `wall_seconds`: wall 2.530s > limit 2.480s (baseline 2.330s × 1.0 + 0.150s)

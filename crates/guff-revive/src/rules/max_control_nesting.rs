@@ -48,8 +48,8 @@ impl Walker<'_> {
                 rule: "max-control-nesting",
                 pos: self.last_ctrl_pos as u32,
                 message: format!("control flow nesting exceeds {MAX_NESTING}"),
-            confidence: None,
-        });
+                ..Failure::default()
+            });
             return;
         }
 

@@ -315,6 +315,7 @@ impl IssueFilter {
             } else {
                 (String::new(), 0, 0)
             };
+            let column = diag.column.map_or(column, i64::from);
             let source_line = None; // filled lazily in apply / for printing
             // Match golangci: when the pass/check name differs from the linter
             // name, prefix Text (`inline: …`, `SA1004: …`, category for suites).

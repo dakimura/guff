@@ -14,6 +14,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     }
 
     let mut failures = Vec::new();
+    let fset = pass.fset();
     let pkg = pass.pkg();
     for (i, file) in pass.files().iter().enumerate() {
         let Some(path) = pkg.compiled_go_files.get(i) else {
@@ -31,14 +32,21 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
             }
         };
         if lines > max {
-            failures.push(Failure {
-                rule: "file-length-limit",
-                pos: file.package.0 as u32,
-                message: format!(
-                    "file length is {lines} lines, which exceeds the limit of {max}"
-                ),
-            confidence: None,
-        });
+            // Upstream reports `token.Position{Line: <line count>, Column: 0}`,
+            // built by hand rather than from a token.Pos: the finding is about
+            // the file, so it points past its last line of code, at no column.
+            let Some(ft) = fset.file(file.pos()) else {
+                continue;
+            };
+            if lines == 0 || lines > ft.line_count() {
+                continue;
+            }
+            failures.push(Failure::at_column(
+                "file-length-limit",
+                ft.line_start(lines).0 as u32,
+                0,
+                format!("file length is {lines} lines, which exceeds the limit of {max}"),
+            ));
         }
     }
     failures

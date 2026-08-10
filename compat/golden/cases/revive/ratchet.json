@@ -1,0 +1,6 @@
+{
+  "missing": 1,
+  "extra": 3,
+  "why": "Accepted permanent incompatibility, not a porting gap. All three diffs are one root cause: revive type-checks with `types.Config{Importer: importer.Default()}`, the gc export-data importer, which finds no .a files on a modern Go toolchain. Every import resolves to invalid, so any rule needing the type of something declared in another package is silent upstream. time-equal (extra, extended_bad.go:73) and epoch-naming (extra, extended_bad.go:428) both ask whether an expression is a time.Time and get invalid; guff has whole-program type information and answers correctly. context-keys-type (the missing/extra pair at bad.go:65) is the same blindness one level down: upstream never resolves context.WithValue's signature, so the untyped string constant passed as the key is never defaulted and the message reads \"untyped string\" where guff says \"string\". Closing these would mean emulating an upstream defect and dropping true positives; guff keeps the findings. See docs/COMPAT-HARDENING.md §6.",
+  "target": "These 3 stay. Any *new* diff in this case is a bug — the ratchet is a fixed floor, not a to-do."
+}

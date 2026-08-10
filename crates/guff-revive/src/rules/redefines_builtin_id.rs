@@ -174,8 +174,8 @@ fn add_failure(pos: u32, failures: &mut Vec<Failure>, message: String) {
         rule: "redefines-builtin-id",
         pos,
         message,
-            confidence: None,
-        });
+        ..Failure::default()
+    });
 }
 
 const BUILTIN_CONST_VARS: &[&str] = &["true", "false", "iota", "nil"];
