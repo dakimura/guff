@@ -228,6 +228,82 @@ def _source_of(json_path: str) -> str:
     return "oss"
 
 
+_IGNORE_ATTR = re.compile(r"#\[ignore(?:\s*=\s*\"(?P<reason>(?:[^\"\\]|\\.)*)\")?\s*\]")
+
+
+def _ignored_test_bodies() -> list[tuple[str, int, str, str]]:
+    """Every `#[ignore]`d Rust test, as `(relpath, line, reason, text)`.
+
+    `text` is the attribute plus the whole function that follows it, so a check
+    named only inside the body counts. That is the case worth catching: SA1011
+    sat in `never` for months next to an `#[ignore]` whose reason said
+    "guff string literals for \\xNN differ from Go byte strings" and never
+    mentioned SA1011 at all (COMPAT-HARDENING.md §4, 2026-08-10 5th entry).
+    """
+    out: list[tuple[str, int, str, str]] = []
+    for path in sorted(
+        glob.glob(os.path.join(ROOT, "crates", "*", "**", "*.rs"), recursive=True)
+    ):
+        try:
+            src = open(path, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        rel = os.path.relpath(path, ROOT)
+        for m in _IGNORE_ATTR.finditer(src):
+            # Body: from the attribute to the end of the function that follows,
+            # found by brace matching from the first `{` after the signature.
+            start = m.start()
+            open_brace = src.find("{", m.end())
+            end = open_brace
+            if open_brace != -1:
+                depth = 0
+                for i in range(open_brace, len(src)):
+                    if src[i] == "{":
+                        depth += 1
+                    elif src[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+            out.append(
+                (rel, src.count("\n", 0, start) + 1, m.group("reason") or "", src[start:end])
+            )
+    return out
+
+
+def _scan_ignored_tests(ids: list[str]) -> dict[str, list[str]]:
+    """check id -> the `#[ignore]`d tests that mention it.
+
+    A disabled test and an unfired check are the same hole seen from two
+    sides, and the ledger only ever showed one of them.
+    """
+    hits: dict[str, list[str]] = collections.defaultdict(list)
+    bodies = _ignored_test_bodies()
+    for cid in ids:
+        needle = cid.split("/", 1)[1] if "/" in cid else cid
+        # A bare word is only searched for when the id is distinctive enough
+        # that a match cannot be prose: a code (`SA1000`, `G101`), a kebab
+        # rule name (`blank-imports`) or a camelCase checker (`assignOp`).
+        # Plain lowercase words (`tests`, `dupl`, `lll`) need the rendered
+        # `name:` form, or every file path containing "tests" is a hit.
+        distinctive = (
+            re.fullmatch(r"[A-Z]{1,2}\d+", needle)
+            or re.fullmatch(r"G\d{3}", needle)
+            or "-" in needle
+            or re.search(r"[a-z][A-Z]", needle)
+        )
+        pattern = (
+            rf"(?<![\w-]){re.escape(needle)}(?![\w-])"
+            if distinctive
+            else rf"(?<![\w-]){re.escape(needle)}:"
+        )
+        word = re.compile(pattern)
+        for rel, line, reason, text in bodies:
+            if word.search(text):
+                hits[cid].append(f"{rel}:{line}" + (f" — {reason}" if reason else ""))
+    return dict(sorted(hits.items()))
+
+
 def _scan_unit_tests(ids: list[str]) -> set[str]:
     """Static scan: which check IDs are mentioned in Rust test sources.
 
@@ -293,6 +369,9 @@ def build_observed(inventory: dict, previous: dict | None = None) -> dict:
         "scanned_artifacts": dict(scanned),
         "observed": {cid: sorted(srcs) for cid, srcs in sorted(sources.items())},
         "fire_counts": dict(totals.most_common()),
+        # Not a source: a disabled test is the *absence* of evidence. It is
+        # recorded so the report can put it next to the status column.
+        "ignored_tests": _scan_ignored_tests(ids),
     }
 
 
@@ -369,6 +448,24 @@ def render_report(inventory: dict, observed: dict) -> str:
             w(f"- **{linter}** ({len(grouped[linter])}): {names}")
     else:
         w("なし。")
+    w("")
+
+    # `#[ignore]` されたテストが言及する check。無効化されたテストと未発火の
+    # check は同じ穴の裏表で、台帳はこれまで片側しか映していなかった
+    # （SA1011 の実例は COMPAT-HARDENING.md §4 / 2026-08-10 5 本目）。
+    ignored = observed.get("ignored_tests") or {}
+    w(f"## `#[ignore]` されたテストが言及する check（{len(ignored)} 件）\n")
+    if ignored:
+        w("`never` / `unit-only` の行が **その check を無効化されたテストが名指ししている**")
+        w("という意味なので、まずそこを読むこと。`fired` なら別のゲートが見ている。\n")
+        w("| check | 状態 | `#[ignore]` されたテスト |")
+        w("|-------|------|--------------------------|")
+        for cid, where in ignored.items():
+            st = status(cid) if cid in known else "—"
+            mark = "**" if st in ("never", "unit-only") else ""
+            w(f"| `{cid}` | {mark}{st}{mark} | {'<br>'.join(where)} |")
+    else:
+        w("なし（`#[ignore]` の付いたテストはどの check ID にも言及していない）。")
     w("")
 
     if unknown:

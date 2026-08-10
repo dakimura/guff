@@ -329,9 +329,21 @@ fn track_slice_bounds(
                     &mut local.ifs,
                     cache,
                 );
-                // gosec: Alloc | Parameter | Slice only (not MakeSlice).
+                // Upstream recurses for `Alloc | Parameter | Slice` and omits
+                // MakeSlice — but that omission is unreachable there, not a
+                // decision: go/ssa lowers `make([]T, constN)` to
+                // `Alloc *[N]T` + `Slice`, so upstream enters at the Alloc and
+                // a re-slice's X is always the *previous Slice*. guff lowers
+                // the same source to a single MakeSlice, so a re-slice's X is
+                // the MakeSlice, and copying the switch literally stopped the
+                // walk one step in: `s := make([]byte, 10); s = s[:2]; s[4]`
+                // reported nothing. MakeSlice stands where upstream's
+                // Alloc/Slice pair stands, so it recurses with them.
                 match slice_x_kind(prog, func, ref_id) {
-                    SliceXKind::Alloc | SliceXKind::Param | SliceXKind::Slice => {
+                    SliceXKind::Alloc
+                    | SliceXKind::Param
+                    | SliceXKind::Slice
+                    | SliceXKind::MakeSlice => {
                         let (l, h, max_idx) = get_slice_bounds(prog, func, ref_id);
                         let new_cap = compute_slice_new_cap(l, h, max_idx, slice_cap);
                         track_slice_bounds(
@@ -344,7 +356,7 @@ fn track_slice_bounds(
                             cache,
                         );
                     }
-                    SliceXKind::MakeSlice | SliceXKind::Other => {}
+                    SliceXKind::Other => {}
                 }
             }
             InstrData::IndexAddr(ia) => {

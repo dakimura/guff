@@ -8,8 +8,8 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 518 | 94.7% |
-| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 21 | 3.8% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 536 | 98.0% |
+| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 3 | 0.5% |
 | `never` | **どこでも発火していない** | 8 | 1.5% |
 | — | **合計** | **547** | 100.0% |
 
@@ -70,7 +70,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | gomodguard | 1 | 1 | 0 | 0 |
 | gomodguard_v2 | 1 | 1 | 0 | 0 |
 | goprintffuncname | 1 | 1 | 0 | 0 |
-| gosec | 35 | 17 | 18 | 0 |
+| gosec | 35 | 35 | 0 | 0 |
 | gosmopolitan | 1 | 1 | 0 | 0 |
 | govet | 30 | 28 | 0 | 2 |
 | grouper | 1 | 1 | 0 | 0 |
@@ -146,6 +146,15 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 - **staticcheck** (3): `S1030`, `SA1027`, `SA3000`
 - **swaggo** (1): `swaggo`
 
+## `#[ignore]` されたテストが言及する check（1 件）
+
+`never` / `unit-only` の行が **その check を無効化されたテストが名指ししている**
+という意味なので、まずそこを読むこと。`fired` なら別のゲートが見ている。
+
+| check | 状態 | `#[ignore]` されたテスト |
+|-------|------|--------------------------|
+| `govet/tests` | fired | crates/guff-packages/tests/embed_multiroot.rs:11 — requires go on PATH; run with cargo test -p guff-packages -- --ignored |
+
 ## インベントリ外の check ID（1 件）
 
 実行結果には出たが、インベントリ抽出が拾えていない ID。抽出器のバグか、
@@ -155,7 +164,7 @@ guff が宣言していない名前を描画している。
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 598, 'isolate': 8145, 'oss': 822, 'regress': 1573}`
+- 走査した実行アーティファクト: `{'golden': 638, 'isolate': 8460, 'oss': 840, 'regress': 1615}`
 - インベントリ: 547 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

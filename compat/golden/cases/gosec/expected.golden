@@ -1,0 +1,62 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec
+# Produced by running golangci-lint on compat/golden/cases/gosec/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:5:2:gosec:medium:G502: Blocklisted import crypto/des: weak cryptographic primitive
+bad/bad.go:6:2:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+bad/bad.go:7:2:gosec:medium:G503: Blocklisted import crypto/rc4: weak cryptographic primitive
+bad/bad.go:9:2:gosec:medium:G505: Blocklisted import crypto/sha1: weak cryptographic primitive
+bad/bad.go:16:2:gosec:medium:G504: Blocklisted import net/http/cgi: Go versions < 1.6.3 are vulnerable to Httpoxy attack: (CVE-2016-5386)
+bad/bad.go:17:2:gosec:high:G108: Profiling endpoint is automatically exposed on /debug/pprof
+bad/bad.go:24:2:gosec:medium:G506: Blocklisted import golang.org/x/crypto/md4: deprecated and weak cryptographic primitive
+bad/bad.go:25:2:gosec:medium:G507: Blocklisted import golang.org/x/crypto/ripemd160: deprecated and weak cryptographic primitive
+bad/bad.go:38:6:gosec:medium:G401: Use of weak cryptographic primitive
+bad/bad.go:39:6:gosec:medium:G401: Use of weak cryptographic primitive
+bad/bad.go:40:6:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)
+bad/bad.go:41:9:gosec:medium:G405: Use of weak cryptographic primitive
+bad/bad.go:42:9:gosec:medium:G405: Use of weak cryptographic primitive
+bad/bad.go:43:6:gosec:medium:G406: Use of deprecated weak cryptographic primitive
+bad/bad.go:44:6:gosec:medium:G406: Use of deprecated weak cryptographic primitive
+bad/bad.go:46:6:gosec:low:G103: Use of unsafe calls should be audited
+bad/bad.go:49:6:gosec:medium:G106: Use of ssh InsecureIgnoreHostKey should be audited
+bad/bad.go:50:6:gosec:medium:G114: Use of net/http serve function that has no support for setting timeouts
+bad/bad.go:51:9:gosec:medium:G102: Binds to all network interfaces
+bad/bad.go:52:9:gosec:medium:G102: Binds to all network interfaces
+bad/bad.go:59:6:gosec:medium:G204: Subprocess launched with variable
+bad/bad.go:60:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+bad/bad.go:62:2:gosec:high:G101: Potential hardcoded credentials
+bad/bad.go:64:2:gosec:high:G101: Potential hardcoded credentials: AWS API Key
+bad/bad.go:67:2:gosec:low:G104: Errors unhandled
+bad/bad.go:70:6:gosec:medium:G301: Expect directory permissions to be 0750 or less
+bad/bad.go:71:6:gosec:medium:G301: Expect directory permissions to be 0750 or less
+bad/bad.go:72:9:gosec:medium:G302: Expect file permissions to be 0600 or less
+bad/bad.go:73:6:gosec:medium:G302: Expect file permissions to be 0600 or less
+bad/bad.go:74:6:gosec:medium:G306: Expect WriteFile permissions to be 0600 or less
+bad/bad.go:75:9:gosec:medium:G403: RSA keys should be at least 2048 bits
+bad/bad.go:76:37:gosec:high:G402: TLS InsecureSkipVerify set to true.
+bad/bad.go:77:6:gosec:medium:G111: Potential directory traversal
+bad/bad.go:79:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+bad/bad.go:80:9:gosec:medium:G110: Potential DoS vulnerability via decompression bomb
+bad/bad.go:82:9:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:83:6:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:83:6:gosec:medium:G306: Expect WriteFile permissions to be 0600 or less
+bad/bad.go:84:6:gosec:medium:G303: File creation in shared tmp directory without using ioutil.Tempfile
+bad/bad.go:86:9:gosec:medium:G107: Potential HTTP request made with variable url
+bad/bad.go:87:8:gosec:medium:G112: Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server
+bad/bad.go:88:18:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
+bad/bad.go:91:6:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+bad/bad.go:94:6:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
+bad/bad.go:97:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:101:21:gosec:high:G703: Path traversal via taint analysis
+g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
+g602/g602.go:16:10:gosec:low:G602: slice index out of range
+g602/g602.go:22:10:gosec:low:G602: slice index out of range
+scores/scores.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+scores/scores.go:7:7:gosec:high:G101: Potential hardcoded credentials
+scores/scores.go:13:6:gosec:medium:G401: Use of weak cryptographic primitive
+settings/settings.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+settings/settings.go:6:6:gosec:medium:G401: Use of weak cryptographic primitive

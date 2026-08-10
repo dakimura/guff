@@ -1,0 +1,74 @@
+# Golden case: gosec.
+#
+# Every rule guff implements is named explicitly in `includes` rather than
+# leaving gosec on its defaults, for the same reason the govet case lists its
+# analyzers: gosec v2.26.1 (the version golangci-lint 2.12.2 pins) ships 39
+# rules and 22 SSA analyzers, and guff implements 35 of those 61. Running the
+# rest would fill the golden with findings from checks guff has never claimed,
+# turning a known scope decision into a permanent diff. Adding a rule to guff
+# means adding it here.
+#
+# `includes` is applied to rules *and* analyzers by golangci's wrapper
+# (pkg/golinters/gosec/gosec.go: createRuleFilters + createAnalyzerFilters), so
+# G122 / G124 / G602 / G703 — the four SSA analyzers in the list — are selected
+# the same way as the AST rules.
+#
+# This is the first case in this tier whose findings carry a **severity**:
+# golangci maps gosec's per-issue score to "low" / "medium" / "high"
+# (convertScoreToString), where every other linter leaves it empty. The golden
+# key includes severity, so this case is also the first to gate that mapping.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      includes:
+        - G101
+        - G102
+        - G103
+        - G104
+        - G106
+        - G107
+        - G108
+        - G109
+        - G110
+        - G111
+        - G112
+        - G114
+        - G122
+        - G124
+        - G203
+        - G204
+        - G301
+        - G302
+        - G303
+        - G306
+        - G401
+        - G402
+        - G403
+        - G404
+        - G405
+        - G406
+        - G501
+        - G502
+        - G503
+        - G504
+        - G505
+        - G506
+        - G507
+        - G602
+        - G703
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Several rules legitimately fire twice on one line (an import line is both a
+  # blocklisted import and, for md5/sha1, the source of a G401 call elsewhere),
+  # and G602 reports index and bounds separately.
+  uniq-by-line: false
+
+run:
+  timeout: 5m

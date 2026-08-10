@@ -270,21 +270,25 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列にして SA1000/1002/1007/1011 と printf の不正 UTF-8 差分を解消**（2026-08-10 5 本目） | 2026-08-10 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-10）: **547** checks 中 `never` **8** / `unit-only` **21** / `fired` **518（94.7%）**。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-11）: **547** checks 中 `never` **8** / `unit-only` **3** / `fired` **536（98.0%）**。
 （計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
 母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
 2026-08-08 の 2 本目のエントリ）。これで Phase 0 が残していた「staticcheck 161 モジュール」の内訳が確定し、
 guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装している**状態になった。
 
-`unit-only` が 102 → 21 に落ちたのは 2026-08-10 の revive ゴールデン化（83 件）による。
-残る 21 件の内訳は gosec 18 / revive 2 / golines 1。
+`unit-only` が 102 → 21 に落ちたのは 2026-08-10 の revive ゴールデン化（83 件）、
+21 → 3 に落ちたのは 2026-08-11 の gosec ゴールデン化（18 件）による。
+**残る 3 件は revive 2 / golines 1 だけ**で、「撃つことは確認済み・同じものを撃つかは未確認」の
+在庫はほぼ尽きた。次の投資先は `unit-only` ではなく、gosec の DEFERRED のように
+**そもそも実装が無い check**（§4 の 2026-08-11「次にやること 3」）と、
+ratchet が残っている staticcheck / revive の側にある。
 
 `never` の 8 件は staticcheck 3（`S1030` / `SA1027` / `SA3000`）/
 govet 2（`cgocall` / `framepointer` — どちらも §6）/ gocritic 1（`whyNoLint`、§6）/
@@ -296,7 +300,10 @@ revive 1（`time-naming`）/ swaggo 1。**うち 3 件は §6「恒久的に観�
 「fixture が無い」でもなく、`guff-constant` が文字列定数を Rust の `String` で持っていたために
 「valid UTF-8 か」という問いが構造上いつでも yes だった**、という形だった。しかも同じ症状が
 `crates/guff-staticcheck/tests/checks_test.rs` の唯一の `#[ignore]` の理由文にも書いてあった。
-**`never` の隣に `#[ignore]` を並べるだけで繋がる**ので、次にやること 1 に挙げてある。
+**`never` の隣に `#[ignore]` を並べるだけで繋がる** —— これは 2026-08-11 に
+`compat/coverage.py` へ組み込んだ（`docs/COVERAGE.md` の「`#[ignore]` されたテストが
+言及する check」節）。理由文だけでは足りず**テスト本体**まで見る必要がある、という
+細部も含めて §4 の同エントリに書いてある。
 
 なお 2026-08-09（4 本目）まで govet は 16 件が `never` に見えていたが、そのうち 1 件
 （`govet/testpass`）は**台帳側のバグ**だった: inventory は Rust の**モジュール名**を採り、
@@ -2581,6 +2588,168 @@ worktree で建て直して同じ機械で走らせるのに、ビルド 2 分�
 
 ---
 
+### 2026-08-11 — gosec 35 rule をゴールデン化（`unit-only` 21 → 3）と、`#[ignore]` の機械化
+
+**やったこと**
+
+前セッションの「次にやること 1」（`#[ignore]` と `never` の突き合わせ）と、
+台帳に残っていた最大の未突合ブロック（gosec の `unit-only` 18 件）。
+
+#### 0. なぜ gosec だったか
+
+`unit-only` 21 件のうち **18 件が gosec** で、その 18 件が持っていた「テスト」は
+
+```rust
+assert!(messages.iter().any(|m| m.contains("G301:")))
+```
+
+—— §1 が名指ししている形そのもの。しかも fixture は `testdata/gosec/stub/` の
+**偽の標準ライブラリ**に対して型検査されていた。golangci-lint と一度も突き合わせていない。
+
+#### 1. fixture は Go では**コンパイルできなかった**
+
+golden 化の最初の一歩（実モジュールに置いて `go build`）で 3 件の型エラーが出た:
+
+```go
+_ = des.NewCipher(nil)      // assignment mismatch: 1 variable but des.NewCipher returns 2 values
+_ = rc4.NewCipher(nil)
+_ = cgi.RequestFromMap(nil)
+```
+
+**スタブ側の signature は正しかった**（どれも 2 値を返すと書いてある）。
+見逃していたのは **guff の型検査器**で、`_ = f()` の arity 不一致を実装していない。
+Rust ハーネスは ill-typed を warning で流すので、誰も気付かない。§7 に記録した。
+
+これは「fixture が guff 経由でしか読まれていないと、実 stdlib の形に依存する
+バグは原理的に捕まらない」の実例で、golden tier が実モジュールを作ることの意味そのもの。
+
+#### 2. 初回は **52 件中 0 件一致**。原因は severity だった
+
+golden のキーは `path:line:col:linter:severity:text`。**gosec は golangci が
+severity を付ける唯一の linter**で（`convertScoreToString` → `low`/`medium`/`high`）、
+他の linter は空。guff はスコア表を**持っていた**（`severity:`/`confidence:` の
+フィルタに使う）のに、診断に載せていなかった。`Diagnostic::severity` は
+**ツリー全体で書き手が 1 人もいない**フィールドだった。
+
+**この 1 フィールドを見るゲートはここ以外に存在しない。**
+
+#### 3. 位置は 5 度目、しかも今回は**両方向**
+
+| rule | 上流 | guff |
+|---|---|---|
+| G101 | `AssignStmt.Pos()`（第 1 LHS） | `:=` トークン |
+| G104 | ExprStmt = call の Pos（callee） | `(` |
+| G108 / G50x | `ImportSpec.Pos()`（`_` があれば `_`） | path リテラル |
+| G112 | `CompositeLit.Pos()`（型） | `{` |
+| **G122 / G703** | **`(` = go/ssa の `CallCommon.pos`** | **callee** |
+
+前 4 つは「内側のトークンを指していた」いつもの形。後ろ 2 つは**その鏡像**で、
+`instr.Pos()` を使う SSA アナライザは go/ssa の仕様上 **Lparen** を指す。
+**AST ルールは node、SSA アナライザは Lparen** —— gosec ではこの 2 つが同居している。
+
+#### 4. G602: 上流で**到達不能な分岐**を、guff は唯一通る
+
+`trackSliceBounds` の再帰は `Alloc | Parameter | Slice` で、MakeSlice は入っていない。
+guff の移植はそれを**コメント付きで正確に写していた**。ところが:
+
+- go/ssa は `make([]T, 定数N)` を `Alloc *[N]T` + `Slice` に落とす。
+  だから上流の入口は Alloc で、再スライスの `X` は**常に直前の Slice**。
+  **MakeSlice の腕には一生入らない**（＝意味を持たない）。
+- guff は同じソースを **MakeSlice 1 個**に落とす。だから再スライスの `X` は MakeSlice で、
+  **上流が絶対に通らない腕だけが guff の通り道**だった。
+
+結果 `s := make([]byte, 10); s = s[:2]; s[4]` が**丸ごと黙る**。
+5 形の probe で上流と 2/5 → **5/5** に。
+
+**教訓**: IR が違う移植では、**上流で dead な分岐こそ最初に疑う**。
+「上流のとおりに書いた」は、上流と同じ入口を通っている場合にしか成り立たない。
+
+#### 5. G204: `TryResolve` を実装した（golden が見たのは 4 件中 1 件）
+
+guff の G204 は「引数が BasicLit か」だけを見ていた。上流は `resolve.go` の
+`TryResolve` を回す。8 形の probe を書いて golangci に食わせると、guff は **4 件過検出**:
+
+| 形 | 上流 | 直す前の guff |
+|---|---|---|
+| `v := "ls"; exec.Command(v)` | 黙る（Decl が literal） | 撃つ |
+| `const v = "ls"` | 黙る（`Obj.Kind != ast.Var`） | 撃つ |
+| `v := "ls"; v = os.Getenv(); exec.Command(v)` | **黙る**（Decl だけ見る＝フロー非依存） | 撃つ |
+| `func f(name string) { exec.Command(name) }` | 黙る（実行ファイル名の位置の param は除外） | 撃つ |
+
+**`ast.Ident.Obj` は parser のファイル単位の解決**である、というのがここの肝。
+同じパッケージの**別ファイル**で宣言された識別子は `Obj == nil` で、
+`resolveIdent` はそれを「解決済み」と扱う。guff の型情報はパッケージ全体を見えるので、
+そのまま辿ると**上流が黙る所で撃つ**。`gosec.rs` の `FileDecls` が
+意図的にファイルローカルなのはそのため。probe は 8/8 一致になった。
+
+#### 6. `#[ignore]` の機械化（前セッションの宿題）
+
+`compat/coverage.py` に `#[ignore]` の付いたテストの**本体ごと**走査して、
+そこで名指しされている check ID を台帳の状態と**同じ表に並べる**セクションを足した。
+
+理由文だけを見ても足りない、というのが SA1011 の教訓の中身である:
+あの `#[ignore]` の理由は `"SC-D08: guff string literals for \xNN … differ"` で、
+**`SA1011` という文字列はどこにも無かった**。ID が出ていたのは本体の側。
+だから関数本体を brace matching で取って照合している。
+単語が平凡な ID（`tests` / `dupl` / `lll`）は `name:` の描画形を要求して誤検出を落とす。
+
+現在の出力は 1 行だけで、それも `fired`（＝別のゲートが見ている）。
+**次に `#[ignore]` を書いた人は、それが `never` なら表の上で赤く並ぶ。**
+
+**結果**
+
+- **golden `gosec` ケースを新設: 54 findings / 54 一致・ratchet なし。**
+  35 rule 全部が載っている（G602 用の fixture `g602.go` を新規作成）。
+- 台帳: `unit-only` **21 → 3**（残りは revive 2 / golines 1）、`fired` 518 → **536（98.0%）**。
+  `never` は 8 のまま（うち 3 件は §6 の恒久組）。
+- `cargo test --workspace` **2,999 件緑**（+1: G602 の再スライス回帰テスト）。
+- golden 9 ケース全部緑（他ケースの ratchet は据え置き）、isolate **114 target**、
+  OSS `--tier pr,nightly` **8 target** すべて据え置き。
+- regress tsdb **PASS**、full も **PASS**（wall 2.400s / 限界 2.510s、finding 20/20 一致）。
+  最初の測定は 2.660s で赤かった —— その切り分けが次節。
+
+#### 7. full の wall は A/B を取って切り分けた
+
+`--profile full` が 2.660s（限界 2.510s）で赤くなった。前セッションの教訓どおり
+**「ホストのせい」と書く前に測った**。まず決定的な事実として、
+**prometheus の `.golangci.yml` は gosec を有効にしていない** —— 本セッションの
+変更は全部 gosec の中なので、full の経路には 1 行も乗っていない。
+そのうえで HEAD を worktree に建てて同一マシンで交互に測った（§4 の 2026-08-10 と同じ手順）:
+
+| 版 | wall（交互 3 回） | 中央値 |
+|---|---|---|
+| HEAD（`5705ad7`） | 2.370 / 2.420 / 2.400 | 2.400 |
+| 本セッション | 2.410 / 2.420 / 2.440 | 2.420 |
+
+差は 0.02s（0.8%）で run 間のばらつきの中、**どちらも限界 2.510s の内側**。
+赤かった 2.660s は `cargo test --workspace` の直後（load 5 分平均 4.25）に測ったもので、
+perf-guard の 1 分平均は通っていたが実際には冷めていなかった。
+**静かな状態で測り直したら PASS。**
+
+`--skip-golangci` を付けると 1 回 1 分弱で回るので、A/B は
+**worktree のビルド 2 分＋計測 6 分**で終わる。前セッションが 10 回先送りした作業と同じ規模である。
+
+**次にやること**
+
+1. **`_ = f()` の arity 不一致を guff-types に実装する**（§7）。
+   `check_assign.rs` の `assign_vars` / `init_vars` は `r == 1 && l != 1` のときだけ
+   `eval_multi` に入るので、`l == r == 1` で右辺が tuple の場合を素通りする。
+   Go は `assignment mismatch: 1 variable but f returns 2 values` を出す。
+   **ill-typed 判定がずれる = そのパッケージの findings が丸ごとずれる**ので、
+   Phase 1 のゲートの土台に当たる。上流のメッセージは callee 名を含む形なので、
+   `assign_error` の「単一 call の特別扱い」も要る。
+2. **`compat/oracles/goregexp` の 202 行（不正 UTF-8）の end-to-end 確認**
+   （前セッションの 2 番。まだ手つかず）。
+3. gosec の DEFERRED を golden に載せていく: G304 / G305 / G307 / G601 / G115 など
+   未実装分と、G402 の MinVersion / CipherSuites、G104 audit モード。
+   **`includes` に 1 行足して regen すれば、その rule の上流の答えがそのまま出る。**
+4. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+5. govet の未実装 16 pass。
+6. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+7. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -2660,6 +2829,33 @@ revive のバージョンを上げるときに再確認すること。
 
 §6 が「上流に食わせても観測できない」なら、こちらは「観測はできるが guff の
 構造上そのままでは再現できない」。**allowlist ではなく、代償を明記した設計判断**として記録する。
+
+### `_ = f()` の arity 不一致を型検査していない `[記録 2026-08-11 / 未修正]`
+
+**これは設計判断ではなく単なる欠落**なので、直すべきものとしてここに置く
+（§4 の 2026-08-11 の「次にやること 1」）。
+
+```go
+func two() (int, error) { return 0, nil }
+_ = two()      // go build: assignment mismatch: 1 variable but two returns 2 values
+x := two()     // 同上
+```
+
+`go build` は両方を落とすが、guff は**エラーを 1 件も出さずに解析を続ける**。
+`crates/guff-types/src/check_assign.rs` の `assign_vars` / `init_vars` が
+`r == 1 && l != 1` のときだけ `eval_multi` に入るためで、`l == r == 1` で
+右辺が tuple のときは `l == r` の枝を素通りする。go/types は `exprList` で
+**l に関係なく**多値を展開してから数を比べるので、この形も捕まる。
+
+影響は finding 1 件では済まない。**ill-typed かどうかはパッケージ単位の
+スイッチ**で、golangci-lint 側はこのパッケージを typecheck エラーとして
+他の findings を落とす。guff は落とさない。Phase 1 のゲートが数えているのは
+まさにこの差である。
+
+見つかった経緯そのものが教訓で、`testdata/gosec/bad.go` は
+**3 箇所この形を含んだまま何ヶ月も緑だった**。Rust のテストハーネスは
+ill-typed を warning で流し、guff の型検査器は気付かない。
+**実 Go ツールチェインに一度も読ませていない fixture は、こうなる。**
 
 ### 再帰の深さ — goroutine スタックは伸びる（SA1001）`[記録 2026-08-10]`
 

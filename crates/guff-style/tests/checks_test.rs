@@ -64,6 +64,26 @@ fn gosec_flags_weak_crypto_rand_unsafe_and_blocklist_imports() {
     }
 }
 
+/// G602 is the only SSA analyzer among guff's gosec rules and the only one
+/// bad.go does not reach, so it gets its own fixture. The forms that go
+/// through a re-slice (`s = s[:2]` then `s[4]`) are the ones the golden case
+/// found missing: guff lowers `make` to a single MakeSlice where go/ssa emits
+/// `Alloc` + `Slice`, and the bounds walk used to stop there.
+#[test]
+fn gosec_g602_tracks_bounds_through_reslices() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g602", "g602.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let bounds = messages
+        .iter()
+        .filter(|m| m.contains("G602: slice bounds out of range"))
+        .count();
+    let index = messages
+        .iter()
+        .filter(|m| m.contains("G602: slice index out of range"))
+        .count();
+    assert_eq!((bounds, index), (1, 2), "{messages:?}");
+}
+
 #[test]
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");

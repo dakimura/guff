@@ -244,3 +244,52 @@ rejects the name (`cannot find rule: multiline-if-init`). guff's
 lives in `config::AHEAD_OF_PIN_RULES`, outside the enable-all set but still
 runnable when named explicitly.
 
+
+## What the gosec case found
+
+`cases/gosec` put all 35 gosec rules guff implements under the gate — 18 of
+them had never been compared against golangci-lint at all, only asserted to
+fire by `assert!(messages.contains("G301:"))` against a stubbed stdlib. 52
+findings, 0 matching on the first run.
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Severity | 52 | **Every** finding. gosec is the one linter golangci grades — its wrapper maps each issue's score through `convertScoreToString` into `Severity: "low" / "medium" / "high"`, where every other linter leaves the field empty. guff had the score table (it needs it for the `severity:` / `confidence:` filters) and simply never put it on the diagnostic, so `Diagnostic::severity` had no writer in the whole tree. Nothing but this tier compares the field. |
+| Position | 6 | Inner tokens for the fifth time — and this case has them in **both** directions. The AST rules report `node.Pos()`: guff had the `:=` for an AssignStmt (G101), the `(` for a call (G104), the `{` for a composite literal (G112), the path literal for an ImportSpec (G108). The two SSA analyzers are the mirror: G122 and G703 report `instr.Pos()` on an `ssa.CallInstruction`, which in go/ssa is the **Lparen**, and guff reported the callee. |
+| Score | 1 | G703 was Medium/High in guff's table; `PathTraversalRule.Severity` is `"HIGH"`. |
+| Precision | 1 (+3) | G204 was `is_resolvable_literal` — a BasicLit test — where upstream runs `TryResolve`. The golden saw one instance; a probe of the eight shapes upstream distinguishes found three more, all silent until now: a `const` executable name, a variable reassigned after a literal initializer, and a parameter in the executable-name slot. |
+| Recall | 1 (+2) | G602 stopped one step into a re-slice: `s := make([]byte, 10); s = s[:2]; s[4]` reported nothing. See below. |
+
+Three are worth generalizing:
+
+* **A port can copy an unreachable branch and make it reachable.** gosec's
+  `trackSliceBounds` recurses for `*ssa.Alloc | *ssa.Parameter | *ssa.Slice`
+  and not for `*ssa.MakeSlice`. guff's port reproduced that switch exactly,
+  with a comment saying so. But upstream can never *reach* the MakeSlice arm:
+  go/ssa lowers `make([]T, constN)` to `Alloc *[N]T` + `Slice`, so the analyzer
+  enters at the Alloc and a re-slice's `X` is always the previous `Slice`.
+  guff lowers the same source to a single `MakeSlice`, so a re-slice's `X` *is*
+  a MakeSlice — the arm upstream never enters is the only one guff ever
+  reaches. **When the IR differs, the branch that is dead upstream is the one
+  to check first.**
+* **`ast.Ident.Obj` is per-file, and guff's type info is not.** gosec's
+  `resolveIdent` reads the **parser's** object graph, so an identifier declared
+  in another file of the same package has `Obj == nil` and counts as
+  *resolved*. A port that follows guff's package-wide type information instead
+  reports where gosec is silent. `FileDecls` in `gosec.rs` is deliberately
+  file-local for that reason. The same shape decides two more corners:
+  `Obj.Kind != ast.Var` exempts constants, and `Obj.Decl` points at the
+  *declaration*, so `v := "ls"; v = os.Getenv("X")` resolves to the literal —
+  upstream is flow-insensitive and guff has to be too.
+* **A fixture that never compiled.** `bad.go` had three calls assigning a
+  two-value result to one blank (`_ = des.NewCipher(nil)`). `go build` rejects
+  all three; the Rust harness only prints a warning, and guff's own type
+  checker does not implement that error at all, so nothing noticed. A fixture
+  reached only through guff cannot catch a rule that depends on the shape of
+  real stdlib signatures — materializing it into a module the real toolchain
+  loads is what surfaced it.
+
+The x/crypto rules (G106 / G406 / G506 / G507) need `golang.org/x/crypto` to
+resolve. The case gets it from a local `replace` onto the stub module the Rust
+tests already use, so the gate needs no network and no `go.sum`: the four rules
+match on import path plus function name, and `./...` skips a nested module.

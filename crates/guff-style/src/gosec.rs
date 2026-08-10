@@ -19,7 +19,9 @@
 //! - **G122** — `filepath.Walk`/`WalkDir` callback path into race-prone `os` sinks (AST approx of SSA)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
-//! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`)
+//! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`;
+//!   full `resolve.go` `TryResolve`, incl. the parameter/field exemption in the
+//!   executable-name slot — see `FileDecls` for why resolution is file-local)
 //! - **G301** — poor directory permissions (`os.Mkdir` / `MkdirAll`; default ≤ `0o750`)
 //! - **G302** — poor file permissions (`os.OpenFile` / `Chmod`; default ≤ `0o600`)
 //! - **G303** — tempfile creation under predictable shared `/tmp` paths
@@ -42,20 +44,23 @@
 //! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
 //! G101 zxcvbn entropy / full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
-//! string-lit TryResolve, full G204 TryResolve / G102 Ident const resolution,
-//! `severity`/`confidence` filters, concurrency.
+//! string-lit TryResolve, G102 Ident const resolution, concurrency.
+//!
+//! Every rule above is gated against golangci-lint 2.12.2 at check level by
+//! `compat/golden/cases/gosec` — including the **severity** golangci attaches
+//! to gosec findings and to no other linter's.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, Spec, ValueSpec,
+    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, ImportSpec, Spec, ValueSpec,
 };
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, ObjectId, TypeData};
 use guff_types::check_lookup::implements;
 use guff_types::new_pointer;
@@ -523,6 +528,20 @@ enum Score {
     High,
 }
 
+impl Score {
+    /// golangci-lint `convertScoreToString`, which is what lands in the
+    /// `Severity` field of a gosec issue. gosec is the only linter golangci
+    /// grades this way — every other one leaves the field empty — so this is
+    /// the only place guff sets `Diagnostic::severity`.
+    fn as_str(self) -> &'static str {
+        match self {
+            Score::Low => "low",
+            Score::Medium => "medium",
+            Score::High => "high",
+        }
+    }
+}
+
 /// golangci-lint `convertToScore`: `""`/`"low"` → Low, and anything
 /// unrecognized disables the filter (upstream returns `-1`, which every score
 /// compares `>=` against).
@@ -575,7 +594,9 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G506", Score::Medium, Score::High),
     ("G507", Score::Medium, Score::High),
     ("G602", Score::Low, Score::High),
-    ("G703", Score::Medium, Score::High),
+    // taint/analyzer.go grades every taint finding `rule.Severity` /
+    // `issue.High`, and `PathTraversalRule.Severity` is "HIGH".
+    ("G703", Score::High, Score::High),
 ];
 
 /// Severity/confidence for one finding.
@@ -726,7 +747,11 @@ fn g122_sink_pos(pass: &Pass<'_>, call: &CallExpr, path_param: &str) -> Option<u
             continue;
         };
         if expr_mentions_ident(arg, path_param) {
-            return Some(call.pos().0 as u32);
+            // `s.addIssue(instr.Pos())` on an `ssa.CallInstruction`, and
+            // go/ssa sets a call's pos to the CallExpr's **Lparen**, not to
+            // the callee. Same for G703 (taint's `call.Pos()`); the AST rules
+            // in this file report the node instead.
+            return Some(call.lparen.0 as u32);
         }
     }
     None
@@ -942,6 +967,33 @@ fn check_cred_value(
     false
 }
 
+/// `ast.Node.Pos()` for the three node kinds this file reports but that guff's
+/// AST only exposes as structs (the `pos()` methods live on the `Expr` / `Stmt`
+/// / `Spec` enums). gosec's `NewIssue(node, …)` takes `node.Pos()`, so getting
+/// these wrong shows up as a column diff and nothing else.
+fn assign_pos(assign: &AssignStmt) -> u32 {
+    assign
+        .lhs
+        .first()
+        .map(|e| e.pos())
+        .unwrap_or(assign.tok_pos)
+        .0 as u32
+}
+
+fn composite_lit_pos(lit: &CompositeLit) -> u32 {
+    lit.ty.as_ref().map(|t| t.pos()).unwrap_or(lit.lbrace).0 as u32
+}
+
+fn import_spec_pos(imp: &ImportSpec) -> u32 {
+    imp.name
+        .as_ref()
+        .map(|n| n.pos())
+        .unwrap_or(imp.path.value_pos)
+        .0 as u32
+}
+
+/// Upstream reports `assign` — `AssignStmt.Pos()`, i.e. the first LHS operand,
+/// not the `=`/`:=` token.
 fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     for lhs in &assign.lhs {
         let Expr::Ident(ident) = lhs else {
@@ -951,7 +1003,7 @@ fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, S
         if name_matched {
             for rhs in &assign.rhs {
                 if let Some(val) = string_lit_from_expr(rhs) {
-                    if check_cred_value(rt, pending, assign.tok_pos.0 as u32, true, &val) {
+                    if check_cred_value(rt, pending, assign_pos(assign), true, &val) {
                         return;
                     }
                 }
@@ -959,7 +1011,7 @@ fn check_g101_assign(rt: &G101Rt, assign: &AssignStmt, pending: &mut Vec<(u32, S
         }
         for rhs in &assign.rhs {
             if let Some(val) = string_lit_from_expr(rhs) {
-                if check_cred_value(rt, pending, assign.tok_pos.0 as u32, false, &val) {
+                if check_cred_value(rt, pending, assign_pos(assign), false, &val) {
                     return;
                 }
             }
@@ -1718,7 +1770,9 @@ fn check_g112_composite(
         return;
     }
     if !composite_has_timeout_field(lit) {
-        pending.push((lit.lbrace.0 as u32, format!("G112: {G112_WHAT}")));
+        // `NewIssue(node, …)` on the CompositeLit: its Pos() is the type, not
+        // the `{`.
+        pending.push((composite_lit_pos(lit), format!("G112: {G112_WHAT}")));
     }
 }
 
@@ -1962,10 +2016,252 @@ fn check_g703_sink_call(
         .iter()
         .any(|a| path_arg_is_g703_tainted(pass, a, tainted))
     {
-        pending.push((
-            call.pos().0 as u32,
-            format!("G703: {G703_WHAT}"),
-        ));
+        // `SinkPos: call.Pos()` on an `*ssa.Call` — the CallExpr's Lparen.
+        // See the note in `g122_sink_pos`.
+        pending.push((call.lparen.0 as u32, format!("G703: {G703_WHAT}")));
+    }
+}
+
+/// The node the parser would hang off an identifier's `Obj.Decl`, for the two
+/// kinds `TryResolve`'s switch knows how to walk.
+enum DeclNode<'a> {
+    Assign(&'a AssignStmt),
+    Value(&'a ValueSpec),
+}
+
+/// One file's view of gosec's `ast.Ident.Obj` graph, which is what
+/// `resolve.go` walks.
+///
+/// Upstream reads the **parser's** per-file object resolution, so an
+/// identifier whose declaration lives in another file of the same package has
+/// `Obj == nil`, and `resolveIdent` calls that *resolved* (returns true).
+/// guff's type information is package-wide and would happily follow the link,
+/// reporting where gosec is silent — so the lookup is deliberately file-local:
+/// a definition this file does not contain is a miss, and a miss means
+/// "no Obj".
+struct FileDecls<'a> {
+    /// Defining-ident position → its declaration, when `TryResolve` handles it.
+    decls: HashMap<u32, DeclNode<'a>>,
+    /// Every object defined in this file. A hit here without an entry in
+    /// `decls` is a parameter, a range clause, a type switch … — an
+    /// `Obj.Decl` the switch does not cover, so `TryResolve` returns false.
+    defined_here: HashSet<u32>,
+    /// `(lbrace, rbrace_end)` of every function body, in preorder. Upstream's
+    /// `getEnclosingBodyStart` keeps the **last** enclosing match, which for a
+    /// preorder walk is the innermost one.
+    bodies: Vec<(u32, u32)>,
+}
+
+impl<'a> FileDecls<'a> {
+    fn build(pass: &Pass<'_>, file: &'a guff::ast::File) -> Self {
+        let mut out = FileDecls {
+            decls: HashMap::new(),
+            defined_here: HashSet::new(),
+            bodies: Vec::new(),
+        };
+        let Some(info) = pass.types_info() else {
+            return out;
+        };
+        preorder(NodeRef::File(file), |n| {
+            match n {
+                NodeRef::Ident(id) => {
+                    if info.defs.contains_key(&id.id) {
+                        out.defined_here.insert(id.pos().0 as u32);
+                    }
+                }
+                NodeRef::AssignStmt(a) => {
+                    if a.tok == Some(Token::DEFINE) {
+                        for lhs in &a.lhs {
+                            if let Expr::Ident(id) = lhs {
+                                out.decls.insert(id.pos().0 as u32, DeclNode::Assign(a));
+                            }
+                        }
+                    }
+                }
+                NodeRef::ValueSpec(vs) => {
+                    for id in &vs.names {
+                        out.decls.insert(id.pos().0 as u32, DeclNode::Value(vs));
+                    }
+                }
+                NodeRef::FuncDecl(fd) => {
+                    if let Some(body) = fd.body.as_ref() {
+                        out.bodies
+                            .push((body.lbrace.0 as u32, body.rbrace.0 as u32 + 1));
+                    }
+                }
+                NodeRef::FuncLit(fl) => {
+                    out.bodies
+                        .push((fl.body.lbrace.0 as u32, fl.body.rbrace.0 as u32 + 1));
+                }
+                _ => {}
+            }
+            true
+        });
+        out
+    }
+
+    /// `getEnclosingBodyStart`: the `{` of the innermost function body around
+    /// `pos`, or `None` when there is none.
+    fn enclosing_body_start(&self, pos: u32) -> Option<u32> {
+        self.bodies
+            .iter()
+            .filter(|(lo, hi)| *lo <= pos && pos < *hi)
+            .next_back()
+            .map(|(lo, _)| *lo)
+    }
+}
+
+/// Port of gosec's `TryResolve` (`resolve.go`): can this expression be reduced
+/// to a compile-time constant by walking declarations?
+///
+/// The node kinds absent from upstream's switch — `SelectorExpr`, `ParenExpr`,
+/// `UnaryExpr`, … — fall through to `false`, so the list here is exhaustive on
+/// purpose and `_ => false` is the upstream default, not a gap.
+fn try_resolve(pass: &Pass<'_>, decls: &FileDecls<'_>, expr: &Expr, depth: u32) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    match expr {
+        Expr::BasicLit(_) => true,
+        Expr::CompositeLit(lit) => {
+            !lit.elts.is_empty()
+                && lit
+                    .elts
+                    .iter()
+                    .all(|e| try_resolve(pass, decls, e, depth + 1))
+        }
+        Expr::Ident(id) => resolve_ident(pass, decls, id, depth),
+        Expr::CallExpr(_) => false, // upstream `resolveCallExpr` is a stub
+        Expr::BinaryExpr(b) => {
+            try_resolve(pass, decls, &b.x, depth + 1) && try_resolve(pass, decls, &b.y, depth + 1)
+        }
+        Expr::KeyValueExpr(kv) => {
+            try_resolve(pass, decls, &kv.key, depth + 1)
+                && try_resolve(pass, decls, &kv.value, depth + 1)
+        }
+        Expr::IndexExpr(ix) => try_resolve(pass, decls, &ix.x, depth + 1),
+        Expr::SliceExpr(sl) => try_resolve(pass, decls, &sl.x, depth + 1),
+        _ => false,
+    }
+}
+
+/// `resolveIdent`: only `ast.Var` objects are followed; everything else
+/// (constants, functions, types) counts as resolved.
+fn resolve_ident(pass: &Pass<'_>, decls: &FileDecls<'_>, id: &Ident, depth: u32) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    let Some(obj) = code::object_of(pass, id) else {
+        return true; // no Obj
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+        return true; // Obj.Kind != ast.Var
+    }
+    let decl_pos = obj.pos(&artifacts.objects);
+    if !decls.defined_here.contains(&decl_pos) {
+        return true; // declared in another file of the package: no Obj
+    }
+    match decls.decls.get(&decl_pos) {
+        Some(DeclNode::Assign(a)) => {
+            !a.rhs.is_empty() && a.rhs.iter().all(|e| try_resolve(pass, decls, e, depth + 1))
+        }
+        Some(DeclNode::Value(vs)) => {
+            !vs.values.is_empty()
+                && vs
+                    .values
+                    .iter()
+                    .all(|e| try_resolve(pass, decls, e, depth + 1))
+        }
+        // A parameter, a receiver, a range clause …: `Obj.Decl` is a node
+        // `TryResolve` does not handle.
+        None => false,
+    }
+}
+
+/// G204 — subprocess launched with a variable.
+///
+/// A pass of its own because it needs [`FileDecls`]. Everything else in this
+/// file decides from the call alone.
+fn check_g204(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
+    if !enabled.contains("G204") {
+        return;
+    }
+    for file in pass.files() {
+        let decls = FileDecls::build(pass, file);
+        preorder(NodeRef::File(file), |n| {
+            if let NodeRef::CallExpr(call) = n {
+                check_g204_call(pass, &decls, call, pending);
+            }
+            true
+        });
+    }
+}
+
+fn check_g204_call(
+    pass: &Pass<'_>,
+    decls: &FileDecls<'_>,
+    call: &CallExpr,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+        return;
+    };
+    if !G204_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
+        return;
+    }
+    // `isContext` matches on the *written* selector, not the resolved import
+    // path: only a call spelled `exec.CommandContext` drops its first argument.
+    let is_context = matches!(
+        call.fun.as_ref(),
+        Expr::SelectorExpr(sel)
+            if sel.sel.name == "CommandContext"
+                && matches!(sel.x.as_ref(), Expr::Ident(x) if x.name == "exec")
+    );
+    let args: &[Expr] = if is_context && !call.args.is_empty() {
+        &call.args[1..]
+    } else {
+        &call.args
+    };
+
+    let artifacts = pass.pkg().type_artifacts.as_ref();
+    for (i, arg) in args.iter().enumerate() {
+        if let Expr::Ident(id) = arg {
+            let Some(artifacts) = artifacts else { continue };
+            let Some(obj) = code::object_of(pass, id) else {
+                continue;
+            };
+            let ObjectData::Var(var) = artifacts.objects.get(obj) else {
+                continue; // only *types.Var arguments are considered
+            };
+            if i == 0 {
+                if var.is_field() {
+                    continue;
+                }
+                // Declared before the enclosing body's `{`: a parameter or a
+                // receiver, which upstream exempts in the executable-name slot.
+                let ident_pos = id.pos().0 as u32;
+                if decls
+                    .enclosing_body_start(ident_pos)
+                    .is_some_and(|start| obj.pos(&artifacts.objects) < start)
+                {
+                    continue;
+                }
+            }
+            if !try_resolve(pass, decls, arg, 0) {
+                pending.push((
+                    call.pos().0 as u32,
+                    "G204: Subprocess launched with variable".to_string(),
+                ));
+                return;
+            }
+        } else if !try_resolve(pass, decls, arg, 0) {
+            pending.push((
+                call.pos().0 as u32,
+                "G204: Subprocess launched with a potential tainted input or cmd arguments"
+                    .to_string(),
+            ));
+            return;
+        }
     }
 }
 
@@ -2209,7 +2505,9 @@ fn check_g104_call(
         return;
     }
     if call_returns_error(pass, call) {
-        pending.push((call.lparen.0 as u32, "G104: Errors unhandled".to_string()));
+        // `NewIssue(n, …)` where n is the ExprStmt, whose Pos() is the call's,
+        // which is the callee's — not the `(`.
+        pending.push((call.pos().0 as u32, "G104: Errors unhandled".to_string()));
     }
 }
 
@@ -2260,30 +2558,8 @@ fn check_call(
         }
     }
 
-    if enabled.contains("G204") && G204_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
-        let skip_first = name == "CommandContext";
-        let args: &[Expr] = if skip_first && !call.args.is_empty() {
-            &call.args[1..]
-        } else {
-            &call.args
-        };
-        let mut flagged = false;
-        let mut msg = "G204: Subprocess launched with variable";
-        for arg in args {
-            if !is_resolvable_literal(arg) {
-                flagged = true;
-                if !matches!(arg, Expr::Ident(_)) {
-                    msg =
-                        "G204: Subprocess launched with a potential tainted input or cmd arguments";
-                }
-                break;
-            }
-        }
-        if flagged {
-            pending.push((call.pos().0 as u32, msg.to_string()));
-        }
-        // DEFERRED: full TryResolve / param/field skip parity with upstream.
-    }
+    // G204 needs the file's declarations, so it runs as its own pass over the
+    // files (`check_g204`) rather than from here.
 
     if enabled.contains("G111") && G111_CALLS.iter().any(|(p, n)| *p == pkg && *n == name) {
         // Upstream matches `http.Dir("/")` / `http.Dir('/')` via regex on reconstructed call text.
@@ -2415,10 +2691,12 @@ fn check_imports(
                     }
                     for (blocked, desc) in rule.imports {
                         if *blocked == path {
-                            pending.push((
-                                imp.path.value_pos.0 as u32,
-                                format!("{}: {}", rule.id, desc),
-                            ));
+                            // Both the blocklist rules and G108 report the
+                            // ImportSpec node, whose Pos() is the local name
+                            // when there is one. `_ "net/http/pprof"` reports
+                            // at the `_`, not at the path literal.
+                            pending
+                                .push((import_spec_pos(imp), format!("{}: {}", rule.id, desc)));
                         }
                     }
                 }
@@ -2444,6 +2722,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g109(pass, &enabled, &mut pending);
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
+    check_g204(pass, &enabled, &mut pending);
     check_g703(pass, &enabled, &mut pending);
     crate::gosec_g602::check_g602(pass, &enabled, &mut pending);
 
@@ -2486,7 +2765,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         {
             continue;
         }
-        pass.reportf(pos, &msg);
+        pass.report(Diagnostic {
+            pos,
+            message: msg,
+            severity: severity.as_str().to_string(),
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

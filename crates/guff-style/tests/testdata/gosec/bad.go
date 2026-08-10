@@ -38,20 +38,26 @@ func bad() {
 	_ = md5.New()
 	_ = sha1.Sum(nil)
 	_ = rand.Intn(10)
-	_ = des.NewCipher(nil)
-	_ = rc4.NewCipher(nil)
+	_, _ = des.NewCipher(nil)
+	_, _ = rc4.NewCipher(nil)
 	_ = md4.New()
 	_ = ripemd160.New()
 	var x uintptr
 	_ = unsafe.Pointer(x)
-	_ = cgi.RequestFromMap(nil)
+	_, _ = cgi.RequestFromMap(nil)
 
 	_ = ssh.InsecureIgnoreHostKey()
 	_ = http.ListenAndServe(":8080", nil)
 	_, _ = net.Listen("tcp", "0.0.0.0:8080")
 	_, _ = tls.Listen("tcp", ":8443", nil)
+	// Resolvable through gosec's TryResolve (Obj.Decl is an AssignStmt whose
+	// RHS is a literal), so upstream is silent here — kept so the golden shows
+	// its absence.
 	cmd := "ls"
 	_ = exec.Command(cmd)
+	envCmd := os.Getenv("GUFF_GOSEC_G204")
+	_ = exec.Command("sh", "-c", envCmd)
+	_ = exec.Command("sh", "-c", os.Getenv("GUFF_GOSEC_G204B"))
 
 	password := "f62e5bcda4fae4f82370da0c6f20697b8f8447ef"
 	_ = password

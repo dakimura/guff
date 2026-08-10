@@ -55,9 +55,12 @@ cargo build --release -p guff-lint
 
 > **`run.sh` 系のゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
 > isolate は 114 linter で合計 178 findings しか比較しておらず、キーは column も severity も
-> 見ていません。548 check のうち 133 は今なおどのテストでも一度も発火していません。
-> これを check 単位で潰していくのが `golden/` で、最初のケース（gocritic）は
-> 載せた時点で 44 件のバグを出しました。改善計画は
+> 見ていません。計画策定時（2026-08-07）は 548 check のうち 133 がどのテストでも
+> 一度も発火していませんでした。これを check 単位で潰していくのが `golden/` で、
+> 最初のケース（gocritic）は載せた時点で 44 件のバグを出し、
+> 直近の gosec は **52 件中 0 件一致**から始まりました
+> （golangci が severity を付ける唯一の linter が gosec で、guff は付けていなかった）。
+> 2026-08-11 時点で 547 check 中 `fired` 536 / `unit-only` 3 / `never` 8。改善計画は
 > [`../docs/COMPAT-HARDENING.md`](../docs/COMPAT-HARDENING.md)、現状値は
 > [`../docs/COVERAGE.md`](../docs/COVERAGE.md)。
 
