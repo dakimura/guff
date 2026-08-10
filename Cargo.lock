@@ -751,7 +751,6 @@ dependencies = [
  "guff-ssa",
  "guff-types",
  "regex",
- "regex-syntax",
  "unicode-general-category",
 ]
 

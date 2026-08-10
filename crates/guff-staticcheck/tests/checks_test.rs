@@ -427,9 +427,37 @@ fn sa1000_flags_invalid_regex_patterns() {
     );
     support::assert_well_typed(&pkg);
 
+    // Pinned in full. SA1000 prints regexp.Compile's error verbatim, so both
+    // the code and the Expr it quotes are user-visible — and a substring check
+    // for "error parsing regexp" passed for as long as this check was an
+    // approximation that got the rest of the line wrong.
     let messages = support::run_analyzer(sa1000::analyzer(), &pkg);
-    assert!(messages.len() >= 3, "{messages:?}");
-    assert!(messages.iter().all(|m| m.contains("error parsing regexp")));
+    assert_eq!(
+        messages,
+        vec![
+            "error parsing regexp: missing closing ): `foo(`",
+            "error parsing regexp: missing closing ]: `[`",
+            "error parsing regexp: unexpected ): `a)`",
+            "error parsing regexp: missing argument to repetition operator: `*`",
+            "error parsing regexp: invalid nested repetition operator: `**`",
+            "error parsing regexp: invalid repeat count: `{2,1}`",
+            "error parsing regexp: invalid repeat count: `{1001}`",
+            "error parsing regexp: invalid repeat count: `{100}`",
+            "error parsing regexp: invalid escape sequence: `\\q`",
+            "error parsing regexp: invalid escape sequence: `\\C`",
+            "error parsing regexp: trailing backslash at end of expression: ``",
+            "error parsing regexp: invalid character class range: `z-a`",
+            "error parsing regexp: invalid character class range: `[:foo:]`",
+            "error parsing regexp: invalid character class range: `\\p{Foo}`",
+            "error parsing regexp: invalid named capture: `(?P<>`",
+            "error parsing regexp: invalid named capture: `(?<a.b>`",
+            "error parsing regexp: invalid or unsupported Perl syntax: `(?=`",
+            "error parsing regexp: missing argument to repetition operator: `+`",
+            "error parsing regexp: invalid named capture: `(?P<>`",
+            "error parsing regexp: invalid escape sequence: `\\d`",
+        ],
+        "{messages:?}"
+    );
 }
 
 #[test]

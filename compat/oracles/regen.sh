@@ -12,7 +12,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 
-ALL="gotime goquote goquote-table gourl gotemplate gotemplate-table"
+ALL="gotime goquote goquote-table gourl gotemplate gotemplate-table goregexp goregexp-table"
 
 dest_for() {
   case "$1" in
@@ -22,25 +22,28 @@ dest_for() {
     gourl)         echo "crates/guff-staticcheck/tests/testdata/gostd/url_parse.tsv" ;;
     gotemplate)    echo "crates/guff-staticcheck/tests/testdata/gostd/template_parse.tsv" ;;
     gotemplate-table) echo "crates/guff-staticcheck/src/gostd/unicode_table.rs" ;;
+    goregexp)      echo "crates/guff-staticcheck/tests/testdata/gostd/regexp_compile.tsv" ;;
+    goregexp-table) echo "crates/guff-staticcheck/src/gostd/regexp_table.rs" ;;
     *) return 1 ;;
   esac
 }
 
-# The two -table oracles are the ones whose output is source rather than
-# testdata: strconv.IsPrint, unicode.IsLetter and unicode.IsDigit are pinned to
-# Go's own Unicode version and cannot be derived from a crate on a different
-# one. The tsv from the oracle of the same name is what gates each table.
+# The -table oracles are the ones whose output is source rather than testdata:
+# strconv.IsPrint, unicode.IsLetter/IsDigit, and unicode.Categories/Scripts/
+# SimpleFold are pinned to Go's own Unicode version and cannot be derived from a
+# crate on a different one. The tsv from the oracle of the same name gates each.
 dir_for() {
   case "$1" in
     goquote-table) echo "goquote" ;;
     gotemplate-table) echo "gotemplate" ;;
+    goregexp-table) echo "goregexp" ;;
     *) echo "$1" ;;
   esac
 }
 
 args_for() {
   case "$1" in
-    goquote-table|gotemplate-table) echo "-rust" ;;
+    goquote-table|gotemplate-table|goregexp-table) echo "-rust" ;;
     *) echo "" ;;
   esac
 }

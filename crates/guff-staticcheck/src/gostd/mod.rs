@@ -10,10 +10,12 @@
 //! is what lives here.
 
 mod isprint_table;
+mod regexp_table;
 mod unicode_table;
 
 pub mod fmt;
 pub mod netip;
+pub mod regexp;
 pub mod strconv;
 pub mod template;
 pub mod time;

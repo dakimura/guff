@@ -31,7 +31,11 @@ accepts, so SA1007 carried hand-written exceptions for shapes nobody had
 enumerated. SA1001 counted braces: it reported one message
 (`unexpected "}" in operand`, with the text before the action spliced in where
 the parse name goes) for the one shape it recognised, and was silent on the
-eleven other shapes that reach a reported message.
+eleven other shapes that reach a reported message. SA1000 leant on the Rust
+`regex` crate with hand-written rewrites in front of it, and agreed with Go on
+**1,987 of 4,014** corpus rows: 589 patterns Go accepts and it rejected, 389 it
+let through, 847 where both said "invalid" and the sentence differed, and 202 it
+could not be asked about at all.
 
 A second trap only this family has: the two whitelisted classes are a *subset*
 of the parse errors. Stopping at a different error than Go does is therefore
@@ -55,17 +59,22 @@ same rule [`../golden`](../golden/README.md) follows.
 | `goquote-table` | `crates/guff-staticcheck/src/gostd/isprint_table.rs` | `gostd::strconv::is_print` |
 | `gotemplate` | `crates/guff-staticcheck/tests/testdata/gostd/template_parse.tsv` | `gostd::template`, `gostd::fmt` (SA1001) |
 | `gotemplate-table` | `crates/guff-staticcheck/src/gostd/unicode_table.rs` | `gostd::unicode` |
+| `goregexp` | `crates/guff-staticcheck/tests/testdata/gostd/regexp_compile.tsv` | `gostd::regexp` (SA1000) |
+| `goregexp-table` | `crates/guff-staticcheck/src/gostd/regexp_table.rs` | `gostd::regexp`'s Unicode data |
 
 The Rust side is `crates/guff-staticcheck/tests/gostd_*.rs`.
 
-The two `-table` oracles are the outputs that are source rather than testdata.
-`strconv.IsPrint`, `unicode.IsLetter` and `unicode.IsDigit` are pinned to the
-Unicode version Go's own tables carry, and a Rust category crate on any other
-version disagrees on every code point assigned in between — 5812 of them between
-Go 1.26 and `unicode-general-category` 1.x. Go's `strconv` ships a generated
-table for the same reason, so guff keeps a copy of Go's rather than deriving one.
-The tsv of the same name is what gates each: the tests check the predicate for
-**every** rune against Go's answer.
+The three `-table` oracles are the outputs that are source rather than testdata.
+`strconv.IsPrint`, `unicode.IsLetter`, `unicode.IsDigit`, and the
+`Categories` / `Scripts` / `SimpleFold` data `regexp/syntax` consults are pinned
+to the Unicode version Go's own tables carry, and a Rust category crate on any
+other version disagrees on every code point assigned in between — 5812 of them
+between Go 1.26 and `unicode-general-category` 1.x. Go's `strconv` ships a
+generated table for the same reason, so guff keeps a copy of Go's rather than
+deriving one. The tsv of the same name is what gates each: for the predicates
+the tests check **every** rune against Go's answer, and for the range tables the
+corpus does it indirectly — the names decide whether `\p{Foo}` is a finding, and
+the ranges feed the rune budget `expression too large` is measured against.
 
 ## Format
 
@@ -88,6 +97,12 @@ along in the same file, and a `parse` row carries a **fourth** column — the
 package the receiver came from, so the test asserts on every row that the two
 agree, which is what lets one port serve both.
 
+`goregexp` deviates in the third column, which is **hex rather than verbatim**.
+`syntax.Error` embeds `Expr`, a raw slice of the pattern, between backquotes,
+and that slice can hold a tab, a newline, or bytes that are not valid UTF-8 —
+`invalid UTF-8` reports precisely the ill-formed tail. There is no quoting step
+to lean on, so the Rust side compares bytes.
+
 ## Go version, and what pins it
 
 Regenerate under a different Go toolchain and rows will move. That is the point:
@@ -106,4 +121,7 @@ Two couplings are worth knowing before you regenerate:
   the last, behind a godebug whose default comes from the main module's go
   directive (go.dev/issue/75223). guff has to match **golangci-lint's** build,
   and v2.12.2 declares `go 1.25.0`. Bump this when golangci-lint bumps its own.
-- **Unicode version** (`goquote-table`), as above.
+- **Unicode version** (`goquote-table`, `gotemplate-table`, `goregexp-table`), as
+  above. `goregexp-table` is the one where a bump is visible to users twice over:
+  a script or category Go adds becomes a `\p{…}` that stops being a finding, and
+  the range sizes move the rune budget behind `expression too large`.

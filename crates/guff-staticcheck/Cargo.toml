@@ -19,7 +19,6 @@ guff-constant = { path = "../guff-constant" }
 guff-types = { path = "../guff-types" }
 guff-ssa = { path = "../guff-ssa" }
 regex = "1"
-regex-syntax = "0.8"
 unicode-general-category = "1"
 
 [dev-dependencies]

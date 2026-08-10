@@ -8,7 +8,7 @@ use guff::ast::Expr;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::is_call_to_any;
+use guff_analysis::code::{call_name, is_call_to_any};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -46,7 +46,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1007 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<u32> = Vec::new();
+    let mut pending: Vec<(u32, String)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
         let NodeRef::CallExpr(call) = node else {
             return;
@@ -56,6 +56,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         {
             return;
         }
+        // Upstream interpolates the symbol it matched, so the message names
+        // whichever of the two was called.
+        let Some(callee) = call_name(pass, &call.fun) else {
+            return;
+        };
         let Expr::BasicLit(lit) = &call.args[0] else {
             return;
         };
@@ -65,12 +70,14 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !should_use_raw_string_src(&lit.value) {
             return;
         }
-        pending.push(lit.value_pos.0 as u32);
+        pending.push((lit.value_pos.0 as u32, callee));
     });
-    for pos in pending {
+    for (pos, callee) in pending {
         pass.report_unless_generated(
             pos,
-            "should use raw string (`...`) with regexp.Compile to avoid having to escape twice",
+            &format!(
+                "should use raw string (`...`) with {callee} to avoid having to escape twice"
+            ),
         );
     }
     Ok(None)

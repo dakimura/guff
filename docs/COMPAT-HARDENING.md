@@ -270,7 +270,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 26 / extra 13）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。stdlib 移植は SA1001 / SA1002 / SA1007 完了・**残るは SA1000 のみ** | 2026-08-10 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 9 / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009） | 2026-08-10 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
@@ -301,7 +301,7 @@ observe は**メッセージ接頭辞＝analyzer 名**（`tests`）で照合し�
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
 **台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
-「一致している」ではない。一致の指標は golden の ratchet（現在 missing 26 / extra 13）と
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 9 / extra 9）と
 OSS / isolate ゲートの側にある。2026-08-09（3 本目）の SA1002 も同じ形で、
 **`fired` 済み・isolate 緑のまま `time.Parse("not-a-layout", …)` を撃ち続けていた**
 （上流は撃たない）。
@@ -2235,6 +2235,159 @@ Go から生成し、**全 rune で** Go の答えと突き合わせている。
 5. **`add-constant` が config を一切読まない**。Phase 4 の材料。
 6. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
 
+### 2026-08-10（4 本目）— SA1000 を `regexp` クレートから `regexp/syntax` の移植に置き換えた
+
+**やったこと**
+
+前セッションの「次にやること 1」。**stdlib 近似は 5 つとも移植になり、この族は終わった**。
+staticcheck-sa の ratchet は **missing 12 / extra 12 → 9 / 9**。
+
+#### 0. 移植前の実測 — 4,014 行中 1,987 行（49.5%）しか合っていなかった
+
+`compat/oracles/goregexp` を先に作り、旧実装（Rust `regex` クレート + 手書きの書き換え）を
+そのまま走らせて数えた。**この数字を取るのが移植の最初の一手**で、SA1002 / SA1007 / SA1001 と同じ順序。
+
+| 内訳 | 件数 |
+|---|---:|
+| 一致 | 1,987 |
+| **誤検出**（Go は受理するのに撃つ） | **589** |
+| **見逃し**（Go は拒否するのに黙る） | **389** |
+| 文言違い（どちらも「不正」だが文が違う） | 847 |
+| そもそも問い合わせられない（入力が UTF-8 でない） | 202 |
+
+誤検出 589 は「Rust の受理集合が RE2 と違う」1 点に集約される。旧実装はそれを
+`{`/`}` の逃がしと `[\w-.]` の逃がしという**手書きの書き換え 2 本**で埋めていたが、
+それは caddy と grafana で実際に踏んだ形だけを塞いだものだった。
+
+#### 1. この族の中で SA1000 だけが持つ 3 つの罠
+
+| 罠 | 中身 |
+|---|---|
+| **`Expr` も一致させる** | 文言は ``error parsing regexp: <Code>: `<Expr>` ``。`Expr` は**サイト毎に違う部分文字列**で、`unexpected )` は正規表現全体、`invalid escape sequence` はエスケープ 2 バイト、`invalid repeat count` は演算子とその被演算子、`trailing backslash` は**空文字列**。Code が合っていて slice が違えば golden は同じように落ちる |
+| **木を本当に建てないと出ない Code がある** | `expression too large` は**ノードのサイズ**、`expression nests too deeply` は**高さ**、`invalid repeat count` の一部は `repeatIsValid` による**木の再走査**から出る。字句を舐めるだけの実装ではこの 3 つに到達できない。したがって `factor` の 4 ラウンドまで含めた**パーサ全体**の移植になった |
+| **whitelist が無い** | SA1001 は `unexpected` / `bad character` の 2 クラスだけ報告するので、移植が困ったときは「その 2 語を含まない文字列を返せば黙る」という逃げ道があった。SA1000 は `regexp.Compile` が返した error を**全部**報告する。**guff 固有の文字列を返す逃げ道が無い**ので、判定できないときは `CompileResult::Undecided` という**第 3 の状態**を作り、SA1000 側が何も報告しない形にした |
+
+#### 2. オラクル `compat/oracles/goregexp`
+
+atoms × wrappers の格子 + 単発形で **4,014 パターン**。うち **1,439 がエラー**で、
+**到達可能な ErrorCode 14 種すべて**に届く（`ErrInternalError` は構造上到達不能、
+`ErrInvalidCharClass` は宣言だけで `parse.go` のどこからも返らない）。**202 行は入力が
+不正な UTF-8** で、これは `ErrInvalidUTF8` の `Expr` が「不正になった以降の末尾そのもの」だから。
+
+行の形は他のオラクルと 1 点違う（README に記載）: **3 列目が verbatim ではなく hex**。
+`Expr` はパターンの生の slice なので、タブでも改行でも UTF-8 でないバイトでもあり得る。
+`gourl` のように「必ず quote を通るから安全」とは言えないので、Rust 側はバイトで突き合わせる。
+
+限界の 2 行は意図的に大きい。`maxRunes`（33.5M rune）は **Go が持つ中で最も rune 密度の高い
+クラス `\pC`（3 バイトで 1,424 rune）**を 23,564 個並べてようやく跨ぐので、その前後 2 行だけで
+ファイルの大半を占める。オラクル側に**「`\pC` は今も 1,424 rune か」「その個数で本当に境界を
+跨ぐか」を実パーサに問い合わせる assert** を置いてあるので、Go が Unicode を上げて密度が
+変わればコーパスが静かに境界を外すのではなく、生成が落ちる。
+
+#### 3. 移植したもの
+
+| モジュール | 中身 |
+|---|---|
+| `gostd/regexp.rs` | `regexp/syntax/parse.go` の全体（`syntax.Perl` モードのみ）。ノードはアリーナ + free list で、**Go がポインタを height / size マップのキーにしている**のをそのまま再現する（`reuse` された id が次の `newRegexp` で再利用される順序まで一致させないとキーがずれる） |
+| `gostd/regexp_table.rs`（生成・240 KB） | `unicode.Categories` / `Scripts` / `FoldCategory` / `FoldScript` / `CategoryAliases` / `SimpleFold` |
+
+**テーブルを生成する理由が `isprint_table` と 1 つ増えている**。名前の集合は
+「`\p{Foo}` が finding になるかどうか」を決め、**range の中身は `p.numRunes` を通じて
+`expression too large` の閾値を決める**。前者だけならクレートでも代用できるが、後者は無理。
+
+#### 4. 再帰の上限は **2 つに分けた**（`MAX_FACTOR_DEPTH` / `MAX_WALK_DEPTH`）
+
+SA1001 と同じ「goroutine スタックは伸びる」問題だが、**1 つの数字では成立しなかった**。
+
+- `factor` → `collapse` → `factor` は**共通リテラル接頭辞 1 rune につき 1 段**潜る。
+  フレームが太く（debug 実測で **600 段が 2 MiB を溢れさせる**）、しかも
+  **下りでは Go 自身の `maxHeight` が効かない**（高さの検査は木を建てる上りで走る）。
+- 一方 `calcSize` / `calcHeight` / `Equal` / `repeatIsValid` はフレームが薄く、
+  **上限は Go の `maxHeight`（1000）を越えていないといけない**。越えていないと
+  `(((…1001 段…)))` が Go では `expression nests too deeply` なのに guff は黙る。
+
+そこで前者 **250**、後者 **2000**。代償は「接頭辞連鎖が 250 段より深いパターンで
+Go が撃つ `nests too deeply` を撃たない」ことだけで、**誤検出は増えない**。
+実在の交替は接頭辞を数 rune しか共有しないので、踏むのは `a|aa|aaa|…` の形だけである。
+なお `a|aa|…` は **n ≈ 8190 を越えると rune 予算の方が先に効く**ので、そこから先は再び一致する
+（`tests/gostd_regexp.rs` が 2 MiB スレッドで 3 方向とも固定している）。
+
+#### 5. コーパスを 5 個の変異で殴って、盲点を 1 つ確認した
+
+4,014 行が**一発で全部通った**ので、ゲートの側が壊れていない証拠を取った。
+移植に既知のバグを 1 つずつ入れて、コーパスが検出するかを見る:
+
+| 入れた変異 | 検出 |
+|---|---:|
+| メッセージ文言を 1 語変える（`missing closing ]` → `missing close ]`） | **57 行** |
+| `unexpected )` の `Expr` を全体から先頭 1 バイトに縮める | **20 行** |
+| `maxHeight` を 1000 → 1100 | **2 行** |
+| `appendRange` の隣接マージ（`+1`）を落とす | **1 行** |
+| **`\P` の符号反転を無視する（`sign = -1` を消す）** | **0 行** |
+
+`a{1000}` の上限を 1001 に変える変異も試したが**検出されない ―― これは正しい**。
+`a{1001}` は境界チェックを抜けても `repeatIsValid` が**同じ Code・同じ Expr** で捕まえる。
+
+最後の 1 つは**本物の盲点**で、しかも直しようがない種類のもの:
+**符号（`\p` と `\P`）はクラスの中身しか変えず、SA1000 はクラスの中身を報告しない**。
+唯一漏れ出す経路は `p.numRunes` → `expression too large` で、そこに届くには
+`\PC` を 2 万個以上並べた行が要る（rune 予算の境界行は `\pC` で既に 280 KB ある）。
+**オラクルは SA1000 が観測するものしか観測できない**という、この方法自体の限界の 2 例目
+（1 例目は 2026-08-10（3 本目）の再帰の深さ）。実害は無い ――
+符号を間違えても**誤った finding は出ず**、非現実的な入力で rune の数だけがずれる。
+
+#### 6. fixture の建て直しが S1007 のバグを 1 件出した
+
+`bad.go` は 3 件しか無かったので、**書ける長さのリテラルで到達できる Code を全部**（12 サイト・20 件）に
+建て直し、`ok.go` には**旧実装が誤検出していた形**（caddy の `{…}`、grafana の `[…[…]`、
+`\Q…\E`、`[\w-.]`）を並べた。`checks_test.rs` の
+`assert!(m.contains("error parsing regexp"))` は**近似時代もずっと通っていた**ので、
+SA1001 / SA1007 と同じくメッセージ全文を固定した。
+
+新しい `regexp.MustCompile("\\")` が **S1007** を撃ち、そこで判明:
+guff は文言に `regexp.Compile` を**ハードコード**していた。上流は
+`m.State["fn"]`（マッチしたシンボル）を差し込むので `MustCompile` を呼べば
+`MustCompile` と出る。**新しい fixture が無ければ出なかった差分**で、ratchet が
+12 → 10 ではなく 12 → 9 まで落ちたのはこの 1 件のおかげ。
+
+**結果**
+
+- golden 8 ケースすべて緑。staticcheck-sa は **223/223 中 214 一致**（ratchet **9/9**）で、
+  SA1000 の diff は **missing 3 / extra 3 → 0 / 0**。
+- 新テスト `tests/gostd_regexp.rs`（4,014 パターン ＋ 再帰の深さ）。
+- `cargo test --workspace` **2,986 件緑**、isolate **114 target 一致**、
+  OSS `--oss --tier pr,nightly` 8 target すべて据え置き。
+- `guff-staticcheck` から **`regex-syntax` 依存が外れた**（`guff-style` の gocritic 2 check は今も使う）。
+- **台帳（`docs/COVERAGE.md`）の件数は変化なし**（517 / 21 / 9）。SA1000 は元から `fired`。
+  §3 が繰り返し書いているとおり **`fired` は「一致している」を意味しない**。
+- **「次にやること 3」を消化**: `.github/workflows/compat.yml` に `unit` ジョブ
+  （`cargo test --workspace`）を追加した。5 セッション連続で先送りされていたもので、
+  **golden / isolate が駆動した修正はすべてここに assertion として着地しているのに、
+  CI では誰も走らせていなかった**。`gostd_regexp` も stdlib differential のステップに追加。
+- regress は **tsdb PASS**（wall 0.850s ≤ 上限 0.880s）、**full は wall だけ FAIL**
+  （2.630s > 上限 2.480s）。**finding は両プロファイルとも完全一致**
+  （tsdb 4/4、full 20/20、`guff_only` / `golangci_only` ともに 0）なので、
+  赤いのは wall ゲート 1 本だけである。
+  なお同じ tsdb を負荷の下で回した 1 回目は 0.940s で落ちており、続く 2 回は
+  **ハーネス自身の perf-guard が `load average 2.90 > 2.50` と
+  「cargo/rustc が動いている」で計測を拒否した** —— 上の 0.850s は
+  guard を満たす静かな状態で取った値である。
+  §4 の 2026-08-10（2・3 本目）と同じ現象で、ベースライン取り直しの必要は変わらない。
+
+**次にやること**
+
+0. **regress `--profile full` の wall ゲートのベースライン取り直し**（9 セッション連続）。
+   手順は 2026-08-10（2 本目）の §7。**perf-guard が効く静かな状態で取ること**。
+1. **Go 文字列定数がバイト列でない**（§7 に新規記録）。`regexp.MustCompile("\xff")` を
+   上流は `invalid UTF-8` で撃ち、guff は**何も撃たない**。移植側は正しく、
+   落としているのは `guff-constant` の `Value::String(Rc<String>)`。
+   SA1000 に残る**唯一の既知の非一致**であり、`gostd::regexp` は
+   `compile_bytes` を公開済みなので、直すのは定数層の側。
+2. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+3. govet の未実装 16 pass。
+4. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+5. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -2337,6 +2490,51 @@ Go は goroutine スタックが伸びるので `{{if}}` を 10 万段ネスト�
 実在のテンプレートは 1 桁段しかネストしない。
 `tests/gostd_template.rs` が **2 MiB スレッド（本番の 1/4）で 10 万段**を回して
 abort しないことを固定している。
+
+### 再帰の深さ、二度目 — `factor` は木の高さでは抑えられない（SA1000）`[記録 2026-08-10]`
+
+SA1001 と同じ問題だが、**上限を 1 つにすると成立しない**ことが分かったので分けて記録する。
+`gostd::regexp` の再帰は 2 種類あり、**コストも到達条件も違う**。
+
+| 再帰 | 1 段のコスト | 何が抑えるか |
+|---|---|---|
+| `factor` → `collapse` → `factor` | **debug 実測で 600 段が 2 MiB を溢れさせる**（Vec を数本持つ） | **何も抑えない**。共通リテラル接頭辞 1 rune につき 1 段潜り、Go の `maxHeight` は木を建てる**上り**でしか効かない |
+| `calcSize` / `calcHeight` / `Equal` / `repeatIsValid` | 局所変数数個 | Go の `maxHeight`（1000）。ただし**上限がそれ未満だと不一致になる** |
+
+したがって `MAX_FACTOR_DEPTH = 250` / `MAX_WALK_DEPTH = 2000`。
+後者を 1000 より大きく取らないと `(((…1001 段…)))` が
+**Go では `expression nests too deeply` なのに guff は黙る**。
+
+超えたときは `CompileResult::Undecided` を返し、**SA1000 は何も報告しない**。
+SA1001 が使った「Go に存在しない文字列を返す」逃げ道は使えない ——
+SA1000 は `regexp.Compile` の error を**全部**報告するので、whitelist の外側が無い。
+
+代償は「接頭辞連鎖が 250 段より深いパターンで上流が撃つ finding を撃たない」ことだけ
+（**誤検出は増えない**）。実在の交替は接頭辞を数 rune しか共有しない。
+なお `a|aa|aaa|…` は n ≈ 8190 を越えると rune 予算の方が先に効くので、そこから先は再び一致する。
+
+### Go の文字列定数はバイト列、guff の定数は `String`（SA1000 ほか）`[記録 2026-08-10]`
+
+Go の `string` は**バイト列**で、`"\xff"` は 1 バイトの 0xFF。
+guff は `guff-constant` の `Value::String(Rc<String>)` ＝ Rust の `String`（= rune 列）で持つので、
+`parse_string_lit` は `\xff` を**コードポイント U+00FF**（UTF-8 で 2 バイト）にしてしまう。
+`guff-ast` の scanner にも同じ注記が既にあるが、**そちらはソース中の不正バイト**の話で、
+こちらは**エスケープの復号**なので別経路である。
+
+観測できる形（`compat/oracles/goregexp` の 202 行はこの入力を扱うが、**通るのは移植の側だけ**）:
+
+```go
+regexp.MustCompile("\xff")
+// golangci-lint: SA1000: error parsing regexp: invalid UTF-8: `<0xFF>`
+// guff:          （何も出ない）
+```
+
+`gostd::regexp` 自体は正しく、`compile_bytes(&[u8])` を公開していて
+オラクルの 202 行に一致する。落としているのは**その手前の定数層**なので、
+SA1000 の fixture にはこの形を置いていない（置くと ratchet が恒久的に 1 増えるだけで、
+直す場所は `guff-staticcheck` の外にある）。**SA1000 に残る唯一の既知の非一致**。
+
+同じ理由で SA1001 / SA1007 も不正 UTF-8 の定数では上流とずれるはずだが、未確認。
 
 ### 依存パッケージを跨ぐ purity 推論（SA4017）
 

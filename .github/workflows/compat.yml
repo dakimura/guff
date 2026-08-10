@@ -45,7 +45,9 @@ jobs:
       # artifacts from the step above — this job has no Cargo cache, and a debug
       # profile would recompile the whole dependency tree.
       - name: Go-stdlib port differentials
-        run: cargo test --release -p guff-staticcheck --test gostd_time --test gostd_url --test gostd_template
+        run: |
+          cargo test --release -p guff-staticcheck \
+            --test gostd_time --test gostd_url --test gostd_template --test gostd_regexp
 
       - name: Compat smoke (fixture)
         run: ./compat/smoke.sh
@@ -57,6 +59,37 @@ jobs:
       # printed in full and the step fails if the count grows (compat/golden/README.md).
       - name: Golden gate (check-level)
         run: ./compat/golden/run.sh
+
+  # The crate test suites: ~3,000 tests that nothing else here runs.
+  #
+  # These do not compare against golangci-lint — they assert that guff fires,
+  # not that it fires the same thing (docs/COMPAT-HARDENING.md §1) — so they are
+  # not a compat gate. They are the regression net *under* one: every fix the
+  # golden and isolate tiers drive is landed as an assertion here, and until now
+  # nothing on CI executed them, so a fix could be undone by a later commit and
+  # only resurface as a golden diff, if at all.
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-workspace-debug
+          cache-targets: true
+
+      - name: Workspace tests
+        run: cargo test --workspace
 
   # Thorough gate: every curated linter alone vs golangci-lint (114 targets).
   # Catches parity holes that multi-linter OSS configs hide.
