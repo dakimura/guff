@@ -54,7 +54,8 @@ enum CaseKey {
     Int(i64),
     Uint(u64),
     Float(u64), // f64 bit pattern (f64 is not Eq/Hash directly)
-    Str(String),
+    // Bytes, not text — see MapKey::Str in literals.rs.
+    Str(Vec<u8>),
 }
 
 /// Equivalent to Go's `goVal(constant.Value) any`.

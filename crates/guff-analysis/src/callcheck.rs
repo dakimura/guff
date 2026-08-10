@@ -321,18 +321,35 @@ pub fn extract_const<'a>(
     }
 }
 
-/// Like [`extract_const`] but requires a string constant value.
-pub fn extract_const_string(
+/// Like [`extract_const`] but requires a string constant value, returned as
+/// the **bytes** Go would see: `"\xff"` is one byte, not U+00FF.
+///
+/// Use this whenever the bytes are handed to a parser — `regexp.Compile`,
+/// `url.Parse`, `time.Parse` — because the error those return depends on the
+/// exact bytes, and an ill-formed one is precisely the interesting case.
+pub fn extract_const_bytes(
     prog: &Program,
     caller: &Function,
     value: SsaValue,
-) -> Option<String> {
+) -> Option<Vec<u8>> {
     let c = extract_const(prog, caller, value)?;
     let val = c.val.as_ref()?;
     if val.kind() != Kind::String {
         return None;
     }
     Some(string_val(val))
+}
+
+/// [`extract_const_bytes`] decoded as UTF-8, with ill-formed bytes replaced by
+/// U+FFFD — which is what Go itself yields when a check ranges over the
+/// string. Callers that inspect the bytes want [`extract_const_bytes`].
+pub fn extract_const_string(
+    prog: &Program,
+    caller: &Function,
+    value: SsaValue,
+) -> Option<String> {
+    extract_const_bytes(prog, caller, value)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// Like [`extract_const`] but requires an integer constant value.

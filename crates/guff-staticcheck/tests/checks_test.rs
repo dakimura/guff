@@ -452,6 +452,15 @@ fn sa1000_flags_invalid_regex_patterns() {
             "error parsing regexp: invalid named capture: `(?P<>`",
             "error parsing regexp: invalid named capture: `(?<a.b>`",
             "error parsing regexp: invalid or unsupported Perl syntax: `(?=`",
+            // A Go string is bytes, so these five reach the scanner as the
+            // ill-formed bytes they name. The last one reports the bad byte
+            // rather than the unclosed group: `regexp/syntax` checks UTF-8
+            // while lexing, before it ever sees the `(`.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}b`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}\u{fffd}\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
             "error parsing regexp: missing argument to repetition operator: `+`",
             "error parsing regexp: invalid named capture: `(?P<>`",
             "error parsing regexp: invalid escape sequence: `\\d`",
@@ -494,6 +503,11 @@ fn sa1002_flags_invalid_parse_layouts() {
             r#"parsing time "12345" as "12345": cannot parse "" as "4""#.to_string(),
             r#"parsing time "1234" as "1234": cannot parse "" as "3""#.to_string(),
             r#"parsing time "123456": hour out of range"#.to_string(),
+            // The layout is bytes and ParseError quotes it, so an ill-formed
+            // one has to print as `\xff` — the single byte, not the three of
+            // a U+FFFD.
+            r#"parsing time "12345\xff" as "12345\xff": cannot parse "\xff" as "4""#.to_string(),
+            r#"parsing time "\xff1234" as "\xff1234": cannot parse "" as "3""#.to_string(),
         ],
     );
 }
@@ -604,6 +618,9 @@ fn sa1007_flags_invalid_urls() {
             r#""http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal"#.to_string(),
             r#""http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")"#.to_string(),
             r#""http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo"#.to_string(),
+            // `%q` renders the ill-formed byte as `\xff`; a U+FFFD would have
+            // printed `\xef\xbf\xbd`, three escapes where Go writes one.
+            r#""http://example.com/\x7f\xff" is not a valid URL: parse "http://example.com/\x7f\xff": net/url: invalid control character in URL"#.to_string(),
         ],
     );
 }
@@ -817,7 +834,6 @@ fn sa1010_allows_nonzero_findall_count() {
 }
 
 #[test]
-#[ignore = "SC-D08: guff string literals for \\xNN (NN>=0x80) differ from Go byte strings"]
 fn sa1011_flags_invalid_utf8_cutsets() {
     let dir = support::testdata("sa1011");
     let strings_stub = dir.join("stub/strings/strings.go");
@@ -828,8 +844,11 @@ fn sa1011_flags_invalid_utf8_cutsets() {
     );
     support::assert_well_typed(&pkg);
 
+    // One per call in bad.go. This used to be `>= 2` behind an `#[ignore]`:
+    // string constants were held as Rust text, so "is this valid UTF-8?" was
+    // answered by the representation rather than by the program.
     let messages = support::run_analyzer(sa1011::analyzer(), &pkg);
-    assert!(messages.len() >= 2, "{messages:?}");
+    assert_eq!(messages.len(), 6, "{messages:?}");
     assert!(
         messages
             .iter()

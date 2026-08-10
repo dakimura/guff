@@ -389,8 +389,9 @@ impl<'a> Matcher<'a> {
                 if val.kind() != Kind::String {
                     return None;
                 }
-                let s = guff_constant::string_val(val).to_string();
-                if &s != want {
+                // Byte comparison: the pattern's literal is Rust text, but the
+                // constant is a Go byte string and may not be valid UTF-8.
+                if guff_constant::string_val(val) != want.as_bytes() {
                     return None;
                 }
                 Some(MatchValue::Node(node))

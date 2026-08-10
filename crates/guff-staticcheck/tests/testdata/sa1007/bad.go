@@ -13,4 +13,7 @@ func main() {
 	url.Parse("http://x[::1]/")
 	url.Parse("http://[12345::]/")
 	url.Parse("http://us er@host/")
+	// The message quotes the URL with %q, so an ill-formed byte has to come
+	// back out as `\xff`. Folding it into U+FFFD first printed `\xef\xbf\xbd`.
+	url.Parse("http://example.com/\x7f\xff")
 }

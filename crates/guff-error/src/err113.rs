@@ -11,7 +11,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
-use guff_constant::string_val;
+use guff_constant::string_val_lossy;
 use guff_types::arena::ObjectData;
 
 use crate::util::{expr_string, is_pure_error, type_of, unparen};
@@ -124,7 +124,7 @@ fn check_comparison(
 fn const_string_arg(pass: &Pass<'_>, e: &Expr) -> Option<String> {
     let info = pass.types_info()?;
     let tav = info.types.get(&e.id())?;
-    Some(string_val(tav.val.as_ref()?))
+    Some(string_val_lossy(tav.val.as_ref()?))
 }
 
 fn is_dynamic_error_call(pass: &Pass<'_>, call: &CallExpr) -> bool {

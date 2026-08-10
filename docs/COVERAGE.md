@@ -8,9 +8,9 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 517 | 94.5% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 518 | 94.7% |
 | `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 21 | 3.8% |
-| `never` | **どこでも発火していない** | 9 | 1.6% |
+| `never` | **どこでも発火していない** | 8 | 1.5% |
 | — | **合計** | **547** | 100.0% |
 
 ## linter 別
@@ -115,7 +115,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | sloglint | 1 | 1 | 0 | 0 |
 | spancheck | 1 | 1 | 0 | 0 |
 | sqlclosecheck | 1 | 1 | 0 | 0 |
-| staticcheck | 160 | 156 | 0 | 4 |
+| staticcheck | 160 | 157 | 0 | 3 |
 | swaggo | 1 | 0 | 0 | 1 |
 | tagalign | 1 | 1 | 0 | 0 |
 | tagliatelle | 1 | 1 | 0 | 0 |
@@ -138,12 +138,12 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | wsl_v5 | 1 | 1 | 0 | 0 |
 | zerologlint | 1 | 1 | 0 | 0 |
 
-## 一度も発火していない check（9 件）
+## 一度も発火していない check（8 件）
 
 - **gocritic** (1): `gocritic/whyNoLint`
 - **govet** (2): `govet/cgocall`, `govet/framepointer`
 - **revive** (1): `revive/time-naming`
-- **staticcheck** (4): `S1030`, `SA1011`, `SA1027`, `SA3000`
+- **staticcheck** (3): `S1030`, `SA1027`, `SA3000`
 - **swaggo** (1): `swaggo`
 
 ## インベントリ外の check ID（1 件）
@@ -155,7 +155,7 @@ guff が宣言していない名前を描画している。
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 565, 'isolate': 8040, 'oss': 816, 'regress': 1572}`
+- 走査した実行アーティファクト: `{'golden': 598, 'isolate': 8145, 'oss': 822, 'regress': 1573}`
 - インベントリ: 547 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

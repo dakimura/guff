@@ -270,13 +270,13 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: missing 9 / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009） | 2026-08-10 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass・ratchet なし）** 完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列にして SA1000/1002/1007/1011 と printf の不正 UTF-8 差分を解消**（2026-08-10 5 本目） | 2026-08-10 |
 | 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-10）: **547** checks 中 `never` **9** / `unit-only` **21** / `fired` **517（94.5%）**。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-10）: **547** checks 中 `never` **8** / `unit-only` **21** / `fired` **518（94.7%）**。
 （計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
 母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
@@ -286,11 +286,17 @@ guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装
 `unit-only` が 102 → 21 に落ちたのは 2026-08-10 の revive ゴールデン化（83 件）による。
 残る 21 件の内訳は gosec 18 / revive 2 / golines 1。
 
-`never` の 9 件は staticcheck 4（`S1030` / `SA1011` / `SA1027` / `SA3000`）/
+`never` の 8 件は staticcheck 3（`S1030` / `SA1027` / `SA3000`）/
 govet 2（`cgocall` / `framepointer` — どちらも §6）/ gocritic 1（`whyNoLint`、§6）/
 revive 1（`time-naming`）/ swaggo 1。**うち 3 件は §6「恒久的に観測できない」側**なので、
-潰せる `never` は実質 6 件しか残っていない。`unit-only` 102 のうち 83 は revive で、こちらは
+潰せる `never` は実質 5 件しか残っていない。`unit-only` 102 のうち 83 は revive で、こちらは
 「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
+
+`SA1011` が 9 件目から抜けたのは 2026-08-10（5 本目）。**`never` の原因が「実装が無い」でも
+「fixture が無い」でもなく、`guff-constant` が文字列定数を Rust の `String` で持っていたために
+「valid UTF-8 か」という問いが構造上いつでも yes だった**、という形だった。しかも同じ症状が
+`crates/guff-staticcheck/tests/checks_test.rs` の唯一の `#[ignore]` の理由文にも書いてあった。
+**`never` の隣に `#[ignore]` を並べるだけで繋がる**ので、次にやること 1 に挙げてある。
 
 なお 2026-08-09（4 本目）まで govet は 16 件が `never` に見えていたが、そのうち 1 件
 （`govet/testpass`）は**台帳側のバグ**だった: inventory は Rust の**モジュール名**を採り、
@@ -301,7 +307,7 @@ observe は**メッセージ接頭辞＝analyzer 名**（`tests`）で照合し�
 **この指標だけを見ないこと。** 2026-08-08 の SA4006（教科書どおりの形を 1 件も撃てていなかった）と
 2026-08-09 の `uniq-by-line` / SA4017 のベンチ除け（どちらも `fired` 済み check の誤検出）は、
 **台帳の数字を 1 も動かさない欠陥**だった。`fired` は「golangci-lint と一度でも突合された」であって
-「一致している」ではない。一致の指標は golden の ratchet（現在 missing 9 / extra 9）と
+「一致している」ではない。一致の指標は golden の ratchet（現在 missing 7 / extra 9）と
 OSS / isolate ゲートの側にある。2026-08-09（3 本目）の SA1002 も同じ形で、
 **`fired` 済み・isolate 緑のまま `time.Parse("not-a-layout", …)` を撃ち続けていた**
 （上流は撃たない）。
@@ -2390,6 +2396,191 @@ guff は文言に `regexp.Compile` を**ハードコード**していた。上�
 
 ---
 
+### 2026-08-10（5 本目）— Go の文字列定数をバイト列にした（§7 から 1 件回収）
+
+**やったこと**
+
+前セッションの「次にやること 1」。**§7 に「アーキテクチャの違いで再現できない」として
+書いたばかりの項目が、実際には単なる表現の誤りだった** —— という点がこのセッションの主題で、
+潰した差分そのものより重い。
+
+#### 0. 直す前に測る
+
+前セッションの記述は「SA1000 が 1 件黙る」だった。実際に `regexp.MustCompile` の 5 形を
+書いて golangci-lint 2.12.2 に食わせると、**黙るのは 4 件で、5 件目は間違ったことを言っていた**:
+
+```go
+regexp.MustCompile("(\xff")
+// 上流: SA1000: error parsing regexp: invalid UTF-8: `<0xFF>`
+// guff: SA1000: error parsing regexp: missing closing ): `(ÿ`
+```
+
+`regexp/syntax` は**字句を舐めながら** UTF-8 を検査するので、`(` の閉じ忘れより先に
+不正バイトに当たる。guff は `\xff` を U+00FF にしていたので、そこを通り抜けて
+別の診断に落ちていた。**「見逃し」ではなく「誤検出」でもあった**。
+
+#### 1. 直したのは 1 箇所（`Value::String`）、波及は 5 クレート
+
+`guff-constant` の `Value::String(Arc<String>)` を `Arc<Vec<u8>>` にした。付随して:
+
+| 場所 | 中身 |
+|---|---|
+| `literal.rs` | `decode_escape` が `Escaped::{Byte, Rune}` を返すようにした。Go の `strconv.UnquoteChar` が `multibyte` フラグを返すのと同じ理由で、`\xff` と `\377` は**バイト**、`\u` / `\U` は**コードポイント**。ついでに `\400`（>255）を Go どおり拒否するようにし、`"\x漢"` で `split_at` が rune 境界を割って panic する経路も消えた |
+| `value.rs` | `string_val` が `Vec<u8>` を返す（`constant.StringVal` と同じ）。テキストが要る呼び出し側には `string_val_lossy` を新設。`quote` は `strconv.Quote` どおり不正バイトを `\xNN` で書く |
+| `utf8.rs`（新規） | Go の `utf8.DecodeRune` と `[]rune(s)` 変換。**Rust の `from_utf8_lossy` は使えない**: 切り詰められた列に対して Unicode の maximal subpart 規則で U+FFFD を **1 個**返すが、Go は 1 **バイト**につき 1 個返す。`"\xe0\xa0"` で 1 対 2 に割れる |
+| `guff-types` | `MapKey::Str` / `CaseKey::Str` が `Vec<u8>` に。`len` と添字境界はバイト長になった |
+
+`string_val` の戻り値型を変えたのは、**呼び出し側 12 箇所を一度ずつ見直させるため**。
+lossy が正しい場所（SA1024 は上流が `[]rune(s)` する、printf の書式は `for range` する）には
+その理由をコメントに書いた。
+
+#### 2. 測り直したら、SA1000 以外に 4 クラス出た
+
+同じ形の probe を SA1002 / SA1007 / SA1011 / SA1020 / SA5009 / govet printf に広げた。
+**前セッションが「未確認」と書いた SA1001 / SA1007 の推測は、当たっていた側と外れていた側がある**:
+
+| check | 何が起きていたか |
+|---|---|
+| **SA1011** | 「この定数は valid UTF-8 か？」を**Rust の `String` に問うていた**ので、構造上**常に yes**。つまり**一度も発火できない check** だった。台帳（`docs/COVERAGE.md`）でも `never` に入っていて、しかも**その原因がこれだと誰も繋げていなかった**。単体テストは `is_valid_utf8_bytes(&[0xff])` を**直接**呼んでいたので、ずっと緑 |
+| **SA1007** | 上流は `%q` で URL を引用するので、メッセージに `\xff` が出る。guff は U+FFFD を引用して `\xef\xbf\xbd` と書いていた |
+| **SA1002** | 同じ。`ParseError` は layout と詰まった要素の両方を引用する |
+| **govet printf** | 2 つ別々のバグ。(a) verb を**バイト**で読んでいた（上流は `utf8.DecodeRuneInString`）ので `%é` が `%Ã`。(b) 列番号がずれる |
+| SA1020 | 差分なし。判定は `:` と数字しか見ず、メッセージは定数 |
+
+**SA1011 は `#[ignore = "SC-D08: guff string literals for \xNN (NN>=0x80) differ from Go byte strings"]`
+という形で 1 つだけ残っていた `#[ignore]` の中身そのものだった。** 症状は正しく記録されていたのに、
+それが `never` の 1 件と同じものだと結び付いていなかった。**`#[ignore]` の理由文と
+台帳の `never` を突き合わせるだけで見つかる**類の穴である。
+
+#### 3. printf の列は「上流のバグを移植する」ことになった
+
+`%d` の位置は `astutil.PosInStringLiteral` が生の literal を歩いて求める。その `walkStringLiteral` は
+
+```go
+r, _, rest, _ := strconv.UnquoteChar(raw, quote) // 2 番目の戻り値が multibyte
+nextI := i + utf8.RuneLen(r)
+```
+
+と、**`multibyte` を捨てて `utf8.RuneLen` で進める**。`\xff` は文字列では 1 バイトなのに
+ここでは 2 バイト数えられるので、**上流自身が 1 列手前を指す**。golangci-lint と一致させる
+以上こちらも同じ数え方をするしかないので、`escape_lengths` が `\xNN` / `\OOO` に対して
+「0x80 未満なら 1、以上なら 2」を返すようにした（理由をコメントに書いてある）。
+
+#### 4. 型検査の側にも出ていた
+
+`"\xff"` と `"ÿ"` は Go では**別の文字列**である。guff は両方 `"ÿ"` にしていたので、
+
+```go
+switch s { case "\xff": case "ÿ": }   // guff: duplicate case
+var m = map[string]int{"\xff": 1, "ÿ": 2} // guff: duplicate key
+```
+
+を**型エラーにしていた**。これは finding 1 件の差では済まない: ill-typed なパッケージは
+guff が丸ごと飛ばすので、**そのファイルの findings が全部消える**（Phase 1 のゲートが
+数えているのはこれ）。回帰テストを `guff-types` の literals / check_files に置いた。
+
+#### 5. 副産物: エクスポートデータの `from_utf8_unchecked` が消えた
+
+`guff-exportdata` の `string_idx` は、**任意のバイト列から `&str` を作る
+`unsafe { from_utf8_unchecked }`** を持っていた（＝Rust としては UB）。これは
+`Value::String` が `String` を要求していたことへの逃げで、しかも `big.Int` の
+リトルエンディアン仮数を `String` 経由で運んでいたので**外せなかった**。
+定数がバイト列になったので `string_bytes_idx` / `Decoder::string_bytes` を足し、
+定数と数値ペイロードはバイトで、パスや名前は lossy な `String` で読むようにした。
+**依存パッケージが `const C = "\xff"` を輸出している場合も、これでバイトが保たれる。**
+
+**結果**
+
+- probe（SA1000/1002/1007/1011/1020/1024/5009 + printf を 1 パッケージに詰めたもの）は
+  **golangci-lint と 16/16 完全一致**（開始時は 6 件差）。
+- golden 8 ケースすべて緑。**staticcheck-sa の ratchet は missing 9 → 7**（extra は 9 のまま）。
+  govet は 0/0 のまま、新しい 4 件（非 ASCII verb・不正バイト）を含めて一致。
+- 台帳: `never` **9 → 8**（SA1011 が抜けた）、`fired` 517 → **518**。
+- `cargo test --workspace` **2,998 件緑**（2,986 → 新規テスト＋ `#[ignore]` 解除で +12）。
+  isolate **114 target 一致**、OSS `--oss --tier pr,nightly` 8 target すべて据え置き。
+- regress は tsdb **PASS**（finding 4/4 一致）、full も **PASS**。
+  **10 セッション続いた「次にやること 0」はここで終わった** —— ただし結論は
+  想定と逆だった。次節を参照。
+
+#### 6. 10 セッション分の診断が間違っていた（regress full の wall）
+
+`--profile full` の wall ゲートは 2026-08-07 以降ずっと赤く、毎回
+「マシンが混んでいるからベースラインを取り直せ」と書き送られてきた。
+**静かな状態で A/B を取ったら、その診断は全部外れていた。**
+
+まず**このセッションの変更が悪化させていないこと**を、同一マシン・交互 3 回で確かめた:
+
+| 版 | wall（3 回） |
+|---|---|
+| HEAD（本セッション前） | 2.490 / 2.480 / 2.530 |
+| 本セッション | 2.450 / 2.470 / 2.510 |
+
+**むしろわずかに速い。**次に、ベースライン 2.33s を刻んだコミット（`4d345bb`）を
+worktree で建てて同じ機械で測った:
+
+| 版 | wall（3 回） |
+|---|---|
+| `4d345bb`（2.33s を刻んだ版） | 2.260 / 2.230 / 2.240 |
+| HEAD | 2.480 / 2.490 / 2.530 |
+
+**機械は当時より速い。ベースラインは古びていない。**差は本物で、17 コミットの
+どこかにある。二分すると **1 コミットに全部乗っていた**:
+
+| コミット | wall |
+|---|---|
+| `4d345bb` | 2.24 |
+| **`7edba5f`**（次のコミット） | **2.46** |
+| `487849e` / `2e8ec62` / `2f42435` / HEAD | 2.46 – 2.50（以降ほぼ横ばい） |
+
+`7edba5f` は「型検査の false positive 8 件を直し、SA1019 に第三者の deprecation を
+見せる」コミットで、**その commit message 自身が「the regress wall check fails on this
+machine … so it is the host, not this change」と書いている**。それが誤りだった。
+
+**では何に使われているのか。** SA1019 の依存スキャンを疑って切ってみたが変わらない。
+本当の理由は ill-typed パッケージの数だった:
+
+```
+4d345bb: ill_typed 14 パッケージ
+HEAD:    ill_typed  8 パッケージ
+差分:    promql/parser, scrape, tsdb/chunks, tsdb/encoding, util/zeropool, web/api/v1
+```
+
+**2.33s は「6 パッケージを丸ごと解析していなかったから速かった」値である。**
+ill-typed なパッケージは `run_despite_errors` でない全アナライザを飛ばす（Phase 1）ので、
+当時の guff はその 6 つで findings を落としていた。`7edba5f` がそれを直した結果、
+**正しく増えた仕事の分だけ遅くなった**。潰すべき無駄ではない。
+
+したがって**改善策は「最適化」ではなく「ゲートを意味のある状態に戻すこと」**とし、
+`--update-baseline` で **2.36s / 3.11 GB** を刻み直した。理由をここに残すのは、
+数字を上げるだけの再ベースラインは**次の本物の劣化を隠す**からで、
+「なぜ上がってよいのか」が書いていない再ベースラインはやってはいけない。
+
+余白は薄い（限界 2.51s に対し実測 2.36–2.51）。**測るたびに緑とは限らない**ので、
+再現する FAIL を見たらまず `scripts/perf-guard.sh` と load を疑い、
+それが綺麗なら**今度こそ本物の劣化**として二分すること —— 上の表がその手順である。
+tsdb 側は 0.760s（限界 0.880s）で余裕があり、据え置いた。
+
+**教訓**: 「ホストのせい」は**測ってから言うこと**。ベースラインを刻んだコミットを
+worktree で建て直して同じ機械で走らせるのに、ビルド 2 分＋計測 1 分しかかからない。
+10 セッションぶん先送りされた作業の実体は、その 3 分だった。
+
+**次にやること**
+
+1. **`#[ignore]` と `never` の突き合わせを機械化する**。今回 SA1011 は
+   「`#[ignore]` の理由文に書いてある」「台帳で `never`」の両方に出ていたのに、
+   2 つが同じものだと気付くのに 1 セッションかかった。`compat/coverage.py` に
+   **`#[ignore]` の付いたテストが言及する check ID を別ソースとして出す**だけで、
+   次の同型は表の上で並ぶ。残る `never` 8 / `unit-only` 21 に同じ形が無いか、これで洗える。
+2. **`compat/oracles/goregexp` の 202 行（不正 UTF-8）が今は end-to-end で通るはず**。
+   前セッションは「通るのは移植の側だけ」と書いた。定数層が直った以上、
+   **`.go` の fixture 経由でも同じ答えになるか**を確かめる価値がある（今回は 5 形しか見ていない）。
+3. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+4. govet の未実装 16 pass。
+5. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+6. revive の残り `unit-only` 2 件と `never` 1 件（`time-naming`）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -2513,28 +2704,18 @@ SA1000 は `regexp.Compile` の error を**全部**報告するので、whitelis
 （**誤検出は増えない**）。実在の交替は接頭辞を数 rune しか共有しない。
 なお `a|aa|aaa|…` は n ≈ 8190 を越えると rune 予算の方が先に効くので、そこから先は再び一致する。
 
-### Go の文字列定数はバイト列、guff の定数は `String`（SA1000 ほか）`[記録 2026-08-10]`
+### ~~Go の文字列定数はバイト列、guff の定数は `String`~~ `[記録 2026-08-10 / 解消 2026-08-10（5 本目）]`
 
-Go の `string` は**バイト列**で、`"\xff"` は 1 バイトの 0xFF。
-guff は `guff-constant` の `Value::String(Rc<String>)` ＝ Rust の `String`（= rune 列）で持つので、
-`parse_string_lit` は `\xff` を**コードポイント U+00FF**（UTF-8 で 2 バイト）にしてしまう。
-`guff-ast` の scanner にも同じ注記が既にあるが、**そちらはソース中の不正バイト**の話で、
-こちらは**エスケープの復号**なので別経路である。
+**解消済み。**§4 の 2026-08-10（5 本目）を参照。ここに残すのは、これが
+「アーキテクチャの違いで再現できない」ものだと**一度は判断された**という記録のためで、
+実際には**単に guff 側の表現の誤り**だった。§7 に入れる前に「本当に直せないのか」を
+問う理由がこれである。
 
-観測できる形（`compat/oracles/goregexp` の 202 行はこの入力を扱うが、**通るのは移植の側だけ**）:
-
-```go
-regexp.MustCompile("\xff")
-// golangci-lint: SA1000: error parsing regexp: invalid UTF-8: `<0xFF>`
-// guff:          （何も出ない）
-```
-
-`gostd::regexp` 自体は正しく、`compile_bytes(&[u8])` を公開していて
-オラクルの 202 行に一致する。落としているのは**その手前の定数層**なので、
-SA1000 の fixture にはこの形を置いていない（置くと ratchet が恒久的に 1 増えるだけで、
-直す場所は `guff-staticcheck` の外にある）。**SA1000 に残る唯一の既知の非一致**。
-
-同じ理由で SA1001 / SA1007 も不正 UTF-8 の定数では上流とずれるはずだが、未確認。
+当時の記述: Go の `string` は**バイト列**で、`"\xff"` は 1 バイトの 0xFF。
+guff は `guff-constant` の `Value::String(Arc<String>)` ＝ Rust の `String`（= rune 列）で
+持つので、`parse_string_lit` は `\xff` を**コードポイント U+00FF**（UTF-8 で 2 バイト）に
+してしまう —— という診断そのものは正しかった。誤っていたのは「直す場所が無い」の側で、
+`Value::String` を `Arc<Vec<u8>>` にするだけで済んだ。
 
 ### 依存パッケージを跨ぐ purity 推論（SA4017）
 

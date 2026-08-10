@@ -16,7 +16,7 @@ use dashu::rational::RBig;
 use guff::token::Token;
 
 use crate::helpers::{ibig_to_fbig, make_complex, make_int, make_rat, rbig_to_fbig, small_int};
-use crate::value::{make_int64, make_string, BinFloat, Value, PREC};
+use crate::value::{make_int64, make_string_bytes, BinFloat, Value, PREC};
 
 /// Parses a Go literal string into a constant [`Value`].
 ///
@@ -314,90 +314,144 @@ fn parse_char_lit(lit: &str) -> Option<Value> {
         return None;
     }
     let inner = lit.strip_prefix('\'')?.strip_suffix('\'')?;
-    let (ch, rest) = decode_escape(inner, '\'')?;
+    let (decoded, rest) = decode_escape(inner.as_bytes(), b'\'')?;
     if !rest.is_empty() {
         return None; // char literal must contain exactly one rune
     }
-    Some(make_int64(ch as i64))
+    // A rune constant is the code point, so `'\xff'` is 255 — the same number
+    // the byte escape contributes to a string.
+    Some(make_int64(match decoded {
+        Escaped::Byte(b) => i64::from(b),
+        Escaped::Rune(ch) => ch as i64,
+    }))
 }
 
 fn parse_string_lit(lit: &str) -> Option<Value> {
     // Two forms: interpreted `"..."` with escapes, or raw `` `...` ``.
+    // (`\r` inside a raw string is already stripped by the scanner, as in
+    // go/scanner — `strconv.Unquote` would otherwise do it here.)
     if let Some(inner) = lit.strip_prefix('`').and_then(|s| s.strip_suffix('`')) {
-        return Some(make_string(inner));
+        return Some(make_string_bytes(inner.as_bytes()));
     }
     let inner = lit.strip_prefix('"')?.strip_suffix('"')?;
-    let mut out = String::with_capacity(inner.len());
-    let mut remaining = inner;
+    let mut out: Vec<u8> = Vec::with_capacity(inner.len());
+    let mut remaining = inner.as_bytes();
     while !remaining.is_empty() {
-        let (ch, rest) = decode_escape(remaining, '"')?;
-        out.push(ch);
+        let (decoded, rest) = decode_escape(remaining, b'"')?;
+        match decoded {
+            Escaped::Byte(b) => out.push(b),
+            Escaped::Rune(ch) => {
+                let mut buf = [0u8; 4];
+                out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+            }
+        }
         remaining = rest;
     }
-    Some(make_string(out))
+    Some(make_string_bytes(out))
+}
+
+/// What one escape sequence contributes to a string literal.
+///
+/// Go's `strconv.UnquoteChar` returns a `multibyte` flag alongside the rune
+/// for exactly this reason: `\xff` and `\377` name a **byte**, and appending
+/// them as a rune would UTF-8 encode 0xFF into the two bytes 0xC3 0xBF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Escaped {
+    Byte(u8),
+    Rune(char),
 }
 
 /// Decode one rune from `s`, handling a single Go escape sequence if `s`
 /// starts with `\`. The `quote` argument is the surrounding quote character
 /// (`'` or `"`) and must be escaped inside the literal.
 ///
-/// Returns `(decoded_rune, remaining_str)` on success.
-fn decode_escape(s: &str, quote: char) -> Option<(char, &str)> {
-    let mut chars = s.chars();
-    let first = chars.next()?;
-    if first != '\\' {
+/// Bytes rather than `&str` so that `\xff` survives; the non-escape path still
+/// decodes a whole rune, because the caller's input came from a `&str` and is
+/// therefore well-formed UTF-8 there.
+///
+/// Returns `(decoded, remaining_bytes)` on success.
+fn decode_escape(s: &[u8], quote: u8) -> Option<(Escaped, &[u8])> {
+    let first = *s.first()?;
+    if first != b'\\' {
         if first == quote {
             // An unescaped quote character is invalid inside the literal body.
             return None;
         }
-        let rest = &s[first.len_utf8()..];
-        return Some((first, rest));
+        // Bounded: `decode_rune` looks at the leading sequence only, so a long
+        // literal is not re-validated once per character.
+        let (ch, width) = crate::utf8::decode_rune(s);
+        return Some((Escaped::Rune(ch?), &s[width..]));
     }
     // Escape sequence: \x..
     let after_backslash = &s[1..];
-    let mut esc_chars = after_backslash.chars();
-    let esc = esc_chars.next()?;
-    let after_esc = &after_backslash[esc.len_utf8()..];
+    let esc = *after_backslash.first()?;
+    let after_esc = &after_backslash[1..];
     let (decoded, rest) = match esc {
-        'a' => ('\x07', after_esc),
-        'b' => ('\x08', after_esc),
-        'f' => ('\x0c', after_esc),
-        'n' => ('\n', after_esc),
-        'r' => ('\r', after_esc),
-        't' => ('\t', after_esc),
-        'v' => ('\x0b', after_esc),
-        '\\' => ('\\', after_esc),
-        '\'' | '"' => (esc, after_esc),
-        'x' => decode_hex_escape(after_esc, 2)?,
-        'u' => decode_hex_escape(after_esc, 4)?,
-        'U' => decode_hex_escape(after_esc, 8)?,
-        '0'..='7' => decode_octal_escape(esc, after_esc)?,
+        b'a' => (Escaped::Rune('\x07'), after_esc),
+        b'b' => (Escaped::Rune('\x08'), after_esc),
+        b'f' => (Escaped::Rune('\x0c'), after_esc),
+        b'n' => (Escaped::Rune('\n'), after_esc),
+        b'r' => (Escaped::Rune('\r'), after_esc),
+        b't' => (Escaped::Rune('\t'), after_esc),
+        b'v' => (Escaped::Rune('\x0b'), after_esc),
+        b'\\' => (Escaped::Rune('\\'), after_esc),
+        b'\'' | b'"' => (Escaped::Rune(esc as char), after_esc),
+        b'x' => decode_hex_byte_escape(after_esc)?,
+        b'u' => decode_unicode_escape(after_esc, 4)?,
+        b'U' => decode_unicode_escape(after_esc, 8)?,
+        b'0'..=b'7' => decode_octal_escape(esc, after_esc)?,
         _ => return None,
     };
     Some((decoded, rest))
 }
 
-fn decode_hex_escape(s: &str, n: usize) -> Option<(char, &str)> {
-    if s.len() < n {
-        return None;
-    }
-    let (digits, rest) = s.split_at(n);
-    let code = u32::from_str_radix(digits, 16).ok()?;
-    let ch = char::from_u32(code)?;
-    Some((ch, rest))
+/// `\xNN` — two hex digits naming one raw byte, not a code point.
+fn decode_hex_byte_escape(s: &[u8]) -> Option<(Escaped, &[u8])> {
+    let digits = s.get(..2)?;
+    let value = hex_value(digits)?;
+    Some((Escaped::Byte(value as u8), &s[2..]))
 }
 
-fn decode_octal_escape(first: char, rest: &str) -> Option<(char, &str)> {
-    if rest.len() < 2 {
+/// `\uNNNN` / `\UNNNNNNNN` — a code point, UTF-8 encoded by the caller. Go
+/// rejects surrogate halves and anything above U+10FFFF, and so does
+/// `char::from_u32`.
+fn decode_unicode_escape(s: &[u8], n: usize) -> Option<(Escaped, &[u8])> {
+    let digits = s.get(..n)?;
+    let code = hex_value(digits)?;
+    let ch = char::from_u32(code)?;
+    Some((Escaped::Rune(ch), &s[n..]))
+}
+
+/// `\NNN` — three octal digits naming one raw byte. Go rejects values above
+/// 255 ("octal escape value > 255"), which is why this cannot reuse the
+/// code-point path.
+fn decode_octal_escape(first: u8, rest: &[u8]) -> Option<(Escaped, &[u8])> {
+    let next2 = rest.get(..2)?;
+    let mut value = u32::from(first - b'0');
+    for &b in next2 {
+        if !(b'0'..=b'7').contains(&b) {
+            return None;
+        }
+        value = value * 8 + u32::from(b - b'0');
+    }
+    if value > 255 {
         return None;
     }
-    let (next2, after) = rest.split_at(2);
-    let mut digits = String::with_capacity(3);
-    digits.push(first);
-    digits.push_str(next2);
-    let code = u32::from_str_radix(&digits, 8).ok()?;
-    let ch = char::from_u32(code)?;
-    Some((ch, after))
+    Some((Escaped::Byte(value as u8), &rest[2..]))
+}
+
+/// Parse `digits` as hex. `None` unless every byte is an ASCII hex digit —
+/// `u32::from_str_radix` would accept a leading `+`, and slicing a `&str` at a
+/// fixed offset would panic on a multi-byte char.
+fn hex_value(digits: &[u8]) -> Option<u32> {
+    let mut value: u32 = 0;
+    for &b in digits {
+        if !b.is_ascii_hexdigit() {
+            return None;
+        }
+        value = value * 16 + u32::from((b as char).to_digit(16)?);
+    }
+    Some(value)
 }
 
 // ----------------------------------------------------------------------------

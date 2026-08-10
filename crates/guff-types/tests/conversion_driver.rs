@@ -5,7 +5,7 @@
 
 use guff::parser::{parse_file, Mode};
 use guff::position::FileSet;
-use guff_constant::string_val;
+use guff_constant::string_val_lossy;
 use guff_types::arena::ObjectData;
 use guff_types::scope::lookup as scope_lookup;
 use guff_types::{Checker, Config};
@@ -23,7 +23,7 @@ fn const_string(check: &Checker, name: &str) -> String {
     let pkg_scope = check.packages.get(check.pkg).scope();
     let obj = scope_lookup(&check.scopes, pkg_scope, name).expect("const not found");
     match check.objects.get(obj) {
-        ObjectData::Const(c) => string_val(c.val()),
+        ObjectData::Const(c) => string_val_lossy(c.val()),
         _ => panic!("{name} is not a constant"),
     }
 }

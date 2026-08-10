@@ -45,7 +45,9 @@ enum MapKey {
     Uint(u64),
     Float(u64),        // f64 bit pattern
     Complex(u64, u64), // (real bits, imag bits)
-    Str(String),
+    // Bytes, not text: `"\xff"` and `"ÿ"` are distinct Go strings and so
+    // must be distinct keys.
+    Str(Vec<u8>),
     Bool(bool),
 }
 

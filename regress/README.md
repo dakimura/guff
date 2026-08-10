@@ -55,6 +55,7 @@ laptops; the profile exists so we can gate regressions while chasing it.
 |------|-----:|---------:|-----|
 | — | 1.890s | 2,501,869,568 | **Invalid.** Measured while 57 of prometheus's 118 packages were ill-typed and therefore skipped by every analyzer without `run_despite_errors`. |
 | 2026-08 | 2.330s | 2,932,523,008 | First baseline measured with the whole corpus actually analyzed. |
+| 2026-08-11 | 2.360s | 3,114,582,016 | **Same failure mode as the 1.890s row, one layer down.** `7edba5f` fixed eight type-checker false positives, taking prometheus from 14 ill-typed packages to 8; the 2.330s was measured while `promql/parser`, `scrape`, `tsdb/chunks`, `tsdb/encoding`, `util/zeropool` and `web/api/v1` were still being skipped whole. |
 
 The old number was not a faster guff. `dep_graph` was keyed by package id, so
 after `filter_duplicate_packages` renamed a package to `P [P.test]` its
@@ -111,6 +112,38 @@ go quadratic on functions with many checks.
 > only just. `PERF_GUARD` (load > ncpu/4) catches the worst of it; anything within
 > ~0.2s of the limit still deserves an interleaved A/B before it is called a
 > regression.
+
+### "It is the host" is a claim you have to measure
+
+The `full` gate then sat red from 2026-08-07 to 2026-08-11 — ten sessions, each
+concluding the host was busy and the baseline needed retaking, `7edba5f`'s own
+commit message included ("clean HEAD measures 2.71-3.10s under the same
+conditions, so it is the host, not this change"). None of them checked, and the
+claim was wrong: on a quiet machine `4d345bb` — the commit that locked 2.330s —
+measures **2.23-2.26s**, i.e. *faster* than when its own baseline was taken. The
+host had not degraded at all.
+
+The check costs three minutes and is worth running before blaming a machine:
+
+```bash
+git worktree add /tmp/base <commit-that-locked-the-baseline>
+(cd /tmp/base && cargo build --release -p guff-lint)     # ~2 min
+# interleave, never batch: A B A B A B
+for r in 1 2 3; do
+  for b in /tmp/base/target/release/guff ./target/release/guff; do
+    GUFF_BIN=$b ./regress/run.sh --profile full --skip-golangci | grep -o 'wall=[0-9.]*s'
+  done
+done
+```
+
+If the old binary reproduces its baseline, the regression is real and lives in
+the commits since — bisect them the same way (each step is one build plus three
+runs). That bisect put the whole 2.24s → 2.46s step on a single commit.
+
+**Rebaseline only with a reason.** A larger number that buys margin is a gate
+that has stopped detecting things. Both increases in the table above are the
+same reason — guff was analyzing code it had previously skipped — and neither is
+overhead to optimize away.
 
 ## Prerequisites
 

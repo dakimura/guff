@@ -146,7 +146,7 @@ fn unknown_taints_binary_op() {
 fn string_concat() {
     let r = binary_op(make_string("foo"), Token::ADD, make_string("bar"));
     assert_eq!(r.kind(), Kind::String);
-    assert_eq!(string_val(&r), "foobar");
+    assert_eq!(string_val(&r), "foobar".as_bytes());
 }
 
 // ---- Complex ----

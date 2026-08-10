@@ -15,7 +15,7 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let Some(arg) = call.args.first() else {
         return;
     };
-    let Some(layout) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
+    let Some(layout) = callcheck::extract_const_bytes(ctx.prog, ctx.caller, arg.value) else {
         return;
     };
     if let Some(msg) = validate_go_time_layout(&layout) {
@@ -31,9 +31,20 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>) {
 /// reference layout containing them would otherwise be reported as invalid.
 /// With the port in [`gostd::time`] doing the parsing, a layout is invalid
 /// exactly when Go says so, worded exactly as Go words it.
-fn validate_go_time_layout(layout: &str) -> Option<String> {
-    let layout = layout.replace('_', " ").replace('Z', "-");
-    gostd::time::parse(&layout, &layout)
+///
+/// Bytes, because `ParseError` quotes both the layout and the offending
+/// element: an ill-formed byte has to be reported as `\xff`, and it cannot be
+/// if it was folded into U+FFFD first.
+fn validate_go_time_layout(layout: &[u8]) -> Option<String> {
+    let layout: Vec<u8> = layout
+        .iter()
+        .map(|&b| match b {
+            b'_' => b' ',
+            b'Z' => b'-',
+            other => other,
+        })
+        .collect();
+    gostd::time::parse_bytes(&layout, &layout)
         .err()
         .map(|e| e.to_string())
 }
@@ -87,11 +98,18 @@ mod tests {
     #[test]
     fn layout_validation_matches_go_smoke_cases() {
         assert_eq!(
-            validate_go_time_layout("12345").as_deref(),
+            validate_go_time_layout(b"12345").as_deref(),
             Some(r#"parsing time "12345" as "12345": cannot parse "" as "4""#),
         );
-        assert_eq!(validate_go_time_layout("2006"), None);
-        assert_eq!(validate_go_time_layout("2006-01-02"), None);
+        assert_eq!(validate_go_time_layout(b"2006"), None);
+        assert_eq!(validate_go_time_layout(b"2006-01-02"), None);
+        // The layout is bytes: `ParseError` quotes it, and Go writes an
+        // ill-formed byte as `\xff` where a U+FFFD would have printed
+        // `\xef\xbf\xbd`.
+        assert_eq!(
+            validate_go_time_layout(b"12345\xff").as_deref(),
+            Some(r#"parsing time "12345\xff" as "12345\xff": cannot parse "\xff" as "4""#),
+        );
     }
 
     /// A layout with no std element at all is a literal that parses itself, so
@@ -99,16 +117,16 @@ mod tests {
     /// positive on any string that merely looked unlike a date.
     #[test]
     fn layout_without_std_elements_is_silent() {
-        assert_eq!(validate_go_time_layout("not-a-layout"), None);
-        assert_eq!(validate_go_time_layout("hello"), None);
-        assert_eq!(validate_go_time_layout(""), None);
+        assert_eq!(validate_go_time_layout(b"not-a-layout"), None);
+        assert_eq!(validate_go_time_layout(b"hello"), None);
+        assert_eq!(validate_go_time_layout(b""), None);
     }
 
     /// The `_`→` ` and `Z`→`-` substitutions run before Parse, so `Z07:00`
     /// reaches it as `-07:00` and `_2` as ` 2`.
     #[test]
     fn substitutions_run_before_parse() {
-        assert_eq!(validate_go_time_layout("Z07:00"), None);
-        assert_eq!(validate_go_time_layout("2006-01-02T15:04:05Z07:00"), None);
+        assert_eq!(validate_go_time_layout(b"Z07:00"), None);
+        assert_eq!(validate_go_time_layout(b"2006-01-02T15:04:05Z07:00"), None);
     }
 }

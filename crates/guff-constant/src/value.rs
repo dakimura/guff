@@ -67,7 +67,12 @@ pub enum Kind {
 pub enum Value {
     Unknown,
     Bool(bool),
-    String(Arc<String>),
+    /// A Go `string`, which is a **byte** string and not a sequence of runes:
+    /// `"\xff"` is one byte, and `len` of it is 1. Storing it as a Rust
+    /// `String` would force `\xff` to become U+00FF (two bytes in UTF-8) and
+    /// silently make guff disagree with Go about the value, its length, and
+    /// its identity as a map key or switch case.
+    String(Arc<Vec<u8>>),
     Int64(i64),
     Int(IBig),
     Rat(RBig),
@@ -114,8 +119,21 @@ pub fn make_bool(b: bool) -> Value {
 /// Equivalent to `constant.MakeString(s)`. The Go implementation uses a lazy
 /// concatenation tree to keep `BinaryOp(Add, ...)` of strings cheap; for now
 /// we eagerly own the string and revisit if profiling demands it.
+///
+/// Takes Rust text, so the result is always valid UTF-8. Constants that can
+/// hold arbitrary bytes — anything decoded from a Go literal — must go through
+/// [`make_string_bytes`].
 pub fn make_string<S: Into<String>>(s: S) -> Value {
-    Value::String(Arc::new(s.into()))
+    Value::String(Arc::new(s.into().into_bytes()))
+}
+
+/// Returns the [`Kind::String`] value for the byte string `b`.
+///
+/// Go's `string` is a byte string, so this — not [`make_string`] — is the
+/// faithful constructor; the escapes `\xff`, `\377` and a `\u` surrogate half
+/// all produce bytes that are not valid UTF-8.
+pub fn make_string_bytes<B: Into<Vec<u8>>>(b: B) -> Value {
+    Value::String(Arc::new(b.into()))
 }
 
 /// Returns the [`Kind::Int`] value for `x`.
@@ -210,17 +228,39 @@ pub fn bool_val(x: &Value) -> bool {
     }
 }
 
-/// Returns the Go `String` value of `x`, which must be a [`Kind::String`] or
-/// [`Kind::Unknown`]. Unknown produces `""`.
+/// Returns the Go `string` value of `x` as **bytes**, which must be a
+/// [`Kind::String`] or [`Kind::Unknown`]. Unknown produces `""`.
+///
+/// Equivalent to `constant.StringVal`. Bytes rather than a Rust `String`
+/// because Go strings are byte strings — see [`Value::String`]. Callers that
+/// need text and can accept U+FFFD for the ill-formed bytes should use
+/// [`string_val_lossy`].
 ///
 /// # Panics
 /// Panics if `x` is not String or Unknown.
-pub fn string_val(x: &Value) -> String {
+pub fn string_val(x: &Value) -> Vec<u8> {
     match x {
         Value::String(s) => (**s).clone(),
-        Value::Unknown => String::new(),
+        Value::Unknown => Vec::new(),
         other => panic!("{:?} not a String", other),
     }
+}
+
+/// [`string_val`] decoded as UTF-8, with ill-formed bytes replaced by U+FFFD.
+///
+/// This is the right accessor whenever the consumer would itself have ranged
+/// over the string in Go: `for range s` yields U+FFFD for each ill-formed
+/// byte, so the replacement is Go's own behaviour and not an approximation.
+/// It is the wrong accessor whenever the bytes are handed to something that
+/// inspects them — a parser, a hash, a comparison against another constant.
+///
+/// Uses [`crate::utf8::decode_lossy`], not `String::from_utf8_lossy`: the two
+/// disagree on how many U+FFFD a truncated sequence produces.
+///
+/// # Panics
+/// Panics if `x` is not String or Unknown.
+pub fn string_val_lossy(x: &Value) -> String {
+    crate::utf8::decode_lossy(&string_val(x))
 }
 
 /// Returns the Go `i64` value of `x` and whether the result is exact.
@@ -349,7 +389,8 @@ pub enum ValRepr {
     /// Returned for [`Value::Unknown`] and [`Value::Complex`] — Go uses `nil`.
     Nil,
     Bool(bool),
-    String(String),
+    /// Go's `string` — bytes, see [`Value::String`].
+    String(Vec<u8>),
     Int64(i64),
     Int(IBig),
     Rat(RBig),
@@ -375,7 +416,7 @@ pub fn val(x: &Value) -> ValRepr {
 pub fn make(x: ValRepr) -> Value {
     match x {
         ValRepr::Bool(b) => make_bool(b),
-        ValRepr::String(s) => make_string(s),
+        ValRepr::String(s) => make_string_bytes(s),
         ValRepr::Int64(v) => make_int64(v),
         ValRepr::Int(v) => helpers_make_int(v),
         ValRepr::Rat(v) => crate::helpers::make_rat(v),
@@ -501,10 +542,24 @@ fn fbig_is_zero_rat(r: &RBig) -> bool {
 /// A minimal implementation of `strconv.Quote` sufficient for displaying
 /// constant values; full Unicode/printability handling can come later when we
 /// port `strconv` proper.
-fn quote(s: &str) -> String {
+///
+/// The input is bytes because a Go string is bytes. `strconv.Quote` decodes
+/// runes and writes each byte that does not start a well-formed rune as
+/// `\xNN`, which is what keeps the quoted form round-trippable — that part is
+/// ported exactly.
+fn quote(s: &[u8]) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
-    for ch in s.chars() {
+    let mut rest = s;
+    while !rest.is_empty() {
+        let (ch, width) = crate::utf8::decode_rune(rest);
+        // `utf8.DecodeRune` returns (RuneError, 1) for a byte that does not
+        // start a well-formed rune; Go writes those out as raw hex.
+        let Some(ch) = ch else {
+            out.push_str(&format!("\\x{:02x}", rest[0]));
+            rest = &rest[1..];
+            continue;
+        };
         match ch {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
@@ -514,6 +569,7 @@ fn quote(s: &str) -> String {
             c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
             c => out.push(c),
         }
+        rest = &rest[width..];
     }
     out.push('"');
     out
@@ -521,7 +577,7 @@ fn quote(s: &str) -> String {
 
 /// Like [`quote`], but truncates with `...` if the quoted form exceeds
 /// `MAX_LEN` runes. Matches the shortening done by Go's `stringVal.String`.
-fn quote_shortened(s: &str) -> String {
+fn quote_shortened(s: &[u8]) -> String {
     const MAX_LEN: usize = 72;
     let quoted = quote(s);
     if quoted.chars().count() <= MAX_LEN {

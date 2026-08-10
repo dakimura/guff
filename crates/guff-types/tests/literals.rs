@@ -76,6 +76,20 @@ fn map_literal_duplicate_string_key_errors() {
 }
 
 #[test]
+fn map_literal_byte_escape_and_code_point_are_distinct_keys() {
+    // A Go string is bytes: "\xff" is the single byte 0xFF and "\u00ff" is the
+    // two bytes of U+00FF. Decoding the byte escape into a code point made
+    // them equal, so this well-formed package was reported as having a
+    // duplicate key — and an ill-typed package is one guff then skips whole.
+    let check = check_src("package p\nvar v = map[string]int{\"\\xff\": 1, \"\\u00ff\": 2}\n");
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+#[test]
 fn map_literal_duplicate_int_key_errors() {
     let check = check_src("package p\nvar v = map[int]string{1: \"a\", 1: \"b\"}\n");
     assert!(

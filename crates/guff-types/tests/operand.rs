@@ -78,7 +78,7 @@ fn set_const_string_lit_produces_untyped_string_constant() {
     assert_eq!(op.mode, OperandMode::Constant);
     assert_eq!(op.typ, Some(u.typ[BasicKind::UntypedString as usize]));
     match op.val {
-        Some(Value::String(ref s)) => assert_eq!(s.as_str(), "hello"),
+        Some(Value::String(ref s)) => assert_eq!(s.as_slice(), b"hello"),
         other => panic!("expected String, got {:?}", other),
     }
 }

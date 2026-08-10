@@ -4,8 +4,6 @@
 // nearly every site.
 //
 // Not here, and why:
-//   - invalid UTF-8: guff's constant layer cannot deliver the bytes (see
-//     docs/COMPAT-HARDENING.md §5). Upstream reports it; guff stays silent.
 //   - expression too large / expression nests too deeply: both need multi-kB
 //     literals. compat/oracles/goregexp covers them instead.
 package main
@@ -48,6 +46,16 @@ func main() {
 
 	// Lookahead is Perl syntax Go does not implement.
 	regexp.MustCompile(`(?=a)`)
+
+	// Invalid UTF-8. A Go string is bytes, so "\xff" is one byte and the
+	// scanner rejects it before it ever looks at the syntax — the last one
+	// reports the bad byte and not the unclosed group. The Expr is the
+	// ill-formed tail, so it is a different span each time.
+	regexp.MustCompile("\xff")
+	regexp.MustCompile("a\xffb")
+	regexp.MustCompile("\x80")
+	regexp.MustCompile("\xed\xa0\x80")
+	regexp.MustCompile("(\xff")
 
 	// The other four call sites upstream matches on.
 	regexp.Match(`+`, nil)

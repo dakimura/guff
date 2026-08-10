@@ -41,7 +41,7 @@ fn representable_const_string_and_bool() {
     let b = c.basic(BasicKind::Bool);
     let int = c.basic(BasicKind::Int);
 
-    let str_val = Value::String(std::sync::Arc::new("hi".to_string()));
+    let str_val = guff_constant::make_string("hi");
     assert!(representable_const(&c.types, &str_val, s).is_some());
     assert!(representable_const(&c.types, &str_val, int).is_none());
 

@@ -28,8 +28,8 @@ fn bool_round_trip() {
 
 #[test]
 fn string_round_trip() {
-    assert_eq!(string_val(&make_string("hello")), "hello");
-    assert_eq!(string_val(&make_unknown()), "");
+    assert_eq!(string_val(&make_string("hello")), "hello".as_bytes());
+    assert_eq!(string_val(&make_unknown()), "".as_bytes());
 }
 
 #[test]

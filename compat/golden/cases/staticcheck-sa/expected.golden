@@ -8,27 +8,32 @@
 
 old/old.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 old/old.go:6:1:staticcheck::ST1021: comment on exported type OldClient should be of the form "OldClient ..." (with optional leading article)
-sa1000/bad/bad.go:18:17:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
-sa1000/bad/bad.go:19:21:staticcheck::SA1000: error parsing regexp: missing closing ]: `[`
-sa1000/bad/bad.go:20:21:staticcheck::SA1000: error parsing regexp: unexpected ): `a)`
-sa1000/bad/bad.go:24:21:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `*`
-sa1000/bad/bad.go:25:21:staticcheck::SA1000: error parsing regexp: invalid nested repetition operator: `**`
-sa1000/bad/bad.go:26:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{2,1}`
-sa1000/bad/bad.go:27:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{1001}`
-sa1000/bad/bad.go:30:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{100}`
-sa1000/bad/bad.go:34:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\q`
-sa1000/bad/bad.go:35:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\C`
-sa1000/bad/bad.go:36:21:staticcheck::S1007: should use raw string (`...`) with regexp.MustCompile to avoid having to escape twice
-sa1000/bad/bad.go:36:21:staticcheck::SA1000: error parsing regexp: trailing backslash at end of expression: ``
-sa1000/bad/bad.go:40:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `z-a`
-sa1000/bad/bad.go:41:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `[:foo:]`
-sa1000/bad/bad.go:42:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `\\p{Foo}`
-sa1000/bad/bad.go:46:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
-sa1000/bad/bad.go:47:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?<a.b>`
-sa1000/bad/bad.go:50:21:staticcheck::SA1000: error parsing regexp: invalid or unsupported Perl syntax: `(?=`
-sa1000/bad/bad.go:53:15:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `+`
-sa1000/bad/bad.go:54:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
-sa1000/bad/bad.go:55:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\d`
+sa1000/bad/bad.go:16:17:staticcheck::SA1000: error parsing regexp: missing closing ): `foo(`
+sa1000/bad/bad.go:17:21:staticcheck::SA1000: error parsing regexp: missing closing ]: `[`
+sa1000/bad/bad.go:18:21:staticcheck::SA1000: error parsing regexp: unexpected ): `a)`
+sa1000/bad/bad.go:22:21:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `*`
+sa1000/bad/bad.go:23:21:staticcheck::SA1000: error parsing regexp: invalid nested repetition operator: `**`
+sa1000/bad/bad.go:24:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{2,1}`
+sa1000/bad/bad.go:25:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{1001}`
+sa1000/bad/bad.go:28:21:staticcheck::SA1000: error parsing regexp: invalid repeat count: `{100}`
+sa1000/bad/bad.go:32:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\q`
+sa1000/bad/bad.go:33:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\C`
+sa1000/bad/bad.go:34:21:staticcheck::S1007: should use raw string (`...`) with regexp.MustCompile to avoid having to escape twice
+sa1000/bad/bad.go:34:21:staticcheck::SA1000: error parsing regexp: trailing backslash at end of expression: ``
+sa1000/bad/bad.go:38:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `z-a`
+sa1000/bad/bad.go:39:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `[:foo:]`
+sa1000/bad/bad.go:40:21:staticcheck::SA1000: error parsing regexp: invalid character class range: `\\p{Foo}`
+sa1000/bad/bad.go:44:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
+sa1000/bad/bad.go:45:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?<a.b>`
+sa1000/bad/bad.go:48:21:staticcheck::SA1000: error parsing regexp: invalid or unsupported Perl syntax: `(?=`
+sa1000/bad/bad.go:54:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:55:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�b`
+sa1000/bad/bad.go:56:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:57:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `���`
+sa1000/bad/bad.go:58:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:61:15:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `+`
+sa1000/bad/bad.go:62:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
+sa1000/bad/bad.go:63:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\d`
 sa1001/bad/bad.go:11:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
 sa1001/bad/bad.go:12:25:staticcheck::SA1001: template: :1: bad character U+002B '+'
 sa1001/bad/bad.go:13:25:staticcheck::SA1001: template: :1: unexpected right paren
@@ -47,6 +52,10 @@ sa1002/bad/bad.go:9:2:staticcheck::SA4017: Parse doesn't have side effects and i
 sa1002/bad/bad.go:9:13:staticcheck::SA1002: parsing time "1234" as "1234": cannot parse "" as "3"
 sa1002/bad/bad.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1002/bad/bad.go:10:13:staticcheck::SA1002: parsing time "123456": hour out of range
+sa1002/bad/bad.go:13:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:13:13:staticcheck::SA1002: parsing time "12345\\xff" as "12345\\xff": cannot parse "\\xff" as "4"
+sa1002/bad/bad.go:14:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
+sa1002/bad/bad.go:14:13:staticcheck::SA1002: parsing time "\\xff1234" as "\\xff1234": cannot parse "" as "3"
 sa1002/ok/ok.go:6:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1002/ok/ok.go:7:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
 sa1002/ok/ok.go:10:2:staticcheck::SA4017: Parse doesn't have side effects and its return value is ignored
@@ -69,14 +78,25 @@ sa1007/bad/bad.go:12:12:staticcheck::SA1007: "http://[::1/" is not a valid URL: 
 sa1007/bad/bad.go:13:12:staticcheck::SA1007: "http://x[::1]/" is not a valid URL: parse "http://x[::1]/": invalid IP-literal
 sa1007/bad/bad.go:14:12:staticcheck::SA1007: "http://[12345::]/" is not a valid URL: parse "http://[12345::]/": invalid host: ParseAddr("12345::"): each group must have 4 or less digits (at "12345::")
 sa1007/bad/bad.go:15:12:staticcheck::SA1007: "http://us er@host/" is not a valid URL: parse "http://us er@host/": net/url: invalid userinfo
+sa1007/bad/bad.go:18:12:staticcheck::SA1007: "http://example.com/\\x7f\\xff" is not a valid URL: parse "http://example.com/\\x7f\\xff": net/url: invalid control character in URL
 sa1008/bad/bad.go:7:6:staticcheck::SA1008: keys in http.Header are canonicalized, "foo" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1008/bad/bad.go:9:6:staticcheck::SA1008: keys in http.Header are canonicalized, "etag" is not canonical; fix the constant or use http.CanonicalHeaderKey
 sa1010/bad/bad.go:8:19:staticcheck::SA1010: calling a FindAll method with n == 0 will return no results, did you mean -1?
 sa1010/bad/bad.go:9:37:staticcheck::SA1010: calling a FindAll method with n == 0 will return no results, did you mean -1?
-sa1011/bad/bad.go:8:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
-sa1011/bad/bad.go:8:22:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
-sa1011/bad/bad.go:9:29:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:10:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:10:22:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:11:29:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:12:26:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:13:30:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:16:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:16:28:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:16:28:staticcheck::SA1024: cutset contains duplicate characters
+sa1011/bad/bad.go:18:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1011/bad/bad.go:18:28:staticcheck::SA1011: argument is not a valid UTF-8 encoded string
+sa1011/bad/bad.go:18:28:staticcheck::SA1024: cutset contains duplicate characters
 sa1011/ok/ok.go:6:2:staticcheck::SA4017: Trim doesn't have side effects and its return value is ignored
+sa1011/ok/ok.go:11:2:staticcheck::SA4017: TrimLeft doesn't have side effects and its return value is ignored
+sa1011/ok/ok.go:12:2:staticcheck::SA4017: TrimRight doesn't have side effects and its return value is ignored
 sa1012/bad/bad.go:14:6:staticcheck::SA1012: do not pass a nil Context, even if a function permits it; pass context.TODO if you are unsure about which Context to use
 sa1013/bad/bad.go:7:2:staticcheck::SA1013: the first argument of io.Seeker is the offset, but an io.Seek* constant is being used instead
 sa1014/bad/bad.go:13:23:staticcheck::SA1014: json.Unmarshal expects to unmarshal into a pointer, but the provided value is not a pointer

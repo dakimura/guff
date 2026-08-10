@@ -6,7 +6,9 @@ use dashu::float::round::mode::HalfEven;
 use dashu::float::FBig;
 use dashu::integer::IBig;
 use dashu::rational::RBig;
-use guff_constant::{binary_op, make_bool, make_from_bytes, make_imag, make_int64, make_string, Value};
+use guff_constant::{
+    binary_op, make_bool, make_from_bytes, make_imag, make_int64, make_string_bytes, Value,
+};
 
 use super::codes::CodeVal;
 use super::reloc::{Index, RelocEnt, RelocKind};
@@ -119,15 +121,20 @@ impl PkgDecoder {
         &self.elem_data[start..end]
     }
 
-    pub fn string_idx(&self, idx: Index) -> &str {
-        let bytes = self.data_idx(RelocKind::STRING, idx);
-        // Go strings are byte sequences; export data uses them for paths and
-        // arbitrary constant payloads (big.Int, etc.).
-        if let Ok(s) = std::str::from_utf8(bytes) {
-            return s;
-        }
-        // SAFETY: matches Go `string([]byte)` — no UTF-8 validation.
-        unsafe { std::str::from_utf8_unchecked(bytes) }
+    /// The raw bytes of a `STRING` reloc.
+    ///
+    /// Bytes, not `&str`: export data uses Go strings both for text (paths,
+    /// names) and for arbitrary binary payloads — a `big.Int`'s little-endian
+    /// magnitude, and any string constant a package exports, which can hold
+    /// ill-formed UTF-8 just as a source literal can.
+    pub fn string_bytes_idx(&self, idx: Index) -> &[u8] {
+        self.data_idx(RelocKind::STRING, idx)
+    }
+
+    /// [`string_bytes_idx`](Self::string_bytes_idx) as text, with ill-formed
+    /// bytes replaced by U+FFFD. Only for the fields that really are text.
+    pub fn string_idx(&self, idx: Index) -> String {
+        guff_constant::decode_lossy(self.string_bytes_idx(idx))
     }
 
     pub fn new_decoder(&self, k: RelocKind, idx: Index, marker: SyncMarker) -> Decoder<'_> {
@@ -276,9 +283,20 @@ impl Decoder<'_> {
         self.raw_reloc(k, idx)
     }
 
+    /// A `STRING` field as text, with ill-formed bytes replaced by U+FFFD.
+    /// Use [`string_bytes`](Self::string_bytes) for constants and binary
+    /// payloads.
     pub fn string(&mut self) -> String {
         self.sync(SyncMarker::STRING);
-        self.common.string_idx(self.reloc(RelocKind::STRING)).to_string()
+        self.common.string_idx(self.reloc(RelocKind::STRING))
+    }
+
+    /// A `STRING` field as the bytes it actually holds.
+    pub fn string_bytes(&mut self) -> Vec<u8> {
+        self.sync(SyncMarker::STRING);
+        self.common
+            .string_bytes_idx(self.reloc(RelocKind::STRING))
+            .to_vec()
     }
 
     pub fn value(&mut self) -> Value {
@@ -295,14 +313,14 @@ impl Decoder<'_> {
         let code = self.code(SyncMarker::VAL);
         match code {
             0 => make_bool(self.bool()),
-            1 => make_string(self.string()),
+            1 => make_string_bytes(self.string_bytes()),
             2 => make_int64(self.int64()),
             3 => self.big_int(),
             4 => {
                 let num = self.big_int_ibig();
-                let denom_bytes = self.string();
+                let denom_bytes = self.string_bytes();
                 use dashu::integer::UBig;
-                let denom = UBig::from_le_bytes(denom_bytes.as_bytes());
+                let denom = UBig::from_le_bytes(&denom_bytes);
                 Value::Rat(RBig::from_parts(num, denom))
             }
             5 => self.big_float(),
@@ -311,9 +329,9 @@ impl Decoder<'_> {
     }
 
     fn big_int_ibig(&mut self) -> IBig {
-        let bytes = self.string();
+        let bytes = self.string_bytes();
         use dashu::integer::UBig;
-        let mut v = IBig::from(UBig::from_le_bytes(bytes.as_bytes()));
+        let mut v = IBig::from(UBig::from_le_bytes(&bytes));
         if self.bool() {
             v = -v;
         }
@@ -321,8 +339,8 @@ impl Decoder<'_> {
     }
 
     fn big_int(&mut self) -> Value {
-        let bytes = self.string();
-        let mut val = make_from_bytes(bytes.as_bytes());
+        let bytes = self.string_bytes();
+        let mut val = make_from_bytes(&bytes);
         if self.bool() {
             val = match val {
                 Value::Int(n) => Value::Int(-n),

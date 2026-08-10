@@ -141,9 +141,9 @@ pub fn binary_op(x_in: Value, op: Token, y_in: Value) -> Value {
         Value::String(s) => {
             if let Value::String(t) = y {
                 if op == Token::ADD {
-                    let mut combined = (*s).clone();
-                    combined.push_str(&t);
-                    return crate::value::make_string(combined);
+                    let mut combined = s.to_vec();
+                    combined.extend_from_slice(&t);
+                    return crate::value::make_string_bytes(combined);
                 }
             }
         }
@@ -377,8 +377,9 @@ pub fn compare(x_in: Value, op: Token, y_in: Value) -> bool {
             }
         }
         (Value::String(s), Value::String(t)) => {
-            let xs: &str = s.as_ref();
-            let ys: &str = t.as_ref();
+            // Go orders strings bytewise, which is what `[u8]` does too.
+            let xs: &[u8] = s.as_ref();
+            let ys: &[u8] = t.as_ref();
             match op {
                 Token::EQL => xs == ys,
                 Token::NEQ => xs != ys,

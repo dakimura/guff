@@ -10,7 +10,7 @@ use std::sync::OnceLock;
 use guff::ast::{BasicLit, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_constant::string_val;
+use guff_constant::string_val_lossy;
 use guff_types::arena::ObjectData;
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
@@ -54,7 +54,9 @@ fn format_string_from_arg(pass: &Pass<'_>, arg: &Expr) -> Option<String> {
         }
     }
     let tav = info.types.get(&arg.id())?;
-    tav.val.as_ref().map(string_val)
+    // Lossy is faithful here: upstream's parser ranges over the format string,
+    // and `for range` yields U+FFFD for each ill-formed byte.
+    tav.val.as_ref().map(string_val_lossy)
 }
 
 fn unquote_go_string(lit: &str) -> String {

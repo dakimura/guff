@@ -50,6 +50,12 @@ func main() {
 	regexp.MustCompile(`[]a]`)
 	regexp.MustCompile(`[a-]`)
 
+	// Well-formed UTF-8 for the same code points the byte escapes above name.
+	// `ÿ` is two bytes and compiles; `\xff` is one and does not.
+	regexp.MustCompile("ÿ")
+	regexp.MustCompile("\xc3\xbf")
+	regexp.MustCompile("a☃b")
+
 	regexp.MustCompile(`^(?P<name>[a-z]+)-(?P<n>\d+)$`)
 	regexp.Match(`\d+`, nil)
 	regexp.MatchReader(`\pL`, nil)

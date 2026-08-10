@@ -15,7 +15,7 @@ fn check_parse(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let Some(arg) = call.args.first() else {
         return;
     };
-    let Some(s) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
+    let Some(s) = callcheck::extract_const_bytes(ctx.prog, ctx.caller, arg.value) else {
         return;
     };
     if let Some(msg) = report_for(&s) {
@@ -27,12 +27,14 @@ fn check_parse(call: &mut Call<'_>, ctx: &CallContext<'_>) {
 /// `fmt.Sprintf("%q is not a valid URL: %s", s, err)`.
 ///
 /// `%q` is `strconv.Quote`, not Rust's `{:?}` — the two differ on the single
-/// quote and on every non-printable rune.
-fn report_for(s: &str) -> Option<String> {
-    let err = gostd::url::parse(s).err()?;
+/// quote and on every non-printable rune. It also differs from *any* rendering
+/// of text: the message has to say `\xff` for a byte the constant carries, so
+/// `s` is bytes all the way through.
+fn report_for(s: &[u8]) -> Option<String> {
+    let err = gostd::url::parse_bytes(s).err()?;
     Some(format!(
         "{} is not a valid URL: {err}",
-        gostd::strconv::quote(s)
+        gostd::strconv::quote_bytes(s)
     ))
 }
 
@@ -85,13 +87,21 @@ mod tests {
     #[test]
     fn url_validation_smoke() {
         assert_eq!(
-            report_for(":").as_deref(),
+            report_for(b":").as_deref(),
             Some(r#"":" is not a valid URL: parse ":": missing protocol scheme"#),
         );
         // Go accepts a relative reference and an opaque scheme:path; the
         // WHATWG parser behind Rust's `url` crate rejects both.
-        assert_eq!(report_for("foobar"), None);
-        assert_eq!(report_for("mailto:a@b.c"), None);
-        assert_eq!(report_for("https://golang.org"), None);
+        assert_eq!(report_for(b"foobar"), None);
+        assert_eq!(report_for(b"mailto:a@b.c"), None);
+        assert_eq!(report_for(b"https://golang.org"), None);
+        // A Go string is bytes, and `%q` renders an ill-formed one as `\xff`.
+        // Decoding it to U+FFFD first printed `\xef\xbf\xbd` instead.
+        assert_eq!(
+            report_for(b"http://example.com/\x7f\xff").as_deref(),
+            Some(
+                r#""http://example.com/\x7f\xff" is not a valid URL: parse "http://example.com/\x7f\xff": net/url: invalid control character in URL"#
+            ),
+        );
     }
 }

@@ -164,10 +164,15 @@ pub fn compile_bytes(pattern: &[u8]) -> CompileResult {
     }
 }
 
-/// [`compile_bytes`] for a pattern guff holds as a `String`.
+/// [`compile_bytes`] for a pattern that is already Rust text.
 ///
 /// Every `Expr` is cut at a rune boundary of the input, so for valid UTF-8 in
 /// the message is valid UTF-8 out; the lossy conversion is unreachable.
+///
+/// SA1000 does **not** use this — a Go string constant is bytes, and a pattern
+/// that is not valid UTF-8 is exactly the case Go rejects. This is the test
+/// helper for patterns written as Rust literals.
+#[cfg(test)]
 pub fn compile(pattern: &str) -> Result<(), Option<String>> {
     match compile_bytes(pattern.as_bytes()) {
         CompileResult::Valid => Ok(()),

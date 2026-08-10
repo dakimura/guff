@@ -13,10 +13,14 @@ fn check(call: &mut Call<'_>, ctx: &CallContext<'_>) {
     let Some(arg) = call.args.get(1) else {
         return;
     };
-    let Some(s) = callcheck::extract_const_string(ctx.prog, ctx.caller, arg.value) else {
+    // Bytes, and only bytes: this check *is* the question "are these bytes
+    // valid UTF-8?", so asking it of a Rust `String` — which is valid by
+    // construction — made SA1011 unable to fire at all. Its unit test passed
+    // throughout, because it called the validator directly.
+    let Some(s) = callcheck::extract_const_bytes(ctx.prog, ctx.caller, arg.value) else {
         return;
     };
-    if !is_valid_utf8_bytes(s.as_bytes()) {
+    if !is_valid_utf8_bytes(&s) {
         call.args[1].invalid("argument is not a valid UTF-8 encoded string");
     }
 }

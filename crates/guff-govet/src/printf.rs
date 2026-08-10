@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, expr_to_string};
+use guff_analysis::code::{call_name, expr_to_bytes};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::{ObjectData, TypeData};
@@ -139,14 +139,20 @@ enum Scan {
 }
 
 /// Parse the directive that starts at `chars` (just after a `%`).
-fn scan_directive(format: &str, start: usize) -> (Scan, usize) {
-    let bytes = format.as_bytes();
+///
+/// The format is bytes, as it is in Go: upstream compares `s.format[s.i]`
+/// byte-wise for every flag, index and digit, and decodes a rune only for the
+/// verb itself.
+fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
+    let bytes = format;
     let mut i = start; // index just after '%'
     let mut text = String::from("%");
     let mut index: Option<usize> = None;
     let mut stars = 0usize;
 
-    let at = |i: usize| -> Option<char> { bytes.get(i).map(|b| *b as char) };
+    // ASCII-only view, for the parts upstream reads as single bytes. A
+    // non-ASCII byte here never matches any of them.
+    let at = |i: usize| -> Option<char> { bytes.get(i).filter(|b| b.is_ascii()).map(|b| *b as char) };
 
     // %%
     if at(i) == Some('%') {
@@ -165,13 +171,13 @@ fn scan_directive(format: &str, start: usize) -> (Scan, usize) {
 
     // Explicit argument index: %[n]
     if at(i) == Some('[') {
-        let close = format[i..].find(']').map(|off| i + off);
+        let close = format[i..].iter().position(|&b| b == b']').map(|off| i + off);
         let Some(close) = close else {
             return (Scan::Error("format has invalid argument index".into()), i + 1);
         };
-        let num = &format[i + 1..close];
-        match num.parse::<usize>() {
-            Ok(n) if n >= 1 => index = Some(n),
+        let num = std::str::from_utf8(&format[i + 1..close]).ok();
+        match num.and_then(|n| n.parse::<usize>().ok()) {
+            Some(n) if n >= 1 => index = Some(n),
             _ => {
                 return (
                     Scan::Error("format has invalid argument index".into()),
@@ -179,7 +185,7 @@ fn scan_directive(format: &str, start: usize) -> (Scan, usize) {
                 )
             }
         }
-        text.push_str(&format[i..=close]);
+        text.push_str(&guff_constant::decode_lossy(&format[i..=close]));
         i = close + 1;
     }
 
@@ -211,12 +217,16 @@ fn scan_directive(format: &str, start: usize) -> (Scan, usize) {
         }
     }
 
-    // The verb.
-    let Some(verb) = at(i) else {
+    // The verb — `verb, w := utf8.DecodeRuneInString(s.format[s.i:])`. This is
+    // the one place upstream decodes a rune rather than reading a byte, so
+    // `%é` is one unknown verb and not the first byte of one.
+    if i >= bytes.len() {
         return (Scan::Error("format string ends with %".into()), i);
-    };
+    }
+    let (decoded, width) = guff_constant::utf8::decode_rune(&bytes[i..]);
+    let verb = decoded.unwrap_or(char::REPLACEMENT_CHARACTER);
     text.push(verb);
-    i += 1;
+    i += width;
 
     (
         Scan::Directive(Directive {
@@ -499,7 +509,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(format_arg) = call.args.get(fmt_idx) else {
             return;
         };
-        let Some(format) = expr_to_string(pass, format_arg) else {
+        let Some(format) = expr_to_bytes(pass, format_arg) else {
             return; // non-constant format string: skip (no false positives)
         };
 
@@ -548,11 +558,17 @@ fn pos_in_string_literal(lit: &guff::ast::BasicLit, offset: usize) -> Option<u32
 /// `(raw bytes consumed, decoded bytes produced)` for the character at the
 /// start of `b` inside a double-quoted Go string literal.
 ///
-/// The decoded lengths here must agree with what
-/// `guff_analysis::code::expr_to_string` actually produced, since the offset
-/// being mapped is an index into that string. `printf/escapes.go` in the golden
-/// case is what holds the two in step — it is how the decoder's own escape bug
-/// was found.
+/// The decoded lengths here must agree with what upstream's own walk counts,
+/// since the offset being mapped is compared against it. That is *not* always
+/// the true byte length: `walkStringLiteral` advances by
+/// `utf8.RuneLen(r)` and drops the `multibyte` flag `strconv.UnquoteChar`
+/// returns alongside `r`, so a `\xff` — one byte in the string — counts as the
+/// two bytes U+00FF would occupy. Matching golangci-lint means reproducing
+/// that, and a directive after an `\x80`-or-above escape is reported one
+/// column early by both tools.
+///
+/// `printf/escapes.go` in the golden case is what holds this in step with the
+/// decoder — it is how the decoder's own escape bug was found.
 fn escape_lengths(b: &[u8]) -> Option<(usize, usize)> {
     if b[0] != b'\\' {
         // A UTF-8 rune occupies the same number of bytes either way.
@@ -568,8 +584,10 @@ fn escape_lengths(b: &[u8]) -> Option<(usize, usize)> {
     let c = *b.get(1)?;
     Some(match c {
         b'a' | b'b' | b'f' | b'n' | b'r' | b't' | b'v' | b'\\' | b'\'' | b'"' => (2, 1),
-        b'x' => (4, 1),
-        b'0'..=b'7' => (4, 1),
+        // A byte escape, counted as upstream counts it: `utf8.RuneLen` of the
+        // code point with that number, so 1 below 0x80 and 2 at or above it.
+        b'x' => (4, rune_len_of_byte_escape(&b[2..4])?),
+        b'0'..=b'7' => (4, rune_len_of_octal_escape(&b[1..4])?),
         // \u and \U decode to a rune, whose UTF-8 length is what the decoded
         // string actually holds.
         b'u' | b'U' => {
@@ -583,6 +601,20 @@ fn escape_lengths(b: &[u8]) -> Option<(usize, usize)> {
         }
         _ => return None,
     })
+}
+
+/// `utf8.RuneLen` of the byte `\xHH` names — 1 below 0x80, 2 above.
+fn rune_len_of_byte_escape(digits: &[u8]) -> Option<usize> {
+    let hex = std::str::from_utf8(digits.get(..2)?).ok()?;
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    Some(if v < 0x80 { 1 } else { 2 })
+}
+
+/// `utf8.RuneLen` of the byte `\OOO` names.
+fn rune_len_of_octal_escape(digits: &[u8]) -> Option<usize> {
+    let oct = std::str::from_utf8(digits.get(..3)?).ok()?;
+    let v = u32::from_str_radix(oct, 8).ok()?;
+    Some(if v < 0x80 { 1 } else { 2 })
 }
 
 /// `opRange`: the position of a directive within the format string, falling
@@ -603,7 +635,7 @@ fn check_one(
     name: &str,
     is_errorf: bool,
     fmt_idx: usize,
-    format: &str,
+    format: &[u8],
     out: &mut Vec<(u32, String)>,
 ) {
     // Upstream reports the leftover-argument case with ReportRangef(call, ...),
@@ -622,7 +654,7 @@ fn check_one(
     let mut max_arg_num = first_arg;
     let mut any_index = false;
 
-    let bytes = format.as_bytes();
+    let bytes = format;
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'%' {
@@ -766,7 +798,7 @@ mod tests {
 
     #[test]
     fn scans_flags_width_precision() {
-        let (scan, next) = scan_directive("%-+#0 12.34d", 1);
+        let (scan, next) = scan_directive(b"%-+#0 12.34d", 1);
         assert_eq!(next, "%-+#0 12.34d".len());
         match scan {
             Scan::Directive(d) => {
@@ -779,7 +811,7 @@ mod tests {
 
     #[test]
     fn scans_stars_and_index() {
-        let (scan, _) = scan_directive("%[2]*.*d", 1);
+        let (scan, _) = scan_directive(b"%[2]*.*d", 1);
         match scan {
             Scan::Directive(d) => {
                 assert_eq!(d.verb, 'd');
@@ -792,11 +824,11 @@ mod tests {
 
     #[test]
     fn literal_percent() {
-        assert!(matches!(scan_directive("%%", 1).0, Scan::Literal));
+        assert!(matches!(scan_directive(b"%%", 1).0, Scan::Literal));
     }
 
     #[test]
     fn trailing_percent_is_error() {
-        assert!(matches!(scan_directive("%", 1).0, Scan::Error(_)));
+        assert!(matches!(scan_directive(b"%", 1).0, Scan::Error(_)));
     }
 }

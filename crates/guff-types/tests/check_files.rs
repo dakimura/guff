@@ -631,6 +631,22 @@ fn switch_duplicate_int_case() {
 }
 
 #[test]
+fn switch_byte_escape_and_code_point_are_distinct_cases() {
+    // "\xff" is one byte and "\u00ff" is the two bytes of U+00FF, so this
+    // switch has no duplicate. Decoding the byte escape into a code point made
+    // both cases the same string and reported one — see the map-literal twin
+    // in tests/literals.rs.
+    let check = check_src(
+        "package p\nfunc f(s string) { switch s { case \"\\xff\": case \"\\u00ff\": } }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "unexpected errors: {:?}",
+        check.errors
+    );
+}
+
+#[test]
 fn switch_duplicate_case_within_one_clause() {
     // `case 2, 2:` — the same value twice inside one clause list.
     let check = check_src("package p\nfunc f(x int) { switch x { case 2, 2: } }\n");

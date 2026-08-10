@@ -117,11 +117,13 @@ pub fn expr_to_int(pass: &Pass<'_>, expr: &Expr) -> Option<i64> {
     exact.then_some(n)
 }
 
-/// If `expr` is a string constant, returns its value.
-pub fn expr_to_string(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+/// If `expr` is a string constant, returns its value as the **bytes** Go would
+/// see. `"\xff"` is one byte here, and offsets into the result are the offsets
+/// Go's own analyzers compute.
+pub fn expr_to_bytes(pass: &Pass<'_>, expr: &Expr) -> Option<Vec<u8>> {
     if let Expr::BasicLit(BasicLit { value, .. }) = expr {
         if value.starts_with('"') || value.starts_with('`') {
-            return Some(unquote_go_string(value));
+            return Some(unquote_go_string_bytes(value));
         }
     }
     let info = pass.types_info()?;
@@ -131,6 +133,14 @@ pub fn expr_to_string(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
         return None;
     }
     Some(string_val(val))
+}
+
+/// If `expr` is a string constant, returns its value as text, with ill-formed
+/// bytes replaced by U+FFFD — the same substitution Go makes when a check
+/// ranges over the string. A check that inspects the bytes themselves, or that
+/// computes an offset into the string, wants [`expr_to_bytes`] instead.
+pub fn expr_to_string(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    expr_to_bytes(pass, expr).map(|b| guff_constant::decode_lossy(&b))
 }
 
 /// Reports whether `expr` is the untyped `nil` constant.
@@ -756,13 +766,13 @@ pub fn knowledge_selector_name(pass: &Pass<'_>, sel: &SelectorExpr) -> String {
     selector_name_for(pass, sel)
 }
 
-fn unquote_go_string(lit: &str) -> String {
+fn unquote_go_string_bytes(lit: &str) -> Vec<u8> {
     if let Some(inner) = lit.strip_prefix('`').and_then(|s| s.strip_suffix('`')) {
-        return inner.to_string();
+        return inner.as_bytes().to_vec();
     }
     let bytes = lit.as_bytes();
     if bytes.first() != Some(&b'"') {
-        return lit.to_string();
+        return lit.as_bytes().to_vec();
     }
     // Go's escape set, byte for byte. The previous version handled only
     // `\n`, `\t`, `\"` and `\\` and dropped the backslash from everything
@@ -846,10 +856,7 @@ fn unquote_go_string(lit: &str) -> String {
             out.push(esc);
         }
     }
-    match String::from_utf8(out) {
-        Ok(s) => s,
-        Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
-    }
+    out
 }
 
 /// Translate a position from a re-parsed file's [`FileSet`] into the analysis
@@ -886,8 +893,8 @@ mod tests {
 
     #[test]
     fn unquote_handles_double_and_backtick_strings() {
-        assert_eq!(unquote_go_string("\"hello\""), "hello");
-        assert_eq!(unquote_go_string("`raw`"), "raw");
+        assert_eq!(unquote_go_string_bytes("\"hello\""), b"hello");
+        assert_eq!(unquote_go_string_bytes("`raw`"), b"raw");
     }
 
     /// Every escape Go's scanner accepts. The old decoder only knew four of
@@ -896,13 +903,29 @@ mod tests {
     /// mapping caught it.
     #[test]
     fn unquote_decodes_every_go_escape() {
-        assert_eq!(unquote_go_string(r#""\a\b\f\n\r\t\v""#), "\u{7}\u{8}\u{c}\n\r\t\u{b}");
-        assert_eq!(unquote_go_string(r#""\\ \" \'""#), "\\ \" '");
-        assert_eq!(unquote_go_string(r#""\x41\x42""#), "AB");
-        assert_eq!(unquote_go_string(r#""\101\102""#), "AB");
-        assert_eq!(unquote_go_string(r#""\u00e9""#), "\u{e9}");
-        assert_eq!(unquote_go_string(r#""\U0001F600""#), "\u{1f600}");
+        assert_eq!(
+            unquote_go_string_bytes(r#""\a\b\f\n\r\t\v""#),
+            b"\x07\x08\x0c\n\r\t\x0b"
+        );
+        assert_eq!(unquote_go_string_bytes(r#""\\ \" \'""#), b"\\ \" '");
+        assert_eq!(unquote_go_string_bytes(r#""\x41\x42""#), b"AB");
+        assert_eq!(unquote_go_string_bytes(r#""\101\102""#), b"AB");
+        assert_eq!(unquote_go_string_bytes(r#""\u00e9""#), "\u{e9}".as_bytes());
+        assert_eq!(
+            unquote_go_string_bytes(r#""\U0001F600""#),
+            "\u{1f600}".as_bytes()
+        );
         // Raw strings keep their backslashes verbatim.
-        assert_eq!(unquote_go_string("`\\x41`"), "\\x41");
+        assert_eq!(unquote_go_string_bytes("`\\x41`"), b"\\x41");
+    }
+
+    /// A byte escape names one byte; `\u` for the same number names a code
+    /// point, which is two bytes here. Conflating them is what let
+    /// `regexp.MustCompile("\xff")` compile.
+    #[test]
+    fn unquote_keeps_byte_escapes_as_single_bytes() {
+        assert_eq!(unquote_go_string_bytes(r#""\xff""#), b"\xff");
+        assert_eq!(unquote_go_string_bytes(r#""\377""#), b"\xff");
+        assert_eq!(unquote_go_string_bytes(r#""\u00ff""#), b"\xc3\xbf");
     }
 }

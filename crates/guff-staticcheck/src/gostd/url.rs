@@ -17,12 +17,15 @@ use super::strconv::{quote, quote_bytes};
 ///
 /// `Ok(())` means Go would have returned a `*URL`. The `Err` is
 /// `(*url.Error).Error()`, i.e. `parse <quoted url>: <cause>`.
-pub fn parse(raw_url: &str) -> Result<(), String> {
-    let b = raw_url.as_bytes();
+///
+/// Bytes, because a Go string is bytes and the error quotes the input with
+/// `%q`: an ill-formed byte has to come back out as `\xff`, which it cannot do
+/// if it was replaced by U+FFFD on the way in.
+pub fn parse_bytes(raw_url: &[u8]) -> Result<(), String> {
     // Cut off #frag.
-    let (u, frag) = match b.iter().position(|&c| c == b'#') {
-        Some(i) => (&b[..i], &b[i + 1..]),
-        None => (b, &b[b.len()..]),
+    let (u, frag) = match raw_url.iter().position(|&c| c == b'#') {
+        Some(i) => (&raw_url[..i], &raw_url[i + 1..]),
+        None => (raw_url, &raw_url[raw_url.len()..]),
     };
     if let Err(cause) = parse_url(u) {
         return Err(format!("parse {}: {}", quote_bytes(u), cause));
@@ -32,9 +35,15 @@ pub fn parse(raw_url: &str) -> Result<(), String> {
     }
     // setFragment
     if let Err(cause) = unescape(frag, Encoding::Fragment) {
-        return Err(format!("parse {}: {}", quote(raw_url), cause));
+        return Err(format!("parse {}: {}", quote_bytes(raw_url), cause));
     }
     Ok(())
+}
+
+/// [`parse_bytes`] for a URL that is already Rust text — the oracle harness and
+/// the unit tests, which write their inputs as Rust literals.
+pub fn parse(raw_url: &str) -> Result<(), String> {
+    parse_bytes(raw_url.as_bytes())
 }
 
 /// Mirrors `url.parse(rawURL, viaRequest=false)`.

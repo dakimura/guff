@@ -65,6 +65,10 @@ printf/escapes/escapes.go:9:16:govet::printf: fmt.Printf format %z has unknown v
 printf/escapes/escapes.go:10:18:govet::printf: fmt.Printf format %z has unknown verb z
 printf/escapes/escapes.go:11:22:govet::printf: fmt.Printf format %z has unknown verb z
 printf/escapes/escapes.go:12:18:govet::printf: fmt.Printf format %z has unknown verb z
+printf/escapes/escapes.go:16:14:govet::printf: fmt.Printf format %é has unknown verb é
+printf/escapes/escapes.go:17:14:govet::printf: fmt.Printf format %☃ has unknown verb ☃
+printf/escapes/escapes.go:21:14:govet::printf: fmt.Printf format %� has unknown verb �
+printf/escapes/escapes.go:22:20:govet::printf: fmt.Printf format %d reads arg #2, but call has 1 arg
 printf/wrongtype/wrongtype.go:6:14:govet::printf: fmt.Printf format %d has arg "str" of wrong type string
 printf/wrongtype/wrongtype.go:7:14:govet::printf: fmt.Printf format %s has arg 42 of wrong type int
 printf/wrongtype/wrongtype.go:8:14:govet::printf: fmt.Printf format %t has arg 5 of wrong type int

@@ -214,13 +214,13 @@ fn char_invalid_returns_unknown() {
 #[test]
 fn string_simple() {
     let v = parse("\"hello\"", Token::STRING);
-    assert_eq!(string_val(&v), "hello");
+    assert_eq!(string_val(&v), "hello".as_bytes());
 }
 
 #[test]
 fn string_with_escapes() {
     let v = parse("\"a\\nb\"", Token::STRING);
-    assert_eq!(string_val(&v), "a\nb");
+    assert_eq!(string_val(&v), "a\nb".as_bytes());
 }
 
 #[test]
@@ -228,17 +228,66 @@ fn string_raw() {
     // Backtick-delimited strings preserve content verbatim, including
     // backslashes.
     let v = parse("`a\\nb`", Token::STRING);
-    assert_eq!(string_val(&v), "a\\nb");
+    assert_eq!(string_val(&v), "a\\nb".as_bytes());
 }
 
 #[test]
 fn string_empty() {
     let v = parse("\"\"", Token::STRING);
-    assert_eq!(string_val(&v), "");
+    assert_eq!(string_val(&v), "".as_bytes());
 }
 
 #[test]
 fn string_unicode_escape() {
     let v = parse("\"\\u2603\"", Token::STRING);
-    assert_eq!(string_val(&v), "\u{2603}");
+    assert_eq!(string_val(&v), "\u{2603}".as_bytes());
+}
+
+/// A Go string is a byte string. `\xff` and `\377` each name one byte, and
+/// neither is the code point U+00FF — which is two bytes, and a *different*
+/// constant. Conflating them let `regexp.MustCompile("\xff")` compile and made
+/// `switch` see a duplicate case where Go sees two.
+#[test]
+fn string_byte_escapes_are_bytes_not_code_points() {
+    assert_eq!(string_val(&parse(r#""\xff""#, Token::STRING)), b"\xff");
+    assert_eq!(string_val(&parse(r#""\377""#, Token::STRING)), b"\xff");
+    assert_eq!(string_val(&parse(r#""\u00ff""#, Token::STRING)), b"\xc3\xbf");
+    assert_ne!(
+        string_val(&parse(r#""\xff""#, Token::STRING)),
+        string_val(&parse(r#""\u00ff""#, Token::STRING)),
+    );
+    // len() is a byte count in Go.
+    assert_eq!(string_val(&parse(r#""\xff""#, Token::STRING)).len(), 1);
+    assert_eq!(string_val(&parse(r#""\u00ff""#, Token::STRING)).len(), 2);
+}
+
+/// A rune constant is the code point, so the byte escapes agree there.
+#[test]
+fn char_byte_escape_is_the_code_point() {
+    assert_eq!(int64_val(&parse(r"'\xff'", Token::CHAR)), (0xff, true));
+    assert_eq!(int64_val(&parse(r"'\377'", Token::CHAR)), (0xff, true));
+    // Go rejects an octal escape above 255, and a surrogate half.
+    assert_eq!(parse(r"'\400'", Token::CHAR).kind(), Kind::Unknown);
+    assert_eq!(parse(r"'\ud800'", Token::CHAR).kind(), Kind::Unknown);
+}
+
+/// The display forms quote bytes the way `strconv.Quote` does.
+#[test]
+fn quoting_writes_ill_formed_bytes_as_hex() {
+    let v = parse(r#""a\xffb""#, Token::STRING);
+    assert_eq!(v.to_string(), r#""a\xffb""#);
+    assert_eq!(v.exact_string(), r#""a\xffb""#);
+}
+
+/// Concatenation and comparison stay bytewise.
+#[test]
+fn byte_strings_concatenate_and_compare_bytewise() {
+    use guff::token::Token as Tok;
+    let a = parse(r#""\xff""#, Token::STRING);
+    let b = parse(r#""\xfe""#, Token::STRING);
+    assert_eq!(
+        string_val(&guff_constant::binary_op(a.clone(), Tok::ADD, b.clone())),
+        b"\xff\xfe"
+    );
+    assert!(guff_constant::compare(b.clone(), Tok::LSS, a.clone()));
 }

@@ -29,7 +29,10 @@ fn is_unique_string_cutset(ctx: &CallContext<'_>, value: callcheck::SsaValue) ->
     if val.kind() != Kind::String {
         return true;
     }
-    let s: Vec<char> = guff_constant::string_val(val).chars().collect();
+    // Upstream converts the cutset with `[]rune(s)`, which turns each
+    // ill-formed byte into U+FFFD — so two of them collide and the cutset is
+    // *not* unique. `string_val_lossy` reproduces that, byte for byte.
+    let s: Vec<char> = guff_constant::string_val_lossy(val).chars().collect();
     if s.len() < 2 {
         return true;
     }
