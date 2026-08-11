@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-go125
+# Produced by running golangci-lint on compat/golden/cases/revive-go125/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+wggo/revivetest/wg_go_bad.go:13:3:revive:warning:forbidden-call-in-wg-go: do not call wg.Done inside wg.Go
+wggo/revivetest/wg_go_bad.go:20:3:revive:warning:forbidden-call-in-wg-go: do not call panic inside wg.Go

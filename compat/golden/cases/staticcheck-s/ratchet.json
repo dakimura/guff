@@ -1,6 +1,6 @@
 {
-  "missing": 3,
+  "missing": 2,
   "extra": 1,
-  "why": "S1030 recall; S1037 precision; two SA4006 findings upstream reaches through IR block optimization (an empty `if` body drops the reference to its condition) that guff-ssa keeps.",
+  "why": "S1037 precision; two SA4006 findings upstream reaches through IR block optimization (an empty `if` body drops the reference to its condition) that guff-ssa keeps.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-08) for the remaining classes."
 }

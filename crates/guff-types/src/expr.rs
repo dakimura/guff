@@ -16,8 +16,10 @@
 //! ## Deferrals (chunk-25a, see §8)
 //!
 //! - target `T`/`hint`, `genericExpr`/`exprOrType`/`exprWithHint`,
-//!   `nonGeneric`/`pendingType`/`singleValue`, and `record`/`recordUse` are
-//!   omitted (no Info recording — §18b).
+//!   `nonGeneric`/`pendingType`, and `record`/`recordUse` are omitted (no Info
+//!   recording — §18b). `singleValue` landed 2026-08-11; `exclude` has not, so
+//!   `x := none()` reports "cannot assign to func()" where Go says
+//!   "none() (no value) used as value".
 //! - `usedVars`/`addDeclDep` (use & dependency tracking), dot-import marking,
 //!   `verifyVersionf` gates on `any`/`comparable`, and the broken-alias check
 //!   are omitted.
@@ -31,7 +33,7 @@ use guff::token::Token;
 use guff_constant::{binary_op, compare, make_bool, shift, sign, uint64_val, unary_op, Value};
 use guff_types_errors::Code;
 
-use crate::arena::{ObjectData, TypeId};
+use crate::arena::{ObjectData, TypeData, TypeId};
 use crate::basic::BasicKind;
 use crate::check::Checker;
 use crate::object::builtin::ExprKind;
@@ -47,13 +49,12 @@ use crate::predicates::{
 impl Checker {
     /// Type-check the expression `e`, recording the result in `x`.
     ///
-    /// Equivalent to `Checker.expr` (without the assignment target). The
-    /// operand is reduced to a single value (the `singleValue` step is a
-    /// no-op until tuple-valued expressions land with call.go).
+    /// Equivalent to `Checker.expr` (without the assignment target).
     pub fn expr<'a>(&mut self, x: &mut Operand<'a>, e: &'a Expr) -> ExprKind {
-        // DEFERRED: singleValue(x) — only matters for multi-valued operands
-        // (function calls), which aren't checked yet.
-        self.raw_expr(x, e, None)
+        let kind = self.raw_expr(x, e, None);
+        // DEFERRED: exclude(x, novalue|builtin|typexpr).
+        self.single_value(x);
+        kind
     }
 
     /// Type-check `e` where `hint` is the element type of the enclosing
@@ -67,7 +68,42 @@ impl Checker {
         e: &'a Expr,
         hint: TypeId,
     ) -> ExprKind {
-        self.raw_expr(x, e, Some(hint))
+        let kind = self.raw_expr(x, e, Some(hint));
+        self.single_value(x);
+        kind
+    }
+
+    /// Reduce a multi-valued operand to a single value, reporting
+    /// `multiple-value f() in single-value context` when it cannot be.
+    ///
+    /// Equivalent to `Checker.singleValue`. Every context that legitimately
+    /// consumes a tuple (`a, b := f()`, `g(f())`, `return f()`) goes through
+    /// [`Checker::raw_expr`] instead, exactly as Go's `multiExpr` / `exprList`
+    /// do — so reaching here with a tuple *is* the error.
+    fn single_value(&mut self, x: &mut Operand<'_>) {
+        if x.mode != OperandMode::Value {
+            return;
+        }
+        // Tuple types are never named, so there is no need to go through the
+        // underlying type here.
+        let Some(t) = x.typ else { return };
+        if !matches!(self.types.get(t), TypeData::Tuple(_)) {
+            return;
+        }
+        let what = match x.expr {
+            Some(e) => format!(
+                "{} (value of type {})",
+                crate::exprstring::expr_string(e),
+                self.type_str(t)
+            ),
+            None => format!("value of type {}", self.type_str(t)),
+        };
+        self.error(
+            x.pos() as u32,
+            Code::WrongResultCount,
+            format!("multiple-value {} in single-value context", what),
+        );
+        x.mode = OperandMode::Invalid;
     }
 
     /// Type-check `e` as a type expression when possible, otherwise as a value.
@@ -91,7 +127,7 @@ impl Checker {
     /// `record`, which are deferred). `hint`, when set, is the composite
     /// literal element type threaded to a bare inner `{...}`. Returns the
     /// expression's [`ExprKind`] (conversion/expression/statement).
-    fn raw_expr<'a>(
+    pub(crate) fn raw_expr<'a>(
         &mut self,
         x: &mut Operand<'a>,
         e: &'a Expr,

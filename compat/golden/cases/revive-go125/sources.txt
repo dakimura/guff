@@ -1,0 +1,5 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Only rules gated on Go 1.25 or newer belong here — see config.yml.
+wggo/revivetest/wg_go_bad.go  crates/guff-revive/tests/testdata/revive/wg_go_bad.go

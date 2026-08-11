@@ -2750,6 +2750,262 @@ perf-guard の 1 分平均は通っていたが実際には冷めていなかっ
 
 ---
 
+### 2026-08-11（2 本目）— `_ = f()` の arity を型検査し、台帳の `never` を 8 → 4 に落とした
+
+**やったこと**
+
+前セッションの「次にやること 1」（arity 不一致、§7）と、
+**台帳に残っていた `never` 8 件 / `unit-only` 3 件を 1 件ずつ潰す**。
+`never` は 8 → **4**、`unit-only` は 3 → **2**、`fired` は 536 → **541（98.9%）**。
+
+#### 1. `_ = f()` — 効いていたのは `isCall` という 4 行のフラグ
+
+`go build` は 4 形すべてを落とす（go1.26.5 で実測）:
+
+```
+_ = two()            assignment mismatch: 1 variable but two returns 2 values
+x := two()           同上
+var y int = two()    multiple-value two() (value of type (int, error)) in single-value context
+var a, b = two(), 1  同上
+```
+
+guff はこの 4 形すべてで**エラーを 1 件も出していなかった**。原因は 2 つで、
+どちらも go/types の中では隣り合っている。
+
+**(a) `assignVars` / `initVars` の `isCall`。** 上流は `l == r` でも
+**右辺が単独の CallExpr なら n:n 分岐に入れない**:
+
+```go
+isCall := false
+if r == 1 { _, isCall = ast.Unparen(orig_rhs[0]).(*ast.CallExpr) }
+if l == r && !isCall { ... n:n ... }
+```
+
+guff の条件は `r == 1 && l != 1` だったので、`l == r == 1` は素通りしていた。
+`(l != 1 || is_call)` に直すと `multiExpr` に入り、tuple が 2 個に展開されて
+`l != r` になり、`assign_error` に落ちる。
+
+**(b) `Checker.expr` の `singleValue` が「DEFERRED」のままだった。**
+tuple 値がそのまま単値の文脈を通り抜けていた。ここを入れると、
+逆に**tuple が正当に来る 4 箇所**を `raw_expr` に移す必要が出る
+（上流も同じ理由で `rawExpr` を呼んでいる）:
+
+| 箇所 | 上流 | 正当な tuple |
+|---|---|---|
+| `eval_multi` | `multiExpr` | `a, b := f()` |
+| `arguments`（引数 1 個のとき） | `genericExprList` の `n == 1` の腕 | `g(f())` |
+| `builtins` の引数評価（同上） | `exprList` | `println(f())` |
+| `ExprStmt` | `stmt.go` の ExprStmt | `http.Get(u)` を 1 行で捨てる |
+
+**4 番目はワークスペースのテストが出した**。`bodyclose` の fixture が
+`http.Get("…")` を 1 行で書いており、`single_value` を入れた瞬間に
+そのパッケージが ill-typed になって analyzer ごと落ちた。
+上流の分岐表を写すのではなく**「上流はどこで rawExpr を呼んでいるか」を写す**のが正しい、
+という形の失敗。
+
+**(c) 副産物: `useLHS` が無かった。** 数の不一致で lhs を評価する 3 箇所が
+`self.expr` を使っていたので、`_ = two()` が
+`cannot use _ as value or type` を**追加で**吐いた。上流の `use1` は
+**blank を明示的に飛ばす**。`use_n` / `use_1` を足し、
+`r != 1` の枝も上流どおり「lhs も rhs も無事なときだけ mismatch を報告する」に変えた。
+
+**(d) `eval_multi` の `want == 2` は `allowCommaOk` ではなかった。**
+上流は `multiExpr(e, l == 2 && returnStmt == nil)` で、**return では comma-ok を許さない**。
+guff は `want`（＝ l）だけを見ていたので、`return m[k]` を 2 値の関数から返すと
+comma-ok に展開していた。引数を `allow_comma_ok: bool` に変えた。
+
+**測ったこと**: 効果は finding 1 件ではない。ill-typed はパッケージ単位のスイッチで、
+
+```
+package tc: strings.Index(s,"x") > -1  ← S1003
+            _ = two()                  ← 型エラー
+```
+
+golangci-lint は typecheck エラーだけを出して S1003 を落とす。
+**guff は直す前は S1003 を出していた**（＝ユーザーに見える差）。直したあとは両方黙る。
+OSS 8 ターゲットの `ill-typed N, at baseline` は 1 つも動かなかったので、
+実コードでの偽陽性は無い。
+
+なお **guff は typecheck エラー自体を finding として出さない**（golangci-lint は
+`typecheck` 疑似 linter として出す）。これは別件で、ここでは触っていない。
+
+9 形の probe を `go build` と突き合わせた結果、**7 形は位置も文言も完全一致**。
+残り 2 形は**どちらも文言だけの差**で、ill-typed の判定は両方とも揃っている:
+
+| 形 | `go build` | guff |
+|---|---|---|
+| `x := none()` | `none() (no value) used as value`（3:17） | `cannot assign to func() in assignment`（3:17） |
+| `g(two())` で g が 1 引数 | `too many arguments in call to g` + have/want（4:14） | `too many arguments in call`（4:12） |
+
+前者は `Checker.expr` の `exclude(x, novalue|builtin|typexpr)` が未実装だから
+（`single_value` の隣にある、今回入れなかった半分）。後者は `arguments` のエラーが
+callee 名と have/want の 2 行を落としているため。**どちらもゲートには出ない**
+（guff は typecheck エラーを finding にしないので）。
+
+`go/types` の `ExprString` を `crates/guff-types/src/exprstring.rs` に移植した。
+`assignment mismatch: 1 variable but v.m returns 2 values` の `v.m` と、
+`multiple-value two() (…)` の `two()` がこれ。**短縮の仕方まで含めて仕様**
+（composite literal の中身は `…`、関数リテラルは `(func() literal)`）なので、
+source printer で代用はできない。
+
+#### 2. `S1030` — スタブの受信子が値だったので、port も値で書かれていた
+
+golden が `missing` として挙げていた 1 件。原因は 1 行:
+
+```rust
+matches!(name, "(bytes.Buffer).Bytes" | "(bytes.Buffer).String")   // 上流は (*bytes.Buffer)
+```
+
+`Bytes` / `String` は `*bytes.Buffer` のメソッドなので上流の
+`code.IsCallTo(pass, call.Args[0], "(*bytes.Buffer).Bytes")` とは永久に一致しない。
+**なぜそう書かれたかが本題**で、fixture の偽 stdlib が
+
+```go
+func (Buffer) String() string { return "" }   // 値レシーバ
+```
+
+だった。port は上流ではなく**スタブに合わせて**書かれていた。
+これは 2026-08-11（1 本目）の gosec の「実 Go ツールチェインに一度も読ませていない
+fixture はこうなる」の 2 例目で、今回は**スタブの側が実物と違う**という形。
+スタブをポインタレシーバに直し、上流に合わせて 3 点も直した:
+
+- 型判定は識別子名ではなく `TypeOf(call.Fun)`（`[]byte(...)` の `Fun` は
+  `ArrayType` なので、`is_builtin_ident(fun, "[]byte")` は**一度も真にならない**死んだ枝だった）
+- メッセージは `report.Render(sel.X)` と `report.Render(call)` を埋める
+  （`"buf"` と `"string(buf.Bytes())"` が**ハードコード**されていた）
+- `m[string(buf.Bytes())]` は**報告しない**（コンパイラの最適化で
+  `m[buf.String()]` より速い）。上流は cursor の親を見るので、guff は
+  IndexExpr の子の node id を先に集めた
+
+fixture を 4 形に増やして golden 4/4 一致。`staticcheck-s` の ratchet は missing 3 → **2**。
+
+#### 3. `SA3000` / `SA1027` — 「発火しない」のは fixture ではなく**モジュールと arch**が原因だった
+
+どちらも `never` で、どちらも fixture は最初からあった。
+
+- **SA3000** は `version.Compare(code.StdlibVersion(pass, node), "go1.15") >= 0` で抜ける。
+  `cases/staticcheck-sa` の go.mod が `go 1.22` なので上流も guff も黙る。
+  **ファイルに `//go:build go1.14` を書いても効かない**: `StdlibVersion` は
+  モジュールが 1.21 以上なら**ファイルタグが上回るときしか採用しない**（実測で 0 件）。
+  → `go 1.14` のモジュールを持つケース `cases/staticcheck-go114` を新設。
+  **1 回目の実行で位置バグが出た**: 上流は `FuncDecl` を報告するので
+  `Type.Pos()` = `func` キーワード、guff は関数名を指していた（内側トークン、6 度目）。
+- **SA1027** は `sizes.Sizeof(uintptr) != 4` で抜ける。64-bit ホストでは
+  どちらも永久に黙る。→ golden ランナーに**ケース単位の `env` ファイル**を足し、
+  `cases/staticcheck-386`（`GOOS=linux GOARCH=386`）を新設。
+  `GOARCH` だけでは駄目で、`darwin/386` は成立しないので golangci-lint が
+  `no go files to analyze` を返す。**GOOS も一緒に動かす**必要がある。2/2 一致。
+
+この `env` の仕組みは §6 が `govet/framepointer` について
+「入れれば解ける」と書いていたものだが、**framepointer には効かなかった**。次項。
+
+#### 4. `govet/framepointer` — §6 に書いてあった理由が間違っていた
+
+§6 は「`build.Default.GOARCH` がホスト依存だからゴールデンに載せられない」としていた。
+`env` を入れたので試したところ、**`GOARCH` を合わせても 0 件**。
+同じ fixture に `go vet` を食わせると:
+
+```
+bad/bad_arm64.s:2:1: frame pointer is clobbered before saving
+bad/bad_arm64.s:1:1: [arm64] bad1: function bad1 missing Go declaration
+（計 6 件）
+```
+
+golangci-lint 2.12.2 は**同じ入力に対して 0 件**。ホスト arch のままでも同じ。
+つまり **golangci-lint は `.s` ファイルの診断を通さない**（asmdecl も同時に死んでいる）。
+GOARCH は無関係だった。§6 の行を実測に書き換えた。
+**「入れれば解ける」と書いてある制約でも、入れてから測るまでは解けたことにならない。**
+
+#### 5. `revive/time-naming` — rule が丸ごと死んでいた
+
+`never` の 1 件。原因は 2 つ:
+
+- 名前の型を `Info.Types` から引いていた。ValueSpec の名前は**定義**なので
+  `Info.Types` には無い（上流の `Pkg.TypeOf` は `Defs` にフォールバックする）。
+  **つまりこの rule は一度も報告を出せなかった。**
+- `file.decls` を歩いていたのでパッケージレベルの `var` しか見ていない。
+  上流の visitor は `*ast.ValueSpec` を**どこでも**拾うので関数内の `var` も対象。
+
+直すと `var timeoutSec time.Duration` / 関数内の `var deadlineSeconds …` の両方を撃つ。
+**上流は両方とも黙る** —— revive の importer 盲目（§6）で `time.Duration` が解決できないため。
+方針どおり真陽性を優先し、`cases/revive` の ratchet を extra 3 → **4** にして
+§6 の表に 1 行足した。**床が 1 段上がったので、`why` も更新してある。**
+
+#### 6. `revive/forbidden-call-in-wg-go` — `unit-only` の理由はモジュールの Go バージョン
+
+上流は `if !file.Pkg.IsAtLeastGoVersion(lint.Go125) { return nil }`。
+`Pkg` なのでバージョンは go.mod 由来で、ファイルタグでは上げられない。
+`cases/revive` は `go 1.22`。単体テストの fixture は**モジュールを持たない**ので
+「十分新しい」と読まれ、そちらだけが通っていた（＝ `unit-only` の正体）。
+
+`cases/revive` を 1.25 に上げると 290 件の golden で他の版依存 rule も同時に動くので、
+`go 1.25` の小さなケース `cases/revive-go125` を新設した。2/2 一致。
+**1 回目は severity で割れた**（golden `revive:warning:` / guff `revive::`）。
+guff の revive severity は config 由来で、`cases/revive` は `severity: warning` を
+書いている。上流も同じで、config に無ければ空。ケースの config に 1 行足して解決。
+
+**結果**
+
+- 台帳: `never` **8 → 4**、`unit-only` **3 → 2**、`fired` 536 → **541（98.9%）**。
+  回収したのは `S1030` / `SA1027` / `SA3000` / `revive/time-naming` /
+  `revive/forbidden-call-in-wg-go`。
+- golden ケース **9 → 12**（`staticcheck-go114` / `staticcheck-386` / `revive-go125`）。
+  12 ケース全部緑。ratchet は `staticcheck-s` が 3/1 → **2/1**、
+  `revive` が 1/3 → **1/4**（§6 の恒久組が 1 件増えたため）。他は据え置き。
+- `cargo test --workspace` **3,011 件緑**（+12: single_value 11 + wg_go 1）。
+- isolate **114 target**、OSS `--tier pr,nightly` **8 target** すべて据え置き。
+  OSS の `ill-typed N, at baseline` が 1 つも動かなかったのが arity 修正の安全確認。
+- regress tsdb **PASS**（wall 0.760s / 限界 0.880s、finding 4/4 一致）、full も **PASS**
+  （wall 2.410s / 限界 2.510s、finding 20/20 一致）。次項。
+
+#### 7. wall が 2 回赤くなり、1 回は本物だった
+
+最初の tsdb は 0.940s（限界 0.880s）。**「ホストのせい」と書く前に、まず疑わしい変更を
+数えた**: S1030 に足した `IndexExpr` の**全ファイル走査**が、prometheus が
+staticcheck を有効にしている以上**全パッケージに乗る**。`m[string(buf.Bytes())]` の
+除外にしか要らない走査なので、**候補が 1 件も無ければ走らせない**ように後置きにした
+（実コードではまず走らない）。ついでに `time-naming` も、`is_duration_type` が
+型を文字列に描画するのに**全変数について**呼んでいたので、
+先に接尾辞（ただの文字列比較）で弾くよう順序を入れ替えた。報告集合は変わらない。
+
+直したあと tsdb は 0.760s で **PASS**。full は依然 2.610s で赤かったので、
+前セッションと同じ手順で worktree に HEAD を建てて交互に測った:
+
+| 版 | wall（交互 3 回） | 中央値 |
+|---|---|---|
+| HEAD（`ee56f7b`） | 2.410 / 2.420 / 2.450 | 2.420 |
+| 本セッション | 2.410 / 2.420 / 2.480 | 2.420 |
+
+**差 0.00s。** 静かな状態で測り直したら 2.410s で PASS。
+2 回目の赤は 3 分前に `cargo build --release` を回した直後のもの。
+
+なお RSS は tsdb で 856 MB（baseline 748 MB の 1.14 倍、限界 1.20 倍）と
+限界に近いが、**前セッションの記録が既に 865 MB** なので本セッションの寄与は 2% 程度。
+**次に何か足す人は先に RSS の baseline を測り直すこと。**
+
+**次にやること**
+
+1. **`golines` / `swaggo` を isolate に載せる**（台帳の最後の `unit-only` / `never`）。
+   golangci-lint v2 でこの 2 つは `formatters:` ブロックなので、
+   `compat/isolate/make_config.py` の `TEMPLATE` が `linters.enable` しか書けないのを直す。
+   fixture は `compat/isolate/fixtures/{golines,swaggo}/` を新設。
+2. **`compat/oracles/goregexp` の 202 行（不正 UTF-8）の end-to-end 確認**
+   （3 セッション積み残し）。
+3. gosec の DEFERRED を golden に載せていく: G304 / G305 / G307 / G601 / G115 など
+   未実装分と、G402 の MinVersion / CipherSuites、G104 audit モード。
+4. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+5. govet の未実装 16 pass。
+6. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+7. **guff は typecheck エラーを finding として出さない**。golangci-lint は
+   `typecheck` 疑似 linter として出すので、ill-typed なパッケージでは
+   **golangci が 1 件、guff が 0 件**になる。今回 ill-typed の判定は揃えたが、
+   出力は揃っていない。golden ケースは typecheck 混入を避ける前提で書かれているので、
+   載せるなら専用ケースが要る。
+8. `staticcheck-s` の残り 2 件（SA4006 ×2、空 `if` 本体のブロック最適化）と
+   `S1037` の extra 1 件。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -2794,8 +3050,9 @@ perf-guard の 1 分平均は通っていたが実際には冷めていなかっ
 | check | 理由 |
 |-------|------|
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
-| `govet/framepointer` | 報告するアセンブリ命令を `build.Default.GOARCH`（＝ホストの GOARCH）で選ぶ。ゴールデンは 1 台で生成して全台で照合するので、arm64 の開発機と amd64 の runner で必ず食い違う。**ゴールデンに載せるには golden ランナーにケース単位の環境変数（`GOARCH`）を渡す仕組みが要る** — 入れれば解ける、という意味で §7 寄りの制約。 |
+| `govet/framepointer` | **golangci-lint は `.s` ファイルの診断を 1 件も出さない**。同じ fixture に `go vet` を食わせると framepointer 2 件 + asmdecl 4 件が出るのに、golangci-lint 2.12.2 は 0 件（`GOARCH` を合わせても、ホスト arch のままでも同じ）。**この行の以前の理由（GOARCH がホスト依存だから）は誤り**で、ケース単位の環境変数を入れても解けない — その仕組み自体は 2026-08-11（2 本目）で入れてあり、`SA1027` はそれで回収できた。単体テストでのみ検証可能。 |
 | `govet/cgocall` | `import "C"` を含むファイルが要る。cgo と C コンパイラを CI ゲートの前提にしたくない。単体テストでのみ検証可能。 |
+| `golines` / `swaggo` | どの corpus リポも有効にしておらず、isolate にも fixture が無い。**isolate の `make_config.py` が `linters.enable` しか書けない**のに対し、golangci-lint v2 でこの 2 つは `formatters:` ブロックの住人なので、fixture を置くだけでは足りない。→ 次にやること。 |
 
 ### 意図的な非互換: revive の importer 盲目には追従しない `[決定 2026-08-10]`
 
@@ -2810,11 +3067,12 @@ rule は上流では**常に黙る**。guff は全プログラムの型情報を
 |---|---|
 | `time-equal`（extra, `extended_bad.go:73`） | `TypeOf(x)` が `time.Time` かを見るが invalid が返る |
 | `epoch-naming`（extra, `extended_bad.go:428`） | 同上（`t.Unix()` のレシーバ型） |
+| `time-naming`（extra, `bad.go:50`）`[追加 2026-08-11（2 本目）]` | 同上（`TypeOf(name)` が `time.Duration` か）。guff 側はこの rule が**そもそも死んでいた**ので、直した結果ここに並んだ。§4 参照 |
 | `context-keys-type`（missing/extra の対, `bad.go:65`） | `context.WithValue` のシグネチャが解決できず、untyped 定数が `string` に defaulting されない。文言が `untyped string` と `string` で割れる |
 
-**追従すると `time-equal` と `epoch-naming` が丸ごと死ぬ。** どちらも実在のバグを指す rule
-なので、上流の欠陥を再現するために真陽性を捨てるのは割に合わないと判断した。
-`cases/revive/ratchet.json` の 1/3 は**到達目標ではなく固定の床**であり、
+**追従すると `time-equal` / `epoch-naming` / `time-naming` が丸ごと死ぬ。** どれも実在のバグを
+指す rule なので、上流の欠陥を再現するために真陽性を捨てるのは割に合わないと判断した。
+`cases/revive/ratchet.json` の 1/4 は**到達目標ではなく固定の床**であり、
 **これ以外の差分が 1 件でも増えたらそれはバグ**。
 
 `unhandled-error` だけは例外的に上流に合わせてある（`callee_is_local`、
@@ -2830,7 +3088,10 @@ revive のバージョンを上げるときに再確認すること。
 §6 が「上流に食わせても観測できない」なら、こちらは「観測はできるが guff の
 構造上そのままでは再現できない」。**allowlist ではなく、代償を明記した設計判断**として記録する。
 
-### `_ = f()` の arity 不一致を型検査していない `[記録 2026-08-11 / 未修正]`
+### ~~`_ = f()` の arity 不一致を型検査していない~~ `[記録 2026-08-11 / 解消 2026-08-11（2 本目）]`
+
+**解消済み。** `is_call` 分岐と `single_value` を入れた。詳細は §4 の
+2026-08-11（2 本目）。以下は当時の記録。
 
 **これは設計判断ではなく単なる欠落**なので、直すべきものとしてここに置く
 （§4 の 2026-08-11 の「次にやること 1」）。

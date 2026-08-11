@@ -410,10 +410,20 @@ impl Checker {
         let ddd = call.ellipsis.0 != 0;
 
         // Evaluate every argument (so all are "used" even on a later error).
+        // A lone argument goes through `raw_expr`, since a multi-valued call
+        // spread across the parameters is legal there and `expr`'s
+        // `single_value` would reject the tuple first. Go's `genericExprList`
+        // splits on exactly the same `n == 1` boundary: the single-element arm
+        // calls `rawExpr` and unpacks a tuple, every other arm goes through
+        // `genericExpr`, which ends in `singleValue`.
         let mut args: Vec<Operand> = Vec::with_capacity(nargs);
         for a in &call.args {
             let mut op = Operand::invalid();
-            self.expr(&mut op, a);
+            if nargs == 1 {
+                self.raw_expr(&mut op, a, None);
+            } else {
+                self.expr(&mut op, a);
+            }
             args.push(op);
         }
 

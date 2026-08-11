@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-go114
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-go114/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+sa3000/bad/bad.go:5:1:staticcheck::SA3000: TestMain should call os.Exit to set exit code

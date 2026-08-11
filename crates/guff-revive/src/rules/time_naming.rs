@@ -1,7 +1,6 @@
 //! `time-naming` — `time.Duration` vars should not use unit-specific suffixes.
 
-use guff::ast::{Decl, File, Spec, ValueSpec};
-use guff::token::Token;
+use guff::ast::ValueSpec;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
@@ -28,11 +27,13 @@ impl<'a> Checker<'a> {
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
-        // Package-level const/var only (mirrors the previous file.decls walk).
-        let NodeRef::File(file) = n else {
+        // Upstream's visitor matches `*ast.ValueSpec` anywhere in the file, so
+        // a `var` inside a function counts too. Walking `file.decls` instead
+        // saw only package-level declarations.
+        let NodeRef::ValueSpec(spec) = n else {
             return;
         };
-        check_file(self.pass, file, &mut self.failures);
+        check_spec(self.pass, spec, &mut self.failures);
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -53,59 +54,53 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     c.into_failures()
 }
 
-fn check_file(pass: &Pass<'_>, file: &File, failures: &mut Vec<Failure>) {
-    for decl in &file.decls {
-        let Decl::GenDecl(g) = decl else {
+fn check_spec(pass: &Pass<'_>, spec: &ValueSpec, failures: &mut Vec<Failure>) {
+    let Some(info) = pass.types_info() else {
+        return;
+    };
+    for name in &spec.names {
+        // Upstream resolves the type first and matches the suffix second; the
+        // reported set is the same either way, and this order keeps
+        // `is_duration_type` — which renders the type to a string — off every
+        // variable in the package.
+        let Some(suffix) = TIME_SUFFIXES
+            .iter()
+            .find(|s| name.name.ends_with(*s))
+            .copied()
+        else {
             continue;
         };
-        if !matches!(g.tok, Some(Token::VAR) | Some(Token::CONST)) {
+        // The names of a ValueSpec are *definitions*: `Info.Types` holds
+        // expression types and has no entry for them. Upstream reads
+        // `Pkg.TypeOf(name)`, which falls back to `Defs[name].Type()` — reading
+        // `Info.Types` here meant the rule never fired at all.
+        let Some(obj) = info.defs.get(&name.id).copied().flatten() else {
+            continue;
+        };
+        let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+            continue;
+        };
+        let Some(typ) = obj.typ(&artifacts.objects) else {
+            continue;
+        };
+        if !is_duration_type(pass, typ) {
             continue;
         }
-        for spec in &g.specs {
-            let Spec::ValueSpec(ValueSpec { names, .. }) = spec else {
-                continue;
-            };
-            for name in names {
-                let Some(info) = pass.types_info() else {
-                    continue;
-                };
-                let Some(typ) = info.types.get(&name.id).map(|tv| tv.typ) else {
-                    continue;
-                };
-                if !is_duration_type(pass, typ) {
-                    continue;
-                }
-                let suffix = TIME_SUFFIXES
-                    .iter()
-                    .find(|s| name.name.ends_with(*s))
-                    .copied();
-                let Some(suffix) = suffix else {
-                    continue;
-                };
-                let type_str = pass
-                    .pkg()
-                    .type_artifacts
-                    .as_ref()
-                    .map(|a| {
-                        guff_types::typestring::type_string(
-                            &a.types,
-                            &a.objects,
-                            &a.packages,
-                            typ,
-                            None,
-                        )
-                    })
-                    .unwrap_or_else(|| "time.Duration".into());
-                failures.push(Failure {
-                    rule: "time-naming",
-                    pos: name.name_pos.0 as u32,
-                    message: format!(
-                        "var {} is of type {}; don't use unit-specific suffix {:?}",
-                        name.name, type_str, suffix
-                    ),
-                    ..Failure::default()
-                });
-            }
-        }
+        let type_str = guff_types::typestring::type_string(
+            &artifacts.types,
+            &artifacts.objects,
+            &artifacts.packages,
+            typ,
+            None,
+        );
+        failures.push(Failure {
+            rule: "time-naming",
+            pos: name.name_pos.0 as u32,
+            message: format!(
+                "var {} is of type {}; don't use unit-specific suffix {:?}",
+                name.name, type_str, suffix
+            ),
+            ..Failure::default()
+        });
     }
 }

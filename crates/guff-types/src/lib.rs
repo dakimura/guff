@@ -43,6 +43,7 @@ pub mod cycles;
 pub mod decl;
 pub mod errors;
 pub mod expr;
+pub mod exprstring;
 pub mod format;
 pub mod hash;
 pub mod importer;

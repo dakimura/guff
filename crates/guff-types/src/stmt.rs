@@ -864,8 +864,12 @@ impl Checker {
                 // spec: "With the exception of specific built-in functions,
                 // function and method calls and receive operations can appear
                 // in statement context. Such statements may be parenthesized."
+                // `raw_expr`, not `expr`: a call statement legitimately
+                // discards a multi-valued result (`http.Get(u)` on its own
+                // line), so `single_value` must not run here. Go's ExprStmt
+                // case calls `rawExpr` for the same reason.
                 let mut x = Operand::invalid();
-                let kind = self.expr(&mut x, &es.x);
+                let kind = self.raw_expr(&mut x, &es.x, None);
                 let diag = match x.mode {
                     OperandMode::Invalid => None,
                     OperandMode::Builtin => Some(("must be called", Code::UncalledBuiltin)),

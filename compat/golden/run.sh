@@ -112,12 +112,28 @@ for case_dir in "$CASES_DIR"/*/; do
   materialize "$name" "$case_dir" "$work"
   golden="$case_dir/expected.golden"
 
+  # Optional `cases/<name>/env`: KEY=VALUE lines applied to *both* tools. A
+  # check whose behaviour depends on the target platform (SA1027 returns early
+  # unless the word size is 4) is unreachable on the host arch and needs
+  # GOOS/GOARCH to be compared at all.
+  case_env=()
+  if [[ -f "$case_dir/env" ]]; then
+    while IFS= read -r raw || [[ -n "$raw" ]]; do
+      line="${raw%%#*}"
+      line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      [[ -z "$line" ]] && continue
+      [[ "$line" == *=* ]] || die "$name: env line is not KEY=VALUE: $raw"
+      case_env+=("$line")
+    done <"$case_dir/env"
+  fi
+
   if [[ "$REGEN" -eq 1 ]]; then
     gcl_json="$RUN_DIR/golden-$name.golangci.json"
     gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-golden-gcl.XXXXXX")"
     (
       cd "$work"
       env "GOLANGCI_LINT_CACHE=$gcl_cache" \
+        ${case_env[@]+"${case_env[@]}"} \
         "$GOLANGCI" run \
         -c "$case_dir/config.yml" \
         --output.json.path=stdout \
@@ -152,6 +168,7 @@ for case_dir in "$CASES_DIR"/*/; do
     cd "$work"
     env "GUFF_CACHE=$guff_cache" \
       "GUFF_DEBUG_ILL_TYPED=1" \
+      ${case_env[@]+"${case_env[@]}"} \
       "$GUFF" run \
       -c "$case_dir/config.yml" \
       --out-format json \

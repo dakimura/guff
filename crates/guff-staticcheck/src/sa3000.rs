@@ -137,7 +137,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         scan_stmts(pass, &body.list, arg, &mut calls_exit, &mut calls_run);
         if !calls_exit && calls_run {
             pending.push((
-                decl.name.name_pos.0 as u32,
+                // Upstream reports the whole FuncDecl, whose `Pos()` is
+                // `Type.Pos()` — the `func` keyword, not the name.
+                decl.ty.pos().0 as u32,
                 "TestMain should call os.Exit to set exit code".into(),
             ));
         }

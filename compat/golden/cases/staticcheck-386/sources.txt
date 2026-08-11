@@ -1,0 +1,7 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Only checks whose behaviour depends on a 32-bit target belong here — see
+# config.yml and env.
+sa1027/bad/bad.go  crates/guff-staticcheck/tests/testdata/sa1027/bad.go
+sa1027/ok/ok.go    crates/guff-staticcheck/tests/testdata/sa1027/ok.go

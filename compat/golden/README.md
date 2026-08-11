@@ -63,7 +63,27 @@ diagnoses ("upstream's importer is blind") turned out to be a plain missing
 | `cases/<name>/sources.txt` | Go files to materialize, and where they live |
 | `cases/<name>/expected.golden` | Generated — do not hand-edit |
 | `cases/<name>/ratchet.json` | Optional: diff ceiling for a case still being brought to zero |
+| `cases/<name>/env` | Optional: `KEY=VALUE` lines applied to **both** tools |
 | `.work/<name>/` | Materialized module (gitignored) |
+
+### The case is the environment, not just the config
+
+Three of the twelve cases exist for their `go.mod` or their `env`, not for
+anything in `config.yml`. A check can be unreachable because of the module's
+Go version or the target platform, and then no fixture will ever wake it:
+
+| Case | What it varies | Why |
+|------|----------------|-----|
+| `staticcheck-go114` | `go 1.14` in go.mod | SA3000 returns early at go1.15+. A `//go:build go1.14` line does **not** help: once the module is 1.21+, `code.StdlibVersion` only honours a file tag that *raises* the version. |
+| `revive-go125` | `go 1.25` in go.mod | `forbidden-call-in-wg-go` calls `file.Pkg.IsAtLeastGoVersion(Go125)` — the *package's* version, which a file tag cannot raise either. |
+| `staticcheck-386` | `GOOS=linux GOARCH=386` | SA1027 returns early unless the word size is 4. `GOARCH` alone is not enough — `darwin/386` is not a valid pair and golangci-lint answers "no go files to analyze". |
+
+Keep these cases small. Bumping an existing case's `go.mod` instead would move
+every other version-gated check in that golden at the same time.
+
+Note the shape of the bug this catches: SA3000 and SA1027 both had fixtures,
+both had unit tests, and both sat in `docs/COVERAGE.md` as *never fired*. The
+fixture was never the missing piece.
 
 ## No allowlist
 
@@ -293,3 +313,29 @@ The x/crypto rules (G106 / G406 / G506 / G507) need `golang.org/x/crypto` to
 resolve. The case gets it from a local `replace` onto the stub module the Rust
 tests already use, so the gate needs no network and no `go.sum`: the four rules
 match on import path plus function name, and `./...` skips a nested module.
+
+
+## What the S1030 stub found
+
+The `staticcheck-s` case had been carrying S1030 as a `missing` for as long as
+the case existed. The whole bug was one string:
+
+```rust
+matches!(name, "(bytes.Buffer).Bytes" | "(bytes.Buffer).String")
+```
+
+`Bytes` and `String` are declared on `*bytes.Buffer`, so this can never equal
+what upstream tests for. The reason it was written that way is the point:
+the Rust fixture's stubbed `bytes` package declared **value** receivers, and
+the port was written against the stub rather than against the standard library.
+Same failure mode as the gosec fixture that would not compile, one level in —
+there the fixture was wrong, here the fake stdlib it was type-checked against
+was wrong. Both are invisible until a real toolchain reads the code.
+
+Fixing the receiver exposed three more divergences in the same 40 lines, none
+of which any test could have caught while the check was dead: the `[]byte(...)`
+arm tested `call.Fun` for an identifier named `[]byte` (it is an `ArrayType`,
+so the arm never ran), the message hard-coded `buf` and `string(buf.Bytes())`
+instead of rendering the actual expressions, and `m[string(buf.Bytes())]` was
+reported where upstream deliberately exempts it — that shape is *faster* than
+`m[buf.String()]` thanks to a compiler optimization.

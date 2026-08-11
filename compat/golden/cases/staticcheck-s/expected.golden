@@ -76,6 +76,9 @@ s1029/bad/bad.go:4:2:staticcheck::SA6003: should range over string, not []rune(s
 s1029/bad/bad.go:10:2:staticcheck::S1029: should range over string, not []rune(string)
 s1029/bad/bad.go:10:2:staticcheck::SA6003: should range over string, not []rune(string)
 s1030/bad/bad.go:5:42:staticcheck::S1030: should use buf.String() instead of string(buf.Bytes())
+s1030/bad/bad.go:7:43:staticcheck::S1030: should use buf.Bytes() instead of []byte(buf.String())
+s1030/bad/bad.go:9:42:staticcheck::S1030: should use buf.Bytes() instead of []byte(buf.String())
+s1030/bad/bad.go:11:54:staticcheck::S1030: should use w.B.String() instead of string(w.B.Bytes())
 s1031/bad/bad.go:4:2:staticcheck::S1031: unnecessary nil check around range
 s1032/bad/bad.go:6:2:staticcheck::S1032: should use sort.Ints(...) instead of sort.Sort(sort.IntSlice(...))
 s1032/bad/bad.go:10:2:staticcheck::S1032: should use sort.Strings(...) instead of sort.Sort(sort.StringSlice(...))

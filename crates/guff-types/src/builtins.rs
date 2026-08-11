@@ -79,10 +79,36 @@ impl Checker {
             nargs = call.args.len();
         } else {
             args.reserve(call.args.len());
-            for a in &call.args {
+            if call.args.len() == 1 {
+                // Go's `exprList` routes a lone argument through `multiExpr`,
+                // so a multi-valued call spreads across the parameters
+                // (`println(two())` is two arguments, not one tuple) and
+                // `single_value` must not reduce it first.
+                let a = &call.args[0];
                 let mut op = Operand::invalid();
-                self.expr(&mut op, a);
-                args.push(op);
+                self.raw_expr(&mut op, a, None);
+                let tuple = op.typ.filter(|_| op.mode != OperandMode::Invalid).filter(
+                    |t| matches!(self.types.get(*t), crate::arena::TypeData::Tuple(_)),
+                );
+                match tuple {
+                    Some(t) => {
+                        for i in 0..crate::tuple::tuple_len(&self.types, Some(t)) {
+                            let v = crate::tuple::tuple_at(&self.types, t, i);
+                            let mut e = Operand::invalid();
+                            e.mode = OperandMode::Value;
+                            e.typ = v.typ(&self.objects);
+                            e.expr = op.expr;
+                            args.push(e);
+                        }
+                    }
+                    None => args.push(op),
+                }
+            } else {
+                for a in &call.args {
+                    let mut op = Operand::invalid();
+                    self.expr(&mut op, a);
+                    args.push(op);
+                }
             }
             nargs = args.len();
             for a in &args {

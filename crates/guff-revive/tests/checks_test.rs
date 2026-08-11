@@ -256,6 +256,30 @@ fn revive_function_length_is_silenced_by_an_empty_body() {
 }
 
 #[test]
+fn revive_flags_forbidden_call_in_wg_go() {
+    // The same rule extended_bad.go covers, in a file of its own so that the
+    // golden tier can materialize it into a `go 1.25` module — the rule is
+    // gated on the *package's* Go version, which no build tag can raise.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/wggo",
+            "wg_go_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        for needle in [
+            "forbidden-call-in-wg-go: do not call wg.Done inside wg.Go",
+            "forbidden-call-in-wg-go: do not call panic inside wg.Go",
+        ] {
+            assert!(
+                messages.iter().any(|m| m.contains(needle)),
+                "missing {needle} in {messages:?}"
+            );
+        }
+    });
+}
+
+#[test]
 fn revive_flags_filename_format_violation() {
     guff_revive::with_extended_rules(|| {
         let pkg = support::typecheck_fixture(

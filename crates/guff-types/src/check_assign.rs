@@ -504,15 +504,21 @@ impl Checker {
 
     /// Type-check assignments of `rhs` expressions to `lhs` expressions.
     ///
-    /// Equivalent to `Checker.assignVars`. The n:1 multi-valued spread
-    /// (`multiExpr`, needs call-result expansion) is DEFERRED (30c).
+    /// Equivalent to `Checker.assignVars`.
     pub fn assign_vars(&mut self, lhs: &[Expr], rhs: &[Expr]) {
         let (l, r) = (lhs.len(), rhs.len());
 
+        // A single call on the right is *never* handled as an n:n mapping,
+        // even when `l == r == 1`: the call may yield a tuple, and routing it
+        // through `eval_multi` is what turns `x = f()` (with `f` returning two
+        // values) into "assignment mismatch: 1 variable but f returns 2
+        // values" instead of silently type-checking. Go's `isCall`.
+        let is_call = r == 1 && matches!(unparen(&rhs[0]), Expr::CallExpr(_));
+
         // n:1 — a single, possibly multi-valued, right-hand side
         // (e.g. `a, b = f()`).
-        if r == 1 && l != 1 {
-            let (mut values, comma_ok) = self.eval_multi(&rhs[0], l);
+        if r == 1 && (l != 1 || is_call) {
+            let (mut values, comma_ok) = self.eval_multi(&rhs[0], l == 2);
             if values.len() == l {
                 // Capture the value types before the operands are consumed.
                 let t0 = values[0].typ.unwrap_or_else(|| self.invalid_type());
@@ -531,11 +537,12 @@ impl Checker {
                 }
                 return;
             }
-            self.assign_error(rhs, l, values.len());
-            for e in lhs {
-                let mut tmp = Operand::invalid();
-                self.expr(&mut tmp, e);
+            // Only report a mismatch if the rhs itself was fine — otherwise
+            // the count is a consequence of an error already reported.
+            if values[0].mode != OperandMode::Invalid {
+                self.assign_error(rhs, l, values.len());
             }
+            self.use_n(lhs, true);
             return;
         }
 
@@ -546,24 +553,55 @@ impl Checker {
             return;
         }
 
-        // l != r and r != 1: a genuine count mismatch.
-        self.assign_error(rhs, l, r);
-        for e in lhs {
-            let mut tmp = Operand::invalid();
-            self.expr(&mut tmp, e);
+        // l != r and r != 1: a genuine count mismatch. Only report it if
+        // neither side had an error of its own.
+        let ok_lhs = self.use_n(lhs, true);
+        let ok_rhs = self.use_n(rhs, false);
+        if ok_lhs && ok_rhs {
+            self.assign_error(rhs, l, r);
         }
-        for e in rhs {
-            let mut tmp = Operand::invalid();
-            self.expr(&mut tmp, e);
+    }
+
+    /// Evaluate `args` for their side effects — errors, and (once use tracking
+    /// lands) marking identifiers used — discarding the values. `lhs` marks
+    /// them as assignment left-hand sides. Reports whether all were valid.
+    ///
+    /// Equivalent to `Checker.useN` / `Checker.use` / `Checker.useLHS`. The
+    /// `usedVars` save/restore of `use1`'s lhs arm is omitted (use tracking is
+    /// deferred), so `lhs` currently changes nothing on its own; the blank
+    /// identifier is skipped either way, as Go does.
+    fn use_n(&mut self, args: &[Expr], lhs: bool) -> bool {
+        let mut ok = true;
+        for e in args {
+            if !self.use_1(e, lhs) {
+                ok = false;
+            }
         }
+        ok
+    }
+
+    /// Equivalent to `Checker.use1`.
+    ///
+    /// Go's identifier arm calls `exprOrType`, which is `rawExpr` plus two
+    /// filters; guff's `expr_or_type` instead *probes* the name as a type and
+    /// reports "x is not a type" when it is a value, so `raw_expr` is used
+    /// directly here — the operand is discarded either way, and only the
+    /// diagnostics differ.
+    fn use_1(&mut self, e: &Expr, _lhs: bool) -> bool {
+        let mut x = Operand::invalid();
+        x.mode = OperandMode::Value; // anything but invalid
+        // Evaluating blank is not an error.
+        if !matches!(unparen(e), Expr::Ident(id) if id.name == "_") {
+            self.raw_expr(&mut x, e, None);
+        }
+        x.mode != OperandMode::Invalid
     }
 
     /// Type-check assignments of initialization expressions `rhs` to the
     /// (already-created) variables `lhs`. If `is_return`, this is the implicit
     /// assignment of result expressions to result parameters.
     ///
-    /// Equivalent to `Checker.initVars`. The n:1 multi-valued spread is
-    /// DEFERRED (30c).
+    /// Equivalent to `Checker.initVars`.
     pub fn init_vars(&mut self, lhs: &[ObjectId], rhs: &[Expr], is_return: bool) {
         let context = if is_return {
             "return statement"
@@ -572,10 +610,14 @@ impl Checker {
         };
         let (l, r) = (lhs.len(), rhs.len());
 
+        // See `assign_vars`: a single call is never an n:n mapping, so that
+        // `x := f()` with a two-valued `f` is a mismatch and not a silent pass.
+        let is_call = r == 1 && matches!(unparen(&rhs[0]), Expr::CallExpr(_));
+
         // n:1 — a single, possibly multi-valued, right-hand side (e.g. a call
         // returning a tuple: `a, b := f()`).
-        if r == 1 && l != 1 {
-            let (mut values, comma_ok) = self.eval_multi(&rhs[0], l);
+        if r == 1 && (l != 1 || is_call) {
+            let (mut values, comma_ok) = self.eval_multi(&rhs[0], l == 2 && !is_return);
             if values.len() == l {
                 let err_before = self.errors.len();
                 for (i, x) in values.iter_mut().enumerate() {
@@ -591,10 +633,13 @@ impl Checker {
                 return;
             }
             let got = values.len();
-            if is_return {
-                self.return_error(rhs, l, got);
-            } else {
-                self.assign_error(rhs, l, got);
+            // Only report a mismatch if the rhs itself was fine.
+            if values[0].mode != OperandMode::Invalid {
+                if is_return {
+                    self.return_error(rhs, l, got);
+                } else {
+                    self.assign_error(rhs, l, got);
+                }
             }
             // Vars keep their `Typ[Invalid]` placeholder.
             return;
@@ -609,15 +654,14 @@ impl Checker {
             return;
         }
 
-        // l != r and r != 1: a genuine count mismatch.
-        if is_return {
-            self.return_error(rhs, l, r);
-        } else {
-            self.assign_error(rhs, l, r);
-        }
-        for e in rhs {
-            let mut tmp = Operand::invalid();
-            self.expr(&mut tmp, e);
+        // l != r and r != 1: a genuine count mismatch. Only report it if the
+        // rhs had no error of its own.
+        if self.use_n(rhs, false) {
+            if is_return {
+                self.return_error(rhs, l, r);
+            } else {
+                self.assign_error(rhs, l, r);
+            }
         }
     }
 
@@ -627,13 +671,16 @@ impl Checker {
     /// expression yields a single operand.
     ///
     /// Equivalent to `Checker.multiExpr`: returns the per-value operands plus a
-    /// `comma_ok` flag. When `want == 2`, a comma-ok-able operand (a map index,
-    /// type assertion, or channel receive) is expanded to `(value, bool)` and
-    /// the flag is `true`; a tuple-valued expression (e.g. a multi-return call)
-    /// is unpacked with the flag `false`.
-    fn eval_multi<'e>(&mut self, e: &'e Expr, want: usize) -> (Vec<Operand<'e>>, bool) {
+    /// `comma_ok` flag. When `allow_comma_ok`, a comma-ok-able operand (a map
+    /// index, type assertion, or channel receive) is expanded to `(value,
+    /// bool)` and the flag is `true`; a tuple-valued expression (e.g. a
+    /// multi-return call) is unpacked with the flag `false`.
+    fn eval_multi<'e>(&mut self, e: &'e Expr, allow_comma_ok: bool) -> (Vec<Operand<'e>>, bool) {
         let mut x = Operand::invalid();
-        self.expr(&mut x, e);
+        // `raw_expr`, not `expr`: this is the one context that *may* yield a
+        // tuple, so `single_value` must not run (Go's `multiExpr` calls
+        // `rawExpr` for the same reason).
+        self.raw_expr(&mut x, e, None);
         if x.mode == OperandMode::Invalid {
             return (vec![x], false);
         }
@@ -654,7 +701,7 @@ impl Checker {
         }
         // Comma-ok form: `v, ok := m[k]` / `v, ok := x.(T)` / `v, ok := <-ch`.
         // The first value is the operand's type; the second is a plain `bool`.
-        if want == 2 && matches!(x.mode, OperandMode::MapIndex | OperandMode::CommaOk) {
+        if allow_comma_ok && matches!(x.mode, OperandMode::MapIndex | OperandMode::CommaOk) {
             let value_typ = x.typ;
             let mut value = Operand::invalid();
             value.mode = OperandMode::Value;
@@ -778,16 +825,28 @@ impl Checker {
 
     /// Report an assignment-count mismatch (`l` variables but `r` values).
     ///
-    /// Simplified `Checker.assignError` (no special-casing of a single call
-    /// expression's result count).
+    /// Equivalent to `Checker.assignError`, including the single-call form
+    /// (`... but f returns 2 values`), which is the message `go build` prints
+    /// for `_ = f()` when `f` is multi-valued.
     fn assign_error(&mut self, rhs: &[Expr], l: usize, r: usize) {
         let pos = rhs.first().map(|e| e.pos().0 as u32).unwrap_or(0);
-        let vars = if l == 1 { "variable" } else { "variables" };
-        let vals = if r == 1 { "value" } else { "values" };
+        let vars = measure(l, "variable");
+        let vals = measure(r, "value");
+        if rhs.len() == 1 {
+            if let Expr::CallExpr(call) = unparen(&rhs[0]) {
+                let fun = crate::exprstring::expr_string(&call.fun);
+                self.error(
+                    pos,
+                    Code::WrongAssignCount,
+                    format!("assignment mismatch: {} but {} returns {}", vars, fun, vals),
+                );
+                return;
+            }
+        }
         self.error(
             pos,
             Code::WrongAssignCount,
-            format!("assignment mismatch: {} {} but {} {}", l, vars, r, vals),
+            format!("assignment mismatch: {} but {}", vars, vals),
         );
     }
 
@@ -825,6 +884,17 @@ impl Checker {
         if let ObjectData::Var(v) = self.objects.get_mut(obj) {
             v.set_typ(typ);
         }
+    }
+}
+
+/// `"1 variable"` / `"2 variables"`.
+///
+/// Equivalent to `measure`.
+fn measure(x: usize, unit: &str) -> String {
+    if x == 1 {
+        format!("{} {}", x, unit)
+    } else {
+        format!("{} {}s", x, unit)
     }
 }
 
