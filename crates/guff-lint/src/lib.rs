@@ -79,6 +79,10 @@ pub fn version_banner() -> String {
     )
 }
 
+/// Exit code when the configuration selects nothing to run — no linters and no
+/// formatters (golangci-lint's "Running error: no linters enabled" uses 3).
+pub const EXIT_NO_LINTERS: i32 = 3;
+
 /// Exit code when `--timeout` / `run.timeout` is exceeded (golangci-lint uses 4).
 pub const EXIT_TIMEOUT: i32 = 4;
 
@@ -967,8 +971,13 @@ pub fn run_and_write_with_teardown(
     teardown: Teardown,
 ) -> Result<i32, RunError> {
     // nolintlint alone enables zero analyzers but still needs package load +
-    // unused-directive reporting (golangci parity).
-    if opts.analyzers.is_empty() && !opts.filter.report_unused_nolint {
+    // unused-directive reporting (golangci parity). So does a format-only
+    // config (`linters.default: none` with `formatters.enable`), which
+    // golangci-lint runs normally.
+    if opts.analyzers.is_empty()
+        && !opts.filter.report_unused_nolint
+        && opts.formatters.is_none()
+    {
         eprintln!("guff: no analyzers enabled (missing linter crates?)");
         return Ok(0);
     }

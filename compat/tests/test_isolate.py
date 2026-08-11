@@ -56,6 +56,33 @@ class MakeConfigTests(unittest.TestCase):
             self.assertIn("disable-dec-order-check: false", text)
 
 
+class FormatterConfigTests(unittest.TestCase):
+    """golangci-lint v2 moved the formatters into a block of their own.
+
+    `linters.enable: [golines]` is a config error there, not a no-op, so a
+    formatter target needs a different template — which is why `golines` and
+    `swaggo` had no isolate target at all.
+    """
+
+    def test_formatter_uses_formatters_block(self):
+        text = make_config("golines")
+        self.assertIn("formatters:\n  enable:\n    - golines", text)
+        self.assertIn("linters:\n  default: none", text)
+        # A formatter must not also be listed as a linter.
+        self.assertNotIn("  enable:\n    - golines\n\nissues", text.split("formatters:")[0])
+
+    def test_formatter_settings_land_under_formatters(self):
+        text = make_config("golines", {"golines": {"max-len": 60}})
+        formatters_block = text.split("formatters:", 1)[1]
+        self.assertIn("settings:", formatters_block)
+        self.assertIn("max-len: 60", formatters_block)
+
+    def test_linter_still_uses_linters_block(self):
+        text = make_config("errcheck")
+        self.assertIn("linters:\n  default: none\n  enable:\n    - errcheck", text)
+        self.assertNotIn("formatters:", text)
+
+
 class LintersManifestTests(unittest.TestCase):
     def test_smoke_linters_have_fixtures(self):
         path = ROOT / "isolate" / "linters.txt"

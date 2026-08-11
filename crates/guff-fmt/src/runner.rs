@@ -579,7 +579,16 @@ pub fn check_files_multi(
         let path_str = path.to_string_lossy().to_string();
         for (fmt_idx, lines) in res? {
             let name = formatters[fmt_idx].name();
-            for line in lines {
+            // One finding per file per formatter, at the first change.
+            //
+            // The diff can have several change groups and `first_changed_lines`
+            // returns all of them, but golangci-lint reports "File is not
+            // properly formatted" once for the file: measured on a file with
+            // two `func f(  )` declarations seven lines apart (two hunks),
+            // golangci reports line 3 only, with `max-same-issues: 0` and
+            // `uniq-by-line: false`. Its own golines testdata expects a single
+            // want-comment for a file with a dozen over-long lines.
+            if let Some(&line) = lines.first() {
                 by_fmt[fmt_idx].push(AttributedFinding {
                     formatter: name.to_string(),
                     file: path_str.clone(),

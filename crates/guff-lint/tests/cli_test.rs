@@ -634,3 +634,77 @@ formatters:
     );
 }
 
+
+/// A config that selects nothing must not quietly run the standard preset.
+///
+/// `linters.default: none` with no `enable`, and `default: standard` with every
+/// standard linter under `disable`, both used to fall through to
+/// `STANDARD_LINTER_NAMES` — so "disable everything" ran everything.
+/// golangci-lint answers `Running error: no linters enabled` and exits 3.
+#[test]
+fn cli_run_with_nothing_selected_exits_three() {
+    for cfg_body in [
+        "version: \"2\"\nlinters:\n  default: none\n",
+        "version: \"2\"\nlinters:\n  default: standard\n  disable: [errcheck, govet, ineffassign, staticcheck, unused]\n",
+    ] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+        std::fs::write(
+            tmp.path().join("a.go"),
+            "package a\n\nfunc unusedFn() int { return 1 }\n",
+        )
+        .unwrap();
+        let cfg = tmp.path().join(".golangci.yml");
+        std::fs::write(&cfg, cfg_body).unwrap();
+
+        let out = Command::new(bin())
+            .args(["run", "-c"])
+            .arg(&cfg)
+            .arg("./...")
+            .current_dir(tmp.path())
+            .output()
+            .expect("spawn guff run");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            out.status.code(),
+            Some(guff_lint::EXIT_NO_LINTERS),
+            "config:\n{cfg_body}\nstdout:\n{stdout}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.trim().is_empty(),
+            "nothing was enabled, so nothing should be reported:\n{stdout}"
+        );
+    }
+}
+
+/// …but a format-only config is legal, and `linters.default: none` is exactly
+/// how you write one. Enabled formatters keep the run alive.
+#[test]
+fn cli_run_with_only_formatters_enabled_still_formats() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(tmp.path().join("a.go"), "package a\n\nfunc f(  ) {}\n").unwrap();
+    let cfg = tmp.path().join(".golangci.yml");
+    std::fs::write(
+        &cfg,
+        "version: \"2\"\nlinters:\n  default: none\nformatters:\n  enable:\n    - gofmt\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "-c"])
+        .arg(&cfg)
+        .arg("./...")
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "stdout:\n{stdout}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("gofmt"), "stdout:\n{stdout}");
+}

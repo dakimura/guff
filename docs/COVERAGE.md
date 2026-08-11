@@ -8,8 +8,8 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 
 | 状態 | 意味 | 件数 | 割合 |
 |------|------|-----:|-----:|
-| `fired` | golden / isolate / OSS / regress の実行で発火した | 541 | 98.9% |
-| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 2 | 0.4% |
+| `fired` | golden / isolate / OSS / regress の実行で発火した | 542 | 99.1% |
+| `unit-only` | Rust 単体テストが ID に言及するのみ（静的スキャン。golangci-lint との突合なし） | 1 | 0.2% |
 | `never` | **どこでも発火していない** | 4 | 0.7% |
 | — | **合計** | **547** | 100.0% |
 
@@ -65,7 +65,7 @@ recall バグがあっても既存のどのゲートにも現れない。ここ�
 | gofumpt | 1 | 1 | 0 | 0 |
 | goheader | 1 | 1 | 0 | 0 |
 | goimports | 1 | 1 | 0 | 0 |
-| golines | 1 | 0 | 1 | 0 |
+| golines | 1 | 1 | 0 | 0 |
 | gomoddirectives | 1 | 1 | 0 | 0 |
 | gomodguard | 1 | 1 | 0 | 0 |
 | gomodguard_v2 | 1 | 1 | 0 | 0 |
@@ -162,7 +162,7 @@ guff が宣言していない名前を描画している。
 
 ## 集計の元データ
 
-- 走査した実行アーティファクト: `{'golden': 686, 'isolate': 8670, 'oss': 852, 'regress': 1630}`
+- 走査した実行アーティファクト: `{'golden': 698, 'isolate': 8672, 'oss': 852, 'regress': 1649}`
 - インベントリ: 547 checks / 114 linters
 - `unit` は Rust テストソースの静的スキャン（下限値）。ID に言及していることの証明であって、
   golangci-lint と突き合わせている証明ではない。

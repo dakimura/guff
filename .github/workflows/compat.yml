@@ -120,6 +120,13 @@ jobs:
             | sh -s -- -b "$HOME/.local/bin" v2.12.2
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # The isolate golines target needs the binary: guff shells out to it,
+      # golangci-lint links the library. Pin the version golangci-lint 2.12.2
+      # embeds (go.mod: github.com/golangci/golines v0.15.0) — a different
+      # version on either side turns a formatting difference into a false diff.
+      - name: Install golines (version golangci-lint embeds)
+        run: go install github.com/golangci/golines@v0.15.0
+
       - name: Prefetch isolate fixture modules
         run: |
           set -euo pipefail

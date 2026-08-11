@@ -326,32 +326,32 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         && !settings.nolintlint.allow_unused;
 
     let mut unknown = Vec::new();
-    let analyzers = if linter_names.is_empty() && args.enable.is_empty() {
-        // Apply settings filters even on the implicit standard preset.
-        resolve_linters_with_settings(
-            &crate::STANDARD_LINTER_NAMES
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect::<Vec<_>>(),
-            settings,
-            &mut |_| {},
-        )
-    } else {
-        let real: Vec<String> = linter_names
-            .iter()
-            .filter(|n| !is_meta_linter(n))
-            .cloned()
-            .collect();
-        resolve_linters_with_settings(&real, settings, &mut |n| unknown.push(n.to_string()))
-    };
+    let real: Vec<String> = linter_names
+        .iter()
+        .filter(|n| !is_meta_linter(n))
+        .cloned()
+        .collect();
+    let analyzers = resolve_linters_with_settings(&real, settings, &mut |n| unknown.push(n.to_string()));
 
     for name in &unknown {
         eprintln!("guff: linter {name:?} is not available yet");
     }
 
-    if analyzers.is_empty() && !report_unused_nolint {
-        eprintln!("guff: no linters to run");
-        return Ok(0);
+    // An empty selection means the config asked for nothing — `default: none`
+    // with no `enable`, or every default linter listed under `disable`. It used
+    // to fall back to the standard preset, which turned "disable everything"
+    // into "run everything"; golangci-lint answers
+    // `Running error: no linters enabled` and exits 3. Formatters are counted
+    // too: `linters.default: none` alongside `formatters.enable` is a valid
+    // format-only config and must still run.
+    let any_formatter = loaded
+        .formatters
+        .enable
+        .iter()
+        .any(|n| guff_fmt::is_formatter(n));
+    if analyzers.is_empty() && !report_unused_nolint && !any_formatter {
+        eprintln!("guff: no linters enabled");
+        return Ok(crate::EXIT_NO_LINTERS);
     }
 
     let mut build_tags = loaded.build_tags;

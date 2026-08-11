@@ -3006,6 +3006,115 @@ staticcheck を有効にしている以上**全パッケージに乗る**。`m[s
 
 ---
 
+### 2026-08-11（3 本目）— formatter を isolate に載せたら、`linters.default: none` が効いていなかった
+
+**やったこと**
+
+前項の「次にやること 1」（`golines` / `swaggo` を isolate に載せる）。
+**1 つの fixture を書いただけで、formatter 全体に効く欠陥が 2 つ出た。**
+
+#### 1. `linters.default: none` は「標準セットを走らせる」と同義だった
+
+`make_config.py` に formatter 用テンプレート（`formatters:` ブロック）を足して
+最初の probe を回したところ、guff が `unused` を報告した。切り分けると:
+
+| config | golangci-lint | 直す前の guff |
+|---|---|---|
+| `linters: {default: none}` | `Running error: no linters enabled` / exit **3** | 標準 5 linter を実行 |
+| `default: standard` + 5 つ全部 `disable` | 同上 | 同上 |
+| `default: none` + `formatters: {enable: [golines]}` | formatter だけ実行 / exit 1 | golines + 標準 5 linter |
+
+原因は `cli.rs` の 1 行:
+
+```rust
+let analyzers = if linter_names.is_empty() && args.enable.is_empty() {
+    // 標準プリセットにフォールバック
+```
+
+**「設定が空」と「設定が明示的に空」を同一視していた。** 前者は起こり得ない
+（設定が無ければ `LinterDefault::Standard` なので `resolve_names()` は空にならない）ので、
+このフォールバックは**後者にしか当たらない** —— つまり
+**「全部 disable」を「全部 enable」に読み替える**分岐だった。
+
+golangci に合わせて exit 3（`EXIT_NO_LINTERS`）で止めるようにした。ただし
+**formatter が 1 つでも有効なら止めない**（`linters.default: none` + `formatters:` は
+正当な「フォーマットだけ」設定で、golangci はこれを普通に実行する）。
+`run_and_write` の `analyzers.is_empty()` ガードにも同じ条件を足した ——
+そちらは `Ok(0)` で早期 return するので、formatter が走らなくなる。
+
+**これは compat の話であると同時に、素の precision バグである。**
+`disable` に 5 つ並べたユーザーは、guff から 5 つ全部の findings を受け取っていた。
+
+#### 2. formatter の finding は**ファイルに 1 件**
+
+fixture を isolate に通すと `guff=2 golangci=1`。
+guff の `first_changed_lines` は差分の**変更グループごと**に 1 件返す。
+`gofmt` で確かめると formatter 共通の欠陥だった:
+
+```go
+func one(  ) {}     // ← 3 行目
+
+func two() { … }    // 3 行の context を超える距離
+
+func three(  ) {}   // ← 10 行目
+```
+
+`max-same-issues: 0` / `uniq-by-line: false` でも **golangci は 3 行目だけ**。
+golangci 自身の golines testdata も、長い行が十数個ある 1 ファイルに対して
+`// want +1` が 1 個しか無い。→ `check_files_multi` で
+**(formatter, file) ごとに最初の 1 件だけ**を出すようにした。
+
+**gofmt / gofumpt / gci / goimports / golines の 5 つ全部に効く。**
+台帳上はどれも `fired` で、既存のゲートを全部通っていた ——
+**corpus のリポジトリが整形済みで、2 ヶ所以上ずれたファイルが 1 つも無かった**だけ。
+
+#### 3. `swaggo` だけは載せられない
+
+`swag` バイナリが要る（guff は shell out する）。CI に入れるかは
+`golines` と同じ判断になるが、`golines` は golangci が**ライブラリとして**
+`v0.15.0` を埋め込んでいるので**同じ版をピンできる**のに対し、
+`swag` 側は golangci が `github.com/golangci/swaggoswag` を使っており対応が自明でない。
+版がずれた瞬間に整形結果が割れて偽の diff になるので、ピンの根拠が出るまで保留。
+CI には `go install github.com/golangci/golines@v0.15.0` を足した（版はピン）。
+
+**結果**
+
+- 台帳: `fired` 541 → **542（99.1%）**、`unit-only` **2 → 1**（残りは
+  `multiline-if-init` = 上流の pin に存在しない恒久組）、`never` は **4** のまま
+  （3 件は §6 の恒久組、残り 1 件が `swaggo`）。
+- isolate **115 target**（`golines` を新設）。golden 12 ケース、OSS 8 target すべて据え置き。
+- `cargo test --workspace` **3,013 件緑**（+2: `default: none` の CLI テスト）、
+  `compat/tests` **61 件緑**（+3: formatter テンプレートのテスト）。
+- regress tsdb **PASS**（0.870s / 限界 0.880s）。full は 2.640s で赤だったが、
+  **直前のコミット `46cb255` 自身が同じ条件で 2.520s**（限界超え）を出す状態だった。
+  交互 A/B:
+
+  | 版 | wall（交互 3 回） | 中央値 |
+  |---|---|---|
+  | `46cb255` | 2.420 / 2.470 / 2.520 | 2.470 |
+  | 本セッション | 2.420 / 2.490 / 2.570 | 2.490 |
+
+  **差 0.02s（0.8%）で、両版とも回を追うごとに同じだけ上がっていく。**
+  本セッションの変更は CLI の分岐 1 つと、formatter finding を**減らす**方向の
+  truncate だけなので、遅くなる経路は無い。1 時間前に同じ full が 2.410s で
+  緑だったことと合わせて、**ホストの温度**と判断した。
+  この機械は本セッション中ずっと外部プロセスで load 3〜6 を維持している
+  （perf-guard が `cursor-agent worker present` を警告している）。
+  **静かになってから測り直したら 2.360s = baseline ちょうどで PASS。**
+
+**次にやること**
+
+1. **`swaggo`**（台帳最後の `never` のうち唯一到達可能なもの）。
+   golangci の `github.com/golangci/swaggoswag` と `swag` CLI の対応版を特定して
+   CI にピンできるか調べる。できないなら §6 に恒久組として書く。
+2. **`guff run` に `-E` / `-D` が無い**。golangci はどちらも短縮形を持ち、
+   `guff fmt` の側には `-E` がある。`golangci-lint run -E gosec` をそのまま
+   `guff run` に打つと `unexpected argument '-E'` で落ちる。clap の
+   `short = 'E'` / `short = 'D'` を足すだけ。
+3. 以下は 2026-08-11（2 本目）の「次にやること」2〜8 がそのまま残っている。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
