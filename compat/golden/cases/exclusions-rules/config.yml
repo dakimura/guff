@@ -1,0 +1,82 @@
+# Golden case: `linters.exclusions.rules` (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `exclusions`; the diff between the two
+# goldens is what these six rules remove.
+#
+# Every rule names at least two conditions, because upstream *rejects* a
+# one-condition exclusion rule outright (`BaseRule.Validate` with
+# `excludeRuleMinConditionsCount = 2`): "at least 2 of (text, source,
+# path[-except], linters) should be set". A rule with only `linters:` is not a
+# broad rule, it is a config error.
+#
+# Two of the six are written to fail on purpose — they name something that
+# looks like it should match and does not. They are the point of the case:
+#
+#   * `linters: [printf]` — `baseRule.matchLinter` is
+#     `slices.Contains(r.linters, issue.FromLinter)`, so it sees `govet` and
+#     never the analyzer name inside it, however the finding is printed.
+#   * `text: "ERROR RETURN VALUE"` — v2 parses exclusion rules with an empty
+#     regex prefix (`parseRules(excludeRules, "", …)`). There is no
+#     `exclude-case-sensitive` knob any more: the pattern is used verbatim, and
+#     the one preset that wants case-insensitivity (EXC0001) spells `(?i)`
+#     itself.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+  exclusions:
+    rules:
+      # linter + path: only cmd's ineffassign finding.
+      - linters: [ineffassign]
+        path: cmd
+      # linter + text: every G104, wherever it is.
+      - linters: [gosec]
+        text: Errors unhandled
+      # linter + source: the source line is read from the file, so this picks
+      # out one of two identical findings.
+      - linters: [errcheck]
+        source: exclude-this-line
+      # linter + path-except: staticcheck everywhere the path does *not* name.
+      - linters: [staticcheck]
+        path-except: presets/presets.go
+      # Names the analyzer rather than the linter: matches nothing.
+      - linters: [printf]
+        path: internal
+      # Right words, wrong case: matches nothing.
+      - linters: [errcheck]
+        text: ERROR RETURN VALUE
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

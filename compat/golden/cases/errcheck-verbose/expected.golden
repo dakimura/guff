@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errcheck-verbose
+# Produced by running golangci-lint on compat/golden/cases/errcheck-verbose/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+basic/bad.go:8:14:errcheck::Error return value is not checked
+defercheck/bad.go:6:16:errcheck::Error return value is not checked
+names/bad.go:28:7:errcheck::Error return value is not checked
+names/bad.go:29:14:errcheck::Error return value is not checked
+names/bad.go:31:4:errcheck::Error return value is not checked
+names/bad.go:35:8:errcheck::Error return value of `(example.com/errcheckverbose/names.writer).Emit` is not checked
+names/bad.go:36:15:errcheck::Error return value of `(example.com/errcheckverbose/names.writer).Emit` is not checked
+names/bad.go:37:15:errcheck::Error return value of `(*example.com/errcheckverbose/names.writer).Flush` is not checked
+names/bad.go:41:18:errcheck::Error return value of `(example.com/errcheckverbose/names.writer).Emit` is not checked
+names/bad.go:42:12:errcheck::Error return value of `(*example.com/errcheckverbose/names.writer).Flush` is not checked
+names/bad.go:46:8:errcheck::Error return value of `(example.com/errcheckverbose/names.emitter).Emit` is not checked

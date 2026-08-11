@@ -1,0 +1,23 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh exclusions-paths
+# Produced by running golangci-lint on compat/golden/cases/exclusions-paths/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+cmd/cmd.go:20:2:gosec:low:G104: Errors unhandled
+cmd/cmd.go:20:7:errcheck::Error return value is not checked
+cmd/cmd.go:21:2:gosec:low:G104: Errors unhandled
+cmd/cmd.go:21:9:errcheck::Error return value of `f.Close` is not checked
+cmd/cmd.go:23:14:govet::printf: fmt.Printf format %d has arg "not a number" of wrong type string
+cmd/cmd.go:25:2:ineffassign::ineffectual assignment to n
+presets/presets.go:10:1:revive:warning:package-comments: should have a package comment
+presets/presets.go:10:1:staticcheck::ST1000: at least one file in a package should have a package comment
+presets/presets.go:18:1:revive:warning:exported: comment on exported function Exported should be of the form "Exported ..."
+presets/presets.go:22:1:revive:warning:exported: exported function Undocumented should have comment or be unexported
+presets/presets.go:26:6:gosec:medium:G301: Expect directory permissions to be 0750 or less
+presets/presets.go:34:9:gosec:medium:G204: Subprocess launched with variable
+presets/presets.go:40:16:gosec:low:G103: Use of unsafe calls should be audited
+presets/presets.go:40:16:govet::unsafeptr: possible misuse of unsafe.Pointer
+presets/presets.go:49:4:staticcheck::SA4011: ineffective break statement. Did you mean to break out of the outer loop?

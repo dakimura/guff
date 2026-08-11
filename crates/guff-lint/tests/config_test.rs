@@ -156,8 +156,11 @@ fn parse_v2_linters_exclusions_prometheus_shape() {
     // paths folded into exclude_files; rules appended.
     assert_eq!(issues.exclude_files.len(), 2);
     assert_eq!(issues.exclude_rules.len(), 2);
-    // v2 default generated mode is lax.
-    assert_eq!(issues.generated.as_deref(), Some("lax"));
+    // `linters.exclusions.generated` defaults to strict: golangci's config
+    // loader fills the empty value in with `GeneratedModeStrict` before any
+    // processor runs. Only `formatters.exclusions.generated` is left empty,
+    // and empty means lax there. See cases/generated{,-lax}.
+    assert_eq!(issues.generated.as_deref(), Some("strict"));
 }
 
 #[test]

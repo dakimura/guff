@@ -1,0 +1,9 @@
+# Same file list for the three `generated` cases — read their goldens as a set.
+#
+# One package per marker shape, because the question each file asks is about
+# the file's own leading comments.
+
+strict/strict.go  crates/guff-lint/tests/testdata/gensem/strict/strict.go
+lax/lax.go        crates/guff-lint/tests/testdata/gensem/lax/lax.go
+after/after.go    crates/guff-lint/tests/testdata/gensem/after/after.go
+plain/plain.go    crates/guff-lint/tests/testdata/gensem/plain/plain.go

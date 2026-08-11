@@ -1,0 +1,31 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nolint
+# Produced by running golangci-lint on compat/golden/cases/nolint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+analyzer/analyzer.go:15:14:govet::printf: fmt.Printf format %d has arg "not a number" of wrong type string
+block/block.go:9:7:errcheck::Error return value is not checked
+block/block.go:14:7:errcheck::Error return value is not checked
+block/block.go:21:7:errcheck::Error return value is not checked
+gap/gap.go:1:1:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
+gap/gap.go:11:7:errcheck::Error return value is not checked
+group/group.go:15:62:misspell::`recieve` is a misspelling of `receive`
+inline/inline.go:27:10:nolintlint::directive `//nolint:errcheck,ineffassign` is unused for linter "ineffassign"
+inline/inline.go:33:10:nolintlint::directive `// nolint:errcheck` should be written without leading space as `//nolint:errcheck`
+inline/inline.go:41:7:errcheck::Error return value is not checked
+inline/inline.go:45:7:errcheck::Error return value is not checked
+inline/inline.go:49:10:nolintlint::directive `//nolint :errcheck` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`
+inline/inline.go:59:2:ineffassign::ineffectual assignment to y
+inline/inline.go:60:8:nolintlint::directive `//nolint:ineffassign` is unused for linter "ineffassign"
+preceding/preceding.go:26:1:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
+preceding/preceding.go:27:7:errcheck::Error return value is not checked
+preceding/preceding.go:31:2:nolintlint::directive `//nolint:errcheck` is unused for linter "errcheck"
+preceding/preceding.go:33:7:errcheck::Error return value is not checked
+unused/unused.go:11:2:nolintlint::directive `//nolint:errcheck // reported: errcheck is enabled and suppressed nothing` is unused for linter "errcheck"
+unused/unused.go:32:2:nolintlint::directive `//nolint // reported without a linter name` is unused
+unused/unused.go:37:2:nolintlint::directive `//nolint:all // reported without a linter name, like the bare form` is unused
+unused/unused.go:42:2:nolintlint::directive `//nolint :errcheck // reported as malformed only — no unused candidate` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`
+wholefile/wholefile.go:16:2:ineffassign::ineffectual assignment to x

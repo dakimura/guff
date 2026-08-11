@@ -1,0 +1,38 @@
+# Golden case: `//nolint` semantics (COMPAT-HARDENING Phase 4).
+#
+# The four analysis linters are here only to *produce* findings for the
+# directives to act on; each one is cheap and deterministic, and between them
+# they cover a statement-level finding (errcheck), an assignment-level one
+# (ineffassign), a comment-level one (misspell) and a linter whose findings
+# carry an analyzer name that differs from the linter name (govet/printf).
+#
+# nolintlint is the linter under test as much as the filter is: upstream
+# reports on the directive itself (leading space, unused, malformed) with no
+# settings at all, so the defaults are deliberately left alone here. The
+# settings axes (allow-unused / require-explanation / require-specific) get
+# their own cases.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # A directive and the finding it fails to suppress land on the same line, and
+  # nolintlint reports one candidate per named linter, so several lines here
+  # legitimately carry more than one finding.
+  uniq-by-line: false
+
+run:
+  timeout: 5m

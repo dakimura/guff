@@ -1,15 +1,18 @@
 //! `//nolint` directive parsing and issue filtering (golangci `nolint_filter`).
 //!
-//! Inline and preceding-line directives suppress matching issues. When
-//! `report_unused` is set, unused directives are emitted as `nolintlint`
-//! findings (subset of golangci's `NeedsUnused`).
+//! Inline and preceding-line directives suppress matching issues. This is the
+//! filter half; [`crate::nolintlint`] is the linter half, and the two parse the
+//! same comment with different regexes because upstream does. The one finding
+//! that needs both — "this directive suppressed nothing" — is settled here,
+//! since only the filter knows what matched.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+use guff::commentmap::{node_end, node_pos};
 use guff::parser::{parse_file, PARSE_COMMENTS};
-use guff::position::{FileSet, Pos};
+use guff::position::FileSet;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::Diagnostic;
 use guff_packages::Package;
@@ -18,6 +21,7 @@ use regex::Regex;
 
 use crate::config::normalize_linter_name;
 use crate::exclude::Issue;
+use crate::nolintlint::{self, Directive, NolintlintStyle};
 use crate::registry::{analyzers_for_linter, linter_name_for_analyzer};
 
 pub const NOLINTLINT_NAME: &str = "nolintlint";
@@ -33,10 +37,15 @@ struct IgnoredRange {
     /// directive. This is not `from`: a `//nolint` at the end of a godoc block
     /// suppresses the whole block but must still be reported on its own line.
     report_line: i64,
+    /// Column of the directive comment, used when reporting it unused.
+    report_col: i64,
+    /// Column of the enclosing *comment group*, which is what the range
+    /// expander compares against a node's start column
+    /// (`rangeExpander.Visit`: `nodeStartPos.Column == r.col`). It is the
+    /// group's and not the comment's: upstream builds the range from `g.Pos()`.
     col: i64,
     /// Empty = all linters (except nolintlint itself).
     linters: Vec<String>,
-    matched: HashMap<String, bool>,
     /// Directive text for unused messages.
     comment_text: String,
     /// True when this range is an AST expansion of a preceding-line directive.
@@ -50,16 +59,14 @@ impl IgnoredRange {
         }
 
         // Bare `//nolint` suppresses every linter except nolintlint.
-        let mut matched = self.linters.is_empty() && issue.from_linter != NOLINTLINT_NAME;
-
-        for name in &self.linters {
-            if name == &issue.from_linter || name == &issue.analyzer {
-                matched = true;
-                break;
-            }
-        }
-
-        matched
+        //
+        // Only the *linter* name counts, never the analyzer's: upstream's
+        // `doesMatch` tests `slices.Contains(i.linters, issue.FromLinter)`, and
+        // the names in the directive have already been resolved through the
+        // linter registry, so `//nolint:printf` (a govet analyzer) is an
+        // unknown name that matches nothing.
+        self.linters.is_empty() && issue.from_linter != NOLINTLINT_NAME
+            || self.linters.iter().any(|name| name == &issue.from_linter)
     }
 }
 
@@ -68,6 +75,17 @@ impl IgnoredRange {
 pub struct NolintIndex {
     /// Keys: absolute path, and basename, both normalized with `/`.
     files: HashMap<String, Vec<IgnoredRange>>,
+    /// The same comments as seen by nolintlint's own parser, which disagrees
+    /// with the filter's on malformed and mixed-case directives.
+    directives: HashMap<String, Vec<Directive>>,
+    /// `(file, directive line, directive column)` → the linters whose findings
+    /// that directive suppressed. Upstream keeps this map on the range and
+    /// copies a pointer to the pre-expansion range so both stay in sync; here
+    /// the directive's own position is the identity, which every expansion of
+    /// it already carries.
+    matched: HashMap<(String, i64, i64), HashSet<String>>,
+    /// `Some` when nolintlint is enabled, carrying its optional checks.
+    style: Option<NolintlintStyle>,
     unknown_linters: HashSet<String>,
     /// Linters enabled for this run. Unused `//nolint:L` is suppressed when `L`
     /// is absent (golangci `nolint_filter` skips disabled linters).
@@ -82,30 +100,35 @@ pub struct NolintIndex {
 impl NolintIndex {
     /// Build an index by re-parsing each compiled Go file with comments.
     pub fn from_packages(packages: &[Arc<Package>]) -> Self {
-        Self::build(packages, None)
+        Self::build(packages, None, None)
     }
 
-    /// Like [`from_packages`], but when `report_unused` is false only files
-    /// referenced by `issues` are considered. Unused-directive reporting still
-    /// requires a full scan.
+    /// Like [`from_packages`], but when nolintlint is off only files
+    /// referenced by `issues` are considered. Reporting on the directives
+    /// themselves needs every file, whether or not it produced a finding.
     pub fn from_packages_for_issues(
         packages: &[Arc<Package>],
         issues: &[Issue],
-        report_unused: bool,
+        style: Option<&NolintlintStyle>,
     ) -> Self {
-        if report_unused || issues.is_empty() {
-            // Empty issues + no unused reporting → nothing to suppress.
-            if !report_unused {
-                return Self::default();
-            }
-            return Self::build(packages, None);
+        if style.is_some() {
+            return Self::build(packages, None, style);
+        }
+        if issues.is_empty() {
+            // Empty issues + nolintlint off → nothing to suppress.
+            return Self::default();
         }
         let needed = issue_path_keys(issues);
-        Self::build(packages, Some(&needed))
+        Self::build(packages, Some(&needed), None)
     }
 
-    fn build(packages: &[Arc<Package>], only: Option<&HashSet<String>>) -> Self {
+    fn build(
+        packages: &[Arc<Package>],
+        only: Option<&HashSet<String>>,
+        style: Option<&NolintlintStyle>,
+    ) -> Self {
         let mut index = Self::default();
+        index.style = style.cloned();
         for pkg in packages {
             for path in &pkg.compiled_go_files {
                 if let Some(needed) = only {
@@ -159,6 +182,16 @@ impl NolintIndex {
             Ok(f) => f,
             Err(_) => return,
         };
+
+        // Only when nolintlint is enabled: this is a second parse of the same
+        // comments, and every finding it feeds — the directive-shape ones and
+        // the unused candidates alike — belongs to that linter.
+        if self.style.is_some() {
+            let directives = extract_directives(&fset, &file.comments);
+            if !directives.is_empty() {
+                self.directives.insert(path_str.clone(), directives);
+            }
+        }
 
         let inline = self.extract_inline_ranges(&fset, &file.comments);
         if inline.is_empty() {
@@ -234,148 +267,132 @@ impl NolintIndex {
             kept.push(issue);
         }
 
+        if self.style.is_some() {
+            // These are ordinary nolintlint findings, so a `//nolint` that
+            // names nolintlint suppresses them like any other issue.
+            for issue in self.style_issues() {
+                if !self.suppress(&issue) {
+                    kept.push(issue);
+                }
+            }
+        }
         if report_unused {
-            kept.extend(self.collect_unused());
+            for issue in self.collect_unused() {
+                if !self.suppress(&issue) {
+                    kept.push(issue);
+                }
+            }
         }
         kept
     }
 
+    /// golangci `shouldPassIssue`: the **first** matching range wins and gets
+    /// the credit; the rest are not consulted.
     fn suppress(&mut self, issue: &Issue) -> bool {
-        let Some(ranges) = self.lookup_mut(&issue.filename) else {
+        let Some(key) = self.resolve_key(&issue.filename) else {
             return false;
         };
-        // Mark *every* matching range (inline + AST expansions). Returning on
-        // the first hit left the inline directive unmarked when only an
-        // expansion matched, so `collect_unused` (which skips expansions)
-        // falsely reported `//nolint:staticcheck` as unused.
-        let mut any = false;
-        for ir in ranges.iter_mut() {
-            if !ir.does_match(issue) {
-                continue;
-            }
-            ir.matched.insert(issue.from_linter.clone(), true);
-            if issue.analyzer != issue.from_linter {
-                ir.matched.insert(issue.analyzer.clone(), true);
-            }
-            any = true;
-        }
-        any
+        let Some(ranges) = self.files.get(&key) else {
+            return false;
+        };
+        let Some(hit) = ranges.iter().find(|ir| ir.does_match(issue)) else {
+            return false;
+        };
+        let pos = (key, hit.report_line, hit.report_col);
+        self.matched
+            .entry(pos)
+            .or_default()
+            .insert(issue.from_linter.clone());
+        true
     }
 
-    fn lookup_mut(&mut self, filename: &str) -> Option<&mut Vec<IgnoredRange>> {
+    /// The key `files` / `directives` are stored under, resolving a basename
+    /// to the one absolute path that ends with it (formatters report issues by
+    /// basename).
+    fn resolve_key(&self, filename: &str) -> Option<String> {
         let norm = filename.replace('\\', "/");
         if self.files.contains_key(&norm) {
-            return self.files.get_mut(&norm);
+            return Some(norm);
         }
-        let base = Path::new(&norm)
-            .file_name()
-            .and_then(|s| s.to_str())?;
-        // Prefer the absolute key with this basename (single source of truth).
-        let abs = self
-            .files
+        let base = Path::new(&norm).file_name().and_then(|s| s.to_str())?;
+        self.files
             .keys()
-            .find(|k| {
-                Path::new(k.as_str())
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    == Some(base)
-            })
-            .cloned()?;
-        self.files.get_mut(&abs)
+            .find(|k| Path::new(k.as_str()).file_name().and_then(|s| s.to_str()) == Some(base))
+            .cloned()
     }
 
-    fn collect_unused(&self) -> Vec<Issue> {
-        let mut seen = HashSet::new();
+    /// The `nolintlint` findings that do not depend on what was suppressed:
+    /// a leading space, a malformed directive, and — under their settings —
+    /// a missing linter list or a missing explanation.
+    fn style_issues(&self) -> Vec<Issue> {
+        let Some(style) = self.style.as_ref() else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
-        // Directive key → whether any range (inline or expansion) matched.
-        let mut used_keys: HashSet<(String, i64, i64, String)> = HashSet::new();
-        for (filename, ranges) in &self.files {
-            if !filename.contains('/') && !filename.contains('\\') {
-                continue;
-            }
-            for ir in ranges {
-                let key = (filename.clone(), ir.report_line, ir.col, ir.comment_text.clone());
-                if ir.linters.is_empty() {
-                    if !ir.matched.is_empty() {
-                        used_keys.insert(key);
-                    }
-                } else {
-                    for lint in &ir.linters {
-                        if ir.matched.contains_key(lint) {
-                            used_keys.insert((
-                                filename.clone(),
-                                ir.report_line,
-                                ir.col,
-                                format!("{}\0{lint}", ir.comment_text),
-                            ));
-                        }
-                    }
+        for (filename, directives) in &self.directives {
+            for d in directives {
+                for text in nolintlint::messages(d, style) {
+                    out.push(nolintlint_issue(filename, d.line, d.col, text));
                 }
             }
         }
-        for (filename, ranges) in &self.files {
-            // Absolute paths only (basename aliases removed).
+        out
+    }
+
+    /// The unused-directive candidates, settled against what each directive
+    /// actually suppressed.
+    ///
+    /// The names come from nolintlint's parse, not the filter's, so they are
+    /// spelled as the user wrote them. That is what makes the enabled-linter
+    /// test below case-sensitive upstream: `//nolint:ErrCheck` produces a
+    /// candidate for a linter called `ErrCheck`, which is not enabled under
+    /// that name, so it is dropped rather than reported.
+    fn collect_unused(&self) -> Vec<Issue> {
+        let mut out = Vec::new();
+        for (filename, directives) in &self.directives {
+            // Absolute paths only (basename aliases are not stored).
             if !filename.contains('/') && !filename.contains('\\') {
                 continue;
             }
-            for ir in ranges {
-                if ir.is_expansion {
+            for d in directives {
+                // A malformed directive is reported as malformed and nothing
+                // else: upstream `continue`s before the unused block.
+                if d.malformed {
                     continue;
                 }
-                let key = (filename.clone(), ir.report_line, ir.col, ir.comment_text.clone());
-                if !seen.insert(key.clone()) {
+                let matched = self.matched.get(&(filename.clone(), d.line, d.col));
+                if d.linters.is_empty() {
+                    if matched.is_none_or(|m| m.is_empty()) {
+                        out.push(unused_issue(filename, d.line, d.col, &d.text, None));
+                    }
                     continue;
                 }
-                if ir.linters.is_empty() {
-                    if ir.matched.is_empty() && !used_keys.contains(&key) {
-                        out.push(unused_issue(
-                            filename,
-                            ir.report_line,
-                            ir.col,
-                            &ir.comment_text,
-                            None,
-                        ));
+                for lint in &d.linters {
+                    // Don't report unused for linters we cannot run yet —
+                    // golangci would have consumed these directives.
+                    if KNOWN_UNIMPLEMENTED_LINTERS.contains(&lint.as_str()) {
+                        continue;
                     }
-                } else {
-                    for lint in &ir.linters {
-                        // Don't report unused for linters we cannot run yet —
-                        // golangci would have consumed these directives.
-                        if KNOWN_UNIMPLEMENTED_LINTERS.contains(&lint.as_str()) {
-                            continue;
-                        }
-                        // golangci: don't expect disabled linters to cover their
-                        // nolint statements (nolint_filter shouldPassIssue).
-                        if !self.enabled_linters.is_empty()
-                            && !self.enabled_linters.contains(lint.as_str())
-                        {
-                            continue;
-                        }
-                        // guff may mark a package ill_typed while go/types is
-                        // clean (e.g. gin). Analyzers that refuse ill_typed
-                        // packages never see those files, so their directives
-                        // stay unmatched — that is not an unused-nolintlint hit.
-                        if self.ill_typed_files.contains(filename)
-                            && linter_skipped_on_ill_typed(&self.enabled_linters, lint)
-                        {
-                            continue;
-                        }
-                        let lint_key = (
-                            filename.clone(),
-                            ir.report_line,
-                            ir.col,
-                            format!("{}\0{lint}", ir.comment_text),
-                        );
-                        if ir.matched.contains_key(lint) || used_keys.contains(&lint_key) {
-                            continue;
-                        }
-                        out.push(unused_issue(
-                            filename,
-                            ir.report_line,
-                            ir.col,
-                            &ir.comment_text,
-                            Some(lint),
-                        ));
+                    // golangci: don't expect disabled linters to cover their
+                    // nolint statements (nolint_filter shouldPassIssue).
+                    if !self.enabled_linters.is_empty()
+                        && !self.enabled_linters.contains(lint.as_str())
+                    {
+                        continue;
                     }
+                    // guff may mark a package ill_typed while go/types is
+                    // clean (e.g. gin). Analyzers that refuse ill_typed
+                    // packages never see those files, so their directives
+                    // stay unmatched — that is not an unused-nolintlint hit.
+                    if self.ill_typed_files.contains(filename)
+                        && linter_skipped_on_ill_typed(&self.enabled_linters, lint)
+                    {
+                        continue;
+                    }
+                    if matched.is_some_and(|m| m.contains(lint.as_str())) {
+                        continue;
+                    }
+                    out.push(unused_issue(filename, d.line, d.col, &d.text, Some(lint)));
                 }
             }
         }
@@ -414,6 +431,10 @@ fn unused_issue(
         Some(l) => format!("directive `{comment}` is unused for linter {l:?}"),
         None => format!("directive `{comment}` is unused"),
     };
+    nolintlint_issue(filename, line, column, text)
+}
+
+fn nolintlint_issue(filename: &str, line: i64, column: i64, text: String) -> Issue {
     Issue {
         from_linter: NOLINTLINT_NAME.into(),
         analyzer: NOLINTLINT_NAME.into(),
@@ -455,6 +476,20 @@ fn path_is_needed(path: &Path, needed: &HashSet<String>) -> bool {
         .is_some_and(|base| needed.contains(base))
 }
 
+/// Every `//nolint` comment as nolintlint sees it, in source order.
+fn extract_directives(fset: &FileSet, comments: &[guff::ast::CommentGroup]) -> Vec<Directive> {
+    let mut out = Vec::new();
+    for g in comments {
+        for c in &g.list {
+            let pos = fset.position(c.pos());
+            if let Some(d) = nolintlint::parse(&c.text, pos.line, pos.column) {
+                out.push(d);
+            }
+        }
+    }
+    out
+}
+
 fn nolint_pattern() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^nolint( |:|$)").expect("nolint regex"))
@@ -467,10 +502,10 @@ fn extract_range(
     pattern: &Regex,
     unknown: &mut HashSet<String>,
 ) -> Option<IgnoredRange> {
-    let mut text = comment.text.as_str();
-    text = text.trim_start_matches('/');
-    text = text.trim_start_matches('/');
-    text = text.trim_start();
+    // `strings.TrimLeft(text, "/ ")`: any run of slashes and *spaces*, in any
+    // order. Not `trim_start()` — a tab after `//` is not trimmed upstream, so
+    // `//\tnolint` is not a directive.
+    let text = comment.text.trim_start_matches(['/', ' ']);
     if !pattern.is_match(text) {
         return None;
     }
@@ -487,9 +522,9 @@ fn extract_range(
         from: group_pos.line,
         to: group_end.line,
         report_line: pos.line,
-        col: pos.column,
+        report_col: pos.column,
+        col: group_pos.column,
         linters,
-        matched: HashMap::new(),
         comment_text: comment.text.clone(),
         is_expansion: false,
     };
@@ -540,140 +575,60 @@ fn is_known_nolint_target(name: &str) -> bool {
 /// would have matched real findings we cannot emit yet).
 const KNOWN_UNIMPLEMENTED_LINTERS: &[&str] = &[];
 
+/// golangci `rangeExpander.Visit`: a directive on its own line stretches over
+/// the node that starts on the next line **in the directive's own column**.
+///
+/// There is no separate file-level rule. `ast.Walk` visits the `*ast.File`
+/// first, and its `Pos()` is the `package` keyword, so a directive on the line
+/// directly above `package` at column 1 expands to the end of the file exactly
+/// like any other node — and one separated from it by a blank line does not.
 fn expand_ranges(
     fset: &FileSet,
     file: &guff::ast::File,
     inline: &[IgnoredRange],
 ) -> Vec<IgnoredRange> {
     let mut expanded = Vec::new();
-    // golangci: a `//nolint` before the package clause covers the whole file
-    // (including blank lines / other file headers above it).
-    let pkg_line = fset.position(file.package).line;
-    let file_end_line = fset.position(file.end()).line.max(pkg_line);
-    for r in inline {
-        if r.to < pkg_line {
-            let mut er = r.clone();
-            er.is_expansion = true;
-            er.to = file_end_line;
-            expanded.push(er);
-        }
-    }
     preorder(NodeRef::File(file), |node| {
-        let Some((npos, nend)) = node_span(node) else {
-            return true;
-        };
+        let npos = node_pos(node);
         if npos.0 == 0 {
             return true;
         }
         let start = fset.position(npos);
-        let end = fset.position(nend);
+        let end = fset.position(node_end(node));
         for r in inline {
-            // Preceding-line nolint: expand when the next node's start line is
-            // the line after the directive. Column need not match exactly —
-            // mid-expression forms like `!(...)` after `//nolint:staticcheck`
-            // start at the unary op column, not the directive's column.
-            if r.to == start.line - 1 {
-                let mut er = r.clone();
-                er.is_expansion = true;
-                if er.to < end.line {
-                    er.to = end.line;
-                }
-                expanded.push(er);
-                break;
+            if r.to != start.line - 1 || r.col != start.column {
+                continue;
             }
+            let mut er = r.clone();
+            er.is_expansion = true;
+            if er.to < end.line {
+                er.to = end.line;
+            }
+            expanded.push(er);
+            break;
         }
         true
     });
     expanded
 }
 
-/// Spans for nodes that commonly follow a preceding-line `//nolint`.
-fn node_span(n: NodeRef<'_>) -> Option<(Pos, Pos)> {
-    match n {
-        NodeRef::GenDecl(d) => {
-            let end = if d.rparen.is_valid() {
-                Pos(d.rparen.0 + 1)
-            } else {
-                d.specs.first().map(|s| s.end()).unwrap_or_default()
-            };
-            Some((d.tok_pos, end))
-        }
-        NodeRef::FuncDecl(d) => {
-            let end = d
-                .body
-                .as_ref()
-                .map(|b| b.end())
-                .unwrap_or_else(|| d.ty.end());
-            Some((d.ty.pos(), end))
-        }
-        NodeRef::DeclStmt(s) => Some((s.decl.pos(), s.decl.end())),
-        NodeRef::ExprStmt(s) => Some((s.x.pos(), s.x.end())),
-        NodeRef::AssignStmt(s) => {
-            let pos = s.lhs.first().map(|e| e.pos()).unwrap_or_default();
-            let end = s.rhs.last().map(|e| e.end()).unwrap_or(pos);
-            Some((pos, end))
-        }
-        NodeRef::ValueSpec(s) => {
-            let pos = s.names.first().map(|n| n.pos()).unwrap_or_default();
-            let end = if let Some(last) = s.values.last() {
-                last.end()
-            } else if let Some(t) = &s.ty {
-                t.end()
-            } else {
-                s.names.last().map(|n| n.end()).unwrap_or_default()
-            };
-            Some((pos, end))
-        }
-        NodeRef::TypeSpec(s) => Some((s.name.pos(), s.ty.end())),
-        NodeRef::ImportSpec(s) => {
-            let pos = s
-                .name
-                .as_ref()
-                .map(|n| n.pos())
-                .unwrap_or(s.path.value_pos);
-            let end = if s.end_pos.0 != 0 {
-                s.end_pos
-            } else {
-                s.path.end()
-            };
-            Some((pos, end))
-        }
-        NodeRef::IfStmt(s) => {
-            let end = s
-                .else_
-                .as_ref()
-                .map(|e| e.end())
-                .unwrap_or_else(|| s.body.end());
-            Some((s.if_, end))
-        }
-        NodeRef::ForStmt(s) => Some((s.for_, s.body.end())),
-        NodeRef::RangeStmt(s) => Some((s.for_, s.body.end())),
-        NodeRef::SwitchStmt(s) => Some((s.switch, s.body.end())),
-        NodeRef::TypeSwitchStmt(s) => Some((s.switch, s.body.end())),
-        NodeRef::SelectStmt(s) => Some((s.select_, s.body.end())),
-        NodeRef::GoStmt(s) => Some((s.go_, s.call.end())),
-        NodeRef::DeferStmt(s) => Some((s.defer_, s.call.end())),
-        NodeRef::ReturnStmt(s) => {
-            let end = s
-                .results
-                .last()
-                .map(|e| e.end())
-                .unwrap_or(Pos(s.return_.0 + 6));
-            Some((s.return_, end))
-        }
-        NodeRef::BlockStmt(s) => Some((s.lbrace, s.end())),
-        NodeRef::CallExpr(s) => Some((s.pos(), s.end())),
-        NodeRef::UnaryExpr(s) => Some((s.op_pos, s.x.end())),
-        NodeRef::BinaryExpr(s) => Some((s.x.pos(), s.y.end())),
-        NodeRef::ParenExpr(s) => Some((s.lparen, Pos(s.rparen.0 + 1))),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use guff_analysis::Diagnostic;
+
+    /// An index with nolintlint enabled, which is what `filter_issues(_, true)`
+    /// means: the unused candidates come from that linter's parse.
+    fn nolintlint_index(packages: &[Arc<Package>]) -> NolintIndex {
+        NolintIndex::from_packages_for_issues(
+            packages,
+            &[],
+            Some(&NolintlintStyle {
+                report_unused: true,
+                ..NolintlintStyle::default()
+            }),
+        )
+    }
 
     fn issue(linter: &str, file: &str, line: i64, text: &str) -> Issue {
         Issue {
@@ -796,7 +751,7 @@ mod tests {
             compiled_go_files: vec![path.clone()],
             ..Package::default()
         };
-        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let mut index = nolintlint_index(&[Arc::new(pkg)]);
         let kept = index.filter_issues(Vec::new(), true);
         let unused: Vec<&Issue> = kept
             .iter()
@@ -816,7 +771,7 @@ mod tests {
             compiled_go_files: vec![path.clone()],
             ..Package::default()
         };
-        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let mut index = nolintlint_index(&[Arc::new(pkg)]);
         let kept = index.filter_issues(Vec::new(), true);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].from_linter, NOLINTLINT_NAME);
@@ -853,7 +808,7 @@ mod tests {
             compiled_go_files: vec![path.clone()],
             ..Package::default()
         };
-        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let mut index = nolintlint_index(&[Arc::new(pkg)]);
         index.set_enabled_linters(["nolintlint".into(), "gosec".into()]);
         let kept = index.filter_issues(Vec::new(), true);
         assert!(
@@ -873,7 +828,7 @@ mod tests {
             ill_typed: true,
             ..Package::default()
         };
-        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let mut index = nolintlint_index(&[Arc::new(pkg)]);
         index.set_enabled_linters(["nolintlint".into(), "ineffassign".into()]);
         let kept = index.filter_issues(Vec::new(), true);
         assert!(
@@ -899,7 +854,7 @@ mod tests {
             ill_typed: true,
             ..Package::default()
         };
-        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let mut index = nolintlint_index(&[Arc::new(pkg)]);
         index.set_enabled_linters(["nolintlint".into(), "staticcheck".into()]);
         let kept = index.filter_issues(Vec::new(), true);
         assert!(

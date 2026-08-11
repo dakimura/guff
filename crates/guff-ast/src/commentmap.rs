@@ -170,7 +170,8 @@ pub fn node_pos(n: NodeRef<'_>) -> crate::position::Pos {
     }
 }
 
-fn node_end(n: NodeRef<'_>) -> crate::position::Pos {
+/// Go's `ast.Node.End()`: one past the last byte of the node's own source text.
+pub fn node_end(n: NodeRef<'_>) -> crate::position::Pos {
     match n {
         NodeRef::Comment(c) => c.end(),
         NodeRef::CommentGroup(c) => c.end(),

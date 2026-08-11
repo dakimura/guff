@@ -1,0 +1,24 @@
+# Golden case: `linters.exclusions.generated` at its default
+# (COMPAT-HARDENING Phase 4).
+#
+# The key is deliberately absent: the default is `lax`, and a case that spells
+# it out would not notice if the default moved. `generated-strict` and
+# `generated-disable` run the same four files with the other two modes, so the
+# three goldens together are the whole setting.
+#
+# errcheck alone, because the question is which *files* survive the filter, not
+# which findings.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

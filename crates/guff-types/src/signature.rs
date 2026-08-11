@@ -124,24 +124,26 @@ pub fn new_signature_type(
 
 /// Set the function-level type parameters on a Signature.
 pub fn signature_set_type_params(arena: &mut TypeArena, id: TypeId, params: TypeParamList) {
-    match arena.get_mut(id) {
+    // `remutate` and not `get_mut`: the type parameters are part of the
+    // hash-cons key, so setting them here has to move the entry.
+    arena.remutate(id, |data| match data {
         TypeData::Signature(s) => s.tparams = Some(params),
         other => panic!(
             "expected Signature, got {:?}",
             std::mem::discriminant(other)
         ),
-    }
+    });
 }
 
 /// Set the receiver type parameters on a Signature (for generic methods).
 pub fn signature_set_recv_type_params(arena: &mut TypeArena, id: TypeId, params: TypeParamList) {
-    match arena.get_mut(id) {
+    arena.remutate(id, |data| match data {
         TypeData::Signature(s) => s.rparams = Some(params),
         other => panic!(
             "expected Signature, got {:?}",
             std::mem::discriminant(other)
         ),
-    }
+    });
 }
 
 // Free-function accessors over a TypeId. Match the Go method shape:

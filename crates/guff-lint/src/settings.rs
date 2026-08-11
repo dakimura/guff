@@ -128,7 +128,10 @@ pub struct ErrcheckSettings {
     /// Additional function/method symbols to exclude (kisielk exclude file format).
     #[serde(default, rename = "exclude-functions", deserialize_with = "string_or_seq")]
     pub exclude_functions: Vec<String>,
-    // DEFERRED (R4 follow-up): verbose.
+    /// Print the receiver- and import-path-qualified name (`(*os.File).Close`)
+    /// instead of the selector as written (`f.Close`).
+    #[serde(default)]
+    pub verbose: bool,
 }
 
 /// `linters.settings.govet` / `linters-settings.govet`.
@@ -1814,7 +1817,27 @@ pub struct NolintlintSettings {
     /// When true, do not report unused `//nolint` directives (golangci default: false).
     #[serde(default, rename = "allow-unused")]
     pub allow_unused: bool,
-    // DEFERRED: allow-leading-space / require-explanation / require-specific.
+    /// Require `//nolint:linter // why` rather than a bare directive.
+    #[serde(default, rename = "require-explanation")]
+    pub require_explanation: bool,
+    /// Require the directive to name the linters it silences.
+    #[serde(default, rename = "require-specific")]
+    pub require_specific: bool,
+    /// Linters exempt from `require-explanation`.
+    #[serde(default, rename = "allow-no-explanation", deserialize_with = "string_or_seq")]
+    pub allow_no_explanation: Vec<String>,
+}
+
+impl NolintlintSettings {
+    /// The shape the nolint filter needs.
+    pub fn to_style(&self) -> crate::nolintlint::NolintlintStyle {
+        crate::nolintlint::NolintlintStyle {
+            require_explanation: self.require_explanation,
+            require_specific: self.require_specific,
+            allow_no_explanation: self.allow_no_explanation.clone(),
+            report_unused: !self.allow_unused,
+        }
+    }
 }
 
 /// One of `thelper.{test,fuzz,benchmark,tb}` option groups.
@@ -2471,6 +2494,7 @@ impl LinterSettings {
                 check_asserts: self.errcheck.check_type_assertions,
                 disable_default_exclusions: self.errcheck.disable_default_exclusions,
                 exclude_functions: self.errcheck.exclude_functions.clone(),
+                verbose: self.errcheck.verbose,
             },
         );
         bag.insert("staticcheck", self.staticcheck.to_guff_stylecheck());

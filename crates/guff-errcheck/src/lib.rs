@@ -38,6 +38,9 @@ pub struct Options {
     /// Extra symbols to skip (`exclude-functions`), kisielk/errcheck format
     /// (e.g. `io.Copy`, `(*net/http.Server).Shutdown`).
     pub exclude_functions: Vec<String>,
+    /// Name the callee by its qualified `types.Func.FullName()` rather than by
+    /// the selector as written (golangci `errcheck.verbose`).
+    pub verbose: bool,
 }
 
 fn make_analyzer(run: RunFn) -> Analyzer {
@@ -190,50 +193,52 @@ struct ErrorTypes {
 
 impl Visitor<'_, '_> {
     fn report_unchecked(&mut self, pos: u32, call: Option<&CallExpr>) {
-        let message = match call {
-            Some(c) => {
-                let name = self.call_display_name(c);
-                if name.is_empty() {
-                    "Error return value is not checked".into()
-                } else {
-                    // Backticks match kisielk/golangci + exclusion presets like
-                    // `Error return value of .((...).|.*Flush|...). is not checked`.
-                    format!("Error return value of `{name}` is not checked")
-                }
-            }
+        let message = match call.and_then(|c| self.call_display_name(c)) {
+            // Backticks match kisielk/golangci + exclusion presets like
+            // `Error return value of .((...).|.*Flush|...). is not checked`.
+            Some(name) => format!("Error return value of `{name}` is not checked"),
             None => "Error return value is not checked".into(),
         };
         self.pending.push((pos, message));
     }
 
-    fn call_display_name(&self, call: &CallExpr) -> String {
-        // Prefer `os.Stderr.Write` form so golangci EXC0001 / std-error-handling
-        // presets match (`(os.)?std(out|err)\..*`).
-        if let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) {
-            if let Expr::SelectorExpr(recv) = unparen(&sel.x) {
-                if let Expr::Ident(pkg) = unparen(&recv.x) {
-                    if pkg.name == "os"
-                        && (recv.sel.name == "Stderr" || recv.sel.name == "Stdout")
-                    {
-                        return format!("os.{}.{}", recv.sel.name, sel.sel.name);
-                    }
-                }
+    /// The code golangci prints between the backticks, or `None` for the
+    /// short "Error return value is not checked" form.
+    ///
+    /// The wrapper picks `cmp.Or(err.SelectorName, err.FuncName)`, or
+    /// `err.FuncName` alone under `errcheck.verbose`
+    /// (pkg/golinters/errcheck/errcheck.go). Both fields come from
+    /// `selectorAndFunc`, which requires the callee to be a **selector** whose
+    /// `Sel` resolves to a `*types.Func`, so a plain `f()` — a call to a
+    /// function in this package, or to a local variable of func type — has no
+    /// name at all and takes the short form.
+    fn call_display_name(&self, call: &CallExpr) -> Option<String> {
+        let Expr::SelectorExpr(sel) = base_call_expr(&call.fun) else {
+            return None;
+        };
+        // `fullName`: the receiver-qualified, import-path-qualified name
+        // (`(*os.File).Close`, `fmt.Printf`) — `types.Func.FullName()`.
+        let full = {
+            let obj = self.call_target_object(call)?;
+            let artifacts = self.pass.pkg().type_artifacts.as_ref()?;
+            let name = code::type_func_name(
+                &artifacts.types,
+                &artifacts.objects,
+                &artifacts.packages,
+                obj,
+            );
+            if name.is_empty() {
+                return None;
             }
+            name
+        };
+        if self.opts.verbose {
+            return Some(full);
         }
-        if let Some(obj) = self.call_target_object(call) {
-            if let Some(artifacts) = self.pass.pkg().type_artifacts.as_ref() {
-                let name = code::type_func_name(
-                    &artifacts.types,
-                    &artifacts.objects,
-                    &artifacts.packages,
-                    obj,
-                );
-                if !name.is_empty() {
-                    return name;
-                }
-            }
-        }
-        code::call_name(self.pass, &call.fun).unwrap_or_default()
+        // `selectorName`: the selector as *written*, but only while it is a
+        // chain of plain identifiers. `foo().Close()` has no such spelling and
+        // falls back to the qualified name.
+        Some(selector_name(sel).unwrap_or(full))
     }
 
     fn visit_expr_stmt(&mut self, x: &Expr) {
@@ -570,6 +575,21 @@ impl Visitor<'_, '_> {
 
     fn is_recover(&self, call: &CallExpr) -> bool {
         matches!(base_call_expr(&call.fun), Expr::Ident(Ident { name, .. }) if name == "recover")
+    }
+}
+
+/// kisielk `getSelectorName`: the selector spelled as it is in the source,
+/// defined only when every step of the chain is a plain identifier.
+///
+/// `f.Close` → `f.Close`, `os.Stdout.Write` → `os.Stdout.Write`,
+/// `newFile().Close` → `None`.
+fn selector_name(sel: &guff::ast::SelectorExpr) -> Option<String> {
+    match &*sel.x {
+        Expr::Ident(ident) => Some(format!("{}.{}", ident.name, sel.sel.name)),
+        Expr::SelectorExpr(inner) => {
+            Some(format!("{}.{}", selector_name(inner)?, sel.sel.name))
+        }
+        _ => None,
     }
 }
 

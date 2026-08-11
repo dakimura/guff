@@ -13,6 +13,7 @@ mod exclude;
 mod fix;
 mod format;
 mod nolint;
+pub mod nolintlint;
 mod pathutil;
 mod registry;
 mod settings;
@@ -44,6 +45,7 @@ pub use format::{
     PrinterOptions, SarifFormatter, TabFormatter, TextFormatter,
 };
 pub use nolint::{NolintIndex, NOLINTLINT_NAME};
+pub use nolintlint::NolintlintStyle;
 pub use pathutil::{format_issue_path, PathMode};
 pub use registry::{
     analyzers_for_linter, analyzers_for_linter_with_settings, format_linters_listing,
@@ -975,7 +977,7 @@ pub fn run_and_write_with_teardown(
     // config (`linters.default: none` with `formatters.enable`), which
     // golangci-lint runs normally.
     if opts.analyzers.is_empty()
-        && !opts.filter.report_unused_nolint
+        && opts.filter.nolintlint.is_none()
         && opts.formatters.is_none()
     {
         eprintln!("guff: no analyzers enabled (missing linter crates?)");

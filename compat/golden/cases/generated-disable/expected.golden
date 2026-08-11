@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh generated-disable
+# Produced by running golangci-lint on compat/golden/cases/generated-disable/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+after/after.go:14:7:errcheck::Error return value is not checked
+lax/lax.go:12:7:errcheck::Error return value is not checked
+plain/plain.go:9:7:errcheck::Error return value is not checked
+strict/strict.go:12:7:errcheck::Error return value is not checked

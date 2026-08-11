@@ -156,12 +156,32 @@ pub fn rule_enabled(pass: &Pass<'_>, name: &str) -> bool {
     effective_settings(pass).rule_enabled(name, DEFAULT_RULES, all_rules())
 }
 
+/// Severity golangci-lint puts on a revive failure.
+///
+/// Never empty: upstream's `normalizeConfig` defaults `revive.severity` to
+/// `warning` and pushes it into every rule that does not set its own, and its
+/// `severity(cfg, failure)` then answers `error` **only** for a rule whose
+/// effective severity is exactly `error`. Anything else — unset, `warning`, or
+/// a value revive does not know — comes out as `warning`.
+///
+/// Returning "" when nothing was configured (as this used to) left every
+/// revive finding with an empty severity field, which no gate compared until
+/// the exclusions case put a config without `revive.severity` under the golden
+/// tier. The `revive` case sets it explicitly, so it never saw this.
 pub fn rule_severity(pass: &Pass<'_>, name: &str) -> String {
-    effective_settings(pass)
-        .rule_severity(name)
-        .unwrap_or_default()
-        .to_string()
+    let settings = effective_settings(pass);
+    let configured = settings.rule_severity(name).unwrap_or(SEVERITY_WARNING);
+    if configured == SEVERITY_ERROR {
+        SEVERITY_ERROR.to_string()
+    } else {
+        SEVERITY_WARNING.to_string()
+    }
 }
+
+/// revive `lint.SeverityWarning` / `lint.SeverityError` (compared verbatim, so
+/// `Error` is not `error`).
+const SEVERITY_WARNING: &str = "warning";
+const SEVERITY_ERROR: &str = "error";
 
 pub fn rule_arguments(pass: &Pass<'_>, name: &str) -> Vec<RuleArgument> {
     effective_settings(pass)

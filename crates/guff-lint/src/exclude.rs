@@ -153,8 +153,14 @@ pub struct IssueFilter {
     uniq_by_line: bool,
     default_severity: Option<String>,
     severity_rules: Vec<(CompiledRule, String)>,
-    /// When true, unused `//nolint` directives are reported as `nolintlint`.
-    pub report_unused_nolint: bool,
+    /// `Some` when nolintlint is enabled at all, carrying its settings.
+    ///
+    /// One field and not a `report_unused` bool beside it: the directive-shape
+    /// findings (leading space, malformed, and the two `require-*` settings)
+    /// are not optional — upstream forces `NeedsMachineOnly` on whenever the
+    /// linter runs — so "nolintlint is on" and "report unused directives" are
+    /// different questions and used to be settable inconsistently.
+    pub nolintlint: Option<crate::nolintlint::NolintlintStyle>,
     /// Linters enabled for this run (for unused-nolintlint parity with golangci).
     pub enabled_linters: HashSet<String>,
     /// Go build cache directory; issues under it are dropped (cgo artifacts).
@@ -172,10 +178,8 @@ pub struct IssueFilter {
 
 #[derive(Debug, Clone)]
 struct CompiledRule {
-    /// Original linter names from config (for exact match).
+    /// Linter names as written in the config, compared verbatim.
     linters: Vec<String>,
-    /// [`normalize_linter_name`] forms of [`Self::linters`] (computed once).
-    linters_norm: Vec<String>,
     path: Option<Regex>,
     path_except: Option<Regex>,
     text: Option<Regex>,
@@ -371,9 +375,9 @@ impl IssueFilter {
         // findings still count as used (golangci analysis-level parity).
         // When unused reporting is off (typical; prometheus), exclude first so
         // we index fewer files and skip the extra mark pass.
-        if self.report_unused_nolint && !packages.is_empty() {
+        if self.nolintlint.is_some() && !packages.is_empty() {
             let mut idx =
-                NolintIndex::from_packages_for_issues(packages, &issues, true);
+                NolintIndex::from_packages_for_issues(packages, &issues, self.nolintlint.as_ref());
             idx.set_enabled_linters(self.enabled_linters.iter().cloned());
             idx.mark_matches(&issues);
             issues.retain(|issue| {
@@ -382,7 +386,11 @@ impl IssueFilter {
                     .iter()
                     .any(|rule| rule.matches(issue, self.path_base.as_deref()))
             });
-            issues = idx.filter_issues(issues, true);
+            let report_unused = self
+                .nolintlint
+                .as_ref()
+                .is_some_and(|s| s.report_unused);
+            issues = idx.filter_issues(issues, report_unused);
         } else {
             issues.retain(|issue| {
                 !self
@@ -391,11 +399,7 @@ impl IssueFilter {
                     .any(|rule| rule.matches(issue, self.path_base.as_deref()))
             });
             if !packages.is_empty() {
-                let mut idx = NolintIndex::from_packages_for_issues(
-                    packages,
-                    &issues,
-                    false,
-                );
+                let mut idx = NolintIndex::from_packages_for_issues(packages, &issues, None);
                 idx.set_enabled_linters(self.enabled_linters.iter().cloned());
                 issues = idx.filter_issues(issues, false);
             }
@@ -529,20 +533,16 @@ impl CompiledRule {
         }
         // Linters first: most rules are linter-scoped; avoid text/path regex
         // work on the other ~10k issues that will never match.
-        if !self.linters.is_empty() {
-            let from = crate::config::normalize_linter_name(&issue.from_linter);
-            let analyzer = crate::config::normalize_linter_name(&issue.analyzer);
-            let ok = self
-                .linters_norm
-                .iter()
-                .any(|want| want == from || want == analyzer)
-                || self
-                    .linters
-                    .iter()
-                    .any(|l| l == &issue.from_linter || l == &issue.analyzer);
-            if !ok {
-                return false;
-            }
+        //
+        // The comparison is `slices.Contains(r.linters, issue.FromLinter)` —
+        // verbatim, against the linter name only. It is deliberately not the
+        // analyzer name: `//nolint:printf` and `linters: [printf]` both name
+        // something golangci-lint has never heard of, and both do nothing,
+        // however prominently `printf: ` is printed in the message. Matching
+        // the analyzer too (and matching alias-normalized names) silently
+        // removed findings upstream keeps.
+        if !self.linters.is_empty() && !self.linters.iter().any(|l| l == &issue.from_linter) {
+            return false;
         }
         if let Some(re) = &self.text {
             if !re.is_match(&issue.text) {
@@ -597,11 +597,6 @@ fn compile_rule(rule: &ExcludeRule, case_prefix: &str) -> Result<CompiledRule, S
         _ => None,
     };
     Ok(CompiledRule {
-        linters_norm: rule
-            .linters
-            .iter()
-            .map(|l| crate::config::normalize_linter_name(l).to_string())
-            .collect(),
         linters: rule.linters.clone(),
         path,
         path_except,
@@ -1084,6 +1079,55 @@ linters:
         let kept = filter.apply(vec![st, issue("errcheck", "a.go", "unchecked")], &[]);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].from_linter, "errcheck");
+    }
+
+    #[test]
+    fn exclude_rule_linters_names_the_linter_not_the_analyzer() {
+        // `baseRule.matchLinter` is `slices.Contains(r.linters, FromLinter)`.
+        // `printf` is govet's analyzer, prominent in the message and useless
+        // here — matching it as well removed findings upstream keeps.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            uniq_by_line: Some(false),
+            exclude_rules: vec![ExcludeRule {
+                linters: vec!["printf".into()],
+                path: Some(r"a\.go".into()),
+                ..ExcludeRule::default()
+            }],
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let mut printf = issue("govet", "a.go", "printf: wrong type");
+        printf.analyzer = "printf".into();
+        let kept = filter.apply(vec![printf], &[]);
+        assert_eq!(kept.len(), 1, "a rule naming the analyzer matches nothing");
+    }
+
+    #[test]
+    fn v2_exclusion_rule_text_is_case_sensitive() {
+        // v2 compiles exclusion rules with an empty prefix and has no
+        // `exclude-case-sensitive` key; the v1 default of `(?i)` would widen
+        // every pattern.
+        use crate::config::parse_config_str;
+        let yaml = r#"
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    rules:
+      - linters: [errcheck]
+        text: ERROR RETURN VALUE
+"#;
+        let cfg = parse_config_str(yaml).unwrap();
+        let filter = IssueFilter::from_config(&cfg.effective_issues(), &cfg.effective_severity());
+        let kept = filter.apply(
+            vec![issue("errcheck", "a.go", "Error return value is not checked")],
+            &[],
+        );
+        assert_eq!(kept.len(), 1, "the pattern is used verbatim");
     }
 
     #[test]

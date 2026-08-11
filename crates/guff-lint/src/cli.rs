@@ -320,10 +320,10 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     let linter_names = selection.resolve_names();
     let settings = &loaded.linter_settings;
 
-    // golangci `linters.settings.nolintlint.allow-unused: true` disables unused
-    // directive reports while keeping nolintlint enabled for other checks.
-    let report_unused_nolint = linter_names.iter().any(|n| n == NOLINTLINT_NAME)
-        && !settings.nolintlint.allow_unused;
+    // nolintlint enables no analyzer of its own: it reports on the `//nolint`
+    // comments, which the issue filter is already parsing.
+    // `settings.nolintlint.allow-unused` rides along inside the style.
+    let nolintlint_enabled = linter_names.iter().any(|n| n == NOLINTLINT_NAME);
 
     let mut unknown = Vec::new();
     let real: Vec<String> = linter_names
@@ -349,7 +349,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         .enable
         .iter()
         .any(|n| guff_fmt::is_formatter(n));
-    if analyzers.is_empty() && !report_unused_nolint && !any_formatter {
+    if analyzers.is_empty() && !nolintlint_enabled && !any_formatter {
         eprintln!("guff: no linters enabled");
         return Ok(crate::EXIT_NO_LINTERS);
     }
@@ -362,7 +362,7 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
     }
 
     let mut filter = loaded.filter;
-    filter.report_unused_nolint = report_unused_nolint;
+    filter.nolintlint = nolintlint_enabled.then(|| settings.nolintlint.to_style());
     filter.enabled_linters = linter_names.iter().cloned().collect();
 
     let timeout = resolve_timeout(args.timeout.as_deref(), loaded.timeout.as_deref())?;
@@ -611,7 +611,7 @@ fn load_run_config(
     let (issues, severity, run, output, linter_settings, settings_fingerprint) = match &file {
         Some(c) => (
             c.effective_issues(),
-            c.severity().clone(),
+            c.effective_severity(),
             c.run().clone(),
             c.output().clone(),
             LinterSettings::from_yaml(c.linter_settings_raw()),

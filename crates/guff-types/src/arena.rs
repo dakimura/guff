@@ -438,6 +438,33 @@ impl TypeArena {
         self.alloc_fresh(data)
     }
 
+    /// Re-key the hash-cons entry for `id` around an in-place mutation.
+    ///
+    /// The intern table is keyed by structure, so mutating an interned type
+    /// leaves the old key pointing at a type that no longer has that shape —
+    /// and the next `alloc` of something that *does* have that shape gets the
+    /// mutated type back. A signature is built before its type parameters are
+    /// known ([`crate::signature::signature_set_type_params`]), which is
+    /// exactly this: `func[T any]() error` is interned as `func() error`, and
+    /// instantiating it then hands back the generic original.
+    ///
+    /// Only the overlay is repaired; the frozen base holds types from packages
+    /// that finished checking, which are never mutated again.
+    pub fn remutate<R>(&mut self, id: TypeId, f: impl FnOnce(&mut TypeData) -> R) -> R {
+        let old_key = InternKey::from_data(self.get(id));
+        if let Some(key) = old_key {
+            if self.intern_overlay.get(&key) == Some(&id) {
+                self.intern_overlay.remove(&key);
+            }
+        }
+        // The new shape is deliberately *not* re-interned. Hash-consing is an
+        // optimization and dropping an entry only costs sharing, while this
+        // path runs for every generic signature in the program (including every
+        // one read back from export data) — so the cheaper half is the one that
+        // keeps the table correct.
+        f(self.get_mut(id))
+    }
+
     fn alloc_fresh(&mut self, data: TypeData) -> TypeId {
         // Index is 1-based so Option<TypeId> can use 0 as the niche.
         let raw = (self.types.push(data) + 1) as u32;

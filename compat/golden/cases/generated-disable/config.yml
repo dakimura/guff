@@ -1,0 +1,21 @@
+# Golden case: `linters.exclusions.generated: disable`
+# (COMPAT-HARDENING Phase 4).
+#
+# The filter is skipped entirely, so this golden is the full finding set of the
+# fixture — the denominator the other two `generated` cases subtract from.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  exclusions:
+    generated: disable
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

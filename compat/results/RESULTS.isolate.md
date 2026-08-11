@@ -117,7 +117,6 @@
 | isolate-gomodguard_v2 | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-wsl_v5 | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-golines | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-swaggo | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -801,9 +800,3 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
 | golines | 1 | 1 | 1 | 100.0% | 100.0% |
-
-## isolate-swaggo
-
-| Linter | guff | golangci | both | P | R |
-|--------|-----:|---------:|-----:|--:|--:|
-| swaggo | 1 | 1 | 1 | 100.0% | 100.0% |

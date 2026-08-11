@@ -224,17 +224,28 @@ godox は caddy の実 config では有効化されていないので、`default
 **Done when**: Phase 0 が挙げた全 check に fixture + golden があり、CI 必須ゲートになっている。
 進捗は `docs/COVERAGE.md` の `never` / `unit-only` 件数で測る。
 
-### Phase 4 — 設定・除外セマンティクスの互換テスト `[未着手]`
+### Phase 4 — 設定・除外セマンティクスの互換テスト `[進行中: nolint / nolintlint / errcheck / exclusions / generated 完了 2026-08-11（7 本目）]`
 
 現在ほぼゼロの層。ユーザーが実際に踏むのはここ。すべて finding-set を変える ＝ 互換性そのもの。
 
 - 各 linter の settings キーを 有効/無効/閾値/リスト で 3〜4 パターン
-- `linters.exclusions.{rules,presets,generated,paths}` / `issues.exclude-rules`
+  → **errcheck の `verbose` 完了**（`cases/errcheck` / `errcheck-verbose`）
+- `linters.exclusions.{rules,presets,generated,paths}`
+  → **完了 2026-08-11（7 本目）**。`cases/exclusions`（baseline）+ `-rules` / `-paths` /
+  `-presets` と `cases/generated{,-lax,-strict,-disable}` の 8 ケース。
+  v2 の `issues` は `exclude-rules` を**持たない**（すべて `linters.exclusions` に移った）ので
+  この行の後半は v1 の話であり、v1 config を読むための
+  `exclude.rs::default_exclude_patterns` 側に残っている
 - `issues.uniq-by-line` / `max-issues-per-linter` / `max-same-issues` / `severity.rules`
 - `//nolint` の全形（同一行・直前行・`//nolint:a,b`・ブロック・説明付き・不正形式）
+  → **完了**（`cases/nolint`。nolintlint の settings は `nolint-strict` / `nolint-allow-unused`）
 - `run.build-tags` / `run.tests` / `run.go` / `output.path-mode`
 
-fixture 1 個 × config N 個の直積で回す。
+**fixture 1 個 × config N 個の直積**は golden tier がそのまま使える。ケースは
+`config.yml` を各自持ち、`sources.txt` が同じ fixture を指すだけなので、
+**ハーネスの変更は 1 行も要らなかった**。設定 1 個の効果は
+**2 つのゴールデンの差分そのもの**として読める（`nolint` と `nolint-allow-unused` の差 =
+`allow-unused` が消す行）。
 
 ### Phase 5 — コーパスの多様化 `[未着手]`
 
@@ -271,12 +282,16 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
-| 4 | 設定・除外セマンティクス | 中 | 未着手 | — |
+| 4 | 設定・除外セマンティクス | 中 | **進行中** — golden に **13 ケース**（nolint 3 / errcheck 2 / **exclusions 4** / **generated 4**）。`//nolint` の 5 規則と nolintlint の 4 診断を移植、errcheck のメッセージを上流の規則に置き換え、型検査器の hash-cons バグを修正（6 本目）。除外規則の linter 照合を**逐語**に、v2 の text/source を**大文字小文字を区別**する形に、revive の severity を常時付与、`generated` の既定を **strict** に（7 本目） | 2026-08-11 |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-11）: **547** checks 中 `never` **8** / `unit-only` **3** / `fired` **536（98.0%）**。
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-11、7 本目で再生成）: **547** checks 中
+`never` **3** / `unit-only` **1** / `fired` **543（99.3%）**。
+`never` の 3 件は **gocritic `whyNoLint` / govet `cgocall` / govet `framepointer`** ——
+**3 件とも §6「恒久的に観測できない」側**なので、潰せる `never` は残っていない。
+`unit-only` の 1 件は revive `time-naming`。
 （計画策定時: 548 checks・`never` 222 / `unit-only` 120 / `fired` 206）
 
 母数が 548 → 547 に減ったのは、**SA9010 が上流に存在しないチェックだった**ため削除したから（§4 の
@@ -284,17 +299,13 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装している**状態になった。
 
 `unit-only` が 102 → 21 に落ちたのは 2026-08-10 の revive ゴールデン化（83 件）、
-21 → 3 に落ちたのは 2026-08-11 の gosec ゴールデン化（18 件）による。
-**残る 3 件は revive 2 / golines 1 だけ**で、「撃つことは確認済み・同じものを撃つかは未確認」の
-在庫はほぼ尽きた。次の投資先は `unit-only` ではなく、gosec の DEFERRED のように
-**そもそも実装が無い check**（§4 の 2026-08-11「次にやること 3」）と、
-ratchet が残っている staticcheck / revive の側にある。
-
-`never` の 8 件は staticcheck 3（`S1030` / `SA1027` / `SA3000`）/
-govet 2（`cgocall` / `framepointer` — どちらも §6）/ gocritic 1（`whyNoLint`、§6）/
-revive 1（`time-naming`）/ swaggo 1。**うち 3 件は §6「恒久的に観測できない」側**なので、
-潰せる `never` は実質 5 件しか残っていない。`unit-only` 102 のうち 83 は revive で、こちらは
-「撃つことは確認済み・同じものを撃つかは未確認」のまま（Phase 3 の残り）。
+21 → 3 に落ちたのは 2026-08-11 の gosec ゴールデン化（18 件）、
+3 → 1 に落ちたのは同日の formatter / swaggo の整理による。
+**「撃つことは確認済み・同じものを撃つかは未確認」の在庫は尽きた**（残り 1 件は
+revive `time-naming`）。次の投資先は `unit-only` ではなく、gosec の G304 のように
+**そもそも実装が無い check**（§4 の 7 本目「次にやること 3」）、
+ratchet が残っている staticcheck / revive、そして
+**「発火したか」ではなく「何を比較しているか」を増やす Phase 4** の側にある。
 
 `SA1011` が 9 件目から抜けたのは 2026-08-10（5 本目）。**`never` の原因が「実装が無い」でも
 「fixture が無い」でもなく、`guff-constant` が文字列定数を Rust の `String` で持っていたために
@@ -3289,6 +3300,364 @@ staging ディレクトリが hidden でないことを直接見るテストを�
    「何件比較しているか」** —— §1 の isolate 178 findings という数字は
    golden 12 ケースが増えた今も更新していない。
 
+### 2026-08-11（6 本目）— Phase 4 に着手: `//nolint` / nolintlint / errcheck の名前
+
+**やったこと**
+
+Phase 3 の台帳が 99.3% で頭打ちになったので、5 本目の「次にやること 7」に従って
+**「発火したか」ではなく「何を比較しているか」**の側に移った。Phase 4 の最初の 5 ケース
+（`nolint` / `nolint-strict` / `nolint-allow-unused` / `errcheck` / `errcheck-verbose`）を
+golden tier に載せた。**ハーネスは 1 行も変えていない** —— ケースは `config.yml` を各自持ち
+`sources.txt` が同じ fixture を指すので、「fixture 1 個 × config N 個」は既存の仕組みで書ける。
+
+#### 1. `//nolint` は 5 つの規則が違っていた（19 件中 6 件しか一致しなかった）
+
+上流は `pkg/result/processors/nolint_filter.go`（抑止）と
+`pkg/golinters/nolintlint/internal/nolintlint.go`（ディレクティブ自身の診断）の 2 本立てで、
+**同じコメントを別々の正規表現で 2 回パースする**。guff は前者だけを持ち、しかも近似していた。
+
+| # | guff | 上流 |
+|---|------|------|
+| 1 | 直前行の展開に**列を見ない**（「mid-expression では列がずれるから」とコメントに書いてあった） | `rangeExpander.Visit` は `nodeStartPos.Column == r.col` を要求する。列が違えば展開しない |
+| 2 | 「`package` より前の `//nolint` はファイル全体」という**独自の規則** | そんな規則は無い。`ast.Walk` が最初に見る `*ast.File` の `Pos()` が `package` キーワードなので、**直上・同列**なら他のノードと同じ規則で末尾まで伸びるだけ。**空行 1 つ挟むと効かない** |
+| 3 | 展開対象を `node_span` の 22 種に限定 | 全ノード（`ast.Walk`）。`node_pos`/`node_end` に委ねれば同じになる |
+| 4 | `//nolint:printf` が **analyzer 名**でも一致 | `doesMatch` は `issue.FromLinter` だけを見る。`printf` は未知の名前で、**何も抑止しないし unused も報告されない**（enabled でないので落ちる） |
+| 5 | `//` と空白を `trim_start()` で剥がす | `strings.TrimLeft(text, "/ ")` —— **タブは剥がさない**（`//\tnolint` はディレクティブではない） |
+
+2 は「独自の規則を足した」のではなく、**上流の一般規則を特殊ケースとして書き写して条件を緩めた**形。
+`gap/gap.go`（空行を 1 つ挟んだ `//nolint:errcheck`）が guff だけ黙る、という差分で出た。
+
+#### 2. nolintlint は 5 種のうち 1 種しか実装されていなかった
+
+`NewLinter` は `needs |= NeedsMachineOnly` を**無条件で**立てる。つまり
+**設定を一切書かなくても** `// nolint`（先頭に空白）と `//nolint :x`（コロン前に空白）は
+報告される。guff が持っていたのは unused だけで、残り 4 種は `settings.rs` に
+`// DEFERRED: allow-leading-space / require-explanation / require-specific` と書かれていた。
+
+`crates/guff-lint/src/nolintlint.rs` を新設して上流の 4 正規表現ごと移植した。
+**フィルタと同じパースを使い回さないこと**が要点で、両者は実入力で食い違う:
+
+| 入力 | フィルタ | nolintlint |
+|---|---|---|
+| `//nolint :errcheck` | `^nolint( \|:\|$)` に一致し、`nolint:` で始まらないので**全 linter を抑止** | `fullDirectivePattern` に一致せず**malformed**（unused 候補は出さない） |
+| `//nolint:ErrCheck` | 小文字化 + エイリアス解決で `errcheck` | **`ErrCheck` のまま** |
+| `//nolint:a b` | 未知の linter 名 `a b` 1 個 | malformed |
+
+3 行目の帰結が効く: unused 候補は nolintlint 側の**生の名前**で作られ、フィルタは
+`enabledLinters[生の名前]` を引くので、**`//nolint:ErrCheck` の unused は永久に報告されない**
+（`ErrCheck` という名前の linter は有効化されていない）。エイリアス `//nolint:megacheck` も同じ。
+guff は正規化した名前で報告していたので、**上流が黙る所で喋っていた**。
+`unused/unused.go` はこの 3 形を撃ち分けるためだけの fixture。
+
+ついでに、range 側の `matched` マップを**ディレクティブの位置キー**に移した。
+展開レンジは clone なので「clone に付いた印が原本に見えない」という問題があり、
+`used_keys` という別の照合表で埋め合わせていた。位置を同一性にすれば
+上流の「**最初に一致したレンジだけ**が credit を得る」（`shouldPassIssue` は return する）も
+そのまま書ける。
+
+#### 3. errcheck のメッセージ —— §5 の 1 番目を潰した
+
+`nolint` ケースを載せた時点で残った差分 8 件は全部これだった。
+guff は `Error return value of \`example.com/pkg.mkerr\` is not checked`、
+上流は `Error return value is not checked`。**§5 の台帳 #1 そのもの**で、
+`normalize.py` が両側を同じキーに畳んでいたため、OSS でも isolate でも見えなかった。
+
+上流の規則（`pkg/golinters/errcheck/errcheck.go` + kisielk `errcheck@v1.10.0`）:
+
+- `selectorAndFunc` が**セレクタでない**呼び出し（`f()`、ローカル関数、func 型の変数）に
+  `false` を返す → `FuncName == ""` → **名前なしの短い形**
+- そうでなければ `cmp.Or(SelectorName, FuncName)`。`SelectorName` は
+  `getSelectorName` の**書かれたとおりの綴り**（`w.Emit` / `os.Stdout.Write`）で、
+  レシーバが識別子の連鎖でないとき（`newWriter().Emit()`、`(&w).Flush()`）は空になり、
+  そこで初めて `FuncName`（= `types.Func.FullName()`）に落ちる
+- `errcheck.verbose: true` なら常に `FuncName`
+
+guff は「常に `FullName`、ただし `os.Stdout`/`os.Stderr` だけ特別扱い」という近似だった。
+その特別扱いは `getSelectorName` を実装すれば**自然に出る**ので消した。
+`verbose` 設定も無かったので足した（`// DEFERRED (R4 follow-up): verbose.` と書いてあった）。
+
+#### 4. 型検査器のバグ: 完全明示のジェネリック呼び出しがパッケージを ill-typed にしていた
+
+`errcheck` ケースの fixture に `generic[int]()` を 1 行入れたら、**guff だけ何も報告しなかった**。
+追うと errcheck ではなく `guff-types` で、
+
+```go
+func one[T any]() error { return nil }
+_ = one[int]()   // guff: cannot infer type arguments in call
+```
+
+`one[T any]() T` なら通り、`one[T any]() error` だけ落ちる。原因は**型アリーナの hash-cons**:
+
+1. `func() error` が `new_signature_type` で intern される（キーの `tparams` は空）
+2. `signature_set_type_params` が**その場で** `tparams` を書き換える
+   → **intern 表は「空 tparams」のキーのまま、ジェネリックになった型を指している**
+3. `one[int]` の実体化は `params`/`results` が変わらないので**同じ形**を alloc する
+   → intern がヒットして**ジェネリックな原本の TypeId が返る**
+4. 呼び出し側はまだ型引数が要ると判断し、引数 0 個から推論して失敗
+
+`TypeArena::remutate` を足し、intern 済みの型を書き換えるときは**キーを張り替える**ようにした。
+`params`/`results` に型パラメータが現れる普通のジェネリック関数は「形が変わる」ので当たらない。
+**引数も返り値も型パラメータを含まない**ジェネリック関数だけが踏む。
+
+実害は finding 1 件では済まない。**ill-typed はパッケージ単位のスイッチ**なので、
+この形を含むパッケージは analyzer が丸ごとスキップされていた。**HEAD のバイナリと
+同じハーネスで背中合わせに測った**ところ、ill-typed が
+
+| target | HEAD | 修正後 |
+|---|---:|---:|
+| helm | 2 | **1** |
+| consul | 8 | **7** |
+| grafana | 29 | **26** |
+| prometheus（regress） | 8 | 8 |
+
+（baseline は上限なのでゲートは緑のまま。prometheus は動かない ——
+つまりこのリポにはこの形が無い。）Phase 1 のゲートが数えているのはまさにこの数字で、
+**減った分だけ黙って失われていた解析が戻った**ことになる。
+
+**測り方の注意**: 最初この差を `GUFF_DEBUG_ILL_TYPED=1` の直接実行で測って
+「8 → 0」という値を得たが、**これはキャッシュのせい**だった —— 2 回目の実行は
+キャッシュに当たって型検査ごと飛ばすので ill_typed を 1 行も出さない。
+`--no-cache` を付けて測り直すと両方 8 で、上の表は compat ハーネス経由で
+（毎回クリーンなキャッシュで）取り直したもの。**ill-typed を数えるときは
+キャッシュを切ること。**
+
+#### 5. perf: 測れたのは +0.03s、それ以上は切り分けられなかった
+
+regress の `full` が最初 2.720s（限界 2.510s）で赤になったので、5 本目の手順どおり
+**HEAD のバイナリと交互に 3 往復**した:
+
+| | 1 | 2 | 3 |
+|---|---:|---:|---:|
+| HEAD | 2.400 | 2.430 | 2.470 |
+| 修正後 | 2.440 | 2.460 | 2.490 |
+
+**3/3 とも +0.03s**（+1.3%）。ノイズ帯（5 本目の実測で 0.00〜0.02s）よりわずかに上なので
+本物と見て、足した仕事を 2 つ削った ——
+nolintlint が無効なら**コメントの 2 度目の解析をしない**（prometheus の config は
+nolintlint を有効にしていない）、`remutate` は**新しいキーで intern し直さない**。
+どちらも入れた後で測り直しても **+0.03s は動かなかった**。
+
+そこから先は**この機械では切り分けられない**。型検査の変更だけのバイナリを足して
+3 分割で測ろうとしたところで裾に入り、**同じバイナリの分散（±0.1s）が
+追っている差（0.03s）を上回った**。静かなときの実測は 2.40〜2.49s で
+限界 2.510s の内側、findings は 20/20 で P=R=1.0。
+
+**「+0.03s の出どころは未特定」**として残す。次に触る人へ: 候補は
+`expand_ranges` が全ノードに `node_pos`/`node_end` を計算するようになったこと
+（対象は `nolint` を含むファイルのみ、prometheus では 32 ファイル）、
+`suppress` がキーに `String` を clone すること、`remutate` が
+ジェネリックなシグネチャ 1 本につき `InternKey` を 1 個作ること。
+**測るなら profile を取ること** —— この裾の中で A/B を重ねても答えは出ない。
+
+**結果**
+
+- golden **17 ケース**（+5）。`nolint` 23/23、`nolint-strict` 36/36、
+  `nolint-allow-unused` 15/15、`errcheck` 11/11 —— いずれも**正規化なし・allowlist なし・完全一致**。
+  `errcheck-verbose` だけ ratchet 1/1（下記）。
+- `cargo test --workspace` **3,024 件緑**（+9）。errcheck の単体テストは
+  `contains("Error return value")` から**メッセージ完全一致**に変えた。
+- isolate 115 target（`swaggo` はこのホストに `swag` が無いのでスキップ）、
+  OSS pr / nightly とも据え置き（consul の allowlist 3 件のみ）。
+
+**恒久差分 1 件（`errcheck-verbose` の ratchet 1/1）**
+
+インターフェースのメソッドで `FullName()` がレシーバを落とす
+（上流 `(pkg.emitter).Emit` / guff `pkg.Emit`）。`guff-types` が
+**インターフェースのメソッドにレシーバを繋いでいない**ためで、
+`subst.rs` が自ら「chunk-2 already deferred receiver wiring for interface methods」と書いている。
+`errcheck` の `build_exclude_set` が `(interface).Method` / `pkg.Method` という
+**別名を足して回っている**のもこれの回避策で、直せば両方消える。§7 に記録した。
+
+**次にやること**
+
+1. Phase 4 の続き。次は **`linters.exclusions.{rules,presets,generated,paths}` と
+   `issues.exclude-rules`** —— `nolint` ケースの fixture がそのまま使える
+   （既に findings が 5 linter 分ある）。その次が `severity.rules` /
+   `max-issues-per-linter` / `max-same-issues` / `uniq-by-line`。
+2. **§5 の台帳の残り 6 件**（unused の prefix、staticcheck のコード剥がし・言い回し・末尾ピリオド、
+   modernize の prefix）。#1 と同じで、**golden ケースを 1 つ作れば正体が出る**。
+   errcheck がそうだったように、`normalize.py` が畳んでいる差分は
+   「表記ゆれ」ではなく**実装の食い違い**であることがある。
+3. 型検査器: **インターフェースのメソッドにレシーバを繋ぐ**（上の恒久差分）。
+   `remutate` と同じで、直すと複数の場所の回避策が同時に消える。
+4. 5 本目からの持ち越し: gosec の DEFERRED、SA9008 の IR 検証 / SA5011 の σ、
+   govet の未実装 16 pass、guff が typecheck エラーを finding として出さない件。
+
+### 2026-08-11（7 本目）— `linters.exclusions` の 4 軸と `generated` の 4 モードを golden に載せた
+
+**やったこと**
+
+6 本目の「次にやること 1」に従い、Phase 4 の残りのうち
+**`linters.exclusions.{rules,paths,presets,generated}`** をゴールデンゲートに載せた。
+新規 8 ケース（`exclusions` / `-rules` / `-paths` / `-presets` と
+`generated` / `-lax` / `-strict` / `-disable`）。ハーネスの変更は今回も 0 行。
+
+fixture は 2 本の新規ツリー
+（`crates/guff-lint/tests/testdata/exclusionsem/`、`crates/guff-lint/tests/testdata/gensem/`）。
+exclusions 側は **baseline ケースを 1 つ置き、他の 3 つは config キーを 1 個だけ足した同じ config**
+にしてある。したがって**ゴールデン同士の差分がその設定の効果そのもの**になり、
+presets ケースの差分は `processors.LinterExclusionPresets` の列挙そのものになる。
+
+**73 findings 中 62 しか一致せず、残り 11 は全部実バグだった。**
+
+| 種別 | 件数 | 内容 |
+|------|-----:|------|
+| 過剰除外 | 1 | 除外規則の `linters:` が **analyzer 名**と別名正規化形にも一致していた |
+| 過剰除外 | 4 | `text:` / `source:` を全部 `(?i)` 付きでコンパイルしていた |
+| severity | 4 | **revive の findings が severity 空**だった（baseline ケースでの件数。revive を回す全ケースに同じ欠陥がある） |
+| recall | 1 | `linters.exclusions.generated` の既定を `lax` にしていた（上流は **strict**） |
+| precision | 1 | lax 判定が**パッケージ節より前**のコメントしか読んでいなかった |
+
+#### 1. `linters:` は linter 名を逐語で見る。analyzer 名ではない
+
+上流は `baseRule.matchLinter` = `slices.Contains(r.linters, issue.FromLinter)`。
+guff は `from_linter` と **`analyzer`** の両方を、しかも `normalize_linter_name` を
+通した形でも照合していた。`linters: [printf]` は上流では**何にも一致しない**
+（`printf` という linter は存在しない。メッセージ本文にどれだけ大きく `printf: ` と
+出ていても関係ない）のに、guff は govet の findings を消していた。
+**6 本目に `//nolint:printf` で見つけたのと同じ形の間違いが、除外規則側にも居た**
+（`doesMatch` も `issue.FromLinter` しか見ない）。
+
+#### 2. v2 の除外規則は大文字小文字を区別する
+
+上流 v2 は `parseRules(excludeRules, "", newExcludeRule)` ——
+**プレフィックス空文字**でコンパイルする。`issues.exclude-case-sensitive` は v1 のキーで、
+v2 の `issues` セクションは `max-issues-per-linter` / `max-same-issues` / `uniq-by-line` /
+`new-from-*` / `whole-files` / `fix` **だけ**しか持たない。severity 規則も同じく空プレフィックス。
+guff は serde の既定 `false` からずっと `(?i)` を足しており、
+`text: ERROR RETURN VALUE` が errcheck の findings を全部消していた。
+`(?i)` が要る唯一の規則（EXC0001）は**上流がパターン自身に書いている**。
+
+`Config::effective_severity()` を足して、v2 では `case_sensitive: true` として読むようにした
+（`effective_issues()` と同じ形）。
+
+#### 3. preset 表が v1 のままだった
+
+guff の v2 preset 表は `EXC0001`…`EXC0015` の **v1 の 15 件**で、上流 v2 の
+`LinterExclusionPresets` は **13 件**。差は EXC0002 / EXC0003（`golint` —— v2 に存在しない）と、
+EXC0011 の linter が `stylecheck` ではなく **`staticcheck`** であること。
+linter 名を逐語で比べる以上、**v1 の残骸は「何もしない」か「過剰除外」にしかならない**。
+EXC0011 が今まで効いていたのは 1 の正規化のおかげで、つまり
+**別の場所で findings を消していたのと同じ緩さに助けられていた**。表を上流と 1 件ずつ揃え、
+`InternalReference` の ID も対照用に持たせた。
+
+#### 4. revive の severity は空にならない
+
+上流 `severity(cfg, failure)` は「そのルールの実効 severity がちょうど `error` なら error、
+それ以外は **warning**」。`normalizeConfig` が `revive.severity` を `warning` で既定化し、
+自前の severity を持たない全ルールにそれを配るので、**空になる経路が無い**。
+guff は「設定されていなければ空」だった。
+
+**既存の `cases/revive` はこれを見られない** —— あのケースは `severity: warning` を
+明示しているので、空との差が出ない。設定を書かない config を golden に載せて初めて出た。
+gosec の severity（5 本目）と同じ「このティアしか比較しないフィールド」の 2 例目。
+
+#### 5. `generated` の既定は `lax` ではなく `strict`
+
+これが今回いちばん効く 1 件。`GeneratedModeLax` という定数があり、matcher は
+`mode == ""` を lax として扱う。だから processor だけ読むと lax に見える。
+しかし **`config.Loader.Load` が空値を `GeneratedModeStrict` に書き換えてから** processor に渡す:
+
+```go
+if l.cfg.Linters.Exclusions.Generated == "" {
+    l.cfg.Linters.Exclusions.Generated = GeneratedModeStrict
+}
+```
+
+書き換えられるのは `linters` 側だけで、`formatters.exclusions.generated` は空のまま
+= lax。つまり **`golangci-lint run` と `golangci-lint fmt` で「生成ファイル」の定義が違い、
+どちらも上流の仕様**。guff は両方 lax にしていたので、
+**先頭コメントに "do not edit" や "autogenerated file" が地の文で入っているだけのファイル**の
+findings を黙って捨てていた。`run` 側を strict に直した（formatter 側は lax のままが正しい）。
+
+**「既定値は挙動であり、型に書いてあるとは限らない」** —— 定数と matcher を読んで
+lax と判断するのが自然な形になっている。既定を**書かない**ケース（`cases/generated`）が
+これを捕まえた。設定を明示するケースだけ作っていたら永久に見つからない。
+
+#### 6. lax はパッケージ節の**下**のコメントも読む
+
+上流は `parser.ParseFile(…, PackageClauseOnly|ParseComments)` の
+**collect した全コメントグループ**を連結する。`PackageClauseOnly` は
+「パッケージ節で読むのをやめる」ではない: パーサは 1 トークン先まで読むので、
+`package p` の**直下のグループ**も（空行で分かれた複数グループでも）入る。
+止まるのは節の後の最初の非コメントトークン（`import` など）。
+
+推測せず go/parser に実際に食わせて確かめた（`getComments` をそのまま写した probe）。
+guff の `leading_comment_doc` はパッケージ節で break していたので、
+`generated-lax` の `after/after.go` を上流だけが生成ファイルと見なす差分になった。
+ついでに `ast.CommentGroup.Text` が落とす**ディレクティブ**（`//name:value`、`//line ` 等）も
+落とすようにした —— `// go:...` のように**空白があれば地の文**、という非対称も含めて写した。
+
+**恒久差分でも ratchet でもなく、8 ケースすべて 0/0 で緑。**
+
+**fixture が 1 件だけ埋められない**: EXC0010（gosec **G304**）。
+guff は G304 を実装していない（`gosec.rs` の DEFERRED）ので、fixture を置くと
+比較ではなく永久 missing になる。**ルールを実装するときに fixture も足すこと。**
+
+**ゲートに載せられない差分（記録のみ）**
+
+上流は**条件が 2 個未満の除外規則を設定エラーとして拒否する**
+（`BaseRule.Validate(excludeRuleMinConditionsCount=2)`。severity 規則は 1 個）。
+`- linters: [errcheck]` だけの規則は「広い規則」ではなく**config エラー**で、
+golangci-lint はそもそも起動しない。guff はこれを受け入れて errcheck を全部消す。
+`path` と `path-except` の同時指定も上流はエラー。preset 名の検証も同様
+（guff は `stdErrorHandling` のような camelCase も受ける）。
+**golden tier は「上流が起動を拒む」を表現できない**ので、実装するなら
+`config.rs` に validate を足して `ConfigError` を返す形になる。次にやること 2。
+
+**結果**
+
+- golden **25 ケース**（+8）。新規 8 ケースはすべて**正規化なし・allowlist なし・ratchet なし**で完全一致。
+  既存 17 ケースは据え置き（staticcheck / revive の ratchet も動かず）。
+- `cargo test --workspace` **3,025 件緑**。`config_test` の
+  「v2 の generated 既定は lax」というアサーションは**テストの方が間違っていた**ので直した。
+- isolate 115 target OK（`swaggo` はこのホストに `swag` が無く実行不能。6 本目と同じ）。
+- OSS pr / nightly とも据え置き（consul の allowlist 3 件のみ、他は P=R=100%）。
+  **`generated` の既定変更は OSS の全ターゲット（gin / caddy / helm / consul / grafana /
+  containerd）の findings を 1 件も動かさなかった** —— 実 config は生成ファイルを
+  `paths` で先に落としているか、lax と strict の差になるファイルを持っていない。
+- regress full: findings 20/20 P=R=1.0 で不変。**wall 2.430s（限界 2.510s）で PASS**。
+
+**perf の測り方（今回ハマった所）**
+
+最初の 3 回は 2.800 / 2.740 / 2.740s で赤だった。原因は**ホストの混雑**で、
+コードではない。切り分けは `--skip-golangci` で guff だけを 3 連続測る形が速くて確実だった
+（golangci-lint のパスは guff の計測の**後**に走るので、このフラグは計測前の条件を何も変えない）:
+
+| | 1 | 2 | 3 |
+|---|---:|---:|---:|
+| `--skip-golangci` | 2.480 | 2.440 | 2.370 |
+
+**3 回とも限界の内側**で、しかも回を追うごとに速くなる（機械が冷えていく）形。
+その後にフル profile を回して 2.430s / PASS。
+
+なお 5 本目・6 本目が使っていた「HEAD のバイナリと交互に測る」は今回**やっていない**。
+prometheus の config が踏むのは
+(a) 除外規則の linter 照合（**正規化を 1 段減らしたので仕事は減る**）、
+(b) `generated` の既定 strict 化（lax より**軽い**走査）、
+(c) revive の severity（アロケーション数は変わらない）で、
+**遅くなる機序が無い**うえ、上の 3 連続が限界の内側に収まったため。
+このホストは常時 load 1.0 前後の何かが走っている状態が続くことがあるので、
+**赤が出たらまず `--skip-golangci` を 3 回**、それでも赤なら A/B に進むこと。
+
+**次にやること**
+
+1. Phase 4 の続き。残りは `issues.uniq-by-line` / `max-issues-per-linter` /
+   `max-same-issues` / `severity.rules` と、`run.build-tags` / `run.tests` / `run.go`。
+   **`severity.rules` は `exclusions` の fixture がそのまま使える**（6 linter 分の findings が既にある）。
+   `max-*` は「どの順で切るか」がそのまま出るので、`apply` の並べ替え（linter 名順）を検証できる。
+2. **config の validate**（上記「ゲートに載せられない差分」）。上流が拒む config を guff も拒む。
+   実装先は `config.rs`（`ConfigError` を返す）。**着手前の調査は済んでいる**:
+   `corpus/cache/*/.golangci.y*ml` と `tests/testdata/config_corpus/*.yml` の
+   **68 config を走査して、条件 1 個の除外規則は 0 件**だった（上流がそれらを
+   実行できている以上そうなるはずで、実測でも裏が取れた）。したがってこの validate を
+   足しても OSS / regress のゲートは動かない。
+3. **gosec G304 の実装**（`readfile.go` の移植）。`filepath.Clean` / `Join` の追跡と
+   `TryResolve` が要る。実装したら `exclusionsem/presets` に fixture を戻し、
+   EXC0010 が preset ケースで比較されるようにする。
+4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
+   gosec の他の DEFERRED、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -3298,7 +3667,7 @@ staging ディレクトリが hidden でないことを直接見るテストを�
 
 | # | 対象 | 正規化が消しているもの | 状態 |
 |---|------|------------------------|------|
-| 1 | errcheck | callee 名を含む形 (`Error return value of \`f\` is not checked`) と含まない形 | 未調査 |
+| 1 | errcheck | callee 名を含む形 (`Error return value of \`f\` is not checked`) と含まない形 | **解消 2026-08-11（6 本目）**。表記ゆれではなく実装の食い違いだった: guff は常に `FullName()` を出しており、上流は**セレクタでない呼び出しに名前を付けない**／付けるときも**書かれたとおりの綴り**を使う。`cases/errcheck` が正規化なしで比較する |
 | 2 | unused | メッセージ先頭の prefix / メソッド修飾 | 未調査 |
 | 3 | staticcheck | `SA1234: ` チェックコードを**両側から**剥がす → コード取り違えが不可視 | 未調査 |
 | 4 | staticcheck | QF1011「could omit type」/ ST1023「should omit type」の言い回し | 未調査 |
@@ -3569,6 +3938,26 @@ i = n          // 上流は撃たない（n の referrer に MakeInterface が�
 解くには guff-ssa 側で `MakeInterface { x: Value }` に変えて referrer を
 張る必要があり、SSA の構造変更なので単独セッションの範囲に収まらない。
 現状の差分は golden の extra 1 件（`sa4006/ok.go`）。
+
+### インターフェースのメソッドにレシーバが繋がっていない `[記録 2026-08-11（6 本目）]`
+
+`types.Func.FullName()` はメソッドを `(pkg.T).M` と綴る。guff の
+`code::type_func_name` は `signature_recv` が `None` を返すと
+`pkg.M` に落ちるが、**インターフェースのメソッドでは常に `None` になる** ——
+`guff-types` がインターフェースのメソッドシグネチャにレシーバを繋いでいないからで、
+`crates/guff-types/src/subst.rs` 自身が
+「chunk-2 already deferred receiver wiring for interface methods」と書いている。
+
+見えるのは 2 箇所:
+
+| 場所 | 症状 |
+|---|---|
+| `errcheck.verbose: true` | 上流 `(pkg.emitter).Emit` / guff `pkg.Emit`。`cases/errcheck-verbose` の ratchet 1/1 |
+| `errcheck` の除外リスト | `build_exclude_set` が `(pkg.T).M` を見るたびに `(interface).M` と `pkg.M` の**別名を足して回っている**。これは回避策であって仕様ではない |
+
+**これは設計判断ではなく欠落**なので直すべき側に置く。直せば ratchet も別名の追加も
+同時に消える。ただし receiver を足すと `subst` / `unify` / メソッド集合の比較に
+波及するので、単独セッションの頭でやること。
 
 ### `mod-year` / `mod-year-range`（goheader）
 

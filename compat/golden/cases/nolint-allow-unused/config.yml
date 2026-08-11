@@ -1,0 +1,30 @@
+# Golden case: `nolintlint.allow-unused: true` (COMPAT-HARDENING Phase 4).
+#
+# The one setting that removes findings rather than adding them. Against the
+# `nolint` case's golden it should drop every "is unused" line and keep the
+# rest — the directive-shape findings are not optional: `NewLinter` ORs
+# `NeedsMachineOnly` into `needs` whatever the settings say.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - nolintlint
+  settings:
+    govet:
+      enable:
+        - printf
+    nolintlint:
+      allow-unused: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

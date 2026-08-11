@@ -1,0 +1,19 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4: this case is about the *runner*, not about any one
+# check. Every file produces the same handful of findings (errcheck,
+# ineffassign, misspell, govet/printf); what the case measures is which of them
+# a `//nolint` directive removes, and what nolintlint says about the directive
+# itself.
+#
+# One package per behaviour, because two of the behaviours cover a whole file.
+
+inline/inline.go        crates/guff-lint/tests/testdata/nolintsem/inline/inline.go
+preceding/preceding.go  crates/guff-lint/tests/testdata/nolintsem/preceding/preceding.go
+wholefile/wholefile.go  crates/guff-lint/tests/testdata/nolintsem/wholefile/wholefile.go
+gap/gap.go              crates/guff-lint/tests/testdata/nolintsem/gap/gap.go
+group/group.go          crates/guff-lint/tests/testdata/nolintsem/group/group.go
+block/block.go          crates/guff-lint/tests/testdata/nolintsem/block/block.go
+analyzer/analyzer.go    crates/guff-lint/tests/testdata/nolintsem/analyzer/analyzer.go
+unused/unused.go        crates/guff-lint/tests/testdata/nolintsem/unused/unused.go

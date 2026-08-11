@@ -101,7 +101,10 @@ fn nolintlint_reports_unused_directive() {
         },
         &SeverityConfig::default(),
     );
-    filter.report_unused_nolint = true;
+    filter.nolintlint = Some(guff_lint::NolintlintStyle {
+        report_unused: true,
+        ..guff_lint::NolintlintStyle::default()
+    });
 
     let result = LintResult {
         packages: vec![pkg.clone()],

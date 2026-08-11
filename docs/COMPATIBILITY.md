@@ -103,7 +103,7 @@
 | nlreturn | ✅ | |
 | noctx | ✅ | |
 | noinlineerr | ✅ | |
-| nolintlint | ✅ | `--enable nolintlint`。書式/説明必須（NeedsMachineOnly / NeedsExplanation）は DEFERRED |
+| nolintlint | ✅ | `--enable nolintlint`。5 種の診断すべて（先頭空白 / 不正形式 / `require-specific` / `require-explanation` + `allow-no-explanation` / unused）|
 | nonamedreturns | ✅ | |
 | nosprintfhostport | ✅ | |
 | paralleltest | ✅ | |
@@ -178,10 +178,10 @@
 | `linters.enable` / `disable` | ✅ | 別名正規化（gosimple→staticcheck ほか） |
 | `linters.settings.*` | ✅ | 各 analyzer に配線（キー詳細は §3.3）。一部キーは DEFERRED |
 | `linters.exclusions.paths` / `paths-except` | ✅ | |
-| `linters.exclusions.rules` | ✅ | linters / path / path-except / text / source |
-| `linters.exclusions.presets` | ✅ | comments / stdErrorHandling / commonFalsePositives / legacy |
+| `linters.exclusions.rules` | ✅ | linters / path / path-except / text / source。`linters` は linter 名を逐語で比較（analyzer 名では一致しない）、`text` / `source` は大文字小文字を区別。条件 1 個の規則を上流は設定エラーにするが guff は受け入れる |
+| `linters.exclusions.presets` | ✅ | comments / std-error-handling / common-false-positives / legacy（上流の 13 規則。camelCase 別名も受ける） |
 | `linters.exclusions.warn-unused` | ❌ | 未実効（DEFERRED） |
-| `linters.exclusions.generated` | ✅ | `lax`（v2 既定）/ `strict` / `disable`。先頭コメントの生成マーカーで issue を除外 |
+| `linters.exclusions.generated` | ✅ | `strict`（**`run` の既定**。`config.Loader.Load` が空値を書き換える）/ `lax`（`formatters.exclusions.generated` の既定）/ `disable`。`lax` はパッケージ節の直下のコメントまで見る |
 | `formatters.enable` / `settings` / `exclusions` | ✅ | §1.1 |
 | `issues.exclude` / `exclude-rules` | ✅ | |
 | `issues.exclude-dirs` / `exclude-files` | ✅ | |

@@ -374,3 +374,41 @@ fn nested_subst_through_pointer_and_slice() {
 // touch them directly.
 #[allow(dead_code)]
 fn _silence_unused(_: ObjectData, _: TypeData) {}
+
+#[test]
+fn instantiating_a_signature_that_substitution_leaves_alone_drops_its_tparams() {
+    // func F[T any]() error — neither the parameters nor the results mention T,
+    // so `F[int]` is structurally identical to `F` itself. The arena
+    // hash-conses signatures, and the type parameters are set *after* the
+    // signature is interned, so the instance used to hit the stale entry and
+    // come back as the generic original: every call to `F[int]()` then tried to
+    // infer T from zero arguments and reported "cannot infer type arguments in
+    // call", which makes the whole package ill-typed.
+    let mut t = init_universe().0;
+    let mut o = ObjectArena::new();
+    let mut ctxt = Context::new();
+    let (_, table) = init_universe();
+    let int = table[BasicKind::Int as usize];
+
+    // Interning the result tuple's shape first is what the checker does when it
+    // reads any other `func() error` in the package.
+    let err_like = table[BasicKind::String as usize];
+    let result = new_var(&mut o, "", err_like);
+    let results = guff_types::new_tuple(&mut t, &[result]);
+    let sig = new_signature_type(&mut t, None, &[], &[], None, results, false);
+
+    let tn_t = new_type_name(&mut o, "T", None);
+    let tp = new_type_param(&mut t, tn_t, None);
+    let tlist = bind_tparams(&mut t, vec![tp]).unwrap();
+    signature_set_type_params(&mut t, sig, tlist);
+
+    let inst = instantiate(&mut t, &mut o, &mut ctxt, sig, vec![int]);
+    assert_ne!(inst, sig, "the instance must not be the generic original");
+    match t.get(inst) {
+        TypeData::Signature(s) => assert!(
+            s.type_params().is_none(),
+            "an instantiated signature has no type parameters"
+        ),
+        other => panic!("expected Signature, got {other:?}"),
+    }
+}

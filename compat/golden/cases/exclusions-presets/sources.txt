@@ -1,0 +1,7 @@
+# Same file list as `cases/exclusions` — read the two goldens as a pair.
+
+cmd/cmd.go              crates/guff-lint/tests/testdata/exclusionsem/cmd/cmd.go
+internal/tool/tool.go   crates/guff-lint/tests/testdata/exclusionsem/internal/tool/tool.go
+source/source.go        crates/guff-lint/tests/testdata/exclusionsem/source/source.go
+presets/presets.go      crates/guff-lint/tests/testdata/exclusionsem/presets/presets.go
+presetdoc/presetdoc.go  crates/guff-lint/tests/testdata/exclusionsem/presetdoc/presetdoc.go

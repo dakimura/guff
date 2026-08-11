@@ -172,3 +172,45 @@ fn errcheck_disable_default_exclusions_flags_fmt_println() {
         "disable-default-exclusions must flag fmt.Println: {messages:?}"
     );
 }
+
+#[test]
+fn errcheck_flags_calls_to_instantiated_generics() {
+    // `one[int]()` is an IndexExpr callee and `two[int, string](1)` an
+    // IndexListExpr one. kisielk's `baseCallExpr` unwraps both, so upstream
+    // reports them like any other call.
+    let dir = support::testdata("generic");
+    let pkg = support::typecheck_pkg("example.com/errcheck/generic", &dir.join("bad.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+}
+
+#[test]
+fn errcheck_names_the_callee_the_way_golangci_does() {
+    // Exact messages, not `contains("Error return value")`: the name between
+    // the backticks is `cmp.Or(SelectorName, FuncName)`, and no gate compared
+    // it before compat/golden/cases/errcheck (COMPAT-HARDENING §5 item 1).
+    let dir = support::testdata("names");
+    let pkg = support::typecheck_pkg("example.com/errcheck/names", &dir.join("bad.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+    let mut messages = support::run_analyzer(analyzer(), &pkg);
+    messages.sort();
+    assert_eq!(
+        messages,
+        vec![
+            "Error return value is not checked".to_string(),
+            "Error return value is not checked".to_string(),
+            "Error return value is not checked".to_string(),
+            // The receiver is spelled without an import path here because the
+            // test harness type-checks the file as a package with no path;
+            // compat/golden/cases/errcheck has the qualified form.
+            "Error return value of `(*writer).Flush` is not checked".to_string(),
+            "Error return value of `(writer).Emit` is not checked".to_string(),
+            "Error return value of `e.Emit` is not checked".to_string(),
+            "Error return value of `pkgLevel.Emit` is not checked".to_string(),
+            "Error return value of `w.Emit` is not checked".to_string(),
+            "Error return value of `w.inner.Flush` is not checked".to_string(),
+        ],
+        "{messages:?}"
+    );
+}
