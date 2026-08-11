@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh issues-limits
+# Produced by running golangci-lint on compat/golden/cases/issues-limits/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+limits/limits.go:34:7:errcheck::Error return value is not checked
+limits/limits.go:35:7:errcheck::Error return value is not checked
+limits/limits.go:36:7:errcheck::Error return value is not checked
+limits/limits.go:37:9:errcheck::Error return value of `f.Close` is not checked
+limits/limits.go:38:9:errcheck::Error return value of `f.Close` is not checked
+limits/limits.go:39:14:govet::printf: fmt.Printf format %d has arg "x" of wrong type string
+limits/limits.go:40:14:govet::printf: fmt.Printf format %d has arg "x" of wrong type string
+limits/limits.go:41:14:govet::printf: fmt.Printf format %d has arg "x" of wrong type string

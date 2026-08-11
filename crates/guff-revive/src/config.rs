@@ -119,6 +119,17 @@ pub const EXTENDED_RULES: &[&str] = &[
     "forbidden-call-in-wg-go",
 ];
 
+/// The configured Go version (`run.go`), without cloning the whole rule list.
+///
+/// Version-gated rules ask this on every run, and [`effective_settings`] copies
+/// every rule's arguments to answer it.
+pub fn configured_go_version(pass: &Pass<'_>) -> Option<String> {
+    if let Some(s) = pass.settings::<Settings>("revive") {
+        return s.go.clone();
+    }
+    THREAD_SETTINGS.with(|slot| slot.borrow().as_ref().and_then(|s| s.go.clone()))
+}
+
 pub fn effective_settings(pass: &Pass<'_>) -> Settings {
     if let Some(s) = pass.settings::<Settings>("revive") {
         return s.clone();
@@ -385,6 +396,7 @@ pub fn extended_test_settings() -> Settings {
         ignore_generated_header: false,
         enable_default_rules: false,
         enable_all_rules: false,
+        go: None,
     }
 }
 

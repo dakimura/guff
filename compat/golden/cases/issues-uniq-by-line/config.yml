@@ -1,0 +1,56 @@
+# Golden case: `issues.uniq-by-line` (COMPAT-HARDENING Phase 4).
+#
+# Identical to `cases/exclusions` except for one key, so the diff between the
+# two goldens is the setting's whole effect.
+#
+# `UniqByLine` keeps at most one finding per (file, line) — not per linter and
+# not per column — and the survivor is *whichever arrives first*. Nothing sorts
+# the slice before it: `Runner.Run` appends each linter's issues in the order
+# `GetOptimizedLinters` hands the linters over, which is by name. So this
+# golden pins guff's inter-linter ordering as a side effect of measuring the
+# setting: on `cmd.go:20` errcheck beats gosec, on `presets.go:40` gosec beats
+# govet, and on both package clauses revive beats staticcheck — alphabetical,
+# every time.
+#
+# The setting is worth a case of its own because it is the one issues-level
+# knob that is ON by default: a user who never writes an `issues:` section is
+# already running it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - revive
+    - staticcheck
+  settings:
+    gosec:
+      includes:
+        - G103
+        - G104
+        - G204
+        - G301
+        - G304
+    govet:
+      enable:
+        - printf
+        - unsafeptr
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+    staticcheck:
+      checks:
+        - ST1000
+        - SA4011
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+
+run:
+  timeout: 5m

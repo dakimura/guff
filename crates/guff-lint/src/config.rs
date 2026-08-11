@@ -322,8 +322,14 @@ impl RunConfig {
 /// `severity` section.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SeverityConfig {
+    /// v1 spelling. v2 renamed the key to `default` (see [`Self::default_v2`]),
+    /// and the two must stay apart: reading the v1 name out of a v2 config would
+    /// apply a default golangci-lint rejects the file for.
     #[serde(default, rename = "default-severity")]
     pub default_severity: Option<String>,
+    /// v2 spelling of the same key (`severity.default`).
+    #[serde(default, rename = "default", skip_serializing)]
+    pub default_v2: Option<String>,
     #[serde(default, rename = "case-sensitive")]
     pub case_sensitive: bool,
     #[serde(default)]
@@ -332,7 +338,10 @@ pub struct SeverityConfig {
 
 impl SeverityConfig {
     fn is_default(&self) -> bool {
-        self.default_severity.is_none() && !self.case_sensitive && self.rules.is_empty()
+        self.default_severity.is_none()
+            && self.default_v2.is_none()
+            && !self.case_sensitive
+            && self.rules.is_empty()
     }
 }
 
@@ -899,11 +908,17 @@ impl ConfigFile {
     /// `{default, rules}` and nothing else, and its rules are compiled with an
     /// empty regex prefix, so the v1-only `case-sensitive` key must read as
     /// true rather than as serde's default false.
+    ///
+    /// The default severity is spelled `default-severity` in v1 and `default`
+    /// in v2, and only the version's own spelling counts — a v2 config that
+    /// says `default-severity` is one golangci-lint refuses to load, not one
+    /// with a default.
     pub fn effective_severity(&self) -> SeverityConfig {
         match self {
             Self::V1(v1) => v1.severity.clone(),
             Self::V2(v2) => SeverityConfig {
                 case_sensitive: true,
+                default_severity: v2.severity.default_v2.clone(),
                 ..v2.severity.clone()
             },
         }
@@ -1504,6 +1519,30 @@ linters:
         let names = sel.resolve_names();
         assert!(!names.contains(&"unused".to_string()));
         assert!(names.contains(&"staticcheck".to_string()));
+    }
+
+    #[test]
+    fn v2_severity_default_is_spelled_default_not_default_severity() {
+        // v1: `severity.default-severity`. v2 renamed it to `severity.default`,
+        // and reading only the v1 name left every v2 config's default silently
+        // unapplied — the findings kept whatever grade the linter gave them.
+        let v2 = parse_config_str(
+            "version: \"2\"\nseverity:\n  default: error\n  rules:\n    - severity: info\n      linters: [errcheck]\n",
+        )
+        .unwrap();
+        let sev = v2.effective_severity();
+        assert_eq!(sev.default_severity.as_deref(), Some("error"));
+        assert_eq!(sev.rules.len(), 1);
+        // The v1 spelling is not a v2 key: golangci-lint refuses to load the
+        // file rather than honouring it.
+        let stray = parse_config_str("version: \"2\"\nseverity:\n  default-severity: error\n").unwrap();
+        assert_eq!(stray.effective_severity().default_severity, None);
+
+        let v1 = parse_config_str("severity:\n  default-severity: warning\n").unwrap();
+        assert_eq!(
+            v1.effective_severity().default_severity.as_deref(),
+            Some("warning")
+        );
     }
 
     #[test]

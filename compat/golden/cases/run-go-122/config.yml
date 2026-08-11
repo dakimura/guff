@@ -1,0 +1,39 @@
+# Golden case: `run.go` above the module's own version
+# (COMPAT-HARDENING Phase 4).
+#
+# The module is still `go 1.21` and the toolchain still compiles it as 1.21;
+# only the version the linters are configured with moves. That is enough to
+# remove findings, because the loader pushes `run.go` into the linters
+# themselves — `Settings.Govet.Go` (which decides whether `loopclosure` is even
+# in the analyzer set), `Settings.Revive.Go` (which `range-val-in-closure` and
+# `range-val-address` read through `IsAtLeastGoVersion`), `Settings.Gocritic.Go`,
+# gofumpt's `-lang` and `GOSECGOVERSION`.
+#
+# So `run.go` is not a claim about the source: it is a claim about which checks
+# apply to it, and the two can disagree.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - revive
+  settings:
+    govet:
+      enable:
+        - loopclosure
+    revive:
+      severity: warning
+      rules:
+        - name: range-val-in-closure
+        - name: range-val-address
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  go: "1.22"

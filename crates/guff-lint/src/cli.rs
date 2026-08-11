@@ -608,7 +608,7 @@ fn load_run_config(
 
     let selection = base.with_cli_overrides(cli_default, enable, disable);
 
-    let (issues, severity, run, output, linter_settings, settings_fingerprint) = match &file {
+    let (issues, severity, run, output, mut linter_settings, settings_fingerprint) = match &file {
         Some(c) => (
             c.effective_issues(),
             c.effective_severity(),
@@ -659,6 +659,16 @@ fn load_run_config(
 
     let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
     let go_version = run.go.clone();
+
+    // golangci `Loader.handleGoVersion`: `run.go` is a linter setting, not a
+    // source property. It also has to reach the cache key — two runs of the
+    // same tree that differ only in `run.go` are two different analyses, and
+    // the raw `linters.settings` fingerprint cannot see the difference.
+    linter_settings.apply_go_version(go_version.as_deref());
+    let settings_fingerprint = match go_version.as_deref() {
+        Some(v) if !v.trim().is_empty() => format!("{settings_fingerprint}\nrun.go={v}"),
+        _ => settings_fingerprint,
+    };
 
     let mut path_mode = crate::PathMode::Rel;
     if let Some(raw) = output.path_mode.as_deref() {

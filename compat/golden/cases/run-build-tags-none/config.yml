@@ -1,0 +1,24 @@
+# Golden case: `run.build-tags` unset (COMPAT-HARDENING Phase 4).
+#
+# The baseline for `run-build-tags`. tagged.go carries `//go:build custom`, so
+# with no tags configured it is not part of the package and only plain.go's
+# finding is reported.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

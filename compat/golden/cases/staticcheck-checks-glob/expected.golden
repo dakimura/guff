@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-checks-glob
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-checks-glob/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+checks/checks.go:13:2:staticcheck::S1008: should use 'return b == true' instead of 'if b == true { return true }; return false'
+checks/checks.go:13:5:staticcheck::S1002: should omit comparison to bool constant, can be simplified to b
+checks/checks.go:27:2:staticcheck::S1008: should use 'return 1 == x' instead of 'if 1 == x { return true }; return false'

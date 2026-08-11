@@ -1,0 +1,14 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 4. Same file list as the `exclusions` cases: the
+# `severity` section is measured against the same finding set, which is chosen
+# so that the three severity states are all present before any rule runs —
+# gosec grades its findings (`low` / `medium`), revive grades all of its
+# (`warning`), and the other four linters leave the field empty.
+
+cmd/cmd.go              crates/guff-lint/tests/testdata/exclusionsem/cmd/cmd.go
+internal/tool/tool.go   crates/guff-lint/tests/testdata/exclusionsem/internal/tool/tool.go
+source/source.go        crates/guff-lint/tests/testdata/exclusionsem/source/source.go
+presets/presets.go      crates/guff-lint/tests/testdata/exclusionsem/presets/presets.go
+presetdoc/presetdoc.go  crates/guff-lint/tests/testdata/exclusionsem/presetdoc/presetdoc.go

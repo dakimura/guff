@@ -77,20 +77,36 @@ the target platform, and then no fixture will ever wake it:
 | `staticcheck-go114` | `go 1.14` in go.mod | SA3000 returns early at go1.15+. A `//go:build go1.14` line does **not** help: once the module is 1.21+, `code.StdlibVersion` only honours a file tag that *raises* the version. |
 | `revive-go125` | `go 1.25` in go.mod | `forbidden-call-in-wg-go` calls `file.Pkg.IsAtLeastGoVersion(Go125)` — the *package's* version, which a file tag cannot raise either. |
 | `staticcheck-386` | `GOOS=linux GOARCH=386` | SA1027 returns early unless the word size is 4. `GOARCH` alone is not enough — `darwin/386` is not a valid pair and golangci-lint answers "no go files to analyze". |
+| `run-go` / `run-go-122` | `go 1.21` in go.mod | The version-gated checks fire *below* a version, so at the current one `run.go` would have nothing to take away. These two then differ only in `config.yml`, which is what isolates the setting from the module. |
 
 Keep these cases small. Bumping an existing case's `go.mod` instead would move
 every other version-gated check in that golden at the same time.
 
 ### One fixture, several configs (Phase 4)
 
-Thirteen cases are not about a check at all: they are about what a *setting*
-does. `nolint`, `nolint-strict` and `nolint-allow-unused` share one
-`sources.txt`; `errcheck` / `errcheck-verbose` share another; `exclusions`,
-`exclusions-rules`, `exclusions-paths` and `exclusions-presets` a third; and
-`generated`, `generated-lax`, `generated-strict` and `generated-disable` a
-fourth. Nothing in the harness knows about this — a case owns its `config.yml`
+Thirty-one cases are not about a check at all: they are about what a *setting*
+does. Each group shares one `sources.txt`, and only `config.yml` differs:
+
+| Group | Cases | Setting |
+|-------|-------|---------|
+| nolint | `nolint`, `nolint-strict`, `nolint-allow-unused` | `//nolint` forms, nolintlint |
+| errcheck | `errcheck`, `errcheck-verbose` | `errcheck.verbose` |
+| exclusions | `exclusions`, `-rules`, `-paths`, `-presets` | `linters.exclusions.*` |
+| generated | `generated`, `-lax`, `-strict`, `-disable` | `linters.exclusions.generated` |
+| issues (limits) | `issues-limits`, `issues-max-per-linter`, `issues-max-same`, `issues-max-both` | `issues.max-issues-per-linter` / `max-same-issues` |
+| issues (uniq) | `issues-uniq-by-line` (baseline: `exclusions`) | `issues.uniq-by-line` |
+| severity | `severity-default`, `severity-rules`, `severity-linter` (baseline: `exclusions`) | `severity.default` / `severity.rules` |
+| run | `run-tests`/`-off`, `run-build-tags`/`-none`, `run-go`/`-122` | `run.tests` / `run.build-tags` / `run.go` |
+| staticcheck.checks | `staticcheck-checks-default`, `-all`, `-glob`, `-not-s` | `linters.settings.staticcheck.checks` |
+
+Nothing in the harness knows about any of this — a case owns its `config.yml`
 and points at whatever fixtures it wants, so the product of "one fixture × N
-configs" needed no new machinery.
+configs" needed no new machinery. The one thing the harness had to give up was
+forcing `--max-issues-per-linter=0 --max-same-issues=0` onto golangci-lint: a
+CLI flag beats the case's config, so the limits could not be measured while it
+did. Every case now states both keys itself (`run.sh` refuses a case that does
+not), which is also what stops a golden being quietly truncated by the 50 / 3
+defaults.
 
 Read them as a group: the diff between two of these goldens **is** the
 setting's effect, stated in golangci-lint's own output. `allow-unused: true`
@@ -159,7 +175,10 @@ nuisance.
 ## Adding a case
 
 1. `mkdir compat/golden/cases/<name>` with `go.mod`, `config.yml` and
-   `sources.txt`.
+   `sources.txt`. The config must set `issues.max-issues-per-linter` and
+   `issues.max-same-issues` — `0` unless the case is *about* them; `run.sh`
+   refuses the case otherwise, because both tools default them to 50 / 3 and a
+   golden truncated by a default silently stops comparing.
 2. `./compat/golden/regen.sh <name>` — read the generated golden. If it is
    empty or tiny, the fixture is not reaching the checks you meant to cover.
 3. `./compat/golden/run.sh --case <name>` and fix guff until it is exact.
@@ -409,3 +428,96 @@ The fixtures cover twelve of the thirteen preset rules. The thirteenth, EXC0010
 (`gosec G304`), has no fixture because guff does not implement G304 yet — a
 fixture for it would be a permanent `missing` rather than a comparison. Add the
 fixture with the rule.
+
+
+## What the issues / severity / run cases found
+
+The fourteen cases for `issues.*`, `severity.*` and `run.*` finish the runner
+side of Phase 4. 119 findings across them, 85 matching on the first run. The 34
+that did not were three bugs, each of a kind this tier is built to find — one in
+the *order* of a pipeline, one in a *key name*, one in a value that never
+reached the linters:
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Severity | 33 | `severity.default` did nothing at all. The key is `default-severity` in v1 and `default` in v2, guff read only the v1 name, and serde drops what it does not know — so every v2 config's severity section was a silent no-op. All 24 findings in `severity-default` kept their linter's own grade, and 9 more in `severity-rules`, where the rules themselves matched correctly and only the default never landed. |
+| Precision | 3 | `run.go` reached gofumpt's `-lang` and nothing else. Every other version question was answered from the module's go directive, so `run.go: "1.22"` on a `go 1.21` module still reported `govet/loopclosure`, `revive/range-val-in-closure` and `revive/range-val-address`, all three of which upstream turns off. |
+| Recall | 1 | The two `issues.max-*` limits ran in the wrong order. Upstream is `MaxSameIssues` **then** `MaxFromLinter`, so the per-linter budget is spent on what survived the per-text cut. guff cut per linter first, which filled errcheck's budget of 3 with three copies of one text and then dropped two of them — losing the findings that would have come next. Only a case that sets *both* limits can see it: either one alone gives the same answer whichever way round they are. |
+
+Three are worth generalizing:
+
+* **A default is not applied to the ungraded — it is applied to everything.**
+  `Severity.transform` ends with an unconditional `issue.Severity = default`,
+  so `severity.default: error` overwrites gosec's `low` / `medium` and revive's
+  `warning` too. `@linter` is the sentinel that opts out, and it opts out by
+  *returning early*, not by writing a value. `severity-linter` exists to pin
+  the resulting no-op: an implementation that treats `@linter` as an ordinary
+  string writes it into every finding.
+* **A setting that only shows up in combination needs a case in combination.**
+  `issues-max-per-linter` and `issues-max-same` both passed on the first run.
+  The order bug lived entirely in `issues-max-both`. The same is true of the
+  fixture: the findings have to be *ordered* so the two limits disagree about
+  what to drop, or the combined case proves nothing.
+* **Ordering is only pinnable where upstream's own order is reproducible.**
+  With `max-issues-per-linter: 2` over the exclusions fixture, three
+  consecutive golangci-lint runs kept three different revive findings — revive
+  lints a package's files concurrently, so which of its findings arrive first
+  is a race. The limits fixture is therefore one file of one package, where the
+  emission order is the AST walk. `uniq-by-line` needs no such care in the
+  *other* direction: which linter wins a shared line is stable, because
+  `Runner.Run` appends linter by linter in name order, and the
+  `issues-uniq-by-line` golden pins exactly that (errcheck beats gosec, gosec
+  beats govet, revive beats staticcheck).
+
+`run.go` is the one of the three `run.*` keys that is not about which files are
+read. It is a value the loader pushes into the linters themselves —
+`Settings.Govet.Go` (which decides whether `loopclosure` is in the analyzer set
+at all), `Settings.Revive.Go`, `Settings.Gocritic.Go`, gofumpt's `-lang` and
+`GOSECGOVERSION` — so a `go 1.21` module linted with `run.go: "1.22"` loses
+three findings while the toolchain still compiles it as 1.21. guff had wired
+`run.go` to gofumpt only, and every other version question was answered from
+the module's go directive.
+
+`output.path-mode` is **not** gated here and cannot be: `run.sh` passes
+`--path-mode abs` so that `golden.py` can key on module-relative paths, which
+is the same normalization the setting changes. Measured by hand instead, on the
+`exclusions` work dir:
+
+| `output.path-mode` | golangci-lint | guff |
+|--------------------|---------------|------|
+| unset | path relative to the **config file's** directory (`../../../../…`) | relative to the cwd |
+| `abs` | absolute | absolute (same) |
+| `rel` | **config error** — `validatePathMode` accepts `""` and `abs` only | accepted, treated as relative |
+
+The unset row only diverges when the config is not in the directory being
+linted, which is exactly what this harness does and not what a user normally
+does. Both rows are recorded in COMPAT-HARDENING rather than fixed here.
+
+
+## What the `staticcheck.checks` cases found
+
+The first per-linter settings group after errcheck's `verbose`. `checks` is the
+setting real configs write most often — 7 of the 16 configs in `corpus/` have
+one — and its grammar is honnef's, copied into golangci-lint verbatim
+(`filterAnalyzerNames`). Four cases over one fixture with a finding in each of
+staticcheck's four categories: 23 findings, 15 matching, and the 8 that did not
+were three bugs in one 30-line function.
+
+| Class | Count | Bug |
+|-------|------:|-----|
+| Recall | 1 | SA9003 was in guff's default-disabled list. The default list is `all` minus **six ST checks** and nothing else, so "empty branch" is on for every config that does not write `checks` — which is most of them. No existing case could see it: they all spell out `checks: [all]`. |
+| Recall | 3 | `checks: ["S*"]` enabled **nothing**, and guff exited "no linters enabled" — the whole case, not a finding. A positive glob was read as a literal check name, and a list without `all` starts from empty, so nothing was left to run. |
+| Recall | 4 | `-S*` was a prefix match, so it removed SA and ST as well as S. Upstream splits a name at its first digit and compares the *category*: `S*` is S and not SA. A glob that already contains a digit (`S1*`) **is** a prefix match — the two spellings mean different things. |
+
+Two are worth generalizing:
+
+* **A selector list is a map, not two sets.** `allowedChecks[name] = b` is
+  written while walking the list, so the last entry wins: `["-ST1000", "all"]`
+  enables ST1000 and `["all", "-ST1000"]` does not. An implementation that
+  collects "enabled" and "disabled" into two sets and lets one win globally
+  gets one of those two orders wrong, and no config in the corpus uses the
+  order that would show it.
+* **The same grammar parsed twice drifts.** guff read the list in two places —
+  the analyzer filter and a `staticcheck_check_enabled` probe used to decide
+  whether SSA needs debug refs — and the two had different bugs. They now share
+  one function that takes the names and returns the allow-map.

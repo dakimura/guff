@@ -4,7 +4,7 @@
 //! options (errcheck), and filters analyzer lists for selection-time options
 //! (govet enable/disable, staticcheck checks).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use guff_analysis::{Analyzer, SettingsBag};
@@ -145,6 +145,11 @@ pub struct GovetSettings {
     pub enable: Vec<String>,
     #[serde(default, deserialize_with = "string_or_seq")]
     pub disable: Vec<String>,
+    /// `run.go`, pushed here by [`LinterSettings::apply_go_version`]. Not a
+    /// config key: upstream's field is `mapstructure:"-"` and only the loader
+    /// writes it.
+    #[serde(skip)]
+    pub go: Option<String>,
 }
 
 /// `linters.settings.staticcheck` / `stylecheck` / `linters-settings.*`.
@@ -206,6 +211,10 @@ pub struct ReviveSettings {
     /// When true, skip diagnostics in generated files.
     #[serde(default, rename = "ignore-generated-header")]
     pub ignore_generated_header: bool,
+    /// `run.go`, pushed here by [`LinterSettings::apply_go_version`] like
+    /// upstream's `Settings.Revive.Go` (`mapstructure:"-"`, loader-written).
+    #[serde(skip)]
+    pub go: Option<String>,
     /// Merge golint-default rules when a `rules:` list is present (golangci).
     #[serde(default, rename = "enable-default-rules")]
     pub enable_default_rules: bool,
@@ -918,6 +927,10 @@ pub struct GocriticSettings {
     /// because each check declares its own param names and types.
     #[serde(default)]
     pub settings: Option<serde_yaml::Value>,
+    /// `run.go`, pushed here by [`LinterSettings::apply_go_version`] like
+    /// upstream's `Settings.Gocritic.Go` (`linterCtx.SetGoVersion`).
+    #[serde(skip)]
+    pub go: Option<String>,
 }
 
 /// One `forbidigo.forbid` entry (string or `{pattern,msg,pkg}`).
@@ -2631,12 +2644,54 @@ impl LinterSettings {
             _ => analyzers,
         }
     }
+
+    /// Push `run.go` into the linters that take a Go version, the way
+    /// golangci-lint's `Loader.handleGoVersion` does.
+    ///
+    /// `run.go` is not a property of the source: it is a value the loader
+    /// copies into `Settings.Govet.Go`, `Settings.Revive.Go`,
+    /// `Settings.Gocritic.Go`, gofumpt's `-lang` and `GOSECGOVERSION`. Those
+    /// linters then answer version questions from it instead of from the go
+    /// directive, so a module can be compiled as 1.21 and linted as 1.22.
+    ///
+    /// Unset means "detect", and what upstream detects is the module's own
+    /// version — which is what these linters fall back to when the field is
+    /// `None`, so there is nothing to fill in here.
+    pub fn apply_go_version(&mut self, go: Option<&str>) {
+        let go = go.map(str::trim).filter(|s| !s.is_empty());
+        self.govet.go = go.map(str::to_string);
+        self.revive.go = go.map(str::to_string);
+        self.gocritic.go = go.map(str::to_string);
+    }
+}
+
+/// `version` is at least `major.minor` (`1.22`, `go1.22`, `1.22.3` all parse).
+fn go_at_least(version: &str, major: u32, minor: u32) -> bool {
+    let stripped = version.trim().strip_prefix("go").unwrap_or(version.trim());
+    let mut parts = stripped.split('.');
+    let maj: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let min: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    maj > major || (maj == major && min >= minor)
 }
 
 fn filter_govet(
     settings: &GovetSettings,
     analyzers: Vec<&'static Analyzer>,
 ) -> Vec<&'static Analyzer> {
+    // golangci-lint drops loopclosure from the analyzer set when the configured
+    // Go version is 1.22 or later (`govet.go`: the analyzer is skipped, not
+    // silenced), because per-iteration loop variables make the check moot. The
+    // version is `run.go` — which need not be the module's own: a `go 1.21`
+    // module with `run.go: "1.22"` still compiles as 1.21 and still has the
+    // capture, and upstream still reports nothing.
+    let analyzers = match settings.go.as_deref() {
+        Some(go) if go_at_least(go, 1, 22) => analyzers
+            .into_iter()
+            .filter(|a| a.name != "loopclosure")
+            .collect(),
+        _ => analyzers,
+    };
+
     if !settings.enable_all
         && !settings.disable_all
         && settings.enable.is_empty()
@@ -2670,112 +2725,95 @@ fn filter_staticcheck(
     settings: &StaticcheckSettings,
     analyzers: Vec<&'static Analyzer>,
 ) -> Vec<&'static Analyzer> {
-    // Upstream default (staticcheck.io): all checks except opinionated ST*/SA9003.
-    // When `checks` is unset, apply the same filter so ST1000 etc. stay off.
-    const DEFAULT_DISABLED: &[&str] = &[
-        "SA9003", "ST1000", "ST1003", "ST1016", "ST1020", "ST1021", "ST1022",
-    ];
-
-    let Some(checks) = settings.checks.as_ref() else {
-        return analyzers
-            .into_iter()
-            .filter(|a| !DEFAULT_DISABLED.contains(&a.name))
-            .collect();
-    };
-    if checks.is_empty() {
-        return analyzers
-            .into_iter()
-            .filter(|a| !DEFAULT_DISABLED.contains(&a.name))
-            .collect();
-    }
-
-    let mut allow_all = false;
-    let mut enabled: HashSet<String> = HashSet::new();
-    let mut disabled: HashSet<String> = HashSet::new();
-    let mut disabled_prefixes: Vec<String> = Vec::new();
-
-    for c in checks {
-        if c == "all" {
-            allow_all = true;
-            continue;
-        }
-        if let Some(rest) = c.strip_prefix('-') {
-            if let Some(prefix) = rest.strip_suffix('*') {
-                // golangci: `-QF*` / `-ST*` disable a whole family.
-                disabled_prefixes.push(prefix.to_string());
-            } else {
-                disabled.insert(rest.to_string());
-            }
-        } else {
-            enabled.insert(c.clone());
-        }
-    }
-
+    let names: Vec<&str> = analyzers.iter().map(|a| a.name).collect();
+    let allowed = allowed_staticcheck_checks(&names, settings.checks.as_deref());
     analyzers
         .into_iter()
-        .filter(|a| {
-            if disabled.contains(a.name) {
-                return false;
-            }
-            if disabled_prefixes.iter().any(|p| a.name.starts_with(p.as_str())) {
-                return false;
-            }
-            if allow_all {
-                return true;
-            }
-            if enabled.is_empty() {
-                return true;
-            }
-            enabled.contains(a.name)
-        })
+        .filter(|a| allowed.get(a.name).copied().unwrap_or(false))
         .collect()
 }
 
-/// Whether a named staticcheck analyzer would survive [`filter_staticcheck`].
-fn staticcheck_check_enabled(settings: &StaticcheckSettings, name: &str) -> bool {
-    const DEFAULT_DISABLED: &[&str] = &[
-        "SA9003", "ST1000", "ST1003", "ST1016", "ST1020", "ST1021", "ST1022",
+/// Port of honnef's `filterAnalyzerNames` (via golangci's copy of it), plus
+/// golangci's substitution of the default list for an unset `checks`.
+///
+/// The three things a hand-rolled version gets wrong, all of which the
+/// `staticcheck-checks-*` golden cases caught:
+///
+/// * **Last write wins.** The result is a map built by walking the list in
+///   order, so `["-ST1000", "all"]` enables ST1000 and `["all", "-ST1000"]`
+///   does not. Collecting "enabled" and "disabled" into two sets loses that.
+/// * **A glob is category-aware, not a prefix.** The name is split at its first
+///   digit: `S*` matches S1002 and **not** SA1000 or ST1017, because the
+///   category of `SA1000` is `SA`. A glob that already contains a digit
+///   (`S1*`) is a plain prefix match instead.
+/// * **A list without `all` starts from nothing**, and a positive glob is the
+///   only thing that then turns anything on.
+///
+/// The default list itself is the fourth: it is `all` minus six **ST** checks
+/// and nothing else. SA9003 ("empty branch") reads like one of the opinionated
+/// ones and is not on it, so it is on by default — which is what every config
+/// that leaves `checks` unset gets.
+fn allowed_staticcheck_checks(names: &[&str], checks: Option<&[String]>) -> HashMap<String, bool> {
+    const DEFAULT_CHECKS: &[&str] = &[
+        "all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022",
     ];
-    let Some(checks) = settings.checks.as_ref() else {
-        return !DEFAULT_DISABLED.contains(&name);
-    };
-    if checks.is_empty() {
-        return !DEFAULT_DISABLED.contains(&name);
-    }
-    let mut allow_all = false;
-    let mut enabled = false;
-    let mut disabled = false;
-    let mut any_positive = false;
-    for c in checks {
-        if c == "all" {
-            allow_all = true;
-            continue;
+
+    let owned: Vec<String>;
+    // An empty list is not "no configuration": `cfg.Checks` is non-nil, so
+    // upstream keeps it and the allow-map comes out empty.
+    let checks: &[String] = match checks {
+        Some(list) => list,
+        None => {
+            owned = DEFAULT_CHECKS.iter().map(|s| (*s).to_string()).collect();
+            &owned
         }
-        if let Some(rest) = c.strip_prefix('-') {
-            if rest == name {
-                disabled = true;
-            } else if let Some(prefix) = rest.strip_suffix('*') {
-                if name.starts_with(prefix) {
-                    disabled = true;
+    };
+
+    let mut allowed: HashMap<String, bool> = HashMap::new();
+    for raw in checks {
+        let mut enable = true;
+        let mut check = raw.as_str();
+        if check.len() > 1 && check.starts_with('-') {
+            enable = false;
+            check = &check[1..];
+        }
+
+        if check == "*" || check == "all" {
+            for name in names {
+                allowed.insert((*name).to_string(), enable);
+            }
+        } else if let Some(prefix) = check.strip_suffix('*') {
+            let is_cat = !prefix.chars().any(|c| c.is_ascii_digit());
+            for name in names {
+                if is_cat {
+                    let cat = match name.find(|c: char| c.is_ascii_digit()) {
+                        Some(idx) => &name[..idx],
+                        None => continue,
+                    };
+                    if prefix == cat {
+                        allowed.insert((*name).to_string(), enable);
+                    }
+                } else if name.starts_with(prefix) {
+                    allowed.insert((*name).to_string(), enable);
                 }
             }
         } else {
-            any_positive = true;
-            if c == name {
-                enabled = true;
-            }
+            allowed.insert(check.to_string(), enable);
         }
     }
-    if disabled {
-        return false;
-    }
-    if allow_all {
-        return true;
-    }
-    if !any_positive {
-        return true;
-    }
-    enabled
+    allowed
+}
+
+/// Whether a named staticcheck analyzer would survive [`filter_staticcheck`].
+///
+/// Answers from the same allow-map the filter builds, so the two cannot drift:
+/// a second hand-rolled reading of the selector list is how `-S*` came to mean
+/// "starts with S" in one place and a category in the other.
+fn staticcheck_check_enabled(settings: &StaticcheckSettings, name: &str) -> bool {
+    allowed_staticcheck_checks(&[name], settings.checks.as_deref())
+        .get(name)
+        .copied()
+        .unwrap_or(false)
 }
 
 impl ReviveSettings {
@@ -2825,6 +2863,7 @@ impl ReviveSettings {
             ignore_generated_header: self.ignore_generated_header,
             enable_default_rules: self.enable_default_rules,
             enable_all_rules: self.enable_all_rules,
+            go: self.go.clone(),
         }
     }
 }
@@ -3485,6 +3524,7 @@ impl GocriticSettings {
             enabled_tags: self.enabled_tags.clone(),
             disabled_tags: self.disabled_tags.clone(),
             check_settings,
+            go: self.go.clone(),
         }
     }
 }
@@ -3805,6 +3845,56 @@ errcheck:
     }
 
     #[test]
+    fn staticcheck_checks_glob_is_a_category_not_a_prefix() {
+        // honnef splits a name at its first digit and compares the category, so
+        // `S*` is S and not SA / ST. Read as a prefix, `S*` alone would enable
+        // everything and `-S*` would empty the linter out.
+        let names = ["S1002", "SA1006", "ST1017", "QF1003"];
+        let analyzers = || -> Vec<&'static Analyzer> {
+            names.iter().map(|n| leak_name(n)).collect()
+        };
+        let kept = |checks: Vec<&str>| -> Vec<&'static str> {
+            let settings = StaticcheckSettings {
+                checks: Some(checks.into_iter().map(String::from).collect()),
+                ..StaticcheckSettings::default()
+            };
+            let mut out: Vec<&'static str> =
+                filter_staticcheck(&settings, analyzers()).iter().map(|a| a.name).collect();
+            out.sort_unstable();
+            out
+        };
+
+        assert_eq!(kept(vec!["S*"]), vec!["S1002"]);
+        assert_eq!(kept(vec!["all", "-S*"]), vec!["QF1003", "SA1006", "ST1017"]);
+        // A glob with a digit in it is a plain prefix match instead.
+        assert_eq!(kept(vec!["S1*"]), vec!["S1002"]);
+        assert_eq!(kept(vec!["SA1*"]), vec!["SA1006"]);
+        // `*` is a spelling of `all`.
+        assert_eq!(kept(vec!["*"]).len(), 4);
+        // Last write wins: the list is a map, not two sets.
+        assert_eq!(kept(vec!["-ST1017", "all"]).len(), 4);
+        assert_eq!(kept(vec!["all", "-ST1017"]), vec!["QF1003", "S1002", "SA1006"]);
+        // A list with no `all` starts from nothing.
+        assert_eq!(kept(vec!["SA1006"]), vec!["SA1006"]);
+    }
+
+    #[test]
+    fn staticcheck_default_checks_turn_off_six_st_checks_and_nothing_else() {
+        // golangci's `defaultChecks` is `all` minus ST1000/1003/1016/1020/1021/
+        // 1022. SA9003 is *not* on that list, however opinionated "empty
+        // branch" reads — and `checks` unset is what most real configs have.
+        let names = ["SA9003", "ST1000", "ST1017", "S1002"];
+        let analyzers: Vec<&'static Analyzer> = names.iter().map(|n| leak_name(n)).collect();
+        let mut kept: Vec<&str> =
+            filter_staticcheck(&StaticcheckSettings::default(), analyzers)
+                .iter()
+                .map(|a| a.name)
+                .collect();
+        kept.sort_unstable();
+        assert_eq!(kept, vec!["S1002", "SA9003", "ST1017"]);
+    }
+
+    #[test]
     fn staticcheck_checks_disable_qf_glob() {
         // nats-server OSS hunt: checks: [all, -QF*, -ST1003, -ST1016]
         let settings = StaticcheckSettings {
@@ -3951,6 +4041,49 @@ custom:
         let filtered = filter_govet(&settings, analyzers);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "printf");
+    }
+
+    #[test]
+    fn run_go_at_least_122_drops_loopclosure() {
+        // golangci-lint removes the analyzer from the set (govet.go), so this
+        // is not "the check reports nothing": it does not run. The distinction
+        // matters because the file's own version can still be below 1.22 — a
+        // `go 1.21` module with `run.go: "1.22"` keeps the capture and loses
+        // the finding.
+        let names = || -> Vec<&'static Analyzer> {
+            ["printf", "loopclosure"].iter().map(|n| leak_name(n)).collect()
+        };
+        let mut settings = LinterSettings::default();
+
+        settings.apply_go_version(Some("1.21"));
+        let kept: Vec<&str> = filter_govet(&settings.govet, names())
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(kept, vec!["printf", "loopclosure"]);
+
+        settings.apply_go_version(Some("1.22"));
+        let kept: Vec<&str> = filter_govet(&settings.govet, names())
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(kept, vec!["printf"]);
+
+        // Unset means "detect", and what upstream detects is the module's own
+        // version — which the analyzer already reads for itself.
+        settings.apply_go_version(None);
+        assert_eq!(filter_govet(&settings.govet, names()).len(), 2);
+    }
+
+    #[test]
+    fn apply_go_version_reaches_every_linter_the_loader_writes() {
+        let mut settings = LinterSettings::default();
+        settings.apply_go_version(Some("  1.23  "));
+        assert_eq!(settings.govet.go.as_deref(), Some("1.23"));
+        assert_eq!(settings.revive.go.as_deref(), Some("1.23"));
+        assert_eq!(settings.gocritic.go.as_deref(), Some("1.23"));
+        settings.apply_go_version(Some(""));
+        assert_eq!(settings.govet.go, None);
     }
 
     fn leak_name(name: &'static str) -> &'static Analyzer {

@@ -106,6 +106,17 @@ for case_dir in "$CASES_DIR"/*/; do
   [[ -f "$case_dir/config.yml" ]] || die "$name: missing config.yml"
   [[ -f "$case_dir/sources.txt" ]] || die "$name: missing sources.txt"
   [[ -f "$case_dir/go.mod" ]] || die "$name: missing go.mod"
+  # Both tools default these to 50 / 3, and a golden truncated by a default is
+  # a golden that silently stops comparing. The gate used to pass
+  # --max-issues-per-linter=0 --max-same-issues=0 to golangci-lint, which also
+  # made the two keys untestable (a CLI flag beats the case's config). Requiring
+  # the case to state them instead keeps config.yml the whole truth: a case that
+  # is not about the limits writes 0, and cases/issues-max-* write the value
+  # they are measuring.
+  for key in max-issues-per-linter max-same-issues; do
+    grep -q "^[[:space:]]*$key:" "$case_dir/config.yml" \
+      || die "$name: config.yml must set issues.$key (0 unless the case is about it)"
+  done
   SELECTED=$((SELECTED + 1))
 
   work="$WORK_ROOT/$name"
@@ -139,8 +150,6 @@ for case_dir in "$CASES_DIR"/*/; do
         --output.json.path=stdout \
         --path-mode abs \
         --issues-exit-code 0 \
-        --max-issues-per-linter=0 \
-        --max-same-issues=0 \
         --allow-parallel-runners \
         ./...
     ) >"$gcl_json" 2>"$RUN_DIR/golden-$name.golangci.stderr" || {

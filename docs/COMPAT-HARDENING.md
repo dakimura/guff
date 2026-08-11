@@ -224,12 +224,15 @@ godox は caddy の実 config では有効化されていないので、`default
 **Done when**: Phase 0 が挙げた全 check に fixture + golden があり、CI 必須ゲートになっている。
 進捗は `docs/COVERAGE.md` の `never` / `unit-only` 件数で測る。
 
-### Phase 4 — 設定・除外セマンティクスの互換テスト `[進行中: nolint / nolintlint / errcheck / exclusions / generated 完了 2026-08-11（7 本目）]`
+### Phase 4 — 設定・除外セマンティクスの互換テスト `[ランナー側は完了 2026-08-12（8 本目）／残りは linter ごとの settings キー]`
 
 現在ほぼゼロの層。ユーザーが実際に踏むのはここ。すべて finding-set を変える ＝ 互換性そのもの。
 
 - 各 linter の settings キーを 有効/無効/閾値/リスト で 3〜4 パターン
-  → **errcheck の `verbose` 完了**（`cases/errcheck` / `errcheck-verbose`）
+  → **errcheck の `verbose`**（`cases/errcheck` / `errcheck-verbose`）と
+  **staticcheck の `checks`**（`cases/staticcheck-checks-{default,all,glob,not-s}`、
+  2026-08-12（8 本目））が完了。
+  **これが Phase 4 の唯一の残件**であり、ランナー側と違って linter の数だけ item がある
 - `linters.exclusions.{rules,presets,generated,paths}`
   → **完了 2026-08-11（7 本目）**。`cases/exclusions`（baseline）+ `-rules` / `-paths` /
   `-presets` と `cases/generated{,-lax,-strict,-disable}` の 8 ケース。
@@ -237,15 +240,31 @@ godox は caddy の実 config では有効化されていないので、`default
   この行の後半は v1 の話であり、v1 config を読むための
   `exclude.rs::default_exclude_patterns` 側に残っている
 - `issues.uniq-by-line` / `max-issues-per-linter` / `max-same-issues` / `severity.rules`
+  → **完了 2026-08-12（8 本目）**。`cases/issues-uniq-by-line`、
+  `cases/issues-{limits,max-per-linter,max-same,max-both}`、
+  `cases/severity-{default,rules,linter}` の 8 ケース
 - `//nolint` の全形（同一行・直前行・`//nolint:a,b`・ブロック・説明付き・不正形式）
   → **完了**（`cases/nolint`。nolintlint の settings は `nolint-strict` / `nolint-allow-unused`）
-- `run.build-tags` / `run.tests` / `run.go` / `output.path-mode`
+- `run.build-tags` / `run.tests` / `run.go`
+  → **完了 2026-08-12（8 本目）**。`cases/run-{tests,tests-off}` /
+  `{run-build-tags,run-build-tags-none}` / `{run-go,run-go-122}` の 6 ケース
+- `output.path-mode`
+  → **このゲートには載せられない**（`run.sh` が `--path-mode abs` を渡し、`golden.py` が
+  モジュール相対に正規化する ＝ この設定が変えるものと同じ正規化）。手で実測した結果は
+  §4 の 2026-08-12（8 本目）に記録した。**未設定時の既定が食い違っている**（上流は config ファイルの
+  ディレクトリ基準、guff は cwd 基準）ことと、**`rel` を上流は config error にする**ことの 2 件
 
 **fixture 1 個 × config N 個の直積**は golden tier がそのまま使える。ケースは
 `config.yml` を各自持ち、`sources.txt` が同じ fixture を指すだけなので、
-**ハーネスの変更は 1 行も要らなかった**。設定 1 個の効果は
+**ハーネスの変更は 7 本目まで 1 行も要らなかった**。設定 1 個の効果は
 **2 つのゴールデンの差分そのもの**として読める（`nolint` と `nolint-allow-unused` の差 =
 `allow-unused` が消す行）。
+
+8 本目で初めてハーネスに手を入れた。`run.sh` が golangci-lint に
+`--max-issues-per-linter=0 --max-same-issues=0` を渡していたためで、
+**CLI フラグは config に勝つ＝この 2 キーは測りようがなかった**。フラグを外し、
+代わりに**各ケースの config が 2 キーを必ず書くことを `run.sh` が要求する**形にした
+（測る対象でないケースは 0）。既定の 50 / 3 で golden が黙って切られる事故も同時に防げる。
 
 ### Phase 5 — コーパスの多様化 `[未着手]`
 
@@ -282,12 +301,14 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
-| 4 | 設定・除外セマンティクス | 中 | **進行中** — golden に **13 ケース**（nolint 3 / errcheck 2 / **exclusions 4** / **generated 4**）。`//nolint` の 5 規則と nolintlint の 4 診断を移植、errcheck のメッセージを上流の規則に置き換え、型検査器の hash-cons バグを修正（6 本目）。除外規則の linter 照合を**逐語**に、v2 の text/source を**大文字小文字を区別**する形に、revive の severity を常時付与、`generated` の既定を **strict** に（7 本目） | 2026-08-11 |
+| 4 | 設定・除外セマンティクス | 中 | **ランナー側は完了** — golden に **31 ケース**（nolint 3 / errcheck 2 / exclusions 4 / generated 4 / **issues 5** / **severity 3** / **run 6** / **staticcheck.checks 4**）。`//nolint` の 5 規則と nolintlint の 4 診断を移植、errcheck のメッセージを上流の規則に置き換え（6 本目）。除外規則の linter 照合を逐語に、`generated` の既定を strict に（7 本目）。**`max-*` の適用順**を上流（same → per-linter）に、**v2 の `severity.default`** を読めるように、**`run.go` を govet / revive / gocritic に配線**、**staticcheck の `checks` セレクタ文法**（カテゴリ glob / 後勝ち / 既定リスト）を上流の移植に置き換え（8 本目）。残件は linter ごとの settings キー | 2026-08-12 |
 | 5 | コーパス多様化 | 中 | 未着手 | — |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-11、7 本目で再生成）: **547** checks 中
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-12、8 本目で再生成。台帳の数字は 7 本目から動かない
+—— Phase 4 は「どの check が発火したか」ではなく「同じ config で同じものを撃つか」を増やす投資なので、
+**この指標が動かないこと自体が想定どおり**）: **547** checks 中
 `never` **3** / `unit-only` **1** / `fired` **543（99.3%）**。
 `never` の 3 件は **gocritic `whyNoLint` / govet `cgocall` / govet `framepointer`** ——
 **3 件とも §6「恒久的に観測できない」側**なので、潰せる `never` は残っていない。
@@ -3655,6 +3676,246 @@ prometheus の config が踏むのは
 3. **gosec G304 の実装**（`readfile.go` の移植）。`filepath.Clean` / `Join` の追跡と
    `TryResolve` が要る。実装したら `exclusionsem/presets` に fixture を戻し、
    EXC0010 が preset ケースで比較されるようにする。
+4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
+   gosec の他の DEFERRED、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+
+---
+
+### 2026-08-12（8 本目）— Phase 4 のランナー側を閉じた: `issues.max-*` / `severity` / `run.*` / `staticcheck.checks`
+
+**やったこと**
+
+7 本目の「次にやること 1」に従い、Phase 4 の残りのうち**ランナー側の設定をすべて**
+ゴールデンゲートに載せ、続けて linter settings の 1 本目（staticcheck の `checks`）も載せた。
+新規 18 ケース:
+
+| グループ | ケース | 測っているもの |
+|---|---|---|
+| issues（重複） | `issues-uniq-by-line`（baseline は `exclusions`） | `issues.uniq-by-line` |
+| issues（上限） | `issues-limits` / `-max-per-linter` / `-max-same` / `-max-both` | `max-issues-per-linter` / `max-same-issues` |
+| severity | `severity-default` / `-rules` / `-linter`（baseline は `exclusions`） | `severity.default` / `severity.rules` |
+| run | `run-tests` / `-off`、`run-build-tags` / `-none`、`run-go` / `-122` | `run.tests` / `run.build-tags` / `run.go` |
+| staticcheck | `staticcheck-checks-{default,all,glob,not-s}` | `linters.settings.staticcheck.checks` |
+
+**142 findings 中 100 しか一致せず、残り 42 は全部実バグだった。**
+
+| 種別 | 件数 | 内容 |
+|------|-----:|------|
+| severity | 33 | **v2 の `severity.default` を一度も読んでいなかった**（キー名が v1 と違う） |
+| precision | 3 | `run.go` が gofumpt の `-lang` にしか配線されていなかった |
+| recall | 4 | `-S*` を接頭辞照合していた（SA / ST まで消していた） |
+| recall | 3 | `checks: ["S*"]` で有効なチェックが 0 になり `no linters enabled` で落ちた（ケース丸ごと） |
+| recall | 1 | `max-*` 2 つの**適用順が上流と逆**だった |
+| recall | 1 | SA9003 を既定 disabled に入れていた |
+
+#### 0. ハーネスに初めて手を入れた —— 測れなかったのはフラグのせい
+
+`run.sh` は golangci-lint に `--max-issues-per-linter=0 --max-same-issues=0` を
+渡していた。既定の 50 / 3 で golden が黙って切られるのを防ぐためだが、
+**CLI フラグは config に勝つ**ので、この 2 キーは golden tier では**測りようがなかった**。
+
+フラグを外し、代わりに**各ケースの config が 2 キーを必ず書くことを `run.sh` が要求する**
+形にした（測る対象でないケースは `0`）。既存 25 ケースは**全部すでに書いていた**ので
+golden は 1 バイトも動かない（`exclusions` を再生成して差分 0 を確認済み）。
+これで「ケースの設定は config.yml がすべて」が本当になり、黙った切り捨ても防げる。
+
+#### 1. `severity.default` は v1 と v2 でキー名が違う
+
+v1 は `severity.default-severity`、**v2 は `severity.default`**。guff は v1 の名前しか
+読んでおらず、serde は知らないキーを黙って捨てるので、**v2 config の `severity` セクションは
+まるごと no-op** だった。`severity-default` の 24 findings は全部リンタが付けた等級のまま、
+`severity-rules` では**規則自体は正しく当たっているのに**既定だけが落ちて 9 件ずれた。
+
+`SeverityConfig` に v2 用の `default` フィールドを足し、`effective_severity()` が
+バージョンごとに**自分の綴りだけ**を読むようにした（v2 config に `default-severity` と
+書いても上流はファイルごと拒否するので、そこを寛容にするのは 7 本目に潰したのと同じ形の間違い）。
+
+上流の意味論はこの 3 行に尽きる（`processors/severity.go`）:
+
+- `default` は**未設定の finding に足す**ものではなく、**全部に上書きする**。
+  gosec の `low` / `medium` も revive の `warning` も `error` になる
+- `@linter` は severity ではなく**番兵**で、値を書かずに `return` する
+- `Validate` により **rules があるなら default は必須**、各 rule の severity も必須、
+  条件は 1 個で足りる（除外規則は 2 個必要 —— この非対称は上流の
+  `severityRuleMinConditionsCount = 1` / `excludeRuleMinConditionsCount = 2` そのもの）
+
+`severity-linter`（`default: "@linter"`）のゴールデンは `exclusions` と**バイト一致**する。
+「何も起きない」ことをケースにしたのは、**そこが静かに壊れる**からで、
+`@linter` をただの文字列として扱えば全 finding に `@linter` と書かれ、
+「default なし」と解釈して代入だけ走らせれば等級が空になる。
+
+#### 2. `run.go` はソースの性質ではなく**リンタに渡す値**
+
+`Loader.handleGoVersion` は `run.go` を `Settings.Govet.Go` /
+`Settings.Revive.Go` / `Settings.Gocritic.Go` / gofumpt の `-lang` /
+`GOSECGOVERSION` に**コピーする**。したがって:
+
+- `govet` は **`loopclosure` をアナライザ集合から外す**（黙らせるのではない）
+- revive の `range-val-in-closure` / `range-val-address` は
+  その版を `IsAtLeastGoVersion` で読む
+
+`go 1.21` のモジュールを `run.go: "1.22"` で lint すると、
+**ツールチェーンは 1.21 としてコンパイルし続けるのに findings は 3 件消える**。
+guff は `run.go` を gofumpt にしか渡しておらず、他はすべてモジュールの go directive を
+見ていたので 3 件とも撃っていた。
+
+直したのは 3 箇所（上流の `handleGoVersion` に対応する 1 メソッドに集約した）:
+`LinterSettings::apply_go_version` が govet / revive / gocritic の settings に版を書き、
+`filter_govet` が 1.22 以上なら `loopclosure` を外し、
+`guff_revive::util::go_version_at_least` と gocritic の版取得が
+**設定値 → モジュール**の順に読む。未設定なら上流も「検出した版＝モジュールの版」を
+入れるだけなので、フォールバックが同じ答えになる。
+
+**`run.go` はキャッシュキーにも入れた。** `settings_fingerprint` は
+`linters.settings` の生 YAML なので、`run.go` だけが違う 2 回の実行を区別できない。
+これは golden tier（`--no-cache`）では見えない種類のバグで、直すのは 1 行だが
+**入れ忘れると「2 回目だけ結果が違う」**という最悪の壊れ方をする。
+
+#### 3. `max-*` は 2 つ揃って初めて順序が見える
+
+上流の順は `UniqByLine → MaxPerFileFromLinter → MaxSameIssues → MaxFromLinter`。
+guff は per-linter を先にやっていた。errcheck が同じ文言を 3 件、別の文言を 2 件出す
+fixture に `max-issues-per-linter: 3` + `max-same-issues: 1` を与えると:
+
+- 上流: 文言で切って 2 件（1 件目と 4 件目）→ per-linter 3 に収まるのでそのまま **2 件**
+- guff（旧）: per-linter で先頭 3 件（全部同じ文言）→ 文言で切って **1 件**
+
+`issues-max-per-linter` と `issues-max-same` は**どちらも一発で一致した**。
+バグは `issues-max-both` にしか出ない。**片方ずつのケースだけ書いていたら見つからない。**
+
+`MaxPerFileFromLinter`（フォーマッタ系 6 つを 1 ファイル 1 件に制限）は guff に
+実装が無いが差は出ない —— guff の formatter は**もともとファイルごとに 1 件**しか出さない
+（`check_files_multi` に実測つきのコメントがある）。`issues.fix: true` のときだけ
+上流が hunk ごとに出す側に回るが、それは fixer の話でこのゲートでは表現できない。
+
+#### 4. 上流の順序が再現しない場所には fixture を置かない
+
+`max-issues-per-linter: 2` を `exclusions` fixture（revive 入り）に当てると、
+**3 回連続で別々の revive finding が残った**。revive はパッケージ内のファイルを並行に
+lint するので、どの finding が先に届くかがレース。上限系は「先頭 N を残す」処理なので、
+**到着順が再現しない linter を混ぜた瞬間にゴールデンが揺れる**。
+
+そこで上限系の fixture は**1 パッケージ 1 ファイル**にした（到着順 = AST 走査順）。
+逆に `uniq-by-line` は揺れない: `Runner.Run` が linter 名順に issues を追加するので、
+同じ行を複数の linter が撃ったときの勝者は決まっている。
+`issues-uniq-by-line` のゴールデンはその順序ごと固定している
+（errcheck > gosec > govet、revive > staticcheck ＝ 名前順）。
+guff は 5 本目までにこの並べ替えを入れてあったので、このケースは一発で一致した。
+
+#### 5. `output.path-mode` はこのゲートに載せられない —— 代わりに実測した
+
+`run.sh` は golangci-lint に `--path-mode abs` を渡し、`golden.py` がモジュール相対に
+正規化する。**それはこの設定が変えるものと同じ正規化**なので、ゲートの中では原理的に
+比較できない。手で実測した結果（`compat/golden/.work/exclusions`、両ツール）:
+
+| `output.path-mode` | golangci-lint | guff |
+|---|---|---|
+| 未設定 | **config ファイルのディレクトリ基準**の相対パス（`../../../../…`） | **cwd 基準** |
+| `abs` | 絶対パス | 絶対パス（一致） |
+| `rel` | **config error**（`validatePathMode` は `""` と `abs` のみ） | 受理して相対扱い |
+
+1 行目が食い違うのは**config が lint 対象ディレクトリの外にあるとき**だけで、
+それはこのハーネスの事情であってユーザの通常運用ではない（リポジトリ直下に
+`.golangci.yml` を置けば cfg 基準 = cwd）。2 行目は「上流が拒む config を guff も拒む」
+（7 本目の次にやること 2）と同じ箱に入る。**どちらも直していない。ここに記録した。**
+
+#### 6. `staticcheck.checks` —— 実際のユーザが一番よく書く settings キー
+
+ランナー側を閉じたので linter settings に着手した。1 本目に `staticcheck.checks` を選んだのは
+**`corpus/` の 16 config 中 7 つが書いている**から（実測）。文法は honnef のもので、golangci-lint は
+`filterAnalyzerNames` を**コメントつきで丸ごとコピー**している。
+
+fixture は 1 ファイルに 4 カテゴリ（S / SA / ST / QF）から 1 件ずつ + SA9003 の空ブランチ。
+4 ケース（既定 / `all` / `S*` / `all,-S*`）で **23 findings 中 15 一致**、
+残り 8 件は 30 行の関数に入っていた 3 つのバグだった:
+
+1. **glob は接頭辞ではなくカテゴリ**。上流は名前を**最初の数字で切って**カテゴリを比較する
+   ので、`S*` は S1002 に当たり **SA1006 / ST1017 には当たらない**。
+   guff は `starts_with` だったので `-S*` が SA と ST も消していた（precision 3 件）。
+   逆に**数字を含む glob（`S1*`）は素の接頭辞照合**で、2 つの綴りは意味が違う。
+2. **正の glob が実装されていなかった** —— `checks: ["S*"]` は「そういう名前のチェック」と
+   解釈され、有効なチェックが 0 になって **guff が `no linters enabled` で落ちていた**。
+   `all` を含まないリストは空集合から始まるので、正の glob だけが唯一の点火手段になる。
+3. **既定リストに SA9003 を入れていた**。上流の `defaultChecks` は
+   `all` から **ST を 6 つ引いただけ**で、「空ブランチ」がどれだけ opinionated に読めても
+   そこには入っていない。**`checks` を書かない config（＝大半）で SA9003 が黙って消えていた**。
+   既存ケースは全部 `checks: [all]` を明示していたので、これを見られるケースが 1 つも無かった。
+
+**セレクタ列は集合 2 つではなく map**（`allowedChecks[name] = b` を順に書く）なので、
+`["-ST1000", "all"]` は ST1000 を**有効にする**し `["all", "-ST1000"]` はしない。
+guff の旧実装は「disabled が常に勝つ」形で、この順序を落としていた。
+corpus の config はどれも `all` を先に書くので**実データでは絶対に露見しない**。
+
+さらに、**同じ文法を 2 か所で読んでいた**（アナライザのフィルタと、
+SSA の debug ref が要るかを決める `staticcheck_check_enabled`）。
+2 か所は別々に壊れていたので、**名前の集合を受け取って allow-map を返す 1 関数**に寄せた。
+
+**ゲート**
+
+- `./compat/golden/run.sh` — **43 ケース**（新規 18）。ratchet 4 本は baseline のまま
+- `cargo test --workspace` — 緑。新規単体テスト 6 本
+  （`max_same_issues_runs_before_max_issues_per_linter`、
+  `v2_severity_default_is_spelled_default_not_default_severity`、
+  `run_go_at_least_122_drops_loopclosure`、
+  `apply_go_version_reaches_every_linter_the_loader_writes`、
+  `staticcheck_checks_glob_is_a_category_not_a_prefix`、
+  `staticcheck_default_checks_turn_off_six_st_checks_and_nothing_else`）
+- `./compat/run.sh --oss --tier pr,nightly` — 8 ターゲット緑（allowlist は consul の 3 件のまま、
+  consul は guff=258 / golangci=255 / P=98.8% / R=100%）。
+  **SA9003 を既定で有効にしたのに OSS の diff が増えていない**のが重要な確認で、
+  上流も同じ findings を出しているから allowlist が動かない
+- `./compat/run.sh --isolate` — **116 ターゲット**全部緑。
+  ただし最初の実行は `swaggo` だけ落ちた。原因は**このホストに `swag` が入っていなかった**だけで、
+  5 本目がピンしたもの（`go install github.com/swaggo/swag/cmd/swag@93e86851e9f2…`）を入れたら 1/1 一致。
+  **エラーメッセージが紛らわしい**ので次に踏む人のために書いておく ——
+  `guff: swaggo: ./bad.go: No such file or directory (os error 2)` は
+  **`bad.go` ではなく `swag` バイナリが無い**という意味（`FormatError::Io` が
+  `Command::new(bin)` の spawn 失敗にソースファイルのパスを添えて表示する）。
+  shell out するフォーマッタ（gci / gofmt / gofumpt / golines / swaggo）は全部この形なので、
+  「ファイルが無い」と言われたら**まず PATH を疑うこと**
+- `compat/coverage.py observe && report` — 台帳の数字は**動かない**（543 / 1 / 3）。
+  Phase 4 は「発火したか」ではなく「同じ config で同じものを撃つか」を増やす投資なので想定どおり
+- `./regress/run.sh --profile full`（cold wall / prometheus `./...`）は
+  **この変更では動いていない**。静かなホストで 3 回ずつ測った A/B:
+
+  | | 1 | 2 | 3 | median |
+  |---|---:|---:|---:|---:|
+  | この作業ツリー | 2.480s | 2.490s | 2.520s | **2.490s** |
+  | HEAD（`crates/` を stash して再ビルド） | 2.510s | 2.490s | 2.450s | **2.490s** |
+
+  peak RSS も 3.06–3.10 GB で両者同じ（baseline 3.11 GB より下）。finding-set は
+  `both=20 / guff_only=0 / golangci_only=0` で不動。
+  **ゲート自体は両方とも赤**で、上限が `2.360 × 1.0 + 0.150 = 2.510s`、
+  つまり**このホストの今日の素の値が上限に重なっている**。7 本目が書いた手順
+  （赤 → `--skip-golangci` を 3 回 → それでも赤なら A/B）をそのまま踏んで、
+  **原因は今回の変更ではない**ところまで確定させた。baseline は**動かしていない**
+  —— 原因の分からない再測定で上限を緩めるのは、次の退行を見えなくするだけだから。
+  最初の 1 回が 2.840s だったのは単にホストが混んでいたためで、
+  `regress/run.sh` の perf-guard（load > ncpu/4 で拒否）がそれを弾くようになっている。
+- OSS / regress は**影響を受けない**ことを config 側から確認済み:
+  corpus の 68 config に**トップレベル `severity:` セクションを持つものは 1 つも無く**
+  （`config_corpus/telegraf.yml` だけが持つが、これはパースのみの fixture）、
+  `run.go` を書いているものも無く、`max-*` を書いているものは全部 `0`。
+  したがって今回の 3 つの修正はどれも既存ゲートの入力を変えない
+
+**次にやること**
+
+1. **Phase 4 の残りは linter ごとの settings キーだけ**になった。ランナー側（issues /
+   severity / run / exclusions / nolint）は閉じ、linter settings は errcheck の `verbose` と
+   staticcheck の `checks` の 2 つが済んでいる。次は 1 セッション 2〜3 linter で、
+   **finding-set を変えるキーから**やる: `gosec.{severity,confidence,includes,excludes}`、
+   `revive.{confidence,severity,enable-all-rules}`、`govet.{enable-all,disable-all}`、
+   `gocritic.{enabled-tags,disabled-checks}`、`errcheck.{check-blank,check-type-assertions,exclude-functions}`。
+   `exclusionsem` / `issuesem` / `staticchecksem` の fixture がそのまま使える。
+   **狙い目は「既定値」と「セレクタ文法」**で、8 本目の 3 バグはどちらもその 2 種類だった
+   —— 既存ケースがキーを明示していると既定は永久に測られない。
+2. **config の validate**（7 本目からの持ち越し、優先度は上がった）。今回さらに 2 件見つかった:
+   `severity.rules` があるのに `severity.default` が無い config と、
+   `output.path-mode: rel`。上流はどちらも起動を拒む。実装先は `config.rs`（`ConfigError`）。
+   **「上流が拒む config を guff は受理する」は golden tier で表現できない**ので、
+   ここに列挙が溜まっていく形になる —— 実装するときは §4 のこの節と 7 本目の同項を突き合わせること。
+3. **gosec G304 の実装**（7 本目からの持ち越し）。`readfile.go` の移植。実装したら
+   `exclusionsem/presets` に fixture を戻し、EXC0010 が preset ケースで比較されるようにする。
 4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
    gosec の他の DEFERRED、SA9008 / SA5011 の σ、govet の未実装 16 pass。
 

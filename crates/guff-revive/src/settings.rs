@@ -38,6 +38,11 @@ pub struct Settings {
     pub enable_default_rules: bool,
     /// When true, enable all known revive rules (golangci `enable-all-rules`).
     pub enable_all_rules: bool,
+    /// Go version the rules are configured with (golangci `run.go`, pushed into
+    /// `Settings.Revive.Go` by the loader). `None` = use the module's own
+    /// directive. Not a user-settable revive key: upstream tags it
+    /// `mapstructure:"-"` and the loader is the only writer.
+    pub go: Option<String>,
 }
 
 impl Default for Settings {
@@ -49,6 +54,7 @@ impl Default for Settings {
             ignore_generated_header: false,
             enable_default_rules: false,
             enable_all_rules: false,
+            go: None,
         }
     }
 }

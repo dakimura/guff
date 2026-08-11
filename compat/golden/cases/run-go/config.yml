@@ -1,0 +1,34 @@
+# Golden case: `run.go` left unset (COMPAT-HARDENING Phase 4).
+#
+# Unset means "detect it", and what the loader detects is the module's own go
+# directive — `go 1.21` here (see go.mod). So this golden is what the module's
+# version alone produces: errcheck's finding plus the checks that only apply
+# below Go 1.22.
+#
+# Read it against `run-go-122`, which raises the version without touching the
+# module.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - revive
+  settings:
+    govet:
+      enable:
+        - loopclosure
+    revive:
+      severity: warning
+      rules:
+        - name: range-val-in-closure
+        - name: range-val-address
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

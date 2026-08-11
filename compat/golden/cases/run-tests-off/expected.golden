@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh run-tests-off
+# Produced by running golangci-lint on compat/golden/cases/run-tests-off/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+code/code.go:12:7:errcheck::Error return value is not checked

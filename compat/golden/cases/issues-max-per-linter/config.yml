@@ -1,0 +1,30 @@
+# Golden case: `issues.max-issues-per-linter` (COMPAT-HARDENING Phase 4).
+#
+# Same fixture and same linters as `issues-limits`, with one key changed. The
+# processor is `MaxFromLinter`: it counts per `issue.FromLinter` and keeps the
+# first `limit` of each, so the golden shows two errcheck findings and two
+# govet ones — and *which* two is the interesting part. Both errcheck survivors
+# carry the same text; the limit is blind to it.
+#
+# The count is per linter, not per analyzer: govet's three printf findings are
+# all `FromLinter: govet`, which is the same distinction that decides what a
+# `linters:` exclusion rule matches.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 2
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

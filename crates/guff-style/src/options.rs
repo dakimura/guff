@@ -739,6 +739,10 @@ pub struct GocriticOptions {
     pub disabled_tags: Vec<String>,
     /// `linters.settings.gocritic.settings` — per-check parameters.
     pub check_settings: GocriticCheckSettings,
+    /// Go version the checks are configured with (golangci `run.go`, pushed
+    /// into `Settings.Gocritic.Go` and then `linterCtx.SetGoVersion`). `None` =
+    /// use the module's own directive.
+    pub go: Option<String>,
 }
 
 /// Per-check parameters from `linters.settings.gocritic.settings`.

@@ -446,20 +446,28 @@ impl IssueFilter {
             issues.retain(|issue| seen.insert((issue.filename.clone(), issue.line)));
         }
 
-        if self.max_issues_per_linter > 0 {
-            let mut counts: HashMap<String, i32> = HashMap::new();
-            issues.retain(|issue| {
-                let n = counts.entry(issue.from_linter.clone()).or_insert(0);
-                *n += 1;
-                *n <= self.max_issues_per_linter
-            });
-        }
+        // Order matters when both limits are set, and it is `MaxSameIssues`
+        // then `MaxFromLinter` (golangci `Runner.Processors`). The per-linter
+        // counter only ever sees what survived the per-text cut, so a linter
+        // that reported the same text N times spends one slot on it, not N.
+        // Reversed — as this was — `max-issues-per-linter: 3` with
+        // `max-same-issues: 1` fills the linter's budget with three copies of
+        // one text and then drops two of them, losing the findings that would
+        // have come after.
         if self.max_same_issues > 0 {
             let mut counts: HashMap<String, i32> = HashMap::new();
             issues.retain(|issue| {
                 let n = counts.entry(issue.text.clone()).or_insert(0);
                 *n += 1;
                 *n <= self.max_same_issues
+            });
+        }
+        if self.max_issues_per_linter > 0 {
+            let mut counts: HashMap<String, i32> = HashMap::new();
+            issues.retain(|issue| {
+                let n = counts.entry(issue.from_linter.clone()).or_insert(0);
+                *n += 1;
+                *n <= self.max_issues_per_linter
             });
         }
 
@@ -949,6 +957,33 @@ mod tests {
         assert_eq!(kept.len(), 2);
         assert_eq!(kept[0].text, "one");
         assert_eq!(kept[1].from_linter, "govet");
+    }
+
+    #[test]
+    fn max_same_issues_runs_before_max_issues_per_linter() {
+        // golangci `Runner.Processors` is MaxSameIssues then MaxFromLinter, so
+        // the per-linter budget is spent on what survived the per-text cut.
+        // Reversed, the three copies of "dup" fill errcheck's budget of 3 and
+        // the per-text cut then leaves one of them — losing "tail" outright.
+        let issues_cfg = IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 3,
+            max_same_issues: 1,
+            uniq_by_line: Some(false),
+            ..IssuesConfig::default()
+        };
+        let filter = IssueFilter::from_config(&issues_cfg, &SeverityConfig::default());
+        let kept = filter.apply(
+            vec![
+                issue_at("errcheck", "a.go", 1, "dup"),
+                issue_at("errcheck", "a.go", 2, "dup"),
+                issue_at("errcheck", "a.go", 3, "dup"),
+                issue_at("errcheck", "a.go", 4, "tail"),
+            ],
+            &[],
+        );
+        let texts: Vec<&str> = kept.iter().map(|i| i.text.as_str()).collect();
+        assert_eq!(texts, vec!["dup", "tail"]);
     }
 
     #[test]

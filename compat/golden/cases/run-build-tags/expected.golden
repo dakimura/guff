@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh run-build-tags
+# Produced by running golangci-lint on compat/golden/cases/run-build-tags/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+tags/plain.go:11:7:errcheck::Error return value is not checked
+tags/tagged.go:13:7:errcheck::Error return value is not checked
+tags/tagged.go:14:14:govet::printf: fmt.Printf format %d has arg "not a number" of wrong type string

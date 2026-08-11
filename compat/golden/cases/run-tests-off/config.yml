@@ -1,0 +1,28 @@
+# Golden case: `run.tests: false` (COMPAT-HARDENING Phase 4).
+#
+# One line different from `run-tests`, and the diff between the two goldens is
+# every finding in code_test.go.
+#
+# This is a loader-level setting, not a filter over findings: with it off the
+# test files are never handed to go/packages, so a linter cannot report on them
+# and cannot see what they declare either.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: false

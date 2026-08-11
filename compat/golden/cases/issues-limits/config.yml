@@ -1,0 +1,29 @@
+# Golden case: the unlimited baseline for the `issues.max-*` cases
+# (COMPAT-HARDENING Phase 4).
+#
+# Both limits are off, so this golden is the full finding set the other three
+# cases cut down: three errcheck findings with one text, two with another, and
+# three identical govet/printf findings. Read the other goldens as subtractions
+# from this one.
+#
+# `uniq-by-line` has to be off as well — two of the errcheck findings would
+# otherwise be indistinguishable from findings the limits removed.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+  settings:
+    govet:
+      enable:
+        - printf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

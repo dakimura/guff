@@ -1,0 +1,24 @@
+# Golden case: `staticcheck.checks: [all]` (COMPAT-HARDENING Phase 4).
+#
+# The diff against `staticcheck-checks-default` is exactly the six ST checks the
+# default list turns off — of which this fixture reaches one, ST1000 (the
+# package has no package comment). Everything else, SA9003 included, is in both
+# goldens: the default list is `all` minus those six and nothing more.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

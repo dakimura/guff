@@ -6109,8 +6109,28 @@ fn method_recv_named<'a>(pass: &Pass<'_>, expr: &'a Expr, method: &str) -> Optio
     }
 }
 
+/// The Go version go-critic's version-gated checks see.
+///
+/// golangci-lint calls `linterCtx.SetGoVersion(settings.Go)` with `run.go`, so
+/// the configured version wins over the module's own go directive. With no
+/// `run.go` the loader detects the module version and sets the same thing, so
+/// falling back to it here is the same answer.
+fn gocritic_go_version(pass: &Pass<'_>) -> String {
+    pass.settings::<GocriticOptions>("gocritic")
+        .and_then(|o| o.go.clone())
+        .map(|v| {
+            if v.starts_with("go") {
+                v
+            } else {
+                format!("go{v}")
+            }
+        })
+        .filter(|v| v != "go")
+        .unwrap_or_else(|| code::module_go_version(pass))
+}
+
 fn check_time_expr_simplify(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec<(u32, String)>) {
-    if code::version_compare(&code::module_go_version(pass), "go1.17") < 0 {
+    if code::version_compare(&gocritic_go_version(pass), "go1.17") < 0 {
         return;
     }
     if !is_int_lit(&bin.y, 1000) {

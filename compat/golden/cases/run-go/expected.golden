@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh run-go
+# Produced by running golangci-lint on compat/golden/cases/run-go/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+gover/gover.go:17:7:errcheck::Error return value is not checked
+gover/gover.go:28:21:revive:warning:range-val-address: suspicious assignment of 'v'. range-loop variables always have the same address
+gover/gover.go:33:8:govet::loopclosure: loop variable v captured by func literal
+gover/gover.go:33:8:revive:warning:range-val-in-closure: loop variable v captured by func literal

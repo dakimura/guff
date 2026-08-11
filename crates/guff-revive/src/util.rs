@@ -422,18 +422,29 @@ pub fn line_of(pass: &Pass<'_>, pos: i64) -> usize {
         .max(0) as usize
 }
 
-/// Returns true when the module Go version is at least `major.minor`, or unknown.
+/// Returns true when the configured Go version is at least `major.minor`, or
+/// unknown.
+///
+/// golangci-lint hands revive a version rather than letting it read the module:
+/// the loader copies `run.go` into `Settings.Revive.Go`, and revive's
+/// `IsAtLeastGoVersion` answers from that. So a config can move
+/// `range-val-in-closure` and the other version-gated rules without touching
+/// the go directive the toolchain compiles against. Only when `run.go` is unset
+/// does the module's own version decide — which is also what the loader does
+/// (it detects the version and then assigns it just the same).
 pub fn go_version_at_least(pass: &Pass<'_>, major: u32, minor: u32) -> bool {
-    let Some(version) = pass
+    let configured = crate::config::configured_go_version(pass);
+    let module = pass
         .pkg()
         .module
         .as_ref()
         .map(|m| m.go_version.as_str())
         .filter(|s| !s.is_empty())
-    else {
+        .map(str::to_string);
+    let Some(version) = configured.filter(|s| !s.trim().is_empty()).or(module) else {
         return true;
     };
-    let (maj, min) = parse_go_version(version);
+    let (maj, min) = parse_go_version(&version);
     maj > major || (maj == major && min >= minor)
 }
 
