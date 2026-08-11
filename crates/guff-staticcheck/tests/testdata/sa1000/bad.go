@@ -56,6 +56,17 @@ func main() {
 	regexp.MustCompile("\x80")
 	regexp.MustCompile("\xed\xa0\x80")
 	regexp.MustCompile("(\xff")
+	// Truncated multi-byte sequences: a lead byte with too few continuation
+	// bytes. The scanner still stops at the first byte, so the Expr is the
+	// whole remaining tail — two bytes for the second one, which is why these
+	// two are distinguishable in the golden where `\xff` and `\x80` are not.
+	regexp.MustCompile("\xc3")
+	regexp.MustCompile("\xe2\x82")
+	// The tail runs to the end of the pattern, operators and all: the byte is
+	// rejected before anything is parsed, so `*` and `{2}` are part of the
+	// quoted Expr rather than a second error.
+	regexp.MustCompile("\xff*")
+	regexp.MustCompile("\xff{2}")
 
 	// The other four call sites upstream matches on.
 	regexp.Match(`+`, nil)

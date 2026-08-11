@@ -4,11 +4,11 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, CallExpr, Expr, Stmt, UnaryExpr};
+use guff::ast::{Expr, Stmt, UnaryExpr};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, is_call_to, is_call_to_any};
+use guff_analysis::code::is_call_to;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -38,12 +38,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(comm) = clauses[0].comm.as_deref() else {
             return;
         };
+        // `(CommClause (UnaryExpr "<-" (CallExpr (Symbol "time.After") [arg])) body)`
+        // — a *bare* receive only. `case t := <-time.After(d):` puts an
+        // AssignStmt in the Comm slot, which the pattern cannot match, so
+        // upstream stays silent on it (measured: two shapes, both silent).
         let recv_expr = match comm {
             Stmt::ExprStmt(es) => match &es.x {
-                Expr::UnaryExpr(UnaryExpr { op: Token::ARROW, x, .. }) => Some(&**x),
-                _ => None,
-            },
-            Stmt::AssignStmt(AssignStmt { rhs, .. }) if rhs.len() == 1 => match &rhs[0] {
                 Expr::UnaryExpr(UnaryExpr { op: Token::ARROW, x, .. }) => Some(&**x),
                 _ => None,
             },
@@ -55,9 +55,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Expr::CallExpr(call) = call_expr else {
             return;
         };
-        let is_after = is_call_to_any(pass, call, &["time.After"])
-            || matches!(&*call.fun, Expr::SelectorExpr(sel) if sel.sel.name == "After");
-        if !is_after {
+        // `Symbol "time.After"` resolves the object. Matching on the selector's
+        // name alone also caught `c.After(d)` on any other type — measured as a
+        // third false positive.
+        if !is_call_to(pass, call, "time.After") {
             return;
         }
         pending.push((

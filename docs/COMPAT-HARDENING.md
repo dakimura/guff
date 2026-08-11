@@ -3107,11 +3107,90 @@ CI には `go install github.com/golangci/golines@v0.15.0` を足した（版は
 1. **`swaggo`**（台帳最後の `never` のうち唯一到達可能なもの）。
    golangci の `github.com/golangci/swaggoswag` と `swag` CLI の対応版を特定して
    CI にピンできるか調べる。できないなら §6 に恒久組として書く。
-2. **`guff run` に `-E` / `-D` が無い**。golangci はどちらも短縮形を持ち、
-   `guff fmt` の側には `-E` がある。`golangci-lint run -E gosec` をそのまま
-   `guff run` に打つと `unexpected argument '-E'` で落ちる。clap の
-   `short = 'E'` / `short = 'D'` を足すだけ。
-3. 以下は 2026-08-11（2 本目）の「次にやること」2〜8 がそのまま残っている。
+2. 以下は 2026-08-11（2 本目）の「次にやること」2〜8 がそのまま残っている。
+
+---
+
+### 2026-08-11（4 本目）— `goregexp` の 202 行を end-to-end で確認し、`S1037` の extra を消した
+
+**やったこと**
+
+3 セッション積み残していた「`compat/oracles/goregexp` の 202 行（不正 UTF-8）の
+end-to-end 確認」と、`staticcheck-s` に残っていた extra 1 件。
+
+#### 1. 202 行 — **移植は 202/202 合っている**。残るのは Rust の `String`
+
+オラクルの 202 パターンを全部 `regexp.MustCompile("\xNN…")` として 1 ファイルに
+書き出し、**text 出力**で両ツールをバイト比較した（JSON では駄目で、その理由が答え）。
+
+| 観測 | 結果 |
+|---|---|
+| finding 数 | 202 / 202 |
+| file:line:col | 全行一致 |
+| メッセージ | **`Expr` の描画以外は全行一致** |
+
+差は 1 点だけで、`syntax.Error.Expr` が「パターンの生 slice」であること
+——Go の `string` は持てて Rust の `String` は持てない——に帰着する。
+**置換の粒度は Go の `encoding/json` と同じ（1 バイト = 1 個の U+FFFD）**なので、
+JSON を通す golden tier では一致し、golangci の text 出力とだけ割れる。
+詳細と 13 行の内訳は §7 に書いた。
+
+fixture には golden で区別できる 4 形（`\xc3` / `\xe2\x82` / 末尾に演算子）だけ足した。
+202 行を全部足しても golden 上は同じ `` の列が並ぶだけで情報が増えない。
+
+#### 2. `S1037` — fixture が guff の側に合わせて書かれていた
+
+`staticcheck-s` に残っていた唯一の extra。上流のパターンは
+
+```
+(SelectStmt (CommClause (UnaryExpr "<-" (CallExpr (Symbol "time.After") [arg])) body))
+```
+
+で、guff は 2 箇所ゆるかった。7 形の probe で実測:
+
+| 形 | 上流 | 直す前の guff |
+|---|---|---|
+| `case <-time.After(d):`（本体空 / 非空） | 撃つ ×2 | 撃つ ×2 |
+| `case t := <-time.After(d):` | **黙る**（Comm が `AssignStmt` なので `UnaryExpr` のパターンに当たらない） | 撃つ |
+| 別の型の `c.After(d)` | **黙る**（`Symbol` は object を解決する） | 撃つ（セレクタ名 `After` だけを見ていた） |
+| clause 2 個 / `default:` 付き | 黙る | 黙る |
+
+**fixture が guff の側に合わせて書かれていた**（`bad.go` は代入形しか持っていなかった）
+ので、bad/ok を上流の答えどおりに建て直した。7/7 一致。
+
+#### 3. `guff run` に `-E` / `-D`
+
+golangci はどちらも短縮形を持ち、`guff fmt` の側には既に `-E` があった。
+`golangci-lint run -E gosec` をそのまま打つと `unexpected argument '-E'` で落ちる。
+
+**結果**
+
+- `staticcheck-s` の ratchet **2 missing / 1 extra → 2 missing / 0 extra**。
+  **この case から「guff が上流より多く撃つ」形が消えた。**
+- `staticcheck-sa` の golden に SA1000 の不正 UTF-8 が 4 形増えて 4/4 一致
+  （ratchet 7/9 は据え置き）。
+- `cargo test --workspace` **3,014 件緑**、`compat/tests` 61 件緑。
+- golden 12 ケース、isolate 115、OSS 8 すべて緑。
+  regress tsdb **PASS**（0.750s / 限界 0.880s）、full も **PASS**（2.420s / 限界 2.510s）。
+  途中 tsdb が 0.940s で 2 回赤くなったが、HEAD（`98dab1f`）と交互に測ると
+  **0.760 / 0.760 / 0.760 対 0.760 / 0.770 / 0.760** で差は 0.00s。
+  `--skip-golangci` を付けた測定は系統的に速く、赤かったのは
+  **直前の golangci-lint 実行で機械が温まっていた**回だった
+  （harness は guff を先に測るので同一 run 内の汚染ではなく、前の run の残り熱）。
+  本セッションの変更のうち prometheus の経路に乗るのは S1037 だけで、
+  しかも**分岐を 1 本減らしている**。
+
+**次にやること**
+
+1. **`swaggo`**（3 本目の 1 と同じ）。
+2. gosec の DEFERRED を golden に載せていく: G304 / G305 / G307 / G601 / G115 など
+   未実装分と、G402 の MinVersion / CipherSuites、G104 audit モード。
+3. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+4. govet の未実装 16 pass。
+5. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+6. **guff は typecheck エラーを finding として出さない**（2 本目の 7）。
+7. `staticcheck-s` の残り 2 件（SA4006 ×2、空 `if` 本体のブロック最適化）。
+   **`staticcheck-s` はこれで 0/0 になる。**
 
 ---
 
@@ -3161,7 +3240,7 @@ CI には `go install github.com/golangci/golines@v0.15.0` を足した（版は
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
 | `govet/framepointer` | **golangci-lint は `.s` ファイルの診断を 1 件も出さない**。同じ fixture に `go vet` を食わせると framepointer 2 件 + asmdecl 4 件が出るのに、golangci-lint 2.12.2 は 0 件（`GOARCH` を合わせても、ホスト arch のままでも同じ）。**この行の以前の理由（GOARCH がホスト依存だから）は誤り**で、ケース単位の環境変数を入れても解けない — その仕組み自体は 2026-08-11（2 本目）で入れてあり、`SA1027` はそれで回収できた。単体テストでのみ検証可能。 |
 | `govet/cgocall` | `import "C"` を含むファイルが要る。cgo と C コンパイラを CI ゲートの前提にしたくない。単体テストでのみ検証可能。 |
-| `golines` / `swaggo` | どの corpus リポも有効にしておらず、isolate にも fixture が無い。**isolate の `make_config.py` が `linters.enable` しか書けない**のに対し、golangci-lint v2 でこの 2 つは `formatters:` ブロックの住人なので、fixture を置くだけでは足りない。→ 次にやること。 |
+| ~~`golines`~~ / `swaggo` | `golines` は 2026-08-11（3 本目）で isolate に載った（`make_config.py` に `formatters:` テンプレートを追加）。`swaggo` は `swag` CLI が要り、golangci が使う `github.com/golangci/swaggoswag` に対応する CLI 版が特定できていないので保留 —— 版がずれると整形結果が割れて偽の diff になる。 |
 
 ### 意図的な非互換: revive の importer 盲目には追従しない `[決定 2026-08-10]`
 
@@ -3247,6 +3326,43 @@ Go は goroutine スタックが伸びるので `{{if}}` を 10 万段ネスト�
 実在のテンプレートは 1 桁段しかネストしない。
 `tests/gostd_template.rs` が **2 MiB スレッド（本番の 1/4）で 10 万段**を回して
 abort しないことを固定している。
+
+### Rust の `String` は不正な UTF-8 を持てない（SA1000 の `Expr`）`[記録 2026-08-11（3 本目）]`
+
+**3 セッション積み残していた「goregexp の 202 行の end-to-end 確認」の答え。**
+結論から言うと**移植は 202/202 合っている**。残るのは 1 点、しかも構造的なもの。
+
+やったこと: オラクルの 202 行（`ErrInvalidUTF8`）のパターンを全部
+`regexp.MustCompile("\xNN…")` として 1 ファイルに書き出し（バイトは全部 `\xNN`
+エスケープなので `.go` 自体は正しい UTF-8）、**text 出力**で両ツールをバイト比較した。
+JSON では駄目で、その理由が本項の中身になる。
+
+| 観測 | 結果 |
+|---|---|
+| finding 数 | 202 / 202 |
+| file:line:col | 全行一致 |
+| メッセージ | **`Expr` の描画以外は全行一致** |
+| `Expr` の中身 | golangci は**生バイト**（`` `\xff` ``）、guff は **U+FFFD** |
+
+`syntax.Error.Expr` は「不正になった以降のパターンの生 slice」なので、
+Go の `string` はそのまま持てるが **Rust の `String` は持てない**。
+`Diagnostic` を `Vec<u8>` にしない限り再現できない。
+
+**ただし置換の粒度は合っている。** guff は**バイト 1 個につき U+FFFD 1 個**を出す。
+Go の `encoding/json` も同じ（`utf8.DecodeRune` が失敗したら 1 バイト進めて
+`�` を書く）ので、**JSON を通す経路ではむしろ一致する** ——
+golden tier が両側 JSON なのはそのためで、この差はそこには出ない。
+出るのは golangci の text 出力だけで、あちらは生バイトを素通しする。
+
+**202 行のうち 189 行は、golangci の出力を lossy デコードしても一致する**
+（1 バイトの不正 = 1 個の U+FFFD）。残り 13 行は `\xe2\x82` のような
+**途中で切れた多バイト列**で、Python や Go の「maximal subpart」規則が
+U+FFFD を 1 個にするのに対し guff（と Go の json）は 2 個にする、という
+**デコーダ側の規則の違い**であって guff の側の誤りではない。
+
+fixture には golden で区別できる形だけ足した（`\xc3` = 1 バイト、
+`\xe2\x82` = 2 バイト、末尾に演算子が付く 2 形）。202 行を全部足しても
+golden 上は同じ `` の列になるだけで情報が増えない。
 
 ### 再帰の深さ、二度目 — `factor` は木の高さでは抑えられない（SA1000）`[記録 2026-08-10]`
 

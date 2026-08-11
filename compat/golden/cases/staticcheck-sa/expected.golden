@@ -31,9 +31,13 @@ sa1000/bad/bad.go:55:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8
 sa1000/bad/bad.go:56:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
 sa1000/bad/bad.go:57:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `���`
 sa1000/bad/bad.go:58:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
-sa1000/bad/bad.go:61:15:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `+`
-sa1000/bad/bad.go:62:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
-sa1000/bad/bad.go:63:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\d`
+sa1000/bad/bad.go:63:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�`
+sa1000/bad/bad.go:64:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `��`
+sa1000/bad/bad.go:68:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�*`
+sa1000/bad/bad.go:69:21:staticcheck::SA1000: error parsing regexp: invalid UTF-8: `�{2}`
+sa1000/bad/bad.go:72:15:staticcheck::SA1000: error parsing regexp: missing argument to repetition operator: `+`
+sa1000/bad/bad.go:73:21:staticcheck::SA1000: error parsing regexp: invalid named capture: `(?P<>`
+sa1000/bad/bad.go:74:21:staticcheck::SA1000: error parsing regexp: invalid escape sequence: `\\d`
 sa1001/bad/bad.go:11:25:staticcheck::SA1001: template: :1: bad character U+007D '}'
 sa1001/bad/bad.go:12:25:staticcheck::SA1001: template: :1: bad character U+002B '+'
 sa1001/bad/bad.go:13:25:staticcheck::SA1001: template: :1: unexpected right paren

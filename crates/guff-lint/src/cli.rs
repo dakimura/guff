@@ -109,11 +109,11 @@ struct RunArgs {
     preset: Option<String>,
 
     /// Enable an additional linter by name (repeatable).
-    #[arg(long = "enable")]
+    #[arg(short = 'E', long = "enable")]
     enable: Vec<String>,
 
     /// Disable a linter from the preset (repeatable).
-    #[arg(long = "disable")]
+    #[arg(short = 'D', long = "disable")]
     disable: Vec<String>,
 
     /// Run analyzers sequentially (tests / deterministic output).
@@ -196,11 +196,11 @@ struct LintersArgs {
     preset: Option<String>,
 
     /// Enable an additional linter by name (repeatable).
-    #[arg(long = "enable")]
+    #[arg(short = 'E', long = "enable")]
     enable: Vec<String>,
 
     /// Disable a linter from the preset (repeatable).
-    #[arg(long = "disable")]
+    #[arg(short = 'D', long = "disable")]
     disable: Vec<String>,
 }
 

@@ -708,3 +708,45 @@ fn cli_run_with_only_formatters_enabled_still_formats() {
     );
     assert!(stdout.contains("gofmt"), "stdout:\n{stdout}");
 }
+
+/// `-E` / `-D` are golangci-lint's shorthands for `--enable` / `--disable`, and
+/// `guff fmt` already had `-E`. Without them on `run`, pasting a
+/// `golangci-lint run -E gosec` command line at guff fails to parse.
+#[test]
+fn cli_run_accepts_short_enable_and_disable() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(
+        tmp.path().join("a.go"),
+        "package a\n\nfunc unusedFn() int { return 1 }\n",
+    )
+    .unwrap();
+
+    // `--default none -E errcheck` runs errcheck alone: nothing to report.
+    let out = Command::new(bin())
+        .args(["run", "--no-config", "--default", "none", "-E", "errcheck", "./..."])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run -E");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // `-D unused` takes the one standard linter this file trips back out.
+    let out = Command::new(bin())
+        .args(["run", "--no-config", "-D", "unused", "./..."])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run -D");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

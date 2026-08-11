@@ -452,15 +452,29 @@ fn sa1000_flags_invalid_regex_patterns() {
             "error parsing regexp: invalid named capture: `(?P<>`",
             "error parsing regexp: invalid named capture: `(?<a.b>`",
             "error parsing regexp: invalid or unsupported Perl syntax: `(?=`",
-            // A Go string is bytes, so these five reach the scanner as the
-            // ill-formed bytes they name. The last one reports the bad byte
-            // rather than the unclosed group: `regexp/syntax` checks UTF-8
-            // while lexing, before it ever sees the `(`.
+            // A Go string is bytes, so these reach the scanner as the
+            // ill-formed bytes they name. `(\xff` reports the bad byte rather
+            // than the unclosed group: `regexp/syntax` checks UTF-8 while
+            // lexing, before it ever sees the `(`.
+            //
+            // U+FFFD, not the byte: the Expr is the ill-formed tail verbatim,
+            // and a Rust `String` cannot hold it. One replacement character per
+            // *byte*, which is also what Go's own `encoding/json` does — so the
+            // golden tier (JSON on both sides) agrees, and only golangci's text
+            // output, which passes the raw bytes through, differs. See
+            // docs/COMPAT-HARDENING.md §7.
             "error parsing regexp: invalid UTF-8: `\u{fffd}`",
             "error parsing regexp: invalid UTF-8: `\u{fffd}b`",
             "error parsing regexp: invalid UTF-8: `\u{fffd}`",
             "error parsing regexp: invalid UTF-8: `\u{fffd}\u{fffd}\u{fffd}`",
             "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            // Truncated lead bytes: `\xc3` wants one continuation byte and
+            // `\xe2\x82` wants two, so the second one is two bytes long.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}\u{fffd}`",
+            // The operator is inside the quoted tail, not a second error.
+            "error parsing regexp: invalid UTF-8: `\u{fffd}*`",
+            "error parsing regexp: invalid UTF-8: `\u{fffd}{2}`",
             "error parsing regexp: missing argument to repetition operator: `+`",
             "error parsing regexp: invalid named capture: `(?P<>`",
             "error parsing regexp: invalid escape sequence: `\\d`",
@@ -1566,8 +1580,16 @@ fn s1037_flags_bad_patterns() {
     );
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(s1037::analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("time.Sleep")));
+    // Both clauses of `bad.go`, and nothing else: `ok.go` holds the four
+    // shapes upstream declines, three of which guff used to report.
+    assert_eq!(
+        messages,
+        vec![
+            "should use time.Sleep instead of elaborate way of sleeping",
+            "should use time.Sleep instead of elaborate way of sleeping",
+        ],
+        "{messages:?}"
+    );
 }
 
 #[test]
