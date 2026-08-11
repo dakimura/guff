@@ -126,3 +126,4 @@ nolintlint
 gomodguard_v2
 wsl_v5
 golines
+swaggo

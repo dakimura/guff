@@ -75,11 +75,18 @@ impl Formatter for Swaggo {
 
 /// Create a private temp dir containing the source as a `.go` file.
 /// Returns `(dir, staged_file_path)`.
+///
+/// The directory name must **not** start with a dot. `swag fmt` walks the tree
+/// through `walkWith`, which returns `filepath.SkipDir` for any directory whose
+/// name begins with `.` (also `vendor` and `docs`) — so a `.guff-swaggo-*`
+/// staging directory was skipped outright and every file came back byte-for-byte
+/// unchanged. The formatter therefore never reported anything, which is why
+/// `swaggo` sat in docs/COVERAGE.md as never having fired.
 fn stage_dir(filename: &str, src: &[u8]) -> Result<(PathBuf, PathBuf), FormatError> {
     let base = std::env::temp_dir();
     let pid = std::process::id();
     for n in 0..1000 {
-        let dir = base.join(format!(".guff-swaggo-{pid}-{n}"));
+        let dir = base.join(format!("guff-swaggo-{pid}-{n}"));
         match fs::create_dir(&dir) {
             Ok(()) => {
                 let name = go_file_name(filename);
@@ -156,7 +163,30 @@ mod tests {
         // Misaligned swag annotations should be realigned by `swag fmt`.
         let src = b"package main\n\n// @Summary   Add a new pet\n// @Description  add\n// @Success 200\nfunc handler() {}\n";
         let out = Swaggo::new().format("api.go", src).expect("swag fmt");
-        assert!(!out.is_empty());
-        assert!(String::from_utf8_lossy(&out).contains("@Summary"));
+
+        // The old version of this test asserted only that the output was
+        // non-empty and still contained "@Summary" — both of which a formatter
+        // that returns its input unchanged satisfies. It did exactly that for
+        // as long as it existed: the staging directory was named
+        // `.guff-swaggo-*`, and `swag fmt` skips any directory whose name
+        // starts with a dot. Assert the realignment itself.
+        assert_ne!(out, src, "swag fmt returned the input unchanged");
+        let text = String::from_utf8_lossy(&out);
+        assert!(
+            text.contains("// @Summary\t"),
+            "annotations should be tab-aligned:\n{text}"
+        );
+    }
+
+    #[test]
+    fn staging_dir_is_not_hidden() {
+        // `swag fmt` walks with `walkWith`, which returns SkipDir for any
+        // directory whose name begins with '.' (and for `vendor` / `docs`).
+        let (dir, _staged) = stage_dir("api.go", b"package main\n").expect("stage");
+        let _guard = DirGuard(dir.clone());
+        let name = dir.file_name().unwrap().to_string_lossy().to_string();
+        assert!(!name.starts_with('.'), "staging dir is hidden: {name}");
+        assert_ne!(name, "vendor");
+        assert_ne!(name, "docs");
     }
 }

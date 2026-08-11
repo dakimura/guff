@@ -3194,6 +3194,103 @@ golangci はどちらも短縮形を持ち、`guff fmt` の側には既に `-E` 
 
 ---
 
+### 2026-08-11（5 本目）— `swaggo` は「載せていない」のではなく**死んでいた**。台帳の `never` が §6 と一致した
+
+**やったこと**
+
+3 本目・4 本目が「版がピンできないので保留」と書いた `swaggo`。
+調べたら**ピンできる**うえに、**guff の formatter が一度も動いていなかった**。
+
+#### 1. 版は readme に書いてある
+
+golangci が使う `github.com/golangci/swaggoswag` は `swaggo/swag` の hard fork で、
+readme が同期元のコミットを名指ししている:
+
+```
+- sync with 93e86851e9f22f1f2db57812cf71fc004c02159c (after v1.16.4)
+```
+
+CI にはこれをピンした（`go install github.com/swaggo/swag/cmd/swag@93e86851e9f2…`）。
+guff は CLI に shell out し、golangci はライブラリをリンクするので、
+**版がずれた瞬間に整形結果が割れて偽の diff になる**。
+
+#### 2. `swag fmt` は**ドットで始まるディレクトリを飛ばす**
+
+ピンした CLI を PATH に置いても guff は 0 件。切り分けると、
+guff は `$TMPDIR/.guff-swaggo-<pid>-<n>` に 1 ファイルだけ置いて
+`swag fmt -d <dir>` を呼ぶのだが、上流の `walkWith` が
+
+```go
+len(f.Name()) > 1 && f.Name()[0] == '.' && f.Name() != ".."  // exclude all hidden folder
+```
+
+で `filepath.SkipDir` を返す（`vendor` と `docs` も同様）。
+**staging ディレクトリごと飛ばされ、入力がそのまま返ってきていた。**
+先頭のドットを外すだけで直る。
+
+**この formatter は実装された日から一度も整形していない。** 台帳が
+`swaggo` を `never` にしていたのは「corpus が使っていないから」ではなく、
+**動いていなかったから**だった。
+
+#### 3. 単体テストは「何かした」しか見ていなかった
+
+`formats_swag_comments` は
+
+```rust
+assert!(!out.is_empty());
+assert!(String::from_utf8_lossy(&out).contains("@Summary"));
+```
+
+—— **入力をそのまま返す formatter が両方とも満たす**。§1 が名指ししている形そのもの。
+`assert_ne!(out, src)` と「タブで整列されていること」に変え、
+staging ディレクトリが hidden でないことを直接見るテストを足した。
+
+**結果**
+
+- isolate **116 target**（`swaggo` を新設、1/1 一致）。
+- 台帳: `fired` 542 → **543（99.3%）**、`never` **4 → 3**。
+  **`never` の 3 件は §6 の恒久組そのもので、「まだ載せていない」check は無くなった。**
+  `unit-only` の 1 件は `multiline-if-init`（pin した revive に存在しない）。
+- `cargo test --workspace` **3,015 件緑**（+1: staging ディレクトリが hidden で
+  ないことを直接見るテスト。整形テストの方は強化しただけで件数は増えていない）。
+  なお整形テストは `swag` が PATH に無ければスキップする ——
+  **CI の `tests` ジョブには入れていない**ので、そちらでは実質スキップになる。
+  実際に守っているのは isolate の `swaggo` target で、あちらは PATH にピン版を置く。
+- golden 12 ケース、OSS 8 すべて据え置き。regress tsdb **PASS**（0.760s）、
+  full **PASS**（2.410s）。
+
+#### 4. 計測の余談 —— このホストの wall には太い裾がある
+
+本セッション（1〜5 本目）で regress を 15 回以上回した結果として記録しておく。
+**同じバイナリ・同じ load でも、10 回に 1 回くらい中央値の +20〜25% が出る。**
+実測（すべて本セッション、コード変更なしの反復）:
+
+| profile | `--skip-golangci` を 3 回 | 公式ゲートの外れ値 |
+|---|---|---|
+| tsdb（限界 0.880s） | 0.760 / 0.760 / 0.770 | **0.940** が 3 回、直後の再実行は 0.760 / 0.760 |
+| full（限界 2.510s） | 2.430 / 2.430 / 2.460 | **2.640** が 3 回、静かにしてから 2.360 / 2.420 |
+
+**外れ値かどうかは A/B でしか判定できない。** 本セッションでは 3 回 A/B を取り、
+3 回とも差は 0.00〜0.02s だった。`--skip-golangci` は 1 分弱で回るので、
+**赤を見たらまず HEAD と交互に 3 回**というのが一番早い。
+限界は tsdb が baseline + 0.150s（+20%）、full が +0.150s（**+6%**）で、
+**full の余裕はこのホストの裾より狭い**。
+
+**次にやること**
+
+1. gosec の DEFERRED を golden に載せていく: G304 / G305 / G307 / G601 / G115 など
+   未実装分と、G402 の MinVersion / CipherSuites、G104 audit モード。
+2. **SA9008 の IR 検証** / **SA5011 の σ 相当**（§7）。consul の allowlist 3 件がこれ。
+3. govet の未実装 16 pass。
+4. **`add-constant` が config を一切読まない**。Phase 4 の材料。
+5. **guff は typecheck エラーを finding として出さない**（2 本目の 7）。
+6. `staticcheck-s` の残り 2 件（SA4006 ×2）。これで `staticcheck-s` は 0/0。
+7. **台帳は 99.3% で頭打ちになった。次に測るべきは「発火したか」ではなく
+   「何件比較しているか」** —— §1 の isolate 178 findings という数字は
+   golden 12 ケースが増えた今も更新していない。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -3235,12 +3332,17 @@ golangci はどちらも短縮形を持ち、`guff fmt` の側には既に `-E` 
 
 ゴールデンでも OSS でも原理的に捕まえられないもの。「未着手」ではなく「不可能」として記録する。
 
+**2026-08-11（5 本目）以降、`docs/COVERAGE.md` の `never` はこの表と一致する。**
+「まだ載せていない」check はもう無い。ここに 1 行足すときは、
+**上流に食わせて 0 件であることを実測してから**書くこと ——
+`govet/framepointer` の行は「GOARCH がホスト依存だから」という**推測**のまま
+1 セッション残り、実測したら理由が違っていた。
+
 | check | 理由 |
 |-------|------|
 | `gocritic/whyNoLint` | 説明のない `//nolint` を報告する checker だが、その `//nolint` 自身が同じ行の findings を抑止するため、golangci-lint の出力に現れない（上流に食わせても 0 件）。単体テストでのみ検証可能。 |
 | `govet/framepointer` | **golangci-lint は `.s` ファイルの診断を 1 件も出さない**。同じ fixture に `go vet` を食わせると framepointer 2 件 + asmdecl 4 件が出るのに、golangci-lint 2.12.2 は 0 件（`GOARCH` を合わせても、ホスト arch のままでも同じ）。**この行の以前の理由（GOARCH がホスト依存だから）は誤り**で、ケース単位の環境変数を入れても解けない — その仕組み自体は 2026-08-11（2 本目）で入れてあり、`SA1027` はそれで回収できた。単体テストでのみ検証可能。 |
 | `govet/cgocall` | `import "C"` を含むファイルが要る。cgo と C コンパイラを CI ゲートの前提にしたくない。単体テストでのみ検証可能。 |
-| ~~`golines`~~ / `swaggo` | `golines` は 2026-08-11（3 本目）で isolate に載った（`make_config.py` に `formatters:` テンプレートを追加）。`swaggo` は `swag` CLI が要り、golangci が使う `github.com/golangci/swaggoswag` に対応する CLI 版が特定できていないので保留 —— 版がずれると整形結果が割れて偽の diff になる。 |
 
 ### 意図的な非互換: revive の importer 盲目には追従しない `[決定 2026-08-10]`
 
