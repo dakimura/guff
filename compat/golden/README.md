@@ -106,6 +106,33 @@ later line of a block comment (upstream reports the `/*`) were both wrong.
 godox had been "fixed" on caddy in 2026-08, but the OSS tier's key contains no
 column, so its position had never actually been compared.
 
+### One case exists for what a parenthesis means (Phase 6)
+
+`parens` is not about a check either — it is about the fact that the four
+linters in it navigate the AST differently, so the same redundant `()` is
+transparent to some and opaque to others:
+
+| Upstream | How it navigates | A `ParenExpr` is |
+|----------|------------------|------------------|
+| revive (`errorf`, `range-val-address`) | `arg.(*ast.CallExpr)`, `switch e := exp.(type)` | opaque — the rule goes silent |
+| honnef S1008 | `pattern.match`, which unwraps on both sides | transparent, and the message renders it unwrapped |
+| honnef QF1003 | `astutil.Equal`, which opens with `reflect.TypeOf` | opaque — breaks the if/else chain |
+| govet `assign` | `reflect.TypeOf(lhs) == reflect.TypeOf(rhs)` | opaque — not a self-assignment |
+
+guff had it backwards in *both* directions at once, which is why the case pairs
+every parenthesized function with an unparenthesized control: the golden has to
+record both that the paren form is silent and that the plain form still fires,
+or a fix that simply stops reporting everything would pass.
+
+The same fixture pins the other thing that changes a finding without changing
+the program — a comment. `S1008CommentBefore` and `S1008CommentInside` are
+silent upstream (`ast.CommentMap`), and were the ninth instance of "the analysis
+AST has no comments" in COMPAT-HARDENING §4.
+
+Every shape in it was produced by [`../fuzz.py`](../fuzz.py) rather than
+written by hand, and its `go.mod` says `go 1.21` because `range-val-address`
+returns early for go1.22+.
+
 ### One fixture, several configs (Phase 4)
 
 Sixty-five of the cases are not about a check at all: they are about what a

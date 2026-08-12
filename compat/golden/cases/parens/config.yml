@@ -1,0 +1,36 @@
+# Golden case: parentheses and comments (COMPAT-HARDENING Phase 6).
+#
+# The four linters here disagree with each other about whether a ParenExpr is
+# transparent, and guff had it backwards for three of them. The fixture's
+# comment explains which is which; this config just turns on the checks whose
+# behaviour changed.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - revive
+    - staticcheck
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - assign
+        - shift
+    revive:
+      rules:
+        - name: errorf
+        - name: range-val-address
+    staticcheck:
+      checks:
+        - S1008
+        - QF1003
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

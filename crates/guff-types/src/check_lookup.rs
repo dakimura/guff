@@ -404,9 +404,32 @@ impl Checker {
         }
     }
 
+    /// Resolve `v`'s method signatures and, if `v` is a generic instance,
+    /// substitute them — everything the free functions below need in place
+    /// before they can compare a method set.
+    ///
+    /// Go needs no such step: `Named.Method(i)` expands lazily, so every reader
+    /// of a method set gets substituted signatures whoever asks first. guff
+    /// expands eagerly at a call site, which means **every** entry point into an
+    /// interface-satisfaction check has to do it. `assignable_to` did; the
+    /// assertion path did not, so `x.(S[T])` compared the *origin's* `add` (bound
+    /// to `S`'s own `T`) against the interface's substituted one and called the
+    /// assertion impossible. Both print as `func(item T, priority int)`, which is
+    /// why the resulting error names the same type on both sides of "does not
+    /// implement". Found by reducing controller-runtime's priorityqueue
+    /// (COMPAT-HARDENING Phase 6).
+    ///
+    /// Resolution comes first: `expand_instance_methods` copies the origin's
+    /// signatures and then refuses to run twice, so expanding before the origin
+    /// is resolved would bake unresolved signatures into the instance for good.
+    fn prepare_method_set(&mut self, v: TypeId) {
+        self.ensure_method_sigs(v);
+        self.expand_instance_methods(v);
+    }
+
     /// See the free [`missing_method`].
     pub fn missing_method(&mut self, v: TypeId, t: TypeId, static_: bool) -> Option<MissingMethod> {
-        self.ensure_method_sigs(v);
+        self.prepare_method_set(v);
         missing_method(
             &mut self.types,
             &self.objects,
@@ -419,7 +442,7 @@ impl Checker {
 
     /// See the free [`implements`].
     pub fn implements(&mut self, v: TypeId, t: TypeId, constraint: bool) -> Result<(), String> {
-        self.ensure_method_sigs(v);
+        self.prepare_method_set(v);
         implements(
             &mut self.types,
             &self.objects,
@@ -446,7 +469,7 @@ impl Checker {
         if !is_valid(&self.types, v) {
             return Ok(());
         }
-        self.ensure_method_sigs(v);
+        self.prepare_method_set(v);
         match missing_method(
             &mut self.types,
             &self.objects,

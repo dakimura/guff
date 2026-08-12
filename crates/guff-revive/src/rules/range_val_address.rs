@@ -8,7 +8,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{go_version_at_least, type_string, unparen};
+use crate::util::{go_version_at_least, type_string};
 
 /// Upstream returns early for Go 1.22+ packages: from that release each
 /// iteration has its own copy of the range value, so its address differs.
@@ -43,7 +43,7 @@ impl<'a> Checker<'a> {
             let Some(value_expr) = range.value.as_ref() else {
                 return true;
             };
-            let Expr::Ident(value) = unparen(value_expr) else {
+            let Expr::Ident(value) = value_expr else {
                 return true;
             };
             let value_is_ptr = self
@@ -78,6 +78,14 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     c.into_failures()
 }
 
+// Every navigation below is a **plain type match, never `unparen`**, because
+// that is what upstream's `rangeBodyVisitor` does: `exp.(*ast.IndexExpr)`,
+// `switch e := exp.(type)`, `u.X.(*ast.Ident)`, `e.Fun.(*ast.Ident)`. A
+// `*ast.ParenExpr` satisfies none of them, so `out = (append(out, &v))` is a
+// shape upstream stays silent on. guff unparenthesized at eight of these points
+// and reported it. Adding `unparen` back "for robustness" reintroduces the
+// false positive — the parentheses are load-bearing for compatibility.
+// (compat/fuzz.py, COMPAT-HARDENING Phase 6.)
 fn inspect_range_body(
     body: &guff::ast::BlockStmt,
     value: &Ident,
@@ -88,7 +96,7 @@ fn inspect_range_body(
         match n {
             Some(NodeRef::AssignStmt(assign)) => {
                 for lhs in &assign.lhs {
-                    if let Expr::IndexExpr(IndexExpr { index, .. }) = unparen(lhs) {
+                    if let Expr::IndexExpr(IndexExpr { index, .. }) = lhs {
                         if is_address_of_range_value(index, value, value_is_ptr) {
                             failures.push(make_failure(value, index));
                         }
@@ -109,10 +117,10 @@ fn check_addr_expr(expr: &Expr, value: &Ident, value_is_ptr: bool, failures: &mu
         failures.push(make_failure(value, expr));
         return;
     }
-    match unparen(expr) {
+    match expr {
         Expr::CallExpr(call) if is_append(call) => {
             for arg in &call.args {
-                if let Expr::CompositeLit(comp) = unparen(arg) {
+                if let Expr::CompositeLit(comp) = arg {
                     check_composite(comp, value, value_is_ptr, failures);
                 } else if is_address_of_range_value(arg, value, value_is_ptr) {
                     failures.push(make_failure(value, arg));
@@ -141,7 +149,7 @@ fn check_composite(
 }
 
 fn is_address_of_range_value(expr: &Expr, value: &Ident, value_is_ptr: bool) -> bool {
-    let Expr::UnaryExpr(UnaryExpr { op, x, .. }) = unparen(expr) else {
+    let Expr::UnaryExpr(UnaryExpr { op, x, .. }) = expr else {
         return false;
     };
     if *op != Token::AND {
@@ -151,20 +159,20 @@ fn is_address_of_range_value(expr: &Expr, value: &Ident, value_is_ptr: bool) -> 
 }
 
 fn refers_to_range_value(expr: &Expr, value: &Ident, value_is_ptr: bool) -> bool {
-    match unparen(expr) {
+    match expr {
         Expr::Ident(Ident { name, .. }) => name == &value.name,
         Expr::SelectorExpr(sel) => {
             if value_is_ptr {
                 return false;
             }
-            matches!(unparen(&sel.x), Expr::Ident(Ident { name, .. }) if name == &value.name)
+            matches!(&*sel.x, Expr::Ident(Ident { name, .. }) if name == &value.name)
         }
         _ => false,
     }
 }
 
 fn is_append(call: &CallExpr) -> bool {
-    matches!(unparen(&call.fun), Expr::Ident(Ident { name, .. }) if name == "append")
+    matches!(&*call.fun, Expr::Ident(Ident { name, .. }) if name == "append")
 }
 
 fn make_failure(value: &Ident, node: &Expr) -> Failure {

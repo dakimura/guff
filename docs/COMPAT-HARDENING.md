@@ -327,15 +327,53 @@ Phase 1 の ill-typed ゲートと golden の側にしかない。
 残る候補: tailscale（cgo + tags）、mattermost-server（規模）、
 gvisor（unsafe / asm）、kubernetes 全体。
 
-### Phase 6 — 差分ファジングと自動最小化 `[未着手]`
+### Phase 6 — 差分ファジングと自動最小化 `[両方とも実装済み 2026-08-12（13 本目）]`
 
 手書き fixture は「思いついた形」しか書けない。
 
-- **まず縮小器 `compat/reduce.py` だけ作る** — 差分が出たら delta-debugging で最小再現に自動縮小し、
-  そのまま `compat/golden/` の新 fixture に昇格させる。現在 `hunt.sh` の結果は人間が読む必要があり、
-  ここが調査コストのボトルネック。
-- その後にミューテーション生成（識別子リネーム、文の並べ替え、括弧付与、型の明示/省略、
-  ループ形式変換、nolint 挿入）。
+- **縮小器 `compat/reduce.py`** — 差分（または ill-typed）を delta-debugging で最小再現に自動縮小する。
+- **ミューテーション生成 `compat/fuzz.py`** — golden fixture を変異させて 2 ツールの一致を問う。
+- 両方が使う **`compat/gospans`**（go/ast、stdlib のみ）が「消せる span」と「変えられる site」を出す。
+
+#### 縮小器の要は編集候補ではなく**不変条件**のほう
+
+編集候補が構文単位であること（宣言まるごと / インターフェースの 1 メソッド / 構造体の 1 フィールド /
+複合リテラルの 1 要素 / 関数本体を `panic("reduce")` に置換）は必要だが、それは
+「行ベースの縮小器が最初の括弧で詰まる」を避けるだけの話である。**本質は
+「実 Go ツールチェインが受理し続けること」を絶対の不変条件にした点**にある。
+
+これが無いと ill-typed の最小化は 4 手で破綻する: guff に
+`Manager has no field or method GetCache` と言わせる最短経路は
+**インターフェースから `GetCache` を消すこと**で、「まだ再現している」としか見ない縮小器は
+迷わずそれをやり、壊れたファイルの完璧な再現手順を出力する。不変条件を入れて初めて
+
+```
+go build（テストに出る形なら go vet）が受理する  かつ  guff がまだ誤る
+```
+
+＝ **guff のバグ**の最小再現になる。§7 が逆方向から辿り着いた
+「実 Go ツールチェインに一度も読ませていない fixture は、こうなる」と同じ規則である。
+
+`--build-cmd` が要るのは `go build` が `_test.go` を型検査しないため。
+pass 0 で `go list -deps -test` の依存閉包に刈り込むので、
+controller-runtime の 359 ファイルは**オラクル 1 回**で 9 に落ちる。
+
+#### ファザーは「findings を保存する」必要が無い
+
+ミューテーションの義務は**コンパイルが通ること 1 つだけ**。比較が
+「ミュータントに対する guff 対 golangci-lint」であって「ミュータント対オリジナル」ではないので、
+**findings が全部変わる変異も等しく有効なテスト**になる。意味保存の議論が要らないぶん
+変異は乱暴に書けて、正しさは Go ツールチェインが無料で保証する。
+
+現在の 6 種は、この codebase で最も戦績の悪い形を狙って選んである:
+`paren`（`x` → `(x)`）、`comment`（文の前にコメント行）、`nolint`（行末に `//nolint`）、
+`swap`（隣接する 2 文の入れ替え）、`varform`（`x := v` ⇄ `var x = v`）。
+**未実装**は識別子リネーム・型の明示/省略・ループ形式変換で、どれも型情報が要る。
+
+ratchet を持つ seed は既定でスキップする（既知差分が全ミュータントに乗って信号が埋もれる）。
+`--allow-dirty-seeds` で件数比較に切り替わる。
+
+見つけた形は golden の `cases/parens` に昇格させた（**81 ケース目**）。括弧つきの各関数に**括弧なしの対照**を並べてあるのが要で、「黙るべき側が黙る」と「撃つべき側が撃つ」を同時に固定しないと、**全部黙らせる修正が通ってしまう**。
 
 ### Phase 7 — 上流ドリフト検知 `[未着手]`
 
@@ -351,10 +389,10 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致 | 2026-08-12 |
 | 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は同じ穴が残っており、測って `#[ignore]` で記録した | 2026-08-12 |
-| 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
+| 6 | 縮小器 → 差分ファジング | 中 | **道具は両方完成** — `compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`。縮小器の実測: controller-runtime `priorityqueue` が **2.6 MB・349 ファイル → 2 KB・2 ファイル**（オラクル 775 回 / 107 秒）。ファザーの実測: 80 ケース・**864 ミュータント / 852 秒**で **36 件の不一致 = 9 バグ**（下記）。どちらも CI ゲートではなく**発見**の道具 | 2026-08-12 |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
 **現在の指標**（`docs/COVERAGE.md` / 2026-08-12、9 本目で再生成。台帳の数字は 7 本目から動かない
@@ -4689,6 +4727,188 @@ revive の `var-declaration`（型パラメータの変数に対する報告）�
    map / chan も同様に落ちる。`generic_ops.rs` に `#[ignore]` 付きで
    4 形を置いた（`coverage.py` の `#[ignore]` 走査に乗る）。
    `allX` と同じく**パッケージ丸ごと ill-typed** になる側なので、優先度は 1 と同格。
+
+---
+
+### 2026-08-12（13 本目）— Phase 6: 縮小器とファジングを作り、9 バグを出した
+
+**やったこと**
+
+Phase 6 の道具を両方作った。`compat/reduce.py`（delta debugging）、`compat/fuzz.py`
+（差分ファジング）、両者が使う `compat/gospans`（go/ast、stdlib のみ、`oracles/` と同じ作法）。
+設計上の要点は §2 の Phase 6 に書いた。**どちらも CI ゲートではない** —— ゲートは「劣化を止める」
+道具で、この 2 つは「まだ知らない差分を見つける」道具である。
+
+#### 0. 12 本目の「次にやること 2」は、縮小器が無いから止まっていた
+
+`manager.Manager has no field or method GetCache` 系の ill-typed 16 パッケージが
+「最小再現が取れておらず `compat/reduce.py` が先」で 2 セッション寝ていた。
+縮小器を作って最初に食わせたのがこれで、実測は **2.6 MB・349 ファイル → 2 KB・2 ファイル /
+オラクル 775 回 / 107 秒**。人間が読む対象が 700 ファイルから 20 行になる。
+
+#### 1. ジェネリック実体のメソッドが、型アサーションの経路で展開されていなかった `[縮小器]`
+
+縮小後に残ったのは 20 行で、標準ライブラリすら要らなかった:
+
+```go
+type I[T comparable] interface{ add(item T, priority int) }
+type S[T any] struct{}
+func (S[T]) add(item T, priority int) {}
+func New[T comparable]() {
+    var m I[T]
+    if _, ok := m.(S[T]); !ok { panic("no") }   // guff: impossible type assertion
+}
+```
+
+guff のエラー文が `queueMetrics[T] does not implement queueMetrics[T]`
+（**同じ型が同じ型を implement していない**）と読めるのが手がかりだった。
+`have` も `want` も `func(item T, priority int)` で、字面が同じで同一でない
+＝ 2 つの `T` が別の TypeParam である。
+
+原因は guff がメソッド集合を**遅延ではなく呼び出し側で**展開すること。Go は
+`Named.Method(i)` が遅延展開なので誰が最初に触っても置換済みが返るが、guff は
+`expand_instance_methods` を明示的に呼んだ経路だけが正しい。`assignable_to` は呼んでおり、
+`assertable_to` → `has_all_methods` は呼んでいなかった。したがって
+**「先に代入がある」と隠れる**（`var m I[T] = S[T]{}` を挟むと再現しない）——
+遅延完了バグの典型的な指紋である。`prepare_method_set` を
+`missing_method` / `implements` / `has_all_methods` の 3 つの入口に置いた。
+順序は「解決 → 展開」で固定してある（`expand_instance_methods` は 2 回目を拒むので、
+origin のシグネチャが未解決のまま展開すると未解決のものが**恒久的に**焼き付く）。
+
+controller-runtime の ill_typed は **16 → 15**。
+
+#### 2. `//nolint` がファイルを跨いで効いていた `[ファザー / 最初の 1 件]`
+
+`cases/errcheck-asserts` の `defaults/bad.go:9` に `//nolint` を足したら、
+**`assert/bad.go:9` の finding が消えた**。
+
+`NolintIndex` の鍵は絶対パス、issue が持つのは**モジュール相対パス**。したがって
+`resolve_key` の「basename が一致する最初の絶対パスを返す」フォールバックは
+例外経路ではなく**主経路**だった。Go のツリーは `doc.go` / `main.go` / `types.go` で
+埋まっているので、衝突は日常的に起きる。しかも症状は「消える」側なので、
+**出力にも stderr にも痕跡が残らない**。
+
+相対パス全体を接尾辞として一意に一致させる形に直し、曖昧なら**抑止しない**
+（抑止し損ねはユーザに見えるが、他ファイルの finding を消すのは誰にも見えない）。
+
+**そしてこの修正が gin を落とした。** OSS tier が
+`gin_test.go:49 gofumpt` の 1 件を extra として捕まえた ——
+フォーマッタは**`./` 付きのパス**（`./a.go`）でフィルタに来る（`./` が落ちるのは出力の直前で、
+フィルタより後）。接尾辞を生パスから作ると `/./a.go` を探すことになり、
+**そのファイルの抑止が全部死ぬ**。旧コードは basename まで削っていたので偶然無事だった。
+`./` を剥がしてから引くようにして両方緑にした。教訓は 2 つある:
+
+- **「入口のパス表現」は 1 つではない** —— 絶対・モジュール相対・`./` 付き・basename の
+  4 通りが同じ関数に来る。今回はそのうち 1 つしか見ていなかった。
+- **ゴールデンでは捕まらなかった。** golden の 81 ケースは全部緑のままで、
+  OSS tier だけが落ちた。ケースが `//nolint` とフォーマッタを同時に持っていないからで、
+  **実リポジトリを回すゲートを残しておく理由がこれである。**
+
+#### 3. govet `assign` / `shift` —— 上流の 4 条件のうち 3 つが無かった `[ファザー]`
+
+`x = (x)` を自己代入と報告したのが入口。上流を読むと guff に無い条件が 3 つあった:
+
+| 上流の条件 | guff | 症状 |
+|---|---|---|
+| `typesinternal.NoEffects(lhs)` / `(rhs)` | 無し | `a[f()] = a[f()]` を報告（消すと呼び出しが 2 つ消える） |
+| `reflect.TypeOf(lhs) == reflect.TypeOf(rhs)` | 無し | `x = (x)` を報告（後段の比較は go/printer 越しで括弧が消える） |
+| 名前は `analysisutil.Format(lhs)` | `id.name`、非 ident は `"_"` | `s.f = s.f` が `self-assignment of _` |
+
+同じ「描画」の欠陥が `shift` にもあり、そちらは**リテラル `"x"`** を使っていた ——
+`s.f << 10` も `a[0] << 10` も `(i) << 10` も全部「x (8 bits) too small」。
+`printf` が同じ罠を踏んで `describe_arg` で**局所的に**直していたので、
+共有ヘルパ `govet_util::format_expr` に引き上げた。この 6 件は 1 つの probe で全部出る。
+
+#### 4. 括弧の方針は linter ごとに違う —— しかも**両方向**に間違えていた `[ファザー]`
+
+`paren` 変異が出した差分を追うと、guff は**片方で剥がしすぎ、もう片方で剥がさなすぎ**だった。
+
+| 上流 | 方針 | guff の誤り |
+|---|---|---|
+| revive（`errorf` / `range-val-address`） | `exp.(*ast.CallExpr)` 等の**素の型アサーション**＝ 決して剥がさない | 10 箇所で `unparen` していた → `errors.New((fmt.Sprintf(…)))` と `out = (append(out, &v))` で誤検出 |
+| honnef の `pattern.match`（S1008） | `case *ast.ParenExpr: return match(m, l.X, r)` ＝ **両側で常に剥がす** | 剥がしていなかった → `return (true)` で黙り、`if (b == true)` の描画に括弧が残る |
+| honnef の `astutil.Equal`（QF1003） | `reflect.TypeOf` で始まる＝**剥がさない** | 剥がしていた → `else if (x) == 3` を tagged switch の連鎖に数えた |
+
+**同じ上流プロジェクトの中でも matcher ごとに違う**（honnef はパターン式では剥がし、
+構造比較では剥がさない）。したがって「一般に unparen するのが親切」は成り立たず、
+**呼んでいる上流の matcher を毎回読むしかない**。3 箇所とも、
+その理由をコード中のコメントに残した（「robustness のために足し戻すと誤検出が戻る」）。
+
+#### 5. 「解析 AST にコメントが無い」の **9 例目**、そして初めて人間以外が見つけた `[ファザー]`
+
+`comment` 変異と `nolint` 変異（どちらも結局コメントの挿入）で S1008 が誤検出になった。
+上流 S1008 は `ast.NewCommentMap` を張って
+「どちらかの枝にコメントがあれば報告しない」を持つ。**guff はそのガードを移植済みだった**
+—— `file.comments` が常に空なので、常に「無い」と答えていただけである。
+
+§4 はこの根本原因を buildtag / directive / comments-density / comment-spacings ほかで
+**8 回、別々のバグとして**診断している。9 例目。既存の作法どおり `PARSE_COMMENTS` で
+再パースし、位置を `pass.fset()` に写像した。写像が要るのは、コメントマップが
+**張られた木のノード同一性**で引くから —— 解析 AST の上に張らないと `filter` が何も見つけない。
+
+#### 6. ファザーが副産物で見つけたもの: **golden fixture が Go に受理されない**
+
+`compat/golden/cases/revive` は `go build` が 4 件のエラーで落ちる
+（`import "os"` が 2 回、未使用 import 2 件）。これは**互換性のバグではない** ——
+golangci-lint も 288 件の revive findings を出すだけで typecheck エラーを 1 件も出さず、
+guff も ill-typed と言わない。**2 ツールは一致している。**
+
+が、§7 が「実 Go ツールチェインに一度も読ませていない fixture は、こうなる」と書いた
+条件そのものであり、実害として **99 rule / 288 findings を持つ最も濃い fixture を
+ファザーが 1 回も回せない**。次にやること 4。
+
+他の 3 件（`staticcheck-sa` / `-s` / `-go114`）はファザー側の欠陥だった:
+`go build ./...` は `package main` を**リンク**するので、`func main` を書いていない
+fixture が「ビルドできない」と誤判定されていた。リンクエラーだけの失敗は
+型検査が通っている証拠なので通すようにした（確認: `--case staticcheck-go114 -n 5` が
+`rejected-by-build 0` で 5 ミュータント回る。以前は 100% スキップ）。
+これで `staticcheck-sa` の 160 check が `--allow-dirty-seeds` の射程に入る。
+
+**ゲート**
+
+- `cargo test --workspace` — **3065 passed / 0 failed**（回帰テストを 3 本追加:
+  `generic_ops.rs` の `type_assertion_sees_instantiated_method_set`、
+  `nolint.rs` の `nolint_does_not_leak_to_a_same_named_file_in_another_dir` と
+  `dot_slash_prefixed_issue_path_still_resolves`）
+- `python3 -m unittest discover -s compat/tests` — **75 passed**（`test_reduce.py` を新設。
+  縮小器の編集代数と 2 つの探索ループ —— ここが狂うと**再現しない再現手順**が出る）
+- `./compat/filesets.sh --tier pr,nightly` — 8 ターゲット一致
+- `./corpus/shapes.py check --offline` — 必須 10 形
+- `./compat/golden/run.sh` — **81 ケース**緑（`cases/parens` を新設。ratchet 据え置き: `staticcheck-sa` missing 5 / extra 7、
+  `staticcheck-s` missing 2、`staticcheck-st` missing 10、`staticcheck-qf` missing 1、
+  `revive` missing 1 / extra 4、`errcheck-verbose` 1/1）
+- `./compat/run.sh --isolate` — 116 ターゲット緑
+- `./compat/run.sh --oss --tier pr,nightly` — 10 ターゲット緑
+  （**1 周目は gin が赤**だった。上の 2 を参照）
+- `compat/fuzz.py` の 36 件の不一致 — **36/36 が解消**（同じミュータントを再実行して確認）
+
+**次にやること**
+
+1. **残りの ill-typed クラス**。controller-runtime は 16 → 15 になっただけで、
+   本丸の `manager.Manager`（埋め込み `cluster.Cluster` のメソッドが 1 つも見えない、63 件）と
+   `cannot infer type arguments in call`（24 件）が残っている。前者には**単独の手がかり**がある:
+   **`./pkg/metrics/filters/...` だけを解析すると再現せず、`./pkg/...` だと再現する**
+   （決定的。3 回とも同数）。つまり**ルート集合に何が入っているかで型検査結果が変わる**。
+   縮小は 2.5 時間走らせて 349 → 155 ファイルまで来たところで**打ち切った**
+   （ゲートに CPU を回すため。結果は保存していない）。`./pkg/...` がオラクルなので
+   1 回 1.5 秒 × ddmin の試行回数がそのまま効く。再開コマンド:
+   ```
+   python3 compat/reduce.py --dir corpus/cache/controller-runtime \
+     --config corpus/cache/controller-runtime/.golangci.yml \
+     --packages ./pkg/... --build-cmd 'go vet ./pkg/...' \
+     --guff-stderr 'has no field or method Get' -o /tmp/reduced-mgr
+   ```
+2. **ファザーを回し続ける**。今回は 1 seed・1 変異/ミュータント・12 ミュータント/ケースの
+   1 周だけである。`--seed` を変える、`--mutations 2` にする、`--allow-dirty-seeds` で
+   ratchet 付き seed（staticcheck-sa の 160 check を含む）に当てる、のどれもまだ空白。
+   CI に載せるかは、1 周 852 秒（うち golangci-lint が 647 秒）をどう扱うか次第。
+3. **変異の追加**: 識別子リネーム、型の明示/省略、ループ形式変換。どれも型情報が要るので
+   `gospans` を go/types 込みにするか、Rust 側に置くかの判断が先。
+4. **`cases/revive` を Go が受理する形に割る**（上の 6）。意図的に壊してある宣言
+   （二重 import・未使用 import）を専用パッケージに隔離すれば、残りをファジングできる。
+5. 12 本目からの持ち越しがそのまま残っている: インターフェースメソッドのレシーバ（§7）、
+   `range` / 送受信の `commonUnder`、config の validate、gosec G304 / G407、
+   §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
 
 ---
 

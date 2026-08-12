@@ -5,7 +5,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{is_pkg_dot_name, type_of, unparen};
+use crate::util::{is_pkg_dot_name, type_of};
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -51,14 +51,31 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     let is_errors_new = is_pkg_dot_name(&call.fun, "errors", "New");
     let mut prefix = "fmt".to_string();
     let mut render_target = "errors.New".to_string();
-    let is_testing_error = if let Expr::SelectorExpr(sel) = unparen(&call.fun) {
+    // Plain matches, not `unparen`: upstream writes `ce.Fun.(*ast.SelectorExpr)`
+    // and `arg.(*ast.CallExpr)`, so `errors.New((fmt.Sprintf(…)))` is a shape it
+    // stays silent on. See the note in range_val_address.rs — same class, found
+    // the same way (compat/fuzz.py, COMPAT-HARDENING Phase 6).
+    let is_testing_error = if let Expr::SelectorExpr(sel) = &*call.fun {
         if sel.sel.name == "Error" {
             if let Some(typ) = type_of(pass, &sel.x) {
                 let s = crate::util::type_string(pass, typ);
                 if s == "*testing.T" {
-                    prefix = match unparen(&sel.x) {
-                        Expr::Ident(id) => id.name.clone(),
-                        _ => "t".into(),
+                    // Upstream: `w.file.Render(se.X)` — the source text, not
+                    // the identifier, so a receiver that is not a bare name
+                    // still renders as written instead of the fixed word "t".
+                    prefix = {
+                        let mut buf: Vec<u8> = Vec::new();
+                        match guff::printer::fprint(
+                            &mut buf,
+                            pass.fset(),
+                            guff::printer::PrintNode::Expr(&sel.x),
+                        )
+                        .ok()
+                        .and_then(|_| String::from_utf8(buf).ok())
+                        {
+                            Some(text) => text,
+                            None => "t".into(),
+                        }
                     };
                     render_target = format!("{prefix}.Error");
                     true
@@ -77,7 +94,7 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     if !is_errors_new && !is_testing_error {
         return;
     }
-    let Expr::CallExpr(inner) = unparen(&call.args[0]) else {
+    let Expr::CallExpr(inner) = &call.args[0] else {
         return;
     };
     if !is_pkg_dot_name(&inner.fun, "fmt", "Sprintf") {

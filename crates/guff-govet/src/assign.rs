@@ -12,7 +12,8 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::TypeData;
 
-use crate::expreq::{expr_equal, unparen};
+use crate::expreq::{expr_equal, same_node_kind, unparen};
+use crate::govet_util::{format_expr, no_effects};
 
 fn is_map_index(pass: &Pass<'_>, e: &Expr) -> bool {
     let Expr::IndexExpr(IndexExpr { x, .. }) = unparen(e) else {
@@ -46,17 +47,24 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let mut exprs = Vec::new();
         for (l, r) in lhs.iter().zip(rhs) {
+            // Upstream's guard is a conjunction of four tests, and guff had
+            // only the map one. `NoEffects` keeps `a[f()] = a[f()]` out (the
+            // suggested fix would delete two calls), and the node-kind test
+            // keeps `x = (x)` out (the text comparison below runs through
+            // go/printer, which erases the parentheses).
+            if !no_effects(pass, l) || !no_effects(pass, r) {
+                continue;
+            }
             if is_map_index(pass, l) {
                 continue;
             }
-            if !expr_equal(l, r) {
+            if !same_node_kind(l, r) || !expr_equal(l, r) {
                 continue;
             }
-            if let Expr::Ident(id) = unparen(l) {
-                exprs.push(id.name.clone());
-            } else {
-                exprs.push("_".to_string());
-            }
+            // Upstream names the operand with `analysisutil.Format(lhs)`, not
+            // with the identifier: `s.f = s.f` reports "self-assignment of s.f".
+            // guff printed "_" for everything that was not a bare ident.
+            exprs.push(format_expr(pass, l));
         }
         if exprs.is_empty() {
             return;

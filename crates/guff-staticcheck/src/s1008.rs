@@ -4,9 +4,11 @@
 
 use std::sync::OnceLock;
 
-use guff::ast::{BinaryExpr, BlockStmt, Expr, IfStmt, ReturnStmt, Stmt};
+use guff::ast::{BinaryExpr, BlockStmt, Comment, CommentGroup, Expr, IfStmt, ReturnStmt, Stmt};
 use guff::ast::is_generated;
 use guff::commentmap::{new_comment_map, CommentMap};
+use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::position::FileSet;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
@@ -17,6 +19,26 @@ use guff_constant::{int64_val, Kind};
 
 use crate::render::render_expr;
 
+/// honnef's `pattern.match` unwraps `*ast.ParenExpr` on **both** sides before
+/// comparing, so every metavariable a pattern binds is bound to the unwrapped
+/// node. For S1008 that shows up three times over: `if (b == true)` still
+/// reaches the operator switch (`cond` is the `BinaryExpr`, not the paren),
+/// `return (true)` still matches `(Builtin (Or "true" "false"))`, and the
+/// rendered message says `b == true` rather than `(b == true)`.
+///
+/// This is the exact opposite of the revive rules in the same session, where
+/// upstream uses plain type assertions and guff had to *stop* unwrapping. The
+/// policy is per-linter and has to be read off the upstream matcher each time:
+/// honnef is pattern-based and always unwraps, revive asserts and never does.
+/// (compat/fuzz.py, COMPAT-HARDENING Phase 6.)
+fn unparen(e: &Expr) -> &Expr {
+    let mut cur = e;
+    while let Expr::ParenExpr(p) = cur {
+        cur = &p.x;
+    }
+    cur
+}
+
 fn is_comparison_if_cond(cond: &Expr) -> bool {
     let Expr::BinaryExpr(BinaryExpr { op, .. }) = cond else {
         return true;
@@ -25,6 +47,84 @@ fn is_comparison_if_cond(cond: &Expr) -> bool {
         *op,
         Token::EQL | Token::LSS | Token::GTR | Token::NEQ | Token::LEQ | Token::GEQ
     )
+}
+
+/// The file's comments, with positions in `pass.fset()`.
+///
+/// `file.comments` on the analysis AST is **empty for anything below the file
+/// header**: the shared load runs the parser without `PARSE_COMMENTS`, so a
+/// comment inside a function body is not in the tree at all. S1008 has always
+/// had the `hasComments` guard upstream requires — it just always answered
+/// "no", so every one of these was reported and upstream reports none:
+///
+/// ```go
+/// if 1 == x { return true }
+/// // any comment here
+/// return false
+/// ```
+///
+/// COMPAT-HARDENING §4 records this same root cause diagnosed separately for
+/// buildtag, directive, comments-density, comment-spacings and four others;
+/// this is the ninth, and the first one a fuzzer found rather than a human
+/// (`compat/fuzz.py`, Phase 6).
+///
+/// The reparse gets its own `FileSet`, so every position has to be mapped back
+/// before the comments can be matched against analysis-AST nodes — the comment
+/// map keys on node identity in the tree it was built over, which must be the
+/// analysis tree for `filter` to find anything.
+fn comments_with_positions(pass: &Pass<'_>, file: &guff::ast::File) -> Vec<CommentGroup> {
+    // The analysis FileSet may name a file by full path or by basename
+    // depending on how it was loaded, so compare on the basename of both.
+    let Some(fname) = pass.fset().file(file.pos()).map(|f| f.name().to_string()) else {
+        return Vec::new();
+    };
+    let base = std::path::Path::new(&fname)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fname.as_str())
+        .to_string();
+    let Some(path) = pass
+        .pkg()
+        .compiled_go_files
+        .iter()
+        .find(|p| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
+    else {
+        return Vec::new();
+    };
+    let Ok(src) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let rfset = FileSet::new();
+    let Ok(rfile) = parse_file(&rfset, name, &src, PARSE_COMMENTS) else {
+        return Vec::new();
+    };
+    let Some(to) = pass.fset().file(file.pos()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(rfile.comments.len());
+    for group in &rfile.comments {
+        let mut list = Vec::with_capacity(group.list.len());
+        for c in &group.list {
+            let Some(from) = rfset.file(c.slash) else {
+                continue;
+            };
+            let offset = from.offset(c.slash);
+            if offset < 0 || offset > to.size() {
+                continue;
+            }
+            list.push(Comment {
+                slash: to.pos(offset),
+                text: c.text.clone(),
+            });
+        }
+        if !list.is_empty() {
+            out.push(CommentGroup { list });
+        }
+    }
+    out
 }
 
 fn has_comments(cm: &CommentMap<'_>, n: NodeRef<'_>) -> bool {
@@ -137,10 +237,10 @@ fn check_if_return(
     if ret1.results.len() != 1 || ret2.results.len() != 1 {
         return None;
     }
-    let Expr::Ident(id1) = &ret1.results[0] else {
+    let Expr::Ident(id1) = unparen(&ret1.results[0]) else {
         return None;
     };
-    let Expr::Ident(id2) = &ret2.results[0] else {
+    let Expr::Ident(id2) = unparen(&ret2.results[0]) else {
         return None;
     };
     let val1 = predeclared_bool_ident(pass, id1)?;
@@ -148,7 +248,7 @@ fn check_if_return(
     if val1 == val2 {
         return None;
     }
-    if !is_comparison_if_cond(&if_.cond) {
+    if !is_comparison_if_cond(unparen(&if_.cond)) {
         return None;
     }
 
@@ -158,7 +258,7 @@ fn check_if_return(
         return None;
     }
 
-    let orig_cond = &if_.cond;
+    let orig_cond = unparen(&if_.cond);
     let cond = if val1 {
         orig_cond.clone()
     } else {
@@ -203,10 +303,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if is_generated(file) {
                 continue;
             }
+            let reparsed = comments_with_positions(pass, file);
             let cm = new_comment_map(
                 pass.fset(),
                 guff::walk::NodeRef::File(file),
-                &file.comments,
+                &reparsed,
             );
             inspect.preorder_typed(node_mask!(BlockStmt), std::slice::from_ref(file), |n| {
                 let NodeRef::BlockStmt(block) = n else {

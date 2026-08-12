@@ -14,6 +14,19 @@ pub fn unparen<'a>(e: &'a Expr) -> &'a Expr {
     cur
 }
 
+/// Are these two expressions the same *kind* of AST node?
+///
+/// Upstream `assign` calls this out as a short-circuit in front of its
+/// source-text comparison —
+/// `reflect.TypeOf(lhs) == reflect.TypeOf(rhs) // short-circuit the
+/// heavy-weight gofmt check` — but it is not only an optimization, because the
+/// text comparison that follows renders through `go/printer`, which drops
+/// redundant parentheses. Skip the kind test and `x = (x)` becomes a
+/// self-assignment upstream never reports.
+pub fn same_node_kind(a: &Expr, b: &Expr) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
+}
+
 pub fn expr_equal(a: &Expr, b: &Expr) -> bool {
     match (unparen(a), unparen(b)) {
         (Expr::Ident(Ident { name: na, .. }), Expr::Ident(Ident { name: nb, .. })) => na == nb,

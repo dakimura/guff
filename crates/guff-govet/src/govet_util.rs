@@ -152,6 +152,111 @@ pub fn is_builtin_named(pass: &Pass<'_>, expr: &Expr, name: &str) -> bool {
     }
 }
 
+/// Render an expression the way upstream diagnostics do.
+///
+/// Every `x/tools` pass that names an expression in its message builds the
+/// string with `analysisutil.Format`, i.e. `go/printer` over the real fileset.
+/// Matching a couple of node kinds and using a fixed word for the rest reads as
+/// harmless and is not: `shift` used the literal `"x"`, so **every** shift whose
+/// operand was not a bare identifier reported the letter x — `s.f << 10` and
+/// `a[0] << 10` and `(i) << 10` all rendered identically, and none of them
+/// matched upstream. `printf` had already hit this and fixed it locally
+/// (`describe_arg`); this is that fix, shared.
+pub fn format_expr(pass: &Pass<'_>, expr: &Expr) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    if guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).is_ok() {
+        if let Ok(text) = String::from_utf8(buf) {
+            return text;
+        }
+    }
+    // Only reached if the printer or UTF-8 conversion fails.
+    match expr {
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::Ident(id) => id.name.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Port of `typesinternal.NoEffects`: can this expression be evaluated without
+/// observable side effects?
+///
+/// Upstream `assign` consults it before calling `x = x` a self-assignment, so
+/// `a[f()] = a[f()]` is left alone — the two calls are two separate calls, and
+/// deleting the statement would delete them. guff had no equivalent and
+/// reported it.
+pub fn no_effects(pass: &Pass<'_>, expr: &Expr) -> bool {
+    use guff::walk::{inspect, NodeRef};
+
+    let mut ok = true;
+    inspect(guff::walk::expr_ref(expr), |n| {
+        let Some(n) = n else {
+            return true; // post-order visit
+        };
+        match n {
+            NodeRef::Ident(_)
+            | NodeRef::BasicLit(_)
+            | NodeRef::BinaryExpr(_)
+            | NodeRef::ParenExpr(_)
+            | NodeRef::SelectorExpr(_)
+            | NodeRef::IndexExpr(_)
+            | NodeRef::IndexListExpr(_)
+            | NodeRef::SliceExpr(_)
+            | NodeRef::TypeAssertExpr(_)
+            | NodeRef::StarExpr(_)
+            | NodeRef::CompositeLit(_)
+            | NodeRef::KeyValueExpr(_)
+            | NodeRef::FieldList(_)
+            | NodeRef::Field(_)
+            | NodeRef::Ellipsis(_) => {}
+
+            // Type syntax: no effects, and no need to descend.
+            NodeRef::ArrayType(_)
+            | NodeRef::StructType(_)
+            | NodeRef::ChanType(_)
+            | NodeRef::FuncType(_)
+            | NodeRef::MapType(_)
+            | NodeRef::InterfaceType(_) => return false,
+
+            // A receive `<-ch` has an effect; the other unary operators do not.
+            NodeRef::UnaryExpr(u) => {
+                if u.op == Token::ARROW {
+                    ok = false;
+                }
+            }
+
+            // A conversion `T(x)` has no effects; a call generally does, except
+            // for the pure builtins.
+            NodeRef::CallExpr(call) => {
+                let is_conversion = pass
+                    .types_info()
+                    .and_then(|i| i.types.get(&call.fun.id()))
+                    .map(|tv| tv.mode == guff_types::operand::OperandMode::TypeExpr)
+                    .unwrap_or(false);
+                if !is_conversion && !calls_pure_builtin(pass, call) {
+                    ok = false;
+                }
+            }
+
+            // A func literal is a value, not a call — but do not descend into
+            // the effects in its body.
+            NodeRef::FuncLit(_) => return false,
+
+            _ => ok = false,
+        }
+        ok
+    });
+    ok
+}
+
+/// Port of `typesinternal.CallsPureBuiltin`. The excluded names matter as much
+/// as the included ones: `append` and `copy` mutate, `panic` diverges.
+fn calls_pure_builtin(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    const PURE: [&str; 9] = [
+        "len", "cap", "complex", "imag", "real", "make", "new", "max", "min",
+    ];
+    PURE.iter().any(|n| is_builtin_named(pass, &call.fun, n))
+}
+
 pub fn expr_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let info = pass.types_info()?;
     info.types.get(&expr.id()).map(|tv| tv.typ)

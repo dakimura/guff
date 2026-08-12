@@ -237,3 +237,77 @@ fn range_and_channel_ops_on_type_params() {
     accepts("func Recv[T interface{ ~chan int }](c T) int { return <-c }");
     accepts("func Send[T interface{ ~chan int }](c T) { c <- 1 }");
 }
+
+// ----------------------------------------------------------------------------
+// Method sets of generic instances, at the type-assertion entry point.
+//
+// guff expands an instance's methods eagerly at the call site rather than
+// lazily like Go's `Named.Method(i)`, so **every** entry into an
+// interface-satisfaction check has to ask for the expansion. `assignable_to`
+// did; the assertion path did not, and compared the origin's `add` (bound to
+// `S`'s own `T`) with the interface's substituted one. Both render as
+// `func(item T, priority int)`, which is why the error read
+// "queueMetrics[T] does not implement queueMetrics[T]".
+//
+// Reduced from controller-runtime's pkg/controller/priorityqueue by
+// compat/reduce.py — see docs/COMPAT-HARDENING.md, 13th session.
+
+const GENERIC_IFACE: &str = "\
+type addI[T comparable] interface{ add(item T, priority int) }\n\
+type addS[T any] struct{}\n\
+func (addS[T]) add(item T, priority int) {}\n";
+
+#[track_caller]
+fn accepts_with_iface(decl: &str) {
+    let c = check_src(&format!("package p\n{}{}\n", GENERIC_IFACE, decl));
+    assert!(
+        c.errors.is_empty(),
+        "{decl}\n  unexpected errors: {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn type_assertion_sees_instantiated_method_set() {
+    // The shape the reducer produced: nothing forces the method set before the
+    // assertion does.
+    accepts_with_iface(
+        "func New[T comparable]() {\n\
+           var m addI[T]\n\
+           if _, ok := m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // Fully concrete instantiation — the bug was never about the use site
+    // having type parameters of its own.
+    accepts_with_iface(
+        "func NewInt() {\n\
+           var m addI[int]\n\
+           if _, ok := m.(addS[int]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // Through a field of an instantiated generic struct, as in the original.
+    accepts_with_iface(
+        "type holder[T comparable] struct{ m addI[T] }\n\
+         func Field[T comparable](h *holder[T]) {\n\
+           if _, ok := h.m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // A preceding assignment used to mask the bug by expanding the method set
+    // first; keep the masked form green too so a fix that only works after an
+    // assignment cannot pass.
+    accepts_with_iface(
+        "func Masked[T comparable]() {\n\
+           var m addI[T] = addS[T]{}\n\
+           if _, ok := m.(addS[T]); !ok { panic(\"no\") }\n\
+         }",
+    );
+    // A type switch reaches assertableTo by the same path.
+    accepts_with_iface(
+        "func Switch[T comparable](m addI[T]) int {\n\
+           switch m.(type) {\n\
+           case addS[T]: return 1\n\
+           default: return 0\n\
+           }\n\
+         }",
+    );
+}

@@ -12,6 +12,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 use crate::expreq::{token_is_shift, token_is_shift_assign};
+use crate::govet_util::format_expr;
 
 fn type_bit_width(pass: &Pass<'_>, expr: &Expr) -> Option<i64> {
     let info = pass.types_info()?;
@@ -53,10 +54,10 @@ fn check_long_shift(pass: &Pass<'_>, node_pos: u32, x: &Expr, y: &Expr, pending:
         return;
     };
     if amt >= bits {
-        let name = match x {
-            Expr::Ident(id) => id.name.clone(),
-            _ => "x".to_string(),
-        };
+        // Upstream: `analysisutil.Format(pass.Fset, x)`. The old fallback here
+        // was the literal string "x", so every operand that was not a bare
+        // identifier — `s.f`, `a[0]`, `(i)` — reported the letter x.
+        let name = format_expr(pass, x);
         pending.push((
             node_pos,
             format!("{name} ({bits} bits) too small for shift of {amt}"),

@@ -23,8 +23,22 @@ fn unparen(expr: &Expr) -> &Expr {
     }
 }
 
+/// Port of honnef's `astutil.Equal`, which is **not** paren-insensitive: it
+/// opens with `reflect.TypeOf(a) != reflect.TypeOf(b) → false` and has an
+/// explicit `*ast.ParenExpr` arm that only matches another `ParenExpr`.
+///
+/// QF1003 leans on exactly that. The whole condition goes through
+/// `astutil.Unparen` (see `binary_cond` below), but the comparison operand is
+/// tested with `Equal(binexpr.X, pairs[0].X)` unwrapped by nothing, so
+/// `if x == 1 … else if (x) == 3` is a chain upstream refuses to call a tagged
+/// switch. Unparenthesizing here made guff report it.
+/// (compat/fuzz.py, COMPAT-HARDENING Phase 6.)
 fn expr_equal(a: &Expr, b: &Expr) -> bool {
-    match (unparen(a), unparen(b)) {
+    if std::mem::discriminant(a) != std::mem::discriminant(b) {
+        return false;
+    }
+    match (a, b) {
+        (Expr::ParenExpr(x), Expr::ParenExpr(y)) => expr_equal(&x.x, &y.x),
         (Expr::Ident(x), Expr::Ident(y)) => x.name == y.name,
         (Expr::BasicLit(x), Expr::BasicLit(y)) => x.value == y.value && x.kind == y.kind,
         (Expr::SelectorExpr(x), Expr::SelectorExpr(y)) => {

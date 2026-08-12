@@ -54,6 +54,15 @@ cargo build --release -p guff-lint
 
 # Go-stdlib ground truth for the checks that just call the stdlib (SA100x)
 ./compat/oracles/regen.sh
+
+# Mutate the golden fixtures and check the two tools still agree
+./compat/fuzz.py --case gocritic -n 200
+
+# Shrink a disagreement (or an ill-typed package) to a minimal reproducer
+./compat/reduce.py --dir corpus/cache/controller-runtime \
+  --config corpus/cache/controller-runtime/.golangci.yml \
+  --packages ./pkg/controller/priorityqueue/... \
+  --guff-stderr 'does not implement' -o /tmp/reduced
 ```
 
 > **`run.sh` 系のゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
@@ -92,6 +101,44 @@ cargo build --release -p guff-lint
 | `results/RESULTS.isolate.md` | Latest isolate report snapshot |
 | `coverage.py` | Check-level coverage ledger → [`../docs/COVERAGE.md`](../docs/COVERAGE.md) |
 | `coverage/` | Ledger data (`inventory.json` / `observed.json`, committed) |
+| `fuzz.py` | Mutate golden fixtures, report where the two tools stop agreeing |
+| `reduce.py` | Delta-debug a disagreement down to a minimal reproducer |
+| `gospans/` | go/ast helper both of the above use: removable spans, mutation sites |
+
+## Fuzzing and minimizing (Phase 6)
+
+These two are a pair, and neither is a CI gate: they are for **finding** bugs
+and then making them cheap to read, which the gates above cannot do.
+
+`fuzz.py` mutates a golden fixture — parenthesizing an expression, inserting a
+comment, appending `//nolint`, swapping two statements, turning `x := v` into
+`var x = v` — and then asks whether guff and golangci-lint still agree on the
+mutant. A mutation only has to **compile**; it does not have to preserve
+findings, because the comparison is between the two tools on the same input, not
+between the mutant and the original. That is what makes the mutations cheap to
+write and safe to be aggressive with.
+
+`reduce.py` takes a disagreement — from the fuzzer, from `hunt.sh`, or from an
+ill-typed package in a corpus repo — and shrinks it by delta debugging, using
+`gospans` so that one edit can be a whole declaration, one interface method, one
+composite-literal element, or a function body replaced by `panic(...)`.
+
+The rule that makes the reducer's output trustworthy is that it never accepts an
+edit the real Go toolchain rejects:
+
+```
+go build (or `go vet`, for cases whose findings are in _test.go) accepts it
+        AND guff still misbehaves
+```
+
+Without it, minimizing "guff says `Manager has no field or method GetCache`"
+converges on deleting `GetCache` — a perfect reproducer of a broken file and no
+evidence of a guff bug at all. Pass `--build-cmd 'go vet ./pkg/...'` when the
+behaviour lives in test files; `go build` does not type-check them.
+
+Measured on the two the 2026-08-12 session left blocked: controller-runtime's
+`pkg/controller/priorityqueue` went from 2.6 MB across 349 files to 4 KB in
+107 seconds (775 oracle runs), and the shape that came out was twenty lines.
 
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 

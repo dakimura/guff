@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 6. One fixture, four linters: the case is about how
+# each of them navigates past a redundant parenthesis or a comment, not about
+# any one check.
+
+parens/parens.go    crates/guff-lint/tests/testdata/parens/parens.go

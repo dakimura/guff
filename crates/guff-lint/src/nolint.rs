@@ -306,19 +306,51 @@ impl NolintIndex {
         true
     }
 
-    /// The key `files` / `directives` are stored under, resolving a basename
-    /// to the one absolute path that ends with it (formatters report issues by
-    /// basename).
+    /// The key `files` / `directives` are stored under.
+    ///
+    /// The index is keyed by absolute path but issues carry a **module-relative**
+    /// one, so this fallback is the common path, not an edge case. It used to
+    /// match on the basename alone and take the first key that matched, which is
+    /// wrong as soon as two packages hold a file of the same name — and Go trees
+    /// are full of `doc.go`, `main.go`, `types.go`. A `//nolint` in one
+    /// `bad.go` then suppressed a finding at the same line of a *different*
+    /// `bad.go`, silently: the finding simply never appeared.
+    ///
+    /// Matching the whole relative path as a suffix resolves that case exactly
+    /// (`assert/bad.go` matches only one absolute key), and still resolves a
+    /// bare basename when it is unique — which is what the fallback was added
+    /// for, since formatters report issues by basename. When the suffix is
+    /// genuinely ambiguous no key is returned: failing to suppress is visible
+    /// to the user and is theirs to fix, while suppressing the wrong file's
+    /// finding deletes it with no trace anywhere.
+    ///
+    /// Found by `compat/fuzz.py` (COMPAT-HARDENING Phase 6) appending a bare
+    /// `//nolint` to `defaults/bad.go:9` in `cases/errcheck-asserts`, which made
+    /// `assert/bad.go:9` disappear.
     fn resolve_key(&self, filename: &str) -> Option<String> {
         let norm = filename.replace('\\', "/");
         if self.files.contains_key(&norm) {
             return Some(norm);
         }
-        let base = Path::new(&norm).file_name().and_then(|s| s.to_str())?;
-        self.files
-            .keys()
-            .find(|k| Path::new(k.as_str()).file_name().and_then(|s| s.to_str()) == Some(base))
-            .cloned()
+        // Issues reach the filter with the path the runner handed them, which
+        // for a formatter is `./a.go` — the `./` is only stripped later, on the
+        // way to output. Matching the raw string as a suffix therefore looks
+        // for `/./a.go` and finds nothing, which silently disables *every*
+        // suppression on that file. Strip the prefix before matching.
+        let mut rel = norm.as_str();
+        while let Some(stripped) = rel.strip_prefix("./") {
+            rel = stripped;
+        }
+        if let Some(k) = self.files.get_key_value(rel).map(|(k, _)| k.clone()) {
+            return Some(k);
+        }
+        let suffix = format!("/{rel}");
+        let mut hits = self.files.keys().filter(|k| k.ends_with(&suffix));
+        let first = hits.next()?;
+        if hits.next().is_some() {
+            return None; // ambiguous — see above
+        }
+        Some(first.clone())
     }
 
     /// The `nolintlint` findings that do not depend on what was suppressed:
@@ -664,6 +696,64 @@ mod tests {
         let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
         let issues = vec![issue("gosec", path.to_str().unwrap(), 7, "G104")];
         let kept = index.filter_issues(issues, false);
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    /// A `//nolint` must not reach a same-numbered line in a *different* file.
+    ///
+    /// The index is keyed by absolute path, issues arrive with a
+    /// module-relative one, and the fallback used to take the first key with a
+    /// matching basename. Two packages each holding a `bad.go` is ordinary Go,
+    /// so the directive in one silently deleted the other's finding.
+    /// Found by compat/fuzz.py — COMPAT-HARDENING.md, 13th session.
+    #[test]
+    fn nolint_does_not_leak_to_a_same_named_file_in_another_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let a_dir = dir.path().join("suppressed");
+        let b_dir = dir.path().join("reported");
+        std::fs::create_dir_all(&a_dir).unwrap();
+        std::fs::create_dir_all(&b_dir).unwrap();
+        let a = a_dir.join("bad.go");
+        let b = b_dir.join("bad.go");
+        let body = "package p\n\nfunc f() error { return nil }\n\nfunc g() {\n\tf()";
+        std::fs::write(&a, format!("{body} //nolint\n}}\n")).unwrap();
+        std::fs::write(&b, format!("{body}\n}}\n")).unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![a.clone(), b.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        // Both issues sit on line 6, and both files are named bad.go.
+        let issues = vec![
+            issue("errcheck", "suppressed/bad.go", 6, "unchecked"),
+            issue("errcheck", "reported/bad.go", 6, "unchecked"),
+        ];
+        let kept = index.filter_issues(issues, false);
+        let files: Vec<&str> = kept.iter().map(|i| i.filename.as_str()).collect();
+        assert_eq!(files, vec!["reported/bad.go"], "kept: {files:?}");
+    }
+
+    /// Formatters hand the filter a `./`-prefixed path (the prefix is stripped
+    /// on the way to output, not before filtering), so the lookup has to
+    /// normalize it. Missing this disabled every suppression on the file —
+    /// gin's `//nolint:gofumpt` stopped working, which the OSS tier caught.
+    #[test]
+    fn dot_slash_prefixed_issue_path_still_resolves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.go");
+        std::fs::write(
+            &path,
+            "package p\n\nfunc f() error { return nil }\n\nfunc g() {\n\tf() //nolint:errcheck\n}\n",
+        )
+        .unwrap();
+
+        let pkg = Package {
+            compiled_go_files: vec![path.clone()],
+            ..Package::default()
+        };
+        let mut index = NolintIndex::from_packages(&[Arc::new(pkg)]);
+        let kept = index.filter_issues(vec![issue("errcheck", "./f.go", 6, "unchecked")], false);
         assert!(kept.is_empty(), "{kept:?}");
     }
 

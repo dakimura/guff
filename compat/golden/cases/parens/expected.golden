@@ -1,0 +1,19 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh parens
+# Produced by running golangci-lint on compat/golden/cases/parens/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+parens/parens.go:49:2:govet::assign: self-assignment of x
+parens/parens.go:56:2:govet::assign: self-assignment of s.f
+parens/parens.go:70:41:govet::shift: s.f (8 bits) too small for shift of 10
+parens/parens.go:71:41:govet::shift: (i) (8 bits) too small for shift of 10
+parens/parens.go:72:41:govet::shift: a[0] (8 bits) too small for shift of 10
+parens/parens.go:79:2:staticcheck::S1008: should use 'return b == true' instead of 'if b == true { return true }; return false'
+parens/parens.go:86:2:staticcheck::S1008: should use 'return x == 1' instead of 'if x == 1 { return true }; return false'
+parens/parens.go:113:2:staticcheck::S1008: should use 'return x == 1' instead of 'if x == 1 { return true }; return false'
+parens/parens.go:134:2:staticcheck::QF1003: could use tagged switch on x
+parens/parens.go:151:9:revive:warning:errorf: should replace errors.New(fmt.Sprintf(...)) with fmt.Errorf(...)
+parens/parens.go:170:21:revive:warning:range-val-address: suspicious assignment of 'v'. range-loop variables always have the same address
