@@ -18,6 +18,30 @@ fn is_bracket_test_id(id: &str) -> bool {
     close > open + 2
 }
 
+/// The import path a `go list -test` **id** names: `Q [P.test]` → `Q`.
+///
+/// The distinction matters because two different things are spelled the same
+/// way. `Package.deps` of an *external* test package holds ids, not paths:
+/// `pkg/cache_test [pkg/cache.test]` lists
+/// `pkg/cluster [pkg/cache.test]` — the recompiled-for-the-test-binary copy of
+/// `pkg/cluster`. Anything that treats that string as an import path registers a
+/// second, differently-named copy of `pkg/cluster` in the seed, and then
+/// `pkg/manager`, whose source says `import ".../pkg/cluster"`, cannot find one.
+///
+/// Collapsing the two is exactly right *for the seed*, which compiles only
+/// production files (`_test.go` is filtered before a dependency is checked), so
+/// `Q [P.test]` and `Q` are the same bytes. It would not be right for analysis,
+/// where the test variant is a genuinely different package.
+pub fn import_path_of_id(id: &str) -> &str {
+    if !is_bracket_test_id(id) {
+        return id;
+    }
+    match id.find(" [") {
+        Some(open) => &id[..open],
+        None => id,
+    }
+}
+
 /// Same-package test variant only: `P [P.test]` (not for-test dep `Q [P.test]`).
 ///
 /// Regex intent of golangci's `^(.*) \[(.*)\.test\]` plus the comment constraint
@@ -100,11 +124,20 @@ pub fn package_for_import_path<'a>(
 pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, Vec<String>> {
     let mut dep_graph = HashMap::default();
     for pkg in by_id.values() {
+        // The values need normalizing as much as the keys do, and for longer:
+        // an external test package's `deps` are **ids**, so a graph whose edges
+        // point at `Q [P.test]` sends the seed off to type-check a package under
+        // a name no `import` statement can ever spell. See `import_path_of_id`.
+        let deps: Vec<String> = pkg
+            .deps
+            .iter()
+            .map(|d| import_path_of_id(d).to_string())
+            .collect();
         let key = pkg.pkg_path.clone();
         if pkg.id == pkg.pkg_path {
-            dep_graph.insert(key, pkg.deps.clone());
+            dep_graph.insert(key, deps);
         } else {
-            dep_graph.entry(key).or_insert_with(|| pkg.deps.clone());
+            dep_graph.entry(key).or_insert(deps);
         }
     }
     dep_graph
@@ -185,6 +218,55 @@ mod tests {
         let out = filter_test_main_packages(pkgs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].pkg_path, "example.com/foo");
+    }
+
+    #[test]
+    fn import_path_of_id_strips_the_for_test_bracket() {
+        assert_eq!(import_path_of_id("example.com/q"), "example.com/q");
+        assert_eq!(
+            import_path_of_id("example.com/q [example.com/p.test]"),
+            "example.com/q"
+        );
+        assert_eq!(
+            import_path_of_id("example.com/p [example.com/p.test]"),
+            "example.com/p"
+        );
+        // A space with no `.test]` after it is not a go list id at all.
+        assert_eq!(import_path_of_id("example.com/q [x]"), "example.com/q [x]");
+    }
+
+    #[test]
+    fn dep_graph_edges_are_import_paths_not_ids() {
+        // An *external* test package's `deps` hold ids: `pkg/cache_test
+        // [pkg/cache.test]` depends on `pkg/cluster [pkg/cache.test]`, the copy
+        // of pkg/cluster recompiled into the test binary. Left as-is, that id
+        // reaches the dependency seed as if it were an import path, so
+        // pkg/cluster is type-checked and registered under a name no `import`
+        // statement can spell — and pkg/manager, which really does import
+        // ".../pkg/cluster", then fails with `undefined: cluster` and every
+        // interface embedding cluster.Cluster loses its methods.
+        //
+        // Measured on controller-runtime before this normalization: 48 reports
+        // of `manager.Manager has no field or method Get*` under `./pkg/...`,
+        // 0 under `./pkg/metrics/filters/...` — the same bytes and the same
+        // config, differing only in which packages were asked for.
+        let mut by_id = HashMap::default();
+        let ext_test = Arc::new(Package {
+            id: "example.com/cache_test [example.com/cache.test]".into(),
+            pkg_path: "example.com/cache_test".into(),
+            deps: vec![
+                "example.com/cluster [example.com/cache.test]".into(),
+                "example.com/plain".into(),
+            ],
+            ..Package::default()
+        });
+        by_id.insert(ext_test.id.clone(), ext_test);
+
+        let graph = import_path_dep_graph(&by_id);
+        assert_eq!(
+            graph.get("example.com/cache_test").map(Vec::as_slice),
+            Some(["example.com/cluster".to_string(), "example.com/plain".to_string()].as_slice()),
+        );
     }
 
     #[test]

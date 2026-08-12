@@ -311,3 +311,91 @@ fn type_assertion_sees_instantiated_method_set() {
          }",
     );
 }
+
+// Inference reads the *arguments'* method sets, so it is a fourth entry point
+// into a method-set comparison that has to expand an instance's methods first —
+// the same lazy-completion seam as `type_assertion_sees_instantiated_method_set`
+// above, one call deeper. And the second half of `cannot infer type arguments in
+// call` had nothing to do with method sets at all.
+//
+// Both reduced by hand from controller-runtime's pkg/source and
+// pkg/internal/source after `compat/reduce.py`'s root-set bisection — see
+// docs/COMPAT-HARDENING.md, 14th session.
+
+#[test]
+fn inference_expands_an_instance_method_set_for_every_argument() {
+    // Two parameters name the same type parameter, and one argument is a
+    // generic instance. The first argument leaves `R` free, so unifying against
+    // the origin's own `R` binds something that happens to be right; the second
+    // arrives with `R` already resolved and compares a substituted signature
+    // against an unsubstituted one. With one argument the bug is invisible.
+    let src = "package p\n\
+        type Req struct{ Key string }\n\
+        type Queue[R comparable] interface{ Add(R) }\n\
+        type Sink[R comparable] interface{ Take(R) }\n\
+        type GQ[R comparable] struct{}\n\
+        func (q *GQ[R]) Add(R) {}\n\
+        type GS[R comparable] struct{}\n\
+        func (s *GS[R]) Take(R) {}\n\
+        func New[request comparable](q Queue[request], s Sink[request]) int { return 0 }\n\
+        var _ = New(&GQ[Req]{}, &GS[Req]{})\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn inference_mixes_a_plain_type_and_an_instance() {
+    // The same shape with one plain struct and one instance — how it appears in
+    // controller-runtime, where the queue is a concrete test double and the
+    // handler is `handler.Funcs`, an alias for an instantiation.
+    let src = "package p\n\
+        type Req struct{ Key string }\n\
+        type Queue[R comparable] interface{ Add(R) }\n\
+        type Sink[R comparable] interface{ Take(R) }\n\
+        type CQ struct{}\n\
+        func (q *CQ) Add(Req) {}\n\
+        type GS[R comparable] struct{}\n\
+        func (s *GS[R]) Take(R) {}\n\
+        type Alias = GS[Req]\n\
+        func New[request comparable](q Queue[request], s Sink[request]) int { return 0 }\n\
+        var _ = New(&CQ{}, &Alias{})\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn untyped_nil_argument_does_not_defeat_inference() {
+    // Go withholds every *untyped* argument from step-1 unification
+    // (`isTyped(arg.typ)`), and untyped nil has no default type to promote
+    // either (`!arg.isNil()`), so it contributes nothing and inference proceeds
+    // from the other arguments. Testing the operand *mode* instead let nil
+    // through — it is a value, not a constant — and unifying a parameter type
+    // that mentions a type parameter against untyped nil fails outright.
+    //
+    // `source.Kind(ic, &corev1.Pod{}, nil)`: `object` is right there in
+    // argument 2, and argument 3 sank the call.
+    let src = "package p\n\
+        type Object interface{ GetName() string }\n\
+        type Pod struct{}\n\
+        func (p *Pod) GetName() string { return \"\" }\n\
+        type Req struct{}\n\
+        type Handler[O any, R comparable] interface{ Create(O, R) }\n\
+        type Pred[O any] interface{ Match(O) bool }\n\
+        func Kind[object Object](obj object, h Handler[object, Req], preds ...Pred[object]) int { return 0 }\n\
+        var _ = Kind(&Pod{}, nil)\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn an_untyped_constant_still_infers_through_its_default_type() {
+    // The counterweight: withholding untyped *constants* from step 1 is correct,
+    // but they must still reach the type parameter. A fix that dropped every
+    // untyped argument on the floor would pass the test above and break this.
+    let src = "package p\n\
+        func Identity[T any](v T) T { return v }\n\
+        var _ = Identity(42)\n\
+        var _ = Identity(\"s\")\n";
+    let c = check_src(src);
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}

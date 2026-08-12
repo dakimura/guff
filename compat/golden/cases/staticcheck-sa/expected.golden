@@ -120,6 +120,7 @@ sa1018/ok/ok.go:6:2:staticcheck::SA4017: Replace doesn't have side effects and i
 sa1018/ok/ok.go:7:2:staticcheck::SA4017: Replace doesn't have side effects and its return value is ignored
 sa1019/bad/bad.go:6:2:staticcheck::SA1019: old.Legacy is deprecated: call New. 
 sa1019/bad/bad.go:7:8:staticcheck::SA1019: old.OldClient is deprecated: use NewClient instead. 
+sa1019/bad/bad.go:13:2:staticcheck::SA1019: o.Old is deprecated: use Fine instead. 
 sa1019/ok/ok.go:5:1:staticcheck::ST1021: comment on exported type Embedder should be of the form "Embedder ..." (with optional leading article)
 sa1020/bad/bad.go:7:22:staticcheck::SA1020: invalid port or service name in host:port pair
 sa1020/bad/bad.go:8:22:staticcheck::SA1020: invalid port or service name in host:port pair

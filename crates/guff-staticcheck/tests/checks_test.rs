@@ -1956,6 +1956,25 @@ macro_rules! sa_check_bad_ok {
 
 sa_check!(sa1015, sa1015_flags_leaky_time_tick, sa1015_allows_endless_time_tick, "leaks the underlying ticker");
 sa_check!(sa1019, sa1019_flags_deprecated_use, sa1019_allows_clean_code, "deprecated");
+
+#[test]
+fn sa1019_flags_a_deprecated_struct_field_of_an_imported_type() {
+    // Reported by the OSS tier the day controller-runtime's ill-typed packages
+    // went to zero: five `//nolint:staticcheck` directives turned up "unused"
+    // because the finding they suppress upstream was never made here.
+    // `o.Fine` is the control — a live field of the same struct must stay quiet.
+    let pkg = typecheck_rule("sa1019", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa1019::analyzer(), &pkg);
+    assert!(
+        messages.iter().any(|m| m.contains("o.Old is deprecated")),
+        "deprecated struct field not reported: {messages:?}"
+    );
+    assert!(
+        messages.iter().all(|m| !m.contains("o.Fine is deprecated")),
+        "a live field of the same struct must stay quiet: {messages:?}"
+    );
+}
 sa_check!(sa1023, sa1023_flags_writer_buffer_modified, sa1023_allows_readonly_write, "must not modify the provided buffer");
 sa_check!(sa1025, sa1025_flags_timer_reset_return, sa1025_allows_timer_reset_without_drain, "Reset's return value");
 

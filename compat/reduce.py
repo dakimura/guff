@@ -320,6 +320,7 @@ class Oracle:
         self.guff = guff_bin
         self.golangci = golangci_bin
         self.build_cmd = build_cmd
+        self.build_cmd_is_default = build_cmd == f"go build {packages}"
         self.timeout = timeout
         self.on_disk: dict[str, bytes] = {}
         self.cache: dict[str, tuple[bool, dict[str, bytes] | None]] = {}
@@ -454,7 +455,9 @@ class Oracle:
     def interesting(self, files: dict[str, bytes]) -> tuple[bool, dict[str, bytes] | None]:
         """Return (interesting, files) — files may have had dead imports removed."""
         key = hashlib.sha256(
-            b"\0".join(f"{r}".encode() + b"\1" + files[r] for r in sorted(files))
+            self.packages.encode()
+            + b"\2"
+            + b"\0".join(f"{r}".encode() + b"\1" + files[r] for r in sorted(files))
         ).hexdigest()
         if key in self.cache:
             return self.cache[key]
@@ -565,9 +568,12 @@ PASS_KINDS: list[tuple[str, tuple[str, ...]]] = [
 
 
 class Reducer:
-    def __init__(self, oracle: Oracle, verbose: bool = False) -> None:
+    def __init__(
+        self, oracle: Oracle, verbose: bool = False, reduce_root_set: bool = True
+    ) -> None:
         self.oracle = oracle
         self.verbose = verbose
+        self.reduce_root_set = reduce_root_set
 
     def log(self, msg: str) -> None:
         print(msg, flush=True)
@@ -618,6 +624,60 @@ class Reducer:
             self.log(f"    closure prune rejected ({len(kept)} of {len(tree.files)} files)")
             return tree
         return Tree(tree.root, fixed if fixed is not None else kept)
+
+    def reduce_roots(self, tree: Tree) -> None:
+        """Shrink the **analysed package set**, before touching a single file.
+
+        Some misbehaviour is not a property of any file: it is a property of
+        which packages were asked for. `manager.Manager has no field or method
+        GetCache` reproduced under `./pkg/...` and not under
+        `./pkg/metrics/filters/...` — same bytes, same config, different answer —
+        because a package that is a *root* is loaded differently from the same
+        package as a *dependency*. A file-level reducer cannot express that, and
+        two and a half hours of one had got 349 files down to 155 without ever
+        naming the cause.
+
+        ddmin over the package list found it in minutes: 64 roots to 3. The point
+        is not that this pass is fast (it is one oracle call per candidate, like
+        any other) but that it shrinks the *oracle* — every later pass runs
+        against three packages instead of sixty-four — and that a three-package
+        answer is small enough to reason about directly.
+
+        Ask what the reproduction is a function of before assuming it is the
+        source.
+        """
+        r = subprocess.run(
+            ["go", "list", "-e", *self.oracle.packages.split()],
+            cwd=self.oracle.workdir,
+            capture_output=True,
+            text=True,
+        )
+        roots = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+        if r.returncode != 0 or len(roots) < 2:
+            return
+        # `go list` prints import paths; the tools take patterns. A path is a
+        # valid pattern for exactly the package it names, which is what we want.
+        original_packages = self.oracle.packages
+        original_build = self.oracle.build_cmd
+
+        def test(kept: list[str]) -> bool:
+            self.oracle.packages = " ".join(kept)
+            if self.oracle.build_cmd_is_default:
+                self.oracle.build_cmd = f"go build {self.oracle.packages}"
+            ok, _ = self.oracle.interesting(tree.files)
+            return ok
+
+        if not test(roots):
+            # The expansion is not equivalent to the pattern (a `_test` package,
+            # a pattern `go list` resolves differently). Leave the roots alone.
+            self.oracle.packages = original_packages
+            self.oracle.build_cmd = original_build
+            return
+        kept = ddmin(roots, test, self.log if self.verbose else (lambda *_: None))
+        test(kept)
+        self.log(f"    -> {len(kept)} of {len(roots)} package(s)")
+        for pkg in kept:
+            self.log(f"       {pkg}")
 
     def reduce_files(self, tree: Tree) -> Tree:
         """Delete whole files. The single biggest win on a real module."""
@@ -674,6 +734,9 @@ class Reducer:
             self.log(f"\n=== round {rnd} — {nf} files, {nb} bytes ===")
 
             if rnd == 1:
+                if self.reduce_root_set:
+                    self.log("  [roots]")
+                    self.reduce_roots(tree)
                 self.log("  [closure]")
                 tree = self.prune_to_closure(tree)
                 self.log(f"    -> {tree.size()[0]} files, {tree.size()[1]} bytes")
@@ -754,6 +817,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-build", action="store_true", help="Drop the toolchain invariant (unsafe)")
     ap.add_argument("--timeout", default="5m")
     ap.add_argument("--rounds", type=int, default=6)
+    ap.add_argument(
+        "--no-reduce-roots",
+        action="store_true",
+        help="Skip the root-set pass (see Reducer.reduce_roots)",
+    )
     ap.add_argument("-v", "--verbose", action="store_true")
 
     g = ap.add_argument_group("predicate (ANDed; at least one required)")
@@ -831,7 +899,9 @@ def main(argv: list[str] | None = None) -> int:
         tree = Tree(workdir, fixed)
 
     t0 = time.time()
-    tree = Reducer(oracle, verbose=args.verbose).run(tree, max_rounds=args.rounds)
+    tree = Reducer(
+        oracle, verbose=args.verbose, reduce_root_set=not args.no_reduce_roots
+    ).run(tree, max_rounds=args.rounds)
     elapsed = time.time() - t0
 
     oracle.sync(tree.files)

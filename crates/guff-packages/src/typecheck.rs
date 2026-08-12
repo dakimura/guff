@@ -128,6 +128,15 @@ impl TypecheckEnv {
     }
 }
 
+/// `GUFF_DEBUG_SEED_ERRORS=1`: print the first type error of each *dependency*
+/// the source seed checks. Read once — `check_sources` runs per source dep, and
+/// a dependency closure is hundreds of them.
+fn seed_errors_enabled() -> bool {
+    static ON: std::sync::LazyLock<bool> =
+        std::sync::LazyLock::new(|| std::env::var_os("GUFF_DEBUG_SEED_ERRORS").is_some());
+    *ON
+}
+
 /// Returns true when the load mode requires parsing or type-checking.
 pub fn needs_typecheck(mode: LoadMode) -> bool {
     mode.contains(LoadMode::NEED_TYPES)
@@ -662,14 +671,16 @@ fn build_export_seed(
             continue;
         };
         for dep in &pkg.deps {
+            let dep = crate::dedup::import_path_of_id(dep).to_string();
             if seen.insert(dep.clone()) {
-                needed.push(dep.clone());
+                needed.push(dep);
             }
         }
         // Direct imports may not always appear in deps (e.g. incomplete list).
         for path in pkg.imports.keys() {
+            let path = crate::dedup::import_path_of_id(path).to_string();
             if seen.insert(path.clone()) {
-                needed.push(path.clone());
+                needed.push(path);
             }
         }
     }
@@ -750,8 +761,18 @@ fn build_source_seed_inner(
     let mut stack: Vec<String> = Vec::new();
     for id in targets {
         if let Some(pkg) = by_id.get(id) {
-            stack.extend(pkg.deps.iter().cloned());
-            stack.extend(pkg.imports.keys().cloned());
+            // `deps` holds go list **ids**, and an external test package's are
+            // bracketed (`Q [P.test]`). Everything downstream — the wave order,
+            // the seed's package registry, the importer every dependency's own
+            // `import` statement goes through — is keyed by import path, so a
+            // bracketed id here seeds a package under a name no source file can
+            // name. See `dedup::import_path_of_id`.
+            stack.extend(pkg.deps.iter().map(|d| crate::dedup::import_path_of_id(d).to_string()));
+            stack.extend(
+                pkg.imports
+                    .keys()
+                    .map(|p| crate::dedup::import_path_of_id(p).to_string()),
+            );
         }
     }
     while let Some(path) = stack.pop() {
@@ -980,6 +1001,24 @@ fn build_source_seed_inner(
         check.set_importer(Box::new(make_importer()));
         check.add_dependency_source(path.to_string(), files);
         let pkg_id = check.preload_import(path)?;
+        // Dependency diagnostics are not reported (they are not the user's
+        // package), but "silently" is not the same as "unobservable": when a
+        // seed dependency fails to type-check, every target that imports it
+        // sees an incomplete type and the *target's* error names something else
+        // entirely — `manager.Manager has no field or method GetCache` for a
+        // failure in `pkg/cluster`. GUFF_DEBUG_SEED_ERRORS=1 is the only way to
+        // read the first error rather than infer it.
+        if seed_errors_enabled() && !check.errors.is_empty() {
+            eprintln!(
+                "guff:     seed dep {path} — {} error(s), first: {}",
+                check.errors.len(),
+                check
+                    .errors
+                    .first()
+                    .map(|e| e.msg.clone())
+                    .unwrap_or_default(),
+            );
+        }
         Some(check.into_worker_overlays(path.to_string(), pkg_id))
     };
     let mut merge_secs = 0f64;

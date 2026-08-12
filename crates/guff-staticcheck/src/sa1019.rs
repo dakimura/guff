@@ -212,6 +212,8 @@ struct PkgDeprecatedFacts {
     /// Methods keyed by `TypeName.Method` (receiver present). Separate from
     /// `objects` so `(*ACL).Create` does not poison `(*Namespaces).Create`.
     methods: HashMap<String, String>,
+    /// Struct fields keyed by `TypeName.Field`, for the same reason.
+    fields: HashMap<String, String>,
     /// True once PARSE_COMMENTS object/method extraction has run.
     objects_scanned: bool,
 }
@@ -546,6 +548,28 @@ fn scan_import_deprecated(
                                         }
                                     }
                                 }
+                                // …and a struct's *fields*, for the same reason
+                                // one level over: `Deprecated:` on a field is
+                                // what the writer of `opts.Old = x` is warned
+                                // about, and reading it needs the struct's own
+                                // doc comments. Keyed by `Type.Field` rather
+                                // than by the bare name, because a field called
+                                // `Old` and a package-level `Old` are different
+                                // objects that would otherwise collide.
+                                if let Expr::StructType(st) = &ts.ty {
+                                    for f in &st.fields.list {
+                                        let Some(fmsg) = extract_deprecated_message(&f.doc)
+                                        else {
+                                            continue;
+                                        };
+                                        for name in &f.names {
+                                            out.fields.insert(
+                                                method_fact_key(&ts.name.name, &name.name),
+                                                fmsg.clone(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -647,8 +671,15 @@ fn selector_diagnostic(
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     // Selections mark method picks; fall back to signature recv when the
     // selector wasn't recorded (some call shapes).
-    let is_method = info.selections.contains_key(&sel.id)
-        || func_has_receiver(&artifacts.types, &artifacts.objects, obj);
+    // A *field* selection is recorded in `selections` exactly like a method
+    // one, so "is there a selection" answers the wrong question: `a.Old` on a
+    // struct field took the method branch, looked for `Options.Old` among the
+    // methods, missed, and returned — which is why a deprecated field was
+    // silent for every importer even once the scanner collected it.
+    let sel_kind = info.selections.get(&sel.id).map(|s| s.kind());
+    let is_field = sel_kind == Some(guff_types::selection::SelectionKind::FieldVal);
+    let is_method = !is_field
+        && (sel_kind.is_some() || func_has_receiver(&artifacts.types, &artifacts.objects, obj));
     let synthetic;
     let depr = if let Some(d) = deprs.objects.get(&obj) {
         d
@@ -672,6 +703,9 @@ fn selector_diagnostic(
                 method_recv_base_from_sig(&artifacts.types, &artifacts.objects, obj)
             })?;
             facts.methods.get(&method_fact_key(&recv, &name))
+        } else if is_field {
+            let recv = selection_recv_base_name(pass, sel)?;
+            facts.fields.get(&method_fact_key(&recv, &name))
         } else {
             facts.objects.get(&name)
         }?

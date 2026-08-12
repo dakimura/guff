@@ -147,6 +147,23 @@ Measured on the two the 2026-08-12 session left blocked: controller-runtime's
 `pkg/controller/priorityqueue` went from 2.6 MB across 349 files to 4 KB in
 107 seconds (775 oracle runs), and the shape that came out was twenty lines.
 
+### Ask what the reproduction is a function of
+
+The first pass is not over files at all. `manager.Manager has no field or method
+GetCache` reproduced under `./pkg/...` and not under `./pkg/metrics/filters/...`
+— same bytes, same config, different answer — because a package that is a *root*
+is loaded differently from the same package as a *dependency*. No amount of
+deleting source can express that, and two and a half hours of file-level ddmin
+had got 349 files to 155 without ever naming the cause.
+
+So `reduce.py` ddmins the **root package set** before it touches a file:
+`./pkg/...` expands to 64 packages and comes back with 3, in minutes. Three
+packages is small enough to read directly — and it also shrinks the oracle for
+every pass after it. `--no-reduce-roots` turns it off.
+
+The general form is worth keeping: **measure what the reproduction is a function
+of before assuming it is the source.**
+
 OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 
 ## Which tiers run where

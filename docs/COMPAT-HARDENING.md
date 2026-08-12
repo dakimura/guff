@@ -375,10 +375,72 @@ ratchet を持つ seed は既定でスキップする（既知差分が全ミュ
 
 見つけた形は golden の `cases/parens` に昇格させた（**81 ケース目**）。括弧つきの各関数に**括弧なしの対照**を並べてあるのが要で、「黙るべき側が黙る」と「撃つべき側が撃つ」を同時に固定しないと、**全部黙らせる修正が通ってしまう**。
 
-### Phase 7 — 上流ドリフト検知 `[未着手]`
+#### 「型情報が要る」変異は、型検査器を足さずに入った `[2026-08-13（14 本目）]`
 
-golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両方でゴールデンを再生成して差分を出す。
-「上流が変えた」を guff のバグと区別できるようにする。
+識別子リネーム・型の明示/省略・ループ形式変換の 3 つは「どれも型情報が要るので
+`gospans` を go/types 込みにするか Rust 側に置くかの判断が先」として保留されていた。
+**どちらも要らない。** 理由はこのファイル冒頭の不変条件そのもので、
+**変異はコンパイルさえ通ればよく、意味を保つ必要も、したがって正しい必要も無い**。
+型が要る編集は「やってみて `go build` に捨てさせる」で足りる。
+ここで型検査器を足すと、**不健全さがすでに無料で検出できる編集**のために
+ファザーの毎パスに importer を背負わせることになる。
+
+したがって 3 つとも「答えがソースに書いてある部分集合」だけを採る:
+
+- `rename` — ファイル内の出現が全部 1 関数の中に収まるローカルを、
+  `len` / `fmt` / `err` / 大文字小文字を反転した綴りへ。
+  predeclared / builtinShadow / importShadow / var-naming / unexported-naming が
+  実際に鍵にしている名前で、`importShadow` の走査範囲は Phase 5 のバグだった。
+- `littype` — `x := 1` ⇄ `var x int = 1`。基本リテラルの型はトークン種そのもの、
+  複合リテラルの型はリテラルに書いてある。ST1023 / S1021 / revive `var-declaration` の行。
+- `rangeint` — `for i := 0; i < 10; i++` → `for i := range 10`。go1.22 未満のモジュールでは
+  ビルドが弾く＝正しい答えが無料で出る。
+
+ついでに `for x := 0; …` のようなヘッダ位置の代入は `varform` / `littype` から除外した。
+Go の文法がそこに SimpleStmt しか許さないので**構造上コンパイルできない**ミュータントで、
+1 周目の 4.5% がこれだった。
+
+### Phase 7 — 上流ドリフト検知 `[完了 2026-08-13（14 本目）]`
+
+他のティアは全部 golangci-lint を止めて「guff は一致しているか」を訊く。
+それは**上流が動くまで**しか効かない。動いた瞬間に golden ゲートが赤くなり、
+その差分は**どちら側が動いたのか**を何も語らない —— ゴールデンは
+「ある瞬間の golangci-lint の答え」であって、比べるべき別の瞬間がどこにも無いからである。
+
+`compat/drift.py` は guff の側を止めて逆を訊く:
+
+```
+keys(golangci@pin, case)  vs  keys(golangci@candidate, case)      ← guff 非依存
+keys(guff, case)          vs  keys(golangci@candidate, case)      ← ピンを上げた日のゲート
+```
+
+前者は**上流の changelog を読むのではなく測ったもの**、後者は
+「ピンを上げた当日に golden ゲートが何と言うか」。**2 つを並べて読むのが要点**で、
+「新しい golden 差分 23 件、うち 21 件は上流が考えを変えた分、2 件は我々の分」なら
+計画が立つが、「新しい golden 差分 23 件」では立たない。
+
+finding が 1 件も動かずに変わるものが 2 つあるので別に測る:
+
+- **linter インベントリ** —— `help linters --json` を両方の binary で。linter の追加・削除・
+  リネーム・deprecated 化・`standard` / `fast` グループの出入りは、
+  **全ユーザの `linters.default` の意味**を変える。
+- **config の受理** —— 上流が落とした settings キーは、guff がまだ受ける config で
+  golangci-lint を**非ゼロ終了**させる。finding 集合の比較では原理的に見えないので、
+  candidate が config を蹴ったケースは `config-rejected` として報告する。
+
+両方の binary は `golden.py write` と同じ「2 回一致するまで回す」規則の下で走らせる
+（§ 下記「上流は関数ではない」）。1 回走らせた結果でドリフト報告を作ると
+**上流のレースを上流のせいにする** —— 正しいが役に立たない。毎週鳴って、毎週違う名前を挙げる。
+
+`compat/drift-ledger.json`（`--update` が書く）は**見たドリフト**を記録する。
+`(pin, candidate)` の組に紐づく —— 2.13.0 をレビューしたことは 2.14.0 について何も言わない ——
+ので、candidate が変われば全部が未レビューに戻る。抑止するものは他に何も無く、
+役目は「同じ変更を毎週報告し続けるのを止める」だけである。
+
+ピン自体は `compat/pins.json` に移した。5 つの workflow ステップに散らばったリテラルで、
+これは `drift.py` が捕まえようとしているのと**同じ失敗**の一段下だった:
+古い binary に取り残されたジョブは、誰もベースラインだと思っていないものと比較しながら
+OK を出し続ける。
 
 ---
 
@@ -392,8 +454,8 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致 | 2026-08-12 |
 | 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は同じ穴が残っており、測って `#[ignore]` で記録した | 2026-08-12 |
-| 6 | 縮小器 → 差分ファジング | 中 | **道具は両方完成** — `compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`。縮小器の実測: controller-runtime `priorityqueue` が **2.6 MB・349 ファイル → 2 KB・2 ファイル**（オラクル 775 回 / 107 秒）。ファザーの実測: 80 ケース・**864 ミュータント / 852 秒**で **36 件の不一致 = 9 バグ**（下記）。どちらも CI ゲートではなく**発見**の道具 | 2026-08-12 |
-| 7 | 上流ドリフト検知 | 小 | 未着手 | — |
+| 6 | 縮小器 → 差分ファジング | 中 | **完了** — 道具（`compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`）と、それで見つかる分の消化。1 周目 864 ミュータントで 36 件 = 9 バグ、2 周目（seed 1・2 編集/ミュータント・888 ミュータント）で **4 件 = 4 バグ**（errorlint の `(nil)`、gocritic newDeref の描画ノード、SA1006 の paren、nolintlint の unused を**別の**ディレクティブが打ち消す）。**型情報が要るとされた 3 変異**（rename / littype / rangeint）は型検査器を足さずに実装。ファザー自身の穴も 1 つ（`issue_key` 直マップで related-information 行まで数え、staticcheck-sa の baseline を 5→17 に膨らませていた）。`--recheck` を追加。**縮小器に「根集合の ddmin」を第 1 パスとして足した**: ill-typed の再現条件がファイルではなく**どのパッケージを root に入れたか**だったので、64 → 3 パッケージまで落として原因に直行した（`--no-reduce-roots` で無効）。結果 controller-runtime の ill-typed は **16 → 0**、そこで**見えるようになった差分が 17 件**（recall は 100% のまま。うち 3 件はその場で修正、17 件を理由つき allowlist に記録（差分は 20 → 17）） | 2026-08-13 |
+| 7 | 上流ドリフト検知 | 小 | **完了** — `compat/drift.py` が 81 ゴールデンケースで `golangci@pin` 対 `golangci@candidate`（guff 非依存）と `guff` 対 `candidate`（ピンを上げた日のゲート）を測り、linter インベントリと config 受理も別に見る。`compat/pins.json` にピンを一元化。週次 workflow（`upstream-drift.yml`）。**2.11.4 で検証**: gosec G124 / govet `inline` / revive enable-all の 5 rule / clickhouselint・gomodguard_v2 の追加と gomodguard の deprecated 化 —— 全部 `since: v2.12.0` と一致。今日は pin == 最新なので 0 件で exit 0 | 2026-08-13 |
 
 **現在の指標**（`docs/COVERAGE.md` / 2026-08-12、9 本目で再生成。台帳の数字は 7 本目から動かない
 —— Phase 4 は「どの check が発火したか」ではなく「同じ config で同じものを撃つか」を増やす投資なので、
@@ -4907,6 +4969,259 @@ fixture が「ビルドできない」と誤判定されていた。リンクエ
 4. **`cases/revive` を Go が受理する形に割る**（上の 6）。意図的に壊してある宣言
    （二重 import・未使用 import）を専用パッケージに隔離すれば、残りをファジングできる。
 5. 12 本目からの持ち越しがそのまま残っている: インターフェースメソッドのレシーバ（§7）、
+   `range` / 送受信の `commonUnder`、config の validate、gosec G304 / G407、
+   §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+
+### 2026-08-13（14 本目）— Phase 6 を閉じ、Phase 7 を作り、controller-runtime の ill-typed を 16 → 0 にした
+
+**やったこと**
+
+Phase 6 の残り 4 項目と Phase 7 を全部。行きがけに、この計画が前提にしていたものが
+1 つ崩れた（下記 1）。
+
+#### 1. **上流は入力の関数ではない**
+
+`cases/revive` の fixture を `go build` が通る形にして（下記 2）ゴールデンを再生成したら、
+**288 キーのところに 63 キーが書かれた**。レビューに回っていれば
+「もっともらしい差分」として通っていた。
+
+golangci-lint 2.12.2 を同じ入力で 24 回回すと、**7 回が 57〜287 件を返す**（正解は 288）。
+落ちるのは**パッケージ丸ごと**、毎回違う部分集合、stderr は空、JSON にもエラーは無い。
+他の 80 ケースは安定。`--concurrency 1` でも直らない。**暖まった `GOLANGCI_LINT_CACHE`
+では安定するが、それを埋めた実行が悪い側だったなら安定して間違っている。**
+
+原因は上流で、しかも**すでに `cases/revive/ratchet.json` が 4 件の恒久差分の犯人として
+名指ししている defect の裏面**だった。revive は
+`types.Config{Importer: importer.Default()}` で型検査する ——
+現代の toolchain に `.a` は無いので、**何かを import しているパッケージは全部**
+`Package.TypeCheck()` が失敗する。そして**結果は memo するがエラーは memo しない**
+（`lint/package.go`: `alreadyTypeChecked := p.typesInfo != nil`）ので、
+**最初の呼び手だけ**が失敗を見る。その失敗を internal failure に変える rule が 2 つあり
+（`epoch-naming` / `inefficient-map-lookup`）、`File.lint` は internal failure を見た瞬間に
+**そのファイルの残り全 rule を捨てて return する**。ファイルは `errgroup` で並列に
+lint されるので、**どのファイルがエラーを引くか＝どの finding が生き残るか**がレースになる。
+
+予測が 2 つとも当たった: **import を 1 つも持たないパッケージは 1 度も finding を落とさない**
+（`dot` / `badalias` / `fixtures/` / `footest` / `funclen` / `siblingok` / `sortableok` /
+`privatereceiverok`）。そしてその 2 rule を config から外すと 16/16 で安定する。
+
+ratchet が見ていたのはこの defect の**静かな半分**（型が全部 invalid なので rule が黙る）で、
+**うるさい半分は「実行ごと結果が変わる」**だった。
+
+対処はハーネス側:
+
+- `golden.py write` が**複数の dump を取り、2 回一致するまで書かない**。
+  `run.sh --regen` は最大 8 回回して一致を探す。
+- 確認は「同じ答えを 2 回見る」であって「N 回の和集合」ではない。
+  和集合は**失われる方向にしか壊れない**ことを仮定するが、revive の
+  `package-naming` の memo は finding を**ファイル間で移動させる**別のレースで、
+  和集合は両方の位置を「期待値」として焼き付ける。
+- `compat/fuzz.py` は逆側から同じ規則を当てる: **不一致を出したミュータントは
+  報告する前にもう一度回す**。ミュータントは直後に捨てられるので、
+  未確認の報告は**誰も再現できない報告**である。
+
+#### 2. `cases/revive` を Go が受理する形に割った（Phase 6 の「次にやること 4」）
+
+81 ケース中これだけが `go build` を通らなかった。素の 2 回目の `import "os"` と
+未使用の `BadAlias` で、Phase 6 の道具は両方とも「Go ツールチェインが受理し続けること」を
+不変条件にしているので、**99 rule / 288 findings という最も濃い fixture が
+縮小器にもファザーにも触れない**状態だった。
+
+revive の `duplicated-imports` は import **パス**だけで鍵を作る（alias を見ない）ので、
+`import osdup "os"` でも重複として報告され、しかも Go が受理する。
+上流の finding 数は動かない（288 → 288）。
+
+そしてこの 1 文字が、**古い形では表現できなかった guff のバグ**を即座に出した:
+`duplicated-imports` は**パスの列**を報告していた。上流は ImportSpec（`Node: imp`）で、
+alias があればその位置になる。alias の無い import では両者は同じトークンなので、
+**「alias 付きの重複が fixture に存在できない」限り正しく見えていた**。
+
+#### 3. 2 周目のファジング — 4 件、全部「括弧が答えを決める」場所（Phase 6 の 2）
+
+seed 1・2 編集/ミュータント・**888 ミュータント**で 4 件、全部確認済み・全部修正:
+
+| linter | 形 | 上流 |
+|---|---|---|
+| errorlint | `err != (nil)` が黙っていた | `isNil` は素の `ex.(*ast.Ident)`。括弧付き nil は nil 比較では**ない**ので報告される。3 つの呼び出し箇所が同じ関数を共有 |
+| gocritic `newDeref` | `*new((int))` を `*new(int)` と描画 | 警告は `expr`（書かれたままの StarExpr）に、提案は `astutil.Unparen(call.Args[0])` から。**別のノード 2 つ** |
+| SA1006 | `fmt.Printf((s))` が黙っていた | `m.State["format"]` を CallExpr/Ident で type-switch するので括弧付きは飛ばすように読める。飛ばさない —— `pattern.match` が**束縛の前に**両側の ParenExpr を剥がす |
+| nolintlint | 使われていない `//nolint` を報告（上流は黙る） | nolintlint は**候補**をディレクティブごとに出し、filter が使われた分を打ち消す。打ち消しは**全 issue と同じ range ループ**を通るので、**その行を覆う任意の range**が、自分が何かを抑止していれば候補を道連れにする |
+
+最後のがファジングの存在理由を 1 段落で説明している。**手書き fixture は range ごとに
+ディレクティブが 1 つ**で、1 つなら「**自分の**ディレクティブが何か抑止したか」という
+誤読が毎回正しい答えを返す。ファイル頭の `//nolint:errcheck` が実際に errcheck の
+finding を 1 件抑止していると、**無関係な下の `//nolint`** が道連れで黙る。
+両側から確認した（errcheck の finding を消すと両方が unused として報告される）。
+
+ファザー自身にも穴があった: `issue_key` を直に map していて、golden tier が落とす
+`(related information)` 行まで数えていた。`staticcheck-sa` の seed baseline が 5 → 17 に膨らみ、
+**ミュータントは baseline を超えたときだけ interesting** なので、
+これはノイズではなく**12 件ぶんの目隠し**だった。`--recheck DIR` も足した ——
+finding ディレクトリが持っているのはミュータントであってその作り方ではないので、
+seed を回し直しても何の証明にもならない。
+
+#### 4. 「型情報が要る」変異 3 種（Phase 6 の 3）
+
+§2 の Phase 6 に書いた。要点は「**不変条件がコンパイルだけなら、変異は正しくなくてよい**」。
+
+#### 5. 縮小する軸はファイルではなかった —— 根集合を縮小したら 64 → 3（Phase 6 の 1）
+
+`manager.Manager has no field or method GetCache` は 2 セッション寝ていて、
+前回は 2.5 時間かけて 349 → 155 ファイルまで来たところで打ち切っている。
+
+今回まず**手がかりの方を測った**: `./pkg/metrics/filters/...` では再現せず `./pkg/...` では
+再現する（決定的）。つまり**再現条件はファイルの中身ではなく、どのパッケージを
+root 集合に入れたか**である。ならば縮小すべきはファイルではなく root 集合で、
+そこに ddmin をかけたら **64 → 3 パッケージ**に落ちた（`pkg/cache` + `pkg/manager` +
+失敗するテストパッケージ）。オラクル 1 回 1.5 秒、数分。
+
+3 つになれば手で回せる。`{cluster, manager, integration}` は**通る**。
+つまり壊れているのは root ではなく**純粋な依存**の `pkg/cluster` の方で、
+壊しているのは「その依存 `pkg/cache` が root になったこと」だった。
+
+seed が飲み込んでいる依存側の診断を出す口（`GUFF_DEBUG_SEED_ERRORS=1`）を足して
+両方の root 集合を diff したら 2 行だけ差が出た:
+
+```
+sigs.k8s.io/controller-runtime/pkg/cluster [.../pkg/cache.test] — 4 errors, first: undefined: intrec
+sigs.k8s.io/controller-runtime/pkg/manager                      — 2 errors, first: undefined: cluster
+```
+
+**外部テストパッケージの `Deps` は import パスではなく id を持つ。**
+`pkg/cache_test [pkg/cache.test]` は `pkg/cluster [pkg/cache.test]` に依存している ——
+テストバイナリ用に再コンパイルされた `pkg/cluster` の複製である。
+これを import パスとして扱うと、seed は `pkg/cluster` を
+**どの `import` 文も綴れない名前**で登録し、`import ".../pkg/cluster"` と書いてある
+`pkg/manager` はそれを見つけられない。`cluster.Cluster` が invalid になり、
+それを埋め込む `manager.Manager` からメソッドが全部消える。
+
+`dedup::import_path_of_id` で正規化した（seed は production ファイルしかコンパイルしないので、
+`Q [P.test]` と `Q` は seed にとって**同じバイト列**であり、潰すのが正しい。
+解析にとっては別パッケージなので、そちらでは潰してはいけない）。
+`./pkg/...` の `has no field or method` は **48 → 0**、ill-typed は **15 → 7**。
+
+root 集合の ddmin は `compat/reduce.py` の**第 1 パス**として入れた（`--no-reduce-roots` で無効）。
+第 2 パス以降のオラクルが 64 パッケージではなく 3 パッケージになるので、
+**この 1 パスが後続を全部安くする**。同じ手順を無人で再現することも確認した
+（64 → 同じ 3 パッケージ）。
+
+#### 6. 残る 7 は 1 クラス — 型引数推論、そのうち 2 つは別のバグ
+
+全部 `cannot infer type arguments in call`。手で 40 行まで縮めて 2 つに分かれた。
+
+**(a) 推論は引数の method set を読む。** つまり `infer` は
+**メソッド集合比較の 4 つ目の入口**であり、13 本目が
+`missing_method` / `implements` / `has_all_methods` に置いた `prepare_method_set` を
+自分でも呼ばなければならない。同じ遅延完了の継ぎ目の 1 段深いところ。
+
+**同じ型パラメータを名指しする引数が 2 つあるときにしか出ない。**
+1 つ目の引数の時点では型パラメータは自由なので、origin 自身の `R` に対して単一化しても
+たまたま正しいものが束縛される。2 つ目は `R` が解決済みで到着し、
+**置換済みのシグネチャを未置換のものと比較する**。両方とも同じ字面で印字される。
+
+**(b) untyped nil が推論を殺していた。** Go の step-1 の門は `isTyped(arg.typ)` であって
+「untyped **定数**か」ではない。untyped `nil` は定数ではなく値なので、
+オペランドの mode で判定していた guff はこれを単一化に通し、
+型パラメータを含むパラメータ型は untyped nil と単一化しようがないので**推論ごと失敗**した。
+`source.Kind(ic, &corev1.Pod{}, nil)` —— `object` は引数 2 に書いてあるのに、引数 3 が沈めた。
+
+controller-runtime の ill-typed は **16（baseline）→ 0**。
+
+#### 7. ill-typed を 0 にすると、**見えていなかった差分が 17 件出てきた**
+
+controller-runtime の weekly tier がこの修正の直後に赤くなった。**recall は 100% のまま**で、
+動いたのは precision（**94.6%**）—— 分母が 17 件増えたからである。
+`ill_typed` なパッケージは `run_despite_errors` でない analyzer に丸ごと飛ばされるので、
+**この 17 件はずっと計算されては捨てられていた**。新しい挙動は 1 つも無い。
+
+§1 が言っていることの縮図である: **見ていないから通っているゲートは、落ちるゲートより悪い。**
+
+内訳と、そこから即座に直った 2 件:
+
+- **nolintlint の「unused」6 件はバグではなく症状。** 上流がその行に
+  staticcheck / unparam の finding を出していないのは、**guff が unused と呼んでいる
+  まさにそのディレクティブ**で抑止されているからで、guff 側はそもそも撃っていない。
+  下の linter を直すと、ここの entry は副作用で消える。
+- **実際 3 件がそうやって消えた。** `//nolint:staticcheck` が並んでいたのは
+  `clusterOptions.EventBroadcaster = options.EventBroadcaster` のような
+  **非推奨の構造体フィールド**への代入で、guff の SA1019 は
+  **importer 側のソーススキャンで struct のフィールドを歩いていなかった**
+  （関数・メソッド・const/var/type・**インターフェースのメソッド**は歩く。
+  最後のは以前のセッションが同じ理由で足したものである）。
+  歩かせても直らず、原因はもう一段あった: **フィールドの選択も
+  `Info.Selections` に載る**ので `is_method` の判定が
+  「selection があるか」では常に真になり、`Options.Old` をメソッド表から探して外していた。
+  guff-only は 20 → 17 に減った。
+- **`//nolint` が `case` 節の本体を覆っていなかった。** SA1019 を直したら grafana に
+  1 件出て、追ったらこれ: Go の `CaseClause.End()` は
+  `if n := len(s.Body); n > 0 { return s.Body[n-1].End() }` で、colon が終端なのは
+  **空の節だけ**である。guff の `node_end` は常に colon を返していたので、
+  節が 1 行のノードになり、`case` の上の `//nolint` は `case` 行しか覆わなかった
+  （golangci の range expander は `Node.End()` を読む）。`CommClause`（select）も同文。
+  15 行に縮めて確認した。**SA1019 を直さなければ一生見えないバグ**である。
+- 残り 17 は `compat/allowlists/controller-runtime.txt` に**理由つきで**記録した。
+  SA1019 の逆方向（同一モジュール内の非推奨**型**を guff だけが撃つ）、
+  `example_test.go` の SA9003「empty branch」6 件、
+  インターフェースを実装するメソッドの unparam 2 件、nilerr と bodyclose が 1 件ずつ。
+  **どれも「上流のどのガードが効いているか」を読んでいない**ので、
+  allowlist のコメントにそう書いてある。
+
+health baseline も実測値まで下げた: controller-runtime **16 → 0**、
+consul 14 → 6、grafana 30 → 21、helm 2 → 1、kubernetes 10 → 8
+（後ろの 4 つはこの修正の副作用。ratchet は下げる分には自由だが、
+**下げなければ次の劣化を捕まえられない**）。
+
+#### 8. Phase 7
+
+§2 の Phase 7 に設計を書いた。実装は `compat/drift.py` / `compat/pins.json` /
+`compat/drift-ledger.json` / `.github/workflows/upstream-drift.yml`。
+
+**ピンが最新なので今日は 0 件で exit 0 する。** それでは道具が動く証拠にならないので、
+実在する古いリリース **2.11.4** に当てて検証した。出てきた行は全部説明がつく:
+gosec の G124（http.Cookie）と govet の `inline` は 2.11.4 に存在しない、
+revive の enable-all 集合が 5 rule 小さい、`clickhouselint` と `gomodguard_v2` が無く
+`gomodguard` がまだ deprecated ではない —— **どれも自身の `since: v2.12.0` と一致する**。
+
+**ゲート**
+
+- `cargo test --workspace` — **3078 passed**（回帰テスト 9 本追加: `generic_ops.rs` に推論 4 本、
+  `dedup.rs` に id 正規化 2 本、`guff-lint/nolint_test.rs` に打ち消し 1 本、
+  `guff-error/checks_test.rs` に括弧付き nil 1 本、`guff-revive/checks_test.rs` に列 1 本 ——
+  最後のは列を見る `run_analyzer_at` ヘルパごと。revive の assertion は
+  ほとんどメッセージしか見ておらず、**fixture に無い形でだけ列が狂う rule** は
+  golden にも単体テストにも映らない）
+- `python3 -m unittest discover -s compat/tests` — **96 passed**（`test_drift.py` 新設、
+  `test_golden.py` に確認ロジック 6 本）
+- `./compat/golden/run.sh` — **81 ケース**緑（ratchet 据え置き）
+- `./compat/run.sh --isolate` — 116 ターゲット緑
+- `./compat/run.sh --oss --tier pr,nightly` / `--tier weekly` — 13 ターゲット緑。
+  **health baseline を実測値まで下げた**（controller-runtime 16 → 0 ほか 4 件）、
+  `compat/allowlists/controller-runtime.txt` に 17 件を理由つきで新設（上の 7）
+- `./compat/filesets.sh --tier pr,nightly` — 8 ターゲット一致
+- `./corpus/shapes.py check --offline` — 必須 10 形
+- `compat/fuzz.py --recheck` — 4/4 解消
+
+**次にやること**
+
+1. **ファザーを新しい変異で回す。** `rename` / `littype` / `rangeint` は入ったが、
+   それらを含む周回はまだ 1 度も回していない。`--allow-dirty-seeds` で
+   ratchet 付き seed（staticcheck-sa の 160 check、revive の 99 rule ——
+   後者は今回 `go build` が通るようになったので初めて射程に入った）も空白のまま。
+   revive を回すときは上記 1 のレースが**ミュータントごとに**乗るので、
+   `--recheck` 前提で読むこと。
+2. **他リポの ill-typed を同じやり方で。** 今回の測定で grafana 21 / consul 6 / helm 1 まで
+   落ちた（この修正の副作用）が、kubernetes と vault は未測定、grafana の 21 は残っている。
+   使う道具はもう `compat/reduce.py` に入っている: **root 集合の ddmin が第 1 パス**で、
+   `./pkg/...` の 64 パッケージを 3 に落とすところまでは無人で走る（`--no-reduce-roots` で無効）。
+   再現に効く軸がファイルでないなら、ファイルを削っても意味の無い答えしか出ない ——
+   **「再現条件は何の関数か」を先に測る**のがこのセッションで一番効いた判断だった。
+3. `compat/drift.py` を CI で 1 度も走らせていない（workflow は書いたが schedule 待ち）。
+   最初の実走のときに `--update` の出力とレビュー手順を確認すること。
+4. **`compat/allowlists/controller-runtime.txt` の 17 件。** ill-typed が 0 になった日に
+   見えるようになった precision の穴で、**recall は 100% のまま**である。
+   nolintlint の unused は症状なので、下の linter（staticcheck / unparam）を直せば
+   まとめて消える。どれも「上流のどのガードが効いているか」を読んでいない。
+5. 13 本目からの持ち越しがそのまま残っている: インターフェースメソッドのレシーバ（§7）、
    `range` / 送受信の `commonUnder`、config の validate、gosec G304 / G407、
    §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
 

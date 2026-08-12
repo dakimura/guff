@@ -561,18 +561,48 @@ impl Checker {
         let mut arg_types: Vec<Option<TypeId>> = Vec::with_capacity(args.len());
         let mut untyped_types: Vec<Option<TypeId>> = Vec::with_capacity(args.len());
         for a in args {
+            let untyped = a.typ.is_some_and(|t| is_untyped(&self.types, t));
             if a.mode == OperandMode::Invalid {
                 arg_types.push(None);
                 untyped_types.push(None);
-            } else if a.mode == OperandMode::Constant
-                && a.typ.map_or(false, |t| is_untyped(&self.types, t))
-            {
+            } else if untyped {
+                // Go's step-1 guard is `isTyped(arg.typ)`, not "is an untyped
+                // *constant*". An untyped `nil` is a value, not a constant, so
+                // testing the mode let it through to unification, where a
+                // parameter type mentioning a type parameter cannot possibly
+                // unify with untyped nil — and inference failed outright rather
+                // than learning the type parameter from another argument.
+                //
+                // `source.Kind(ic, &corev1.Pod{}, nil)` is the shape: `object`
+                // is right there in argument 2, and argument 3 sank the call.
                 arg_types.push(None);
-                untyped_types.push(a.typ);
+                // Step 3 promotes an untyped argument to its default type, and
+                // untyped nil has none — Go excludes it explicitly
+                // (`!arg.isNil()`), so it contributes nothing to either step.
+                untyped_types.push((a.mode == OperandMode::Constant).then_some(a.typ).flatten());
             } else {
                 arg_types.push(a.typ);
                 untyped_types.push(None);
             }
+        }
+
+        // Interface inference reads the *arguments'* method sets: unifying a
+        // parameter `Iface[R]` against a concrete argument matches their methods
+        // and learns `R` from the signatures. For a generic instance that only
+        // works once the instance's methods have been substituted, and `infer`
+        // is a fourth entry point into a method-set comparison that has to do
+        // that itself — see `prepare_method_set` for why guff needs the step at
+        // all and Go does not.
+        //
+        // It only shows with *two* arguments naming the same type parameter. One
+        // argument leaves the parameter free, so unifying against the origin's
+        // own `R` still binds something that happens to be right; the second
+        // arrives with `R` already resolved and compares a substituted signature
+        // against an unsubstituted one. Both print the same, and the error is
+        // `cannot infer type arguments in call` — 24 of them across
+        // controller-runtime, and none in any fixture with a one-argument call.
+        for t in arg_types.iter().flatten() {
+            self.prepare_method_set(*t);
         }
 
         let targs_in = vec![None; renamed_tparams.len()];

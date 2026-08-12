@@ -248,10 +248,25 @@ pub fn node_end(n: NodeRef<'_>) -> crate::position::Pos {
                 crate::position::Pos(x.body.rbrace.0 + 1)
             }
         }
-        NodeRef::CaseClause(x) => crate::position::Pos(x.colon.0 + 1),
+        // Go: `if n := len(s.Body); n > 0 { return s.Body[n-1].End() }` —
+        // the colon is the end only of an *empty* clause. Returning it always
+        // made a clause a one-line node, so a `//nolint` on the line above a
+        // `case` covered the `case` line and nothing under it, while
+        // golangci's range expander (which reads `Node.End()`) covered the
+        // whole clause. Found on grafana, where the directive above
+        // `case q.ID != nil` left the body's use of the deprecated field
+        // unsuppressed.
+        NodeRef::CaseClause(x) => match x.body.last() {
+            Some(last) => Stmt_end(last),
+            None => crate::position::Pos(x.colon.0 + 1),
+        },
         NodeRef::SwitchStmt(x) => crate::position::Pos(x.body.rbrace.0 + 1),
         NodeRef::TypeSwitchStmt(x) => crate::position::Pos(x.body.rbrace.0 + 1),
-        NodeRef::CommClause(x) => crate::position::Pos(x.colon.0 + 1),
+        // Same shape in `select`; Go's CommClause.End() is written identically.
+        NodeRef::CommClause(x) => match x.body.last() {
+            Some(last) => Stmt_end(last),
+            None => crate::position::Pos(x.colon.0 + 1),
+        },
         NodeRef::SelectStmt(x) => crate::position::Pos(x.body.rbrace.0 + 1),
         NodeRef::ForStmt(x) => crate::position::Pos(x.body.rbrace.0 + 1),
         NodeRef::RangeStmt(x) => crate::position::Pos(x.body.rbrace.0 + 1),

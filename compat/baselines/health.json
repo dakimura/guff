@@ -4,7 +4,7 @@
     "A package that fails type checking is skipped whole by every analyzer",
     "without run_despite_errors, so its findings silently become 0.",
     "Counts may shrink freely; growth fails the gate. Targets absent here",
-    "are gated strictly at 0. Panics are never baselined — they always fail.",
+    "are gated strictly at 0. Panics are never baselined \u2014 they always fail.",
     "Re-record with: ./compat/run.sh --oss --tier <t> --update-baseline"
   ],
   "targets": {
@@ -12,25 +12,22 @@
       "ill_typed": 2
     },
     "consul": {
-      "ill_typed": 14
-    },
-    "controller-runtime": {
-      "ill_typed": 16
+      "ill_typed": 6
     },
     "gin": {
       "ill_typed": 2
     },
     "grafana": {
-      "ill_typed": 30
+      "ill_typed": 21
     },
     "helm": {
-      "ill_typed": 2
+      "ill_typed": 1
     },
     "k9s": {
       "ill_typed": 1
     },
     "kubernetes": {
-      "ill_typed": 10
+      "ill_typed": 8
     }
   }
 }

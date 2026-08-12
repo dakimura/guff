@@ -422,7 +422,7 @@ impl Checker {
     /// Resolution comes first: `expand_instance_methods` copies the origin's
     /// signatures and then refuses to run twice, so expanding before the origin
     /// is resolved would bake unresolved signatures into the instance for good.
-    fn prepare_method_set(&mut self, v: TypeId) {
+    pub(crate) fn prepare_method_set(&mut self, v: TypeId) {
         self.ensure_method_sigs(v);
         self.expand_instance_methods(v);
     }
