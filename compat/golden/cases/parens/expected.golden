@@ -17,3 +17,6 @@ parens/parens.go:113:2:staticcheck::S1008: should use 'return x == 1' instead of
 parens/parens.go:134:2:staticcheck::QF1003: could use tagged switch on x
 parens/parens.go:151:9:revive:warning:errorf: should replace errors.New(fmt.Sprintf(...)) with fmt.Errorf(...)
 parens/parens.go:170:21:revive:warning:range-val-address: suspicious assignment of 'v'. range-loop variables always have the same address
+parens/parens.go:182:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+parens/parens.go:188:2:staticcheck::SA1006: printf-style function with dynamic format string and no further arguments should use print-style function instead
+parens/parens.go:196:9:errorlint::comparing with != will fail on wrapped errors. Use errors.Is to check for a specific error

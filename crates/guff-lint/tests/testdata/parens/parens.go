@@ -171,3 +171,32 @@ func RangeAddrPlain() []*int {
 	}
 	return out
 }
+
+// --- staticcheck SA1006 -----------------------------------------------------
+
+// SA1006 type-switches on `m.State["format"]` for *ast.CallExpr / *ast.Ident,
+// which reads like the parenthesized form is skipped. It is not: pattern.match
+// strips ParenExpr from both sides *before* any binding is made, so the switch
+// never sees one and this is reported.
+func SA1006Paren(s string) {
+	fmt.Printf((s))
+}
+
+// The control: reported too. Both must fire — this pair exists to stop a fix
+// that silences the parenthesized form from looking correct.
+func SA1006Plain(s string) {
+	fmt.Printf(s)
+}
+
+// --- errorlint --------------------------------------------------------------
+
+// errorlint's `isNil` is a bare `ex.(*ast.Ident)` assertion, so `(nil)` is not
+// a nil comparison to it and the comparison is reported like any other.
+func ErrorlintParenNil(err error) bool {
+	return err != (nil)
+}
+
+// The control: silent, because this one *is* a nil comparison.
+func ErrorlintPlainNil(err error) bool {
+	return err != nil
+}

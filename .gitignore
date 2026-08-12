@@ -31,6 +31,9 @@
 # Golden cases are materialized from their canonical sources on every run.
 /compat/golden/.work/
 
+# golangci-lint binaries compat/drift.py downloads to compare versions.
+/compat/.tools/
+
 # Prometheus regress harness raw run artifacts (keep RESULTS*.md + baseline*.json)
 /regress/results/*
 !/regress/results/RESULTS.md
@@ -44,3 +47,6 @@
 
 __pycache__/
 *.pyc
+
+# `go build ./...` inside compat/gospans drops its binary next to the source.
+/compat/gospans/gospans

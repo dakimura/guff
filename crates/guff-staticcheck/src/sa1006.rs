@@ -30,6 +30,27 @@ const PRINTF_ONE_ARG: &[&str] = &[
     "(testing.TB).Skipf",
 ];
 
+/// The format argument as the check actually sees it.
+///
+/// Upstream matches the call with `pattern.MustParse` and then type-switches on
+/// `m.State["format"]` for `*ast.CallExpr` / `*ast.Ident`, which reads as "the
+/// parenthesized form is skipped". It is not: `pattern.match` strips
+/// `*ast.ParenExpr` from **both** sides before any binding is made
+/// (`pattern/match.go`, the two `case *ast.ParenExpr` arms sit above the
+/// `matcher` dispatch), so what the type switch inspects is already unwrapped
+/// and `fmt.Printf((s))` is reported.
+///
+/// Which way a matcher goes has to be read off the matcher every time — the
+/// same honnef tree strips parens here and refuses to in `astutil.Equal`
+/// (QF1003), and revive's rules type-assert raw. Three ports of this check have
+/// been wrong in three different directions.
+fn format_arg(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::ParenExpr(p) => format_arg(&p.x),
+        other => other,
+    }
+}
+
 fn is_dynamic_format_arg(expr: &Expr) -> bool {
     matches!(expr, Expr::CallExpr(_) | Expr::Ident(_))
 }
@@ -68,6 +89,7 @@ fn check_printf_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, S
         return;
     };
 
+    let format = format_arg(format);
     if !is_dynamic_format_arg(format) || is_splatted_tuple(pass, format) {
         return;
     }

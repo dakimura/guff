@@ -21,3 +21,4 @@ preceding/preceding.go:27:7:errcheck::Error return value is not checked
 preceding/preceding.go:33:7:errcheck::Error return value is not checked
 unused/unused.go:42:2:nolintlint::directive `//nolint :errcheck // reported as malformed only — no unused candidate` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`
 wholefile/wholefile.go:16:2:ineffassign::ineffectual assignment to x
+wholefile/wholefile.go:32:2:ineffassign::ineffectual assignment to y

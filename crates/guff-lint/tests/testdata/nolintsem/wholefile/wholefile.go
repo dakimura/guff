@@ -17,3 +17,19 @@ func B() int {
 	x = 2
 	return x
 }
+
+// C carries a directive that suppresses nothing at all — and neither tool
+// reports it unused, because the file-level directive above did suppress
+// something. nolintlint emits an unused *candidate* per directive, and the
+// filter cancels it through the same range loop every issue takes: any
+// covering range whose own directive matched cancels the candidate with it.
+// Take the `mkerr()` finding away and both directives get reported.
+//
+// (A comment line starting with the directive word and a space is itself a
+// malformed directive to nolintlint, which is why this paragraph does not
+// spell it out. Learned by regenerating the golden.)
+func C() int {
+	y := 1
+	y = 2 //nolint
+	return y
+}

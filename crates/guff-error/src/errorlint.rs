@@ -99,8 +99,18 @@ static ALLOWED_WILDCARDS: &[(&str, &str)] = &[
     ("golang.org/x/sys/unix.E", "golang.org/x/sys/unix."),
 ];
 
+/// Upstream's `isNil` is `ex.(*ast.Ident) && ident.Name == "nil"` — a bare type
+/// assertion, so a parenthesized `(nil)` is **not** a nil comparison to it and
+/// `err != (nil)` is reported. Unparenthesizing here is more sensible and less
+/// compatible; all three of upstream's call sites (binary comparison, value
+/// switch, type switch) share this one function, so all three follow it.
+///
+/// The rule is per-matcher, not per-project: `switchComparesNonNil` two
+/// functions down asks the same question and answers it the same way, while
+/// honnef's `pattern.match` strips parens on both sides and its `astutil.Equal`
+/// does not. Read the matcher being ported; there is no general policy.
 fn is_nil_ident(e: &Expr) -> bool {
-    matches!(unparen(e), Expr::Ident(Ident { name, .. }) if name == "nil")
+    matches!(e, Expr::Ident(Ident { name, .. }) if name == "nil")
 }
 
 fn is_error_type(pass: &Pass<'_>, e: &Expr) -> bool {

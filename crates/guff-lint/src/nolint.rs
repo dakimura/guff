@@ -392,13 +392,13 @@ impl NolintIndex {
                 if d.malformed {
                     continue;
                 }
-                let matched = self.matched.get(&(filename.clone(), d.line, d.col));
                 if d.linters.is_empty() {
-                    if matched.is_none_or(|m| m.is_empty()) {
+                    if !self.unused_is_cancelled(filename, d.line, None) {
                         out.push(unused_issue(filename, d.line, d.col, &d.text, None));
                     }
                     continue;
                 }
+                let matched = self.matched.get(&(filename.clone(), d.line, d.col));
                 for lint in &d.linters {
                     // Don't report unused for linters we cannot run yet —
                     // golangci would have consumed these directives.
@@ -421,7 +421,9 @@ impl NolintIndex {
                     {
                         continue;
                     }
-                    if matched.is_some_and(|m| m.contains(lint.as_str())) {
+                    if matched.is_some_and(|m| m.contains(lint.as_str()))
+                        || self.unused_is_cancelled(filename, d.line, Some(lint))
+                    {
                         continue;
                     }
                     out.push(unused_issue(filename, d.line, d.col, &d.text, Some(lint)));
@@ -429,6 +431,50 @@ impl NolintIndex {
             }
         }
         out
+    }
+
+    /// `doesMatch`'s third arm, which asks a wider question than it looks like.
+    ///
+    /// nolintlint does not decide that a directive is unused: it emits a
+    /// *candidate* for every directive and the nolint filter cancels the ones
+    /// that turn out to be used. Cancelling runs the candidate through the same
+    /// range loop as any other issue, so **any** range covering the candidate's
+    /// line can cancel it — not only the range the directive itself created:
+    ///
+    /// ```go
+    /// //nolint:errcheck // covers the whole file   <- suppresses line 4
+    /// package p
+    ///
+    /// func A()     { mkerr() }
+    /// func B() int { x := 1; x = 2 /*nolint*/; return x }   <- unused, unreported
+    /// ```
+    ///
+    /// The file-level directive's range spans the file and has matched the
+    /// errcheck finding, so `len(matchedIssueFromLinter) > 0` holds for it and
+    /// the *other* directive's unused candidate is filtered out with it. Take
+    /// away the errcheck finding and both directives are reported unused —
+    /// which is how this was confirmed rather than assumed.
+    ///
+    /// Reading it as "did my own directive suppress anything" gives the right
+    /// answer whenever there is one directive per range, which is every fixture
+    /// anyone writes by hand; a differential fuzzer put a second directive
+    /// inside a file-level one and the two readings came apart.
+    fn unused_is_cancelled(&self, filename: &str, line: i64, specific: Option<&str>) -> bool {
+        let Some(ranges) = self.files.get(filename) else {
+            return false;
+        };
+        ranges.iter().any(|ir| {
+            if line < ir.from || line > ir.to {
+                return false;
+            }
+            let matched = self
+                .matched
+                .get(&(filename.to_string(), ir.report_line, ir.report_col));
+            match specific {
+                Some(l) => matched.is_some_and(|m| m.contains(l)),
+                None => matched.is_some_and(|m| !m.is_empty()),
+            }
+        })
     }
 }
 

@@ -1,14 +1,21 @@
 # Golden case: parentheses and comments (COMPAT-HARDENING Phase 6).
 #
-# The four linters here disagree with each other about whether a ParenExpr is
-# transparent, and guff had it backwards for three of them. The fixture's
+# The linters here disagree with each other about whether a ParenExpr is
+# transparent, and guff had it backwards for most of them. The fixture's
 # comment explains which is which; this config just turns on the checks whose
 # behaviour changed.
+#
+# errorlint and SA1006 joined on the second fuzzing round, in opposite
+# directions: SA1006's matcher strips parens before the check ever looks, and
+# errorlint's `isNil` does not strip them at all — so `fmt.Printf((s))` and
+# `err != (nil)` are both reported, one because upstream sees through the paren
+# and one because it does not.
 version: "2"
 
 linters:
   default: none
   enable:
+    - errorlint
     - govet
     - revive
     - staticcheck
@@ -26,6 +33,7 @@ linters:
       checks:
         - S1008
         - QF1003
+        - SA1006
 
 issues:
   max-issues-per-linter: 0

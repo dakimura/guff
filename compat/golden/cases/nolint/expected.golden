@@ -29,3 +29,4 @@ unused/unused.go:32:2:nolintlint::directive `//nolint // reported without a lint
 unused/unused.go:37:2:nolintlint::directive `//nolint:all // reported without a linter name, like the bare form` is unused
 unused/unused.go:42:2:nolintlint::directive `//nolint :errcheck // reported as malformed only — no unused candidate` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`
 wholefile/wholefile.go:16:2:ineffassign::ineffectual assignment to x
+wholefile/wholefile.go:32:2:ineffassign::ineffectual assignment to y

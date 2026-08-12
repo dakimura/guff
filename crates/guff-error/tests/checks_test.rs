@@ -100,6 +100,23 @@ fn errorlint_flags_error_comparison() {
 }
 
 #[test]
+fn errorlint_reports_a_parenthesized_nil_comparison() {
+    // Found by compat/fuzz.py: the `paren` mutation turned `err != nil` into
+    // `err != (nil)` and guff went quiet where golangci-lint did not.
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint/paren", &dir.join("paren_nil.go"));
+    let messages = support::run_analyzer(errorlint(), &pkg);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("comparing with"))
+            .count(),
+        1,
+        "`err != (nil)` is reported and `err != nil` is not: {messages:?}"
+    );
+}
+
+#[test]
 fn errorlint_allows_nil_check() {
     let dir = support::testdata("errorlint");
     let pkg = support::typecheck_pkg("example.com/errorlint/ok", &dir.join("ok.go"));

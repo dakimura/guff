@@ -130,3 +130,11 @@ func Store(v int) error {
 	}
 	return nil
 }
+
+// zeroIntParen pins which node newDeref renders. Upstream warns on `expr` — the
+// whole `*new(T)` as written — while computing the suggestion from
+// `astutil.Unparen(call.Args[0])`, so the parenthesis survives on the left of
+// the message and not on the right. guff spliced the message back together out
+// of the unparenthesized argument and lost it on both sides.
+// (compat/fuzz.py, COMPAT-HARDENING Phase 6.)
+func zeroIntParen() int { return *new((int)) }

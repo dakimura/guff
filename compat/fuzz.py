@@ -54,7 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent / "golden"))
-from golden import issue_key as golden_key  # noqa: E402  (compat/golden/golden.py)
+from golden import issue_keys as golden_keys  # noqa: E402  (compat/golden/golden.py)
 from normalize import load_issues  # noqa: E402
 from reduce import Edit, Spanner, Tree, apply_edits, resolve_guff  # noqa: E402
 
@@ -153,7 +153,13 @@ class Runner:
             return []
         finally:
             tmp.unlink(missing_ok=True)
-        return sorted(golden_key(i, str(root)) for i in issues)
+        # `issue_keys`, not a map over `issue_key`: it drops the
+        # `(related information)` rows, which is what the golden tier compares
+        # and therefore what a baseline here has to mean. Counting them inflated
+        # `staticcheck-sa`'s seed diff from 5 to 17 — and since a mutant is only
+        # interesting when its diff *exceeds* the baseline, an inflated baseline
+        # is not noise, it is twelve findings' worth of blindfold.
+        return golden_keys(issues, str(root))
 
     # `go build` links every `package main` it finds, and a fixture that exists
     # to hold one check rarely bothers to declare `func main`. That is a link
@@ -413,6 +419,39 @@ def _restore(work: Path, base: dict[str, bytes]) -> None:
 # --------------------------------------------------------------------------
 
 
+def recheck(dirs: list[str], runner: Runner) -> int:
+    """Re-run both tools on saved findings — the only honest way to close one.
+
+    A finding directory holds the mutant, not a recipe for it: the fuzzer works
+    in a temp tree and throws it away. Re-running the seed proves nothing about
+    a mutant, and re-deriving the mutant by hand from `report.json`'s byte
+    offsets is how a fix gets declared for the wrong reason.
+    """
+    failed = 0
+    for d in dirs:
+        dest = Path(d).resolve()
+        report = json.loads((dest / "report.json").read_text(encoding="utf-8"))
+        env = {}
+        gk, _ = runner.run_guff(dest, dest / "config.yml", env)
+        ck = runner.stable_golangci(dest, dest / "config.yml", env)
+        if ck is None:
+            print(f"{dest.name}: golangci-lint would not agree with itself")
+            failed += 1
+            continue
+        missing, extra = diff_keys(gk, ck)
+        was = len(report["missing_from_guff"]) + len(report["extra_in_guff"])
+        now = len(missing) + len(extra)
+        verdict = "FIXED" if now <= report.get("baseline_diff", 0) else "STILL DIFFERS"
+        print(f"{dest.name}: {verdict} (was {was}, now {now})")
+        for k in missing:
+            print(f"   -gcl  {k}")
+        for k in extra:
+            print(f"   +guff {k}")
+        if verdict != "FIXED":
+            failed += 1
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -424,12 +463,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-dirty-seeds", action="store_true")
     ap.add_argument("-o", "--output", help="Where to write findings")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument(
+        "--recheck",
+        nargs="+",
+        metavar="DIR",
+        help="Re-run both tools on saved finding directories instead of fuzzing",
+    )
     args = ap.parse_args(argv)
 
     golangci = os.environ.get("GOLANGCI_LINT_BIN") or shutil.which("golangci-lint")
     if not golangci:
         raise SystemExit("golangci-lint not on PATH")
     guff = resolve_guff()
+
+    if args.recheck:
+        return recheck(args.recheck, Runner(guff, golangci))
 
     cases = load_cases(args.case)
     if not cases:

@@ -42,3 +42,6 @@ unused/unused.go:37:2:nolintlint::directive `//nolint:all // reported without a 
 unused/unused.go:37:2:nolintlint::directive `//nolint:all // reported without a linter name, like the bare form` should mention specific linter such as `//nolint:my-linter`
 unused/unused.go:42:2:nolintlint::directive `//nolint :errcheck // reported as malformed only — no unused candidate` should match `//nolint[:<comma-separated-linters>] [// <explanation>]`
 wholefile/wholefile.go:16:2:ineffassign::ineffectual assignment to x
+wholefile/wholefile.go:32:2:ineffassign::ineffectual assignment to y
+wholefile/wholefile.go:33:8:nolintlint::directive `//nolint` should mention specific linter such as `//nolint:my-linter`
+wholefile/wholefile.go:33:8:nolintlint::directive `//nolint` should provide explanation such as `//nolint // this is why`

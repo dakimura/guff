@@ -130,6 +130,68 @@ fn nolintlint_reports_unused_directive() {
     );
 }
 
+/// A directive that suppressed nothing, inside the range of one that did.
+///
+/// nolintlint emits an unused *candidate* for every directive and the nolint
+/// filter cancels the used ones — through the same range loop every issue takes,
+/// so any covering range that matched something cancels the candidate, not only
+/// the range the directive itself created. Here the file-level
+/// `//nolint:errcheck` really does suppress the `mkerr()` finding, and that
+/// silences the unrelated `//nolint` further down as a side effect.
+///
+/// Found by compat/fuzz.py: no hand-written fixture had two directives whose
+/// ranges overlapped, and with one directive per range the wrong reading ("did
+/// *my* directive suppress anything") gives the right answer every time.
+#[test]
+fn nolintlint_unused_is_cancelled_by_a_covering_directive_that_matched() {
+    let dir = fixture_dir("nolint_unused_covered");
+    let pkg = typecheck_fixture(&dir, "example.com/guff-test/nolint_unused_covered", "bad.go");
+    assert!(!pkg.ill_typed, "{:?}", pkg.errors);
+
+    let analyzers = analyzers_for_linter("errcheck").expect("errcheck");
+    let mut filter = IssueFilter::from_config(
+        &IssuesConfig {
+            exclude_use_default: false,
+            max_issues_per_linter: 0,
+            max_same_issues: 0,
+            exclude_dirs_use_default: Some(false),
+            ..IssuesConfig::default()
+        },
+        &SeverityConfig::default(),
+    );
+    filter.nolintlint = Some(guff_lint::NolintlintStyle {
+        report_unused: true,
+        ..guff_lint::NolintlintStyle::default()
+    });
+
+    let result = LintResult {
+        packages: vec![pkg.clone()],
+        run: run_on_packages(
+            &analyzers,
+            std::slice::from_ref(&pkg),
+            &RunnerOptions {
+                sequential: true,
+                ..RunnerOptions::default()
+            },
+        )
+        .expect("run"),
+        filter,
+        cached_issues: Vec::new(),
+        path_mode: guff_lint::PathMode::Rel,
+        path_prefix: None,
+    };
+
+    let nolintlint: Vec<_> = result
+        .issues()
+        .into_iter()
+        .filter(|i| i.from_linter == NOLINTLINT_NAME)
+        .collect();
+    assert!(
+        nolintlint.is_empty(),
+        "both directives are cancelled by the file-level range: {nolintlint:?}"
+    );
+}
+
 #[test]
 fn cli_honors_same_line_nolint() {
     let dir = fixture_dir("nolint_errcheck");

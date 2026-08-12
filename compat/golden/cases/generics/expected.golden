@@ -16,3 +16,4 @@ generics/generics.go:101:29:gocritic::newDeref: replace `*new(int)` with `0`
 generics/generics.go:105:34:gocritic::newDeref: replace `*new(Box[int])` with `Box[int]{}`
 generics/generics.go:121:3:nilerr::error is not nil (line 120) but it returns nil
 generics/generics.go:129:3:nilerr::error is not nil (line 128) but it returns nil
+generics/generics.go:140:34:gocritic::newDeref: replace `*new((int))` with `0`

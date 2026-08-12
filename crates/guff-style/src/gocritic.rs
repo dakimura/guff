@@ -870,8 +870,16 @@ fn check_new_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, Str
     // The message embeds two rendered nodes, so both go through `go/printer`:
     // `expr_text` cannot render `[]int`, `map[string]int` or `struct{ B int }`
     // at all and used to drop those findings on the floor.
+    //
+    // The two nodes are *not* the same one. Upstream warns on `expr` — the whole
+    // `*new(T)` as written — while computing the suggestion from
+    // `astutil.Unparen(call.Args[0])`. So `*new((int))` renders with its
+    // parentheses on the left of the message and yields `0` on the right.
     let type_expr = unparen(&call.args[0]);
     let Some(arg) = node_text(pass, type_expr) else {
+        return;
+    };
+    let Some(cause_arg) = node_text(pass, &call.args[0]) else {
         return;
     };
     let Some(typ) = type_of(pass, &call.args[0]) else {
@@ -884,7 +892,7 @@ fn check_new_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, Str
         pending,
         star.star.0 as u32,
         "newDeref",
-        format!("replace `*new({arg})` with `{suggestion}`"),
+        format!("replace `*new({cause_arg})` with `{suggestion}`"),
     );
 }
 
