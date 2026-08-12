@@ -214,3 +214,43 @@ pub fn run_analyzer(
         .map(|(_, d)| d.message)
         .collect()
 }
+
+/// Like [`run_analyzer`], but each entry is `"line:col: message"`.
+///
+/// Most revive assertions here only need the message, because the golden tier
+/// (`compat/golden/run.sh`) is what compares columns against golangci-lint.
+/// A rule whose column is only wrong on a *shape the fixtures do not contain*
+/// stays invisible to both, though — `duplicated-imports` reported the import
+/// path's column instead of the ImportSpec's for years, and could not be caught
+/// until an aliased duplicate existed to tell the two apart.
+pub fn run_analyzer_at(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<String> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    let fset = pkg.fset.as_ref().expect("fixture package has a FileSet");
+    let mut out: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| {
+            let pos = fset.position(guff::position::Pos(i64::from(d.pos)));
+            let col = d.column.map_or(pos.column, i64::from);
+            format!("{}:{}: {}", pos.line, col, d.message)
+        })
+        .collect();
+    out.sort();
+    out
+}

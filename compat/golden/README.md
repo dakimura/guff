@@ -214,6 +214,53 @@ value by hand, so no assumption about upstream can smuggle itself in. When you
 are unsure what upstream does in some corner, do not reason about it: write the
 corner into a scratch module, run golangci-lint on it, and read the answer.
 
+### Upstream is not a function
+
+Regeneration runs golangci-lint **until two runs return identical keys** and
+refuses to write a golden otherwise (`GOLDEN_REGEN_CONFIRMATIONS`,
+`GOLDEN_REGEN_ATTEMPTS`). That is not paranoia:
+
+| measurement | result |
+|---|---|
+| `cases/revive`, 24 cold-cache runs of golangci-lint 2.12.2 | **7 returned fewer findings than the other 17** — 57, 58, 62, 64, 71, 151, 287 against a complete 288 |
+| the other 80 cases, 3 runs each | all identical |
+| `--concurrency 1` | still flaky (7 of 24) |
+| a *warm* `GOLANGCI_LINT_CACHE` | stable — but stably wrong if the run that filled it was one of the bad ones |
+
+What is lost is whole packages, a different subset each time, with nothing on
+stderr and no error in the JSON. The first regeneration attempted after this was
+measured wrote **63 keys where the golden holds 288** — and would have passed
+review as a plausible-looking diff.
+
+The cause is upstream and exact. revive type-checks with
+`types.Config{Importer: importer.Default()}`, the gc export-data importer, which
+finds no `.a` files on a modern toolchain — so `Package.TypeCheck()` fails for
+every package that imports **anything**. It memoizes the *result* but not the
+*error* (`lint/package.go`: `alreadyTypeChecked := p.typesInfo != nil`), so only
+the **first** caller sees the failure. Two rules turn that failure into an
+`internal` failure (`epoch-naming`, `inefficient-map-lookup`), and `File.lint`
+returns the moment it sees one — abandoning every rule not yet run *for that
+file*. Files are linted concurrently (`Package.lint` uses an `errgroup`), so
+which file draws the error, and therefore which findings survive, is a race.
+
+Two predictions confirm it: packages with **no imports** never lose findings
+(`dot`, `badalias`, `fixtures/`, `footest`, `funclen`, `siblingok`,
+`sortableok`, `privatereceiverok` — stable in every run), and removing those two
+rules from the config makes the case stable at 16/16.
+
+This is the same upstream defect `cases/revive/ratchet.json` already blames for
+its four permanent diffs. The ratchet only ever saw its quiet half — rules that
+silently answer "no" because every type is invalid. The loud half is that the
+whole run is nondeterministic.
+
+Confirmation is "the same answer seen twice", not "the union of N runs".
+A union assumes the only failure mode is loss; revive's `package-naming`
+memoization is a second race that *moves* a finding between files (see
+`cases/revive/sources.txt`), and a union would record both positions as
+expected. `compat/fuzz.py` applies the same rule from the other end: a mutant
+that disagrees is re-run before it is reported, because the mutant is discarded
+afterwards and an unconfirmed report is one nobody can reproduce.
+
 ### Ratchet (a case on its way to zero)
 
 Landing a large case — staticcheck arrived with 506 findings and 173 of them
@@ -377,6 +424,23 @@ fixtures here:
 * **Probe with a fresh `GOLANGCI_LINT_CACHE`.** Half a session went into a
   behaviour difference that was a stale cache entry. `run.sh --regen` already
   uses a fresh cache; ad-hoc `golangci-lint run` invocations do not.
+* **…and then run it twice.** A fresh cache is what *exposes* the
+  nondeterminism described in "Upstream is not a function" above. One run of
+  this case proves nothing.
+
+The fixtures were also made to compile. `extended_bad.go` used to carry a bare
+second `import "os"` and an unused `BadAlias`, which cost the whole module its
+`go build` — and with it every Phase 6 tool, since both the reducer and the
+fuzzer take "the Go toolchain still accepts this" as their invariant. revive
+keys `duplicated-imports` on the import **path** alone, so `import osdup "os"`
+is still a duplicate and still reported, and Go accepts it. Upstream's finding
+count did not move (288 before, 288 after).
+
+That one-character change immediately found a guff bug the old shape could not
+express: `duplicated-imports` reported the *path's* column, upstream reports the
+ImportSpec's (`Node: imp`). On an unaliased import those are the same token, so
+the rule looked correct for as long as no fixture had an aliased duplicate —
+and no fixture could have one while the file was required not to compile.
 
 `multiline-if-init` exists on revive's master branch but not in v1.15.0, which
 rejects the name (`cannot find rule: multiline-if-init`). guff's

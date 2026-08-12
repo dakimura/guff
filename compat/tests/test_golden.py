@@ -10,7 +10,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "golden"))
 
-from golden import diff, escape, issue_key, issue_keys, parse_golden, sort_key  # noqa: E402
+from golden import (  # noqa: E402
+    confirm,
+    diff,
+    escape,
+    format_unconfirmed,
+    issue_key,
+    issue_keys,
+    parse_golden,
+    sort_key,
+)
 
 
 def issue(line, col, text, linter="gocritic", severity="", filename="/root/a.go"):
@@ -73,6 +82,43 @@ class DiffTests(unittest.TestCase):
         missing, extra = diff(["a.go:1:1:l::x", "a.go:1:1:l::x"], ["a.go:1:1:l::x"])
         self.assertEqual(missing, ["a.go:1:1:l::x"])
         self.assertEqual(extra, [])
+
+
+class ConfirmationTests(unittest.TestCase):
+    """golangci-lint can drop whole packages' findings; a golden must not.
+
+    See golden.confirm's docstring and compat/golden/README.md,
+    "Upstream is not a function".
+    """
+
+    A = ["a.go:1:1:l::x", "a.go:2:1:l::y"]
+    SHORT = ["a.go:1:1:l::x"]
+
+    def test_one_run_is_never_enough_by_default(self):
+        self.assertIsNone(confirm([self.A], confirmations=2))
+
+    def test_two_identical_runs_confirm(self):
+        self.assertEqual(confirm([self.A, list(self.A)], confirmations=2), self.A)
+
+    def test_a_truncated_run_between_two_good_ones_does_not_win(self):
+        runs = [self.A, self.SHORT, list(self.A)]
+        self.assertEqual(confirm(runs, confirmations=2), self.A)
+
+    def test_all_runs_distinct_is_unconfirmed(self):
+        runs = [self.A, self.SHORT, []]
+        self.assertIsNone(confirm(runs, confirmations=2))
+
+    def test_confirmation_is_not_a_union(self):
+        # The union of a truncated run and a run that moved a finding would
+        # record both positions as expected; "seen twice" records neither.
+        moved = ["a.go:1:1:l::x", "b.go:2:1:l::y"]
+        self.assertIsNone(confirm([self.A, moved], confirmations=2))
+
+    def test_unconfirmed_report_names_the_unstable_keys(self):
+        text = format_unconfirmed("revive", [self.A, self.SHORT])
+        self.assertIn("did not agree", text)
+        self.assertIn("a.go:2:1:l::y", text)
+        self.assertNotIn("a.go:1:1:l::x", text)
 
 
 class GoldenFileTests(unittest.TestCase):

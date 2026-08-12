@@ -12,7 +12,7 @@ import (
 )
 
 import "os"
-import "os"
+import osdup "os"
 import dot "example.com/revive/dot"
 import BadAlias "example.com/revive/badalias"
 
@@ -452,3 +452,12 @@ func badForbiddenWgGo() {
 		wg.Done()
 	})
 }
+
+// The two import lines above exist to make `duplicated-imports` fire: revive
+// keys that rule on the import *path* alone, so an alias still counts as a
+// duplicate — and unlike a bare second `import "os"`, an aliased one compiles.
+// Go rejects an unused import, so both names have to be referenced; keeping
+// the references at the end of the file leaves every position above unmoved.
+var _ = osdup.Args
+
+var _ = BadAlias.X

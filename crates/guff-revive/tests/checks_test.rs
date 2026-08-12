@@ -180,6 +180,35 @@ fn revive_analyzer_graph_is_valid() {
 }
 
 #[test]
+fn revive_duplicated_imports_reports_the_import_spec_not_the_path() {
+    // Upstream passes `Node: imp` — the whole ImportSpec — so the column is the
+    // alias's when there is one. Only the *path* is compared for duplication,
+    // which is why `import "os"` and `import osdup "os"` are a duplicate pair
+    // at all: Go accepts them, and revive still reports the second one.
+    //
+    // extended_bad.go:14 is the bare `import "os"` and :15 the aliased one; on
+    // an unaliased spec ImportSpec.Pos() *is* the path's position, so a rule
+    // that reports the path looks correct until an alias appears.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let found: Vec<String> = support::run_analyzer_at(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("duplicated-imports:"))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["15:8: duplicated-imports: Package \"os\" already imported".to_string()],
+            "duplicated-imports must report the ImportSpec's column (8, the alias), \
+             not the path's (14)"
+        );
+    });
+}
+
+#[test]
 fn revive_flags_extended_rule_violations() {
     guff_revive::with_extended_rules(|| {
         let pkg = support::typecheck_fixture(

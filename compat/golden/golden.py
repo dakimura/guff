@@ -89,6 +89,51 @@ def parse_golden(path: Path | str) -> list[str]:
     return out
 
 
+def confirm(runs: list[list[str]], confirmations: int) -> list[str] | None:
+    """Return the key list seen at least `confirmations` times, else None.
+
+    golangci-lint is not a deterministic function of its input. Measured on the
+    pinned 2.12.2 against `cases/revive`: 7 of 24 cold-cache runs returned
+    between 57 and 287 findings where the complete answer is 288, and the loss
+    is a different random subset every time. The cause is upstream and precise
+    — see compat/golden/README.md "Upstream is not a function" — but the
+    consequence for this harness is what matters: **a golden written from one
+    run can be silently truncated, and a truncated golden stops comparing.**
+    That is the exact failure §1 of COMPAT-HARDENING.md exists to prevent, so
+    the regeneration path refuses to write until it has seen the same answer
+    twice.
+
+    Confirmation is deliberately "seen N times", not "union of all runs". A
+    union assumes the only failure mode is loss; revive also has a memoization
+    race that *moves* a finding between files (see cases/revive/sources.txt),
+    and a union would happily record both positions as expected.
+    """
+    tally: collections.Counter[tuple[str, ...]] = collections.Counter()
+    for run in runs:
+        tally[tuple(run)] += 1
+        if tally[tuple(run)] >= confirmations:
+            return run
+    return None
+
+
+def format_unconfirmed(case: str, runs: list[list[str]]) -> str:
+    """Explain which keys are unstable across `runs`, largest run as the base."""
+    base = max(runs, key=len)
+    lines = [
+        f"{case}: {len(runs)} run(s) of golangci-lint did not agree "
+        f"(sizes {[len(r) for r in runs]})"
+    ]
+    unstable: set[str] = set()
+    for run in runs:
+        unstable |= set(base) ^ set(run)
+    for k in sorted(unstable, key=sort_key)[:20]:
+        seen = sum(1 for r in runs if k in r)
+        lines.append(f"  {seen}/{len(runs)} runs {k}")
+    if len(unstable) > 20:
+        lines.append(f"  ... and {len(unstable) - 20} more")
+    return "\n".join(lines)
+
+
 def diff(expected: list[str], actual: list[str]) -> tuple[list[str], list[str]]:
     """Return (missing, extra) as multisets: golden-only and guff-only keys."""
     exp, act = collections.Counter(expected), collections.Counter(actual)
@@ -147,10 +192,22 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p_write = sub.add_parser("write", help="Write a golden from a golangci-lint JSON dump")
+    p_write = sub.add_parser("write", help="Write a golden from golangci-lint JSON dumps")
     p_write.add_argument("--case", required=True)
     p_write.add_argument("--root", required=True)
-    p_write.add_argument("--golangci", required=True)
+    p_write.add_argument(
+        "--golangci",
+        action="append",
+        required=True,
+        metavar="JSON",
+        help="A golangci-lint dump; repeat to supply independent runs of the same case",
+    )
+    p_write.add_argument(
+        "--confirmations",
+        type=int,
+        default=2,
+        help="Runs that must produce identical keys before the golden is written",
+    )
     p_write.add_argument("--tool-version", default="unknown")
     p_write.add_argument("-o", "--output", required=True)
 
@@ -167,11 +224,16 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.cmd == "write":
-        keys = issue_keys(load_issues(args.golangci), args.root)
+        runs = [issue_keys(load_issues(p), args.root) for p in args.golangci]
+        keys = confirm(runs, max(1, args.confirmations))
+        if keys is None:
+            print(f"  {format_unconfirmed(args.case, runs)}", file=sys.stderr)
+            return 1
         Path(args.output).write_text(
             render_golden(args.case, keys, args.tool_version), encoding="utf-8"
         )
-        print(f"  {args.case}: wrote {len(keys)} keys to {args.output}")
+        note = "" if len(runs) <= args.confirmations else f" (after {len(runs)} runs)"
+        print(f"  {args.case}: wrote {len(keys)} keys to {args.output}{note}")
         return 0
 
     if args.cmd == "check":

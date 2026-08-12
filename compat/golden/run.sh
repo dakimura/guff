@@ -23,6 +23,10 @@ RESULTS_DIR="$ROOT/compat/results"
 
 REGEN=0
 CASE_FILTER=""
+# Regeneration only: how many identical golangci-lint runs a golden needs before
+# it is written, and how many runs we are willing to spend looking for them.
+REGEN_CONFIRMATIONS="${GOLDEN_REGEN_CONFIRMATIONS:-2}"
+REGEN_ATTEMPTS="${GOLDEN_REGEN_ATTEMPTS:-8}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -139,33 +143,54 @@ for case_dir in "$CASES_DIR"/*/; do
   fi
 
   if [[ "$REGEN" -eq 1 ]]; then
-    gcl_json="$RUN_DIR/golden-$name.golangci.json"
-    gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-golden-gcl.XXXXXX")"
-    (
-      cd "$work"
-      env "GOLANGCI_LINT_CACHE=$gcl_cache" \
-        ${case_env[@]+"${case_env[@]}"} \
-        "$GOLANGCI" run \
-        -c "$case_dir/config.yml" \
-        --output.json.path=stdout \
-        --path-mode abs \
-        --issues-exit-code 0 \
-        --allow-parallel-runners \
-        ./...
-    ) >"$gcl_json" 2>"$RUN_DIR/golden-$name.golangci.stderr" || {
-      echo "golangci-lint failed for $name; see $RUN_DIR/golden-$name.golangci.stderr" >&2
-      cat "$RUN_DIR/golden-$name.golangci.stderr" >&2 || true
+    # golangci-lint is not a deterministic function of its input: on cases/revive
+    # roughly one cold-cache run in four silently drops whole packages' findings
+    # (root cause in README.md, "Upstream is not a function"). A golden written
+    # from such a run compares less than it claims to, and nothing downstream
+    # would ever notice. So: run it repeatedly and refuse to write until two
+    # runs have produced identical keys.
+    gcl_args=()
+    attempt=0
+    regen_ok=0
+    while (( attempt < REGEN_ATTEMPTS )); do
+      attempt=$((attempt + 1))
+      gcl_json="$RUN_DIR/golden-$name.golangci.$attempt.json"
+      gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-golden-gcl.XXXXXX")"
+      (
+        cd "$work"
+        env "GOLANGCI_LINT_CACHE=$gcl_cache" \
+          ${case_env[@]+"${case_env[@]}"} \
+          "$GOLANGCI" run \
+          -c "$case_dir/config.yml" \
+          --output.json.path=stdout \
+          --path-mode abs \
+          --issues-exit-code 0 \
+          --allow-parallel-runners \
+          ./...
+      ) >"$gcl_json" 2>"$RUN_DIR/golden-$name.golangci.$attempt.stderr" || {
+        echo "golangci-lint failed for $name; see $RUN_DIR/golden-$name.golangci.$attempt.stderr" >&2
+        cat "$RUN_DIR/golden-$name.golangci.$attempt.stderr" >&2 || true
+        rm -rf "$gcl_cache"
+        break
+      }
       rm -rf "$gcl_cache"
+      gcl_args+=(--golangci "$gcl_json")
+      (( attempt < REGEN_CONFIRMATIONS )) && continue
+      if python3 "$GOLDEN_PY" write \
+        --case "$name" \
+        --root "$work" \
+        "${gcl_args[@]}" \
+        --confirmations "$REGEN_CONFIRMATIONS" \
+        --tool-version "$GCL_VER" \
+        -o "$golden"; then
+        regen_ok=1
+        break
+      fi
+    done
+    if [[ "$regen_ok" -eq 0 ]]; then
+      echo "  $name: NOT regenerated — golangci-lint never agreed with itself in $attempt run(s)" >&2
       FAILED=$((FAILED + 1))
-      continue
-    }
-    rm -rf "$gcl_cache"
-    python3 "$GOLDEN_PY" write \
-      --case "$name" \
-      --root "$work" \
-      --golangci "$gcl_json" \
-      --tool-version "$GCL_VER" \
-      -o "$golden"
+    fi
     continue
   fi
 

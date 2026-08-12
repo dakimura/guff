@@ -71,7 +71,7 @@ ctxallow/revivetest/context_allow.go:21:22:revive:warning:context-as-argument: c
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
-extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  2% (6 comment lines for 249 code lines) but expected a minimum of 10%
+extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  4% (11 comment lines for 249 code lines) but expected a minimum of 10%
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
@@ -227,7 +227,7 @@ extended/util/extended_bad.go:434:21:revive:warning:enforce-map-style: use make(
 extended/util/extended_bad.go:436:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
 extended/util/extended_bad.go:440:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
 extended/util/extended_bad.go:445:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
-extended/util/extended_bad.go:454:0:revive:warning:file-length-limit: file length is 454 lines, which exceeds the limit of 350
+extended/util/extended_bad.go:463:0:revive:warning:file-length-limit: file length is 463 lines, which exceeds the limit of 350
 fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
 fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID

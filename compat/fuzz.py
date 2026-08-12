@@ -213,6 +213,18 @@ class Runner:
             self.gcl_time += time.time() - t0
         return self._keys(r.stdout, work)
 
+    def stable_golangci(
+        self, work: Path, config: Path, env: dict[str, str], attempts: int = 6
+    ) -> list[str] | None:
+        """Run golangci-lint until two runs return the same keys, or give up."""
+        seen: list[list[str]] = []
+        for _ in range(attempts):
+            keys = self.run_golangci(work, config, env)
+            if keys in seen:
+                return keys
+            seen.append(keys)
+        return None
+
 
 def diff_keys(guff: list[str], gcl: list[str]) -> tuple[list[str], list[str]]:
     import collections
@@ -233,6 +245,7 @@ class Stats:
     rejected_nosites: int = 0
     agreed: int = 0
     disagreed: int = 0
+    unconfirmed: int = 0
 
 
 def fuzz_case(
@@ -262,7 +275,14 @@ def fuzz_case(
             return st
 
         g0, _ = runner.run_guff(work, case.config, case.env)
-        c0 = runner.run_golangci(work, case.config, case.env)
+        # The seed's baseline decides both whether the case is fuzzed at all and
+        # what counts as "worse than the seed" for every mutant after it. One
+        # flaky golangci-lint run here would mis-set that for the whole case, so
+        # it is the one measurement worth confirming up front.
+        c0 = runner.stable_golangci(work, case.config, case.env)
+        if c0 is None:
+            print(f"  {case.name}: SKIP — golangci-lint would not agree with itself on the seed")
+            return st
         miss0, extra0 = diff_keys(g0, c0)
         baseline = len(miss0) + len(extra0)
         if baseline and not allow_dirty:
@@ -310,6 +330,25 @@ def fuzz_case(
                 _restore(work, base_files)
                 continue
 
+            # golangci-lint is not a deterministic function of its input — see
+            # compat/golden/README.md, "Upstream is not a function". A single
+            # dropped package looks exactly like a recall bug in guff, and the
+            # mutant that produced it is thrown away at the end of this loop, so
+            # an unconfirmed report is a report nobody can reproduce. Re-run
+            # both tools and keep only what survives.
+            ck2 = runner.run_golangci(work, case.config, case.env)
+            gk2, _ = runner.run_guff(work, case.config, case.env)
+            missing2, extra2 = diff_keys(gk2, ck2)
+            if (missing2, extra2) != (missing, extra):
+                st.unconfirmed += 1
+                print(
+                    f"  {case.name}: UNSTABLE — a second run of the same mutant "
+                    f"disagreed differently ({len(missing)}/{len(extra)} then "
+                    f"{len(missing2)}/{len(extra2)}); not reporting"
+                )
+                _restore(work, base_files)
+                continue
+
             st.disagreed += 1
             slug = f"{case.name}-{st.disagreed:03d}"
             dest = out_dir / slug
@@ -332,6 +371,7 @@ def fuzz_case(
                         "missing_from_guff": missing,
                         "extra_in_guff": extra,
                         "baseline_diff": baseline,
+                        "confirmed_by_a_second_run": True,
                         "guff_stderr": gstderr[-4000:],
                     },
                     indent=2,
@@ -415,7 +455,10 @@ def main(argv: list[str] | None = None) -> int:
             case, runner, rng, args.mutants, args.mutations,
             out_dir, args.allow_dirty_seeds, args.verbose,
         )
-        for f in ("mutants", "rejected_build", "rejected_nosites", "agreed", "disagreed"):
+        for f in (
+            "mutants", "rejected_build", "rejected_nosites",
+            "agreed", "disagreed", "unconfirmed",
+        ):
             setattr(total, f, getattr(total, f) + getattr(st, f))
 
     elapsed = time.time() - t0
@@ -425,7 +468,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         f"  agreed {total.agreed} / disagreed {total.disagreed} / "
-        f"rejected-by-build {total.rejected_build}"
+        f"rejected-by-build {total.rejected_build} / "
+        f"unconfirmed {total.unconfirmed}"
     )
     if total.disagreed:
         print(f"\n{total.disagreed} disagreement(s) under {out_dir}")

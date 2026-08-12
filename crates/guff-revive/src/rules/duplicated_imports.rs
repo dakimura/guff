@@ -7,6 +7,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
+use crate::util::import_spec_pos;
 
 pub struct Checker {
     seen: HashSet<String>,
@@ -33,7 +34,12 @@ impl Checker {
         if !self.seen.insert(path.clone()) {
             self.failures.push(Failure {
                 rule: "duplicated-imports",
-                pos: imp.path.pos().0 as u32,
+                // Upstream reports `Node: imp` — the whole ImportSpec, whose
+                // Pos() is the alias when there is one. Only the *path* is
+                // compared, so `import "os"` and `import osdup "os"` are a
+                // duplicate pair; reporting at `imp.path` puts the column six
+                // characters to the right of upstream's for the aliased half.
+                pos: import_spec_pos(imp),
                 message: format!("Package {path} already imported"),
                 ..Failure::default()
             });

@@ -3,3 +3,5 @@
 package revivetest
 
 import . "example.com/revive/dot"
+
+var _ = X
