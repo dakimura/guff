@@ -33,7 +33,7 @@ use guff::token::Token;
 use guff_constant::make_int64;
 use guff_types_errors::Code;
 
-use crate::alias::new_alias;
+use crate::alias::{alias_set_rhs, new_alias};
 use crate::arena::{ObjectData, TypeData, TypeId};
 use crate::check::Checker;
 use crate::named::{
@@ -536,12 +536,41 @@ impl Checker {
     ///
     /// Equivalent to `Checker.typeDecl` (non-generic subset).
     fn type_decl(&mut self, obj: ObjectId, tdecl: &TypeSpec) {
-        // alias declaration: `type T = U`.
+        // alias declaration: `type T = U`, possibly generic (`type A[P any] = B[P]`,
+        // go1.24). The Alias is allocated before the RHS is checked — it
+        // back-fills obj.typ, and a generic alias needs somewhere to hang its
+        // type parameters while the RHS that mentions them is resolved.
         if tdecl.assign.is_valid() {
-            // DEFERRED: generic aliases (type parameters on an alias).
-            let rhs = self.typ(&tdecl.ty);
-            // new_alias back-fills obj.typ and memoises the resolved actual.
-            new_alias(&mut self.types, &mut self.objects, obj, Some(rhs));
+            let alias = new_alias(&mut self.types, &mut self.objects, obj, None);
+
+            let has_tparams = tdecl
+                .type_params
+                .as_ref()
+                .map_or(false, |fl| !fl.list.is_empty());
+            if let Some(fl) = tdecl.type_params.as_ref().filter(|_| has_tparams) {
+                let scope =
+                    self.open_scope(fl.pos().0 as u32, fl.closing.0 as u32, "type parameters");
+                self.record_scope(tdecl.id, scope);
+                self.collect_type_params(alias, fl);
+            }
+
+            let mut rhs = self.typ(&tdecl.ty);
+
+            // spec: "In an alias declaration the given type cannot be a type
+            // parameter declared in the same declaration." (`type A[P any] = P`)
+            if self.alias_declares_tparam(alias, rhs) {
+                self.error(
+                    tdecl.ty.pos().0 as u32,
+                    Code::MisplacedTypeParam,
+                    "cannot use type parameter declared in alias declaration as RHS",
+                );
+                rhs = self.invalid_type();
+            }
+
+            alias_set_rhs(&mut self.types, alias, rhs);
+            if has_tparams {
+                self.close_scope();
+            }
             return;
         }
 
@@ -629,7 +658,7 @@ impl Checker {
     /// **Note**: go/ast groups shared bounds — `[A, B any]` is a single
     /// `Field` with two names. We flatten that so each name becomes its own
     /// `TypeParam` sharing the field's bound.
-    fn collect_type_params(&mut self, named: TypeId, list: &FieldList) {
+    fn collect_type_params(&mut self, target: TypeId, list: &FieldList) {
         let (tparams, field_of) = self.declare_type_params(list);
         if tparams.is_empty() {
             return;
@@ -640,9 +669,26 @@ impl Checker {
         // (go.dev/issue/47887).
         let tlist =
             bind_tparams(&mut self.types, tparams.clone()).expect("non-empty type-parameter list");
-        named_set_type_params(&mut self.types, named, tlist);
+        match self.types.get(target) {
+            TypeData::Alias(_) => crate::alias::alias_set_type_params(&mut self.types, target, tlist),
+            _ => named_set_type_params(&mut self.types, target, tlist),
+        }
 
         self.resolve_type_param_bounds(list, &tparams, &field_of);
+    }
+
+    /// Is `rhs` one of the type parameters declared by the generic alias
+    /// `alias` itself? (`type A[P any] = P`, which the spec forbids.)
+    fn alias_declares_tparam(&self, alias: TypeId, rhs: TypeId) -> bool {
+        if !is_type_param(&self.types, rhs) {
+            return false;
+        }
+        match self.types.get(alias) {
+            TypeData::Alias(a) => a
+                .type_params()
+                .is_some_and(|tps| tps.list().contains(&rhs)),
+            _ => false,
+        }
     }
 
     /// Declare each type parameter named in `list` into the current scope,

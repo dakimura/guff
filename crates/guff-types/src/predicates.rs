@@ -5,8 +5,6 @@
 //! [`is_valid_name`].
 //!
 //! Chunk-5 deferrals (documented inline at the call site):
-//! - The `allX` predicates (which iterate a TypeParam's type set) — these
-//!   need a typeset-iterating callback; trivial to add when first called.
 //! - `Signature` identical (chunk 70): generic signatures are identical
 //!   modulo type-parameter renaming. Instead of materialising a substituted
 //!   `y` via `subst.go` (which needs `&mut ObjectArena`/`Context`), we thread
@@ -27,8 +25,8 @@ use crate::hash::HashSet;
 use crate::alias::unalias_readonly;
 use crate::arena::{ObjectArena, ObjectData, ObjectId, PackageArena, TypeArena, TypeData, TypeId};
 use crate::basic::{
-    BasicKind, IS_BOOLEAN, IS_COMPLEX, IS_CONST_TYPE, IS_FLOAT, IS_INTEGER, IS_NUMERIC, IS_STRING,
-    IS_UNSIGNED, IS_UNTYPED,
+    BasicKind, IS_BOOLEAN, IS_COMPLEX, IS_CONST_TYPE, IS_FLOAT, IS_INTEGER, IS_NUMERIC, IS_ORDERED,
+    IS_STRING, IS_UNSIGNED, IS_UNTYPED,
 };
 use crate::interface::interface_compute_typeset;
 use crate::termlist;
@@ -49,8 +47,8 @@ pub fn is_valid(arena: &TypeArena, t: TypeId) -> bool {
 // Basic-info predicates
 //
 // These look at `t.Underlying()`; they don't look inside type parameters
-// (matching Go's `isX` family). Type-set-aware variants (`allX`) are
-// deferred — see module docs.
+// (matching Go's `isX` family). For the type-set-aware variants see the
+// `allX` family below.
 
 /// Reports whether `t.Underlying()` is a basic type whose info overlaps
 /// `info`. Doesn't peek inside type parameters.
@@ -88,6 +86,79 @@ pub fn is_integer_or_float(arena: &TypeArena, t: TypeId) -> bool {
 }
 pub fn is_const_type(arena: &TypeArena, t: TypeId) -> bool {
     is_basic(arena, t, IS_CONST_TYPE)
+}
+
+// ----------------------------------------------------------------------------
+// Type-set-aware predicates (`allX`)
+//
+// The `isX` family above stops at `t.Underlying()`, so a type parameter never
+// satisfies any of them. Go's `allX` family looks *inside* the parameter: the
+// predicate must hold for every specific term of the constraint's type set.
+// Without these, `func Sum[T ~int | ~float64](…) { total += x }` is rejected
+// with "operator ADD not defined on operand" and the whole package goes
+// ill-typed — i.e. every type-dependent analyzer silently reports nothing.
+
+/// Reports whether `t.Underlying()` is a basic type whose info overlaps
+/// `info`; if `t` is a type parameter, whether that holds for *every*
+/// specific term of its type set.
+///
+/// A type set with no specific terms (e.g. `any`) yields `false`, matching
+/// Go's `is(f)` calling `f(nil)` and `allBasic`'s `t != nil &&` guard.
+///
+/// Equivalent to `predicates.go::allBasic`.
+pub fn all_basic(
+    arena: &mut TypeArena,
+    objects: &ObjectArena,
+    packages: &PackageArena,
+    t: TypeId,
+    info: crate::basic::BasicInfo,
+) -> bool {
+    let u = unalias_readonly(arena, t);
+    if !matches!(arena.get(u), TypeData::TypeParam(_)) {
+        return is_basic(arena, t, info);
+    }
+    let iface = crate::typeparam::type_param_iface(arena, objects, packages, u);
+    interface_compute_typeset(arena, objects, packages, iface);
+    // Read the cache in place rather than via `interface_typeset`, which hands
+    // back a clone: this runs on every operand of every operator.
+    let types: &TypeArena = arena;
+    let Some(tset) = (match types.get(iface) {
+        TypeData::Interface(i) => i.cached_typeset(),
+        _ => None,
+    }) else {
+        return false;
+    };
+    tset.is(|_tilde, term| match term {
+        Some(ty) => is_basic(types, ty, info),
+        None => false,
+    })
+}
+
+pub fn all_boolean(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_BOOLEAN)
+}
+pub fn all_integer(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_INTEGER)
+}
+pub fn all_unsigned(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_UNSIGNED)
+}
+pub fn all_numeric(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_NUMERIC)
+}
+pub fn all_string(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_STRING)
+}
+pub fn all_ordered(a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, t: TypeId) -> bool {
+    all_basic(a, o, p, t, IS_ORDERED)
+}
+pub fn all_numeric_or_string(
+    a: &mut TypeArena,
+    o: &ObjectArena,
+    p: &PackageArena,
+    t: TypeId,
+) -> bool {
+    all_basic(a, o, p, t, IS_NUMERIC | IS_STRING)
 }
 
 // ----------------------------------------------------------------------------

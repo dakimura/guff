@@ -100,8 +100,30 @@ pub fn new_alias(
     }
     // Pre-compute and memoise actual — matches Go's NewAlias which calls
     // cleanup() at the tail to ensure unalias is a pure getter afterwards.
-    unalias(arena, id);
+    // With no RHS yet the chain is incomplete, so memoising would cache the
+    // alias itself; that alias is finished off by [`alias_set_rhs`].
+    if rhs.is_some() {
+        unalias(arena, id);
+    }
     id
+}
+
+/// Fill in the RHS of an alias created with `rhs: None`, then re-memoise
+/// `actual`.
+///
+/// `type A[T any] = B[T]` has to allocate the `Alias` *before* its RHS is
+/// type-checked, so the type-parameter scope and the RHS can both refer to
+/// `A` (Go allocates in `newAlias` and assigns `fromRHS` afterwards). This is
+/// the second half of that split.
+pub fn alias_set_rhs(arena: &mut TypeArena, id: TypeId, rhs: TypeId) {
+    match arena.get_mut(id) {
+        TypeData::Alias(a) => {
+            a.from_rhs = Some(rhs);
+            a.actual = None;
+        }
+        other => panic!("expected Alias, got {:?}", std::mem::discriminant(other)),
+    }
+    unalias(arena, id);
 }
 
 /// Walk the alias chain starting at `id` and return the first non-alias

@@ -189,8 +189,19 @@ pub fn new_alias_instance(
     // Create a fresh TypeName for the instance (sharing the origin's
     // name; the resulting instance still reports orig.obj as its
     // Origin().Obj() via the orig back-pointer).
+    //
+    // Go's `newAliasInstance` builds it as `NewTypeName(pos, orig.obj.pkg,
+    // orig.obj.name, nil)`: the package and position come across too. Leaving
+    // `pkg` unset makes the instance indistinguishable from a predeclared
+    // type — `Object.Pkg() == nil` is exactly how callers spell "builtin", so
+    // e.g. revive's `exportedType` waves through every instance of an
+    // unexported generic alias.
     let name = orig_obj.name(oarena).to_string();
     let inst_typename = crate::object::type_name::new_type_name(oarena, name, None);
+    if let Some(pkg) = orig_obj.pkg(oarena) {
+        inst_typename.set_pkg(oarena, pkg);
+    }
+    inst_typename.set_pos(oarena, orig_obj.pos(oarena));
     let new_id = crate::alias::new_alias(arena, oarena, inst_typename, new_rhs);
 
     // Snapshot origin's tparams.

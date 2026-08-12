@@ -43,21 +43,54 @@ type Number interface {
 	~int | ~int64 | ~float64
 }
 
+// Alias is a generic type alias (Go 1.24). corpus/shapes.py counts
+// `genericalias` at zero on every gated target, so this is the only place the
+// form is compared at all. The alias has to be created before its RHS is
+// checked or the parameters aren't in scope for it — guff said "undefined: T"
+// and took the package ill-typed with it.
+type Alias[T any] = Box[T]
+
+type hiddenAlias[T any] = hidden[T]
+
+// newAlias is unreferenced on purpose: it is here for the composite literal,
+// which instantiates the alias and reaches for a field through it.
+func newAlias[T any](v T) Alias[T] { return Alias[T]{v: v} }
+
+// NewHidden returns an unexported generic type through an alias, which is what
+// `unexported-return` has to see through.
+func NewHidden[T any](v T) hiddenAlias[T] { return hiddenAlias[T]{v: v} }
+
 // Last returns the final element, or the zero value.
-//
-// The body deliberately does no arithmetic on T. guff's type checker has no
-// type-set-aware `allNumeric`/`allOrdered` (guff-types' predicates say so:
-// "Type-set-aware variants (allX) are deferred"), so `total += x` here would
-// make the whole package ill-typed and silently drop every type-dependent
-// finding in this case. A generic type alias (`type Alias[T any] = Box[T]`,
-// Go 1.24) does the same — "undefined: T". Both are recorded with minimal
-// repros in docs/COMPAT-HARDENING.md; put them back here once they type-check.
 func Last[T Number](xs []T) T {
 	var last T
 	for _, x := range xs {
 		last = x
 	}
 	return last
+}
+
+// Sum adds the elements.
+//
+// The arithmetic is the point. `+=` on a value whose type is a parameter needs
+// the type-set-aware `allNumeric`; `<` below needs `allOrdered`; `var total
+// T = 0` needs an untyped constant to convert to a type parameter. Until
+// 2026-08-12 guff had none of the three, so this function alone made the whole
+// package ill-typed and every type-dependent finding in this case vanished —
+// silently, since a finding that is never produced is not a diff.
+func Sum[T Number](xs []T) T {
+	var total T = 0
+	for _, x := range xs {
+		total += x
+	}
+	return total
+}
+
+// Max returns the larger of the two.
+func Max[T Number](a, b T) T {
+	if a < b {
+		return b
+	}
+	return a
 }
 
 // zeroParam dereferences new() of a type parameter: go-critic's newDeref

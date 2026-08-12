@@ -36,7 +36,7 @@ use crate::object::builtin::ExprKind;
 use crate::object::var::{new_var, VarKind};
 use crate::operand::{Operand, OperandMode};
 use crate::predicates::{
-    comparable, has_nil, identical, is_boolean, is_integer, is_interface, is_numeric, is_string,
+    comparable, has_nil, identical, is_integer, is_interface, is_string,
     is_type_param, is_valid,
 };
 use crate::scope::{insert as scope_insert, new_scope};
@@ -268,11 +268,13 @@ impl Checker {
         self.close_scope();
     }
 
-    /// Does the underlying of `t` denote a boolean type? (`allBoolean` without
-    /// the type-parameter term iteration, which is approximated by `Underlying`.)
-    fn all_boolean(&self, t: Option<TypeId>) -> bool {
+    /// Does `t` denote a boolean type — for a type parameter, do all the
+    /// specific terms of its constraint? (`allBoolean`.)
+    fn all_boolean(&mut self, t: Option<TypeId>) -> bool {
         match t {
-            Some(t) => is_boolean(&self.types, t.underlying(&self.types)),
+            Some(t) => {
+                crate::predicates::all_boolean(&mut self.types, &self.objects, &self.packages, t)
+            }
             None => false,
         }
     }
@@ -955,8 +957,12 @@ impl Checker {
                 self.expr(&mut x, &s.x);
                 if x.mode != OperandMode::Invalid {
                     let xtyp = x.typ.unwrap_or_else(|| self.invalid_type());
-                    let u = xtyp.underlying(&self.types);
-                    if !is_numeric(&self.types, u) {
+                    if !crate::predicates::all_numeric(
+                        &mut self.types,
+                        &self.objects,
+                        &self.packages,
+                        xtyp,
+                    ) {
                         let (xs, ts) = (self.operand_str(&x), self.type_str(xtyp));
                         self.error(
                             s.x.pos().0 as u32,

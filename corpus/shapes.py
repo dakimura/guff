@@ -114,6 +114,11 @@ EXCLUDED = {
         "No mainstream Go corpus repo declares non-ASCII identifiers. Covered "
         "by fixture instead: compat/golden/cases/nonascii."
     ),
+    "genericalias": (
+        "Measured at 0 on every target, gated or not — the form needs go1.24 "
+        "and is still rare. Covered by fixture instead: the `Alias`/"
+        "`hiddenAlias` declarations in compat/golden/cases/generics."
+    ),
     "biggen": (
         "Subsumed by `generated`; size only changes wall-clock, not the "
         "finding set. consul and kubernetes each carry one anyway."

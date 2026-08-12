@@ -277,7 +277,7 @@ impl Checker {
     /// non-nil → interface (empty / ordinary) are handled; type-param interface
     /// targets still report `InvalidUntypedConversion`.
     fn implicit_type_and_value(
-        &self,
+        &mut self,
         x: &Operand,
         target: TypeId,
     ) -> (Option<TypeId>, Option<Value>, Option<Code>) {
@@ -342,7 +342,34 @@ impl Checker {
                     return (Some(self.basic(BasicKind::UntypedNil)), None, None);
                 }
                 if is_type_param(&self.types, target) {
-                    return (None, None, Some(Code::InvalidUntypedConversion));
+                    // Go: the operand must convert to *every* underlying type
+                    // in the constraint's type set; it then takes the type
+                    // parameter itself, with no rounded constant value. A
+                    // term-less set (`any`) calls the predicate once with
+                    // `nil` and so never converts.
+                    //
+                    // Without this, `var total T` / `total += 1` / `a++` all
+                    // fail with "cannot convert untyped int to type T" and the
+                    // package goes ill-typed.
+                    let mut unders: Vec<Option<TypeId>> = Vec::new();
+                    crate::under::under_is(
+                        &mut self.types,
+                        &self.objects,
+                        &self.packages,
+                        target,
+                        |u| {
+                            unders.push(u);
+                            true
+                        },
+                    );
+                    let ok = unders.iter().all(|u| match u {
+                        Some(u) => self.implicit_type_and_value(x, *u).0.is_some(),
+                        None => false,
+                    });
+                    if !ok {
+                        return (None, None, Some(Code::InvalidUntypedConversion));
+                    }
+                    return (Some(target), None, None);
                 }
                 let _ = other;
                 let _ = default_type(&self.types, &self.typ, xtyp);

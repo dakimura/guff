@@ -81,7 +81,7 @@ use crate::arena::{ObjectData, ObjectId, TypeId};
 use crate::check::Checker;
 use crate::object::var::{new_var, VarKind};
 use crate::operand::{Operand, OperandMode};
-use crate::predicates::{is_integer, is_untyped};
+use crate::predicates::is_untyped;
 use crate::selection::{Selection, SelectionKind};
 use guff_constant::Value;
 use guff_types_errors::Code;
@@ -335,7 +335,9 @@ impl Checker {
         // Otherwise we have the final type. Remove `e` from the untyped map.
         self.untyped.remove(&nid);
 
-        if old.is_lhs && !is_integer(&self.types, typ) {
+        if old.is_lhs
+            && !crate::predicates::all_integer(&mut self.types, &self.objects, &self.packages, typ)
+        {
             // The lhs of a non-constant shift must end up an integer type.
             let es = self.type_str(typ);
             self.error(

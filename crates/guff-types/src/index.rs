@@ -33,7 +33,7 @@ use crate::check::Checker;
 use crate::map::{map_elem, map_key};
 use crate::operand::{Operand, OperandMode};
 use crate::pointer::pointer_elem;
-use crate::predicates::{is_integer, is_string, is_type_param, is_valid};
+use crate::predicates::{is_string, is_type_param, is_valid};
 use crate::slice::{new_slice, slice_elem};
 
 /// The element/length classification of an indexable operand's underlying type.
@@ -591,7 +591,7 @@ impl Checker {
         }
         let xt = x.typ.unwrap_or_else(|| self.invalid_type());
         // spec: "the index x must be of integer type or an untyped constant"
-        if !is_integer(&self.types, xt) {
+        if !crate::predicates::all_integer(&mut self.types, &self.objects, &self.packages, xt) {
             let xs = self.operand_str(x);
             self.error(
                 x.pos() as u32,

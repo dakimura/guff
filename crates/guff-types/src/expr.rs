@@ -41,9 +41,9 @@ use crate::operand::{Operand, OperandMode};
 use crate::conversions::is_pointer;
 use crate::pointer::{new_pointer, pointer_elem};
 use crate::predicates::{
-    comparable, default_type, has_nil, identical, is_boolean, is_integer, is_integer_or_float,
-    is_interface, is_numeric, is_string, is_type_param, is_typed, is_unsigned, is_untyped,
-    is_valid,
+    all_boolean, all_integer, all_numeric, all_numeric_or_string, all_ordered, comparable,
+    default_type, has_nil, identical, is_integer, is_interface, is_type_param, is_typed,
+    is_unsigned, is_untyped, is_valid,
 };
 
 impl Checker {
@@ -444,7 +444,7 @@ impl Checker {
         }
 
         // Validate the operator against the operand's type.
-        if !unary_op_ok(&self.types, op, typ) {
+        if !unary_op_ok(&mut self.types, &self.objects, &self.packages, op, typ) {
             self.error(
                 e.op_pos.0 as u32,
                 Code::UndefinedOp,
@@ -534,7 +534,7 @@ impl Checker {
             return;
         }
 
-        if !binary_op_ok(&self.types, op, xt) {
+        if !binary_op_ok(&mut self.types, &self.objects, &self.packages, op, xt) {
             self.error(
                 e.op_pos.0 as u32,
                 Code::UndefinedOp,
@@ -546,7 +546,8 @@ impl Checker {
 
         // Division/remainder by zero.
         if matches!(op, Token::QUO | Token::REM) {
-            let x_intish = x.mode == OperandMode::Constant || is_integer(&self.types, xt);
+            let x_intish = x.mode == OperandMode::Constant
+                || all_integer(&mut self.types, &self.objects, &self.packages, xt);
             if x_intish && y.mode == OperandMode::Constant {
                 if let Some(yv) = &y.val {
                     if sign(yv) == 0 {
@@ -652,7 +653,8 @@ impl Checker {
                         && comparable(&mut self.types, &self.objects, &self.packages, yt))
             }
             Token::LSS | Token::LEQ | Token::GTR | Token::GEQ => {
-                is_ordered(&self.types, xt) && is_ordered(&self.types, yt)
+                all_ordered(&mut self.types, &self.objects, &self.packages, xt)
+                    && all_ordered(&mut self.types, &self.objects, &self.packages, yt)
             }
             _ => false,
         };
@@ -704,7 +706,7 @@ impl Checker {
 
         // The shift count must be an integer.
         let yt = y.typ.unwrap_or_else(|| self.invalid_type());
-        if !is_integer(&self.types, yt) {
+        if !all_integer(&mut self.types, &self.objects, &self.packages, yt) {
             self.error(
                 e.op_pos.0 as u32,
                 Code::InvalidShiftCount,
@@ -716,7 +718,7 @@ impl Checker {
 
         // The left operand must be an integer (or an untyped constant that can
         // become one).
-        let x_int_ok = is_integer(&self.types, xt)
+        let x_int_ok = all_integer(&mut self.types, &self.objects, &self.packages, xt)
             || (x.mode == OperandMode::Constant && is_untyped_int_const(&self.types, xt));
         if !x_int_ok {
             self.error(
@@ -940,20 +942,25 @@ fn is_comparison_op(op: Token) -> bool {
 
 /// Reports whether binary operator `op` is defined on operands of type `t`.
 /// Mirrors `binaryOpPredicates` (non-shift, non-comparison ops).
-fn binary_op_ok(arena: &crate::arena::TypeArena, op: Token, t: crate::TypeId) -> bool {
+///
+/// The predicates are the type-set-aware `allX` family, so a type parameter
+/// whose constraint admits only numeric terms supports `+` and friends.
+fn binary_op_ok(
+    arena: &mut crate::arena::TypeArena,
+    objects: &crate::arena::ObjectArena,
+    packages: &crate::arena::PackageArena,
+    op: Token,
+    t: crate::TypeId,
+) -> bool {
     match op {
-        Token::ADD => is_numeric(arena, t) || is_string(arena, t),
-        Token::SUB | Token::MUL | Token::QUO => is_numeric(arena, t),
-        Token::REM | Token::AND | Token::OR | Token::XOR | Token::AndNot => is_integer(arena, t),
-        Token::LAND | Token::LOR => is_boolean(arena, t),
+        Token::ADD => all_numeric_or_string(arena, objects, packages, t),
+        Token::SUB | Token::MUL | Token::QUO => all_numeric(arena, objects, packages, t),
+        Token::REM | Token::AND | Token::OR | Token::XOR | Token::AndNot => {
+            all_integer(arena, objects, packages, t)
+        }
+        Token::LAND | Token::LOR => all_boolean(arena, objects, packages, t),
         _ => false,
     }
-}
-
-/// Reports whether `t` supports ordering operators (`<`, `<=`, `>`, `>=`):
-/// integers, floats, and strings (complex is excluded).
-fn is_ordered(arena: &crate::arena::TypeArena, t: crate::TypeId) -> bool {
-    is_integer_or_float(arena, t) || is_string(arena, t)
 }
 
 /// Reports whether `t` is the untyped-int/rune basic type (used to permit an
@@ -967,12 +974,19 @@ fn is_untyped_int_const(arena: &crate::arena::TypeArena, t: crate::TypeId) -> bo
 
 /// Reports whether unary operator `op` is defined on an operand of type `t`.
 /// Mirrors the relevant entries of `unaryOpPredicates`:
-/// `+`/`-` require a numeric type, `^` an integer, `!` a boolean.
-fn unary_op_ok(arena: &crate::arena::TypeArena, op: Token, t: crate::TypeId) -> bool {
+/// `+`/`-` require a numeric type, `^` an integer, `!` a boolean —
+/// type-set-aware, as upstream's are.
+fn unary_op_ok(
+    arena: &mut crate::arena::TypeArena,
+    objects: &crate::arena::ObjectArena,
+    packages: &crate::arena::PackageArena,
+    op: Token,
+    t: crate::TypeId,
+) -> bool {
     match op {
-        Token::ADD | Token::SUB => is_numeric(arena, t),
-        Token::XOR => is_integer(arena, t),
-        Token::NOT => is_boolean(arena, t),
+        Token::ADD | Token::SUB => all_numeric(arena, objects, packages, t),
+        Token::XOR => all_integer(arena, objects, packages, t),
+        Token::NOT => all_boolean(arena, objects, packages, t),
         _ => false,
     }
 }

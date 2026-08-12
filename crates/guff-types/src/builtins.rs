@@ -408,7 +408,8 @@ impl Checker {
                 return false;
             }
             let at = a.typ.unwrap_or_else(|| self.invalid_type());
-            if !is_ordered(&self.types, at) {
+            if !crate::predicates::all_ordered(&mut self.types, &self.objects, &self.packages, at)
+            {
                 let as_ = self.operand_str(&a);
                 self.error(
                     a.pos() as u32,
@@ -1047,8 +1048,9 @@ impl Checker {
         if nargs == 2 && crate::util::has_dots(call) {
             let y = &args[1];
             let y_typ = y.typ.unwrap_or_else(|| self.invalid_type());
-            let y_under = y_typ.underlying(&self.types);
-            if is_string(&self.types, y_under) && self.assignable_to(x, byte_slice).ok {
+            if crate::predicates::all_string(&mut self.types, &self.objects, &self.packages, y_typ)
+                && self.assignable_to(x, byte_slice).ok
+            {
                 let s_param = crate::object::var::new_param(&mut self.objects, "", s_typ);
                 // Variadic last param is the string type itself (not []string),
                 // matching go/types Signature special case for append.

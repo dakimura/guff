@@ -268,7 +268,7 @@ godox は caddy の実 config では有効化されていないので、`default
 代わりに**各ケースの config が 2 キーを必ず書くことを `run.sh` が要求する**形にした
 （測る対象でないケースは 0）。既定の 50 / 3 で golden が黙って切られる事故も同時に防げる。
 
-### Phase 5 — コーパスの多様化 `[進行中: 台帳・ゲート・サブ形の測定まで完了 2026-08-12（11 本目）]`
+### Phase 5 — コーパスの多様化 `[進行中: 台帳・ゲート・サブ形の測定まで完了 2026-08-12（11 本目）/ 踏んでいる形が型検査を通るところまで 2026-08-12（12 本目）]`
 
 現行 8 リポは「普通の Go」に偏っている。踏めていない形:
 generics 多用、cgo、build tags、`go.work` マルチモジュール、`vendor/`、`embed`、
@@ -310,6 +310,13 @@ v1 でハーネスの前提を満たさない）と、**サブ形の測定**。�
 | `genericalias`（go1.24 のジェネリック型エイリアス） | **全ターゲット 0** |
 
 `genericrecv` は `REQUIRED` に入れた。11 本目のバグのうち 3 つはこの形にしか出ない。
+`genericalias` は 12 本目で `EXCLUDED` に移した（測定値 0、`nonascii` と同じく fixture で埋める）。
+
+**そして「踏んでいる」は「解析されている」ですらなかった。** 12 本目が測ったのは
+gated ターゲットが持つジェネリックコードが **guff の型検査を通るか**で、
+`total += x` も `a < b` も通っていなかった（§4 の 12 本目）。
+形の台帳は「入力が来ているか」しか見ない —— **来た入力が捨てられていないか**は、
+Phase 1 の ill-typed ゲートと golden の側にしかない。
 
 **ただし「gated ターゲットが踏んでいる」は弱い保証である。** consul と grafana は
 `genericrecv` を 39 ファイル持っているのに、revive の受け手の綴りのバグを 1 件も撃たなかった
@@ -346,7 +353,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致 | 2026-08-12 |
-| 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画 | 2026-08-12 |
+| 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は同じ穴が残っており、測って `#[ignore]` で記録した | 2026-08-12 |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
@@ -4567,6 +4574,122 @@ ill-typed は baseline に 16 で記録した。移すのは残り 8 件が消�
 4. 10 本目からの持ち越し: config の validate、gosec G304 / G407。
    6 本目からの持ち越し: §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
 
+### 2026-08-12（12 本目）— 型集合を見る型検査: `allX` / untyped 定数 / ジェネリック型エイリアス
+
+**やったこと**
+
+11 本目の「次にやること 1」をそのまま開けた。11 本目は「`generics` covered の中身」を測った。
+12 本目が測ったのは**その中身が guff の型検査を通っているか**で、通っていなかった。
+`go build` の通るジェネリック算術は 1 行残らず落ち、**落ちるとパッケージ全体が
+ill-typed** になる ＝ 型に依存する analyzer が丸ごと黙る。
+Phase 1 が「差分に出ない失敗」と呼んでいるものそのもので、
+**finding が 0 件になる欠陥は finding の差分では見つからない**。
+
+#### 1. `allX` —— `isX` は型パラメータの中を見ない（11 箇所）
+
+上流の `predicates.go` は 2 つの族を持つ。`isX` は `t.Underlying()` で止まり、
+`allX` は**型パラメータの型集合の全項**に対して `isX` を確かめる
+（項が 1 つも無い ＝ `any` は `f(nil)` を呼ぶので**常に偽**）。
+guff は前者しか持たず、後者を「呼ばれたときに足すのは簡単」と
+`predicates.rs` のモジュールコメントで先送りしていた。実際には
+**演算子のほぼ全部**が上流では `allX` を引いている:
+
+| 呼び出し元 | 上流の述語 | guff（修正前） |
+|---|---|---|
+| `unaryOpPredicates`（`+` `-` `^` `!`） | `allNumeric` / `allInteger` / `allBoolean` | `isNumeric` … |
+| `binaryOpPredicates`（`+` `-` `*` `/` `%` `&` `\|` `^` `&^` `&&` `\|\|`） | `allNumericOrString` / `allNumeric` / `allInteger` / `allBoolean` | 同上 |
+| `comparison` の `< <= > >=` | `allOrdered` | `isIntegerOrFloat \|\| isString` |
+| `shift` の左辺・右辺、`updateExprType` の shift-lhs | `allInteger` | `isInteger` |
+| ゼロ除算ガード | `allInteger` | `isInteger` |
+| `if` / `for` の条件、`&&` の両辺 | `allBoolean` | guff の `Checker::all_boolean` は名前だけで、中身は `Underlying` 1 段（自分でそう書いてある） |
+| `x++` / `x--` | `allNumeric` | `isNumeric` |
+| 添字 `s[i]` | `allInteger` | `isInteger` |
+| `min` / `max` | `allOrdered` | `isOrdered` |
+| `append([]byte, string...)` | `allString` | `isString` |
+
+`all_basic` は `TypeSet::is`（4 本目から在る）に乗るだけで書けた。
+`all_unsigned` だけは呼び出し元が無い —— 上流でそれを引くのは
+「符号付きシフト量は go1.13 以降」の版判定で、guff にその判定が無いからである。
+族として揃えて置いた（移植であって最小実装ではない）。
+先送りのコメントが「trivial to add when first called」と言っていたのは正しく、
+**間違っていたのは「まだ呼ばれていない」のほう**である。
+
+ground truth は `go build`（go1.26）。肯定 19 形・否定 14 形を実際に食わせて
+`crates/guff-types/tests/generic_ops.rs` に落とした。否定側が要るのは
+`allX` が**全項**を要求する述語だからで、`~int | ~string` は `+` を許して `-` を許さない、
+`~int | ~bool` は `<` も `min` も許さない、`any` は何も許さない。
+
+#### 2. untyped 定数 → 型パラメータ（`underIs`）
+
+`allX` を入れても `a++` が通らなかった。合成される `a + 1` の `1` を
+型パラメータに変換できないためで、上流 `implicitTypeAndValue` の
+`*TypeParam` の枝（`underIs` で**型集合の全項が受け入れるか**を見て、
+受け入れるなら**基底型ではなく型パラメータ自身**を、**丸めた値なしで**返す）が
+無かった。guff は `InvalidUntypedConversion` を返す 1 行で塞いでいた。
+`var total T = 0` / `total += 1` / `a++` が全部これに当たる。
+`under_is` は `under.rs` に既にあった。
+
+#### 3. ジェネリック型エイリアス（go1.24）
+
+`type Alias[T any] = Box[T]` が `undefined: T`。`type_decl` のエイリアス枝が
+**RHS を解決してから** `new_alias` していたので、型パラメータを吊るす先が
+その時点で存在せず、スコープも開いていなかった。上流は
+`newAlias(obj, nil)` → `openScope` → `collectTypeParams(&alias.tparams, …)` →
+RHS → `alias.fromRHS = rhs` の順である。同じ順に組み替え、
+`alias_set_rhs`（`from_rhs` を埋めて `actual` を貼り直す）を足した。
+`collect_type_params` は Named 決め打ちだったので Alias にも振るようにした。
+spec の「エイリアス宣言の RHS に自分が宣言した型パラメータは書けない」
+（`type Bad[P any] = P`）も同時に入れた。
+
+#### 4. エイリアス実体の TypeName に package が無かった（revive `unexported-return`）
+
+fixture に `type hiddenAlias[T any] = hidden[T]` と、それを返す公開関数を足したら
+golden が 1 件 missing になった。`new_alias_instance` が実体用の TypeName を
+`new_type_name(oarena, name, None)` で作っており、**package を持ち越していなかった**
+（上流は `NewTypeName(pos, orig.obj.pkg, orig.obj.name, nil)`）。
+`Object.Pkg() == nil` は呼び出し側が「組み込み型」を綴る言い方そのものなので、
+revive の `exportedType` は最初の `case obj.Pkg() == nil:` で素通りし、
+**非公開ジェネリックエイリアスの実体が全部 exported 扱い**になっていた。
+Named の実体は origin の obj を使い回していたので、エイリアスだけの穴だった。
+
+#### 5. fixture に 2 形を戻した
+
+`crates/guff-lint/tests/testdata/generics/generics.go` は 11 本目に
+「型検査が通るようになったら戻すこと」と書いて 2 形を避けてあった。戻した:
+`Sum`（`var total T = 0` + `+=`）、`Max`（`<`）、`Alias` / `hiddenAlias` /
+`NewHidden`。golden は 8 → **10 件**に増え、増えた 2 件が
+revive の `var-declaration`（型パラメータの変数に対する報告）と
+`unexported-return`（エイリアス越し）である。
+`corpus/shapes.py` の `genericalias` は `EXCLUDED` に移した ——
+どのターゲットでも 0 と測れており、`nonascii` と同じく fixture で埋める形だから。
+
+**ゲート**
+
+- `./compat/golden/run.sh` — **80 ケース**緑（ratchet は据え置き: `staticcheck-sa` missing 5 / extra 7、`staticcheck-s` missing 2、`staticcheck-st` missing 10、`revive` missing 1 / extra 3）
+- `./compat/run.sh --isolate` — 116 ターゲット緑
+- `./compat/run.sh --oss --tier pr,nightly` — 10 ターゲット緑
+- `./compat/filesets.sh --tier pr,nightly` — 8 ターゲット一致
+- `./corpus/shapes.py check --offline` — 必須 10 形
+- `cargo test --workspace` — 緑（`generic_ops.rs` を新設。20 テスト、うち 1 つは下の「次にやること 4」を記録する `#[ignore]`）
+
+**次にやること**
+
+1. **`errcheck` / `unify` に効く「インターフェースメソッドにレシーバが繋がっていない」**（§7）。
+   11 本目の「次にやること 2」（controller-runtime を `pr` に上げる）の残り 8 件のうち
+   5 件がこれで、`cases/errcheck-verbose` の ratchet 1 件も同じ根。
+   §7 の記録どおり `subst` / `unify` / メソッド集合に波及するので**セッションの頭で**やること。
+2. 11 本目からの持ち越し: `manager.Manager has no field or method GetCache` 系の
+   ill-typed 16 件（最小再現が取れておらず、`compat/reduce.py`（Phase 6）が先）。
+3. 10 本目からの持ち越し: config の validate、gosec G304 / G407。
+   6 本目からの持ち越し: §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+4. `allX` を入れて**まだ**残っている型集合の穴: `range` 文と送受信は
+   `commonUnder` を引く**別系統**で、guff 側は `Underlying` 1 段のままである
+   （`stmt.rs` の `range_key_val` と `chan_elem` が自分でそう書いている）。
+   **測った**: `for range xs`（`T ~[]int`）は `cannot range over xs`、
+   map / chan も同様に落ちる。`generic_ops.rs` に `#[ignore]` 付きで
+   4 形を置いた（`coverage.py` の `#[ignore]` 走査に乗る）。
+   `allX` と同じく**パッケージ丸ごと ill-typed** になる側なので、優先度は 1 と同格。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -4868,7 +4991,12 @@ i = n          // 上流は撃たない（n の referrer に MakeInterface が�
 同時に消える。ただし receiver を足すと `subst` / `unify` / メソッド集合の比較に
 波及するので、単独セッションの頭でやること。
 
-### 型集合を見ない `allX` と、ジェネリック型エイリアス `[記録 2026-08-12（11 本目）]`
+### ~~型集合を見ない `allX` と、ジェネリック型エイリアス~~ `[記録 2026-08-12（11 本目）/ 解消 2026-08-12（12 本目）]`
+
+**解消済み。** `predicates.rs` に `all_basic` と `allX` 7 本を入れて演算子・文・
+組み込み関数の 12 箇所を差し替え、untyped 定数の型パラメータへの変換
+（`underIs`）と go1.24 のジェネリック型エイリアスも入れた。詳細は §4 の
+2026-08-12（12 本目）。以下は当時の記録。
 
 **これは設計判断ではなく欠落**なので、直すべき側に置く。どちらも
 `go build` が通るコードで **guff の型検査だけが落ち**、パッケージ全体が ill-typed になる
@@ -4898,6 +5026,7 @@ func Less[T Number](a, b T) bool { return a < b }    // guff: operator LSS not d
 `corpus/shapes.py` の `genericalias` が**どのターゲットでも 0**と測っている形。
 `compat/golden/cases/generics` はこの 2 形を避けて書いてあり、
 避けた理由は fixture 自身のコメントにも残してある。型検査が通るようになったら戻すこと。
+（12 本目で戻した。`genericalias` は `EXCLUDED` に「fixture で埋める」と記録した。）
 
 ### `mod-year` / `mod-year-range`（goheader）
 
