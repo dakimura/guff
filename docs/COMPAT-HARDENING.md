@@ -5199,16 +5199,22 @@ revive の enable-all 集合が 5 rule 小さい、`clickhouselint` と `gomodgu
   `compat/allowlists/controller-runtime.txt` に 17 件を理由つきで新設（上の 7）
 - `./compat/filesets.sh --tier pr,nightly` — 8 ターゲット一致
 - `./corpus/shapes.py check --offline` — 必須 10 形
-- `compat/fuzz.py --recheck` — 4/4 解消
+- `compat/fuzz.py --recheck` — 4/4 解消。3 周目（seed 2・新変異込み）は
+  **740 ミュータント / 不一致 0 / unconfirmed 1**（その 1 件が上記 1 のレース）
 
 **次にやること**
 
-1. **ファザーを新しい変異で回す。** `rename` / `littype` / `rangeint` は入ったが、
-   それらを含む周回はまだ 1 度も回していない。`--allow-dirty-seeds` で
-   ratchet 付き seed（staticcheck-sa の 160 check、revive の 99 rule ——
-   後者は今回 `go build` が通るようになったので初めて射程に入った）も空白のまま。
-   revive を回すときは上記 1 のレースが**ミュータントごとに**乗るので、
-   `--recheck` 前提で読むこと。
+1. **`--allow-dirty-seeds` がまだ空白。** 3 周目（seed 2・新変異込み・**740 ミュータント**）は
+   **不一致 0**、`rejected-by-build` は 1 周目の 4.5% から 3.4% に下がった
+   （ヘッダ位置の代入を除外した分）。clean seed 側は当面枯れたと見てよい。
+   残っているのは ratchet 付き seed —— staticcheck-sa の 160 check と revive の 99 rule で、
+   後者は今回 `go build` が通るようになって初めて射程に入った。
+
+   その 3 周目が確認のしかたも実演している: `revive-enable-all-rules` が 1 件
+   `UNSTABLE` を出した（**同じミュータント**の 2 回目が違う差分を出した:
+   missing 5 → 3）。上記 1 のレースそのもので、**確認しない設計なら
+   「revive の recall バグ 5 件」として報告されていた**。revive を回すときは
+   これがミュータントごとに乗る。
 2. **他リポの ill-typed を同じやり方で。** 今回の測定で grafana 21 / consul 6 / helm 1 まで
    落ちた（この修正の副作用）が、kubernetes と vault は未測定、grafana の 21 は残っている。
    使う道具はもう `compat/reduce.py` に入っている: **root 集合の ddmin が第 1 パス**で、
