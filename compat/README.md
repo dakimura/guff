@@ -63,6 +63,10 @@ cargo build --release -p guff-lint
   --config corpus/cache/controller-runtime/.golangci.yml \
   --packages ./pkg/controller/priorityqueue/... \
   --guff-stderr 'does not implement' -o /tmp/reduced
+
+# Did *upstream* change? (pin vs latest release, on the 81 golden cases)
+./compat/drift.py
+./compat/drift.py --candidate 2.11.4      # or against any specific version
 ```
 
 > **`run.sh` 系のゲートは「合格しているが、ほとんど何も比較していない」**という測定結果があります。
@@ -104,6 +108,9 @@ cargo build --release -p guff-lint
 | `fuzz.py` | Mutate golden fixtures, report where the two tools stop agreeing |
 | `reduce.py` | Delta-debug a disagreement down to a minimal reproducer |
 | `gospans/` | go/ast helper both of the above use: removable spans, mutation sites |
+| `drift.py` | Upstream drift: the pinned golangci-lint vs a newer one, on the goldens |
+| `pins.json` | The pinned golangci-lint version, and the two tools it shells out to |
+| `drift-ledger.json` | Upstream drift that has been reviewed (written by `drift.py --update`) |
 
 ## Fuzzing and minimizing (Phase 6)
 

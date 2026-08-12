@@ -1,0 +1,83 @@
+name: Upstream drift (Phase 7)
+
+# Every other compat job holds golangci-lint still and asks whether guff agrees
+# with it. This one holds *guff* still and asks whether golangci-lint agrees
+# with itself across versions, so that the week the pin moves, the resulting
+# golden diff can be split into "upstream changed its mind" and "we broke
+# something" without bisecting by hand.
+#
+# It is deliberately not part of the PR gate: nothing a pull request does can
+# change what upstream released, and a job that fails for reasons outside the
+# diff teaches people to ignore red.
+
+on:
+  schedule:
+    # Thursday 06:17 UTC. Off the hour on purpose — every cron job in the world
+    # is scheduled at :00.
+    - cron: "17 6 * * 4"
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: "golangci-lint version to compare the pin against (default: latest release)"
+        required: false
+        type: string
+
+concurrency:
+  group: upstream-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: guff-lint-release
+          cache-targets: true
+
+      - name: Build guff
+        run: cargo build --release -p guff-lint
+
+      # drift.py installs both versions itself, into compat/.tools/<version>/, so
+      # that two binaries can coexist. Nothing else in CI needs golangci-lint on
+      # PATH for this job.
+      - name: Compare the pin against upstream
+        id: drift
+        run: |
+          python3 compat/drift.py \
+            ${{ inputs.candidate && format('--candidate {0}', inputs.candidate) || '' }} \
+            -o "$RUNNER_TEMP/drift"
+
+      - name: Upload the drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-drift-report
+          path: ${{ runner.temp }}/drift/REPORT.md
+          if-no-files-found: ignore
+          retention-days: 90
+
+      # A failure here means upstream moved in a way nobody has looked at yet.
+      # The fix is never to edit this workflow: read the report, decide per case
+      # whether guff follows upstream or records a permanent difference, then
+      # `compat/drift.py --candidate <v> --update` and commit the ledger with a
+      # filled-in `why` for each entry.
+      - name: What to do about a failure
+        if: failure()
+        run: |
+          echo "::notice::Unreviewed upstream drift. Download the upstream-drift-report artifact,"
+          echo "::notice::then run: compat/drift.py --candidate <version> --update"
+          echo "::notice::and fill in every 'why' in compat/drift-ledger.json before committing."

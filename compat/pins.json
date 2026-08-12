@@ -1,0 +1,27 @@
+{
+  "_why": [
+    "The single place the pinned golangci-lint version is written down.",
+    "It used to be a literal in five workflow steps across two workflows, which",
+    "is the failure mode compat/drift.py exists to catch, one level down: a job",
+    "left behind on an older binary compares against something nobody thinks is",
+    "the baseline, and the gate goes on printing OK.",
+    "",
+    "Bumping golangci_lint here is a deliberate act. Do it only after",
+    "compat/drift.py has been run against the new version and its report",
+    "reviewed — see docs/COMPAT-HARDENING.md Phase 7."
+  ],
+  "golangci_lint": "2.12.2",
+
+  "_shelled_out_why": [
+    "Two tools golangci-lint *links* and guff *shells out to*. A different",
+    "version on either side turns a formatting difference into a false compat",
+    "diff, so the isolate tier installs exactly what golangci-lint embeds at the",
+    "pin. Read golines off golangci-lint's go.mod; swaggo is indirect —",
+    "golangci-lint depends on github.com/golangci/swaggoswag, a hard fork whose",
+    "readme names the upstream swaggo/swag commit it is synced with, and that",
+    "commit is what `go install` can actually fetch."
+  ],
+  "golines": "v0.15.0",
+  "swaggoswag": "v0.0.0-20250504205917-77f2aca3143e",
+  "swag_commit": "93e86851e9f22f1f2db57812cf71fc004c02159c"
+}

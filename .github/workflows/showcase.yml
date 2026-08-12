@@ -24,8 +24,13 @@ jobs:
       - name: Install golangci-lint
         run: |
           # master/install.sh is stale; use the current install script.
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
           curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build guff

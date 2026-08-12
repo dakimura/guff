@@ -29,8 +29,13 @@ jobs:
 
       - name: Install golangci-lint
         run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
           curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Unit-test normalize / isolate harness
@@ -116,23 +121,25 @@ jobs:
 
       - name: Install golangci-lint
         run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
           curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # The isolate golines and swaggo targets need the binaries: guff shells
-      # out to them, golangci-lint links the libraries. Pin what golangci-lint
-      # 2.12.2 embeds — a different version on either side turns a formatting
-      # difference into a false diff.
-      #
-      #   golines  go.mod: github.com/golangci/golines v0.15.0
-      #   swaggo   go.mod: github.com/golangci/swaggoswag <pseudo-version>, a
-      #            hard fork of swaggo/swag whose readme names the commit it is
-      #            synced with: 93e86851e9f2 (after v1.16.4).
+      # out to them, golangci-lint links the libraries. A different version on
+      # either side turns a formatting difference into a false diff, so both
+      # versions live in compat/pins.json next to the golangci-lint pin — where
+      # bumping one is visibly a decision about all three.
       - name: Install golines and swag (versions golangci-lint embeds)
         run: |
-          go install github.com/golangci/golines@v0.15.0
-          go install github.com/swaggo/swag/cmd/swag@93e86851e9f22f1f2db57812cf71fc004c02159c
+          read -r GOLINES SWAG < <(python3 -c 'import json;p=json.load(open("compat/pins.json"));print(p["golines"],p["swag_commit"])')
+          go install "github.com/golangci/golines@$GOLINES"
+          go install "github.com/swaggo/swag/cmd/swag@$SWAG"
 
       - name: Prefetch isolate fixture modules
         run: |
@@ -189,8 +196,13 @@ jobs:
 
       - name: Install golangci-lint
         run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
           curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build guff
@@ -265,8 +277,13 @@ jobs:
 
       - name: Install golangci-lint
         run: |
+          # The version lives in compat/pins.json, not here. It used to be a
+          # literal in five steps across two workflows, and a job left behind on
+          # an older binary compares against something nobody thinks is the
+          # baseline while still printing OK.
+          V="$(python3 -c 'import json;print(json.load(open("compat/pins.json"))["golangci_lint"])')"
           curl -sSfL https://golangci-lint.run/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v2.12.2
+            | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build guff
