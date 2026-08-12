@@ -26,8 +26,8 @@ use super::{
     time_date, time_equal, time_naming, unchecked_type_assertion, unexported_naming,
     unexported_return, unhandled_error, unnecessary_format, unnecessary_if, unnecessary_stmt,
     unreachable_code, unsecure_url_scheme, unused_parameter, unused_receiver, use_any,
-    use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough, var_declaration,
-    var_naming, waitgroup_by_value,
+    use_errors_new, use_fmt_print, use_slices_sort, useless_fallthrough, var_naming,
+    waitgroup_by_value,
 };
 
 /// Fan-out visitor: each enabled rule's checker sees every node; walk never prunes.
@@ -109,7 +109,6 @@ struct SharedFileRules<'a> {
     use_fmt_print: Option<use_fmt_print::Checker>,
     use_slices_sort: Option<use_slices_sort::Checker>,
     useless_fallthrough: Option<useless_fallthrough::Checker>,
-    var_declaration: Option<var_declaration::Checker<'a>>,
     var_naming: Option<var_naming::Checker>,
     waitgroup_by_value: Option<waitgroup_by_value::Checker>,
 }
@@ -255,8 +254,6 @@ impl<'a> SharedFileRules<'a> {
             use_slices_sort: enabled("use-slices-sort").then(use_slices_sort::Checker::new),
             useless_fallthrough: enabled("useless-fallthrough")
                 .then(useless_fallthrough::Checker::new),
-            var_declaration: enabled("var-declaration")
-                .then(|| var_declaration::Checker::new(pass)),
             var_naming: enabled("var-naming").then(|| var_naming::Checker::new(pass)),
             waitgroup_by_value: enabled("waitgroup-by-value").then(waitgroup_by_value::Checker::new),
         }
@@ -344,7 +341,6 @@ impl<'a> SharedFileRules<'a> {
             use_fmt_print,
             use_slices_sort,
             useless_fallthrough,
-            var_declaration,
             var_naming,
             waitgroup_by_value,
         )
@@ -456,7 +452,6 @@ impl<'a> SharedFileRules<'a> {
             "use-fmt-print" => use_fmt_print,
             "use-slices-sort" => use_slices_sort,
             "useless-fallthrough" => useless_fallthrough,
-            "var-declaration" => var_declaration,
             "var-naming" => var_naming,
             "waitgroup-by-value" => waitgroup_by_value,
         );
@@ -553,7 +548,6 @@ impl<'a> Visitor<'a> for SharedFileRules<'a> {
             use_fmt_print,
             use_slices_sort,
             useless_fallthrough,
-            var_declaration,
             var_naming,
             waitgroup_by_value,
         );

@@ -664,7 +664,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(mut cache) = ErrTypeCache::new(&ir.prog) else {
             return Ok(None);
         };
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             run_func(&ir.prog, func, &mut cache, &mut reports);
         }

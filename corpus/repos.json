@@ -40,6 +40,14 @@
     "timeout": "10m"
   },
   {
+    "name": "controller-runtime",
+    "url": "https://github.com/kubernetes-sigs/controller-runtime.git",
+    "ref": "v0.24.1",
+    "packages": "./...",
+    "tier": "weekly",
+    "timeout": "15m"
+  },
+  {
     "name": "consul",
     "url": "https://github.com/hashicorp/consul.git",
     "ref": "v1.21.5",

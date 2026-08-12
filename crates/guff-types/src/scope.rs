@@ -191,6 +191,24 @@ pub fn lookup_chain(arena: &ScopeArena, mut scope: ScopeId, name: &str) -> Optio
     }
 }
 
+/// [`lookup_chain`], but also returns the scope the name was found in — the
+/// key half of Go's `dotImportKey{scope, name}`.
+pub fn lookup_chain_scope(
+    arena: &ScopeArena,
+    mut scope: ScopeId,
+    name: &str,
+) -> Option<(ScopeId, ObjectId)> {
+    loop {
+        if let Some(obj) = arena.get(scope).lookup_local(name) {
+            return Some((scope, obj));
+        }
+        match arena.get(scope).parent {
+            Some(p) => scope = p,
+            None => return None,
+        }
+    }
+}
+
 /// Insert `obj` into `scope`. If the scope already contains an object with
 /// the same name, returns that alternative and leaves the scope unchanged.
 /// Otherwise inserts, sets the inserted object's `parent` to `scope` if

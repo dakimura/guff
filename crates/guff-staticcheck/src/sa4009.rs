@@ -181,7 +181,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 };
 
                 // Locate the SSA Parameter for this type-checker Var.
-                let Some((func, pid)) = ir.src_funcs.iter().find_map(|&fid| {
+                let Some((func, pid)) = ir.src_funcs_with_methods().iter().find_map(|&fid| {
                     let f = ir.prog.functions.get(fid);
                     f.params
                         .iter()

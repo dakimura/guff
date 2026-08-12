@@ -207,7 +207,6 @@ impl Checker {
                 None => self.record_implicit(spec.id, obj),
             }
             self.imports.push(obj);
-            self.dot_imported.insert(imported, obj);
 
             // Merge exported objects into the file scope, without reparenting
             // them (they belong to the imported package). A collision with an
@@ -223,6 +222,9 @@ impl Checker {
                     .get(pkg_scope)
                     .lookup_local(&nm)
                     .expect("name came from this scope");
+                // One `dotImportMap` entry per name, exactly as Go records
+                // it — this is what makes the unused-import check per file.
+                self.dot_imported.insert((file_scope, nm.clone()), obj);
                 if crate::scope::insert_no_reparent(&mut self.scopes, file_scope, &nm, o).is_some() {
                     self.error(
                         pos,

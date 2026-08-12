@@ -1,6 +1,6 @@
 {
-  "missing": 7,
-  "extra": 9,
-  "why": "SA5011 needs sigma nodes (§7); SA4006 boxing into an interface (guff-ssa's MakeInterface carries no operand); SA6001 recall; SA1019/SA1023/SA4020 position and text; SA4015/SA4031/SA5005/SA9004 precision. The Go stdlib error text that used to head this list is gone: SA1000, SA1001, SA1002 and SA1007 are all ports now, in crates/guff-staticcheck/src/gostd/. SA1011's recall is gone from this list too (missing 9 -> 7, 2026-08-10): it asked whether a constant was valid UTF-8 while the constant layer held it as Rust text, so the answer was always yes. SA9008's pattern matches upstream exactly; what remains there is its IR verification (docs/COMPAT-HARDENING.md §4, 2026-08-09).",
+  "missing": 5,
+  "extra": 7,
+  "why": "SA5011 needs sigma nodes (§7); SA4006 boxing into an interface (guff-ssa's MakeInterface carries no operand); SA6001 recall; SA1023/SA4020 position and text; SA4015/SA4031/SA5005/SA9004 precision. The Go stdlib error text that used to head this list is gone: SA1000, SA1001, SA1002 and SA1007 are all ports now, in crates/guff-staticcheck/src/gostd/. SA1011's recall is gone from this list too (missing 9 -> 7, 2026-08-10): it asked whether a constant was valid UTF-8 while the constant layer held it as Rust text, so the answer was always yes. SA9008's pattern matches upstream exactly; what remains there is its IR verification (docs/COMPAT-HARDENING.md §4, 2026-08-09). SA1019 left this list on 2026-08-12 (missing 7 -> 5, extra 9 -> 7): it reported at the selected name instead of the start of the selector (upstream hands `report.Report` the whole `*ast.SelectorExpr`), and the deprecation message was trimmed while upstream's `strings.Replace(alt, \"\\\\n\", \" \", -1)` leaves the trailing space that `doc.Text()` puts there.",
   "target": "0/0 — see docs/COMPAT-HARDENING.md §4 (2026-08-09) for the remaining classes."
 }

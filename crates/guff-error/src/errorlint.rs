@@ -1,9 +1,10 @@
 //! Port of [`github.com/polyfloyd/go-errorlint`](https://github.com/polyfloyd/go-errorlint).
 //!
 //! Default flags match upstream analyzer defaults: comparison + asserts on,
-//! errorf off. The full allowed-errors allowlist is reduced to a few common
-//! sentinels (`io.EOF`, …); DEFERRED for the complete package table.
+//! errorf off. The allowed-errors table is upstream's, verbatim, and is keyed
+//! the way upstream keys it: on the (sentinel, producing function) *pair*.
 
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
@@ -13,12 +14,90 @@ use guff::ast::{
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
+use guff_types::arena::ObjectId;
 use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
 
 use crate::util::{expr_string, is_pure_error, type_of, unparen, implements_error};
+
+/// Upstream's `setDefaultAllowedErrors` table, verbatim: a sentinel is only
+/// exempt from the comparison check when the error being compared came out of
+/// one of *these* functions. Comparing `io.EOF` against something a random
+/// function returned is still a finding.
+static ALLOWED_ERRORS: &[(&str, &str)] = &[
+    ("io.EOF", "(*archive/tar.Reader).Next"),
+    ("io.EOF", "(*archive/tar.Reader).Read"),
+    ("io.EOF", "(*bufio.Reader).Discard"),
+    ("io.EOF", "(*bufio.Reader).Peek"),
+    ("io.EOF", "(*bufio.Reader).Read"),
+    ("io.EOF", "(*bufio.Reader).ReadByte"),
+    ("io.EOF", "(*bufio.Reader).ReadBytes"),
+    ("io.EOF", "(*bufio.Reader).ReadLine"),
+    ("io.EOF", "(*bufio.Reader).ReadSlice"),
+    ("io.EOF", "(*bufio.Reader).ReadString"),
+    ("io.EOF", "(*bufio.Scanner).Scan"),
+    ("io.EOF", "(*bytes.Buffer).Read"),
+    ("io.EOF", "(*bytes.Buffer).ReadByte"),
+    ("io.EOF", "(*bytes.Buffer).ReadBytes"),
+    ("io.EOF", "(*bytes.Buffer).ReadRune"),
+    ("io.EOF", "(*bytes.Buffer).ReadString"),
+    ("io.EOF", "(*bytes.Reader).Read"),
+    ("io.EOF", "(*bytes.Reader).ReadAt"),
+    ("io.EOF", "(*bytes.Reader).ReadByte"),
+    ("io.EOF", "(*bytes.Reader).ReadRune"),
+    ("io.EOF", "(*bytes.Reader).ReadString"),
+    ("database/sql.ErrNoRows", "(*database/sql.Row).Scan"),
+    ("io.EOF", "debug/elf.Open"),
+    ("io.EOF", "debug/elf.NewFile"),
+    ("io.EOF", "(io.ReadCloser).Read"),
+    ("io.EOF", "(io.Reader).Read"),
+    ("io.EOF", "(io.ReaderAt).ReadAt"),
+    ("io.EOF", "(*io.LimitedReader).Read"),
+    ("io.EOF", "(*io.SectionReader).Read"),
+    ("io.EOF", "(*io.SectionReader).ReadAt"),
+    ("io.ErrClosedPipe", "(*io.PipeWriter).Write"),
+    ("io.EOF", "io.ReadAtLeast"),
+    ("io.ErrShortBuffer", "io.ReadAtLeast"),
+    ("io.ErrUnexpectedEOF", "io.ReadAtLeast"),
+    ("io.EOF", "io.ReadFull"),
+    ("io.ErrUnexpectedEOF", "io.ReadFull"),
+    ("mime.ErrInvalidMediaParameter", "mime.ParseMediaType"),
+    ("net/http.ErrServerClosed", "(*net/http.Server).ListenAndServe"),
+    ("net/http.ErrServerClosed", "(*net/http.Server).ListenAndServeTLS"),
+    ("net/http.ErrServerClosed", "(*net/http.Server).Serve"),
+    ("net/http.ErrServerClosed", "(*net/http.Server).ServeTLS"),
+    ("net/http.ErrServerClosed", "net/http.ListenAndServe"),
+    ("net/http.ErrServerClosed", "net/http.ListenAndServeTLS"),
+    ("net/http.ErrServerClosed", "net/http.Serve"),
+    ("net/http.ErrServerClosed", "net/http.ServeTLS"),
+    ("io.EOF", "(*os.File).Read"),
+    ("io.EOF", "(*os.File).ReadAt"),
+    ("io.EOF", "(*os.File).ReadDir"),
+    ("io.EOF", "(*os.File).Readdir"),
+    ("io.EOF", "(*os.File).Readdirnames"),
+    ("io.EOF", "(*strings.Reader).Read"),
+    ("io.EOF", "(*strings.Reader).ReadAt"),
+    ("io.EOF", "(*strings.Reader).ReadByte"),
+    ("io.EOF", "(*strings.Reader).ReadRune"),
+    ("context.DeadlineExceeded", "(context.Context).Err"),
+    ("context.Canceled", "(context.Context).Err"),
+    ("io.EOF", "(*encoding/json.Decoder).Decode"),
+    ("io.EOF", "(*encoding/json.Decoder).Token"),
+    ("io.EOF", "(*encoding/csv.Reader).Read"),
+    ("io.EOF", "(*mime/multipart.Reader).NextPart"),
+    ("io.EOF", "(*mime/multipart.Reader).NextRawPart"),
+    ("mime/multipart.ErrMessageTooLarge", "(*mime/multipart.Reader).ReadForm"),
+];
+
+/// `allowedErrorWildcards`: prefix match on both halves. `syscall.Errno` values
+/// are never wrapped, so any `syscall.E*` compared against the result of any
+/// `syscall.*` function is fine.
+static ALLOWED_WILDCARDS: &[(&str, &str)] = &[
+    ("syscall.E", "syscall."),
+    ("golang.org/x/sys/unix.E", "golang.org/x/sys/unix."),
+];
 
 fn is_nil_ident(e: &Expr) -> bool {
     matches!(unparen(e), Expr::Ident(Ident { name, .. }) if name == "nil")
@@ -28,39 +107,183 @@ fn is_error_type(pass: &Pass<'_>, e: &Expr) -> bool {
     is_pure_error(pass, e)
 }
 
-fn is_allowed_sentinel(pass: &Pass<'_>, e: &Expr) -> bool {
-    let Expr::SelectorExpr(sel) = unparen(e) else {
-        return false;
-    };
-    if let Some(n) = code::selector_name(pass, sel) {
-        if matches!(
-            n.as_str(),
-            "io.EOF"
-                | "context.Canceled"
-                | "context.DeadlineExceeded"
-                | "database/sql.ErrNoRows"
-        ) {
-            return true;
+/// Package-wide index that `isAllowedErrorComparison` needs: upstream reads it
+/// off `TypesInfoExt` (`IdentifiersForObject` + `NodeParent`), which is built
+/// once per package.
+struct AllowIndex<'a> {
+    /// Ident node id -> the RHS expression assigned to it, when that ident is
+    /// the LHS of an assignment (`pass.NodeParent[ident]` being an `AssignStmt`
+    /// is the only parent kind upstream looks at).
+    assigned_rhs: HashMap<u32, &'a Expr>,
+    /// Object -> every ident node in the package that denotes it.
+    obj_idents: HashMap<ObjectId, Vec<u32>>,
+}
+
+impl<'a> AllowIndex<'a> {
+    fn build(pass: &Pass<'_>, files: &'a [guff::ast::File]) -> Self {
+        let mut idx = AllowIndex {
+            assigned_rhs: HashMap::new(),
+            obj_idents: HashMap::new(),
+        };
+        for file in files {
+            walk::inspect(NodeRef::File(file), |n| {
+                match n {
+                    Some(NodeRef::Ident(id)) => {
+                        if let Some(obj) = object_of(pass, id) {
+                            idx.obj_idents.entry(obj).or_default().push(id.id);
+                        }
+                    }
+                    Some(NodeRef::AssignStmt(a)) => {
+                        for (i, lhs) in a.lhs.iter().enumerate() {
+                            let Expr::Ident(name) = lhs else {
+                                continue;
+                            };
+                            // Upstream defaults to `Rhs[0]` and only pairs LHS
+                            // with RHS position-wise when the two lists are the
+                            // same length — which is what makes `a, b := f()`
+                            // (2 vs 1) still trace back to the single call.
+                            let rhs = if a.lhs.len() == a.rhs.len() {
+                                let j = a
+                                    .lhs
+                                    .iter()
+                                    .position(|l| {
+                                        matches!(l, Expr::Ident(other) if other.name == name.name)
+                                    })
+                                    .unwrap_or(i);
+                                a.rhs.get(j)
+                            } else {
+                                a.rhs.first()
+                            };
+                            if let Some(rhs) = rhs {
+                                idx.assigned_rhs.insert(name.id, rhs);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            });
         }
-        // Upstream wildcards: syscall.E* and golang.org/x/sys/unix.E* may be
-        // compared with == when returned from the same packages (Errno is not
-        // wrapped). Without this, vault/prometheus `err == unix.ENOTSUP` after
-        // FcntlFstore is a false guff-only vs golangci.
-        if n.starts_with("syscall.E") || n.starts_with("golang.org/x/sys/unix.E") {
-            return true;
+        idx
+    }
+}
+
+fn object_of(pass: &Pass<'_>, ident: &Ident) -> Option<ObjectId> {
+    let info = pass.types_info()?;
+    info.uses
+        .get(&ident.id)
+        .copied()
+        .or_else(|| info.defs.get(&ident.id).copied().flatten())
+}
+
+/// `assigningCallExprs`: every call whose result was assigned to `subject`,
+/// following assignments through intermediate identifiers.
+fn assigning_call_exprs<'a>(
+    pass: &Pass<'_>,
+    idx: &AllowIndex<'a>,
+    subject: &Ident,
+    visited: &mut HashSet<ObjectId>,
+    out: &mut Vec<&'a Expr>,
+) {
+    let Some(obj) = object_of(pass, subject) else {
+        return;
+    };
+    if !visited.insert(obj) {
+        return;
+    }
+    let Some(idents) = idx.obj_idents.get(&obj) else {
+        return;
+    };
+    for &ident_id in idents {
+        if ident_id == subject.id {
+            continue;
+        }
+        let Some(rhs) = idx.assigned_rhs.get(&ident_id) else {
+            continue;
+        };
+        match rhs {
+            Expr::CallExpr(_) => out.push(rhs),
+            Expr::Ident(next) => {
+                if object_of(pass, next) != Some(obj) {
+                    assigning_call_exprs(pass, idx, next, visited, out);
+                }
+            }
+            _ => {}
         }
     }
-    let Expr::Ident(pkg) = unparen(&sel.x) else {
-        return false;
+}
+
+/// `(recv).Method` for a method call, `pkg/path.Func` for a package function,
+/// and `None` for anything whose callee is not a selector — upstream treats
+/// that last case as "not a stdlib function", i.e. not allowed.
+fn call_function_name(pass: &Pass<'_>, call: &Expr) -> Option<String> {
+    let Expr::CallExpr(call) = call else {
+        return None;
     };
-    matches!(
-        (pkg.name.as_str(), sel.sel.name.as_str()),
-        ("io", "EOF")
-            | ("context", "Canceled")
-            | ("context", "DeadlineExceeded")
-            | ("sql", "ErrNoRows")
-    ) || (matches!(pkg.name.as_str(), "unix" | "syscall")
-        && sel.sel.name.starts_with('E'))
+    let Expr::SelectorExpr(sel) = unparen(&call.fun) else {
+        return None;
+    };
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if let Some(selection) = info.selections.get(&sel.id) {
+        let recv = guff_types::typestring::type_string(
+            &artifacts.types,
+            &artifacts.objects,
+            &artifacts.packages,
+            selection.recv(),
+            None,
+        );
+        let name = selection.obj().name(&artifacts.objects);
+        return Some(format!("({recv}).{name}"));
+    }
+    code::selector_name(pass, sel)
+}
+
+fn is_allowed_err_and_func(err: &str, fun: &str) -> bool {
+    if ALLOWED_ERRORS
+        .iter()
+        .any(|(e, f)| *e == err && *f == fun)
+    {
+        return true;
+    }
+    ALLOWED_WILDCARDS
+        .iter()
+        .any(|(e, f)| fun.starts_with(f) && err.starts_with(e))
+}
+
+/// Port of `isAllowedErrorComparison`. The exemption is a *pair*: the sentinel
+/// on one side and the function that produced the error on the other. guff used
+/// to allow four sentinels no matter where the error came from, which both let
+/// `net/http.ErrServerClosed` through as a diff (it was not in the four) and
+/// silently dropped findings upstream reports (`err == io.EOF` on an error from
+/// a function that is not on the list).
+fn is_allowed_error_comparison<'a>(
+    pass: &Pass<'_>,
+    idx: &AllowIndex<'a>,
+    a: &'a Expr,
+    b: &'a Expr,
+) -> bool {
+    let mut err_name = String::new();
+    let mut calls: Vec<&Expr> = Vec::new();
+    for expr in [a, b] {
+        match expr {
+            Expr::SelectorExpr(sel) => {
+                err_name = code::selector_name(pass, sel).unwrap_or_default();
+            }
+            Expr::Ident(id) => {
+                let mut visited = HashSet::new();
+                assigning_call_exprs(pass, idx, id, &mut visited, &mut calls);
+            }
+            Expr::CallExpr(_) => calls.push(expr),
+            _ => {}
+        }
+    }
+    if err_name.is_empty() || calls.is_empty() {
+        return false;
+    }
+    calls.iter().all(|call| {
+        call_function_name(pass, call).is_some_and(|fun| is_allowed_err_and_func(&err_name, &fun))
+    })
 }
 
 fn in_error_is_method(stack: &[NodeRef<'_>], pass: &Pass<'_>) -> bool {
@@ -99,9 +322,10 @@ fn in_error_is_method(stack: &[NodeRef<'_>], pass: &Pass<'_>) -> bool {
     false
 }
 
-fn check_comparison(
+fn check_comparison<'a>(
     pass: &Pass<'_>,
-    be: &BinaryExpr,
+    idx: &AllowIndex<'a>,
+    be: &'a BinaryExpr,
     stack: &[NodeRef<'_>],
     pending: &mut Vec<Diagnostic>,
 ) {
@@ -114,7 +338,7 @@ fn check_comparison(
     if !is_error_type(pass, &be.x) && !is_error_type(pass, &be.y) {
         return;
     }
-    if is_allowed_sentinel(pass, &be.x) || is_allowed_sentinel(pass, &be.y) {
+    if is_allowed_error_comparison(pass, idx, &be.x, &be.y) {
         return;
     }
     if in_error_is_method(stack, pass) {
@@ -235,9 +459,29 @@ fn check_type_switch(
     ));
 }
 
-fn check_value_switch(
+/// `switchComparesNonNil`: a `default` clause (empty list) and `case nil` are
+/// safe; anything else — including an identifier that is not `nil` — is not.
+fn switch_compares_non_nil(sw: &SwitchStmt) -> bool {
+    for stmt in &sw.body.list {
+        let Stmt::CaseClause(CaseClause { list, .. }) = stmt else {
+            continue;
+        };
+        for clause in list {
+            if let Expr::Ident(id) = clause {
+                if id.name == "nil" {
+                    continue;
+                }
+            }
+            return true;
+        }
+    }
+    false
+}
+
+fn check_value_switch<'a>(
     pass: &Pass<'_>,
-    sw: &SwitchStmt,
+    idx: &AllowIndex<'a>,
+    sw: &'a SwitchStmt,
     stack: &[NodeRef<'_>],
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -250,27 +494,34 @@ fn check_value_switch(
     if in_error_is_method(stack, pass) {
         return;
     }
-    let mut compares_non_nil = false;
-    for stmt in &sw.body.list {
-        let Stmt::CaseClause(CaseClause { list, .. }) = stmt else {
+    // Upstream keeps two questions apart, and they answer differently: *which*
+    // clause is problematic (the first non-nil case the allowlist does not
+    // exempt) and *whether* the switch compares against anything but `nil` at
+    // all (purely syntactic, allowlist not consulted). The finding is reported
+    // at the problematic clause's `case` keyword, not at the `switch`.
+    let mut problematic: Option<u32> = None;
+    'outer: for stmt in &sw.body.list {
+        let Stmt::CaseClause(CaseClause { case, list, .. }) = stmt else {
             continue;
         };
         for e in list {
             if is_nil_ident(e) {
                 continue;
             }
-            if is_allowed_sentinel(pass, e) {
-                continue;
+            if !is_allowed_error_comparison(pass, idx, tag, e) {
+                problematic = Some(case.0 as u32);
+                break 'outer;
             }
-            compares_non_nil = true;
-            break;
         }
     }
-    if !compares_non_nil {
+    let Some(case_pos) = problematic else {
+        return;
+    };
+    if !switch_compares_non_nil(sw) {
         return;
     }
     pending.push((
-        sw.switch.0 as u32,
+        case_pos,
         "switch on an error will fail on wrapped errors. Use errors.Is to check for specific errors"
             .into(),
     ));
@@ -283,18 +534,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut diags = Vec::new();
     let mut msgs = Vec::new();
-    for file in pass.files() {
-        let mut stack = Vec::new();
-        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
-            match n {
-                NodeRef::BinaryExpr(be) => check_comparison(pass, be, stack, &mut diags),
-                NodeRef::TypeAssertExpr(ta) => check_type_assert(pass, ta, stack, &mut msgs),
-                NodeRef::TypeSwitchStmt(ts) => check_type_switch(pass, ts, stack, &mut msgs),
-                NodeRef::SwitchStmt(sw) => check_value_switch(pass, sw, stack, &mut msgs),
-                _ => {}
-            }
-            true
-        });
+    {
+        let files = pass.files();
+        let idx = AllowIndex::build(pass, files);
+        for file in files {
+            let mut stack = Vec::new();
+            walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
+                match n {
+                    NodeRef::BinaryExpr(be) => check_comparison(pass, &idx, be, stack, &mut diags),
+                    NodeRef::TypeAssertExpr(ta) => check_type_assert(pass, ta, stack, &mut msgs),
+                    NodeRef::TypeSwitchStmt(ts) => check_type_switch(pass, ts, stack, &mut msgs),
+                    NodeRef::SwitchStmt(sw) => check_value_switch(pass, &idx, sw, stack, &mut msgs),
+                    _ => {}
+                }
+                true
+            });
+        }
     }
     for d in diags {
         pass.report(d);

@@ -103,6 +103,64 @@ fn revive_exported_skips_methods_on_private_receivers() {
 }
 
 #[test]
+fn revive_var_declaration_does_not_descend_into_values() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclprune",
+        "var_decl_prune.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+    assert!(
+        decls.iter().any(|m| m.contains("var TopLevel")),
+        "a plain declaration is still reported: {decls:?}"
+    );
+    assert!(
+        decls
+            .iter()
+            .all(|m| !m.contains("inClosure") && !m.contains("inBlank")),
+        "vars inside a declaration's value are invisible upstream: {decls:?}"
+    );
+}
+
+#[test]
+fn revive_exported_names_generic_receivers_like_upstream() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/genericreceiver",
+        "generic_receiver.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let exported: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("exported:"))
+        .collect();
+    assert!(
+        exported
+            .iter()
+            .any(|m| m.contains("exported method Box.Get should have comment")),
+        "pointer receiver on a generic type must read `Box.Get`: {exported:?}"
+    );
+    assert!(
+        exported
+            .iter()
+            .any(|m| m.contains("exported method Pair.First should have comment")),
+        "two-parameter receiver must read `Pair.First`: {exported:?}"
+    );
+    assert!(
+        exported.iter().all(|m| !m.contains("Exported")),
+        "methods on the unexported generic type must stay silent: {exported:?}"
+    );
+    assert!(
+        exported.iter().all(|m| !m.contains("IndexExpr") && !m.contains('*')),
+        "receiver must be the bare type name: {exported:?}"
+    );
+}
+
+#[test]
 fn revive_exported_skips_sort_interface_methods() {
     let pkg = support::typecheck_fixture(
         "revive",

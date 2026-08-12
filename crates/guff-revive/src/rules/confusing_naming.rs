@@ -7,7 +7,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{receiver_type_key, unparen};
+use crate::util::{confusing_naming_holder, unparen};
 
 const PACKAGE_FUNCS: &str = "_";
 
@@ -98,7 +98,7 @@ fn receiver_holder(f: &FuncDecl) -> String {
     f.recv
         .as_ref()
         .and_then(|r| r.list.first())
-        .map(|field| receiver_type_key(field.ty.as_ref().expect("recv type")))
+        .map(|field| confusing_naming_holder(field.ty.as_ref().expect("recv type")))
         .unwrap_or_else(|| PACKAGE_FUNCS.into())
 }
 

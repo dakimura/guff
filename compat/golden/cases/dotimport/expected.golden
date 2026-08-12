@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh dotimport
+# Produced by running golangci-lint on compat/golden/cases/dotimport/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+two.go:13:14:govet::printf: fmt.Printf format %d has arg Farewell() of wrong type string
+two.go:30:9:errorlint::comparing with == will fail on wrapped errors. Use errors.Is to check for a specific error

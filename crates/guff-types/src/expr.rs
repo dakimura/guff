@@ -773,7 +773,7 @@ impl Checker {
         // expr set by raw_expr
 
         let name = e.name.as_str();
-        let obj = match self.lookup(name) {
+        let (found_scope, obj) = match self.lookup_scope(name) {
             None => {
                 let pos = e.pos().0 as u32;
                 if name == "_" {
@@ -788,7 +788,7 @@ impl Checker {
 
         // DEFERRED: verifyVersionf gate for predeclared comparable/any.
         self.record_use(e, obj);
-        self.mark_dot_import_use(obj);
+        self.mark_dot_import_use(Some(found_scope), name);
 
         let is_type_name = matches!(self.objects.get(obj), ObjectData::TypeName(_));
 

@@ -67,18 +67,53 @@ pub fn is_duration_type(pass: &Pass<'_>, typ: TypeId) -> bool {
     s == "time.Duration" || s == "*time.Duration"
 }
 
+/// Port of upstream `internal/typeparams.ReceiverType`: the receiver's type
+/// name **without** the `*` and **without** the type arguments, or the literal
+/// `"invalid-type"` for anything else.
+///
+/// The two omissions are load-bearing. `exported` and `receiver-naming` put
+/// this string in their messages (`exported method Plain.Method …`, never
+/// `*Plain.Method`), `exported` asks `ast.IsExported` of it to decide whether a
+/// private receiver skips the rule, and `Sortable()` keys its Len/Less/Swap
+/// table by it — so a value receiver and a pointer receiver on the same type
+/// have to land on the same key.
+///
+/// Upstream matches on the bare node, so a parenthesized receiver
+/// (`func (t (*T)) M()`, which `go vet` accepts) falls through to
+/// `"invalid-type"`; not unwrapping the parens here is deliberate.
 pub fn receiver_type_key(recv_ty: &Expr) -> String {
-    match unparen(recv_ty) {
+    let stripped = match recv_ty {
+        Expr::StarExpr(star) => star.x.as_ref(),
+        other => other,
+    };
+    let unpacked = match stripped {
+        Expr::IndexExpr(ix) => ix.x.as_ref(),
+        Expr::IndexListExpr(ix) => ix.x.as_ref(),
+        other => other,
+    };
+    match unpacked {
         Expr::Ident(id) => id.name.clone(),
-        Expr::StarExpr(star) => format!("*{}", receiver_type_key(&star.x)),
-        Expr::SelectorExpr(sel) => {
-            let pkg = match unparen(&sel.x) {
-                Expr::Ident(id) => id.name.clone(),
-                other => format!("{other:?}"),
-            };
-            format!("{pkg}.{}", sel.sel.name)
-        }
-        other => format!("{other:?}"),
+        _ => "invalid-type".to_string(),
+    }
+}
+
+/// Port of upstream `rule.getStructName` (confusing-naming), which is *not*
+/// `typeparams.ReceiverType`: it falls back to `"_"` — the same key it uses for
+/// package-level functions — and it unpacks `IndexExpr` but **not**
+/// `IndexListExpr`, so a method on a two-parameter generic type
+/// (`func (p *Pair[K, V]) M()`) is filed with the package-level functions.
+pub fn confusing_naming_holder(recv_ty: &Expr) -> String {
+    let unpacked = match recv_ty {
+        Expr::StarExpr(star) => match star.x.as_ref() {
+            Expr::IndexExpr(ix) => ix.x.as_ref(),
+            other => other,
+        },
+        Expr::IndexExpr(ix) => ix.x.as_ref(),
+        other => other,
+    };
+    match unpacked {
+        Expr::Ident(id) => id.name.clone(),
+        _ => "_".to_string(),
     }
 }
 

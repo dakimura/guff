@@ -83,7 +83,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA2002 requires buildir analyzer".to_string())?;
 
     let mut pending: Vec<(u32, String)> = Vec::new();
-    for &fid in &ir.src_funcs {
+    for &fid in ir.src_funcs_with_methods() {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {

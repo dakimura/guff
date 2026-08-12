@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# COMPAT-HARDENING Phase 5, second measurement: `corpus/shapes.py` said
+# `generics` was covered by seven targets, but the sub-shapes it now counts
+# say what that coverage is made of — no gated target declares a method on a
+# generic type (`genericrecv`), and none anywhere declares a generic type
+# alias. Both forms are carried by fixture, the same way `nonascii` is.
+
+generics/generics.go    crates/guff-lint/tests/testdata/generics/generics.go

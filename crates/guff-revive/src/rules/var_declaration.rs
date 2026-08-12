@@ -11,48 +11,33 @@ use guff_types::predicates::is_untyped;
 use crate::failure::Failure;
 use crate::util::{is_blank, is_ident, is_interface_type_expr, type_of, unparen};
 
-pub struct Checker<'a> {
-    pass: &'a Pass<'a>,
-    failures: Vec<Failure>,
-}
-
-impl<'a> Checker<'a> {
-    pub fn new(pass: &'a Pass<'a>) -> Self {
-        Self {
-            pass,
-            failures: Vec::new(),
-        }
-    }
-
-    pub fn visit(&mut self, n: NodeRef<'_>) {
-            
-                    if let NodeRef::GenDecl(g) = n {
-                        if g.tok == Some(Token::VAR) {
-                            for spec in &g.specs {
-                                if let Spec::ValueSpec(vs) = spec {
-                                    check_value_spec(self.pass, vs, &mut self.failures);
-                                }
-                            }
-                        }
-                    }
-    }
-
-    pub fn into_failures(self) -> Vec<Failure> {
-        self.failures
-    }
-}
-
+/// This rule cannot ride `shared_walk` (which never prunes): upstream's
+/// visitor returns `nil` from **every** path of its `*ast.ValueSpec` case, so
+/// the walk never descends into a declaration's value. A `var` inside a
+/// function literal that initializes another `var` is therefore invisible to
+/// upstream — which is most of a ginkgo suite, where everything lives under
+/// `var _ = Describe("…", func() { … })`. The non-var/non-const `GenDecl` case
+/// returns `nil` as well; here that falls out of pruning at every `GenDecl`,
+/// since guff reads a var declaration's specs inline instead of walking into
+/// them.
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new(pass);
+    let mut failures = Vec::new();
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
-            if let Some(n) = n {
-                c.visit(n);
+            let Some(NodeRef::GenDecl(g)) = n else {
+                return true;
+            };
+            if g.tok == Some(Token::VAR) {
+                for spec in &g.specs {
+                    if let Spec::ValueSpec(vs) = spec {
+                        check_value_spec(pass, vs, &mut failures);
+                    }
+                }
             }
-            true
+            false
         });
     }
-    c.into_failures()
+    failures
 }
 
 

@@ -392,7 +392,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pure: HashSet::new(),
         answers: HashMap::new(),
     };
-    for &fid in &ir.src_funcs {
+    for &fid in ir.src_funcs_with_methods() {
         state.check(fid);
     }
     let pure = state.pure;

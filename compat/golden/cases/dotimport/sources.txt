@@ -1,0 +1,11 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# Two files of one package dot-importing the same package, both using it.
+# The findings here are type-aware on purpose: govet's printf and errorlint's
+# comparison only exist if the package type-checks, so this case fails the
+# moment the per-file dot-import bookkeeping regresses.
+
+lib/lib.go              crates/guff-lint/tests/testdata/dotimport/lib/lib.go
+one.go                  crates/guff-lint/tests/testdata/dotimport/one.go
+two.go                  crates/guff-lint/tests/testdata/dotimport/two.go

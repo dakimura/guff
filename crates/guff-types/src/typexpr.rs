@@ -65,6 +65,17 @@ impl Checker {
         lookup_chain(&self.scopes, self.universe_scope, name)
     }
 
+    /// [`Self::lookup`], plus the scope the name was found in. Dot-imported
+    /// names live in the file scope, which is what `dotImportMap` keys on.
+    pub fn lookup_scope(&self, name: &str) -> Option<(crate::arena::ScopeId, ObjectId)> {
+        if let Some(scope) = self.env.scope {
+            if let Some(found) = crate::scope::lookup_chain_scope(&self.scopes, scope, name) {
+                return Some(found);
+            }
+        }
+        crate::scope::lookup_chain_scope(&self.scopes, self.universe_scope, name)
+    }
+
     /// The core type-expression dispatch.
     ///
     /// Equivalent to `Checker.typInternal` (the chunk-21a subset).
@@ -292,7 +303,7 @@ impl Checker {
     /// requires it to denote a `TypeName`, and returns the type it names.
     fn type_ident(&mut self, id: &Ident) -> TypeId {
         let name = id.name.as_str();
-        let obj = match self.lookup(name) {
+        let (found_scope, obj) = match self.lookup_scope(name) {
             Some(o) => o,
             None => {
                 let pos = id.pos().0 as u32;
@@ -306,7 +317,7 @@ impl Checker {
         };
 
         self.record_use(id, obj);
-        self.mark_dot_import_use(obj);
+        self.mark_dot_import_use(Some(found_scope), name);
 
         // Classify the object without holding an arena borrow across the
         // (mutating) objDecl call below.

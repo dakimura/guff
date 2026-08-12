@@ -268,7 +268,7 @@ godox は caddy の実 config では有効化されていないので、`default
 代わりに**各ケースの config が 2 キーを必ず書くことを `run.sh` が要求する**形にした
 （測る対象でないケースは 0）。既定の 50 / 3 で golden が黙って切られる事故も同時に防げる。
 
-### Phase 5 — コーパスの多様化 `[進行中: 台帳とゲート完成 2026-08-12（10 本目）]`
+### Phase 5 — コーパスの多様化 `[進行中: 台帳・ゲート・サブ形の測定まで完了 2026-08-12（11 本目）]`
 
 現行 8 リポは「普通の Go」に偏っている。踏めていない形:
 generics 多用、cgo、build tags、`go.work` マルチモジュール、`vendor/`、`embed`、
@@ -295,7 +295,29 @@ generics 多用、cgo、build tags、`go.work` マルチモジュール、`vendo
 grafana を `./pkg/... ./apps/advisor/...` に広げて **go.work の 2 モジュール跨ぎ**、
 非 ASCII は fixture（`compat/golden/cases/nonascii`）。合計 **6 バグ**。
 
-残る候補: ent（generics + codegen）、tailscale（cgo + tags）、mattermost-server（規模）、
+**11 本目で入れたもの**: controller-runtime（generics + codegen。ent は `.golangci.yml` が
+v1 でハーネスの前提を満たさない）と、**サブ形の測定**。合計 **8 バグ**。
+
+#### 形の「濃さ」—— covered は「何で」covered なのか `[11 本目]`
+
+`generics` は 7 ターゲットが covered だったが、その中身は測っていなかった。
+`corpus/shapes.py` に 3 列足した結果:
+
+| サブ形 | gated ターゲット |
+|---|---|
+| `genericrecv`（ジェネリック型のメソッド） | consul 21 / grafana 18 —— **pr tier は 0** |
+| `genericunion`（`~T` / `A \| B` の型集合） | caddy 4 / consul 8 / grafana 36 |
+| `genericalias`（go1.24 のジェネリック型エイリアス） | **全ターゲット 0** |
+
+`genericrecv` は `REQUIRED` に入れた。11 本目のバグのうち 3 つはこの形にしか出ない。
+
+**ただし「gated ターゲットが踏んでいる」は弱い保証である。** consul と grafana は
+`genericrecv` を 39 ファイル持っているのに、revive の受け手の綴りのバグを 1 件も撃たなかった
+—— それらの実 config が `exported` を有効にしていないからで、
+**ゲートが比較しているのは「形 × 有効な check」の積**のほうである。
+形だけの台帳ではそこは守れないので、積は golden 側（`cases/generics`）に置く。
+
+残る候補: tailscale（cgo + tags）、mattermost-server（規模）、
 gvisor（unsafe / asm）、kubernetes 全体。
 
 ### Phase 6 — 差分ファジングと自動最小化 `[未着手]`
@@ -324,7 +346,7 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致 | 2026-08-12 |
-| 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置 | 2026-08-12 |
+| 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画 | 2026-08-12 |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
@@ -4357,6 +4379,194 @@ Phase 5 が新しい形を入れると出てくるのはこういうものでも
 4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
    SA9008 / SA5011 の σ、govet の未実装 16 pass。
 
+### 2026-08-12（11 本目）— Phase 5 の二度目の測定: 「generics は covered」の中身を測ったら 8 バグ
+
+**やったこと**
+
+10 本目の「次にやること 1」——**踏んでいる形の「濃さ」は測っていない**——をそのまま開けた。
+台帳は `generics` を 7 ターゲットが covered と言っていたが、
+**その covered が何でできているか**は誰も見ていなかった。
+
+#### 0. サブ形を数えた —— `genericrecv` は gated ターゲット 8 個中 0 個だった
+
+`corpus/shapes.py` に 3 列足した（どれも構文だけを見る下限値で、census ではない）:
+
+| 形 | 意味 | 実測（gated 8 ターゲット） |
+|---|---|---|
+| `genericrecv` | ジェネリック型のメソッド `func (x T[P]) M()` | **consul 21 / grafana 18、pr tier は 0** |
+| `genericunion` | `~T` / `A \| B` の型集合 | caddy 4 / consul 8 / grafana 36 |
+| `genericalias` | ジェネリック型エイリアス（go1.24） | **全ターゲット 0** |
+
+`genericrecv` を `REQUIRED` に入れた（今回のバグの 3 つがこの形にしか出ない）。
+**ただし「covered」は依然として弱い保証**である: consul と grafana は 21 + 18 ファイル
+持っているのに今回のバグを 1 件も撃たなかった —— **それらの実 config が
+revive の `exported` を有効にしていない**からで、形とチェックの積を測っているのは
+golden tier のほうだけである。だから新ケース `cases/generics` を置いた。
+
+#### 1. controller-runtime を足した —— 39 差分 = 8 バグ
+
+v2 config を持つ generics + codegen リポとして `kubernetes-sigs/controller-runtime@v0.24.1`
+を入れた（ent は v1 config でハーネスの前提を満たさない）。初回 **P=88.5%**（guff 339 / golangci 300）。
+
+**(1) revive の受け手の綴りが 3 通り全部違っていた（24 件）。**
+`receiver_type_key` は上流 `internal/typeparams.ReceiverType` の移植のつもりで、
+実際には (a) `*` を**付けたまま**返し、(b) 型引数を剥がさず、(c) 想定外の形を
+**Rust の `{:?}` で Debug 出力**していた。結果:
+
+| 受け手 | 上流 | guff（修正前） |
+|---|---|---|
+| `func (p *Plain) Method()` | `exported method Plain.Method …` | `*Plain.Method` |
+| `func (b *Box[T]) Get()` | `Box.Get` | `*IndexExpr(IndexExpr { x: Ident(Ident { name_pos: Pos(91), …` |
+| `func (h *hidden[T]) Exported()` | **報告しない**（private receiver） | 報告する |
+
+3 番目が効きの大きいところで、Debug 文字列は `I` で始まるので
+`ast.IsExported` が真になり、**非公開のジェネリック型のメソッドが全部誤検出**になっていた。
+上流は `*` を剥がしてから `IndexExpr` / `IndexListExpr` を開き、それ以外は
+`"invalid-type"` を返す（`func (t (*T)) M()` —— go vet が通す形 —— はこれに落ちる。実測して確認した）。
+`confusing-naming` だけは**別の関数**（`getStructName`）で、フォールバックが `_`、
+`IndexListExpr` を開かない（＝ 2 パラメータのジェネリック型のメソッドは
+パッケージ関数と同じ箱に入る）ので、そちらは専用の移植にした。
+
+**(2) revive `var-declaration` は ValueSpec の下に降りてはいけない（5 件）。**
+上流の visitor は `*ast.ValueSpec` の case を**どの経路でも `nil` で返す**ので、
+**var 初期化子の中は一切見ない**。ginkgo のスイートは丸ごと
+`var _ = Describe("…", func() { … })` の中にあるため、上流はそこの `var count uint64 = 0` を
+1 件も報告しない。guff は `shared_walk`（「刈らないルール専用」と自分で書いてある）に
+相乗りしていたので全部報告していた。刈る以上そこには乗れないので、
+自前の pruning walk に戻した。最小再現は 15 行（`var fn = func() { var x uint64 = 0 }`）。
+
+**(3) gocritic `newDeref` は型を見ていなかった（2 件 + 4 件の recall）。**
+`*new(T)` の示唆を**引数の綴りだけ**から作っていた（`other => format!("{other}{{}}")`）。
+上流は `lintutil.ZeroValueOf` に**型**を渡す。24 形を上流に食わせて測った結果:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `*new(T)`（型パラメータ） | **報告しない**（go-critic #1272） | `T{}` |
+| `*new(int32)` | `int32(0)` | `0` |
+| `*new(MyInt)` | `MyInt(0)` | `MyInt{}` |
+| `*new(*MyStruct)` | `(*MyStruct)(nil)` | `*MyStruct(nil)` |
+| `*new([]int)` / `map` / `struct{…}` | `[]int(nil)` など | **何も報告しない**（`expr_text` が型構文を描画できず None） |
+| `*new(chan int)` / `func()` | 報告しない | `chan int{}` |
+| `*new(complex128)` | `%!s(PANIC=String method: runtime error: invalid memory address or nil pointer dereference)` | `0` |
+
+最後の行は上流のバグで、`zv` が nil のまま `*ast.CallExpr` に包まれ、`fmt` が
+String メソッドの panic を捕まえてこの文字列を書く。**finding は出る**ので、
+落とすと recall 損失になる。文字列ごと再現した。描画は `expr_text` ではなく
+`node_text`（go/printer）に替えた —— そこの doc コメントが最初から
+「ノードを埋め込むメッセージはこちらを通せ」と書いてあった。
+
+**(4) errorlint の allowed-errors は「センチネル」ではなく「対」だった（2 件 + recall）。**
+guff はセンチネル 4 つを**どこから来た error でも**免除していた。上流は
+`(センチネル, それを返した関数)` の**対**で 64 行の表を引き、`err` に代入した
+呼び出しを識別子をまたいで遡る（`assigningCallExprs`）。表と機構を丸ごと移植した。
+効果は両側にある: `net/http.ErrServerClosed`（表にあるが guff の 4 つには無い）が
+差分として消え、同時に**`err == io.EOF` が許可外の関数の戻り値でも黙っていた**recall 損失も消えた。
+ついでに value switch の報告位置が違っていた（上流は
+`problematicCaseClause.Pos()`＝ `case` の位置、guff は `switch`）。
+
+**(5) SSA を読む 16 個の analyzer がメソッドを 1 つも見ていなかった。**
+`nolintlint` が `//nolint:nilerr` を「未使用」と言ったのが糸口。
+`BuildIrResult::src_funcs` は `Package.members`（＝パッケージレベル関数）だけで、
+**メソッドは入らない**。上流の `buildssa` / `buildir` の `SrcFuncs` は
+AST の FuncDecl 全部（メソッド込み）である。しかも guff 側は
+`buildir_src_methods` 設定に依存していて、この設定は
+**contextcheck が有効なときだけ真**になる ——
+つまり**有効な linter の集合によって finding が変わる**状態だった。
+`src_funcs_with_methods()`（§7 のとおり SA5011 だけは σ が無いので据え置き）に
+16 か所を切り替えた: nilerr / nilnesserr / zerologlint / callcheck / purity /
+SA1015 / SA1025 / SA2002 / SA2003 / SA4009 / SA4010 / SA4012 / SA4023 /
+SA5000 / SA5007 / SA5010。**pr tier の 5 ターゲットは全部 100% のまま**（誤検出は増えなかった）。
+
+**(6) ドット import の使用記録がパッケージ単位だった（ill-typed 44 → 16）。**
+`dot_imported: HashMap<PackageId, ObjectId>` は「Go の `dotImportMap` の簡略化」と
+自分でコメントしていたが、**同じパッケージを 2 つのファイルがドット import すると
+片方の `PkgName` が上書きされ**、負けたファイルが
+`"github.com/onsi/ginkgo/v2" imported and not used` になる。
+ginkgo/gomega を使うリポでは**テストパッケージが軒並み ill-typed**になり、
+型に依存する analyzer が丸ごと落ちる（Phase 1 が言う「差分に出ない失敗」）。
+Go は `(fileScope, name)` で持つので、そのとおりに直した（1 名前 1 エントリ）。
+最小再現は 2 ファイル 8 行。
+
+**(7) SA1019 の位置とメッセージ（golden の ratchet が missing 7/extra 9 → 5/7）。**
+上流は `report.Report(pass, sel, …)` に**セレクタ式全体**を渡すので位置は `x` の先頭
+（`lib.OldFunc` なら `lib`）。guff は選択された名前のほうを指していた。
+さらにメッセージ本文: 上流は `strings.Replace(alt, "\n", " ", -1)` だけで **trim しない**ので、
+`doc.Text()` 由来の**末尾スペースがそのまま出る**。guff は trim していた。
+golden の比較は改行しか落とさないので、この 1 文字が 2 行分の差分だった。
+
+**(8) 非推奨の**インターフェースメソッド**が別パッケージから見えなかった。**
+依存ソースの遅延スキャンが `Decl::FuncDecl`（＝レシーバ付きの具象メソッド）しか
+methods 表に入れていなかった。`type P interface { // Deprecated: … \n M() }` を
+インポート側から呼んでも黙る。TypeSpec が InterfaceType のとき
+メソッドの doc も拾うようにした。
+
+#### 2. `cases/generics` —— 形とチェックの積を golden で固定した
+
+コーパスに無い形は fixture で埋める（`nonascii` の前例）。
+`crates/guff-lint/tests/testdata/generics/generics.go` + `compat/golden/cases/generics`（8 件）。
+revive（exported / receiver-naming / unexported-return / var-declaration）、
+gocritic の `newDeref`、nilerr を**位置とメッセージまで**比較する。
+ジェネリック型のメソッド、2 パラメータの受け手、非公開ジェネリック型の公開メソッド、
+型パラメータの `*new(T)`、メソッド本体の nilerr が入っている。
+
+#### 3. 直していない: guff の型検査が落ちるジェネリックの 2 形
+
+fixture を書いていて出た。**どちらもパッケージ全体が ill-typed になる**
+＝ 型依存の analyzer が丸ごと黙る側の欠陥である。
+
+```go
+type Box[T any] struct{ v T }
+type Alias[T any] = Box[T]        // guff: undefined: T   (go1.24 のジェネリック型エイリアス)
+
+type Number interface{ ~int | ~float64 }
+func Sum[T Number](xs []T) T {
+    var total T
+    for _, x := range xs { total += x }   // guff: operator ADD not defined on operand
+    return total
+}
+func Less[T Number](a, b T) bool { return a < b }  // guff: operator LSS not defined on operands
+```
+
+2 つ目は `crates/guff-types/src/predicates.rs` が自分で書いている
+「Type-set-aware variants (`allX`) are deferred」そのもの。上流の `Checker.binary` は
+`allNumeric` / `allOrdered`（型集合の全項が満たすか）を引く。
+**ジェネリックな算術を書くコードは、今の guff では丸ごと解析されない。**
+fixture はこの 2 形を避けて書いてあり、避けた理由はファイル内のコメントにも残してある。
+
+#### 4. controller-runtime は `weekly` に置いた（gated tier ではない）
+
+残差分 8 件（うち 5 件は上の (8) と同族で、`cluster.Cluster` が**別パッケージの
+インターフェースを埋め込んでいる**ため、選択の受け手（`Cluster`）と
+メソッドの宣言元（`recorder.Provider`）が食い違うケース。
+`guff-types` がインターフェースメソッドにレシーバを繋いでいない §7 の欠落と同じ根）と、
+bodyclose 1 件・unparam 1 件が残っている。
+**allowlist を 8 件足して pr tier に入れるより、緑の gated tier を保ったまま
+weekly に置くほうが正直**と判断した（k9s / cobra は allowlist 0 件で入っている）。
+ill-typed は baseline に 16 で記録した。移すのは残り 8 件が消えたとき。
+
+**ゲート**
+
+- `./compat/golden/run.sh` — **79 ケース**（新規 `generics`）。
+  `staticcheck-sa` の ratchet を **missing 7 → 5 / extra 9 → 7** に下げた（SA1019 の 2 行）
+- `./compat/run.sh --oss --tier pr,nightly` — 10 ターゲット緑（consul の allowlist 3 件は据え置き）
+- `./compat/run.sh --isolate` — 116 ターゲット緑
+- `./compat/filesets.sh --tier pr,nightly` — 8 ターゲット一致
+- `./corpus/shapes.py check --offline` — **必須 10 形**（`genericrecv` を追加）
+- `cargo test --workspace` — 緑
+
+**次にやること**
+
+1. **型検査のジェネリック 2 形**（上の 3）。`allX` の型集合対応が本体で、
+   これが入るまで「generics covered」は名ばかりである。ジェネリック型エイリアスも同じ枠。
+2. **controller-runtime を pr tier に上げる**。残り 8 件のうち 5 件は
+   §7 の「インターフェースメソッドにレシーバが繋がっていない」を直せば同時に消える見込み。
+3. `manager.Manager has no field or method GetCache` 系の ill-typed 16 件。
+   **最小再現は取れていない**（別パッケージのインターフェース埋め込み・同名メソッドの
+   重複宣言・in-package テストでの拡張、いずれも単体では再現しない）。
+   10 本目の k9s と同じ壁で、**`compat/reduce.py`（Phase 6）を先に作るほうが速い**。
+4. 10 本目からの持ち越し: config の validate、gosec G304 / G407。
+   6 本目からの持ち越し: §5 の台帳の残り 6 件、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -4657,6 +4867,37 @@ i = n          // 上流は撃たない（n の referrer に MakeInterface が�
 **これは設計判断ではなく欠落**なので直すべき側に置く。直せば ratchet も別名の追加も
 同時に消える。ただし receiver を足すと `subst` / `unify` / メソッド集合の比較に
 波及するので、単独セッションの頭でやること。
+
+### 型集合を見ない `allX` と、ジェネリック型エイリアス `[記録 2026-08-12（11 本目）]`
+
+**これは設計判断ではなく欠落**なので、直すべき側に置く。どちらも
+`go build` が通るコードで **guff の型検査だけが落ち**、パッケージ全体が ill-typed になる
+＝ 型に依存する analyzer が丸ごと黙る（Phase 1 が数えているのがまさにこれ）。
+
+```go
+type Box[T any] struct{ v T }
+type Alias[T any] = Box[T]        // guff: undefined: T
+
+type Number interface{ ~int | ~float64 }
+func Sum[T Number](xs []T) T {
+    var total T
+    for _, x := range xs { total += x }              // guff: operator ADD not defined on operand
+    return total
+}
+func Less[T Number](a, b T) bool { return a < b }    // guff: operator LSS not defined on operands
+```
+
+`crates/guff-types/src/predicates.rs` は自分でこう書いている ——
+「These look at `t.Underlying()`; they don't look inside type parameters
+(matching Go's `isX` family). Type-set-aware variants (`allX`) are deferred」。
+上流の `Checker.binary` が引くのは `allNumeric` / `allOrdered`、
+つまり**型集合の全項が満たすか**のほうである。
+したがって現状、**ジェネリックな算術・比較を書くパッケージは丸ごと解析されない**。
+
+エイリアスのほうは Go 1.24 の「型パラメータを持つエイリアス」で、
+`corpus/shapes.py` の `genericalias` が**どのターゲットでも 0**と測っている形。
+`compat/golden/cases/generics` はこの 2 形を避けて書いてあり、
+避けた理由は fixture 自身のコメントにも残してある。型検査が通るようになったら戻すこと。
 
 ### `mod-year` / `mod-year-range`（goheader）
 

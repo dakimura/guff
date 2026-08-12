@@ -15,7 +15,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .result_of::<buildir::BuildIrResult>(buildir::analyzer())
             .ok_or_else(|| "SA5007 requires buildir analyzer".to_string())?;
 
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             each_call(func, &ir.prog, |bid, caller, iid, _call, callee| {
                 let Some(callee) = callee else {

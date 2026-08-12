@@ -527,7 +527,17 @@ fn implements_error(pass: &Pass<'_>, typ: TypeId) -> bool {
 }
 
 /// Best-effort source rendering of an argument for diagnostics.
-fn describe_arg(arg: &Expr) -> String {
+/// Upstream renders the argument with `analysisutil.Format`, i.e. `go/printer`
+/// over the real fileset — `has arg Farewell() of wrong type string`. Matching
+/// only literals and identifiers and calling everything else "arg" turned every
+/// call, selector, index and conversion into the same three letters.
+fn describe_arg(pass: &Pass<'_>, arg: &Expr) -> String {
+    let mut buf: Vec<u8> = Vec::new();
+    if guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(arg)).is_ok() {
+        if let Ok(text) = String::from_utf8(buf) {
+            return text;
+        }
+    }
     match arg {
         Expr::BasicLit(lit) => lit.value.clone(),
         Expr::Ident(id) => id.name.clone(),
@@ -813,7 +823,7 @@ fn check_one(
                     format!(
                         "{name} format {} has arg {} of wrong type {}",
                         dir.text,
-                        describe_arg(arg),
+                        describe_arg(pass, arg),
                         type_name(pass, typ)
                     ),
                 ));

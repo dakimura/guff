@@ -63,7 +63,7 @@ fn check_func(pass: &Pass<'_>, f: &FuncDecl, failures: &mut Vec<Failure>) {
         if let Some(recv) = f.recv.as_ref().and_then(|r| r.list.first()) {
             if let Some(ty) = &recv.ty {
                 let key = receiver_type_key(ty);
-                if !guff::ast::ast_is_exported(key.trim_start_matches('*')) {
+                if !guff::ast::ast_is_exported(&key) {
                     return;
                 }
             }

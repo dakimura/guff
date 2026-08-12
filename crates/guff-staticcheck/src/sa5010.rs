@@ -19,7 +19,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .result_of::<buildir::BuildIrResult>(buildir::analyzer())
             .ok_or_else(|| "SA5010 requires buildir analyzer".to_string())?;
 
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             for (_, block) in func.live_blocks() {
                 for &iid in &block.instrs {

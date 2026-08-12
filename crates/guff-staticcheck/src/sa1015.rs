@@ -33,7 +33,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA1015 requires buildir analyzer".to_string())?;
 
     let mut pending = Vec::new();
-    for &fid in &ir.src_funcs {
+    for &fid in ir.src_funcs_with_methods() {
         let func = ir.prog.functions.get(fid);
         let fpos = func_pos(pass, func);
         if fpos == 0 || version_compare(&stdlib_version(pass, fpos), "go1.23") >= 0 {

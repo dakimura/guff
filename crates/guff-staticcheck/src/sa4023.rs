@@ -118,7 +118,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4023 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
-    for &fid in &ir.src_funcs {
+    for &fid in ir.src_funcs_with_methods() {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {

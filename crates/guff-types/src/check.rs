@@ -166,13 +166,13 @@ pub struct Checker {
     /// The set of `PkgName` objects referred to by a qualified identifier
     /// (`pkg.X`). Equivalent to `check.usedPkgNames`.
     pub used_pkg_names: crate::hash::HashSet<ObjectId>,
-    /// Maps each dot-imported package to the `PkgName` that dot-imported it.
-    /// When a bare identifier resolves to an object of one of these packages,
-    /// the corresponding `PkgName` is marked used. Simplification of Go's
-    /// `dotImportMap` (which keys on `(fileScope, name)`); resolving on the
-    /// object's package is sufficient here because dot-imported objects belong
-    /// to the imported package.
-    pub dot_imported: HashMap<PackageId, ObjectId>,
+    /// Go's `dotImportMap`, keyed the way Go keys it: `(file scope, name)` ->
+    /// the `PkgName` that dot-imported the name. Keying on the *package*
+    /// instead — which this map used to do — collapses two files that dot-import
+    /// the same package into one entry, so the file whose `PkgName` lost the
+    /// race was reported as "imported and not used" even though it used the
+    /// import. That is per-file bookkeeping in Go, and it has to be here too.
+    pub dot_imported: HashMap<(crate::arena::ScopeId, String), ObjectId>,
     /// Map of expressions that do not yet have a final (typed) type, keyed on
     /// the AST node id (see `guff::ast::Ident::id`). Entries are narrowed
     /// in place by `update_expr_type` as their context becomes known and
@@ -990,18 +990,19 @@ impl Checker {
         }
     }
 
-    /// If `obj` belongs to a dot-imported package, mark that package's
-    /// `PkgName` as used so it is not reported as an unused import. Called
+    /// If `name` resolved in `scope` to a dot-imported object, mark that
+    /// import's `PkgName` as used so it is not reported as unused. Called
     /// wherever a bare identifier resolves to an object (Go marks
     /// `usedPkgNames` via `dotImportMap` in `expr.go`/`typexpr.go`).
-    pub fn mark_dot_import_use(&mut self, obj: ObjectId) {
+    pub fn mark_dot_import_use(&mut self, scope: Option<crate::arena::ScopeId>, name: &str) {
         if self.dot_imported.is_empty() {
             return;
         }
-        if let Some(pkg) = obj.pkg(&self.objects) {
-            if let Some(&pname) = self.dot_imported.get(&pkg) {
-                self.used_pkg_names.insert(pname);
-            }
+        let Some(scope) = scope else {
+            return;
+        };
+        if let Some(&pname) = self.dot_imported.get(&(scope, name.to_string())) {
+            self.used_pkg_names.insert(pname);
         }
     }
 

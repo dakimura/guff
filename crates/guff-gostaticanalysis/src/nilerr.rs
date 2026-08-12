@@ -365,7 +365,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return Ok(None);
         };
         let fset = pass.fset().clone();
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             let mut reports = Vec::new();
             run_func(&ir.prog, func, &mut cache, &mut reports);

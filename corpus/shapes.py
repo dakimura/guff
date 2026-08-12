@@ -64,6 +64,9 @@ GATED_TIERS = ("pr", "nightly")
 # directive). `desc` is what the number counts.
 SHAPES = {
     "generics": "packages with a type-parameterized func/type declaration",
+    "genericrecv": "files declaring a method on a generic type (`func (x T[P]) M()`)",
+    "genericunion": "files with a `~T` / `A | B` type set in a constraint",
+    "genericalias": "files with a generic type alias (`type A[T any] = B[T]`, go1.24)",
     "cgo": 'packages with cgo files (import "C")',
     "buildtags": "files excluded from the build by //go:build constraints",
     "gowork": "targets analyzed inside an active go.work workspace",
@@ -82,6 +85,7 @@ SHAPES = {
 # otherwise.
 REQUIRED = (
     "generics",
+    "genericrecv",
     "buildtags",
     "gowork",
     "multimodule",
@@ -117,6 +121,15 @@ EXCLUDED = {
 }
 
 TYPEPARAM = re.compile(r"^(?:func\s+\w+\[[A-Z_]|type\s+\w+\[[A-Z_])", re.M)
+# "generics is covered" was the shape ledger's answer; it says nothing about
+# *which* generic form a target exercises, and the forms fail differently.
+# A method on a generic type is its own shape: three of the 2026-08-12 bugs
+# (revive's receiver rendering, revive's private-receiver skip, nilerr's blind
+# spot on methods) only fire on `func (x T[P]) M()`, and no gated target had
+# one. These are syntactic like TYPEPARAM above — a lower bound, not a census.
+GENERIC_RECV = re.compile(r"^func\s+\(\s*\w+\s+\*?\w+\[", re.M)
+GENERIC_UNION = re.compile(r"(?:^|[\s\[|])~\w|\w\s*\|\s*~\w", re.M)
+GENERIC_ALIAS = re.compile(r"^type\s+\w+\[[^\]]*\]\s*=", re.M)
 NONASCII_IDENT = re.compile(r"(?:func|var|const|type)\s+[^\x00-\x7f\W]\w*")
 GENERATED = re.compile(r"^// Code generated .* DO NOT EDIT\.", re.M)
 GO_DIRECTIVE = re.compile(r"^go (\d+)\.(\d+)", re.M)
@@ -190,6 +203,12 @@ def probe_target(repo: dict) -> dict | None:
                 continue
             if TYPEPARAM.search(text):
                 counts["generics"] += 1
+            if GENERIC_RECV.search(text):
+                counts["genericrecv"] += 1
+            if GENERIC_UNION.search(text):
+                counts["genericunion"] += 1
+            if GENERIC_ALIAS.search(text):
+                counts["genericalias"] += 1
             if NONASCII_IDENT.search(text):
                 counts["nonascii"] += 1
             if GENERATED.search(text):

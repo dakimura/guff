@@ -48,7 +48,7 @@
 | errcheck | ✅ | excludes / blank / assert 対応 |
 | errchkjson | ✅ | |
 | errname | ✅ | |
-| errorlint | 🟡 | comparison / type assertion 対応。errorf 既定オフ・allowed マップは DEFERRED |
+| errorlint | 🟡 | comparison / type assertion 対応。errorf は既定オフ。allowed-errors は上流の 64 行の表を `(センチネル, それを返した関数)` の対で引く移植（2026-08-12） |
 | exhaustive | ✅ | |
 | exhaustruct | 🟡 | 検出は対応。`//exhaustruct:ignore` コメントディレクティブは DEFERRED |
 | exptostd | ✅ | |

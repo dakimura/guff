@@ -111,7 +111,9 @@ fn extract_deprecated_message(doc: &Option<guff::ast::CommentGroup>) -> Option<S
     let doc = doc.as_ref()?;
     for part in doc.text().split("\n\n") {
         if let Some(rest) = part.strip_prefix("Deprecated: ") {
-            return Some(rest.replace('\n', " ").trim().to_string());
+            // See the note in the deprecated fact pass: upstream does not
+            // trim, and the trailing space reaches the printed message.
+            return Some(rest.replace('\n', " "));
         }
     }
     None
@@ -523,6 +525,27 @@ fn scan_import_deprecated(
                                 if let Some(msg) = msg {
                                     out.objects.insert(ts.name.name.clone(), msg);
                                 }
+                                // An interface's *methods* carry their own
+                                // `Deprecated:` docs, and a call through the
+                                // interface value is what the caller writes.
+                                // Only concrete methods (`Decl::FuncDecl` with
+                                // a receiver) were being collected, so a
+                                // deprecated interface method was silent for
+                                // every importer.
+                                if let Expr::InterfaceType(it) = &ts.ty {
+                                    for m in &it.methods.list {
+                                        let Some(mmsg) = extract_deprecated_message(&m.doc)
+                                        else {
+                                            continue;
+                                        };
+                                        for name in &m.names {
+                                            out.methods.insert(
+                                                method_fact_key(&ts.name.name, &name.name),
+                                                mmsg.clone(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -659,7 +682,10 @@ fn selector_diagnostic(
     // Stdlib table keyed by SelectorName; message uses source rendering (report.Render).
     let table_key = knowledge_selector_name(pass, sel);
     let display = render_expr(&Expr::SelectorExpr(sel.clone()));
-    let pos = sel.sel.name_pos.0 as u32;
+    // Upstream passes the whole `*ast.SelectorExpr` to `report.Report`, so the
+    // position is where `x` starts, not where the selected name does:
+    // `lib.OldFunc` is reported at `lib`, `i.GetOld` at `i`.
+    let pos = sel.x.pos().0 as u32;
     handle_deprecation(
         pass,
         deprs,

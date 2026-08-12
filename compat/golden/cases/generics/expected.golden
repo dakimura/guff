@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh generics
+# Produced by running golangci-lint on compat/golden/cases/generics/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+generics/generics.go:19:1:revive:warning:exported: exported method Box.Get should have comment or be unexported
+generics/generics.go:21:1:revive:warning:exported: exported method Box.Peek should have comment or be unexported
+generics/generics.go:30:1:revive:warning:exported: exported method Pair.First should have comment or be unexported
+generics/generics.go:32:1:revive:warning:exported: exported method Pair.Second should have comment or be unexported
+generics/generics.go:68:29:gocritic::newDeref: replace `*new(int)` with `0`
+generics/generics.go:72:34:gocritic::newDeref: replace `*new(Box[int])` with `Box[int]{}`
+generics/generics.go:88:3:nilerr::error is not nil (line 87) but it returns nil
+generics/generics.go:96:3:nilerr::error is not nil (line 95) but it returns nil

@@ -56,7 +56,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .ok_or_else(|| "SA1025 requires buildir analyzer".to_string())?;
 
         let mut pending = Vec::new();
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             for (bid, block) in func.live_blocks() {
                 let instrs = filter_debug(&block.instrs, func);

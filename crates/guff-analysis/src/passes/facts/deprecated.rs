@@ -67,7 +67,12 @@ fn extract_deprecated_message(docs: &[&Option<guff::ast::CommentGroup>]) -> Opti
         };
         for part in doc.text().split("\n\n") {
             if let Some(rest) = part.strip_prefix("Deprecated: ") {
-                return Some(rest.replace('\n', " ").trim().to_string());
+                // No trim: upstream is `strings.Replace(alt, "\n", " ", -1)`
+                // over a `doc.Text()` that ends in a newline, so the last
+                // paragraph's message carries a trailing space into the
+                // message text. golangci-lint prints it, and the golden tier
+                // compares messages byte for byte.
+                return Some(rest.replace('\n', " "));
             }
         }
     }
@@ -231,7 +236,11 @@ mod tests {
         assert!(file.doc.is_some(), "expected file doc, got {:?}", file.doc);
         let docs = [&file.doc];
         let msg = extract_deprecated_message(&docs).expect("deprecated msg");
-        assert_eq!(msg, "use New instead.");
+        // Trailing space intended: `doc.Text()` ends in a newline and upstream
+        // only replaces newlines with spaces, so the space reaches the printed
+        // SA1019 message. golangci-lint prints it too, and the golden tier
+        // compares message text byte for byte.
+        assert_eq!(msg, "use New instead. ");
     }
 
     #[test]

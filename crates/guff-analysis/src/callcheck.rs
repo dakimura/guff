@@ -113,7 +113,7 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
 
         let mut pending = Vec::new();
 
-        for &fid in &ir.src_funcs {
+        for &fid in ir.src_funcs_with_methods() {
             let caller = ir.prog.functions.get(fid);
             for (_, block) in caller.live_blocks() {
                 for &iid in &block.instrs {

@@ -95,7 +95,9 @@ use guff_constant::{int64_val, make_from_literal};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{basic_kind, BasicKind, IS_FLOAT, IS_INTEGER};
+use guff_types::basic::{
+    basic_info, basic_kind, BasicKind, IS_BOOLEAN, IS_FLOAT, IS_INTEGER, IS_STRING,
+};
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
@@ -855,7 +857,7 @@ fn check_unslice(pass: &Pass<'_>, slice: &SliceExpr, pending: &mut Vec<(u32, Str
     );
 }
 
-fn check_new_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
+fn check_new_deref(pass: &Pass<'_>, star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     let Expr::CallExpr(call) = star.x.as_ref() else {
         return;
     };
@@ -865,16 +867,18 @@ fn check_new_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
     if fun.name != "new" || call.args.len() != 1 {
         return;
     }
-    let Some(arg) = expr_text(&call.args[0]) else {
+    // The message embeds two rendered nodes, so both go through `go/printer`:
+    // `expr_text` cannot render `[]int`, `map[string]int` or `struct{ B int }`
+    // at all and used to drop those findings on the floor.
+    let type_expr = unparen(&call.args[0]);
+    let Some(arg) = node_text(pass, type_expr) else {
         return;
     };
-    let suggestion = match arg.as_str() {
-        "bool" => "false".to_string(),
-        "string" => "\"\"".to_string(),
-        "int" | "int8" | "int16" | "int32" | "int64" | "uint" | "uint8" | "uint16" | "uint32"
-        | "uint64" | "uintptr" | "byte" | "rune" | "float32" | "float64" | "complex64"
-        | "complex128" => "0".to_string(),
-        other => format!("{other}{{}}"),
+    let Some(typ) = type_of(pass, &call.args[0]) else {
+        return;
+    };
+    let Some(suggestion) = zero_value_of(pass, type_expr, &arg, typ) else {
+        return;
     };
     report(
         pending,
@@ -882,6 +886,96 @@ fn check_new_deref(star: &StarExpr, pending: &mut Vec<(u32, String)>) {
         "newDeref",
         format!("replace `*new({arg})` with `{suggestion}`"),
     );
+}
+
+/// Rendering of a `go/printer` conversion `T(v)`: the printer prints a call's
+/// `Fun` at `HighestPrec`, and a `*ast.StarExpr` at that precedence takes
+/// parentheses — so a pointer type reads `(*T)(nil)`, never `*T(nil)`.
+fn conversion_text(type_expr: &Expr, typ_text: &str, value: &str) -> String {
+    if matches!(type_expr, Expr::StarExpr(_)) {
+        format!("({typ_text})({value})")
+    } else {
+        format!("{typ_text}({value})")
+    }
+}
+
+/// Port of go-critic's `lintutil.ZeroValueOf`, rendered as source text.
+///
+/// Upstream builds the suggestion as an AST *around the type expression the
+/// call was written with*, so `[]int` becomes `[]int(nil)` and a named integer
+/// becomes `MyInt(0)`; a bare `0` or a `MyInt{}` is only right for the four
+/// types whose zero literal needs no conversion (`bool`, `int`, `float64`,
+/// `string`). `None` means upstream emits nothing at all: channels, funcs and
+/// type parameters have no zero-value expression to suggest.
+fn zero_value_of(
+    pass: &Pass<'_>,
+    type_expr: &Expr,
+    typ_text: &str,
+    typ: TypeId,
+) -> Option<String> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let types = &artifacts.types;
+    // `*new(T)` where T is a type parameter: upstream returns before asking for
+    // a zero value at all (go-critic #1272).
+    if matches!(types.get(typ), TypeData::TypeParam(_)) {
+        return None;
+    }
+    let under = typ.underlying(types);
+    match types.get(under) {
+        TypeData::Basic(_) => {
+            let info = basic_info(types, under);
+            let lit = if info.contains(IS_INTEGER) {
+                Some("0")
+            } else if info.contains(IS_FLOAT) {
+                Some("0.0")
+            } else if info.contains(IS_STRING) {
+                Some("\"\"")
+            } else if info.contains(IS_BOOLEAN) {
+                Some("false")
+            } else {
+                // Complex and `unsafe.Pointer` reach `ZeroValueOf` with `zv`
+                // still nil, and upstream wraps that nil in a `*ast.CallExpr`
+                // anyway. The finding is emitted; only its rendering blows up,
+                // and `fmt` catches the nil-pointer panic and writes the text
+                // below in place of the suggestion. Measured against
+                // golangci-lint 2.12.2 — dropping the finding instead would be
+                // a recall loss, so guff reproduces the string verbatim.
+                None
+            };
+            let Some(lit) = lit else {
+                return Some(
+                    "%!s(PANIC=String method: runtime error: invalid memory address or nil pointer dereference)"
+                        .to_string(),
+                );
+            };
+            // `isDefaultLiteralType` looks at the *declared* type, not the
+            // underlying one, so a named `type MyInt int` takes the conversion
+            // branch even though its underlying basic is `int`.
+            if is_default_literal_type(pass, typ) {
+                Some(lit.to_string())
+            } else {
+                Some(conversion_text(type_expr, typ_text, lit))
+            }
+        }
+        TypeData::Slice(_) | TypeData::Map(_) | TypeData::Pointer(_) | TypeData::Interface(_) => {
+            Some(conversion_text(type_expr, typ_text, "nil"))
+        }
+        TypeData::Array(_) | TypeData::Struct(_) => Some(format!("{typ_text}{{}}")),
+        _ => None,
+    }
+}
+
+fn is_default_literal_type(pass: &Pass<'_>, typ: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if !matches!(artifacts.types.get(typ), TypeData::Basic(_)) {
+        return false;
+    }
+    matches!(
+        basic_kind(&artifacts.types, typ),
+        BasicKind::Bool | BasicKind::Int | BasicKind::Float64 | BasicKind::String
+    )
 }
 
 fn check_append_assign(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
@@ -8592,7 +8686,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::StarExpr(s) => {
                     if enabled(&set, "newDeref") {
-                        check_new_deref(s, &mut pending);
+                        check_new_deref(pass, s, &mut pending);
                     }
                     if enabled(&set, "flagDeref") {
                         check_flag_deref(pass, s, &mut pending);

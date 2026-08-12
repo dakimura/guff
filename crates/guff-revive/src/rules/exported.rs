@@ -312,9 +312,7 @@ fn must_check_method(
         .and_then(|fld| fld.ty.as_ref())
         .map(receiver_type_key)
         .unwrap_or_default();
-    // Strip pointer star for export check (upstream `typeparams.ReceiverType`).
-    let recv_name = recv.trim_start_matches('*');
-    if !guff::ast::ast_is_exported(recv_name) && !check_private_receivers {
+    if !guff::ast::ast_is_exported(&recv) && !check_private_receivers {
         return false;
     }
     if COMMON_METHODS.contains(&f.name.name.as_str()) {

@@ -1,0 +1,41 @@
+# Golden case: the generic forms the OSS corpus does not carry (Phase 5).
+#
+# The linters here are the ones whose 2026-08-12 bugs lived in this shape:
+#
+#   revive    — rendered a generic receiver by debug-printing the AST, and so
+#               never took the private-receiver skip (the debug string starts
+#               with `I`, which `ast.IsExported` calls exported)
+#   gocritic  — newDeref suggested `T{}` for `*new(T)` where upstream returns
+#               early for type parameters
+#   nilerr    — reads SrcFuncs, which held package-level functions only, so no
+#               method body of any kind was ever analyzed
+#
+# Each one is compared here on position and message text, not just presence.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+    - govet
+    - nilerr
+    - revive
+  settings:
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        - newDeref
+    revive:
+      rules:
+        - name: exported
+        - name: receiver-naming
+        - name: unexported-return
+        - name: var-declaration
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
