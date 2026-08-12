@@ -1,0 +1,24 @@
+# Golden case: `revive.confidence` above the 0.9 rung (COMPAT-HARDENING Phase 4).
+#
+# One more rung: only errorf, whose failures carry confidence 1, survives.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      confidence: 0.95
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

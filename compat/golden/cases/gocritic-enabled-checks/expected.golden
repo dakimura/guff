@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-enabled-checks
+# Produced by running golangci-lint on compat/golden/cases/gocritic-enabled-checks/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings.go:30:2:gocritic::singleCaseSwitch: should rewrite switch statement to if statement
+settings.go:45:16:gocritic::appendAssign: append result not assigned to the same slice
+settings.go:59:1:gocritic::paramTypeCombine: func(a int, b int) int could be replaced with func(a, b int) int
+settings.go:67:3:gocritic::emptyFallthrough: replace empty case containing only fallthrough with expression list

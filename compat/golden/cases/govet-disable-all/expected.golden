@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-disable-all
+# Produced by running golangci-lint on compat/golden/cases/govet-disable-all/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings/bad.go:22:9:govet::shift: i (8 bits) too small for shift of 10

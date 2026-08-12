@@ -13,6 +13,7 @@ use guff::ast::{
     ParenExpr, Spec, TypeAssertExpr,
 };
 use guff::node_mask;
+use guff::position::Pos;
 use guff::walk::{NodeMask, NodeRef};
 use guff_analysis::code::{self, type_with_name};
 use guff_analysis::passes::inspect;
@@ -22,8 +23,6 @@ use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::operand::OperandMode;
 use guff_types::TypeId;
-
-use expreq::unparen;
 
 /// Options controlling errcheck behaviour (kisielk/errcheck / golangci flags).
 #[derive(Clone, Debug, Default)]
@@ -131,7 +130,7 @@ fn run(pass: &mut Pass<'_>, opts: Options) -> Result<Option<AnalysisResult>, Run
         exclude: &exclude,
         opts: &opts,
         pending: &mut pending,
-        skip_assert_positions: HashSet::new(),
+        skip: None,
         error_types: RefCell::default(),
     };
 
@@ -166,7 +165,20 @@ struct Visitor<'a, 'b> {
     exclude: &'a HashSet<String>,
     opts: &'a Options,
     pending: &'a mut Vec<(u32, String)>,
-    skip_assert_positions: HashSet<u32>,
+    /// Span of the subtree upstream's `Visit` declined to descend into.
+    ///
+    /// kisielk's visitor prunes by returning `nil` — from `case
+    /// *ast.TypeAssertExpr` always, and from an assignment whose single RHS is
+    /// an assertion — and the pruned subtree is then *not* examined at all, so
+    /// a call inside a function literal in there is never reported either.
+    /// [`inspect::InspectResult::preorder_typed`] has no pruning, but it visits
+    /// parents before children, and AST spans nest: a node whose position falls
+    /// inside this range is inside that subtree, and one outside it is not.
+    ///
+    /// A single "everything below this offset" watermark would be one byte
+    /// smaller and wrong across files — positions are per-`FileSet` and a later
+    /// file need not start above an earlier one's spans.
+    skip: Option<(u32, u32)>,
     /// Answers to "does this type implement `error`?", which every unchecked
     /// call asks about its result type.
     ///
@@ -241,7 +253,21 @@ impl Visitor<'_, '_> {
         Some(selector_name(sel).unwrap_or(full))
     }
 
+    /// Is this node inside a subtree upstream's `Visit` pruned? See
+    /// [`Visitor::skip`].
+    fn pruned(&self, pos: Pos) -> bool {
+        let pos = pos.0 as u32;
+        self.skip.is_some_and(|(start, end)| pos >= start && pos < end)
+    }
+
+    fn prune(&mut self, start: Pos, end: Pos) {
+        self.skip = Some((start.0 as u32, end.0 as u32));
+    }
+
     fn visit_expr_stmt(&mut self, x: &Expr) {
+        if self.pruned(x.pos()) {
+            return;
+        }
         if let Expr::CallExpr(call) = x {
             if !self.ignore_call(call) && self.call_returns_error(call) {
                 self.report_unchecked(call.lparen.0 as u32, Some(call));
@@ -250,24 +276,31 @@ impl Visitor<'_, '_> {
     }
 
     fn visit_go_defer(&mut self, call: &CallExpr) {
+        if self.pruned(call.pos()) {
+            return;
+        }
         if !self.ignore_call(call) && self.call_returns_error(call) {
             self.report_unchecked(call.lparen.0 as u32, Some(call));
         }
     }
 
     fn visit_assign(&mut self, s: &AssignStmt) {
-        self.check_assignment(&s.lhs, &s.rhs);
-        if self.opts.check_asserts && s.rhs.len() == 1 {
-            if let Expr::TypeAssertExpr(t) = unparen(&s.rhs[0]) {
-                if t.ty.is_some() {
-                    self.skip_assert_positions.insert(t.lparen.0 as u32);
-                }
+        let start = s.lhs.first().map_or(s.tok_pos, Expr::pos);
+        if self.pruned(start) {
+            return;
+        }
+        if !self.check_assignment(&s.lhs, &s.rhs) {
+            // `Visit` returned nil: nothing under this statement is examined —
+            // including the left-hand side, which is why the span starts there
+            // and not at the assertion.
+            if let Some(last) = s.rhs.last() {
+                self.prune(start, last.end());
             }
         }
     }
 
     fn visit_gendecl(&mut self, g: &GenDecl) {
-        if g.tok != Some(guff::token::Token::VAR) {
+        if g.tok != Some(guff::token::Token::VAR) || self.pruned(g.tok_pos) {
             return;
         }
         for spec in &g.specs {
@@ -276,24 +309,52 @@ impl Visitor<'_, '_> {
                 continue;
             }
             let lhs: Vec<Expr> = vs.names.iter().map(|n| Expr::Ident(n.clone())).collect();
-            self.check_assignment(&lhs, &vs.values);
+            if !self.check_assignment(&lhs, &vs.values) {
+                // Upstream returns nil from inside the spec loop, so the specs
+                // *after* this one are not checked either.
+                // `Decl::end` for a `GenDecl`, without cloning the decl: the
+                // `)` when the declaration is parenthesized, and otherwise its
+                // one and only spec.
+                let end = if g.rparen.is_valid() {
+                    Pos(g.rparen.0 + 1)
+                } else {
+                    g.specs.last().map(|s| s.end()).unwrap_or_default()
+                };
+                self.prune(g.tok_pos, end);
+                return;
+            }
         }
     }
 
     fn visit_type_assert(&mut self, t: &TypeAssertExpr) {
+        if self.pruned(t.x.pos()) {
+            return;
+        }
+        // `case *ast.TypeAssertExpr` prunes unconditionally — before the two
+        // early returns below, not after them.
+        self.prune(t.x.pos(), Pos(t.rparen.0 + 1));
         if !self.opts.check_asserts || t.ty.is_none() {
             return;
         }
-        let pos = t.lparen.0 as u32;
-        if self.skip_assert_positions.contains(&pos) {
-            return;
-        }
-        self.report_unchecked(pos, None);
+        // `checkAssertExpr` reports at `expr.Pos()`, and an
+        // `ast.TypeAssertExpr` begins at its operand, not at `.(`. The two
+        // coincide only when the operand is one character long — which is why
+        // `_ = i.(string)` matched upstream and `return i.(string)` did not.
+        self.report_unchecked(t.x.pos().0 as u32, None);
     }
 
+    /// Port of `checkAssignment`. The return value is upstream's `followed`:
+    /// `false` means `Visit` returns nil and the statement's whole subtree goes
+    /// unexamined (see [`Visitor::skip_until`]).
+    ///
+    /// Nothing here unwraps parentheses, because upstream's type switches do
+    /// not: `_ = (f())` has a `*ast.ParenExpr` on the right, matches neither
+    /// arm, and is therefore not a blank assignment at all. `_ = (i.(string))`
+    /// falls through the same way and is reported later, by the assertion's own
+    /// visit — one column to the right of where the unwrapped form reports.
     fn check_assignment(&mut self, lhs: &[Expr], rhs: &[Expr]) -> bool {
         if rhs.len() == 1 {
-            if let Expr::CallExpr(call) = unparen(&rhs[0]) {
+            if let Expr::CallExpr(call) = &rhs[0] {
                 if !self.opts.check_blank {
                     return true;
                 }
@@ -302,7 +363,7 @@ impl Visitor<'_, '_> {
                 }
                 let is_error = self.errors_by_arg(call);
                 for (i, l) in lhs.iter().enumerate() {
-                    let Expr::Ident(id) = unparen(l) else {
+                    let Expr::Ident(id) = l else {
                         continue;
                     };
                     if id.name != "_" {
@@ -312,16 +373,17 @@ impl Visitor<'_, '_> {
                         self.report_unchecked(id.name_pos.0 as u32, Some(call));
                     }
                 }
-            } else if let Expr::TypeAssertExpr(assert) = unparen(&rhs[0]) {
+            } else if let Expr::TypeAssertExpr(assert) = &rhs[0] {
                 if !self.opts.check_asserts {
                     return false;
                 }
                 if assert.ty.is_none() {
+                    // type switch
                     return false;
                 }
                 if lhs.len() < 2 {
                     self.report_unchecked(rhs[0].pos().0 as u32, None);
-                } else if let Expr::Ident(id) = unparen(&lhs[1]) {
+                } else if let Expr::Ident(id) = &lhs[1] {
                     if self.opts.check_blank && id.name == "_" {
                         self.report_unchecked(id.name_pos.0 as u32, None);
                     }
@@ -330,12 +392,9 @@ impl Visitor<'_, '_> {
             }
         } else {
             for (i, l) in lhs.iter().enumerate() {
-                let Expr::Ident(id) = unparen(l) else {
+                let Expr::Ident(id) = l else {
                     continue;
                 };
-                if id.name != "_" {
-                    continue;
-                }
                 if let Some(Expr::CallExpr(call)) = rhs.get(i) {
                     if !self.opts.check_blank {
                         continue;
@@ -343,10 +402,14 @@ impl Visitor<'_, '_> {
                     if self.ignore_call(call) {
                         continue;
                     }
-                    if self.call_returns_error(call) {
+                    if id.name == "_" && self.call_returns_error(call) {
                         self.report_unchecked(id.name_pos.0 as u32, Some(call));
                     }
                 } else if let Some(Expr::TypeAssertExpr(assert)) = rhs.get(i) {
+                    // Note the asymmetry with the call arm above: an assertion
+                    // in a multi-value assignment is reported for *any* name on
+                    // the left, not only for `_`. `a, b = i.(int), j.(string)`
+                    // is two findings under `check-type-assertions`.
                     if !self.opts.check_asserts || assert.ty.is_none() {
                         continue;
                     }
@@ -720,15 +783,4 @@ pub fn analyzer_check_asserts() -> &'static Analyzer {
 
 pub fn analyzers() -> Vec<&'static Analyzer> {
     vec![analyzer()]
-}
-
-mod expreq {
-    use guff::ast::{Expr, ParenExpr};
-    pub fn unparen<'a>(e: &'a Expr) -> &'a Expr {
-        let mut cur = e;
-        while let Expr::ParenExpr(ParenExpr { x, .. }) = cur {
-            cur = x;
-        }
-        cur
-    }
 }

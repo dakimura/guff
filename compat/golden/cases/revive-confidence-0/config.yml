@@ -1,0 +1,27 @@
+# Golden case: `revive.confidence: 0` (COMPAT-HARDENING Phase 4).
+#
+# Zero is the value that shows the default is applied with `cmp.Or`, which
+# treats the zero value as unset — so `confidence: 0` is **not** "report
+# everything down to zero", it is the 0.8 default all over again. This golden
+# is byte-identical to `revive-settings`, and that identity is the point.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      confidence: 0
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

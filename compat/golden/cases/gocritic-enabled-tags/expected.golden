@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-enabled-tags
+# Produced by running golangci-lint on compat/golden/cases/gocritic-enabled-tags/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings.go:30:2:gocritic::singleCaseSwitch: should rewrite switch statement to if statement
+settings.go:45:16:gocritic::appendAssign: append result not assigned to the same slice
+settings.go:52:2:gocritic::rangeValCopy: each iteration copies 256 bytes (consider pointers or indexing)

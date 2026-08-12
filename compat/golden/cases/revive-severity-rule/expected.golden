@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-severity-rule
+# Produced by running golangci-lint on compat/golden/cases/revive-severity-rule/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings/settings.go:23:5:revive:warning:error-naming: error var BadError should have name of the form ErrFoo
+settings/settings.go:27:2:revive:error:increment-decrement: should replace i += 1 with i++
+settings/settings.go:33:9:revive:warning:errorf: should replace errors.New(fmt.Sprintf(...)) with fmt.Errorf(...)

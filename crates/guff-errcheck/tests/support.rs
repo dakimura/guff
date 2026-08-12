@@ -150,3 +150,42 @@ pub fn run_analyzer_with_settings(
         .map(|(_, d)| d.message)
         .collect()
 }
+
+/// Like [`run_analyzer_with_settings`], but keyed on `line:col`.
+///
+/// The golden gate compares columns; a message-only assertion cannot see one
+/// move, and errcheck's position rules are the whole content of some of its
+/// arms (`expr.Pos()` vs `.(`, the LHS name vs the RHS node).
+pub fn run_analyzer_positions(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+    options: &RunnerOptions,
+) -> Vec<String> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..options.clone()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    let fset = pkg.fset.as_ref().expect("fixture package has a FileSet");
+    let mut out: Vec<(i64, i64)> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| {
+            let pos = fset.position(guff::position::Pos(i64::from(d.pos)));
+            (pos.line, d.column.map_or(pos.column, i64::from))
+        })
+        .collect();
+    out.sort_unstable();
+    out.into_iter()
+        .map(|(line, col)| format!("{line}:{col}"))
+        .collect()
+}

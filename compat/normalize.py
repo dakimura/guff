@@ -69,17 +69,24 @@ def normalize_path(filename: str, root: str) -> str:
             return rel
         return filename
 
+    # Relative path that already lives under root. This has to be tried
+    # *before* the module-prefix heuristic below: when a package directory
+    # happens to share the root's basename (``.work/nonascii`` holding
+    # ``nonascii/nonascii.go``), that heuristic would strip a component the
+    # path genuinely has, and the two tools would disagree only because one
+    # of them reports absolute paths and takes the branch above.
+    if (Path(root_n) / filename).exists():
+        return filename
+
     # golangci sometimes prefixes the module directory name
-    # (e.g. ``fixture/main.go`` when root ends with ``fixture``).
+    # (e.g. ``fixture/main.go`` when root ends with ``fixture``). Only reachable
+    # now when no such file exists under root, which is exactly when the
+    # prefix is spurious.
     parts = filename.split("/")
     if parts and parts[0] == base:
         stripped = "/".join(parts[1:])
         if stripped:
             return stripped
-
-    # Relative path that already lives under root.
-    if (Path(root_n) / filename).exists():
-        return filename
 
     joined = under_root(os.path.join(root_n, filename))
     if joined is not None:

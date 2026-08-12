@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nonascii
+# Produced by running golangci-lint on compat/golden/cases/nonascii/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+nonascii/nonascii.go:35:10:errcheck::Error return value of `os.Chdir` is not checked
+nonascii/nonascii.go:40:2:ineffassign::ineffectual assignment to αβγ
+nonascii/nonascii.go:43:10:errcheck::Error return value of `os.Chdir` is not checked
+nonascii/nonascii.go:46:2:godox::Line contains TODO: "TODO: godox keyword sitting after ✓ a 3-..."
+nonascii/nonascii.go:55:14:govet::printf: fmt.Printf format %d has arg 名前 of wrong type string
+nonascii/nonascii.go:66:1:lll::The line is 61 characters long, which exceeds the maximum of 60 characters.
+nonascii/nonascii.go:67:1:lll::The line is 61 characters long, which exceeds the maximum of 60 characters.

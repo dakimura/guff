@@ -1,0 +1,25 @@
+# Golden case: `govet.disable-all` plus one `enable` (COMPAT-HARDENING Phase 4).
+#
+# `disable-all` is tested *after* both lists, so `enable` still turns an
+# analyzer back on under it — and with no `enable` at all it would leave govet
+# with nothing to run. This is the shape cases/govet uses to make its analyzer
+# list exhaustive.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+  settings:
+    govet:
+      disable-all: true
+      enable:
+        - shift
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

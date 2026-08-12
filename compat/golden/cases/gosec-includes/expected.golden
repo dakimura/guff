@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-includes
+# Produced by running golangci-lint on compat/golden/cases/gosec-includes/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+ladder/scoreladder.go:39:6:gosec:medium:G401: Use of weak cryptographic primitive

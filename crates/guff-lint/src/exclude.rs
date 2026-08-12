@@ -391,6 +391,32 @@ impl IssueFilter {
                 .as_ref()
                 .is_some_and(|s| s.report_unused);
             issues = idx.filter_issues(issues, report_unused);
+
+            // `filter_issues` is where nolintlint's own findings are born, and
+            // that is *after* the three exclusion filters above already ran —
+            // so until now nothing could exclude them. Upstream has no such
+            // hole: nolintlint is an ordinary linter there, its issues exist
+            // before any processor runs, and `ExclusionPaths` / exclude-text /
+            // `ExclusionRules` all see them. Re-run the three; they are
+            // idempotent for the issues that already passed.
+            //
+            // Measured on k9s, whose config excludes the path `internal/x`
+            // (an unanchored regex, so it covers `internal/xray/`): upstream
+            // drops the nolintlint finding on `internal/xray/section.go:64`
+            // along with every other finding in that tree, and guff kept it.
+            issues.retain(|issue| !self.is_excluded_by_path(issue));
+            issues.retain(|issue| {
+                !self
+                    .exclude_text_res
+                    .iter()
+                    .any(|re| re.is_match(&issue.text))
+            });
+            issues.retain(|issue| {
+                !self
+                    .exclude_rules
+                    .iter()
+                    .any(|rule| rule.matches(issue, self.path_base.as_deref()))
+            });
         } else {
             issues.retain(|issue| {
                 !self

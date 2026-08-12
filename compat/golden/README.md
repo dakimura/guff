@@ -82,22 +82,68 @@ the target platform, and then no fixture will ever wake it:
 Keep these cases small. Bumping an existing case's `go.mod` instead would move
 every other version-gated check in that golden at the same time.
 
+### One case exists for a shape no corpus repo has (Phase 5)
+
+`nonascii` is not about a check or a setting — it is about the *bytes*.
+`corpus/shapes.py` measures **zero** non-ASCII identifiers across every gated
+OSS target, and no mainstream Go repo supplies them, so the shape is covered
+here rather than by adding a repo.
+
+What it pins is that two quantities in the same finding use different units:
+
+| Quantity | Unit |
+|----------|------|
+| a finding's **column** | **bytes** (`go/token`) |
+| `lll`'s line length | **runes** (`utf8.RuneCountInString`) |
+| `godox`'s message truncation | **runes**, at 40 |
+
+Every finding in the fixture sits after multi-byte text on its line, and one
+kana line is 34 runes / 94 bytes so that `lll` has to pick a side. This is the
+split that made `godox` panic on caddy by slicing a comment at a non-boundary
+byte — and adding the case immediately found that godox's **column** (upstream
+is the comment's start column *plus one*) and its **line** for a keyword on a
+later line of a block comment (upstream reports the `/*`) were both wrong.
+godox had been "fixed" on caddy in 2026-08, but the OSS tier's key contains no
+column, so its position had never actually been compared.
+
 ### One fixture, several configs (Phase 4)
 
-Thirty-one cases are not about a check at all: they are about what a *setting*
-does. Each group shares one `sources.txt`, and only `config.yml` differs:
+Sixty-five of the cases are not about a check at all: they are about what a
+*setting* does. Each group shares one `sources.txt`, and only `config.yml`
+differs:
 
 | Group | Cases | Setting |
 |-------|-------|---------|
 | nolint | `nolint`, `nolint-strict`, `nolint-allow-unused` | `//nolint` forms, nolintlint |
-| errcheck | `errcheck`, `errcheck-verbose` | `errcheck.verbose` |
 | exclusions | `exclusions`, `-rules`, `-paths`, `-presets` | `linters.exclusions.*` |
 | generated | `generated`, `-lax`, `-strict`, `-disable` | `linters.exclusions.generated` |
 | issues (limits) | `issues-limits`, `issues-max-per-linter`, `issues-max-same`, `issues-max-both` | `issues.max-issues-per-linter` / `max-same-issues` |
 | issues (uniq) | `issues-uniq-by-line` (baseline: `exclusions`) | `issues.uniq-by-line` |
 | severity | `severity-default`, `severity-rules`, `severity-linter` (baseline: `exclusions`) | `severity.default` / `severity.rules` |
 | run | `run-tests`/`-off`, `run-build-tags`/`-none`, `run-go`/`-122` | `run.tests` / `run.build-tags` / `run.go` |
-| staticcheck.checks | `staticcheck-checks-default`, `-all`, `-glob`, `-not-s` | `linters.settings.staticcheck.checks` |
+| staticcheck | `staticcheck-checks-default`, `-all`, `-glob`, `-not-s` | `staticcheck.checks` |
+| errcheck (naming) | `errcheck`, `errcheck-verbose` | `errcheck.verbose` |
+| errcheck (options) | `errcheck-opts` (baseline), `-blank`, `-asserts`, `-exclude-functions`, `-no-default-exclusions` | `errcheck.check-blank` / `check-type-assertions` / `exclude-functions` / `disable-default-exclusions` |
+| govet | `govet-settings` (baseline), `-disable`, `-enable-wins`, `-disable-all`, `-enable-all` | `govet.enable` / `disable` / `enable-all` / `disable-all` |
+| gocritic | `gocritic-settings` (baseline), `-enabled-tags`, `-enabled-checks`, `-disabled-checks`, `-disabled-tags`, `-disable-all`, `-enable-all` | gocritic's six selector keys |
+| revive | `revive-settings` (baseline), `-confidence-{085,095,0}`, `-severity-{error,info,rule}`, `-enable-{default,all}-rules` | `revive.confidence` / `severity` / `enable-*-rules` |
+| gosec | `gosec-settings` (baseline), `-default-rules`, `-severity-{medium,high}`, `-confidence-{medium,high}`, `-includes`, `-excludes` | `gosec.severity` / `confidence` / `includes` / `excludes` |
+
+**Every group's baseline writes none of the keys it is about.** A case that
+spells its settings out cannot see a default, and defaults are where four of
+the nine bugs the per-linter groups found were living: govet's default analyzer
+set, gocritic's default checker set, gosec's default rule set, and revive's
+`confidence` (0.8, filled in with `cmp.Or`, so `confidence: 0` means *unset*
+rather than "report everything").
+
+The five per-linter groups also need their own small fixtures rather than the
+existing per-check ones. `cases/gosec` names 35 rules in `includes` so that its
+golden is about the rules; moving a threshold there moves dozens of 57 findings
+at once, and nothing can be read off the diff. Each settings fixture is instead
+built so that **one finding sits on each rung of the axis under test** —
+gosec's four rules order differently by severity than by confidence, revive's
+three sit at confidence 0.8 / 0.9 / 1, and gocritic's five are one per tag
+class.
 
 Nothing in the harness knows about any of this — a case owns its `config.yml`
 and points at whatever fixtures it wants, so the product of "one fixture × N

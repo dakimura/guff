@@ -1,0 +1,31 @@
+# Golden case: `disabled-tags` applied *after* `enabled-checks`
+# (COMPAT-HARDENING Phase 4).
+#
+# The five steps of `inferEnabledChecks` run in a fixed order — base,
+# enabled-tags, enabled-checks, disabled-tags, disabled-checks — so a checker
+# named in `enabled-checks` whose tag is in `disabled-tags` ends up **off**.
+# This config asks for `paramTypeCombine` by name and then removes the
+# opinionated tag it carries, and upstream's answer is the bare baseline.
+#
+# guff used to treat an explicit `enabled-checks` entry as immune to the tag
+# filter, which is the reading that feels right and is wrong.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gocritic
+  settings:
+    gocritic:
+      enabled-checks:
+        - paramTypeCombine
+      disabled-tags:
+        - opinionated
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

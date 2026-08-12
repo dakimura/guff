@@ -102,8 +102,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let Some(body) = extract_comment_body(&c.text) else {
                     continue;
                 };
-                let start_line = re_fset.position(c.slash).line;
-                for (offset, line) in body.lines().enumerate() {
+                let start = re_fset.position(c.slash);
+                let (start_line, start_col) = (start.line, start.column);
+                for line in body.lines() {
                     let trimmed = line.trim();
                     if trimmed.len() < 4 {
                         continue;
@@ -113,8 +114,20 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             continue;
                         }
                         let display = display_comment(trimmed);
-                        let line_no = start_line + offset as i64;
-                        if let Some(pos) = line_pos(&fset, file.pos(), line_no) {
+                        // Upstream reports `fset.Position(comment.Pos())` — the
+                        // comment's *own* start — for every matching line in it,
+                        // never the line the keyword sits on. godox does add the
+                        // line offset, but only inside the message string it
+                        // formats itself, and golangci-lint throws that string
+                        // away and builds its own from `i.Pos`. So a `TODO` on
+                        // the third line of a block comment is reported at the
+                        // `/*`.
+                        //
+                        // The column is then `i.Pos.Column + 1` in golangci's
+                        // wrapper, which is why a comment in column 1 is
+                        // reported at column 2.
+                        if let Some(line_start) = line_pos(&fset, file.pos(), start_line) {
+                            let pos = line_start + start_col as u32;
                             pending.push((
                                 pos,
                                 format!("Line contains {joined}: {display:?}"),

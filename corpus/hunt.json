@@ -1,13 +1,5 @@
 [
   {
-    "name": "cobra",
-    "url": "https://github.com/spf13/cobra.git",
-    "ref": "v1.10.2",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "10m"
-  },
-  {
     "name": "go-redis",
     "url": "https://github.com/redis/go-redis.git",
     "ref": "v9.22.0",
@@ -27,14 +19,6 @@
     "name": "nats-server",
     "url": "https://github.com/nats-io/nats-server.git",
     "ref": "v2.14.4",
-    "packages": "./...",
-    "tier": "hunt",
-    "timeout": "20m"
-  },
-  {
-    "name": "k9s",
-    "url": "https://github.com/derailed/k9s.git",
-    "ref": "v0.51.0",
     "packages": "./...",
     "tier": "hunt",
     "timeout": "20m"

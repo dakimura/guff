@@ -224,15 +224,17 @@ godox は caddy の実 config では有効化されていないので、`default
 **Done when**: Phase 0 が挙げた全 check に fixture + golden があり、CI 必須ゲートになっている。
 進捗は `docs/COVERAGE.md` の `never` / `unit-only` 件数で測る。
 
-### Phase 4 — 設定・除外セマンティクスの互換テスト `[ランナー側は完了 2026-08-12（8 本目）／残りは linter ごとの settings キー]`
+### Phase 4 — 設定・除外セマンティクスの互換テスト `[完了 2026-08-12（9 本目）]`
 
 現在ほぼゼロの層。ユーザーが実際に踏むのはここ。すべて finding-set を変える ＝ 互換性そのもの。
 
 - 各 linter の settings キーを 有効/無効/閾値/リスト で 3〜4 パターン
-  → **errcheck の `verbose`**（`cases/errcheck` / `errcheck-verbose`）と
-  **staticcheck の `checks`**（`cases/staticcheck-checks-{default,all,glob,not-s}`、
-  2026-08-12（8 本目））が完了。
-  **これが Phase 4 の唯一の残件**であり、ランナー側と違って linter の数だけ item がある
+  → **完了 2026-08-12（9 本目）**。errcheck の `verbose`（6 本目）と staticcheck の
+  `checks`（8 本目）に、9 本目が **errcheck 5 / govet 5 / gocritic 7 / revive 9 / gosec 8**
+  の 34 ケースを足して、finding-set を変える主要キーを閉じた。
+  **各グループの baseline はキーを 1 つも書かないケース**にしてある —— 8 本目の教訓
+  （既存ケースがキーを明示していると既定は永久に測られない）どおりで、
+  9 本目の 9 バグのうち 4 つはその既定側にあった
 - `linters.exclusions.{rules,presets,generated,paths}`
   → **完了 2026-08-11（7 本目）**。`cases/exclusions`（baseline）+ `-rules` / `-paths` /
   `-presets` と `cases/generated{,-lax,-strict,-disable}` の 8 ケース。
@@ -266,14 +268,34 @@ godox は caddy の実 config では有効化されていないので、`default
 代わりに**各ケースの config が 2 キーを必ず書くことを `run.sh` が要求する**形にした
 （測る対象でないケースは 0）。既定の 50 / 3 で golden が黙って切られる事故も同時に防げる。
 
-### Phase 5 — コーパスの多様化 `[未着手]`
+### Phase 5 — コーパスの多様化 `[進行中: 台帳とゲート完成 2026-08-12（10 本目）]`
 
 現行 8 リポは「普通の Go」に偏っている。踏めていない形:
 generics 多用、cgo、build tags、`go.work` マルチモジュール、`vendor/`、`embed`、
 テストのみパッケージ、アセンブリ、非 ASCII 識別子、古い go directive、
 巨大生成ファイル（protobuf / deepcopy）。
 
-候補: ent（generics + codegen）、tailscale（cgo + tags）、mattermost-server（規模）、
+**この列挙自体が推測だったので、まず測った。** `corpus/shapes.py` が各ターゲットの
+**実際の package パターン**（＝ゲートが両ツールに食わせる集合そのもの）で `go list` を回す。
+チェックアウトの中身とは別物である点が要で、grafana のチェックアウトには `go.mod` が 47 個
+あるが `./pkg/...` が解析するのは **1 モジュールだけ**だった。10 本目の初回測定:
+
+| 形 | 8 ターゲット合計 |
+|---|---|
+| cgo パッケージ / vendor 配下の解析対象 / 非 ASCII 識別子 | **どれも 0** |
+| 1 回の実行が跨ぐモジュール数 | **全ターゲットで 1** |
+| `go` ディレクティブ | 最古で 1.24 |
+
+`corpus/shapes.py check` が**ゲート**で、必須の形を gated ターゲットが 1 つも踏んでいなければ
+落ちる（PR は `--offline` で台帳を信じ、nightly は `go list` で測り直して台帳のズレを捕まえる）。
+「踏んでいる」と数えるのは `pr` と `nightly` だけ —— `weekly` はジョブが無く、
+**走らないゲートは形を守れない**。踏まないと決めた形は `EXCLUDED` に測定つきで書く（§6 と同じ作法）。
+
+**10 本目で入れたもの**: k9s（`pr`）、cobra（`pr`、`go 1.15`）、
+grafana を `./pkg/... ./apps/advisor/...` に広げて **go.work の 2 モジュール跨ぎ**、
+非 ASCII は fixture（`compat/golden/cases/nonascii`）。合計 **6 バグ**。
+
+残る候補: ent（generics + codegen）、tailscale（cgo + tags）、mattermost-server（規模）、
 gvisor（unsafe / asm）、kubernetes 全体。
 
 ### Phase 6 — 差分ファジングと自動最小化 `[未着手]`
@@ -301,12 +323,12 @@ golangci-lint **2.12.2** ピンに対し、週次で最新版と現ピンの両�
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
 | 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（28 pass）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 3** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-11 |
-| 4 | 設定・除外セマンティクス | 中 | **ランナー側は完了** — golden に **31 ケース**（nolint 3 / errcheck 2 / exclusions 4 / generated 4 / **issues 5** / **severity 3** / **run 6** / **staticcheck.checks 4**）。`//nolint` の 5 規則と nolintlint の 4 診断を移植、errcheck のメッセージを上流の規則に置き換え（6 本目）。除外規則の linter 照合を逐語に、`generated` の既定を strict に（7 本目）。**`max-*` の適用順**を上流（same → per-linter）に、**v2 の `severity.default`** を読めるように、**`run.go` を govet / revive / gocritic に配線**、**staticcheck の `checks` セレクタ文法**（カテゴリ glob / 後勝ち / 既定リスト）を上流の移植に置き換え（8 本目）。残件は linter ごとの settings キー | 2026-08-12 |
-| 5 | コーパス多様化 | 中 | 未着手 | — |
+| 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致 | 2026-08-12 |
+| 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置 | 2026-08-12 |
 | 6 | 縮小器 → 差分ファジング | 中 | 未着手 | — |
 | 7 | 上流ドリフト検知 | 小 | 未着手 | — |
 
-**現在の指標**（`docs/COVERAGE.md` / 2026-08-12、8 本目で再生成。台帳の数字は 7 本目から動かない
+**現在の指標**（`docs/COVERAGE.md` / 2026-08-12、9 本目で再生成。台帳の数字は 7 本目から動かない
 —— Phase 4 は「どの check が発火したか」ではなく「同じ config で同じものを撃つか」を増やす投資なので、
 **この指標が動かないこと自体が想定どおり**）: **547** checks 中
 `never` **3** / `unit-only` **1** / `fired` **543（99.3%）**。
@@ -326,7 +348,8 @@ guff は上流 `honnef.co/go/tools@v0.7.0` の **160 check をちょうど実装
 revive `time-naming`）。次の投資先は `unit-only` ではなく、gosec の G304 のように
 **そもそも実装が無い check**（§4 の 7 本目「次にやること 3」）、
 ratchet が残っている staticcheck / revive、そして
-**「発火したか」ではなく「何を比較しているか」を増やす Phase 4** の側にある。
+**「発火したか」ではなく「何を比較しているか」を増やす** 側にある —— その Phase 4 は
+9 本目で閉じたので、次は Phase 5（同じ check に**別の形の入力**を通す）。
 
 `SA1011` が 9 件目から抜けたのは 2026-08-10（5 本目）。**`never` の原因が「実装が無い」でも
 「fixture が無い」でもなく、`guff-constant` が文字列定数を Rust の `String` で持っていたために
@@ -3918,6 +3941,421 @@ SSA の debug ref が要るかを決める `staticcheck_check_enabled`）。
    `exclusionsem/presets` に fixture を戻し、EXC0010 が preset ケースで比較されるようにする。
 4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
    gosec の他の DEFERRED、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+
+### 2026-08-12（9 本目）— linter ごとの settings キー 5 本: errcheck / govet / gocritic / revive / gosec
+
+**やったこと**
+
+8 本目の「次にやること 1」に従い、Phase 4 の唯一の残件だった **linter ごとの settings キー**を
+5 linter ぶんゴールデンゲートに載せた。新規 34 ケースで **43 → 77 ケース**:
+
+| グループ | ケース | 測っているもの |
+|---|---|---|
+| errcheck | `errcheck-opts`（baseline）/ `-blank` / `-asserts` / `-exclude-functions` / `-no-default-exclusions` | `check-blank` / `check-type-assertions` / `exclude-functions` / `disable-default-exclusions` |
+| govet | `govet-settings`（baseline）/ `-disable` / `-enable-wins` / `-disable-all` / `-enable-all` | `enable` / `disable` / `enable-all` / `disable-all` と**既定のアナライザ集合** |
+| gocritic | `gocritic-settings`（baseline）/ `-enabled-tags` / `-enabled-checks` / `-disabled-checks` / `-disabled-tags` / `-disable-all` / `-enable-all` | 6 つのセレクタキーと**既定のチェッカ集合** |
+| revive | `revive-settings`（baseline）/ `-confidence-{085,095,0}` / `-severity-{error,info,rule}` / `-enable-{default,all}-rules` | `confidence` / `severity` / `enable-*-rules` |
+| gosec | `gosec-settings`（baseline）/ `-default-rules` / `-severity-{medium,high}` / `-confidence-{medium,high}` / `-includes` / `-excludes` | `severity` / `confidence` / `includes` / `excludes` と**既定のルール集合** |
+
+**104 findings 中 97 しか一致せず、差分は 4 か所**だった。ただし**バグは 10 個**で、
+差分が指した 4 か所のうち 1 つ（errcheck の列）が、上流の 80 行を読んだ結果
+**同じ関数の中の別の 3 バグ**に化け、`enabled-tags` を直したことで初めて突き合わせられた
+k9s がさらに 1 つ（`boolExprSimplify`）を出した。8 本目までと同じ形（ゴールデン差分は
+「どこが」しか言わない）だが、今回は**新しい fixture を書かないと残りは永久に測れない**
+ところまで行った。
+
+| linter | 差分 | 実バグ | 内容 |
+|---|---:|---:|---|
+| errcheck | 3 | 4 | 型アサーションの位置と、上流の**枝刈り**、それに括弧 |
+| govet | 1 | 2 | `enable` と `disable` の優先順、既定集合 |
+| gocritic | 4 | 4 | `enabled-tags` が**フィルタになっていた**、`disabled-tags` の適用順、タグ表、`boolExprSimplify` の untyped bool |
+| revive | 0 | 0 | 9 ケースすべて一発一致 |
+| gosec | 0 | 0 | 8 ケースすべて一発一致 |
+
+#### 1. errcheck —— ゴールデンが指したのは列で、直したのは走査そのもの
+
+`errcheck-asserts` の 9 件中 3 件が**列だけ**ずれていた。`_ = i.(string)` は合っていて
+`return i.(string)` はずれる、という形で、原因は `visit_type_assert` が `.(` の位置を
+報告していたこと。上流の `checkAssertExpr` は `expr.Pos()` で、`ast.TypeAssertExpr` は
+**オペランドから始まる**（`i.(string)` なら `i`）。**オペランドが 1 文字のときだけ
+両者が一致する**ので、既存の fixture はその 1 文字の形しか持っていなかった。
+
+ここで `errcheck.go` の `Visit` を読むと、この関数の周りに**まだ測っていないもの**が
+3 つあった。scratch モジュールに書いて両方のツールを走らせた結果:
+
+| 形 | 上流 | guff（当時） |
+|---|---|---|
+| `var a = i.(string)` | 1 件 | **2 件** |
+| `var b, ok = i.(string)` | 0 件 | **1 件** |
+| `_ = (f())`（`check-blank`） | 0 件 | **1 件** |
+| `(_) = f()` | 0 件 | **1 件** |
+| `_ = (i.(string))` | 7 列目 | **6 列目** |
+| `_ = (func() error { f(); return nil })().(error)` | 1 件 | **2 件** |
+
+原因は 2 つ:
+
+- **上流は枝刈りする。** `case *ast.TypeAssertExpr` は無条件に `return nil` を返し、
+  単一 RHS がアサーションの代入も `followed=false` で `return nil` になる。
+  刈られた部分木は**一切見られない**ので、その中の関数リテラルにある未チェック呼び出しも
+  報告されない。guff は `preorder_typed` で全ノードを平坦に舐めていて、
+  `AssignStmt` の分だけ「lparen の位置」を skip セットに入れる形で近似していた
+  —— `GenDecl` は入れていなかったので `var a = i.(string)` が二重に出て、
+  `var b, ok = …` に至っては**上流が出さないものを出していた**。
+  ノードは親→子・兄弟は位置順に来るので、**`skip_until` という単調な水位**を置けば
+  枝刈りと同じことが言える（AST のスパンは入れ子になるので、水位より前にある後続ノードは
+  水位を立てた部分木の中にしかいない）。
+- **上流はどこでも括弧を剥がさない。** `rhs[0].(*ast.CallExpr)` は `(f())` に当たらないので
+  それは blank assignment ではなく、`(i.(string))` も同様に落ちて**アサーション自身の visit**が
+  報告する ＝ 括弧の内側の列になる。guff は `check_assignment` の 6 か所で `unparen` していた。
+  6 か所とも上流に対応物が無い。
+
+ついでに、多値代入の腕は上流だと**`_` でなくても報告する**（`id.Name == "_"` の判定は
+呼び出しの腕の中にしかない）ので `a, c := i.(string), j.(int)` は 4 件になる ——
+2 つの名前 + 走査が続くので 2 つのアサーション自身。guff はループ先頭で `_` を要求していた。
+
+**この 6 行は fixture が無いと二度と測れない**ので、
+`crates/guff-errcheck/tests/testdata/assert_shapes/bad.go` を足して 5 ケース全部に載せ、
+Rust 側にも `line:col` で突き合わせるテストを 1 本足した
+（`support::run_analyzer_positions` を新設。従来の `run_analyzer` はメッセージしか返さず、
+**列が動いても単体テストからは永久に見えない**）。
+
+#### 2. govet —— `enable` は `disable` より先に読まれる
+
+`isAnalyzerEnabled` の腕の順序がこの関数のすべてで、guff は
+「レジストリ − disable」という集合演算に潰していた。したがって
+**両方のリストに同じ名前を書くと上流は有効・guff は無効**になる。
+`govet-enable-wins` のゴールデンは `govet-settings` と**バイト一致**する。
+
+もう 1 つ、`default` の腕は `defaultAnalyzers`（cmd/vet の集合）であって
+「全部」ではない。guff は自分のレジストリ全体を既定にしていた。
+**今日の guff には差が出ない** —— 実装している 30 個は全部 `defaultAnalyzers` の中にあり、
+`allAnalyzers` にしかない 10 個（nilness / shadow / fieldalignment / unusedwrite /
+atomicalign / deepequalerrors / reflectvaluecompare / sortslice / httpmux / findcall）は
+1 つも実装していないから。**が、その 1 つ目を移植した日に既定で発火する**ので、
+`GOVET_DEFAULT_ANALYZERS` を置いて `govet_default_set_is_not_every_analyzer` で留めた。
+**「まだ差が出ないバグ」は差が出ないうちにしか安く直せない。**
+
+#### 3. gocritic —— `enabled-tags` はフィルタではなく**和集合**
+
+`enabled-tags: [performance]` に対して **guff は 0 件、上流は 3 件**だった。
+`inferEnabledChecks` は既定集合から始めてタグの付いたチェッカを**足す**。
+guff は「そのタグを持つものだけ残す」と読んでいて、
+**既定 ON のチェッカは定義上どれもオプトインタグを持たない**（既定集合とは
+experimental / opinionated / performance / security のどれも持たないもののこと）ので、
+**このキーを書いた瞬間に既定の結果が丸ごと消えていた**。
+
+corpus でこのキーを書いているリポジトリ直下 config は **k9s だけ**（vendor 配下の
+fxamacker/cbor にもあるが、それは lint 対象の config ではない）。k9s は 5 つのタグを
+**まとめて**書くので消えるのは「タグ表に載っていない既定 ON のチェッカ」だが、
+そもそも **k9s は `corpus/repos.json` の tier に入っていない**。
+OSS ゲートがこれを緑のまま通していたのは allowlist のせいではなく、
+**このキーを書く config を 1 つも走らせていなかった**から。
+
+さらに 2 つ:
+
+- **5 つの手順には順序がある**（base → enabled-tags → enabled-checks → disabled-tags →
+  disabled-checks）。4 と 5 が 2 と 3 の後なので、
+  **`enabled-checks` で名指ししたチェッカでも、そのタグが `disabled-tags` にあれば消える**。
+  guff は「明示的に名指しされたものはタグフィルタの例外」にしていた ——
+  そう読みたくなるが違う。
+- **タグ表が 1 チェッカ 1 タグで、しかも歯抜けだった。** 和集合にした以上、
+  表の欠けは「静かに足されないチェッカ」になる。go-critic v0.14.4 の
+  `checkers/*_checker.go`（`info.Tags`）と `checkers/rulesdata/rulesdata.go`（`DocTags`）から
+  **107 チェッカ全部**を生成し直した（`unnamedResult` のように 3 つ持つものがある）。
+  同時に `DEFAULT_CHECKS` は**表からの導出**と一致することを
+  `gocritic_default_checks_are_exactly_the_untagged_ones` で固定した ——
+  上流に既定リストは存在せず、あるのは述語だけなので、手書きのリストは
+  移植のたびに静かにずれる側にある。
+
+#### 4. revive と gosec —— 17 ケースが一発で一致した
+
+revive の `confidence` は**閾値を切るのが golangci-lint 側**（`wrapper.run` が
+`failure.Confidence < w.conf.Confidence` で捨てる）で、fixture は
+**信頼度 0.8 / 0.9 / 1 の 3 段**を 1 ルールずつ持つ（increment-decrement / error-naming /
+errorf）。閾値を上げるたびに 1 件ずつ減る。`confidence: 0` が
+**`revive-settings` とバイト一致する**のが今回の目玉で、`normalizeConfig` が
+`cmp.Or` で既定を入れる ＝ **ゼロ値は「未設定」**だから
+「0 なら全部出す」にはならない。
+
+`severity` は 2 値スイッチで、**`error` 以外は何を書いても `warning`** になる
+（`severity()` は rule config の severity が `error` のときだけ `error` を返す）。
+`revive-severity-info` も `revive-settings` とバイト一致する。
+設定文字列をそのまま流すのが素直な実装で、それは間違い ——
+**severity を比較するゲートでしか見えない**。
+
+gosec は `filterIssues` の `i.Severity >= severity && i.Confidence >= confidence` で、
+fixture は **2 軸で順序が食い違う 4 ルール**にした（G104 low/high、G401 medium/high、
+G404 high/medium、G101 high/low）。`severity` を上げると G104 から消え、
+`confidence` を上げると G101 から消える。**同じ 4 件で 2 つのキーが別々に読める。**
+
+どちらも 17 ケース 50 findings が一発一致で、**バグは 0**。
+それでも既定値は 2 つとも新しく測れるようになった:
+`gosec-default-rules` は `includes` を**書かない**唯一のケース（既存の `cases/gosec` は
+35 ルールを名指しする）で、`revive-settings` は `severity` を書かない唯一のケース。
+
+#### 5. ついでに落ちた 1 件と、k9s に残っている 3 件
+
+gocritic の `enabled-tags` を直したので、**k9s の設定で初めて両ツールを突き合わせられる**
+ようになった（k9s は `corpus/repos.json` の tier に入っていない —— それが、この規模の
+recall バグが OSS ゲートを緑のまま通り抜けた理由でもある）。
+`./internal/...` を k9s 自身の gocritic 設定で走らせると、**guff だけが 5 件**出した。
+うち 2 件は 1 行で直った:
+
+**`boolExprSimplify` は `if` / `for` の条件そのものには当たらない。**
+`VisitExpr` の門は `typep.HasBoolKind`、つまり **`types.Basic` の kind が `Bool`
+ちょうど**であることで、**`UntypedBool` は別の kind なので落ちる**。比較式が typed に
+なるのは何かが型を与えたときだけなので:
+
+| 形 | 条件の型 | 上流 |
+|---|---|---|
+| `_ = x+1 > y` | `bool`（代入が既定型を与える） | 報告する |
+| `if x+1 > y && ok` | `bool`（`ok` が typed） | 報告する |
+| `switch { case x+1 > y: }` / `f(x+1 > y)` | `bool` | 報告する |
+| **`if x+1 > y`** | **`untyped bool`** | **報告しない** |
+| **`for x > y-1`** | **`untyped bool`** | **報告しない** |
+
+guff の `type_is_boolean` は `info().contains(IS_BOOLEAN)` で、これは
+`UntypedBool` にも真になる。`kind() == BasicKind::Bool` に締めたら k9s の 2 件が消え、
+`cases/gocritic` のゴールデンは**逆に 1 行増えた** —— `extras.go` に足した
+`if a+1 > b && x` の側は上流も報告するからで、**同じ 1 行の修正の両側**が
+1 つのゴールデンに載っている。
+
+残る 3 件は**このセッションでは直していない**。次に開ける人のために再現手順ごと置いておく:
+
+```
+cd corpus/cache/k9s
+golangci-lint run -c <gocritic だけを有効にした k9s の設定> --path-mode abs ./internal/...
+```
+
+- `rangeValCopy` が `_test.go` の 3 か所で guff だけ出る
+  （`internal/render/{container_int_test,node_int_test,table_test}.go`）。
+  golangci-lint は同じファイルの `appendAssign` は出しているので、
+  **テストファイルを見ていないのではない**
+- `importShadow` が `internal/config/alias_test.go:102` で guff だけ出る
+  （`shadow of imported from '…/internal/view/cmd' package 'cmd'`）
+
+**k9s を tier に入れる**のが本当の直し方で、それは Phase 5 の仕事そのもの。
+
+#### 6. 直していないもの: gosec の `G407`
+
+golangci-lint は gosec の settings ブロックがあると **`excludes` に `G407` を
+無条件で足す**（securego/gosec#1211 の回避）。guff は G407 を実装していないので
+**偶然一致している**だけで、規則として一致しているわけではない。
+G407 を移植する日には、この append も一緒に移植すること。
+
+**ゲート**
+
+- `./compat/golden/run.sh` — **77 ケース**（新規 34）。ratchet 4 本は baseline のまま。
+  `cases/gocritic` は 164 → 165 findings（`boolExprSimplify` の修正で足した
+  `if a+1 > b && x`）
+- `cargo test --workspace` — 緑。新規単体テスト 6 本
+  （`errcheck_assert_positions_and_pruning_match_upstream`、
+  `govet_enable_is_checked_before_disable`、
+  `govet_default_set_is_not_every_analyzer`、
+  `gocritic_selector_keys_follow_infer_enabled_checks`、
+  `gocritic_default_checks_are_exactly_the_untagged_ones`、
+  `gocritic_every_implemented_check_has_tags`）
+- `./compat/run.sh --oss --tier pr,nightly` — 8 ターゲット緑。
+  **consul は guff=258 / golangci=255 / P=98.8% / R=100%** で 8 本目から 1 件も動かず、
+  allowlist も consul の 3 件のまま。errcheck の枝刈りと括弧、gocritic の `enabled-tags`、
+  govet の優先順はどれも**この 8 リポの config では発火しない**。実測: `corpus/cache/*/`
+  のリポジトリ直下 config で gocritic の `enabled-tags` を書いているのは **k9s だけ**で、
+  tier の 6 リポ（gin / caddy / helm / consul / grafana / containerd）はどれも書いていない
+  —— つまりこのキーの意味論は**どのゲートでも一度も比較されていなかった**（上の 5 節）
+- `./compat/run.sh --isolate` — **116 ターゲット**全部緑
+- `compat/coverage.py observe && report` — 台帳の数字は**動かない**（543 / 1 / 3）。
+  8 本目と同じ理由で、これは想定どおり
+
+**次にやること**
+
+1. **Phase 4 は閉じた**（ランナー側 8 本目 / linter settings 9 本目）。残っている settings キーは
+   どれも finding-set を変えないか、既に別のゲートで見えているもの。次に開けるのは
+   **Phase 5（コーパスの多様化）**で、現行 8 リポが踏めていない形は §2 に列挙してある ——
+   generics、cgo、build tags、`go.work`、`vendor/`、`embed`、テストのみパッケージ、
+   アセンブリ、非 ASCII 識別子、巨大生成ファイル。
+   **9 本目の 10 バグのうち 7 つは「既定値」か「セレクタ文法」**で、8 本目の 3 バグと同じ
+   2 種類だった。Phase 5 が探すのは 3 種類目（**入力の形**）になる。
+   **最初に入れる候補は k9s** —— 上の 5 節の 3 件がそこにあり、`corpus/repos.json` の
+   tier に入っていないこと自体が今回いちばん大きな recall バグを隠していた。
+2. **config の validate**（7・8 本目からの持ち越し）。今回さらに 2 件増えた:
+   gocritic の `enable-all` + `enabled-tags` と `disable-all` + `disabled-checks` は
+   上流が `validateOptionsCombinations` で拒む組み合わせで、`disable-all` だけを書いて
+   何も enable しない config も拒まれる。guff はどれも受理して黙って走る。
+3. **gosec G304 の実装**（7 本目からの持ち越し）。実装したら
+   `exclusionsem/presets` に fixture を戻し、EXC0010 が preset ケースで比較されるようにする。
+   G407 も同じ箱（上の 5 節）。
+4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
+   gosec の他の DEFERRED、SA9008 / SA5011 の σ、govet の未実装 16 pass。
+### 2026-08-12（10 本目）— Phase 5 に着手: コーパスに 2 リポ足して 6 バグ、そして「形」の台帳
+
+**やったこと**
+
+9 本目の「次にやること 1」に従い **Phase 5（コーパスの多様化）**を開けた。
+k9s と cobra を tier に入れ、grafana を 2 モジュールに広げ、
+**「どの形の入力がどのゲートにも当たっていないか」を測る台帳**（`corpus/shapes.py`）を作った。
+
+#### 0. まず測った —— tier が実際に解析している「形」
+
+Phase 5 の §2 は踏めていない形を列挙していたが、**その列挙自体が推測**だった。
+`go list -e -json` を各ターゲットの**実 package パターン**で回した結果は §2 の表のとおりで、
+cgo / vendor 配下 / 非 ASCII 識別子が 0、**マルチモジュールを踏んでいるターゲットは 1 つも無い**。
+チェックアウトを数えると grafana は 47 モジュール・kubernetes は 36 モジュールに見えるが、
+**ゲートが見るのはパターンが選ぶ集合だけ**で、どちらも 1 モジュールしか解析していなかった。
+
+#### 1. k9s —— 14 件の差分は 4 個のバグだった
+
+`P=97.8%`（guff 650 / golangci 636 / guff-only 14）から始まり、**allowlist 0 件で 636/636** に到達。
+
+**(1) 同じ linter が `enable` と `disable` の両方に書いてある。**
+k9s の config は `disable: [staticcheck]` と `enable: [..., staticcheck, ...]` を**両方**持つ。
+上流はこれを **disable 勝ち**として扱い staticcheck を 1 件も報告しない。guff は enable 勝ちで、
+k9s に実在する 9 件を撃っていた。最小再現で `default` を standard / none / all の 3 通り、
+2 つのリストの**記述順も入れ替えて**測ったが、答えは常に disable 勝ちだった。
+
+面白いのは **9 本目が govet の同名キーで逆の結論を出している**こと
+（`enable` を先に見るので両方に書かれたアナライザは有効）。
+**綴りが同じキーが、階層違いで逆に解決する。** `config.rs::resolve_names` は
+「base から disable を引き、その後 enable を**無条件で** push し直す」形だったので、
+両方に載っている名前が最後に必ず復活していた。
+
+**(2) nolintlint の findings だけが除外フィルタの外にいた。**
+k9s の `linters.exclusions.paths` は `internal/x` を含む。これは**アンカーされていない正規表現**なので
+`internal/xray/` 以下に丸ごと当たる。上流はそのツリーの findings を 50 件ほど全部落とし、
+guff も落とす —— **nolintlint の 1 件を除いて**。`exclude.rs::apply` は path / text / rules の
+3 フィルタを掛けた**後**に `filter_issues` を呼び、そこで初めて nolintlint の findings が
+**生まれる**ためだった。上流では nolintlint は普通の linter で、findings はプロセッサが走る前から
+存在する。3 フィルタを生成後にもう一度掛ける形にした（既に通ったものには冪等）。
+
+**(3) `skipTestFuncs` は未実装の設定ではなく、既定値の取りこぼしだった。**
+`rangeValCopy` と `rangeExprCopy` は go-critic の 107 チェッカのうち**この 2 つだけ**が
+`skipTestFuncs` を持ち、その**既定は true**。`EnterFunc` が unit test 関数で false を返して
+サブツリーごと刈る。`isUnitTestFunc` はファイル名を一切見ず、**名前と署名**だけを見る
+（`Test` 接頭辞 / `*testing.T` 1 個 / 戻り値なし）。guff の DEFERRED 一覧には
+`sizeThreshold` は載っていたが `skipTestFuncs` は無く、
+**「設定を配線していない」ではなく「既定の挙動が違う」**側だった。
+
+**(4) `importShadow` は上流より広く走査していた。**
+`astwalk.localDefWalker` が「定義」と見なすのは `AssignStmt(DEFINE)` と `GenDecl` の
+ValueSpec だけで、**どちらの case も `return false` で終わる**。上流に食わせた実測:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `for os, strings := range m` | 報告しない（RangeStmt は AssignStmt ではない） | **報告する** |
+| `f = func() { os := 1 }`（非 define 代入） | 報告しない（降りない） | **報告する** |
+| `var g = func() { os := 1 }`（GenDecl） | 報告しない（降りない） | **報告する** |
+| `func() { os := 1 }()`（それ以外の経路） | 報告する | 報告する |
+| `func C() (os int)`（名前付き戻り値） | **報告する** | **報告しない** |
+
+最後の 1 行は recall 側で、k9s には出ていない。**上流を読んだから見つかった**もので、
+`walkSignature` が params → results → recv を回すのに guff は recv → params しか回していなかった。
+
+#### 2. cobra —— `go 1.15` が引き当てた printf のバグ
+
+コーパスで最も古い `go` ディレクティブ（他は全部 1.24 以上）が目的だったが、
+出たバグは go バージョンとは無関係だった。`P=98.1%`（160 / 157）の 3 件はすべて
+`fmt.Sprintf("… %-36[1]s …")` で、guff が `%-36[` を「未知の verb `[`」と読んでいた。
+`fmtstr.ParsePrintf` は `parseIndex` を **3 か所**で呼ぶ —— フラグの直後、`.` の直後
+（`parsePrecision` の中）、そして **`indexPending` でなければ verb の直前でもう一度**。
+guff は最初の 1 か所しか見ていなかったので、`%[1]s` は通るのに `%-36[1]s` が通らなかった。
+`*` が保留中の index を吸収する（`%[1]*d`）ところまで含めて移植した。
+
+#### 3. grafana を 2 モジュールに
+
+`./pkg/...` に `./apps/advisor/...` を足し、**1 回の実行が go.work の 2 モジュールを跨ぐ**形にした
+（837 パッケージ / 2 モジュール）。差分は出ず、ill-typed はむしろ 30 → 27 に減った。
+「差分が出ないこと」自体が測定結果で、それまでこの形は**一度も測られていなかった**。
+
+#### 4. 非 ASCII は fixture で埋め、godox の位置バグが出た（`cases/nonascii`）
+
+コーパスに無い形なので golden 側に置いた。狙いは**単位系が 2 つ混在している**こと:
+finding の **column はバイト**（go/token）、lll の行長は**ルーン**
+（`utf8.RuneCountInString`）、godox のメッセージ切り詰めは**ルーン 40**。
+fixture の finding は全部多バイト文字の**後ろ**に置き、34 ルーン / 94 バイトのかな行を 1 本入れて
+lll がどちらで数えるかを固定した。
+
+ここで **godox の位置が 2 つとも違っていた**。しかも**非 ASCII とは無関係**で、
+ASCII だけの最小例でも全件ずれる:
+
+| | 上流 | guff（修正前） |
+|---|---|---|
+| column | コメント開始桁 **+1**（1 桁目のコメントは 2） | 常に 1 |
+| ブロックコメント途中行の line | **コメント開始行**（`/*` の行） | キーワードのある行 |
+
+godox 自身の `Message.Pos` は `fset.Position(comment.Pos())` で**常にコメント先頭**であり、
+行オフセットは godox が自前で組み立てるメッセージ文字列の中にしか入らない。
+golangci-lint はその文字列を捨てて `i.Pos` から作り直すので、**行オフセットは消える**。
+桁の `+1` は golangci 側のラッパが足している。
+**godox は 2026-08 に caddy で panic を直したチェッカ**（§2 Phase 2）だが、
+あのとき合わせたのは finding の集合だけで、`compat/normalize.py` の比較キーは column を見ない。
+**golden に載せて初めて位置が比較された。** §5 が「残りの linter にも同種の column バグが
+あると考えるのが妥当」と書いていたとおりだった。
+
+#### 5. ハーネスのバグ: `normalize_path` が実在するディレクトリを剥がしていた
+
+`cases/nonascii` を足したら guff だけ `nonascii/nonascii.go` を `nonascii.go` と報告した。
+guff を直接動かすと正しいので、犯人は `compat/normalize.py` のほうだった:
+「golangci はモジュールのディレクトリ名を前置することがある」ための剥がし処理が、
+**root の basename と同じ名前のパッケージディレクトリ**を無条件に食っていた。
+golangci 側は絶対パスで報告するので早い分岐に入り、guff 側だけが剥がされる。
+「root 直下に実在するならそのまま返す」判定を**先**に持ってきた
+（剥がすのは実在しないときだけ ＝ 前置が偽物のときだけ）。
+**ケースの名前とパッケージの名前が衝突するまで誰も踏まなかった**種類のバグで、
+Phase 5 が新しい形を入れると出てくるのはこういうものでもある。
+
+#### 6. 直していないもの: k9s の ill-typed 1 件
+
+`internal/dao` が guff の型検査に落ちる（`go build` は通る）。`accessors` の map リテラル
+24 エントリが全部 `cannot use *Workload value as Accessor value` になる。
+**findings は 636/636 で一致している**ので今は見えないが、型依存のアナライザがこのパッケージで
+丸ごと落ちている＝ Phase 1 が言う「差分に出ない失敗」の予備軍である。
+他の 6 ターゲットと同じく baseline に記録した（k9s 1 / grafana 27 / consul 7 / kubernetes 10）。
+
+**次に開ける人のために、再現しなかった縮小を全部置いておく**（どれも `go build` が通り、guff も黙る）:
+
+1. 埋め込みインターフェースからのメソッド昇格（3 段の struct 埋め込み経由）
+2. `Workload → Table → Generic → NonResource` の埋め込み鎖をそのまま写したもの
+3. 前方参照（`Accessors` 型が使用行より後ろ、`Accessor` が別ファイル）
+4. `Factory` が `Get` / `List` を**別シグネチャで**持ち、`NonResource` がそれを埋め込む形
+
+パッケージ内に probe ファイルを置くと `_ Accessor = (*Workload)(nil)` も
+`Accessors{client.WkGVR: new(Workload)}` も**通る**。同じ型の対が `accessor.go` では落ちて
+後ろのファイルでは通るので、残る差はチェック順序だと思われる。
+**手で縮小する限界に当たっている** —— これは Phase 6 の `compat/reduce.py`
+（delta-debugging）が存在する理由そのもので、次にこれを開けるなら**先に縮小器を作るほうが速い**。
+
+**ゲート**
+
+- `./compat/golden/run.sh` — **78 ケース**（新規 `nonascii`）。`cases/gocritic` は
+  165 → 172 findings（`testfuncs.go` を追加、`extras.go` に importShadow の 3 形）。ratchet 4 本は baseline のまま
+- `./compat/run.sh --oss --tier pr,nightly` — **10 ターゲット**緑（新規 k9s / cobra）。
+  k9s 636/636、cobra 157/157、grafana は 2 モジュールで 0/0。consul の allowlist 3 件は据え置き
+- `./compat/run.sh --isolate` / `./compat/filesets.sh --tier pr,nightly` — 緑
+- `./corpus/shapes.py check` — 必須 9 形すべて gated ターゲットが踏んでいる
+  （`cgo` と `nonascii` は `EXCLUDED`）
+- `compat/coverage.py observe && report` — **543 / 1 / 3 のまま動かない**。
+  8・9 本目と同じ理由で想定どおり: Phase 5 が増やすのは check ではなく
+  **同じ check に通る入力の形**なので、この台帳の数字は原理的に動かない。
+  **動いた指標は golden の 165 → 172 と OSS の 8 → 10 ターゲットのほう**
+- `cargo test --workspace` — **3,044 passed / 0 failed**（ignored 11）。新規単体テスト 2 本
+  （`linter_in_both_enable_and_disable_is_disabled`、`gocritic_range_copy_skips_unit_test_funcs`）。
+  printf の 5 形は既存の `printf_allows_stringer_and_composites`（ok2.go は 0 件であること）が拾う。
+  なお `gocritic_range_copy_skips_unit_test_funcs` は **`testdata/gocritic/stub/testing/` を足さないと通らない** ——
+  単体テストのハーネスは stdlib を stub でしか解決せず、`testing` が無いと
+  `*testing.T` が undefined になって `isUnitTestFunc` が常に false になる。
+  **golden 側（本物のツールチェーン）は 172/172 で一致していたので、これは guff ではなくハーネスの穴**
+
+**次にやること**
+
+1. **Phase 5 の残り**: 台帳が `EXCLUDED` 扱いにしていない形はもう無いが、
+   **踏んでいる形の「濃さ」は測っていない**。generics は grafana の 66 ファイルで踏んでいる
+   ことになっているが、それが型パラメータ制約の何を通しているかは別問題。
+   次の 1 リポを選ぶなら **ent（generics + codegen）か tailscale（cgo + build tags）**で、
+   cgo を入れるなら §2 の `EXCLUDED` の判断（C ツールチェーンを CI の前提にしない）を
+   先に覆すこと。
+2. **k9s の ill-typed**（上の 6）。`compat/reduce.py` を先に作るほうが速い ＝ 実質 Phase 6 の着手。
+3. 9 本目からの持ち越し: config の validate、gosec G304 / G407 の実装。
+4. 6 本目からの持ち越し: §5 の台帳の残り 6 件、インターフェースメソッドのレシーバ配線、
+   SA9008 / SA5011 の σ、govet の未実装 16 pass。
 
 ---
 

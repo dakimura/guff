@@ -1,0 +1,27 @@
+# Golden case: `revive.severity: error` (COMPAT-HARDENING Phase 4).
+#
+# `normalizeConfig` copies the top-level severity into every rule that has none
+# of its own, and the reported severity is then `error` for those rules. The
+# golden key carries severity, so this case differs from `revive-settings` in
+# the severity field of all three lines and nowhere else.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - revive
+  settings:
+    revive:
+      severity: error
+      rules:
+        - name: increment-decrement
+        - name: error-naming
+        - name: errorf
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

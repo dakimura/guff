@@ -24,6 +24,22 @@
     "timeout": "15m"
   },
   {
+    "name": "k9s",
+    "url": "https://github.com/derailed/k9s.git",
+    "ref": "v0.51.0",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "20m"
+  },
+  {
+    "name": "cobra",
+    "url": "https://github.com/spf13/cobra.git",
+    "ref": "v1.10.2",
+    "packages": "./...",
+    "tier": "pr",
+    "timeout": "10m"
+  },
+  {
     "name": "consul",
     "url": "https://github.com/hashicorp/consul.git",
     "ref": "v1.21.5",
@@ -35,7 +51,7 @@
     "name": "grafana",
     "url": "https://github.com/grafana/grafana.git",
     "ref": "v13.1.1",
-    "packages": "./pkg/...",
+    "packages": "./pkg/... ./apps/advisor/...",
     "tier": "nightly",
     "timeout": "30m"
   },

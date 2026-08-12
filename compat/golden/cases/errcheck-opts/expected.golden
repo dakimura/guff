@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errcheck-opts
+# Produced by running golangci-lint on compat/golden/cases/errcheck-opts/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+blank/bad.go:17:3:errcheck::Error return value is not checked
+blank/bad.go:18:3:errcheck::Error return value is not checked
+exclude/bad.go:6:9:errcheck::Error return value of `io.Copy` is not checked
+exclude/bad.go:10:16:errcheck::Error return value of `io.WriteString` is not checked

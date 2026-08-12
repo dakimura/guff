@@ -138,6 +138,44 @@ enum Scan {
     Error(String),
 }
 
+/// Outcome of one `parseIndex` attempt.
+enum IndexScan {
+    /// No `[` here — upstream's `parseIndex` returns nil without consuming.
+    Absent,
+    /// `[n]` consumed: the index, the text to append, and the new offset.
+    Found(usize, String, usize),
+    /// Malformed: message and the offset to resume reporting from.
+    Bad(String, usize),
+}
+
+/// `fmtstr.state.parseIndex` — an explicit `[n]` argument index.
+///
+/// Upstream calls this at **three** points in one directive: after the flags,
+/// again after a `.` inside `parsePrecision`, and once more just before the
+/// verb when no index is still pending. `%-36[1]s` (cobra) only has one at the
+/// third position, so parsing the index solely after the flags leaves `[` to be
+/// read as the verb.
+fn parse_arg_index(format: &[u8], i: usize) -> IndexScan {
+    if format.get(i) != Some(&b'[') {
+        return IndexScan::Absent;
+    }
+    let open = i;
+    let Some(close) = format[i..].iter().position(|&b| b == b']').map(|off| i + off) else {
+        return IndexScan::Bad("format has invalid argument index".into(), i + 1);
+    };
+    let num = std::str::from_utf8(&format[open + 1..close])
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok());
+    match num {
+        Some(n) if n >= 1 => IndexScan::Found(
+            n,
+            guff_constant::decode_lossy(&format[open..=close]),
+            close + 1,
+        ),
+        _ => IndexScan::Bad("format has invalid argument index".into(), close + 1),
+    }
+}
+
 /// Parse the directive that starts at `chars` (just after a `%`).
 ///
 /// The format is bytes, as it is in Go: upstream compares `s.format[s.i]`
@@ -169,29 +207,28 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
         }
     }
 
-    // Explicit argument index: %[n]
-    if at(i) == Some('[') {
-        let close = format[i..].iter().position(|&b| b == b']').map(|off| i + off);
-        let Some(close) = close else {
-            return (Scan::Error("format has invalid argument index".into()), i + 1);
-        };
-        let num = std::str::from_utf8(&format[i + 1..close]).ok();
-        match num.and_then(|n| n.parse::<usize>().ok()) {
-            Some(n) if n >= 1 => index = Some(n),
-            _ => {
-                return (
-                    Scan::Error("format has invalid argument index".into()),
-                    close + 1,
-                )
-            }
+    // `indexPending` upstream: an index that no `*` has absorbed yet, which
+    // therefore belongs to the verb. It is what stops the pre-verb
+    // `parseIndex` from running a second time.
+    let mut index_pending = false;
+
+    // Explicit argument index: %[n], first of three positions.
+    match parse_arg_index(format, i) {
+        IndexScan::Absent => {}
+        IndexScan::Found(n, t, next) => {
+            index = Some(n);
+            index_pending = true;
+            text.push_str(&t);
+            i = next;
         }
-        text.push_str(&guff_constant::decode_lossy(&format[i..=close]));
-        i = close + 1;
+        IndexScan::Bad(msg, next) => return (Scan::Error(msg), next),
     }
 
     // Width: digits or '*'.
     if at(i) == Some('*') {
         stars += 1;
+        // `parseSize` absorbs a pending index into the `*` operand.
+        index_pending = false;
         text.push('*');
         i += 1;
     } else {
@@ -201,12 +238,23 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
         }
     }
 
-    // Precision: '.' then digits or '*'.
+    // Precision: '.' then an optional index, then digits or '*'.
     if at(i) == Some('.') {
         text.push('.');
         i += 1;
+        match parse_arg_index(format, i) {
+            IndexScan::Absent => {}
+            IndexScan::Found(n, t, next) => {
+                index = Some(n);
+                index_pending = true;
+                text.push_str(&t);
+                i = next;
+            }
+            IndexScan::Bad(msg, next) => return (Scan::Error(msg), next),
+        }
         if at(i) == Some('*') {
             stars += 1;
+            index_pending = false;
             text.push('*');
             i += 1;
         } else {
@@ -214,6 +262,19 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
                 text.push(at(i).unwrap());
                 i += 1;
             }
+        }
+    }
+
+    // "Now a verb, possibly prefixed by an index (which we may already have)."
+    if !index_pending {
+        match parse_arg_index(format, i) {
+            IndexScan::Absent => {}
+            IndexScan::Found(n, t, next) => {
+                index = Some(n);
+                text.push_str(&t);
+                i = next;
+            }
+            IndexScan::Bad(msg, next) => return (Scan::Error(msg), next),
         }
     }
 

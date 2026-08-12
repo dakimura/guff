@@ -1,0 +1,28 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errcheck-asserts
+# Produced by running golangci-lint on compat/golden/cases/errcheck-asserts/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+assert/bad.go:5:6:errcheck::Error return value is not checked
+assert/bad.go:7:18:errcheck::Error return value is not checked
+assert/bad.go:9:5:errcheck::Error return value is not checked
+assert/bad.go:15:7:errcheck::Error return value is not checked
+assert/bad.go:21:9:errcheck::Error return value is not checked
+blank/bad.go:17:3:errcheck::Error return value is not checked
+blank/bad.go:18:3:errcheck::Error return value is not checked
+exclude/bad.go:6:9:errcheck::Error return value of `io.Copy` is not checked
+exclude/bad.go:10:16:errcheck::Error return value of `io.WriteString` is not checked
+shapes/bad.go:19:10:errcheck::Error return value is not checked
+shapes/bad.go:30:7:errcheck::Error return value is not checked
+shapes/bad.go:31:5:errcheck::Error return value is not checked
+shapes/bad.go:33:15:errcheck::Error return value is not checked
+shapes/bad.go:40:6:errcheck::Error return value is not checked
+shapes/bad.go:43:6:errcheck::Error return value is not checked
+shapes/bad.go:54:7:errcheck::Error return value is not checked
+shapes/bad.go:60:2:errcheck::Error return value is not checked
+shapes/bad.go:60:5:errcheck::Error return value is not checked
+shapes/bad.go:60:10:errcheck::Error return value is not checked
+shapes/bad.go:60:22:errcheck::Error return value is not checked

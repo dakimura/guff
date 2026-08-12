@@ -1,0 +1,23 @@
+# Golden case: govet with no settings block at all (COMPAT-HARDENING Phase 4).
+#
+# The baseline of the five-case selector group, and the only one that can see
+# the **default analyzer set**. `analyzersFromConfig` returns `defaultAnalyzers`
+# — cmd/vet's own list, which is `allAnalyzers` minus ten (atomicalign,
+# deepequalerrors, fieldalignment, findcall, httpmux, nilness,
+# reflectvaluecompare, shadow, sortslice, unusedwrite). Every other case in this
+# repo names its analyzers, and a named analyzer is a default that is never
+# checked.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

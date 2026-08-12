@@ -135,6 +135,16 @@ impl LinterSelection {
 
         for e in &self.enable {
             let normalized = normalize_linter_name(e);
+            // A linter named in *both* lists stays off. Upstream applies
+            // `disable` last, so it wins whichever order the two lists are
+            // written in and whatever `default` is — measured against
+            // golangci-lint 2.12.2 for `default` standard / none / all.
+            // Note this is the opposite of govet's per-analyzer `enable` /
+            // `disable`, where `enable` is checked first (see
+            // `settings.rs::govet_analyzer_enabled`).
+            if disable.contains(normalized) {
+                continue;
+            }
             if !names.iter().any(|n| n == normalized) {
                 names.push(normalized.to_string());
             }
@@ -1646,6 +1656,37 @@ linters:
         };
         let v2 = migrate_v1_to_v2(&v1);
         assert_eq!(v2.linters.default.as_deref(), Some("none"));
+    }
+
+    /// A linter written in *both* `enable` and `disable` stays off, whatever
+    /// `default` is. k9s's real config does exactly this with `staticcheck`,
+    /// and guff used to run it: 9 findings golangci-lint never reports.
+    ///
+    /// Note the asymmetry with govet's per-analyzer keys, where `enable` is
+    /// checked first and therefore wins (`settings.rs::govet_analyzer_enabled`).
+    /// The two keys are spelled the same and resolve opposite ways.
+    #[test]
+    fn linter_in_both_enable_and_disable_is_disabled() {
+        for default in [
+            LinterDefault::Standard,
+            LinterDefault::None,
+            LinterDefault::All,
+        ] {
+            let sel = LinterSelection {
+                default,
+                enable: vec!["staticcheck".into(), "ineffassign".into()],
+                disable: vec!["staticcheck".into()],
+            };
+            let names = sel.resolve_names();
+            assert!(
+                !names.contains(&"staticcheck".to_string()),
+                "staticcheck should be off for default {default:?}: {names:?}"
+            );
+            assert!(
+                names.contains(&"ineffassign".to_string()),
+                "ineffassign should still be on for default {default:?}"
+            );
+        }
     }
 
     #[test]

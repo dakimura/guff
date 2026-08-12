@@ -1,0 +1,27 @@
+# Golden case: `gosec.severity: high` (COMPAT-HARDENING Phase 4).
+#
+# Two rungs: only G404 and G101 survive. Note that this is *not* the same pair
+# `confidence: high` leaves — the two scores order the four rules differently,
+# which is the point of the fixture.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      severity: high
+      includes:
+        - G101
+        - G104
+        - G401
+        - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

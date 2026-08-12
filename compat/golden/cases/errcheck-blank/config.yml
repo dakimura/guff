@@ -1,0 +1,23 @@
+# Golden case: `errcheck.check-blank` (COMPAT-HARDENING Phase 4).
+#
+# Upstream sets `Exclusions.BlankAssignments = !CheckAssignToBlank`, so this key
+# does not add a check — it stops errcheck *excluding* the assignments it
+# already found. The diff against `errcheck-opts` is every `_ = f()` and
+# `r, _ := f()` in `blank/bad.go`.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+  settings:
+    errcheck:
+      check-blank: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

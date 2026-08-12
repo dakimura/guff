@@ -7,3 +7,4 @@
 bad.go     crates/guff-style/tests/testdata/gocritic/bad.go
 ok.go      crates/guff-style/tests/testdata/gocritic/ok.go
 extras.go  crates/guff-style/tests/testdata/gocritic/extras.go
+testfuncs.go  crates/guff-style/tests/testdata/gocritic/testfuncs.go

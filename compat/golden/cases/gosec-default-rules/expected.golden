@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gosec-default-rules
+# Produced by running golangci-lint on compat/golden/cases/gosec-default-rules/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+ladder/scoreladder.go:22:2:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
+ladder/scoreladder.go:28:7:gosec:high:G101: Potential hardcoded credentials
+ladder/scoreladder.go:34:2:gosec:low:G104: Errors unhandled
+ladder/scoreladder.go:39:6:gosec:medium:G401: Use of weak cryptographic primitive
+ladder/scoreladder.go:44:9:gosec:high:G404: Use of weak random number generator (math/rand or math/rand/v2 instead of crypto/rand)

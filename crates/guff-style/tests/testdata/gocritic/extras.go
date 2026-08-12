@@ -393,6 +393,39 @@ func importShadowExtra() {
 	_ = filepath
 }
 
+// astwalk.localDefWalker decides importShadow's reach, and three shapes k9s
+// contains are *not* definitions to it. Each pair below is one reported case
+// next to the unreported one it is easily confused with.
+func importShadowNamedResultExtra() (sort int) { return 0 }
+
+func importShadowRangeExtra(m map[string]int) {
+	// A RangeStmt is not an AssignStmt: neither name is visited.
+	for sort, time := range m {
+		_, _ = sort, time
+	}
+}
+
+func importShadowAssignExtra() {
+	// Non-define assign: the walker returns false, so the closure is skipped.
+	var f func()
+	f = func() {
+		sort := 1
+		_ = sort
+	}
+	f()
+	// Same for a GenDecl initializer.
+	var g = func() {
+		time := 1
+		_ = time
+	}
+	g()
+	// Reached any other way, the closure *is* walked.
+	func() {
+		sort := 2
+		_ = sort
+	}()
+}
+
 func unnamedResultExtra() (float64, float64) {
 	return 0, 0
 }
@@ -517,6 +550,19 @@ func boolExprSimplifyExtra(x, y bool, a, b int) {
 	// foldRanges
 	_ = a > 10 && a < 12
 	_ = a < 11 || a > 11
+	// An `if`/`for` condition that is exactly one comparison keeps the type
+	// `untyped bool`, and `typep.HasBoolKind` wants kind `Bool` exactly — so
+	// neither of the next two is reported. The third one is: the typed operand
+	// `x` types the whole condition. k9s hits this shape.
+	if a+1 > b {
+		_ = a
+	}
+	for a > b-1 {
+		break
+	}
+	if a+1 > b && x {
+		_ = a
+	}
 }
 
 func unlambdaExtra() {

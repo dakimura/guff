@@ -214,3 +214,67 @@ fn errcheck_names_the_callee_the_way_golangci_does() {
         "{messages:?}"
     );
 }
+
+#[test]
+fn errcheck_assert_positions_and_pruning_match_upstream() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_errcheck::Options;
+    use guff_runner::RunnerOptions;
+
+    // Every line here is one of upstream's position or pruning rules, and each
+    // one was wrong before COMPAT-HARDENING Phase 4 measured it against
+    // golangci-lint. compat/golden/cases/errcheck-asserts runs the same bytes.
+    let dir = support::testdata("assert_shapes");
+    let pkg = support::typecheck_pkg("example.com/errcheck/assert_shapes", &dir.join("bad.go"));
+    assert!(!pkg.ill_typed, "fixture must typecheck: {:?}", pkg.errors);
+
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "errcheck",
+        Options {
+            check_blank: true,
+            check_asserts: true,
+            ..Options::default()
+        },
+    );
+    let positions = support::run_analyzer_positions(
+        analyzer(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+
+    assert_eq!(
+        positions,
+        vec![
+            // `var a = i.(string)` — the RHS node's start, i.e. the operand.
+            "19:10",
+            // `sink(i.(string))` / `if i.(string) == ""` / `[]string{…}` —
+            // `expr.Pos()`, never the `.(`.
+            "30:7",
+            "31:5",
+            "33:15",
+            // Nested assertion: the outer one only. The inner is pruned.
+            "40:6",
+            // The pruned subtree's `f()` is *not* here — only the assertion.
+            "43:6",
+            // `_ = (i.(string))`: the parenthesized RHS is not an assignment
+            // errcheck recognizes, so the assertion reports itself, one column
+            // to the right of the bare form. `_ = (f())` above it reports
+            // nothing at all, for the same reason.
+            "54:7",
+            // `a, c := i.(string), j.(int)`: the multi-value arm reports both
+            // names — `a` and `c`, not only a blank — and then the two
+            // assertions are visited on their own as well.
+            "60:2",
+            "60:5",
+            "60:10",
+            "60:22",
+        ],
+        "{positions:?}"
+    );
+}

@@ -1,0 +1,27 @@
+# Golden case: `gosec.confidence: medium` (COMPAT-HARDENING Phase 4).
+#
+# The other half of `filterIssues`. G101 is gosec's *highest* severity and its
+# *lowest* confidence — a regex on a constant's name — so it is the first thing
+# this key removes and the last thing `severity` does.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      confidence: medium
+      includes:
+        - G101
+        - G104
+        - G401
+        - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

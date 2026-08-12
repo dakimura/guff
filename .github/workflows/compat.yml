@@ -211,6 +211,12 @@ jobs:
       - name: File-set gate (pr tier)
         run: ./compat/filesets.sh --tier pr
 
+      # Phase 5: fail when no gated target exercises a required input shape.
+      # Offline — it reads the committed ledger rather than re-running `go list`
+      # over every target, which the nightly job does instead.
+      - name: Corpus shape ledger
+        run: ./corpus/shapes.py check --offline
+
       - name: Upload OSS report
         if: always()
         uses: actions/upload-artifact@v4
@@ -281,6 +287,12 @@ jobs:
 
       - name: File-set gate (nightly tier)
         run: ./compat/filesets.sh --tier nightly
+
+      # The nightly job has every tier's checkout, so re-measure for real here:
+      # this is what catches a ledger that has drifted from the corpus (an
+      # upstream ref that dropped its go.work, a pattern that stopped matching).
+      - name: Corpus shape ledger (re-measured)
+        run: ./corpus/shapes.py check
 
       - name: Upload OSS report
         if: always()

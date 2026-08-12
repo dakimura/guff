@@ -23,6 +23,9 @@
     "helm": {
       "ill_typed": 2
     },
+    "k9s": {
+      "ill_typed": 1
+    },
     "kubernetes": {
       "ill_typed": 10
     }

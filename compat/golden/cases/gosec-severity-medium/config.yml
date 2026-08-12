@@ -1,0 +1,26 @@
+# Golden case: `gosec.severity: medium` (COMPAT-HARDENING Phase 4).
+#
+# `filterIssues` keeps `i.Severity >= severity`. One rung up takes G104 (low)
+# away and leaves G401 (medium), G404 and G101 (high).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+  settings:
+    gosec:
+      severity: medium
+      includes:
+        - G101
+        - G104
+        - G401
+        - G404
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

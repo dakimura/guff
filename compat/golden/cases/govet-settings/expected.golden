@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh govet-settings
+# Produced by running golangci-lint on compat/golden/cases/govet-settings/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings/bad.go:16:2:govet::assign: self-assignment of x
+settings/bad.go:22:9:govet::shift: i (8 bits) too small for shift of 10
+settings/bad.go:27:2:govet::unreachable: unreachable code

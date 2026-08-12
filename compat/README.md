@@ -49,6 +49,9 @@ cargo build --release -p guff-lint
 # Check-level coverage ledger — which checks have never fired in any test?
 ./compat/coverage.py all
 
+# Input-shape ledger — which *shape of input* has no gated target at all?
+./corpus/shapes.py check --offline
+
 # Go-stdlib ground truth for the checks that just call the stdlib (SA100x)
 ./compat/oracles/regen.sh
 ```
@@ -60,7 +63,10 @@ cargo build --release -p guff-lint
 > 最初のケース（gocritic）は載せた時点で 44 件のバグを出し、
 > 直近の gosec は **52 件中 0 件一致**から始まりました
 > （golangci が severity を付ける唯一の linter が gosec で、guff は付けていなかった）。
-> 2026-08-11 時点で 547 check 中 `fired` 536 / `unit-only` 3 / `never` 8。改善計画は
+> 2026-08-12 時点で 547 check 中 `fired` 543 / `unit-only` 1 / `never` 3
+> （残る 3 件は §6「恒久的に観測できない」側）。**この数字だけを見ないこと**: check が
+> 発火したかと、*どんな形の入力で*発火したかは別問題で、後者は
+> [`../corpus/shapes.py`](../corpus/shapes.py) が測る。改善計画は
 > [`../docs/COMPAT-HARDENING.md`](../docs/COMPAT-HARDENING.md)、現状値は
 > [`../docs/COVERAGE.md`](../docs/COVERAGE.md)。
 

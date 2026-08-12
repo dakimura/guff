@@ -6436,6 +6436,65 @@ fn gocritic_enable_all_extras() {
 }
 
 #[test]
+/// `rangeValCopy` / `rangeExprCopy` take `skipTestFuncs`, default **true**, and
+/// are the only two checkers that do. `isUnitTestFunc` is name + signature
+/// (`Test` prefix, one `*testing.T`, no results), never the file name — so a
+/// benchmark, a `Test…` with a result, and a plain helper are all still
+/// reported. k9s had three of these in `internal/render/*_test.go`; the same
+/// bytes go through golangci-lint in `compat/golden/cases/gocritic`.
+#[test]
+fn gocritic_range_copy_skips_unit_test_funcs() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    let pkg = support::typecheck_fixture(
+        "gocritic",
+        "example.com/gocritic/testfuncs",
+        "testfuncs.go",
+    );
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "gocritic",
+        GocriticOptions {
+            enable_all: true,
+            ..GocriticOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        gocritic(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
+    // Exact counts, because the whole point is what is *absent*. Measured
+    // against golangci-lint 2.12.2 in compat/golden/cases/gocritic: six
+    // rangeValCopy sites, of which the two inside TestRangeValCopySkipped
+    // (its body and its `t.Run` closure, pruned with the parent) go
+    // unreported; two rangeExprCopy sites, one of them pruned.
+    let val_copies = messages
+        .iter()
+        .filter(|m| m.contains("each iteration copies"))
+        .count();
+    let expr_copies = messages
+        .iter()
+        .filter(|m| m.contains("can be avoided with &"))
+        .count();
+    assert_eq!(
+        val_copies, 4,
+        "rangeValCopy should skip the two sites in the unit test func: {messages:?}"
+    );
+    assert_eq!(
+        expr_copies, 1,
+        "rangeExprCopy should skip the site in the unit test func: {messages:?}"
+    );
+}
+
+#[test]
 fn gocritic_extras_off_by_default() {
     let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/extras", "extras.go");
     let messages = support::run_analyzer(gocritic(), &pkg);
@@ -7299,4 +7358,73 @@ fn zerologlint_allows_dispatched_events() {
     let pkg = support::typecheck_fixture("zerologlint", "example.com/zerologlint/ok", "ok.go");
     let messages = support::run_analyzer(zerologlint(), &pkg);
     assert!(messages.is_empty(), "{messages:?}");
+}
+#[test]
+fn gocritic_selector_keys_follow_infer_enabled_checks() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::GocriticOptions;
+
+    // The fixture holds one finding per tag class; compat/golden/cases/
+    // gocritic-* runs the same bytes through golangci-lint.
+    let pkg = support::typecheck_fixture("gocritic", "example.com/gocritic/settings", "settings.go");
+    let run = |opts: GocriticOptions| -> Vec<String> {
+        let mut bag = SettingsBag::new();
+        bag.insert("gocritic", opts);
+        let mut names: Vec<String> = support::run_analyzer_with_settings(
+            gocritic(),
+            &pkg,
+            &RunnerOptions {
+                settings: Arc::new(bag),
+                ..RunnerOptions::default()
+            },
+        )
+        .into_iter()
+        // The checker name is the message's prefix up to the colon.
+        .map(|m| m.split(':').next().unwrap_or("").to_string())
+        .collect();
+        names.sort();
+        names
+    };
+
+    // Default: the checkers carrying none of the four opt-in tags.
+    assert_eq!(
+        run(GocriticOptions::default()),
+        vec!["appendAssign", "singleCaseSwitch"]
+    );
+
+    // `enabled-tags` is a **union** with the default set, not a filter on it.
+    // Read as a filter this is empty: no default-on checker carries an opt-in
+    // tag.
+    assert_eq!(
+        run(GocriticOptions {
+            enabled_tags: vec!["performance".into()],
+            ..GocriticOptions::default()
+        }),
+        vec!["appendAssign", "rangeValCopy", "singleCaseSwitch"]
+    );
+
+    // `disabled-tags` runs *after* `enabled-checks`, so naming a checker and
+    // then disabling its tag leaves it off.
+    assert_eq!(
+        run(GocriticOptions {
+            enabled_checks: vec!["paramTypeCombine".into()],
+            disabled_tags: vec!["opinionated".into()],
+            ..GocriticOptions::default()
+        }),
+        vec!["appendAssign", "singleCaseSwitch"]
+    );
+
+    // `disable-all` revokes the default set; `enabled-checks` is then the only
+    // thing left running.
+    assert_eq!(
+        run(GocriticOptions {
+            disable_all: true,
+            enabled_checks: vec!["rangeValCopy".into()],
+            ..GocriticOptions::default()
+        }),
+        vec!["rangeValCopy"]
+    );
 }

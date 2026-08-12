@@ -95,7 +95,7 @@ use guff_constant::{int64_val, make_from_literal};
 use guff_types::alias::unalias_readonly;
 use guff_types::api_predicates::{api_identical, api_implements};
 use guff_types::arena::{ObjectData, TypeData};
-use guff_types::basic::{basic_kind, BasicKind, IS_BOOLEAN, IS_FLOAT, IS_INTEGER};
+use guff_types::basic::{basic_kind, BasicKind, IS_FLOAT, IS_INTEGER};
 use guff_types::lookup::{lookup_field_or_method, LookupResult};
 use guff_types::named::named_obj;
 use guff_types::operand::OperandMode;
@@ -242,115 +242,200 @@ fn is_implemented(name: &str) -> bool {
     DEFAULT_CHECKS.contains(&name) || ENABLE_ALL_EXTRA_CHECKS.contains(&name)
 }
 
-/// go-critic tags for implemented checkers (from CheckerInfo.Tags / `//doc:tags`).
-/// Untagged checks are never removed by `disabled-tags` alone.
+/// go-critic's own tags for every checker this port implements, from
+/// `CheckerInfo.Tags` in `checkers/*_checker.go` and `DocTags` in
+/// `checkers/rulesdata/rulesdata.go` (go-critic v0.14.4).
+///
+/// The table has to be **complete and multi-valued**, not a rough grouping:
+/// `enabled-tags` unions in every checker carrying the tag, so a missing entry
+/// is a silently missing check rather than a cosmetic gap, and most checkers
+/// carry two or three tags (`unnamedResult` is style + opinionated +
+/// experimental). It is also what [`DEFAULT_CHECKS`] means — see
+/// [`is_enabled_by_default`].
+const CHECK_TAGS: &[(&str, &[&str])] = &[
+    ("appendAssign", &["diagnostic"]),
+    ("appendCombine", &["performance"]),
+    ("argOrder", &["diagnostic"]),
+    ("assignOp", &["style"]),
+    ("badCall", &["diagnostic"]),
+    ("badCond", &["diagnostic"]),
+    ("badLock", &["diagnostic", "experimental"]),
+    ("badRegexp", &["diagnostic", "experimental"]),
+    ("badSorting", &["diagnostic", "experimental"]),
+    ("badSyncOnceFunc", &["diagnostic", "experimental"]),
+    ("boolExprSimplify", &["experimental", "style"]),
+    ("builtinShadow", &["opinionated", "style"]),
+    ("builtinShadowDecl", &["diagnostic", "experimental"]),
+    ("captLocal", &["style"]),
+    ("caseOrder", &["diagnostic"]),
+    ("codegenComment", &["diagnostic"]),
+    ("commentFormatting", &["style"]),
+    ("commentedOutCode", &["diagnostic", "experimental"]),
+    ("commentedOutImport", &["experimental", "style"]),
+    ("defaultCaseOrder", &["style"]),
+    ("deferInLoop", &["diagnostic", "experimental"]),
+    ("deferUnlambda", &["experimental", "style"]),
+    ("deprecatedComment", &["diagnostic"]),
+    ("docStub", &["experimental", "style"]),
+    ("dupArg", &["diagnostic"]),
+    ("dupBranchBody", &["diagnostic"]),
+    ("dupCase", &["diagnostic"]),
+    ("dupImport", &["experimental", "style"]),
+    ("dupOption", &["diagnostic", "experimental"]),
+    ("dupSubExpr", &["diagnostic"]),
+    ("dynamicFmtString", &["diagnostic", "experimental"]),
+    ("elseif", &["style"]),
+    ("emptyDecl", &["diagnostic", "experimental"]),
+    ("emptyFallthrough", &["experimental", "style"]),
+    ("emptyStringTest", &["experimental", "style"]),
+    ("equalFold", &["experimental", "performance"]),
+    ("evalOrder", &["diagnostic", "experimental"]),
+    ("exitAfterDefer", &["diagnostic"]),
+    ("exposedSyncMutex", &["experimental", "style"]),
+    ("externalErrorReassign", &["diagnostic", "experimental"]),
+    ("filepathJoin", &["diagnostic", "experimental"]),
+    ("flagDeref", &["diagnostic"]),
+    ("flagName", &["diagnostic"]),
+    ("hexLiteral", &["experimental", "style"]),
+    ("httpNoBody", &["experimental", "style"]),
+    ("hugeParam", &["performance"]),
+    ("ifElseChain", &["style"]),
+    ("importShadow", &["opinionated", "style"]),
+    ("indexAlloc", &["performance"]),
+    ("initClause", &["experimental", "opinionated", "style"]),
+    ("mapKey", &["diagnostic"]),
+    ("methodExprCall", &["experimental", "style"]),
+    ("nestingReduce", &["experimental", "opinionated", "style"]),
+    ("newDeref", &["style"]),
+    ("nilValReturn", &["diagnostic", "experimental"]),
+    ("octalLiteral", &["experimental", "opinionated", "style"]),
+    ("offBy1", &["diagnostic"]),
+    ("paramTypeCombine", &["opinionated", "style"]),
+    ("preferDecodeRune", &["experimental", "performance"]),
+    ("preferFilepathJoin", &["experimental", "style"]),
+    ("preferFprint", &["experimental", "performance"]),
+    ("preferStringWriter", &["experimental", "performance"]),
+    ("preferWriteByte", &["experimental", "opinionated", "performance"]),
+    ("ptrToRefParam", &["experimental", "opinionated", "style"]),
+    ("rangeAppendAll", &["diagnostic", "experimental"]),
+    ("rangeExprCopy", &["performance"]),
+    ("rangeValCopy", &["performance"]),
+    ("redundantSprint", &["experimental", "style"]),
+    ("regexpMust", &["style"]),
+    ("regexpPattern", &["diagnostic", "experimental"]),
+    ("regexpSimplify", &["experimental", "opinionated", "style"]),
+    ("returnAfterHttpError", &["diagnostic", "experimental"]),
+    ("singleCaseSwitch", &["style"]),
+    ("sliceClear", &["experimental", "performance"]),
+    ("sloppyLen", &["diagnostic"]),
+    ("sloppyReassign", &["diagnostic", "experimental"]),
+    ("sloppyTypeAssert", &["diagnostic"]),
+    ("sortSlice", &["diagnostic", "experimental"]),
+    ("sprintfQuotedString", &["diagnostic", "experimental"]),
+    ("sqlQuery", &["diagnostic", "experimental"]),
+    ("stringConcatSimplify", &["experimental", "style"]),
+    ("stringXbytes", &["performance"]),
+    ("stringsCompare", &["experimental", "style"]),
+    ("switchTrue", &["style"]),
+    ("syncMapLoadAndDelete", &["diagnostic", "experimental"]),
+    ("timeExprSimplify", &["experimental", "style"]),
+    ("todoCommentWithoutDetail", &["experimental", "opinionated", "style"]),
+    ("tooManyResultsChecker", &["experimental", "opinionated", "style"]),
+    ("truncateCmp", &["diagnostic", "experimental"]),
+    ("typeAssertChain", &["experimental", "style"]),
+    ("typeDefFirst", &["experimental", "style"]),
+    ("typeSwitchVar", &["style"]),
+    ("typeUnparen", &["opinionated", "style"]),
+    ("uncheckedInlineErr", &["diagnostic", "experimental"]),
+    ("underef", &["style"]),
+    ("unlabelStmt", &["experimental", "style"]),
+    ("unlambda", &["style"]),
+    ("unnamedResult", &["experimental", "opinionated", "style"]),
+    ("unnecessaryBlock", &["experimental", "opinionated", "style"]),
+    ("unnecessaryDefer", &["diagnostic", "experimental"]),
+    ("unslice", &["style"]),
+    ("valSwap", &["style"]),
+    ("weakCond", &["diagnostic", "experimental"]),
+    ("whyNoLint", &["experimental", "style"]),
+    ("wrapperFunc", &["style"]),
+    ("yodaStyleExpr", &["experimental", "style"]),
+    ("zeroByteRepeat", &["performance"]),
+];
+
 fn check_tags(name: &str) -> &'static [&'static str] {
-    match name {
-        // Style (default + enable-all)
-        "boolExprSimplify"
-        | "builtinShadow"
-        | "captLocal"
-        | "commentFormatting"
-        | "commentedOutImport"
-        | "defaultCaseOrder"
-        | "docStub"
-        | "dupImport"
-        | "elseif"
-        | "emptyFallthrough"
-        | "emptyStringTest"
-        | "hexLiteral"
-        | "ifElseChain"
-        | "importShadow"
-        | "initClause"
-        | "methodExprCall"
-        | "nestingReduce"
-        | "newDeref"
-        | "octalLiteral"
-        | "paramTypeCombine"
-        | "ptrToRefParam"
-        | "regexpMust"
-        | "regexpSimplify"
-        | "singleCaseSwitch"
-        | "switchTrue"
-        | "todoCommentWithoutDetail"
-        | "tooManyResultsChecker"
-        | "typeAssertChain"
-        | "typeDefFirst"
-        | "typeSwitchVar"
-        | "typeUnparen"
-        | "underef"
-        | "unlabelStmt"
-        | "unlambda"
-        | "unnamedResult"
-        | "unnecessaryBlock"
-        | "unslice"
-        | "valSwap"
-        | "whyNoLint"
-        | "wrapperFunc"
-        | "assignOp"
-        | "yodaStyleExpr" => &["style"],
-
-        // Diagnostic
-        "appendAssign" | "argOrder" | "badCall" | "badCond" | "badRegexp" | "builtinShadowDecl"
-        | "caseOrder" | "codegenComment" | "commentedOutCode" | "deferInLoop"
-        | "deprecatedComment" | "dupBranchBody" | "dupCase" | "dupOption" | "dupSubExpr"
-        | "evalOrder" | "exitAfterDefer" | "filepathJoin" | "flagDeref" | "flagName" | "mapKey"
-        | "nilValReturn" | "offBy1" | "rangeAppendAll" | "regexpPattern" | "sloppyLen"
-        | "sloppyReassign" | "sloppyTypeAssert" | "sortSlice" | "sqlQuery" | "truncateCmp"
-        | "unnecessaryDefer" | "weakCond" => &["diagnostic"],
-
-        // Performance
-        "appendCombine" | "hugeParam" | "indexAlloc" | "preferFprint" | "rangeExprCopy"
-        | "rangeValCopy" | "stringXbytes" => &["performance"],
-
-        _ => &[],
-    }
+    CHECK_TAGS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(&[][..], |(_, tags)| *tags)
 }
 
+/// `isEnabledByDefaultGoCriticChecker`: everything that carries none of the
+/// four opt-in tags. This is the definition [`DEFAULT_CHECKS`] spells out, and
+/// `gocritic_default_checks_are_exactly_the_untagged_ones` holds the two
+/// together.
+fn is_enabled_by_default(name: &str) -> bool {
+    !check_tags(name)
+        .iter()
+        .any(|t| matches!(*t, "experimental" | "opinionated" | "performance" | "security"))
+}
+
+/// Port of golangci-lint's `settingsWrapper.inferEnabledChecks`.
+///
+/// The five steps are applied in this order and the order is the semantics:
+///
+/// 1. the base set — empty under `disable-all`, everything under `enable-all`,
+///    otherwise the default-by-tag set;
+/// 2. `enabled-tags` **adds** every checker carrying the tag. It is a union,
+///    not a filter: `enabled-tags: [performance]` keeps the whole default set
+///    and adds the performance checkers on top. Reading it as "only these
+///    tags" empties the result, because no default-on checker carries an
+///    opt-in tag by construction;
+/// 3. `enabled-checks` adds by name;
+/// 4. `disabled-tags` removes by tag;
+/// 5. `disabled-checks` removes by name.
+///
+/// Because 4 and 5 come after 2 and 3, a checker named in `enabled-checks`
+/// whose tag is in `disabled-tags` ends up **off**.
 fn enabled_set(opts: &GocriticOptions) -> HashSet<String> {
-    let mut set: HashSet<String> = if opts.enable_all {
-        implemented_checks().map(|s| s.to_string()).collect()
-    } else if opts.disable_all {
+    let mut set: HashSet<String> = if opts.disable_all {
         HashSet::new()
+    } else if opts.enable_all {
+        implemented_checks().map(|s| s.to_string()).collect()
     } else {
-        DEFAULT_CHECKS.iter().map(|s| (*s).to_string()).collect()
+        implemented_checks()
+            .filter(|n| is_enabled_by_default(n))
+            .map(|s| s.to_string())
+            .collect()
     };
-    for name in &opts.enabled_checks {
-        set.insert(name.clone());
-    }
-    for name in &opts.disabled_checks {
-        set.remove(name);
-    }
 
     let enabled_tags: HashSet<String> = opts
         .enabled_tags
         .iter()
         .map(|t| t.to_ascii_lowercase())
         .collect();
+    if !enabled_tags.is_empty() {
+        for name in implemented_checks() {
+            if check_tags(name).iter().any(|t| enabled_tags.contains(*t)) {
+                set.insert(name.to_string());
+            }
+        }
+    }
+
+    for name in &opts.enabled_checks {
+        set.insert(name.clone());
+    }
+
     let disabled_tags: HashSet<String> = opts
         .disabled_tags
         .iter()
         .map(|t| t.to_ascii_lowercase())
         .collect();
+    if !disabled_tags.is_empty() {
+        set.retain(|name| !check_tags(name).iter().any(|t| disabled_tags.contains(*t)));
+    }
 
-    if !enabled_tags.is_empty() || !disabled_tags.is_empty() {
-        set.retain(|name| {
-            let tags = check_tags(name);
-            if !enabled_tags.is_empty() {
-                // Explicit enabled-tags: keep checks that carry any enabled tag
-                // (or were named in enabled-checks — already inserted above).
-                if opts.enabled_checks.iter().any(|c| c == name) {
-                    return true;
-                }
-                if !tags.iter().any(|t| enabled_tags.contains(*t)) {
-                    return false;
-                }
-            }
-            if tags.iter().any(|t| disabled_tags.contains(*t)) {
-                return false;
-            }
-            true
-        });
+    for name in &opts.disabled_checks {
+        set.remove(name);
     }
 
     // Only keep implemented names (unknown / deferred names are ignored).
@@ -6555,42 +6640,52 @@ fn check_import_shadow_func(
     imports: &HashMap<String, String>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    check_import_shadow_fields(f.recv.as_ref(), imports, pending);
+    // `astwalk.walkSignature` order: params, results, then the receiver.
+    // Results were missing entirely, so a named result shadowing an import
+    // went unreported (upstream flags `func C() (os int)`).
     check_import_shadow_fields(f.ty.params.as_ref(), imports, pending);
+    check_import_shadow_fields(f.ty.results.as_ref(), imports, pending);
+    check_import_shadow_fields(f.recv.as_ref(), imports, pending);
     let Some(body) = &f.body else {
         return;
     };
+    // Mirrors `astwalk.localDefWalker.walkFuncBody`, whose two cases both end
+    // in `return false`. What it does *not* visit is as load-bearing as what
+    // it does — all three of these are unreported upstream, measured against
+    // golangci-lint 2.12.2:
+    //
+    //   for os, strings := range m {}   // a RangeStmt is not an AssignStmt
+    //   f = func() { os := 1 }          // non-define assign: not descended
+    //   var g = func() { os := 1 }      // GenDecl: not descended
+    //
+    // while a closure reached any other way (`func() { os := 1 }()`) is.
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
             return true;
         };
         match n {
-            NodeRef::AssignStmt(a) if a.tok == Some(Token::DEFINE) => {
-                for lhs in &a.lhs {
-                    if let Expr::Ident(id) = lhs {
-                        if is_def_ident(pass, id) {
-                            warn_import_shadow(id, imports, pending);
+            NodeRef::AssignStmt(a) => {
+                if a.tok == Some(Token::DEFINE) {
+                    for lhs in &a.lhs {
+                        if let Expr::Ident(id) = lhs {
+                            if is_def_ident(pass, id) {
+                                warn_import_shadow(id, imports, pending);
+                            }
                         }
                     }
                 }
+                // `return false` for *either* token: upstream stops here even
+                // when the assignment defines nothing.
+                false
             }
             NodeRef::ValueSpec(vs) => {
                 for name in &vs.names {
                     warn_import_shadow(name, imports, pending);
                 }
+                false
             }
-            NodeRef::RangeStmt(rs) => {
-                for opt in [&rs.key, &rs.value] {
-                    if let Some(Expr::Ident(id)) = opt.as_ref() {
-                        if rs.tok == Some(Token::DEFINE) {
-                            warn_import_shadow(id, imports, pending);
-                        }
-                    }
-                }
-            }
-            _ => {}
+            _ => true,
         }
-        true
     });
 }
 
@@ -7015,6 +7110,49 @@ fn check_why_no_lint(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
 
 const HUGE_PARAM_SIZE_THRESHOLD: i64 = 80;
 const RANGE_VAL_COPY_SIZE_THRESHOLD: i64 = 128;
+
+/// Upstream `checkers.isUnitTestFunc`: `func TestXxx(*testing.T)` returning
+/// nothing.
+///
+/// `rangeValCopy` and `rangeExprCopy` are the only two checkers that take a
+/// `skipTestFuncs` param, and it **defaults to true** — so this is not an
+/// unwired setting but part of their default behaviour. Their `EnterFunc`
+/// returns false for such a function, which prunes the whole subtree (nested
+/// `t.Run(..., func(t *testing.T) { ... })` closures included).
+fn is_unit_test_func(pass: &Pass<'_>, decl: &FuncDecl) -> bool {
+    if !decl.name.name.starts_with("Test") {
+        return false;
+    }
+    if decl.ty.results.as_ref().is_some_and(|r| !r.list.is_empty()) {
+        return false;
+    }
+    let Some(params) = decl.ty.params.as_ref() else {
+        return false;
+    };
+    // `sig.Params().Len() == 1`: one field holding one name (`t *testing.T`)
+    // or one unnamed field (`*testing.T`).
+    if params.list.len() != 1 || params.list[0].names.len() > 1 {
+        return false;
+    }
+    let Some(ty) = params.list[0].ty.as_ref() else {
+        return false;
+    };
+    let Some(typ) = type_of(pass, ty) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    // Upstream compares `sig.Params().At(0).Type().String()`, so a renamed
+    // import (`import tst "testing"`) still reads as `*testing.T`.
+    type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ) == "*testing.T"
+}
 
 fn is_stringer_method(decl: &FuncDecl) -> bool {
     if decl.recv.is_none() || decl.name.name != "String" {
@@ -7657,6 +7795,17 @@ fn check_bad_lock(stmts: &[Stmt], pending: &mut Vec<(u32, String)>) {
     }
 }
 
+/// `typep.HasBoolKind`: the type is `*types.Basic` **with kind exactly
+/// `types.Bool`**.
+///
+/// Not "has the boolean property" — `types.UntypedBool` is a different kind and
+/// fails this, which is load-bearing rather than pedantic. A comparison keeps
+/// its untyped-bool type wherever nothing gives it a typed context, and the one
+/// place that happens for whole expressions is an `if` or `for` **condition**:
+/// `_ = x+1 > y` is `bool` (the assignment defaults it) and `if x+1 > y` is
+/// `untyped bool`. So `boolExprSimplify` says nothing about a condition that is
+/// exactly one comparison, and does report `if x+1 > y && ok`, where the `ok`
+/// operand makes the whole condition typed.
 fn type_is_boolean(pass: &Pass<'_>, typ: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
@@ -7665,7 +7814,7 @@ fn type_is_boolean(pass: &Pass<'_>, typ: TypeId) -> bool {
     let TypeData::Basic(b) = artifacts.types.get(typ) else {
         return false;
     };
-    b.info().contains(IS_BOOLEAN)
+    b.kind() == BasicKind::Bool
 }
 
 fn type_has_float(pass: &Pass<'_>, typ: TypeId) -> bool {
@@ -8233,6 +8382,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
 
+        // `rangeValCopy` / `rangeExprCopy` prune unit-test functions in
+        // `EnterFunc`, which stops upstream's walk from descending into them.
+        // guff walks the file flat, so record the body spans up front and skip
+        // range statements that fall inside one.
+        let mut test_func_bodies: Vec<(u32, u32)> = Vec::new();
+        if enabled(&set, "rangeValCopy") || enabled(&set, "rangeExprCopy") {
+            for decl in &file.decls {
+                if let Decl::FuncDecl(f) = decl {
+                    if let Some(body) = f.body.as_ref() {
+                        if is_unit_test_func(pass, f) {
+                            test_func_bodies.push((body.lbrace.0 as u32, body.rbrace.0 as u32));
+                        }
+                    }
+                }
+            }
+        }
+
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
                 return true;
@@ -8326,10 +8492,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "rangeAppendAll") {
                         check_range_append_all(pass, s, &mut pending);
                     }
-                    if enabled(&set, "rangeExprCopy") {
+                    let in_test_func = test_func_bodies
+                        .iter()
+                        .any(|(lo, hi)| s.for_.0 as u32 >= *lo && (s.for_.0 as u32) <= *hi);
+                    if enabled(&set, "rangeExprCopy") && !in_test_func {
                         check_range_expr_copy(pass, s, &mut pending);
                     }
-                    if enabled(&set, "rangeValCopy") {
+                    if enabled(&set, "rangeValCopy") && !in_test_func {
                         check_range_val_copy(pass, s, &mut pending);
                     }
                     if enabled(&set, "nestingReduce") {
@@ -8649,4 +8818,33 @@ pub fn analyzer() -> &'static Analyzer {
         requires: vec![inspect::analyzer()],
         fact_types: vec![],
     })
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+
+    #[test]
+    fn gocritic_default_checks_are_exactly_the_untagged_ones() {
+        // `DEFAULT_CHECKS` is a hand-written list; upstream has no such list at
+        // all, only the predicate. Keeping the two in step by hand is what
+        // fails silently when a checker is ported — so assert the derivation
+        // instead of the list.
+        let mut derived: Vec<&str> = implemented_checks().filter(|n| is_enabled_by_default(n)).collect();
+        derived.sort_unstable();
+        let mut declared: Vec<&str> = DEFAULT_CHECKS.to_vec();
+        declared.sort_unstable();
+        assert_eq!(derived, declared);
+    }
+
+    #[test]
+    fn gocritic_every_implemented_check_has_tags() {
+        // A checker with no tags is enabled by default (it carries no opt-in
+        // tag) and can never be reached by `enabled-tags` — the two halves of
+        // the same omission, and neither one looks like a bug from the outside.
+        let untagged: Vec<&str> = implemented_checks()
+            .filter(|n| check_tags(n).is_empty())
+            .collect();
+        assert!(untagged.is_empty(), "checkers with no tags: {untagged:?}");
+    }
 }

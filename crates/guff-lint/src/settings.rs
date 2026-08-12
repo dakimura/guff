@@ -2692,34 +2692,96 @@ fn filter_govet(
         _ => analyzers,
     };
 
-    if !settings.enable_all
-        && !settings.disable_all
-        && settings.enable.is_empty()
-        && settings.disable.is_empty()
-    {
-        return analyzers;
-    }
-
     let enable: HashSet<&str> = settings.enable.iter().map(String::as_str).collect();
     let disable: HashSet<&str> = settings.disable.iter().map(String::as_str).collect();
 
-    // guff-govet::analyzers() is the full available set (= golangci default ∪ extras).
-    if settings.disable_all {
-        return analyzers
-            .into_iter()
-            .filter(|a| enable.contains(a.name))
-            .collect();
-    }
-
-    // Default / enable-all: full registry minus `disable`.
-    // `enable` only matters with disable-all (above); otherwise the registry
-    // already includes every pass enable could add.
-    let _ = (settings.enable_all, &enable);
     analyzers
         .into_iter()
-        .filter(|a| !disable.contains(a.name))
+        .filter(|a| govet_analyzer_enabled(a.name, settings, &enable, &disable))
         .collect()
 }
+
+/// Port of golangci-lint's `isAnalyzerEnabled` (`golinters/govet/govet.go`).
+///
+/// The order of the arms is the whole content of the function, and two of them
+/// are easy to get backwards:
+///
+/// * **`enable` is checked before `disable`**, so an analyzer named in *both*
+///   lists is enabled. Filtering "the registry minus `disable`" says the
+///   opposite.
+/// * **`disable-all` is checked last**, so `enable` still turns things back on
+///   under it — but `disable-all` alone, with no `enable`, is empty rather than
+///   "the default set".
+///
+/// The default arm is the reason [`GOVET_DEFAULT_ANALYZERS`] exists even though
+/// guff currently implements no analyzer outside it: the day one of the ten
+/// non-default passes (nilness, shadow, fieldalignment, …) is ported, a config
+/// with no `settings.govet` block must not start firing it.
+fn govet_analyzer_enabled(
+    name: &str,
+    settings: &GovetSettings,
+    enable: &HashSet<&str>,
+    disable: &HashSet<&str>,
+) -> bool {
+    if settings.enable_all {
+        return !disable.contains(name);
+    }
+    if enable.contains(name) {
+        return true;
+    }
+    if disable.contains(name) {
+        return false;
+    }
+    if settings.disable_all {
+        return false;
+    }
+    GOVET_DEFAULT_ANALYZERS.contains(&name)
+}
+
+/// golangci-lint's `defaultAnalyzers`, by name — `cmd/vet`'s own set.
+///
+/// Ten of `allAnalyzers` are **not** here (atomicalign, deepequalerrors,
+/// fieldalignment, findcall, httpmux, nilness, reflectvaluecompare, shadow,
+/// sortslice, unusedwrite) and only ever run under `enable-all` or an explicit
+/// `enable`.
+const GOVET_DEFAULT_ANALYZERS: &[&str] = &[
+    "appends",
+    "asmdecl",
+    "assign",
+    "atomic",
+    "bools",
+    "buildtag",
+    "cgocall",
+    "composites",
+    "copylocks",
+    "defers",
+    "directive",
+    "errorsas",
+    "framepointer",
+    "hostport",
+    "httpresponse",
+    "ifaceassert",
+    "inline",
+    "loopclosure",
+    "lostcancel",
+    "nilfunc",
+    "printf",
+    "shift",
+    "sigchanyzer",
+    "slog",
+    "stdmethods",
+    "stdversion",
+    "stringintconv",
+    "structtag",
+    "testinggoroutine",
+    "tests",
+    "timeformat",
+    "unmarshal",
+    "unreachable",
+    "unsafeptr",
+    "unusedresult",
+    "waitgroup",
+];
 
 fn filter_staticcheck(
     settings: &StaticcheckSettings,
@@ -4041,6 +4103,64 @@ custom:
         let filtered = filter_govet(&settings, analyzers);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "printf");
+    }
+
+    #[test]
+    fn govet_enable_is_checked_before_disable() {
+        // `isAnalyzerEnabled` returns true on the `enable` arm before it ever
+        // looks at `disable`, so naming an analyzer in both keeps it. Reading
+        // the pair as "the set minus the disabled ones" inverts this, and no
+        // config in corpus/ names an analyzer twice — cases/govet-enable-wins
+        // is the only place it shows.
+        let settings = GovetSettings {
+            enable: vec!["assign".into()],
+            disable: vec!["assign".into(), "shift".into()],
+            ..GovetSettings::default()
+        };
+        let analyzers: Vec<&'static Analyzer> = ["assign", "shift", "printf"]
+            .iter()
+            .map(|n| leak_name(n))
+            .collect();
+        let kept: Vec<&str> = filter_govet(&settings, analyzers)
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(kept, vec!["assign", "printf"]);
+    }
+
+    #[test]
+    fn govet_default_set_is_not_every_analyzer() {
+        // guff implements none of the ten non-default passes today, so this is
+        // the assertion that stops the first one arriving on by default.
+        let analyzers: Vec<&'static Analyzer> = ["printf", "nilness", "shadow", "fieldalignment"]
+            .iter()
+            .map(|n| leak_name(n))
+            .collect();
+        let kept: Vec<&str> = filter_govet(&GovetSettings::default(), analyzers)
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(kept, vec!["printf"]);
+
+        // …and that `enable-all` is what turns them on, `enable` naming one
+        // being the other way.
+        let analyzers: Vec<&'static Analyzer> = ["printf", "nilness", "shadow"]
+            .iter()
+            .map(|n| leak_name(n))
+            .collect();
+        let settings = GovetSettings {
+            enable_all: true,
+            disable: vec!["shadow".into()],
+            enable: vec!["shadow".into()],
+            ..GovetSettings::default()
+        };
+        let kept: Vec<&str> = filter_govet(&settings, analyzers)
+            .iter()
+            .map(|a| a.name)
+            .collect();
+        // `enable-all` is the first arm: only `disable` survives it, and
+        // `enable` is not consulted at all — so `shadow` stays off.
+        assert_eq!(kept, vec!["printf", "nilness"]);
     }
 
     #[test]

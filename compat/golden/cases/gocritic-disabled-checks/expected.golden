@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gocritic-disabled-checks
+# Produced by running golangci-lint on compat/golden/cases/gocritic-disabled-checks/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+settings.go:45:16:gocritic::appendAssign: append result not assigned to the same slice

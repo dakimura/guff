@@ -1,0 +1,31 @@
+# Golden case: gosec with no settings block at all (COMPAT-HARDENING Phase 4).
+#
+# cases/gosec names all 35 rules guff implements in `includes`, and says why:
+# gosec ships 39 rules and 22 analyzers, so the default set would fill that
+# golden with checks guff has never claimed. The consequence is that **no case
+# in this repo measured what gosec runs by default** — which is what a user
+# who writes `gosec:` and nothing else gets.
+#
+# On a four-function fixture it is measurable. The finding it adds over
+# `gosec-settings` is G501 (blocklisted md5 *import*, distinct from G401 on the
+# call), and if this golden ever grows another line, the fixture has drifted
+# into a rule guff does not implement — read it as that.
+#
+# One default is deliberately invisible here: golangci-lint appends `G407` to
+# `excludes` whenever a gosec settings block exists at all, as a workaround for
+# securego/gosec#1211. guff does not implement G407, so the two agree by
+# accident rather than by rule; porting G407 means porting that append with it.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
