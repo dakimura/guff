@@ -113,51 +113,75 @@ case "$os" in
     ;;
 esac
 
-if [ "$VERSION" = "latest" ]; then
-  echo "Resolving latest release…"
-  release_url="${GITHUB_API}/repos/${REPO}/releases/latest"
-else
-  release_url="${GITHUB_API}/repos/${REPO}/releases/tags/${VERSION}"
-fi
-
-release_json=$(api_curl "application/vnd.github+json" "$release_url") || {
-  echo "failed to fetch release metadata (private repo? set GITHUB_TOKEN)" >&2
-  exit 1
-}
-
-if command -v python3 >/dev/null 2>&1; then
-  VERSION=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
-else
-  VERSION=$(printf '%s' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
-fi
-if [ -z "$VERSION" ]; then
-  echo "failed to parse release tag" >&2
-  exit 1
-fi
-
-ver_num="${VERSION#v}"
-asset="guff_${ver_num}_${os}_${arch}.tar.gz"
-asset_id=$(printf '%s' "$release_json" | asset_id_from_json "$asset") || true
-
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
-dest="${tmpdir}/${asset}"
 
-if [ -n "$asset_id" ]; then
-  echo "Downloading ${asset} (id ${asset_id})"
-  api_curl "application/octet-stream" \
-    "${GITHUB_API}/repos/${REPO}/releases/assets/${asset_id}" \
-    -o "$dest" || {
-      echo "asset download failed" >&2
-      exit 1
-    }
-else
+asset_name() {
+  # $1: tag (v-prefixed) → release asset file name
+  echo "guff_${1#v}_${os}_${arch}.tar.gz"
+}
+
+dest=""
+
+# Fast path: a pinned tag already names its asset, and the public download host
+# serves it without touching the API. That is one request instead of two, and it
+# spends no REST quota — which matters on CI, where a shared runner IP and a
+# matrix of jobs can otherwise push a repo into rate limiting. A private repo
+# answers 404 here; the authenticated API path below then handles it.
+if [ "$VERSION" != "latest" ]; then
+  asset=$(asset_name "$VERSION")
   url="${GITHUB_DL}/${REPO}/releases/download/${VERSION}/${asset}"
   echo "Downloading ${url}"
-  curl -fsSL -o "$dest" "$url" || {
-    echo "download failed; if the repo is private set GITHUB_TOKEN / GH_TOKEN" >&2
+  if curl -fsSL -o "${tmpdir}/${asset}" "$url"; then
+    dest="${tmpdir}/${asset}"
+  else
+    echo "direct download unavailable, falling back to the release API…"
+  fi
+fi
+
+if [ -z "$dest" ]; then
+  if [ "$VERSION" = "latest" ]; then
+    echo "Resolving latest release…"
+    release_url="${GITHUB_API}/repos/${REPO}/releases/latest"
+  else
+    release_url="${GITHUB_API}/repos/${REPO}/releases/tags/${VERSION}"
+  fi
+
+  release_json=$(api_curl "application/vnd.github+json" "$release_url") || {
+    echo "failed to fetch release metadata (private repo? set GITHUB_TOKEN)" >&2
     exit 1
   }
+
+  if command -v python3 >/dev/null 2>&1; then
+    VERSION=$(printf '%s' "$release_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+  else
+    VERSION=$(printf '%s' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+  fi
+  if [ -z "$VERSION" ]; then
+    echo "failed to parse release tag" >&2
+    exit 1
+  fi
+
+  asset=$(asset_name "$VERSION")
+  asset_id=$(printf '%s' "$release_json" | asset_id_from_json "$asset") || true
+  dest="${tmpdir}/${asset}"
+
+  if [ -n "$asset_id" ]; then
+    echo "Downloading ${asset} (id ${asset_id})"
+    api_curl "application/octet-stream" \
+      "${GITHUB_API}/repos/${REPO}/releases/assets/${asset_id}" \
+      -o "$dest" || {
+        echo "asset download failed" >&2
+        exit 1
+      }
+  else
+    url="${GITHUB_DL}/${REPO}/releases/download/${VERSION}/${asset}"
+    echo "Downloading ${url}"
+    curl -fsSL -o "$dest" "$url" || {
+      echo "download failed; if the repo is private set GITHUB_TOKEN / GH_TOKEN" >&2
+      exit 1
+    }
+  fi
 fi
 
 echo "Extracting…"

@@ -265,6 +265,10 @@ jobs:
           args: run --out-format=github-actions ./...
 ```
 
+该 Action 会在多次运行之间保留 guff 的分析缓存，因此 pull request 只重新检查改
+动过的部分——在大型模块上可快 3～8 倍。矩阵构建、缓存体积与自托管 runner 请见
+[`docs/CI.md`](docs/CI.md)。
+
 ---
 
 ## Docker
