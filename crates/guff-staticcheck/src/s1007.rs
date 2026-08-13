@@ -1,6 +1,13 @@
 //! S1007 — simplify regular expression by using raw string literal.
 //!
 //! Port of `honnef.co/go/tools/simple/s1007`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
@@ -8,7 +15,7 @@ use guff::ast::Expr;
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, is_call_to_any};
+use guff_analysis::code::{call_name, is_call_to_any, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -61,7 +68,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(callee) = call_name(pass, &call.fun) else {
             return;
         };
-        let Expr::BasicLit(lit) = &call.args[0] else {
+        let Expr::BasicLit(lit) = unparen(&call.args[0]) else {
             return;
         };
         if lit.kind != Some(Token::STRING) || lit.value.starts_with('`') {

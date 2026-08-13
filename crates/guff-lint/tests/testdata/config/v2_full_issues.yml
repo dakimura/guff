@@ -37,7 +37,12 @@ issues:
         - funlen
       source: "^//go:generate "
 severity:
-  default-severity: warning
+  # v2 spells this `default`. Written as `default-severity` (v1's key) this file
+  # was a config golangci-lint 2.12.2 refuses to load — "can't set severity rule
+  # option: no default severity defined" — which is now what
+  # `ConfigFile::validate` says too, so the fixture had to become a config that
+  # upstream can actually run.
+  default: warning
   rules:
     - linters:
         - errcheck

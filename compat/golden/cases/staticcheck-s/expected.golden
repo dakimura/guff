@@ -86,6 +86,8 @@ s1033/bad/bad.go:4:2:staticcheck::S1033: unnecessary guard around call to delete
 s1034/bad/bad.go:4:9:staticcheck::S1034: assigning the result of this type assertion to a variable (switch i := i.(type)) could eliminate type assertions in switch cases
 s1035/bad/bad.go:5:31:staticcheck::S1035: calling net/http.CanonicalHeaderKey on the 'key' argument of (net/http.Header).Set is redundant
 s1036/bad/bad.go:4:2:staticcheck::S1036: unnecessary guard around map access
+s1036/bad/bad.go:16:2:staticcheck::S1036: unnecessary guard around map access
+s1036/bad/bad.go:22:2:staticcheck::S1036: unnecessary guard around map access
 s1037/bad/bad.go:10:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case
 s1037/bad/bad.go:10:2:staticcheck::S1037: should use time.Sleep instead of elaborate way of sleeping
 s1037/bad/bad.go:16:2:staticcheck::S1000: should use a simple channel send/receive instead of select with a single case

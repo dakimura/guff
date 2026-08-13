@@ -12,16 +12,13 @@
       "ill_typed": 1
     },
     "consul": {
-      "ill_typed": 5
+      "ill_typed": 4
     },
     "gin": {
       "ill_typed": 1
     },
     "grafana": {
-      "ill_typed": 14
-    },
-    "kubernetes": {
-      "ill_typed": 1
+      "ill_typed": 13
     }
   }
 }

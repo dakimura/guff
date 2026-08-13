@@ -1,6 +1,13 @@
 //! S1033 — unnecessary guard around call to delete.
 //!
 //! Port of `honnef.co/go/tools/simple/s1033`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
@@ -8,12 +15,12 @@ use guff::ast::{AssignStmt, CallExpr, Expr, Ident, IfStmt, IndexExpr, Stmt};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_call_to, object_of};
+use guff_analysis::code::{is_call_to, object_of, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
-    match (a, b) {
+    match (unparen(a), unparen(b)) {
         (Expr::Ident(ia), Expr::Ident(ib)) => {
             object_of(pass, ia) == object_of(pass, ib) || ia.name == ib.name
         }
@@ -28,13 +35,13 @@ fn map_index_init(init: &Stmt) -> Option<(&Expr, &Expr)> {
     if tok != &Some(Token::DEFINE) || lhs.len() != 2 || rhs.len() != 1 {
         return None;
     };
-    let Expr::Ident(blank) = &lhs[0] else {
+    let Expr::Ident(blank) = unparen(&lhs[0]) else {
         return None;
     };
     if blank.name != "_" {
         return None;
     };
-    let Expr::IndexExpr(IndexExpr { x: m, index: key, .. }) = &rhs[0] else {
+    let Expr::IndexExpr(IndexExpr { x: m, index: key, .. }) = unparen(&rhs[0]) else {
         return None;
     };
     Some((m, key))
@@ -44,7 +51,7 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
     let Some((m, key)) = ifs.init.as_deref().and_then(map_index_init) else {
         return false;
     };
-    let Expr::Ident(ok) = &ifs.cond else {
+    let Expr::Ident(ok) = unparen(&ifs.cond) else {
         return false;
     };
     if ok.name == "_" || ifs.else_.is_some() || ifs.body.list.len() != 1 {
@@ -53,7 +60,7 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
     let Stmt::ExprStmt(es) = &ifs.body.list[0] else {
         return false;
     };
-    let Expr::CallExpr(call) = &es.x else {
+    let Expr::CallExpr(call) = unparen(&es.x) else {
         return false;
     };
     call.args.len() == 2

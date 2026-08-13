@@ -1,0 +1,1 @@
+can't load config: error in exclude rule #0: path and path-except should not be set at the same time

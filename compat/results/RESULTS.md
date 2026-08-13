@@ -4,9 +4,14 @@
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | fixture | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | local | 108 | 108 | 108 | 100.0% | 100.0% | 0 |
-| controller-runtime | 309 | 300 | 300 | 97.1% | 100.0% | 0 |
-| vault | 161 | 161 | 161 | 100.0% | 100.0% | 0 |
-| kubernetes | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| gin | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
+| caddy | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
+| helm | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| k9s | 636 | 636 | 636 | 100.0% | 100.0% | 0 |
+| cobra | 157 | 157 | 157 | 100.0% | 100.0% | 0 |
+| consul | 257 | 255 | 255 | 99.2% | 100.0% | 0 |
+| grafana | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
+| containerd | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 
 Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unexpected` counts diffs not covered by the allowlist (`compat/allowlists/`).
 
@@ -27,40 +32,59 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 | staticcheck | 72 | 72 | 72 | 100.0% | 100.0% |
 | unused | 12 | 12 | 12 | 100.0% | 100.0% |
 
-## controller-runtime
+## gin
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| bodyclose | 1 | 0 | 0 | 0.0% | 100.0% |
-| goconst | 294 | 294 | 294 | 100.0% | 100.0% |
-| govet | 5 | 5 | 5 | 100.0% | 100.0% |
-| nilerr | 1 | 0 | 0 | 0.0% | 100.0% |
-| nolintlint | 6 | 1 | 1 | 16.7% | 100.0% |
-| unparam | 2 | 0 | 0 | 0.0% | 100.0% |
+| gosec | 2 | 2 | 2 | 100.0% | 100.0% |
+| govet | 7 | 7 | 7 | 100.0% | 100.0% |
 
-### Allowed known diffs (9)
-- guff-only: `examples/builtins/validatingwebhook.go:55:unparam:(*podValidator).ValidateUpdate - oldObj is unused`
-- guff-only: `examples/tokenreview/tokenreview.go:32:unparam:(*authenticator).Handle - ctx is unused`
-- guff-only: `pkg/cluster/cluster_test.go:168:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"`
-- guff-only: `pkg/internal/controller/controller.go:395:nilerr:error is not nil (line 394) but it returns nil`
-- guff-only: `pkg/manager/internal.go:264:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"`
-- guff-only: `pkg/manager/manager_test.go:1361:bodyclose:response body must be closed`
-- guff-only: `pkg/manager/manager_test.go:1819:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"`
-- guff-only: `pkg/manager/manager_test.go:1994:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"`
-- … and 1 more (see `compat/allowlists/`)
-
-## vault
+## caddy
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| errcheck | 23 | 23 | 23 | 100.0% | 100.0% |
-| govet | 63 | 63 | 63 | 100.0% | 100.0% |
-| ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
-| staticcheck | 69 | 69 | 69 | 100.0% | 100.0% |
-| unused | 4 | 4 | 4 | 100.0% | 100.0% |
 
-## kubernetes
+## helm
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| govet | 5 | 5 | 5 | 100.0% | 100.0% |
+| modernize | 5 | 5 | 5 | 100.0% | 100.0% |
+
+## k9s
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| errcheck | 1 | 1 | 1 | 100.0% | 100.0% |
+| goconst | 626 | 626 | 626 | 100.0% | 100.0% |
+| gosec | 7 | 7 | 7 | 100.0% | 100.0% |
+| govet | 1 | 1 | 1 | 100.0% | 100.0% |
+| intrange | 1 | 1 | 1 | 100.0% | 100.0% |
+
+## cobra
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| goconst | 156 | 156 | 156 | 100.0% | 100.0% |
+| gosec | 1 | 1 | 1 | 100.0% | 100.0% |
+
+## consul
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| govet | 18 | 18 | 18 | 100.0% | 100.0% |
+| staticcheck | 239 | 237 | 237 | 99.2% | 100.0% |
+
+### Allowed known diffs (2)
+- guff-only: `agent/event_endpoint_test.go:115:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
+- guff-only: `agent/http_test.go:1728:staticcheck:err refers to the result of a failed type assertion and is a zero value, not the value that was being type-asserted`
+
+## grafana
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+
+## containerd
+
+| Linter | guff | golangci | both | P | R |
+|--------|-----:|---------:|-----:|--:|--:|
+| gosec | 1 | 1 | 1 | 100.0% | 100.0% |

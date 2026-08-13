@@ -94,6 +94,8 @@ stringintconv/bad/bad.go                           crates/guff-govet/tests/testd
 stringintconv/ok/ok.go                             crates/guff-govet/tests/testdata/stringintconv/ok.go
 structtag/bad/bad.go                               crates/guff-govet/tests/testdata/structtag/bad.go
 structtag/ok/ok.go                                 crates/guff-govet/tests/testdata/structtag/ok.go
+testinggoroutine/bad_test/bad_test.go              crates/guff-govet/tests/testdata/testinggoroutine/bad_test.go
+testinggoroutine/ok_test/ok_test.go                crates/guff-govet/tests/testdata/testinggoroutine/ok_test.go
 tests/bad_test/bad_test.go                         crates/guff-govet/tests/testdata/tests/bad_test.go
 tests/ok_test/ok_test.go                           crates/guff-govet/tests/testdata/tests/ok_test.go
 timeformat/bad/bad.go                              crates/guff-govet/tests/testdata/timeformat/bad.go

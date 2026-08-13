@@ -65,6 +65,14 @@ jobs:
       - name: Golden gate (check-level)
         run: ./compat/golden/run.sh
 
+      # The other direction: configs golangci-lint validates and refuses to
+      # start on. A finding-set tier cannot express "upstream exited before
+      # linting", and a tool that runs such a config lints with an enable set
+      # the user never asked for (COMPAT-HARDENING.md §4). Both tools are run;
+      # both must refuse, for the same reason.
+      - name: Reject gate (configs upstream refuses)
+        run: ./compat/reject/run.sh
+
   # The crate test suites: ~3,000 tests that nothing else here runs.
   #
   # These do not compare against golangci-lint — they assert that guff fires,
@@ -100,7 +108,7 @@ jobs:
   # Catches parity holes that multi-linter OSS configs hide.
   isolate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
@@ -153,6 +161,8 @@ jobs:
       - name: Build guff
         run: cargo build --release -p guff-lint
 
+      # Same confirmation rule as the OSS tiers (golangci-lint x2 identical),
+      # so this step's golangci half roughly doubled on 2026-08-13.
       - name: Compat isolate (all linters)
         run: ./compat/run.sh --isolate
 
@@ -176,7 +186,7 @@ jobs:
   # OSS finding-set on the PR-tier corpus (own configs).
   oss-pr:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -217,6 +227,13 @@ jobs:
             corpus-pr-
 
       # Also gates worker panics and ill-typed package counts (compat/health.py).
+      #
+      # Since 2026-08-13 this runs golangci-lint until two runs return the same
+      # finding set (COMPAT_CONFIRMATIONS, default 2), so the golangci half of
+      # the wall clock roughly doubles. That is the price of not deciding a
+      # target on one run of a tool that is not a function of its input — see
+      # compat/golden/README.md, "Upstream is not a function". Raise the job
+      # timeout rather than lowering the confirmation count.
       - name: Compat OSS (pr tier, own-config)
         run: ./compat/run.sh --oss --tier pr
 
@@ -257,7 +274,7 @@ jobs:
   oss-nightly:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
 

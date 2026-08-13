@@ -21,7 +21,8 @@ mod watch;
 
 pub use config::{
     backup_path, discover_config, load_config, migrate_config_file, normalize_linter_name,
-    parse_config_str, parse_gofmt_settings, ConfigError, ConfigFile, ConfigV2, ExcludeRule,
+    parse_config_str, parse_gofmt_settings, validate_gocritic_options, ConfigError, ConfigFile,
+    ConfigV2, ExcludeRule,
     FormatterExclusions, FormattersV2, IssuesConfig, LinterDefault, LinterExclusions,
     LinterSelection, OutputConfig, RunConfig, SeverityConfig, SeverityRule, CONFIG_FILE_NAMES,
     DEPRECATED_LINTERS, FORMATTER_NAMES,
@@ -368,9 +369,16 @@ impl LintOptions {
 
 /// Analyzers that read `ast::Ident.obj` (filled by parser object resolution).
 ///
-/// Today only `ineffassign` and `maintidx`. When neither is enabled, target
-/// parse can set [`TypecheckEnv::skip_object_resolution`] (P0-3).
-const AST_OBJECT_RESOLUTION_ANALYZERS: &[&str] = &["ineffassign", "maintidx"];
+/// When none of them is enabled, target parse can set
+/// [`TypecheckEnv::skip_object_resolution`] (P0-3) and skip the walk.
+///
+/// **An analyzer missing from this list does not fail — it goes quiet.** The
+/// field is simply `None` for every identifier, so whatever the analyzer asks
+/// of it answers "no". `testinggoroutine` was written, tested against the
+/// golden tier, and found short by exactly one finding for this reason: the one
+/// shape whose region is reached through `Ident.obj` (`fn := func(){…}; go fn()`).
+const AST_OBJECT_RESOLUTION_ANALYZERS: &[&str] =
+    &["ineffassign", "maintidx", "testinggoroutine"];
 
 fn analyzers_need_ast_object_resolution(analyzers: &[&Analyzer]) -> bool {
     analyzers

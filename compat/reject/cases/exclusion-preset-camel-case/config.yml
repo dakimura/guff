@@ -1,0 +1,7 @@
+version: "2"
+linters:
+  default: none
+  enable: [errcheck]
+  exclusions:
+    # v2's vocabulary is kebab-case; this is the pre-v2 spelling.
+    presets: [stdErrorHandling]

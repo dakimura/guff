@@ -1,0 +1,1 @@
+gocritic: invalid settings: all checks were disabled, but no one check was enabled: at least one must be enabled

@@ -195,11 +195,16 @@ impl Checker {
                 // A generic function value `f[targs]` used as a value: `index_expr`
                 // signals it, then `func_inst` instantiates the signature.
                 if self.index_expr(x, ie) {
+                    // Value position: there is no argument list to learn the
+                    // remaining type arguments from, so `infer` is true and a
+                    // partial instantiation is an error here (Go: `funcInst`
+                    // with a nil target).
                     self.func_inst(
                         x,
                         &ie.x,
                         std::slice::from_ref(&*ie.index),
                         ie.x.pos().0 as u32,
+                        true,
                     );
                 }
             }
@@ -207,7 +212,7 @@ impl Checker {
                 // Multi-argument explicit instantiation `f[T1, T2]` as a value.
                 self.expr(x, &ie.x);
                 if self.is_generic_func_value(x) {
-                    self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32);
+                    self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, true);
                 } else if x.mode != OperandMode::Invalid {
                     let xs = self.operand_str(x);
                     self.error(

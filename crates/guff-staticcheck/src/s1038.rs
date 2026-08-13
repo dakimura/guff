@@ -1,20 +1,27 @@
 //! S1038 — unnecessarily complex way of printing formatted string.
 //!
 //! Port of `honnef.co/go/tools/simple/s1038`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{call_name, is_call_to, is_call_to_any};
+use guff_analysis::code::{call_name, is_call_to, is_call_to_any, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn fmt_print_message(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
     let name = call_name(pass, &call.fun)?;
     let short = name.strip_prefix("fmt.").unwrap_or(&name);
-    let Expr::CallExpr(inner) = call.args.first()? else {
+    let Expr::CallExpr(inner) = unparen(call.args.first()?) else {
         return None;
     };
     if !is_call_to(pass, inner, "fmt.Sprintf") {
@@ -25,7 +32,11 @@ fn fmt_print_message(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
             Some(format!("should use fmt.{short}f instead of fmt.{short}(fmt.Sprintf(...))"))
         }
         "Println" | "Fprintln" | "Sprintln" => {
-            if inner.args.first().is_some_and(|e| matches!(e, Expr::BasicLit(_))) {
+            if inner
+                .args
+                .first()
+                .is_some_and(|e| matches!(unparen(e), Expr::BasicLit(_)))
+            {
                 let base = &short[..short.len() - 2];
                 Some(format!(
                     "should use fmt.{base}f instead of fmt.{short}(fmt.Sprintf(...))"
@@ -54,7 +65,7 @@ fn log_message(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
         return None;
     }
     let name = call_name(pass, &call.fun)?;
-    let Expr::CallExpr(inner) = call.args.first()? else {
+    let Expr::CallExpr(inner) = unparen(call.args.first()?) else {
         return None;
     };
     if !is_call_to(pass, inner, "fmt.Sprintf") {

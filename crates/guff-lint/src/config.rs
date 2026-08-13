@@ -794,6 +794,13 @@ pub enum ConfigError {
     Io(std::io::Error),
     Parse(serde_yaml::Error),
     Migrate(String),
+    /// A config golangci-lint refuses to start on ([`ConfigFile::validate`]).
+    Validation(String),
+    /// Linter settings golangci-lint refuses to build a linter from
+    /// ([`validate_gocritic_options`]). Upstream reports these from the linter's
+    /// context setter rather than from the config loader, so the message has no
+    /// `can't load config` prefix on either side.
+    LinterSettings(String),
     NotFound,
 }
 
@@ -803,6 +810,8 @@ impl fmt::Display for ConfigError {
             Self::Io(e) => write!(f, "{e}"),
             Self::Parse(e) => write!(f, "invalid config: {e}"),
             Self::Migrate(msg) => write!(f, "{msg}"),
+            Self::Validation(msg) => write!(f, "can't load config: {msg}"),
+            Self::LinterSettings(msg) => write!(f, "{msg}"),
             Self::NotFound => write!(f, "no configuration file found"),
         }
     }
@@ -973,6 +982,247 @@ impl ConfigFile {
 
     pub fn is_v2(&self) -> bool {
         matches!(self, Self::V2(_))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Configs golangci-lint refuses to start on
+// ---------------------------------------------------------------------------
+//
+// golangci-lint validates the loaded config before it runs anything
+// (`config.Config.Validate`, called from `loader.go`), and a config that fails
+// it produces no findings at all. guff used to accept every one of these and
+// run — quietly, with a *different* enable set than the config asks for, which
+// is the worst of the three possible behaviours.
+//
+// This cannot be gated by `compat/golden`: that tier compares two finding sets,
+// and upstream's finding set here is "the process exited before linting".
+// COMPAT-HARDENING.md §4 therefore collected the rules by reading upstream
+// across the 7th/8th/9th sessions; the tests for them live in
+// `crates/guff-lint/tests/config_validate_test.rs`.
+//
+// Deliberately *not* ported: upstream also compiles `path` / `path-except` /
+// `text` / `source` as Go regexes here and rejects the config if any fails to
+// compile. guff's regexes are Rust `regex` patterns, and the two dialects
+// disagree in both directions (lookarounds compile in Go, not in Rust), so
+// mirroring that check would reject configs upstream accepts. The other four
+// `BaseRule.Validate` conditions are dialect-free and are ported below.
+
+/// `linters.exclusions.presets` vocabulary (`config/linters_exclusions.go`).
+///
+/// Kebab-case only. guff's own [`normalize_exclusion_preset`] additionally
+/// accepts the camelCase spellings (`stdErrorHandling`) that golangci-lint's
+/// docs used before v2 — those are the ones upstream now refuses to start on.
+const EXCLUSION_PRESET_NAMES: &[&str] = &[
+    "comments",
+    "std-error-handling",
+    "common-false-positives",
+    "legacy",
+];
+
+/// `excludeRuleMinConditionsCount` — an exclude rule this wide is a config error,
+/// not a wide rule.
+const EXCLUDE_RULE_MIN_CONDITIONS: usize = 2;
+
+/// `severityRuleMinConditionsCount` — severity rules may name one condition.
+const SEVERITY_RULE_MIN_CONDITIONS: usize = 1;
+
+fn is_set(value: Option<&String>) -> bool {
+    value.is_some_and(|v| !v.is_empty())
+}
+
+/// `config.BaseRule.Validate`, minus the regex compilation (see above).
+fn validate_base_rule(
+    linters: &[String],
+    path: Option<&String>,
+    path_except: Option<&String>,
+    text: Option<&String>,
+    source: Option<&String>,
+    min_conditions: usize,
+) -> Result<(), String> {
+    if is_set(path) && is_set(path_except) {
+        return Err("path and path-except should not be set at the same time".to_string());
+    }
+
+    let mut non_blank = 0;
+    if !linters.is_empty() {
+        non_blank += 1;
+    }
+    // Upstream counts path filtering once however it is spelled: a rule with
+    // both would otherwise pass a check that exists to keep rules narrow.
+    if is_set(path) || is_set(path_except) {
+        non_blank += 1;
+    }
+    if is_set(text) {
+        non_blank += 1;
+    }
+    if is_set(source) {
+        non_blank += 1;
+    }
+
+    if non_blank < min_conditions {
+        return Err(format!(
+            "at least {min_conditions} of (text, source, path[-except], linters) should be set"
+        ));
+    }
+    Ok(())
+}
+
+/// `config.LinterExclusions.Validate`.
+fn validate_exclude_rules(rules: &[ExcludeRule]) -> Result<(), ConfigError> {
+    for (i, rule) in rules.iter().enumerate() {
+        validate_base_rule(
+            &rule.linters,
+            rule.path.as_ref(),
+            rule.path_except.as_ref(),
+            rule.text.as_ref(),
+            rule.source.as_ref(),
+            EXCLUDE_RULE_MIN_CONDITIONS,
+        )
+        .map_err(|e| ConfigError::Validation(format!("error in exclude rule #{i}: {e}")))?;
+    }
+    Ok(())
+}
+
+/// `config.Severity.Validate`.
+fn validate_severity(severity: &SeverityConfig, default: Option<&String>) -> Result<(), ConfigError> {
+    if !severity.rules.is_empty() && !is_set(default) {
+        return Err(ConfigError::Validation(
+            "can't set severity rule option: no default severity defined".to_string(),
+        ));
+    }
+    for (i, rule) in severity.rules.iter().enumerate() {
+        let err = if rule.severity.is_empty() {
+            Err("severity should be set".to_string())
+        } else {
+            validate_base_rule(
+                &rule.linters,
+                rule.path.as_ref(),
+                rule.path_except.as_ref(),
+                rule.text.as_ref(),
+                rule.source.as_ref(),
+                SEVERITY_RULE_MIN_CONDITIONS,
+            )
+        };
+        err.map_err(|e| ConfigError::Validation(format!("error in severity rule #{i}: {e}")))?;
+    }
+    Ok(())
+}
+
+/// `config.Output.validatePathMode`: only unset and `abs` exist.
+///
+/// `rel` reads like the name of the default, and is not a value — measured
+/// against 2.12.2 in the 8th session (§4). guff used to accept it and print
+/// relative paths, so the one config in this family that upstream refuses is
+/// also the one where guff's output looked most plausibly correct.
+fn validate_path_mode(output: &OutputConfig) -> Result<(), ConfigError> {
+    match output.path_mode.as_deref() {
+        None | Some("") | Some("abs") => Ok(()),
+        Some(other) => Err(ConfigError::Validation(format!(
+            "unsupported output path mode {other:?}"
+        ))),
+    }
+}
+
+/// `gocritic.settingsWrapper.validateOptionsCombinations`.
+///
+/// Upstream runs this from the linter's context setter, so it only fires when
+/// gocritic is actually enabled: a stale `linters.settings.gocritic` block in a
+/// config that no longer enables gocritic starts fine, and must keep doing so
+/// here. Call it from the runner once the enable set is known, not from
+/// [`ConfigFile::validate`].
+pub fn validate_gocritic_options(
+    enable_all: bool,
+    disable_all: bool,
+    enabled_tags: &[String],
+    enabled_checks: &[String],
+    disabled_tags: &[String],
+    disabled_checks: &[String],
+) -> Result<(), ConfigError> {
+    // Upstream: `logger.Fatalf("%s: invalid settings: %s", linterName, err)`,
+    // which reaches the terminal as
+    // `level=error msg="[linters_context] gocritic: invalid settings: …"`.
+    let err = |msg: &str| {
+        Err(ConfigError::LinterSettings(format!(
+            "gocritic: invalid settings: {msg}"
+        )))
+    };
+
+    if enable_all && disable_all {
+        return err("enable-all and disable-all options must not be combined");
+    }
+    if enable_all {
+        if !enabled_tags.is_empty() {
+            return err("enable-all and enabled-tags options must not be combined");
+        }
+        if !enabled_checks.is_empty() {
+            return err("enable-all and enabled-checks options must not be combined");
+        }
+    } else if disable_all {
+        if !disabled_tags.is_empty() {
+            return err("disable-all and disabled-tags options must not be combined");
+        }
+        if !disabled_checks.is_empty() {
+            return err("disable-all and disabled-checks options must not be combined");
+        }
+        if enabled_tags.is_empty() && enabled_checks.is_empty() {
+            return err("all checks were disabled, but no one check was enabled: at least one must be enabled");
+        }
+    }
+    Ok(())
+}
+
+impl ConfigFile {
+    /// Fail on configs golangci-lint's `Config.Validate` rejects.
+    ///
+    /// The order matches upstream's validator list (`output`, then `linters`,
+    /// then `severity`), so the first complaint a user sees is the same one.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        match self {
+            Self::V2(v2) => {
+                validate_path_mode(&v2.output)?;
+                // `config.Linters.validateNoFormatters`: v2 moved these six to
+                // their own section, and naming one under `linters` is a config
+                // error rather than a linter guff has not got to yet — which is
+                // what guff used to answer, one name at a time and only for the
+                // first one it met.
+                for name in v2.linters.enable.iter().chain(v2.linters.disable.iter()) {
+                    if FORMATTER_NAMES.contains(&name.as_str()) {
+                        return Err(ConfigError::Validation(format!("{name} is a formatter")));
+                    }
+                }
+                // `config.Formatters.Validate`: and the reverse.
+                for name in &v2.formatters.enable {
+                    if !FORMATTER_NAMES.contains(&name.as_str()) {
+                        return Err(ConfigError::Validation(format!("{name} is not a formatter")));
+                    }
+                }
+                validate_exclude_rules(&v2.linters.exclusions.rules)?;
+                for preset in &v2.linters.exclusions.presets {
+                    if !EXCLUSION_PRESET_NAMES.contains(&preset.as_str()) {
+                        return Err(ConfigError::Validation(format!(
+                            "invalid preset: {preset}"
+                        )));
+                    }
+                }
+                // v2 spells the key `severity.default`; a v2 config carrying v1's
+                // `default-severity` has no default at all, which is exactly the
+                // config this rule exists to reject.
+                validate_severity(&v2.severity, v2.severity.default_v2.as_ref())?;
+                // v1's `issues.exclude-rules` in a v2 file is a section upstream
+                // does not read; leaving it unvalidated keeps guff from
+                // inventing an error golangci-lint cannot produce.
+            }
+            Self::V1(v1) => {
+                // golangci-lint v2 refuses v1 configs outright, so there is no
+                // upstream behaviour to match on the v2-only keys. These two
+                // rules are the ones v1's own `Config.Validate` had, with the
+                // v1 spellings.
+                validate_exclude_rules(&v1.issues.exclude_rules)?;
+                validate_severity(&v1.severity, v1.severity.default_severity.as_ref())?;
+            }
+        }
+        Ok(())
     }
 }
 

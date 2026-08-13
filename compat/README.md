@@ -42,6 +42,10 @@ cargo build --release -p guff-lint
 ./compat/golden/run.sh
 ./compat/golden/regen.sh gocritic
 
+# Configs golangci-lint refuses to start on — both tools must refuse, alike
+./compat/reject/run.sh
+./compat/reject/run.sh --regen
+
 # Do both tools analyze the same .go files? (build tags / tests / vendor)
 ./compat/filesets.sh --tier pr
 ./compat/filesets.sh --isolate
@@ -95,6 +99,7 @@ cargo build --release -p guff-lint
 | `all_linters.py` / `allowlists-all/` | `--all-linters` config rewrite + its own (empty) allowlist |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |
+| `reject/` | Configs upstream refuses to start on — the tier a finding-set diff cannot express ([README](reject/README.md)) |
 | `oracles/` | Go-stdlib ground truth for the `gostd` ports ([README](oracles/README.md)) |
 | `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |
 | `baselines/` | Ill-typed package counts per target (panics are never baselined) |
@@ -186,7 +191,7 @@ OSS inventory, tiers, and clone/warm live in [`../corpus/`](../corpus/).
 
 | Gate | Trigger | Targets |
 |------|---------|---------|
-| `smoke` (+ golden) | every PR and push | fixture, 7 golden cases |
+| `smoke` (+ golden + reject) | every PR and push | fixture, golden cases, 12 reject cases |
 | `isolate` | every PR and push | 114 per-linter fixtures |
 | `oss-pr` | every PR and push | gin, caddy, helm |
 | `oss-nightly` | **push to main only** | consul, grafana, containerd |

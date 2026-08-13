@@ -1,6 +1,13 @@
 //! S1031 — omit redundant nil check around loop.
 //!
 //! Port of `honnef.co/go/tools/simple/s1031`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
@@ -8,7 +15,7 @@ use guff::ast::{BinaryExpr, Expr, Ident, IfStmt, RangeStmt, Stmt};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_nil, object_of};
+use guff_analysis::code::{is_nil, object_of, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::TypeData;
@@ -31,13 +38,13 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<()> {
     if ifs.init.is_some() {
         return None;
     }
-    let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = &ifs.cond else {
+    let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = unparen(&ifs.cond) else {
         return None;
     };
     if *op != Token::NEQ || !is_nil(pass, y) {
         return None;
     };
-    let Expr::Ident(id) = &**x else {
+    let Expr::Ident(id) = unparen(x) else {
         return None;
     };
     if ifs.body.list.len() != 1 {
@@ -46,7 +53,7 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<()> {
     let Stmt::RangeStmt(rs) = &ifs.body.list[0] else {
         return None;
     };
-    let Expr::Ident(range_var) = &rs.x else {
+    let Expr::Ident(range_var) = unparen(&rs.x) else {
         return None;
     };
     if object_of(pass, id) != object_of(pass, range_var) && id.name != range_var.name {
@@ -69,10 +76,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if check_if(pass, ifs).is_none() {
             return;
         }
-        let Expr::BinaryExpr(BinaryExpr { x, .. }) = &ifs.cond else {
+        let Expr::BinaryExpr(BinaryExpr { x, .. }) = unparen(&ifs.cond) else {
             return;
         };
-        let Expr::Ident(id) = &**x else {
+        let Expr::Ident(id) = unparen(x) else {
             return;
         };
         let Some(obj) = object_of(pass, id) else {

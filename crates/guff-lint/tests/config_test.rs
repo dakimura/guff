@@ -131,8 +131,15 @@ fn parse_v2_full_issues_run_severity_output() {
     assert_eq!(run.concurrency, Some(4));
     assert_eq!(run.go.as_deref(), Some("1.22"));
 
+    // v2's key is `severity.default`; the post-processor reads it through
+    // `effective_severity`, which maps it onto the v1-named field.
     let severity = cfg.severity();
-    assert_eq!(severity.default_severity.as_deref(), Some("warning"));
+    assert_eq!(severity.default_v2.as_deref(), Some("warning"));
+    assert_eq!(severity.default_severity, None);
+    assert_eq!(
+        cfg.effective_severity().default_severity.as_deref(),
+        Some("warning")
+    );
     assert_eq!(severity.rules.len(), 1);
     assert_eq!(severity.rules[0].severity, "error");
 
@@ -215,6 +222,14 @@ fn parse_golangci_config_corpus() {
             "{} should exercise golangci-lint v2 config parsing",
             path.display()
         );
+
+        // These are configs their projects run golangci-lint with every day, so
+        // upstream's validator accepts all of them by construction. That makes
+        // the corpus the standing guard on the other side of
+        // `ConfigFile::validate`: a rule ported too strictly (a preset spelling,
+        // a condition count) shows up here as a real repo guff would refuse.
+        cfg.validate()
+            .unwrap_or_else(|err| panic!("{} should validate: {err}", path.display()));
 
         // Exercise the follow-on resolution steps used by the CLI, not just
         // serde shape compatibility.

@@ -1,6 +1,13 @@
 //! S1036 — unnecessary guard around map access.
 //!
 //! Port of `honnef.co/go/tools/simple/s1036`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
@@ -8,12 +15,12 @@ use guff::ast::{AssignStmt, CallExpr, CompositeLit, Expr, Ident, IfStmt, IncDecS
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_int, is_call_to, object_of};
+use guff_analysis::code::{expr_to_int, is_call_to, object_of, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
-    match (a, b) {
+    match (unparen(a), unparen(b)) {
         (Expr::Ident(ia), Expr::Ident(ib)) => {
             object_of(pass, ia) == object_of(pass, ib) || ia.name == ib.name
         }
@@ -31,20 +38,20 @@ fn map_index_init(init: &Stmt) -> Option<&IndexExpr> {
     if tok != &Some(Token::DEFINE) || lhs.len() != 2 || rhs.len() != 1 {
         return None;
     };
-    let Expr::Ident(blank) = &lhs[0] else {
+    let Expr::Ident(blank) = unparen(&lhs[0]) else {
         return None;
     };
     if blank.name != "_" {
         return None;
     };
-    let Expr::IndexExpr(ix) = &rhs[0] else {
+    let Expr::IndexExpr(ix) = unparen(&rhs[0]) else {
         return None;
     };
     Some(ix)
 }
 
 fn same_map_index(pass: &Pass<'_>, lhs: &Expr, ix: &IndexExpr) -> bool {
-    let Expr::IndexExpr(lhs_ix) = lhs else {
+    let Expr::IndexExpr(lhs_ix) = unparen(lhs) else {
         return false;
     };
     same_expr(pass, &lhs_ix.x, &ix.x) && same_expr(pass, &lhs_ix.index, &ix.index)
@@ -80,7 +87,7 @@ fn check_append_guard(pass: &Pass<'_>, ifs: &IfStmt, ix: &IndexExpr) -> bool {
     if !same_map_index(pass, &then.lhs[0], ix) {
         return false;
     }
-    let Expr::CallExpr(call) = &then.rhs[0] else {
+    let Expr::CallExpr(call) = unparen(&then.rhs[0]) else {
         return false;
     };
     if !is_call_to(pass, call, "append") || call.args.len() != 2 || !same_expr(pass, &call.args[0], &then.lhs[0])
@@ -90,7 +97,7 @@ fn check_append_guard(pass: &Pass<'_>, ifs: &IfStmt, ix: &IndexExpr) -> bool {
     matches!(else_assign.tok, Some(Token::ASSIGN))
         && else_assign.lhs.len() == 1
         && same_expr(pass, &else_assign.lhs[0], &then.lhs[0])
-        && matches!(else_assign.rhs.first(), Some(Expr::CompositeLit(CompositeLit { elts, .. })) if elts.len() == 1 && same_expr(pass, &elts[0], &call.args[1]))
+        && matches!(else_assign.rhs.first().map(unparen), Some(Expr::CompositeLit(CompositeLit { elts, .. })) if elts.len() == 1 && same_expr(pass, &elts[0], &call.args[1]))
 }
 
 fn check_add_guard(pass: &Pass<'_>, ifs: &IfStmt, ix: &IndexExpr) -> bool {
@@ -126,7 +133,7 @@ fn check_inc_guard(pass: &Pass<'_>, ifs: &IfStmt, ix: &IndexExpr) -> bool {
         && same_map_index(pass, x, ix)
         && matches!(else_assign.tok, Some(Token::ASSIGN))
         && else_assign.lhs.len() == 1
-        && else_assign.lhs[0].id() == x.id()
+        && same_expr(pass, &else_assign.lhs[0], x)
         && else_assign.rhs.len() == 1
         && expr_to_int(pass, &else_assign.rhs[0]).is_some_and(|n| n == 1)
 }
@@ -135,7 +142,7 @@ fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> bool {
     let Some(ix) = ifs.init.as_deref().and_then(map_index_init) else {
         return false;
     };
-    let Expr::Ident(ok) = &ifs.cond else {
+    let Expr::Ident(ok) = unparen(&ifs.cond) else {
         return false;
     };
     if ok.name == "_" || ifs.body.list.len() != 1 {

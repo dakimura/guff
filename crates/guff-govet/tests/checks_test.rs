@@ -8,7 +8,7 @@ use guff_govet::{
     nilfunc_analyzer, printf_analyzer, shift_analyzer, sigchanyzer_analyzer, slog_analyzer,
     stdmethods_analyzer, stringintconv_analyzer, structtag_analyzer, tests_analyzer,
     timeformat_analyzer, unmarshal_analyzer, unreachable_analyzer, unsafeptr_analyzer,
-    unusedresult_analyzer, waitgroup_analyzer,
+    testinggoroutine_analyzer, unusedresult_analyzer, waitgroup_analyzer,
 };
 use guff_types::Config;
 
@@ -997,4 +997,48 @@ mod framepointer_tests {
         );
         assert!(support::run_analyzer(framepointer_analyzer(), &pkg).is_empty());
     }
+}
+
+#[test]
+fn testinggoroutine_flags_forbidden_calls_from_goroutines() {
+    let dir = support::testdata("testinggoroutine");
+    let stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/testinggoroutine",
+        &dir.join("bad_test.go"),
+        &[("testing", &stub)],
+    );
+    let messages = support::run_analyzer(testinggoroutine_analyzer(), &pkg);
+    // Every shape of region: the go statement itself, a literal, a variable
+    // holding a literal, a function of this package, and (*testing.B).
+    assert_eq!(messages.len(), 8, "{messages:?}");
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("call to (*testing.T).Fatal from a non-test goroutine")));
+    // The identifier that reached the region is named, and so is the method.
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("(fn calls (*testing.T).FailNow)")));
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("(helper calls (*testing.T).Fatal)")));
+    assert!(messages
+        .iter()
+        .any(|m| m.contains("call to (*testing.B).Fatal")));
+}
+
+#[test]
+fn testinggoroutine_leaves_the_tests_own_goroutine_alone() {
+    let dir = support::testdata("testinggoroutine");
+    let stub = dir.join("stub/testing/testing.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/testinggoroutine/ok",
+        &dir.join("ok_test.go"),
+        &[("testing", &stub)],
+    );
+    // Includes the two shapes that are easy to get wrong: Errorf (no Goexit)
+    // inside a goroutine, and a t.Fatal inside a subtest nested in one — the
+    // subtest region claims it, so upstream says nothing.
+    let messages = support::run_analyzer(testinggoroutine_analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }

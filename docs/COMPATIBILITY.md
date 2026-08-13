@@ -76,7 +76,7 @@
 | goprintffuncname | ✅ | |
 | gosec | 🟡 | 主要ルール対応。G113 / G115–G118 / G201–G202 / G304–G305 / G307 / G601 等は DEFERRED |
 | gosmopolitan | ✅ | |
-| govet | 🟡 | 上流 46 pass のうち **30 を実装**。printf は引数個数・型照合まで `go vet` 一致。28 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。未実装: appends / asmdecl / atomicalign / deepequalerrors / fieldalignment / findcall / hostport / httpmux / nilness / reflectvaluecompare / shadow / sortslice / stdversion / testinggoroutine / unusedwrite / waitgroup |
+| govet | 🟡 | 上流 46 pass のうち **34 を実装**。printf は引数個数・型照合まで `go vet` 一致。32 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。未実装 12: asmdecl（golangci-lint は `.s` の診断を 1 件も出さないので観測できない） / stdversion（stdlib 全シンボルの導入バージョン表が要る） / atomicalign / deepequalerrors / fieldalignment / findcall / httpmux / nilness / reflectvaluecompare / shadow / sortslice / unusedwrite（この 10 は `enable-all` 専用） |
 | grouper | ✅ | |
 | iface | ✅ | |
 | importas | ✅ | |
@@ -230,7 +230,8 @@ exhaustivestruct / exportloopref / ifshort / nosnakecase / tenv / execinquery）
 |------|:----:|------|
 | `//nolint` / `//nolint:linter` | ✅ | 同一行・直前行の AST 展開。書式/説明必須は DEFERRED |
 | `--fix`（autofix） | 🟡 | SuggestedFix / TextEdit を適用。linter ごとの fix 網羅は継続 |
-| 終了コード | ✅ | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー |
+| 終了コード | 🟡 | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー。**上流は設定エラーを 3 で終える**（実測、golangci-lint 2.12.2）— 合わせていない |
+| 設定の検証 | ✅ | 上流が起動を拒む config は guff も拒み、**理由の文言も同じ**（除外規則の条件数 / `path`+`path-except` / preset 名 / `severity.default` / `output.path-mode` / gocritic の組み合わせ / linter と formatter の取り違え）。ゲートは `compat/reject/`。上流の regexp コンパイル検証だけは方言差のため写していない |
 | キャッシュ | ✅ | パッケージ単位の issues 永続キャッシュ。facts 永続化は DEFERRED（→ R24） |
 | 並列実行 | ✅ | action DAG を rayon で並列。型チェックも並列 |
 | プリセット | 🟡 | `standard` / `fast` / `all` / `none`（`standard`==`all`） |

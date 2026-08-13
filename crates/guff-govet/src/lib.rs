@@ -29,6 +29,7 @@ mod slog;
 mod stdmethods;
 mod stringintconv;
 mod structtag;
+mod testinggoroutine;
 mod testpass;
 mod timeformat;
 mod unmarshal;
@@ -63,6 +64,7 @@ pub use slog::analyzer as slog_analyzer;
 pub use stdmethods::analyzer as stdmethods_analyzer;
 pub use stringintconv::analyzer as stringintconv_analyzer;
 pub use structtag::analyzer as structtag_analyzer;
+pub use testinggoroutine::analyzer as testinggoroutine_analyzer;
 pub use testpass::analyzer as tests_analyzer;
 pub use timeformat::analyzer as timeformat_analyzer;
 pub use unmarshal::analyzer as unmarshal_analyzer;
@@ -102,6 +104,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         stdmethods::analyzer(),
         stringintconv::analyzer(),
         structtag::analyzer(),
+        testinggoroutine::analyzer(),
         testpass::analyzer(),
         timeformat::analyzer(),
         unmarshal::analyzer(),

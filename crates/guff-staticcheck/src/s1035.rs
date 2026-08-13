@@ -1,23 +1,31 @@
 //! S1035 — redundant call to net/http.CanonicalHeaderKey in Header method.
 //!
 //! Port of `honnef.co/go/tools/simple/s1035`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
 use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff::node_mask;
 use guff::walk::NodeRef;
+use guff_analysis::code::unparen;
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 const HEADER_METHODS: &[&str] = &["Add", "Del", "Get", "Set"];
 
 fn is_canonical_header_key_arg(arg: &Expr) -> bool {
-    let Expr::CallExpr(call) = arg else {
+    let Expr::CallExpr(call) = unparen(arg) else {
         return false;
     };
     matches!(
-        &*call.fun,
+        unparen(&call.fun),
         Expr::SelectorExpr(SelectorExpr { sel, .. }) if sel.name == "CanonicalHeaderKey"
     )
 }
@@ -43,7 +51,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let NodeRef::CallExpr(call) = node else {
             return;
         };
-        let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = &*call.fun else {
+        let Expr::SelectorExpr(SelectorExpr { x, sel, .. }) = unparen(&call.fun) else {
             return;
         };
         if !HEADER_METHODS.contains(&sel.name.as_str()) {
@@ -64,7 +72,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             return;
         };
         pending.push((
-            arg.pos().0 as u32,
+            // The pattern binds the *unparenthesized* node, so upstream's
+            // report starts inside the parens: `h.Set((canon(k)), v)` is
+            // reported at `canon`, one column in from `(`.
+            unparen(arg).pos().0 as u32,
             format!(
                 "calling net/http.CanonicalHeaderKey on the 'key' argument of ({recv}).{} is redundant",
                 sel.name

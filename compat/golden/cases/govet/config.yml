@@ -50,6 +50,7 @@ linters:
         - stdmethods
         - stringintconv
         - structtag
+        - testinggoroutine
         - tests
         - timeformat
         - unmarshal

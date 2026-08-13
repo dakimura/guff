@@ -1906,6 +1906,11 @@
       "linter": "govet"
     },
     {
+      "declared_in": "guff-govet/src/testinggoroutine.rs",
+      "id": "govet/testinggoroutine",
+      "linter": "govet"
+    },
+    {
       "declared_in": "guff-govet/src/testpass.rs",
       "id": "govet/tests",
       "linter": "govet"
@@ -2808,7 +2813,7 @@
       "goprintffuncname": 1,
       "gosec": 35,
       "gosmopolitan": 1,
-      "govet": 33,
+      "govet": 34,
       "grouper": 1,
       "iface": 1,
       "importas": 1,
@@ -2874,7 +2879,7 @@
       "wsl_v5": 1,
       "zerologlint": 1
     },
-    "total": 550
+    "total": 551
   },
   "linters": [
     "arangolint",

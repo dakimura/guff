@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -13,11 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from normalize import (  # noqa: E402
+    confirm,
     diff_sets,
     extract_issues_json,
     format_report,
+    format_unconfirmed,
     issue_key,
     issue_keys,
+    main,
     normalize_message,
     normalize_path,
     parse_allowlist,
@@ -223,6 +228,88 @@ class DiffTests(unittest.TestCase):
         text = format_report([r])
         self.assertIn("100.0%", text)
         self.assertIn("fixture", text)
+
+
+class ConfirmTests(unittest.TestCase):
+    """The OSS tier's copy of the golden/fuzz rule: upstream is not a function."""
+
+    def test_two_identical_runs_confirm(self):
+        a = {"a.go:1:govet:x"}
+        self.assertEqual(confirm([set(a), set(a)], 2), 1)
+
+    def test_one_confirmation_takes_the_first_run(self):
+        self.assertEqual(confirm([{"a.go:1:govet:x"}, set()], 1), 0)
+
+    def test_disagreeing_runs_are_not_confirmed(self):
+        runs = [{"a.go:1:govet:x"}, set(), {"b.go:2:govet:y"}]
+        self.assertIsNone(confirm(runs, 2))
+
+    def test_the_repeat_wins_even_when_it_is_not_the_largest(self):
+        """Confirmation is "seen twice", not "the union" or "the biggest".
+
+        A finding that *moves* (revive's memoization race) makes the union wrong,
+        and a run that is larger because upstream duplicated work is not more
+        right than one seen twice.
+        """
+        small, big = {"a.go:1:govet:x"}, {"a.go:1:govet:x", "b.go:2:govet:y"}
+        idx = confirm([set(big), set(small), set(small)], 2)
+        self.assertEqual(idx, 2)
+
+    def test_unconfirmed_report_names_the_moving_keys(self):
+        runs = [{"a.go:1:govet:x"}, {"a.go:1:govet:x", "b.go:2:govet:y"}]
+        text = format_unconfirmed("k9s", runs)
+        self.assertIn("did not agree", text)
+        self.assertIn("b.go:2:govet:y", text)
+        self.assertIn("1/2 runs", text)
+
+    def test_cli_prints_the_confirmed_dump(self):
+        paths = [_write_issues(["x"]), _write_issues(["y"]), _write_issues(["x"])]
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+                rc = main(
+                    ["confirm", "--target", "t", "--root", "/mod",
+                     "--confirmations", "2", *paths]
+                )
+            self.assertEqual(rc, 0)
+            # The third run repeats the first, so it is the one to diff.
+            self.assertEqual(buf.getvalue().strip(), paths[2])
+        finally:
+            for p in paths:
+                Path(p).unlink(missing_ok=True)
+
+    def test_cli_fails_when_no_two_runs_agree(self):
+        paths = [_write_issues(["x"]), _write_issues(["y"])]
+        try:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = main(
+                    ["confirm", "--target", "t", "--root", "/mod",
+                     "--confirmations", "2", *paths]
+                )
+            self.assertEqual(rc, 1)
+            self.assertEqual(out.getvalue(), "")
+            self.assertIn("did not agree", err.getvalue())
+        finally:
+            for p in paths:
+                Path(p).unlink(missing_ok=True)
+
+
+def _write_issues(texts: list[str]) -> str:
+    payload = {
+        "Issues": [
+            {
+                "FromLinter": "govet",
+                "Text": t,
+                "Pos": {"Filename": "/mod/main.go", "Line": 1, "Column": 1, "Offset": 0},
+            }
+            for t in texts
+        ],
+        "Report": None,
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        fh.write(json.dumps(payload))
+        return fh.name
 
 
 def parse_allowlist_lines(lines: list[str]):

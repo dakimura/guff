@@ -78,14 +78,21 @@ impl Checker {
         // position — `f[targs](args)` — is handled specially: `index_expr`
         // signals a generic-function operand and `func_inst` instantiates the
         // signature so the ordinary call path below sees a concrete signature.
+        // Type arguments written explicitly but not completely — `f[int](x)`
+        // where `f` has two type parameters. Upstream leaves the signature
+        // generic in that case and carries the partial list into `arguments`,
+        // where one `infer` sees both what was written and what the arguments
+        // imply (`callExpr` → `arguments(call, sig, targs, …)`).
+        let mut partial_targs: Vec<TypeId> = Vec::new();
         match call.fun.as_ref() {
             Expr::IndexExpr(ie) => {
                 if self.index_expr(x, ie) {
-                    self.func_inst(
+                    partial_targs = self.func_inst(
                         x,
                         &ie.x,
                         std::slice::from_ref(&*ie.index),
                         ie.x.pos().0 as u32,
+                        false,
                     );
                 }
                 // Otherwise `index_expr` already fully evaluated `x` (ordinary
@@ -94,7 +101,8 @@ impl Checker {
             Expr::IndexListExpr(ie) => {
                 self.expr(x, &ie.x);
                 if self.is_generic_func_value(x) {
-                    self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32);
+                    partial_targs =
+                        self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, false);
                 } else if x.mode != OperandMode::Invalid {
                     // A multi-index on a non-generic operand is not a valid call
                     // target (ordinary indexing takes a single index).
@@ -235,7 +243,7 @@ impl Checker {
         // Check arguments. For a generic callee, `arguments` infers the type
         // arguments from the call's argument types and returns the instantiated
         // (non-generic) signature; for an ordinary callee it returns `sig`.
-        let sig = match self.arguments(call, sig) {
+        let sig = match self.arguments(call, sig, &partial_targs) {
             Some(s) => s,
             None => {
                 x.mode = OperandMode::Invalid;
@@ -292,18 +300,26 @@ impl Checker {
     /// instantiated function value (mode `Value`, a concrete non-generic
     /// `Signature`), so a surrounding call flows through the ordinary path.
     ///
-    /// Equivalent to `Checker.funcInst` for the fully-explicit case.
-    /// **Deferred**: partial instantiation completed by inference from the call
-    /// arguments or an assignment target (`got < want`), and reverse type
-    /// inference (the `target` machinery) — a partial explicit instantiation is
-    /// reported as `CannotInferTypeArgs`.
+    /// Equivalent to `Checker.funcInst`. `infer` is upstream's parameter of the
+    /// same name: with it false — the call-position caller — a *partial*
+    /// explicit instantiation (`got < want`) is not an error here. The type
+    /// arguments that were written are returned and `x` keeps its generic
+    /// signature, so [`Checker::arguments`] can hand them and the argument
+    /// types to one `infer`. The returned vector is empty in every other case
+    /// (fully instantiated, invalid, or `infer` true).
+    ///
+    /// **Deferred**: inference from an assignment target (Go's `target`
+    /// machinery, `var f func(int) = g` for generic `g`) — with `infer` true
+    /// and `got < want` this still reports `CannotInferTypeArgs`, which is what
+    /// upstream does when it has no target either.
     pub(crate) fn func_inst(
         &mut self,
         x: &mut Operand,
         base: &Expr,
         index_exprs: &[Expr],
         pos: u32,
-    ) {
+        infer: bool,
+    ) -> Vec<TypeId> {
         // Go: verifyVersionf(go1_18, "function instantiation") — gate deferred.
 
         // A function value's type is a Signature directly.
@@ -322,7 +338,7 @@ impl Checker {
             None => {
                 x.mode = OperandMode::Invalid;
                 x.typ = Some(self.invalid_type());
-                return;
+                return Vec::new();
             }
         };
 
@@ -339,12 +355,20 @@ impl Checker {
             );
             x.mode = OperandMode::Invalid;
             x.typ = Some(self.invalid_type());
-            return;
+            return Vec::new();
         }
         if got < want {
-            // DEFERRED: infer the remaining type arguments from the call's
-            // arguments or an assignment target (Go's `infer` / reverse
-            // inference via `target`).
+            if !infer {
+                // Call position: `x` stays the generic function and the caller
+                // completes the list from the argument types. `sets.KeySet[string](m)`
+                // is the shape — one of two type parameters written, the other
+                // only knowable from `m` — and it cost kubernetes' `util/sets`
+                // and everything importing it.
+                return targs;
+            }
+            // No call to learn the rest from, and the assignment-target path is
+            // not ported: same diagnostic upstream gives when `infer` finds
+            // nothing to work with.
             self.error(
                 pos,
                 Code::CannotInferTypeArgs,
@@ -355,7 +379,7 @@ impl Checker {
             );
             x.mode = OperandMode::Invalid;
             x.typ = Some(self.invalid_type());
-            return;
+            return Vec::new();
         }
 
         // got == want: verify constraints (soft error) and instantiate.
@@ -388,6 +412,7 @@ impl Checker {
         self.record_instance(base, targs, inst);
         x.typ = Some(inst);
         x.mode = OperandMode::Value;
+        Vec::new()
     }
 
     /// Count-check and `assignment`-check a call's arguments against `sig`,
@@ -396,11 +421,18 @@ impl Checker {
     ///
     /// Simplified `Checker.arguments`. For a **generic callee** the type
     /// arguments are inferred from the argument types via [`crate::infer`] and
-    /// the signature is instantiated; explicit instantiation `f[int](...)`,
-    /// generic function arguments (reverse inference), `renameTParams`, and
-    /// multi-valued single arguments are not handled (see [`Checker::call_expr`]
-    /// deferrals). Variadic spreading builds the per-argument target type inline.
-    pub(crate) fn arguments(&mut self, call: &CallExpr, sig: TypeId) -> Option<TypeId> {
+    /// the signature is instantiated. `partial_targs` are the type arguments
+    /// the call wrote out explicitly when it did not write them all
+    /// (`f[int](x)` for a two-parameter `f`); they seed inference in the same
+    /// positions upstream seeds them. Multi-valued single arguments are not
+    /// handled (see [`Checker::call_expr`] deferrals). Variadic spreading
+    /// builds the per-argument target type inline.
+    pub(crate) fn arguments(
+        &mut self,
+        call: &CallExpr,
+        sig: TypeId,
+        partial_targs: &[TypeId],
+    ) -> Option<TypeId> {
         let (params, variadic) = match self.types.get(sig) {
             TypeData::Signature(s) => (s.params(), s.variadic()),
             _ => return None,
@@ -495,7 +527,7 @@ impl Checker {
             _ => Vec::new(),
         };
         let rsig = if !tparam_ids.is_empty() {
-            match self.infer_call(call, sig, &tparam_ids, &mut args, nargs, ddd) {
+            match self.infer_call(call, sig, &tparam_ids, &mut args, nargs, ddd, partial_targs) {
                 Some(s) => s,
                 None => return None,
             }
@@ -521,12 +553,17 @@ impl Checker {
     /// argument operands and return the instantiated (non-generic) signature.
     /// Reports `CannotInferTypeArgs` and returns `None` on failure.
     ///
-    /// Equivalent to the inference slice of `Checker.arguments`. **Deferred**:
-    /// explicit + partial type arguments and untyped-argument default-type
-    /// promotion (the `infer` step-3 carry, D11). Reverse inference from
-    /// generic function arguments is handled below; a generic argument's
-    /// operand type is rewritten in place to the instantiated signature, as
-    /// upstream does before it checks the assignments.
+    /// Equivalent to the inference slice of `Checker.arguments`. `partial_targs`
+    /// are the callee's explicitly written type arguments when the call wrote
+    /// some but not all of them; they occupy the first positions of the list
+    /// `infer` starts from, exactly as upstream's `for len(targs) < len(tparams)
+    /// { targs = append(targs, nil) }` leaves them. **Deferred**:
+    /// untyped-argument default-type promotion (the `infer` step-3 carry, D11).
+    /// Reverse inference from generic function arguments is handled below; a
+    /// generic argument's operand type is rewritten in place to the
+    /// instantiated signature, as upstream does before it checks the
+    /// assignments.
+    #[allow(clippy::too_many_arguments)]
     fn infer_call(
         &mut self,
         call: &CallExpr,
@@ -535,6 +572,7 @@ impl Checker {
         args: &mut [Operand],
         nargs: usize,
         ddd: bool,
+        partial_targs: &[TypeId],
     ) -> Option<TypeId> {
         // Build the parameter tuple matching the call's argument count
         // (variadic functions need their tail expanded — `infer` requires
@@ -652,7 +690,14 @@ impl Checker {
         }
         let renamed_tparams = all_tparams;
 
-        let targs_in = vec![None; renamed_tparams.len()];
+        // The callee's own type parameters come first, so the explicitly
+        // written arguments land on the parameters they were written for; the
+        // rest — the callee's unwritten ones and every generic argument's —
+        // stay open for inference.
+        let mut targs_in: Vec<Option<TypeId>> = vec![None; renamed_tparams.len()];
+        for (i, t) in partial_targs.iter().take(callee_ntparams).enumerate() {
+            targs_in[i] = Some(*t);
+        }
         let typ_table = self.typ.clone();
         // Go enables shared-method interface inference for go1.21+ (an unset
         // language version defaults to current, so this is on by default).

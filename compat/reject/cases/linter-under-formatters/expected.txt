@@ -1,0 +1,1 @@
+can't load config: errcheck is not a formatter

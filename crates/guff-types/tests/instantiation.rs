@@ -526,3 +526,90 @@ fn explicit_func_instantiation_constraint_violation() {
         c.errors
     );
 }
+
+// --- partially explicit type arguments -------------------------------------
+//
+// `f[int](x)` for a two-parameter `f`: what the call writes is not enough on
+// its own, and the rest comes from the arguments. Upstream keeps the signature
+// generic and hands both halves to one `infer` (`callExpr` → `arguments(call,
+// sig, targs, …)`); guff used to report `CannotInferTypeArgs` on sight, which
+// cost kubernetes' `util/sets` — and, through it, every package importing it.
+
+#[test]
+fn partial_explicit_targs_are_completed_from_the_arguments() {
+    // The shape from kubernetes: `sets.KeySet[string](m)`, where M and V are
+    // only knowable from the argument.
+    let c = check_src(
+        "package p\n\
+         type Set[T comparable] map[T]struct{}\n\
+         func KeySet[T comparable, M ~map[T]V, V any](m M) Set[T] { var s Set[T]; return s }\n\
+         func f() { m := map[string]int{}; _ = KeySet[string](m) }\n",
+    );
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn partial_explicit_targs_bind_the_parameters_they_were_written_for() {
+    // `two[int](1, "s")` must fix A = int and infer B = string, not the other
+    // way round: a partial list is positional.
+    let c = check_src(
+        "package p\n\
+         func two[A any, B any](a A, b B) B { return b }\n\
+         func f() { var s string = two[int](1, \"s\"); _ = s }\n",
+    );
+    assert!(c.errors.is_empty(), "unexpected errors: {:?}", c.errors);
+}
+
+#[test]
+fn a_written_type_argument_still_type_checks_its_own_parameter() {
+    // Seeding inference must not turn the explicit half into a free variable:
+    // A is int, so a string argument in that position is still an error.
+    let c = check_src(
+        "package p\n\
+         func two[A any, B any](a A, b B) B { return b }\n\
+         func f() { _ = two[int](\"x\", \"s\") }\n",
+    );
+    assert!(!c.errors.is_empty(), "expected an argument type error");
+}
+
+#[test]
+fn partial_explicit_targs_that_the_arguments_contradict_still_fail() {
+    // M is written as `map[string]int` but the argument is a different map:
+    // inference has nothing to reconcile and the call must not pass.
+    let c = check_src(
+        "package p\n\
+         func get[K comparable, V any](m map[K]V, k K) V { return m[k] }\n\
+         func f() { m := map[string]int{}; _ = get[int](m, 1) }\n",
+    );
+    assert!(!c.errors.is_empty(), "expected a type error");
+}
+
+#[test]
+fn partial_explicit_targs_in_value_position_are_still_an_error() {
+    // No argument list to learn from, and the assignment-target path is not
+    // ported — same as upstream with no target.
+    let c = check_src(
+        "package p\n\
+         func two[A any, B any](a A, b B) B { return b }\n\
+         func f() { _ = two[int] }\n",
+    );
+    assert!(
+        c.errors.iter().any(|e| e.code == Code::CannotInferTypeArgs),
+        "expected CannotInferTypeArgs, got {:?}",
+        c.errors
+    );
+}
+
+#[test]
+fn too_many_type_arguments_is_still_counted_first() {
+    let c = check_src(
+        "package p\n\
+         func two[A any, B any](a A, b B) B { return b }\n\
+         func f() { _ = two[int, string, bool](1, \"s\") }\n",
+    );
+    assert!(
+        c.errors.iter().any(|e| e.code == Code::WrongTypeArgCount),
+        "expected WrongTypeArgCount, got {:?}",
+        c.errors
+    );
+}

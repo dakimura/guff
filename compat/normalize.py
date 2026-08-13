@@ -181,6 +181,53 @@ def issue_keys(issues: Iterable[dict], root: str) -> set[str]:
     return {issue_key(i, root) for i in issues if not is_related_information(i)}
 
 
+def confirm(runs: list[set[str]], confirmations: int) -> int | None:
+    """Return the index of the first run whose key set was seen `confirmations` times.
+
+    golangci-lint is not a deterministic function of its input: it drops whole
+    packages' findings on some runs, and revive's memoization race *moves* a
+    finding between files (measured — see compat/golden/README.md, "Upstream is
+    not a function"). ``compat/golden/golden.py`` refuses to write a golden until
+    it has seen the same answer twice and ``compat/fuzz.py`` re-runs a
+    disagreeing mutant before reporting it; this is the same rule for the OSS
+    tier, whose single run used to decide a target's verdict on its own.
+
+    Both directions of that gamble matter. A truncated upstream run turns guff's
+    correct findings into "guff-only" noise (loud, and that is how k9s's goconst
+    was noticed at all), but it can just as easily hide a real guff recall bug by
+    dropping the very finding guff is missing — silently, and green.
+
+    "Seen N times", never the union of all runs: a union assumes the only
+    failure mode is loss, and would happily accept both positions of a finding
+    that moved.
+    """
+    tally: defaultdict[tuple[str, ...], int] = defaultdict(int)
+    for i, run in enumerate(runs):
+        k = tuple(sorted(run))
+        tally[k] += 1
+        if tally[k] >= confirmations:
+            return i
+    return None
+
+
+def format_unconfirmed(target: str, runs: list[set[str]]) -> str:
+    """Explain which keys moved across `runs`, largest run as the base."""
+    base = max(runs, key=len)
+    lines = [
+        f"{target}: {len(runs)} run(s) of golangci-lint did not agree "
+        f"(sizes {[len(r) for r in runs]})"
+    ]
+    unstable: set[str] = set()
+    for run in runs:
+        unstable |= base ^ run
+    for k in sorted(unstable)[:20]:
+        seen = sum(1 for r in runs if k in r)
+        lines.append(f"  {seen}/{len(runs)} runs {k}")
+    if len(unstable) > 20:
+        lines.append(f"  ... and {len(unstable) - 20} more")
+    return "\n".join(lines)
+
+
 @dataclass
 class AllowEntry:
     target: str
@@ -426,6 +473,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Write machine-readable summary JSON",
     )
 
+    p_confirm = sub.add_parser(
+        "confirm",
+        help="Pick the JSON dump whose key set repeated across independent runs",
+    )
+    p_confirm.add_argument("json", nargs="+", help="Independent runs of the same target")
+    p_confirm.add_argument("--target", required=True)
+    p_confirm.add_argument("--root", required=True)
+    p_confirm.add_argument(
+        "--confirmations",
+        type=int,
+        default=2,
+        help="Runs that must produce identical keys (1 disables confirmation)",
+    )
+
     p_report = sub.add_parser(
         "report",
         help="Build a multi-target report from a TSV of target\\troot\\tguff.json\\tgcl.json",
@@ -445,6 +506,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "keys":
         for k in sorted(issue_keys(load_issues(args.json), args.root)):
             print(k)
+        return 0
+
+    if args.cmd == "confirm":
+        runs = [issue_keys(load_issues(p), args.root) for p in args.json]
+        idx = confirm(runs, max(1, args.confirmations))
+        if idx is None:
+            print(format_unconfirmed(args.target, runs), file=sys.stderr)
+            return 1
+        # stdout is the dump the caller should diff against; everything else
+        # goes to stderr so `$(... confirm ...)` stays a path.
+        print(args.json[idx])
+        if len(runs) > max(1, args.confirmations):
+            print(
+                f"  {args.target}: golangci-lint agreed with itself on run "
+                f"{idx + 1} of {len(runs)}",
+                file=sys.stderr,
+            )
         return 0
 
     if args.cmd == "diff":

@@ -588,6 +588,10 @@ fn load_run_config(
         match path {
             Some(p) => {
                 let cfg = load_config(&p)?;
+                // golangci-lint validates before it runs anything, so a config
+                // in this family produces no findings there. Running it here
+                // with a silently different enable set is not compatibility.
+                cfg.validate()?;
                 (Some(cfg), Some(p))
             }
             None => (None, None),
@@ -659,6 +663,21 @@ fn load_run_config(
 
     let formatters = file.as_ref().map(|c| c.formatters()).unwrap_or_default();
     let go_version = run.go.clone();
+
+    // gocritic validates its own option combinations from the linter's context
+    // setter, so upstream only rejects them when gocritic is enabled — a stale
+    // settings block under a disabled linter starts fine there and must here.
+    if selection.resolve_names().iter().any(|n| n == "gocritic") {
+        let gc = &linter_settings.gocritic;
+        crate::config::validate_gocritic_options(
+            gc.enable_all,
+            gc.disable_all,
+            &gc.enabled_tags,
+            &gc.enabled_checks,
+            &gc.disabled_tags,
+            &gc.disabled_checks,
+        )?;
+    }
 
     // golangci `Loader.handleGoVersion`: `run.go` is a linter setting, not a
     // source property. It also has to reach the cache key — two runs of the

@@ -1,6 +1,13 @@
 //! S1009 — omit redundant nil check on slices, maps, and channels.
 //!
 //! Port of `honnef.co/go/tools/simple/s1009`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
@@ -8,7 +15,7 @@ use guff::ast::{BinaryExpr, Expr};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{is_call_to, is_integer_literal, is_nil};
+use guff_analysis::code::{is_call_to, is_integer_literal, is_nil, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_constant::{int64_val, Kind};
@@ -37,7 +44,7 @@ fn is_const_zero(pass: &Pass<'_>, expr: &Expr) -> Option<bool> {
     if is_integer_literal(pass, expr, 0) {
         return Some(true);
     }
-    let Expr::Ident(ident) = expr else {
+    let Expr::Ident(ident) = unparen(expr) else {
         return None;
     };
     let info = pass.types_info()?;
@@ -67,6 +74,10 @@ fn nil_check_type(pass: &Pass<'_>, expr: &Expr) -> Option<&'static str> {
 }
 
 fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
+    // Unparenthesizing here is what makes `(x) != nil && len(x) > 0` compare
+    // equal, and it is also why there is no `ParenExpr` arm below: neither side
+    // can still be one.
+    let (a, b) = (unparen(a), unparen(b));
     if std::mem::discriminant(a) != std::mem::discriminant(b) {
         return false;
     }
@@ -83,7 +94,6 @@ fn same_expr(pass: &Pass<'_>, a: &Expr, b: &Expr) -> bool {
             }
             true
         }
-        (Expr::ParenExpr(x), Expr::ParenExpr(y)) => same_expr(pass, &x.x, &y.x),
         (Expr::StarExpr(x), Expr::StarExpr(y)) => same_expr(pass, &x.x, &y.x),
         (Expr::SelectorExpr(x), Expr::SelectorExpr(y)) => {
             x.sel.name == y.sel.name && same_expr(pass, &x.x, &y.x)
@@ -99,13 +109,13 @@ fn check_binary(pass: &Pass<'_>, outer: &BinaryExpr) -> Option<(u32, String)> {
     if outer.op != Token::LAND && outer.op != Token::LOR {
         return None;
     }
-    let Expr::BinaryExpr(inner) = &*outer.x else {
+    let Expr::BinaryExpr(inner) = unparen(&outer.x) else {
         return None;
     };
-    let Expr::BinaryExpr(rhs) = &*outer.y else {
+    let Expr::BinaryExpr(rhs) = unparen(&outer.y) else {
         return None;
     };
-    let Expr::CallExpr(len_call) = &*rhs.x else {
+    let Expr::CallExpr(len_call) = unparen(&rhs.x) else {
         return None;
     };
     if !is_call_to(pass, len_call, "len") || len_call.args.len() != 1 {

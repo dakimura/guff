@@ -81,6 +81,14 @@ slog/bad/bad.go:6:2:govet::slog: call to slog.Info missing a final value
 stdmethods/bad/bad.go:7:16:govet::stdmethods: method Unwrap() should have signature Unwrap() error or Unwrap() []error
 stringintconv/bad/bad.go:4:6:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
 structtag/bad/bad.go:4:2:govet::structtag: struct field x has json tag but is not exported
+testinggoroutine/bad_test/bad_test.go:7:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:11:3:govet::testinggoroutine: call to (*testing.T).Fatalf from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:19:2:govet::testinggoroutine: call to (*testing.T).FailNow from a non-test goroutine (fn calls (*testing.T).FailNow)
+testinggoroutine/bad_test/bad_test.go:22:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine (helper calls (*testing.T).Fatal)
+testinggoroutine/bad_test/bad_test.go:26:3:govet::testinggoroutine: call to (*testing.T).Skip from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:27:3:govet::testinggoroutine: call to (*testing.T).Skipf from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:28:3:govet::testinggoroutine: call to (*testing.T).SkipNow from a non-test goroutine
+testinggoroutine/bad_test/bad_test.go:37:2:govet::testinggoroutine: call to (*testing.B).Fatal from a non-test goroutine
 tests/bad_test/bad_test.go:5:6:govet::tests: Testbad has malformed name: first letter after 'Test' must not be lowercase
 timeformat/bad/bad.go:6:21:govet::timeformat: 2006-02-01 should be 2006-01-02
 unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer as second argument

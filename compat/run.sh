@@ -13,13 +13,18 @@
 #   ./compat/run.sh --isolate --linter errcheck
 #   ./compat/run.sh --update-allowlist   # rewrite allowlists from current diffs
 #   ./compat/run.sh --update-baseline    # re-record ill-typed baselines
+#   ./compat/run.sh --confirmations 1    # one golangci-lint run (fast iteration)
 #
 # OSS targets use each checkout's real golangci-lint v2 config (via corpus/).
 # Fixture / local keep compat/standard.yml.
 # Isolate mode enables exactly one linter per target (see compat/isolate/).
 #
+# golangci-lint is run until two runs return the same finding set (see
+# "Confirmation" below); guff is run once.
+#
 # Env:
 #   GUFF_BIN / GOLANGCI_LINT_BIN / CORPUS_CACHE
+#   COMPAT_CONFIRMATIONS (default 2) / COMPAT_CONFIRM_ATTEMPTS (default 4)
 #
 # Exit 0 when every target's unexpected-diff set is empty (allowlist covers
 # all known mismatches). Exit 1 on unexpected diffs or tool failure.
@@ -55,6 +60,11 @@ ALL_LINTERS=0
 TIER="pr"
 LINTER_FILTER=""
 NAME_FILTER=""
+# Confirmation: how many golangci-lint runs must return the same finding set
+# before that set is diffed, and how many runs we are willing to spend looking
+# for them. 1 disables confirmation (one run, the pre-16th-session behaviour).
+CONFIRMATIONS="${COMPAT_CONFIRMATIONS:-2}"
+CONFIRM_ATTEMPTS="${COMPAT_CONFIRM_ATTEMPTS:-4}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -88,6 +98,22 @@ while [[ $# -gt 0 ]]; do
       NAME_FILTER="${1#*=}"
       shift
       ;;
+    --confirmations)
+      CONFIRMATIONS="$2"
+      shift 2
+      ;;
+    --confirmations=*)
+      CONFIRMATIONS="${1#*=}"
+      shift
+      ;;
+    --confirm-attempts)
+      CONFIRM_ATTEMPTS="$2"
+      shift 2
+      ;;
+    --confirm-attempts=*)
+      CONFIRM_ATTEMPTS="${1#*=}"
+      shift
+      ;;
     -h|--help)
       sed -n '2,24p' "$0"
       exit 0
@@ -112,6 +138,12 @@ if [[ "$ALL_LINTERS" -eq 1 && "$OSS" -eq 0 ]]; then
 fi
 if [[ -n "$NAME_FILTER" && "$OSS" -eq 0 ]]; then
   die "--name requires --oss (isolate mode uses --linter)"
+fi
+[[ "$CONFIRMATIONS" =~ ^[0-9]+$ && "$CONFIRMATIONS" -ge 1 ]] \
+  || die "--confirmations wants a positive integer, got '$CONFIRMATIONS'"
+[[ "$CONFIRM_ATTEMPTS" =~ ^[0-9]+$ ]] || die "--confirm-attempts wants an integer"
+if [[ "$CONFIRM_ATTEMPTS" -lt "$CONFIRMATIONS" ]]; then
+  die "--confirm-attempts ($CONFIRM_ATTEMPTS) < --confirmations ($CONFIRMATIONS)"
 fi
 
 resolve_guff() {
@@ -187,6 +219,11 @@ else
   echo "  standard: $CONFIG_STANDARD"
 fi
 echo "  allowlists:$ACTIVE_ALLOWLIST_DIR"
+if [[ "$CONFIRMATIONS" -gt 1 ]]; then
+  echo "  confirm:  golangci-lint x$CONFIRMATIONS identical (up to $CONFIRM_ATTEMPTS runs)"
+else
+  echo "  confirm:  DISABLED (one golangci-lint run decides this target)"
+fi
 echo "  results:  $RUN_DIR"
 echo
 
@@ -200,11 +237,10 @@ run_target() {
   echo "  config: $config"
   echo "  packages: $packages  timeout: $timeout"
 
-  local guff_json gcl_json guff_cache gcl_cache run_config
+  local guff_json gcl_json guff_cache run_config
   guff_json="$RUN_DIR/${name}.guff.json"
   gcl_json="$RUN_DIR/${name}.golangci.json"
   guff_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-compat-guff.XXXXXX")"
-  gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-compat-gcl.XXXXXX")"
 
   # Force unlimited issue caps so max-same-issues truncation cannot rotate keys.
   # standard.yml and isolate configs already set max-*-issues: 0.
@@ -242,32 +278,80 @@ run_target() {
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr" || {
     echo "guff failed for $name; see $RUN_DIR/${name}.guff.stderr" >&2
     cat "$RUN_DIR/${name}.guff.stderr" >&2 || true
-    rm -rf "$guff_cache" "$gcl_cache"
+    rm -rf "$guff_cache"
     return 1
   }
+  rm -rf "$guff_cache"
 
-  # shellcheck disable=SC2086
-  (
-    cd "$dir"
-    env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
-      "$GOLANGCI" run \
-      -c "$run_config" \
-      --output.json.path=stdout \
-      --path-mode abs \
-      --issues-exit-code 0 \
-      --timeout="$timeout" \
-      --max-issues-per-linter=0 \
-      --max-same-issues=0 \
-      --allow-parallel-runners \
-      $packages
-  ) >"$gcl_json" 2>"$RUN_DIR/${name}.golangci.stderr" || {
-    echo "golangci-lint failed for $name; see $RUN_DIR/${name}.golangci.stderr" >&2
-    cat "$RUN_DIR/${name}.golangci.stderr" >&2 || true
-    rm -rf "$guff_cache" "$gcl_cache"
+  # golangci-lint is not a deterministic function of its input: whole packages'
+  # findings go missing on some runs, and revive's memoization race moves a
+  # finding between files (measured — compat/golden/README.md, "Upstream is not
+  # a function"). golden.py refuses to write a golden until it has seen the same
+  # answer twice, and fuzz.py re-runs a disagreeing mutant before reporting it.
+  # This is the same rule here: run golangci-lint until two runs return the same
+  # normalized key set, and diff that set.
+  #
+  # A single run gambles in both directions. Truncation upstream turns guff's
+  # correct findings into "guff-only" noise, which is loud — that is how k9s's
+  # goconst was noticed at all. Dropping the very finding guff is missing is the
+  # same coin landing the other way up: the diff comes out empty and the gate
+  # goes green over a real recall bug, with nothing to notice.
+  #
+  # Every attempt gets a fresh GOLANGCI_LINT_CACHE. Reusing one would make the
+  # second run replay the first run's answer from cache, and confirmation would
+  # confirm nothing.
+  local attempt=0 confirmed_json="" gcl_cache
+  local gcl_runs=()
+  while ((attempt < CONFIRM_ATTEMPTS)); do
+    attempt=$((attempt + 1))
+    local this_json="$RUN_DIR/${name}.golangci.$attempt.json"
+    gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-compat-gcl.XXXXXX")"
+    # shellcheck disable=SC2086
+    (
+      cd "$dir"
+      env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
+        "$GOLANGCI" run \
+        -c "$run_config" \
+        --output.json.path=stdout \
+        --path-mode abs \
+        --issues-exit-code 0 \
+        --timeout="$timeout" \
+        --max-issues-per-linter=0 \
+        --max-same-issues=0 \
+        --allow-parallel-runners \
+        $packages
+    ) >"$this_json" 2>"$RUN_DIR/${name}.golangci.$attempt.stderr" || {
+      echo "golangci-lint failed for $name; see $RUN_DIR/${name}.golangci.$attempt.stderr" >&2
+      cat "$RUN_DIR/${name}.golangci.$attempt.stderr" >&2 || true
+      rm -rf "$gcl_cache"
+      return 1
+    }
+    rm -rf "$gcl_cache"
+    gcl_runs+=("$this_json")
+    ((attempt < CONFIRMATIONS)) && continue
+    if confirmed_json="$(python3 "$NORMALIZE" confirm \
+      --target "$name" \
+      --root "$dir" \
+      --confirmations "$CONFIRMATIONS" \
+      "${gcl_runs[@]}")"; then
+      break
+    fi
+    confirmed_json=""
+  done
+
+  if [[ -z "$confirmed_json" ]]; then
+    # Nothing to diff against: the tool this target is compared to has no single
+    # answer today. Say so instead of picking one of its answers.
+    echo "  $name: UNSTABLE — golangci-lint never agreed with itself in $attempt run(s); not diffed" >&2
+    UNSTABLE_TARGETS=$((UNSTABLE_TARGETS + 1))
     return 1
-  }
+  fi
+  cp "$confirmed_json" "$gcl_json"
+  cp "${confirmed_json%.json}.stderr" "$RUN_DIR/${name}.golangci.stderr"
+  if ((attempt > CONFIRMATIONS)); then
+    echo "  $name: golangci-lint needed $attempt runs to repeat itself"
+  fi
 
-  rm -rf "$guff_cache" "$gcl_cache"
   printf '%s\t%s\t%s\t%s\n' "$name" "$dir" "$guff_json" "$gcl_json" >>"$MANIFEST"
 
   # Silent recall losses: a panicking analyzer drops its findings, and an
@@ -313,6 +397,7 @@ PY
 
 FAILED_TARGETS=0
 HEALTH_FAILED=0
+UNSTABLE_TARGETS=0
 
 run_isolate_targets() {
   [[ -f "$ISOLATE_LINTERS" ]] || die "missing $ISOLATE_LINTERS"
@@ -538,8 +623,18 @@ fi
 
 echo
 echo "Wrote $REPORT"
-if [[ -f "$RESULT_SNAPSHOT" ]] && { [[ "$ISOLATE" -eq 1 ]] || [[ "$SMOKE" -eq 0 ]]; }; then
+# Same condition as the copy above, --name included: a one-target run leaves the
+# committed snapshot alone, and saying otherwise sends the reader to a file that
+# does not describe this run.
+if [[ -f "$RESULT_SNAPSHOT" ]] && [[ -z "$NAME_FILTER" ]] &&
+  { [[ "$ISOLATE" -eq 1 ]] || [[ "$SMOKE" -eq 0 ]]; }; then
   echo "Wrote $RESULT_SNAPSHOT"
+fi
+
+if [[ "$UNSTABLE_TARGETS" -gt 0 ]]; then
+  echo "FAIL: $UNSTABLE_TARGETS target(s) where golangci-lint never returned the same" \
+    "finding set twice in $CONFIRM_ATTEMPTS runs" >&2
+  echo "Raise --confirm-attempts, or read the per-run keys in $RUN_DIR" >&2
 fi
 
 if [[ "$FAILED_TARGETS" -gt 0 ]]; then

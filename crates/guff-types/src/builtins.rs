@@ -1060,7 +1060,7 @@ impl Checker {
                 let results = crate::tuple::new_tuple(&mut self.types, &[result_var]);
                 let sig =
                     new_signature_type(&mut self.types, None, &[], &[], params, results, true);
-                self.arguments(call, sig);
+                self.arguments(call, sig, &[]);
                 x.mode = OperandMode::Value;
                 x.typ = Some(s_typ);
                 return true;
@@ -1077,7 +1077,7 @@ impl Checker {
         let results = crate::tuple::new_tuple(&mut self.types, &[result_var]);
         let sig = new_signature_type(&mut self.types, None, &[], &[], params, results, true);
         // Discard the result — we already know the result type is S.
-        self.arguments(call, sig);
+        self.arguments(call, sig, &[]);
 
         x.mode = OperandMode::Value;
         x.typ = Some(s_typ); // unchanged

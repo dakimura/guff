@@ -1,13 +1,20 @@
 //! S1039 — unnecessary use of `fmt.Sprint`.
 //!
 //! Port of `honnef.co/go/tools/simple/s1039`.
+//!
+//! **Parentheses.** Upstream states this check as a `pattern` query, and
+//! `pattern.match` strips `*ast.ParenExpr` at every recursion (before binding),
+//! so `f((x))` matches wherever `f(x)` does. This port descends by hand, so
+//! every descent has to `unparen` — `compat/fuzz.py`'s `paren` mutation found
+//! nine S-checks going quiet on a parenthesized subexpression at once
+//! (COMPAT-HARDENING §4, 2026-08-13).
 
 use std::sync::OnceLock;
 
 use guff::ast::{BasicLit, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::expr_to_string;
+use guff_analysis::code::{expr_to_string, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
@@ -33,10 +40,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if call.args.len() != 1 {
             return;
         }
-        let Expr::BasicLit(BasicLit { .. }) = &call.args[0] else {
+        let arg = unparen(&call.args[0]);
+        let Expr::BasicLit(BasicLit { .. }) = arg else {
             return;
         };
-        let Some(val) = expr_to_string(pass, &call.args[0]) else {
+        let Some(val) = expr_to_string(pass, arg) else {
             return;
         };
         // Match upstream: only Sprintf treats '%' as a possible format string.
