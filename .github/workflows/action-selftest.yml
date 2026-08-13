@@ -44,9 +44,24 @@ jobs:
           go-version: stable
 
       - uses: ./
+        id: guff
         with:
           working-directory: ${{ env.FIXTURE }}
           args: ${{ env.ARGS }}
+
+      - name: Key carries the invalidation bucket
+        env:
+          KEY: ${{ steps.guff.outputs.cache-key }}
+        run: |
+          set -euo pipefail
+          echo "key: ${KEY}"
+          # Default interval is 7 days, so the key must end in a bucket segment.
+          # Without it in the *prefix*, restore-keys would match straight past
+          # the reset and it would never actually go cold.
+          case "${KEY}" in
+            *-i[0-9]*-*) ;;
+            *) echo "::error::key has no invalidation bucket: ${KEY}"; exit 1 ;;
+          esac
 
       - name: Cache directory is wired up and seed-free
         run: |
@@ -140,3 +155,30 @@ jobs:
             echo "::error::cache-seed=true should not disable seed persistence"
             exit 1
           }
+
+      # verify-cache reruns with --no-cache and diffs; a green step here means
+      # the two agreed on the fixture.
+      - uses: ./
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+          verify-cache: "true"
+          cache-dir: ${{ runner.temp }}/guff/cache-verify
+
+      - uses: ./
+        id: no-interval
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+          cache-invalidation-interval: "0"
+          cache-dir: ${{ runner.temp }}/guff/cache-no-interval
+
+      - name: interval=0 drops the bucket
+        env:
+          KEY: ${{ steps.no-interval.outputs.cache-key }}
+        run: |
+          set -euo pipefail
+          echo "key: ${KEY}"
+          case "${KEY}" in
+            *-i[0-9]*-*) echo "::error::interval=0 still bucketed: ${KEY}"; exit 1 ;;
+          esac

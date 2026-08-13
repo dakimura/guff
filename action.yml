@@ -41,6 +41,26 @@ inputs:
       different configs and must not share a cache.
     required: false
     default: ""
+  cache-invalidation-interval:
+    description: >
+      Days before the cache is abandoned and a run goes genuinely cold. Every
+      guff sub-cache is content-keyed and validates itself, so this is not how
+      correctness is maintained — it is the backstop for the bug that gets past
+      that. Without it a single bad entry could hide a finding for as long as
+      the repository keeps restoring it. Matches golangci-lint-action's default
+      of 7. `0` disables the reset.
+    required: false
+    default: "7"
+  verify-cache:
+    description: >
+      After the cached run, lint the same tree again with `--no-cache` and fail
+      if the two disagree. This is the only setting here that *detects* a cache
+      defect rather than bounding how long one could persist, and it checks the
+      property on your code rather than on guff's test fixtures. It roughly
+      doubles the job's lint time, so it belongs on a nightly or main-branch
+      build rather than on every pull request.
+    required: false
+    default: "false"
   cache-seed:
     description: >
       Also carry the type-checking seed overlays ($GUFF_CACHE/seed) between runs.
@@ -52,6 +72,20 @@ inputs:
       matters and the budget is free.
     required: false
     default: "false"
+
+outputs:
+  cache-key:
+    description: >
+      The cache key this run used, empty when caching is off. Worth logging when
+      a cache is not behaving: it carries the guff version, the working-directory
+      scope and the invalidation bucket, so a key that changed unexpectedly
+      explains a miss on its own.
+    value: ${{ steps.cache-meta.outputs.key }}
+  cache-restored:
+    description: >
+      The key an entry was actually restored from — exact or prefix — or empty
+      if the run started cold.
+    value: ${{ steps.cache-restore.outputs.cache-matched-key }}
 
 runs:
   using: composite
@@ -90,6 +124,7 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         KEY_SUFFIX: ${{ inputs.cache-key-suffix }}
         CACHE_SEED: ${{ inputs.cache-seed }}
+        CACHE_INTERVAL: ${{ inputs.cache-invalidation-interval }}
       run: |
         set -euo pipefail
         guff_version="$("${GUFF_BIN_DIR}/guff" version --short)"
@@ -104,7 +139,25 @@ runs:
           sha256() { shasum -a 256; }  # macOS runners
         fi
         scope="$(printf '%s|%s' "${WORKING_DIRECTORY}" "${KEY_SUFFIX}" | sha256 | cut -c1-12)"
-        prefix="guff-cache-v1-${RUNNER_OS}-${RUNNER_ARCH}-${guff_version}-${scope}"
+
+        # The interval belongs in the prefix, not just the key: restore-keys
+        # match by prefix, so an interval that only appeared in the key would be
+        # matched straight past and never actually reset anything.
+        # A malformed interval falls back to the default rather than to "no
+        # reset": losing the backstop is the one outcome a typo must not buy.
+        interval="${CACHE_INTERVAL}"
+        case "${interval}" in
+          '' | *[!0-9]*)
+            echo "::warning::cache-invalidation-interval must be a whole number of days, got '${CACHE_INTERVAL}'; using 7"
+            interval=7
+            ;;
+        esac
+
+        bucket=""
+        if [ "${interval}" -gt 0 ]; then
+          bucket="-i$(( $(date +%s) / 86400 / interval ))"
+        fi
+        prefix="guff-cache-v1-${RUNNER_OS}-${RUNNER_ARCH}-${guff_version}-${scope}${bucket}"
 
         mkdir -p "${CACHE_DIR}"
         {
@@ -143,11 +196,42 @@ runs:
     - name: Run guff
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        VERIFY_CACHE: ${{ inputs.verify-cache }}
+        CACHE_ENABLED: ${{ inputs.cache }}
+        OUT_DIR: ${{ runner.temp }}/guff/out
       run: |
-        set -euo pipefail
+        set -uo pipefail
+        mkdir -p "${OUT_DIR}"
+
+        # Tee rather than redirect, so the log still streams and any
+        # `--out-format=github-actions` annotations still reach the UI.
         # Intentionally unquoted so callers can pass multiple args.
         # shellcheck disable=SC2086
-        guff ${{ inputs.args }}
+        guff ${{ inputs.args }} 2>&1 | tee "${OUT_DIR}/cached.out"
+        status=${PIPESTATUS[0]}
+
+        if [ "${VERIFY_CACHE}" = "true" ] && [ "${CACHE_ENABLED}" = "true" ]; then
+          # guff's output is deterministic, so "identical" is the right bar:
+          # anything the cache changed about the findings shows up in the diff.
+          echo "::group::verifying the cache against a cold run"
+          # shellcheck disable=SC2086
+          guff ${{ inputs.args }} --no-cache > "${OUT_DIR}/cold.out" 2>&1
+          cold_status=$?
+          echo "::endgroup::"
+
+          if ! diff -u "${OUT_DIR}/cached.out" "${OUT_DIR}/cold.out"; then
+            echo "::error::guff disagreed with itself: the cached run and --no-cache produced different findings on the same tree. The diff above is the bug — please report it at https://github.com/dakimura/guff/issues"
+            exit 1
+          fi
+          if [ "${status}" -ne "${cold_status}" ]; then
+            echo "::error::cached run exited ${status} but --no-cache exited ${cold_status} on the same tree"
+            exit 1
+          fi
+          echo "cache verified: identical to a cold run"
+        fi
+
+        exit "${status}"
 
     # Skipped on an exact key hit (a re-run of the same commit), where the
     # upload would be rejected as a duplicate anyway.
