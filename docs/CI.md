@@ -63,24 +63,82 @@ forces a cold run.
 
 ## Safety of a stale cache
 
-Every sub-cache validates itself against the content it was derived from, so a
-cache restored from an older commit cannot produce a stale finding: entries whose
-inputs still match are reused, and everything else is recomputed. That is why
-the Action restores on a **prefix** match rather than requiring an exact key —
-a near-miss cache is nearly as good as an exact one, and far better than none.
+The failure everyone is right to worry about is a cache that hides a finding:
+you edit an exported signature, every caller now has a real problem, and the
+run reports nothing because those callers were served from a cache keyed on
+their own unchanged bytes.
+
+guff's cache entries are not keyed that way. Every issue and fact lookup uses
+the hash mode that folds in **each transitive dependency's content hash**, taken
+from the flat `deps` list `go list` already produces. Changing a package
+therefore changes the key of everything downstream of it, and all of it is
+recomputed. `crates/guff-lint/tests/cache_dep_invalidation.rs` pins this
+end-to-end: a package's dependency gains an error return, the dependent's own
+source is asserted byte-identical, and the warm-cache run must produce the same
+errcheck finding as `--no-cache` on the same tree.
+
+That is what makes a **prefix** restore safe, rather than requiring an exact
+key: entries whose inputs still match are reused, everything else is recomputed,
+so a near-miss cache is nearly as good as an exact one and far better than none.
 
 The practical consequence is that you do not need `go.sum` or `.golangci.yml` in
 the cache key, and you should not add them. Doing so throws the whole cache away
 on a dependency bump, where a prefix match would have kept most of it.
 
+None of that is a proof of no bugs, which is why `cache-invalidation-interval`
+defaults to 7 days: the key carries a bucket number, so once a week the
+restore misses and the run is genuinely cold. It bounds how long a hypothetical
+bad entry could survive. golangci-lint-action carries the same 7-day default for
+the same reason.
+
+If you ever suspect the cache, `--no-cache` reproduces a cold run in place and
+the two outputs should be identical.
+
+## When caching is not worth it
+
+The win is real but not universal, and the honest crossover is about size.
+Restoring and uploading a cache costs time too, so caching pays only when the
+work it skips exceeds the transfer. On the numbers above — a 27 MB cache against
+a 17-second cold run — it pays easily. On a small module where a cold run is
+already a couple of seconds, it may not: the archive round-trip is roughly
+constant while the work saved shrinks with the module.
+
+So: leave it on for anything substantial, and if your cold run is already fast
+enough that nobody complains, `cache: false` is a perfectly reasonable setting
+that removes a moving part. What you should not do is keep caching on and never
+look — check a run's log once and see whether the restore is buying anything.
+
 ## Settings
 
 | Input | Default | When to change it |
 |---|---|---|
-| `cache` | `true` | Set `false` to always run cold. Mostly useful when reproducing a bug. |
+| `cache` | `true` | Set `false` to always run cold — a small module, or reproducing a bug. |
 | `cache-dir` | `${{ runner.temp }}/guff/cache` | Keep it outside the checkout. |
 | `cache-key-suffix` | `""` | Two jobs linting the same directory with different configs. |
+| `cache-invalidation-interval` | `7` | Days before a forced cold run. `0` disables it. |
+| `verify-cache` | `false` | See below. |
 | `cache-seed` | `false` | See below. |
+
+### `verify-cache`
+
+Everything above bounds the risk; this one measures it. With `verify-cache: true`
+the Action lints the tree a second time with `--no-cache` and fails the job if
+the two runs disagree, so a cache defect surfaces as a diff in your own
+repository rather than as a finding nobody ever saw.
+
+It roughly doubles the job's lint time, which is why it is off by default and
+belongs on a nightly or main-branch build rather than on every pull request:
+
+```yaml
+- uses: dakimura/guff@v0.4.1
+  with:
+    verify-cache: ${{ github.ref == 'refs/heads/main' }}
+```
+
+The Action also exposes `cache-key` and `cache-restored` outputs. When a cache
+is not behaving, print them: the key carries the guff version, the
+working-directory scope and the invalidation bucket, so a key that moved
+unexpectedly explains the miss by itself.
 
 ### `cache-key-suffix` and matrices
 
