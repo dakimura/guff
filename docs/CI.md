@@ -94,19 +94,28 @@ the same reason.
 If you ever suspect the cache, `--no-cache` reproduces a cold run in place and
 the two outputs should be identical.
 
-## When caching is not worth it
+## What the cache costs to move
 
-The win is real but not universal, and the honest crossover is about size.
-Restoring and uploading a cache costs time too, so caching pays only when the
-work it skips exceeds the transfer. On the numbers above — a 27 MB cache against
-a 17-second cold run — it pays easily. On a small module where a cold run is
-already a couple of seconds, it may not: the archive round-trip is roughly
-constant while the work saved shrinks with the module.
+A warm run only wins if restoring the cache costs less than the work it skips,
+and a wall-clock table shows only the second half. Since `actions/cache`
+compresses before upload, the number that matters is the compressed size, and it
+is not one you can guess from the directory listing:
 
-So: leave it on for anything substantial, and if your cold run is already fast
-enough that nobody complains, `cache: false` is a perfectly reasonable setting
-that removes a moving part. What you should not do is keep caching on and never
-look — check a run's log once and see whether the restore is buying anything.
+| cache | on disk | compressed |
+|---|---:|---:|
+| default (seeds excluded) | 27 MB | **2.0 MB** |
+| `cache-seed: true` | 171 MB | 23 MB |
+
+Two megabytes against a 17-second cold run is not a close call, and it is the
+main reason the seeds are excluded by default: keeping them is a 10× larger
+artifact for about a second of lint time.
+
+That said, the win is not universal, and the crossover is about module size.
+The round-trip is roughly fixed while the work saved shrinks with the module, so
+on something small enough that a cold run is already a couple of seconds,
+caching may be noise. `cache: false` is a perfectly reasonable setting there and
+removes a moving part. What you should not do is leave caching on and never
+look — read one run's log and see whether the restore bought anything.
 
 ## Settings
 
