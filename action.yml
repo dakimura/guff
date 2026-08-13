@@ -64,12 +64,13 @@ inputs:
   cache-seed:
     description: >
       Also carry the type-checking seed overlays ($GUFF_CACHE/seed) between runs.
-      They are by far the largest part of the cache — on a 1600-package module,
-      ~144 MB against ~27 MB for everything else — and buy about a second once
-      the issue cache is warm. Off by default because a per-service matrix would
-      otherwise spend the repository's 10 GB cache budget on them and evict the
-      Go module cache. Turn on for a single large module where that second
-      matters and the budget is free.
+      They are by far the largest part of the cache — on a 1600-package module
+      the archive goes from 2 MB compressed to 23 MB — and buy about a second
+      once the issue cache is warm. Off by default because that is a 10× upload
+      for a second, and because a per-service matrix storing it per commit would
+      spend the repository's 10 GB cache budget on them and evict the Go module
+      cache. Turn on for a single large module where the second matters and the
+      budget is free.
     required: false
     default: "false"
 
