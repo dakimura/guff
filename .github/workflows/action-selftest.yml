@@ -1,0 +1,142 @@
+name: Action self-test
+
+# action.yml installs a released binary and manages a cache around it. None of
+# that is exercised by the other workflows, which build guff from source and
+# call it directly — so a break in the Action would previously only surface in a
+# consumer's CI.
+#
+# The fixture is dependency-free, so these jobs need no module downloads and the
+# whole workflow is a couple of minutes. `--issues-exit-code 0` keeps the
+# fixture's intentional findings from failing the job: a red run here means the
+# Action broke, not that the fixture is dirty.
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - scripts/install.sh
+      - .github/workflows/action-selftest.yml
+  push:
+    branches: [main]
+    paths:
+      - action.yml
+      - scripts/install.sh
+      - .github/workflows/action-selftest.yml
+  workflow_dispatch:
+
+concurrency:
+  group: action-selftest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FIXTURE: benchmarks/fixture
+  ARGS: run --issues-exit-code 0 ./...
+
+jobs:
+  # Default inputs: cache on, seed overlays excluded.
+  defaults:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - uses: ./
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+
+      - name: Cache directory is wired up and seed-free
+        run: |
+          set -euo pipefail
+          test -n "${GUFF_CACHE:-}" || { echo "::error::GUFF_CACHE was not exported"; exit 1; }
+          test -d "${GUFF_CACHE}/issues" || { echo "::error::no issues cache under ${GUFF_CACHE}"; exit 1; }
+          test "${GUFF_SEED_PERSIST:-}" = "0" || { echo "::error::seed persistence was not disabled"; exit 1; }
+          if [ -d "${GUFF_CACHE}/seed" ]; then
+            echo "::error::seed overlays were written despite GUFF_SEED_PERSIST=0"
+            exit 1
+          fi
+          du -sh "${GUFF_CACHE}"
+
+  # Proves the save half actually landed: a probe restore keyed only on the
+  # shared prefix must find what `defaults` wrote. Skipped for fork pull
+  # requests, which cannot write to the cache at all.
+  restores:
+    needs: defaults
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Probe for the cache the previous job saved
+        id: probe
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/guff-probe
+          key: guff-cache-v1-probe-miss-on-purpose
+          restore-keys: guff-cache-v1-
+          lookup-only: true
+
+      - name: A prefix match must exist
+        run: |
+          set -euo pipefail
+          matched="${{ steps.probe.outputs.cache-matched-key }}"
+          if [ -z "${matched}" ]; then
+            echo "::error::no guff-cache-v1-* entry was saved by the previous job"
+            exit 1
+          fi
+          echo "restored via ${matched}"
+
+      - uses: ./
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+
+  # The two escape hatches, so neither rots.
+  opt-outs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - uses: ./
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+          cache: "false"
+
+      - name: cache=false leaves the environment alone
+        run: |
+          set -euo pipefail
+          if [ -n "${GUFF_CACHE:-}" ]; then
+            echo "::error::cache=false still exported GUFF_CACHE=${GUFF_CACHE}"
+            exit 1
+          fi
+
+      - uses: ./
+        with:
+          working-directory: ${{ env.FIXTURE }}
+          args: ${{ env.ARGS }}
+          cache-seed: "true"
+          cache-dir: ${{ runner.temp }}/guff/cache-with-seed
+
+      - name: cache-seed=true keeps the overlays
+        run: |
+          set -euo pipefail
+          test -d "${GUFF_CACHE}/seed" || {
+            echo "::error::cache-seed=true did not produce ${GUFF_CACHE}/seed"
+            exit 1
+          }
+          test -z "${GUFF_SEED_PERSIST:-}" || {
+            echo "::error::cache-seed=true should not disable seed persistence"
+            exit 1
+          }
