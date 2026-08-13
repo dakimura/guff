@@ -4,7 +4,7 @@ use guff::ast::{Expr, Ident, Spec, ValueSpec};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
-use guff_types::arena::TypeData;
+use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::predicates::is_untyped;
 
@@ -75,6 +75,26 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     if lhs_typ != rhs_typ {
         return;
     }
+    // Upstream's gate above `IsUntypedConst` is
+    // `if !validType(lhsTyp) || !validType(rhsTyp) { return }`, commented
+    // "Type checking failed (often due to missing imports)" — and for revive
+    // that is not a rare failure. It type-checks with its own `lint.Package`,
+    // so *any* operand reaching into an import comes back invalid and the rule
+    // bails before it ever asks about constants.
+    //
+    // Measured against golangci-lint 2.12.2, one var block per shape:
+    // `local1 + local1`, `localFunc()` and `localVar` are all reported, while
+    // `sub.EscapingKey`, `sub.Func()` and `sub.Var` are all silent. So the line
+    // is drawn at "does the right-hand side reach into another package", not at
+    // constness — `config/config.go:579` in prometheus
+    // (`model.EscapingKey + "=" + model.AllowUTF8`) is the silent side.
+    //
+    // The gate this replaces was removed wholesale on 2026-08-13 for firing on
+    // every literal. It was over-broad, but it was not baseless: it approximated
+    // this same behaviour through the one shape that had been noticed then.
+    if rhs_refers_to_other_package(pass, rhs) {
+        return;
+    }
     // Upstream has exactly one gate here: `IsUntypedConst(rhs)` re-evaluates the
     // right-hand side *outside* assignment context, and the finding is dropped
     // only when the declared type is not the constant's default type. So
@@ -103,6 +123,35 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
             name.name
         ),
     ));
+}
+
+/// Reports whether any identifier in `expr` is an import name, i.e. whether the
+/// expression reaches into another package. See the call site for the measured
+/// upstream behaviour this stands in for.
+fn rhs_refers_to_other_package(pass: &Pass<'_>, expr: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut found = false;
+    walk::preorder(walk::expr_ref(expr), |n| {
+        let NodeRef::Ident(ident) = n else {
+            return true;
+        };
+        let obj = info
+            .defs
+            .get(&ident.id)
+            .and_then(|o| *o)
+            .or_else(|| info.uses.get(&ident.id).copied());
+        if obj.is_some_and(|o| matches!(artifacts.objects.get(o), ObjectData::PkgName(_))) {
+            found = true;
+            return false;
+        }
+        true
+    });
+    found
 }
 
 /// Approximate revive's `File.IsUntypedConst`: detect RHS expressions that are

@@ -8,14 +8,14 @@
 //!
 //! ## Deferrals (chunk-33b, see §8)
 //!
-//! - interface-method receivers are left unset (`sig.recv == None`); Go sets a
-//!   `RecvVar` of the interface/named type for error messages and method-set
-//!   semantics. Our `implements`/`missingMethod` compare method signatures
-//!   ignoring the receiver, so this is safe for now.
 //! - `sortMethods` (API-stability sort) is skipped; method dedup is by
 //!   `Object.id` in `compute_interface_type_set`.
-//! - method type-parameter rejection, `Info` recording, and `def`-based
-//!   receiver naming are omitted.
+//! - method type-parameter rejection and `Info` recording are omitted.
+//!
+//! `def`-based receiver naming is *not* deferred, but it is spelled differently:
+//! Go threads `def` into `interfaceType` and names the receiver up front, while
+//! here the interface is built with itself as the receiver and `Checker.typeDecl`
+//! re-points it at the named type (`interface_repoint_method_receivers`).
 
 use guff::ast::{Expr, InterfaceType};
 use guff::token::Token;
@@ -71,13 +71,23 @@ impl Checker {
                 }
                 continue;
             }
-            // DEFERRED: set sig.recv to a RecvVar of the interface/named type.
             let m = new_func(&mut self.objects, name.name.clone(), Some(typ));
             m.set_pkg(&mut self.objects, self.pkg);
             methods.push(m);
         }
 
         let iface = new_interface_type(&mut self.types, methods, embeddeds);
+        // Give each method a receiver of the interface itself. A `type T
+        // interface{…}` declaration re-points them at the named type once its
+        // underlying is set (`Checker.typeDecl`), which is what Go's `def`
+        // argument to `interfaceType` does; that back-fill is a no-op for an
+        // interface literal, which keeps the interface as its own receiver.
+        crate::interface::interface_set_method_receivers(
+            &mut self.types,
+            &mut self.objects,
+            iface,
+            iface,
+        );
         // Compute the type set in a delayed action, exactly like Go's
         // `Checker.interfaceType`. Computing it here instead would cache a
         // method set built from embedded named types whose underlying is not

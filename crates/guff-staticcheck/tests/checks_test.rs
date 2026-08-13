@@ -1996,15 +1996,10 @@ fn sa4006_allows_ok_cases() {
     let pkg = typecheck_rule("sa4006", "ok.go");
     support::assert_well_typed(&pkg);
     let messages = support::run_analyzer(sa4006::analyzer(), &pkg);
-    // golangci-lint 2.12.2 reports nothing here. `interfaceBoxing` is the one
-    // shape guff still gets wrong: guff-ssa's `MakeInterface` carries no
-    // operand, so the boxed value has no referrer and looks unused. Tracked as
-    // a golden diff — see docs/COMPAT-HARDENING.md §4 (2026-08-08).
-    assert!(
-        messages.iter().all(|m| m.contains("this value of i is never used")),
-        "{messages:?}"
-    );
-    assert_eq!(messages.len(), 1, "{messages:?}");
+    // golangci-lint 2.12.2 reports nothing here, and neither does guff since
+    // `MakeInterface` gained its operand: `i = n` boxes `n`, so `n` has a
+    // referrer and no longer looks unused.
+    assert!(messages.is_empty(), "{messages:?}");
 }
 sa_check_bad_ok!(sa4008, sa4008_flags_bad_cases, sa4008_allows_ok_cases);
 sa_check_bad_ok!(sa4009, sa4009_flags_bad_cases, sa4009_allows_ok_cases);

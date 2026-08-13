@@ -723,6 +723,18 @@ impl<'dec> Reader<'dec> {
         }
 
         let iface = new_interface_type(state.ctx.types, methods, embeddeds);
+        // `signature(.., None, ..)` above leaves the methods without a
+        // receiver, exactly as go/internal/gcimporter's `ureader` does — and
+        // `types.NewInterfaceType` then fills in the *interface* (never the
+        // named type it may be the underlying of). That is why an imported
+        // interface method's `FullName` is `(interface).M` while a
+        // source-checked one is `(pkg.T).M`.
+        guff_types::interface::interface_set_method_receivers(
+            state.ctx.types,
+            state.ctx.objects,
+            iface,
+            iface,
+        );
         if implicit {
             interface_mark_implicit(state.ctx.types, iface);
         }

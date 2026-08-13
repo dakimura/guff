@@ -2362,18 +2362,58 @@ fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
     api_identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
 }
 
+thread_local! {
+    /// `type_implements` answers for the package currently being linted.
+    ///
+    /// `api_implements` takes `&mut TypeArena` — computing a method set can
+    /// intern — so the only way to ask it a question without disturbing the
+    /// package's own arena is to hand it a copy. That copy was being made *per
+    /// call*, and `implements_error` is asked once per candidate node, which
+    /// put `TypeArena::clone` at 1.29s of self CPU on prometheus `./...` —
+    /// the largest single entry in the profile, before counting the memmove,
+    /// the allocator traffic and the `Vec<TypeData>` drop it drags with it.
+    ///
+    /// The answer is a pure function of `(v, iface)` within one package, so
+    /// memoizing collapses it to one clone per distinct pair. Keyed by
+    /// `Package::id`: a `TypeId` indexes its own package's arena, and a rayon
+    /// worker moves between packages, so an unkeyed cache would answer about a
+    /// different type of the same number.
+    static IMPLEMENTS_MEMO: std::cell::RefCell<(String, HashMap<(TypeId, TypeId), bool>)> =
+        std::cell::RefCell::new((String::new(), HashMap::new()));
+}
+
 fn type_implements(pass: &Pass<'_>, v: TypeId, iface: TypeId) -> bool {
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
         return false;
     };
+    let pkg_id = pass.pkg().id.as_str();
+    let hit = IMPLEMENTS_MEMO.with(|m| {
+        let m = m.borrow();
+        if m.0 != pkg_id {
+            return None;
+        }
+        m.1.get(&(v, iface)).copied()
+    });
+    if let Some(hit) = hit {
+        return hit;
+    }
     let mut types = artifacts.types.clone();
-    api_implements(
+    let answer = api_implements(
         &mut types,
         &artifacts.objects,
         &artifacts.packages,
         v,
         iface,
-    )
+    );
+    IMPLEMENTS_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.0 != pkg_id {
+            m.0 = pkg_id.to_string();
+            m.1.clear();
+        }
+        m.1.insert((v, iface), answer);
+    });
+    answer
 }
 
 fn type_is_interface(pass: &Pass<'_>, typ: TypeId) -> bool {

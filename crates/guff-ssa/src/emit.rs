@@ -5,8 +5,8 @@
 use crate::function::Function;
 use crate::ids::{BlockId, FuncId, InstrId};
 use crate::instr::{
-    Alloc, Call, CallCommon, ChangeType, Convert, Extract, Field, FieldAddr, IndexAddr, InstrData,
-    Return, Store, TypeAssert, UnOp,
+    Alloc, Call, CallCommon, ChangeInterface, ChangeType, Convert, Extract, Field, FieldAddr,
+    IndexAddr, InstrData, MakeInterface, Return, Store, TypeAssert, UnOp,
 };
 use crate::program::{value_type_of, Program};
 use crate::value::Value;
@@ -14,8 +14,9 @@ use guff::token::Token;
 use guff::{Pos, NO_POS};
 use guff_types::arena::TypeData;
 use guff_types::{
-    empty_tuple, identical, is_pointer, new_pointer, new_tuple, new_var, pointer_elem,
-    signature_results, struct_field, tuple_at, tuple_len, BasicKind, ObjectData, ObjectId, TypeId,
+    empty_tuple, identical, is_non_type_param_interface, is_pointer, new_pointer, new_tuple,
+    new_var, pointer_elem, signature_results, struct_field, tuple_at, tuple_len, BasicKind,
+    ObjectData, ObjectId, TypeId,
 };
 
 /// emit adds the instruction `data` to the end of the specified `block`,
@@ -120,13 +121,35 @@ pub fn emit_local_var(prog: &mut Program, fid: FuncId, block: BlockId, obj: Obje
     v
 }
 
-/// emit_store emits a store instruction (`*addr = val`) at position `pos`.
-/// (Go: `emitStore`)
-pub fn emit_store(f: &mut Function, block: BlockId, addr: Value, val: Value, pos: Pos) {
-    emit_with_pos(f, block, InstrData::Store(Store {
-        addr,
-        val,
-    }), pos);
+/// emit_store emits a store instruction (`*addr = val`) at position `pos`,
+/// converting `val` to the pointee type of `addr` first — that conversion is
+/// where a concrete value assigned to an interface-typed variable becomes a
+/// [`MakeInterface`], and so where the stored value picks up a referrer.
+/// (Go: `emitStore`, whose `Val` is `emitConv(f, val, MustDeref(addr.Type()))`.)
+pub fn emit_store(
+    prog: &mut Program,
+    fid: FuncId,
+    block: BlockId,
+    addr: Value,
+    val: Value,
+    pos: Pos,
+) {
+    let addr_ty = value_type_of(prog, prog.functions.get(fid), addr);
+    let val = match prog.type_arena.get(addr_ty.underlying(&prog.type_arena)) {
+        TypeData::Pointer(_) => {
+            let elem = pointer_elem(&prog.type_arena, addr_ty);
+            emit_conv(prog, fid, block, val, elem)
+        }
+        // Hybrid/incomplete type info can leave an lvalue's address typed as
+        // something other than a pointer; store as-is rather than panicking.
+        _ => val,
+    };
+    emit_with_pos(
+        prog.functions.get_mut(fid),
+        block,
+        InstrData::Store(Store { addr, val }),
+        pos,
+    );
 }
 
 /// emit_extract emits an instruction to extract the `index`th component of the
@@ -234,12 +257,77 @@ pub fn emit_conv(
         return Value::Instr(id);
     }
 
+    // Conversion to, or construction of a value of, an interface type?
+    // (Go: the `isNonTypeParamInterface(typ)` arm of `emitConv`.)
+    if is_non_type_param_interface(&prog.type_arena, typ) {
+        // Interface -> interface is a widening/narrowing of the method set;
+        // it always succeeds, so it is a ChangeInterface, not a MakeInterface.
+        if is_non_type_param_interface(&prog.type_arena, t_src) {
+            let id = emit(
+                prog.functions.get_mut(fid),
+                block,
+                InstrData::ChangeInterface(ChangeInterface { x: val, typ }),
+            );
+            return Value::Instr(id);
+        }
+
+        // Untyped nil: there is nothing to box. Go returns `zeroConst(typ)`,
+        // an interface-typed nil constant.
+        if matches!(
+            prog.type_arena.get(ut_src),
+            TypeData::Basic(b) if b.kind() == BasicKind::UntypedNil
+        ) {
+            return prog.emit_const(None, typ);
+        }
+
+        // Other untyped constants box at their default type (`untyped int`
+        // boxes as `int`), so recurse once to give the operand a typed type.
+        let val = match prog.type_arena.get(ut_src) {
+            TypeData::Basic(b) if (b.info().0 & guff_types::IS_UNTYPED.0) != 0 => {
+                let dflt = default_basic_type(prog, ut_src);
+                emit_conv(prog, fid, block, val, dflt)
+            }
+            _ => val,
+        };
+
+        // The boxed type needs a runtime type descriptor.
+        // (Go: `f.Pkg.Prog.needMethodsOf(val.Type())`.)
+        let boxed = value_type_of(prog, prog.functions.get(fid), val);
+        prog.note_runtime_type(boxed);
+
+        let id = emit(
+            prog.functions.get_mut(fid),
+            block,
+            InstrData::MakeInterface(MakeInterface { x: val, typ }),
+        );
+        return Value::Instr(id);
+    }
+
     let id = emit(
         prog.functions.get_mut(fid),
         block,
         InstrData::Convert(Convert { x: val, typ }),
     );
     Value::Instr(id)
+}
+
+/// The default typed type for an untyped basic type (`untyped int` -> `int`),
+/// resolved against the program's predeclared basics. (Go: `types.Default`.)
+fn default_basic_type(prog: &Program, ut: TypeId) -> TypeId {
+    let kind = match prog.type_arena.get(ut) {
+        TypeData::Basic(b) => b.kind(),
+        _ => return ut,
+    };
+    let dflt = match kind {
+        BasicKind::UntypedBool => BasicKind::Bool,
+        BasicKind::UntypedInt => BasicKind::Int,
+        BasicKind::UntypedRune => BasicKind::Int32,
+        BasicKind::UntypedFloat => BasicKind::Float64,
+        BasicKind::UntypedComplex => BasicKind::Complex128,
+        BasicKind::UntypedString => BasicKind::String,
+        _ => return ut,
+    };
+    prog.basic_type(dflt)
 }
 
 /// emit_type_test emits a comma-ok type assertion `x.(t)`, yielding the 2-tuple

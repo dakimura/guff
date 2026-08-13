@@ -156,6 +156,19 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
     let Ok(src) = std::fs::read(path) else {
         return out;
     };
+    // Cheap filter before the reparse, the same shape `inline`, `directive` and
+    // `buildtag` already use for theirs: the only thing this function can
+    // extract is a `Deprecated: ` paragraph, so a file whose bytes never
+    // mention it cannot contribute a fact. Without this the pass paid a disk
+    // read and a full `PARSE_COMMENTS` parse for *every* file in the package,
+    // and deprecations are rare — on prometheus `./...` the marker appears in a
+    // handful of files out of ~1500.
+    if !src
+        .windows(b"Deprecated:".len())
+        .any(|w| w == b"Deprecated:")
+    {
+        return out;
+    }
     let rfset = guff::position::FileSet::new();
     let Ok(rfile) = guff::parser::parse_file(&rfset, &base, &src, guff::parser::PARSE_COMMENTS)
     else {

@@ -596,7 +596,7 @@ impl<'a> Builder<'a> {
     /// block at source position `pos`.
     pub fn emit_store(&mut self, addr: Value, val: Value, pos: Pos) {
         let block = self.block.expect("no current block");
-        crate::emit::emit_store(self.func_mut(), block, addr, val, pos);
+        crate::emit::emit_store(self.prog, self.func_id, block, addr, val, pos);
     }
 
     /// new_basic_block creates a new basic block and adds it to the function.

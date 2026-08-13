@@ -108,6 +108,21 @@ fn instr_call_common(func: &Function, iid: InstrId) -> Option<&CallCommon> {
     }
 }
 
+/// Strips value-preserving `ChangeType` wrappers. Returning a func literal as a
+/// *named* function type (`return func(ns string) error {…}` from a
+/// `func() listFunc`) converts at the return, so the `Function` value sits one
+/// instruction in. (Go: the ChangeType `emitConv` inserts for a return operand.)
+fn unwrap_change_type(func: &Function, v: Value) -> Value {
+    let mut cur = v;
+    loop {
+        let Value::Instr(iid) = cur else { return cur };
+        match func.instrs.get(iid) {
+            InstrData::ChangeType(ct) => cur = ct.x,
+            _ => return cur,
+        }
+    }
+}
+
 fn ensure_ctx_fact_decoder() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -490,8 +505,8 @@ impl<'a> Runner<'a> {
         };
         ret.results
             .iter()
-            .filter_map(|v| match v {
-                Value::Function(fid) => Some(*fid),
+            .filter_map(|v| match unwrap_change_type(func, *v) {
+                Value::Function(fid) => Some(fid),
                 _ => None,
             })
             .collect()

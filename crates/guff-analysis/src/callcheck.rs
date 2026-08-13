@@ -134,7 +134,7 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
                     };
 
                     let pos = caller.pos(iid);
-                    let mut call = build_call(&ir.prog, common, target);
+                    let mut call = build_call(&ir.prog, caller, common, target);
                     let ctx = CallContext {
                         prog: &ir.prog,
                         caller,
@@ -206,7 +206,12 @@ pub fn call_target_name(ctx: &CallContext<'_>, common: &CallCommon) -> Option<St
     ))
 }
 
-fn build_call<'a>(prog: &'a Program, common: &'a CallCommon, target: ObjectId) -> Call<'a> {
+fn build_call<'a>(
+    prog: &'a Program,
+    caller: &Function,
+    common: &'a CallCommon,
+    target: ObjectId,
+) -> Call<'a> {
     let mut ir_args = common.args.clone();
     if common.method.is_none() {
         if let Some(sig) = target.typ(&prog.object_arena) {
@@ -216,10 +221,17 @@ fn build_call<'a>(prog: &'a Program, common: &'a CallCommon, target: ObjectId) -
         }
     }
 
+    // Upstream unwraps interface boxing before a rule ever sees the argument
+    // (`if iarg, ok := arg.(*ir.MakeInterface); ok { arg = iarg.X }`), so a rule
+    // that asks for the argument's type gets the *boxed* type, not `any`. SA1014
+    // depends on this: `json.Unmarshal(data, m)` with a map `m` is a finding
+    // even though the parameter is `any`.
     let args = ir_args
         .into_iter()
         .map(|v| Argument {
-            value: SsaValue { inner: v },
+            value: SsaValue {
+                inner: unwrap_make_interface(caller, v),
+            },
             invalids: Vec::new(),
         })
         .collect();
@@ -229,6 +241,16 @@ fn build_call<'a>(prog: &'a Program, common: &'a CallCommon, target: ObjectId) -
         args,
         invalids: Vec::new(),
         _private: (),
+    }
+}
+
+/// Returns the value a [`MakeInterface`](InstrData::MakeInterface) boxes, or `v`
+/// unchanged. (Go: the `arg = iarg.X` line in `callcheck.checkCalls`.)
+fn unwrap_make_interface(caller: &Function, v: Value) -> Value {
+    let Value::Instr(iid) = v else { return v };
+    match caller.instrs.get(iid) {
+        InstrData::MakeInterface(mi) => mi.x,
+        _ => v,
     }
 }
 

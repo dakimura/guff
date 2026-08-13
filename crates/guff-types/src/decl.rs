@@ -624,6 +624,21 @@ impl Checker {
         };
         set_underlying(&mut self.types, named, u);
 
+        // `type T interface{ M() }`: the interface literal built itself as the
+        // receiver of `M`; the declaration is what makes it `(pkg.T).M`.
+        // Restricted to a literal on the RHS because that is exactly when Go
+        // passes `def` down to `Checker.interfaceType` — `type T U` shares `U`'s
+        // interface, whose methods keep reading `(pkg.U).M`.
+        if matches!(crate::stmt::unparen(&tdecl.ty), Expr::InterfaceType(_)) {
+            crate::interface::interface_repoint_method_receivers(
+                &mut self.types,
+                &mut self.objects,
+                u,
+                u,
+                named,
+            );
+        }
+
         if has_tparams {
             self.close_scope();
         }

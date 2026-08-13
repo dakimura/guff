@@ -278,7 +278,7 @@ pub(crate) fn add_spilled_param(prog: &mut Program, fid: FuncId, entry: crate::i
     let param = add_param_var(prog, fid, obj);
     // emit_local_var rebinds objects[obj] from the Parameter to the spill cell.
     let spill = crate::emit::emit_local_var(prog, fid, entry, obj);
-    crate::emit::emit_store(prog.functions.get_mut(fid), entry, spill, param, guff::NO_POS);
+    crate::emit::emit_store(prog, fid, entry, spill, param, guff::NO_POS);
 }
 
 /// add_param_var allocates one [`Parameter`] for `obj`, records the

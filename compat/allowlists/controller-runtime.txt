@@ -43,14 +43,20 @@ controller-runtime guff-only pkg/manager/manager_test.go:1994:nolintlint:directi
 controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive `//nolint:unparam` is unused for linter "unparam"
 
 # unparam: guff reports an unused parameter on a method that implements an
-# interface. Read as of 2026-08-13: upstream builds `typesImplementing` from
-# every `ssa.MakeInterface` instruction — `addImplementing(findNamed(instr.X
-# .Type()), iface)` — and then skips any method whose name is in that type's
-# list (`check/check.go`, "skip - method required to implement an interface").
-# guff cannot answer it: guff-ssa's `MakeInterface` is `pub struct
-# MakeInterface {}`, carrying neither the boxed value nor its type, which is
-# the same gap docs/COMPAT-HARDENING.md §7 records for SA4006. One SSA change
-# closes both, plus the `//nolint:unparam` symptom above.
+# interface. Upstream builds `typesImplementing` from every `ssa.MakeInterface`
+# instruction — `addImplementing(findNamed(instr.X.Type()), iface)` — and then
+# skips any method whose name is in that type's list (`check/check.go`, "skip -
+# method required to implement an interface").
+#
+# Re-read 2026-08-14: it takes *two* SSA changes, not one. `MakeInterface` now
+# carries the boxed value (that one is done, and it closed the SA4006 golden
+# extra), but the conversion here happens at `WithValidator(&podValidator{})` —
+# a call argument — and guff's `builder/call.rs` pushes arguments without
+# converting them to the parameter type. go/ssa's `emitCallArgs` does
+# `emitConv(fn, args[i], sig.Params().At(i).Type())`, so upstream has a
+# `MakeInterface` here and guff has nothing. An SSA-driven `typesImplementing`
+# was written and measured on 2026-08-14: the table comes out empty, so it was
+# not landed. `emitCallArgs` first — docs/COMPAT-HARDENING.md §7.
 controller-runtime guff-only examples/builtins/validatingwebhook.go:55:unparam:(*podValidator).ValidateUpdate - oldObj is unused
 controller-runtime guff-only examples/tokenreview/tokenreview.go:32:unparam:(*authenticator).Handle - ctx is unused
 

@@ -67,8 +67,113 @@ static ANALYZER_TIMING: std::sync::LazyLock<Mutex<HashMap<&'static str, (u128, u
 static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u64, u64, u64)>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
+/// Debug-only per-package analyze accumulator, printed at `GUFF_DEBUG_CACHE=2`.
+///
+/// The per-analyzer table above sums CPU across workers, which answers "what is
+/// expensive" but not "what is the run waiting on". Two sessions in a row cut
+/// analyze CPU and moved wall by ~1% (gocritic memoization, the inspect kind
+/// index), because the workers are only busy ~40% of the wall — so the number
+/// that decides wall is the **critical path**, and its analyze half is the
+/// slowest single package. This records both halves of that: summed CPU per
+/// package, and the span from the package's first action starting to its last
+/// finishing (which includes time the package spent blocked on a dependency).
+static PACKAGE_TIMING: std::sync::LazyLock<Mutex<HashMap<String, PkgTiming>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
+
+/// Wall-clock origin for the span offsets in [`PkgTiming`]; first touched by
+/// the first action to finish, i.e. the start of the analyze phase.
+static ANALYZE_EPOCH: std::sync::LazyLock<std::time::Instant> =
+    std::sync::LazyLock::new(std::time::Instant::now);
+
+#[derive(Default, Clone, Copy)]
+struct PkgTiming {
+    /// Summed action time (across workers; can exceed the span).
+    cpu_nanos: u128,
+    actions: usize,
+    /// Offsets from [`ANALYZE_EPOCH`], in nanoseconds.
+    first_start: u128,
+    last_end: u128,
+}
+
 fn timing_enabled() -> bool {
     std::env::var_os("GUFF_DEBUG_CACHE").is_some()
+}
+
+/// Whether the level-2 breakdown is on. Mirrors `guff-lint`'s `debug::detailed`;
+/// the crates deliberately share no support crate, so keep the mapping in sync.
+fn timing_detailed() -> bool {
+    match std::env::var_os("GUFF_DEBUG_CACHE") {
+        None => false,
+        Some(v) => v
+            .to_str()
+            .and_then(|s| s.trim().parse::<u8>().ok())
+            .unwrap_or(1)
+            .max(1)
+            >= 2,
+    }
+}
+
+fn record_package_time(pkg_path: &str, start: std::time::Instant, nanos: u128) {
+    let epoch = *ANALYZE_EPOCH;
+    let first_start = start.saturating_duration_since(epoch).as_nanos();
+    let last_end = first_start + nanos;
+    let mut m = PACKAGE_TIMING.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = m.entry(pkg_path.to_string()).or_default();
+    entry.cpu_nanos += nanos;
+    entry.actions += 1;
+    if entry.actions == 1 {
+        entry.first_start = first_start;
+    } else {
+        entry.first_start = entry.first_start.min(first_start);
+    }
+    entry.last_end = entry.last_end.max(last_end);
+}
+
+/// Print and reset the per-package table: the slowest packages by CPU, and the
+/// one whose span ends last (the tail the analyze phase cannot finish before).
+fn report_package_timing() {
+    if !timing_detailed() {
+        return;
+    }
+    let mut m = PACKAGE_TIMING.lock().unwrap_or_else(|e| e.into_inner());
+    if m.is_empty() {
+        return;
+    }
+    let mut rows: Vec<(String, PkgTiming)> = m.drain().collect();
+    drop(m);
+
+    let total_cpu: u128 = rows.iter().map(|(_, t)| t.cpu_nanos).sum();
+    let span_end = rows.iter().map(|(_, t)| t.last_end).max().unwrap_or(0);
+    rows.sort_by_key(|(_, t)| std::cmp::Reverse(t.cpu_nanos));
+
+    eprintln!(
+        "guff: per-package analyze time (top 20 of {} pkgs; {:.2}s total CPU, \
+         {:.2}s from first action to last):",
+        rows.len(),
+        total_cpu as f64 / 1e9,
+        span_end as f64 / 1e9,
+    );
+    for (path, t) in rows.iter().take(20) {
+        eprintln!(
+            "  {:>9.2}s CPU  {:>6} actions  [{:>6.2}s..{:>6.2}s]  {}",
+            t.cpu_nanos as f64 / 1e9,
+            t.actions,
+            t.first_start as f64 / 1e9,
+            t.last_end as f64 / 1e9,
+            path,
+        );
+    }
+    // The package the phase ends on — not necessarily the most expensive one,
+    // which is the whole point of printing it separately.
+    if let Some((path, t)) = rows.iter().max_by_key(|(_, t)| t.last_end) {
+        eprintln!(
+            "  tail: {} ends at {:.2}s ({:.2}s CPU over {:.2}s span)",
+            path,
+            t.last_end as f64 / 1e9,
+            t.cpu_nanos as f64 / 1e9,
+            (t.last_end - t.first_start) as f64 / 1e9,
+        );
+    }
 }
 
 fn record_analyzer_time(name: &'static str, nanos: u128) {
@@ -114,6 +219,7 @@ pub(crate) fn report_analyzer_timing() {
     m.clear();
     drop(m);
     report_preorder_timing(analyze_total);
+    report_package_timing();
 }
 
 /// Print the B-0 measurement: how much of the analyze phase is spent inside
@@ -320,7 +426,9 @@ impl Action {
                 (self.analyzer.run)(&mut pass)
             }));
             if let Some(start) = start {
-                record_analyzer_time(self.analyzer.name, start.elapsed().as_nanos());
+                let nanos = start.elapsed().as_nanos();
+                record_analyzer_time(self.analyzer.name, nanos);
+                record_package_time(&self.package.pkg_path, start, nanos);
                 let pre_after = guff_analysis::preorder_thread_totals();
                 record_preorder_share(
                     self.analyzer.name,

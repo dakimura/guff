@@ -682,24 +682,48 @@ fn is_expected_value_factory(pass: &Pass<'_>, ce: &CallExpr, pattern: &Regex) ->
     }
 }
 
-fn expected_actual_pattern(opts: &TestifylintOptions) -> Regex {
+/// A compiled pattern, built once per distinct pattern string.
+///
+/// Both callers below sit directly above the check they configure —
+/// `expected_actual_pattern` is two lines above the two
+/// `is_expected_value_candidate` calls — so the regex was being **compiled per
+/// assertion**, on every `assert.Equal`-shaped call in the package. On
+/// prometheus `./...` that made regex *construction* (`RegexBuilder::build`
+/// plus the Thompson NFA compiler and `Utf8Sequences`) ~0.53s of CPU, more than
+/// every regex match in the run put together. The pattern comes from config and
+/// does not vary within a run.
+fn cached_pattern(pat: &str, fallback: &'static str) -> std::sync::Arc<Regex> {
+    thread_local! {
+        static CACHE: RefCell<HashMap<String, std::sync::Arc<Regex>>> =
+            RefCell::new(HashMap::new());
+    }
+    CACHE.with(|c| {
+        if let Some(hit) = c.borrow().get(pat) {
+            return hit.clone();
+        }
+        let re = std::sync::Arc::new(
+            Regex::new(pat)
+                .unwrap_or_else(|_| Regex::new(fallback).expect("default testifylint pattern")),
+        );
+        c.borrow_mut().insert(pat.to_string(), re.clone());
+        re
+    })
+}
+
+fn expected_actual_pattern(opts: &TestifylintOptions) -> std::sync::Arc<Regex> {
     let pat = opts
         .expected_actual_pattern
         .as_deref()
         .unwrap_or(DEFAULT_EXPECTED_ACTUAL_PATTERN);
-    Regex::new(pat).unwrap_or_else(|_| {
-        Regex::new(DEFAULT_EXPECTED_ACTUAL_PATTERN).expect("default expected-actual pattern")
-    })
+    cached_pattern(pat, DEFAULT_EXPECTED_ACTUAL_PATTERN)
 }
 
-fn time_compare_suppress_pattern(opts: &TestifylintOptions) -> Regex {
+fn time_compare_suppress_pattern(opts: &TestifylintOptions) -> std::sync::Arc<Regex> {
     let pat = opts
         .time_compare_suppress_calls_pattern
         .as_deref()
         .unwrap_or(DEFAULT_TIME_COMPARE_SUPPRESS);
-    Regex::new(pat).unwrap_or_else(|_| {
-        Regex::new(DEFAULT_TIME_COMPARE_SUPPRESS).expect("default time-compare suppress")
-    })
+    cached_pattern(pat, DEFAULT_TIME_COMPARE_SUPPRESS)
 }
 
 fn expr_source_approx(expr: &Expr) -> String {

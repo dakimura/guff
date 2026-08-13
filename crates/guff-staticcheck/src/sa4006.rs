@@ -319,6 +319,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         match node {
             NodeRef::AssignStmt(assign) => {
+                // `irutil.IsExample` is asked per `SrcFuncs` entry, before the
+                // body is looked at, so every assignment inside a runnable
+                // example is skipped whole. The spans were already being
+                // computed here but never consulted, which is how
+                // `tsdb/example_test.go:58` became a guff-only finding on
+                // prometheus (COMPAT-HARDENING §4, 2026-08-13).
+                if in_example_func(&examples, assign_pos(assign)) {
+                    return;
+                }
                 // Upstream picks the first `src_funcs` entry that resolves the
                 // first rhs or, failing that, the first lhs — i.e. the lower of
                 // the two `src_funcs` positions.
@@ -387,12 +396,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     // (MakeInterface) — is not a finding upstream, while a real
                     // conversion (`string(b)`, a Convert) is. Verified against
                     // golangci-lint 2.12.2 with all four shapes side by side.
-                    //
-                    // The MakeInterface arm cannot fire today: guff-ssa's
-                    // `MakeInterface` carries no operand (`struct MakeInterface {}`),
-                    // so boxing leaves no referrer edge and the boxed value looks
-                    // unused. `i = n` into an `interface{}` is therefore still a
-                    // false positive — see docs/COMPAT-HARDENING.md §4 (2026-08-08).
                     if let Value::Instr(iid) = v {
                         if matches!(
                             func.instrs.get(iid),

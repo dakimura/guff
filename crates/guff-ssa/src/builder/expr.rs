@@ -6,6 +6,7 @@ use crate::builder::Builder;
 use crate::value::Value;
 use crate::instr::InstrData;
 use guff::ast::{Expr, BasicLit, FuncLit, Ident, IndexListExpr, UnaryExpr, BinaryExpr, IndexExpr, SliceExpr, TypeAssertExpr, SelectorExpr};
+use guff::token::Token;
 use guff_types::{BasicKind, OperandMode, SelectionKind};
 use std::cell::Cell;
 
@@ -408,7 +409,85 @@ impl<'a> Builder<'a> {
         Value::Instr(id)
     }
 
+    /// logical_binop lowers a **value-context** `&&` / `||` into control flow:
+    /// the right operand gets a block of its own, reached only when the left
+    /// operand did not short-circuit, and a Phi in the join block merges the
+    /// short-circuit constant with the right operand's value.
+    ///
+    /// Emitting both operands into one block instead — which is what guff did
+    /// before — loses the only record that `y` runs conditionally, so every
+    /// analysis that reads the CFG reads it wrong: SA5011 saw the deref in
+    /// `hints != nil && hints.ShardCount > 0` as unguarded, and honnef's IR has
+    /// nowhere to put the sigma node that renames `hints` below the check.
+    /// (Go: `builder.logicalBinop`.)
+    fn logical_binop(&mut self, bin: &BinaryExpr) -> Value {
+        let rhs = self.new_basic_block("binop.rhs".to_string());
+        let done = self.new_basic_block("binop.done".to_string());
+
+        // T(e) = T(e.X) = T(e.Y), except for untyped constants — and a constant
+        // `&&` never reaches here, `expr_inner` folds it first.
+        let raw_typ = self.prog.info.types.get(&bin.id).map(|tv| tv.typ);
+        let typ = match raw_typ {
+            Some(t) => self.typ_type(t),
+            None => self.prog.basic_type(BasicKind::Bool),
+        };
+
+        let bool_ty = self.prog.basic_type(BasicKind::Bool);
+        // The value the short-circuit path carries: `false` for `&&`, `true`
+        // for `||`. (Go: `vFalse` / `vTrue`.)
+        let short = match bin.op {
+            Token::LAND => {
+                self.cond(&bin.x, rhs, done);
+                self.prog
+                    .emit_const(Some(guff_constant::Value::Bool(false)), bool_ty)
+            }
+            _ => {
+                self.cond(&bin.x, done, rhs);
+                self.prog
+                    .emit_const(Some(guff_constant::Value::Bool(true)), bool_ty)
+            }
+        };
+
+        // Is rhs unreachable? Simplify `false && y` to `false`, `true || y` to
+        // `true`.
+        if self.func().blocks.get(rhs).preds.is_empty() {
+            self.set_block(Some(done));
+            return short;
+        }
+        // Is done unreachable? Simplify `true && y` (or `false || y`) to `y`.
+        if self.func().blocks.get(done).preds.is_empty() {
+            self.set_block(Some(rhs));
+            return self.expr(&bin.y);
+        }
+
+        // Every edge from `e.X` into `done` carries the short-circuit value; the
+        // one edge from `e.Y` carries `y`, and is appended last so the Phi's
+        // edges line up with `done.preds`.
+        let n_short = self.func().blocks.get(done).preds.len();
+        let mut edges: Vec<Option<Value>> = vec![Some(short); n_short];
+        self.set_block(Some(rhs));
+        let y = self.expr(&bin.y);
+        edges.push(Some(y));
+        self.emit_jump(done);
+        self.set_block(Some(done));
+
+        let id = crate::emit::emit_with_pos(
+            self.func_mut(),
+            done,
+            InstrData::Phi(crate::instr::Phi {
+                edges,
+                comment: bin.op.to_string(),
+                typ,
+            }),
+            bin.op_pos,
+        );
+        Value::Instr(id)
+    }
+
     fn binary_expr(&mut self, bin: &BinaryExpr) -> Value {
+        if matches!(bin.op, Token::LAND | Token::LOR) {
+            return self.logical_binop(bin);
+        }
         let x = self.expr(&bin.x);
         let y = self.expr(&bin.y);
         let raw_typ = self.prog.info.types.get(&bin.id).map(|tv| tv.typ);

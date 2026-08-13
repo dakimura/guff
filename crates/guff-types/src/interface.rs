@@ -115,6 +115,106 @@ pub fn new_interface_type(
     }))
 }
 
+/// Back-fills a receiver onto every explicit method of `iface` that has none.
+///
+/// Go does this inside `types.NewInterfaceType`: a method whose signature has a
+/// nil receiver gets `NewVar(pos, pkg, "", typ)`. Which type that is decides how
+/// `types.Func.FullName` spells the method, and therefore what every
+/// name-keyed rule (errcheck's exclude list, staticcheck's call tables) matches
+/// against:
+///
+/// - `recv_type` is the **named** type for `type T interface{ M() }` —
+///   `Checker.interfaceType` uses its `def` argument — so `FullName` is
+///   `(pkg.T).M`;
+/// - `recv_type` is the **interface itself** for an interface literal and for
+///   everything read back from export data (`ureader` builds methods with a nil
+///   receiver and hands them to `NewInterfaceType`), so `FullName` is
+///   `(interface).M` — `writeFuncName` prints the literal word `interface`
+///   rather than the whole type.
+///
+/// A method that already has a receiver is left alone; use
+/// [`interface_repoint_method_receivers`] to move one that is already set.
+pub fn interface_set_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    recv_type: TypeId,
+) {
+    set_method_receivers(types, objects, iface, recv_type, None)
+}
+
+/// Moves the receivers that currently point at `from` to point at `to`.
+///
+/// This is how `type T interface{ M() }` ends up with `(pkg.T).M`: the
+/// interface literal is built first with itself as the receiver, and the
+/// declaration re-points it at the named type once the underlying is known —
+/// what Go achieves by threading `def` into `Checker.interfaceType`.
+///
+/// Filtering on `from` is what keeps it from over-reaching. A nested literal
+/// (`type T interface{ M() interface{ N() } }`) carries its *own* interface as
+/// the receiver of `N`, and `type T U` for a named interface `U` shares `U`'s
+/// underlying, whose methods already read `(pkg.U).M` — upstream keeps both.
+pub fn interface_repoint_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    from: TypeId,
+    to: TypeId,
+) {
+    set_method_receivers(types, objects, iface, to, Some(from))
+}
+
+fn set_method_receivers(
+    types: &mut TypeArena,
+    objects: &mut ObjectArena,
+    iface: TypeId,
+    recv_type: TypeId,
+    replace: Option<TypeId>,
+) {
+    let methods = match types.get(iface) {
+        TypeData::Interface(i) => i.methods.clone(),
+        _ => return,
+    };
+    for m in methods {
+        let Some(sig) = m.typ(objects) else {
+            continue;
+        };
+        let (recv, params, results, variadic, rparams, tparams) = match types.get(sig) {
+            TypeData::Signature(s) => (
+                s.recv(),
+                s.params(),
+                s.results(),
+                s.variadic(),
+                s.recv_type_params().cloned(),
+                s.type_params().cloned(),
+            ),
+            _ => continue,
+        };
+        match (recv, replace) {
+            // Fill in a missing receiver.
+            (None, None) => {}
+            // Move a receiver that points at `from`.
+            (Some(r), Some(from)) if r.typ(objects) == Some(from) => {}
+            _ => continue,
+        }
+        // The receiver is unnamed, like Go's `NewVar(pos, pkg, "", typ)`.
+        let recv = crate::object::var::new_var(objects, "", recv_type);
+        let new_sig = crate::signature::new_signature_type(
+            types, Some(recv), &[], &[], params, results, variadic,
+        );
+        if let Some(rp) = rparams {
+            crate::signature::signature_set_recv_type_params(types, new_sig, rp);
+        }
+        if let Some(tp) = tparams {
+            crate::signature::signature_set_type_params(types, new_sig, tp);
+        }
+        match objects.get_mut(m) {
+            crate::arena::ObjectData::Func(f) => f.set_typ(new_sig),
+            _ => continue,
+        }
+    }
+}
+
 // Free-function accessors.
 
 pub fn interface_num_explicit_methods(arena: &TypeArena, id: TypeId) -> usize {

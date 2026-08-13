@@ -1,6 +1,0 @@
-{
-  "missing": 1,
-  "extra": 1,
-  "why": "One finding, and it is the only shape in this case that reaches types.Func.FullName() through an interface method: upstream prints `(example.com/errcheckverbose/names.emitter).Emit` where guff prints `example.com/errcheckverbose/names.Emit`. guff-types does not wire a receiver onto interface method signatures at all — a deferral its own source calls out (crates/guff-types/src/subst.rs: \"chunk-2 already deferred receiver wiring for interface methods\") — so `signature_recv` answers None and `code::type_func_name` falls back to the package-qualified form. Every other name in this case matches byte for byte, including the pointer-receiver spelling. The default `errcheck` case is 0/0: `verbose` is the only setting that puts FullName in front of a user. See docs/COMPAT-HARDENING.md §7.",
-  "target": "0/0 — needs receivers on interface methods in guff-types, which also removes the `(interface).Method` / `pkg.Method` aliases build_exclude_set adds to work around it."
-}

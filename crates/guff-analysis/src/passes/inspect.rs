@@ -75,12 +75,16 @@ thread_local! {
     };
 
     /// Re-entrancy depth. Some analyzers walk the AST *from inside* a preorder
-    /// callback — `SA4023::interface_from_typed_nil` runs a full-file walk per
-    /// candidate identifier — so the inner walk's time is already inside the
-    /// outer call's `elapsed()`. Charging both would inflate the total (it made
-    /// SA4023 report more preorder time than its whole analyzer run took), so
-    /// only depth 0 accrues time. Calls and nodes still count every walk: they
-    /// describe the work done, and the nesting is exactly what B-1 must fix.
+    /// callback, so the inner walk's time is already inside the outer call's
+    /// `elapsed()`. Charging both would inflate the total (it made SA4023 report
+    /// more preorder time than its whole analyzer run took), so only depth 0
+    /// accrues time. Calls and nodes still count every walk: they describe the
+    /// work done, and the nesting is exactly what B-1 must fix.
+    ///
+    /// SA4023 was the example here, running a full-file walk *per candidate
+    /// identifier*: 267M of the run's 467M scanned nodes on prometheus `./...`.
+    /// It now builds one index lazily (`concrete_pointer_assigns`), so it still
+    /// nests — once — and this guard still covers it.
     static PREORDER_DEPTH: Cell<u32> = const { Cell::new(0) };
 }
 

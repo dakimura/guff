@@ -98,18 +98,17 @@ fn build_exclude_set(opts: &Options) -> HashSet<String> {
             continue;
         }
         set.insert(sym.to_string());
-        // golangci configs often list `(pkg.Type).Method` while guff's
-        // `type_func_name` for some interface calls is `pkg.Method` or
-        // `(interface).Method`. Accept those aliases.
+        // A call through an interface reaches `types.Func.FullName()` as
+        // `(interface).M` for an imported interface (gcimporter gives the
+        // method the interface itself as its receiver) — upstream errcheck
+        // sidesteps that by building the name from the *selection's* receiver
+        // type instead (`namesForExcludeCheck` /
+        // `walkThroughEmbeddedInterfaces`). Until that walk is ported, accept
+        // `(interface).M` as an alias of any `(pkg.T).M` the config lists.
         if let Some(rest) = sym.strip_prefix('(') {
-            if let Some((type_part, method)) = rest.split_once(").") {
+            if let Some((_, method)) = rest.split_once(").") {
                 if !method.is_empty() {
                     set.insert(format!("(interface).{method}"));
-                    if let Some((pkg, _)) = type_part.rsplit_once('.') {
-                        if !pkg.is_empty() {
-                            set.insert(format!("{pkg}.{method}"));
-                        }
-                    }
                 }
             }
         }

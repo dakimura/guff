@@ -366,6 +366,26 @@ fn instr_body(id: InstrId, block: BlockId, f: &Function, prog: &Program) -> Stri
                 disassemble_value(c.x, prog, f)
             )
         }
+        InstrData::ChangeInterface(c) => {
+            // Go: "change interface <resultType> <- <xType> (<x>)".
+            let x_ty = crate::program::value_type_of(prog, f, c.x);
+            format!(
+                "change interface {} <- {} ({})",
+                rel_type(prog, c.typ),
+                rel_type(prog, x_ty),
+                disassemble_value(c.x, prog, f)
+            )
+        }
+        InstrData::MakeInterface(m) => {
+            // Go: "make <resultType> <- <xType> (<x>)".
+            let x_ty = crate::program::value_type_of(prog, f, m.x);
+            format!(
+                "make {} <- {} ({})",
+                rel_type(prog, m.typ),
+                rel_type(prog, x_ty),
+                disassemble_value(m.x, prog, f)
+            )
+        }
         InstrData::Convert(c) => {
             // Go: "convert <resultType> <- <xType> (<x>)".
             let x_ty = crate::program::value_type_of(prog, f, c.x);

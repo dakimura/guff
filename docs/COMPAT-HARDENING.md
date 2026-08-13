@@ -451,7 +451,7 @@ OK を出し続ける。
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（16 本目で 34 pass —— 15 本目の `appends` / `waitgroup` / `hostport` に `testinggoroutine` を追加）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11） | 2026-08-13 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（16 本目で 34 pass —— 15 本目の `appends` / `waitgroup` / `hostport` に `testinggoroutine` を追加）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11）。**18 本目で go/ssa の欠落を 2 つ塞いだ**: `emitStore` の `emitConv`（＝インターフェースへのボクシングが起きる唯一の場所。`MakeInterface` / `ChangeInterface` は空構造体で、一度も emit されていなかった）と `logicalBinop`（値文脈の `&&` / `||` の CFG）。前者で staticcheck-sa の ratchet が **extra 7 → 6**、後者で SA5011 の構文側の当て木を削除。同じく 18 本目でインターフェースのメソッドにレシーバが付き、**errcheck-verbose の ratchet 1/1 を削除**（0/0） | 2026-08-14 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致。**16 本目で「上流が起動を拒む config」を tier にした**（`compat/reject/`、12 ケース）—— finding 集合の tier では原理的に表現できない側で、7・8・9 本目が列挙した 8 規則 + 上流の同じ関数の隣にあった 2 規則を実装し、**理由の文言まで上流と一致**することを両ツール実行で確認する | 2026-08-13 |
 | 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は 15 本目で解消（`#[ignore]` 解除）。**15 本目は ill-typed をもう一段掘って型検査器の欠陥 6 種**: untyped な「値」の代入可能性（`bool(v != 0)`）、埋め込みを辿らないメソッド署名の遅延解決、`IsComparable` のフラグ読み、`commonUnder`、`convertible_to` のメソッド集合準備、逆方向の型推論（go1.21）。kubernetes は 8 → 1 パッケージ、**16 本目の部分的な明示型引数（`sets.KeySet[string](m)`）で 0** | 2026-08-13 |
 | 6 | 縮小器 → 差分ファジング | 中 | **完了** — 道具（`compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`）と、それで見つかる分の消化。1 周目 864 ミュータントで 36 件 = 9 バグ、2 周目（seed 1・2 編集/ミュータント・888 ミュータント）で **4 件 = 4 バグ**（errorlint の `(nil)`、gocritic newDeref の描画ノード、SA1006 の paren、nolintlint の unused を**別の**ディレクティブが打ち消す）。**型情報が要るとされた 3 変異**（rename / littype / rangeint）は型検査器を足さずに実装。ファザー自身の穴も 1 つ（`issue_key` 直マップで related-information 行まで数え、staticcheck-sa の baseline を 5→17 に膨らませていた）。`--recheck` を追加。**15 本目で `--allow-dirty-seeds` を初めて回した**: staticcheck-sa 220 ミュータントで 4 件 —— **4 件とも 1 つの構造的欠陥**（パターンマッチャが根でしか括弧を外していなかった）を別々に指していた。revive 側は上流のレースが乗るので `UNSTABLE` が 60 中 7 出るが、確認を通った 1 件が **revive の括弧の向きは staticcheck と逆**（上流は素の型アサーションで括弧を見ない＝黙る、guff は剥がして撃っていた）を出した。**縮小器に「根集合の ddmin」を第 1 パスとして足した**: ill-typed の再現条件がファイルではなく**どのパッケージを root に入れたか**だったので、64 → 3 パッケージまで落として原因に直行した（`--no-reduce-roots` で無効）。結果 controller-runtime の ill-typed は **16 → 0**、そこで**見えるようになった差分が 17 件**（recall は 100% のまま。うち 3 件はその場で修正、17 件を理由つき allowlist に記録（差分は 20 → 17）） | 2026-08-13 |
@@ -5917,6 +5917,348 @@ baseline が最後にロックされたのは 5 本目（`5705ad7`）で、
    controller-runtime の nilerr / bodyclose 各 1 件（**まだ上流を読んでいない**）、
    gosec G304 / G407。
 
+### 2026-08-13（17 本目）— 赤かった 2 軸を分けて畳んだ: finding は 0 に、wall は犯人 1 本を特定して 4.31 → 3.16s
+
+16 本目が**赤のまま引き継いだ** `--profile full` を始点にした。赤は 2 軸あり
+（`guff_only` 4 / wall 4.150s）、**別々の原因**だったので別々に扱った。
+
+#### 1. 引き継ぎの前提が 1 つ間違っていた —— 14 本目もすでに赤
+
+`gate.py` の上限は `baseline × ratio + epsilon` = `2.360 × 1.0 + 0.150` = **2.510s**。
+16 本目が「良い側」とした 14 本目（`6a3cd9a`）は **2.98s** で、すでに 0.47s 超えている。
+二分探索の述語が単調でなかったので、収束したのは**最後の遷移だけ**だった。
+finding のほうは 14 本目が 20 で baseline と一致するので、偽陽性 4 件が
+15 本目だけの話であるという結論は正しい。
+
+#### 2. wall の犯人は 13 本目（`b96fd2e`）—— S1008 の再パースが無条件だった
+
+各コミットを建てて 3 回ずつ測った。**run1 は毎回外れる**（ビルド直後でバイナリが
+ページキャッシュに無い）ので run2/3 を採る:
+
+| コミット | wall | ill_typed |
+|---|---:|---:|
+| `c71825b`（8 本目 / 記録に残る最後の実行） | 2.45 / 2.46 | 8 |
+| `72af24e` | 2.39 / 2.41 | 8 |
+| `fe256bf` | 2.45 / 2.47 | 8 |
+| `a9ce168`（12 本目） | 2.53 / 2.55 | 7 |
+| **`b96fd2e`**（13 本目） | **2.86 / 2.90** | 7 |
+
+**+0.34s が 1 本に乗っており、ill_typed は動いていない** —— §6（10 セッション分の
+誤診）とは違って、これは「正しく増えた仕事」ではない。
+
+中身は 13 本目の「S1008 がコメントを見ていなかった」修正で、`PARSE_COMMENTS`
+再パースと `CommentMap` の構築を**パッケージ内の全ファイルで無条件に**やっていた。
+`if cond { return true }; return false` の形はほぼどのファイルにも無い。
+
+**同じ形が 15 本目の `fact_deprecated` にもあった。** そして
+`inline` / `directive` / `buildtag` は**すでにバイトスキャンのゲートを持っている**
+（`inline` のコメントは「almost no files carry `//go:fix inline`」と書いてある）。
+直近 2 セッションで入った 2 つだけがその作法を外していた。
+
+#### 3. 偽陽性 4 件 —— 3 件は 15 本目の副作用、1 件は初回 commit から
+
+| linter | 位置 | 原因 |
+|---|---|---|
+| SA4006 | `tsdb/example_test.go:58` | `example_func_spans` を計算して**一度も参照していなかった**（15 本目で入ったまま未配線） |
+| SA9004 | `tsdb/head.go:240` | `group_specs` が上流の `astutil.GroupSpecs`（行の隣接）ではなく「値を持たない spec で切る」だった |
+| SA5011 | `tsdb/querier.go:243` | 値文脈の `&&` が分岐に落ちていない（`logicalBinop` 未移植） |
+| revive `var-declaration` | `config/config.go:579` | 15 本目が外したゲートに、上流の対応物があった |
+
+**SA9004 は fixture のほうも間違っていた。** `const ( A E = 1; B = 2 )` は
+上流が撃たない形（同一行の spec は `End().Line + 1 != Pos().Line` で必ず割れる）で、
+guff の旧グルーピングに合わせて書かれていた。4 形（隣接行 / コメント挟み /
+空行 / 同一行）を golangci-lint 2.12.2 で実測し、**隣接行だけが報告される**ことを
+確認して `bad.go` / `ok.go` を書き直した。§7 の「実際の Go ツールチェインに
+読ませていない fixture」が、コンパイルは通る側で出た例である。
+
+**revive `var-declaration` の境界も実測で確定した。** 15 本目は
+「上流のゲートは `IsUntypedConst` ただ 1 つ」と書いてゲートを削除したが、
+実際に効いているのはその**手前**の `validType(rhsTyp)`
+（コメントに `// Type checking failed (often due to missing imports).` とある）で、
+revive は自前の `lint.Package` で型検査するので**インポート越しのオペランドは
+そこで落ちる**。1 var ブロック 1 形で測った:
+
+```
+local1 + local1 / localFunc() / localVar        → 報告する
+sub.EscapingKey / sub.Func() / sub.Var / sub.Typed → 黙る
+```
+
+**定数性ではなく「RHS が他パッケージに触れているか」が線である。**
+消したゲートは広すぎたが、根拠が無かったわけではない。
+
+#### 4. SA5011 の下に SSA の欠落がある（未修正、サイズ付き）
+
+`hints != nil && hints.ShardCount > 0` の deref が無防備に見えるのは、
+guff-ssa の `builder::expr::binary_expr` が**両オペランドを現在のブロックに
+無条件で吐く**からである。go/ssa は値文脈の `&&` / `||` を `logicalBinop` に回して
+`y` 専用のブロックと Phi を作り、honnef の IR はそこに sigma を置く。
+`cond.rs` は条件文脈の `&&` だけを分岐に落としている。
+
+当座は構文側で「`x` が nil 比較したポインタの、`y` の中の deref」を抑制した
+（`short_circuit_guarded_derefs`）。**ポインタ一致で絞ってあるので
+`a != nil && b.F > 0` は報告されたままである。** 恒久修正は `logicalBinop` の移植で、
+CFG の形が変わるので単独セッションの頭でやること。
+
+#### 5. 入れた perf 修正と、入れなかったもの
+
+| 修正 | wall |
+|---|---|
+| （偽陽性 4 件修正後の出発点） | 4.31s |
+| S1008 の遅延化 + `fact_deprecated` のバイトゲート | 3.75s |
+| testifylint の regex キャッシュ | 3.34s |
+| SA4023 の索引化 | 3.21s |
+
+- **testifylint**: `expected_actual_pattern` が `is_expected_value_candidate` の
+  2 行上にあり、**アサーション毎に regex をコンパイル**していた。
+  regex の*構築*が 0.53s CPU —— 実行中の全 regex マッチより大きい。
+- **SA4023**: 候補比較ごとにパッケージ全体を再走査していた。
+  **全走査 467M ノードのうち 267M**（57%）を単独で占めていた。索引 1 回に。
+- **gocritic `type_implements`**: 呼び出し毎に `TypeArena` 全体を clone。
+  メモ化したが **wall は 1% しか動かなかった**（CPU 17.85 → 17.71s）。
+
+**入れなかったもの: `InspectResult` の kind 索引。** preorder の
+「202M 走査して 97% を mask で捨てている / analyze CPU の 22.9%」という数字から
+kind ごとの索引を作ったが、**wall は 3.21 → 3.19s でノイズ内**だった。
+2.89s という数字自体が `GUFF_DEBUG_CACHE=2` の計測オーバーヘッドを含んでおり、
+素の線形走査（16 バイト × 連続配列）はもともと安かった。
+`PERF_TASKS.md` の「狙った phase の秒数が実際に下がったか。下がっていないなら
+入れる意味がない＝再考」に従って戻した。**計測器が測っている対象を太らせる例。**
+
+#### 6. baseline は再ロックしていない
+
+finding は **20/20/20 P=R=1.0** に戻り、ゲートの finding 軸は緑。
+wall だけ 3.16s（限界 2.510s）で赤のまま残す。
+
+残っている差は 2 種類の合計で、**まだ分けられていない**:
+
+1. **正しく増えた仕事** —— baseline を刻んだ時点（5 本目）に対し、
+   ill_typed は 8 → 3（5 パッケージ分の解析が増えた）、`fact_deprecated` は
+   自パッケージについて**何も出力していなかった**、`preorder` の 4 箇所が
+   走査を途中で打ち切っていた、SA1019 の deprecation ガードが不活性だった。
+2. **まだ無駄な分** —— CPU 上位は gocritic 1.06s / QF1008 1.03s / buildir 0.88s /
+   SA5009 0.79s / godot 0.67s / SA1019 0.66s / unconvert 0.65s / revive 0.64s。
+
+**ただし CPU を削っても wall はあまり動かない**ことが 2 回続けて確認できた
+（gocritic のメモ化、kind 索引）。ワーカーは wall 3.2s に対して 1.3s しか
+回っていない。次に効くのは CPU の総量ではなく**クリティカルパス**
+（`typecheck_roots` 1.04s と analyze の最も遅いパッケージ）である。
+per-package の時間を出す計測がまだ無いので、そこから。
+
+**次にやること**
+
+0. **wall は赤のまま。** 上記 6 の 2 分割を先にやること —— 「正しく増えた分」が
+   何秒かを出さないと、baseline を上げるべきか下げる余地があるかが決まらない。
+   per-package の analyze 時間を `GUFF_DEBUG_CACHE=2` に足すのが最初の一手。
+1. **`logicalBinop` の移植**（上記 4）。SA5011 の構文側の当て木が外せる。
+2. `MakeInterface` にオペランドを持たせる（15 本目からの持ち越し、優先度そのまま）。
+
+### 2026-08-14（18 本目）— 17 本目の「次にやること」3 本を全部畳み、SSA の欠落を 1 つ**新しく**名指しした
+
+17 本目が残した 0（per-package 計測）・1（`logicalBinop`）・2（`MakeInterface`）を
+順に片付けた。副産物として、**この 3 本の前提だった診断が 1 つ間違っていた**ことと、
+その下にもう 1 段の欠落があることが分かったので、そこも実測つきで置いておく。
+
+#### 1. `MakeInterface` は「オペランドが無い」のではなく、**一度も発行されていなかった**
+
+15 本目から「`pub struct MakeInterface {}` がボクシングされる値を持たないので
+referrer が張れない」と記録してきた。オペランドを足して測ったら、
+**`sa4006/ok.go` の偽陽性が消えなかった**。IR を出すと理由がすぐ出た:
+
+```
+func interfaceBoxing(n int):        ← 修正前
+	t0 = println(1)
+	t1 = println(n)
+	return
+```
+
+変換命令が 1 つも無い。`var i interface{} = 1` の代入は
+`lvalue::Address::store` → `Builder::emit_store` → `emit::emit_store` と降りるが、
+**`emit_store` が値を素通しで格納していた**。go/ssa の `emitStore` は
+`Val: emitConv(f, val, MustDeref(addr.Type()))` である ——
+つまりインターフェースへのボクシングが起きる場所そのものが、guff には無かった。
+`MakeInterface` が空構造体だったのは症状であって原因ではない。
+
+直したのは 3 か所:
+
+| 場所 | 内容 |
+|---|---|
+| `instr.rs` | `MakeInterface { x, typ }` / `ChangeInterface { x, typ }`。**両方とも空構造体で、両方とも一度も emit されていなかった** |
+| `emit.rs::emit_conv` | 上流の `isNonTypeParamInterface(typ)` の枝を移植。iface → iface は `ChangeInterface`、untyped nil は interface 型の nil 定数、その他の untyped は既定型へ 1 段変換してから `MakeInterface` |
+| `emit.rs::emit_store` | 格納先のポインタ先型へ `emit_conv`（= 上流の `emitStore`） |
+
+```
+func interfaceBoxing(n int):        ← 修正後
+	t0 = make interface{} <- int (1)
+	t1 = println(t0)
+	t2 = make interface{} <- int (n)
+	t3 = println(t2)
+	return
+```
+
+**落ちた 2 件は、どちらも「上流の作法を guff が別の形で肩代わりしていた」側だった。**
+
+- **SA1014** が 3 件 → 2 件に落ちた。落ちたのは `var i1 any = v; json.Unmarshal(data, i1)`
+  の形 —— 代入で箱に入るようになった結果、`i1` の値が `MakeInterface`（型は `any`）に
+  なり、`Pointer()` 述語（`*types.Pointer | *types.Interface`）を通ってしまう。
+  上流の `callcheck.checkCalls` は `Call.Args` を組む前に
+  `if iarg, ok := arg.(*ir.MakeInterface); ok { arg = iarg.X }` と**箱を剥がしている**。
+  golangci-lint 2.12.2 に 5 形を読ませて確認した —— map・map を入れた `any` 変数・struct、
+  `Unmarshal` と `Decode` の**全部が報告される**。`interface` を許す述語で
+  `any` 変数まで報告されるのは、剥がしている場合だけである。
+  （`json.Unmarshal(data, v)` に map を直接渡す形は前後で変わらない。
+  guff は呼び出し引数を仮引数型に変換しないので、そこには箱が無い —— 下記 5。）
+- **contextcheck** の `contextcheck_nocapture` が黙った。
+  `func fromClient() listFunc { return func(ns string) error {…} }` は
+  戻り値型が名前付きなので、**return で `changetype` が挟まる**（go/ssa も同じ）。
+  `instr_callees` が `Return.results` の中に素の `Value::Function` を探していたので、
+  1 命令ぶん奥に入っただけで追跡が切れた。`ChangeType` を剥がすようにした。
+
+`crates/guff-ssa/tests/emit_test.rs` も落ちた。テストが
+**空のアリーナに transmute した `Value::Global`** を渡していて、
+`emit_store` が格納先の型を読むようになった瞬間に添字が範囲外になる。
+go/ssa の `emitStore` も `addr.Type()` を読むので、これは直す側。実 universe に書き換えた。
+
+**結果**: golden の staticcheck-sa ratchet を **extra 7 → 6**。
+`compat/golden/cases/staticcheck-sa/ratchet.json` から SA4006 の行を落とした。
+
+#### 2. `logicalBinop` を移植し、SA5011 の当て木を外した
+
+17 本目が「恒久修正は `logicalBinop` の移植、CFG の形が変わるので単独セッションの頭で」と
+書いていたもの。値文脈の `x && y` / `x || y` に `binop.rhs` ブロックと
+`binop.done` の Phi を作る（短絡側の辺は `false` / `true` 定数、`y` 側の辺は `y` の値）。
+上流と同じく、`rhs` に前任者がいなければ短絡定数を返し、`done` に前任者がいなければ
+`y` をそのまま返す。
+
+これで 17 本目の `short_circuit_guarded_derefs`（構文から guard を復元していた当て木）を
+**丸ごと削除**できた。prometheus `./tsdb/...` は SA5011 **0 件**。
+4 形を golangci-lint 2.12.2 と並べて実測し、両者一致を確認した:
+
+| 形 | 上流 | guff |
+|---|:--:|:--:|
+| `n := a.N` の後に `if a == nil` | 報告 | 報告 |
+| `if ok && a.N > 0`（左辺が `a` を見ていない） | 黙る | 黙る |
+| `if a != nil && a.N > 0` | 黙る | 黙る |
+| `ok := a != nil && a.N > 0`（値文脈） | 黙る | 黙る |
+
+#### 3. インターフェースのメソッドにレシーバを繋いだ（6 本目からの持ち越し）
+
+§7 が「設計判断ではなく欠落」と書いていたもの。`interface_set_method_receivers` /
+`interface_repoint_method_receivers` を足して 3 か所で呼ぶ。
+
+**上流自身が 2 通りに綴る**、というのがこの件の要だった:
+
+| 由来 | 上流の綴り | なぜ |
+|---|---|---|
+| ソース検査した `type T interface{…}` | `(pkg.T).M` | `Checker.interfaceType` が `def` を受け取り、名前付き型をレシーバにする |
+| export data から読んだもの | `(interface).M` | `ureader` はレシーバ無しで作り、`types.NewInterfaceType` が**インターフェース自身**を入れる。`writeFuncName` は `*types.Interface` を見ると型を書かず `interface` と綴る |
+
+guff は `def` を `typ` に通していないので、順序を逆にした ——
+インターフェースを自分自身をレシーバとして建て、`type T interface{…}` の宣言側で
+`named` に**付け替える**。付け替えを `from == iface` で絞ってあるので、
+入れ子のリテラルも `type T U`（`U` が名前付きインターフェース）も上流どおり動かない。
+
+**errcheck の別名は片方だけ消えた。** `build_exclude_set` が
+`(pkg.T).M` を見るたびに足していた 2 つのうち、`pkg.M` は不要になったので削除した。
+`(interface).M` は**残す** —— 回避策ではなく、上流 errcheck が
+`namesForExcludeCheck` / `walkThroughEmbeddedInterfaces` で
+**選択の受け手型から**名前を組み立てていることの代役だからである。
+`(io.Writer).Write` を除外する config を両ツールに読ませて、削除の前後で一致を確認した。
+
+**結果**: golden の errcheck-verbose ratchet **1/1 を削除**（0/0）。
+
+#### 4. per-package の analyze 時間 —— wall を決めているのは 1 パッケージだった
+
+17 本目の「次にやること 0」。`GUFF_DEBUG_CACHE=2` に per-package の表を足した
+（summed CPU / action 数 / **最初の action が始まってから最後が終わるまでの span**）。
+prometheus `./...`:
+
+```
+guff: per-package analyze time (top 20 of 114 pkgs; 10.91s total CPU, 1.49s from first action to last):
+       2.90s CPU     206 actions  [  0.00s..  1.49s]  .../prometheus/tsdb
+       0.60s CPU     205 actions  [  0.00s..  1.47s]  .../prometheus/web/api/v1
+       0.55s CPU     202 actions  [  0.00s..  1.48s]  .../prometheus/storage/remote
+       …
+  tail: .../prometheus/tsdb ends at 1.49s (2.90s CPU over 1.49s span)
+guff: phase typecheck_roots 1.06s (114 pkgs, 114 analyze roots)
+guff: phase analyze (run_on_packages) 1.54s
+```
+
+**analyze の wall は `tsdb` 1 パッケージで決まっている。** CPU 合計 10.91s に対し
+span は 1.49s（≒7.3 並列）だが、`tsdb` だけで 2.90s CPU を 1.49s の span に
+押し込んでおり（≒1.95 並列）、しかもその span が phase 全体を覆っている。
+2 番手の `web/api/v1` は 0.60s CPU、つまり **`tsdb` を除くと analyze は 1s を切る**。
+
+これで 17 本目が 2 回続けて観測した「CPU を削っても wall が動かない」
+（gocritic のメモ化 CPU 17.85 → 17.71s で wall 1%、kind 索引で wall 3.21 → 3.19s）が
+数字になった。**削るべきは CPU 総量ではなく `tsdb` 上の 1 パッケージ分の CPU**、
+あるいはパッケージ内 action DAG の幅である。
+
+**上の秒数を 17 本目の 3.16s と直接引き算しないこと。** この測定を採った時点の
+作業ツリーには**別セッションが進行中の `TypeArena` の overlay を `Arc` 化する変更**
+（`arena.rs`、PERF_TASKS_V3 V1-1）が同時に入っていた。分けて測っていないので、
+17 本目からの差のどれだけがそちらのものかは**この記録では答えられない**。
+（その後そちらは `.claude/worktrees/perf-v3` に移り、main のツリーからは消えている。）
+per-package の表そのもの（どのパッケージが tail か、CPU と span の比）は
+どちらの変更にも依存しないので、上の読みは有効である。
+
+#### 5. その下にもう 1 段: **`emitCallArgs` が無い**
+
+`MakeInterface` を直せば controller-runtime の unparam 2 件と
+その `//nolint:unparam` の nolintlint 1 件も消える、と allowlist に書いてあった。
+消えなかった。上流 unparam の表は
+`addImplementing(findNamed(instr.X.Type()), iface)` を**全 `MakeInterface` について**回すが、
+実際の変換地点が `WithValidator(&podValidator{})` ——
+**呼び出しの引数**だからである。そして:
+
+```go
+func viaArg(t T)    { take(t) }                 // take(i I)
+func viaAssign(t T) { var i I = t; take(i) }
+```
+
+```
+func viaArg(t T):        guff: t0 = take(t)                    go/ssa: t0 = make I <- T (t) / t1 = take(t0)
+func viaAssign(t T):     guff: t0 = make I <- T (t) / t1 = take(t0)
+```
+
+`builder/call.rs` の `c.args.push(self.expr(arg))` が
+**引数を仮引数型へ変換していない**。go/ssa の `emitCallArgs` は
+`emitConv(fn, args[i], sig.Params().At(i).Type())` を通常引数ぶん回し、
+可変長引数はスライスに詰め直す。
+
+unparam 側に SSA から `typesImplementing` を組む実装を書いて回してみたが、
+上のとおり表が空になり**観測可能な差が 0**、buildir 依存だけが増えるので**入れずに戻した**。
+先に `emitCallArgs` を入れること。allowlist の「SSA を 1 つ直すと 4 件」は正しくなく、
+**2 つ**である: `MakeInterface` のオペランド（済）と `emitCallArgs`（未）。
+
+#### 6. ゲートの状態
+
+`cargo test` **3116 green**。golden **81 ケース一致**（ratchet: errcheck-verbose を削除、
+staticcheck-sa を extra 7 → 6 に低下）。reject **12 ケース**。isolate tier **116 ターゲット**緑。
+OSS pr + nightly tier **10 ターゲット**緑（recall は全ターゲットで 100%、
+`unexpected_guff` / `unexpected_golangci` とも 0、health は 3 ターゲットとも baseline どおり）。
+
+**regress full の wall は測れていない。** 別セッションの perf 変更が
+`.claude/worktrees/perf-v3` に移った後にもう一度回したが、
+`regress/run.sh` の perf ガードが**そのセッションのビルドで機械が contended**
+（load 5.87 / `claude` が CPU 31.5%）だと言って測定を拒んだ。ガードは正しく働いている。
+17 本目が残した「wall 赤」は**赤のまま引き継ぎ**、数字の更新は機械が空いてから。
+finding 軸のほうは golden / OSS / isolate が全部緑なので、赤いのは wall だけである。
+
+**次にやること**
+
+1. **`emitCallArgs` の移植**（上記 5）。呼び出し引数すべてに変換が入るので blast radius は
+   今回の `emit_store` より大きい —— 単独セッションの頭でやること。
+   controller-runtime の unparam 2 件 + nolintlint 1 件がこれで閉じる（はず。閉じたら実測すること）。
+2. **wall**: 上記 4 のとおり `tsdb` 1 パッケージ。per-analyzer の表を
+   **パッケージで絞れる**ようにするのが次の一手（今の表は全パッケージ合算なので、
+   `tsdb` の 2.90s の内訳が読めない）。**まず `regress/run.sh --profile full` を
+   空いた機械で 1 回通すこと** —— 18 本目は perf ガードに 2 回とも止められていて、
+   17 本目の 3.16s から動いたかどうかすら分かっていない。
+3. `replaceRecvType`（`subst.rs`）—— インスタンス化したジェネリックインターフェースの
+   メソッドが、レシーバとして**元の**インターフェースを指したままになっている。
+   上流は Func と Signature を複製する（メソッドはインスタンス間で共有されるため）。
+   読むのは名前だけ（`identical` はレシーバを見ない）なので優先度は低い。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -6183,6 +6525,11 @@ if ce != nil { … }         // こちらは別の値 → 一致しない → �
 同じ形で `ce` が単一の値になり、guff は撃ってしまう。prometheus の
 `scrape/scrape.go:1709-1711` ほか計 6 件がこれ（2026-08-08 §4）。
 
+なお `hints != nil && hints.ShardCount > 0` の側は**別問題**で、17 本目が構文側の
+当て木（`short_circuit_guarded_derefs`）を当てていたもの。18 本目に
+`logicalBinop` を移植して当て木を削除した（§4 の 2026-08-14）。σ が無い件とは違い、
+これは CFG が足りていなかっただけである。
+
 波及として、**`buildir` の `SrcFuncs` に既定でメソッドを入れられない**。
 上流は常に入れるが、入れた瞬間にこの SA5011 偽陽性がメソッド本体から噴き出して
 regress ゲートが落ちる。現状は
@@ -6191,53 +6538,67 @@ regress ゲートが落ちる。現状は
 ＝ 静かな recall 損失が残っている。** 解くには SA5011 に σ 相当の手当て
 （分岐をまたぐ値の区別）を入れるのが先。
 
-### `MakeInterface` がオペランドを持たない（SA4006、そして unparam）
+### ~~`MakeInterface` がオペランドを持たない~~ → **発行されていなかった**（SA4006／unparam）`[記録 2026-08-08 / 解消 2026-08-14（18 本目）/ 残り 1 件は下記 `emitCallArgs`]`
 
-guff-ssa の `MakeInterface` は **空構造体** (`pub struct MakeInterface {}`) で、
-ボクシングされる値を保持しない。go/ssa の `MakeInterface` は `X` を持ち、
-その値の referrer になる。したがって
+**解消済み、ただし診断が間違っていた。** 15 本目から 17 本目まで
+「`pub struct MakeInterface {}` がボクシングされる値を持たない」と記録してきたが、
+オペランドを足しても `sa4006/ok.go` の偽陽性は消えなかった。原因は 1 段下にあり、
+**`emit_store` が値を素通しで格納していた** —— go/ssa の `emitStore` は
+`Val: emitConv(f, val, MustDeref(addr.Type()))` で、そこが**インターフェースへの
+ボクシングが起きる唯一の場所**である。空構造体だったのは症状であって原因ではない。
+詳細は §4 の 2026-08-14（18 本目）。SA4006 の extra 1 件は消え、
+golden の staticcheck-sa ratchet は extra 7 → 6 になった。
+
+**unparam の 2 件はまだ閉じていない。** 下記 `emitCallArgs` を参照。
+
+### `emitCallArgs` が無い —— 呼び出し引数が仮引数型へ変換されない `[記録 2026-08-14（18 本目）]`
+
+`builder/call.rs` の `c.args.push(self.expr(arg))` は引数をそのまま積む。
+go/ssa の `emitCallArgs` は通常引数ぶん
+`emitConv(fn, args[i], sig.Params().At(i).Type())` を回し、可変長引数はスライスに詰め直す。
+実測:
 
 ```go
-var i interface{} = 1
-_ = i
-i = n          // 上流は撃たない（n の referrer に MakeInterface がある）
+func take(i I) {}
+func viaArg(t T)    { take(t) }                 // guff: t0 = take(t)
+func viaAssign(t T) { var i I = t; take(i) }    // guff: t0 = make I <- T (t) / t1 = take(t0)
 ```
 
-で guff は `n` を未使用とみなして SA4006 を撃つ。上流に合わせる分岐は
-`sa4006.rs` に置いてあるが、命令がオペランドを持たない以上**発火しえない**。
-解くには guff-ssa 側で `MakeInterface { x: Value }` に変えて referrer を
-張る必要があり、SSA の構造変更なので単独セッションの範囲に収まらない。
-現状の差分は golden の extra 1 件（`sa4006/ok.go`）。
+go/ssa は `viaArg` にも `t0 = make I <- T (t)` を出す。
 
-**同じ欠落が unparam にも出ている `[追加 2026-08-13（15 本目）]`。** 上流の unparam は
-`ssa.MakeInterface` を全部見て `addImplementing(findNamed(instr.X.Type()), iface)` で
-「この名前付き型が実装しなければならないメソッド名」を集め、そこに載っている名前の
-メソッドは**シグネチャを変えられない**として飛ばす（`check/check.go` の
-"skip - method required to implement an interface"）。guff の `MakeInterface` は
-箱詰めする値も型も持たないので、この表が作れない。
-`compat/allowlists/controller-runtime.txt` の unparam 2 件と、
-その `//nolint:unparam` が「未使用」に見える nolintlint 1 件がこれである。
-**SSA を 1 つ直すと 4 件が同時に消える**（SA4006 の extra 1 + unparam 2 + nolintlint 1）。
+見えるのは `compat/allowlists/controller-runtime.txt` の unparam 2 件と、
+その `//nolint:unparam` が「未使用」に見える nolintlint 1 件。
+上流 unparam は `addImplementing(findNamed(instr.X.Type()), iface)` を
+**全 `MakeInterface` について**回して「この名前付き型が実装しなければならない
+メソッド名」の表を作るが、実際の変換地点（`WithValidator(&podValidator{})`）が
+**呼び出しの引数**なので、guff には命令が無く表が空になる。
+18 本目に SSA 版の `typesImplementing` を書いて回したが観測可能な差が 0 だったため、
+buildir 依存だけを増やすことになるので**入れずに戻した**。先にこちらを入れること。
 
-### インターフェースのメソッドにレシーバが繋がっていない `[記録 2026-08-11（6 本目）]`
+**allowlist の「SSA を 1 つ直すと 4 件が同時に消える」は正しくない。2 つである** ——
+`MakeInterface` のオペランド（済）と `emitCallArgs`（未）。
 
-`types.Func.FullName()` はメソッドを `(pkg.T).M` と綴る。guff の
-`code::type_func_name` は `signature_recv` が `None` を返すと
-`pkg.M` に落ちるが、**インターフェースのメソッドでは常に `None` になる** ——
-`guff-types` がインターフェースのメソッドシグネチャにレシーバを繋いでいないからで、
-`crates/guff-types/src/subst.rs` 自身が
-「chunk-2 already deferred receiver wiring for interface methods」と書いている。
+### ~~インターフェースのメソッドにレシーバが繋がっていない~~ `[記録 2026-08-11（6 本目）/ 解消 2026-08-14（18 本目）]`
 
-見えるのは 2 箇所:
+**解消済み。** `interface_set_method_receivers` /
+`interface_repoint_method_receivers` を足し、`Checker::interface_type`（インターフェース
+自身）・`Checker::type_decl`（`type T interface{…}` のとき名前付き型へ付け替え）・
+`ureader`（インターフェース自身）の 3 か所で呼ぶ。golden の errcheck-verbose ratchet
+1/1 を削除した。
 
-| 場所 | 症状 |
-|---|---|
-| `errcheck.verbose: true` | 上流 `(pkg.emitter).Emit` / guff `pkg.Emit`。`cases/errcheck-verbose` の ratchet 1/1 |
-| `errcheck` の除外リスト | `build_exclude_set` が `(pkg.T).M` を見るたびに `(interface).M` と `pkg.M` の**別名を足して回っている**。これは回避策であって仕様ではない |
+**上流自身が 2 通りに綴る**、というのがこの件の要だった: ソース検査した
+`type T interface{…}` は `(pkg.T).M`（`Checker.interfaceType` が `def` を受け取る）、
+export data から読んだものは `(interface).M`（`ureader` はレシーバ無しで作り、
+`types.NewInterfaceType` がインターフェース自身を入れ、`writeFuncName` は
+`*types.Interface` を見ると型を書かず `interface` と綴る）。
+したがって errcheck の別名は**片方だけ**消えた: `pkg.M` は削除、`(interface).M` は残す ——
+後者は回避策ではなく、上流 errcheck が `namesForExcludeCheck` /
+`walkThroughEmbeddedInterfaces` で**選択の受け手型から**名前を組み立てていることの代役である。
 
-**これは設計判断ではなく欠落**なので直すべき側に置く。直せば ratchet も別名の追加も
-同時に消える。ただし receiver を足すと `subst` / `unify` / メソッド集合の比較に
-波及するので、単独セッションの頭でやること。
+残っているのは `subst.rs` の `replaceRecvType`: インスタンス化したジェネリック
+インターフェースのメソッドが、レシーバとして**元の**インターフェースを指したままになる。
+上流は Func と Signature を複製する（メソッドはインスタンス間で共有されるため）。
+読むのは名前だけ（`identical` はレシーバを見ない）なので優先度は低い。
 
 ### ~~型集合を見ない `allX` と、ジェネリック型エイリアス~~ `[記録 2026-08-12（11 本目）/ 解消 2026-08-12（12 本目）]`
 

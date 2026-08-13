@@ -328,8 +328,13 @@ fn subst_interface(
         return typ;
     }
     crate::interface::new_interface_type(arena, new_methods, new_embeds)
-    // Chunk-9: skipping replaceRecvType (interface method receiver back-fill);
-    // chunk-2 already deferred receiver wiring for interface methods.
+    // Still skipping `replaceRecvType`: the substituted methods keep receivers
+    // pointing at the *original* interface, so a method of an instantiated
+    // generic interface names its origin. Doing it right means cloning the Func
+    // (Go allocates a new `*Func` and `*Signature` rather than mutating, since
+    // methods are shared across instantiations), and only naming reads the
+    // receiver — `identical` ignores it. Receivers themselves are no longer
+    // deferred: `interface_set_method_receivers` wires them at construction.
 }
 
 fn subst_alias(

@@ -35,7 +35,7 @@ fn check_const_decl(pass: &Pass<'_>, decl: &GenDecl, pending: &mut Vec<u32>) {
     if decl.tok != Some(Token::CONST) || !decl.lparen.is_valid() {
         return;
     }
-    let groups = group_specs(decl);
+    let groups = group_specs(pass, decl);
     for group in groups {
         if group.len() < 2 {
             continue;
@@ -108,21 +108,38 @@ fn is_simple_literal(expr: &Expr) -> bool {
     }
 }
 
-fn group_specs(decl: &GenDecl) -> Vec<Vec<&ValueSpec>> {
-    let mut groups = Vec::new();
-    let mut current: Vec<&ValueSpec> = Vec::new();
+/// Port of `astutil.GroupSpecs`: two specs share a group only when they sit on
+/// consecutive lines (`prev.End().Line + 1 == next.Pos().Line`), which is
+/// `PositionFor(…, false)` — raw lines, not `//line` adjusted.
+///
+/// A doc comment between two constants splits the group just as a blank line
+/// does, because `ValueSpec.Pos()` is the first name and starts *below* the
+/// comment. guff used to split on "this spec has no values" instead, which is a
+/// different rule entirely: it put `tsdb/head.go:239-242` — two constants, each
+/// carrying its own doc comment — into one group and reported it, where
+/// upstream sees two groups of one and never reaches the check. Dropping the
+/// values test loses nothing, since the group body below already refuses any
+/// spec that does not have exactly one value (the `iota` shape).
+fn group_specs<'a>(pass: &Pass<'_>, decl: &'a GenDecl) -> Vec<Vec<&'a ValueSpec>> {
+    let fset = pass.fset();
+    let mut groups: Vec<Vec<&'a ValueSpec>> = Vec::new();
+    let mut prev_end_line: Option<i64> = None;
     for spec in &decl.specs {
         let guff::ast::Spec::ValueSpec(vs) = spec else {
             continue;
         };
-        if vs.values.is_empty() && !current.is_empty() {
-            groups.push(current);
-            current = Vec::new();
+        let starts_new_group = match prev_end_line {
+            Some(prev) => prev + 1 != fset.line_for(spec.pos(), false),
+            None => true,
+        };
+        if starts_new_group {
+            groups.push(Vec::new());
         }
-        current.push(vs);
-    }
-    if !current.is_empty() {
-        groups.push(current);
+        groups
+            .last_mut()
+            .expect("a group was just pushed when empty")
+            .push(vs);
+        prev_end_line = Some(fset.line_for(spec.end(), false));
     }
     groups
 }

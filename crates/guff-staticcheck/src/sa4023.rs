@@ -9,6 +9,8 @@
 //! The fallback only considers assignments that appear *before* the comparison
 //! so later concrete writes (e.g. go-redis `Manager.Listener`) are not FPs.
 
+use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, Expr, Ident};
@@ -22,7 +24,7 @@ use guff_analysis::is_nil_const;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_ssa::instr::{BinOp, InstrData};
 use guff_ssa::value::Value;
-use guff_types::arena::TypeData;
+use guff_types::arena::{ObjectId, TypeData};
 
 fn is_interface_type(prog: &guff_ssa::program::Program, typ: guff_types::TypeId) -> bool {
     matches!(
@@ -47,33 +49,25 @@ fn is_concrete_pointer(pass: &Pass<'_>, id: &Ident) -> bool {
     )
 }
 
-/// True if `id` was assigned a concrete pointer value before `before_pos`.
+/// Positions at which each object was assigned a concrete pointer value.
 ///
-/// Matches by types object identity (not bare name) so a later write to a
-/// different `listener` in another function cannot poison the comparison.
-fn interface_from_concrete_pointer_before(
+/// This used to be answered per candidate comparison by walking every
+/// `AssignStmt` in the package again. The mask filter makes each node cheap, but
+/// the shape is quadratic in the package, and it showed: on prometheus `./...`
+/// SA4023 scanned 267M of the run's 467M total AST nodes — 57% of all scanning
+/// in the whole run, for one check. One walk answers every candidate.
+///
+/// Keyed by types object identity (not bare name) so a later write to a
+/// different `listener` in another function cannot poison the comparison, which
+/// is what the per-candidate walk was matching on too.
+fn concrete_pointer_assigns(
     pass: &Pass<'_>,
-    id: &Ident,
-    before_pos: u32,
-) -> bool {
+    inspect: &inspect::InspectResult,
+) -> HashMap<ObjectId, Vec<u32>> {
+    let mut out: HashMap<ObjectId, Vec<u32>> = HashMap::new();
     let Some(info) = pass.types_info() else {
-        return false;
+        return out;
     };
-    let Some(target) = info
-        .uses
-        .get(&id.id)
-        .copied()
-        .or_else(|| info.defs.get(&id.id).copied().flatten())
-    else {
-        return false;
-    };
-    let Some(inspect) = pass
-        .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .cloned()
-    else {
-        return false;
-    };
-    let mut found = false;
     inspect.preorder_typed(node_mask!(AssignStmt), pass.files(), |node| {
         let NodeRef::AssignStmt(AssignStmt { lhs, rhs, .. }) = node else {
             return;
@@ -90,23 +84,41 @@ fn interface_from_concrete_pointer_before(
         else {
             return;
         };
-        if lhs_obj != target {
-            return;
-        }
-        // Only assignments that textually precede the comparison can feed it.
-        if lhs_id.name_pos.0 as u32 >= before_pos {
-            return;
-        }
-        let Some(rhs) = rhs.first() else {
+        let Some(Expr::Ident(rhs_id)) = rhs.first() else {
             return;
         };
-        if let Expr::Ident(rhs_id) = rhs {
-            if is_concrete_pointer(pass, rhs_id) {
-                found = true;
-            }
+        if is_concrete_pointer(pass, rhs_id) {
+            out.entry(lhs_obj)
+                .or_default()
+                .push(lhs_id.name_pos.0 as u32);
         }
     });
-    found
+    out
+}
+
+/// True if `id` was assigned a concrete pointer value before `before_pos`.
+///
+/// Only assignments that textually precede the comparison can feed it.
+fn interface_from_concrete_pointer_before(
+    pass: &Pass<'_>,
+    assigns: &HashMap<ObjectId, Vec<u32>>,
+    id: &Ident,
+    before_pos: u32,
+) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(target) = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).copied().flatten())
+    else {
+        return false;
+    };
+    assigns
+        .get(&target)
+        .is_some_and(|ps| ps.iter().any(|&p| p < before_pos))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -118,6 +130,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA4023 requires inspect analyzer".to_string())?
         .clone();
     let mut pending = Vec::new();
+    // Most packages have no interface-vs-nil comparison at all; build the index
+    // on the first question, as SA4006 does with its `IdentIndex`.
+    let assigns: OnceCell<HashMap<ObjectId, Vec<u32>>> = OnceCell::new();
     for &fid in ir.src_funcs_with_methods() {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
@@ -183,7 +198,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         ) {
             return;
         }
-        if interface_from_concrete_pointer_before(pass, id, bin.op_pos.0 as u32) {
+        let assigns = assigns.get_or_init(|| concrete_pointer_assigns(pass, &inspect));
+        if interface_from_concrete_pointer_before(pass, assigns, id, bin.op_pos.0 as u32) {
             let qualifier = if bin.op == Token::EQL { "never" } else { "always" };
             // Upstream reports the BinOp node; its position is the start of
             // the left operand, not the operator.

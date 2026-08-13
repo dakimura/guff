@@ -219,11 +219,14 @@ fn negate(pass: &Pass<'_>, expr: &Expr) -> Expr {
     }
 }
 
+/// `cm` is `None` during the structural pre-pass, which asks only whether this
+/// file contains the shape at all — see [`run`]. Everything above the comment
+/// test is pure AST and answers identically either way.
 fn check_if_return(
     pass: &Pass<'_>,
     if_: &IfStmt,
     ret2: &ReturnStmt,
-    cm: &CommentMap<'_>,
+    cm: Option<&CommentMap<'_>>,
 ) -> Option<String> {
     if if_.init.is_some() || if_.else_.is_some() {
         return None;
@@ -252,10 +255,12 @@ fn check_if_return(
         return None;
     }
 
-    let n1 = NodeRef::IfStmt(if_);
-    let n2 = NodeRef::ReturnStmt(ret2);
-    if has_comments(cm, n1) || has_comments(cm, n2) {
-        return None;
+    if let Some(cm) = cm {
+        let n1 = NodeRef::IfStmt(if_);
+        let n2 = NodeRef::ReturnStmt(ret2);
+        if has_comments(cm, n1) || has_comments(cm, n2) {
+            return None;
+        }
     }
 
     let orig_cond = unparen(&if_.cond);
@@ -272,7 +277,11 @@ fn check_if_return(
     ))
 }
 
-fn check_block(pass: &Pass<'_>, block: &BlockStmt, cm: &CommentMap<'_>) -> Option<(u32, String)> {
+fn check_block(
+    pass: &Pass<'_>,
+    block: &BlockStmt,
+    cm: Option<&CommentMap<'_>>,
+) -> Option<(u32, String)> {
     let l = block.list.len();
     if l < 2 {
         return None;
@@ -303,6 +312,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if is_generated(file) {
                 continue;
             }
+            // The comment map below costs a disk read, a full `PARSE_COMMENTS`
+            // reparse and a whole-file walk — more than every other S1008 check
+            // put together, and it used to be paid for every file in the
+            // package. Almost no file contains the `if cond { return true };
+            // return false` shape, so ask the cheap question first and build
+            // nothing when the answer is no. Same shape as SA4006's
+            // `OnceCell<IdentIndex>`, spelled as two walks because a
+            // `CommentMap` borrows the reparse it was built over.
+            let mut has_candidate = false;
+            inspect.preorder_typed(node_mask!(BlockStmt), std::slice::from_ref(file), |n| {
+                if has_candidate {
+                    return;
+                }
+                let NodeRef::BlockStmt(block) = n else {
+                    return;
+                };
+                has_candidate = check_block(pass, block, None).is_some();
+            });
+            if !has_candidate {
+                continue;
+            }
             let reparsed = comments_with_positions(pass, file);
             let cm = new_comment_map(
                 pass.fset(),
@@ -313,7 +343,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let NodeRef::BlockStmt(block) = n else {
                     return;
                 };
-                if let Some(diag) = check_block(pass, block, &cm) {
+                if let Some(diag) = check_block(pass, block, Some(&cm)) {
                     pending.push(diag);
                 }
             });

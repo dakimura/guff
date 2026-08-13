@@ -175,8 +175,16 @@ pub struct MakeClosure {
     /// the closure's type (a `*types.Signature`).
     pub typ: TypeId,
 }
+/// MakeInterface constructs an instance of an interface type from a value of a
+/// concrete type: it boxes `x`, which becomes an operand (and so a referrer of
+/// whatever produced `x`). (Go: `MakeInterface`)
 #[derive(Debug)]
-pub struct MakeInterface {}
+pub struct MakeInterface {
+    /// the boxed value; its type is always concrete (never an interface).
+    pub x: Value,
+    /// the interface type constructed (Go: `MakeInterface.Type()`).
+    pub typ: TypeId,
+}
 /// MakeMap yields a new, empty map (`make(map[K]V)` or an empty map literal).
 /// `reserve`, when present, hints the initial capacity. (Go: `MakeMap`)
 #[derive(Debug)]
@@ -279,8 +287,14 @@ pub struct ChangeType {
     pub x: Value,
     pub typ: TypeId,
 }
+/// ChangeInterface yields `x` converted to a different interface type. The
+/// conversion always succeeds (the destination's method set is a subset of the
+/// source's), so unlike [`TypeAssert`] it cannot panic. (Go: `ChangeInterface`)
 #[derive(Debug)]
-pub struct ChangeInterface {}
+pub struct ChangeInterface {
+    pub x: Value,
+    pub typ: TypeId,
+}
 
 /// A DebugRef pseudo-instruction maps a source-level expression to the SSA
 /// value `x` that represents its value (`is_addr == false`) or address
@@ -386,6 +400,8 @@ impl InstrData {
             InstrData::Field(fld) => Some(fld.typ),
             InstrData::FieldAddr(fld) => Some(fld.typ),
             InstrData::ChangeType(c) => Some(c.typ),
+            InstrData::ChangeInterface(c) => Some(c.typ),
+            InstrData::MakeInterface(m) => Some(m.typ),
             InstrData::Convert(c) => Some(c.typ),
             InstrData::Index(i) => Some(i.typ),
             InstrData::IndexAddr(i) => Some(i.typ),
@@ -526,6 +542,12 @@ impl InstrData {
                 f(&i.x);
             }
             InstrData::ChangeType(i) => {
+                f(&i.x);
+            }
+            InstrData::ChangeInterface(i) => {
+                f(&i.x);
+            }
+            InstrData::MakeInterface(i) => {
                 f(&i.x);
             }
             InstrData::Convert(i) => {
@@ -674,6 +696,12 @@ impl InstrData {
                 f(&mut i.x);
             }
             InstrData::ChangeType(i) => {
+                f(&mut i.x);
+            }
+            InstrData::ChangeInterface(i) => {
+                f(&mut i.x);
+            }
+            InstrData::MakeInterface(i) => {
                 f(&mut i.x);
             }
             InstrData::Convert(i) => {
