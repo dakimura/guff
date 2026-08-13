@@ -306,6 +306,67 @@ fn region_uses_value(func: &Function, root: BlockId, key: Value) -> bool {
     false
 }
 
+/// True when upstream's IR would have renamed the pointer *before it reached
+/// the check*, so the `BinOp` operand `maybeNil` is keyed on is a sigma and the
+/// earlier deref's value can never match it.
+///
+/// [`sigma_shadows`] models the other direction — check first, deref below. This
+/// one is the deref-first shape SA5011's own doc comment advertises:
+///
+/// ```go
+/// _ = *x
+/// if x == nil { return }   // reported
+/// ```
+///
+/// which upstream reports only while *nothing branches in between*. Put any
+/// conditional between them and the fall-through block is solely preceded by a
+/// branch, so it gets a sigma for every live value; the `if x == nil` below
+/// then compares the sigma, not the value the deref read, and upstream goes
+/// quiet:
+///
+/// ```go
+/// v, err := sub(g.SDS)     // deref of g
+/// if err != nil { return } // <- sigma for g inserted in the fall-through
+/// if g != nil { … }        // compares the sigma: not reported
+/// ```
+///
+/// consul `agent/xds/listeners_ingress.go:227` is exactly that, and it only
+/// became visible when the package stopped being ill-typed
+/// (COMPAT-HARDENING §4, 15th session). Reduced to twenty lines.
+fn renamed_before_check(func: &Function, check: &NilCheck, deref_block: BlockId, key: Value) -> bool {
+    if check.check_block == deref_block {
+        return false;
+    }
+    let deref_bb = func.blocks.get(deref_block);
+    // Only meaningful when the deref comes first on every path to the check.
+    if !deref_bb.dominates(func.blocks.get(check.check_block)) {
+        return false;
+    }
+    // Walk the dominator chain from the check back to the deref. Any block on
+    // it whose single predecessor ends in an `If` is a sigma insertion point,
+    // and the sigma survives when the region below uses the value — which it
+    // does, since the check itself is below and reads it.
+    let mut b = check.check_block;
+    while b != deref_block {
+        let bb = func.blocks.get(b);
+        if bb.preds.len() == 1 {
+            let pred = func.blocks.get(bb.preds[0]);
+            let ends_in_if = pred
+                .instrs
+                .last()
+                .is_some_and(|&iid| matches!(func.instrs.get(iid), InstrData::If(_)));
+            if ends_in_if && region_uses_value(func, b, key) {
+                return true;
+            }
+        }
+        match bb.dom.idom {
+            Some(idom) => b = idom,
+            None => return false,
+        }
+    }
+    false
+}
+
 /// True when upstream's IR would have renamed the pointer before `deref_block`,
 /// so `maybeNil` — keyed on the *pre-branch* value — could not match the deref.
 ///
@@ -461,11 +522,15 @@ fn is_guarded_by_non_nil(
     func: &Function,
     check: &NilCheck,
     deref_block: BlockId,
+    key: Value,
 ) -> bool {
     if sigma_shadows(func, check, deref_block) {
         return true;
     }
     if separated_by_branch(func, check.check_block, deref_block) {
+        return true;
+    }
+    if renamed_before_check(func, check, deref_block, key) {
         return true;
     }
     let Some(non_nil_block) = check.non_nil_block else {
@@ -519,10 +584,11 @@ fn any_check_guards(
     func: &Function,
     checks: &[NilCheck],
     deref_block: BlockId,
+    key: Value,
 ) -> bool {
     checks
         .iter()
-        .any(|check| is_guarded_by_non_nil(prog, func, check, deref_block))
+        .any(|check| is_guarded_by_non_nil(prog, func, check, deref_block, key))
 }
 
 fn lookup_maybe_nil<'a>(
@@ -534,7 +600,7 @@ fn lookup_maybe_nil<'a>(
 ) -> Option<&'a NilCheck> {
     let key = peel_load(func, ptr);
     if let Some(checks) = maybe_nil.get(&key) {
-        if any_check_guards(prog, func, checks, deref_block) {
+        if any_check_guards(prog, func, checks, deref_block, key) {
             return None;
         }
         // Not guarded by any check — relate to the first (earliest) check.
@@ -548,7 +614,7 @@ fn lookup_maybe_nil<'a>(
         if !ptr_keys_equal(prog, func, k, key) {
             return None;
         }
-        if any_check_guards(prog, func, checks, deref_block) {
+        if any_check_guards(prog, func, checks, deref_block, k) {
             return None;
         }
         checks.first()

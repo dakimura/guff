@@ -95,17 +95,28 @@ def normalize_path(filename: str, root: str) -> str:
     return filename
 
 
-_UNUSED_PREFIX = re.compile(r"^(func|var|const|type|field|method)\s+")
-# honnef unused qualifies methods as `(*T).name` / `(T).name`; strip so bare
-# `name is unused` from older guff still collides.
-_UNUSED_METHOD_QUAL = re.compile(r"^\(\*?[\w.]+\)\.")
 _STATICCHECK_CODE = re.compile(r"^(?:SA|ST|S|QF)\d{4}:\s*")
-# golangci modernize prefixes the check name (`slicesbackward: …`); guff omits it.
-_MODERNIZE_CHECK = re.compile(r"^[a-z][a-z0-9]*:\s*")
-# golangci govet prefixes the pass name (`inline: Constant …`); guff omits it.
-_GOVET_PASS = re.compile(r"^[a-z][a-z0-9]*:\s*")
 # guff errcheck often includes the callee; golangci may omit it.
 _ERRCHECK_OF = re.compile(r"^Error return value of `.+?` is not checked$")
+
+# Four normalizations were removed on 2026-08-13 after each was *measured*
+# rather than assumed (COMPAT-HARDENING §5). The method: re-key an existing
+# run's finding sets with one normalization switched off and see whether the
+# diff grows. Two were doing nothing at all and two were hiding real bugs:
+#
+#   unused prefix / method qual  — hiding a bug. guff omitted the `func` / `var`
+#       / `const` / `type` kind word honnef puts in front of the name
+#       (`lintcmd/lint.go`: "%s %s is unused") and wrapped a value receiver in
+#       parentheses where upstream does not. Both fixed in guff-unused.
+#   modernize check prefix       — hiding a bug. Two of twenty-five checks set
+#       `Diagnostic::category` and the rest left it empty, so `minmax` and
+#       `rangeint` shipped their messages without the `name: ` prefix. Now
+#       stamped centrally.
+#   staticcheck trailing period  — dead. Removing it moved nothing.
+#   govet pass prefix            — dead. Removing it moved nothing; guff has
+#       emitted the prefix for some time.
+#
+# What is left below is what the measurement says is still load-bearing.
 
 # Known equivalent phrasings across guff and golangci-lint.
 _ERRCHECK_EQUIV = {
@@ -120,11 +131,11 @@ def normalize_message(linter: str, text: str) -> str:
     if linter == "errcheck":
         if t in _ERRCHECK_EQUIV or _ERRCHECK_OF.match(t):
             return "Error return value is not checked"
-    if linter == "unused":
-        t = _UNUSED_PREFIX.sub("", t)
-        t = _UNUSED_METHOD_QUAL.sub("", t)
     if linter == "staticcheck":
         # golangci prefixes check codes (`QF1003: …`); guff often omits them.
+        # Measured cost: exactly one diff hides behind this, the ST1023 /
+        # QF1011 pair below — the two checks report the same line with
+        # different codes *and* different wording.
         t = _STATICCHECK_CODE.sub("", t)
         # QF1011 ("could omit type") and ST1023 ("should omit type") are the
         # same finding with different wording; collapse so enable-set drift
@@ -134,14 +145,11 @@ def normalize_message(linter: str, text: str) -> str:
             "omit type ",
             t,
         )
-        # Trailing period drift on Deprecated docs (`Use X.` vs `Use X`).
-        t = t.rstrip(".")
-    if linter == "modernize":
-        t = _MODERNIZE_CHECK.sub("", t)
     if linter == "govet":
-        t = _GOVET_PASS.sub("", t)
         # golangci embeds the Go version that built its binary (`go1.26.2`);
-        # guff uses the local GOROOT (`go1.26.4`). Patch is noise for matching.
+        # guff uses the local GOROOT (`go1.26.5`). Patch is noise for matching,
+        # and this one is genuinely environmental — it is the only row of §5
+        # that was always marked intentional.
         t = re.sub(
             r"\(declared using (go1\.\d+)(?:\.\d+)+\)",
             r"(declared using \1)",

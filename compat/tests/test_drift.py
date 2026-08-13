@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "golden"))
 
 from drift import (  # noqa: E402
+    WHY_PLACEHOLDER,
     CaseDrift,
     diff_lists,
     inventory_drift,
@@ -114,7 +115,7 @@ class LedgerTests(unittest.TestCase):
         ledger = {
             "pin": "2.12.2",
             "candidate": "2.13.0",
-            "cases": {"gosec": {"signature": self.drifted().signature()}},
+            "cases": {"gosec": {"signature": self.drifted().signature(), "why": "read it"}},
         }
         v = ledger_verdict(ledger, "2.12.2", "2.14.0", [self.drifted()], EMPTY_INV)
         self.assertTrue(v, "reviewing 2.13.0 says nothing about 2.14.0")
@@ -124,16 +125,46 @@ class LedgerTests(unittest.TestCase):
         ledger = {
             "pin": "2.12.2",
             "candidate": "2.13.0",
-            "cases": {"gosec": {"signature": d.signature()}},
+            "cases": {"gosec": {"signature": d.signature(), "why": "upstream dropped G999"}},
         }
         self.assertEqual(ledger_verdict(ledger, "2.12.2", "2.13.0", [d], EMPTY_INV), [])
+
+    def test_a_placeholder_why_is_not_a_review(self):
+        # `--update` writes every `why` as a placeholder and tells the reviewer
+        # to fill them in. Nothing enforced it, so a ledger committed straight
+        # out of `--update` silenced the weekly job while recording nothing.
+        # Found on Phase 7's first real `--update` run (COMPAT-HARDENING §4,
+        # 2026-08-13).
+        d = self.drifted()
+        for why in (WHY_PLACEHOLDER, "", "   ", "TODO", "todo: later", None):
+            ledger = {
+                "pin": "2.12.2",
+                "candidate": "2.13.0",
+                "cases": {"gosec": {"signature": d.signature(), "why": why}},
+            }
+            self.assertTrue(
+                ledger_verdict(ledger, "2.12.2", "2.13.0", [d], EMPTY_INV),
+                f"{why!r} should not count as reviewed",
+            )
+
+    def test_a_placeholder_inventory_why_is_not_a_review(self):
+        inv = {"added": ["linter:brandnew"], "removed": [], "changed": []}
+        ledger = {
+            "pin": "2.12.2",
+            "candidate": "2.13.0",
+            "cases": {},
+            "inventory": {"signature": inv, "why": WHY_PLACEHOLDER},
+        }
+        self.assertTrue(ledger_verdict(ledger, "2.12.2", "2.13.0", [], inv))
+        ledger["inventory"]["why"] = "brandnew is new in 2.13.0; guff does not implement it yet"
+        self.assertEqual(ledger_verdict(ledger, "2.12.2", "2.13.0", [], inv), [])
 
     def test_more_drift_than_was_reviewed_is_unreviewed_again(self):
         reviewed = self.drifted()
         ledger = {
             "pin": "2.12.2",
             "candidate": "2.13.0",
-            "cases": {"gosec": {"signature": reviewed.signature()}},
+            "cases": {"gosec": {"signature": reviewed.signature(), "why": "read it"}},
         }
         worse = self.drifted()
         worse.upstream_added = ["a.go:2:1:gosec:high:G999: something new"]

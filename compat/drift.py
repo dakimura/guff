@@ -43,6 +43,9 @@ separately:
     compat/drift.py --offline           # only versions already under compat/.tools
     compat/drift.py --update            # accept this run as the reviewed baseline
 
+`--update` writes each entry's `why` as a placeholder; the run is only treated
+as reviewed once every one has been replaced with what the drift actually is.
+
 Findings are written to `compat/results/drift-<stamp>/REPORT.md`. Exit status is
 1 when this run's drift is not the drift `compat/drift-ledger.json` records as
 reviewed — including when the ledger was reviewed against a *different*
@@ -368,13 +371,43 @@ def ledger_verdict(ledger: dict, pin: str, cand: str, results: list[CaseDrift],
     for r in results:
         if not r.drifted:
             continue
-        want = known_cases.get(r.name, {}).get("signature")
+        entry = known_cases.get(r.name, {})
+        want = entry.get("signature")
         if want != r.signature():
             unreviewed.append(f"  case {r.name}: drift differs from the reviewed baseline")
-    known_inv = (ledger.get("inventory") or {}).get("signature")
-    if any(inv[k] for k in ("added", "removed", "changed")) and known_inv != inv:
-        unreviewed.append("  the linter inventory drift differs from the reviewed baseline")
+        elif not is_reviewed(entry.get("why")):
+            unreviewed.append(
+                f"  case {r.name}: signature matches but `why` is still the placeholder"
+            )
+    known_inv_entry = ledger.get("inventory") or {}
+    known_inv = known_inv_entry.get("signature")
+    if any(inv[k] for k in ("added", "removed", "changed")):
+        if known_inv != inv:
+            unreviewed.append("  the linter inventory drift differs from the reviewed baseline")
+        elif not is_reviewed(known_inv_entry.get("why")):
+            unreviewed.append(
+                "  the linter inventory: signature matches but `why` is still the placeholder"
+            )
     return unreviewed
+
+
+WHY_PLACEHOLDER = "TODO: say what upstream changed and what guff must do about it"
+
+
+def is_reviewed(why: object) -> bool:
+    """Has a human actually written down what this drift is?
+
+    `--update` writes every `why` as a placeholder, and the workflow tells the
+    reviewer to fill them in before committing. Nothing enforced it, so a ledger
+    committed straight from `--update` silenced the job while recording nothing
+    — the exact shape COMPAT-HARDENING §1 is about, one level up: a gate that
+    passes because it is not looking. Found on Phase 7's first real `--update`
+    run (§4, 2026-08-13).
+    """
+    if not isinstance(why, str):
+        return False
+    text = why.strip()
+    return bool(text) and text != WHY_PLACEHOLDER and not text.upper().startswith("TODO")
 
 
 def write_ledger(pin: str, cand: str, results: list[CaseDrift], inv: dict) -> None:
@@ -391,12 +424,12 @@ def write_ledger(pin: str, cand: str, results: list[CaseDrift], inv: dict) -> No
         "cases": {
             r.name: {
                 "signature": r.signature(),
-                "why": "TODO: say what upstream changed and what guff must do about it",
+                "why": WHY_PLACEHOLDER,
             }
             for r in results
             if r.drifted
         },
-        "inventory": {"signature": inv},
+        "inventory": {"signature": inv, "why": WHY_PLACEHOLDER},
     }
     LEDGER.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n", encoding="utf-8")
 

@@ -1776,6 +1776,11 @@
       "linter": "gosmopolitan"
     },
     {
+      "declared_in": "guff-govet/src/appends.rs",
+      "id": "govet/appends",
+      "linter": "govet"
+    },
+    {
       "declared_in": "guff-govet/src/assign.rs",
       "id": "govet/assign",
       "linter": "govet"
@@ -1828,6 +1833,11 @@
     {
       "declared_in": "guff-govet/src/framepointer.rs",
       "id": "govet/framepointer",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/hostport.rs",
+      "id": "govet/hostport",
       "linter": "govet"
     },
     {
@@ -1923,6 +1933,11 @@
     {
       "declared_in": "guff-govet/src/unusedresult.rs",
       "id": "govet/unusedresult",
+      "linter": "govet"
+    },
+    {
+      "declared_in": "guff-govet/src/waitgroup.rs",
+      "id": "govet/waitgroup",
       "linter": "govet"
     },
     {
@@ -2793,7 +2808,7 @@
       "goprintffuncname": 1,
       "gosec": 35,
       "gosmopolitan": 1,
-      "govet": 30,
+      "govet": 33,
       "grouper": 1,
       "iface": 1,
       "importas": 1,
@@ -2859,7 +2874,7 @@
       "wsl_v5": 1,
       "zerologlint": 1
     },
-    "total": 547
+    "total": 550
   },
   "linters": [
     "arangolint",

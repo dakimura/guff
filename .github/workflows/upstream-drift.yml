@@ -75,6 +75,12 @@ jobs:
       # whether guff follows upstream or records a permanent difference, then
       # `compat/drift.py --candidate <v> --update` and commit the ledger with a
       # filled-in `why` for each entry.
+      #
+      # The `why` is not decoration. `--update` writes each one as a
+      # placeholder, and `drift.py` refuses to treat a placeholder as reviewed —
+      # committing the ledger straight out of `--update` used to silence this
+      # job while recording nothing, which is the failure mode the job exists to
+      # catch, one level up (found on the first real `--update` run, 2026-08-13).
       - name: What to do about a failure
         if: failure()
         run: |

@@ -3545,7 +3545,11 @@ fn check_go_require_func(
         }
     };
 
-    walk::preorder(NodeRef::BlockStmt(body), |n| {
+    // Upstream is `ast.Inspect`: every `return false` here prunes one subtree
+    // and the walk goes on. `go func(){…}()` and a testify call that has been
+    // classified are both pruned rather than terminal, so anything after them
+    // in the same body is still examined.
+    walk::preorder_prune(NodeRef::BlockStmt(body), |n| {
         if result != GoRequireVerdict::NoExit {
             return false;
         }

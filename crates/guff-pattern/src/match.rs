@@ -152,6 +152,20 @@ impl<'a> Matcher<'a> {
     }
 
     fn match_node_inner(&mut self, pat: &Node, node: NodeRef<'a>) -> Option<MatchValue<'a>> {
+        // Upstream's `match` (honnef `pattern/match.go`) unwraps `*ast.ParenExpr`
+        // on the AST side at *every* recursion, not only at the root, and it
+        // does so before the `Binding` case runs — so a metavariable is always
+        // bound to the unparenthesized node.
+        //
+        // guff only unwrapped in `match_node`, which the walk calls once per
+        // candidate; every descent into a field (`match_expr_node` and friends)
+        // came here instead. The effect is a check that goes quiet the moment a
+        // parenthesis appears anywhere below the pattern root, and it is not
+        // one check: `compat/fuzz.py`'s `paren` mutation found SA1004, SA1013
+        // and SA4024 in one round, on top of SA1006 and SA6006 already fixed by
+        // hand. The pattern language has no `ParenExpr` node — upstream's
+        // doesn't either — so nothing can want the unwrapped form.
+        let node = unparen_node_ref(node);
         match pat {
             Node::Any => Some(MatchValue::Node(node)),
             Node::Nil => {
@@ -861,6 +875,15 @@ impl<'a> Matcher<'a> {
 enum ListKind {
     Expr,
     Stmt,
+}
+
+/// Strips `*ast.ParenExpr` only — the one unwrap that is safe to repeat at
+/// every level of the match. See [`Matcher::match_node_inner`].
+fn unparen_node_ref<'a>(node: NodeRef<'a>) -> NodeRef<'a> {
+    match node {
+        NodeRef::ParenExpr(p) => unparen_node_ref(expr_node_ref(&p.x).unwrap_or(node)),
+        other => other,
+    }
 }
 
 fn unwrap_node_ref<'a>(node: NodeRef<'a>) -> NodeRef<'a> {

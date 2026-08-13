@@ -26,8 +26,8 @@ use crate::conversions::convertible_to as convertible_to_fn;
 use crate::object::var::{new_var, VarKind};
 use crate::operand::{Operand, OperandMode};
 use crate::predicates::{
-    default_type, has_nil, is_const_type, is_integer, is_non_type_param_interface, is_string,
-    is_type_param, is_untyped, is_valid,
+    default_type, has_nil, is_boolean, is_const_type, is_integer, is_interface,
+    is_non_type_param_interface, is_numeric, is_string, is_type_param, is_untyped, is_valid,
 };
 use crate::scope::lookup as scope_lookup;
 use crate::stmt::unparen;
@@ -45,6 +45,15 @@ fn implements_closure(
 }
 
 /// The `representable` closure: is operand `x` representable as `t`?
+///
+/// This stands in for Go's `check.implicitTypeAndValue(x, T) != nil`, which
+/// `assignableTo` calls for *every* untyped operand — not only constants. An
+/// untyped **value** has no `x.val`: `v != 0` is an untyped bool that is not a
+/// constant, and `implicitTypeAndValue`'s non-constant arm judges it on kind
+/// alone (`UntypedBool` → `isBoolean(T)`, and so on). Answering `false` there
+/// made `bool(v != 0)` — the shape every `generated.pb.go` unmarshaller emits —
+/// fail its conversion, and with it the whole package: 9 of kubernetes'
+/// apimachinery ill-typed errors were this one line.
 fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
     if let Some(v) = &x.val {
         return representable_const(a, v, t).is_some();
@@ -52,17 +61,30 @@ fn representable_closure(a: &TypeArena, x: &Operand, t: TypeId) -> bool {
     if x.is_nil() {
         return has_nil(a, t);
     }
-    if let Some(xtyp) = x.typ {
-        if is_untyped(a, xtyp) {
-            if matches!(
-                a.get(xtyp.underlying(a)),
-                TypeData::Basic(b) if b.kind() == BasicKind::UntypedNil
-            ) {
-                return has_nil(a, t);
-            }
-        }
+    let Some(xtyp) = x.typ else { return false };
+    if !is_untyped(a, xtyp) {
+        return false;
     }
-    false
+    let TypeData::Basic(b) = a.get(xtyp.underlying(a)) else {
+        return false;
+    };
+    let xkind = b.kind();
+    // Untyped non-nil → interface: Go converts through the operand's default
+    // type. guff is permissive here for the same reason `implicit_type_and_value`
+    // is — the concrete cases are validated by the caller's assignability path.
+    if is_interface(a, t.underlying(a)) {
+        return true;
+    }
+    match xkind {
+        BasicKind::UntypedBool => is_boolean(a, t),
+        BasicKind::UntypedInt
+        | BasicKind::UntypedRune
+        | BasicKind::UntypedFloat
+        | BasicKind::UntypedComplex => is_numeric(a, t),
+        BasicKind::UntypedString => is_string(a, t),
+        BasicKind::UntypedNil => has_nil(a, t),
+        _ => false,
+    }
 }
 
 impl Checker {
@@ -96,6 +118,17 @@ impl Checker {
     ///
     /// Checker-driven wrapper over [`crate::conversions::convertible_to`].
     pub fn convertible_to(&mut self, x: &Operand, target: TypeId) -> bool {
+        // A conversion's first question is "is x assignable to T", so it needs
+        // the same lazy completion `assignable_to` does. Without it a
+        // conversion to an interface written *above* the method that satisfies
+        // it fails — `var _ = net.RoundTripperWrapper(&Transport{})` on the line
+        // before `func (rt *Transport) WrappedRoundTripper()`, which is how
+        // kubernetes' `util/proxy` spells its compile-time assertion, and the
+        // package went ill-typed for it.
+        if let Some(v) = x.typ {
+            self.prepare_method_set(v);
+        }
+        self.prepare_method_set(target);
         let assignable =
             |a: &mut TypeArena, o: &ObjectArena, p: &PackageArena, x: &Operand, t: TypeId| {
                 assignable_to_fn(a, o, p, x, t, &implements_closure, &representable_closure).ok

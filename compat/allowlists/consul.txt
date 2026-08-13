@@ -10,7 +10,7 @@
 # drops the comments below. The rationale for every entry is kept in
 # docs/COMPAT-HARDENING.md §5, which is the copy to read and to update.
 #
-# Why these three are here at all (2026-08-09): the nightly tier had no CI job,
+# Why these are here at all (2026-08-09): the nightly tier had no CI job,
 # so consul's diff went undated — RESULTS.md claimed P=R=100% while HEAD had six
 # extra findings and nothing said since when. `.github/workflows/compat.yml`
 # now runs the tier on every push to main, and a gate that is permanently red
@@ -18,10 +18,13 @@
 # Keys are pinned to consul v1.21.5 (corpus/repos.json), so the line numbers
 # are stable until that ref moves.
 
-# SA5011 — guff reports a nil dereference upstream does not. Upstream's IR has
-# σ (sigma) nodes that refine a value along a branch; guff's does not, so the
-# nil-checked branch does not narrow the pointer. docs/COMPAT-HARDENING.md §7.
-consul guff-only agent/consul/catalog_endpoint.go:280:staticcheck:possible nil pointer dereference
+# The SA5011 entry that stood here (agent/consul/catalog_endpoint.go:280) is
+# gone as of 2026-08-13: `renamed_before_check` in crates/guff-staticcheck/
+# src/sa5011.rs models the remaining half of upstream's sigma renaming — a
+# branch *between* a deref and a later nil check renames the pointer, so the
+# check compares a sigma and upstream cannot match it. Both this entry and a
+# second instance found the same day (agent/xds/listeners_ingress.go:227) went
+# with it. docs/COMPAT-HARDENING.md §7.
 
 # SA9008 ×2 — `if err, ok := err.(HTTPError); ok { … } else { … err … }` inside a
 # range loop. guff's pattern now matches upstream's exactly (2026-08-09), and

@@ -11,8 +11,35 @@ use guff::token::Token;
 use guff_analysis::code::is_generated_at;
 use guff_analysis::passes::facts::generated;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
-use guff_types::arena::{ObjectArena, ObjectId, TypeArena, TypeData};
+use guff_types::arena::{ObjectArena, ObjectData, ObjectId, TypeArena, TypeData};
 use guff_types::{pointer_elem, signature_recv};
+
+/// `typString` (honnef `unused/unused.go`): the word that precedes the name in
+/// the diagnostic.
+fn object_kind(objects: &ObjectArena, types: &TypeArena, obj: ObjectId) -> &'static str {
+    match objects.get(obj) {
+        ObjectData::Func(_) => "func",
+        ObjectData::Var(v) => {
+            if v.is_field() {
+                "field"
+            } else {
+                "var"
+            }
+        }
+        ObjectData::Const(_) => "const",
+        ObjectData::TypeName(_) => {
+            let is_tparam = obj
+                .typ(objects)
+                .is_some_and(|t| matches!(types.get(t), TypeData::TypeParam(_)));
+            if is_tparam {
+                "type param"
+            } else {
+                "type"
+            }
+        }
+        _ => "identifier",
+    }
+}
 
 fn is_exported(name: &str) -> bool {
     name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
@@ -71,6 +98,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut method_display: HashMap<ObjectId, String> = HashMap::new();
     let mut iface_method_names: HashSet<String> = HashSet::new();
 
+    // Every method name any interface *type* mentions — including an anonymous
+    // one written inline, which is how a package keeps a method private to
+    // itself and still calls it:
+    //
+    //     if setReadSizer, ok := wrec.(interface{ setReadSize(*int) }); ok {
+    //
+    // Collecting only from `type X interface {…}` declarations missed those, so
+    // caddy's `setReadSize` and `tlsNetConn` were reported unused. They were
+    // invisible until the ill-typed count dropped and the package was analysed
+    // at all (COMPAT-HARDENING §4, 15th session).
+    for file in pass.files() {
+        guff::walk::preorder_prune(guff::walk::NodeRef::File(file), |n| {
+            if let guff::walk::NodeRef::InterfaceType(iface) = n {
+                for field in &iface.methods.list {
+                    for name in &field.names {
+                        iface_method_names.insert(name.name.clone());
+                    }
+                }
+            }
+            true
+        });
+    }
+
     for file in pass.files() {
         if is_generated_at(pass, file.file_start.0 as u32) {
             continue;
@@ -96,11 +146,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     if let Some(type_obj) = type_obj {
                                         method_recv_type.insert(*obj, type_obj);
                                     }
+                                    // `(*T).M` for a pointer receiver, `T.M`
+                                    // for a value one — upstream only wraps the
+                                    // type in parentheses when it printed a `*`
+                                    // (unused.go's `newObject`). guff wrapped
+                                    // both, which `normalize.py`'s
+                                    // `_UNUSED_METHOD_QUAL` was erasing along
+                                    // with the whole qualifier.
                                     let ptr = matches!(ty, Expr::StarExpr(_));
                                     let qual = if ptr {
                                         format!("(*{}).", type_ident.name)
                                     } else {
-                                        format!("({}).", type_ident.name)
+                                        format!("{}.", type_ident.name)
                                     };
                                     method_display
                                         .insert(*obj, format!("{qual}{}", f.name.name));
@@ -159,13 +216,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 } else {
                                     candidates.insert(*obj);
                                 }
-                                if let Expr::InterfaceType(iface) = ty {
-                                    for field in &iface.methods.list {
-                                        for n in &field.names {
-                                            iface_method_names.insert(n.name.clone());
-                                        }
-                                    }
-                                }
+                                // Named interfaces are picked up by the
+                                // whole-file sweep below; nothing extra to do
+                                // here.
                             }
                             Spec::ValueSpec(ValueSpec { names, .. }) => {
                                 for id in names {
@@ -264,12 +317,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let name = obj.name(&artifacts.objects);
         let pos = obj.pos(&artifacts.objects);
-        let message = method_display
+        let display = method_display
             .get(&obj)
             .cloned()
-            .map(|d| format!("{d} is unused"))
-            .unwrap_or_else(|| format!("{name} is unused"));
-        pending.push((pos, message));
+            .unwrap_or_else(|| name.to_string());
+        // `fmt.Sprintf("%s %s is unused", uo.obj.Kind, uo.obj.Name)`
+        // (honnef `lintcmd/lint.go`). guff omitted the kind entirely, which
+        // `normalize.py` stripped off upstream's side to match — one of the six
+        // rows COMPAT-HARDENING §5 carried as "unexamined".
+        let kind = object_kind(&artifacts.objects, &artifacts.types, obj);
+        pending.push((pos, format!("{kind} {display} is unused")));
     }
 
     for (pos, message) in pending {

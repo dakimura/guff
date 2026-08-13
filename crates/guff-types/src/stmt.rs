@@ -283,12 +283,14 @@ impl Checker {
     /// Reports `InvalidSend` and returns `None` if `x` is not a sendable
     /// channel.
     ///
-    /// Simplified `Checker.chanElem` for the send (`recv == false`) case: the
-    /// type-parameter (`commonUnder` over a type set) path is DEFERRED — the
-    /// underlying type is used directly.
+    /// Port of `Checker.chanElem` for the send (`recv == false`) case. The
+    /// underlying type comes from `commonUnder`, so `c <- 1` type-checks when
+    /// `c`'s type parameter has one common channel underlying type.
     fn send_chan_elem(&mut self, x: &Operand, pos: u32) -> Option<TypeId> {
         let xtyp = x.typ?;
-        let u = xtyp.underlying(&self.types);
+        let (common, _err) =
+            crate::under::common_under(&mut self.types, &self.objects, &self.packages, xtyp, None);
+        let u = common.unwrap_or_else(|| xtyp.underlying(&self.types));
         match self.types.get(u) {
             TypeData::Chan(_) => {
                 if crate::chan::chan_dir(&self.types, u) == crate::chan::ChanDir::RecvOnly {
@@ -318,12 +320,26 @@ impl Checker {
     /// The key and value types produced by a `range` clause over an expression
     /// of type `orig`. Returns `(key, val, ok)`; `None` for an absent key/val.
     ///
-    /// Simplified `rangeKeyVal`: `commonUnder` is approximated by `Underlying`
-    /// (no type-set iteration), and the **function-iterator** form (`range over
-    /// func`, go1.23) is DEFERRED — it reports `ok == false`. Integer ranges,
-    /// strings, arrays, `*array`, slices, maps, and channels are handled.
-    fn range_key_val(&self, orig: TypeId) -> (Option<TypeId>, Option<TypeId>, bool) {
-        let u = orig.underlying(&self.types);
+    /// Port of `rangeKeyVal`. The operand's underlying type comes from
+    /// `commonUnder`, so ranging over a **type parameter** works whenever every
+    /// term of its type set has the same underlying type —
+    /// `func F[T interface{ ~[]int }](xs T) { for range xs {} }`. Reading
+    /// `Underlying()` instead answered `TypeParam` and rejected the loop, which
+    /// took the whole package ill-typed (kubernetes' `pkg/api/validate`,
+    /// COMPAT-HARDENING §7 / 12th session).
+    fn range_key_val(&mut self, orig: TypeId) -> (Option<TypeId>, Option<TypeId>, bool) {
+        // Upstream's `cond` callback rejects a send-only channel in the type
+        // set. Checking the *result* is equivalent: when every term shares one
+        // underlying type, that type is the channel, and when they do not,
+        // `common_under` fails either way.
+        let (common, _err) =
+            crate::under::common_under(&mut self.types, &self.objects, &self.packages, orig, None);
+        let u = match common {
+            Some(u) => u,
+            // No single common underlying type — Go reports the cause and
+            // bails; guff's caller reports `cannot range over x`.
+            None => return (None, None, false),
+        };
         // arrayPtrDeref: range over `*[N]T` ranges over the array.
         let t = if let TypeData::Pointer(_) = self.types.get(u) {
             let base = crate::pointer::pointer_elem(&self.types, u);

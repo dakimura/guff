@@ -209,16 +209,14 @@ fn non_string_type_param_cannot_be_appended_to_bytes() {
 }
 
 // ----------------------------------------------------------------------------
-// Not fixed here: `range` and channel operations reach the type set through
-// `commonUnder`, a separate mechanism from `allX`. `stmt.rs` says so in both
-// places ("`commonUnder` is approximated by `Underlying` (no type-set
-// iteration)"). Every declaration below compiles under go1.26; guff rejects
-// it and takes the package ill-typed with it.
+// `range` and channel operations reach the type set through `commonUnder`, a
+// separate mechanism from `allX`. Both were approximated by `Underlying()`,
+// which answers `TypeParam` and rejects every declaration below — code go1.26
+// accepts — taking the whole package ill-typed with it.
 //
-// Recorded, not asserted-green: see docs/COMPAT-HARDENING.md, 12th session.
+// Recorded with `#[ignore]` by the 12th session; ported in the 15th.
 
 #[test]
-#[ignore = "commonUnder over a type set is not ported — see COMPAT-HARDENING.md (12th session, next step 4)"]
 fn range_and_channel_ops_on_type_params() {
     accepts(
         "func RangeSlice[T interface{ ~[]int }](xs T) int {\n\

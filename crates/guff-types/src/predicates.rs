@@ -865,6 +865,55 @@ pub fn comparable(
 ///
 /// Returns `Ok(())` if `t` is comparable, or `Err(message)` describing
 /// why not.
+/// Does every type in interface `u`'s type set compare?
+///
+/// Port of `_TypeSet.IsComparable`. The `comparable` **flag** only records that
+/// the interface embedded `comparable` literally; when the set has terms, the
+/// answer has to be *computed* from them. Reading the flag alone made
+/// `cmp.Ordered` — whose terms are all strictly comparable basic types — fail
+/// to satisfy `comparable`, so every `Set[T]` in kubernetes'
+/// `apimachinery/pkg/util/sets` and `pkg/api/validate` was rejected and the
+/// packages went ill-typed.
+pub fn typeset_is_comparable(
+    arena: &mut TypeArena,
+    oarena: &ObjectArena,
+    parena: &PackageArena,
+    u: TypeId,
+    seen: &mut HashSet<TypeId>,
+) -> bool {
+    crate::interface::interface_compute_typeset(arena, oarena, parena, u);
+    let (terms_all, flag, terms) = match arena.get(u) {
+        TypeData::Interface(i) => {
+            let ts = i.tset.as_ref().expect("typeset computed above");
+            (
+                crate::termlist::is_all(&ts.terms),
+                ts.comparable(),
+                ts.terms.clone(),
+            )
+        }
+        _ => return false,
+    };
+    if terms_all {
+        return flag;
+    }
+    // `s.is(...)`: true for every specific term, and `is` calls the predicate
+    // once with `nil` when there are none — which the `t != nil` guard then
+    // fails, so a term-less (empty) set is not comparable.
+    let mut any = false;
+    for slot in terms.iter() {
+        let Some(t) = slot.as_ref() else { continue };
+        any = true;
+        // A term with no type is the `𝓤` (all types) term; `terms.isAll()`
+        // above already handled the only set that is only that, so reaching it
+        // here means the set is not comparable.
+        let Some(typ) = t.typ else { return false };
+        if comparable_type(arena, oarena, parena, typ, false, seen).is_err() {
+            return false;
+        }
+    }
+    any
+}
+
 pub fn comparable_type(
     arena: &mut TypeArena,
     oarena: &ObjectArena,
@@ -919,7 +968,10 @@ pub fn comparable_type(
             if dynamic && !is_type_param(arena, t) {
                 return Ok(());
             }
-            // Otherwise, defer to the interface's type-set comparable flag.
+            // Otherwise, ask the type set — `IsComparable`, not the raw flag.
+            if typeset_is_comparable(arena, oarena, parena, u, seen) {
+                return Ok(());
+            }
             interface_compute_typeset(arena, oarena, parena, u);
             let (is_empty, is_comp) = match arena.get(u) {
                 TypeData::Interface(i) => {

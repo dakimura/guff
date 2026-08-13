@@ -75,15 +75,20 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     if lhs_typ != rhs_typ {
         return;
     }
-    // Cross-pkg untyped consts can appear typed in Types due to assignment
-    // context, while go/types Identical(typed, untyped) is false. If the RHS
-    // names an untyped const (object type) but the Types entry is typed, skip.
-    if rhs_names_untyped_const(pass, rhs) && !types_entry_is_untyped(pass, rhs) {
-        return;
-    }
-    // Upstream re-evals the RHS outside assignment context. Untyped consts
-    // (e.g. `math.MaxInt64`, `5`) take the LHS type in Types, so Identical
-    // succeeds — only warn when the LHS is the const's default type (`int`).
+    // Upstream has exactly one gate here: `IsUntypedConst(rhs)` re-evaluates the
+    // right-hand side *outside* assignment context, and the finding is dropped
+    // only when the declared type is not the constant's default type. So
+    // `var b int = 1` is reported and `var e int64 = 1` is not.
+    //
+    // guff used to carry a second gate — "the RHS names an untyped const but its
+    // `Types` entry is typed, so skip" — which has no upstream counterpart and
+    // fired on *every* literal, because a literal's `Types` entry always carries
+    // the type the assignment gave it. That silenced the rule's entire common
+    // case: `var a string = "x"`, `var b int = 1`, `var c float64 = 1.5`,
+    // `var d bool = true` were all missed, and only a non-constant right-hand
+    // side was ever reported. Found by `compat/fuzz.py`'s `littype` mutation,
+    // which writes exactly this form from a `:=` (COMPAT-HARDENING §4,
+    // 2026-08-13).
     if let Some(def) = untyped_const_default_name(pass, rhs) {
         if !is_ident(ty, def) {
             return;
@@ -106,17 +111,13 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
 fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static str> {
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
 
-    // Prefer Types entry when still recorded as untyped. If Types has a typed
-    // entry, do not fall through to AST (assignment-context typing).
-    if let Some(info) = pass.types_info() {
-        if let Some(tv) = info.types.get(&expr.id()) {
-            if let Some(name) = untyped_basic_default(&artifacts.types, tv.typ) {
-                return Some(name);
-            }
-            return None;
-        }
-    }
-
+    // Syntax and objects first, `Types` only as a fallback. Reading `Types`
+    // first cannot answer this question: assignment context has already given
+    // the operand the declared type, so `1` in `var e int64 = 1` comes back
+    // `int64` and the comparison against the *default* type (`int`) can no
+    // longer be made. Upstream sidesteps it by re-evaluating the expression in
+    // a fresh context; here the answer is read off the literal's token kind and
+    // the constant object's own type, which is the same information.
     match unparen(expr) {
         Expr::BasicLit(lit) => match lit.kind {
             Some(Token::INT) => Some("int"),
@@ -152,7 +153,13 @@ fn untyped_const_default_name(pass: &Pass<'_>, expr: &Expr) -> Option<&'static s
             Some(max_default_name(l, r))
         }
         Expr::ParenExpr(p) => untyped_const_default_name(pass, &p.x),
-        _ => None,
+        // Not syntactically a constant: fall back to whatever the type checker
+        // recorded, in case it is still untyped there.
+        _ => {
+            let info = pass.types_info()?;
+            let tv = info.types.get(&expr.id())?;
+            untyped_basic_default(&artifacts.types, tv.typ)
+        }
     }
 }
 

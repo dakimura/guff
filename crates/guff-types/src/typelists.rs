@@ -37,6 +37,17 @@ impl TypeParamList {
         &self.tparams
     }
 
+    /// Wrap an already-bound list without re-binding it.
+    ///
+    /// `bind_tparams` panics on an entry whose index is already set, which is
+    /// exactly the state `rename_tparams` leaves its output in — it copies the
+    /// original indices deliberately. Upstream writes the same thing as
+    /// `&TypeParamList{atparams}` when it re-points a renamed signature at its
+    /// fresh parameters (`Checker.arguments`, reverse type inference).
+    pub fn from_bound(tparams: Vec<TypeId>) -> Self {
+        Self { tparams }
+    }
+
     /// Relocate ids when merging into a shared seed base (R25).
     pub(crate) fn remap_ids(&mut self, r: &crate::merge::Remapper) {
         for t in &mut self.tparams {

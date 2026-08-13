@@ -105,6 +105,24 @@ fn enabled(opts: &ModernizeOptions, name: &str) -> bool {
     !opts.disable.iter().any(|d| d == name)
 }
 
+/// Give every diagnostic a check just produced its check name, which
+/// `format_issue_text` renders as the `name: ` prefix golangci-lint puts in
+/// front of every modernize message.
+///
+/// Two of the twenty-five checks set `category` themselves and the rest left it
+/// empty, so `minmax` and `rangeint` shipped their messages bare and
+/// `normalize.py` stripped the prefix off upstream's side to keep the tiers
+/// green (COMPAT-HARDENING §5, row 6). Stamping it here rather than in each
+/// check is the same move the gocritic sweep made when it pushed the checker
+/// prefix into `report()`: a new check cannot forget what it never writes.
+fn stamp_category(pending: &mut [Diagnostic], from: usize, name: &str) {
+    for d in &mut pending[from..] {
+        if d.category.is_empty() {
+            d.category = name.to_string();
+        }
+    }
+}
+
 fn go_at_least(pass: &Pass<'_>, pos: u32, want: &str) -> bool {
     code::version_compare(&code::stdlib_version(pass, pos), want) >= 0
 }
@@ -5573,23 +5591,33 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         export_newexpr_decls(pass, cands, &mut pending);
     }
     if enabled(&options, "atomictypes") {
+        let _before = pending.len();
         check_atomictypes(pass, &mut pending);
+        stamp_category(&mut pending, _before, "atomictypes");
     }
     for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
             check_plusbuild(file, &mut pending);
         }
         if enabled(&options, "testingcontext") {
+            let _before = pending.len();
             check_testingcontext(pass, file, &mut pending);
+            stamp_category(&mut pending, _before, "testingcontext");
         }
         if enabled(&options, "bloop") {
+            let _before = pending.len();
             check_bloop(pass, file, &mut pending);
+            stamp_category(&mut pending, _before, "bloop");
         }
         if enabled(&options, "importcomment") {
+            let _before = pending.len();
             check_importcomment(pass, file_idx, file, &mut pending);
+            stamp_category(&mut pending, _before, "importcomment");
         }
         if enabled(&options, "stringsbuilder") {
+            let _before = pending.len();
             check_stringsbuilder(pass, file, &mut pending);
+            stamp_category(&mut pending, _before, "stringsbuilder");
         }
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
@@ -5601,77 +5629,117 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::RangeStmt(s) => {
                     if enabled(&options, "forvar") {
+                        let _before = pending.len();
                         check_forvar(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "forvar");
                     }
                     if enabled(&options, "stringsseq") {
+                        let _before = pending.len();
                         check_stringsseq(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "stringsseq");
                     }
                     if enabled(&options, "mapsloop") {
+                        let _before = pending.len();
                         check_mapsloop(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "mapsloop");
                     }
                     if enabled(&options, "stditerators") {
+                        let _before = pending.len();
                         check_stditerators_range(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "stditerators");
                     }
                 }
                 NodeRef::ForStmt(s) => {
                     if enabled(&options, "rangeint") {
+                        let _before = pending.len();
                         check_rangeint(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "rangeint");
                     }
                     if enabled(&options, "slicesbackward") {
+                        let _before = pending.len();
                         check_slicesbackward(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "slicesbackward");
                     }
                     if enabled(&options, "stditerators") {
+                        let _before = pending.len();
                         check_stditerators_for(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "stditerators");
                     }
                 }
                 NodeRef::IfStmt(s) => {
                     if enabled(&options, "minmax") {
+                        let _before = pending.len();
                         check_minmax(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "minmax");
                     }
                     if enabled(&options, "stringscutprefix") {
+                        let _before = pending.len();
                         check_stringscutprefix(pass, s, &mut pending);
+                        stamp_category(&mut pending, _before, "stringscutprefix");
                     }
                     if enabled(&options, "errorsastype") {
+                        let _before = pending.len();
                         check_errorsastype(pass, file, s, &mut pending);
+                        stamp_category(&mut pending, _before, "errorsastype");
                     }
                 }
                 NodeRef::BlockStmt(b) => {
                     if enabled(&options, "slicescontains") {
+                        let _before = pending.len();
                         check_slicescontains(pass, b, &mut pending);
+                        stamp_category(&mut pending, _before, "slicescontains");
                     }
                     if enabled(&options, "waitgroupgo") {
+                        let _before = pending.len();
                         check_waitgroupgo(pass, b, &mut pending);
+                        stamp_category(&mut pending, _before, "waitgroupgo");
                     }
                 }
                 NodeRef::AssignStmt(a) => {
                     if enabled(&options, "stringscut") {
+                        let _before = pending.len();
                         check_stringscut(pass, a, &mut pending);
+                        stamp_category(&mut pending, _before, "stringscut");
                     }
                     if enabled(&options, "reflecttypeassert") {
+                        let _before = pending.len();
                         check_reflecttypeassert(pass, a, &mut pending);
+                        stamp_category(&mut pending, _before, "reflecttypeassert");
                     }
                 }
                 NodeRef::CallExpr(c) => {
                     if enabled(&options, "fmtappendf") {
+                        let _before = pending.len();
                         check_fmtappendf(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "fmtappendf");
                     }
                     if enabled(&options, "slicessort") {
+                        let _before = pending.len();
                         check_slicessort(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "slicessort");
                     }
                     if enabled(&options, "slicesdelete") {
+                        let _before = pending.len();
                         check_slicesdelete(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "slicesdelete");
                     }
                     if enabled(&options, "reflecttypefor") {
+                        let _before = pending.len();
                         // Prefer Elem() special-case; plain TypeOf is handled when
                         // this call is not itself the X of a `.Elem()` selector.
                         check_reflecttypefor_elem(pass, c, &mut pending);
                         check_reflecttypefor(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "reflecttypefor");
                     }
                     if enabled(&options, "unsafefuncs") {
+                        let _before = pending.len();
                         check_unsafefuncs(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "unsafefuncs");
                     }
                     if enabled(&options, "newexpr") {
+                        let _before = pending.len();
                         check_newexpr_call(pass, c, &mut pending);
+                        stamp_category(&mut pending, _before, "newexpr");
                     }
                 }
                 NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {

@@ -81,8 +81,18 @@ fn if_fmt(i: &IfStmt) -> String {
     )
 }
 
+/// Render an expression the way `astutils.GoFmt` does — i.e. the way
+/// `go/printer` does, which **keeps** parentheses.
+///
+/// This used to open with `unparen(expr)`, which made the `ParenExpr` arm below
+/// unreachable and quietly dropped a level of parentheses from every message
+/// built out of it. `use-fmt-print` printed
+/// `replace it by "fmt.Fprintln(os.Stderr, "ok")"` where upstream prints
+/// `…, ("ok"))` for `println(("ok"))`. Same family as the `unnecessary-format`
+/// fix in the same session: revive never unwraps parentheses, in matching or in
+/// rendering (COMPAT-HARDENING §4, 2026-08-13).
 pub fn expr_fmt(expr: &Expr) -> String {
-    match unparen(expr) {
+    match expr {
         Expr::Ident(Ident { name, .. }) => name.clone(),
         Expr::BasicLit(BasicLit { value, kind, .. }) => {
             if *kind == Some(Token::STRING) {

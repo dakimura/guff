@@ -495,7 +495,7 @@ impl Checker {
             _ => Vec::new(),
         };
         let rsig = if !tparam_ids.is_empty() {
-            match self.infer_call(call, sig, &tparam_ids, &args, nargs, ddd) {
+            match self.infer_call(call, sig, &tparam_ids, &mut args, nargs, ddd) {
                 Some(s) => s,
                 None => return None,
             }
@@ -522,15 +522,17 @@ impl Checker {
     /// Reports `CannotInferTypeArgs` and returns `None` on failure.
     ///
     /// Equivalent to the inference slice of `Checker.arguments`. **Deferred**:
-    /// explicit + partial type arguments, `renameTParams` (recursive calls),
-    /// reverse inference from generic function arguments, and untyped-argument
-    /// default-type promotion (the `infer` step-3 carry, D11).
+    /// explicit + partial type arguments and untyped-argument default-type
+    /// promotion (the `infer` step-3 carry, D11). Reverse inference from
+    /// generic function arguments is handled below; a generic argument's
+    /// operand type is rewritten in place to the instantiated signature, as
+    /// upstream does before it checks the assignments.
     fn infer_call(
         &mut self,
         call: &CallExpr,
         sig: TypeId,
         tparam_ids: &[TypeId],
-        args: &[Operand],
+        args: &mut [Operand],
         nargs: usize,
         ddd: bool,
     ) -> Option<TypeId> {
@@ -560,7 +562,7 @@ impl Checker {
         // their default type.
         let mut arg_types: Vec<Option<TypeId>> = Vec::with_capacity(args.len());
         let mut untyped_types: Vec<Option<TypeId>> = Vec::with_capacity(args.len());
-        for a in args {
+        for a in args.iter() {
             let untyped = a.typ.is_some_and(|t| is_untyped(&self.types, t));
             if a.mode == OperandMode::Invalid {
                 arg_types.push(None);
@@ -605,6 +607,51 @@ impl Checker {
             self.prepare_method_set(*t);
         }
 
+        // --- Reverse type inference (go1.21) -----------------------------
+        //
+        // An argument that is itself an *uninstantiated generic function* has
+        // type parameters of its own, and the callee's type arguments can only
+        // be inferred jointly with them:
+        //
+        //     func each[T any](xs []T, match MatchFunc[T]) {}
+        //     func SemanticDeepEqual[U any](a, b U) bool { … }
+        //     each([]S{…}, SemanticDeepEqual)   // T and U inferred together
+        //
+        // Upstream (`Checker.arguments`) clones each such argument signature,
+        // renames its type parameters so `f(g, g)` gives the two `g`s distinct
+        // identities, appends them to the callee's list, and hands the whole
+        // problem to one `infer`. Without it every call of this shape fails —
+        // kubernetes' `pkg/api/validate` had 21, all in one file, and lost the
+        // package to them.
+        let mut all_tparams = renamed_tparams.clone();
+        let callee_ntparams = renamed_tparams.len();
+        let mut generic_args: Vec<usize> = Vec::new();
+        if self.allow_version(&crate::version::go1_21()) {
+            for i in 0..arg_types.len() {
+                let Some(at) = arg_types[i] else { continue };
+                // A generic argument cannot have a defined (*Named) type, so
+                // there is no underlying() step here — as upstream notes.
+                let atparams: Vec<TypeId> =
+                    match crate::signature::signature_type_params(&self.types, at) {
+                        Some(l) if !l.is_empty() => l.list().to_vec(),
+                        _ => continue,
+                    };
+                let (new_tparams, renamed) =
+                    rename_tparams(&mut self.types, &mut self.objects, &atparams, at);
+                // `rename_tparams` does not touch the signature's own tparam
+                // list, so re-point it at the fresh parameters.
+                crate::signature::signature_set_type_params(
+                    &mut self.types,
+                    renamed,
+                    crate::typelists::TypeParamList::from_bound(new_tparams.clone()),
+                );
+                arg_types[i] = Some(renamed);
+                all_tparams.extend(new_tparams);
+                generic_args.push(i);
+            }
+        }
+        let renamed_tparams = all_tparams;
+
         let targs_in = vec![None; renamed_tparams.len()];
         let typ_table = self.typ.clone();
         // Go enables shared-method interface inference for go1.21+ (an unset
@@ -624,6 +671,34 @@ impl Checker {
         );
         match result {
             InferResult::Ok(targs) => {
+                // The first `callee_ntparams` entries belong to the callee; the
+                // rest were contributed by generic function arguments and are
+                // used to instantiate those, not this signature.
+                // Instantiate each generic function argument with the type
+                // arguments inferred for *its* parameters and write the result
+                // back onto the operand, so the assignment check that follows
+                // compares `func(S, S) bool` against `MatchFunc[S]` rather than
+                // the uninstantiated `func[T any](T, T) bool`.
+                let mut j = callee_ntparams;
+                for &i in &generic_args {
+                    let Some(at) = arg_types[i] else { continue };
+                    let k = j + crate::signature::signature_type_params(&self.types, at)
+                        .map(|l| l.len())
+                        .unwrap_or(0);
+                    let atargs: Vec<TypeId> = targs[j..k].to_vec();
+                    let inst_arg = instantiate(
+                        &mut self.types,
+                        &mut self.objects,
+                        &mut self.ctxt,
+                        at,
+                        atargs,
+                    );
+                    args[i].typ = Some(inst_arg);
+                    j = k;
+                }
+                let callee_targs: Vec<TypeId> =
+                    targs.iter().copied().take(callee_ntparams).collect();
+                let targs = callee_targs;
                 let inst = instantiate(
                     &mut self.types,
                     &mut self.objects,

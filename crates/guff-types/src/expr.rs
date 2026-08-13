@@ -408,7 +408,17 @@ impl Checker {
             }
             // Channel receive: `<-ch` yields the channel's element type.
             Token::ARROW => {
-                let u = typ.underlying(&self.types);
+                // `Checker.chanElem` reaches the channel through `commonUnder`,
+                // so `<-c` works when `c`'s type parameter has a single common
+                // channel underlying type.
+                let (common, _err) = crate::under::common_under(
+                    &mut self.types,
+                    &self.objects,
+                    &self.packages,
+                    typ,
+                    None,
+                );
+                let u = common.unwrap_or_else(|| typ.underlying(&self.types));
                 let chan = match self.types.get(u) {
                     crate::arena::TypeData::Chan(_) => u,
                     _ => {

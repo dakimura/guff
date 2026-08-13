@@ -32,41 +32,28 @@
 # no staticcheck/unparam finding at these lines because its own finding was
 # suppressed by the very directive guff calls unused; guff's staticcheck and
 # unparam do not fire there at all. Fixing the linter below each directive
-# removes the entry here as a side effect (three already went that way when
-# SA1019 learned to read a deprecated struct *field*, 2026-08-13).
+# removes the entry here as a side effect: three went that way when SA1019
+# learned to read a deprecated struct *field*, and a fourth
+# (pkg/webhook/server_test.go:215, `//nolint:unparam`) is waiting on the
+# unparam gap recorded below.
 controller-runtime guff-only pkg/cluster/cluster_test.go:168:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/internal.go:264:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/manager_test.go:1819:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/manager_test.go:1994:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive `//nolint:unparam` is unused for linter "unparam"
 
-# SA1019 on a deprecated *type* used inside the same module. guff reports it,
-# upstream does not — the opposite direction from the deprecated-field gap
-# fixed the same day, so the two are not the same condition. Unread: honnef's
-# SA1019 has several guards around who may use a deprecated symbol (the use
-# site being itself deprecated, the object's package being "related"), and
-# which one applies here has not been established.
-controller-runtime guff-only pkg/builder/webhook.go:68:staticcheck:admission.CustomDefaulter is deprecated: CustomDefaulter is deprecated, use Defaulter instead
-controller-runtime guff-only pkg/builder/webhook.go:84:staticcheck:admission.CustomValidator is deprecated: CustomValidator is deprecated, use Validator instead
-
-# SA9003 "empty branch", all six in `example_test.go` files. Every one is an
-# `if err != nil { }` inside a runnable example. Unread: whether upstream skips
-# these for a property of the file (an Example function, a `_test` package) or
-# of the branch.
-controller-runtime guff-only pkg/handler/example_test.go:46:staticcheck:empty branch
-controller-runtime guff-only pkg/handler/example_test.go:61:staticcheck:empty branch
-controller-runtime guff-only pkg/handler/example_test.go:86:staticcheck:empty branch
-controller-runtime guff-only pkg/handler/example_test.go:124:staticcheck:empty branch
-controller-runtime guff-only pkg/source/example_test.go:35:staticcheck:empty branch
-controller-runtime guff-only pkg/source/example_test.go:51:staticcheck:empty branch
-
 # unparam: guff reports an unused parameter on a method that implements an
-# interface. Upstream unparam does not report a parameter it cannot prove is
-# free to change, and an interface method's signature is fixed by the
-# interface.
+# interface. Read as of 2026-08-13: upstream builds `typesImplementing` from
+# every `ssa.MakeInterface` instruction — `addImplementing(findNamed(instr.X
+# .Type()), iface)` — and then skips any method whose name is in that type's
+# list (`check/check.go`, "skip - method required to implement an interface").
+# guff cannot answer it: guff-ssa's `MakeInterface` is `pub struct
+# MakeInterface {}`, carrying neither the boxed value nor its type, which is
+# the same gap docs/COMPAT-HARDENING.md §7 records for SA4006. One SSA change
+# closes both, plus the `//nolint:unparam` symptom above.
 controller-runtime guff-only examples/builtins/validatingwebhook.go:55:unparam:(*podValidator).ValidateUpdate - oldObj is unused
 controller-runtime guff-only examples/tokenreview/tokenreview.go:32:unparam:(*authenticator).Handle - ctx is unused
 
-# One each, undiagnosed.
+# One each, still undiagnosed — nobody has read which upstream guard applies.
 controller-runtime guff-only pkg/internal/controller/controller.go:395:nilerr:error is not nil (line 394) but it returns nil
 controller-runtime guff-only pkg/manager/manager_test.go:1361:bodyclose:response body must be closed

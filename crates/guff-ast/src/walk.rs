@@ -797,9 +797,44 @@ where
     rec(node, &mut f);
 }
 
+/// `preorder_prune(node, f)` mirrors Go's `ast.Inspect`: the callback runs once
+/// per node in depth-first preorder, and returning `false` **prunes that node's
+/// subtree** — siblings and everything after them are still visited.
+///
+/// This is the semantics almost every ported analyzer wants, because almost
+/// every analyzer upstream is written with `ast.Inspect`. [`preorder`] is the
+/// other one — `ast.Preorder`, an iterator, where `false` is `break` and stops
+/// the walk outright. Reaching for the wrong one is silent and looks like a
+/// recall bug in whatever check sits downstream: a port that writes
+/// `NodeRef::FuncLit(_) => return false` to mean "don't look inside closures"
+/// instead stops at the first closure and never sees the rest of the file.
+///
+/// `sa4010.rs` had already met this and hand-rolled its own stack to get around
+/// it; `forcetypeassert`, `SA9001`, testifylint's `go-require` and the
+/// `fact_deprecated` pass had not, and were each truncating a walk. The last
+/// one truncated at the `import` declaration, so it exported no facts at all
+/// for any file with imports (COMPAT-HARDENING §4, 2026-08-13).
+pub fn preorder_prune<'a, F>(node: NodeRef<'a>, mut f: F)
+where
+    F: FnMut(NodeRef<'a>) -> bool,
+{
+    fn rec<'a, F>(node: NodeRef<'a>, f: &mut F)
+    where
+        F: FnMut(NodeRef<'a>) -> bool,
+    {
+        if !f(node) {
+            return;
+        }
+        for_each_child(node, |c| rec(c, f));
+    }
+    rec(node, &mut f);
+}
+
 /// `preorder(node, f)` mirrors Go's `ast.Preorder`. The callback is
 /// invoked once per node in depth-first preorder. Return `false` from
 /// `f` to stop the traversal (no callbacks for any remaining nodes).
+///
+/// To prune one subtree and keep walking, use [`preorder_prune`].
 pub fn preorder<'a, F>(node: NodeRef<'a>, mut f: F)
 where
     F: FnMut(NodeRef<'a>) -> bool,

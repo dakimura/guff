@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr};
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::is_call_to_any;
+use guff_analysis::code::{is_call_to_any, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::TypeData;
@@ -33,17 +33,21 @@ fn is_byte_slice(pass: &Pass<'_>, expr: &Expr) -> bool {
     )
 }
 
+/// Upstream matches `(CallExpr (Builtin "string") [arg])`, and `pattern.match`
+/// strips `*ast.ParenExpr` at every level before binding — so
+/// `io.WriteString(w, (string(b)))` and `io.WriteString(w, ((string))(b))` both
+/// match, and `arg` binds to the unparenthesized operand.
 fn string_bytes_arg(expr: &Expr) -> Option<&Expr> {
-    let Expr::CallExpr(call) = expr else {
+    let Expr::CallExpr(call) = unparen(expr) else {
         return None;
     };
-    let Expr::Ident(id) = call.fun.as_ref() else {
+    let Expr::Ident(id) = unparen(call.fun.as_ref()) else {
         return None;
     };
     if id.name != "string" || call.args.len() != 1 {
         return None;
     }
-    Some(&call.args[0])
+    Some(unparen(&call.args[0]))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

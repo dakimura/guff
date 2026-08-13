@@ -26,6 +26,8 @@
 # composites' fixture imports a sibling package; it is materialized at the path
 # its import resolves to.
 composites/other/config.go                         crates/guff-govet/tests/testdata/composites/stub/other/config.go
+appends/bad/bad.go                                 crates/guff-govet/tests/testdata/appends/bad.go
+appends/ok/ok.go                                   crates/guff-govet/tests/testdata/appends/ok.go
 assign/bad/bad.go                                  crates/guff-govet/tests/testdata/assign/bad.go
 assign/ok/ok.go                                    crates/guff-govet/tests/testdata/assign/ok.go
 atomic/bad/bad.go                                  crates/guff-govet/tests/testdata/atomic/bad.go
@@ -57,6 +59,8 @@ errorsas/concrete_ok/concrete_ok.go                crates/guff-govet/tests/testd
 errorsas/ok/ok.go                                  crates/guff-govet/tests/testdata/errorsas/ok.go
 httpresponse/bad/bad.go                            crates/guff-govet/tests/testdata/httpresponse/bad.go
 httpresponse/ok/ok.go                              crates/guff-govet/tests/testdata/httpresponse/ok.go
+hostport/bad/bad.go                                crates/guff-govet/tests/testdata/hostport/bad.go
+hostport/ok/ok.go                                  crates/guff-govet/tests/testdata/hostport/ok.go
 ifaceassert/bad/bad.go                             crates/guff-govet/tests/testdata/ifaceassert/bad.go
 ifaceassert/ok/ok.go                               crates/guff-govet/tests/testdata/ifaceassert/ok.go
 inline_local/bad/bad.go                            crates/guff-govet/tests/testdata/inline_local/bad.go
@@ -102,3 +106,5 @@ unsafeptr/bad/bad.go                               crates/guff-govet/tests/testd
 unsafeptr/ok/ok.go                                 crates/guff-govet/tests/testdata/unsafeptr/ok.go
 unusedresult/bad/bad.go                            crates/guff-govet/tests/testdata/unusedresult/bad.go
 unusedresult/ok/ok.go                              crates/guff-govet/tests/testdata/unusedresult/ok.go
+waitgroup/bad/bad.go                               crates/guff-govet/tests/testdata/waitgroup/bad.go
+waitgroup/ok/ok.go                                 crates/guff-govet/tests/testdata/waitgroup/ok.go

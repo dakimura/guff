@@ -63,22 +63,28 @@ fn check_gen_decl(g: &GenDecl, failures: &mut Vec<Failure>) {
     let Some(tok) = g.tok else {
         return;
     };
+    // Upstream hands `addFailure` the **GenDecl**, not the name — so the
+    // failure lands on the `var` / `const` / `type` keyword. The two spellings
+    // only differ once the declaration is not a short one:
+    //
+    //     len := 1        // reported at `len`, which is also the statement
+    //     var len int = 1 // reported at `var`, not at `len`
+    //
+    // `compat/fuzz.py`'s `littype` mutation writes the second form from the
+    // first, which is how this surfaced (COMPAT-HARDENING §4, 2026-08-13).
+    let pos = g.tok_pos.0 as u32;
     match tok {
         Token::TYPE => {
-            for spec in &g.specs {
-                let Spec::TypeSpec(TypeSpec { name, .. }) = spec else {
-                    continue;
-                };
-                if let Some(kind) = builtin_kind(&name.name) {
-                    add_failure(
-                        name.name_pos.0 as u32,
-                        failures,
-                        format!(
-                            "redefinition of the built-in {} {}",
-                            kind, name.name
-                        ),
-                    );
-                }
+            // Upstream looks at `n.Specs[0]` only and stops descending.
+            let Some(Spec::TypeSpec(TypeSpec { name, .. })) = g.specs.first() else {
+                return;
+            };
+            if let Some(kind) = builtin_kind(&name.name) {
+                add_failure(
+                    pos,
+                    failures,
+                    format!("redefinition of the built-in {} {}", kind, name.name),
+                );
             }
         }
         Token::VAR | Token::CONST => {
@@ -89,12 +95,9 @@ fn check_gen_decl(g: &GenDecl, failures: &mut Vec<Failure>) {
                 for name in names {
                     if let Some(kind) = builtin_kind(&name.name) {
                         add_failure(
-                            name.name_pos.0 as u32,
+                            pos,
                             failures,
-                            format!(
-                                "redefinition of the built-in {} {}",
-                                kind, name.name
-                            ),
+                            format!("redefinition of the built-in {} {}", kind, name.name),
                         );
                     }
                 }

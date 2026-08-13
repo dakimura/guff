@@ -9,25 +9,19 @@
   ],
   "targets": {
     "caddy": {
-      "ill_typed": 2
+      "ill_typed": 1
     },
     "consul": {
-      "ill_typed": 6
+      "ill_typed": 5
     },
     "gin": {
-      "ill_typed": 2
+      "ill_typed": 1
     },
     "grafana": {
-      "ill_typed": 21
-    },
-    "helm": {
-      "ill_typed": 1
-    },
-    "k9s": {
-      "ill_typed": 1
+      "ill_typed": 14
     },
     "kubernetes": {
-      "ill_typed": 8
+      "ill_typed": 1
     }
   }
 }

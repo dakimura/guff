@@ -24,6 +24,7 @@ linters:
     govet:
       disable-all: true
       enable:
+        - appends
         - assign
         - atomic
         - bools
@@ -35,6 +36,7 @@ linters:
         - directive
         - errorsas
         - framepointer
+        - hostport
         - httpresponse
         - ifaceassert
         - inline
@@ -54,6 +56,7 @@ linters:
         - unreachable
         - unsafeptr
         - unusedresult
+        - waitgroup
 
 issues:
   max-issues-per-linter: 0

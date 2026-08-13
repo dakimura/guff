@@ -1,13 +1,14 @@
 mod support;
 
 use guff_govet::{
-    assign_analyzer, atomic_analyzer, bools_analyzer, buildtag_analyzer, cgocall_analyzer,
-    composites_analyzer, copylocks_analyzer, defers_analyzer, directive_analyzer,
-    errorsas_analyzer, framepointer_analyzer, httpresponse_analyzer, ifaceassert_analyzer,
-    inline_analyzer, loopclosure_analyzer, lostcancel_analyzer, nilfunc_analyzer, printf_analyzer,
-    shift_analyzer, sigchanyzer_analyzer, slog_analyzer, stdmethods_analyzer,
-    stringintconv_analyzer, structtag_analyzer, tests_analyzer, timeformat_analyzer,
-    unmarshal_analyzer, unreachable_analyzer, unsafeptr_analyzer, unusedresult_analyzer,
+    appends_analyzer, assign_analyzer, atomic_analyzer, bools_analyzer, buildtag_analyzer,
+    cgocall_analyzer, composites_analyzer, copylocks_analyzer, defers_analyzer,
+    directive_analyzer, errorsas_analyzer, framepointer_analyzer, httpresponse_analyzer,
+    hostport_analyzer, ifaceassert_analyzer, inline_analyzer, loopclosure_analyzer, lostcancel_analyzer,
+    nilfunc_analyzer, printf_analyzer, shift_analyzer, sigchanyzer_analyzer, slog_analyzer,
+    stdmethods_analyzer, stringintconv_analyzer, structtag_analyzer, tests_analyzer,
+    timeformat_analyzer, unmarshal_analyzer, unreachable_analyzer, unsafeptr_analyzer,
+    unusedresult_analyzer, waitgroup_analyzer,
 };
 use guff_types::Config;
 
@@ -403,6 +404,86 @@ fn composites_allows_keyed_imported_struct() {
         &[("example.com/govet/composites/other", &stub)],
     );
     assert!(support::run_analyzer(composites_analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn hostport_flags_sprintf_address_formats() {
+    let dir = support::testdata("hostport");
+    let net_stub = dir.join("stub/net/net.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/hostport",
+        &dir.join("bad.go"),
+        &[("net", &net_stub), ("fmt", &fmt_stub)],
+    );
+    let messages = support::run_analyzer(hostport_analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages
+        .iter()
+        .any(|m| m.contains(r#"address format "%s:%d" does not work with IPv6"#)));
+    // The variable form names the dial's line; the direct form does not.
+    assert!(messages.iter().any(|m| m.contains("passed to net.Dial at L")));
+}
+
+#[test]
+fn hostport_allows_joinhostport_and_undialed_formats() {
+    let dir = support::testdata("hostport");
+    let net_stub = dir.join("stub/net/net.go");
+    let fmt_stub = dir.join("stub/fmt/fmt.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/hostport/ok",
+        &dir.join("ok.go"),
+        &[("net", &net_stub), ("fmt", &fmt_stub)],
+    );
+    assert!(support::run_analyzer(hostport_analyzer(), &pkg).is_empty());
+}
+
+#[test]
+fn appends_flags_append_with_no_values() {
+    let dir = support::testdata("appends");
+    let pkg = support::typecheck_pkg("example.com/govet/appends", &dir.join("bad.go"));
+    let messages = support::run_analyzer(appends_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("append with no values"));
+}
+
+#[test]
+fn appends_allows_values_spread_and_a_shadowed_builtin() {
+    let dir = support::testdata("appends");
+    let pkg = support::typecheck_pkg("example.com/govet/appends/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(appends_analyzer(), &pkg).is_empty(),
+        "a local named `append` is not the builtin"
+    );
+}
+
+#[test]
+fn waitgroup_flags_add_inside_the_goroutine() {
+    let dir = support::testdata("waitgroup");
+    let stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/waitgroup",
+        &dir.join("bad.go"),
+        &[("sync", &stub)],
+    );
+    let messages = support::run_analyzer(waitgroup_analyzer(), &pkg);
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("WaitGroup.Add called from inside new goroutine"));
+}
+
+#[test]
+fn waitgroup_wants_add_as_the_goroutines_first_statement() {
+    let dir = support::testdata("waitgroup");
+    let stub = dir.join("stub/sync/sync.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/waitgroup/ok",
+        &dir.join("ok.go"),
+        &[("sync", &stub)],
+    );
+    assert!(
+        support::run_analyzer(waitgroup_analyzer(), &pkg).is_empty(),
+        "upstream matches a fixed stack shape whose ExprStmt is Block.List[0]"
+    );
 }
 
 #[test]

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::{BranchStmt, DeferStmt, FuncLit, RangeStmt, ReturnStmt};
 use guff::node_mask;
 use guff::token::Token;
-use guff::walk::{NodeRef, preorder};
+use guff::walk::{preorder_prune, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::TypeData;
@@ -43,16 +43,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let mut exits = false;
         let mut defers: Vec<&DeferStmt> = Vec::new();
-        preorder(NodeRef::BlockStmt(&rng.body), &mut |n| {
+        // Upstream is `ast.Inspect`: `false` prunes the closure's body and the
+        // walk carries on. Neither the return nor the branch arm stops it —
+        // and the branch arm *assigns* rather than or-s, so a `continue` after
+        // a `break` puts `exits` back to false. Reproduced verbatim; guff used
+        // to stop the walk at the first of any of the three, which lost every
+        // `defer` that followed it.
+        preorder_prune(NodeRef::BlockStmt(&rng.body), |n| {
             match n {
-                NodeRef::ReturnStmt(ReturnStmt { .. }) => {
-                    exits = true;
-                    return false;
-                }
-                NodeRef::BranchStmt(BranchStmt { tok, .. }) if *tok == Token::BREAK => {
-                    exits = true;
-                    return false;
-                }
+                NodeRef::ReturnStmt(ReturnStmt { .. }) => exits = true,
+                NodeRef::BranchStmt(BranchStmt { tok, .. }) => exits = *tok == Token::BREAK,
                 NodeRef::DeferStmt(d) => defers.push(d),
                 NodeRef::FuncLit(FuncLit { .. }) => return false,
                 _ => {}

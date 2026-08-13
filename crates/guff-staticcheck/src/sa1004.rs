@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use guff::ast::Expr;
 use guff::node_mask;
 use guff::walk::NodeRef;
-use guff_analysis::code::{expr_to_int, is_call_to};
+use guff_analysis::code::{expr_to_int, is_call_to, unparen};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Diagnostic, RunError, RunFn, Pass, SuggestedFix, TextEdit};
 
@@ -31,7 +31,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if !is_call_to(pass, call, "time.Sleep") {
                 return;
             }
-            let Some(arg) = call.args.first() else {
+            // Upstream's pattern is `(CallExpr (Symbol "time.Sleep")
+            // lit@(IntegerLiteral value))`, and `pattern.match` strips the
+            // parentheses before binding `lit` — so `time.Sleep((42))` matches
+            // and is reported at the `42`, not at the `(`.
+            let Some(arg) = call.args.first().map(unparen) else {
                 return;
             };
             if !matches!(arg, Expr::BasicLit(_)) {

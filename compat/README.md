@@ -76,7 +76,7 @@ cargo build --release -p guff-lint
 > 最初のケース（gocritic）は載せた時点で 44 件のバグを出し、
 > 直近の gosec は **52 件中 0 件一致**から始まりました
 > （golangci が severity を付ける唯一の linter が gosec で、guff は付けていなかった）。
-> 2026-08-12 時点で 547 check 中 `fired` 543 / `unit-only` 1 / `never` 3
+> 2026-08-13 時点で 550 check 中 `fired` 546 / `unit-only` 1 / `never` 3
 > （残る 3 件は §6「恒久的に観測できない」側）。**この数字だけを見ないこと**: check が
 > 発火したかと、*どんな形の入力で*発火したかは別問題で、後者は
 > [`../corpus/shapes.py`](../corpus/shapes.py) が測る。改善計画は
@@ -129,6 +129,22 @@ write and safe to be aggressive with.
 ill-typed package in a corpus repo — and shrinks it by delta debugging, using
 `gospans` so that one edit can be a whole declaration, one interface method, one
 composite-literal element, or a function body replaced by `panic(...)`.
+
+Seeds whose baseline already differs are skipped by default;
+`--allow-dirty-seeds` includes them and compares diff *counts*. Both dirty
+seeds have now been run (2026-08-13). They behave differently and it is worth
+knowing which you are in:
+
+* `staticcheck-sa` is stable — 220 mutants, 4 disagreements, and all four were
+  the same structural defect seen from four directions (the pattern matcher
+  unparenthesized only at the root).
+* `revive` carries upstream's own race, so roughly one mutant in eight comes
+  back `UNSTABLE` and is not reported. That is the confirmation rule doing its
+  job: without it those would be filed as revive recall bugs. What survives it
+  is worth reading — the one that did showed revive's parenthesis polarity is
+  the *opposite* of staticcheck's (honnef matches through `pattern`, which
+  strips parens at every level; revive uses plain type assertions and never
+  does, so guff has to stop unwrapping).
 
 The rule that makes the reducer's output trustworthy is that it never accepts an
 edit the real Go toolchain rejects:
@@ -206,6 +222,32 @@ before pushing**: `./compat/run.sh --oss --tier pr,nightly`.
   template that cannot match, so each reports once per analyzed file. Blind
   spot: goheader ignores files whose first comment is a `//go:` directive, so
   those are invisible to the probe on both sides.
+
+## Two walks that were not the walk upstream uses (2026-08-13)
+
+Both of these were one defect apiece that a dozen checks were sitting on, and
+both were found by asking what the *upstream* primitive does rather than by
+reading any single check.
+
+**`preorder` is `ast.Preorder`, not `ast.Inspect`.** Returning `false` stops the
+whole traversal, siblings included; `ast.Inspect` only prunes the subtree, and
+that is what almost every ported analyzer is written against. Four ports kept
+the `return false` and were silently truncating: `fact_deprecated` (at the
+`import` declaration, so it exported no facts at all for any file with
+imports), `forcetypeassert`, `SA9001`, and testifylint's `go-require`. Use
+`walk::preorder_prune` for the `ast.Inspect` shape.
+
+**The pattern matcher unparenthesized only at the root.** `pattern.match`
+upstream strips `*ast.ParenExpr` on both sides at *every* recursion and before
+it binds anything; guff only did it in `match_node`, so every field descent
+went unstripped and the check went quiet the moment a parenthesis appeared
+below the pattern root. `compat/fuzz.py`'s `paren` mutation found SA1004,
+SA1013 and SA4024 in a single round, on top of SA1006 and SA6006 found by hand.
+
+The polarity is per-linter and has to be read off the upstream matcher each
+time: honnef matches through `pattern` and always unwraps; revive uses plain
+type assertions and never does, so guff has to *stop* unwrapping there
+(`unnecessary-format`).
 
 ## OSS finding-set fixes (2026-08)
 

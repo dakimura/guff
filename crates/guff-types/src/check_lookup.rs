@@ -329,7 +329,11 @@ pub fn implements(
 
     // Comparability: if T is comparable, V must be comparable.
     let check_comparability = |types: &mut TypeArena| -> Result<(), String> {
-        if !tts.comparable() {
+        // `if !Ti.IsComparable() { return true }` — the computed answer, not the
+        // `comparable` flag: an interface whose terms are all comparable is
+        // comparable even though it never embedded `comparable`.
+        let mut tseen = HashSet::default();
+        if !crate::predicates::typeset_is_comparable(types, oarena, parena, tu, &mut tseen) {
             return Ok(());
         }
         let mut seen = HashSet::default();
@@ -386,9 +390,36 @@ impl Checker {
     /// `objDecl(f)` so interface checks see real signatures even when a
     /// package-level `var _ I = (T)(nil)` appears *before* the method decls.
     pub fn ensure_method_sigs(&mut self, v: TypeId) {
+        let mut seen = crate::hash::HashSet::default();
+        self.ensure_method_sigs_rec(v, &mut seen);
+    }
+
+    /// `ensure_method_sigs`, following embedded fields.
+    ///
+    /// A method set is not only the type's own methods: `struct{ Multi }`
+    /// answers `Reset()` out of `Multi`, and the lookup that finds it needs
+    /// `Multi`'s *signatures* resolved just as much as it needs `Wrap`'s.
+    /// Stopping at the outer type left promoted methods unresolved, so
+    ///
+    /// ```go
+    /// var _ Resettable = &Wrap{}   // ← checked here
+    /// type Wrap struct{ Multi }
+    /// type Multi []Base
+    /// func (m Multi) Reset() {}    // ← declared here
+    /// ```
+    ///
+    /// failed while the same file with the `var` moved to the bottom passed —
+    /// an order dependence, which is the signature of a missing lazy
+    /// completion rather than a missing rule. Reduced from kubernetes'
+    /// `apimachinery/pkg/api/meta` (483 files → 3, COMPAT-HARDENING §4).
+    fn ensure_method_sigs_rec(&mut self, v: TypeId, seen: &mut crate::hash::HashSet<TypeId>) {
         use crate::named::named_origin;
+        use crate::r#struct::{struct_field, struct_num_fields};
 
         let (base, _) = deref(&self.types, v);
+        if !seen.insert(base) {
+            return;
+        }
         let Some(named) = as_named(&self.types, base) else {
             return;
         };
@@ -401,6 +432,24 @@ impl Checker {
             if matches!(self.objects.get(m), ObjectData::Func(_)) {
                 self.obj_decl(m);
             }
+        }
+
+        // Descend through embedded fields. Snapshot first: `obj_decl` above and
+        // the recursion below both mutate the arenas.
+        let u = base.underlying(&self.types);
+        if !matches!(self.types.get(u), crate::arena::TypeData::Struct(_)) {
+            return;
+        }
+        let embedded: Vec<TypeId> = (0..struct_num_fields(&self.types, u))
+            .map(|i| struct_field(&self.types, u, i))
+            .filter(|f| match self.objects.get(*f) {
+                ObjectData::Var(var) => var.embedded(),
+                _ => false,
+            })
+            .filter_map(|f| f.typ(&self.objects))
+            .collect();
+        for e in embedded {
+            self.ensure_method_sigs_rec(e, seen);
         }
     }
 

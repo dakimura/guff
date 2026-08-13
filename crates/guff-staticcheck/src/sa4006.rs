@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use guff::ast::{Expr, Ident, Stmt};
 use guff::node_mask;
 use guff::walk::{preorder, NodeRef};
-use guff_analysis::code::object_of;
+use guff_analysis::code::{example_func_spans, in_example_func, object_of};
 use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Extract, InstrData};
@@ -309,6 +309,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // Only candidates that SSA already believes are unused consult it, and most
     // packages have none — build the walk-wide index on the first question.
     let idents: OnceCell<IdentIndex> = OnceCell::new();
+    // `irutil.IsExample` is the first thing upstream's loop over SrcFuncs asks,
+    // before it even looks at `fn.Source()`.
+    let examples = example_func_spans(pass);
     let mut pending = Vec::new();
     // Upstream walks `*ast.AssignStmt` only: `n++` is an `*ast.IncDecStmt` and is
     // never examined, so `func f(n int) { n++ }` is not a finding. Verified

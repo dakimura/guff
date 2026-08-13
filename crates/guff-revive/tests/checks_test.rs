@@ -127,6 +127,113 @@ fn revive_var_declaration_does_not_descend_into_values() {
 }
 
 #[test]
+fn revive_never_unwraps_parentheses() {
+    use guff_analysis::SettingsBag;
+    use guff_revive::{RuleSetting, Settings};
+    use guff_runner::{run_on_packages, RunnerOptions};
+    use std::sync::Arc;
+
+    let rule = |name: &str| RuleSetting {
+        name: name.into(),
+        arguments: Vec::new(),
+        disabled: false,
+        severity: None,
+    };
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "revive",
+        Settings {
+            severity: None,
+            rules: Some(vec![
+                rule("unnecessary-format"),
+                rule("use-fmt-print"),
+                rule("redefines-builtin-id"),
+            ]),
+            confidence: None,
+            ignore_generated_header: false,
+            enable_default_rules: false,
+            enable_all_rules: false,
+            go: None,
+        },
+    );
+    let bag = Arc::new(bag);
+
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/parenpolarity",
+        "paren_polarity.go",
+    );
+    let result = run_on_packages(
+        &[revive()],
+        std::slice::from_ref(&pkg),
+        &RunnerOptions {
+            sequential: true,
+            settings: bag,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run revive");
+    let messages: Vec<String> = result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| d.message.clone())
+        .collect();
+
+    let formats: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("unnecessary use of formatting function"))
+        .collect();
+    assert_eq!(
+        formats.len(),
+        1,
+        "only the bare `fmt.Errorf(\"…\")` is a finding: {messages:?}"
+    );
+
+    // `astutils.GoFmt` is `go/printer`: it keeps the parentheses.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(r#"fmt.Fprintln(os.Stderr, ("ok"))"#)),
+        "use-fmt-print renders with parens: {messages:?}"
+    );
+
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("redefinition of the built-in function len"))
+            .count(),
+        2,
+        "both the short and the `var` form are findings: {messages:?}"
+    );
+}
+
+#[test]
+fn revive_var_declaration_reports_untyped_constant_defaults() {
+    let pkg = support::typecheck_fixture(
+        "revive",
+        "example.com/revive/vardeclconst",
+        "var_decl_untyped_const.go",
+    );
+    let messages = support::run_analyzer(revive(), &pkg);
+    let decls: Vec<&String> = messages
+        .iter()
+        .filter(|m| m.contains("var-declaration:"))
+        .collect();
+    for want in ["var a", "var b", "var c", "var d", "var g"] {
+        assert!(
+            decls.iter().any(|m| m.contains(want)),
+            "{want} should be reported: {decls:?}"
+        );
+    }
+    for skip in ["var e", "var f"] {
+        assert!(
+            decls.iter().all(|m| !m.contains(skip)),
+            "{skip}'s declared type is not the constant's default type: {decls:?}"
+        );
+    }
+}
+
+#[test]
 fn revive_exported_names_generic_receivers_like_upstream() {
     let pkg = support::typecheck_fixture(
         "revive",

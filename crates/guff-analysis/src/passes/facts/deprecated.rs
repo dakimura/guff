@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use guff::ast::{File, GenDecl, Ident};
 use guff::token::Token;
-use guff::walk::{NodeRef, preorder};
+use guff::walk::{preorder_prune, NodeRef};
 use guff_types::arena::{ObjectId, PackageId};
 
 use crate::analyzer::{AnalysisResult, Analyzer, RunError, RunFn};
@@ -79,8 +79,22 @@ fn extract_deprecated_message(docs: &[&Option<guff::ast::CommentGroup>]) -> Opti
     None
 }
 
-fn export_deprecated(pass: &mut Pass<'_>, names: &[&Ident], docs: &[&Option<guff::ast::CommentGroup>]) {
-    let Some(msg) = extract_deprecated_message(docs) else {
+fn export_deprecated(
+    pass: &mut Pass<'_>,
+    docs_by_offset: &HashMap<i64, String>,
+    names: &[&Ident],
+    docs: &[&Option<guff::ast::CommentGroup>],
+) {
+    let msg = match extract_deprecated_message(docs) {
+        Some(m) => Some(m),
+        // The analysis AST carries no doc comments (see `docs_by_offset`), so
+        // for the package being analysed every message comes from the reparse,
+        // keyed by the byte offset of the declared name.
+        None => names
+            .iter()
+            .find_map(|n| offset_of(pass, n.pos()).and_then(|off| docs_by_offset.get(&off).cloned())),
+    };
+    let Some(msg) = msg else {
         return;
     };
     for name in names {
@@ -93,6 +107,130 @@ fn export_deprecated(pass: &mut Pass<'_>, names: &[&Ident], docs: &[&Option<guff
             pass.export_object_fact(obj, Box::new(IsDeprecated { msg: msg.clone() }));
         }
     }
+}
+
+/// Byte offset of `pos` within its file, in the analysis `FileSet`.
+fn offset_of(pass: &Pass<'_>, pos: guff::position::Pos) -> Option<i64> {
+    let f = pass.fset().file(pos)?;
+    let off = f.offset(pos);
+    (off >= 0).then_some(off)
+}
+
+/// `Deprecated:` messages of this package's own declarations, keyed by the byte
+/// offset of the declared name.
+///
+/// The shared load parses without `PARSE_COMMENTS` (`guff-packages`'
+/// `typecheck.rs`), so `decl.doc` on the analysis AST is always `None` and this
+/// pass exported **nothing for the package being analysed** — every fact it had
+/// came from a dependency. Nothing depended on the missing half until SA1019's
+/// "a deprecated function may use deprecated symbols" guard, whose whole input
+/// is the enclosing function's own deprecation: it asked `deprs.objects` a
+/// question that could only ever be answered "no", so the guard was inert and
+/// controller-runtime got two findings upstream does not make.
+///
+/// COMPAT-HARDENING §4 records this same root cause diagnosed separately for
+/// buildtag, directive, comments-density, comment-spacings, S1008 and four
+/// others. This is the tenth.
+///
+/// Offsets, not node identity: both parses read the same bytes, so a name's
+/// offset is the same in either tree, and no position mapping is needed beyond
+/// asking each `FileSet` for it.
+fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, String> {
+    let mut out = HashMap::new();
+    let Some(fname) = pass.fset().file(file.pos()).map(|f| f.name().to_string()) else {
+        return out;
+    };
+    let base = std::path::Path::new(&fname)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fname.as_str())
+        .to_string();
+    let Some(path) = pass
+        .pkg()
+        .compiled_go_files
+        .iter()
+        .find(|p| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
+    else {
+        return out;
+    };
+    let Ok(src) = std::fs::read(path) else {
+        return out;
+    };
+    let rfset = guff::position::FileSet::new();
+    let Ok(rfile) = guff::parser::parse_file(&rfset, &base, &src, guff::parser::PARSE_COMMENTS)
+    else {
+        return out;
+    };
+
+    let mut record = |names: &[&Ident], docs: &[&Option<guff::ast::CommentGroup>]| {
+        let Some(msg) = extract_deprecated_message(docs) else {
+            return;
+        };
+        for n in names {
+            if let Some(f) = rfset.file(n.pos()) {
+                let off = f.offset(n.pos());
+                if off >= 0 {
+                    out.entry(off).or_insert_with(|| msg.clone());
+                }
+            }
+        }
+    };
+
+    // Same shape as `walk_file` below, over the tree that has the comments.
+    preorder_prune(NodeRef::File(&rfile), |node| match node {
+        NodeRef::GenDecl(decl) => {
+            match decl.tok {
+                Some(Token::TYPE) | Some(Token::CONST) | Some(Token::VAR) => {}
+                _ => return false,
+            }
+            let mut docs: Vec<&Option<guff::ast::CommentGroup>> = vec![&decl.doc];
+            let mut names: Vec<&Ident> = Vec::new();
+            for spec in &decl.specs {
+                match spec {
+                    guff::ast::Spec::ValueSpec(vs) => {
+                        docs.push(&vs.doc);
+                        names.extend(vs.names.iter());
+                    }
+                    guff::ast::Spec::TypeSpec(ts) => {
+                        docs.push(&ts.doc);
+                        names.push(&ts.name);
+                    }
+                    _ => {}
+                }
+            }
+            record(&names, &docs);
+            true
+        }
+        NodeRef::FuncDecl(decl) => {
+            record(&[&decl.name], &[&decl.doc]);
+            false
+        }
+        NodeRef::TypeSpec(spec) => {
+            record(&[&spec.name], &[&spec.doc]);
+            true
+        }
+        NodeRef::ValueSpec(spec) => {
+            let names: Vec<&Ident> = spec.names.iter().collect();
+            record(&names, &[&spec.doc]);
+            false
+        }
+        NodeRef::StructType(st) => {
+            for field in &st.fields.list {
+                let names: Vec<&Ident> = field.names.iter().collect();
+                record(&names, &[&field.doc]);
+            }
+            false
+        }
+        NodeRef::InterfaceType(it) => {
+            for method in &it.methods.list {
+                let names: Vec<&Ident> = method.names.iter().collect();
+                record(&names, &[&method.doc]);
+            }
+            false
+        }
+        _ => true,
+    });
+    out
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -143,33 +281,34 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 }
 
 fn walk_file(pass: &mut Pass<'_>, file: &File) {
-    preorder(NodeRef::File(file), |node| {
+    let docs_by_offset = deprecated_docs_by_offset(pass, file);
+    preorder_prune(NodeRef::File(file), |node| {
         match node {
-            NodeRef::GenDecl(decl) => walk_gen_decl(pass, decl),
+            NodeRef::GenDecl(decl) => walk_gen_decl(pass, &docs_by_offset, decl),
             NodeRef::FuncDecl(decl) => {
-                export_deprecated(pass, &[&decl.name], &[&decl.doc]);
+                export_deprecated(pass, &docs_by_offset, &[&decl.name], &[&decl.doc]);
                 false
             }
             NodeRef::TypeSpec(spec) => {
-                export_deprecated(pass, &[&spec.name], &[&spec.doc]);
+                export_deprecated(pass, &docs_by_offset, &[&spec.name], &[&spec.doc]);
                 true
             }
             NodeRef::ValueSpec(spec) => {
                 let names: Vec<&Ident> = spec.names.iter().collect();
-                export_deprecated(pass, &names, &[&spec.doc]);
+                export_deprecated(pass, &docs_by_offset, &names, &[&spec.doc]);
                 false
             }
             NodeRef::StructType(st) => {
                 for field in &st.fields.list {
                     let names: Vec<&Ident> = field.names.iter().collect();
-                    export_deprecated(pass, &names, &[&field.doc]);
+                    export_deprecated(pass, &docs_by_offset, &names, &[&field.doc]);
                 }
                 false
             }
             NodeRef::InterfaceType(it) => {
                 for method in &it.methods.list {
                     let names: Vec<&Ident> = method.names.iter().collect();
-                    export_deprecated(pass, &names, &[&method.doc]);
+                    export_deprecated(pass, &docs_by_offset, &names, &[&method.doc]);
                 }
                 false
             }
@@ -178,7 +317,11 @@ fn walk_file(pass: &mut Pass<'_>, file: &File) {
     });
 }
 
-fn walk_gen_decl(pass: &mut Pass<'_>, decl: &GenDecl) -> bool {
+fn walk_gen_decl(
+    pass: &mut Pass<'_>,
+    docs_by_offset: &HashMap<i64, String>,
+    decl: &GenDecl,
+) -> bool {
     match decl.tok {
         Some(Token::TYPE) | Some(Token::CONST) | Some(Token::VAR) => {}
         _ => return false,
@@ -198,7 +341,7 @@ fn walk_gen_decl(pass: &mut Pass<'_>, decl: &GenDecl) -> bool {
             _ => {}
         }
     }
-    export_deprecated(pass, &names, &docs);
+    export_deprecated(pass, docs_by_offset, &names, &docs);
     true
 }
 

@@ -46,6 +46,15 @@ fn formatting_spec(fun: &Expr) -> Option<FormatSpec> {
     None
 }
 
+/// Does printing `fun` put a parenthesis in the callee's rendered name?
+fn has_parens(fun: &Expr) -> bool {
+    match fun {
+        Expr::ParenExpr(_) => true,
+        Expr::SelectorExpr(sel) => matches!(sel.x.as_ref(), Expr::ParenExpr(_)),
+        _ => false,
+    }
+}
+
 fn func_label(fun: &Expr) -> String {
     match unparen(fun) {
         Expr::SelectorExpr(sel) => {
@@ -99,13 +108,30 @@ fn check_call(call: &CallExpr, failures: &mut Vec<Failure>) {
     if call.args.is_empty() {
         return;
     }
+    // Upstream keys the table on `astutils.GoFmt(ce.Fun)` — the *printed*
+    // callee — so a parenthesis anywhere in it (`(fmt.Errorf)(…)`,
+    // `(fmt).Errorf(…)`) renders to something that is not a key and the rule
+    // stays silent. And `astutils.IsStringLiteral` is a bare
+    // `e.(*ast.BasicLit)` with no unwrapping, so a parenthesized format string
+    // is not a string literal to it either.
+    //
+    // This is the mirror image of the staticcheck rules in the same session:
+    // honnef matches through `pattern`, which strips parentheses at every
+    // level, and revive asserts, which never does. The polarity has to be read
+    // off the upstream matcher per linter — guff had it the staticcheck way
+    // here, and reported `fmt.Errorf(("clean error"))` where upstream does not
+    // (`compat/fuzz.py --allow-dirty-seeds --case revive`, COMPAT-HARDENING §4
+    // 2026-08-13).
+    if has_parens(&call.fun) {
+        return;
+    }
     let Some(spec) = formatting_spec(&call.fun) else {
         return;
     };
     if call.args.len() <= spec.format_arg {
         return;
     }
-    let Expr::BasicLit(lit) = unparen(&call.args[spec.format_arg]) else {
+    let Expr::BasicLit(lit) = &call.args[spec.format_arg] else {
         return;
     };
     let Some(format) = basic_lit_string_value(lit) else {

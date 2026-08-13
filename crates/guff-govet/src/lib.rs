@@ -1,5 +1,6 @@
 //! guff-govet — Rust port of Go vet analysis passes.
 
+mod appends;
 mod assign;
 mod atomic;
 mod bools;
@@ -13,6 +14,7 @@ mod errorsas;
 mod expreq;
 mod framepointer;
 mod govet_util;
+mod hostport;
 mod httpresponse;
 mod ifaceassert;
 mod inline;
@@ -33,7 +35,9 @@ mod unmarshal;
 mod unreachable;
 mod unsafeptr;
 mod unusedresult;
+mod waitgroup;
 
+pub use appends::analyzer as appends_analyzer;
 pub use assign::analyzer as assign_analyzer;
 pub use atomic::analyzer as atomic_analyzer;
 pub use bools::analyzer as bools_analyzer;
@@ -45,6 +49,7 @@ pub use defers::analyzer as defers_analyzer;
 pub use directive::analyzer as directive_analyzer;
 pub use errorsas::analyzer as errorsas_analyzer;
 pub use framepointer::analyzer as framepointer_analyzer;
+pub use hostport::analyzer as hostport_analyzer;
 pub use httpresponse::analyzer as httpresponse_analyzer;
 pub use ifaceassert::analyzer as ifaceassert_analyzer;
 pub use inline::analyzer as inline_analyzer;
@@ -64,12 +69,14 @@ pub use unmarshal::analyzer as unmarshal_analyzer;
 pub use unreachable::analyzer as unreachable_analyzer;
 pub use unsafeptr::analyzer as unsafeptr_analyzer;
 pub use unusedresult::analyzer as unusedresult_analyzer;
+pub use waitgroup::analyzer as waitgroup_analyzer;
 
 use guff_analysis::Analyzer;
 
 /// All govet analyzers implemented in this crate.
 pub fn analyzers() -> Vec<&'static Analyzer> {
     vec![
+        appends::analyzer(),
         assign::analyzer(),
         atomic::analyzer(),
         bools::analyzer(),
@@ -81,6 +88,7 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         directive::analyzer(),
         errorsas::analyzer(),
         framepointer::analyzer(),
+        hostport::analyzer(),
         httpresponse::analyzer(),
         ifaceassert::analyzer(),
         inline::analyzer(),
@@ -100,5 +108,6 @@ pub fn analyzers() -> Vec<&'static Analyzer> {
         unreachable::analyzer(),
         unsafeptr::analyzer(),
         unusedresult::analyzer(),
+        waitgroup::analyzer(),
     ]
 }

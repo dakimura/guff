@@ -6,6 +6,7 @@
 
 # golangci-lint: 2.12.2
 
+appends/bad/bad.go:4:9:govet::appends: append with no values
 assign/bad/bad.go:5:2:govet::assign: self-assignment of x
 atomic/bad/bad.go:7:2:govet::atomic: direct assignment to atomic value
 bools/bad/bad.go:4:9:govet::bools: redundant or: true || true
@@ -26,6 +27,8 @@ directive/invalid_space/invalid_space.go:6:1:govet::directive: invalid space '\\
 directive/invalid_space_nbsp/invalid_space_nbsp.go:3:1:govet::directive: invalid space '\\u00a0' in //go:generate directive
 errorsas/bad/bad.go:8:2:govet::errorsas: second argument to errors.As should not be *error
 errorsas/concrete_bad/concrete_bad.go:12:2:govet::errorsas: second argument to errors.As must be a non-nil pointer to either a type that implements error, or to any interface type
+hostport/bad/bad.go:9:30:govet::hostport: address format "%s:%d" does not work with IPv6
+hostport/bad/bad.go:13:22:govet::hostport: address format "%s:%s" does not work with IPv6 (passed to net.Dial at L14)
 httpresponse/bad/bad.go:7:8:govet::httpresponse: using resp before checking for errors
 ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
 inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
@@ -84,3 +87,4 @@ unmarshal/bad/bad.go:7:16:govet::unmarshal: call of Unmarshal passes non-pointer
 unreachable/bad/bad.go:5:2:govet::unreachable: unreachable code
 unsafeptr/bad/bad.go:7:6:govet::unsafeptr: possible misuse of unsafe.Pointer
 unusedresult/bad/bad.go:6:2:govet::unusedresult: result of errors.New call not used
+waitgroup/bad/bad.go:7:9:govet::waitgroup: WaitGroup.Add called from inside new goroutine

@@ -31,7 +31,13 @@ fn is_any(pass: &Pass<'_>, expr: &Expr) -> bool {
 fn find_type_assertion(exprs: &[Expr]) -> Option<&TypeAssertExpr> {
     for expr in exprs {
         let mut found = None;
-        walk::preorder(expr_ref(expr), |n| {
+        // Upstream is `ast.Inspect`, so both `return false`s prune a subtree and
+        // the walk continues over the siblings. That has two consequences guff
+        // was missing by stopping the walk outright: an assertion *after* a
+        // closure is still found, and when an expression holds several, the
+        // assignment is overwritten — so the answer is the last one, not the
+        // first.
+        walk::preorder_prune(expr_ref(expr), |n| {
             match n {
                 NodeRef::FuncLit(_) => return false,
                 NodeRef::TypeAssertExpr(ta) => {

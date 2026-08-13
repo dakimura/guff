@@ -60,10 +60,17 @@ class NormalizeTests(unittest.TestCase):
             normalize_message("errcheck", "Error return value is not checked"),
         )
 
-    def test_unused_strips_func_prefix(self):
+    def test_unused_message_is_no_longer_normalized(self):
+        # guff emits honnef's exact wording now (kind word + `T.name` for a
+        # value receiver), so nothing is stripped and the two sides must match
+        # byte for byte. COMPAT-HARDENING §5 row 2.
         self.assertEqual(
             normalize_message("unused", "func unusedHelper is unused"),
-            "unusedHelper is unused",
+            "func unusedHelper is unused",
+        )
+        self.assertEqual(
+            normalize_message("unused", "func (*T).m is unused"),
+            "func (*T).m is unused",
         )
 
     def test_staticcheck_strips_check_code(self):
@@ -72,11 +79,14 @@ class NormalizeTests(unittest.TestCase):
             normalize_message("staticcheck", "could use tagged switch on k % 3"),
         )
 
-    def test_modernize_strips_check_name_prefix(self):
+    def test_modernize_check_name_prefix_is_kept(self):
+        # Every modernize check stamps its name into `Diagnostic::category`
+        # now, so the prefix is part of the compared message. COMPAT-HARDENING
+        # §5 row 6.
         body = "backward loop over slice can be modernized using slices." + " " + "Backward"
         self.assertEqual(
             normalize_message("modernize", "slicesbackward: " + body),
-            body,
+            "slicesbackward: " + body,
         )
 
     def test_errcheck_strips_callee(self):
@@ -95,6 +105,9 @@ class NormalizeTests(unittest.TestCase):
         )
 
     def test_govet_declared_using_strips_patch(self):
+        # The pass-name prefix is *not* normalized any more (guff emits it);
+        # only the Go patch version is, and that is environmental — golangci
+        # reports the version its own binary was built with.
         self.assertEqual(
             normalize_message(
                 "govet",
@@ -103,7 +116,7 @@ class NormalizeTests(unittest.TestCase):
             ),
             normalize_message(
                 "govet",
-                "cannot inline call to ioutil.TempDir (declared using go1.26.2) "
+                "inline: cannot inline call to ioutil.TempDir (declared using go1.26.2) "
                 "into a file using go1.24.3",
             ),
         )
@@ -117,8 +130,12 @@ class NormalizeTests(unittest.TestCase):
             "into a file using go1.24.3",
         )
 
-    def test_staticcheck_strips_trailing_period(self):
-        self.assertEqual(
+    def test_staticcheck_trailing_period_is_significant(self):
+        # The `rstrip(".")` that used to erase this was measured to change no
+        # diff on any target, so it was removed rather than kept on faith.
+        # A deprecation message that really did differ by a period would now
+        # fail a tier, which is the point. COMPAT-HARDENING §5 row 5.
+        self.assertNotEqual(
             normalize_message(
                 "staticcheck",
                 "d.started.CAS is deprecated: Use CompareAndSwap.",

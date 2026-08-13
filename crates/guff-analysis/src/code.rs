@@ -23,6 +23,16 @@ use crate::pass::Pass;
 pub fn call_name(pass: &Pass<'_>, fun: &Expr) -> Option<String> {
     let info = pass.types_info()?;
 
+    // Upstream opens with `astutil.Unparen(call.Fun)` and then peels one level
+    // of instantiation — `f[int](x)` names `f`. Instantiating a function cannot
+    // yield another generic function, so once is enough, and `(foo)[T]` is not a
+    // valid instantiation, so there is no second unparen.
+    let fun = match unparen(fun) {
+        Expr::IndexExpr(ix) => unparen(&ix.x),
+        Expr::IndexListExpr(ix) => unparen(&ix.x),
+        other => other,
+    };
+
     let obj_id = match fun {
         Expr::Ident(id) => info.uses.get(&id.id).copied(),
         Expr::SelectorExpr(sel) => info.uses.get(&sel.sel.id).copied(),
@@ -244,6 +254,64 @@ pub fn is_generated_at(pass: &Pass<'_>, pos: u32) -> bool {
         return is_generated(file);
     }
     false
+}
+
+/// Strips redundant parentheses, as `astutil.Unparen` does.
+///
+/// Every check upstream writes as a `pattern.MustParse` gets this for free and
+/// at *every* level: `pattern.match` unwraps `*ast.ParenExpr` on both sides
+/// before it binds anything (`pattern/match.go`). A hand-rolled port that
+/// destructures the AST directly does not, and the resulting check is silent on
+/// exactly the inputs a parenthesis touches — the shape nobody writes a fixture
+/// for. SA1006 (2026-08-13) and SA6006 (2026-08-13) were both found this way.
+pub fn unparen(mut e: &Expr) -> &Expr {
+    while let Expr::ParenExpr(p) = e {
+        e = &p.x;
+    }
+    e
+}
+
+/// Source ranges of the package's runnable examples — the functions
+/// `irutil.IsExample` answers `true` for.
+///
+/// Upstream's test is on the *IR function*: `strings.HasPrefix(fn.Name(),
+/// "Example")` and the file it was declared in ends in `_test.go`. Nothing
+/// about the receiver or the signature is consulted, and an anonymous function
+/// inside `ExampleFoo` is named `ExampleFoo$1`, so closures are covered by the
+/// prefix too. A range over the whole `FuncDecl` therefore matches: every node
+/// upstream skips lies inside one of these, and no node it visits does.
+///
+/// Callers that walk the AST with `inspect` (rather than over `SrcFuncs`) need
+/// this to reach the same set — see `SA9003` and `SA4006`, the two checks
+/// upstream guards with it.
+pub fn example_func_spans(pass: &Pass<'_>) -> Vec<(i64, i64)> {
+    use guff::ast::Decl;
+
+    let mut spans = Vec::new();
+    for (i, file) in pass.files().iter().enumerate() {
+        let is_test = pass
+            .pkg()
+            .compiled_go_files
+            .get(i)
+            .is_some_and(|p| p.to_string_lossy().ends_with("_test.go"));
+        if !is_test {
+            continue;
+        }
+        for decl in &file.decls {
+            let Decl::FuncDecl(f) = decl else { continue };
+            if !f.name.name.starts_with("Example") {
+                continue;
+            }
+            spans.push((decl.pos().0, decl.end().0));
+        }
+    }
+    spans
+}
+
+/// Reports whether `pos` falls inside one of [`example_func_spans`].
+pub fn in_example_func(spans: &[(i64, i64)], pos: u32) -> bool {
+    let p = pos as i64;
+    spans.iter().any(|&(start, end)| start <= p && p <= end)
 }
 
 /// Returns the type-checker object for an identifier, whether a definition or use.
