@@ -265,6 +265,10 @@ jobs:
           args: run --out-format=github-actions ./...
 ```
 
+The Action persists guff's analysis cache between runs, so a pull request
+re-lints only what it changed — worth 3–8× on a large module. Matrices, the
+cache size knob, and self-hosted runners: [`docs/CI.md`](docs/CI.md).
+
 ---
 
 ## Docker

@@ -265,6 +265,11 @@ jobs:
           args: run --out-format=github-actions ./...
 ```
 
+La Action conserva la caché de análisis de guff entre ejecuciones, de modo que un
+pull request vuelve a analizar solo lo que cambió: entre 3× y 8× más rápido en un
+módulo grande. Matrices, tamaño de la caché y runners autoalojados en
+[`docs/CI.md`](docs/CI.md).
+
 ---
 
 ## Docker

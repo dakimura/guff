@@ -82,6 +82,10 @@ CI should use the GitHub Action or Docker image so local mise/aqua drift does no
     args: run --out-format=github-actions ./...
 ```
 
+Pin the tag rather than tracking `latest`: it saves an API round-trip on install
+and keeps the analysis cache key stable. Cache behavior and matrix setups are in
+[`CI.md`](CI.md).
+
 ## Docker
 
 ```bash
