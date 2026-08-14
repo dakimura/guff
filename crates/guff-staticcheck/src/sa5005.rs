@@ -1,69 +1,91 @@
 //! SA5005 — finalizer references the finalized object.
 //!
-//! Port of `honnef.co/go/tools/staticcheck/sa5005` (AST-based).
+//! Port of `honnef.co/go/tools/staticcheck/sa5005`.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Expr, FuncLit, Ident};
-use guff::node_mask;
-use guff::walk::{NodeRef, preorder};
-use guff_analysis::code::{is_call_to, object_of};
-use guff_analysis::passes::inspect;
+use guff::token::Token;
+use guff_analysis::callcheck::{self, Call, CallContext};
+use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_ssa::instr::{InstrData, UnOp};
+use guff_ssa::value::Value;
 
-fn closure_captures(pass: &Pass<'_>, lit: &FuncLit, obj: guff_types::ObjectId) -> bool {
-    let mut found = false;
-    preorder(NodeRef::BlockStmt(&lit.body), &mut |n| {
-        if let NodeRef::Ident(id) = n {
-            if object_of(pass, id) == Some(obj) {
-                found = true;
-                return false;
-            }
-        }
-        true
-    });
-    found
-}
-
-fn check_call(pass: &Pass<'_>, call: &CallExpr) -> Option<u32> {
-    if !is_call_to(pass, call, "runtime.SetFinalizer") || call.args.len() < 2 {
-        return None;
-    }
-    let Expr::Ident(obj) = &call.args[0] else {
-        return None;
+/// Upstream's conditions are exact, and all three have to hold:
+///
+/// 1. the object argument is a **load of an `Alloc`** — a variable still in
+///    memory, which is what being captured by a closure forces;
+/// 2. the finalizer argument is a **`MakeClosure`**;
+/// 3. one of that closure's bindings **is that same `Alloc`**.
+///
+/// Both arguments are `any`, so both arrive boxed; upstream strips the
+/// `MakeInterface` first, and `callcheck` here does the same before a rule sees
+/// them.
+///
+/// Measured on 2026-08-14: golangci-lint 2.12.2 reports **nothing** for this
+/// check, on any shape tried — including the example in its own documentation
+/// (`x := &Foo{}; runtime.SetFinalizer(x, func(y *Foo) { … x … })`). The AST
+/// approximation that used to live here reported all of them.
+///
+/// **Known unverifiable difference:** upstream's message ends with `(at %s)`
+/// naming the closure's position. Since no upstream finding can be produced to
+/// compare against, that suffix is left off rather than guessed at.
+fn check_set_finalizer(call: &mut Call<'_>, ctx: &CallContext<'_>) {
+    let Some(obj) = call.args.first() else {
+        return;
     };
-    let obj_id = object_of(pass, obj)?;
-    let Expr::FuncLit(lit) = &call.args[1] else {
-        return None;
+    let Some(fin) = call.args.get(1) else {
+        return;
     };
-    if closure_captures(pass, lit, obj_id) {
-        Some(call.lparen.0 as u32)
-    } else {
-        None
+
+    // The object must be a load of an addressed local.
+    let Value::Instr(load_id) = obj.value.value() else {
+        return;
+    };
+    let InstrData::UnOp(UnOp { op: Token::MUL, x: loaded, .. }) = ctx.caller.instrs.get(load_id)
+    else {
+        return;
+    };
+    let Value::Instr(alloc_id) = *loaded else {
+        return;
+    };
+    if !matches!(ctx.caller.instrs.get(alloc_id), InstrData::Alloc(_)) {
+        return;
     }
-}
 
-fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let inspect = pass
-        .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "SA5005 requires inspect analyzer".to_string())?
-        .clone();
-
-    let mut pending = Vec::new();
-    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
-        let NodeRef::CallExpr(call) = n else {
-            return;
-        };
-        if let Some(pos) = check_call(pass, call) {
-            pending.push(pos);
-        }
-    });
-    for pos in pending {
-        pass.report_unless_generated(
-            pos,
+    // The finalizer must be a closure that binds that same cell.
+    let Value::Instr(mc_id) = fin.value.value() else {
+        return;
+    };
+    let InstrData::MakeClosure(mc) = ctx.caller.instrs.get(mc_id) else {
+        return;
+    };
+    if mc.bindings.iter().any(|b| *b == *loaded) {
+        call.invalid(
             "the finalizer closes over the object, preventing the finalizer from ever running",
         );
     }
+}
+
+fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
+    static RULES: OnceLock<HashMap<&'static str, callcheck::CheckFn>> = OnceLock::new();
+    RULES.get_or_init(|| {
+        HashMap::from([(
+            "runtime.SetFinalizer",
+            check_set_finalizer as callcheck::CheckFn,
+        )])
+    })
+}
+
+fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
+    if pass
+        .result_of::<buildir::BuildIrResult>(buildir::analyzer())
+        .is_none()
+    {
+        return Err("SA5005 requires buildir analyzer".into());
+    }
+    callcheck::run(pass, rules());
     Ok(None)
 }
 
@@ -74,7 +96,7 @@ fn sa5005_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA5005",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![buildir::analyzer()],
         fact_types: vec![],
     }
 }

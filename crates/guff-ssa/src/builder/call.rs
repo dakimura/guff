@@ -232,6 +232,10 @@ impl<'a> Builder<'a> {
             return self.emit_panic(e);
         }
 
+        if self.is_builtin_named(c.value, "new") {
+            return self.emit_new_builtin(e);
+        }
+
         self.emit_call_args(e, &mut c);
 
         let typ = match self.prog.info.types.get(&e.id) {
@@ -317,6 +321,22 @@ impl<'a> Builder<'a> {
 
     /// Lowers `make(T, …)` to `MakeSlice` / `MakeMap` / `MakeChan`. (Go:
     /// `builder.expr` for `make`.)
+    /// Lowers `new(T)` to a heap `Alloc`, as go/ssa's `builder.builtin` does
+    /// (`emitNew(fn, mustDeref(typ), pos, "new")`).
+    ///
+    /// Leaving it as an ordinary call to the `new` builtin hid it from every
+    /// check that asks where a pointer came from: SA4031 proves `p != nil` by
+    /// walking back to an `Alloc`, so `p := new(int); if p == nil` was silently
+    /// not a finding.
+    fn emit_new_builtin(&mut self, e: &CallExpr) -> Value {
+        // The call's recorded type is `*T`; the Alloc allocates `T`.
+        let ptr = self.type_of(e.id);
+        let elem = guff_types::pointer::pointer_elem(&self.prog.type_arena, ptr);
+        let block = self.block.expect("no current block");
+        let fid = self.func_id;
+        crate::emit::emit_new(self.prog, fid, block, elem, e.lparen, "new".to_string())
+    }
+
     fn emit_make(&mut self, e: &CallExpr) -> Value {
         let typ = self.type_of(e.id);
         let u = typ.underlying(&self.prog.type_arena);

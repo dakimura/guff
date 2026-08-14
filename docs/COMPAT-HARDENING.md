@@ -6411,6 +6411,37 @@ unconvert 14%）が引き続き唯一の具体的な打ち手である。
 
 wall 軸は**赤のまま**。finding 軸は緑。
 
+#### 8. SA4031 を移植し、SA5005 は「条件は合っているが IR が違う」と分かった
+
+上記 6 が「どちらも SA4015 と同じ反転」と書いた 2 件。
+
+**SA4031 —— 完全一致（5 形）。** 上流は `*ast.IfStmt` **だけ**を歩き、
+`nil` は**右辺**でなければならず、`&x == nil` は SA4022 に譲る。そのうえで
+IR を `MakeChan` / `MakeMap` / `MakeSlice` / `Alloc` / `Function` /
+`MakeClosure` / `Slice` / `FieldAddr` / `Phi` まで遡って never-nil を証明する。
+guff は**逆**で、`if` に限らず撃ち、その遡りを持っていなかった。
+
+**これを直すには guff-ssa 側も 1 つ足りなかった: `new(T)` が Alloc に落ちていない。**
+`t0 = new(nil)` という builtin 呼び出しのままで、
+「このポインタはどこから来たか」を訊く検査からは見えない。
+go/ssa の `builder.builtin` は `emitNew(fn, mustDeref(typ), pos, "new")` である。
+
+測るときの罠が 1 つ: **golangci-lint の `issues.max-same-issues` は既定 3** なので、
+同文言の 4 件目以降が消える。関連情報だけが残って所見が消えるので
+「上流は撃たない」と読み違える。`max-same-issues: 0` を置いて測ること。
+
+**SA5005 —— 条件は移植した。差分は IR の形。** 上流の条件は 3 つとも厳密で
+（オブジェクト引数が **Alloc の Load**、finalizer 引数が **MakeClosure**、
+その binding に**同じ Alloc** がいる）、guff もそのとおりに実装した。
+それでも guff は撃ち、上流は撃たない —— **guff の IR が条件を満たし、
+honnef の IR が満たさない**からである。上流は
+`x := &Foo{}; runtime.SetFinalizer(x, func(y *Foo){ … x … })` という
+**自分のドキュメントの例でも報告しない**。
+これは検査の欠陥ではなく IR の差なので、ratchet に理由つきで残した。
+（上流の文言末尾 `(at %s)` は、比較できる上流の所見が存在しないので付けていない。）
+
+**ratchet は extra 6 → 1**（19 本目の開始時からの通算）。
+
 **次にやること**
 
 1. **QF1008 と unconvert を `tsdb` の上で読む**（上記 5・7）。合算表ではなく
@@ -6418,8 +6449,7 @@ wall 軸は**赤のまま**。finding 軸は緑。
    wall の 0.85s はここ以外から出ていない。
 2. ~~**wall の実測**~~ 済み（下記 7）。**3.210s** —— 17 本目の 3.160s から
    +0.05s、ゲート自身のノイズ許容（epsilon 0.15s）の中。
-3. **SA4031 と SA5005**（上記 6）。どちらも「反転」なので、直すと
-   ratchet の extra が減るだけでなく **recall が増える**側である。
+3. 残っている missing 3（SA6001 の recall、SA5011 の σ、SA6000 まわりの SA4006）。
 4. `replaceRecvType`（`subst.rs`）。優先度低のまま。
 
 ---

@@ -226,6 +226,12 @@ sa4027/bad/bad.go:7:2:staticcheck::SA4027: (*net/url.URL).Query returns a copy, 
 sa4028/bad/bad.go:2:19:staticcheck::SA4028: x % 1 is always zero
 sa4029/bad/bad.go:5:5:staticcheck::SA4029: sort.StringSlice is a type, not a function, and sort.StringSlice(x) doesn't sort your values; consider using sort.Strings instead
 sa4030/bad/bad.go:3:15:staticcheck::SA4030: math/rand.Intn(n) generates a random value 0 <= x < n; that is, the generated values don't include n; rand.Intn(1) therefore always returns 0
+sa4031/bad/bad.go:11:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:15:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:19:5:staticcheck::SA4031: this nil check is never true
+sa4031/bad/bad.go:23:5:staticcheck::SA4031: the checked variable contains a function and is never nil; did you mean to call it?
+sa4031/bad/bad.go:28:5:staticcheck::SA4031: this nil check is never true
+sa4031/ok/ok.go:21:5:staticcheck::SA4022: the address of a variable cannot be nil
 sa5000/bad/bad.go:2:31:staticcheck::SA5000: assignment to nil map
 sa5001/bad/bad.go:14:2:staticcheck::SA5001: should check error returned from fn1() before deferring rc.Close()
 sa5001/bad/bad.go:15:2:staticcheck::SA9003: empty branch
