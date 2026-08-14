@@ -75,6 +75,21 @@ pub fn filter_debug(instrs: &[InstrId], func: &Function) -> Vec<InstrId> {
         .collect()
 }
 
+/// [`filter_debug`] without the `Vec`.
+///
+/// Most callers only walk the result once, and the allocation showed up as its
+/// own line in the profile (PERF_TASKS_V3 V1-9). Use [`filter_debug`] when the
+/// result needs indexing or a length — SA2003 looks at adjacent pairs.
+pub fn iter_non_debug<'a>(
+    instrs: &'a [InstrId],
+    func: &'a Function,
+) -> impl Iterator<Item = InstrId> + 'a {
+    instrs
+        .iter()
+        .copied()
+        .filter(move |&iid| !matches!(func.instrs.get(iid), InstrData::DebugRef(_)))
+}
+
 /// True if any non-`DebugRef` referrer exists (avoids allocating for the common
 /// "has any real use?" check in SA4017 / SA4010 / …).
 pub fn has_non_debug_referrer(instrs: &[InstrId], func: &Function) -> bool {

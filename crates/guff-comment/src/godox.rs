@@ -94,7 +94,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some(path) = paths.get(i) else {
             continue;
         };
-        let Some((re_fset, parsed)) = reparse_with_comments(path) else {
+        let Some((re_fset, parsed)) = reparse_with_comments(path, pass.pkg().source_bytes(i))
+        else {
             continue;
         };
         for cg in &parsed.comments {

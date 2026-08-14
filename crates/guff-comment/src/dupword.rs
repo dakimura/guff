@@ -170,7 +170,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             .unwrap_or(false);
 
         if let Some(path) = path {
-            if let Some((re_fset, parsed)) = reparse_with_comments(path) {
+            if let Some((re_fset, parsed)) =
+                reparse_with_comments(path, pass.pkg().source_bytes(i))
+            {
                 for cg in &parsed.comments {
                     if is_test && !cg.list.is_empty() && is_example_output(&cg.list[0].text) {
                         continue;

@@ -10,12 +10,22 @@
 //   `Arc::ptr_eq`.
 // * The per-file mutex and the FileSet-wide locks are real
 //   `std::sync::Mutex` / `RwLock`s.
-// * The "last looked-up file" cache uses a `Mutex<Option<Arc<File>>>`
-//   instead of `atomic.Pointer[File]`. This avoids an extra crate at
-//   the cost of slightly more contention on the lookup fast path.
+// * The "last looked-up file" cache is **per thread** rather than Go's
+//   process-wide `atomic.Pointer[File]` (PERF_TASKS_V3 V1-7). It used to be a
+//   `Mutex<Option<Arc<File>>>` on the `FileSet`, which every `position()` call
+//   locked — and `position()` is called from every analyzer on every
+//   diagnostic and every source lookup. On prometheus `./...` that single
+//   mutex cost **2.9s of the 20.3s profile** in `__psynch_mutexwait` +
+//   `__psynch_mutexdrop`: ten rayon workers queueing on one lock. It was also
+//   a *single* slot shared by all of them, so workers on different files
+//   evicted each other's entry and the "fast path" mostly missed. Per thread
+//   it is both uncontended and actually warm, since a worker runs one action
+//   at a time.
 
+use std::cell::RefCell;
 use std::fmt;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 use crate::tree::{file_key, Key, Tree};
 
@@ -96,15 +106,21 @@ struct FileMutable {
 
 /// A `File` is a handle for a file belonging to a `FileSet`.
 ///
-/// `File` values are typically shared as `Arc<File>`; internal mutable
-/// state is protected by a `Mutex`. `name`, `base`, and `size` are
-/// immutable once the file is added to a `FileSet`.
+/// `File` values are typically shared as `Arc<File>`; internal mutable state is
+/// protected by an `RwLock`. `name`, `base`, and `size` are immutable once the
+/// file is added to a `FileSet`.
+///
+/// The lock is an `RwLock` rather than a `Mutex` because the access pattern is
+/// write-once-then-read-forever: `add_line` fills the table while the file is
+/// being parsed, and every `position()` / `line_for()` afterwards only reads it.
+/// Under a `Mutex` those reads serialized across rayon workers sharing a
+/// dependency's `File` (PERF_TASKS_V3 V1-7).
 #[derive(Debug)]
 pub struct File {
     name: String,
     base: i64,
     size: i64,
-    mutable: Mutex<FileMutable>,
+    mutable: RwLock<FileMutable>,
 }
 
 impl File {
@@ -114,7 +130,7 @@ impl File {
             name,
             base,
             size,
-            mutable: Mutex::new(FileMutable {
+            mutable: RwLock::new(FileMutable {
                 lines: vec![0],
                 infos: Vec::new(),
             }),
@@ -133,7 +149,7 @@ impl File {
             name,
             base,
             size,
-            mutable: Mutex::new(FileMutable { lines, infos }),
+            mutable: RwLock::new(FileMutable { lines, infos }),
         })
     }
 
@@ -167,13 +183,13 @@ impl File {
     }
 
     pub fn line_count(&self) -> usize {
-        self.mutable.lock().unwrap().lines.len()
+        self.mutable.read().unwrap().lines.len()
     }
 
     /// Add a line offset for a new line. Ignored if the offset is not
     /// strictly greater than the previous line offset or `>= size`.
     pub fn add_line(&self, offset: i64) {
-        let mut m = self.mutable.lock().unwrap();
+        let mut m = self.mutable.write().unwrap();
         let i = m.lines.len();
         if (i == 0 || m.lines[i - 1] < offset) && offset < self.size {
             m.lines.push(offset);
@@ -183,7 +199,7 @@ impl File {
     /// Merge `line` with the following line. Panics on invalid input.
     pub fn merge_line(&self, line: usize) {
         assert!(line >= 1, "invalid line number {} (should be >= 1)", line);
-        let mut m = self.mutable.lock().unwrap();
+        let mut m = self.mutable.write().unwrap();
         assert!(
             line < m.lines.len(),
             "invalid line number {} (should be < {})",
@@ -196,7 +212,7 @@ impl File {
 
     /// Clone of the current line-offset table.
     pub fn lines(&self) -> Vec<i64> {
-        self.mutable.lock().unwrap().lines.clone()
+        self.mutable.read().unwrap().lines.clone()
     }
 
     /// Replace the line-offset table. Returns false (and leaves the
@@ -208,7 +224,7 @@ impl File {
                 return false;
             }
         }
-        self.mutable.lock().unwrap().lines = lines;
+        self.mutable.write().unwrap().lines = lines;
         true
     }
 
@@ -225,13 +241,13 @@ impl File {
                 line = offset as i64 + 1;
             }
         }
-        self.mutable.lock().unwrap().lines = lines;
+        self.mutable.write().unwrap().lines = lines;
     }
 
     /// Pos of the start of `line` (1-based). Panics on out-of-range.
     pub fn line_start(&self, line: usize) -> Pos {
         assert!(line >= 1, "invalid line number {} (should be >= 1)", line);
-        let m = self.mutable.lock().unwrap();
+        let m = self.mutable.read().unwrap();
         assert!(
             line <= m.lines.len(),
             "invalid line number {} (should be < {})",
@@ -250,7 +266,7 @@ impl File {
     /// unless the offset strictly increases relative to the previous
     /// info and is strictly less than `size`.
     pub fn add_line_column_info(&self, offset: i64, filename: &str, line: i64, column: i64) {
-        let mut m = self.mutable.lock().unwrap();
+        let mut m = self.mutable.write().unwrap();
         let i = m.infos.len();
         if (i == 0 || m.infos[i - 1].offset < offset) && offset < self.size {
             m.infos.push(LineInfo {
@@ -289,7 +305,7 @@ impl File {
     }
 
     fn unpack(&self, offset: i64, adjusted: bool) -> (String, i64, i64) {
-        let m = self.mutable.lock().unwrap();
+        let m = self.mutable.read().unwrap();
         let mut filename = self.name.clone();
         let mut line: i64 = 0;
         let mut column: i64 = 0;
@@ -329,7 +345,7 @@ impl File {
             return 0;
         }
         let offset = self.fix_offset(p.0 - self.base);
-        let m = self.mutable.lock().unwrap();
+        let m = self.mutable.read().unwrap();
         let i = search_ints(&m.lines, offset);
         let mut line = if i >= 0 { (i + 1) as i64 } else { 0 };
         if adjusted && !m.infos.is_empty() {
@@ -373,18 +389,18 @@ impl File {
     /// Test-only access to the raw line offsets.
     #[cfg(test)]
     pub(crate) fn raw_lines(&self) -> Vec<i64> {
-        self.mutable.lock().unwrap().lines.clone()
+        self.mutable.read().unwrap().lines.clone()
     }
 
     /// Test-only access to the raw line-info table.
     #[cfg(test)]
     pub(crate) fn raw_infos(&self) -> Vec<LineInfo> {
-        self.mutable.lock().unwrap().infos.clone()
+        self.mutable.read().unwrap().infos.clone()
     }
 
     /// Internal accessor used by `serialize`.
     pub(crate) fn snapshot_for_serialize(&self) -> (String, i64, i64, Vec<i64>, Vec<LineInfo>) {
-        let m = self.mutable.lock().unwrap();
+        let m = self.mutable.read().unwrap();
         (
             self.name.clone(),
             self.base,
@@ -401,11 +417,31 @@ struct FileSetInner {
     tree: Tree,
 }
 
+/// Identity for the per-thread lookup cache. Handed out by [`FileSet::new`].
+static NEXT_FILESET_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// This thread's most recent [`FileSet::file_internal`] hit.
+    ///
+    /// Two slots, not one: a worker typically alternates between the shared
+    /// package `FileSet` and a private one (comment reparses and formatters
+    /// each build their own), and a single slot would thrash between them.
+    ///
+    /// Entries are `(fileset id, generation, file)`. The generation guards
+    /// against [`FileSet::remove_file`] retiring a file that this thread still
+    /// has cached — the tree is behind a lock, but this cache is not.
+    static LAST_FILE: RefCell<[Option<(u64, u64, Arc<File>)>; 2]> =
+        const { RefCell::new([None, None]) };
+}
+
 /// A `FileSet` represents a set of source files. Methods are safe to
 /// call concurrently from multiple threads.
 pub struct FileSet {
     inner: RwLock<FileSetInner>,
-    last: Mutex<Option<Arc<File>>>,
+    /// Distinguishes this set's entries in the per-thread [`LAST_FILE`] cache.
+    id: u64,
+    /// Bumped by [`FileSet::remove_file`]; invalidates cached entries.
+    generation: AtomicU64,
 }
 
 impl FileSet {
@@ -416,7 +452,8 @@ impl FileSet {
                 base: 1, // 0 == NO_POS
                 tree: Tree::new(),
             }),
-            last: Mutex::new(None),
+            id: NEXT_FILESET_ID.fetch_add(1, Ordering::Relaxed),
+            generation: AtomicU64::new(0),
         })
     }
 
@@ -446,7 +483,10 @@ impl FileSet {
         let file = File::new(filename.to_string(), base, size);
         inner.base = next_base;
         inner.tree.add(file.clone());
-        *self.last.lock().unwrap() = Some(file.clone());
+        // No cache seeding: the per-thread cache is filled on the first lookup
+        // that wants this file, and pre-seeding it from `add_file` would only
+        // warm the *adding* thread — which in a parallel load is rarely the one
+        // that goes on to ask for positions in it.
         file
     }
 
@@ -469,14 +509,10 @@ impl FileSet {
     /// is a no-op.
     pub fn remove_file(&self, file: &Arc<File>) {
         let mut inner = self.inner.write().unwrap();
-        {
-            let mut last = self.last.lock().unwrap();
-            if let Some(l) = last.as_ref() {
-                if Arc::ptr_eq(l, file) {
-                    *last = None;
-                }
-            }
-        }
+        // Retire every thread's cached entry for this set. Threads cannot be
+        // reached directly, so the generation does it for them: a cached entry
+        // stamped with the old value stops matching.
+        self.generation.fetch_add(1, Ordering::AcqRel);
         let (found, _) = inner.tree.locate(file_key(file));
         if let Some(idx) = found {
             if Arc::ptr_eq(inner.tree.file_at(idx), file) {
@@ -502,26 +538,38 @@ impl FileSet {
     }
 
     fn file_internal(&self, p: Pos) -> Option<Arc<File>> {
-        // Fast path: last looked-up file.
-        {
-            let last = self.last.lock().unwrap();
-            if let Some(f) = last.as_ref() {
-                if f.base <= p.0 && p.0 <= f.base + f.size {
+        // Fast path: this thread's last looked-up file, no lock at all.
+        let gen = self.generation.load(Ordering::Acquire);
+        let hit = LAST_FILE.with(|c| {
+            for slot in c.borrow().iter().flatten() {
+                let (id, g, f) = slot;
+                if *id == self.id && *g == gen && f.base <= p.0 && p.0 <= f.base + f.size {
                     return Some(f.clone());
                 }
             }
+            None
+        });
+        if hit.is_some() {
+            return hit;
         }
         let inner = self.inner.read().unwrap();
         let (found, _) = inner.tree.locate(Key::point(p.0));
         if let Some(idx) = found {
             let f = inner.tree.file_at(idx).clone();
-            // Update the cache while still holding the read lock so a
-            // concurrent `remove_file` (which needs the write lock) can't
-            // slip in between our tree lookup and the cache update — that
-            // window otherwise lets us cache a file that was already
-            // removed from the tree.
-            *self.last.lock().unwrap() = Some(f.clone());
+            // Re-read the generation while still holding the read lock: a
+            // concurrent `remove_file` needs the write lock, so a bump seen
+            // here means the removal is already ordered before this lookup and
+            // caching `f` under the *old* generation would keep a retired file
+            // reachable. Caching under the fresh value is safe — `f` came out
+            // of the tree as it stands now.
+            let gen = self.generation.load(Ordering::Acquire);
+            let entry = (self.id, gen, f.clone());
             drop(inner);
+            LAST_FILE.with(|c| {
+                let mut slots = c.borrow_mut();
+                slots.swap(0, 1);
+                slots[0] = Some(entry);
+            });
             return Some(f);
         }
         None
@@ -580,7 +628,9 @@ impl FileSet {
             inner.tree.add(f);
         }
         drop(inner);
-        *self.last.lock().unwrap() = None;
+        // The tree was replaced wholesale, so every thread's cached entry for
+        // this set is now suspect.
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 }
 

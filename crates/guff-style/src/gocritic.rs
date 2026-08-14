@@ -2711,11 +2711,21 @@ fn check_codegen_comment(doc: &CommentGroup, pending: &mut Vec<(u32, String)>) {
     }
 }
 
-fn reparse_with_comments(path: &Path) -> Option<(Arc<FileSet>, File)> {
-    let src = fs::read(path).ok()?;
+/// `cached` is the package's already-read source bytes; re-opening the file the
+/// type-checker just read makes the kernel do the work twice (PERF_TASKS_V3
+/// V1-4).
+fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
+    let owned;
+    let src: &[u8] = match cached {
+        Some(b) => b,
+        None => {
+            owned = fs::read(path).ok()?;
+            &owned
+        }
+    };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
     Some((fset, file))
 }
 
@@ -2770,7 +2780,8 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         let Some(path) = paths.get(i) else {
             continue;
         };
-        let Some((re_fset, parsed)) = reparse_with_comments(path) else {
+        let Some((re_fset, parsed)) = reparse_with_comments(path, pass.pkg().source_bytes(i))
+        else {
             continue;
         };
 
@@ -6281,8 +6292,15 @@ fn check_sprintf_quoted_string(pass: &Pass<'_>, call: &CallExpr, pending: &mut V
     if v.len() < 2 {
         return;
     }
-    let quoted_pct_s = Regex::new(r#"^`.*"%s".*`$"#).unwrap();
-    let escaped_pct_s = Regex::new(r#"^".*\\"%s\\".*"$"#).unwrap();
+    // Constant patterns, but this runs per `fmt.Sprintf` call site — compiling
+    // them here made the `regex` compiler show up in the profile
+    // (PERF_TASKS_V3 V1-8).
+    static QUOTED_PCT_S: OnceLock<Regex> = OnceLock::new();
+    static ESCAPED_PCT_S: OnceLock<Regex> = OnceLock::new();
+    let quoted_pct_s =
+        QUOTED_PCT_S.get_or_init(|| Regex::new(r#"^`.*"%s".*`$"#).expect("quoted %s regex"));
+    let escaped_pct_s =
+        ESCAPED_PCT_S.get_or_init(|| Regex::new(r#"^".*\\"%s\\".*"$"#).expect("escaped %s regex"));
     // The `%#q` / backquoted arm is unreachable upstream: it is a second
     // `m.Match("fmt.Sprintf($s, $*_)")` with the *same* syntax pattern as the
     // first, and ruleguard keeps only one rule per pattern. Verified against

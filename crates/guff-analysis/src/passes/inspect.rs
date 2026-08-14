@@ -166,6 +166,19 @@ struct Event {
 struct Events {
     /// Nodes in exactly the order [`preorder_stack`] would visit them.
     nodes: Vec<Event>,
+    /// Indices into [`Self::nodes`], grouped by [`NodeKind`] (PERF_TASKS_V3
+    /// V1-2). Group `k` is `by_kind[kind_off[k] .. kind_off[k + 1]]`, and its
+    /// entries ascend — so iterating a group yields that kind's nodes in
+    /// preorder order, without touching the other 97%.
+    ///
+    /// The linear scan this replaces read every event and threw away the ones
+    /// the mask did not want. On prometheus `./...` that was 202M events
+    /// scanned to deliver 7M (measured with `GUFF_DEBUG_CACHE=2`), because 119
+    /// of the 149 `preorder_typed` call sites ask for exactly **one** kind and
+    /// 15 more ask for two.
+    by_kind: Vec<u32>,
+    /// Start offset of each kind's group in [`Self::by_kind`], plus a terminator.
+    kind_off: [u32; NodeKind::COUNT + 1],
     /// Identity of the `&[File]` the events came from. **Compared, never
     /// dereferenced.** A caller that hands `preorder` some other slice (a
     /// single file, a filtered list) falls back to walking it.
@@ -186,6 +199,40 @@ struct Events {
 // sharing these pointers is exactly as safe as sharing that `&Package`.
 unsafe impl Send for Events {}
 unsafe impl Sync for Events {}
+
+/// Counting-sort `nodes` indices into per-kind groups (PERF_TASKS_V3 V1-2).
+///
+/// Returns `(by_kind, kind_off)` where group `k` occupies
+/// `by_kind[kind_off[k] .. kind_off[k + 1]]`. Two linear passes: count, then
+/// scatter. Because the scatter walks `nodes` front to back, each group comes
+/// out in ascending index order — which is preorder order, so a masked walk
+/// over a group is indistinguishable from the filtered linear scan.
+fn index_by_kind(nodes: &[Event]) -> (Vec<u32>, [u32; NodeKind::COUNT + 1]) {
+    let mut off = [0u32; NodeKind::COUNT + 1];
+    for e in nodes {
+        off[e.kind as usize + 1] += 1;
+    }
+    for k in 0..NodeKind::COUNT {
+        off[k + 1] += off[k];
+    }
+    let mut cursor = off;
+    let mut by_kind = vec![0u32; nodes.len()];
+    for (i, e) in nodes.iter().enumerate() {
+        let slot = &mut cursor[e.kind as usize];
+        by_kind[*slot as usize] = i as u32;
+        *slot += 1;
+    }
+    (by_kind, off)
+}
+
+/// How many kinds a bucket walk will merge before the linear scan wins.
+///
+/// 137 of the 149 `preorder_typed` call sites pass three kinds or fewer, and a
+/// merge of `k` sorted groups costs `O(hits * k)` comparisons against the scan's
+/// `O(total)` mask tests. Past a handful of kinds the groups stop being
+/// selective and the flat scan — one sequential pass, no indirection — is
+/// simply faster. Raising this is a measurement, not a guess.
+const MAX_MERGE_KINDS: u32 = 4;
 
 /// Rebuild a node reference, tying its lifetime to the caller's `files`.
 ///
@@ -234,9 +281,12 @@ impl InspectResult {
             });
         }
         nodes.shrink_to_fit();
+        let (by_kind, kind_off) = index_by_kind(&nodes);
         Self {
             events: Some(Arc::new(Events {
                 nodes,
+                by_kind,
+                kind_off,
                 files_ptr: files.as_ptr(),
                 files_len: files.len(),
                 _owner: owner,
@@ -247,10 +297,9 @@ impl InspectResult {
     /// The flattened events, but only if `files` is the very slice they were
     /// built from.
     #[inline]
-    fn events_for(&self, files: &[File]) -> Option<&[Event]> {
+    fn events_for(&self, files: &[File]) -> Option<&Events> {
         let ev = self.events.as_ref()?;
-        (ev.files_ptr == files.as_ptr() && ev.files_len == files.len())
-            .then(|| ev.nodes.as_slice())
+        (ev.files_ptr == files.as_ptr() && ev.files_len == files.len()).then(|| &**ev)
     }
 
     /// Visit every AST node in each file once, in preorder.
@@ -289,13 +338,15 @@ impl InspectResult {
         self.visit_masked(mask, files, f);
     }
 
-    /// The traversal itself: a linear scan when the events match, the original
-    /// recursive walk otherwise. Both produce the identical node sequence — the
-    /// events were recorded by the same [`preorder_stack`] call shape.
+    /// The traversal itself: per-kind groups when the mask is narrow, a linear
+    /// scan when it is wide, and the original recursive walk when the events do
+    /// not belong to `files`. All three produce the identical node sequence —
+    /// the events were recorded by the same [`preorder_stack`] call shape, and
+    /// each group is in ascending event order.
     ///
     /// Returns how many nodes were scanned and how many were delivered; both
     /// are dropped on the release path (the counters are only read under
-    /// `GUFF_DEBUG_CACHE`) and exist so the two arms can't disagree about what
+    /// `GUFF_DEBUG_CACHE`) and exist so the arms can't disagree about what
     /// counts as work.
     #[inline]
     fn visit_masked<F>(&self, mask: NodeMask, files: &[File], mut f: F) -> (u64, u64)
@@ -305,17 +356,68 @@ impl InspectResult {
         let mut scanned: u64 = 0;
         let mut hits: u64 = 0;
         match self.events_for(files) {
-            Some(events) => {
-                scanned = events.len() as u64;
-                for &e in events {
-                    if !mask.contains(e.kind) {
-                        continue;
+            Some(ev) => {
+                // `NodeKind::bit()` is `1 << (kind as u8)`, so a set bit's
+                // position *is* the kind's discriminant — and its index into
+                // `kind_off`. No `NodeKind` round-trip needed.
+                let bits = mask.bits();
+                let n = bits.count_ones() as usize;
+                if n == 1 {
+                    // The 119-call-site case: one kind, so its group *is* the
+                    // answer — already in preorder order, no merge, no mask test.
+                    let k = bits.trailing_zeros() as usize;
+                    let group = &ev.by_kind[ev.kind_off[k] as usize..ev.kind_off[k + 1] as usize];
+                    scanned = group.len() as u64;
+                    hits = scanned;
+                    for &idx in group {
+                        let e = ev.nodes[idx as usize];
+                        // SAFETY: `events_for` just confirmed these events were
+                        // recorded from this exact slice, and `Events::_owner`
+                        // keeps its AST alive; the nodes are live and unmoved.
+                        f(unsafe { node_in(files, e) });
                     }
-                    hits += 1;
-                    // SAFETY: `events_for` just confirmed these events were
-                    // recorded from this exact slice, and `Events::_owner` keeps
-                    // its AST alive; the nodes are therefore live and unmoved.
-                    f(unsafe { node_in(files, e) });
+                } else if n as u32 <= MAX_MERGE_KINDS {
+                    // Narrow mask: walk only the requested kinds' groups,
+                    // merging by event index so the caller still sees preorder
+                    // order. `scanned` counts what we actually touched, which is
+                    // the point of the whole exercise.
+                    let mut cursors = [(0u32, 0u32); MAX_MERGE_KINDS as usize];
+                    let mut rest = bits;
+                    for slot in cursors[..n].iter_mut() {
+                        let k = rest.trailing_zeros() as usize;
+                        rest &= rest - 1;
+                        *slot = (ev.kind_off[k], ev.kind_off[k + 1]);
+                    }
+                    loop {
+                        // Pick the group whose next event comes first.
+                        let mut best: Option<(usize, u32)> = None;
+                        for (i, &(cur, end)) in cursors[..n].iter().enumerate() {
+                            if cur == end {
+                                continue;
+                            }
+                            let idx = ev.by_kind[cur as usize];
+                            if best.is_none_or(|(_, b)| idx < b) {
+                                best = Some((i, idx));
+                            }
+                        }
+                        let Some((slot, idx)) = best else { break };
+                        cursors[slot].0 += 1;
+                        scanned += 1;
+                        hits += 1;
+                        let e = ev.nodes[idx as usize];
+                        // SAFETY: as above.
+                        f(unsafe { node_in(files, e) });
+                    }
+                } else {
+                    scanned = ev.nodes.len() as u64;
+                    for &e in &ev.nodes {
+                        if !mask.contains(e.kind) {
+                            continue;
+                        }
+                        hits += 1;
+                        // SAFETY: as above.
+                        f(unsafe { node_in(files, e) });
+                    }
                 }
             }
             None => {

@@ -258,7 +258,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             continue;
         };
         let skip_tests = is_test_path(path);
-        let Some((re_fset, parsed)) = reparse_with_comments(path) else {
+        let Some((re_fset, parsed)) = reparse_with_comments(path, pass.pkg().source_bytes(i))
+        else {
             continue;
         };
         let pkg_name = parsed.name.name.as_str();
