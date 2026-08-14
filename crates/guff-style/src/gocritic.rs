@@ -8463,10 +8463,51 @@ fn check_bool_expr_simplify(
     );
 }
 
+/// Every node kind the file walk in [`run`] dispatches on.
+///
+/// Read off the `match` arms; anything not listed falls through to `_ => {}`,
+/// so the mask changes nothing about which checks fire. It exists so the walk
+/// can go through the shared inspector's flat event array instead of recursing
+/// the tree again (PERF_TASKS_V3 V1-12).
+///
+/// **Adding a `NodeRef::X(..)` arm to that `match` means adding `X` here.**
+/// Forgetting is silent — the arm simply never runs, and a checker that stops
+/// firing looks exactly like a clean repository. Two things catch it: the
+/// `gocritic` golden case asserts 180 findings (`compat/golden/run.sh`), and
+/// `GUFF_INSPECT_MASKS=0` widens every mask back to `ALL`, so one binary run
+/// twice over any corpus must produce identical findings.
+const WALKED_KINDS: guff::walk::NodeMask = guff::node_mask!(
+    AssignStmt,
+    BasicLit,
+    BinaryExpr,
+    BlockStmt,
+    CallExpr,
+    CaseClause,
+    CommClause,
+    CompositeLit,
+    DeferStmt,
+    ForStmt,
+    FuncDecl,
+    FuncLit,
+    GenDecl,
+    IfStmt,
+    IndexExpr,
+    RangeStmt,
+    ReturnStmt,
+    SelectorExpr,
+    SliceExpr,
+    StarExpr,
+    SwitchStmt,
+    TypeAssertExpr,
+    TypeSwitchStmt,
+    UnaryExpr,
+);
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let _ = pass
+    let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "gocritic requires inspect analyzer".to_string())?;
+        .ok_or_else(|| "gocritic requires inspect analyzer".to_string())?
+        .clone();
 
     let options = pass
         .settings::<GocriticOptions>("gocritic")
@@ -8559,10 +8600,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             }
         }
 
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
+        // The shared inspector's flat array instead of a fresh recursive walk
+        // (PERF_TASKS_V3 V1-12). `walk::inspect` also fired the callback a
+        // second time per node on the way back up (`f(None)`), which this
+        // closure only ever answered `return true` to — so half the calls were
+        // pure overhead. The `Some` sequence is identical either way, and the
+        // callback never returned `false`, so nothing was being pruned.
+        inspect.preorder_typed(WALKED_KINDS, std::slice::from_ref(file), |n| {
             match n {
                 NodeRef::IfStmt(s) => {
                     if enabled(&set, "elseif") {
@@ -8931,7 +8975,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 _ => {}
             }
-            true
         });
     }
 
