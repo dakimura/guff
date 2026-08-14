@@ -321,9 +321,22 @@ impl InspectResult {
         if ev.files_ptr == files.as_ptr() && ev.files_len == files.len() {
             return Some((ev, 0, ev.nodes.len() as u32));
         }
-        // SAFETY of the comparison, not of a dereference: `offset_from` needs
-        // both pointers in one allocation, so establish that by address range
-        // first and only then compute the index.
+        // Address arithmetic on `usize`, never `offset_from` — the two pointers
+        // are only known to share an allocation *after* the checks below, which
+        // is exactly what `offset_from` would require up front.
+        //
+        // Why a foreign slice cannot be mistaken for one of ours: the three
+        // checks together confine `here` to
+        // `[base, base + files_len * stride)`, stride-aligned. That interval is
+        // precisely the `[File]` the events were built from, and no other live
+        // object can overlap an allocation that is still borrowed here — so a
+        // pointer landing inside it *is* an element of that slice. A caller's
+        // own `Vec<File>` fails the range check and falls back to walking.
+        //
+        // A zero-length `files` is the one case where the pointer carries no
+        // such guarantee, but it also cannot go wrong: whichever branch it
+        // takes, `file_off[i] .. file_off[i + 0]` is empty and the fallback
+        // walk visits nothing.
         let base = ev.files_ptr as usize;
         let here = files.as_ptr() as usize;
         let stride = std::mem::size_of::<File>();
