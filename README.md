@@ -266,8 +266,10 @@ jobs:
 ```
 
 The Action persists guff's analysis cache between runs, so a pull request
-re-lints only what it changed — worth 3–8× on a large module. Matrices, the
-cache size knob, and self-hosted runners: [`docs/CI.md`](docs/CI.md).
+re-lints only what it changed. On a GitHub-hosted runner over a 113-package
+module, a cold run is 7.9s, an unchanged tree 0.2s, and a real edit to a
+widely-imported file 4.2s. Matrices, the cache size knob, and self-hosted
+runners: [`docs/CI.md`](docs/CI.md).
 
 ---
 
