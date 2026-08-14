@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !plan9
 
 package p
 

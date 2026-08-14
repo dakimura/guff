@@ -267,11 +267,17 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if !matches!(bin.op, Token::EQL | Token::NEQ) {
                 return;
             }
-            let (sym, lit) = match (bin.x.as_ref(), bin.y.as_ref()) {
-                (Expr::SelectorExpr(sel), lit) => (selector_name(pass, sel), lit),
-                (lit, Expr::SelectorExpr(sel)) => (selector_name(pass, sel), lit),
-                _ => return,
+            // Upstream's pattern is
+            //   (BinaryExpr (Symbol "runtime.GOOS") op@(Or "==" "!=") lit@(BasicLit "STRING" _))
+            // so the operands are not interchangeable: the symbol must be on the
+            // left and the value must be a literal. `"linux" == runtime.GOOS`
+            // and `runtime.GOOS == someStringConst` are both quiet upstream.
+            let (Expr::SelectorExpr(sel), lit @ Expr::BasicLit(_)) =
+                (bin.x.as_ref(), bin.y.as_ref())
+            else {
+                return;
             };
+            let sym = selector_name(pass, sel);
             let Some(go_val) = expr_to_string(pass, lit) else {
                 return;
             };
@@ -287,7 +293,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 _ => None,
             };
             if let Some(msg) = msg {
-                all_pending.push((bin.op_pos.0 as u32, msg));
+                // `report.Report(pass, node, ...)` — the node is the whole
+                // BinaryExpr, so the caret sits on the comparison's first
+                // token, not on the operator.
+                all_pending.push((bin.x.pos().0 as u32, msg));
             }
         });
     }
