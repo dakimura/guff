@@ -6237,12 +6237,8 @@ staticcheck-sa を extra 7 → 6 に低下）。reject **12 ケース**。isolat
 OSS pr + nightly tier **10 ターゲット**緑（recall は全ターゲットで 100%、
 `unexpected_guff` / `unexpected_golangci` とも 0、health は 3 ターゲットとも baseline どおり）。
 
-**regress full の wall は測れていない。** 別セッションの perf 変更が
-`.claude/worktrees/perf-v3` に移った後にもう一度回したが、
-`regress/run.sh` の perf ガードが**そのセッションのビルドで機械が contended**
-（load 5.87 / `claude` が CPU 31.5%）だと言って測定を拒んだ。ガードは正しく働いている。
-17 本目が残した「wall 赤」は**赤のまま引き継ぎ**、数字の更新は機械が空いてから。
-finding 軸のほうは golden / OSS / isolate が全部緑なので、赤いのは wall だけである。
+**regress full の wall は 19 本目の末尾で測れた**（18 本目の時点では perf ガードが
+2 回とも contended で拒否していた）。結果は下記 7。
 
 **次にやること**
 
@@ -6396,13 +6392,32 @@ golden の ratchet は**両側を 1 行ずつ**しか見せないので、
   `runtime.SetFinalizer(x, func(_ *int){ _ = x })` すら。guff は報告する。
   上流がどの条件でだけ撃つのかを honnef のソースで確かめるところから。
 
+#### 7. wall を 3 セッションぶりに測った —— SSA の忠実化は wall を動かしていない
+
+`regress/run.sh --profile full`（load 1.94 の静かな機械で 1 回）:
+
+| 指標 | baseline | 17 本目 | 19 本目 |
+|---|---:|---:|---:|
+| wall_seconds | 2.360 | 3.160 | **3.210** |
+| peak_rss | 2.90 GiB | — | 3.14 GiB（上限 ×1.20 = 3.48 GiB 内） |
+| finding | 20/20/20 | 20/20/20 | **20/20/20 P=R=1.0** |
+
+**18・19 本目で入れた SSA の 3 変更はどれも命令を増やす側**
+（`emit_store` の変換、`logicalBinop` のブロックと Phi、`emitCallArgs` の変換）
+**なのに、wall は +0.05s しか動いていない** —— ゲート自身が測定ノイズとして
+許している epsilon 0.15s の中である。つまり **baseline との 0.85s 差は
+このセッション群の作業由来ではない**。上記 5 の tail 内訳（QF1008 21% /
+unconvert 14%）が引き続き唯一の具体的な打ち手である。
+
+wall 軸は**赤のまま**。finding 軸は緑。
+
 **次にやること**
 
-1. **QF1008 と unconvert を `tsdb` の上で読む**（上記 5）。合算表ではなく
+1. **QF1008 と unconvert を `tsdb` の上で読む**（上記 5・7）。合算表ではなく
    tail の内訳が打ち手を決める、というのが 18・19 本目で分かったこと。
-2. **wall の実測**。17 本目の 3.16s から動いたかどうかが 3 セッション続けて
-   分かっていない（perf ガードが毎回 contended で拒否）。`emitCallArgs` は
-   命令を増やすので、測らないままだと次の診断が濁る。
+   wall の 0.85s はここ以外から出ていない。
+2. ~~**wall の実測**~~ 済み（下記 7）。**3.210s** —— 17 本目の 3.160s から
+   +0.05s、ゲート自身のノイズ許容（epsilon 0.15s）の中。
 3. **SA4031 と SA5005**（上記 6）。どちらも「反転」なので、直すと
    ratchet の extra が減るだけでなく **recall が増える**側である。
 4. `replaceRecvType`（`subst.rs`）。優先度低のまま。
