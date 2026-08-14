@@ -14,11 +14,29 @@ use guff::position::{FileSet, Pos};
 /// from `file.comments`. Comment linters re-parse from disk like `nolint`.
 /// Keep the returned [`FileSet`] so positions on `File` stay valid while mapping
 /// line numbers back onto the Pass [`FileSet`].
-pub fn reparse_with_comments(path: &Path) -> Option<(Arc<FileSet>, File)> {
-    let src = fs::read(path).ok()?;
+///
+/// `cached` is the package's already-read source bytes
+/// (`pass.pkg().source_bytes(i)`). Pass them: type-checking read the file
+/// moments ago, and re-opening it makes the kernel do the work twice. On
+/// prometheus `./...` this path was a visible part of `__open` (0.97s) and
+/// `read` (0.59s) in the profile. `None` falls back to reading, for callers
+/// that have no package handle.
+///
+/// (Sharing one reparse across *all* comment linters was tried and reverted —
+/// see PERF_TASKS_V3 §V1-4 NO-GO: retaining a second AST per file for the whole
+/// analyze phase cost +0.94 GiB RSS for +1.1% wall.)
+pub fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
+    let owned;
+    let src: &[u8] = match cached {
+        Some(b) => b,
+        None => {
+            owned = fs::read(path).ok()?;
+            &owned
+        }
+    };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
     Some((fset, file))
 }
 

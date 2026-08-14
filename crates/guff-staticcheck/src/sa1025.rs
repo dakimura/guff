@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use guff::token::Token;
-use guff_analysis::filter_debug;
+use guff_analysis::iter_non_debug;
 use guff_analysis::is_call_to;
 use guff_analysis::passes::buildir;
 use guff_analysis::referrers;
@@ -59,8 +59,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
             for (bid, block) in func.live_blocks() {
-                let instrs = filter_debug(&block.instrs, func);
-                for &iid in &instrs {
+                for iid in iter_non_debug(&block.instrs, func) {
                     let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
                         continue;
                     };

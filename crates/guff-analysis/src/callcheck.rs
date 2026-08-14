@@ -100,6 +100,56 @@ pub struct CallContext<'a> {
 /// User-defined validation for a single function name (`"time.Parse"`, …).
 pub type CheckFn = fn(&mut Call<'_>, &CallContext<'_>);
 
+thread_local! {
+    /// Rendered call-target names for the package this thread is linting.
+    ///
+    /// [`code::type_func_name`] builds a fresh `String` — and for a method,
+    /// renders the receiver type through `type_string` — for *every* call
+    /// instruction in the package. Twenty-five staticcheck analyzers each run
+    /// [`run`] over the whole SSA program, so the same handful of names
+    /// (`fmt.Printf`, `time.Parse`, …) were re-rendered twenty-five times per
+    /// call site: `object_call_name` was 0.51s of self CPU on prometheus
+    /// `./...`, plus the allocator and `memmove` traffic behind it
+    /// (PERF_TASKS_V3 V1-5).
+    ///
+    /// Keyed by `Package::id`: an `ObjectId` indexes its own package's arena,
+    /// and a rayon worker moves between packages, so an unkeyed cache would
+    /// answer about a different object of the same number. Same shape as
+    /// gocritic's `IMPLEMENTS_MEMO`.
+    static CALL_NAME_MEMO: std::cell::RefCell<(String, HashMap<ObjectId, std::rc::Rc<str>>)> =
+        std::cell::RefCell::new((String::new(), HashMap::new()));
+}
+
+fn call_target_name_memo(
+    pkg_id: &str,
+    type_arena: &TypeArena,
+    objects: &ObjectArena,
+    packages: &PackageArena,
+    target: ObjectId,
+) -> std::rc::Rc<str> {
+    let hit = CALL_NAME_MEMO.with(|m| {
+        let m = m.borrow();
+        if m.0 != pkg_id {
+            return None;
+        }
+        m.1.get(&target).cloned()
+    });
+    if let Some(hit) = hit {
+        return hit;
+    }
+    let name: std::rc::Rc<str> =
+        code::type_func_name(type_arena, objects, packages, target).into();
+    CALL_NAME_MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.0 != pkg_id {
+            m.0 = pkg_id.to_string();
+            m.1.clear();
+        }
+        m.1.insert(target, std::rc::Rc::clone(&name));
+    });
+    name
+}
+
 /// Runs `rules` over every static call in the package's SSA IR.
 pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
     let pending = {
@@ -123,13 +173,14 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
                     let Some(target) = resolve_call_target(common, &ir.prog) else {
                         continue;
                     };
-                    let name = code::type_func_name(
+                    let name = call_target_name_memo(
+                        pass.pkg().id.as_str(),
                         &ir.prog.type_arena,
                         &artifacts.objects,
                         &artifacts.packages,
                         target,
                     );
-                    let Some(&check) = rules.get(name.as_str()) else {
+                    let Some(&check) = rules.get(&*name) else {
                         continue;
                     };
 
@@ -144,6 +195,19 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
                     };
                     check(&mut call, &ctx);
                     let (arg_msgs, call_msgs) = call.into_reports();
+                    // A rule that looked at this call and found nothing still
+                    // produced a `PendingReport`, and `emit_report` opens with
+                    // an unconditional `find_ast_call` — a full preorder walk of
+                    // the package's files to locate one node by position. Since
+                    // the overwhelming majority of matched calls are clean (every
+                    // correct `fmt.Printf` is one), that walk ran for findings
+                    // that never existed: `callcheck::run <- sa5009::run` alone
+                    // was 0.78s of `walk::preorder::rec` on prometheus `./...`.
+                    // Dropping a report with no messages emits exactly the same
+                    // diagnostics — `emit_report`'s `diags` would be empty.
+                    if call_msgs.is_empty() && arg_msgs.iter().all(|m| m.is_empty()) {
+                        continue;
+                    }
                     pending.push(PendingReport {
                         kind,
                         pos,

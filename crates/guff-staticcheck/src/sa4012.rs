@@ -9,7 +9,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 use guff_analysis::callcheck;
 use guff_analysis::passes::buildir;
-use guff_analysis::{filter_debug, is_call_to};
+use guff_analysis::{is_call_to, iter_non_debug};
 use guff_ssa::instr::{BinOp, Call, InstrData};
 use guff_ssa::value::Value;
 
@@ -28,7 +28,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for &fid in ir.src_funcs_with_methods() {
         let func = ir.prog.functions.get(fid);
         for (_, block) in func.live_blocks() {
-            for iid in filter_debug(&block.instrs, func) {
+            for iid in iter_non_debug(&block.instrs, func) {
                 let InstrData::BinOp(BinOp { x, y, .. }) = func.instrs.get(iid) else { continue };
                 if is_nan_call(&ir.prog, func, *x) || is_nan_call(&ir.prog, func, *y) {
                     pending.push((

@@ -11,7 +11,7 @@ use guff::node_mask;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::code::{example_func_spans, in_example_func, object_of};
 use guff_analysis::passes::{buildir, inspect};
-use guff_analysis::{filter_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{iter_non_debug, referrers, AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_ssa::instr::{Extract, InstrData};
 use guff_ssa::value::Value;
 use guff_types::ObjectId;
@@ -343,7 +343,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 let func = ir.prog.functions.get(fid);
                 if assign.lhs.len() > 1 && assign.rhs.len() == 1 {
                     if let Some((v, _)) = exprs.value_in(&ir.prog, fid, &assign.rhs[0]) {
-                        for rid in filter_debug(referrers(func, v), func) {
+                        for rid in iter_non_debug(referrers(func, v), func) {
                             if let InstrData::Extract(Extract { index, .. }) = func.instrs.get(rid)
                             {
                                 let lhs = &assign.lhs[*index];

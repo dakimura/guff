@@ -134,7 +134,10 @@ pub struct TypeArena {
     /// Intern table for the frozen base (shared across [`TypeArena::shared_clone`]).
     intern_base: Arc<HashMap<InternKey, TypeId>>,
     /// Intern table for types appended after the last freeze / shared_clone.
-    intern_overlay: HashMap<InternKey, TypeId>,
+    ///
+    /// `Arc` for the same reason as [`Layered::overlay`] — see V1-1 there. A
+    /// scratch clone that asks a question without interning never touches it.
+    intern_overlay: Arc<HashMap<InternKey, TypeId>>,
 }
 
 /// Storage for all Go objects (variables, functions, type names, etc.).
@@ -158,12 +161,27 @@ pub struct PackageArena {
 /// A copy-on-write, append-friendly backing store shared across arena clones.
 ///
 /// The `base` prefix is an `Arc`-shared, effectively read-only run of elements;
-/// `overlay` holds elements appended after the base was frozen. Cloning shares
-/// the base (an `Arc` refcount bump) and deep-copies only the usually-small
-/// overlay, so the large decoded-dependency prefix (the R24.3 export seed) is
-/// shared across all packages instead of duplicated per package. Element ids are
+/// `overlay` holds elements appended after the base was frozen. Element ids are
 /// stable positions into `base` then `overlay`, so existing ids keep working as
 /// the overlay grows.
+///
+/// **Both layers are `Arc`, so cloning is two refcount bumps regardless of size**
+/// (PERF_TASKS_V3 V1-1). The overlay used to be an owned `Vec`, which made
+/// `TypeArena::clone` deep-copy every type the package had allocated. That
+/// mattered because `identical` / `implements` / `lookup_field_or_method` take
+/// `&mut TypeArena` (interning can append), so ~30 check sites clone the arena
+/// *per call* just to ask a question:
+///
+/// ```ignore
+/// let mut types = artifacts.types.clone();   // was: whole overlay, per call
+/// identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
+/// ```
+///
+/// On prometheus `./...` that put `TypeArena::clone` at 1.36s of self CPU (6.8%
+/// of the run), before counting the `memmove`, the allocator traffic and the
+/// `Vec<TypeData>` drop it dragged behind it. With a shared overlay the clone is
+/// free and the copy happens only if the callee actually appends — which is the
+/// rare case, and costs exactly what the unconditional clone used to.
 ///
 /// Mutating a base element first promotes the base to a private copy
 /// (`Arc::make_mut`); this is rare in practice — measured on Prometheus, only a
@@ -172,14 +190,14 @@ pub struct PackageArena {
 #[derive(Debug, Clone)]
 struct Layered<T> {
     base: Arc<Vec<T>>,
-    overlay: Vec<T>,
+    overlay: Arc<Vec<T>>,
 }
 
 impl<T> Default for Layered<T> {
     fn default() -> Self {
         Self {
             base: Arc::new(Vec::new()),
-            overlay: Vec::new(),
+            overlay: Arc::new(Vec::new()),
         }
     }
 }
@@ -214,16 +232,21 @@ impl<T: Clone> Layered<T> {
             // mutations reuse the now-owned copy).
             &mut Arc::make_mut(&mut self.base)[idx]
         } else {
-            &mut self.overlay[idx - b]
+            &mut Arc::make_mut(&mut self.overlay)[idx - b]
         }
     }
 
     /// Append `data`, returning its 0-based index. Appends always land in the
-    /// owned overlay, so they never disturb the shared base.
+    /// overlay, so they never disturb the shared base.
+    ///
+    /// `Arc::make_mut` is a uniqueness check, not a copy, on the type-checking
+    /// path: the checker owns its overlay alone while it builds a package. It
+    /// only copies when a *scratch* clone appends — exactly the case the old
+    /// unconditional deep clone paid for every time.
     #[inline]
     fn push(&mut self, data: T) -> usize {
         let idx = self.len();
-        self.overlay.push(data);
+        Arc::make_mut(&mut self.overlay).push(data);
         idx
     }
 
@@ -232,7 +255,7 @@ impl<T: Clone> Layered<T> {
     fn freeze(&mut self) {
         if !self.overlay.is_empty() {
             let base = Arc::make_mut(&mut self.base);
-            base.append(&mut self.overlay);
+            base.append(Arc::make_mut(&mut self.overlay));
         }
     }
 
@@ -248,7 +271,9 @@ impl<T: Clone> Layered<T> {
     /// allocations for merging into a shared seed (R25); the base is the shared
     /// frozen seed the worker was cloned from and is discarded.
     fn into_overlay(self) -> Vec<T> {
-        self.overlay
+        // Uniquely owned on this path (the worker is finished and its scratch
+        // clones are gone), so this unwraps without copying.
+        Arc::try_unwrap(self.overlay).unwrap_or_else(|shared| (*shared).clone())
     }
 
     /// Append already-relocated elements directly into the base. The caller must
@@ -273,11 +298,15 @@ impl<T: Clone> Layered<T> {
         );
         Self {
             base: Arc::clone(&self.base),
-            overlay: Vec::new(),
+            overlay: Arc::new(Vec::new()),
         }
     }
 
-    /// Borrow the shared base and owned overlay (RSS attribution, C-8).
+    /// Borrow the shared base and the overlay (RSS attribution, C-8).
+    ///
+    /// The overlay is `Arc`-shared since V1-1, so a scratch clone that never
+    /// appended charges its (shared) overlay again here. That over-counts only
+    /// under `GUFF_DEBUG_RSS`, and only while a scratch clone is alive.
     pub(crate) fn parts(&self) -> (&Arc<Vec<T>>, &Vec<T>) {
         (&self.base, &self.overlay)
     }
@@ -432,7 +461,7 @@ impl TypeArena {
                 return id;
             }
             let id = self.alloc_fresh(data);
-            self.intern_overlay.insert(key, id);
+            Arc::make_mut(&mut self.intern_overlay).insert(key, id);
             return id;
         }
         self.alloc_fresh(data)
@@ -454,7 +483,7 @@ impl TypeArena {
         let old_key = InternKey::from_data(self.get(id));
         if let Some(key) = old_key {
             if self.intern_overlay.get(&key) == Some(&id) {
-                self.intern_overlay.remove(&key);
+                Arc::make_mut(&mut self.intern_overlay).remove(&key);
             }
         }
         // The new shape is deliberately *not* re-interned. Hash-consing is an
@@ -574,7 +603,7 @@ impl TypeArena {
         self.types.freeze();
         if !self.intern_overlay.is_empty() {
             let base = Arc::make_mut(&mut self.intern_base);
-            for (k, v) in self.intern_overlay.drain() {
+            for (k, v) in Arc::make_mut(&mut self.intern_overlay).drain() {
                 base.entry(k).or_insert(v);
             }
         }
@@ -585,7 +614,7 @@ impl TypeArena {
         Self {
             types: self.types.shared_clone(),
             intern_base: Arc::clone(&self.intern_base),
-            intern_overlay: HashMap::default(),
+            intern_overlay: Arc::new(HashMap::default()),
         }
     }
 

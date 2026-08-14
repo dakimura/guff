@@ -21,11 +21,21 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::FunlenOptions;
 
-fn reparse_with_comments(path: &Path) -> Option<(Arc<FileSet>, File)> {
-    let src = fs::read(path).ok()?;
+/// `cached` is the package's already-read source bytes; re-opening the file the
+/// type-checker just read makes the kernel do the work twice (PERF_TASKS_V3
+/// V1-4).
+fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
+    let owned;
+    let src: &[u8] = match cached {
+        Some(b) => b,
+        None => {
+            owned = fs::read(path).ok()?;
+            &owned
+        }
+    };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, &src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
     Some((fset, file))
 }
 
@@ -192,7 +202,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 _ => false,
             });
             if over_limit {
-                reparsed = paths.get(i).and_then(|p| reparse_with_comments(p));
+                reparsed = paths
+                    .get(i)
+                    .and_then(|p| reparse_with_comments(p, pass.pkg().source_bytes(i)));
             }
         }
         for decl in &file.decls {
