@@ -599,9 +599,13 @@ samply（`perf-v3`、総 CPU 17.8s、prometheus `./...` cold）の self 上位�
 
 ## 7. 進捗
 
-作業ブランチ: `perf-v3`（`953d243` から分岐）。**すべて findings バイト同一**
-（`Pos.Offset` のみ除外。これは FileSet の割当順に依存する値で、golangci 比較でも
-`compat/normalize.py` が見ていない）。
+作業ブランチ: `perf-v3`（`953d243` から分岐 → `b5dbcb8` に rebase）。
+**すべて findings バイト同一**（`Pos.Offset` のみ除外。これは FileSet の割当順に依存する値で、
+golangci 比較でも `compat/normalize.py` が見ていない）。
+
+> **数字が 2 系統あります。** §7.1.5 は**分岐元 `953d243` 比**（−35%）、
+> §7.1.9 が**現在の main `b5dbcb8` 比**（−20.3%）です。
+> 差は main が V1-8 相当を独立に入れたぶん（§7.1.8）。**引用するなら §7.1.9 を。**
 
 | ID | 状態 | 実測 |
 |---|---|---|
