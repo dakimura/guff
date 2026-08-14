@@ -13,8 +13,21 @@
 
 ## 📌 セッションを引き継いだ人はここから
 
+> ### 結果（2026-08-14, ブランチ `perf-v3`）
+>
+> **prometheus `./...` cold: 4.435s → 2.960s（−33.3%）。analyze phase 2.72s → 1.13s（−58%）。**
+> **peak RSS 変化なし。findings は HEAD とバイト同一**（並列 / `-j 1` / masks on / masks off）。
+> `cargo test --workspace` 3,116 passed、`compat/golden` 81 ケース全一致。
+> 詳細は [§7](#7-進捗)、次にやることは [§4.5](#45-次にやる人へ--v1-完了後の地図2026-08-14)。
+>
+> 一番効いたのは**計画に無かった項目**でした（§7.1）。
+> V1-1〜V1-3 を入れてプロファイルを取り直したら、それまで見えていなかった
+> `FileSet` の**グローバル `Mutex` が 1 位（2.9s / 14.3%）**に浮上しています。
+> **1 つ潰すたびに測り直すこと。**
+
 **計測日**: 2026-08-14 / Darwin 25.2.0 arm64（Apple M4, 10 core, 24 GiB） / go1.26.4
 **対象**: `prometheus ./...`（`.golangci.yml`, 118 roots / 1616 pkgs）, cold, `--no-cache`
+**着手時のベース**: `953d243`
 
 - **regress full ゲートは FAIL 中**: wall **3.16s** vs baseline **2.36s**（+34%）。
   `regress/results/RESULTS.full.md` に記録済み。tsdb プロファイルは 0.77s / 0.73s で PASS。
@@ -195,7 +208,19 @@ analyze の実効並列度は約 7.7（CPU 14.5s / wall 1.89s）なので、CPU 
 5. **compat golden**: `compat/` の golden / ratchet を壊していないこと。
 6. **A/B/A/B 交互計測**（V2 §X-3）。この開発機は単発スパイクします。
 
-### 3.1 このマシン固有の注意（2026-08-14 に再確認）
+### 3.1 `git checkout <file>` で他人（過去の自分）の変更を巻き添えにしない
+
+**2026-08-14 に実際にやりました（§7.1.7）。** 1 つのファイルに 2 つのタスクの変更が
+入っている状態で、片方を戻すつもりで `git checkout <file>` を打つと**両方消えます**。
+しかもビルドは通り、findings も変わらないので**気づけません**。
+
+- タスクを revert する前に `git diff <file>` を見て、**そのファイルに他のタスクの変更が
+  同居していないか**確認する。
+- 同居しているなら `git checkout` ではなく、当該ハンクだけを戻す。
+- **revert 後は「入っているはずのもの」を 1 つずつ grep で確認する。**
+  `grep -c 'let en_val_swap' crates/guff-style/src/gocritic.rs` の類で十分です。
+
+### 3.2 このマシン固有の注意（2026-08-14 に再確認）
 
 - `target/debug/deps` が **136,330 ファイル / 8.9 GB** まで肥大しており、
   `syspolicyd` が**常時 1.4 コアを焼いています**（`ps aux` で 143%）。
@@ -468,6 +493,47 @@ FxHash 化する。**先に V2 §0-12（iteration order 依存の洗い出し）
 
 ---
 
+## 4.5 次にやる人へ — V1 完了後の地図（2026-08-14）
+
+**直列 phase は 2.85s。内訳は analyze 1.13s / typecheck_roots 1.14s / load_graph 0.53s
+で、初めて 3 つがほぼ同じ大きさになりました。**「ここを削れば効く」という単独の山は
+もうありません。
+
+samply（`perf-v3`、総 CPU 17.8s、prometheus `./...` cold）の self 上位は:
+
+| CPU | % | symbol | 読み方 |
+|---:|---:|---|---|
+| 1.22s | 6.8% | `_platform_memmove` | 最大の呼び元は `code::func_name` の `format!` |
+| 0.98s | 5.5% | `__open` | `load_package_files`（native lister）+ `build_source_seed_inner` |
+| 0.64s | 3.6% | `Scanner::scan` | 本物のパース |
+| 0.55s | 3.1% | `read` | 同上 |
+| 0.54s | 3.0% | `Scanner::next` | 同上 |
+| 0.52s | 2.9% | `walk::inspect::rec` | **gocritic の自前再帰 walk**（inspector を使っていない） |
+| ~1.2s | ~7% | `mi_free` / `mi_malloc_aligned` / `mi_page_free_list_extend` | アロケータ |
+
+### 着手候補（期待値の高い順）
+
+1. ~~**`code::func_name` の `String` を作らない**~~ → **NO-GO 済み（§7.1.6）。着手しないこと。**
+   実装して測ったら第1版は CPU +6.5%、第2版で誤差帯でした。
+2. **gocritic を inspector に載せる**
+   `walk::inspect(NodeRef::File(file), |n| ...)` を自前で回しています（0.52s）。
+   ただし**この walk は `bool` を返して部分木を刈っている**ので、フラット配列に単純移行はできません。
+   刈っている枝が実際に何割かを先に測ること。**測らずに着手しない**（V2 §0-14）。
+3. **`typecheck_roots` 1.14s** — V2 §B-9（wave バリア撤廃）は原則着手しない、が結論のまま。
+   ただし今や analyze と同じ大きさなので、**再評価する価値は出てきました**。
+4. **`load_graph` 0.53s** — `load_package_files` がヘッダ読みで全 `.go` を open します。
+   その後 typecheck が同じファイルを読み直すので、**main module 分だけバイト列を持ち回す**案。
+   RSS とのトレードオフ（V1-4 の NO-GO と同じ形）なので、必ず RSS を測ること。
+5. **アロケータ ~7%** — `Ident::clone` / `Expr::clone` が残っています。
+
+### やってはいけない
+
+- **`format_checks` に手を出さない。** `waited=0.00s` で余裕 2.2s、まだ内側に隠れています（V2 §B-10）。
+- **プロファイルを取り直さずに次を選ばない。** 第3弾の最大の一撃（V1-7, 2.9s）は、
+  V1-1〜V1-3 を入れて**測り直したときに初めて 1 位に現れました**。
+
+---
+
 ## 5. Tier V2 — 個別 analyzer（V1 を入れてから測り直して着手）
 
 **V1 を全部入れた後の per-analyzer 表を取り直してから着手すること。** V1-1 だけで
@@ -509,7 +575,7 @@ FxHash 化する。**先に V2 §0-12（iteration order 依存の洗い出し）
 | V1-4 コメント再パース共有 | **NO-GO** | RSS **+0.94 GiB**、wall **+1.1%**。§V1-4 参照 |
 | V1-4' 再パースに既読バイトを渡す | **DONE** | `read` 0.59s → 0.12s |
 | V1-5 callcheck の呼び出し名メモ化 | **DONE** | `object_call_name` を 25 重 → 1 重に |
-| V1-6 gocritic の `enabled` 巻き上げ | **DONE** | ノードごとの SipHash 114 回 → 0 |
+| V1-6 gocritic の `enabled` 巻き上げ | **NO-GO** | CPU **+0.5%**。§7.1.7（**一度 DONE と誤記していました**） |
 | **V1-7 `FileSet` の last キャッシュを thread-local 化** | **DONE** | **`__psynch_mutexwait`+`drop` 2.9s（14.3%）が消滅。第3弾で最大の一撃** |
 | V1-8 walk 内の `Regex::new` を排除 | **DONE** | `Regex::new` 2.11s inclusive（6.6%）→ 消滅 |
 | **V1-2b 部分スライスも索引で配る** | **DONE** | `from_ref(file)` 経路（S1008 ほか 5 箇所）が再帰 walk に落ちていた。20.7M → **18.0M scanned** |
@@ -587,6 +653,30 @@ delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で
 > 未コミット分をマージすれば findings 側の FAIL は消えるはずです（本ブランチの変更は
 > findings に対して no-op なので干渉しません）。
 
+**OSS コーパス（A/B/A/B 交互 3 往復、`./...`、cold、`--no-cache`）**
+
+| target | HEAD | perf-v3 | 差 |
+|---|---:|---:|---:|
+| gin | 0.551s | 0.363s | **−34.1%** |
+| caddy | 0.861s | 0.774s | −10.1% |
+| cobra | 0.235s | 0.222s | −5.5% |
+| k9s | 1.920s | 1.845s | −3.9% |
+| helm | 1.380s | 1.370s | −0.7% |
+
+> **効き幅は「その設定がどれだけ analyze を回すか」に比例します。**
+> prometheus の設定は `gocritic: enable-all` / `govet: enable-all` / staticcheck 全部 /
+> revive 25 ルール / godot / testifylint `enable-all` …と analyze が重く、−33%。
+> helm / k9s は有効リンタが少なく load_graph と typecheck が支配的なので、
+> 今回の改善はほとんど乗りません。**これは想定どおりで、次の一手が
+> typecheck / load_graph 側にあることを示しています（§9）。**
+>
+> `benchmarks/run.sh --oss --tier pr` の perf ゲートは PASS。golangci-lint 比は
+> cold 6.0〜11.4x / warm 11.0〜27.2x（`benchmarks/results/SCOREBOARD.md`）。
+>
+> ⚠️ `benchmarks/run.sh` は**片方のバイナリの全サンプルを流し切ってからもう片方**を回すので、
+> 途中で別プロセスが立ち上がると偽の回帰が出ます（2026-08-14 に `mediaanalysisd` で実際に発生し、
+> helm が「+47%」に見えました）。**A/B 比較には交互実行を使うこと。**
+
 **検証（全部 PASS）**
 
 | 検証 | 結果 |
@@ -596,6 +686,7 @@ delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で
 | `GUFF_INSPECT_MASKS=0` ≡ 既定 | ✅ 同一（V1-2 のマスク経路の健全性） |
 | 決定性（同一バイナリ 5 回） | ✅ 同一 |
 | `cargo test --release --workspace` | ✅ **3,116 passed / 0 failed** |
+| `compat/golden/run.sh`（check レベル golden） | ✅ **OK: 81 case(s) match golden exactly**（staticcheck-sa/st の ratchet も baseline どおり） |
 
 > V1-2b で `passes::inspect::tests::foreign_file_slice_falls_back_to_walking` が
 > 1 本落ちました。**「単一ファイルのスライスは fallback する」という旧実装の性質を
@@ -603,6 +694,72 @@ delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で
 > `single_file_subslice_uses_the_flat_index`（部分スライスの列が直接 walk と完全一致することを
 > 確認）へ書き換え、fallback 側は「そもそも別の allocation のファイル」で検証するよう
 > 直しました。**意味的な assert（`first == direct` など）は落ちていません。**
+
+### 7.1.6 V1-11 NO-GO — `is_call_to` の `String` 割当は「犯人」ではなかった
+
+§4.5 の候補 1 番（`code::func_name` の `format!` を消す）を**実装して測って NO-GO** にしました。
+記録として残します。
+
+`is_call_to` / `is_call_to_any` は 75 箇所から呼ばれ、いずれも
+`"import/path.Func"` を `format!` で組んでリテラルと比較し、すぐ捨てています。
+プロファイル上 `code::func_name` は `_platform_memmove`（1.22s / 6.8%）の最大の呼び元でした。
+
+**第1版**: `object_call_name_is(pass, obj, want) -> bool` を足して割当を廃止。
+→ **CPU +6.5%（中央値 20.88s → 22.23s、5 往復すべてで悪化）。**
+理由は明白で、`is_call_to_any(pass, call, LOCK_CALLS)` が**名前 1 つごとに**
+`objects.get` / `obj.pkg` / `packages.get(pkg).path()` をやり直していました。
+**1 回の割当を N 回のアリーナ参照に置き換えていた**わけです。
+
+**第2版**: オブジェクトの解決を 1 回に巻き上げ、`(path, name)` を借りたまま N 回比較。
+→ **CPU −0.1%（18.05s → 18.04s）＝ 誤差帯。**
+
+つまり **`String` の割当自体は mimalloc がほぼ吸収しており、削っても wall にも CPU にも出ません。**
+プロファイルで `func_name` 経由の `memmove` が見えていたのは、大半が
+**callcheck の `type_func_name`**（メソッド受信側の型を `type_string` で描画する重い方）で、
+そちらは **V1-5 のメモ化で既に解決済み**でした。
+
+**振る舞いに影響しない・計測で出ないリファクタは入れない**（V2 §0-14）ため、revert しました。
+**§4.5 の候補 1 番は消し込み済みです。次の人は 2〜5 番から選んでください。**
+
+### 7.1.7 V1-6 NO-GO — そして「入れたつもりで入っていなかった」記録
+
+**この節は失敗の記録です。同じ事故を避けるために残します。**
+
+V1-6（gocritic の `enabled(&set, "x")` 99 個を run 先頭に巻き上げ）は一度実装し、
+findings 同一を確認し、**DONE として表に書き、コミットメッセージにも書きました**。
+しかしその後 V1-4 を revert するとき
+
+```bash
+git checkout crates/guff-style/src/gocritic.rs   # V1-4 の変更を戻すつもり
+```
+
+を実行しており、**同じファイルに入っていた V1-6 も一緒に消えていました**。
+以降の計測はすべて V1-6 **なし**の状態で取られています。
+
+気づいたのは §4.5 の候補 2（gocritic を inspector に載せる）を調べようとして
+`gocritic.rs` を開いたときで、`enabled(&set, ...)` が 114 箇所そのまま残っていました。
+
+**そこで改めて入れ直して測ったところ、NO-GO でした**（`abcpu.sh`、5 往復交互）:
+
+```
+V1-6 なし CPU: median 18.48s
+V1-6 あり CPU: median 18.58s      → +0.10s (+0.5%)、min-to-min +0.51s
+```
+
+理由の見立て:
+- prometheus の設定は `gocritic: enable-all` なので**ほとんどの checker が有効**＝
+  どのみち分岐は成立し、飛ばせる仕事がない。
+- 短いリテラルの `HashSet<String>::contains` は分岐予測とキャッシュにほぼ吸収される。
+- 巨大な関数に `let` を 99 個足すのはレジスタ圧の面でむしろ不利。
+
+**そもそも根拠の読み違いでした。** プロファイルの SipHash 0.264s は、
+callers を見ると最大の呼び元が **`guff_unused::run`** であって gocritic ではありません。
+「gocritic がノードごとに 114 回ハッシュしている」は**コードから推測しただけで、
+プロファイルで裏を取っていませんでした**（V2 §0-14 違反）。
+
+**したがって §7.1.5 の実測値（−33.3% / −35.6%）に V1-6 は含まれていません。**
+数字自体は V1-6 なしで取られているので**正しいまま**です。
+`b012b69` のコミットメッセージだけが V1-6 を含むかのように書かれています。
 
 ### 7.2 V1-4 NO-GO の詳細
 
