@@ -200,19 +200,38 @@ analyze の実効並列度は約 7.7（CPU 14.5s / wall 1.89s）なので、CPU 
 
 ## 3. 検証プロトコル（V2 §2 の再確認 + 第3弾の追加）
 
+**第3弾で 2 本ツールを足しました。以降はこれを使ってください。**
+
+- `scripts/perf-ab.sh <binA> <binB> [--mode wall|cpu|analyzer]` — **交互 A/B 計測**
+- `scripts/perf-findings-diff.py <before.json> <after.json>` — **findings 同一性**
+
 各タスクで**必ず**:
 
-1. **findings byte 一致**
+1. **findings バイト一致**
    ```bash
-   ./target/release/guff run -c prometheus/.golangci.yml --out-format json \
-     --issues-exit-code 0 --no-cache ./... > after.json    # prometheus 内で
-   diff <(jq -S . before.json) <(jq -S . after.json)       # 空であること
+   scripts/perf-findings-diff.py before.json after.json   # → IDENTICAL
    ```
-2. **決定性**: 同じコマンドを 5 回、`-j 1` でも 1 回、出力が同一。
-3. **マスク健全性**（V1-2 のとき必須）: `GUFF_INSPECT_MASKS=0` と既定で findings 一致。
-4. **本番ゲート**: `./regress/run.sh --profile tsdb` と `--profile full` の両方 PASS。
-5. **compat golden**: `compat/` の golden / ratchet を壊していないこと。
-6. **A/B/A/B 交互計測**（V2 §X-3）。この開発機は単発スパイクします。
+   `compat/normalize.py` は `path:line:linter:message` でしか比べません
+   （guff↔golangci は列が正当に食い違うため）。性能変更にはそれでは緩いので、
+   **順序・列・severity・SourceLines まで比べ、`Pos.Offset` だけ除外**します
+   （FileSet の割当順で決まる値で、同じバイナリでも run ごとに変わります）。
+2. **決定性**: 同じコマンドを 5 回、`-j 1`（+ `RAYON_NUM_THREADS=1`）でも 1 回、出力が同一。
+3. **マスク健全性**（inspector 系を触ったら必須）: `GUFF_INSPECT_MASKS=0` と既定で findings 一致。
+4. **本番ゲート**: `./regress/run.sh --profile tsdb` と `--profile full`。
+   **FAIL したら「main も同じ FAIL か」を必ず確認すること** — baseline は古い時点の値なので、
+   自分のせいでない FAIL が混ざります（§7.1.5）。
+5. **compat golden**: `./compat/golden/run.sh` が `OK: 81 case(s)`。
+6. **A/B/A/B 交互計測**（V2 §X-3）。`benchmarks/run.sh` は**片方を流し切ってからもう片方**なので
+   A/B には使えません（§3.2）。
+
+### 3.0 wall で出ないときは CPU で測る
+
+`--mode cpu`（user+sys 合計）は他プロセスの負荷にほぼ影響されないので、
+**「仕事を減らしただけ」の変更を wall が解像できないときに使えます**。
+ただし**並列度の改善は CPU に出ません** — V1-7（Mutex 除去）は wall に −25% 出ますが
+CPU はほとんど動きません。逆に V1-11 は CPU で +6.5% と出て NO-GO になりました。
+**1 本の analyzer だけ触ったなら `--mode analyzer --analyzer <name>`** を使ってください
+（0.08s の差は全体の CPU では見えません。V1-12 / V1-13 はこれで判定しました）。
 
 ### 3.1 `git checkout <file>` で他人（過去の自分）の変更を巻き添えにしない
 
@@ -882,6 +901,18 @@ cargo build --profile profiling -p guff-lint    # samply 用（strip なし）
 
 # 計測環境の確認（通らないなら数字を信じない）
 scripts/perf-guard.sh
+
+# --- A/B（第3弾で追加） ---
+# 比較用に「変更前」のバイナリを取っておくこと。
+#   git stash && cargo build --release -p guff-lint && cp target/release/guff /tmp/guff-before
+scripts/perf-ab.sh /tmp/guff-before target/release/guff                      # wall
+scripts/perf-ab.sh /tmp/guff-before target/release/guff --mode cpu           # 負荷に強い
+scripts/perf-ab.sh /tmp/guff-before target/release/guff \
+    --mode analyzer --analyzer gocritic                                      # 1 analyzer だけ
+scripts/perf-ab.sh A B --dir corpus/cache/helm                               # 別リポで
+
+# findings 同一性（IDENTICAL 以外は即ロールバック）
+scripts/perf-findings-diff.py before.json after.json
 
 # phase + per-analyzer 内訳
 cd prometheus
