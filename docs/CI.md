@@ -38,28 +38,38 @@ CI is the case that benefits most, because CI re-lints a tree that is almost
 entirely identical to the last one it linted. Without a persisted cache, every
 run pays full cold cost for a diff of a handful of files.
 
-Measured on Prometheus (118 root packages, 1616 total) with guff 0.4.1 and
-go1.26.5, on an Apple M4. The cache was copied from an archive before each trial
-rather than reused in place, so these approximate what a runner sees after a
-cache restore:
+Measured on a GitHub-hosted `ubuntu-latest` runner (4 cores, 15 GB) against
+Prometheus at 113 root packages, under that project's own `.golangci.yml` —
+revive with two dozen rules, gocritic and govet at `enable-all`, staticcheck,
+modernize. guff 0.4.1, go1.25.10:
 
-| `$GUFF_CACHE` | no source change | one core file changed |
+| `$GUFF_CACHE` | no source change | one widely-imported file changed |
 |---|---:|---:|
-| empty (no caching) | 17.0s | 17.0s |
-| restored, default (27 MB) | 2.2s | 5.0s |
-| restored, `cache-seed: true` (171 MB) | 1.4s | 3.9s |
+| empty (no caching) | 7.9s | 7.9s |
+| restored, default | **0.2s** | **4.2s** |
+| restored, `cache-seed: true` | 0.2s | 2.9s |
 
-Two things worth reading off that table. A warm cache is worth roughly 3–8× on
-this module, and the win survives a real change, because only the packages
-affected by that change are recomputed.
+The win survives a real change, which is the part that matters: only the
+packages affected by the edit are recomputed, so a pull request pays for its own
+diff rather than for the repository.
 
-The cache also makes guff largely independent of the Go build cache: with
-`$GUFF_CACHE` restored and `GOCACHE` empty, an unchanged tree still finished in
-under a second locally, because nothing downstream of `go list` had to run.
+The cache also makes guff largely independent of the Go build cache. Across two
+runs of the same commit where the only difference was whether `actions/setup-go`
+restored `GOCACHE`, guff's cold run moved from 8.09s to 7.88s. For comparison,
+golangci-lint's moved from 120s to 70s on the same pair — worth knowing if you
+are benchmarking either tool, because it is easily the largest source of
+variance in that measurement.
 
 Findings are identical in every configuration above — the cache is a
 memoization, not an approximation. If you ever suspect otherwise, `--no-cache`
 forces a cold run.
+
+One caveat when you compare those outputs yourself: the *order* findings are
+printed in can differ between a cached and an uncached run, because emission
+follows the order work finished and serving packages from cache changes that.
+Measured on the same module, 841 findings each way, equal once sorted but not in
+the same sequence. Compare the set, not the transcript — `output.sort-order` in
+your config pins the order if you want the transcripts to match too.
 
 ## Safety of a stale cache
 
@@ -103,12 +113,17 @@ is not one you can guess from the directory listing:
 
 | cache | on disk | compressed |
 |---|---:|---:|
-| default (seeds excluded) | 27 MB | **2.0 MB** |
-| `cache-seed: true` | 171 MB | 23 MB |
+| default (seeds excluded) | 29 MB | **1.2 MB** |
+| `cache-seed: true` | 126 MB | 16 MB |
 
-Two megabytes against a 17-second cold run is not a close call, and it is the
-main reason the seeds are excluded by default: keeping them is a 10× larger
-artifact for about a second of lint time.
+Roughly a megabyte against an eight-second cold run is not a close call, and it
+is the main reason the seeds are excluded by default: keeping them is a 13×
+larger artifact to save one to three seconds on the incremental run. (How much
+depends on how widely the changed package is imported — edit a leaf and the
+seeds save almost nothing; edit something central and it is nearer three.)
+
+For scale, golangci-lint's own cache on the same module is 76 MB on disk and
+1.8 MB compressed. Neither tool has a transfer problem here.
 
 That said, the win is not universal, and the crossover is about module size.
 The round-trip is roughly fixed while the work saved shrinks with the module, so
@@ -134,6 +149,13 @@ Everything above bounds the risk; this one measures it. With `verify-cache: true
 the Action lints the tree a second time with `--no-cache` and fails the job if
 the two runs disagree, so a cache defect surfaces as a diff in your own
 repository rather than as a finding nobody ever saw.
+
+It compares the *set* of findings, sorted, rather than the two transcripts. The
+emission order legitimately differs between a cached and an uncached run, so a
+transcript diff would fail on every run and report a bug that is not there — and
+a check that cries wolf gets switched off, which costs more than never having
+added it. A finding that appears, disappears, moves or changes wording still
+fails the job.
 
 It roughly doubles the job's lint time, which is why it is off by default and
 belongs on a nightly or main-branch build rather than on every pull request:
@@ -172,13 +194,14 @@ and evict each other every run.
 ### `cache-seed`
 
 The type-checking seed overlays are the largest part of the cache by a wide
-margin — 144 MB of the 171 MB above — and they save about a second once the
-issue cache is warm. The Action leaves them out by default and sets
-`GUFF_SEED_PERSIST=0` so the run does not write them at all.
+margin — 97 MB of the 126 MB above — and they save one to three seconds on an
+incremental run, scaling with how many packages depend on the one you edited.
+The Action leaves them out by default and sets `GUFF_SEED_PERSIST=0` so the run
+does not write them at all.
 
 That default is about the repository's 10 GB cache budget rather than about the
-second. A five-service matrix storing 171 MB per leg per commit exhausts it in
-roughly a dozen commits, and GitHub evicts least-recently-used entries across the
+seconds. A five-service matrix storing 126 MB per leg per commit exhausts it in
+under twenty commits, and GitHub evicts least-recently-used entries across the
 whole repository — including the Go module cache the same workflow depends on.
 Turn it on for a single large module where the budget is otherwise unspent:
 

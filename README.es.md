@@ -266,9 +266,10 @@ jobs:
 ```
 
 La Action conserva la caché de análisis de guff entre ejecuciones, de modo que un
-pull request vuelve a analizar solo lo que cambió: entre 3× y 8× más rápido en un
-módulo grande. Matrices, tamaño de la caché y runners autoalojados en
-[`docs/CI.md`](docs/CI.md).
+pull request vuelve a analizar solo lo que cambió. Medido en un runner de GitHub
+sobre un módulo de 113 paquetes: 7,9 s en frío, 0,2 s sin cambios y 4,2 s tras
+editar un archivo con muchos dependientes. Matrices, tamaño de la caché y runners
+autoalojados en [`docs/CI.md`](docs/CI.md).
 
 ---
 

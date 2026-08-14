@@ -64,13 +64,14 @@ inputs:
   cache-seed:
     description: >
       Also carry the type-checking seed overlays ($GUFF_CACHE/seed) between runs.
-      They are by far the largest part of the cache — on a 1600-package module
-      the archive goes from 2 MB compressed to 23 MB — and buy about a second
-      once the issue cache is warm. Off by default because that is a 10× upload
-      for a second, and because a per-service matrix storing it per commit would
-      spend the repository's 10 GB cache budget on them and evict the Go module
-      cache. Turn on for a single large module where the second matters and the
-      budget is free.
+      They are by far the largest part of the cache — measured on a 113-package
+      module the archive goes from 1.2 MB compressed to 16 MB — and save one to
+      three seconds on an incremental run, depending on how widely the changed
+      package is imported. Off by default because that is a 13x upload for a
+      couple of seconds, and because a per-service matrix storing it per commit
+      would spend the repository's 10 GB cache budget on them and evict the Go
+      module cache. Turn on for a single large module where those seconds matter
+      and the budget is free.
     required: false
     default: "false"
 
@@ -213,15 +214,33 @@ runs:
         status=${PIPESTATUS[0]}
 
         if [ "${VERIFY_CACHE}" = "true" ] && [ "${CACHE_ENABLED}" = "true" ]; then
-          # guff's output is deterministic, so "identical" is the right bar:
-          # anything the cache changed about the findings shows up in the diff.
           echo "::group::verifying the cache against a cold run"
           # shellcheck disable=SC2086
           guff ${{ inputs.args }} --no-cache > "${OUT_DIR}/cold.out" 2>&1
           cold_status=$?
           echo "::endgroup::"
 
-          if ! diff -u "${OUT_DIR}/cached.out" "${OUT_DIR}/cold.out"; then
+          # Compare the SET of findings, not the transcript.
+          #
+          # A cached run and a --no-cache run can emit the same findings in a
+          # different order — measured on a 113-package module: 841 findings
+          # each, byte-for-byte equal once sorted, but not in the same sequence.
+          # Unless the config pins `output.sort-order`, emission order follows
+          # the order work completed, and serving packages from cache changes
+          # that. Diffing the raw transcripts would fail every such run and
+          # report a cache bug that is not there — a check that cries wolf gets
+          # switched off, which costs more than never having added it.
+          #
+          # Findings are the unindented `file:line:col:` lines; the source
+          # excerpt underneath each travels with it and carries no extra
+          # information.
+          findings_of() {
+            LC_ALL=C grep -E '^[^[:space:]].*:[0-9]+:[0-9]+: ' "$1" | LC_ALL=C sort
+          }
+          findings_of "${OUT_DIR}/cached.out" > "${OUT_DIR}/cached.findings"
+          findings_of "${OUT_DIR}/cold.out"   > "${OUT_DIR}/cold.findings"
+
+          if ! diff -u "${OUT_DIR}/cached.findings" "${OUT_DIR}/cold.findings"; then
             echo "::error::guff disagreed with itself: the cached run and --no-cache produced different findings on the same tree. The diff above is the bug — please report it at https://github.com/dakimura/guff/issues"
             exit 1
           fi
