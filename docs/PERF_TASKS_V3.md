@@ -15,8 +15,13 @@
 
 > ### 結果（2026-08-14, ブランチ `perf-v3`）
 >
-> **prometheus `./...` cold: −35%（3 回別々に取り直して −33.3 / −35.6 / −35.4%）。**
-> **analyze phase 2.72s → 1.11s（−59%）。`regress --profile full` 6.61s → 3.02s（−54%）。**
+> **`b5dbcb8`（rebase 後の main）比: prometheus `./...` cold 3.445s → 2.745s（−20.3%）。**
+> **analyze phase 1.59s → 0.95s（−40%）。inspector 走査 198.2M → 11.1M（−94.4%）。**
+> RSS は 3.21 GiB → 3.19 GiB でわずかに低下。findings は **20 件でバイト同一**。
+>
+> 分岐元の `953d243` 比では −35% でしたが、その後 main が**同じ regex 修正を独立に入れた**
+> （§7.1.8）ぶん差が縮んでいます。**下の §7.1.5 の表は `953d243` 比の記録**で、
+> 現在の main 比は上の数字です。
 > **peak RSS 変化なし。findings は HEAD とバイト同一**（並列 / `-j 1` / masks on / masks off）。
 > `cargo test --workspace` 3,116 passed、`compat/golden` 81 ケース全一致。
 > 詳細は [§7](#7-進捗)、次にやることは [§4.5](#45-次にやる人へ--v1-完了後の地図2026-08-14)。
@@ -589,7 +594,7 @@ samply（`perf-v3`、総 CPU 17.8s、prometheus `./...` cold）の self 上位�
 | V1-5 callcheck の呼び出し名メモ化 | **DONE** | `object_call_name` を 25 重 → 1 重に |
 | V1-6 gocritic の `enabled` 巻き上げ | **NO-GO** | CPU **+0.5%**。§7.1.7（**一度 DONE と誤記していました**） |
 | **V1-7 `FileSet` の last キャッシュを thread-local 化** | **DONE** | **`__psynch_mutexwait`+`drop` 2.9s（14.3%）が消滅。第3弾で最大の一撃** |
-| V1-8 walk 内の `Regex::new` を排除 | **DONE** | `Regex::new` 2.11s inclusive（6.6%）→ 消滅 |
+| V1-8 walk 内の `Regex::new` を排除 | **main が同着** | `Regex::new` 2.11s inclusive（6.6%）→ 消滅。§7.1.8 |
 | **V1-2b 部分スライスも索引で配る** | **DONE** | `from_ref(file)` 経路（S1008 ほか 5 箇所）が再帰 walk に落ちていた。20.7M → **18.0M scanned** |
 | V1-9 `filter_debug` の `Vec` 割当を除去 | **DONE** | 走査のみの 3 箇所を `iter_non_debug` へ |
 | V1-10 S1008 の再パース/位置引き | **DONE** | `fs::read` → `source_bytes`、`rfset.file()` をコメント毎 → ファイル毎に |
@@ -783,6 +788,47 @@ callers を見ると最大の呼び元が **`guff_unused::run`** であって go
 **したがって §7.1.5 の実測値（−33.3% / −35.6%）に V1-6 は含まれていません。**
 数字自体は V1-6 なしで取られているので**正しいまま**です。
 `b012b69` のコミットメッセージだけが V1-6 を含むかのように書かれています。
+
+### 7.1.9 rebase 後（`b5dbcb8` 比）の実測 — **これが現在の数字**
+
+`953d243` → `b5dbcb8` の間に main 側で compat 修正と V1-8 相当が入ったので、取り直しました。
+
+**wall（A/B/A/B 交互 6 往復）**
+
+```
+main   : median 3.445s   (3.20, 3.38, 3.41, 3.51, 3.48, 3.50)   RSS 3.20–3.23 GiB
+perf-v3: median 2.745s   (2.64, 2.71, 2.71, 2.78, 2.78, 2.83)   RSS 3.16–3.22 GiB
+                                                  → -0.700s / -20.3%
+```
+
+**phase 内訳**
+
+| phase | main | perf-v3 | 差 |
+|---|---:|---:|---:|
+| load_graph | 0.54s | 0.55s | +0.01 |
+| typecheck_roots | 1.15s | 1.19s | +0.04 |
+| **analyze** | **1.59s** | **0.95s** | **−0.64（−40%）** |
+| format_checks（並走） | 0.89s | 0.71s | −0.18 |
+
+**inspector 走査**: 198,249,510 → **11,138,708**（**−94.4%**）。
+delivered が 6.75M → 7.38M と増えているのは V1-12 で gocritic が inspector 経由になり
+計上されるようになったためで、gocritic の走査量が増えたわけではありません。
+
+**regress `--profile full`**: `guff_only` **0**、precision/recall **1.0000**（main と同じ）。
+`wall_seconds` だけ baseline 超過で FAIL ですが、**main 3.210s に対し本ブランチ 2.930s** で、
+超過幅は 0.85s → 0.42s と半減します。baseline `2.360s` は 2026-07-30 時点の値なので、
+**マージ後に `--update-baseline` を回すのが筋**です。
+
+### 7.1.8 V1-8 は main と同着だった（rebase 時に判明）
+
+本ブランチを `b5dbcb8` に rebase したとき、`testifylint.rs` だけが衝突しました。
+中身を見たら **main 側も同じ修正を独立に入れていました** — walk の中で毎回
+`Regex::new` していたのを thread-local の `cached_pattern` にする、まったく同じ形です。
+理由の書き方まで似ています（あちらは「regex *construction* が ~0.53s、
+run 中の全 regex マッチを合計したより多い」）。
+
+**main 側を採用**して本ブランチの重複を落としました。同じ結論に別々に到達したので、
+この最適化については確度が高いと言えます。
 
 ### 7.2 V1-4 NO-GO の詳細
 
