@@ -179,9 +179,18 @@ struct Events {
     by_kind: Vec<u32>,
     /// Start offset of each kind's group in [`Self::by_kind`], plus a terminator.
     kind_off: [u32; NodeKind::COUNT + 1],
-    /// Identity of the `&[File]` the events came from. **Compared, never
-    /// dereferenced.** A caller that hands `preorder` some other slice (a
-    /// single file, a filtered list) falls back to walking it.
+    /// Where each file's events begin in [`Self::nodes`], plus a terminator
+    /// (length `files_len + 1`).
+    ///
+    /// Files were flattened in order, so file `i` owns
+    /// `nodes[file_off[i] .. file_off[i + 1]]` — a contiguous run. That is what
+    /// lets a caller passing `std::slice::from_ref(file)` still use the flat
+    /// index: five call sites do that (S1008, S1002, …), and before
+    /// PERF_TASKS_V3 V1-2b they fell all the way back to a fresh recursive walk
+    /// of the file. S1008 was the most expensive analyzer in the run.
+    file_off: Vec<u32>,
+    /// Identity of the `&[File]` the events came from. **Compared and used for
+    /// offset arithmetic, never dereferenced.**
     files_ptr: *const File,
     files_len: usize,
     /// Keeps that AST alive for as long as any clone of this result exists.
@@ -271,7 +280,9 @@ impl InspectResult {
         let files = pass.files();
         let mut nodes = Vec::new();
         let mut stack = Vec::new();
+        let mut file_off = Vec::with_capacity(files.len() + 1);
         for file in files {
+            file_off.push(nodes.len() as u32);
             preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
                 nodes.push(Event {
                     ptr: n.erased_ptr(),
@@ -280,6 +291,7 @@ impl InspectResult {
                 true
             });
         }
+        file_off.push(nodes.len() as u32);
         nodes.shrink_to_fit();
         let (by_kind, kind_off) = index_by_kind(&nodes);
         Self {
@@ -287,6 +299,7 @@ impl InspectResult {
                 nodes,
                 by_kind,
                 kind_off,
+                file_off,
                 files_ptr: files.as_ptr(),
                 files_len: files.len(),
                 _owner: owner,
@@ -294,12 +307,38 @@ impl InspectResult {
         }
     }
 
-    /// The flattened events, but only if `files` is the very slice they were
-    /// built from.
+    /// The flattened events plus the `[start, end)` event range covering
+    /// `files` — if `files` is the slice they were built from, or a contiguous
+    /// subslice of it.
+    ///
+    /// The subslice case is what `std::slice::from_ref(&pass.files()[i])`
+    /// produces, and it is common enough to matter (PERF_TASKS_V3 V1-2b).
+    /// Anything else — a caller's own `Vec<File>`, a filtered list — has no
+    /// events here and falls back to walking.
     #[inline]
-    fn events_for(&self, files: &[File]) -> Option<&Events> {
+    fn events_for(&self, files: &[File]) -> Option<(&Events, u32, u32)> {
         let ev = self.events.as_ref()?;
-        (ev.files_ptr == files.as_ptr() && ev.files_len == files.len()).then(|| &**ev)
+        if ev.files_ptr == files.as_ptr() && ev.files_len == files.len() {
+            return Some((ev, 0, ev.nodes.len() as u32));
+        }
+        // SAFETY of the comparison, not of a dereference: `offset_from` needs
+        // both pointers in one allocation, so establish that by address range
+        // first and only then compute the index.
+        let base = ev.files_ptr as usize;
+        let here = files.as_ptr() as usize;
+        let stride = std::mem::size_of::<File>();
+        if stride == 0 || here < base {
+            return None;
+        }
+        let byte_delta = here - base;
+        if byte_delta % stride != 0 {
+            return None;
+        }
+        let i = byte_delta / stride;
+        if i >= ev.files_len || i + files.len() > ev.files_len {
+            return None;
+        }
+        Some((ev, ev.file_off[i], ev.file_off[i + files.len()]))
     }
 
     /// Visit every AST node in each file once, in preorder.
@@ -356,7 +395,16 @@ impl InspectResult {
         let mut scanned: u64 = 0;
         let mut hits: u64 = 0;
         match self.events_for(files) {
-            Some(ev) => {
+            Some((ev, lo, hi)) => {
+                // Each kind's group is ascending, and `[lo, hi)` is a contiguous
+                // run of event indices, so the group's entries for this range are
+                // a contiguous slice of the group — found by binary search.
+                let clip = |k: usize| -> &[u32] {
+                    let g = &ev.by_kind[ev.kind_off[k] as usize..ev.kind_off[k + 1] as usize];
+                    let s = g.partition_point(|&i| i < lo);
+                    let e = g.partition_point(|&i| i < hi);
+                    &g[s..e]
+                };
                 // `NodeKind::bit()` is `1 << (kind as u8)`, so a set bit's
                 // position *is* the kind's discriminant — and its index into
                 // `kind_off`. No `NodeKind` round-trip needed.
@@ -365,15 +413,15 @@ impl InspectResult {
                 if n == 1 {
                     // The 119-call-site case: one kind, so its group *is* the
                     // answer — already in preorder order, no merge, no mask test.
-                    let k = bits.trailing_zeros() as usize;
-                    let group = &ev.by_kind[ev.kind_off[k] as usize..ev.kind_off[k + 1] as usize];
+                    let group = clip(bits.trailing_zeros() as usize);
                     scanned = group.len() as u64;
                     hits = scanned;
                     for &idx in group {
                         let e = ev.nodes[idx as usize];
                         // SAFETY: `events_for` just confirmed these events were
-                        // recorded from this exact slice, and `Events::_owner`
-                        // keeps its AST alive; the nodes are live and unmoved.
+                        // recorded from this slice (or the slice it is part of),
+                        // and `Events::_owner` keeps its AST alive; the nodes are
+                        // live and unmoved.
                         f(unsafe { node_in(files, e) });
                     }
                 } else if n as u32 <= MAX_MERGE_KINDS {
@@ -381,27 +429,25 @@ impl InspectResult {
                     // merging by event index so the caller still sees preorder
                     // order. `scanned` counts what we actually touched, which is
                     // the point of the whole exercise.
-                    let mut cursors = [(0u32, 0u32); MAX_MERGE_KINDS as usize];
+                    let mut cursors: [&[u32]; MAX_MERGE_KINDS as usize] =
+                        [&[]; MAX_MERGE_KINDS as usize];
                     let mut rest = bits;
                     for slot in cursors[..n].iter_mut() {
                         let k = rest.trailing_zeros() as usize;
                         rest &= rest - 1;
-                        *slot = (ev.kind_off[k], ev.kind_off[k + 1]);
+                        *slot = clip(k);
                     }
                     loop {
                         // Pick the group whose next event comes first.
                         let mut best: Option<(usize, u32)> = None;
-                        for (i, &(cur, end)) in cursors[..n].iter().enumerate() {
-                            if cur == end {
-                                continue;
-                            }
-                            let idx = ev.by_kind[cur as usize];
+                        for (i, g) in cursors[..n].iter().enumerate() {
+                            let Some(&idx) = g.first() else { continue };
                             if best.is_none_or(|(_, b)| idx < b) {
                                 best = Some((i, idx));
                             }
                         }
                         let Some((slot, idx)) = best else { break };
-                        cursors[slot].0 += 1;
+                        cursors[slot] = &cursors[slot][1..];
                         scanned += 1;
                         hits += 1;
                         let e = ev.nodes[idx as usize];
@@ -409,8 +455,9 @@ impl InspectResult {
                         f(unsafe { node_in(files, e) });
                     }
                 } else {
-                    scanned = ev.nodes.len() as u64;
-                    for &e in &ev.nodes {
+                    let window = &ev.nodes[lo as usize..hi as usize];
+                    scanned = window.len() as u64;
+                    for &e in window {
                         if !mask.contains(e.kind) {
                             continue;
                         }
@@ -587,28 +634,66 @@ mod tests {
         assert_eq!(expected, got);
     }
 
-    /// A caller that passes some other slice must not be served the cached
-    /// events; it gets a real walk of what it actually handed us.
+    /// A single-file subslice — `std::slice::from_ref(&pass.files()[i])`, which
+    /// five call sites use — is served from the flat index, clipped to that
+    /// file's event range, and yields exactly the file's own nodes in order.
+    ///
+    /// This used to fall back to a fresh recursive walk (PERF_TASKS_V3 V1-2b);
+    /// S1008 was the most expensive analyzer in the run because of it.
+    #[test]
+    fn single_file_subslice_uses_the_flat_index() {
+        let (pkg, fset) = two_file_package();
+        let flat = flat_result(&pkg, &fset);
+
+        for i in 0..pkg.syntax.len() {
+            let one = std::slice::from_ref(&pkg.syntax[i]);
+            let (_, lo, hi) = flat
+                .events_for(one)
+                .expect("a subslice of the built files must resolve to an event range");
+            assert!(lo < hi, "file {i} must own a non-empty event range");
+
+            let mut expected: Vec<(&'static str, *const ())> = Vec::new();
+            preorder(NodeRef::File(&pkg.syntax[i]), |n| {
+                expected.push((n.kind_name(), n.erased_ptr()));
+                true
+            });
+            let mut got: Vec<(&'static str, *const ())> = Vec::new();
+            flat.preorder(one, |n| got.push((n.kind_name(), n.erased_ptr())));
+            assert_eq!(expected, got, "file {i}: subslice sequence must match a direct walk");
+            assert_eq!(expected.len(), (hi - lo) as usize);
+        }
+
+        let mut whole = 0usize;
+        flat.preorder(&pkg.syntax, |_| whole += 1);
+        let mut first = 0usize;
+        flat.preorder(std::slice::from_ref(&pkg.syntax[0]), |_| first += 1);
+        assert!(first < whole, "subset must visit fewer nodes ({first} vs {whole})");
+    }
+
+    /// A slice that is *not* part of the built files has no events here and
+    /// gets a real walk of what the caller actually handed us.
     #[test]
     fn foreign_file_slice_falls_back_to_walking() {
         let (pkg, fset) = two_file_package();
         let flat = flat_result(&pkg, &fset);
 
-        let only_first = std::slice::from_ref(&pkg.syntax[0]);
-        assert!(flat.events_for(only_first).is_none());
+        // A file the result was never built from — its own allocation, so the
+        // subslice arithmetic in `events_for` cannot mistake it for one of ours.
+        let other_fset = FileSet::new();
+        let outside = vec![
+            parse_file(&other_fset, "a.go", SRC.as_bytes(), Mode::NONE).expect("parse outside"),
+        ];
+        assert!(flat.events_for(&outside).is_none());
 
-        let mut whole = 0usize;
-        flat.preorder(&pkg.syntax, |_| whole += 1);
-        let mut first = 0usize;
-        flat.preorder(only_first, |_| first += 1);
-
-        let mut direct = 0usize;
-        preorder(NodeRef::File(&pkg.syntax[0]), |_| {
-            direct += 1;
+        let mut expected = 0usize;
+        preorder(NodeRef::File(&outside[0]), |_| {
+            expected += 1;
             true
         });
-        assert_eq!(first, direct);
-        assert!(first < whole, "subset must visit fewer nodes ({first} vs {whole})");
+        let mut got = 0usize;
+        flat.preorder(&outside, |_| got += 1);
+        assert_eq!(expected, got);
+        assert!(got > 5, "expected a real walk, got {got} nodes");
     }
 
     /// A masked traversal must be **exactly** the unmasked one filtered — same

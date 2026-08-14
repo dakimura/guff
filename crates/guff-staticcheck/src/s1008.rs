@@ -83,34 +83,47 @@ fn comments_with_positions(pass: &Pass<'_>, file: &guff::ast::File) -> Vec<Comme
         .and_then(|s| s.to_str())
         .unwrap_or(fname.as_str())
         .to_string();
-    let Some(path) = pass
+    let Some((index, path)) = pass
         .pkg()
         .compiled_go_files
         .iter()
-        .find(|p| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
+        .enumerate()
+        .find(|(_, p)| p.file_name().and_then(|s| s.to_str()) == Some(base.as_str()))
     else {
         return Vec::new();
     };
-    let Ok(src) = std::fs::read(path) else {
-        return Vec::new();
+    // The type-checker already read this file; re-opening it makes the kernel
+    // do the work twice (PERF_TASKS_V3 V1-4).
+    let owned;
+    let src: &[u8] = match pass.pkg().source_bytes(index) {
+        Some(b) => b,
+        None => match std::fs::read(path) {
+            Ok(b) => {
+                owned = b;
+                &owned
+            }
+            Err(_) => return Vec::new(),
+        },
     };
     let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
         return Vec::new();
     };
     let rfset = FileSet::new();
-    let Ok(rfile) = parse_file(&rfset, name, &src, PARSE_COMMENTS) else {
+    let Ok(rfile) = parse_file(&rfset, name, src, PARSE_COMMENTS) else {
         return Vec::new();
     };
     let Some(to) = pass.fset().file(file.pos()) else {
+        return Vec::new();
+    };
+    // Every comment came out of the same reparse, so it lives in the one file
+    // `rfset` holds — look it up once instead of per comment.
+    let Some(from) = rfset.file(rfile.package) else {
         return Vec::new();
     };
     let mut out = Vec::with_capacity(rfile.comments.len());
     for group in &rfile.comments {
         let mut list = Vec::with_capacity(group.list.len());
         for c in &group.list {
-            let Some(from) = rfset.file(c.slash) else {
-                continue;
-            };
             let offset = from.offset(c.slash);
             if offset < 0 || offset > to.size() {
                 continue;
