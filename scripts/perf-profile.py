@@ -14,6 +14,12 @@ hex address. See docs/DEVELOPMENT.md §9.4.
     scripts/perf-profile.py /tmp/guff.json.gz --top 80
     scripts/perf-profile.py /tmp/guff.json.gz --inclusive 'Scanner|to_vec'
     scripts/perf-profile.py /tmp/guff.json.gz --threads       # per-thread CPU
+    scripts/perf-profile.py /tmp/guff.json.gz --subtree 'build_source_seed_inner'
+
+`--inclusive` says a phase costs 1.7s; `--callers` says who reached a leaf.
+`--subtree` answers the third question a phase investigation needs — what that
+1.7s is *made of* — by charging each sample taken anywhere under the matching
+frame to its own leaf. Percentages are of the subtree, not of the run.
 
 CPU time comes from each sample's `threadCPUDelta`, not from wall-clock sample
 counts, so a thread parked in `go list` or on a rayon barrier contributes ~0.
@@ -130,8 +136,8 @@ def walk_stack(stack_table: dict, stack: int) -> list[int]:
     return frames
 
 
-def collect(profile: dict, symbols: SymbolIndex, process: str, callers_re=None, depth=1):
-    """Returns (self_us, inclusive_us, per_thread_us, callers_us, total_us)."""
+def collect(profile: dict, symbols: SymbolIndex, process: str, callers_re=None, depth=1, subtree_re=None):
+    """Returns (self_us, inclusive_us, per_thread_us, callers_us, subtree_us, total_us)."""
     libs = profile["libs"]
     self_us: dict[str, float] = defaultdict(float)
     # Inclusive time counts a function once per sample even if it recurses,
@@ -139,6 +145,7 @@ def collect(profile: dict, symbols: SymbolIndex, process: str, callers_re=None, 
     incl_us: dict[str, float] = defaultdict(float)
     per_thread: dict[str, float] = defaultdict(float)
     callers_us: dict[str, float] = defaultdict(float)
+    subtree_us: dict[str, float] = defaultdict(float)
     total = 0.0
 
     for thread in profile["threads"]:
@@ -173,7 +180,9 @@ def collect(profile: dict, symbols: SymbolIndex, process: str, callers_re=None, 
                     up = [names[f] for f in frames[hit + 1 :] if not callers_re.search(names[f])]
                     if up:
                         callers_us[" <- ".join(up[:depth])] += us
-    return self_us, incl_us, per_thread, callers_us, total
+            if subtree_re is not None and any(subtree_re.search(names[f]) for f in frames):
+                subtree_us[names[frames[0]]] += us
+    return self_us, incl_us, per_thread, callers_us, subtree_us, total
 
 
 def print_table(title: str, rows, total: float, top: int) -> None:
@@ -194,6 +203,12 @@ def main() -> int:
     ap.add_argument("--inclusive", metavar="REGEX", help="also print inclusive CPU for symbols matching REGEX")
     ap.add_argument("--callers", metavar="REGEX", help="attribute CPU spent in symbols matching REGEX to their callers")
     ap.add_argument("--depth", type=int, default=1, help="caller frames to show per row with --callers (default: 1)")
+    ap.add_argument(
+        "--subtree",
+        metavar="REGEX",
+        help="self CPU of samples taken anywhere under a frame matching REGEX "
+        "(i.e. what one phase's inclusive time is made of)",
+    )
     ap.add_argument("--threads", action="store_true", help="print per-thread CPU instead of symbols")
     args = ap.parse_args()
 
@@ -209,8 +224,9 @@ def main() -> int:
     symbols = SymbolIndex(json.loads(syms.read_text()))
 
     callers_re = re.compile(args.callers) if args.callers else None
-    self_us, incl_us, per_thread, callers_us, total = collect(
-        profile, symbols, args.process, callers_re, max(1, args.depth)
+    subtree_re = re.compile(args.subtree) if args.subtree else None
+    self_us, incl_us, per_thread, callers_us, subtree_us, total = collect(
+        profile, symbols, args.process, callers_re, max(1, args.depth), subtree_re
     )
     if total == 0:
         print(f"error: no samples for processName={args.process!r}", file=sys.stderr)
@@ -240,6 +256,16 @@ def main() -> int:
     if callers_re is not None:
         rows = sorted(callers_us.items(), key=lambda kv: -kv[1])
         print_table(f"callers of /{args.callers}/", rows, total, args.top)
+        if not rows:
+            print("  (no symbol matched)")
+
+    if subtree_re is not None:
+        # Percentages here are of the subtree, not of the run: the question
+        # --subtree answers is "what is this phase made of", and 16% of the seed
+        # build is the useful number, not the 2% of total CPU it also is.
+        rows = sorted(subtree_us.items(), key=lambda kv: -kv[1])
+        sub_total = sum(subtree_us.values())
+        print_table(f"self CPU inside /{args.subtree}/", rows, sub_total, args.top)
         if not rows:
             print("  (no symbol matched)")
     return 0

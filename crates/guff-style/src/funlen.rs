@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use guff::ast::{Decl, Expr, File, FuncDecl, Stmt};
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -35,7 +35,7 @@ fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<File
     };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, COMMENTS_ONLY).ok()?;
     Some((fset, file))
 }
 

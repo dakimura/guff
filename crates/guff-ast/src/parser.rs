@@ -70,6 +70,25 @@ pub const SKIP_FUNC_BODIES: Mode = Mode(1 << 7);
 pub const SKIP_STAMP_NODE_IDS: Mode = Mode(1 << 8);
 pub const ALL_ERRORS: Mode = SPURIOUS_ERRORS;
 
+/// What a linter should re-parse with when it only needs comments and doc
+/// strings — which is every re-parse in the tree except the type-checker's.
+///
+/// The production load runs with [`Mode::NONE`], so comments inside function
+/// bodies are simply absent from the shared AST and a comment linter has to
+/// parse the file again to see them. That second parse has no use for object
+/// resolution: it fills `Ident.obj`, `file.scope` and `file.unresolved`, and
+/// the only analyzers that read `Ident.obj` (ineffassign, maintidx, sloglint,
+/// testinggoroutine — see `analyzers_need_ast_object_resolution`) read it off
+/// the *shared* type-checked AST, never off a re-parse. `file.scope` and
+/// `file.unresolved` are not read outside this crate at all.
+///
+/// Resolution is not a rounding error: filling `Ident.obj` deep-clones each
+/// declaration's subtree into an [`crate::scope::ObjDecl`], so it also drives
+/// the matching drop. On prometheus `./...` it was ~29% of every re-parse.
+/// Go made the same call — `go/parser` skips object resolution by default and
+/// documents the feature as deprecated.
+pub const COMMENTS_ONLY: Mode = Mode(PARSE_COMMENTS.0 | SKIP_OBJECT_RESOLUTION.0);
+
 // ====================================================================
 // Bailout
 // ====================================================================

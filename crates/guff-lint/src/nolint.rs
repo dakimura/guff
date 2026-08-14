@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use guff::commentmap::{node_end, node_pos};
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::FileSet;
 use guff::walk::{preorder, NodeRef};
 use guff_analysis::Diagnostic;
@@ -178,7 +178,7 @@ impl NolintIndex {
         }
         let path_str = path.to_string_lossy().replace('\\', "/");
         let fset = FileSet::new();
-        let file = match parse_file(&fset, &path_str, &src, PARSE_COMMENTS) {
+        let file = match parse_file(&fset, &path_str, &src, COMMENTS_ONLY) {
             Ok(f) => f,
             Err(_) => return,
         };

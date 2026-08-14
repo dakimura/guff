@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use guff::ast::{CommentGroup, Decl, File};
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos};
 
 /// Re-parse `path` with comments so free-floating comments are available.
@@ -25,6 +25,9 @@ use guff::position::{FileSet, Pos};
 /// (Sharing one reparse across *all* comment linters was tried and reverted —
 /// see PERF_TASKS_V3 §V1-4 NO-GO: retaining a second AST per file for the whole
 /// analyze phase cost +0.94 GiB RSS for +1.1% wall.)
+///
+/// Parsed with [`COMMENTS_ONLY`]: godot, dupword, godox and godoclint read
+/// comments and doc strings, never `Ident.obj`.
 pub fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<FileSet>, File)> {
     let owned;
     let src: &[u8] = match cached {
@@ -36,7 +39,7 @@ pub fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<
     };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, COMMENTS_ONLY).ok()?;
     Some((fset, file))
 }
 

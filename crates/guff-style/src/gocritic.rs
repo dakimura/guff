@@ -84,7 +84,7 @@ use guff::ast::{
     IfStmt, ImportSpec, IndexExpr, LabeledStmt, RangeStmt, ReturnStmt, SelectorExpr, SliceExpr,
     Spec, StarExpr, Stmt, SwitchStmt, TypeAssertExpr, TypeSwitchStmt, ValueSpec,
 };
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos, NO_POS};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
@@ -2725,7 +2725,7 @@ fn reparse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<(Arc<File
     };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, COMMENTS_ONLY).ok()?;
     Some((fset, file))
 }
 

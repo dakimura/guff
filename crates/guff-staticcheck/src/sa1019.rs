@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use guff::ast::{CompositeLit, Decl, Expr, GenDecl, ImportSpec, SelectorExpr, Spec};
 use guff::node_mask;
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::FileSet;
 use guff::token::Token;
 use guff::walk::{NodeMask, NodeRef};
@@ -431,11 +431,12 @@ fn scan_import_deprecated(
         objects_scanned: need_objects,
         ..PkgDeprecatedFacts::default()
     };
-    // Package docs are retained with Mode::NONE; object docs need PARSE_COMMENTS.
+    // Package docs survive without PARSE_COMMENTS; object docs need it. Neither
+    // needs object resolution — this scan reads `Deprecated:` doc text only.
     let parse_mode = if need_objects {
-        PARSE_COMMENTS
+        COMMENTS_ONLY
     } else {
-        guff::parser::Mode::NONE
+        guff::parser::SKIP_OBJECT_RESOLUTION
     };
     let mut paths = prefer_package_doc_files(files, pkg_path);
     if !need_objects {

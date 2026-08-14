@@ -808,6 +808,12 @@ fn build_source_seed_inner(
 
     let loadable: HashSet<String> = needed.iter().cloned().collect();
     let timing = crate::debug::enabled();
+    // GUFF_DEBUG_CACHE=2 only: time each dep so the wave schedule can be scored
+    // against the two bounds that matter — `sum/threads` (perfectly balanced,
+    // no barriers) and the dependency critical path (the floor no schedule can
+    // beat). Without both, "the barriers cost X" is a guess. One Instant pair
+    // per dep, so it stays off the default path but costs nothing when on.
+    let acct = crate::debug::detailed();
     let t_check_start = std::time::Instant::now();
 
     let make_conf = || TypeConfig {
@@ -1025,6 +1031,8 @@ fn build_source_seed_inner(
     let mut widest = 0usize;
     let mut seed_hits = 0usize;
     let mut seed_misses = 0usize;
+    let mut wave_walls: Vec<f64> = Vec::new();
+    let mut dep_secs_by_path: HashMap<String, f64> = HashMap::default();
     // Running fingerprint of the seed prefix. Extended after each merged pkg
     // so wave N+1 does not re-hash the entire merged list (O(n²) SHA).
     let mut running_fp = persist.as_ref().map(|_| {
@@ -1046,7 +1054,11 @@ fn build_source_seed_inner(
         // Resolve each path to (path, overlay, from_cache, self_hash). `path` and
         // `self_hash` are returned so `merged` bookkeeping stays aligned with
         // merge order after filter_map drops failures.
-        let resolve_one = |path: &str| -> Option<(String, WorkerOverlays, bool, Option<String>)> {
+        let resolve_one = |path: &str| -> Option<(String, WorkerOverlays, bool, Option<String>, f64)> {
+            let t_dep = acct.then(std::time::Instant::now);
+            let dep_secs = |t: Option<std::time::Instant>| {
+                t.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0)
+            };
             let pkg = crate::dedup::package_for_import_path(by_id, path)?;
             let seed_files: Vec<PathBuf> = pkg
                 .compiled_go_files
@@ -1073,7 +1085,7 @@ fn build_source_seed_inner(
                 (persist.as_ref(), base_fp.as_ref(), self_hash.as_ref())
             {
                 if let Some(o) = crate::seed_cache::load_overlay(dir, path, h, fp) {
-                    return Some((path.to_string(), o, true, self_hash));
+                    return Some((path.to_string(), o, true, self_hash, dep_secs(t_dep)));
                 }
             }
 
@@ -1098,17 +1110,24 @@ fn build_source_seed_inner(
                     }
                 }
             }
-            Some((path.to_string(), o, false, self_hash))
+            Some((path.to_string(), o, false, self_hash, dep_secs(t_dep)))
         };
 
-        let resolved: Vec<(String, WorkerOverlays, bool, Option<String>)> = if parallel {
+        let t_wave = acct.then(std::time::Instant::now);
+        let resolved: Vec<(String, WorkerOverlays, bool, Option<String>, f64)> = if parallel {
             wave.par_iter().filter_map(|p| resolve_one(p)).collect()
         } else {
             wave.iter().filter_map(|p| resolve_one(p)).collect()
         };
+        if let Some(t) = t_wave {
+            wave_walls.push(t.elapsed().as_secs_f64());
+        }
 
         let mut overlays = Vec::with_capacity(resolved.len());
-        for (path, overlay, from_cache, self_hash) in resolved {
+        for (path, overlay, from_cache, self_hash, secs) in resolved {
+            if acct {
+                dep_secs_by_path.insert(path.clone(), secs);
+            }
             if from_cache {
                 seed_hits += 1;
             } else {
@@ -1135,6 +1154,60 @@ fn build_source_seed_inner(
         w.finish();
     }
 
+    if acct && !wave_walls.is_empty() {
+        // Score the wave schedule against the only two numbers that bound it.
+        //
+        //   busy/threads  — every core saturated end to end, barriers gone.
+        //   critical path — the longest chain of deps, each waiting for the one
+        //                   below it. No schedule, barriered or not, beats this.
+        //
+        // The gap between the measured wall and `max(busy/threads, crit)` is the
+        // whole prize for reworking the schedule. docs/PERF_TASKS.md §1.8 sized
+        // that prize when the seed build was 2.65s; it is worth re-reading the
+        // number before believing a barrier-removal estimate today.
+        let threads = if parallel { rayon::current_num_threads() } else { 1 };
+        let busy: f64 = dep_secs_by_path.values().sum();
+        // Guard the occupancy division: a seed whose every dep came back inside
+        // the timer's resolution would otherwise print `inf%`.
+        let wave_wall: f64 = wave_walls.iter().sum::<f64>().max(f64::MIN_POSITIVE);
+        // Longest dependency chain weighted by measured per-dep seconds.
+        // `order` is a topological order, so each dep's own path is final.
+        let mut cp: HashMap<&str, f64> = HashMap::default();
+        let mut crit = 0f64;
+        for p in &order {
+            let Some(&own) = dep_secs_by_path.get(p.as_str()) else {
+                continue;
+            };
+            let mut best = 0f64;
+            if let Some(deps) = dep_graph.get(p) {
+                for d in deps {
+                    if let Some(&c) = cp.get(d.as_str()) {
+                        best = best.max(c);
+                    }
+                }
+            }
+            let total = best + own;
+            crit = crit.max(total);
+            cp.insert(p.as_str(), total);
+        }
+        // Waves narrower than the thread count cannot fill the machine no
+        // matter how fast each dep is; they are where a barrier actually bites.
+        let narrow: usize = waves.iter().filter(|w| w.len() < threads).count();
+        let narrow_wall: f64 = waves
+            .iter()
+            .zip(&wave_walls)
+            .filter(|(w, _)| w.len() < threads)
+            .map(|(_, s)| *s)
+            .sum();
+        eprintln!(
+            "guff:     seed wave schedule: wall {wave_wall:.2}s vs busy/{threads} {:.2}s vs \
+             critical path {crit:.2}s (busy {busy:.2}s, occupancy {:.0}%); \
+             {narrow}/{} waves narrower than {threads} threads hold {narrow_wall:.2}s",
+            busy / threads as f64,
+            busy / threads as f64 / wave_wall * 100.0,
+            waves.len(),
+        );
+    }
     if timing {
         if persist.is_some() {
             eprintln!(
