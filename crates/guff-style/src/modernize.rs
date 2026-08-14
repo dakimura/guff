@@ -383,11 +383,37 @@ fn is_package_level_obj(pass: &Pass<'_>, obj: ObjectId) -> bool {
 /// Rejects limits that are assigned or address-taken anywhere (not just in the
 /// loop), matching rangeint's typeindex check — e.g. `k := …; for i < k; …;
 /// k = …` must not modernize the first loop.
-fn var_is_scalar_lvalue_anywhere(pass: &Pass<'_>, obj: ObjectId) -> bool {
+thread_local! {
+    /// Objects that are assigned, incremented or address-taken somewhere in the
+    /// package this thread is linting — the answer to
+    /// [`var_is_scalar_lvalue_anywhere`] for every object at once.
+    ///
+    /// The question is asked once per `for i := 0; i < N; i++` loop whose limit
+    /// is an identifier (modernize's `rangeint`), and each ask used to walk
+    /// **every file in the package** looking for that one object. The walk
+    /// stops early once it finds a hit, but the common answer is "no" — an
+    /// unmodified loop bound — and "no" costs a full package traversal. Same
+    /// shape as SA4023's full-file-walk-per-candidate, which was fixed the same
+    /// way (PERF_TASKS_V3 V1-13).
+    ///
+    /// Keyed by `Package::id`: an `ObjectId` indexes its own package's arena,
+    /// and a rayon worker moves between packages, so an unkeyed cache would
+    /// answer about a different object of the same number.
+    static SCALAR_LVALUES: std::cell::RefCell<(String, HashSet<ObjectId>)> =
+        std::cell::RefCell::new((String::new(), HashSet::new()));
+}
+
+/// Collect every object used as a scalar lvalue anywhere in the package.
+///
+/// Mirrors the per-object test this replaces arm for arm, including its one
+/// asymmetry: for `x, y := …` the object comes from `Uses` (a `:=` that
+/// reassigns an existing `x` records it there), and everywhere else from
+/// [`ident_obj`], which prefers `Defs`.
+fn collect_scalar_lvalues(pass: &Pass<'_>) -> HashSet<ObjectId> {
+    let mut out = HashSet::new();
     let Some(info) = pass.types_info() else {
-        return false;
+        return out;
     };
-    let mut found = false;
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             let Some(n) = n else {
@@ -401,48 +427,55 @@ fn var_is_scalar_lvalue_anywhere(pass: &Pass<'_>, obj: ObjectId) -> bool {
                         };
                         if a.tok == Some(Token::DEFINE) {
                             // `x, y := …` reassignment of an existing x appears in Uses.
-                            if info.uses.get(&id.id).copied() == Some(obj) {
-                                found = true;
-                            }
-                        } else if ident_obj(pass, id) == Some(obj) {
-                            found = true;
+                            out.extend(info.uses.get(&id.id).copied());
+                        } else {
+                            out.extend(ident_obj(pass, id));
                         }
                     }
                 }
                 NodeRef::IncDecStmt(inc) => {
                     if let Expr::Ident(id) = unparen_expr(&inc.x) {
-                        if ident_obj(pass, id) == Some(obj) {
-                            found = true;
-                        }
+                        out.extend(ident_obj(pass, id));
                     }
                 }
-                NodeRef::UnaryExpr(u)
-                    if u.op == Token::AND =>
-                {
+                NodeRef::UnaryExpr(u) if u.op == Token::AND => {
                     if let Expr::Ident(id) = unparen_expr(&u.x) {
-                        if ident_obj(pass, id) == Some(obj) {
-                            found = true;
-                        }
+                        out.extend(ident_obj(pass, id));
                     }
                 }
                 NodeRef::RangeStmt(rs) if rs.tok == Some(Token::ASSIGN) => {
                     for side in rs.key.iter().chain(rs.value.iter()) {
                         if let Expr::Ident(id) = unparen_expr(side) {
-                            if ident_obj(pass, id) == Some(obj) {
-                                found = true;
-                            }
+                            out.extend(ident_obj(pass, id));
                         }
                     }
                 }
                 _ => {}
             }
-            !found
+            true
         });
-        if found {
-            return true;
-        }
     }
-    false
+    out
+}
+
+fn var_is_scalar_lvalue_anywhere(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    if pass.types_info().is_none() {
+        return false;
+    }
+    let pkg_id = pass.pkg().id.as_str();
+    let hit = SCALAR_LVALUES.with(|c| {
+        let c = c.borrow();
+        (c.0 == pkg_id).then(|| c.1.contains(&obj))
+    });
+    if let Some(hit) = hit {
+        return hit;
+    }
+    let set = collect_scalar_lvalues(pass);
+    let answer = set.contains(&obj);
+    SCALAR_LVALUES.with(|c| {
+        *c.borrow_mut() = (pkg_id.to_string(), set);
+    });
+    answer
 }
 
 fn limit_ident_is_safe(pass: &Pass<'_>, id: &guff::ast::Ident) -> bool {
