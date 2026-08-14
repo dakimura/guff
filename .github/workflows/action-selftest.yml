@@ -75,19 +75,45 @@ jobs:
           fi
           du -sh "${GUFF_CACHE}"
 
-  # Proves the save half actually landed: a probe restore keyed only on the
-  # shared prefix must find what `defaults` wrote. Skipped for fork pull
-  # requests, which cannot write to the cache at all.
+  # Proves the save half actually landed: an entry written by `defaults` must be
+  # restorable from a later job. Skipped for fork pull requests, which cannot
+  # write to the cache at all.
   restores:
     needs: defaults
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: stable
+
+      # The cache service is eventually consistent: `defaults` logged "Cache
+      # saved with key: ..." and a restore twelve seconds later still reported
+      # the key as not found, while the REST API listed it shortly after. Wait
+      # for the entry to become visible before asking cache/restore for it,
+      # rather than letting a propagation delay read as "the save is broken".
+      - name: Wait for the entry to become visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            keys=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+                     --jq '.actions_caches[].key' 2>/dev/null || true)
+            if printf '%s\n' "${keys}" | grep -q '^guff-cache-v1-'; then
+              echo "visible after ${attempt} attempt(s):"
+              printf '%s\n' "${keys}" | grep '^guff-cache-v1-'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::no guff-cache-v1-* entry became visible within 100s of the save"
+          exit 1
 
       - name: Probe for the cache the previous job saved
         id: probe
@@ -103,7 +129,7 @@ jobs:
           set -euo pipefail
           matched="${{ steps.probe.outputs.cache-matched-key }}"
           if [ -z "${matched}" ]; then
-            echo "::error::no guff-cache-v1-* entry was saved by the previous job"
+            echo "::error::entry is listed but cache/restore did not match prefix guff-cache-v1-"
             exit 1
           fi
           echo "restored via ${matched}"
@@ -143,6 +169,10 @@ jobs:
           args: ${{ env.ARGS }}
           cache-seed: "true"
           cache-dir: ${{ runner.temp }}/guff/cache-with-seed
+          # Distinct key, or this would collide with `defaults`: the key is
+          # derived from the working directory, which every job here shares.
+          # Three jobs wrote the same key on the first run of this workflow.
+          cache-key-suffix: selftest-seed
 
       - name: cache-seed=true keeps the overlays
         run: |
@@ -164,6 +194,7 @@ jobs:
           args: ${{ env.ARGS }}
           verify-cache: "true"
           cache-dir: ${{ runner.temp }}/guff/cache-verify
+          cache-key-suffix: selftest-verify
 
       - uses: ./
         id: no-interval
@@ -172,6 +203,7 @@ jobs:
           args: ${{ env.ARGS }}
           cache-invalidation-interval: "0"
           cache-dir: ${{ runner.temp }}/guff/cache-no-interval
+          cache-key-suffix: selftest-no-interval
 
       - name: interval=0 drops the bucket
         env:
