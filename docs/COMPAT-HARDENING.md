@@ -6640,6 +6640,121 @@ SA4006 が「never used」と言う。1 文でも後ろにあれば融合しな�
 
 ---
 
+### 2026-08-14（21 本目）— ゴールデンは「一台の記録」だった: linux 限定の fixture 2 本と、その裏に隠れていた SA4032 の欠陥 2 つ
+
+PR #3 / #4 のあと、main で唯一赤かったのが smoke の `staticcheck-sa` ratchet である。
+**同じコミット・同じ guff バイナリで、ホストだけ変えて測った**:
+
+| ホスト | guff | golden | missing | extra | 判定 |
+|---|---:|---:|---:|---:|---|
+| darwin/arm64（開発機） | 257 | 259 | 3 | **1** | pass |
+| linux/amd64（CI） | 259 | 259 | 3 | **3** | fail |
+
+差の 2 件はちょうど **linux 限定の build constraint を持つ fixture** 2 本だった ——
+`sa4019/bad.go`（`// +build linux` ×2）と `sa4032/bad.go`（`//go:build linux`）。
+darwin では `go list` の段階で落ちるので誰も解析せず、**golden も darwin で記録されている**ので
+そこにエントリが無い。linux では両方ビルド対象になり、guff の 2 件が extra として出る。
+
+#### 1. ratchet を 3 に上げる案は却下した
+
+それは「golden がプラットフォーム依存」という欠陥を baseline に焼き込む。
+PR #3（runtime の Go が baseline の Go と違う）と PR #4（形の台帳が計測機の記録だった）で
+直したのと**同じ型の欠陥**を、GOOS 軸で追認することになる。
+
+#### 2. まず上流を測った ——「guff のバグ」ではなく「golden の欠落」だった
+
+Docker の linux/arm64（Go 1.26.5・golangci-lint 2.12.2、CI と同じピン）で
+`./compat/golden/run.sh --regen --case staticcheck-sa` を回すと **261 キー**（darwin は 259）:
+
+```
+> sa4019/bad/bad.go:4:1:staticcheck::SA4019: identical build constraints "linux" and "linux"
+> sa4032/bad/bad.go:6:9:staticcheck::SA4032: ... runtime.GOOS will never equal "windows"
+```
+
+**上流も linux では両方報告する。** guff の 2 件は正しく、golden が短かった。
+CI の extra 3 件のうち想定内なのは SA5005 の 1 件だけで、残り 2 件は
+**ratchet を書いた人が darwin でしか測っていなかった**ことの帰結である。
+
+#### 3. 軸そのものを消した ——「制約を消す」のではなく「どこでも同じに解決する制約にする」
+
+`!windows` で足りるが、**`!plan9` にした**: リリース対象（linux/darwin × amd64/arm64）だけでなく
+windows でも真になり、コストは同じである。検査の主題は変わらない ——
+同一の `// +build` 行 2 本は依然 2 本だし、`!plan9` の下で `runtime.GOOS == "plan9"` は依然恒偽。
+
+**全 81 ケースを linux で再生成して darwin の golden と突き合わせた**（platform 軸の全数調査）:
+
+| 再生成した環境 | committed（darwin/arm64）との差 |
+|---|---|
+| linux/arm64（コンテナ・ネイティブ） | `staticcheck-sa` の上記 2 件のみ |
+| linux/amd64（コンテナ・エミュレーション） | 同上 |
+
+**GOARCH 軸は 1 件も無い。** `govet/framepointer` を §6 で golden から外してあるのが効いている。
+（linux/amd64 では `revive` が 8 回とも自分と一致せず再生成できなかった。README の
+「Upstream is not a function」の既知の非決定性で、この件とは無関係。）
+
+#### 4. 比較できるようになった途端、SA4032 に本物の欠陥が 2 つ出た
+
+fixture が linux 限定だった間、**この 2 つはどのゲートからも到達不能だった**。
+両方 `honnef.co/go/tools` のパターン
+`(BinaryExpr (Symbol "runtime.GOOS") op@(Or "==" "!=") lit@(BasicLit "STRING" _))` で裏を取った:
+
+| 欠陥 | guff | 上流 |
+|---|---|---|
+| 報告位置 | 演算子（`op_pos`） | `report.Report(pass, node, …)` の `node` は `BinaryExpr` 全体＝**先頭トークン** |
+| 被演算子 | どちら向きでも、**文字列定数**なら報告 | シンボルは**左**、値は **`BasicLit`** に固定 |
+
+後者は実測でも確認した（`_ = "plan9" == runtime.GOOS` と `runtime.GOOS == someConst` は
+golangci-lint 2.12.2 が **0 件**）。両方 `sa4032/ok.go` に対照として入れた。
+**実利用では踏んでいない。** grafana と kubernetes は `runtime.GOOS == 名前付き定数` を書いている
+（grafana は `windows = "windows"` を宣言して 4 回比較している）が、**どれも build constraint の無いファイル**で、
+SA4032 は制約が空のファイルを見る前に返る。逆順は corpus に 1 件も無い。2 つとも潜在的な欠陥で、
+**潜在のままだったのは、捕まえられる唯一の fixture が golden を記録した機械では見えなかったから**である。
+
+#### 5. 予防: ゲートが自分の入力を検査するようにした
+
+`compat/golden/platforms.py`。materialize した `.work/<name>/` を両ツールより先に走査し、
+**すべてのファイルの「ビルド対象か否か」が 4 プラットフォームで一致しない限りケースを拒否する**。
+不変条件は「build constraint を書くな」ではない —— SA4032 は build constraint **についての**
+検査で、制約なしには test できない。「どこでも同じに解決すること」である。
+
+* `linux` / `// +build linux` / `bar_linux.go` → 拒否
+* `!plan9` / `unix` → 通る（4 つすべてで真）
+* `custom` / `!nope` / `go1.24` → 通る（platform tag ではない。真偽**両方**を試して、
+  どちらでも 4 つが一致することを確認する）
+* `env` で GOOS/GOARCH を固定しているケース（`staticcheck-386` だけ）は軸が既に無いので、
+  その 1 組だけを見る
+
+入れた初回に **`govet` の `buildtag/ok/ok.go`（`//go:build linux`）を捕まえた。**
+golden には元々エントリが無い（`ok` の fixture なので）が、
+「整形式のヘッダ指令は flag されない」という**対照としての値が darwin では検証されていなかった**。
+これも `!plan9` にした。単体テスト 24 本を `compat/tests/test_golden_platform.py` に置いた（smoke で走る）。
+
+#### 6. 検証
+
+| 環境 | golden gate | 単体 |
+|---|---|---|
+| darwin/arm64 | **81/81 OK**、`staticcheck-sa` は ratchet baseline（missing 3 / extra 1） | `compat/tests` 142 本 OK |
+| linux/arm64（コンテナ） | **81/81 OK**、数字は darwin と完全一致 | `test_golden_platform` 24 本 OK |
+
+`staticcheck-sa` / `govet` の golden を linux で再生成すると、**darwin で生成したものと byte 一致**する。
+
+**未検証**: linux は GitHub runner そのものではなくコンテナ（arm64 はネイティブ、amd64 は
+エミュレーション）。windows は support matrix に無いので誰も測っていない ——
+`!plan9` は windows でも真なので、matrix を広げるときにこの 2 本は動かなくてよい。
+
+**次にやること**
+
+1. **guff 本体が `go list` のツールチェーン昇格に追従しない件**（PR #3 が CI 側だけ塞いだもの）。
+   `GOTOOLCHAIN=auto`（Go の既定）で古い `go` が PATH にある利用者環境では、パッケージが
+   丸ごと ill-typed になり **findings が既定で無警告に 0 になる**。golangci-lint は
+   go/packages 経由なので影響を受けず、**上流との差分ゲートでも検出できない**（両者 0 件で
+   「一致」に見える）。原因は `crates/guff-packages/src/golist.rs` の `go_root_from_path()` が
+   `go env` のサブプロセス（実測 0.074s）を避けて `go` を実行しない設計。
+   案: (a) `go list` が使った GOROOT と不一致なら警告 (b) それに従う。性能方針に触るので要判断。
+2. missing 3 の移植（20 本目の「次にやること」3 のまま）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、

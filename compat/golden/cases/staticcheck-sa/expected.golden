@@ -210,6 +210,7 @@ sa4017/bad/bad.go:22:2:staticcheck::SA4017: double doesn't have side effects and
 sa4017/bad/bad.go:23:2:staticcheck::SA4017: trimmed doesn't have side effects and its return value is ignored
 sa4017/bad/bad.go:24:2:staticcheck::SA4017: norm doesn't have side effects and its return value is ignored
 sa4018/bad/bad.go:2:23:staticcheck::SA4018: self-assignment of x to x
+sa4019/bad/bad.go:4:1:staticcheck::SA4019: identical build constraints "!plan9" and "!plan9"
 sa4020/bad/bad.go:9:2:staticcheck::SA4020: unreachable case clause: any will always match before example.com/sa4020/bad.T
 sa4021/bad/bad.go:4:5:staticcheck::SA4006: this value of s is never used
 sa4021/bad/bad.go:4:9:staticcheck::SA4021: x = append(y) is equivalent to x = y
@@ -232,6 +233,8 @@ sa4031/bad/bad.go:19:5:staticcheck::SA4031: this nil check is never true
 sa4031/bad/bad.go:23:5:staticcheck::SA4031: the checked variable contains a function and is never nil; did you mean to call it?
 sa4031/bad/bad.go:28:5:staticcheck::SA4031: this nil check is never true
 sa4031/ok/ok.go:21:5:staticcheck::SA4022: the address of a variable cannot be nil
+sa4032/bad/bad.go:6:9:staticcheck::SA4032: due to the file's build constraints, runtime.GOOS will never equal "plan9"
+sa4032/ok/ok.go:10:9:staticcheck::ST1017: don't use Yoda conditions
 sa5000/bad/bad.go:2:31:staticcheck::SA5000: assignment to nil map
 sa5001/bad/bad.go:14:2:staticcheck::SA5001: should check error returned from fn1() before deferring rc.Close()
 sa5001/bad/bad.go:15:2:staticcheck::SA9003: empty branch
