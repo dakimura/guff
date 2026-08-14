@@ -15,7 +15,8 @@
 
 > ### 結果（2026-08-14, ブランチ `perf-v3`）
 >
-> **prometheus `./...` cold: 4.435s → 2.960s（−33.3%）。analyze phase 2.72s → 1.13s（−58%）。**
+> **prometheus `./...` cold: −35%（3 回別々に取り直して −33.3 / −35.6 / −35.4%）。**
+> **analyze phase 2.72s → 1.11s（−59%）。`regress --profile full` 6.61s → 3.02s（−54%）。**
 > **peak RSS 変化なし。findings は HEAD とバイト同一**（並列 / `-j 1` / masks on / masks off）。
 > `cargo test --workspace` 3,116 passed、`compat/golden` 81 ケース全一致。
 > 詳細は [§7](#7-進捗)、次にやることは [§4.5](#45-次にやる人へ--v1-完了後の地図2026-08-14)。
@@ -515,16 +516,27 @@ samply（`perf-v3`、総 CPU 17.8s、prometheus `./...` cold）の self 上位�
 
 1. ~~**`code::func_name` の `String` を作らない**~~ → **NO-GO 済み（§7.1.6）。着手しないこと。**
    実装して測ったら第1版は CPU +6.5%、第2版で誤差帯でした。
-2. **gocritic を inspector に載せる**
-   `walk::inspect(NodeRef::File(file), |n| ...)` を自前で回しています（0.52s）。
-   ただし**この walk は `bool` を返して部分木を刈っている**ので、フラット配列に単純移行はできません。
-   刈っている枝が実際に何割かを先に測ること。**測らずに着手しない**（V2 §0-14）。
+2. ~~**gocritic を inspector に載せる**~~ → **DONE（V1-12）。**
+   「部分木を刈っているから単純移行はできない」と書きましたが、**確かめたら刈っていませんでした** —
+   クロージャに `return false` は 1 つも無く、末尾も `true` です。加えて `walk::inspect` は
+   復路にも `f(None)` を撃つのに、このクロージャはそれを `return true` で捨てるだけなので、
+   **呼び出しの半分が純粋な無駄**でした。gocritic CPU −3.3%。
+   *教訓: 「〜だからできない」は仮説です。grep で 30 秒で確かめられました。*
 3. **`typecheck_roots` 1.14s** — V2 §B-9（wave バリア撤廃）は原則着手しない、が結論のまま。
    ただし今や analyze と同じ大きさなので、**再評価する価値は出てきました**。
-4. **`load_graph` 0.53s** — `load_package_files` がヘッダ読みで全 `.go` を open します。
-   その後 typecheck が同じファイルを読み直すので、**main module 分だけバイト列を持ち回す**案。
-   RSS とのトレードオフ（V1-4 の NO-GO と同じ形）なので、必ず RSS を測ること。
-5. **アロケータ ~7%** — `Ident::clone` / `Expr::clone` が残っています。
+4. **`load_graph` 0.53s** — `__open` はプロファイル 1 位（8.5%）ですが、
+   **優先度は低いと判断しました**。`load_package_files` のヘッダ読みは
+   GOMODCACHE / GOROOT 分が `modmeta` に恒久キャッシュされるので（V2 §C-3c Phase 3）、
+   **この 0.53s は「`GUFF_CACHE` が空の初回だけ」の数字**です。
+   本ファイルの計測はすべて毎回 `mktemp -d` で cold にしているのでフルに出ていますが、
+   実利用の 2 回目以降は V2 実測で load **0.04s** です。
+   *プロファイルの 1 位が最優先とは限らない、の実例。*
+5. **アロケータ ~6%**（`mi_free` / `mi_malloc_aligned` / `mi_page_free_list_extend`）と
+   `drop_in_place<Expr>` 0.31s / `Expr::clone` 0.15s。AST のクローンと破棄です。
+6. **同種の O(候補 × AST) 探し。** V1-13 は「1 候補ごとにパッケージ全走査」でした。
+   同型が他にもあります（`grep -n "for file in pass.files()" -A2 | grep walk`）。
+   **ただし着手前に必ずプロファイルで裏を取ること** — V1-11 は「コードを読んで怪しい」
+   だけで着手して 1 時間を失いました。
 
 ### やってはいけない
 
@@ -581,6 +593,9 @@ samply（`perf-v3`、総 CPU 17.8s、prometheus `./...` cold）の self 上位�
 | **V1-2b 部分スライスも索引で配る** | **DONE** | `from_ref(file)` 経路（S1008 ほか 5 箇所）が再帰 walk に落ちていた。20.7M → **18.0M scanned** |
 | V1-9 `filter_debug` の `Vec` 割当を除去 | **DONE** | 走査のみの 3 箇所を `iter_non_debug` へ |
 | V1-10 S1008 の再パース/位置引き | **DONE** | `fs::read` → `source_bytes`、`rfset.file()` をコメント毎 → ファイル毎に |
+| V1-11 `is_call_to` の `String` 割当除去 | **NO-GO** | 第1版 CPU **+6.5%** / 第2版 −0.1%（§7.1.6） |
+| V1-12 gocritic を共有 inspector へ | **DONE** | gocritic CPU **−3.3%**（§4.5 候補 2 の答え合わせ） |
+| V1-13 modernize の「代入されるか」を索引化 | **DONE** | modernize CPU **−12.5%**、O(loops × AST) → O(AST) |
 
 ### 7.1 V1-7 は計画に無かった —「詰めたら出てきた」項目
 
@@ -612,13 +627,20 @@ thread-local 2 スロット（共有 fset と再パース用 fset の往復に�
 
 ### 7.1.5 実測（`953d243` vs `perf-v3`、同一マシン・同一セッション）
 
-**wall（A/B/A/B 交互 6 往復、クリーンなマシン、prometheus `./...`, cold, `--no-cache`）**
+**wall（A/B/A/B 交互、クリーンなマシン、prometheus `./...`, cold, `--no-cache`）**
 
-```
-HEAD : median 4.435s   (4.67, 4.28, 4.37, 4.43, 4.53, 4.44)   RSS 3.22–3.30 GiB
-final: median 2.960s   (3.04, 2.86, 2.91, 2.91, 3.01, 3.01)   RSS 3.21–3.27 GiB
-                                                → -1.475s / -33.3%   RSS 変化なし
-```
+**3 回、別々のタイミングで取り直して同じところに落ちます**:
+
+| 計測 | HEAD | perf-v3 | 差 |
+|---|---:|---:|---:|
+| V1-1〜V1-10 時点（6 往復） | 4.435s | 2.960s | **−33.3%** |
+| 同・コミット後の再確認（6 往復） | 5.050s | 3.250s | **−35.6%** |
+| V1-12/V1-13 後（6 往復） | 4.980s | **3.215s** | **−35.4%** |
+
+RSS は 3.24 GiB → 3.23 GiB で**変化なし**（むしろわずかに低い）。
+
+> HEAD 側の絶対値が 4.4〜5.1s とぶれているのは、この開発機に他エージェントの
+> Go ビルドが断続的に乗るためです。**交互実行なので比だけは安定します**（§3.2）。
 
 **phase 内訳**（同じ条件で `GUFF_DEBUG_CACHE=2`、A→B を続けて実行）
 
@@ -627,14 +649,15 @@ final: median 2.960s   (3.04, 2.86, 2.91, 2.91, 3.01, 3.01)   RSS 3.21–3.27 Gi
 | startup | 0.00s | 0.00s | — |
 | load_graph | 0.57s | 0.53s | −0.04 |
 | cache setup+partition | 0.00s | 0.00s | — |
-| typecheck_roots | 1.21s | 1.14s | −0.07 |
-| **analyze** | **2.72s** | **1.13s** | **−1.59（−58%）** |
+| typecheck_roots | 1.21s | 1.12s | −0.09 |
+| **analyze** | **2.72s** | **1.11s** | **−1.61（−59%）** |
 | issues+filter | 0.05s | 0.05s | — |
-| **直列合計** | **4.55s** | **2.85s** | **−1.70（−37%）** |
-| format_checks（内側で並走） | 0.72s | 0.67s | −0.05 |
+| **直列合計** | **4.55s** | **2.81s** | **−1.74（−38%）** |
+| format_checks（内側で並走） | 0.72s | 0.66s | −0.06 |
 
-**inspector の走査量**: 466,830,871 → **18,046,429 nodes scanned**（−96.1%）。
-delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で配っている。
+**inspector の走査量**: 466,830,871 → **19,544,005 nodes scanned**（−95.8%）。
+delivered（15.16M → 15.78M）が増えているのは V1-12 で gocritic が inspector 経由になり
+**その分が計上されるようになった**ためで、gocritic 自身の走査量が増えたわけではありません。
 
 > **format_checks はまだ `waited=0.00s`** です。直列 2.85s に対して format 0.67s なので、
 > 余裕は約 2.2s。**B-10 の追加作業（V2 §B-10）は今も着手条件を満たしていません。**
@@ -644,7 +667,7 @@ delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で
 | profile | HEAD wall | perf-v3 wall | 差 | findings | peak RSS |
 |---|---:|---:|---:|---|---|
 | `tsdb` | 1.920s | **1.190s** | **−38%** | 7/4/3 で同一 | 1.225 GB → 1.235 GB |
-| `full` | 6.610s | **3.650s** | **−45%** | 24/20/4 で同一 | 3.420 GB → 3.413 GB |
+| `full` | 6.610s | **3.020s** | **−54%** | 24/20/4 で同一 | 3.420 GB → 3.381 GB |
 
 > **両 profile とも FAIL のままですが、FAIL の中身は HEAD と同一です。**
 > `guff_only`（tsdb 3 / full 4）と RSS 超過は **`953d243` 時点で既に存在する**もので、
