@@ -8,8 +8,8 @@
 
 | Metric | Baseline | Measured |
 |--------|---------:|---------:|
-| wall_seconds | 2.360 | 3.210 |
-| peak_rss_bytes | 3,114,582,016 | 3,374,071,808 |
+| wall_seconds | 2.360 | 2.440 |
+| peak_rss_bytes | 3,114,582,016 | 3,302,457,344 |
 | guff_issues | 20 | 20 |
 | golangci_issues | 20 | 20 |
 | both | 20 | 20 |
@@ -18,6 +18,6 @@
 | precision | 1.0000 | 1.0000 |
 | recall | 1.0000 | 1.0000 |
 
-## FAIL
+## PASS
 
-- `wall_seconds`: wall 3.210s > limit 2.510s (baseline 2.360s × 1.0 + 0.150s)
+No regressions vs baseline (within tolerances).
