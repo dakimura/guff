@@ -80,6 +80,16 @@ static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u6
 static PACKAGE_TIMING: std::sync::LazyLock<Mutex<HashMap<String, PkgTiming>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
+/// Debug-only `(package, analyzer) -> nanos`, printed at `GUFF_DEBUG_CACHE=2`
+/// for the package the analyze phase ends on.
+///
+/// The per-package table says *which* package the run waits for; this says what
+/// that package spends its time in. Without it the tail package is a single
+/// number and the only available move is to cut CPU everywhere — which is
+/// exactly what moved wall by ~1% twice.
+static ANALYZER_BY_PACKAGE: std::sync::LazyLock<Mutex<HashMap<(String, &'static str), u128>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
+
 /// Wall-clock origin for the span offsets in [`PkgTiming`]; first touched by
 /// the first action to finish, i.e. the start of the analyze phase.
 static ANALYZE_EPOCH: std::sync::LazyLock<std::time::Instant> =
@@ -113,7 +123,16 @@ fn timing_detailed() -> bool {
     }
 }
 
-fn record_package_time(pkg_path: &str, start: std::time::Instant, nanos: u128) {
+fn record_package_time(
+    pkg_path: &str,
+    analyzer: &'static str,
+    start: std::time::Instant,
+    nanos: u128,
+) {
+    if timing_detailed() {
+        let mut m = ANALYZER_BY_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
+        *m.entry((pkg_path.to_string(), analyzer)).or_insert(0) += nanos;
+    }
     let epoch = *ANALYZE_EPOCH;
     let first_start = start.saturating_duration_since(epoch).as_nanos();
     let last_end = first_start + nanos;
@@ -141,6 +160,11 @@ fn report_package_timing() {
     }
     let mut rows: Vec<(String, PkgTiming)> = m.drain().collect();
     drop(m);
+    // Reset the companion table too, so a second run in the same process (the
+    // watch mode) does not accumulate.
+    let mut abp = ANALYZER_BY_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
+    let by_pkg: HashMap<(String, &'static str), u128> = abp.drain().collect();
+    drop(abp);
 
     let total_cpu: u128 = rows.iter().map(|(_, t)| t.cpu_nanos).sum();
     let span_end = rows.iter().map(|(_, t)| t.last_end).max().unwrap_or(0);
@@ -173,6 +197,35 @@ fn report_package_timing() {
             t.cpu_nanos as f64 / 1e9,
             (t.last_end - t.first_start) as f64 / 1e9,
         );
+        report_analyzers_in_package(&by_pkg, path, t.cpu_nanos);
+    }
+}
+
+/// Print what the tail package spends its CPU on. This is the number to act on:
+/// the phase cannot end before this package does, and the package cannot finish
+/// faster than its own analyzer DAG.
+fn report_analyzers_in_package(
+    by_pkg: &HashMap<(String, &'static str), u128>,
+    pkg_path: &str,
+    pkg_cpu: u128,
+) {
+    let mut rows: Vec<(&'static str, u128)> = by_pkg
+        .iter()
+        .filter(|((p, _), _)| p == pkg_path)
+        .map(|((_, a), n)| (*a, *n))
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    rows.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    eprintln!("  tail breakdown (top 15 analyzers in that package):");
+    for (name, nanos) in rows.iter().take(15) {
+        let share = if pkg_cpu > 0 {
+            *nanos as f64 / pkg_cpu as f64 * 100.0
+        } else {
+            0.0
+        };
+        eprintln!("    {:>30} {:>8.3}s  {share:>5.1}%", name, *nanos as f64 / 1e9);
     }
 }
 
@@ -428,7 +481,7 @@ impl Action {
             if let Some(start) = start {
                 let nanos = start.elapsed().as_nanos();
                 record_analyzer_time(self.analyzer.name, nanos);
-                record_package_time(&self.package.pkg_path, start, nanos);
+                record_package_time(&self.package.pkg_path, self.analyzer.name, start, nanos);
                 let pre_after = guff_analysis::preorder_thread_totals();
                 record_preorder_share(
                     self.analyzer.name,

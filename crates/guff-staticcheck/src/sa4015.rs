@@ -3,14 +3,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use guff::ast::{CallExpr, Expr, SelectorExpr};
-use guff::node_mask;
-use guff::walk::NodeRef;
 use guff_analysis::callcheck::{self, Call, CallContext};
-use guff_analysis::code::{expr_to_int, selector_name};
-use guff_analysis::passes::{buildir, inspect};
+use guff_analysis::passes::buildir;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_ssa::instr::{ChangeType, InstrData};
+use guff_ssa::instr::{Convert, InstrData};
 use guff_ssa::value::Value;
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
@@ -18,7 +14,13 @@ use guff_types::basic::BasicKind;
 fn is_converted_from_int(ctx: &CallContext<'_>, arg: &callcheck::Argument) -> bool {
     let v = callcheck::flatten_ssa_value(ctx.caller, arg.value.value());
     let Value::Instr(iid) = v else { return false };
-    let InstrData::ChangeType(ChangeType { x, .. }) = ctx.caller.instrs.get(iid) else { return false };
+    // Upstream asks for an `ir.Convert` — a *representation-changing*
+    // conversion. `int -> float64` is exactly that. Matching `ChangeType`
+    // instead (which go/ssa reserves for value-preserving renames) made this
+    // arm dead, and the AST fallback that stood in for it fired on a plain
+    // literal, which upstream never reports: `math.Ceil(1)` has no conversion
+    // at all, the constant is already `float64`.
+    let InstrData::Convert(Convert { x, .. }) = ctx.caller.instrs.get(iid) else { return false };
     let src_typ = callcheck::ssa_value_type(ctx.prog, ctx.caller, callcheck::SsaValue::new(*x));
     let arena = &ctx.prog.type_arena;
     let u = src_typ.underlying(arena);
@@ -45,66 +47,14 @@ fn rules() -> &'static HashMap<&'static str, callcheck::CheckFn> {
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
-    let mut pending = Vec::new();
-    if pass.result_of::<buildir::BuildIrResult>(buildir::analyzer()).is_some() {
-        callcheck::run(pass, rules());
+    if pass
+        .result_of::<buildir::BuildIrResult>(buildir::analyzer())
+        .is_none()
+    {
+        return Err("SA4015 requires buildir analyzer".into());
     }
-    let inspect = pass
-        .result_of::<inspect::InspectResult>(inspect::analyzer())
-        .ok_or_else(|| "SA4015 requires inspect analyzer".to_string())?
-        .clone();
-    inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |node| {
-        let NodeRef::CallExpr(call) = node else {
-            return;
-        };
-        let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
-            return;
-        };
-        if !matches!(sel.sel.name.as_str(), "Ceil" | "Floor" | "Trunc" | "IsNaN" | "IsInf") {
-            return;
-        }
-        let Some(arg) = call.args.first() else {
-            return;
-        };
-        if !arg_is_int_like(pass, arg) {
-            return;
-        }
-        pending.push((
-            call.lparen.0 as u32,
-            format!("calling {} on a converted integer is pointless", sel.sel.name),
-        ));
-    });
-    for (pos, msg) in pending {
-        pass.reportf(pos, msg);
-    }
+    callcheck::run(pass, rules());
     Ok(None)
-}
-
-fn call_target(pass: &Pass<'_>, fun: &Expr) -> Option<String> {
-    if let Expr::SelectorExpr(sel) = fun {
-        if let Some(name) = selector_name(pass, sel) {
-            return Some(name);
-        }
-        return Some(format!("{}.{}", "math", sel.sel.name));
-    }
-    None
-}
-
-fn arg_is_int_like(pass: &Pass<'_>, arg: &Expr) -> bool {
-    if let Expr::BasicLit(lit) = arg {
-        if !lit.value.contains('.') && lit.value.chars().all(|c| c.is_ascii_digit() || c == '-' || c == '+') {
-            return true;
-        }
-    }
-    if expr_to_int(pass, arg).is_some() {
-        return true;
-    }
-    if let Expr::CallExpr(CallExpr { fun, args, .. }) = arg {
-        if let Expr::Ident(id) = fun.as_ref() {
-            return id.name == "float64" && args.first().is_some_and(|a| arg_is_int_like(pass, a));
-        }
-    }
-    false
 }
 
 fn sa4015_analyzer_impl() -> Analyzer {
@@ -114,7 +64,7 @@ fn sa4015_analyzer_impl() -> Analyzer {
         url: "https://staticcheck.dev/docs/checks/#SA4015",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![buildir::analyzer(), inspect::analyzer()],
+        requires: vec![buildir::analyzer()],
         fact_types: vec![],
     }
 }

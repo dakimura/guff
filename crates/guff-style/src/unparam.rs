@@ -25,7 +25,7 @@ use std::sync::OnceLock;
 use guff::ast::{Decl, Expr, FuncDecl, FuncLit, Stmt};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
-use guff_analysis::passes::inspect;
+use guff_analysis::passes::{buildir, inspect};
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use crate::options::UnparamOptions;
 
@@ -39,6 +39,17 @@ fn recv_type_string(expr: &Expr) -> String {
         Expr::StarExpr(s) => format!("*{}", recv_type_string(&s.x)),
         _ => "?".to_string(),
     }
+}
+
+/// The receiver's type name with any `*` stripped — the key
+/// [`collect_types_implementing`] uses. (Go: `findNamed(recv.Type()).Obj().Name()`.)
+fn recv_base_type_name(recv: &guff::ast::FieldList) -> Option<String> {
+    let ty = recv.list.first()?.ty.as_ref()?;
+    let name = recv_type_string(ty);
+    let name = name.strip_prefix('*').unwrap_or(&name);
+    // A generic receiver renders as `T[P]`; upstream keys on the origin's name.
+    let name = name.split('[').next().unwrap_or(name);
+    (name != "?" && !name.is_empty()).then(|| name.to_string())
 }
 
 fn func_display_name(fd: &FuncDecl) -> String {
@@ -445,16 +456,116 @@ fn method_key(name: &str, ty: &guff::ast::FuncType) -> String {
     format!("{name}{}", signature_key(ty))
 }
 
+/// `"<named type>.<method>"` for every method an interface requires of a type
+/// that is actually converted to it somewhere in this package.
+///
+/// This is upstream's `typesImplementing`, built the way upstream builds it:
+/// walk the IR for `MakeInterface` and record every method of the destination
+/// interface against `findNamed(instr.X.Type())` (`check/check.go`'s "skip -
+/// method required to implement an interface").
+///
+/// Being driven by the conversions rather than the declarations makes it
+/// *narrower* than [`collect_interface_methods`] where that matters — an
+/// interface nothing is ever converted to does not silence a report — and
+/// *wider* elsewhere: the interface may be declared in another package, which
+/// the AST scan cannot see. `WithValidator(&podValidator{})` in
+/// controller-runtime is exactly that shape.
+fn collect_types_implementing(pass: &Pass<'_>) -> HashSet<String> {
+    use guff_ssa::instr::InstrData;
+
+    let mut out = HashSet::new();
+    let Some(ir) = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer()) else {
+        return out;
+    };
+    let arena = &ir.prog.type_arena;
+    for &fid in ir.src_funcs_with_methods() {
+        let func = ir.prog.functions.get(fid);
+        for (_, block) in func.live_blocks() {
+            for &iid in &block.instrs {
+                let InstrData::MakeInterface(mi) = func.instrs.get(iid) else {
+                    continue;
+                };
+                let boxed = guff_ssa::program::value_type_of(&ir.prog, func, mi.x);
+                let Some(named) = find_named_name(&ir.prog, boxed) else {
+                    continue;
+                };
+                let iface = mi.typ.underlying(arena);
+                if !matches!(arena.get(iface), guff_types::arena::TypeData::Interface(_)) {
+                    continue;
+                }
+                let mut names = Vec::new();
+                collect_iface_method_names(&ir.prog, iface, &mut names, 0);
+                for m in names {
+                    out.insert(format!("{named}.{m}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The name of the named type `t` denotes, following one level of pointer.
+/// (Go: `findNamed`, plus `Named.Obj().Name()`.)
+fn find_named_name(prog: &guff_ssa::program::Program, t: guff_types::TypeId) -> Option<String> {
+    use guff_types::arena::TypeData;
+    let arena = &prog.type_arena;
+    let t = match arena.get(t) {
+        TypeData::Pointer(p) => p.elem(),
+        _ => t,
+    };
+    match arena.get(t) {
+        TypeData::Named(_) => {
+            let obj = guff_types::named::named_obj(arena, t);
+            Some(obj.name(&prog.object_arena).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Method names of an interface, explicit plus those promoted from embedded
+/// interfaces. Walks the embeddings by hand because the type-set accessors that
+/// would answer this directly need `&mut TypeArena`, and the IR hands out a
+/// shared program.
+fn collect_iface_method_names(
+    prog: &guff_ssa::program::Program,
+    iface: guff_types::TypeId,
+    out: &mut Vec<String>,
+    depth: u32,
+) {
+    use guff_types::arena::TypeData;
+    if depth > 16 {
+        return; // defensive: embedding cycles are ill-typed, but never hang
+    }
+    let arena = &prog.type_arena;
+    let (methods, embeddeds) = match arena.get(iface) {
+        TypeData::Interface(i) => (
+            (0..i.num_explicit_methods())
+                .map(|k| i.explicit_method(k))
+                .collect::<Vec<_>>(),
+            (0..i.num_embeddeds())
+                .map(|k| i.embedded_type(k))
+                .collect::<Vec<_>>(),
+        ),
+        _ => return,
+    };
+    for m in methods {
+        out.push(m.name(&prog.object_arena).to_string());
+    }
+    for e in embeddeds {
+        let u = e.underlying(arena);
+        if matches!(arena.get(u), TypeData::Interface(_)) {
+            collect_iface_method_names(prog, u, out, depth + 1);
+        }
+    }
+}
+
 /// Methods declared by an interface type in this package.
 ///
 /// A method that satisfies an interface cannot have its signature changed, so
-/// upstream never reports its parameters. Upstream learns this from SSA: every
-/// `MakeInterface` marks the methods of the concrete type that the interface
-/// requires. guff has no such conversion record, so it matches an interface
-/// method by name and signature instead. That is wider than upstream in one
-/// direction (an interface nothing is ever converted to still suppresses a
-/// report) and narrower in another (an interface declared in another package is
-/// not visible here).
+/// upstream never reports its parameters. This is the AST half of that: it
+/// matches an interface method by name *and signature*, so it still covers
+/// interfaces declared here that nothing in this package ever converts to —
+/// which the IR-driven [`collect_types_implementing`] deliberately does not.
 fn collect_interface_methods(files: &[guff::ast::File]) -> HashSet<String> {
     let mut out = HashSet::new();
     for file in files {
@@ -526,6 +637,7 @@ fn check_func_decl(
     sign_required: &HashSet<String>,
     sign_required_methods: &HashSet<String>,
     interface_methods: &HashSet<String>,
+    types_implementing: &HashSet<String>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -545,6 +657,13 @@ fn check_func_decl(
     }
     if fd.recv.is_some() && interface_methods.contains(&method_key(&fd.name.name, &fd.ty)) {
         return;
+    }
+    if let Some(recv) = &fd.recv {
+        if let Some(base) = recv_base_type_name(recv) {
+            if types_implementing.contains(&format!("{base}.{}", fd.name.name)) {
+                return;
+            }
+        }
     }
     let Some(params) = &fd.ty.params else {
         return;
@@ -579,6 +698,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let sign_required = collect_sign_required_funcs(files, &call_fun_ids);
     let sign_required_methods = collect_sign_required_methods(files, &call_fun_ids);
     let interface_methods = collect_interface_methods(files);
+    let types_implementing = collect_types_implementing(pass);
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
@@ -593,6 +713,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 &sign_required,
                 &sign_required_methods,
                 &interface_methods,
+                &types_implementing,
                 &mut pending,
             );
         }
@@ -619,7 +740,7 @@ pub fn analyzer() -> &'static Analyzer {
         url: "https://github.com/mvdan/unparam",
         run: run as RunFn,
         run_despite_errors: false,
-        requires: vec![inspect::analyzer()],
+        requires: vec![inspect::analyzer(), buildir::analyzer()],
         fact_types: vec![],
     })
 }

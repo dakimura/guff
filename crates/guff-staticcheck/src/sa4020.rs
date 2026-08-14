@@ -88,6 +88,18 @@ fn collect_unreachable(pass: &Pass<'_>, ts: &TypeSwitchStmt, pending: &mut Vec<(
             for &t in earlier {
                 for &v in later {
                     if is_empty_interface(pass, &artifacts.types, t) {
+                        // Upstream names the earlier clause's type here like
+                        // anywhere else — and it names it *as written*, so
+                        // `case any:` reads "any" and `case interface{}:`
+                        // reads "interface{}". Measured against
+                        // golangci-lint 2.12.2 with both spellings.
+                        let tname = type_string(
+                            &artifacts.types,
+                            &artifacts.objects,
+                            &artifacts.packages,
+                            t,
+                            None,
+                        );
                         let vname = type_string(
                             &artifacts.types,
                             &artifacts.objects,
@@ -97,7 +109,7 @@ fn collect_unreachable(pass: &Pass<'_>, ts: &TypeSwitchStmt, pending: &mut Vec<(
                         );
                         pending.push((
                             cc.case.0 as u32,
-                            format!("unreachable case clause: earlier case will always match before {vname}"),
+                            format!("unreachable case clause: {tname} will always match before {vname}"),
                         ));
                         continue;
                     }

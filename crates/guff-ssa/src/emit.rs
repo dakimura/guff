@@ -216,11 +216,13 @@ pub fn emit_type_coercion(
 
 /// emit_conv emits code to convert `val` to exactly type `typ`.
 ///
-/// This is a pragmatic subset of go/ssa's `emitConv`: identical types are a
-/// no-op; same-underlying (named ↔ underlying) uses [`ChangeType`]; everything
-/// else uses [`Convert`]. Full interface / slice-to-array / multi-convert
-/// cases remain DEFERRED — enough to lower explicit `T(x)` conversions during
-/// buildir without panicking.
+/// Identical types are a no-op; a value-preserving change of type (see
+/// [`is_value_preserving`]) uses [`ChangeType`]; an interface destination uses
+/// [`ChangeInterface`] or [`MakeInterface`]; everything else uses [`Convert`].
+///
+/// DEFERRED vs go/ssa: the slice-to-array / slice-to-array-pointer cases and
+/// `MultiConvert` (the type-parameter fan-out), which go/ssa reaches through its
+/// `classify` term walk. Every other arm is ported.
 /// (Go: `emitConv`)
 pub fn emit_conv(
     prog: &mut Program,
@@ -242,13 +244,7 @@ pub fn emit_conv(
 
     let ut_src = t_src.underlying(&prog.type_arena);
     let ut_dst = typ.underlying(&prog.type_arena);
-    if identical(
-        &mut prog.type_arena,
-        &prog.object_arena,
-        &prog.package_arena,
-        ut_src,
-        ut_dst,
-    ) {
+    if is_value_preserving(prog, ut_src, ut_dst) {
         let id = emit(
             prog.functions.get_mut(fid),
             block,
@@ -303,12 +299,57 @@ pub fn emit_conv(
         return Value::Instr(id);
     }
 
+    // Conversion of a compile-time constant to a basic type is *folded*: go/ssa
+    // returns `NewConst(c.Value, typ)` rather than emitting anything. Emitting a
+    // `Convert` here is not merely noisy — SA4015 asks "was this argument
+    // converted from an integer?" by looking for an `ir.Convert`, so
+    // `math.Ceil(1)` would become a finding upstream never makes.
+    // (Go: the `if c, ok := val.(*Const)` block after `classify`.)
+    if let Value::Const(cid) = val {
+        if matches!(prog.type_arena.get(ut_dst), TypeData::Basic(_)) {
+            let cv = prog.constants.get(cid).val.clone();
+            return prog.emit_const(cv, typ);
+        }
+        // A nil constant converts to a nil of the destination type; the
+        // slice-to-array cases that could panic are not modelled here.
+        if prog.constants.get(cid).val.is_none() {
+            return prog.emit_const(None, typ);
+        }
+    }
+
     let id = emit(
         prog.functions.get_mut(fid),
         block,
         InstrData::Convert(Convert { x: val, typ }),
     );
     Value::Instr(id)
+}
+
+/// Reports whether converting `ut_src` to `ut_dst` changes the type but neither
+/// the value nor its representation — i.e. whether a [`ChangeType`] is enough.
+/// (Go: `isValuePreserving`.)
+///
+/// The two special cases beyond "identical underlying types" are the ones that
+/// look like real conversions and are not: a channel losing or gaining a
+/// direction (`chan T` -> `chan<- T`, which is what `signal.Notify` does to its
+/// argument) and a pointer changing base type. Emitting a `Convert` for those
+/// hides the operand from every check that follows `ChangeType` back to the
+/// value it renamed — SA1017 stops seeing the channel it was handed.
+fn is_value_preserving(prog: &mut Program, ut_src: TypeId, ut_dst: TypeId) -> bool {
+    if identical(
+        &mut prog.type_arena,
+        &prog.object_arena,
+        &prog.package_arena,
+        ut_dst,
+        ut_src,
+    ) {
+        return true;
+    }
+    match prog.type_arena.get(ut_dst) {
+        TypeData::Chan(_) => matches!(prog.type_arena.get(ut_src), TypeData::Chan(_)),
+        TypeData::Pointer(_) => matches!(prog.type_arena.get(ut_src), TypeData::Pointer(_)),
+        _ => false,
+    }
 }
 
 /// The default typed type for an untyped basic type (`untyped int` -> `int`),

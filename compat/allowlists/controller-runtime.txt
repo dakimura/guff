@@ -33,32 +33,28 @@
 # suppressed by the very directive guff calls unused; guff's staticcheck and
 # unparam do not fire there at all. Fixing the linter below each directive
 # removes the entry here as a side effect: three went that way when SA1019
-# learned to read a deprecated struct *field*, and a fourth
-# (pkg/webhook/server_test.go:215, `//nolint:unparam`) is waiting on the
-# unparam gap recorded below.
+# learned to read a deprecated struct *field*.
+#
+# pkg/webhook/server_test.go:215 (`//nolint:unparam`) is still here on
+# 2026-08-14, and its cause is now *unknown*. It used to be filed under the
+# interface-satisfaction gap below; that gap is closed and this line did not
+# move, so the two were never the same thing. The directive sits on a func
+# literal whose `error` result is always nil, which points at unparam's
+# constant-result check — a guff DEFERRED (crates/guff-style/src/unparam.rs) —
+# but nobody has reproduced it in isolation yet.
 controller-runtime guff-only pkg/cluster/cluster_test.go:168:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/internal.go:264:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/manager_test.go:1819:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/manager/manager_test.go:1994:nolintlint:directive `//nolint:staticcheck` is unused for linter "staticcheck"
 controller-runtime guff-only pkg/webhook/server_test.go:215:nolintlint:directive `//nolint:unparam` is unused for linter "unparam"
 
-# unparam: guff reports an unused parameter on a method that implements an
-# interface. Upstream builds `typesImplementing` from every `ssa.MakeInterface`
-# instruction — `addImplementing(findNamed(instr.X.Type()), iface)` — and then
-# skips any method whose name is in that type's list (`check/check.go`, "skip -
-# method required to implement an interface").
-#
-# Re-read 2026-08-14: it takes *two* SSA changes, not one. `MakeInterface` now
-# carries the boxed value (that one is done, and it closed the SA4006 golden
-# extra), but the conversion here happens at `WithValidator(&podValidator{})` —
-# a call argument — and guff's `builder/call.rs` pushes arguments without
-# converting them to the parameter type. go/ssa's `emitCallArgs` does
-# `emitConv(fn, args[i], sig.Params().At(i).Type())`, so upstream has a
-# `MakeInterface` here and guff has nothing. An SSA-driven `typesImplementing`
-# was written and measured on 2026-08-14: the table comes out empty, so it was
-# not landed. `emitCallArgs` first — docs/COMPAT-HARDENING.md §7.
-controller-runtime guff-only examples/builtins/validatingwebhook.go:55:unparam:(*podValidator).ValidateUpdate - oldObj is unused
-controller-runtime guff-only examples/tokenreview/tokenreview.go:32:unparam:(*authenticator).Handle - ctx is unused
+# The two unparam entries that used to sit here (validatingwebhook.go:55 and
+# tokenreview.go:32) are gone as of 2026-08-14. They needed two SSA changes, not
+# the one recorded: `MakeInterface` carrying its boxed value, *and*
+# `emitCallArgs` — the conversion happens at `WithValidator(&podValidator{})`,
+# a call argument, and guff pushed arguments unconverted. With both in place
+# unparam builds upstream's `typesImplementing` table from the IR and skips the
+# methods an interface requires. docs/COMPAT-HARDENING.md §4 (2026-08-14).
 
 # One each, still undiagnosed — nobody has read which upstream guard applies.
 controller-runtime guff-only pkg/internal/controller/controller.go:395:nilerr:error is not nil (line 394) but it returns nil

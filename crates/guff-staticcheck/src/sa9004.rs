@@ -89,11 +89,14 @@ fn check_const_decl(pass: &Pass<'_>, decl: &GenDecl, pending: &mut Vec<u32>) {
             }
         }
         if ok_group {
+            // Upstream hands `report.Report` the group's first `*ast.ValueSpec`,
+            // whose `Pos()` is its first *name* — not the type that follows it.
+            // `const ( A E = 1; B = 2 )` reports at `A`, column 2.
             pending.push(
                 first
-                    .ty
-                    .as_ref()
-                    .map(|t| t.pos().0 as u32)
+                    .names
+                    .first()
+                    .map(|n| n.name_pos.0 as u32)
                     .unwrap_or(decl.lparen.0 as u32),
             );
         }

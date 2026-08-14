@@ -196,6 +196,10 @@ sa4014/bad/bad.go:5:12:staticcheck::SA9003: empty branch
 sa4014/bad/bad.go:5:15:staticcheck::SA4014: this condition occurs multiple times in this if/else if chain
 sa4014/ok/ok.go:4:5:staticcheck::QF1003: could use tagged switch on x
 sa4014/ok/ok.go:5:12:staticcheck::SA9003: empty branch
+sa4015/bad/bad.go:14:6:staticcheck::SA4015: calling math.Ceil on a converted integer is pointless
+sa4015/bad/bad.go:15:6:staticcheck::SA4015: calling math.Floor on a converted integer is pointless
+sa4015/bad/bad.go:16:6:staticcheck::SA4015: calling math.IsNaN on a converted integer is pointless
+sa4015/bad/bad.go:17:6:staticcheck::SA4015: calling math.Ceil on a converted integer is pointless
 sa4016/bad/bad.go:4:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
 sa4016/bad/bad.go:4:8:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
 sa4016/bad/bad.go:5:6:staticcheck::SA4016: x & 0 always equals 0
@@ -248,6 +252,7 @@ sa9001/bad/bad.go:2:38:staticcheck::SA9001: defers in this range loop won't run 
 sa9002/bad/bad.go:3:26:staticcheck::SA9002: file mode '644' evaluates to 01204; did you mean '0644'?
 sa9003/bad/bad.go:4:2:staticcheck::SA9003: empty branch
 sa9003/bad/bad.go:5:9:staticcheck::SA9003: empty branch
+sa9004/bad/bad.go:12:2:staticcheck::SA9004: only the first constant in this group has an explicit type
 sa9005/bad/bad.go:4:28:staticcheck::SA9005: struct type 'example.com/sa9005/bad.t' doesn't have any exported fields, nor custom marshaling
 sa9006/bad/bad.go:2:30:staticcheck::SA9006: shifting 8-bit value by 8 bits will always clear it
 sa9007/bad/bad.go:3:12:staticcheck::SA9007: this call to os.RemoveAll deletes the user's entire temporary directory, not a subdirectory therein

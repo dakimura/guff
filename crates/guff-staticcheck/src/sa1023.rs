@@ -49,41 +49,50 @@ fn is_io_writer_write(pass: &Pass<'_>, decl: &FuncDecl) -> Option<guff_types::ar
     Some(obj)
 }
 
-fn modifies_buf_param(pass: &Pass<'_>, body: &[Stmt], buf: guff_types::arena::ObjectId) -> bool {
+/// Collects the source position of every statement that writes into the
+/// `Write` buffer parameter.
+///
+/// Upstream reports the *instruction*, once each: an `ir.Store` at the
+/// assignment, an `ir.Call` at the `append`. Measured against golangci-lint
+/// 2.12.2 — two `b[i] = …` lines in one `Write` produce two findings, at the
+/// start of each assignment, and `_ = append(b, 1)` reports at `append`, not at
+/// the `_`.
+fn buf_modification_positions(
+    pass: &Pass<'_>,
+    body: &[Stmt],
+    buf: guff_types::arena::ObjectId,
+    out: &mut Vec<u32>,
+) {
     for stmt in body {
         match stmt {
             Stmt::AssignStmt(AssignStmt { lhs, rhs, .. }) => {
                 for (l, r) in lhs.iter().zip(rhs.iter()) {
                     if modifies_slice(pass, l, buf) {
-                        return true;
+                        out.push(l.pos().0 as u32);
                     }
                     if let Expr::CallExpr(call) = r {
-                        if call_name(pass, &call.fun).as_deref() == Some("append")
-                            && call.args.first().is_some_and(|a| refers_to(pass, a, buf))
-                        {
-                            return true;
+                        if is_append_onto(pass, call, buf) {
+                            out.push(call.pos().0 as u32);
                         }
                     }
                 }
             }
             Stmt::ExprStmt(es) => {
                 if let Expr::CallExpr(call) = &es.x {
-                    if call_name(pass, &call.fun).as_deref() == Some("append")
-                        && call.args.first().is_some_and(|a| refers_to(pass, a, buf))
-                    {
-                        return true;
+                    if is_append_onto(pass, call, buf) {
+                        out.push(call.pos().0 as u32);
                     }
                 }
             }
-            Stmt::BlockStmt(b) => {
-                if modifies_buf_param(pass, &b.list, buf) {
-                    return true;
-                }
-            }
+            Stmt::BlockStmt(b) => buf_modification_positions(pass, &b.list, buf, out),
             _ => {}
         }
     }
-    false
+}
+
+fn is_append_onto(pass: &Pass<'_>, call: &CallExpr, buf: guff_types::arena::ObjectId) -> bool {
+    call_name(pass, &call.fun).as_deref() == Some("append")
+        && call.args.first().is_some_and(|a| refers_to(pass, a, buf))
 }
 
 fn modifies_slice(pass: &Pass<'_>, expr: &Expr, buf: guff_types::arena::ObjectId) -> bool {
@@ -114,10 +123,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let sig = write_fn.typ(&artifacts.objects).unwrap();
         let params = signature_params(&artifacts.types, sig).unwrap();
         let buf_param = tuple_at(&artifacts.types, params, 0);
-        if !modifies_buf_param(pass, &body.list, buf_param) {
-            return;
+        let mut positions = Vec::new();
+        buf_modification_positions(pass, &body.list, buf_param, &mut positions);
+        for pos in positions {
+            pending.push((pos, MSG.to_string()));
         }
-        pending.push((decl.name.name_pos.0 as u32, MSG.to_string()));
     });
 
     for (pos, msg) in pending {

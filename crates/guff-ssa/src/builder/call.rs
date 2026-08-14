@@ -10,14 +10,127 @@ use guff::ast::{CallExpr, Expr, SelectorExpr};
 use guff_constant::make_int64;
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
-use guff_types::{is_interface, is_pointer, SelectionKind};
+use guff_types::{is_interface, is_pointer, SelectionKind, TypeId};
 
 impl<'a> Builder<'a> {
     pub(crate) fn set_call(&mut self, e: &CallExpr, c: &mut CallCommon) {
         c.ellipsis = e.ellipsis.is_valid();
         self.set_call_func(e, c);
+        self.emit_call_args(e, c);
+    }
+
+    /// Evaluates the actual parameters of `e` into `c.args`, then converts each
+    /// to its formal parameter type. (Go: `emitCallArgs`.)
+    ///
+    /// The conversion is the point: without it a concrete value passed to an
+    /// interface parameter never becomes a `MakeInterface`, so `take(t)` leaves
+    /// no record that `T` was boxed — which is what upstream unparam builds its
+    /// `typesImplementing` table from.
+    ///
+    /// **Deliberately not ported: the variadic slice construction.** go/ssa
+    /// replaces the variadic tail with a freshly allocated array + `Slice`;
+    /// guff passes those arguments through individually and records the spread
+    /// with [`CallCommon::ellipsis`](crate::instr::CallCommon::ellipsis), which
+    /// every analyzer here already reads. So the tail is converted to the
+    /// variadic parameter's *element* type — the type each argument would have
+    /// had inside the slice go/ssa builds.
+    fn emit_call_args(&mut self, e: &CallExpr, c: &mut CallCommon) {
+        // `offset` is 1 when `set_call_func` already pushed a concrete
+        // receiver, 0 otherwise. (Go: `offset := len(args)`.)
+        let offset = c.args.len();
         for arg in &e.args {
             c.args.push(self.expr(arg));
+        }
+        self.convert_call_args(e, c, offset);
+    }
+
+    /// The callee's signature, as recorded for the `Fun` expression. `None` when
+    /// it is not a signature (a builtin with no usable type, or incomplete
+    /// hybrid info), in which case the arguments are left unconverted.
+    fn call_signature(&mut self, e: &CallExpr, c: &CallCommon) -> Option<TypeId> {
+        // Builtins are typed ad hoc here and handled by their own lowering in
+        // go/ssa; converting against a synthesized signature would be wrong.
+        if matches!(c.value, Value::Builtin(_)) {
+            return None;
+        }
+        let raw = self.prog.info.types.get(&unparen(&e.fun).id())?.typ;
+        let sig = self.typ_type(raw);
+        let u = sig.underlying(&self.prog.type_arena);
+        matches!(self.prog.type_arena.get(u), TypeData::Signature(_)).then_some(u)
+    }
+
+    fn convert_call_args(&mut self, e: &CallExpr, c: &mut CallCommon, offset: usize) {
+        let Some(sig) = self.call_signature(e, c) else {
+            return;
+        };
+        let arena = &self.prog.type_arena;
+        let params = guff_types::signature::signature_params(arena, sig);
+        let n_params = guff_types::tuple::tuple_len(arena, params);
+        let variadic = guff_types::signature::signature_variadic(arena, sig);
+        let n_actual = c.args.len() - offset;
+
+        // Actuals and formals must line up one-for-one before anything is
+        // converted. They do not for a chained multi-value call (`f(g())`):
+        // go/ssa flattens the tuple with `emitExtract`, guff keeps the tuple as
+        // one argument. Converting under that mismatch would coerce the wrong
+        // operand, so leave the call alone.
+        // DEFERRED: the MRV flattening that would make this case convertible.
+        let lines_up = if c.ellipsis {
+            n_actual == n_params
+        } else if variadic {
+            n_actual + 1 >= n_params
+        } else {
+            n_actual == n_params
+        };
+        if !lines_up {
+            return;
+        }
+
+        // `f(a, xs...)`: the slice is passed straight through, so every actual
+        // takes its formal's type as-is, variadic parameter included.
+        let n_direct = if c.ellipsis || !variadic {
+            n_params
+        } else {
+            n_params - 1
+        };
+
+        let block = self.block.expect("no current block");
+        let fid = self.func_id;
+        for i in 0..n_direct {
+            let Some(pt) = self.param_type(params, i) else {
+                continue;
+            };
+            let arg = c.args[offset + i];
+            c.args[offset + i] = crate::emit::emit_conv(self.prog, fid, block, arg, pt);
+        }
+        if c.ellipsis || !variadic {
+            return;
+        }
+        // The variadic tail, converted to the element type.
+        let Some(slice_ty) = self.param_type(params, n_params - 1) else {
+            return;
+        };
+        let elem = {
+            let arena = &self.prog.type_arena;
+            let u = slice_ty.underlying(arena);
+            match arena.get(u) {
+                TypeData::Slice(_) => guff_types::slice::slice_elem(arena, u),
+                _ => return,
+            }
+        };
+        for i in (offset + n_direct)..c.args.len() {
+            let arg = c.args[i];
+            c.args[i] = crate::emit::emit_conv(self.prog, fid, block, arg, elem);
+        }
+    }
+
+    /// The declared type of the `i`th parameter in a params tuple.
+    fn param_type(&self, params: Option<TypeId>, i: usize) -> Option<TypeId> {
+        let params = params?;
+        let var = guff_types::tuple::tuple_at(&self.prog.type_arena, params, i);
+        match self.prog.object_arena.get(var) {
+            guff_types::arena::ObjectData::Var(v) => Some(v.typ()),
+            _ => None,
         }
     }
 
@@ -119,9 +232,7 @@ impl<'a> Builder<'a> {
             return self.emit_panic(e);
         }
 
-        for arg in &e.args {
-            c.args.push(self.expr(arg));
-        }
+        self.emit_call_args(e, &mut c);
 
         let typ = match self.prog.info.types.get(&e.id) {
             Some(tv) => self.typ_type(tv.typ),

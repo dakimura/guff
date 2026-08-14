@@ -451,7 +451,7 @@ OK を出し続ける。
 | 0 | カバレッジ台帳 | 小 | **完了**（設定キー突合は Phase 4 へ移動） | 2026-08-07 |
 | 1 | ill-typed / panic / ファイル集合ゲート | 小 | **完了** — 3 つとも CI ゲート化。残件だった goheader 位置つきマッチャも移植済み | 2026-08-07 |
 | 2 | `default: all` tier | 小 | **ハーネス完成** — `--all-linters`。差分の解消（recall 数千件）は未着手 | 2026-08-07 |
-| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（16 本目で 34 pass —— 15 本目の `appends` / `waitgroup` / `hostport` に `testinggoroutine` を追加）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11）。**18 本目で go/ssa の欠落を 2 つ塞いだ**: `emitStore` の `emitConv`（＝インターフェースへのボクシングが起きる唯一の場所。`MakeInterface` / `ChangeInterface` は空構造体で、一度も emit されていなかった）と `logicalBinop`（値文脈の `&&` / `||` の CFG）。前者で staticcheck-sa の ratchet が **extra 7 → 6**、後者で SA5011 の構文側の当て木を削除。同じく 18 本目でインターフェースのメソッドにレシーバが付き、**errcheck-verbose の ratchet 1/1 を削除**（0/0） | 2026-08-14 |
+| 3 | ゴールデン差分の産業化 | 大 | **進行中** — gocritic / goheader / **govet（16 本目で 34 pass —— 15 本目の `appends` / `waitgroup` / `hostport` に `testinggoroutine` を追加）** / **gosec（35 rule）** は ratchet なしで完了。staticcheck 160 check（ratchet: **missing 7** / extra 9）と **revive 99 rule**（ratchet: **missing 1 / extra 4** — 全部「上流の importer 盲目」1 クラスで、§6 のとおり**追従しないと決めた恒久差分**。`extra` が 3 でなく 4 なのは 2026-08-11（2 本目）に `time-naming` が加わったため）をゲート化。**stdlib 移植は 5 つとも完了**（SA1000 / SA1001 / SA1002 / SA1007 / SA5009）。**文字列定数をバイト列に**（2026-08-10 5 本目）、**gosec の severity / TryResolve / G602 の再スライス**（2026-08-11）。**18 本目で go/ssa の欠落を 2 つ塞いだ**: `emitStore` の `emitConv`（＝インターフェースへのボクシングが起きる唯一の場所。`MakeInterface` / `ChangeInterface` は空構造体で、一度も emit されていなかった）と `logicalBinop`（値文脈の `&&` / `||` の CFG）。前者で staticcheck-sa の ratchet が **extra 7 → 6**、後者で SA5011 の構文側の当て木を削除。同じく 18 本目でインターフェースのメソッドにレシーバが付き、**errcheck-verbose の ratchet 1/1 を削除**（0/0）。**19 本目で `emitCallArgs` と `isValuePreserving`** —— 呼び出し引数が仮引数型へ変換されるようになり、unparam が上流の `typesImplementing` を IR から組めるようになって `compat/allowlists/controller-runtime.txt` の **unparam 2 件が閉じた**。同じく 19 本目で staticcheck-sa の ratchet を **missing 5 → 3 / extra 6 → 2**（SA1023 の位置と件数、SA4020 の文言、SA9004 の列、**SA4015 は反転していたので IR の腕だけに書き直し**） | 2026-08-14 |
 | 4 | 設定・除外セマンティクス | 中 | **完了** — golden に **65 ケース**（nolint 3 / errcheck 7 / exclusions 4 / generated 4 / issues 5 / severity 3 / run 6 / staticcheck.checks 4 / **govet 5** / **gocritic 7** / **revive 9** / **gosec 8**）。ランナー側（`//nolint` の 5 規則と nolintlint、除外規則、`generated` の既定、`max-*` の適用順、v2 の `severity.default`、`run.go` の配線）は 6〜8 本目で閉じ、**linter ごとの settings キー**を 9 本目が閉じた: errcheck の枝刈り／括弧／アサーションの位置、govet の `enable` 優先と既定集合、gocritic の `enabled-tags` が**フィルタではなく和集合**であること・`disabled-tags` の適用順・107 チェッカのタグ表・`boolExprSimplify` が `untyped bool` の条件を見ないこと。revive（confidence / severity / enable-*-rules）と gosec（severity / confidence / includes / excludes）は 17 ケースが一発一致。**16 本目で「上流が起動を拒む config」を tier にした**（`compat/reject/`、12 ケース）—— finding 集合の tier では原理的に表現できない側で、7・8・9 本目が列挙した 8 規則 + 上流の同じ関数の隣にあった 2 規則を実装し、**理由の文言まで上流と一致**することを両ツール実行で確認する | 2026-08-13 |
 | 5 | コーパス多様化 | 中 | **進行中** — `corpus/shapes.py` が「どの形の入力がどのゲートにも当たっていないか」を測って CI ゲート化。k9s と cobra を `pr` tier に、grafana を go.work の 2 モジュール跨ぎに。非 ASCII は `cases/nonascii`。**6 バグ**（10 本目）: `linters.disable` の優先順、nolintlint が除外フィルタを素通り、gocritic の `skipTestFuncs` と `importShadow` の走査範囲、printf の `parseIndex` 3 か所、godox の位置。11 本目は**サブ形**（`genericrecv` / `genericunion` / `genericalias`）を測って controller-runtime を足し、**8 バグ**: revive の受け手の綴り 3 種、`var-declaration` の刈り込み、gocritic `newDeref` の型、errorlint の allowed **対**、SSA 系 16 analyzer がメソッドを見ていない、ドット import の使用記録がパッケージ単位、SA1019 の位置と末尾スペース、非推奨インターフェースメソッド、govet printf の引数描画。12 本目は**踏んでいる形が型検査を通っているか**を測って `allX`（型集合を見る述語 7 本 × 演算子 11 箇所）・untyped 定数の型パラメータ変換・go1.24 のジェネリック型エイリアスを入れた —— どれも**落ちるとパッケージ丸ごと ill-typed** ＝ 型依存 analyzer が全部黙る側の欠陥。ついでにエイリアス実体の TypeName が package を持たず revive の `unexported-return` が素通りしていた 1 件。`range` / 送受信（`commonUnder` 系）は 15 本目で解消（`#[ignore]` 解除）。**15 本目は ill-typed をもう一段掘って型検査器の欠陥 6 種**: untyped な「値」の代入可能性（`bool(v != 0)`）、埋め込みを辿らないメソッド署名の遅延解決、`IsComparable` のフラグ読み、`commonUnder`、`convertible_to` のメソッド集合準備、逆方向の型推論（go1.21）。kubernetes は 8 → 1 パッケージ、**16 本目の部分的な明示型引数（`sets.KeySet[string](m)`）で 0** | 2026-08-13 |
 | 6 | 縮小器 → 差分ファジング | 中 | **完了** — 道具（`compat/reduce.py` / `compat/fuzz.py` / `compat/gospans`）と、それで見つかる分の消化。1 周目 864 ミュータントで 36 件 = 9 バグ、2 周目（seed 1・2 編集/ミュータント・888 ミュータント）で **4 件 = 4 バグ**（errorlint の `(nil)`、gocritic newDeref の描画ノード、SA1006 の paren、nolintlint の unused を**別の**ディレクティブが打ち消す）。**型情報が要るとされた 3 変異**（rename / littype / rangeint）は型検査器を足さずに実装。ファザー自身の穴も 1 つ（`issue_key` 直マップで related-information 行まで数え、staticcheck-sa の baseline を 5→17 に膨らませていた）。`--recheck` を追加。**15 本目で `--allow-dirty-seeds` を初めて回した**: staticcheck-sa 220 ミュータントで 4 件 —— **4 件とも 1 つの構造的欠陥**（パターンマッチャが根でしか括弧を外していなかった）を別々に指していた。revive 側は上流のレースが乗るので `UNSTABLE` が 60 中 7 出るが、確認を通った 1 件が **revive の括弧の向きは staticcheck と逆**（上流は素の型アサーションで括弧を見ない＝黙る、guff は剥がして撃っていた）を出した。**縮小器に「根集合の ddmin」を第 1 パスとして足した**: ill-typed の再現条件がファイルではなく**どのパッケージを root に入れたか**だったので、64 → 3 パッケージまで落として原因に直行した（`--no-reduce-roots` で無効）。結果 controller-runtime の ill-typed は **16 → 0**、そこで**見えるようになった差分が 17 件**（recall は 100% のまま。うち 3 件はその場で修正、17 件を理由つき allowlist に記録（差分は 20 → 17）） | 2026-08-13 |
@@ -6259,6 +6259,154 @@ finding 軸のほうは golden / OSS / isolate が全部緑なので、赤いの
    上流は Func と Signature を複製する（メソッドはインスタンス間で共有されるため）。
    読むのは名前だけ（`identical` はレシーバを見ない）なので優先度は低い。
 
+### 2026-08-14（19 本目）— `emitCallArgs` を入れて、18 本目が名指しした残り 1 段を塞いだ
+
+18 本目が「次にやること 1」として実測つきで置いていったもの。呼び出し引数が
+仮引数型へ変換されないので `take(t)` に `MakeInterface` が出ない、という欠落。
+
+#### 1. 移植したもの／**意図的に移植しなかったもの**
+
+`builder/call.rs` の `set_call` と `emit_call` が共通の `emit_call_args` を通り、
+評価した実引数を仮引数型へ `emit_conv` する。上流 `emitCallArgs` と同じく
+`offset`（具象レシーバが既に積まれていれば 1）を起点にする。
+
+**可変長引数のスライス構築は移植していない。** 上流は末尾を配列 + `Slice` に
+詰め直すが、guff は個別に渡して `CallCommon::ellipsis` で spread を記録する既存の
+規約があり、こちらの analyzer は全部それを読んでいる。そこで末尾は
+**可変長仮引数の要素型**へ変換する —— 上流が作るスライスの中で各引数が持つ型である。
+
+```
+func viaVariadic(t T, n int):        takeAny(a ...interface{})
+	t0 = make interface{} <- T (t)
+	t1 = make interface{} <- int (n)
+	t2 = takeAny(t0, t1)
+func viaSpread(xs []interface{}):    takeAny(xs...)  ← 素通し
+	t0 = takeAny(xs)
+```
+
+**多値の連鎖（`f(g())`）は変換しない。** 上流は `emitExtract` でタプルを平らにするが
+guff は 1 引数のまま渡すので、実引数と仮引数の個数が合わない。数が合わないときは
+**何も変換しない**（合わないまま変換すると別のオペランドを強制することになる）。
+`DEFERRED` として `convert_call_args` に書いてある。
+
+builtin（`Value::Builtin`）も飛ばす。上流は builtin を専用の lowering に回すので、
+合成したシグネチャで変換するのは間違いになる。
+
+#### 2. golden が `isValuePreserving` の欠落を 1 つ出した
+
+入れた直後、`sa1017/bad` が **missing** に落ちた（SA1017: signal.Notify に渡す
+チャネルはバッファすべき）。`signal.Notify(c chan<- os.Signal, …)` に
+`chan os.Signal` を渡すと変換が入るが、guff の `emit_conv` は
+「underlying が identical か」しか見ていないので **`Convert` を出していた**。
+上流の `isValuePreserving` は
+
+```go
+switch ut_dst.(type) {
+case *types.Chan:    _, ok := ut_src.(*types.Chan); return ok
+case *types.Pointer: _, ok := ut_src.(*types.Pointer); return ok
+}
+```
+
+と、**チャネル間・ポインタ間は値を保存する**と答える ＝ `ChangeType`。
+`Convert` にしてしまうと、`ChangeType` を辿って元の値に戻る検査
+（`flatten_ssa_value`）から演算子が見えなくなる。移植して golden は 81 一致に戻った。
+
+**これは `emitCallArgs` が無ければ一生踏まなかった欠陥である。** 変換が起きる場所が
+無ければ、変換の分類が間違っていても観測できない。
+
+#### 3. 閉じたもの
+
+`compat/allowlists/controller-runtime.txt` の **unparam 2 件**と、その
+`//nolint:unparam` が「未使用」に見えていた **nolintlint 1 件**。
+18 本目が書いて戻した SSA 版 `typesImplementing` を入れ直したら、今度は表が埋まった:
+
+```
+typesImplementing[.../examples/builtins] = [… "podValidator.ValidateCreate",
+    "podValidator.ValidateDelete", "podValidator.ValidateUpdate", …]
+typesImplementing[.../examples/tokenreview] = ["Webhook.ServeHTTP", "authenticator.Handle"]
+```
+
+AST 側の `collect_interface_methods`（名前 + シグネチャ一致）は**残してある**。
+IR 側は「実際に変換された型」しか見ないので、このパッケージで宣言されているが
+一度も変換されないインターフェースを取りこぼす。上流は SSA だけで判断するが、
+guff の IR はパッケージ単位なので両方要る。
+
+#### 4. 落とし穴（記録）—— `guff run` は issues キャッシュを持っている
+
+「直したのに出力が変わらない」を 3 回繰り返した。原因は analyzer ではなく
+**永続 issues キャッシュ**で、同じツリーの 2 回目以降は analyzer が走らない。
+デバッグ用の `eprintln!` すら出ないので「コードが呼ばれていない」ように見える。
+**手で確認するときは `--no-cache` を付けること。** ゲート（`compat/run.sh` /
+`golden/run.sh`）は毎回新しい結果ディレクトリを使うのでこの影響を受けない。
+
+#### 5. tail パッケージの内訳を出した —— 犯人は QF1008 と unconvert
+
+18 本目の「次にやること 2」。`(package, analyzer)` の集計を足して、
+**span が最後に終わるパッケージ**について上位 15 analyzer を出すようにした。
+prometheus `./...`（`--no-cache`）:
+
+```
+  tail: .../prometheus/tsdb ends at 3.25s (8.75s CPU over 3.25s span)
+  tail breakdown (top 15 analyzers in that package):
+                            QF1008    1.843s   21.1%
+                         unconvert    1.234s   14.1%
+                            SA5009    0.771s    8.8%
+                          gocritic    0.727s    8.3%
+                           buildir    0.418s    4.8%
+                             godot    0.370s    4.2%
+```
+
+**QF1008 と unconvert だけで、analyze の wall を決めているパッケージの 35%。**
+全パッケージ合算の表では QF1008 は上位 20 に入っておらず（gocritic / buildir /
+SA5009 が上に来る）、**この 2 本は `tsdb` に集中している**ことが初めて見えた。
+17 本目が 2 回とも「CPU を削っても wall が動かない」で終わったのは、
+合算表を見て**合算表の上位**を削っていたからである。
+
+**絶対値は信用しないこと。** この測定時の load average は 3.9 で、
+`regress/run.sh` の perf ガードなら測定を拒む水準である。比率
+（どの analyzer が tail パッケージの何 % か）は使えるが、秒数は使えない。
+
+#### 6. golden の ratchet を extra 6 → 2 に落とした —— そのうち 1 本は「検査が丸ごと反転」していた
+
+残っていた staticcheck-sa の差分を 1 件ずつ実測して潰した。
+
+| 差分 | 実態 |
+|---|---|
+| SA1023 の位置 | guff は**関数名**に 1 件、上流は**書き込んでいる命令**に 1 件ずつ。2 行書き換える `Write` で上流は 2 件、`_ = append(b, 1)` は `append` の位置（`_` ではない） |
+| SA4020 の文言 | 空インターフェースの節を "earlier case" と綴っていた。上流は**書かれたとおりの型名**（`case any:` は `any`、`case interface{}:` は `interface{}`） |
+| SA9004 の列 | グループの**型**の位置に報告していた。上流は `group[0].Pos()` ＝ 最初の**名前** |
+| **SA4015** | **反転していた。** IR の腕が `ir.Convert` ではなく `ChangeType` を見ていて**recall が 0**、その代役の AST 経路が `math.Ceil(1)` に当たっていた —— 上流は定数を報告しない（定数は既に `float64` で、変換が存在しない）。IR の腕だけに書き直し、7 形が上流と完全一致 |
+
+**SA4015 の教訓は「extra 1 件」に見えていたものが「recall 0 + 誤検出 1」だった**こと。
+golden の ratchet は**両側を 1 行ずつ**しか見せないので、
+`bad.go` の fixture が上流の撃たない形になっていると、
+**recall の穴が extra 1 件に化けて見える**。
+
+**fixture を書き換えたら golden を再生成すること。** SA4015 の fixture を直したら、
+17 本目が書き換えた **SA9004 の fixture 由来の行が同時に出てきた** ——
+つまりあのとき golden を再生成しておらず、**ratchet の余裕がそれを吸収して隠していた**。
+再生成の差分は追加 5 行のみで、削除は無い（レビュー済み）。
+
+残った 2 件（SA4031 / SA5005）は**どちらも SA4015 と同じ反転**で、直すには移植が要る:
+
+- **SA4031**: 上流は 5 形を報告する（`make` / `new` / スライスリテラル / 関数値 /
+  アドレス取得、いずれも変数名を挙げる related information つき）。guff は
+  **その 5 形を全部落とし**、上流が黙る `make(chan int) == nil` のインライン形だけを報告する。
+- **SA5005**: 上流は**何も報告しない** —— 教科書どおりの
+  `runtime.SetFinalizer(x, func(_ *int){ _ = x })` すら。guff は報告する。
+  上流がどの条件でだけ撃つのかを honnef のソースで確かめるところから。
+
+**次にやること**
+
+1. **QF1008 と unconvert を `tsdb` の上で読む**（上記 5）。合算表ではなく
+   tail の内訳が打ち手を決める、というのが 18・19 本目で分かったこと。
+2. **wall の実測**。17 本目の 3.16s から動いたかどうかが 3 セッション続けて
+   分かっていない（perf ガードが毎回 contended で拒否）。`emitCallArgs` は
+   命令を増やすので、測らないままだと次の診断が濁る。
+3. **SA4031 と SA5005**（上記 6）。どちらも「反転」なので、直すと
+   ratchet の extra が減るだけでなく **recall が増える**側である。
+4. `replaceRecvType`（`subst.rs`）。優先度低のまま。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
@@ -6551,7 +6699,19 @@ golden の staticcheck-sa ratchet は extra 7 → 6 になった。
 
 **unparam の 2 件はまだ閉じていない。** 下記 `emitCallArgs` を参照。
 
-### `emitCallArgs` が無い —— 呼び出し引数が仮引数型へ変換されない `[記録 2026-08-14（18 本目）]`
+### ~~`emitCallArgs` が無い —— 呼び出し引数が仮引数型へ変換されない~~ `[記録 2026-08-14（18 本目）/ 解消 2026-08-14（19 本目）]`
+
+**解消済み。** `builder/call.rs` の `set_call` / `emit_call` が共通の
+`emit_call_args` を通り、実引数を仮引数型へ `emit_conv` する。
+可変長引数のスライス構築は**意図的に移植していない**（guff は個別に渡して
+`CallCommon::ellipsis` で spread を記録する既存の規約があるため）ので、
+末尾は可変長仮引数の**要素型**へ変換する。多値の連鎖（`f(g())`）は実引数と
+仮引数の個数が合わないので変換しない —— 上流は `emitExtract` で平らにする。
+入れた直後に golden が `isValuePreserving` の欠落（チャネル間・ポインタ間の変換が
+`Convert` になっていた）を出したので、それも移植した。詳細は §4 の 2026-08-14（19 本目）。
+`compat/allowlists/controller-runtime.txt` の unparam 2 件はこれで閉じた。
+以下は当時の記録。
+
 
 `builder/call.rs` の `c.args.push(self.expr(arg))` は引数をそのまま積む。
 go/ssa の `emitCallArgs` は通常引数ぶん
@@ -6577,6 +6737,10 @@ buildir 依存だけを増やすことになるので**入れずに戻した**�
 
 **allowlist の「SSA を 1 つ直すと 4 件が同時に消える」は正しくない。2 つである** ——
 `MakeInterface` のオペランド（済）と `emitCallArgs`（未）。
+
+**［19 本目で解消］** `emitCallArgs` を入れ、`typesImplementing` を入れ直したら
+表が埋まり、unparam 2 件が閉じた。ただし**4 件目（nolintlint 1 件）は閉じなかった** ——
+つまり「4 件」の内訳自体が間違っていて、あの nolintlint は別の原因である。
 
 ### ~~インターフェースのメソッドにレシーバが繋がっていない~~ `[記録 2026-08-11（6 本目）/ 解消 2026-08-14（18 本目）]`
 
