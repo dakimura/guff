@@ -223,13 +223,21 @@ fn inline_allows_preferred_const() {
 fn inline_flags_ioutil_go_version_mismatch() {
     let dir = support::testdata("inline_ioutil");
     let stub = dir.join("stub/io/ioutil/ioutil.go");
+    // The callee side of this comparison is the *host toolchain* version, and
+    // `version_compare` only reads major.minor. A literal caller version made
+    // the test a function of which Go the machine had: on go1.24.x a "1.24.3"
+    // caller compared equal, the diagnostic never fired, and the test failed.
+    // Derive a caller one minor below the toolchain so the mismatch holds on
+    // any Go.
+    let toolchain = guff_analysis::code::toolchain_go_version();
+    let caller = one_minor_below(&toolchain);
     let pkg = support::with_go_version(
         support::typecheck_with_deps(
             "example.com/govet/inline_ioutil",
             &dir.join("bad.go"),
             &[("io/ioutil", &stub)],
         ),
-        "1.24.3",
+        &caller,
     );
     let messages = support::run_analyzer(inline_analyzer(), &pkg);
     assert_eq!(messages.len(), 1, "{messages:?}");
@@ -238,9 +246,48 @@ fn inline_flags_ioutil_go_version_mismatch() {
         "{messages:?}"
     );
     assert!(
-        messages[0].contains("into a file using go1.24.3"),
+        messages[0].contains(&format!("into a file using go{caller}")),
         "{messages:?}"
     );
+}
+
+/// Upstream gates on `versions.Before(caller, callee)`, so a caller at the
+/// toolchain's own version is *not* a mismatch. Without this the check could
+/// start firing on every `io/ioutil` call and nothing in the suite would say so.
+#[test]
+fn inline_allows_ioutil_at_the_toolchain_version() {
+    let dir = support::testdata("inline_ioutil");
+    let stub = dir.join("stub/io/ioutil/ioutil.go");
+    let pkg = support::with_go_version(
+        support::typecheck_with_deps(
+            "example.com/govet/inline_ioutil",
+            &dir.join("bad.go"),
+            &[("io/ioutil", &stub)],
+        ),
+        &guff_analysis::code::toolchain_go_version(),
+    );
+    assert!(
+        support::run_analyzer(inline_analyzer(), &pkg).is_empty(),
+        "caller at the toolchain version must not be reported"
+    );
+}
+
+/// `go1.26.5` -> `1.25.0`. Panics rather than guessing: every Go this crate
+/// builds under is well past 1.0, so a version that will not parse means the
+/// toolchain probe itself broke, which is worth failing loudly.
+fn one_minor_below(toolchain: &str) -> String {
+    let v = toolchain.strip_prefix("go").unwrap_or(toolchain);
+    let mut parts = v.split('.');
+    let major: u32 = parts
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("unparsable toolchain version {toolchain:?}"));
+    let minor: u32 = parts
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("unparsable toolchain version {toolchain:?}"));
+    assert!(minor >= 1, "toolchain {toolchain:?} has no earlier minor");
+    format!("{major}.{}.0", minor - 1)
 }
 
 #[test]
