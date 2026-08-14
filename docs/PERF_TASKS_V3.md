@@ -512,6 +512,9 @@ FxHash 化する。**先に V2 §0-12（iteration order 依存の洗い出し）
 | V1-6 gocritic の `enabled` 巻き上げ | **DONE** | ノードごとの SipHash 114 回 → 0 |
 | **V1-7 `FileSet` の last キャッシュを thread-local 化** | **DONE** | **`__psynch_mutexwait`+`drop` 2.9s（14.3%）が消滅。第3弾で最大の一撃** |
 | V1-8 walk 内の `Regex::new` を排除 | **DONE** | `Regex::new` 2.11s inclusive（6.6%）→ 消滅 |
+| **V1-2b 部分スライスも索引で配る** | **DONE** | `from_ref(file)` 経路（S1008 ほか 5 箇所）が再帰 walk に落ちていた。20.7M → **18.0M scanned** |
+| V1-9 `filter_debug` の `Vec` 割当を除去 | **DONE** | 走査のみの 3 箇所を `iter_non_debug` へ |
+| V1-10 S1008 の再パース/位置引き | **DONE** | `fs::read` → `source_bytes`、`rfset.file()` をコメント毎 → ファイル毎に |
 
 ### 7.1 V1-7 は計画に無かった —「詰めたら出てきた」項目
 
@@ -543,22 +546,32 @@ thread-local 2 スロット（共有 fset と再パース用 fset の往復に�
 
 ### 7.1.5 実測（`953d243` vs `perf-v3`、同一マシン・同一セッション）
 
-**phase 内訳**（prometheus `./...`, cold, `--no-cache`, `GUFF_DEBUG_CACHE=2`、
-A→B を続けて実行）
+**wall（A/B/A/B 交互 6 往復、クリーンなマシン、prometheus `./...`, cold, `--no-cache`）**
+
+```
+HEAD : median 4.435s   (4.67, 4.28, 4.37, 4.43, 4.53, 4.44)   RSS 3.22–3.30 GiB
+final: median 2.960s   (3.04, 2.86, 2.91, 2.91, 3.01, 3.01)   RSS 3.21–3.27 GiB
+                                                → -1.475s / -33.3%   RSS 変化なし
+```
+
+**phase 内訳**（同じ条件で `GUFF_DEBUG_CACHE=2`、A→B を続けて実行）
 
 | phase | HEAD | perf-v3 | 差 |
 |---|---:|---:|---:|
 | startup | 0.00s | 0.00s | — |
-| load_graph | 0.52s | 0.51s | −0.01 |
+| load_graph | 0.57s | 0.53s | −0.04 |
 | cache setup+partition | 0.00s | 0.00s | — |
-| typecheck_roots | 1.26s | 1.17s | −0.09 |
-| **analyze** | **2.90s** | **1.33s** | **−1.57（−54%）** |
-| issues+filter | 0.05s | 0.09s | +0.04 |
-| **直列合計** | **4.73s** | **3.10s** | **−1.63（−34%）** |
-| format_checks（内側で並走） | 0.92s | 0.63s | −0.29 |
+| typecheck_roots | 1.21s | 1.14s | −0.07 |
+| **analyze** | **2.72s** | **1.13s** | **−1.59（−58%）** |
+| issues+filter | 0.05s | 0.05s | — |
+| **直列合計** | **4.55s** | **2.85s** | **−1.70（−37%）** |
+| format_checks（内側で並走） | 0.72s | 0.67s | −0.05 |
 
-**inspector の走査量**: 466,830,871 → **20,678,830 nodes scanned**（−95.6%）。
+**inspector の走査量**: 466,830,871 → **18,046,429 nodes scanned**（−96.1%）。
 delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で配っている。
+
+> **format_checks はまだ `waited=0.00s`** です。直列 2.85s に対して format 0.67s なので、
+> 余裕は約 2.2s。**B-10 の追加作業（V2 §B-10）は今も着手条件を満たしていません。**
 
 **regress ゲート**（`./regress/run.sh`, 同一セッションで両方を実行）
 
@@ -583,6 +596,13 @@ delivered は 15,155,755 で**完全に不変**＝同じノードを同じ順で
 | `GUFF_INSPECT_MASKS=0` ≡ 既定 | ✅ 同一（V1-2 のマスク経路の健全性） |
 | 決定性（同一バイナリ 5 回） | ✅ 同一 |
 | `cargo test --release --workspace` | ✅ **3,116 passed / 0 failed** |
+
+> V1-2b で `passes::inspect::tests::foreign_file_slice_falls_back_to_walking` が
+> 1 本落ちました。**「単一ファイルのスライスは fallback する」という旧実装の性質を
+> assert していた**テストなので、新しい契約に合わせて
+> `single_file_subslice_uses_the_flat_index`（部分スライスの列が直接 walk と完全一致することを
+> 確認）へ書き換え、fallback 側は「そもそも別の allocation のファイル」で検証するよう
+> 直しました。**意味的な assert（`first == direct` など）は落ちていません。**
 
 ### 7.2 V1-4 NO-GO の詳細
 
