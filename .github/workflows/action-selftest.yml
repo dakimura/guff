@@ -92,34 +92,30 @@ jobs:
         with:
           go-version: stable
 
-      # The cache service is eventually consistent: `defaults` logged "Cache
-      # saved with key: ..." and a restore twelve seconds later still reported
-      # the key as not found, while the REST API listed it shortly after. Wait
-      # for the entry to become visible before asking cache/restore for it,
-      # rather than letting a propagation delay read as "the save is broken".
-      - name: Wait for the entry to become visible
+      # Diagnostic only. If the probe below misses, this says whether the entry
+      # is absent or merely unmatched, which are different bugs.
+      - name: List the cache entries this run produced
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 20); do
-            keys=$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
-                     --jq '.actions_caches[].key' 2>/dev/null || true)
-            if printf '%s\n' "${keys}" | grep -q '^guff-cache-v1-'; then
-              echo "visible after ${attempt} attempt(s):"
-              printf '%s\n' "${keys}" | grep '^guff-cache-v1-'
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "::error::no guff-cache-v1-* entry became visible within 100s of the save"
-          exit 1
+          gh api "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '.actions_caches[] | select(.key | startswith("guff-cache-v1-")) | "\(.ref)\t\(.key)"' \
+            || echo "(caches API unavailable)"
 
       - name: Probe for the cache the previous job saved
         id: probe
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/guff-probe
+          # Must be the SAME path spec the Action saved under, seed exclusion
+          # included. actions/cache scopes entries by a "version" derived from
+          # the paths, and restore-keys only prefix-match within a version — so
+          # a probe pointed at a different directory misses every time no matter
+          # how well the key matches. An earlier revision probed a scratch path
+          # and read the guaranteed miss as "the save is broken".
+          path: |
+            ${{ runner.temp }}/guff/cache
+            !${{ runner.temp }}/guff/cache/seed
           key: guff-cache-v1-probe-miss-on-purpose
           restore-keys: guff-cache-v1-
           lookup-only: true
@@ -129,7 +125,7 @@ jobs:
           set -euo pipefail
           matched="${{ steps.probe.outputs.cache-matched-key }}"
           if [ -z "${matched}" ]; then
-            echo "::error::entry is listed but cache/restore did not match prefix guff-cache-v1-"
+            echo "::error::no guff-cache-v1-* entry was restorable. If the listing above shows one, the paths the Action saves under and the paths probed here have diverged."
             exit 1
           fi
           echo "restored via ${matched}"
