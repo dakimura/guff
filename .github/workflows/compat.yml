@@ -11,6 +11,24 @@ concurrency:
   group: compat-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every gate here compares against a baseline recorded on somebody's machine,
+# and the ill-typed counts and goldens are a function of the *stdlib* guff type-
+# checks against. That version lives in `.go-version` — the same reason the
+# golangci-lint pin lives in compat/pins.json rather than in the steps.
+#
+# GOTOOLCHAIN=local is what keeps the two halves of a run agreeing. Under the
+# default `auto`, `go list` silently re-execs into whatever newer toolchain a
+# target's go.mod asks for, while guff keeps reading stdlib source from the
+# GOROOT it derived from the `go` on PATH (golist.rs `go_root_from_path`, which
+# deliberately does not run `go`). The run then type-checks go1.26 sources
+# against a go1.24 stdlib, and every package using a newer API — `wg.Go` on
+# helm, caddy and containerd — goes ill-typed. That is silent by construction:
+# an ill-typed package is skipped whole, so its findings become 0 rather than
+# wrong. With `local`, a target that outgrows the pin fails at `go list` and
+# says so instead.
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   # Fast signal: harness unit tests + tiny fixture smoke.
   smoke:
@@ -22,7 +40,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -90,7 +108,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -115,7 +133,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
           cache: true
 
       - name: Install Rust
@@ -193,7 +211,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -281,7 +299,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
