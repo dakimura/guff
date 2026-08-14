@@ -80,14 +80,20 @@ static PREORDER_BY_ANALYZER: std::sync::LazyLock<Mutex<HashMap<&'static str, (u6
 static PACKAGE_TIMING: std::sync::LazyLock<Mutex<HashMap<String, PkgTiming>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
-/// Debug-only `(package, analyzer) -> nanos`, printed at `GUFF_DEBUG_CACHE=2`
+/// Debug-only `(package, analyzer) -> timing`, printed at `GUFF_DEBUG_CACHE=2`
 /// for the package the analyze phase ends on.
 ///
 /// The per-package table says *which* package the run waits for; this says what
 /// that package spends its time in. Without it the tail package is a single
 /// number and the only available move is to cut CPU everywhere — which is
 /// exactly what moved wall by ~1% twice.
-static ANALYZER_BY_PACKAGE: std::sync::LazyLock<Mutex<HashMap<(String, &'static str), u128>>> =
+///
+/// Each entry carries the same shape as [`PkgTiming`] — CPU *and* span — for the
+/// same reason the per-package table does: the tail package's CPU exceeds its
+/// span (its analyzers run in parallel), so the biggest CPU consumer is not
+/// necessarily the one the package's span ends on. Cutting the former shrinks
+/// CPU; only cutting the latter can shorten the phase.
+static ANALYZER_BY_PACKAGE: std::sync::LazyLock<Mutex<HashMap<(String, &'static str), PkgTiming>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::default()));
 
 /// Wall-clock origin for the span offsets in [`PkgTiming`]; first touched by
@@ -103,6 +109,20 @@ struct PkgTiming {
     /// Offsets from [`ANALYZE_EPOCH`], in nanoseconds.
     first_start: u128,
     last_end: u128,
+}
+
+impl PkgTiming {
+    /// Fold one finished action in: CPU adds up, the span widens to cover it.
+    fn merge(&mut self, nanos: u128, first_start: u128, last_end: u128) {
+        self.cpu_nanos += nanos;
+        self.actions += 1;
+        if self.actions == 1 {
+            self.first_start = first_start;
+        } else {
+            self.first_start = self.first_start.min(first_start);
+        }
+        self.last_end = self.last_end.max(last_end);
+    }
 }
 
 fn timing_enabled() -> bool {
@@ -129,23 +149,17 @@ fn record_package_time(
     start: std::time::Instant,
     nanos: u128,
 ) {
-    if timing_detailed() {
-        let mut m = ANALYZER_BY_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
-        *m.entry((pkg_path.to_string(), analyzer)).or_insert(0) += nanos;
-    }
     let epoch = *ANALYZE_EPOCH;
     let first_start = start.saturating_duration_since(epoch).as_nanos();
     let last_end = first_start + nanos;
+    if timing_detailed() {
+        let mut m = ANALYZER_BY_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = m.entry((pkg_path.to_string(), analyzer)).or_default();
+        entry.merge(nanos, first_start, last_end);
+    }
     let mut m = PACKAGE_TIMING.lock().unwrap_or_else(|e| e.into_inner());
     let entry = m.entry(pkg_path.to_string()).or_default();
-    entry.cpu_nanos += nanos;
-    entry.actions += 1;
-    if entry.actions == 1 {
-        entry.first_start = first_start;
-    } else {
-        entry.first_start = entry.first_start.min(first_start);
-    }
-    entry.last_end = entry.last_end.max(last_end);
+    entry.merge(nanos, first_start, last_end);
 }
 
 /// Print and reset the per-package table: the slowest packages by CPU, and the
@@ -163,7 +177,7 @@ fn report_package_timing() {
     // Reset the companion table too, so a second run in the same process (the
     // watch mode) does not accumulate.
     let mut abp = ANALYZER_BY_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
-    let by_pkg: HashMap<(String, &'static str), u128> = abp.drain().collect();
+    let by_pkg: HashMap<(String, &'static str), PkgTiming> = abp.drain().collect();
     drop(abp);
 
     let total_cpu: u128 = rows.iter().map(|(_, t)| t.cpu_nanos).sum();
@@ -197,35 +211,87 @@ fn report_package_timing() {
             t.cpu_nanos as f64 / 1e9,
             (t.last_end - t.first_start) as f64 / 1e9,
         );
-        report_analyzers_in_package(&by_pkg, path, t.cpu_nanos);
+        report_analyzers_in_package(&by_pkg, path, *t);
     }
 }
 
-/// Print what the tail package spends its CPU on. This is the number to act on:
-/// the phase cannot end before this package does, and the package cannot finish
-/// faster than its own analyzer DAG.
+/// Print what the tail package spends its CPU on, and what its *span* ends on.
+/// This is the number to act on: the phase cannot end before this package does,
+/// and the package cannot finish faster than its own analyzer DAG.
+///
+/// Two orderings, because they answer different questions and the answers
+/// differ. By CPU: what the package's work is made of — cut it and the machine
+/// does less. By end offset: what the package is still waiting for when it
+/// finishes — cut *that* and the phase gets shorter. A 20%-of-CPU analyzer that
+/// finished at 40% of the span is free to delete and will not move wall at all.
 fn report_analyzers_in_package(
-    by_pkg: &HashMap<(String, &'static str), u128>,
+    by_pkg: &HashMap<(String, &'static str), PkgTiming>,
     pkg_path: &str,
-    pkg_cpu: u128,
+    pkg: PkgTiming,
 ) {
-    let mut rows: Vec<(&'static str, u128)> = by_pkg
+    let mut rows: Vec<(&'static str, PkgTiming)> = by_pkg
         .iter()
         .filter(|((p, _), _)| p == pkg_path)
-        .map(|((_, a), n)| (*a, *n))
+        .map(|((_, a), t)| (*a, *t))
         .collect();
     if rows.is_empty() {
         return;
     }
-    rows.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-    eprintln!("  tail breakdown (top 15 analyzers in that package):");
-    for (name, nanos) in rows.iter().take(15) {
-        let share = if pkg_cpu > 0 {
-            *nanos as f64 / pkg_cpu as f64 * 100.0
+    let secs = |n: u128| n as f64 / 1e9;
+    let share = |n: u128| {
+        if pkg.cpu_nanos > 0 {
+            n as f64 / pkg.cpu_nanos as f64 * 100.0
         } else {
             0.0
-        };
-        eprintln!("    {:>30} {:>8.3}s  {share:>5.1}%", name, *nanos as f64 / 1e9);
+        }
+    };
+
+    rows.sort_by_key(|(_, t)| std::cmp::Reverse(t.cpu_nanos));
+    eprintln!(
+        "  tail breakdown (top 15 of {} analyzers in that package, by CPU; \
+         [start..end] are offsets into the analyze phase):",
+        rows.len(),
+    );
+    for (name, t) in rows.iter().take(15) {
+        eprintln!(
+            "    {:>30} {:>8.3}s  {:>5.1}%  [{:>6.2}s..{:>6.2}s]",
+            name,
+            secs(t.cpu_nanos),
+            share(t.cpu_nanos),
+            secs(t.first_start),
+            secs(t.last_end),
+        );
+    }
+
+    // The critical tail *within* the tail package: the analyzers still running
+    // when it finishes. Sorted by end offset so the last line is the one the
+    // package's span actually ends on.
+    //
+    // `waited` — the gap between the package's first action and this analyzer's
+    // first — separates the two reasons an analyzer can end last. Large CPU and
+    // small `waited` means it is slow: make it cheaper. Small CPU and large
+    // `waited` means it barely ran and simply started late, so making it cheaper
+    // cannot help.
+    //
+    // `waited` does not say *why* it started late: its dependencies may still
+    // have been running, or they may have finished long before and the workers
+    // were busy elsewhere. Check the analyzer's `requires` and read each
+    // dependency's own `[start..end]` above to tell those apart. On Prometheus's
+    // tsdb, SA4006 / SA4010 / SA9005 require only `buildir` (and `inspect`),
+    // `buildir` ended at 0.34s, and all three still start past 0.81s — for those
+    // three it is ordering, not the DAG.
+    rows.sort_by_key(|(_, t)| t.last_end);
+    eprintln!("  tail critical path (last 5 analyzers to finish in that package):");
+    for (name, t) in rows.iter().rev().take(5).rev() {
+        eprintln!(
+            "    {:>30} [{:>6.2}s..{:>6.2}s]  {:>8.3}s CPU ({:>5.1}%)  waited {:>6.2}s",
+            name,
+            secs(t.first_start),
+            secs(t.last_end),
+            secs(t.cpu_nanos),
+            share(t.cpu_nanos),
+            secs(t.first_start.saturating_sub(pkg.first_start)),
+        );
     }
 }
 

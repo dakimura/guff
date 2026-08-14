@@ -6454,6 +6454,192 @@ honnef の IR が満たさない**からである。上流は
 
 ---
 
+### 2026-08-14（20 本目）— 犯人は当たっていたが、同じ日に別のワークストリームがもっと広く直していた。残ったのは「tail は働いていない、待っている」
+
+19 本目の「次にやること」1・2。**このセッションの成果物は計測器 1 つと、それが出した所見**である。
+最初に書いた修正は**測って捨てた** —— 以下はその経緯も含めて書く。
+
+**worktree で作業する場合の準備**（並行セッションと混ざらないために推奨）:
+`.cargo/config.toml` も `CARGO_TARGET_DIR` も無いので `target/` は worktree ごとに
+自動的に別になる（フルビルドが 1 回要る）。一方で**ゲートの入力は gitignore されていて
+worktree には来ない**ので、本体から symlink を張る必要がある ——
+`prometheus`（`regress/`）、`corpus/cache`（OSS tier）、`compat/corpus`、`compat/.tools`。
+`.gitignore` の該当行は末尾が `/` なので**symlink は無視されず untracked に見える**。
+コミットしないよう `git add <path>` を明示すること（`git add -A` を使わない）。
+
+#### 1. QF1008 と unconvert の正体は当たっていた —— `TypeArena::clone` が 8 割
+
+`cargo build --profile profiling` + `sample(1)`（§9.4）で、部分木のサンプルを
+**自己時間でシンボル別に**集計した:
+
+| 部分木 | サンプル | うち `TypeArena` の clone + drop |
+|---|---:|---:|
+| `qf1008::run` | 1089 | **~79%** |
+| `unconvert::run` | 754 | **~86%** |
+
+内訳は `arena.rs:133`（`Layered<TypeData>` の複製）、`arena.rs:137`（`intern_overlay` の複製）、
+`drop_in_place<Vec<TypeData>>`、`drop_in_place<RawTable<(InternKey, TypeId)>>`。
+**検査そのものはほとんど動いていない。**
+
+原因は 1 行。`lookup_field_or_method` と `identical` はメソッド集合と型集合を遅延キャッシュ
+するので `&mut TypeArena` を要求するが、パッケージのアリーナは共有で渡ってくる。そこで
+**呼び出しごとに `artifacts.types.clone()`** していた。clone は base を `Arc` で共有する一方
+**overlay（そのパッケージ自身が確保した型）は実体コピー**するので、
+**1 回のコストがパッケージの大きさに比例する** —— 合算表で上位に来ないのに tsdb で
+21% / 14% を占めていた理由がこれである。**合算は、まさにこの形の欠陥を平均で薄めて隠す。**
+
+パッケージごとに 1 回だけ clone して `&mut TypeArena` を引き回す形に直し、
+tsdb の CPU 4.48s → 3.04s、analyze phase 1.78s → 1.67s、findings 完全一致まで確認した。
+**この 4 つの数字はすべて統合前（b5dbcb8）の上のもの**で、下の 3 に出てくる
+統合後の数字（analyze 0.93s）とは土台が違う。並べて読まないこと。
+
+#### 2. そこで push しようとしたら、main に 10 コミット載っていた
+
+**同じ日に別のワークストリームが同じ根本原因に到達していて、しかも直し方が広かった。**
+`Layered::overlay` と `intern_overlay` を `Arc` にして
+（`docs/PERF_TASKS_V3.md` の **V1-1**）、**`TypeArena::clone` を参照カウント 2 回にした** ——
+2 か所ではなく**約 30 か所の呼び出し側が、コード無変更のまま**タダになる。
+
+rebase したうえで、`scripts/perf-ab.sh`（同じセッションが入れた交互 A/B ハーネス）で
+**A = 統合後、B = 統合後 + 自分の 2 analyzer 修正**を測った:
+
+```
+perf-ab --mode cpu --rounds 6
+  A cpu: median 16.245   B cpu: median 16.330
+  delta: +0.085 (+0.5%)   min-to-min +0.000
+```
+
+`GUFF_DEBUG_CACHE=2` を A/B/A/B と 3 往復させても、analyze phase は
+A 1.02/1.04/1.03 対 B 1.01/1.03/1.06 で**区別がつかない**。tsdb の tail 上位 15 から
+**QF1008 も unconvert も両側で消えている**。
+
+→ **自分の修正は統合後の状態でゼロだった**ので、**捨てた**。V1-1 が完全に上位互換である
+（interning が呼び出しをまたいで残るぶんだけ理屈では得だが、測って出ない差は入れない）。
+**残したのは下の計測器だけ。**
+
+**教訓として残す価値があるのはここ**: 「プロファイルが指した犯人が正しい」ことと
+「自分の直し方が要る」ことは別である。**rebase 後に測り直す**という手順が無ければ、
+効果ゼロの引数引き回しを 2 ファイルに永久に残していた。
+
+#### 3. per-analyzer 表に span を足した —— そして「tail は働いていない、待っている」と分かった
+
+19 本目の「次にやること」2。`ANALYZER_BY_PACKAGE` の値を `u128` から
+`PkgTiming`（CPU ＋ first_start/last_end）に変え、tail の内訳に `[start..end]` を出し、
+**「そのパッケージで最後に終わる 5 本」を `waited` つきで**並べるようにした
+（`waited` ＝ パッケージの最初のアクションからその analyzer が始まるまでの空き。
+`format_checks waited` と同じ語彙）。`GUFF_DEBUG_CACHE` 無指定時のコストはゼロ。
+
+統合後の tsdb（1.85s CPU / 0.90s span、analyze phase 0.93s）:
+
+```
+  tail breakdown (top 15 of 206 analyzers in that package, by CPU; [start..end] …):
+                          gocritic    0.241s   13.0%  [  0.38s..  0.62s]
+                           buildir    0.206s   11.2%  [  0.13s..  0.34s]
+                             godot    0.184s    9.9%  [  0.45s..  0.64s]
+  tail critical path (last 5 analyzers to finish in that package):
+                            SA9005 [  0.86s..  0.87s]     0.006s CPU (  0.3%)  waited   0.86s
+                            SA4010 [  0.82s..  0.87s]     0.044s CPU (  2.4%)  waited   0.82s
+                            SA4006 [  0.81s..  0.87s]     0.056s CPU (  3.0%)  waited   0.81s
+                       ineffassign [  0.83s..  0.88s]     0.045s CPU (  2.5%)  waited   0.83s
+                            SA4017 [  0.89s..  0.90s]     0.010s CPU (  0.6%)  waited   0.89s
+```
+
+**span を決めている 5 本は、合計 0.16s しか働いていない。0.81〜0.89s は待ちである。**
+この 5 本を全部 0 にしても span は 0.90 → 0.89s にしかならない。
+
+**待ちの理由を `requires` で確かめた。** SA4006 / SA4010 / SA9005 は
+`buildir`（と `inspect`）**しか**要求しておらず、その `buildir` は
+**0.34s で終わっている**。にもかかわらず 3 本とも 0.81s 以降に始まる ——
+**この 3 本は依存ではなく順序で待っている**（tail パッケージの残りアクションが
+スケジュールの最後尾に回されている）。SA4017 だけは `purity` も要求するので、
+最後の 0.03s は本物の依存かもしれない —— **そこは未確認**。
+
+つまり analyze の残りの tail は「analyzer の CPU を削る」とは**別軸**にある。
+効くのは**順序**で、tail パッケージのアクションを優先的に流せば span は
+buildir 終了（0.34s）＋ 実働（0.16s）の側に寄る余地がある。
+
+**同時に、CPU 表だけを見て着手してはいけないことも表に出た。** gocritic は tsdb の
+CPU 1 位（13.0%）だが **0.62s で終わっている**。丸ごと 0 にしても wall は動かない。
+17 本目が 2 回とも「CPU を削ったのに wall が 1% しか動かない」で終わったのは、
+この区別を**測る手段が無かった**からである。今はある。
+
+#### 4. 残っている missing 3 を全部 golangci-lint 2.12.2 で実測した
+
+19 本目の「次にやること」3 の前半。**3 件とも原因まで特定した**（移植は未着手）。
+測定は golden の case config そのまま（`max-same-issues: 0` /
+`max-issues-per-linter: 0` 済み）＋ `compat/golden/.work/staticcheck-sa/`。
+
+**SA5011 `sa5011/ok/ok.go:89:17` —— `func_has_interface_param` が条件を取り違えている。**
+上流は `okSequentialConcreteFatal(t fataler, statusResp *Status)` を**報告する**
+（related information は `86:5`）。guff は報告しない。guff の
+`block_has_soft_abort_call` は「**囲む関数がインターフェース型の引数を持つか**」で
+soft-abort を判定していて、`fataler` が具象 struct なのでこの経路に入らない。
+上流の基準はそこではなく**呼ばれた `Fatal` が実際に noreturn か**である:
+`(*testing.T).Fatal` は `runtime.Goexit` に落ちるので `ctrlflow.NoReturn` が noreturn と答えて黙り、
+ユーザ定義の `fataler.Fatal`（空の本体）は**戻る**ので撃つ。インターフェース経由は
+callee 不明 ＝ noreturn でない ＝ 撃つ。実測でも **`bad.go:23`（TB）と `ok.go:89`（具象）の
+両方を上流は撃っている**。guff は前者だけ。
+**fixture のコメント（「check stays clean」）が上流と逆で、そこが誤りの出発点。**
+直すには引数の型ではなく **callee の noreturn 性**が要る（`panic` / `os.Exit` /
+`runtime.Goexit` / それらに落ちる関数、の推移閉包）。guff には今 `lostcancel` の
+名前ベースの代用しか無いので、そこから作ることになる。**精度に効くので OSS ゲートで守ること。**
+
+**SA4006 `sa6000/ok/ok.go:13:5` —— `if` の 2 つの後続が両方そのまま関数の出口に落ちると、
+上流の IR は分岐ごと畳んで条件値の参照者を消す。** 3 関数のプローブで確定させた:
+
+```go
+func tail(lines []string) {                    // 報告される
+	if match, _ := regexp.MatchString(`b`, lines[1]); !match { return }
+}
+func notTail(lines []string) {                 // 報告されない
+	if match, _ := regexp.MatchString(`b`, lines[1]); !match { return }
+	println("after")                       // ← 1 文足すだけで消える
+}
+func middle(lines []string) {                  // 2 つ目だけ報告される
+	if match, _ := regexp.MatchString(`a`, lines[0]); !match { return }
+	if match, _ := regexp.MatchString(`b`, lines[1]); !match { return }
+}
+```
+
+then 側も else 側も**空のまま関数の出口へ行く**とき両者は同じブロックに融合し、
+`If` は後続が同一になって `Jump` に置き換わる。条件値の参照者が 0 になり
+SA4006 が「never used」と言う。1 文でも後ろにあれば融合しないので消える。
+**stub は関係ない**（golden は本物の `regexp` を使う。`sa6000/stub/` は
+`tests/support.rs::collect_stubs` 経由で Rust の単体テストだけが読む）。
+移植先は SA4006 ではなく **guff-ssa のブロック整理**。
+
+**SA6001 `sa4006/bad/bad.go:29:6` —— 死んだ `s = string(b)` に上流が撃つ。** 実測の切り分け:
+
+| 形 | 上流 |
+|---|---|
+| `k := string(bs); return m[k]` | **撃つ**（教科書どおり） |
+| `s := "a"; _ = s; s = string(bs)`（golden の形。値は読まれない） | **撃つ** |
+| `s := string(bs); _ = s` | 撃たない |
+| `return string(bs)` / `sink(string(bs))` | 撃たない |
+| `k := string(bs); sink(k); return m[k]` | 撃たない |
+
+`[]byte → string` 変換の**参照者の集合**で決まっている。死んだ再代入が撃たれて
+死んだ宣言が撃たれない差はまだ説明できていない。`honnef.co/go/tools` の
+`CheckMapBytesKey` の実物を読むところから（module cache に無いので取得が要る）。
+
+**次にやること**
+
+1. **tail パッケージのアクションを優先的にスケジュールする**（上記 3）。
+   analyze の残りの tail は CPU ではなく**順序**である —— span を決める 5 本は
+   合計 0.16s しか働かず、0.8s 待っている。依存（`buildir`）は 0.34s で終わっている。
+   `docs/PERF_TASKS_V3.md` の V1/V2 は「どの analyzer が重いか」の軸なので、
+   **これはその表には出てこない**。着手前に `GUFF_DEBUG_CACHE=2` の
+   critical path を取り直すこと（V1 が進むたびに顔ぶれが変わる）。
+2. **CPU 表の上位から着手しないこと。** gocritic は tsdb の CPU 1 位だが 0.62s で終わる。
+   `waited` と `[start..end]` を見てから決める。
+3. missing 3 の移植（上記 4 に原因と実測がある）。SA5011 は callee の noreturn 性、
+   SA4006 は guff-ssa のブロック融合、SA6001 は上流ソースの取得が先。
+4. `replaceRecvType`（`subst.rs`）。優先度低のまま。**観測できる差分がまだ無い**ので、
+   着手するなら先に「インスタンス化した generic interface のメソッドの型文字列」が
+   実際にズレる入力を作ること。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
