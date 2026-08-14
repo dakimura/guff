@@ -6,6 +6,12 @@ on:
     - cron: "15 5 * * *"
   workflow_dispatch:
 
+# Same toolchain contract as compat.yml — see the comment there for why the
+# version lives in `.go-version` and why `auto` desyncs guff's stdlib from the
+# one `go list` used.
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   nightly:
     runs-on: ubuntu-latest
@@ -16,7 +22,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: .go-version
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
