@@ -49,6 +49,44 @@ ST1023/QF1011 の言い回し、末尾ピリオド、govet の Go バージョ�
 
 ---
 
+## 1.5 CI が緑なら何が保証されるのか（2026-08-15）
+
+「CI が通った ＝ 互換性は担保」と言えるようにするための現在地です。
+**保証されるものと、CI の外に残っているものを分けて書きます。**
+
+### PR ごとに回るゲート（`compat.yml`）
+
+| ジョブ | 何と比較するか | 保証されること |
+|---|---|---|
+| `smoke` | **golden 81 ケース**（`path:line:col:linter:severity:text` を**正規化なしで完全一致**） | check レベルの出力が 1 文字でも動いたら落ちる |
+| 〃 | reject ゲート | 「upstream が起動を拒む設定」で guff も拒む |
+| 〃 | Go stdlib port differential（time / url / template / regexp） | SA100x のパーサ移植が本物の stdlib と一致 |
+| `unit` | — | `cargo test --workspace` 約 3,100 件（「guff が撃つ」ことの回帰網。ground truth ではない） |
+| `isolate` | **114 linter を 1 本ずつ** golangci-lint と実行比較 | 複数 linter 構成に隠れるパリティ穴 |
+| 〃 | fileset ゲート | 両ツールが**同じ .go ファイル集合**を解析している |
+| `oss-pr` | OSS **5 リポ**を各自の `.golangci.yml` で golangci-lint と比較 | 実リポでの precision / recall と worker panic / ill-typed 数 |
+| 〃 | `corpus/shapes.py check --offline` | 必須の入力形（generics / cgo / build tags …）を誰かが踏んでいる |
+
+### PR では回らないもの
+
+| 何 | どこで回るか | 埋め方 |
+|---|---|---|
+| **OSS nightly tier**（consul / grafana / containerd。findings の大半はここ） | main への push | **PR に `nightly-corpus` ラベル**を付ければ PR でも回ります（2026-08-15 追加）。解析系を触る PR は付けること |
+| shape ledger の**再測定**（`check` の非 offline） | main への push / ラベル付き PR | 同上 |
+| `weekly` tier 3 リポ | **どのジョブにも無い** | 走らないゲートは何も守れない（§Phase 5 と同じ話） |
+| **性能・RSS**（`regress/run.sh`） | ローカルのみ | baseline がマシン固有なので CI では判定しない。`docs/PERF_TASKS_V5.md` §7 の手順で手で回す |
+
+### 緑でも残っている既知の差分
+
+- **ratchet**: `revive` / `staticcheck-{sa,st,qf,s}` の golden は**既知の差分件数を凍結**しています。
+  増えたら落ちますが、**今ある差分は緑のまま**です。
+- **allowlist**: `compat/allowlists/*.txt` に記録した OSS の既知差分（例: consul 3 件）は
+  理由と日付つきで除外されています。
+- **比較キーの穴**: `compat/normalize.py` は OSS 比較で column / severity / SuggestedFix を見ません（§1）。
+  **golden だけがそこまで見ます**。つまり **golden に入っていない check は、列がずれても CI は緑です。**
+
+---
+
 ## 2. フェーズ
 
 各フェーズは独立に着手・完了できる。番号は推奨実行順（安価で以降の判断材料になるものが先）。
@@ -1565,6 +1603,15 @@ IR 値が assert の結果そのものでなくなる（back edge 越しの Phi 
 `compat.yml` に **`oss-nightly` ジョブ**を追加し、**main への push ごとに**
 consul / grafana / containerd を回す（PR では回さない: コールドな GHA コーパスで 30 分かかる。
 代わりに push 前にローカルで `--tier pr,nightly`）。
+
+> **2026-08-15 追記 — PR から nightly を呼べるようにした。**
+> 「push 前にローカルで回す」は**覚えていないと守れない規約**で、しかも
+> このセクション自身が「pr tier だけでは 3 件の誤検出に気付けなかった」と書いています。
+> そこで `oss-nightly` の条件を
+> **「main への push、または PR に `nightly-corpus` ラベルが付いているとき」**にしました。
+> 解析系を触る PR はラベルを 1 つ付ければ**マージ前に**答えが出ます。
+> 付けなければ従来どおり PR では回りません（毎 PR に 90 分は払わない）。
+> あわせて `workflow_dispatch` を足したので、ブランチを指定して手で回すこともできます。
 
 **恒久的に赤いゲートは何も日付を付けられない**ので、残る consul 3 件
 （SA5011 1 / SA9008 2）を理由と日付つきで `compat/allowlists/consul.txt` に記録した（§5 参照）。

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # So the heavy tiers can be asked for on a branch without opening a PR, and
+  # so a red nightly on main can be retried once its cause is fixed elsewhere.
+  workflow_dispatch:
 
 # Prefer finding regressions over saving a few CI minutes.
 # Full per-linter isolate is ~a few minutes locally; allow headroom on GHA.
@@ -285,12 +288,21 @@ jobs:
   # 2026-08-09). Running the tier on every push to main is what makes a
   # regression attributable to a commit.
   #
-  # Not run on pull requests: the tier takes ~3 minutes locally and much longer
-  # on a cold GHA corpus cache, and a regression caught on the merge commit is
-  # still dated to the day. Run it locally before pushing:
+  # Not run on every pull request: the tier takes ~3 minutes locally and much
+  # longer on a cold GHA corpus cache, and a regression caught on the merge
+  # commit is still dated to the day.
+  #
+  # But "run it locally before pushing" is a rule that has to be remembered, and
+  # the tier exists because the pr tier is not enough — the 2026-08-09 session
+  # found three false positives that only nightly saw (COMPAT-HARDENING §4). A
+  # PR that wants that answer *before* merging can now ask for it, by carrying
+  # the `nightly-corpus` label, without every PR paying ninety minutes for it.
+  # Label an analysis-touching PR, or run it locally:
   #   ./compat/run.sh --oss --tier pr,nightly
   oss-nightly:
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'nightly-corpus')
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
