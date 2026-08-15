@@ -144,8 +144,8 @@ guff:   seed speculate MISS ...
 3. cgo の compiled files を、golist peek と同じキャッシュから attach する。
    これが無いと prometheus の `client_golang/prometheus` が 28 対 30 でズレて、
    **そこ 1 パッケージだけで MISS します**。
-4. **MISS が理由を言うようにしました。** 「MISS (fingerprint/targets)」では
-   1 か月間ずっと健康に見えていました。今は
+4. **MISS が理由を言うようにしました。** 「MISS (fingerprint/targets)」は
+   **どちらの入力がどうずれたのかを何も言いません**。今は
    `MISS after 0.16s (github.com/prometheus/client_golang/prometheus: compiled_go_files 28 vs 30)`
    のように**どこがどう違うか**を出します。**上の 2 つのバグはこれで見つけました。**
 
@@ -325,12 +325,15 @@ analyzer B」の順で回る）は、**RSS そのものの説明にもなって�
 | findings バイト同一（**C-7 が HIT した状態**で） | ✅ IDENTICAL（並列 / `-j 1` とも） |
 | `cargo test --release --workspace` | ✅ **3,119 passed / 0 failed / 13 ignored**（V4 の 3,118 + 本 PR の 1 本） |
 | `compat/golden/run.sh` | ✅ **OK: 81 case(s) match golden exactly**（ratchet は baseline どおり: sa missing 3 / extra 1、st missing 10 / extra 0） |
-| `regress --profile full` | 下記 |
+| `regress --profile full` | ✅ **PASS**（wall 2.390s / limit 2.510s、peak RSS 3,306,930,176 / limit 3,737,498,419、P=R=1.0000）。ただし 1 サンプルでは落ちもします — 下記 |
 | `regress --profile tsdb` | ⚠️ **base と同じ 2 項目で FAIL**（wall / peak RSS）。findings は P=R=1.0000 / `guff_only` 0。RSS は base 1,101,529,088 に対し本ブランチ **1,077,198,848 で低い** |
 
 ### `regress --profile full` — 1 サンプルでは符号が反転する
 
-**1 発ずつ撃つと base PASS (2.470s) / 本ブランチ FAIL (2.630s)** と出ました。
+**同じバイナリで 2.390s（PASS）/ 2.630s（FAIL）/ 2.730s（FAIL）が出ます。**
+差は**マシンが落ち着いているかどうか**だけで、2.730s は 40 分の compat ゲート直後、
+2.390s は load average が 2.5 を割るまで待ってからの値です。
+**1 発ずつ撃つと base PASS (2.470s) / 本ブランチ FAIL (2.630s)** とも出ました。
 **V4 §7.2 が「まさにこれが起きる」と書いていたもの**です（あちらは逆向きに出ています）。
 **交互 4 往復**（`--skip-golangci`、同一条件）だと:
 
