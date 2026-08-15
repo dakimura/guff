@@ -114,16 +114,7 @@ fn refine(
     // (e.g. NEED_MODULE via NEED_TYPES) are retained — matching go/packages.
     clear_unrequested_fields(&mut by_id, requested_mode.implied());
 
-    // golangci-lint drops the plain `P` when `P [P.test]` exists (and drops
-    // synthetic testmains). Without this, unused / ineffassign / friends report
-    // false positives on the prod-only view of packages that have tests.
-    let all_pkgs: Vec<Arc<Package>> = by_id.values().cloned().collect();
-    let keep: HashSet<String> = crate::dedup::filter_test_main_packages(
-        crate::dedup::filter_duplicate_packages(all_pkgs),
-    )
-    .into_iter()
-    .map(|p| p.id.clone())
-    .collect();
+    let keep = surviving_ids(&by_id);
     by_id.retain(|id, _| keep.contains(id));
     response.roots.retain(|id| keep.contains(id));
 
@@ -154,6 +145,59 @@ fn refine(
 
     let _ = cfg;
     Ok((roots, all))
+}
+
+/// Which package ids survive the load.
+///
+/// golangci-lint drops the plain `P` when `P [P.test]` exists (and drops
+/// synthetic testmains). Without this, unused / ineffassign / friends report
+/// false positives on the prod-only view of packages that have tests.
+fn surviving_ids(by_id: &HashMap<String, Arc<Package>>) -> HashSet<String> {
+    let all_pkgs: Vec<Arc<Package>> = by_id.values().cloned().collect();
+    crate::dedup::filter_test_main_packages(crate::dedup::filter_duplicate_packages(all_pkgs))
+        .into_iter()
+        .map(|p| p.id.clone())
+        .collect()
+}
+
+/// The shape [`refine`] would give this driver response — which packages exist
+/// and which of them are roots — without type-checking anything.
+///
+/// C-7 speculation guesses the graph from a disk cache and starts building the
+/// seed against it while the authoritative load runs; the seed is only usable
+/// if the guess reproduces the real graph exactly
+/// (`SpeculativeSeed::matches`). A raw driver response is not that graph:
+/// prometheus `./...` lists 1792 packages and 293 root-ish entries, which
+/// `refine` narrows to 1616 and 118. Speculating from the raw response
+/// therefore missed on the target list every single time — measured on
+/// 2026-08-15, on the `go list` path C-7 was written for, so this had never
+/// hit for anyone.
+///
+/// Shares `connect_imports` and [`surviving_ids`] with `refine` so the two
+/// cannot drift into disagreeing about what the graph is.
+pub(crate) fn peeked_graph_shape(
+    response: DriverResponse,
+) -> (Vec<String>, Vec<Arc<Package>>) {
+    let mut by_id: HashMap<String, Arc<Package>> = HashMap::default();
+    for pkg in response.packages {
+        by_id.insert(pkg.id.clone(), pkg);
+    }
+    connect_imports(&mut by_id);
+
+    let keep = surviving_ids(&by_id);
+    by_id.retain(|id, _| keep.contains(id));
+
+    let mut roots: Vec<String> = response
+        .roots
+        .into_iter()
+        .filter(|id| keep.contains(id))
+        .collect();
+    roots.sort();
+    roots.dedup();
+
+    let mut all: Vec<Arc<Package>> = by_id.into_values().collect();
+    all.sort_by(|a, b| a.id.cmp(&b.id));
+    (roots, all)
 }
 
 fn connect_imports(by_id: &mut HashMap<String, Arc<Package>>) {
@@ -335,5 +379,80 @@ mod tests {
             .expect("load");
         assert!(roots[0].name.is_empty());
         assert!(!roots[0].go_files.is_empty());
+    }
+
+    /// C-7 speculation guesses the graph from a disk cache, and the guess is
+    /// only useful if it reproduces what `refine` produces. The raw driver
+    /// response does not: it still holds the prod-only `P` that `P [P.test]`
+    /// replaces. Speculating from the raw response is what made the target
+    /// list disagree — 293 guessed against 118 real on prometheus `./...` —
+    /// so every speculation missed.
+    #[test]
+    fn peeked_graph_shape_drops_what_refine_drops() {
+        let prod = Arc::new(Package {
+            id: "example.com/a".into(),
+            pkg_path: "example.com/a".into(),
+            name: "a".into(),
+            go_files: vec!["a.go".into()],
+            ..Package::default()
+        });
+        let test_variant = Arc::new(Package {
+            id: "example.com/a [example.com/a.test]".into(),
+            pkg_path: "example.com/a".into(),
+            name: "a".into(),
+            go_files: vec!["a.go".into(), "a_test.go".into()],
+            ..Package::default()
+        });
+        let response = DriverResponse {
+            roots: vec![
+                "example.com/a".into(),
+                "example.com/a [example.com/a.test]".into(),
+            ],
+            packages: vec![prod, test_variant],
+            ..DriverResponse::default()
+        };
+
+        let (roots, all) = peeked_graph_shape(response);
+        assert_eq!(roots, vec!["example.com/a [example.com/a.test]".to_string()]);
+        assert_eq!(all.len(), 1);
+
+        // And it agrees with what the real load would produce from the same
+        // response — the property that makes a guess usable at all.
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS,
+            ..Config::default()
+        };
+        let refined_roots = load_with_driver(
+            &cfg,
+            &[".".to_string()],
+            &FakeDriver {
+                response: DriverResponse {
+                    roots: vec![
+                        "example.com/a".into(),
+                        "example.com/a [example.com/a.test]".into(),
+                    ],
+                    packages: vec![
+                        Arc::new(Package {
+                            id: "example.com/a".into(),
+                            pkg_path: "example.com/a".into(),
+                            name: "a".into(),
+                            go_files: vec!["a.go".into()],
+                            ..Package::default()
+                        }),
+                        Arc::new(Package {
+                            id: "example.com/a [example.com/a.test]".into(),
+                            pkg_path: "example.com/a".into(),
+                            name: "a".into(),
+                            go_files: vec!["a.go".into(), "a_test.go".into()],
+                            ..Package::default()
+                        }),
+                    ],
+                    ..DriverResponse::default()
+                },
+            },
+        )
+        .expect("load");
+        let refined: Vec<String> = refined_roots.iter().map(|p| p.id.clone()).collect();
+        assert_eq!(roots, refined);
     }
 }
