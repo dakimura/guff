@@ -2,7 +2,7 @@
 //!
 //! Port of `honnef.co/go/tools/analysis/callcheck`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use guff::ast::{CallExpr, File};
 use guff::token::Token;
@@ -160,6 +160,44 @@ pub fn run(pass: &mut Pass<'_>, rules: &HashMap<&str, CheckFn>) {
             Some(a) => a,
             None => return,
         };
+
+        // Does this package call anything this rule table names? The set of
+        // names it calls is the same question all twenty-five analyzers below
+        // were each answering with their own full walk, so it is built once per
+        // package and cached on the IR — see `BuildIrResult::call_target_names`.
+        // When the answer is no, which it is for most packages, this returns
+        // without walking. When it is yes, the walk below runs unchanged and
+        // reports in the order it always did.
+        let called = ir.call_target_names(|| {
+            let mut out = HashSet::new();
+            for &fid in ir.src_funcs_with_methods() {
+                let caller = ir.prog.functions.get(fid);
+                for (_, block) in caller.live_blocks() {
+                    for &iid in &block.instrs {
+                        let Some((_, common)) = call_common(caller, iid) else {
+                            continue;
+                        };
+                        let Some(target) = resolve_call_target(common, &ir.prog) else {
+                            continue;
+                        };
+                        out.insert(
+                            call_target_name_memo(
+                                pass.pkg().id.as_str(),
+                                &ir.prog.type_arena,
+                                &artifacts.objects,
+                                &artifacts.packages,
+                                target,
+                            )
+                            .to_string(),
+                        );
+                    }
+                }
+            }
+            out
+        });
+        if !rules.keys().any(|name| called.contains(*name)) {
+            return;
+        }
 
         let mut pending = Vec::new();
 

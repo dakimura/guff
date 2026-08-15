@@ -2,6 +2,7 @@
 //!
 //! Port of `honnef.co/go/tools/internal/passes/buildir`.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use std::sync::Arc;
@@ -31,6 +32,8 @@ pub struct BuildIrResult {
     expr_values: OnceLock<ExprValueIndex>,
     /// Built on first use — see [`Self::src_funcs_with_methods`].
     src_funcs_all: OnceLock<Vec<FuncId>>,
+    /// Built on first use — see [`Self::call_target_names`].
+    call_target_names: OnceLock<HashSet<String>>,
 }
 
 impl BuildIrResult {
@@ -47,6 +50,7 @@ impl BuildIrResult {
             src_funcs,
             expr_values: OnceLock::new(),
             src_funcs_all: OnceLock::new(),
+            call_target_names: OnceLock::new(),
         }
     }
 
@@ -74,6 +78,31 @@ impl BuildIrResult {
     pub fn expr_values(&self) -> &ExprValueIndex {
         self.expr_values
             .get_or_init(|| ExprValueIndex::build(&self.prog, &self.src_funcs))
+    }
+
+    /// The set of call-target names this package uses, built once on first ask.
+    ///
+    /// Twenty-five staticcheck analyzers hand [`crate::callcheck::run`] a rule
+    /// table keyed by call-target name, and each of them walked every
+    /// instruction of every function to find out that this package calls none
+    /// of them. Most packages call none: SA1030's rules are all
+    /// `strconv.Quote`-shaped, SA6000's are `regexp.Match`-shaped, and an
+    /// average package touches neither. That walk was 0.32s of self CPU on
+    /// prometheus `./...`, twenty-five times over the same instructions.
+    ///
+    /// The answer is the same for all of them, so the first analyzer to ask
+    /// pays for it and the other twenty-four get a hash lookup per rule.
+    /// Whoever does match still walks, and reports in the order it always did.
+    ///
+    /// `build` supplies the names — collecting them needs the type arenas and
+    /// the call-target memo, which live above this pass. Same lifetime as the
+    /// other lazy indices here: the runner hands every analyzer for a package
+    /// the same `Arc<BuildIrResult>` and drops it when the last one is done.
+    pub fn call_target_names(
+        &self,
+        build: impl FnOnce() -> HashSet<String>,
+    ) -> &HashSet<String> {
+        self.call_target_names.get_or_init(build)
     }
 }
 
