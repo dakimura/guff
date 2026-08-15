@@ -132,6 +132,8 @@ for case_dir in "$CASES_DIR"/*/; do
   # unless the word size is 4) is unreachable on the host arch and needs
   # GOOS/GOARCH to be compared at all.
   case_env=()
+  case_goos=""
+  case_goarch=""
   if [[ -f "$case_dir/env" ]]; then
     while IFS= read -r raw || [[ -n "$raw" ]]; do
       line="${raw%%#*}"
@@ -139,8 +141,21 @@ for case_dir in "$CASES_DIR"/*/; do
       [[ -z "$line" ]] && continue
       [[ "$line" == *=* ]] || die "$name: env line is not KEY=VALUE: $raw"
       case_env+=("$line")
+      [[ "$line" == GOOS=* ]] && case_goos="${line#GOOS=}"
+      [[ "$line" == GOARCH=* ]] && case_goarch="${line#GOARCH=}"
     done <"$case_dir/env"
   fi
+
+  # A fixture whose build constraints resolve differently on darwin and on the
+  # runner makes the golden a recording of one machine, and the difference
+  # surfaces as unexplained guff extras rather than as "platform" (the module
+  # names the two fixtures this actually happened to). Checked in both modes:
+  # regenerating from a platform-dependent fixture is how such a golden gets
+  # written in the first place.
+  plat_args=(--case "$name" --root "$work")
+  [[ -n "$case_goos" ]] && plat_args+=(--goos "$case_goos")
+  [[ -n "$case_goarch" ]] && plat_args+=(--goarch "$case_goarch")
+  python3 "$GOLDEN_DIR/platforms.py" "${plat_args[@]}" || die "$name: fixtures are not platform-independent"
 
   if [[ "$REGEN" -eq 1 ]]; then
     # golangci-lint is not a deterministic function of its input: on cases/revive

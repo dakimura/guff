@@ -23,7 +23,7 @@ use std::sync::OnceLock;
 
 use guff::ast::File as AstFile;
 use guff::constraint::{self, Expr};
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos};
 use guff_analysis::code;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
@@ -420,7 +420,7 @@ fn check_go_file(pass: &mut Pass<'_>, index: usize) {
     };
 
     let re_fset = FileSet::new();
-    let Ok(parsed) = parse_file(&re_fset, name, &src, PARSE_COMMENTS) else {
+    let Ok(parsed) = parse_file(&re_fset, name, &src, COMMENTS_ONLY) else {
         return;
     };
     let mut check = Checker::new();

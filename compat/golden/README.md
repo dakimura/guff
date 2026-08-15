@@ -58,6 +58,7 @@ diagnoses ("upstream's importer is blind") turned out to be a plain missing
 | `run.sh` | Gate (and `--regen`) |
 | `regen.sh` | Thin wrapper for `run.sh --regen` |
 | `golden.py` | Strict key extraction, golden read/write, diff |
+| `platforms.py` | Refuses a case whose fixtures are compiled on some supported platforms and skipped on others |
 | `cases/<name>/config.yml` | golangci-lint v2 config for the case |
 | `cases/<name>/go.mod` | Module for the materialized case |
 | `cases/<name>/sources.txt` | Go files to materialize, and where they live |
@@ -291,6 +292,31 @@ bad.go     crates/guff-style/tests/testdata/gocritic/bad.go
 So the golden and the Rust unit tests exercise the same bytes and cannot drift.
 Editing a fixture changes the golden diff — that is the intended signal, not a
 nuisance.
+
+### …and a fixture may not depend on the platform
+
+A golden is a recording of one machine's golangci-lint run, and the tier is only
+worth anything if every machine records the same thing. Build constraints break
+that silently: a file carrying `//go:build linux` is invisible to `go list` on a
+darwin laptop and compiled on the runner, so a golden regenerated on the laptop
+is short exactly the findings that file would have produced — and CI then reports
+them as guff's *extras*, with nothing in the diff saying "platform".
+
+`platforms.py` runs over the materialized `.work/<name>/` before either tool
+does, and refuses the case unless every file's include/exclude decision is the
+same on all four platforms the project releases for (linux and darwin ×
+amd64 and arm64). The rule is not "no build constraints" — SA4032 *is* a check
+about build constraints and cannot be tested without one. It is that the
+constraint must resolve the same way everywhere:
+
+| Constraint | Verdict |
+|------------|---------|
+| `//go:build linux`, `// +build linux`, `bar_linux.go` | refused — compiled on two of the four |
+| `//go:build !plan9`, `//go:build unix` | fine — true on all four |
+| `//go:build custom`, `!nope`, `go1.24` | fine — not a platform tag; tried both ways, and each way is constant |
+
+A case that pins the platform in its `env` (only `staticcheck-386` does) has
+already removed the axis, so the pinned pair is the only one checked.
 
 ## Adding a case
 
@@ -658,3 +684,44 @@ Two are worth generalizing:
   the analyzer filter and a `staticcheck_check_enabled` probe used to decide
   whether SSA needs debug refs — and the two had different bugs. They now share
   one function that takes the names and returns the allow-map.
+
+## What the platform gate found
+
+`platforms.py` was written after CI reported three `staticcheck-sa` extras that
+did not reproduce on a darwin laptop. Two of them were not guff findings at all:
+
+| Fixture | Constraint it had | What that cost |
+|---------|-------------------|----------------|
+| `sa4019/bad.go` | `// +build linux` ×2 | the golden had no SA4019 entry, so the *only* fixture for that check was compared against nothing on the machine the golden was recorded on |
+| `sa4032/bad.go` | `//go:build linux` | same, for SA4032 |
+| `govet` `buildtag/ok.go` | `//go:build linux` | no golden entry either way (it is an *ok* fixture), but its control value — "a well-formed header directive is not flagged" — was never actually exercised on darwin |
+
+Measured on the same commit and the same binary, changing only the host:
+
+| Host | guff | golden | missing | extra |
+|------|-----:|-------:|--------:|------:|
+| darwin/arm64 | 257 | 259 | 3 | 1 |
+| linux/amd64 | 259 | 259 | 3 | 3 |
+
+The fixtures now say `!plan9`, which is true on every supported platform and
+keeps each check's subject intact (two identical `// +build` lines are still two
+identical lines; `runtime.GOOS == "plan9"` under `!plan9` is still impossible).
+
+Comparing them for the first time immediately found two real SA4032 defects that
+had been unreachable behind the constraint, both confirmed against
+`honnef.co/go/tools`' own pattern
+(`(BinaryExpr (Symbol "runtime.GOOS") op@(Or "==" "!=") lit@(BasicLit "STRING" _))`):
+
+* guff reported at the **operator**; upstream passes the whole `BinaryExpr` to
+  `report.Report`, so the caret is on the comparison's first token.
+* guff accepted either operand order and any string **constant**; upstream's
+  pattern pins the symbol on the left and a string **literal** on the right, so
+  `"plan9" == runtime.GOOS` and `runtime.GOOS == someConst` are both silent.
+
+Both are now in `sa4032/ok.go` as controls. Neither was a *live* false positive:
+grafana and kubernetes do write `runtime.GOOS == someConst` (grafana declares
+`windows = "windows"` and compares against it four times), but always in files
+with no build constraints at all, and SA4032 returns before looking at a file
+that has none. The reversed order appears nowhere in the corpus. So the defects
+were latent — and they stayed latent because the one fixture that could have
+caught them was invisible on the machine the golden was recorded on.

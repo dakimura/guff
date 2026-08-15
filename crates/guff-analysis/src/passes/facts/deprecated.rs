@@ -170,7 +170,7 @@ fn deprecated_docs_by_offset(pass: &Pass<'_>, file: &File) -> HashMap<i64, Strin
         return out;
     }
     let rfset = guff::position::FileSet::new();
-    let Ok(rfile) = guff::parser::parse_file(&rfset, &base, &src, guff::parser::PARSE_COMMENTS)
+    let Ok(rfile) = guff::parser::parse_file(&rfset, &base, &src, guff::parser::COMMENTS_ONLY)
     else {
         return out;
     };

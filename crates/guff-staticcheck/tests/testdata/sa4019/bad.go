@@ -1,5 +1,5 @@
-// +build linux
-// +build linux
+// +build !plan9
+// +build !plan9
 
 package main
 

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use guff::ast::{
     BasicLit, BinaryExpr, CallExpr, Expr, File, Ident, IndexExpr, SelectorExpr, StarExpr, UnaryExpr,
 };
-use guff::parser::{parse_file, PARSE_COMMENTS};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::FileSet;
 use guff::scanner::{Scanner, SCAN_COMMENTS};
 use guff::token::Token;
@@ -359,7 +359,7 @@ fn parse_with_comments(path: &Path, cached: Option<&[u8]>) -> Option<Reparsed> {
     };
     let name = path.file_name()?.to_str()?;
     let fset = FileSet::new();
-    let file = parse_file(&fset, name, src, PARSE_COMMENTS).ok()?;
+    let file = parse_file(&fset, name, src, COMMENTS_ONLY).ok()?;
     Some(Reparsed { fset, file })
 }
 
