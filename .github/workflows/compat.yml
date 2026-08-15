@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `labeled` is here so the `nightly-corpus` label (see the oss-nightly job)
+    # actually starts something. Without it, a job's `if` is evaluated against
+    # the labels the PR had when the run began, so labelling an open PR does
+    # nothing until the next push — which is how it was tried first, and the
+    # nightly job simply reported `skipped`. The other three are the defaults,
+    # which naming `types` at all would otherwise drop.
+    types: [opened, synchronize, reopened, labeled]
   # So the heavy tiers can be asked for on a branch without opening a PR, and
   # so a red nightly on main can be retried once its cause is fixed elsewhere.
   workflow_dispatch:
