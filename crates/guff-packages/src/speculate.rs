@@ -36,34 +36,7 @@ pub fn seed_input_fingerprint(
     by_id: &HashMap<String, Arc<Package>>,
 ) -> String {
     let export_paths = collect_existing_exports(by_id);
-    let mut needed: Vec<String> = Vec::new();
-    let mut seen = HashSet::default();
-    let mut stack: Vec<String> = Vec::new();
-    for id in targets {
-        if let Some(pkg) = by_id.get(id) {
-            stack.extend(pkg.deps.iter().cloned());
-            stack.extend(pkg.imports.keys().cloned());
-        }
-    }
-    while let Some(path) = stack.pop() {
-        if path == "unsafe" || path == "C" {
-            continue;
-        }
-        if !seen.insert(path.clone()) {
-            continue;
-        }
-        needed.push(path.clone());
-        if let Some(pkg) = by_id.get(&path) {
-            stack.extend(pkg.deps.iter().cloned());
-        }
-    }
-    needed.retain(|p| {
-        export_paths.contains_key(p)
-            || by_id
-                .get(p)
-                .is_some_and(|pk| !pk.compiled_go_files.is_empty())
-    });
-    needed.sort();
+    let needed = needed_ids(targets, by_id, &export_paths);
 
     let mut hasher = Sha256::new();
     hasher.update(b"seed-spec-v1\0");
@@ -106,6 +79,44 @@ pub fn seed_input_fingerprint(
     hex_encode(hasher.finalize())
 }
 
+/// Every package the seed for `targets` reads, in the order the fingerprint
+/// folds them.
+fn needed_ids(
+    targets: &[String],
+    by_id: &HashMap<String, Arc<Package>>,
+    export_paths: &HashMap<String, PathBuf>,
+) -> Vec<String> {
+    let mut needed: Vec<String> = Vec::new();
+    let mut seen = HashSet::default();
+    let mut stack: Vec<String> = Vec::new();
+    for id in targets {
+        if let Some(pkg) = by_id.get(id) {
+            stack.extend(pkg.deps.iter().cloned());
+            stack.extend(pkg.imports.keys().cloned());
+        }
+    }
+    while let Some(path) = stack.pop() {
+        if path == "unsafe" || path == "C" {
+            continue;
+        }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        needed.push(path.clone());
+        if let Some(pkg) = by_id.get(&path) {
+            stack.extend(pkg.deps.iter().cloned());
+        }
+    }
+    needed.retain(|p| {
+        export_paths.contains_key(p)
+            || by_id
+                .get(p)
+                .is_some_and(|pk| !pk.compiled_go_files.is_empty())
+    });
+    needed.sort();
+    needed
+}
+
 fn collect_existing_exports(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, PathBuf> {
     let mut out = HashMap::default();
     for (id, pkg) in by_id {
@@ -133,9 +144,89 @@ pub struct SpeculativeSeed {
     pub fset: Arc<FileSet>,
     pub fingerprint: String,
     pub targets: Vec<String>,
+    /// The graph this seed was built from, kept for [`Self::explain_miss`].
+    guessed: HashMap<String, Arc<Package>>,
 }
 
 impl SpeculativeSeed {
+    /// What the guessed graph got wrong, for the debug line on a miss.
+    ///
+    /// A bare "MISS" is what let C-7 look like it was working for a month: it
+    /// never hit on this corpus, and nothing said which of the two inputs —
+    /// the target list or the package contents — disagreed. Both have been
+    /// wrong at different times, and they have different causes.
+    pub fn explain_miss(&self, all: &[Arc<Package>], miss_ids: &[String]) -> String {
+        let mut a = self.targets.clone();
+        let mut b = miss_ids.to_vec();
+        a.sort();
+        b.sort();
+        if a != b {
+            let only_guessed = a.iter().filter(|t| !b.contains(t)).count();
+            let only_real = b.iter().filter(|t| !a.contains(t)).count();
+            return format!(
+                "targets: guessed {} vs real {} ({} only guessed, {} only real)",
+                a.len(),
+                b.len(),
+                only_guessed,
+                only_real,
+            );
+        }
+        let real_by_id: HashMap<String, Arc<Package>> =
+            all.iter().map(|p| (p.id.clone(), Arc::clone(p))).collect();
+        let real_exports = collect_existing_exports(&real_by_id);
+        let guessed_exports = collect_existing_exports(&self.guessed);
+        let real_needed = needed_ids(miss_ids, &real_by_id, &real_exports);
+        let guessed_needed = needed_ids(&self.targets, &self.guessed, &guessed_exports);
+        if real_needed != guessed_needed {
+            let only_guessed = guessed_needed
+                .iter()
+                .find(|id| !real_needed.contains(id))
+                .cloned();
+            let only_real = real_needed
+                .iter()
+                .find(|id| !guessed_needed.contains(id))
+                .cloned();
+            return format!(
+                "dependency set: guessed {} vs real {} (e.g. only guessed: {:?}, only real: {:?})",
+                guessed_needed.len(),
+                real_needed.len(),
+                only_guessed,
+                only_real,
+            );
+        }
+        for id in real_needed.iter().chain(miss_ids.iter()) {
+            let real = all.iter().find(|p| &p.id == id);
+            let guessed = self.guessed.get(id);
+            match (real, guessed) {
+                (Some(r), Some(g)) => {
+                    if r.compiled_go_files != g.compiled_go_files {
+                        return format!(
+                            "{id}: compiled_go_files {} vs {}",
+                            g.compiled_go_files.len(),
+                            r.compiled_go_files.len(),
+                        );
+                    }
+                    let (mut rd, mut gd) = (r.deps.clone(), g.deps.clone());
+                    rd.sort();
+                    gd.sort();
+                    if rd != gd {
+                        return format!("{id}: deps {} vs {}", gd.len(), rd.len());
+                    }
+                    if r.export_file != g.export_file {
+                        return format!(
+                            "{id}: export_file {:?} vs {:?}",
+                            g.export_file, r.export_file
+                        );
+                    }
+                }
+                (None, Some(_)) => return format!("{id}: guessed but not in the real graph"),
+                (Some(_), None) => return format!("{id}: real but not guessed"),
+                (None, None) => {}
+            }
+        }
+        "a dependency outside the target list".to_string()
+    }
+
     /// True when the authoritative miss set and package graph match what we built.
     pub fn matches(&self, all: &[Arc<Package>], miss_ids: &[String]) -> bool {
         let mut a = self.targets.clone();
@@ -196,8 +287,9 @@ impl SpeculativeSeedJob {
         } else {
             if timing {
                 eprintln!(
-                    "guff:   seed speculate MISS (fingerprint/targets) after {:.2}s; rebuilding",
+                    "guff:   seed speculate MISS after {:.2}s ({}); rebuilding",
                     waited.as_secs_f64(),
+                    spec.explain_miss(all, miss_ids),
                 );
             }
             None
@@ -290,6 +382,7 @@ pub fn start_seed_speculation(
                 fset,
                 fingerprint,
                 targets,
+                guessed: by_id,
             })
         })
         .ok()?;

@@ -1306,7 +1306,7 @@ pub struct PeekedGraph {
     pub packages: Vec<Arc<Package>>,
 }
 
-/// Best-effort read of the golist disk caches for C-7 speculation.
+/// Best-effort read of the disk caches for C-7 speculation.
 ///
 /// Ignores `disable_cache`. Returns `Ok(None)` when there is no usable cache
 /// (or stdlib exports are missing — without them the seed fingerprint would
@@ -1317,7 +1317,14 @@ pub fn peek_cached_graph(
 ) -> Result<Option<PeekedGraph>, GoListError> {
     let args = golist_args(cfg, patterns, go_minor_version(cfg));
     let Some(stdout) = try_peek_golist_cache(cfg, patterns, &args) else {
-        return Ok(None);
+        // No `go list` stdout to peek at — which since C-3c is the *normal*
+        // case, not the exception. The native lister became the default on
+        // 2026-07-31 and writes `native_list/` instead, so nothing has written
+        // `golist/` since; C-7 has been skipping on every run for a fortnight
+        // ("seed speculate skip (no golist/stdlib cache peek)" even on the
+        // third run of a warm cache) and nobody noticed, because a speculation
+        // that does not start is silent by construction.
+        return Ok(peek_native_cached_graph(cfg, patterns));
     };
     if !export_paths_exist(&stdout) {
         return Ok(None);
@@ -1412,6 +1419,67 @@ pub fn peek_cached_graph(
     }
 
     Ok(Some(PeekedGraph { roots, packages }))
+}
+
+/// The same peek, against the cache the native lister actually writes.
+///
+/// Speculation only pays off if the graph it guesses from reproduces the
+/// authoritative one — otherwise `SpeculativeSeed::matches` rejects the seed
+/// and the work is thrown away. So this deliberately does not run when
+/// `GUFF_NATIVE_LIST` says the run will be answered by `go list`: the two
+/// listers agree on packages, but guessing from the wrong one is a fingerprint
+/// miss waiting to happen, and a miss costs a thread's worth of parsing.
+fn peek_native_cached_graph(cfg: &Config, patterns: &[String]) -> Option<PeekedGraph> {
+    use crate::native::NativeListMode;
+
+    if matches!(
+        NativeListMode::from_env(),
+        NativeListMode::Off | NativeListMode::Verify
+    ) {
+        return None;
+    }
+    let mut cached = crate::native_cache::try_load(cfg, patterns)?;
+    if cached.packages.is_empty() || cached.roots.is_empty() {
+        return None;
+    }
+
+    // The real load runs `attach_hybrid_exports` over the driver response
+    // before refining it, which fills in `CompiledGoFiles` for cgo packages —
+    // and the native cache stores the response from *before* that step. Left
+    // out, prometheus's `client_golang/prometheus` guesses 28 compiled files
+    // where the run has 30, and the fingerprint misses on that one package.
+    // Read the same compiled-files cache the golist peek reads, and give up
+    // rather than seed from the `GoFiles` fallback: a guess that cannot match
+    // is worse than not guessing, because the seed thread runs either way.
+    if defers_compiled(cfg) {
+        let mut want: Vec<String> = cached
+            .packages
+            .iter()
+            .filter(|p| p.has_cgo && p.errors.is_empty() && !p.id.contains(' '))
+            .map(|p| {
+                if p.pkg_path.is_empty() {
+                    p.id.clone()
+                } else {
+                    p.pkg_path.clone()
+                }
+            })
+            .collect();
+        want.sort();
+        want.dedup();
+        if !want.is_empty() {
+            let compiled = peek_compiled_files_cache(cfg, &want)?;
+            attach_compiled_files(&mut cached.packages, &compiled);
+        }
+    }
+
+    // The raw response is not the graph the run will analyze — see
+    // `load::peeked_graph_shape`. Guessing from the raw one is what made the
+    // target list miss every time.
+    let (roots, packages) = crate::load::peeked_graph_shape(cached);
+    if roots.is_empty() {
+        return None;
+    }
+    Some(PeekedGraph { roots, packages })
 }
 
 fn store_golist_cache(cfg: &Config, patterns: &[String], args: &[String], stdout: &str) {
