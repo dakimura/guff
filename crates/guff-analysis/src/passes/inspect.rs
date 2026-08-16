@@ -215,23 +215,26 @@ pub fn preorder_arm_totals() -> Vec<(&'static str, u64)> {
     Arm::NAMES.iter().copied().zip(out).collect()
 }
 
-/// One visited node, flattened out of the AST (PERF_TASKS_V2 B-1a).
-///
-/// Go's `inspector` stores `[]ast.Node` — an interface value that already
-/// carries the concrete type. `NodeRef<'a>` borrows, so it cannot live in a
-/// `'static` `AnalysisResult`; the equivalent here is the kind plus a
-/// type-erased pointer, which round-trips through `NodeRef::from_erased`.
-#[derive(Clone, Copy)]
-struct Event {
-    ptr: *const (),
-    kind: NodeKind,
-}
-
 /// The preorder sequence of one package's files, built once.
+///
+/// One visited node is a [`NodeKind`] plus a type-erased pointer (PERF_TASKS_V2
+/// B-1a). Go's `inspector` stores `[]ast.Node`, an interface value that already
+/// carries its concrete type; `NodeRef<'a>` borrows, so it cannot live in a
+/// `'static` `AnalysisResult`, and the pair round-trips through
+/// `NodeRef::from_erased` instead.
+///
+/// The pair is stored as **two arrays, not an array of pairs** (PERF_TASKS_V8
+/// §V8-3). A struct of `{*const (), NodeKind}` is 16 bytes — 8 of pointer, 1 of
+/// kind, 7 of padding — and the wide linear scan reads only the kind. Split, it
+/// streams 1 byte per node instead of 16 on the arm that scans the most nodes,
+/// and the whole structure gets 44% smaller.
 struct Events {
-    /// Nodes in exactly the order [`preorder_stack`] would visit them.
-    nodes: Vec<Event>,
-    /// Indices into [`Self::nodes`], grouped by [`NodeKind`] (PERF_TASKS_V3
+    /// The erased pointer of each node, in exactly the order [`preorder_stack`]
+    /// would visit them.
+    ptrs: Vec<*const ()>,
+    /// The kind of each node, at the same index as [`Self::ptrs`].
+    kinds: Vec<NodeKind>,
+    /// Indices into [`Self::ptrs`], grouped by [`NodeKind`] (PERF_TASKS_V3
     /// V1-2). Group `k` is `by_kind[kind_off[k] .. kind_off[k + 1]]`, and its
     /// entries ascend — so iterating a group yields that kind's nodes in
     /// preorder order, without touching the other 97%.
@@ -244,11 +247,11 @@ struct Events {
     by_kind: Vec<u32>,
     /// Start offset of each kind's group in [`Self::by_kind`], plus a terminator.
     kind_off: [u32; NodeKind::COUNT + 1],
-    /// Where each file's events begin in [`Self::nodes`], plus a terminator
+    /// Where each file's events begin in [`Self::ptrs`], plus a terminator
     /// (length `files_len + 1`).
     ///
     /// Files were flattened in order, so file `i` owns
-    /// `nodes[file_off[i] .. file_off[i + 1]]` — a contiguous run. That is what
+    /// `ptrs[file_off[i] .. file_off[i + 1]]` — a contiguous run. That is what
     /// lets a caller passing `std::slice::from_ref(file)` still use the flat
     /// index: five call sites do that (S1008, S1002, …), and before
     /// PERF_TASKS_V3 V1-2b they fell all the way back to a fresh recursive walk
@@ -274,52 +277,92 @@ struct Events {
 unsafe impl Send for Events {}
 unsafe impl Sync for Events {}
 
-/// Counting-sort `nodes` indices into per-kind groups (PERF_TASKS_V3 V1-2).
+/// Counting-sort event indices into per-kind groups (PERF_TASKS_V3 V1-2).
 ///
 /// Returns `(by_kind, kind_off)` where group `k` occupies
 /// `by_kind[kind_off[k] .. kind_off[k + 1]]`. Two linear passes: count, then
-/// scatter. Because the scatter walks `nodes` front to back, each group comes
+/// scatter. Because the scatter walks `kinds` front to back, each group comes
 /// out in ascending index order — which is preorder order, so a masked walk
 /// over a group is indistinguishable from the filtered linear scan.
-fn index_by_kind(nodes: &[Event]) -> (Vec<u32>, [u32; NodeKind::COUNT + 1]) {
+fn index_by_kind(kinds: &[NodeKind]) -> (Vec<u32>, [u32; NodeKind::COUNT + 1]) {
     let mut off = [0u32; NodeKind::COUNT + 1];
-    for e in nodes {
-        off[e.kind as usize + 1] += 1;
+    for &k in kinds {
+        off[k as usize + 1] += 1;
     }
     for k in 0..NodeKind::COUNT {
         off[k + 1] += off[k];
     }
     let mut cursor = off;
-    let mut by_kind = vec![0u32; nodes.len()];
-    for (i, e) in nodes.iter().enumerate() {
-        let slot = &mut cursor[e.kind as usize];
+    let mut by_kind = vec![0u32; kinds.len()];
+    for (i, &k) in kinds.iter().enumerate() {
+        let slot = &mut cursor[k as usize];
         by_kind[*slot as usize] = i as u32;
         *slot += 1;
     }
     (by_kind, off)
 }
 
-/// How many kinds a bucket walk will merge before the linear scan wins.
+/// How many kinds the cheap linear-min merge handles before the arm is chosen
+/// by measurement instead of by kind count.
 ///
-/// 137 of the 149 `preorder_typed` call sites pass three kinds or fewer, and a
-/// merge of `k` sorted groups costs `O(hits * k)` comparisons against the scan's
-/// `O(total)` mask tests. Past a handful of kinds the groups stop being
-/// selective and the flat scan — one sequential pass, no indirection — is
-/// simply faster. Raising this is a measurement, not a guess.
+/// 137 of the 149 `preorder_typed` call sites pass three kinds or fewer. Up to
+/// this many cursors, picking the minimum by scanning them all is a handful of
+/// register comparisons per delivered node and always beats reading the whole
+/// window — no arithmetic needed to know that.
+///
+/// Above it, kind count alone is the wrong question, and asking it was what
+/// dropped `errcheck` (6 kinds, 5% of the window) into the same arm as
+/// `gocritic` (20+ kinds, 42% of it). [`merge_beats_scan`] decides those.
 const MAX_MERGE_KINDS: u32 = 4;
+
+/// Whether merging `k` per-kind groups holding `selected` events is cheaper
+/// than one mask test per event over a `total`-event window (PERF_TASKS_V8
+/// §V8-3).
+///
+/// Both sides are counted in "units of work the arm does per node it touches":
+///
+///   * merge delivers `selected` nodes, and each one costs a min-select over
+///     the `k` live cursors plus a random read into `ptrs` — call it `k`;
+///   * scan touches `total` kinds, one byte each, sequentially, and a mask test
+///     is a shift and an and. That is the cheapest thing in this file, and
+///     `SCAN_UNITS_PER_NODE` being below 1 is what says so.
+///
+/// The numbers that made this necessary, from `GUFF_DEBUG_CACHE=2` on
+/// prometheus `./...`:
+///
+/// | analyzer | k | selected | total | merge | scan | cheaper |
+/// |---|---:|---:|---:|---:|---:|---|
+/// | `errcheck` | 6 | 84,173 | 1,606,518 | 505k | 803k | merge |
+/// | `copylocks` | 8 | 238,189 | 1,606,518 | 1.91M | 803k | scan |
+/// | `gocritic` | 20+ | 625,288 | 1,497,576 | 12.5M | 749k | scan |
+///
+/// so raising [`MAX_MERGE_KINDS`] to cover `errcheck` would have dragged
+/// `gocritic` along and made it 17x worse. That is why the existing comment
+/// said raising it "is a measurement, not a guess" — this is the measurement.
+#[inline]
+fn merge_beats_scan(k: usize, selected: usize, total: usize) -> bool {
+    /// How many scanned nodes cost what one merged node costs. Streaming a
+    /// `u8` and testing a bit is cheaper than a cursor min-select plus a random
+    /// read into `ptrs`; 2 puts the cross-over just past `copylocks` (k=8, 15%
+    /// selectivity), which the V8-3 table has as a near-tie.
+    const SCAN_NODES_PER_MERGE_UNIT: usize = 2;
+    selected.saturating_mul(k).saturating_mul(SCAN_NODES_PER_MERGE_UNIT) < total
+}
 
 /// Rebuild a node reference, tying its lifetime to the caller's `files`.
 ///
 /// # Safety
 ///
-/// `e` must have been recorded from a node inside `files` (checked by
-/// [`InspectResult::events_for`] before this is reached).
+/// `kind` / `ptr` must have been recorded from a node inside `files` (checked
+/// by [`InspectResult::events_for`] before this is reached), and must be the
+/// pair recorded at the *same* event index — the two arrays are only a node
+/// when read together.
 #[inline]
-unsafe fn node_in<'a>(files: &'a [File], e: Event) -> NodeRef<'a> {
+unsafe fn node_in<'a>(files: &'a [File], kind: NodeKind, ptr: *const ()) -> NodeRef<'a> {
     // Binds the returned lifetime to the borrow of `files` rather than letting
     // it be inferred as anything the callback would accept.
     let _ = files;
-    unsafe { NodeRef::from_erased(e.kind, e.ptr) }
+    unsafe { NodeRef::from_erased(kind, ptr) }
 }
 
 /// Result of the `inspect` analyzer.
@@ -343,25 +386,26 @@ impl InspectResult {
             return Self::default();
         };
         let files = pass.files();
-        let mut nodes = Vec::new();
+        let mut ptrs = Vec::new();
+        let mut kinds = Vec::new();
         let mut stack = Vec::new();
         let mut file_off = Vec::with_capacity(files.len() + 1);
         for file in files {
-            file_off.push(nodes.len() as u32);
+            file_off.push(ptrs.len() as u32);
             preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
-                nodes.push(Event {
-                    ptr: n.erased_ptr(),
-                    kind: n.kind(),
-                });
+                ptrs.push(n.erased_ptr());
+                kinds.push(n.kind());
                 true
             });
         }
-        file_off.push(nodes.len() as u32);
-        nodes.shrink_to_fit();
-        let (by_kind, kind_off) = index_by_kind(&nodes);
+        file_off.push(ptrs.len() as u32);
+        ptrs.shrink_to_fit();
+        kinds.shrink_to_fit();
+        let (by_kind, kind_off) = index_by_kind(&kinds);
         Self {
             events: Some(Arc::new(Events {
-                nodes,
+                ptrs,
+                kinds,
                 by_kind,
                 kind_off,
                 file_off,
@@ -384,7 +428,7 @@ impl InspectResult {
     fn events_for(&self, files: &[File]) -> Option<(&Events, u32, u32)> {
         let ev = self.events.as_ref()?;
         if ev.files_ptr == files.as_ptr() && ev.files_len == files.len() {
-            return Some((ev, 0, ev.nodes.len() as u32));
+            return Some((ev, 0, ev.ptrs.len() as u32));
         }
         // Address arithmetic on `usize`, never `offset_from` — the two pointers
         // are only known to share an allocation *after* the checks below, which
@@ -493,59 +537,83 @@ impl InspectResult {
                     arm = Arm::Single;
                     // The 119-call-site case: one kind, so its group *is* the
                     // answer — already in preorder order, no merge, no mask test.
-                    let group = clip(bits.trailing_zeros() as usize);
+                    let k = bits.trailing_zeros() as usize;
+                    let group = clip(k);
                     scanned = group.len() as u64;
                     hits = scanned;
+                    // Every node in a single-kind group has that kind, so it is
+                    // read once here instead of once per delivered node.
+                    // `NodeMask` bits *are* discriminants, so this cannot miss;
+                    // an empty group makes the `else` unreachable anyway.
+                    let kind = NodeKind::from_index(k as u8);
+                    // SAFETY (this loop and the two below): `events_for` just
+                    // confirmed these events were recorded from this slice (or
+                    // the slice it is part of), and `Events::_owner` keeps that
+                    // AST alive, so the nodes are live and unmoved. Each index
+                    // reads `kinds` and `ptrs` at the *same* position, which is
+                    // what makes the pair a node.
                     for &idx in group {
-                        let e = ev.nodes[idx as usize];
-                        // SAFETY: `events_for` just confirmed these events were
-                        // recorded from this slice (or the slice it is part of),
-                        // and `Events::_owner` keeps its AST alive; the nodes are
-                        // live and unmoved.
-                        f(unsafe { node_in(files, e) });
+                        let idx = idx as usize;
+                        let kind = kind.unwrap_or(ev.kinds[idx]);
+                        f(unsafe { node_in(files, kind, ev.ptrs[idx]) });
                     }
-                } else if n as u32 <= MAX_MERGE_KINDS {
-                    arm = Arm::Merge;
-                    // Narrow mask: walk only the requested kinds' groups,
-                    // merging by event index so the caller still sees preorder
-                    // order. `scanned` counts what we actually touched, which is
-                    // the point of the whole exercise.
-                    let mut cursors: [&[u32]; MAX_MERGE_KINDS as usize] =
-                        [&[]; MAX_MERGE_KINDS as usize];
+                } else {
+                    // Cursors for every kind in the mask. Sized for the widest
+                    // possible mask so the merge arm is not capped by the array:
+                    // 64 slices is 1 KiB of stack, once per call, and only the
+                    // first `n` are ever touched.
+                    let mut cursors: [&[u32]; NodeKind::COUNT] = [&[]; NodeKind::COUNT];
                     let mut rest = bits;
+                    let mut selected = 0usize;
                     for slot in cursors[..n].iter_mut() {
                         let k = rest.trailing_zeros() as usize;
                         rest &= rest - 1;
                         *slot = clip(k);
+                        selected += slot.len();
                     }
-                    loop {
-                        // Pick the group whose next event comes first.
-                        let mut best: Option<(usize, u32)> = None;
-                        for (i, g) in cursors[..n].iter().enumerate() {
-                            let Some(&idx) = g.first() else { continue };
-                            if best.is_none_or(|(_, b)| idx < b) {
-                                best = Some((i, idx));
+                    let total = (hi - lo) as usize;
+                    // Up to `MAX_MERGE_KINDS` the merge always wins; past it,
+                    // the groups' real sizes decide (PERF_TASKS_V8 §V8-3). Both
+                    // are `O(k)` to have: `clip` is a pair of binary searches
+                    // the merge arm needs anyway.
+                    if n as u32 <= MAX_MERGE_KINDS || merge_beats_scan(n, selected, total) {
+                        arm = Arm::Merge;
+                        // Walk only the requested kinds' groups, merging by
+                        // event index so the caller still sees preorder order.
+                        // `scanned` counts what we actually touched, which is
+                        // the point of the whole exercise.
+                        loop {
+                            // Pick the group whose next event comes first.
+                            let mut best: Option<(usize, u32)> = None;
+                            for (i, g) in cursors[..n].iter().enumerate() {
+                                let Some(&idx) = g.first() else { continue };
+                                if best.is_none_or(|(_, b)| idx < b) {
+                                    best = Some((i, idx));
+                                }
                             }
+                            let Some((slot, idx)) = best else { break };
+                            cursors[slot] = &cursors[slot][1..];
+                            scanned += 1;
+                            hits += 1;
+                            let idx = idx as usize;
+                            let (kind, ptr) = (ev.kinds[idx], ev.ptrs[idx]);
+                            f(unsafe { node_in(files, kind, ptr) });
                         }
-                        let Some((slot, idx)) = best else { break };
-                        cursors[slot] = &cursors[slot][1..];
-                        scanned += 1;
-                        hits += 1;
-                        let e = ev.nodes[idx as usize];
-                        // SAFETY: as above.
-                        f(unsafe { node_in(files, e) });
-                    }
-                } else {
-                    arm = Arm::Wide;
-                    let window = &ev.nodes[lo as usize..hi as usize];
-                    scanned = window.len() as u64;
-                    for &e in window {
-                        if !mask.contains(e.kind) {
-                            continue;
+                    } else {
+                        arm = Arm::Wide;
+                        scanned = total as u64;
+                        // Only `kinds` is streamed — one byte per node, and the
+                        // reason it is stored apart from `ptrs`. `ptrs` is
+                        // touched once per *delivered* node.
+                        let window = &ev.kinds[lo as usize..hi as usize];
+                        for (i, &kind) in window.iter().enumerate() {
+                            if !mask.contains(kind) {
+                                continue;
+                            }
+                            hits += 1;
+                            let ptr = ev.ptrs[lo as usize + i];
+                            f(unsafe { node_in(files, kind, ptr) });
                         }
-                        hits += 1;
-                        // SAFETY: as above.
-                        f(unsafe { node_in(files, e) });
                     }
                 }
             }
