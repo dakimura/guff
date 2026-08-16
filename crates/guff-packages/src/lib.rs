@@ -46,7 +46,10 @@ pub use package::{
 pub use preset::load_for_go_analysis;
 /// Fast hashmap used by package-loading hot paths (and a few public typecheck helpers).
 pub use rustc_hash::FxHashMap;
-pub use rss::{attribute_packages, enabled as rss_enabled, report_packages, PackageRssReport};
+pub use rss::{
+    attribute_packages, enabled as rss_enabled, process_rss_bytes, report_packages,
+    report_process, PackageRssReport,
+};
 pub use speculate::{start_seed_speculation, SpeculativeSeed, SpeculativeSeedJob};
 pub use typecheck::{
     needs_typecheck, typecheck_package, typecheck_package_with_seed, typecheck_packages,

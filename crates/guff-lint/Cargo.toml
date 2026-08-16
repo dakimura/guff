@@ -17,6 +17,10 @@ path = "src/lib.rs"
 
 [dependencies]
 mimalloc = "0.1"
+# Debug-only: `mi_collect` / `mi_process_info` behind `GUFF_DEBUG_RSS`, to tell
+# live memory apart from pages the allocator is holding (PERF_TASKS_V7 §1).
+# Already linked transitively by `mimalloc`; naming it adds nothing to the binary.
+libmimalloc-sys = { version = "0.1", features = ["extended"] }
 memchr = "2"
 clap = { version = "4", features = ["derive"] }
 regex = "1"

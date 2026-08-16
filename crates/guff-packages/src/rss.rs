@@ -21,6 +21,54 @@ pub fn enabled() -> bool {
     *ENABLED
 }
 
+/// The process's actual resident size, in bytes.
+///
+/// [`attribute_packages`] can only name what it can walk, and on prometheus
+/// `./...` it names 1.29 GiB of a 2.2 GiB process (PERF_TASKS_V6 §4.1). Naming
+/// the gap needs the other number at the same instants, and the gap is not a
+/// constant: it matters whether it appears while the seed is being built (a
+/// retained structure nobody accounts for) or after (allocator pages that were
+/// freed but not returned).
+///
+/// `ps` rather than a platform crate: this runs a handful of times per run
+/// behind `GUFF_DEBUG_RSS`, so ~10ms of subprocess is free, and it keeps a
+/// debug-only probe from adding a dependency that ships in every build.
+pub fn process_rss_bytes() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()?;
+    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+    Some(kib.saturating_mul(1024))
+}
+
+/// Print the process RSS with a label, and how it moved since the last call.
+pub fn report_process(label: &str) {
+    if !enabled() {
+        return;
+    }
+    let Some(bytes) = process_rss_bytes() else {
+        return;
+    };
+    static LAST: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let delta = bytes as i64 - *last as i64;
+    let first = *last == 0;
+    *last = bytes;
+    drop(last);
+    let mib = |b: f64| b / (1024.0 * 1024.0);
+    if first {
+        eprintln!("guff:   rss now {:.0} MiB ({label})", mib(bytes as f64));
+    } else {
+        eprintln!(
+            "guff:   rss now {:.0} MiB ({label}, {:+.0} MiB)",
+            mib(bytes as f64),
+            mib(delta as f64),
+        );
+    }
+}
+
 /// Category totals after walking `packages`.
 #[derive(Debug, Default)]
 pub struct PackageRssReport {
