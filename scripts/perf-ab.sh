@@ -8,6 +8,11 @@
 # background load hit both sides equally: the absolutes still wander, the ratio
 # does not.
 #
+# Why the order also swaps each round: interleaving cancels load that arrives
+# between rounds, not a machine that heats up during one. This laptop does —
+# six rounds take the same binary from 2.45s to 2.70s — so a fixed A-then-B
+# order charges the drift to B every time (docs/PERF_TASKS_V6.md §1).
+#
 # Three modes, because different changes show up in different numbers:
 #
 #   wall      what users feel. The default. Needs a reasonably quiet machine —
@@ -87,10 +92,21 @@ echo "perf-ab: mode=$MODE rounds=$ROUNDS dir=$DIR"
 [[ "$MODE" == analyzer ]] && echo "  analyzer: $ANALYZER"
 as=(); bs=()
 for ((r = 1; r <= ROUNDS; r++)); do
-  ta="$(one "$A")"; tb="$(one "$B")"
+  # Swap which side runs first every round. Interleaving alone cancels load
+  # that arrives *between* rounds; it does not cancel a machine that heats up
+  # *within* one, and this one does — six rounds of prometheus `./...` take the
+  # same binary from 2.45s to 2.70s. With A always first, B is always the side
+  # measured on the hotter machine, which reads as a small regression that is
+  # not there (docs/PERF_TASKS_V6.md §1).
+  if (( r % 2 )); then
+    ta="$(one "$A")"; tb="$(one "$B")"
+  else
+    tb="$(one "$B")"; ta="$(one "$A")"
+  fi
   [[ -n "$ta" && -n "$tb" ]] || die "no measurement parsed (analyzer '$ANALYZER' never ran?)"
   as+=("$ta"); bs+=("$tb")
-  printf '  r%-2d A=%-8s B=%-8s\n' "$r" "$ta" "$tb"
+  printf '  r%-2d A=%-8s B=%-8s%s\n' "$r" "$ta" "$tb" \
+    "$( ((r % 2)) && echo "" || echo "   (B ran first)" )"
 done
 
 python3 - "$MODE" "${as[*]}" "${bs[*]}" <<'PY'

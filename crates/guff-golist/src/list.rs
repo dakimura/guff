@@ -168,8 +168,20 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
 
     // Process the BFS queue in parallel batches: import_dir is syscall-bound
     // and independent across packages already in the queue.
+    //
+    // `GUFF_DEBUG_CACHE=2` reports the shape of this loop (`native list bfs`):
+    // how many levels, how wide each was, and how the wall splits between the
+    // parallel scan and the serial fan-out. Without it "load_graph is 0.54s"
+    // says nothing about whether the barrier between levels costs anything.
+    let bfs_debug = matches!(
+        std::env::var("GUFF_DEBUG_CACHE").ok().as_deref(),
+        Some(v) if v.trim().parse::<u8>().unwrap_or(1).max(1) >= 2
+    );
+    let mut bfs_levels: Vec<(usize, u128, u128)> = Vec::new();
     while !queue.is_empty() {
         let batch: Vec<(String, PathBuf, ResolvedModule, bool)> = queue.drain(..).collect();
+        let level_width = batch.len();
+        let scan_start = bfs_debug.then(std::time::Instant::now);
         let scanned: Vec<_> = batch
             .par_iter()
             .map(|(pkg_path, dir, module, is_root)| {
@@ -189,6 +201,8 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                 (pkg_path.clone(), dir.clone(), module.clone(), *is_root, result)
             })
             .collect();
+        let scan_nanos = scan_start.map(|s| s.elapsed().as_nanos()).unwrap_or(0);
+        let serial_start = bfs_debug.then(std::time::Instant::now);
 
         for (pkg_path, dir, module, is_root, build_result) in scanned {
             let build_pkg = match build_result {
@@ -242,27 +256,75 @@ pub fn list_packages(cfg: &ListConfig, patterns: &[String]) -> Result<ListRespon
                 build_pkg,
             )?;
         }
+        if bfs_debug {
+            bfs_levels.push((
+                level_width,
+                scan_nanos,
+                serial_start.map(|s| s.elapsed().as_nanos()).unwrap_or(0),
+            ));
+        }
+    }
+    if bfs_debug {
+        let scan: u128 = bfs_levels.iter().map(|l| l.1).sum();
+        let serial: u128 = bfs_levels.iter().map(|l| l.2).sum();
+        let widest = bfs_levels.iter().map(|l| l.0).max().unwrap_or(0);
+        let narrow = bfs_levels.iter().filter(|l| l.0 < 4).count();
+        let narrow_wall: u128 = bfs_levels
+            .iter()
+            .filter(|l| l.0 < 4)
+            .map(|l| l.1 + l.2)
+            .sum();
+        eprintln!(
+            "guff:     native list bfs: {} levels (widest {}, {} narrower than 4 holding {:.2}s); \
+             scan {:.2}s parallel + fan-out {:.2}s serial",
+            bfs_levels.len(),
+            widest,
+            narrow,
+            narrow_wall as f64 / 1e9,
+            scan as f64 / 1e9,
+            serial as f64 / 1e9,
+        );
     }
 
     // Packages that import the package-under-test (or another for-test variant)
     // must be recompiled as `Q [P.test]` — matching cmd/go list -test.
+    let fortest_start = bfs_debug.then(std::time::Instant::now);
     if cfg.tests {
         emit_fortest_dep_variants(&mut packages, &mut direct_imports);
     }
+    let fortest_nanos = fortest_start.map(|s| s.elapsed().as_nanos()).unwrap_or(0);
 
-    // Fill transitive deps from the direct-import graph.
-    for id in packages.keys().cloned().collect::<Vec<_>>() {
-        let deps = transitive_deps(&id, &direct_imports);
+    // Fill transitive deps from the direct-import graph. Each package walks the
+    // graph independently and reads nothing but `direct_imports`, so the walks
+    // run in parallel; the serial version was 0.09s of the lister's 0.41s on
+    // prometheus `./...` — the largest single-threaded stretch left in it.
+    let deps_start = bfs_debug.then(std::time::Instant::now);
+    let ids: Vec<String> = packages.keys().cloned().collect();
+    let computed: Vec<Vec<String>> = ids
+        .par_iter()
+        .map(|id| transitive_deps(id, &direct_imports))
+        .collect();
+    for (id, deps) in ids.into_iter().zip(computed) {
         if let Some(pkg) = packages.get_mut(&id) {
             pkg.deps = deps;
         }
     }
+    let deps_nanos = deps_start.map(|s| s.elapsed().as_nanos()).unwrap_or(0);
 
+    let finish_start = bfs_debug.then(std::time::Instant::now);
     let mut pkgs: Vec<ListPackage> = packages.into_values().collect();
     pkgs.sort_by(|a, b| a.id.cmp(&b.id));
     response.roots.sort();
     response.packages = pkgs;
     modmeta_session.flush();
+    if bfs_debug {
+        eprintln!(
+            "guff:     native list post: fortest {:.2}s + transitive deps {:.2}s + sort/flush {:.2}s",
+            fortest_nanos as f64 / 1e9,
+            deps_nanos as f64 / 1e9,
+            finish_start.map(|s| s.elapsed().as_nanos()).unwrap_or(0) as f64 / 1e9,
+        );
+    }
     Ok(response)
 }
 

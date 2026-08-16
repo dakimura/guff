@@ -12,6 +12,7 @@ name = "guff_staticcheck"
 path = "src/lib.rs"
 
 [dependencies]
+memchr = "2"
 guff-ast = { path = "../guff-ast" }
 guff-analysis = { path = "../guff-analysis" }
 guff-pattern = { path = "../guff-pattern" }
