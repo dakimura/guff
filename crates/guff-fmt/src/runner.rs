@@ -612,42 +612,68 @@ fn check_file_multi(
     opts: &RunnerOptions,
     cache: Option<&crate::FormatCheckCache>,
 ) -> Result<Vec<(usize, Vec<i64>)>, FormatError> {
+    use crate::timing::{self, Stage};
     use crate::{content_hash, CachedCheck};
 
-    if is_excluded_path(path, &opts.exclude_paths) {
-        return Ok(Vec::new());
-    }
-    if !opts.include_tests && is_test_go_path(path) {
-        return Ok(Vec::new());
-    }
-    let path_str = path.to_string_lossy();
-    let src = fs::read(path).map_err(|e| FormatError::Io {
-        formatter: "guff-fmt".into(),
-        path: path_str.to_string(),
-        source: e,
-    })?;
-    if is_generated(&src, opts.generated) {
-        return Ok(Vec::new());
-    }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file.go");
-    if opts.filter_build_constraints {
-        match opts.build_context().match_file(name, &src) {
-            Ok(false) => return Ok(Vec::new()),
-            Ok(true) => {}
-            // Malformed build lines: still format (golangci loads what it can).
-            Err(_) => {}
+    // One `Read` measurement covers the whole "can this file be skipped, and
+    // what are its bytes" step: the three pre-filters read the same bytes the
+    // formatters do, and splitting them would time three things nobody can act
+    // on separately.
+    let Some((path_str, src)) = timing::timed(Stage::Read, || -> Result<_, FormatError> {
+        if is_excluded_path(path, &opts.exclude_paths) {
+            return Ok(None);
         }
-    }
+        if !opts.include_tests && is_test_go_path(path) {
+            return Ok(None);
+        }
+        let path_str = path.to_string_lossy();
+        let src = fs::read(path).map_err(|e| FormatError::Io {
+            formatter: "guff-fmt".into(),
+            path: path_str.to_string(),
+            source: e,
+        })?;
+        timing::add_bytes(src.len() as u64);
+        if is_generated(&src, opts.generated) {
+            return Ok(None);
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file.go");
+        if opts.filter_build_constraints {
+            match opts.build_context().match_file(name, &src) {
+                Ok(false) => return Ok(None),
+                Ok(true) => {}
+                // Malformed build lines: still format (golangci loads what it can).
+                Err(_) => {}
+            }
+        }
+        Ok(Some((path_str, src)))
+    })?
+    else {
+        return Ok(Vec::new());
+    };
 
     let ch = cache.map(|_| content_hash(&src));
     let mut out = Vec::with_capacity(formatters.len());
+    if timing::enabled() {
+        // "Was this file free?" — every formatter served from the warm cache
+        // means no parse and no diff for it.
+        let all_hit = match (cache, ch.as_ref()) {
+            (Some(cache), Some(ch)) => fingerprints
+                .iter()
+                .all(|(name, fp)| cache.get(name, fp, ch).is_some()),
+            _ => false,
+        };
+        timing::add_cache(all_hit);
+    }
 
     // Prefer a shared skip-object parse when native gci + gofumpt are both in
-    // the set (B-10 parse share). Other formatters still run on `src`.
-    let shared = try_shared_gci_gofumpt(formatters, fingerprints, &path_str, &src, ch.as_deref(), cache);
+    // the set (B-10 parse share). Other formatters still run on `src`. Its
+    // stages time themselves from inside (`Stage::SharedParse` / `Gci` /
+    // `Gofumpt`), so there is no wrapper timer here to nest with them.
+    let shared =
+        try_shared_gci_gofumpt(formatters, fingerprints, &path_str, &src, ch.as_deref(), cache);
 
     for (i, formatter) in formatters.iter().enumerate() {
         if let Some(lines) = shared.as_ref().and_then(|s| s[i].clone()) {
@@ -671,14 +697,16 @@ fn check_file_multi(
             }
         }
 
-        let formatted = formatter.format(&path_str, &src)?;
+        let formatted = timing::timed(Stage::Format, || formatter.format(&path_str, &src))?;
         let lines = if formatted == src {
             Vec::new()
         } else {
-            let old = String::from_utf8_lossy(&src);
-            let new = String::from_utf8_lossy(&formatted);
-            let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
-            first_changed_lines(&diff)
+            timing::timed(Stage::Diff, || {
+                let old = String::from_utf8_lossy(&src);
+                let new = String::from_utf8_lossy(&formatted);
+                let diff = TextDiff::from_lines(old.as_ref(), new.as_ref());
+                first_changed_lines(&diff)
+            })
         };
         if let (Some(cache), Some(ch)) = (cache, ch.as_ref()) {
             let entry = if lines.is_empty() {

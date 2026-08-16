@@ -14,6 +14,7 @@ mod meta;
 pub mod native;
 mod runner;
 mod swaggo;
+mod timing;
 
 pub use fmt_cache::{
     content_hash, fingerprint_parts, format_cache_dir_from_env, CachedCheck, FormatCheckCache,
@@ -32,6 +33,7 @@ pub use runner::{
     RunStats,
 };
 pub use swaggo::Swaggo;
+pub use timing::report as format_stage_report;
 
 /// A source formatter: rewrite Go source bytes.
 pub trait Formatter: Send + Sync {

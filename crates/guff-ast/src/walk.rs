@@ -139,6 +139,20 @@ macro_rules! node_variants {
                 1u64 << (self as u8)
             }
 
+            /// The kind whose flat discriminant is `i`, or `None` past
+            /// [`Self::COUNT`].
+            ///
+            /// Inverse of `kind as u8`, and the safe way back from a
+            /// [`NodeMask`] bit position — masks store kinds as `1 << (kind as
+            /// u8)`, so a set bit's index *is* a discriminant, and the
+            /// inspector's single-kind arm would otherwise reach for a
+            /// `transmute` to say so.
+            #[inline]
+            pub fn from_index(i: u8) -> Option<NodeKind> {
+                const TABLE: &[NodeKind] = &[$(NodeKind::$variant),*];
+                TABLE.get(i as usize).copied()
+            }
+
             /// Inverse of [`NodeRef::kind_name`]. `None` for anything that is
             /// not one of the 56 variant names.
             ///

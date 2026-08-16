@@ -308,6 +308,9 @@ fn run_format_checks_inner(
             formatters.len(),
             summary.join(", "),
         );
+        for line in guff_fmt::format_stage_report() {
+            eprintln!("{line}");
+        }
     }
     let mut issues = Vec::new();
     for f in findings {

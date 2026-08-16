@@ -94,9 +94,10 @@ fn check_go_stmt(
     go122_for: bool,
     failures: &mut Vec<Failure>,
 ) {
-    let Expr::FuncLit(FuncLit { body, .. }) = unparen(&go.call.fun) else {
+    let Expr::FuncLit(lit) = unparen(&go.call.fun) else {
         return;
     };
+    let body = &lit.body;
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(NodeRef::Ident(Ident { name, name_pos, .. })) = n else {
             return true;

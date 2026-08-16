@@ -93,8 +93,8 @@ fn visit_deferred_call(call: &CallExpr, in_loop: bool, failures: &mut Vec<Failur
 
 fn visit_deferred_expr(expr: &Expr, in_loop: bool, failures: &mut Vec<Failure>) {
     match unparen(expr) {
-        Expr::FuncLit(FuncLit { body, .. }) => {
-            visit_block(&body.list, true, in_loop, 1, failures);
+        Expr::FuncLit(lit) => {
+            visit_block(&lit.body.list, true, in_loop, 1, failures);
         }
         Expr::CallExpr(call) => {
             check_recover_call(call, true, 0, failures);

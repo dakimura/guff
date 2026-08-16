@@ -108,9 +108,10 @@ fn check_loop(last: Option<&Stmt>, vars: Vec<String>, failures: &mut Vec<Failure
         Stmt::DeferStmt(d) => &d.call,
         _ => return,
     };
-    let Expr::FuncLit(FuncLit { body, .. }) = unparen(&call.fun) else {
+    let Expr::FuncLit(lit) = unparen(&call.fun) else {
         return;
     };
+    let body = &lit.body;
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(NodeRef::Ident(Ident { name, name_pos, .. })) = n else {
             return true;

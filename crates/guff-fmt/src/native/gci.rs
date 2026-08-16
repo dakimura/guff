@@ -109,7 +109,10 @@ pub(crate) fn format_shared_with_gofumpt(
     } else {
         gci_opts.filename.as_str()
     };
-    let mut file = match parser_interface::parse_file(&fset, name, Some(src), PARSER_MODE) {
+    let parsed = crate::timing::timed(crate::timing::Stage::SharedParse, || {
+        parser_interface::parse_file(&fset, name, Some(src), PARSER_MODE)
+    });
+    let mut file = match parsed {
         Ok(f) => f,
         Err(e) => {
             let gci_err = map_err(AstFormatError::Parse(e), "native-gci");
@@ -122,16 +125,54 @@ pub(crate) fn format_shared_with_gofumpt(
         }
     };
 
-    let gci_out = match extract_imports(src, &fset, &file) {
-        Ok(None) => Ok(src.to_vec()),
-        Ok(Some(parsed)) => format_from_parsed_imports(src, &parsed, &sections)
-            .map_err(|e| map_err(e, "native-gci")),
-        Err(e) => Err(map_err(e, "native-gci")),
-    };
+    let gci_out = crate::timing::timed(crate::timing::Stage::Gci, || {
+        let parsed = match extract_imports(src, &fset, &file) {
+            Ok(None) => return Ok(src.to_vec()),
+            Ok(Some(p)) => p,
+            Err(e) => return Err(map_err(e, "native-gci")),
+        };
+        // Same steps as `format_from_parsed_imports`, with one shortcut the
+        // standalone path cannot take: when the reconstructed block is
+        // byte-identical to the source, gci's answer is `gofmt(src)` — and the
+        // parse `gofmt` would do is the parse we are already holding.
+        //
+        // That is the overwhelmingly common case (an already-gci-clean file
+        // reconstructs to itself), and it was costing a second full parse of
+        // every file with two or more imports.
+        let Some(dist) = reconstructed(src, &parsed, &sections).map_err(|e| map_err(e, "native-gci"))?
+        else {
+            return Ok(src.to_vec());
+        };
+        crate::timing::add_gci_parse(dist == src);
+        if dist == src {
+            go_format::source_parsed(&fset, &mut file).map_err(|e| map_err(e, "native-gci"))
+        } else {
+            go_format::source(&dist).map_err(|e| map_err(e, "native-gci"))
+        }
+    });
 
-    let fumpt_out = super::gofumpt::format_parsed(&fset, &mut file, fumpt_opts);
+    let fumpt_out = crate::timing::timed(crate::timing::Stage::Gofumpt, || {
+        super::gofumpt::format_parsed(&fset, &mut file, fumpt_opts)
+    });
 
     (gci_out, fumpt_out)
+}
+
+/// gci's rewritten source, before the closing gofmt — or `None` when gci leaves
+/// the file alone (`≤1` non-C import).
+fn reconstructed(
+    src: &[u8],
+    parsed: &ParsedImports,
+    sections: &[Section],
+) -> Result<Option<Vec<u8>>, AstFormatError> {
+    // gci: do not reformat when ≤1 non-C import.
+    if parsed.imports.len() <= 1 {
+        return Ok(None);
+    }
+    let grouped = assign_sections(&parsed.imports, sections)?;
+    let dist = reconstruct(src, parsed, sections, &grouped);
+    // Match gci: strip CR, then gofmt.
+    Ok(Some(dist.into_iter().filter(|&b| b != b'\r').collect()))
 }
 
 fn format_from_parsed_imports(
@@ -139,16 +180,10 @@ fn format_from_parsed_imports(
     parsed: &ParsedImports,
     sections: &[Section],
 ) -> Result<Vec<u8>, AstFormatError> {
-    // gci: do not reformat when ≤1 non-C import.
-    if parsed.imports.len() <= 1 {
-        return Ok(src.to_vec());
+    match reconstructed(src, parsed, sections)? {
+        None => Ok(src.to_vec()),
+        Some(dist) => go_format::source(&dist),
     }
-
-    let grouped = assign_sections(&parsed.imports, sections)?;
-    let dist = reconstruct(src, parsed, sections, &grouped);
-    // Match gci: strip CR, then gofmt.
-    let dist: Vec<u8> = dist.into_iter().filter(|&b| b != b'\r').collect();
-    go_format::source(&dist)
 }
 
 // ---- section model ---------------------------------------------------------
@@ -625,7 +660,6 @@ fn reconstruct(
     grouped: &[(String, Vec<(usize, usize)>)],
 ) -> Vec<u8> {
     let mut body: Vec<u8> = Vec::new();
-    let mut first = true;
 
     for (_key, blocks) in grouped {
         if blocks.is_empty() {
@@ -635,11 +669,13 @@ fn reconstruct(
             body.push(b'\n');
         }
         for &(start, end) in blocks {
-            if !first {
-                body.push(b'\t');
-            } else {
-                first = false;
-            }
+            // Indent every spec, the first one included. gofmt re-indents the
+            // block either way, so this does not change gci's output — but it
+            // is what lets the caller notice that the reconstruction *is* the
+            // source and skip the reparse (PERF_TASKS_V8 §V8-2). Leaving the
+            // first spec at column 0 made `dist == src` impossible for every
+            // file in the corpus.
+            body.push(b'\t');
             let end = end.min(src.len());
             let start = start.min(end);
             body.extend_from_slice(&src[start..end]);

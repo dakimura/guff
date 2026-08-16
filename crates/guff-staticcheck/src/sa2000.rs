@@ -46,9 +46,10 @@ fn find_waitgroup_add_in_body<'a>(
 }
 
 fn check_go_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
-    let Expr::FuncLit(FuncLit { body, .. }) = unparen_expr(call.fun.as_ref()) else {
+    let Expr::FuncLit(lit) = unparen_expr(call.fun.as_ref()) else {
         return;
     };
+    let body = &lit.body;
     let Some(add_call) = find_waitgroup_add_in_body(pass, &body.list) else {
         return;
     };

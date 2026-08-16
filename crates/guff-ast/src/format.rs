@@ -93,6 +93,26 @@ pub fn source(src: &[u8]) -> Result<Vec<u8>, FormatError> {
     format_buf(&fset, &file, source_adj.as_ref(), indent_adj, src, default_config())
 }
 
+/// gofmt output for a file that has already been parsed from the same bytes.
+///
+/// [`source`] is `parse` → [`sort_imports`] → print, and its parse uses exactly
+/// this module's `PARSER_MODE`. A caller that has already parsed the identical
+/// bytes with that mode — `guff_fmt`'s shared gci+gofumpt path is the one that
+/// matters (PERF_TASKS_V8 §V8-2) — would otherwise pay for a second parse of
+/// the file to get an AST it is holding.
+///
+/// `file` is sorted in place, exactly as [`source`] sorts its own copy. That is
+/// the caller's AST, so the sort is visible afterwards; it is idempotent, and
+/// every consumer of a gofmt-shaped AST sorts imports itself before printing.
+///
+/// **`file` must be the whole-file parse of the same bytes.** Handing it an AST
+/// parsed from different source, or one of `parse`'s fragment wrappers, returns
+/// formatted output for whatever it *was* — not an error.
+pub fn source_parsed(fset: &Arc<FileSet>, file: &mut File) -> Result<Vec<u8>, FormatError> {
+    sort_imports(fset, file);
+    format_buf(fset, file, None, 0, &[], default_config())
+}
+
 /// Errors from [`source`] / [`node`].
 #[derive(Debug)]
 pub enum FormatError {

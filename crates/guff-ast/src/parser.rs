@@ -1188,13 +1188,13 @@ impl Parser {
                         let params = self.parse_parameters(false);
                         let results = self.parse_parameters(true);
                         idents.push(ident.clone());
-                        typ = Expr::FuncType(FuncType {
+                        typ = Expr::FuncType(Box::new(FuncType {
                             id: 0,
                             func: NO_POS,
                             type_params: None,
                             params,
                             results,
-                        });
+                        }));
                         return Field {
                             doc,
                             names: idents,
@@ -1225,13 +1225,13 @@ impl Parser {
                 let params = self.parse_parameters(false);
                 let results = self.parse_parameters(true);
                 idents.push(ident.clone());
-                typ = Expr::FuncType(FuncType {
+                typ = Expr::FuncType(Box::new(FuncType {
                     id: 0,
                     func: NO_POS,
                     type_params: None,
                     params,
                     results,
-                });
+                }));
             } else {
                 typ = Expr::Ident(ident);
             }
@@ -1434,7 +1434,7 @@ impl Parser {
             }
             Token::STRUCT => Some(Expr::StructType(p.parse_struct_type())),
             Token::MUL => Some(Expr::StarExpr(p.parse_pointer_type())),
-            Token::FUNC => Some(Expr::FuncType(p.parse_func_type())),
+            Token::FUNC => Some(Expr::FuncType(Box::new(p.parse_func_type()))),
             Token::INTERFACE => Some(Expr::InterfaceType(p.parse_interface_type())),
             Token::MAP => Some(Expr::MapType(p.parse_map_type())),
             Token::CHAN | Token::ARROW => Some(Expr::ChanType(p.parse_chan_type())),
@@ -1548,16 +1548,16 @@ impl Parser {
     fn parse_func_type_or_lit(&mut self) -> Expr {
         let typ = self.parse_func_type();
         if self.tok != Token::LBRACE {
-            return Expr::FuncType(typ);
+            return Expr::FuncType(Box::new(typ));
         }
         self.expr_lev += 1;
         let body = self.parse_body();
         self.expr_lev -= 1;
-        Expr::FuncLit(FuncLit {
+        Expr::FuncLit(Box::new(FuncLit {
             id: 0,
             ty: typ,
             body,
-        })
+        }))
     }
 
     fn parse_operand(&mut self) -> Expr {

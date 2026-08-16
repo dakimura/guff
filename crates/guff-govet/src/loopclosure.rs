@@ -65,10 +65,10 @@ fn ident_object(pass: &Pass<'_>, e: &Expr) -> Option<guff_types::ObjectId> {
 }
 
 fn lit_stmts(fun: &Expr) -> Option<&[Stmt]> {
-    let Expr::FuncLit(FuncLit { body, .. }) = unparen(fun) else {
+    let Expr::FuncLit(lit) = unparen(fun) else {
         return None;
     };
-    Some(&body.list)
+    Some(&lit.body.list)
 }
 
 fn for_each_last_stmt(stmts: &[Stmt], on_last: &mut dyn FnMut(&Stmt)) {
