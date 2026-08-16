@@ -36,7 +36,8 @@
 > `Stmt` は 1 行も触っていません。`SendStmt = {Expr, Pos, Expr}` のように
 > **`Expr` を埋め込んでいるものが全部連鎖して縮んだ**からです。
 >
-> 実測（prometheus `./...`、交互 A/B 6 ラウンド）:
+> 実測（prometheus `./...`、交互 A/B 6 ラウンド）。**この表は `Expr` の
+> boxing だけの効果**です（型アリーナのぶんは後述、合計は §1）:
 >
 > | | before | after | |
 > |---|---:|---:|---|
@@ -234,39 +235,49 @@ intern の重複率（未計測）です。
 
 ## 1. この回のベースライン（次回はこの数字を基準に）
 
-この回のぶんを全部入れた `cargo build --release` 直後、prometheus `./...`:
+この回のぶん（#10 / #11 / #12）を全部入れた main を `cargo build --release` した直後、
+静かなマシンで prometheus `./...`（3 回の中央値）:
 
 | 条件 | wall | CPU | peak RSS |
 |---|---:|---:|---:|
-| cold（`GUFF_CACHE` 空 + `--no-cache`） | 2.13s | 11.48s | **1779 MiB** |
-| seed warm / issue cold | **1.36s** | 7.15s | **1782 MiB** |
-| 完全 warm（無変更） | 0.13s | 0.14s | 128 MiB |
-| cold `-j 1` + `RAYON_NUM_THREADS=1` | 4.95s | — | **1643 MiB** |
+| cold（`GUFF_CACHE` 空 + `--no-cache`） | **1.98s** | 10.5s | **1779 MiB** |
+| seed warm / issue cold | **1.36s** | 8.5s | **1717 MiB** |
+| 完全 warm（無変更） | 0.13s | 0.14s | **121 MiB** |
+| cold `-j 1` + `RAYON_NUM_THREADS=1` | **4.90s** | — | **1590 MiB** |
 
-（RSS の列は `TypeData` の boxing 込みです。AST だけの時点では
-それぞれ 1931 / 1926 / 1776 MiB でした。）
+第8弾の同じ表（`b18da95`）との差:
+
+| | 第8弾 | 第9弾 | |
+|---|---:|---:|---|
+| cold wall | 2.33s | 1.98s | −15% |
+| seed warm wall | 1.51s | 1.36s | −10% |
+| seed warm peak RSS | 2517 MiB | 1717 MiB | **−32%** |
+| `-j 1` wall | 5.48s | 4.90s | −11% |
 
 RSS の内訳（`GUFF_DEBUG_RSS=1`, post analyze）:
 
 ```
-type arenas: types=350.7MiB objects=230.0MiB scopes=35.5MiB names=8.5MiB
-             intern=23.5MiB  (types_total=648.6MiB)
+type arenas: types=350.7MiB objects=145.1MiB scopes=35.5MiB names=8.5MiB
+             intern=23.5MiB  (types_total=563.8MiB)
 Info maps:   136.2MiB
 AST est:     122.6MiB envelope (1606518 nodes × ~80B)
-attributed:  924.5MiB of 1777 MiB  ← 残り 850 MiB は今も無名（SSA IR / allocator / stack）
+attributed:  839.6MiB of 1743 MiB
 ```
 
-> **次に大きいのは `objects=230.0MiB` と、attribution が名前を付けられていない 850 MiB です。**
+> **次に大きいのは、attribution が名前を付けられていない 900 MiB です**
+> （SSA IR / allocator / stack）。`types=350.7MiB` はまだ大きいですが、
+> slot サイズで削れる分はもう取り切りました — 次は**本数**（intern の重複率）の話で、
+> それは §V9-3 のとおり未計測です。
 
 seed warm の phase 内訳と、**wall のクリティカルパス**:
 
 ```
-load_graph      0.24s ┐
-typecheck_roots 0.53s ├ この 3 本は直列。合計がほぼ wall。
-analyze         0.60s ┘
+load_graph      0.23s ┐
+typecheck_roots 0.57s ├ この 3 本は直列。合計がほぼ wall。
+analyze         0.53s ┘   （うち seed dep check 0.33s は typecheck_roots の内数）
 issues+filter   0.03s
 ────────────────────────
-format_checks   0.64s  ← 直列ではない。プロセス開始から重なり、waited 0.00s
+format_checks   0.55s  ← 直列ではない。プロセス開始から重なり、waited 0.00s
 wall            1.36s
 ```
 
