@@ -52,6 +52,26 @@
 > match ergonomics でそのまま通り、直す必要があったのは
 > `Expr::FuncLit(FuncLit { body, .. })` 形の分解束縛と構築箇所だけです。
 >
+> ### 同じ話が型アリーナにもありました — `TypeData` 112 → 72 B
+>
+> RSS の最大項は **type slot 545.6 MiB**で、`rss.rs` はこれを
+> `capacity × size_of::<TypeData>()` として数えています。**約 5.1M slot** です。
+> 埋めているのは `Slice`（**4 バイト**）や `Pointer`（**4 バイト**）のような小さい種類なのに、
+> `Interface`(112B) と `Named`(96B) がインラインなせいで全部が 112 バイト払っていました。
+>
+> この 2 つを `Box` に入れて **peak RSS さらに −150 MiB**（wall / CPU は中立）。
+> **壊れた呼び出しは 2 箇所**。`Box` は serde に透過なので seed overlay の
+> ディスク表現は変わりません。詳細は §V9-3。
+>
+> ### つまり、この回で本当に学ぶべきこと
+>
+> **要素数が百万単位の配列に入る型は、`std::mem::size_of` を測ってください。**
+> 第1〜8弾の 8 回、誰も測っていませんでした。両方とも
+> 「一番太いヴァリアント 1〜2 個が、全ヴァリアントの値段を決めていた」という同じ話で、
+> 直し方も同じ（`Box` に入れる）、壊れる箇所も 2〜12 個と小さいです。
+> **`Expr` と `TypeData` には const assert を置いて再膨張を build エラーにしてあります。**
+> 次の候補は `ObjectData`（**104 B × 約 2.3M slot = 230 MiB**、未測定）。
+>
 > ### 2 番目に重要な結論 — **`preorder CPU` は走査のコストではありません**
 >
 > 第5弾以降ずっと引用されてきた「preorder が analyze CPU の 28.7%」は、
@@ -195,20 +215,39 @@ AST est:     122.6MiB envelope (1606518 nodes × ~80B)
 ```
 
 **型アリーナ 843 MiB は 1 バイトも動いていません。** V8-5 が本当に狙うべきはここで、
-それは `types=545.6MiB` の中身の話です（§3.2 に再掲）。
+それは `types=545.6MiB` の中身の話です。そして開けてみると
+**`Expr` とまったく同じ問題**でした（§V9-3）: `capacity × size_of::<TypeData>()` の
+`TypeData` が 112 バイトあり、`Interface` と `Named` を `Box` に入れて 72 バイト、
+**peak RSS さらに −150 MiB**。残りは `ObjectData`（104 B × 約 2.3M）と、
+intern の重複率（未計測）です。
 
 ---
 
 ## 1. この回のベースライン（次回はこの数字を基準に）
 
-`perf/v8` マージ後の `cargo build --release` 直後、prometheus `./...`:
+この回のぶんを全部入れた `cargo build --release` 直後、prometheus `./...`:
 
 | 条件 | wall | CPU | peak RSS |
 |---|---:|---:|---:|
-| cold（`GUFF_CACHE` 空 + `--no-cache`） | 2.13s | 11.48s | 1931 MiB |
-| seed warm / issue cold | **1.36s** | 7.15s | 1926 MiB |
+| cold（`GUFF_CACHE` 空 + `--no-cache`） | 2.13s | 11.48s | **1779 MiB** |
+| seed warm / issue cold | **1.36s** | 7.15s | **1782 MiB** |
 | 完全 warm（無変更） | 0.13s | 0.14s | 128 MiB |
-| cold `-j 1` + `RAYON_NUM_THREADS=1` | 4.93s | — | 1776 MiB |
+| cold `-j 1` + `RAYON_NUM_THREADS=1` | 4.95s | — | **1643 MiB** |
+
+（RSS の列は `TypeData` の boxing 込みです。AST だけの時点では
+それぞれ 1931 / 1926 / 1776 MiB でした。）
+
+RSS の内訳（`GUFF_DEBUG_RSS=1`, post analyze）:
+
+```
+type arenas: types=350.7MiB objects=230.0MiB scopes=35.5MiB names=8.5MiB
+             intern=23.5MiB  (types_total=648.6MiB)
+Info maps:   136.2MiB
+AST est:     122.6MiB envelope (1606518 nodes × ~80B)
+attributed:  924.5MiB of 1777 MiB  ← 残り 850 MiB は今も無名（SSA IR / allocator / stack）
+```
+
+> **次に大きいのは `objects=230.0MiB` と、attribution が名前を付けられていない 850 MiB です。**
 
 seed warm の phase 内訳と、**wall のクリティカルパス**:
 
@@ -269,15 +308,45 @@ pub struct Ident {
 **注意**: `Expr` と違い `Stmt` の連鎖効果はもう小さいはずです。**先に size を測って、
 `Stmt` を 320 → いくつにできるかを見てから**着手してください。
 
-### V9-3 — `types=545.6MiB` の中身を割る（**未着手 / RSS の本丸**）
+### V9-3 — 型アリーナの slot（**半分着手済み。`TypeData` は 112 → 72 に縮めました**）
 
-V8-5 の正しい入口です。型アリーナ 843 MiB のうち 545.6 MiB が type slot。
-**まだ誰も「どの種類の型が何本あるか」を測っていません。**
-`rss.rs` の attribution は slot 数 × slot サイズしか出しません。
+V8-5 の正しい入口です。型アリーナ 843 MiB のうち 545.6 MiB が type slot で、
+`rss.rs` はこれを **`capacity × size_of::<TypeData>()`** として数えています。
+つまり `Expr` とまったく同じ形の問題でした:
 
-- 先に `TypeId` の種類別ヒストグラム（Named / Signature / Slice / Map / …）を出す。
-- `slot` 1 個のサイズと、種類ごとの重複率（同じ `[]byte` が何本あるか）を見る。
-- **intern が効いていない種類があればそこが答え**で、
+| | before | after |
+|---|---:|---:|
+| `TypeData` | 112 B | **72 B** |
+
+`545.6 MiB / 112 B` ＝ **約 5.1M slot**。そしてアリーナを埋めているのは
+**小さい種類**です（`Slice` は 4 バイト、`Pointer` も 4）。
+それが 112 バイトを占めていたのは、`Interface`(112) と `Named`(96) が
+インラインだったからです。この 2 つを `Box` に入れて **peak RSS −150 MiB**
+（`-j N` 1932 → 1782 MiB、`-j 1` 1785 → 1643 MiB）。attribution でも:
+
+```
+before: type arenas: types=545.6MiB objects=230.0MiB … (types_total=843.4MiB)
+after:  type arenas: types=350.7MiB objects=230.0MiB … (types_total=648.6MiB)
+```
+
+**壊れた呼び出しは 2 箇所だけ**でした（アリーナがよく閉じている）。
+wall と CPU は交互 A/B 2 回でどちらも符号が安定せず＝中立。
+`Box` は serde に透過なので **seed overlay のディスク表現は不変**です。
+
+**残り**:
+
+- **`ObjectData` は 104 バイト × 約 2.3M slot = 230 MiB**（`types` を縮めた今、
+  アリーナで最大の項目です）。同じ手が使えるはずですが
+  **まだヴァリアント別のサイズを測っていません。** そこから始めてください。
+  当たりが付いているのは `Const`: `name: String`(24) + `TypeId`(4) +
+  **`Value`**（`RBig` / `BinFloat` を持つ多倍長 enum）+ `ObjectMeta`(24) で、
+  104 バイトのほとんどを `Value` が決めていそうに見えます。
+  `Const` は `Var` / `Func` に比べて数が少ないので、箱に入れる先として筋がいいはずです
+  — **ただし §4.1 のとおり、測ってから。**
+- `capacity` と `len` の差（Vec の倍々成長の余り）も未計測。ただし第7弾の
+  「macOS では解放しても RSS は戻らない」があるので `shrink_to_fit` は期待薄です。
+- 種類ごとの重複率（同じ `[]byte` が何本あるか）は依然未計測で、
+  **intern が効いていない種類があればそこが次の答え**です。
   第8弾が想定した mmap + 遅延展開はその後の話です。
 
 ### V9-4 — `seed dep check` の `open()`（**測って据え置き / 難物**）
@@ -372,9 +441,32 @@ analyze から CPU を奪うだけです。
 
 1. **`cargo build --release` を走らせ、`ls -l target/release/guff` の mtime を目視する**
    （第8弾 §📌 の事故。ルール11 相当として扱ってください）。
-2. **`V9-1`（`Ident` の文字列）から始める。** 第8弾の boxing とまったく同じ形で、
-   同じ規模の当たりが期待できる唯一の残り。
-3. RSS を狙うなら `V9-3`（型アリーナの内訳）。**測るところから。**
-4. `V9-4` はユーザー承認が要る意味論の変更を含みます。
-5. `enum` のサイズは **`std::mem::size_of` を測る習慣**をつけてください。
-   第8弾までの 7 回、誰も測っていませんでした。
+2. **`V9-1`（`Ident` の文字列）から始める。** この回の 2 つの当たりとまったく同じ形
+   （百万単位で並ぶ型の 1 個あたりの値段）で、いちばん有望な残りです。
+3. RSS を続けるなら `V9-3` の残り＝ **`ObjectData`（104 B × 約 2.3M）のヴァリアント別サイズ**。
+   これも同じ手順で 30 分で判断がつくはずです。
+4. `V9-4` はユーザー承認が要る意味論の変更を含みます。勝手に入れないでください。
+5. `V9-5`（`--watch`）は**アイドル RSS の目標値を決めてから**。
+   いまの実装が型を毎回捨てているのは事故ではなく設計です。
+
+### 4.1 この回の手順（そのまま再利用できます）
+
+百万単位で並ぶ型を疑うときの手順は毎回同じでした。**30 分で GO/NO-GO が出ます。**
+
+```bash
+# 1. サイズを測る（テストに 1 本足して --nocapture で出すだけ）
+#    println!("{}", std::mem::size_of::<TargetType>());
+# 2. ヴァリアント別に測って、最大を決めている 1〜2 個を特定する
+# 3. その 1〜2 個だけを Box<...> にする
+# 4. 壊れた箇所を数える
+cargo check --workspace --message-format short 2>&1 \
+  | grep -E "error(\[|:)" | grep -v "could not compile" | sort -u
+# 5. サイズを測り直し、findings 同一性 → A/B（wall / CPU）→ RSS の順で確認する
+```
+
+実績: `Expr` は 12 箇所、`TypeData` は **2 箇所**。パターンマッチは match ergonomics で
+そのまま通るので、壊れるのは**構築箇所と分解束縛だけ**です。
+
+> **`Box` にする判断は必ず実測で**。`Expr` は wall/CPU/RSS の 3 つとも改善しましたが、
+> `TypeData` は **RSS だけ**で wall/CPU は中立でした。間接参照が増える以上、
+> 「アクセスが熱いのに要素数が少ない」ヴァリアントを箱に入れると損をします。
