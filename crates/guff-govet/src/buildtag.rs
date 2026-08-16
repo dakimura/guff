@@ -408,8 +408,21 @@ fn check_go_file(pass: &mut Pass<'_>, index: usize) {
         .cloned()
         .or_else(|| pass.pkg().go_files.get(index).cloned());
     let Some(path) = path else { return };
-    let Ok(src) = fs::read(&path) else { return };
-    let Ok(text) = std::str::from_utf8(&src) else {
+    // Type-checking already read this file and kept the bytes (`source_files`,
+    // parallel to `syntax`); opening it a second time here cost one `open` per
+    // file of every package — 0.04s of analyze CPU on prometheus `./...` for a
+    // gate that rejects almost every file. Fall back to a read only when the
+    // bytes were not retained (`-j 1` trimming, export-data packages).
+    let owned;
+    let src: &[u8] = match pass.pkg().source_bytes(index) {
+        Some(bytes) => bytes,
+        None => {
+            let Ok(read) = fs::read(&path) else { return };
+            owned = read;
+            &owned
+        }
+    };
+    let Ok(text) = std::str::from_utf8(src) else {
         return;
     };
     if !may_have_constraints(text) {
@@ -420,7 +433,7 @@ fn check_go_file(pass: &mut Pass<'_>, index: usize) {
     };
 
     let re_fset = FileSet::new();
-    let Ok(parsed) = parse_file(&re_fset, name, &src, COMMENTS_ONLY) else {
+    let Ok(parsed) = parse_file(&re_fset, name, src, COMMENTS_ONLY) else {
         return;
     };
     let mut check = Checker::new();

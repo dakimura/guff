@@ -196,9 +196,20 @@ fn check_go_file(pass: &mut Pass<'_>, index: usize) {
         .or_else(|| pass.pkg().go_files.get(index).cloned());
     let Some(path) = path else { return };
     let filename = path.to_string_lossy().to_string();
-    let Ok(src) = fs::read(&path) else { return };
+    // Reuse the bytes type-checking already holds (see `buildtag::check_go_file`
+    // for why): this pass runs on every file of every package and almost always
+    // stops at the gate below.
+    let owned;
+    let src: &[u8] = match pass.pkg().source_bytes(index) {
+        Some(bytes) => bytes,
+        None => {
+            let Ok(read) = fs::read(&path) else { return };
+            owned = read;
+            &owned
+        }
+    };
     // Every report path is gated on a `//go:` prefix.
-    if !src.windows(5).any(|w| w == b"//go:") {
+    if memchr::memmem::find(src, b"//go:").is_none() {
         return;
     }
     let Some(name) = Path::new(&path).file_name().and_then(|s| s.to_str()) else {
@@ -206,7 +217,7 @@ fn check_go_file(pass: &mut Pass<'_>, index: usize) {
     };
 
     let re_fset = FileSet::new();
-    let Ok(parsed) = parse_file(&re_fset, name, &src, PARSE_COMMENTS) else {
+    let Ok(parsed) = parse_file(&re_fset, name, src, PARSE_COMMENTS) else {
         return;
     };
     let mut check = Checker::new(filename, Some(parsed.name.name.clone()));

@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 guff-ast = { path = "../guff-ast" }
+memchr = "2"
 guff-analysis = { path = "../guff-analysis" }
 guff-constant = { path = "../guff-constant" }
 guff-types = { path = "../guff-types" }

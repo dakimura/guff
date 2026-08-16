@@ -171,19 +171,29 @@ fn collect_inlinable_consts(pass: &Pass<'_>) -> HashSet<ObjectId> {
         let Some(path) = path else {
             continue;
         };
-        let Ok(src) = fs::read(&path) else {
-            continue;
+        // Type-checking kept these bytes; re-reading them cost one `open` per
+        // file of every package (see `buildtag::check_go_file`).
+        let owned;
+        let src: &[u8] = match pass.pkg().source_bytes(i) {
+            Some(bytes) => bytes,
+            None => match fs::read(&path) {
+                Ok(read) => {
+                    owned = read;
+                    &owned
+                }
+                Err(_) => continue,
+            },
         };
         // Cheap filter: almost no files carry `//go:fix inline`; avoid a full
         // PARSE_COMMENTS reparse on the common path.
-        if !src.windows(b"go:fix inline".len()).any(|w| w == b"go:fix inline") {
+        if memchr::memmem::find(src, b"go:fix inline").is_none() {
             continue;
         }
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
         let re_fset = FileSet::new();
-        let Ok(parsed) = parse_file(&re_fset, name, &src, PARSE_COMMENTS) else {
+        let Ok(parsed) = parse_file(&re_fset, name, src, PARSE_COMMENTS) else {
             continue;
         };
         for const_name in go_fix_const_names(&parsed) {
@@ -199,19 +209,31 @@ fn collect_inlinable_consts(pass: &Pass<'_>) -> HashSet<ObjectId> {
 }
 
 fn package_has_go_fix_inline(pass: &Pass<'_>) -> bool {
-    for path in pass
+    // Retained bytes first, in `syntax` order; only files without them (and the
+    // `go_files` the compiled list does not cover) are read.
+    for (i, path) in pass
         .pkg()
         .compiled_go_files
         .iter()
         .chain(pass.pkg().go_files.iter())
+        .enumerate()
     {
-        let Ok(src) = fs::read(path) else {
-            continue;
-        };
-        if src
-            .windows(b"go:fix inline".len())
-            .any(|w| w == b"go:fix inline")
+        let owned;
+        let src: &[u8] = match pass
+            .pkg()
+            .source_bytes(i)
+            .filter(|_| i < pass.pkg().compiled_go_files.len())
         {
+            Some(bytes) => bytes,
+            None => match fs::read(path) {
+                Ok(read) => {
+                    owned = read;
+                    &owned
+                }
+                Err(_) => continue,
+            },
+        };
+        if memchr::memmem::find(src, b"go:fix inline").is_some() {
             return true;
         }
     }
