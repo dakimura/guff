@@ -456,10 +456,13 @@ fn scan_import_deprecated(
             n == "doc.go" || n == base.as_str()
         });
     }
-    // `source_files` is parallel to `syntax`, which is parallel to
-    // `compiled_go_files` — so the index is only a valid key into it when the
-    // list above is the compiled one.
-    let in_memory = !imp.compiled_go_files.is_empty();
+    // `source_files` is parallel to `syntax`, which holds only the files that
+    // parsed: a file that failed to parse is dropped from both, and every later
+    // index shifts. So the index is a valid key into `source_files` only when
+    // the list above is the compiled one *and* nothing was dropped — otherwise
+    // this would probe one file's bytes for another file's docs.
+    let in_memory = !imp.compiled_go_files.is_empty()
+        && imp.source_files.len() == imp.compiled_go_files.len();
     for (idx, path) in paths {
         let owned;
         let src: &[u8] = match imp.source_bytes(idx).filter(|_| in_memory) {

@@ -209,8 +209,11 @@ fn collect_inlinable_consts(pass: &Pass<'_>) -> HashSet<ObjectId> {
 }
 
 fn package_has_go_fix_inline(pass: &Pass<'_>) -> bool {
-    // Retained bytes first, in `syntax` order; only files without them (and the
-    // `go_files` the compiled list does not cover) are read.
+    // Retained bytes first; only files without them (and the `go_files` the
+    // compiled list does not cover) are read. `source_files` is parallel to
+    // `syntax`, which holds only the files that parsed — so an index into
+    // `compiled_go_files` addresses it correctly only when nothing was dropped.
+    let aligned = pass.pkg().source_files.len() == pass.pkg().compiled_go_files.len();
     for (i, path) in pass
         .pkg()
         .compiled_go_files
@@ -222,7 +225,7 @@ fn package_has_go_fix_inline(pass: &Pass<'_>) -> bool {
         let src: &[u8] = match pass
             .pkg()
             .source_bytes(i)
-            .filter(|_| i < pass.pkg().compiled_go_files.len())
+            .filter(|_| aligned && i < pass.pkg().compiled_go_files.len())
         {
             Some(bytes) => bytes,
             None => match fs::read(path) {
