@@ -234,24 +234,24 @@ fn global_dep_store() -> &'static std::sync::Mutex<HashMap<String, Arc<PkgDeprec
 fn src_has_deprecated_doc(src: &[u8]) -> bool {
     // Match doc-comment forms only — bare `Deprecated:` in strings is common
     // and would force expensive PARSE_COMMENTS on unrelated files.
-    const PATS: [&[u8]; 2] = [b"// Deprecated:", b"* Deprecated:"];
-    for pat in PATS {
-        if src.windows(pat.len()).any(|w| w == pat) {
-            return true;
-        }
-    }
-    false
+    //
+    // `windows().any()` compared byte-by-byte over every dependency file this
+    // probe rejects, which is nearly all of them; `memmem` is the same search
+    // vectorized. Both find the identical first match, so the answer cannot
+    // change.
+    memchr::memmem::find(src, b"// Deprecated:").is_some()
+        || memchr::memmem::find(src, b"* Deprecated:").is_some()
 }
 
 /// Package comments sit immediately above the `package` clause. Object-level
 /// `// Deprecated:` elsewhere must not force a Mode::NONE parse when we only
 /// need the package fact (e.g. golang/protobuf/proto/deprecated.go).
 fn src_has_package_deprecated_doc(src: &[u8]) -> bool {
-    let preamble = match src.windows(8).position(|w| w == b"\npackage") {
+    let preamble = match memchr::memmem::find(src, b"\npackage") {
         Some(i) => &src[..=i],
         None => {
             // Single-line / no leading newline before `package`.
-            if let Some(i) = src.windows(7).position(|w| w == b"package") {
+            if let Some(i) = memchr::memmem::find(src, b"package") {
                 &src[..i]
             } else {
                 src
@@ -262,20 +262,25 @@ fn src_has_package_deprecated_doc(src: &[u8]) -> bool {
 }
 
 /// Prefer conventional homes for package docs (`doc.go`, `{basename}.go`).
+///
+/// Each entry keeps its index in `files` so the caller can ask the package for
+/// bytes it already holds instead of opening the file again.
 fn prefer_package_doc_files<'a>(
     files: &'a [std::path::PathBuf],
     pkg_path: &str,
-) -> Vec<&'a std::path::PathBuf> {
+) -> Vec<(usize, &'a std::path::PathBuf)> {
     let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
-    let mut paths: Vec<&std::path::PathBuf> = files
+    let mut paths: Vec<(usize, &std::path::PathBuf)> = files
         .iter()
-        .filter(|p| {
+        .enumerate()
+        .filter(|(_, p)| {
             !p.file_name()
                 .and_then(|s| s.to_str())
                 .is_some_and(|n| n.ends_with("_test.go"))
         })
         .collect();
-    paths.sort_by_key(|p| {
+    // `sort_by_key` is stable, so files in the same bucket keep `files` order.
+    paths.sort_by_key(|(_, p)| {
         let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
         if n == "doc.go" {
             0
@@ -446,21 +451,37 @@ fn scan_import_deprecated(
         // wall. Object-level Deprecated: lives elsewhere and is handled by
         // the gated PARSE_COMMENTS path.
         let base = format!("{}.go", pkg_path.rsplit('/').next().unwrap_or(""));
-        paths.retain(|p| {
+        paths.retain(|(_, p)| {
             let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
             n == "doc.go" || n == base.as_str()
         });
     }
-    for path in paths {
-        let Ok(src) = fs::read(path) else {
-            continue;
+    // `source_files` is parallel to `syntax`, which is parallel to
+    // `compiled_go_files` — so the index is only a valid key into it when the
+    // list above is the compiled one.
+    let in_memory = !imp.compiled_go_files.is_empty();
+    for (idx, path) in paths {
+        let owned;
+        let src: &[u8] = match imp.source_bytes(idx).filter(|_| in_memory) {
+            // A dependency inside the same module is usually one of the root
+            // packages guff already type-checked from source, and those keep
+            // their bytes. Opening every dependency file again was a third of
+            // this analyzer's CPU on prometheus `./...`.
+            Some(bytes) => bytes,
+            None => match fs::read(path) {
+                Ok(read) => {
+                    owned = read;
+                    &owned
+                }
+                Err(_) => continue,
+            },
         };
         // Package-only: preamble filter so object-level Deprecated: files are
         // skipped cheaply. Object scan: any doc Deprecated: may matter.
         let interesting = if need_objects {
-            src_has_deprecated_doc(&src)
+            src_has_deprecated_doc(src)
         } else {
-            src_has_package_deprecated_doc(&src)
+            src_has_package_deprecated_doc(src)
         };
         if !interesting {
             continue;
@@ -469,7 +490,7 @@ fn scan_import_deprecated(
             continue;
         };
         let fset = FileSet::new();
-        let Ok(file) = parse_file(&fset, name, &src, parse_mode) else {
+        let Ok(file) = parse_file(&fset, name, src, parse_mode) else {
             continue;
         };
         if out.package.is_none() {
