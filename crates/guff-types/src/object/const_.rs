@@ -72,10 +72,10 @@ pub fn new_const(
     typ: TypeId,
     val: Value,
 ) -> ObjectId {
-    arena.alloc(ObjectData::Const(Const {
+    arena.alloc(ObjectData::Const(Box::new(Const {
         name: name.into(),
         typ,
         val,
         meta: ObjectMeta::default(),
-    }))
+    })))
 }

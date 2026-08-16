@@ -365,16 +365,37 @@ const _: () = TYPE_DATA_STAYS_SMALL;
 ///
 /// Chunks 1–6 cover `Var`, `Func`, `TypeName`, `Const`, `Nil`, `Builtin`.
 /// `PkgName` arrives with imports (D16). `Label` is still deferred.
+///
+/// **Multiplied by about 2.3M** on prometheus `./...`, so the same rule as
+/// [`TypeData`] applies (PERF_TASKS_V9 §V9-3). `Const` was 104 bytes against
+/// ≤ 56 for every other variant — its `guff_constant::Value` carries big-int
+/// and rational payloads — and set the slot size by itself. Boxed, the slot is
+/// 64 and the attributed object bytes go 230.0 → 145.1 MiB.
+///
+/// Peak RSS moves less than that (−38 MiB): retained bytes and peak are
+/// different quantities, and the peak is set by transient allocation during
+/// analyze. Do not quote the attribution's delta as an RSS delta.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ObjectData {
     Var(Var),
     Func(Func),
     TypeName(TypeName),
-    Const(Const),
+    /// Boxed to keep [`ObjectData`] small — see the type's docs before unboxing.
+    Const(Box<Const>),
     Nil(Nil),
     Builtin(Builtin),
     PkgName(PkgName),
 }
+
+/// Guards the slot size the object arena was tuned to (see [`ObjectData`]).
+///
+/// Same contract as [`TYPE_DATA_STAYS_SMALL`]: a ceiling, and the fix for a
+/// failure is to box the variant that grew, not to raise the number.
+const OBJECT_DATA_STAYS_SMALL: () = assert!(
+    std::mem::size_of::<ObjectData>() <= 72,
+    "ObjectData grew past 72 bytes; ~2.3M arena slots pay for it (docs/PERF_TASKS_V9.md §V9-3)",
+);
+const _: () = OBJECT_DATA_STAYS_SMALL;
 
 /// Shallow structural key for B-5 hash-consing. Pointer / Array / Map / Chan /
 /// Signature only — **not Slice**.
@@ -919,12 +940,27 @@ impl ObjectArena {
                 ObjectData::PkgName(p) => p.name().len(),
             }
         };
+        // Payload a boxed variant keeps *outside* the slot array, which
+        // `capacity * size_of::<ObjectData>()` cannot see. It is small here —
+        // 3.6 MiB of `Const` against the 85 MiB boxing takes off the slots —
+        // but "small" is a measurement, not something the report should assume:
+        // box a common variant and this term is the whole story.
+        let boxed_len = |obj: &ObjectData| -> usize {
+            match obj {
+                ObjectData::Const(_) => size_of::<Const>(),
+                _ => 0,
+            }
+        };
+        let mut charge = |acct: &mut crate::retained::RetainedBytes, obj: &ObjectData| {
+            acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+            acct.object_slots = acct.object_slots.saturating_add(boxed_len(obj));
+        };
         if overlay_only {
             acct.object_slots = acct
                 .object_slots
                 .saturating_add(overlay.capacity().saturating_mul(size_of::<ObjectData>()));
             for obj in overlay.iter() {
-                acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+                charge(acct, obj);
             }
             return;
         }
@@ -936,11 +972,11 @@ impl ObjectArena {
         );
         if first {
             for obj in base.iter() {
-                acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+                charge(acct, obj);
             }
         }
         for obj in overlay.iter() {
-            acct.name_bytes = acct.name_bytes.saturating_add(name_len(obj));
+            charge(acct, obj);
         }
     }
 
