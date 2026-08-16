@@ -121,7 +121,7 @@ fn func_lit_in_scope(id: &Ident) -> Option<FuncLit> {
         _ => None,
     };
     match rhs {
-        Some(Expr::FuncLit(lit)) => Some(lit),
+        Some(Expr::FuncLit(lit)) => Some(*lit),
         _ => None,
     }
 }

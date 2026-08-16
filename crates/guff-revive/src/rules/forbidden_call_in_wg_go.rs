@@ -28,9 +28,10 @@ impl Checker {
         if !is_ident_dot_name(&call.fun, "wg", "Go") || call.args.len() != 1 {
             return;
         }
-        let Expr::FuncLit(FuncLit { body, .. }) = unparen(&call.args[0]) else {
+        let Expr::FuncLit(lit) = unparen(&call.args[0]) else {
             return;
         };
+        let body = &lit.body;
         walk::inspect(NodeRef::BlockStmt(body), |inner| {
             let Some(NodeRef::CallExpr(inner_call)) = inner else {
                 return true;

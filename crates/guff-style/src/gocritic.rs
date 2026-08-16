@@ -1117,7 +1117,7 @@ fn check_exit_after_defer(pass: &Pass<'_>, func: &FuncDecl, pending: &mut Vec<(u
     fn defer_label(pass: &Pass<'_>, stmt: &Stmt, d: &DeferStmt) -> String {
         if let Expr::FuncLit(fl) = d.call.fun.as_ref() {
             let sig =
-                node_text(pass, &Expr::FuncType(fl.ty.clone())).unwrap_or_else(|| "func()".into());
+                node_text(pass, &Expr::FuncType(Box::new(fl.ty.clone()))).unwrap_or_else(|| "func()".into());
             return format!("defer {sig}{{...}}(...)");
         }
         node_text_stmt(pass, stmt).unwrap_or_else(|| "defer ...".into())
@@ -2018,7 +2018,7 @@ fn check_unlambda(pass: &Pass<'_>, fl: &FuncLit, pending: &mut Vec<(u32, String)
     // Upstream renders the literal with `astfmt`, i.e. the real source text:
     // `func(s string) string { return strings.TrimSpace(s) }`. `expr_text` has
     // no case for a func literal's body, so it has to go through go/printer.
-    let lit = Expr::FuncLit(fl.clone());
+    let lit = Expr::FuncLit(Box::new(fl.clone()));
     let Some(lit_text) = node_text(pass, &lit)
         .or_else(|| expr_text(&lit))
         .or_else(|| Some(format!("func(...) {{ return {callable}(...) }}")))

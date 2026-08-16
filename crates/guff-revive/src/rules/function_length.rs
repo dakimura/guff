@@ -163,8 +163,8 @@ fn count_body_stmts(stmts: &[Stmt]) -> usize {
 }
 
 fn count_func_lit_stmts(expr: &Expr) -> usize {
-    if let Expr::FuncLit(FuncLit { body, .. }) = expr {
-        count_stmts(&body.list)
+    if let Expr::FuncLit(lit) = expr {
+        count_stmts(&lit.body.list)
     } else {
         0
     }

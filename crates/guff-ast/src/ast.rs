@@ -607,13 +607,29 @@ pub struct ChanType {
 
 // --- Expr enum ------------------------------------------------------
 
+/// A Go expression.
+///
+/// **Every variant costs what the largest one costs**, and this enum is the
+/// unit the whole AST is built out of — so its size is a memory and bandwidth
+/// decision, not a formatting one. Two variants used to set that size on their
+/// own: `FuncLit` (192 B) and `FuncType` (136 B). Boxing them (PERF_TASKS_V9
+/// §📌) took `Expr` from **192 bytes to 80**, and `Stmt` — which was never
+/// touched — from **656 to 320**, because `SendStmt`, `RangeStmt` and the rest
+/// embed `Expr`s and inherited the shrink. On prometheus `./...` that is
+/// −12% wall, −18% CPU and −23% peak RSS.
+///
+/// So: **check `size_of::<Expr>()` before adding a variant or widening one.**
+/// A new inline field big enough to become the maximum silently re-inflates
+/// every node in the tree, and nothing else in the build will complain — which
+/// is why [`EXPR_STAYS_SMALL`] does.
 #[derive(Debug, Clone)]
 pub enum Expr {
     BadExpr(BadExpr),
     Ident(Ident),
     Ellipsis(Ellipsis),
     BasicLit(BasicLit),
-    FuncLit(FuncLit),
+    /// Boxed to keep [`Expr`] small — see the type's docs before unboxing.
+    FuncLit(Box<FuncLit>),
     CompositeLit(CompositeLit),
     ParenExpr(ParenExpr),
     SelectorExpr(SelectorExpr),
@@ -628,11 +644,25 @@ pub enum Expr {
     KeyValueExpr(KeyValueExpr),
     ArrayType(ArrayType),
     StructType(StructType),
-    FuncType(FuncType),
+    /// Boxed to keep [`Expr`] small — see the type's docs before unboxing.
+    FuncType(Box<FuncType>),
     InterfaceType(InterfaceType),
     MapType(MapType),
     ChanType(ChanType),
 }
+
+/// Guards the size the AST was tuned to (see [`Expr`]).
+///
+/// A ceiling rather than an equality, so adding a *small* variant stays a
+/// non-event; it only fires when something re-inflates the node. If it does
+/// fire, the fix is almost always to `Box` the offending variant and add it to
+/// the list above — not to raise the number. Measure the effect before either:
+/// `Stmt` and `Spec` follow `Expr` down, so the reach is bigger than it looks.
+const EXPR_STAYS_SMALL: () = assert!(
+    std::mem::size_of::<Expr>() <= 96,
+    "Expr grew past 96 bytes; every AST node pays for it (docs/PERF_TASKS_V9.md §📌)",
+);
+const _: () = EXPR_STAYS_SMALL;
 
 impl Expr {
     pub fn pos(&self) -> Pos {

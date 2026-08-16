@@ -116,10 +116,11 @@ fn check_fuzz_call(pass: &Pass<'_>, fn_: &FuncDecl) -> Vec<(u32, String)> {
             return;
         }
         let arg = &call.args[0];
-        let Expr::FuncLit(FuncLit { ty, .. }) = arg else {
+        let Expr::FuncLit(lit) = arg else {
             out.push((arg.pos().0 as u32, "argument to Fuzz must be a function".into()));
             return;
         };
+        let ty = &lit.ty;
         if ty.results.as_ref().is_some_and(|r| !r.list.is_empty()) {
             out.push((arg.pos().0 as u32, "fuzz target must not return any value".into()));
         }

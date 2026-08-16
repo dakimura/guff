@@ -126,7 +126,8 @@ impl Walker<'_> {
     }
 
     fn visit_func_lit_expr(&mut self, expr: &Expr) {
-        if let Expr::FuncLit(FuncLit { body, .. }) = expr {
+        if let Expr::FuncLit(lit) = expr {
+            let body = &lit.body;
             let mut inner = Walker {
                 nesting: 0,
                 last_ctrl_pos: 0,
