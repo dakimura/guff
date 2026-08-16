@@ -1186,10 +1186,24 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
         return;
     }
 
-    // Wavefront schedule: each wave is a maximal set of actions whose deps are
-    // already done, then rayon's pool runs the wave in parallel. Matching the
-    // sequential topo order's diagnostic root walk keeps output deterministic
-    // after collection (roots still walk in construction order).
+    // Dependency-driven schedule: an action is spawned the moment its last
+    // dependency finishes, by the worker that finished it. No global barrier.
+    //
+    // The wavefront schedule this replaced ran every package's `inspect`, then
+    // every package's `gocritic`, and so on: with 118 root packages the phase
+    // held 118 live `InspectResult` / `BuildIrResult` / `Index` values at once,
+    // because a package's producer result cannot be dropped until its last
+    // consumer runs — and under a barrier that consumer is in a later wave, i.e.
+    // after every other package has caught up. The per-package table showed it
+    // directly: all 118 packages spanned [0.00s..0.79s] of a 0.81s phase.
+    // Releasing on the finishing worker instead lets one package run its whole
+    // analyzer chain while the results are still hot, so only the packages
+    // actually in flight (≈ worker count) are resident. Peak RSS is the point —
+    // prometheus `./...` went 3.13 → 2.53 GiB — and the analyze phase also got
+    // faster (0.84s → 0.66s wall, 7.2s → 6.0s CPU) because a package's results
+    // stay in cache across its own analyzers instead of being revisited a wave
+    // later.
+    //
     // Rayon's default worker stack (~512 KiB on macOS) is too small for deep SSA
     // / type substitution on large modules; match the main thread's headroom.
     const WORKER_STACK: usize = 8 * 1024 * 1024;
@@ -1198,20 +1212,109 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
         .stack_size(WORKER_STACK)
         .build()
         .expect("rayon thread pool");
-    let remaining = &remaining;
+    let sched = Sched::new(&order, remaining);
     pool.install(|| {
-        for wave in dependency_waves(&order) {
-            rayon::scope(|s| {
-                for act in &wave {
-                    let act = Arc::clone(act);
-                    s.spawn(move |_| {
-                        act.execute();
-                        release_finished_deps(&act, remaining);
-                    });
-                }
-            });
-        }
+        rayon::scope(|s| {
+            for &i in &sched.initial_ready {
+                let sched = &sched;
+                s.spawn(move |s| sched.run(s, i as usize));
+            }
+        })
     });
+    // A dependency counter can only fail to reach zero if the graph has a cycle,
+    // which `validate` rules out for `requires` and the import graph rules out
+    // for facts. If one ever slips through, run the leftovers rather than let an
+    // analyzer silently produce no diagnostics — a missing finding is the one
+    // outcome this scheduler must never have.
+    for (i, act) in order.iter().enumerate() {
+        if sched.indeg[i].load(Ordering::Acquire) != 0 {
+            act.execute();
+            release_finished_deps(act, &sched.remaining);
+        }
+    }
+}
+
+/// Ready-queue state for the dependency-driven analyze schedule.
+///
+/// `indeg[i]` counts `order[i]`'s not-yet-finished dependencies; the worker that
+/// takes it to zero owns spawning it. Edges are counted with multiplicity, so a
+/// duplicated dependency decrements twice and still reaches zero exactly once.
+struct Sched<'a> {
+    order: &'a [Arc<Action>],
+    /// `dependents[i]` = indices whose `deps` contain `order[i]`.
+    dependents: Vec<Vec<u32>>,
+    indeg: Vec<AtomicUsize>,
+    /// Outstanding-consumer counts for [`release_finished_deps`].
+    remaining: HashMap<usize, AtomicUsize>,
+    /// Actions with no dependencies, grouped so that consecutive entries belong
+    /// to the same package. Rayon hands stealing workers consecutive tasks, so
+    /// grouping keeps them on one package instead of fanning across all 118 —
+    /// the same reason the barrier had to go. Ordering the packages themselves
+    /// (longest-processing-time first, by source bytes) was tried and measured
+    /// flat on both analyze wall and RSS, so the order stays first-seen.
+    initial_ready: Vec<u32>,
+}
+
+impl<'a> Sched<'a> {
+    fn new(order: &'a [Arc<Action>], remaining: HashMap<usize, AtomicUsize>) -> Self {
+        let mut index: HashMap<usize, u32> =
+            HashMap::with_capacity_and_hasher(order.len(), Default::default());
+        for (i, act) in order.iter().enumerate() {
+            index.insert(Arc::as_ptr(act) as usize, i as u32);
+        }
+        let mut dependents: Vec<Vec<u32>> = vec![Vec::new(); order.len()];
+        let mut indeg: Vec<AtomicUsize> = Vec::with_capacity(order.len());
+        for (i, act) in order.iter().enumerate() {
+            indeg.push(AtomicUsize::new(act.deps.len()));
+            for dep in &act.deps {
+                // `order` is a topological post-order over the same graph, so
+                // every dependency is already indexed.
+                if let Some(&d) = index.get(&(Arc::as_ptr(dep) as usize)) {
+                    dependents[d as usize].push(i as u32);
+                }
+            }
+        }
+        let mut initial_ready: Vec<u32> = (0..order.len() as u32)
+            .filter(|&i| order[i as usize].deps.is_empty())
+            .collect();
+        // Group by package (stable within a package, packages in first-seen
+        // order) so the initial fan-out does not scatter workers over every
+        // package at once. Measured on prometheus `./...`: grouped analyze
+        // 0.66-0.68s vs ungrouped 0.68-0.72s; peak RSS is the same either way
+        // (that half is the barrier removal, not the order).
+        let mut pkg_rank: HashMap<usize, u32> = HashMap::default();
+        for &i in &initial_ready {
+            let key = Arc::as_ptr(&order[i as usize].package) as usize;
+            let next = pkg_rank.len() as u32;
+            pkg_rank.entry(key).or_insert(next);
+        }
+        initial_ready.sort_by_key(|&i| {
+            let key = Arc::as_ptr(&order[i as usize].package) as usize;
+            (pkg_rank[&key], i)
+        });
+        Self {
+            order,
+            dependents,
+            indeg,
+            remaining,
+            initial_ready,
+        }
+    }
+
+    fn run<'scope>(&'scope self, s: &rayon::Scope<'scope>, i: usize) {
+        let act = &self.order[i];
+        act.execute();
+        release_finished_deps(act, &self.remaining);
+        for &d in &self.dependents[i] {
+            let d = d as usize;
+            // `AcqRel` for the same reason as `release_finished_deps`: the
+            // worker that observes zero must see every other dependency's
+            // writes to the action state it is about to read.
+            if self.indeg[d].fetch_sub(1, Ordering::AcqRel) == 1 {
+                s.spawn(move |s| self.run(s, d));
+            }
+        }
+    }
 }
 
 /// Counts, per action (keyed by `Arc` pointer), how many actions list it as a
@@ -1245,37 +1348,6 @@ fn release_finished_deps(act: &Arc<Action>, remaining: &HashMap<usize, AtomicUsi
             dep.state.lock().unwrap().result = None;
         }
     }
-}
-
-/// Groups actions into waves where every action in a wave has all dependencies
-/// in earlier waves (or no deps). Actions within a wave are independent.
-///
-/// `order` is already a topological post-order (every action's deps precede it,
-/// see [`topo_postorder`]), so each action's wave is `1 + max(dep wave)` and can
-/// be computed in a single O(V+E) pass. Pushing in `order` sequence keeps each
-/// wave in topo-appearance order without a sort — the old implementation rescanned
-/// `remaining` per wave (O(waves·n)) and sorted each wave with a linear
-/// `order.iter().position()` key (O(n² log n)), which dominated the analyze phase
-/// on large runs and made parallel execution slower than sequential.
-fn dependency_waves(order: &[Arc<Action>]) -> Vec<Vec<Arc<Action>>> {
-    let mut level: HashMap<usize, usize> = HashMap::with_capacity_and_hasher(order.len(), Default::default());
-    let mut waves: Vec<Vec<Arc<Action>>> = Vec::new();
-    for act in order {
-        let mut lvl = 0usize;
-        for dep in &act.deps {
-            // Deps precede `act` in topo order, so their level is already set.
-            // (A missing dep would indicate `order` was not a valid post-order.)
-            if let Some(&dl) = level.get(&(Arc::as_ptr(dep) as usize)) {
-                lvl = lvl.max(dl + 1);
-            }
-        }
-        level.insert(Arc::as_ptr(act) as usize, lvl);
-        if waves.len() <= lvl {
-            waves.resize_with(lvl + 1, Vec::new);
-        }
-        waves[lvl].push(Arc::clone(act));
-    }
-    waves
 }
 
 fn clone_result(result: &AnalysisResult) -> AnalysisResult {
