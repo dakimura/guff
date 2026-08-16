@@ -1047,7 +1047,15 @@ fn build_source_seed_inner(
     // (path, self_hash) in merge order — kept for debug / legacy callers.
     let mut merged: Vec<(String, String)> = Vec::new();
 
-    for wave in &waves {
+    // Under `GUFF_DEBUG_RSS`, sample the process every eighth wave. The
+    // per-package attribution can only name what it can walk, so the shape of
+    // this curve is what says whether the unnamed remainder is built here or
+    // left behind here (PERF_TASKS_V6 §4.1).
+    let rss_probe = crate::rss::enabled();
+    if rss_probe {
+        crate::rss::report_process("seed build start");
+    }
+    for (wave_idx, wave) in waves.iter().enumerate() {
         widest = widest.max(wave.len());
         let base_fp = running_fp.clone();
 
@@ -1145,6 +1153,12 @@ fn build_source_seed_inner(
         let m = std::time::Instant::now();
         seed.merge_wave(overlays);
         merge_secs += m.elapsed().as_secs_f64();
+        if rss_probe && wave_idx % 8 == 7 {
+            crate::rss::report_process(&format!("seed wave {}", wave_idx + 1));
+        }
+    }
+    if rss_probe {
+        crate::rss::report_process("seed build done");
     }
 
     // Flush any in-flight overlay writes before returning so a persistent cache

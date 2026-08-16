@@ -1163,25 +1163,45 @@ pub(crate) fn exec_all(roots: &[Arc<Action>], sequential: bool, concurrency: Opt
     // are collected after the run); the post-run sweep still clears them.
     let remaining = reverse_dep_counts(&order);
 
-    if sequential {
-        for act in &order {
-            act.execute();
-            release_finished_deps(act, &remaining);
-        }
-        return;
-    }
-
-    let workers = concurrency.unwrap_or_else(|| {
-        // Analyze SSA overlays are small vs the shared seed base; allow full
-        // ncpu here. Seed/target typecheck stay on the capped global pool.
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-    });
+    let workers = if sequential {
+        1
+    } else {
+        concurrency.unwrap_or_else(|| {
+            // Analyze SSA overlays are small vs the shared seed base; allow full
+            // ncpu here. Seed/target typecheck stay on the capped global pool.
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        })
+    };
     if workers <= 1 {
-        for act in &order {
+        // One worker, same schedule. `order` is analyzer-major — it runs every
+        // package's `inspect`, then every package's `buildir` — which is the
+        // shape the parallel path stopped using because it keeps 118 packages'
+        // results alive at once. Running the ready queue depth-first instead
+        // costs nothing here and takes `-j 1` peak RSS on prometheus `./...`
+        // from 2953 MiB to the same neighbourhood as the parallel run.
+        let sched = Sched::new(&order, remaining);
+        let mut stack: Vec<u32> = sched.initial_ready.clone();
+        while let Some(i) = stack.pop() {
+            let i = i as usize;
+            let act = &sched.order[i];
             act.execute();
-            release_finished_deps(act, &remaining);
+            release_finished_deps(act, &sched.remaining);
+            for &d in &sched.dependents[i] {
+                if sched.indeg[d as usize].fetch_sub(1, Ordering::AcqRel) == 1 {
+                    stack.push(d);
+                }
+            }
+        }
+        // Same "cannot happen" guard as the parallel path: a dependency cycle
+        // would leave actions unrun, and an analyzer that never runs is a
+        // finding that silently disappears.
+        for (i, act) in order.iter().enumerate() {
+            if sched.indeg[i].load(Ordering::Acquire) != 0 {
+                act.execute();
+                release_finished_deps(act, &sched.remaining);
+            }
         }
         return;
     }

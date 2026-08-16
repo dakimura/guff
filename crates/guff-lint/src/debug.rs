@@ -38,3 +38,45 @@ pub(crate) fn enabled() -> bool {
 pub(crate) fn detailed() -> bool {
     level() >= 2
 }
+
+/// Split the RSS the OS reports into "live" and "held by the allocator", by
+/// asking mimalloc to hand back everything it can and re-reading RSS.
+///
+/// The per-package attribution names 1.29 GiB of a 2.16 GiB process on
+/// prometheus `./...` (PERF_TASKS_V6 §4.1). That gap has two very different
+/// explanations — memory nobody thought to count, or pages freed but never
+/// returned — and they call for opposite work. `mi_collect(true)` decides it:
+/// whatever RSS drops was the allocator's, whatever stays is live.
+///
+/// Debug-only (`GUFF_DEBUG_RSS`). `mi_collect` is not free and never runs
+/// otherwise.
+pub(crate) fn report_rss_after_collect(label: &str) {
+    if !guff_packages::rss_enabled() {
+        return;
+    }
+    let before = guff_packages::process_rss_bytes();
+    // Safety: `mi_collect` is the allocator's own maintenance entry point and
+    // takes no pointers; it is safe to call from any thread at any time.
+    unsafe { libmimalloc_sys::mi_collect(true) };
+    let after = guff_packages::process_rss_bytes();
+    if std::env::var_os("GUFF_DEBUG_RSS").is_some_and(|v| v.to_str() == Some("2")) {
+        // mimalloc's own ledger: `reserved` is what it took from the OS,
+        // `committed`/`current` what it is holding for live blocks. If RSS is
+        // far above `current`, the pages are the allocator's, not ours.
+        // Safety: both are the allocator's own reporting entry points.
+        unsafe {
+            libmimalloc_sys::mi_stats_print(std::ptr::null_mut());
+        }
+    }
+    if let (Some(b), Some(a)) = (before, after) {
+        let mib = |v: u64| v as f64 / (1024.0 * 1024.0);
+        eprintln!(
+            "guff:   rss after mi_collect ({label}): {:.0} MiB → {:.0} MiB \
+             (allocator gave back {:.0} MiB; {:.0} MiB is live)",
+            mib(b),
+            mib(a),
+            mib(b.saturating_sub(a)),
+            mib(a),
+        );
+    }
+}

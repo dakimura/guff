@@ -624,7 +624,9 @@ pub(crate) fn run_linters_on_graph(
             miss_roots.len(),
         );
     }
+    guff_packages::report_process("post typecheck_roots");
     guff_packages::report_packages("post typecheck_roots", &miss_roots);
+    crate::debug::report_rss_after_collect("post typecheck_roots");
     let t3 = std::time::Instant::now();
 
     let result = run_on_packages(
@@ -645,7 +647,9 @@ pub(crate) fn run_linters_on_graph(
             t3.elapsed().as_secs_f64(),
         );
     }
+    guff_packages::report_process("post analyze");
     guff_packages::report_packages("post analyze", &miss_roots);
+    crate::debug::report_rss_after_collect("post analyze");
 
     if crate::debug::enabled() {
         eprintln!(
@@ -1141,9 +1145,13 @@ fn run_and_write_inner(
         opts.issues_exit_code
     };
     let td = std::time::Instant::now();
-    match teardown {
-        Teardown::Free => drop(result),
-        Teardown::LeakOnProcessExit => std::mem::forget(result),
+    if rss_category_probe_enabled() {
+        rss_category_probe(result);
+    } else {
+        match teardown {
+            Teardown::Free => drop(result),
+            Teardown::LeakOnProcessExit => std::mem::forget(result),
+        }
     }
     if timing {
         eprintln!(
@@ -1156,6 +1164,76 @@ fn run_and_write_inner(
         );
     }
     Ok(code)
+}
+
+/// Whether `GUFF_DEBUG_RSS=3` asked for the destructive category probe.
+fn rss_category_probe_enabled() -> bool {
+    std::env::var_os("GUFF_DEBUG_RSS").is_some_and(|v| v.to_str() == Some("3"))
+}
+
+/// Take the run's retained memory apart one category at a time, printing RSS
+/// after each, so the categories are *measured* rather than estimated.
+///
+/// `rss::attribute_packages` estimates: a flat 192 bytes per AST node, arena
+/// slots without the heap hanging off each type, `Info` maps by entry count. It
+/// names 1.29 GiB of a 2.17 GiB process on prometheus `./...` and says so, but
+/// an estimate cannot tell you whether the missing 0.88 GiB is one structure
+/// nobody counted or every estimate being 40% low (PERF_TASKS_V6 §4.1).
+/// Dropping a category and reading RSS back answers that exactly.
+///
+/// Destructive and debug-only: it runs after issues are printed, in place of
+/// the teardown that would otherwise leak the result to process exit.
+fn rss_category_probe(mut result: LintResult) {
+    guff_packages::report_process("teardown start");
+    // Every action holds an `Arc<Package>`; until the graph is gone the package
+    // Arcs are shared and cannot be taken apart in place.
+    result.run.graph = guff_runner::Graph::empty();
+    result.run.packages.clear();
+    guff_packages::report_process("after dropping the action graph");
+
+    let mut shared = 0usize;
+    let mut with_syntax = 0usize;
+    for pkg in &mut result.packages {
+        match std::sync::Arc::get_mut(pkg) {
+            Some(p) => {
+                if !p.syntax.is_empty() {
+                    with_syntax += 1;
+                }
+                p.syntax = Vec::new();
+                p.source_files = Vec::new();
+            }
+            None => shared += 1,
+        }
+    }
+    guff_packages::report_process(&format!(
+        "after dropping syntax + source bytes ({with_syntax} pkgs, {shared} still shared)"
+    ));
+
+    for pkg in &mut result.packages {
+        if let Some(p) = std::sync::Arc::get_mut(pkg) {
+            p.types_info = None;
+        }
+    }
+    guff_packages::report_process("after dropping Info maps");
+
+    for pkg in &mut result.packages {
+        if let Some(p) = std::sync::Arc::get_mut(pkg) {
+            p.type_artifacts = None;
+        }
+    }
+    guff_packages::report_process("after dropping type artifacts (arenas)");
+
+    for pkg in &mut result.packages {
+        if let Some(p) = std::sync::Arc::get_mut(pkg) {
+            p.fset = None;
+            p.imports.clear();
+            p.deps = Vec::new();
+        }
+    }
+    guff_packages::report_process("after dropping FileSet + import graph + dep lists");
+
+    drop(result);
+    guff_packages::report_process("after dropping everything");
 }
 
 /// Run on a worker thread and abort the process-visible wait when `timeout` elapses.
