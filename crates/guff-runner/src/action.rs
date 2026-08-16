@@ -375,6 +375,22 @@ fn report_preorder_timing(analyze_total: u128) {
         },
         nanos as f64 / 1e9,
     );
+    // Which arm of `visit_masked` actually served those calls (PERF_TASKS_V8
+    // §1). `scanned` alone cannot tell the wide linear scan apart from the
+    // recursive-walk fallback: both report the whole window.
+    let arms = guff_analysis::preorder_arm_totals();
+    if !arms.is_empty() {
+        // Every arm is printed, including the zero rows: "the recursive-walk
+        // fallback fired 0 times" is the whole point of the table, and a row
+        // that vanishes when it is zero cannot say that.
+        eprintln!("guff: preorder arm taken (of {calls} calls):");
+        for (name, n) in arms {
+            eprintln!(
+                "  {name:>32} {n:>10} calls ({:.1}%)",
+                n as f64 / calls as f64 * 100.0
+            );
+        }
+    }
     let mut by = PREORDER_BY_ANALYZER.lock().unwrap_or_else(|e| e.into_inner());
     let mut rows: Vec<(&'static str, u64, u64, u64)> =
         by.iter().map(|(k, (t, n, h))| (*k, *t, *n, *h)).collect();

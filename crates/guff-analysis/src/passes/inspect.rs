@@ -38,6 +38,52 @@ struct PreorderCounters {
     /// have taken off the callback path so far.
     hits: AtomicU64,
     nanos: AtomicU64,
+    /// Which arm of [`InspectResult::visit_masked`] each call took, indexed by
+    /// [`Arm`] (PERF_TASKS_V8 §1 / P0).
+    ///
+    /// V1-2 built the per-kind groups so that a one-kind mask would deliver
+    /// `O(hits)` instead of `O(all nodes)`, but the run-wide counters say the
+    /// opposite is happening: prometheus `./...` scans 198M events to deliver
+    /// 6.75M, and a single 4,385-node package is scanned 126 times over. Both
+    /// fast arms set `hits == scanned`, so neither can be producing those
+    /// numbers — something is falling through to a slower arm, and `scanned`
+    /// alone cannot say which. This counts the arms directly.
+    arms: [AtomicU64; Arm::COUNT],
+}
+
+/// Which branch of [`InspectResult::visit_masked`] served a call.
+///
+/// The two `Walk*` variants are the same code path (the recursive fallback);
+/// they are counted apart because they have completely different fixes — one is
+/// a missing `Arc<Package>` on the pass, the other is a caller passing a `File`
+/// slice the events were not built from.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum Arm {
+    /// One kind: its group *is* the answer. `hits == scanned`.
+    Single = 0,
+    /// 2..=`MAX_MERGE_KINDS` kinds, merged by event index. `hits == scanned`.
+    Merge = 1,
+    /// Wider than `MAX_MERGE_KINDS`: linear scan of the event window.
+    Wide = 2,
+    /// Recursive walk because the result carries no events at all — the pass
+    /// had no `Arc<Package>` for [`InspectResult::build`] to anchor to.
+    WalkNoEvents = 3,
+    /// Recursive walk because `files` is not the slice the events were built
+    /// from, nor a contiguous subslice of it.
+    WalkForeignSlice = 4,
+}
+
+impl Arm {
+    const COUNT: usize = 5;
+
+    const NAMES: [&'static str; Self::COUNT] = [
+        "single-kind group",
+        "merged groups",
+        "wide linear scan",
+        "recursive walk (no events)",
+        "recursive walk (foreign slice)",
+    ];
 }
 
 static PREORDER_ENABLED: LazyLock<bool> =
@@ -148,6 +194,25 @@ pub fn preorder_totals() -> (u64, u64, u64, u64) {
             hi + c.hits.load(Ordering::Relaxed),
         )
     })
+}
+
+/// `(arm name, calls)` for each [`Arm`], summed across every worker thread.
+///
+/// Answers "is the V1-2 fast path being taken at all?" without inferring it
+/// from `scanned` vs `delivered`, which cannot tell the wide scan apart from
+/// the recursive walk.
+pub fn preorder_arm_totals() -> Vec<(&'static str, u64)> {
+    if !*PREORDER_ENABLED {
+        return Vec::new();
+    }
+    let reg = PREORDER_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut out = [0u64; Arm::COUNT];
+    for c in reg.iter() {
+        for (slot, a) in out.iter_mut().zip(c.arms.iter()) {
+            *slot += a.load(Ordering::Relaxed);
+        }
+    }
+    Arm::NAMES.iter().copied().zip(out).collect()
 }
 
 /// One visited node, flattened out of the AST (PERF_TASKS_V2 B-1a).
@@ -396,17 +461,18 @@ impl InspectResult {
     /// the events were recorded by the same [`preorder_stack`] call shape, and
     /// each group is in ascending event order.
     ///
-    /// Returns how many nodes were scanned and how many were delivered; both
-    /// are dropped on the release path (the counters are only read under
-    /// `GUFF_DEBUG_CACHE`) and exist so the arms can't disagree about what
-    /// counts as work.
+    /// Returns how many nodes were scanned, how many were delivered, and which
+    /// [`Arm`] served the call; all three are dropped on the release path (the
+    /// counters are only read under `GUFF_DEBUG_CACHE`) and exist so the arms
+    /// can't disagree about what counts as work.
     #[inline]
-    fn visit_masked<F>(&self, mask: NodeMask, files: &[File], mut f: F) -> (u64, u64)
+    fn visit_masked<F>(&self, mask: NodeMask, files: &[File], mut f: F) -> (u64, u64, Arm)
     where
         F: FnMut(NodeRef<'_>),
     {
         let mut scanned: u64 = 0;
         let mut hits: u64 = 0;
+        let mut arm;
         match self.events_for(files) {
             Some((ev, lo, hi)) => {
                 // Each kind's group is ascending, and `[lo, hi)` is a contiguous
@@ -424,6 +490,7 @@ impl InspectResult {
                 let bits = mask.bits();
                 let n = bits.count_ones() as usize;
                 if n == 1 {
+                    arm = Arm::Single;
                     // The 119-call-site case: one kind, so its group *is* the
                     // answer — already in preorder order, no merge, no mask test.
                     let group = clip(bits.trailing_zeros() as usize);
@@ -438,6 +505,7 @@ impl InspectResult {
                         f(unsafe { node_in(files, e) });
                     }
                 } else if n as u32 <= MAX_MERGE_KINDS {
+                    arm = Arm::Merge;
                     // Narrow mask: walk only the requested kinds' groups,
                     // merging by event index so the caller still sees preorder
                     // order. `scanned` counts what we actually touched, which is
@@ -468,6 +536,7 @@ impl InspectResult {
                         f(unsafe { node_in(files, e) });
                     }
                 } else {
+                    arm = Arm::Wide;
                     let window = &ev.nodes[lo as usize..hi as usize];
                     scanned = window.len() as u64;
                     for &e in window {
@@ -481,6 +550,14 @@ impl InspectResult {
                 }
             }
             None => {
+                // Split the one fallback into its two causes: no events at all
+                // (the pass had no `Arc<Package>`) versus events that belong to
+                // a different `[File]` than the caller passed.
+                arm = if self.events.is_none() {
+                    Arm::WalkNoEvents
+                } else {
+                    Arm::WalkForeignSlice
+                };
                 let mut stack = Vec::new();
                 for file in files {
                     preorder_stack(NodeRef::File(file), &mut stack, |n, _| {
@@ -494,7 +571,7 @@ impl InspectResult {
                 }
             }
         }
-        (scanned, hits)
+        (scanned, hits, arm)
     }
 
     /// Same traversal as [`preorder_typed`](Self::preorder_typed), plus B-0
@@ -510,7 +587,7 @@ impl InspectResult {
     {
         let guard = DepthGuard::enter();
         let start = (guard.0 == 0).then(std::time::Instant::now);
-        let (scanned, hits) = self.visit_masked(mask, files, f);
+        let (scanned, hits, arm) = self.visit_masked(mask, files, f);
         let nanos = start.map_or(0, |s| s.elapsed().as_nanos() as u64);
         drop(guard);
         PREORDER_LOCAL.with(|c| {
@@ -518,6 +595,7 @@ impl InspectResult {
             c.nodes.fetch_add(scanned, Ordering::Relaxed);
             c.hits.fetch_add(hits, Ordering::Relaxed);
             c.nanos.fetch_add(nanos, Ordering::Relaxed);
+            c.arms[arm as usize].fetch_add(1, Ordering::Relaxed);
         });
     }
 }

@@ -22,7 +22,8 @@ mod validate;
 
 pub use passes::buildir::BuildIrResult;
 pub use passes::inspect::{
-    masks_enabled, preorder_stats_enabled, preorder_thread_totals, preorder_totals,
+    masks_enabled, preorder_arm_totals, preorder_stats_enabled, preorder_thread_totals,
+    preorder_totals,
 };
 pub use passes::facts::deprecated::{DeprecatedResult, IsDeprecated};
 pub use passes::typeindex::Index as TypeIndex;
