@@ -316,6 +316,20 @@ impl<T: Clone> Layered<T> {
 ///
 /// Chunks 1–3 cover every type kind. The Checker proper (which animates them)
 /// is still to come.
+///
+/// **This enum's size is multiplied by about 5.1M** on prometheus `./...` —
+/// it is the single largest thing the process retains (PERF_TASKS_V9 §V9-3).
+/// The arena is dominated by the *small* kinds: a `Slice` is 4 bytes and a
+/// `Pointer` is 4, and they were each occupying 112 because `Interface` (112)
+/// and `Named` (96) are inline. Boxing those two takes the slot to 72 and peak
+/// RSS down 150 MiB, with wall and CPU unchanged across two interleaved A/B
+/// runs — the indirection is only paid when an interface or named type is read,
+/// and the dense kinds got 36% more of them per cache line.
+///
+/// `Box` is transparent to serde, so seed overlays on disk are unaffected.
+///
+/// So: **check `size_of::<TypeData>()` before adding or widening a variant.**
+/// [`TYPE_DATA_STAYS_SMALL`] fails the build if it grows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TypeData {
     Basic(Basic),
@@ -327,12 +341,25 @@ pub enum TypeData {
     Tuple(Tuple),
     Struct(Struct),
     Signature(Signature),
-    Interface(Interface),
+    /// Boxed to keep [`TypeData`] small — see the type's docs before unboxing.
+    Interface(Box<Interface>),
     Union(Union),
-    Named(Named),
+    /// Boxed to keep [`TypeData`] small — see the type's docs before unboxing.
+    Named(Box<Named>),
     Alias(Alias),
     TypeParam(TypeParam),
 }
+
+/// Guards the slot size the type arena was tuned to (see [`TypeData`]).
+///
+/// A ceiling, not an equality: a new small variant stays a non-event. If this
+/// fires, `Box` the variant that grew rather than raising the number — every
+/// one of ~5.1M slots pays the difference, whether or not it is that kind.
+const TYPE_DATA_STAYS_SMALL: () = assert!(
+    std::mem::size_of::<TypeData>() <= 80,
+    "TypeData grew past 80 bytes; ~5.1M arena slots pay for it (docs/PERF_TASKS_V9.md §V9-3)",
+);
+const _: () = TYPE_DATA_STAYS_SMALL;
 
 /// Backing data for each [`ObjectId`].
 ///

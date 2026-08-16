@@ -170,7 +170,7 @@ pub fn new_named(
     }
 
     let (allow_nil_rhs, allow_nil_underlying) = (underlying.is_none(), underlying.is_none());
-    let id = type_arena.alloc(TypeData::Named(Named {
+    let id = type_arena.alloc(TypeData::Named(Box::new(Named {
         obj,
         from_rhs: underlying,
         underlying,
@@ -179,7 +179,7 @@ pub fn new_named(
         allow_nil_underlying,
         tparams: None,
         inst: None,
-    }));
+    })));
 
     // Back-fill TypeName.typ if it wasn't set.
     if obj.typ(object_arena).is_none() {

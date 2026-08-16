@@ -106,13 +106,13 @@ pub fn new_interface_type(
     methods: Vec<ObjectId>,
     embeddeds: Vec<TypeId>,
 ) -> TypeId {
-    arena.alloc(TypeData::Interface(Interface {
+    arena.alloc(TypeData::Interface(Box::new(Interface {
         methods,
         embeddeds,
         implicit: false,
         complete: true,
         tset: None,
-    }))
+    })))
 }
 
 /// Back-fills a receiver onto every explicit method of `iface` that has none.
