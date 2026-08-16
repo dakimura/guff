@@ -38,6 +38,15 @@ struct PreorderCounters {
     /// have taken off the callback path so far.
     hits: AtomicU64,
     nanos: AtomicU64,
+    /// Nanoseconds the same walks take with the callback replaced by a no-op
+    /// (`GUFF_DEBUG_PREORDER_NULL`, PERF_TASKS_V8 §V8-4).
+    ///
+    /// [`Self::nanos`] times `visit_masked`, and `visit_masked` calls the
+    /// analyzer — so it has always been "traversal **plus** every callback
+    /// body", not traversal. Reading it as traversal is what sized V8-4's fused
+    /// traversal at 20-30% of analyze CPU. Walking the same events a second
+    /// time with `|_| {}` prices the part a fusion could actually remove.
+    null_nanos: AtomicU64,
     /// Which arm of [`InspectResult::visit_masked`] each call took, indexed by
     /// [`Arm`] (PERF_TASKS_V8 §1 / P0).
     ///
@@ -106,6 +115,17 @@ static MASKS_ENABLED: LazyLock<bool> =
 pub fn masks_enabled() -> bool {
     *MASKS_ENABLED
 }
+
+/// Walk every masked traversal a second time with an empty callback, to price
+/// the traversal apart from the analyzer that rides on it (V8-4's GO/NO-GO).
+///
+/// Off by default and meaningless without `GUFF_DEBUG_CACHE`: it roughly
+/// doubles traversal work, so the run's own timings are not comparable to a
+/// normal one while it is set. Findings cannot move — the second walk's
+/// callback does nothing.
+static PREORDER_NULL_ENABLED: LazyLock<bool> = LazyLock::new(|| {
+    *PREORDER_ENABLED && std::env::var_os("GUFF_DEBUG_PREORDER_NULL").is_some()
+});
 
 static PREORDER_REGISTRY: LazyLock<Mutex<Vec<Arc<PreorderCounters>>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -194,6 +214,19 @@ pub fn preorder_totals() -> (u64, u64, u64, u64) {
             hi + c.hits.load(Ordering::Relaxed),
         )
     })
+}
+
+/// Nanoseconds the masked walks cost with an empty callback, summed across
+/// every worker thread, or 0 unless `GUFF_DEBUG_PREORDER_NULL` is set.
+///
+/// Against [`preorder_totals`]'s `nanos` this splits "the inspector's traversal"
+/// from "the analyzers riding on it" — the split V8-4 has to be sized against.
+pub fn preorder_null_nanos() -> u64 {
+    if !*PREORDER_NULL_ENABLED {
+        return 0;
+    }
+    let reg = PREORDER_REGISTRY.lock().unwrap_or_else(|e| e.into_inner());
+    reg.iter().map(|c| c.null_nanos.load(Ordering::Relaxed)).sum()
 }
 
 /// `(arm name, calls)` for each [`Arm`], summed across every worker thread.
@@ -657,12 +690,33 @@ impl InspectResult {
         let start = (guard.0 == 0).then(std::time::Instant::now);
         let (scanned, hits, arm) = self.visit_masked(mask, files, f);
         let nanos = start.map_or(0, |s| s.elapsed().as_nanos() as u64);
+        // Same walk, same arm, no analyzer. Timed at depth 0 only, for the same
+        // reason `nanos` is: a nested walk's null pass is already inside its
+        // parent's.
+        //
+        // `black_box` on the node, not an empty body: without it LLVM sees a
+        // callback with no effects, deletes the reconstruction of `NodeRef`
+        // with it, and can fold a whole arm down to `group.len()`. That timed
+        // the traversal at 1.5% of preorder CPU, which is the answer for a
+        // traversal that does not happen. The floor a real callback pays is
+        // "visit the event and hand over a usable `NodeRef`", so that is what
+        // is timed.
+        let null_nanos = if *PREORDER_NULL_ENABLED && guard.0 == 0 {
+            let t = std::time::Instant::now();
+            let _ = self.visit_masked(mask, files, |n| {
+                std::hint::black_box(n);
+            });
+            t.elapsed().as_nanos() as u64
+        } else {
+            0
+        };
         drop(guard);
         PREORDER_LOCAL.with(|c| {
             c.calls.fetch_add(1, Ordering::Relaxed);
             c.nodes.fetch_add(scanned, Ordering::Relaxed);
             c.hits.fetch_add(hits, Ordering::Relaxed);
             c.nanos.fetch_add(nanos, Ordering::Relaxed);
+            c.null_nanos.fetch_add(null_nanos, Ordering::Relaxed);
             c.arms[arm as usize].fetch_add(1, Ordering::Relaxed);
         });
     }

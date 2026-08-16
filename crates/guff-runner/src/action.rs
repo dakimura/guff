@@ -375,6 +375,21 @@ fn report_preorder_timing(analyze_total: u128) {
         },
         nanos as f64 / 1e9,
     );
+    // How much of that CPU is the traversal itself (PERF_TASKS_V8 §V8-4).
+    // `nanos` above times `visit_masked`, and `visit_masked` calls the
+    // analyzer — so it is traversal *plus* every callback body, and reading it
+    // as traversal overstates what a fused walk could ever remove.
+    let null = guff_analysis::preorder_null_nanos();
+    if null > 0 {
+        eprintln!(
+            "guff:   of which traversal only: {:.2}s ({:.1}% of preorder CPU); \
+             callbacks {:.2}s. NOTE: GUFF_DEBUG_PREORDER_NULL walks everything \
+             twice, so this run's other timings are inflated.",
+            null as f64 / 1e9,
+            null as f64 / nanos as f64 * 100.0,
+            (nanos.saturating_sub(null)) as f64 / 1e9,
+        );
+    }
     // Which arm of `visit_masked` actually served those calls (PERF_TASKS_V8
     // §1). `scanned` alone cannot tell the wide linear scan apart from the
     // recursive-walk fallback: both report the whole window.
