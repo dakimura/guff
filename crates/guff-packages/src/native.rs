@@ -15,7 +15,7 @@ use std::sync::Arc;
 use guff_golist::{list_packages, Bail, BailReason, ListConfig, ListModule, ListPackage, ListResponse};
 
 use crate::config::Config;
-use crate::golist::{go_available, go_list_driver};
+use crate::golist::{go_available, go_list_driver, uses_export_data};
 use crate::load_mode::LoadMode;
 use crate::package::{DriverResponse, Module, Package};
 use crate::typecheck::TypecheckEnv;
@@ -142,6 +142,23 @@ pub fn native_or_golist(cfg: &Config, patterns: &[String]) -> Result<DriverRespo
 }
 
 fn load_native(cfg: &Config, patterns: &[String]) -> Result<DriverResponse, Bail> {
+    // Before the cache lookup, not after: a cached native response has no export
+    // paths either, so serving one would reproduce the same empty answer faster.
+    //
+    // Nothing used to check this. `list_config_from` looks at build flags and
+    // `NEED_DEPS` and never at export data, and `attach_hybrid_exports` returns
+    // early when `dep_source` is off — so `GUFF_DEP_SOURCE=0`, the documented
+    // way to ask for the export-data path, produced packages with an empty
+    // `export_file` and no error. On benchmarks/fixture that silently cost two
+    // of four findings: with no `.a` files the dependent packages type-check to
+    // nothing, and an ill-typed package is skipped whole, so `ineffassign` and
+    // `unused` reported zero rather than reporting wrong.
+    if uses_export_data(cfg) {
+        return Err(Bail::new(
+            BailReason::ExportData,
+            "export data requested (dep_source off); only `go list -export` produces it",
+        ));
+    }
     if let Some(cached) = crate::native_cache::try_load(cfg, patterns) {
         if crate::debug::enabled() {
             eprintln!(
@@ -456,6 +473,30 @@ mod tests {
 
     fn golist_testdata() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/testdata/golist")
+    }
+
+    /// The native lister has no way to produce a `.a` path, so it must refuse
+    /// rather than answer with an empty one. Needs no `go` and no listing: the
+    /// refusal happens before both, so a warm native cache cannot serve the
+    /// same empty answer either.
+    #[test]
+    fn native_bails_when_export_data_is_requested() {
+        let cfg = Config {
+            mode: LoadMode::LOAD_IMPORTS | LoadMode::NEED_EXPORT_FILE,
+            dir: golist_testdata(),
+            dep_source: false,
+            ..Config::default()
+        };
+        let bail = load_native(&cfg, &[".".to_string()]).expect_err("must bail");
+        assert_eq!(bail.reason, BailReason::ExportData);
+
+        // Hybrid is the default and does not use export data, so it must not
+        // start bailing here — that would send every cold run through `go list`.
+        let hybrid = Config {
+            dep_source: true,
+            ..cfg
+        };
+        assert!(load_native(&hybrid, &[".".to_string()]).is_ok());
     }
 
     #[test]
