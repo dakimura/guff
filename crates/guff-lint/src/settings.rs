@@ -4014,6 +4014,36 @@ revive:
     }
 
     #[test]
+    fn parse_revive_map_arguments() {
+        // `arguments: [{allowRegex: "^_"}]` is the shape coredns uses for
+        // unused-parameter; it has to survive as a Map, not collapse to a
+        // string, or the rule silently runs with its default `^_$`.
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            r#"
+revive:
+  rules:
+    - name: unused-parameter
+      arguments:
+        - allowRegex: "^_"
+"#,
+        )
+        .unwrap();
+        let bag = LinterSettings::from_yaml(&yaml).to_bag();
+        let revive = bag
+            .get::<guff_revive::Settings>("revive")
+            .expect("revive settings");
+        let args = revive.rule_arguments("unused-parameter");
+        assert_eq!(args.len(), 1, "{args:?}");
+        let guff_revive::RuleArgument::Map(map) = &args[0] else {
+            panic!("expected a map argument, got {args:?}");
+        };
+        assert!(
+            matches!(map.get("allowRegex"), Some(guff_revive::RuleArgument::String(s)) if s == "^_"),
+            "{map:?}"
+        );
+    }
+
+    #[test]
     fn revive_settings_without_rules_match_golangci_empty_set() {
         // golangci-lint: any non-zero revive settings (e.g. confidence) without
         // enable-default-rules / rules list → empty rule set.

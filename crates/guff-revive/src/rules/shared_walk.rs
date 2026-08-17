@@ -246,8 +246,10 @@ impl<'a> SharedFileRules<'a> {
             unsecure_url_scheme: enabled("unsecure-url-scheme")
                 .then(|| unsecure_url_scheme::Checker::try_new(pass))
                 .flatten(),
-            unused_parameter: enabled("unused-parameter").then(unused_parameter::Checker::new),
-            unused_receiver: enabled("unused-receiver").then(unused_receiver::Checker::new),
+            unused_parameter: enabled("unused-parameter")
+                .then(|| unused_parameter::Checker::new(pass)),
+            unused_receiver: enabled("unused-receiver")
+                .then(|| unused_receiver::Checker::new(pass)),
             use_any: enabled("use-any").then(use_any::Checker::new),
             use_errors_new: enabled("use-errors-new").then(use_errors_new::Checker::new),
             use_fmt_print: enabled("use-fmt-print").then(|| use_fmt_print::Checker::new(pass)),
