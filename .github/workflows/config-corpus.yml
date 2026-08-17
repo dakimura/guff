@@ -21,4 +21,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Parse OSS .golangci.yml corpus
-        run: cargo test -p guff-lint --test config_test parse_golangci_config_corpus
+        run: cargo test --locked -p guff-lint --test config_test parse_golangci_config_corpus
