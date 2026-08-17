@@ -152,10 +152,10 @@ jobs:
       # this job installed two steps up — so nothing but habit was keeping them
       # unrun, and two of them had quietly stopped meaning what they say.
       # `golist_export_file.rs` asserts a contract that both the hybrid-source
-      # default and the native list driver moved out from under (see that file's
-      # header; the native half is still a live gap). `cache_dep_invalidation.rs`
-      # is the test docs/CI.md points at to claim a warm cache cannot hide a
-      # finding, and it had never run here.
+      # default and the native list driver had moved out from under, and is now
+      # the regression test for the fallback that fixed the second one.
+      # `cache_dep_invalidation.rs` is the test docs/CI.md points at to claim a
+      # warm cache cannot hide a finding, and it had never run here.
       #
       # A separate step rather than `-- --include-ignored` on the one above:
       # that flag reaches doctests too, and rustdoc's ```ignore blocks are
