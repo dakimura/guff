@@ -84,6 +84,38 @@ fn gosec_g602_tracks_bounds_through_reslices() {
     assert_eq!((bounds, index), (1, 2), "{messages:?}");
 }
 
+/// G115 is the other SSA analyzer (gosec `conversion_overflow.go` +
+/// `range_analyzer.go`). The fixture marks every conversion `// FINDING` or
+/// `// silent`, and those marks are gated against golangci-lint 2.12.2 by
+/// `compat/golden/cases/gosec`; this test pins the same finding set — as a
+/// multiset of messages, since a rule that stopped bounding values would keep
+/// the count of *some* pairs and change others.
+#[test]
+fn gosec_g115_reports_only_unbounded_conversions() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g115", "g115.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let count = |needle: &str| messages.iter().filter(|m| m.as_str() == needle).count();
+
+    assert_eq!(
+        (
+            count("G115: integer overflow conversion int -> int32"),
+            count("G115: integer overflow conversion int64 -> int32"),
+            count("G115: integer overflow conversion int -> uint8"),
+            count("G115: integer overflow conversion int -> uint32"),
+            count("G115: integer overflow conversion uint64 -> int"),
+        ),
+        (4, 2, 6, 1, 1),
+        "{messages:?}"
+    );
+    // Nothing else: every other conversion in the fixture is bounded, and the
+    // fixture's `// silent` marks say which.
+    assert_eq!(
+        messages.iter().filter(|m| m.starts_with("G115:")).count(),
+        14,
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");

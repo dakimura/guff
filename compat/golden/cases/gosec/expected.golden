@@ -49,9 +49,24 @@ bad/bad.go:86:9:gosec:medium:G107: Potential HTTP request made with variable url
 bad/bad.go:87:8:gosec:medium:G112: Potential Slowloris Attack because ReadHeaderTimeout is not configured in the http.Server
 bad/bad.go:88:18:gosec:medium:G124: http.Cookie missing or has insecure Secure, HttpOnly, or SameSite attribute
 bad/bad.go:91:6:gosec:high:G109: Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+bad/bad.go:91:11:gosec:high:G115: integer overflow conversion int -> int32
 bad/bad.go:94:6:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
 bad/bad.go:97:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
 bad/bad.go:101:21:gosec:high:G703: Path traversal via taint analysis
+g115/g115.go:24:39:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:26:45:gosec:high:G115: integer overflow conversion int64 -> int32
+g115/g115.go:28:44:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:30:49:gosec:high:G115: integer overflow conversion uint64 -> int
+g115/g115.go:32:50:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:34:49:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:41:14:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:50:14:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:144:14:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:155:45:gosec:high:G115: integer overflow conversion int -> uint32
+g115/g115.go:159:43:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:163:44:gosec:high:G115: integer overflow conversion int -> int32
+g115/g115.go:165:43:gosec:high:G115: integer overflow conversion int -> uint8
+g115/g115.go:194:14:gosec:high:G115: integer overflow conversion int64 -> int32
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range
 g602/g602.go:22:10:gosec:low:G602: slice index out of range

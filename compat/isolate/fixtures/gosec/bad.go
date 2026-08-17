@@ -29,3 +29,16 @@ func BadSliceBounds() {
 	s := make([]byte, 0)
 	_ = s[:3] // G602
 }
+
+func BadConversion(i int) int32 {
+	return int32(i) // G115
+}
+
+// The guarded twin: G115's range analysis has to keep this one silent, which is
+// the half of the rule an isolate diff can actually catch regressing.
+func OkConversion(i int) int32 {
+	if i > 2147483647 || i < -2147483648 {
+		return 0
+	}
+	return int32(i)
+}
