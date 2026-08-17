@@ -10,9 +10,10 @@ Cold-cache wall time on Darwin arm64 (see [`benchmarks/results/SCOREBOARD.md`](.
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
-| grafana | 394.8s | 23.8s | 17× |
-| helm | 22.1s | 1.7s | 13× |
-| caddy | 10.0s | 0.99s | 10× |
+| grafana | 290.4s | 17.8s | 16× |
+| consul | 39.4s | 4.7s | 8× |
+| helm | 17.4s | 1.3s | 13× |
+| caddy | 8.7s | 0.91s | 10× |
 
 ## Compatibility snapshot
 

@@ -47,8 +47,8 @@ AI コーディングエージェントの反復のたび。
 **guff は、Go の lint を再び速くします。**
 
 ```
-golangci-lint: 394s
-guff:           24s
+golangci-lint: 290s
+guff:           18s
 
 同じリポジトリ。
 同じ設定。
@@ -63,11 +63,14 @@ guff:           24s
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
-| grafana | 394.8s | **23.8s** | **17× faster** |
-| helm | 22.1s | **1.7s** | **13× faster** |
-| caddy | 10.0s | **0.99s** | **10× faster** |
-| gin | 4.2s | **0.38s** | **11× faster** |
-| rclone | 6.3s | **0.64s** | **10× faster** |
+| grafana | 290.4s | **17.8s** | **16× faster** |
+| consul | 39.4s | **4.7s** | **8× faster** |
+| helm | 17.4s | **1.3s** | **13× faster** |
+| k9s | 14.3s | **2.1s** | **7× faster** |
+| caddy | 8.7s | **0.91s** | **10× faster** |
+| containerd | 4.1s | **0.40s** | **10× faster** |
+| gin | 3.9s | **0.37s** | **11× faster** |
+| cobra | 1.4s | **0.22s** | **6× faster** |
 
 Darwin arm64・コールドキャッシュ。
 
@@ -158,12 +161,13 @@ guff が自動で読むファイル:
 
 guff は次のために設計されています:
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - CI パイプライン
 - ローカル開発
 
-エージェント向けの定型文: [`docs/AGENTS.md`](docs/AGENTS.md)
+エージェント向けの定型文: [`docs/AGENTS.md`](docs/AGENTS.md) — Claude Code なら `CLAUDE.md`、Cursor なら `.cursor/rules`、他はシステムプロンプトに貼り付けてください。
 
 ---
 
@@ -258,7 +262,7 @@ jobs:
         with:
           go-version: stable
 
-      - uses: dakimura/guff@v0.4.1
+      - uses: dakimura/guff@v0.5.0
         with:
           args: run --out-format=github-actions ./...
 ```
@@ -281,7 +285,7 @@ Action は guff の解析キャッシュを実行間で保持するため、プ�
 docker run --rm \
   -v "$PWD":/app \
   -w /app \
-  ghcr.io/dakimura/guff:0.4.1 \
+  ghcr.io/dakimura/guff:0.5.0 \
   run ./...
 ```
 
@@ -295,7 +299,7 @@ docker run --rm \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod \
   -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.4.1 \
+  ghcr.io/dakimura/guff:0.5.0 \
   run ./...
 ```
 

@@ -47,8 +47,8 @@
 **guff 让 Go lint 重新变快。**
 
 ```
-golangci-lint: 394s
-guff:           24s
+golangci-lint: 290s
+guff:           18s
 
 同一仓库。
 同一配置。
@@ -63,11 +63,14 @@ guff:           24s
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
-| grafana | 394.8s | **23.8s** | **17× faster** |
-| helm | 22.1s | **1.7s** | **13× faster** |
-| caddy | 10.0s | **0.99s** | **10× faster** |
-| gin | 4.2s | **0.38s** | **11× faster** |
-| rclone | 6.3s | **0.64s** | **10× faster** |
+| grafana | 290.4s | **17.8s** | **16× faster** |
+| consul | 39.4s | **4.7s** | **8× faster** |
+| helm | 17.4s | **1.3s** | **13× faster** |
+| k9s | 14.3s | **2.1s** | **7× faster** |
+| caddy | 8.7s | **0.91s** | **10× faster** |
+| containerd | 4.1s | **0.40s** | **10× faster** |
+| gin | 3.9s | **0.37s** | **11× faster** |
+| cobra | 1.4s | **0.22s** | **6× faster** |
 
 Darwin arm64 冷缓存基准。
 
@@ -160,12 +163,13 @@ AI 编程代理会频繁调用工具。
 
 guff 面向：
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - CI 流水线
 - 本地开发
 
-可复制的代理说明：[`docs/AGENTS.md`](docs/AGENTS.md)
+可复制的代理说明：[`docs/AGENTS.md`](docs/AGENTS.md) —— Claude Code 放进 `CLAUDE.md`，Cursor 放进 `.cursor/rules`，其他代理放进系统提示词。
 
 ---
 
@@ -260,7 +264,7 @@ jobs:
         with:
           go-version: stable
 
-      - uses: dakimura/guff@v0.4.1
+      - uses: dakimura/guff@v0.5.0
         with:
           args: run --out-format=github-actions ./...
 ```
@@ -282,7 +286,7 @@ jobs:
 docker run --rm \
   -v "$PWD":/app \
   -w /app \
-  ghcr.io/dakimura/guff:0.4.1 \
+  ghcr.io/dakimura/guff:0.5.0 \
   run ./...
 ```
 
@@ -296,7 +300,7 @@ docker run --rm \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod \
   -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.4.1 \
+  ghcr.io/dakimura/guff:0.5.0 \
   run ./...
 ```
 
