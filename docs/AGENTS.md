@@ -4,7 +4,8 @@ Agents re-run linters dozens of times per session. A multi-minute golangci-lint 
 
 ## Recommended agent instructions
 
-Paste into `AGENTS.md`, `.cursor/rules`, or your agent’s system prompt:
+Paste into `CLAUDE.md` (Claude Code), `AGENTS.md`, `.cursor/rules`, or your
+agent’s system prompt:
 
 ```markdown
 ## Lint
@@ -26,6 +27,26 @@ Paste into `AGENTS.md`, `.cursor/rules`, or your agent’s system prompt:
 | Config | `.golangci.yml` | same file |
 
 Benchmark context: [COMPARE.md](COMPARE.md), [`benchmarks/results/SCOREBOARD.md`](../benchmarks/results/SCOREBOARD.md).
+
+## Claude Code
+
+Claude Code reads `CLAUDE.md` from the repository root on every session, so the
+block above is picked up without any per-session setup — put it under a `## Lint`
+heading and it applies to every turn.
+
+Two things that fit the way Claude Code works:
+
+- **It runs the linter itself, repeatedly.** `guff run ./...` finishing in
+  seconds is what keeps "edit → lint → fix" inside one turn instead of spanning
+  several. On the repos in [COMPARE.md](COMPARE.md) that is the difference
+  between ~1s and ~17s per iteration.
+- **`--out-format json` is the machine-readable path.** Ask for it when you want
+  the agent to parse findings rather than read prose:
+  `guff run --out-format json ./...`.
+
+`guff cache status` reports where the issues cache lives and how big it is. An
+agent re-running the same packages within a session hits that cache and comes
+back in well under a second.
 
 ## CI still matters
 

@@ -163,12 +163,13 @@ Un comando de lint lento se convierte en un ciclo de desarrollo lento.
 
 guff está pensado para:
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - pipelines de CI
 - desarrollo local
 
-Instrucciones listas para copiar: [`docs/AGENTS.md`](docs/AGENTS.md)
+Instrucciones listas para copiar: [`docs/AGENTS.md`](docs/AGENTS.md) — pégalas en `CLAUDE.md` para Claude Code, en `.cursor/rules` para Cursor, o en el system prompt de tu agente.
 
 ---
 

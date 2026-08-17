@@ -161,12 +161,13 @@ guff が自動で読むファイル:
 
 guff は次のために設計されています:
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - CI パイプライン
 - ローカル開発
 
-エージェント向けの定型文: [`docs/AGENTS.md`](docs/AGENTS.md)
+エージェント向けの定型文: [`docs/AGENTS.md`](docs/AGENTS.md) — Claude Code なら `CLAUDE.md`、Cursor なら `.cursor/rules`、他はシステムプロンプトに貼り付けてください。
 
 ---
 

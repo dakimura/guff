@@ -163,12 +163,13 @@ AI 编程代理会频繁调用工具。
 
 guff 面向：
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - CI 流水线
 - 本地开发
 
-可复制的代理说明：[`docs/AGENTS.md`](docs/AGENTS.md)
+可复制的代理说明：[`docs/AGENTS.md`](docs/AGENTS.md) —— Claude Code 放进 `CLAUDE.md`，Cursor 放进 `.cursor/rules`，其他代理放进系统提示词。
 
 ---
 

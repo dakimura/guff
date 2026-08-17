@@ -163,12 +163,13 @@ A slow lint command becomes a slow development loop.
 
 guff is designed for:
 
+- Claude Code
 - Cursor
 - GitHub Copilot
 - CI pipelines
 - local development
 
-Copy-paste agent instructions: [`docs/AGENTS.md`](docs/AGENTS.md).
+Copy-paste agent instructions: [`docs/AGENTS.md`](docs/AGENTS.md) — drop them into `CLAUDE.md` for Claude Code, `.cursor/rules` for Cursor, or your agent's system prompt.
 
 ---
 
