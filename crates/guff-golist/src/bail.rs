@@ -51,6 +51,10 @@ pub enum BailReason {
     HasCgo,
     /// Import path could not be resolved.
     UnresolvedImport,
+    /// Compiler export data was requested. The native lister reads the module
+    /// graph off disk and never builds anything, so only `go list -export` can
+    /// answer; nothing here can synthesize a `.a` path.
+    ExportData,
     /// Filesystem / parse error while listing.
     Io,
 }

@@ -1844,7 +1844,7 @@ fn needs_compiled_query(seen: &HashMap<String, JsonPackage>) -> Vec<String> {
     out
 }
 
-fn uses_export_data(cfg: &Config) -> bool {
+pub(crate) fn uses_export_data(cfg: &Config) -> bool {
     // Source mode resolves dependency types by type-checking source, so `go list`
     // must not build export data (`-export`) — that build is the cold-path cost
     // this mode exists to avoid.
