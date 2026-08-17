@@ -7,20 +7,19 @@
 //!
 //! guff lowers `make([]T, n)` as [`MakeSlice`] (go/ssa often uses Alloc of
 //! `[n]T` + Slice); the MakeSlice entry covers isolate fixtures.
+//!
+//! The SSA program and the `SrcFuncs` list come from [`crate::gosec_ssa`], which
+//! builds them once for every SSA-based gosec analyzer.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use guff::token::Token;
 use guff_analysis::callcheck::{extract_const_int, static_callee, SsaValue};
 use guff_analysis::referrers;
-use guff_analysis::Pass;
 use guff_ssa::function::Function;
-use guff_ssa::ids::{BlockId, FuncId, InstrId, PackageId};
+use guff_ssa::ids::{BlockId, FuncId, InstrId};
 use guff_ssa::instr::InstrData;
-use guff_ssa::member::MemberData;
-use guff_ssa::mode::BuilderMode;
 use guff_ssa::program::{value_type_of, Program};
-use guff_ssa::ssautil::build_package_for_analysis;
 use guff_ssa::value::Value;
 use guff_types::arena::TypeData;
 use guff_types::TypeId;
@@ -63,35 +62,15 @@ struct TrackCacheValue {
     ifs: HashMap<(FuncId, InstrId), InstrId>,
 }
 
-/// Run G602 when enabled; append `(pos, message)` into `pending`.
-///
-/// Builds a private SSA package (like wastedassign) so enabling gosec does not
-/// flip shared `buildir_src_methods` / `buildir_despite_errors` and perturb
-/// staticcheck (SA5011).
-pub(crate) fn check_g602(pass: &mut Pass<'_>, enabled: &HashSet<&str>, pending: &mut Vec<(u32, String)>) {
-    if !enabled.contains("G602") {
-        return;
-    }
-    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
-        return;
-    };
-    let files = pass.files();
-    if files.is_empty() {
-        return;
-    }
-    let Ok(built) = build_package_for_analysis(
-        artifacts.snapshot(),
-        files,
-        pass.fset().clone(),
-        BuilderMode::GLOBAL_DEBUG,
-    ) else {
-        return;
-    };
-
+/// Collects G602 out of the SSA build [`crate::gosec_ssa`] shares between the
+/// gosec analyzers, appending `(pos, message)` into `pending`.
+pub(crate) fn collect_g602(
+    prog: &Program,
+    src_funcs: &[FuncId],
+    pending: &mut Vec<(u32, String)>,
+) {
     let mut reports: HashMap<(FuncId, InstrId), &'static str> = HashMap::new();
-    let prog = &built.prog;
-    let src_funcs = collect_src_funcs_with_methods(prog, built.pkg);
-    collect_g602(prog, &src_funcs, &mut reports);
+    collect_reports(prog, src_funcs, &mut reports);
 
     for ((fid, iid), msg) in reports {
         let func = prog.functions.get(fid);
@@ -102,72 +81,7 @@ pub(crate) fn check_g602(pass: &mut Pass<'_>, enabled: &HashSet<&str>, pending: 
     }
 }
 
-fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> Vec<FuncId> {
-    use std::collections::HashSet;
-    let mut seen = HashSet::new();
-    let mut named: Vec<(String, FuncId)> = Vec::new();
-    for (fid, f) in prog.functions.iter() {
-        if f.pkg != Some(pkg) {
-            continue;
-        }
-        if f.object.is_none() {
-            continue;
-        }
-        if f.blocks.is_empty() {
-            continue;
-        }
-        if matches!(
-            f.synthetic.as_deref(),
-            Some("from type information (on demand)" | "missing generic origin")
-        ) {
-            continue;
-        }
-        if !seen.insert(fid) {
-            continue;
-        }
-        named.push((f.name.clone(), fid));
-    }
-    named.sort_by(|(a, _), (b, _)| a.cmp(b));
-    let mut funcs: Vec<FuncId> = named.into_iter().map(|(_, f)| f).collect();
-    // Also package-level members (in case object filter missed some).
-    let ssa_pkg = prog.packages.get(pkg);
-    let mut top: Vec<(&str, FuncId)> = ssa_pkg
-        .members
-        .iter()
-        .filter_map(|(name, m)| match m {
-            MemberData::Function(fid) => Some((name.as_str(), *fid)),
-            _ => None,
-        })
-        .collect();
-    top.sort_by(|(a, _), (b, _)| a.cmp(b));
-    for (_, fid) in top {
-        if seen.insert(fid) {
-            funcs.push(fid);
-        }
-        collect_anon_funcs(prog, fid, &mut funcs, &mut seen);
-    }
-    for &fid in funcs.clone().iter() {
-        collect_anon_funcs(prog, fid, &mut funcs, &mut seen);
-    }
-    funcs
-}
-
-fn collect_anon_funcs(
-    prog: &Program,
-    fid: FuncId,
-    out: &mut Vec<FuncId>,
-    seen: &mut std::collections::HashSet<FuncId>,
-) {
-    let anon = prog.functions.get(fid).anon_funcs.clone();
-    for child in anon {
-        if seen.insert(child) {
-            out.push(child);
-            collect_anon_funcs(prog, child, out, seen);
-        }
-    }
-}
-
-fn collect_g602(
+fn collect_reports(
     prog: &Program,
     src_funcs: &[FuncId],
     reports: &mut HashMap<(FuncId, InstrId), &'static str>,

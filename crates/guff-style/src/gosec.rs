@@ -16,6 +16,8 @@
 //! - **G111** — `http.Dir("/")` directory traversal
 //! - **G112** — `http.Server` without `ReadHeaderTimeout`/`ReadTimeout` (Slowloris)
 //! - **G114** — `net/http` serve helpers without timeouts
+//! - **G115** — integer overflow conversion (SSA + range analysis; see
+//!   `gosec_g115`)
 //! - **G122** — `filepath.Walk`/`WalkDir` callback path into race-prone `os` sinks (AST approx of SSA)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
@@ -40,7 +42,7 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G113, G115–G118, G201–G202, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G116–G118, G201–G202, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
 //! G101 zxcvbn entropy / full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
@@ -278,8 +280,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G122", "G124", "G203", "G204",
-    "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G122", "G124", "G203",
+    "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
 ];
 
 const G703_WHAT: &str = "Path traversal via taint analysis";
@@ -571,6 +573,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G111", Score::Medium, Score::Medium),
     ("G112", Score::Medium, Score::Low),
     ("G114", Score::Medium, Score::High),
+    ("G115", Score::High, Score::Medium),
     ("G122", Score::High, Score::Medium),
     ("G124", Score::Medium, Score::High),
     ("G203", Score::Medium, Score::Low),
@@ -2724,7 +2727,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g204(pass, &enabled, &mut pending);
     check_g703(pass, &enabled, &mut pending);
-    crate::gosec_g602::check_g602(pass, &enabled, &mut pending);
+    crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {

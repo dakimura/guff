@@ -6,13 +6,16 @@
 # each fixture as a package of its own against the stub universe under
 # testdata/gosec/stub/, so every file gets its own directory here too.
 #
-# The fixtures reach 34 of guff's 35 gosec rules; g602/ is the 35th (slice
-# bounds, the one SSA analyzer among them) and had no fixture before this case.
+# The fixtures reach 34 of guff's 36 gosec rules; the other two are the SSA
+# analyzers, which get a file each: g602/ (slice bounds) and g115/ (integer
+# overflow conversion, whose fixture is mostly *silent* cases — see the header
+# there for why those are the ones worth gating).
 bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
 ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
 scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
 settings/settings.go  crates/guff-style/tests/testdata/gosec/settings.go
 g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
+g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
 
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it

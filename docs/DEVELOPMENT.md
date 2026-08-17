@@ -113,7 +113,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 > 最終更新: 2026-07-18。ワークスペース全体 **2663 tests green**。実装済み linter の一覧・件数・設定配線は §3.3 を、作業履歴は `SESSION-LOG.md` を参照。golangci-lint v2 との対応表は [`COMPATIBILITY.md`](COMPATIBILITY.md)（R23）。R24（facts / export seed / golist キャッシュ）完了。R25（Prometheus スケール修正）— R25.1（アリーナフットプリント、layered CoW で export seed を全 pkg 共有、**83s→11.9s / peak 56GB→5.8GB**）・R25.2（位置破損 = 決定論的 u32 オーバーフロー。fake export-data ファイルを実サイズ化して共有 fset の Pos 空間を u32 内に収め、依存ファイルへの誤マップ **226→0**・診断 234→2671）完了。残: §8 R25 の DEFERRED（隔離済み非致命 panic・govet unreachable の順序依存・R25.3 go list cold）。
 > 2026-08-07: R26.1（型検査の誤検出 8 件。大規模モノレポで `ill_typed` **13 → 0** パッケージ、
 > prometheus でも **14 → 8**）・R26.2（SA1019 の外部モジュール deprecation、golangci-only **11 → 0**）完了。
-> 残: §8 R26.3（gosec G115 未実装ほか guff-only 17 件）。
+> 残: §8 R26.3 の guff-only（G115 は §8 R27.1 で実装済み）。
 
 ### 3.1 型チェッカ（`guff-types`）
 - 構造層（全 Type/Object 種別・述語・universe・ジェネリクス subst/instantiate/infer/unify・
@@ -664,10 +664,10 @@ unused 判定されていた nolintlint 6 件を含む）。
 
 guff-only 17 件。内訳と、なぜ guff だけが出すのか:
 
-1. **gosec G115（整数オーバーフロー変換）が未実装** — `int32(nanos)` 等。golangci 側では
-   出るので `//nolint:gosec` が置かれており、guff ではその directive が unused 扱いになる
-   （nolintlint 4 件として顕在化）。素朴に実装すると誤検出だらけになるので、
-   上流の範囲解析（定数・`len()`・アーキ依存幅）まで含めて移植する必要がある。
+1. ~~**gosec G115（整数オーバーフロー変換）が未実装**~~ — `int32(nanos)` 等。golangci 側では
+   出るので `//nolint:gosec` が置かれており、guff ではその directive が unused 扱いになっていた
+   （nolintlint 4 件として顕在化）。**§8 R27.1 で実装済み（2026-08-17）**——
+   上流のレンジ解析ごと移植した。
 2. **SA1019 の取りこぼしが残る** — 依存モジュールによっては doc 走査でも拾えていない
    （nolintlint 6 件として顕在化）。
 3. **exhaustive** — enum メンバが依存パッケージ由来のときに列挙しきれていない
@@ -711,6 +711,7 @@ guff-only 17 件。内訳と、なぜ guff だけが出すのか:
 | 症状 | 根本原因 | 直した場所 | ゲート |
 |------|----------|-----------|--------|
 | **A** `new-from-merge-base` 下で **git 未追跡ファイルの指摘が全部消える**（exit 0・0 findings で「きれい」に見える） | revgrep は `git diff` の他に `git ls-files --others --exclude-standard` を採り、その結果を「行リスト = nil」で changed map に入れる。`IsNew` は nil を「全行が新規」と読む（`whole-files` とは独立）。guff は `git diff` しか見ていなかった | `guff-lint/src/diff.rs`（`DiffState::new_files` + `git_untracked_files`） | `diff.rs` 単体 3 + `crates/guff-lint/tests/diff_untracked_test.rs` 6（実 git repo × 実バイナリ） |
+| **B** gosec **G115** を 1 件も出さない（`int32(i)` 等） | 未実装。素朴な実装では `int32(len(b))` から `uint8(i % 256)` まで**誤検出だらけになる**ので、上流のレンジ解析ごと移植しないと載せられなかった (R26.3 の 1 番から持ち越し) | `guff-style/src/gosec_g115.rs`（`conversion_overflow.go` + `range_analyzer.go` の移植）+ `gosec_ssa.rs`（G602 と SSA ビルドを 1 回に共有） | `checks_test` 1（14 findings の多重集合）+ `compat/golden/cases/gosec` の `g115/`（14 件・列と型名まで） + `compat/isolate/fixtures/gosec` に発火/非発火の 1 対 |
 | **C** SA1019 が **stdlib の deprecation を 1 件も出さない**（`p.X` on `*ecdsa.PublicKey`） | SA1019 のメッセージは「バージョン 2 つ（knowledge テーブル）＋ deprecation の本文（doc コメント）」で構成される。stdlib は export data 経由で doc コメントを持たないので本文が無く、診断が組み立たない。ところが GOROOT のソースはディスク上にある | `guff-staticcheck/src/sa1019.rs`（`worth_object_doc_scan` / `dep_facts` の stdlib 早期 return）+ `stdlib_deprecations.rs`（`stdlib_deprecated_packages`） | `stdlib_deprecations` 単体 3 + `compat/golden/cases/staticcheck-sa1019-stdlib`（package-level func / struct field / pointer method の 3 形・計 6 件） |
 | **F**（cosmetic）forbidigo の設定メッセージが `` `…` `` | 上流 `UsedIssue.Details` は custom message だけ `%q`、pattern 側だけバッククォート | `guff-style/src/forbidigo.rs` | `checks_test` 2（完全一致）+ `compat/golden/cases/forbidigo-msg` |
 | **G** 未知の linter 名を**警告して続行**（exit 0 / 0 findings） | 「まだ実装していない linter」を素通しする設計だったが、実装は 112/112 揃っている。typo が「黙って検査されない」に化ける | `guff-lint/src/cli.rs`（`EXIT_CONFIG_ERROR` で fail closed） | `cli_test` 3（うち 1 つは「golangci が受ける名前を guff が全部解決できる」ことの担保）+ `compat/reject/cases/unknown-linter` |
@@ -756,29 +757,72 @@ guff-only 17 件。内訳と、なぜ guff だけが出すのか:
   レポート側の 951 件差は設定の別のキー（`exclusions.rules` 等）由来の疑いが濃い。
 - **E** protogetter 362 vs 0 / misspell 19 vs 0 / exhaustive 0 vs 6 — レポート自身が
   「未 root-cause の生観測」としている。設定全文が要る。
-- **B** gosec G115（+ G703 の taint ケース）— 未実装。下の R27.1。
+- **B の残り** G703 の taint ケース 1 件 — G115 は上の表で解消。`G703` は現状の「local-assign 近似」で届かない形（全 taint エンジンは DEFERRED のまま）。
 - **peak RSS が `./...` 規模で golangci +33%** — 手元の corpus では再現条件が作れない
   （`regress --profile full` が prometheus 規模の唯一のゲート）。
 
-##### R27.1 gosec G115（整数オーバーフロー変換）— 未着手
+##### R27.1 gosec G115（整数オーバーフロー変換）✅ 完了 (2026-08-17)
 
-R26.3 の 1 番から持ち越し。**素朴に実装すると誤検出だらけになる**ので、上流のレンジ解析まで
-含めて移植する必要がある、という判断は変わっていない。分量の実測:
+上流 v2.26.1（golangci-lint 2.12.2 が pin しているバージョン）の
+`analyzers/conversion_overflow.go` 339 行 + `analyzers/range_analyzer.go` 1,524 行のうち
+**変換から到達する全部**を `guff-style/src/gosec_g115.rs` に移植。ルール本体は 2 行
+（「変換先は変換元の全値を保持できるか」）で、残りは全部**「もう境界が付いている」と
+判定するためのレンジ解析**——これを持たないと `int32(len(b))` から `uint8(i % 256)` まで
+片っ端から誤検出する。移植しなかったのは `ByteRange` 群（`ResolveByteRange` /
+`BufferedLen` / `mergeRanges` / `Precedes` —— taint と walk-symlink 用で変換からは到達しない）と
+`sync.Pool` + `shared` フラグのリサイクル（Go のアロケーション戦略で移植対象が無い）。
 
-| 上流ファイル | 行数 | guff 側の受け皿 |
-|---|---:|---|
-| `analyzers/conversion_overflow.go` | 339 | 新規 `guff-style/src/gosec_g115.rs` |
-| `analyzers/range_analyzer.go` | 1,524 | 同上（`rangeResult` / `ResolveRange` / `getResultRangeForIfEdge`） |
-| `analyzers/util.go` の `GetIntTypeInfo` / `IsConstantInTypeRange` / `ExplicitValsInRange` 周辺 | ~150 | `gosec.rs` に同居させるか小 module |
+SSA ビルドは `gosec_ssa.rs` に集約した。**gosec を有効にしたコストは SSA ビルド 1 回**で、
+SSA ルール 1 本につき 1 回ではない（G602 が自前で建てていたのを共有に変えた）。
 
-guff-ssa 側の前提は揃っている（`InstrData::Convert` / `Function::dom_preorder` / `Phi` / `If`、
-G602 が同じ形で 1,021 行の移植を済ませている）。手順は §5 の通常フローで、
-**完了条件は「`isolate-gosec` と golden の gosec ケースが増えた分ちょうどで一致し、
-`compat/run.sh --oss --tier pr,nightly` に guff-only が 1 件も増えないこと」**。
-上流が `#nosec G115` を自分のコードに 6 箇所置いている（`range_analyzer.go`）ことからも
-分かるとおり、レンジ解析の甘い実装は corpus 全体に誤検出をばらまく。段階導入するなら
-「safe と証明できない限り黙る」側に倒すこと（上流と逆向きの誤りになるが、
-guff のゲートは誤検出を FAIL にする設計なので、そちらの向きしか運用できない）。
+**途中で見つかった guff-ssa の欠落（G115 固有ではない）**: go/ssa の `NewConst` は
+`val == nil` を `soleTypeKind` で `0` / `false` / `""` に**正規化する**（x/tools 0.44
+`go/ssa/const.go`）。guff の `Const::new` は `None` のままにしている
+（`// TODO: soleTypeKind logic if val is None`）。`var acc int` は初期化ストアを持たないので
+lifter が phi の入口辺にこの定数を置き、**正規化しないと phi の範囲が「未知」になって
+ごく普通の accumulator コードが全部 G115 になる**（上流は [0, 0] を出して黙る）。
+今回は `gosec_g115.rs` 側（`const_id_int64` / `const_id_uint64`）で正規化した。
+恒久修正は guff-ssa 側だが、**SSA の全消費者に影響する**ので別セッション。
+`acc := 0` は最初から一致していた（そちらの定数は値を持っている）ため、
+「同じ意味の 2 つの書き方で答えが違う」という形で出る。
+
+**コスト**: prometheus `./...`（1,792 pkg）で gosec を `includes: [G602]` と
+`includes: [G602, G115]` に切り替えて cold で 3 往復すると **+0.06 / +0.06 / +0.19s**
+（1.89s 比で約 3%）。prometheus の実 config は gosec を有効にしていないので
+`regress` の数字は動かない（tsdb / full 両方 PASS、full は 20/20/0/0・wall 2.18s / 上限 2.19s）。
+**corpus のどのリポも G115 を有効にしていない**（gin / k9s / containerd / caddy は自分の
+config で除外済み）ため、規模での差分検査は `includes: [G115]` を外から与えて
+containerd `./pkg/...` で実施した: **両ツール 21 件・行と列は完全一致**、
+文言違いは R27.2 の 1 件（`rune -> byte`）だけ。
+
+**測り方の落とし穴**: linter のロジックを変えた直後にフィクスチャを回して
+「finding が変わらない」ときは、まず `guff cache clean`。ディスクキャッシュは
+設定と入力でキーが決まるので、**同じ設定なら旧バイナリの結果が返る**。
+このセッションはこれで 30 分溶かした（`--no-config -E gosec` では新しい結果、
+config ファイル経由では古い結果、という形で出た）。
+
+##### R27.2 `byte` / `rune` が型名を出す診断で `uint8` / `int32` になる（未着手）
+
+R27.1 の差分検査で見つかった**既存の**分岐。go/types の universe は
+`byte` / `rune` を「kind は `Uint8` / `Int32` だが `Name()` が `"byte"` / `"rune"` の
+別 `*Basic`」として持ち（`identical` は Basic を kind で比較するので型としては同一）、
+**どちらの綴りで書かれたかが型名として残る**。guff の universe は
+`byte` / `rune` を正規の `uint8` / `int32` を指す TypeName にしているので、この情報が無い。
+
+型名を出す診断が全部ずれる:
+
+| | golangci-lint 2.12.2 | guff |
+|---|---|---|
+| gosec G115 | `integer overflow conversion rune -> byte` | `… int32 -> uint8` |
+| govet printf | `arg r of wrong type rune` | `… of wrong type int32` |
+
+ゲートされている corpus では踏んでいない（`--oss --tier pr,nightly` は緑）が、
+**規模での差分検査では 21 件中 1 件がこれだった**（containerd `pkg/filters/quote.go:218` の
+`byte(r)`）。`byte(i)` は Go では日常的な変換なので、G115 を有効にしたリポが corpus に
+入った日に**必ず**出る。
+根本修正は guff-types の universe に `byte` / `rune` 用の `Basic` を足し、
+`identical` の Basic 比較を kind ベースにすること。影響範囲は `typestring` を通す全診断なので、
+ゴールデンの再生成を伴う独立タスク。
 
 ---
 

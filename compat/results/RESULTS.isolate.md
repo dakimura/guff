@@ -83,7 +83,7 @@
 | isolate-wsl | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-gocritic | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-revive | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
-| isolate-gosec | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
+| isolate-gosec | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-unparam | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-dupl | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-grouper | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -603,7 +603,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| gosec | 7 | 7 | 7 | 100.0% | 100.0% |
+| gosec | 8 | 8 | 8 | 100.0% | 100.0% |
 
 ## isolate-unparam
 

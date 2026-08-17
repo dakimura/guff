@@ -74,7 +74,7 @@
 | gomodguard | 🟡 | v2 で deprecated（`gomodguard_v2` の別名）。allow/block は対応、一部設定 DEFERRED |
 | gomodguard_v2 | 🟡 | `gomodguard` と同一 analyzer を駆動 |
 | goprintffuncname | ✅ | |
-| gosec | 🟡 | 主要ルール対応。G113 / G115–G118 / G201–G202 / G304–G305 / G307 / G601 等は DEFERRED |
+| gosec | 🟡 | 主要ルール対応（G115 = 整数オーバーフロー変換はレンジ解析ごと移植済み）。G113 / G116–G118 / G201–G202 / G304–G305 / G307 / G601 等は DEFERRED |
 | gosmopolitan | ✅ | |
 | govet | 🟡 | 上流 46 pass のうち **34 を実装**。printf は引数個数・型照合まで `go vet` 一致。32 pass は `compat/golden/cases/govet` で位置・文言まで完全一致（cgocall / framepointer は環境依存で golden に載せられない）。未実装 12: asmdecl（golangci-lint は `.s` の診断を 1 件も出さないので観測できない） / stdversion（stdlib 全シンボルの導入バージョン表が要る） / atomicalign / deepequalerrors / fieldalignment / findcall / httpmux / nilness / reflectvaluecompare / shadow / sortslice / unusedwrite（この 10 は `enable-all` 専用） |
 | grouper | ✅ | |
