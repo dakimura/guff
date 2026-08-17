@@ -4,16 +4,19 @@ use guff::ast::Ident;
 use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
+use crate::config::AllowRegex;
 use crate::failure::Failure;
 use crate::util::is_blank;
 
 pub struct Checker {
+    allow: AllowRegex,
     failures: Vec<Failure>,
 }
 
 impl Checker {
-    pub fn new() -> Self {
+    pub fn new(pass: &Pass<'_>) -> Self {
         Self {
+            allow: AllowRegex::new(pass, "unused-receiver"),
             failures: Vec::new(),
         }
     }
@@ -34,6 +37,11 @@ impl Checker {
         if is_blank(recv_name) {
             return;
         }
+        // Upstream checks the regex before it inspects the body, so an allowed
+        // receiver name is never a finding whether or not it is referenced.
+        if self.allow.allows(&recv_name.name) {
+            return;
+        }
         let Some(body) = &f.body else {
             return;
         };
@@ -49,13 +57,19 @@ impl Checker {
             true
         });
         if !used {
+            let name = &recv_name.name;
+            let message = match &self.allow.configured {
+                Some(pattern) => format!(
+                    "method receiver '{name}' is not referenced in method's body, consider removing or renaming it to match {pattern}"
+                ),
+                None => format!(
+                    "method receiver '{name}' is not referenced in method's body, consider removing or renaming it as _"
+                ),
+            };
             self.failures.push(Failure {
                 rule: "unused-receiver",
                 pos: recv_name.name_pos.0 as u32,
-                message: format!(
-                    "method receiver '{}' is not referenced in method's body, consider removing or renaming it as _",
-                    recv_name.name
-                ),
+                message,
                 ..Failure::default()
             });
         }
@@ -67,7 +81,7 @@ impl Checker {
 }
 
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
-    let mut c = Checker::new();
+    let mut c = Checker::new(pass);
     for file in pass.files() {
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {

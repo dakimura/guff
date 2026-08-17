@@ -320,6 +320,74 @@ pub fn is_rule_option(key: &str, want: &str) -> bool {
     norm(key) == norm(want)
 }
 
+/// `arguments: [{ allowRegex: "^_" }]`, shared verbatim by `unused-parameter`
+/// and `unused-receiver`.
+///
+/// Upstream's two `Configure` methods are the same function twice: default the
+/// regex to `^_$`, and if argument 0 is a `map[string]any` whose key is
+/// `allowRegex`, compile its string value instead — which also *changes the
+/// failure message*, from "…renaming it as _" to "…renaming it to match
+/// <regex>". Returning the pattern rather than a compiled `Regex` is what lets
+/// each rule render its own half of that sentence.
+///
+/// `None` means "upstream would keep the default", which covers argument 0
+/// missing, not being a map, or holding a non-`allowRegex` key. A key whose
+/// value is not a string is an upstream *error* (golangci-lint refuses to
+/// start); guff has no channel for that here, so it also reads as the default.
+///
+/// Upstream ranges over the option map and `return`s on the first key that is
+/// not `allowRegex`, so a map holding `allowRegex` *and* something else is
+/// decided by Go's randomized map order — either outcome is upstream's. This
+/// takes the one the user meant.
+pub fn allow_regex_pattern(pass: &Pass<'_>, rule: &str) -> Option<String> {
+    let map = rule_arg_map(pass, rule, 0)?;
+    let (_, value) = map.iter().find(|(k, _)| is_rule_option(k, "allowRegex"))?;
+    match value {
+        RuleArgument::String(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// The `allowRegex` a rule actually runs with, plus whether it was configured.
+///
+/// An unparsable pattern is upstream's second start-up error; here it falls
+/// back to the default, so a bad config cannot turn the rule into a crash.
+pub struct AllowRegex {
+    regex: regex::Regex,
+    /// The configured pattern, when one was given and compiled — this is what
+    /// the "…to match <regex>" message interpolates.
+    pub configured: Option<String>,
+}
+
+impl AllowRegex {
+    pub fn new(pass: &Pass<'_>, rule: &str) -> Self {
+        static DEFAULT: OnceLock<regex::Regex> = OnceLock::new();
+        let default = DEFAULT.get_or_init(|| regex::Regex::new("^_$").expect("valid regex"));
+        match allow_regex_pattern(pass, rule) {
+            Some(pattern) => match regex::Regex::new(&pattern) {
+                Ok(regex) => Self {
+                    regex,
+                    configured: Some(pattern),
+                },
+                Err(_) => Self {
+                    regex: default.clone(),
+                    configured: None,
+                },
+            },
+            None => Self {
+                regex: default.clone(),
+                configured: None,
+            },
+        }
+    }
+
+    /// Upstream tests with `FindStringIndex(name) != nil` — an unanchored
+    /// search, so the anchors that matter are the ones in the pattern.
+    pub fn allows(&self, name: &str) -> bool {
+        self.regex.is_match(name)
+    }
+}
+
 pub fn string_format_rules(pass: &Pass<'_>) -> Vec<(String, String, String)> {
     let args = rule_arguments(pass, "string-format");
     let mut out = Vec::new();

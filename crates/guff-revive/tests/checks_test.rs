@@ -943,3 +943,89 @@ fn revive_var_naming_allowlist_blocklist() {
         );
     });
 }
+
+/// `unused-parameter` / `unused-receiver` take `arguments: [{allowRegex: …}]`.
+///
+/// coredns configures `allowRegex: "^_"` and golangci-lint reports none of its
+/// `_ctx` / `_next` parameters; guff reported 229 of them, because the argument
+/// was never read. The message is part of the contract too: upstream swaps
+/// "renaming it as _" for "renaming it to match <regex>" the moment a pattern
+/// is configured.
+#[test]
+fn revive_unused_parameter_and_receiver_honour_allow_regex() {
+    use guff_revive::{with_settings, RuleArgument, RuleSetting, Settings};
+    use std::collections::HashMap;
+
+    let run = |allow_regex: Option<&str>| -> Vec<String> {
+        let arguments = match allow_regex {
+            Some(pattern) => vec![RuleArgument::Map(HashMap::from([(
+                "allowRegex".to_string(),
+                RuleArgument::String(pattern.to_string()),
+            )]))],
+            None => Vec::new(),
+        };
+        let rule = |name: &str| RuleSetting {
+            name: name.into(),
+            arguments: arguments.clone(),
+            disabled: false,
+            severity: None,
+        };
+        let settings = Settings {
+            rules: Some(vec![rule("unused-parameter"), rule("unused-receiver")]),
+            ..Settings::default()
+        };
+        let pkg = support::typecheck_fixture("revive", "example.com/revive/allowregex", "allow_regex.go");
+        with_settings(settings, || support::run_analyzer(revive(), &pkg))
+    };
+
+    // Default: `^_$`, so only the bare `_` is spared.
+    let default = run(None);
+    assert!(
+        default.iter().any(|m| m.contains("parameter '_ctx'")),
+        "default allowRegex is ^_$, so _ctx is a finding: {default:?}"
+    );
+    assert!(
+        default.iter().any(|m| m.contains("method receiver '_t'")),
+        "default allowRegex is ^_$, so _t is a finding: {default:?}"
+    );
+    assert!(
+        default
+            .iter()
+            .all(|m| m.contains("renaming it as _")),
+        "unconfigured rules keep the `as _` wording: {default:?}"
+    );
+
+    // Configured `^_`: every underscore-prefixed name is allowed, and the
+    // wording changes for the findings that remain.
+    let configured = run(Some("^_"));
+    assert!(
+        !configured.iter().any(|m| m.contains("'_ctx'") || m.contains("'_t'")),
+        "allowRegex ^_ spares _ctx and _t: {configured:?}"
+    );
+    assert!(
+        configured
+            .iter()
+            .any(|m| m == "unused-parameter: parameter 'ctx' seems to be unused, consider removing or renaming it to match ^_"),
+        "configured message names the regex: {configured:?}"
+    );
+    assert!(
+        configured.iter().any(|m| m
+            == "unused-receiver: method receiver 't' is not referenced in method's body, consider removing or renaming it to match ^_"),
+        "configured receiver message names the regex: {configured:?}"
+    );
+
+    // A used parameter, a used receiver, and `_` are silent either way.
+    for messages in [&default, &configured] {
+        assert!(
+            !messages.iter().any(|m| m.contains("'n'") || m.contains("'_ '")),
+            "used parameters and `_` are never findings: {messages:?}"
+        );
+    }
+
+    // An unparsable pattern falls back to the default rather than panicking.
+    let broken = run(Some("^(_"));
+    assert!(
+        broken.iter().any(|m| m.contains("parameter '_ctx'")),
+        "invalid allowRegex falls back to ^_$: {broken:?}"
+    );
+}
