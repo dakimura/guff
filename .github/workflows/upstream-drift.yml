@@ -55,7 +55,7 @@ jobs:
           cache-targets: true
 
       - name: Build guff
-        run: cargo build --release -p guff-lint
+        run: cargo build --release --locked -p guff-lint
 
       # drift.py installs both versions itself, into compat/.tools/<version>/, so
       # that two binaries can coexist. Nothing else in CI needs golangci-lint on

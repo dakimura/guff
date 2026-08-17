@@ -40,7 +40,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build guff
-        run: cargo build --release -p guff-lint
+        run: cargo build --release --locked -p guff-lint
 
       - name: Cache OSS corpus clones
         uses: actions/cache@v4
