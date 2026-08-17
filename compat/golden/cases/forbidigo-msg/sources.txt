@@ -1,0 +1,8 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# One call matched by a pattern that carries a `msg:` and one matched by a
+# pattern that does not, so both halves of `UsedIssue.Details` appear in the
+# golden.
+
+bad.go   crates/guff-style/tests/testdata/forbidigo/bad.go

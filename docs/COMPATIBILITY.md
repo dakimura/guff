@@ -189,7 +189,7 @@
 | `issues.max-issues-per-linter` / `max-same-issues` | ✅ | 既定 50 / 3 |
 | `issues.uniq-by-line` | ✅ | 既定 true |
 | `issues.include` | ✅ | 既定 exclusion の打ち消し |
-| `issues.new` / `new-from-rev` / `new-from-merge-base` / `new-from-patch` | ✅ | git diff（subprocess）。失敗時は警告してスキップ |
+| `issues.new` / `new-from-rev` / `new-from-merge-base` / `new-from-patch` | ✅ | git diff（subprocess）。失敗時は警告してスキップ。revgrep と同じく `git ls-files --others --exclude-standard` の**未追跡ファイルは全行が新規**（`new-from-patch` だけは対象外 — patch が変更集合を自分で表している） |
 | `issues.whole-files` | ✅ | `new*` と併用。変更ファイル全体の issue を残す |
 | `severity.default-severity` / `rules` / `case-sensitive` | ✅ | |
 | `output.formats` / `format`（deprecated） | ✅ | §3 |
@@ -230,8 +230,8 @@ exhaustivestruct / exportloopref / ifshort / nosnakecase / tenv / execinquery）
 |------|:----:|------|
 | `//nolint` / `//nolint:linter` | ✅ | 同一行・直前行の AST 展開。書式/説明必須は DEFERRED |
 | `--fix`（autofix） | 🟡 | SuggestedFix / TextEdit を適用。linter ごとの fix 網羅は継続 |
-| 終了コード | 🟡 | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー。**上流は設定エラーを 3 で終える**（実測、golangci-lint 2.12.2）— 合わせていない |
-| 設定の検証 | ✅ | 上流が起動を拒む config は guff も拒み、**理由の文言も同じ**（除外規則の条件数 / `path`+`path-except` / preset 名 / `severity.default` / `output.path-mode` / gocritic の組み合わせ / linter と formatter の取り違え）。ゲートは `compat/reject/`。上流の regexp コンパイル検証だけは方言差のため写していない |
+| 終了コード | 🟡 | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー / 3=設定が何も走らせない・**不明な linter 名**（上流 `exitcodes.Failure` に一致）。上流が 3 を返す他の設定エラーは 2 のまま — `compat/reject/` は「両者が拒む」ことを見ており、番号は見ていない |
+| 設定の検証 | ✅ | 上流が起動を拒む config は guff も拒み、**理由の文言も同じ**（除外規則の条件数 / `path`+`path-except` / preset 名 / `severity.default` / `output.path-mode` / gocritic の組み合わせ / linter と formatter の取り違え / **不明な linter 名**）。ゲートは `compat/reject/`。上流の regexp コンパイル検証だけは方言差のため写していない |
 | キャッシュ | ✅ | パッケージ単位の issues 永続キャッシュ。facts 永続化は DEFERRED（→ R24） |
 | 並列実行 | ✅ | action DAG を rayon で並列。型チェックも並列 |
 | プリセット | 🟡 | `standard` / `fast` / `all` / `none`（`standard`==`all`） |

@@ -16,7 +16,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "reject"))
 
-from reject import check_accept, check_case, reason_golangci, reason_guff  # noqa: E402
+from reject import (  # noqa: E402
+    canonical_reason,
+    check_accept,
+    check_case,
+    reason_golangci,
+    reason_guff,
+)
 
 GCL_CONFIG_ERROR = (
     "Error: can't load config: error in exclude rule #0: "
@@ -110,6 +116,45 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(len(check_accept("_control", 2, 0)), 1)
         self.assertEqual(len(check_accept("_control", 0, 3)), 1)
         self.assertEqual(len(check_accept("_control", 2, 3)), 2)
+
+
+
+class HelpPointerTests(unittest.TestCase):
+    """The one thing this tier rewrites: each tool's own listing command.
+
+    `unknown linters: …` ends by telling the user how to list the linters, and
+    neither tool can name the other's command. The reason is the same; only the
+    advice differs, so the comparison collapses that tail and nothing else.
+    """
+
+    GCL = (
+        "unknown linters: 'nosuchlinter', run 'golangci-lint help linters' "
+        "to see the list of supported linters"
+    )
+    GUFF = (
+        "unknown linters: 'nosuchlinter', run 'guff linters' "
+        "to see the list of supported linters"
+    )
+
+    def test_both_spellings_collapse_to_the_same_reason(self):
+        self.assertEqual(canonical_reason(self.GCL), canonical_reason(self.GUFF))
+
+    def test_a_case_where_only_the_pointer_differs_passes(self):
+        self.assertEqual(
+            check_case("unknown-linter", self.GCL, f"guff: {self.GUFF}\n", 3, f"Error: {self.GCL}\n", 3),
+            [],
+        )
+
+    def test_a_different_linter_name_still_fails(self):
+        wrong = self.GUFF.replace("nosuchlinter", "othertypo")
+        problems = check_case(
+            "unknown-linter", self.GCL, f"guff: {wrong}\n", 3, f"Error: {self.GCL}\n", 3
+        )
+        self.assertTrue(problems, "a different offending linter must not be collapsed away")
+
+    def test_nothing_else_is_rewritten(self):
+        self.assertEqual(canonical_reason(REASON_CONFIG), REASON_CONFIG)
+        self.assertIsNone(canonical_reason(None))
 
 
 if __name__ == "__main__":

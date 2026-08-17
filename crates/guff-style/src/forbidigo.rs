@@ -172,7 +172,14 @@ fn check_ident_or_selector(st: &mut ForbidState<'_>, expr: &Expr) {
         let explanation = if p.msg.is_empty() {
             format!(" by pattern `{}`", p.pattern)
         } else {
-            format!(" because `{}`", p.msg)
+            // Upstream renders the configured message with `%q`, not with
+            // backticks: `fmt.Sprintf(" because %q", a.customMsg)` in
+            // forbidigo's `UsedIssue.Details`. Only the pattern half uses
+            // backticks. Reported from the field on 2026-08-17 (issue F).
+            // Rust's `Debug` for `str` agrees with Go's `%q` on the escapes a
+            // config message can realistically contain (quote, backslash, tab,
+            // newline) and leaves printable non-ASCII alone, as `%q` does.
+            format!(" because {:?}", p.msg)
         };
         st.pending.push((
             expr.pos().0 as u32,

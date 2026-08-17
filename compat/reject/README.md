@@ -46,6 +46,13 @@ Error: can't load config: invalid preset: stdErrorHandling
 guff: can't load config: invalid preset: stdErrorHandling
 ```
 
+One thing is rewritten before comparison, and only one: a refusal that ends by
+telling the user how to list the linters can only name its own command
+(`run 'golangci-lint help linters'` vs `run 'guff linters'`). That tail is
+advice, not the reason, and guff printing golangci-lint's command at a user
+would be a bug rather than compatibility, so both spellings collapse to one
+token. Everything else is compared verbatim, which is the point of this tier.
+
 Three things are asserted per case: golangci-lint **still** refuses it, guff
 refuses it, and the reasons are equal. The first of those matters as much as the
 others — a recorded expectation upstream has stopped producing is a case that
@@ -89,6 +96,7 @@ the rules themselves are asserted at the unit level in
 | `gocritic-enable-all-and-enabled-tags` | `gocritic.validateOptionsCombinations` |
 | `gocritic-disable-all-and-disabled-checks` | same |
 | `gocritic-disable-all-enabling-nothing` | same |
+| `unknown-linter` | `Linters.Validate` — a name that is not a linter stops the run |
 
 Not covered, deliberately: upstream also compiles `path` / `path-except` /
 `text` / `source` as **Go** regexes and rejects the config when one fails. guff

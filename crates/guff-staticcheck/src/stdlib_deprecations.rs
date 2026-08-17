@@ -2,7 +2,7 @@
 //!
 //! Port of `knowledge.StdlibDeprecations`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 pub const DEPRECATED_NEVER_USE: &str = "never";
@@ -211,6 +211,43 @@ pub fn stdlib_deprecations() -> &'static HashMap<&'static str, Deprecation> {
     MAP.get_or_init(|| TABLE.iter().copied().collect())
 }
 
+/// The stdlib import paths [`stdlib_deprecations`] has any entry for.
+///
+/// SA1019 needs two things to fire: the *version* pair, which this table
+/// carries, and the deprecation's own prose, which only lives in a doc comment.
+/// Dependencies read from export data have no doc comments, so for the stdlib
+/// the prose has to come from a GOROOT source scan — and that scan has to be
+/// bounded, because walking every stdlib package a program imports would cost
+/// more than the check is worth. This set is that bound: a stdlib package is
+/// worth opening exactly when the table says something in it is deprecated.
+///
+/// Keys take four shapes — `pkg/path.Name`, `(pkg/path.Type).Field`,
+/// `(*pkg/path.Type).Method`, and a bare `pkg/path` for a deprecated package —
+/// so the path is everything up to the first `.` that follows the last `/`.
+pub fn stdlib_deprecated_packages() -> &'static HashSet<&'static str> {
+    static SET: OnceLock<HashSet<&str>> = OnceLock::new();
+    SET.get_or_init(|| {
+        TABLE
+            .iter()
+            .filter_map(|(key, _)| table_key_package(key))
+            .collect()
+    })
+}
+
+/// Import path of a [`stdlib_deprecations`] key, or `None` for a non-stdlib one.
+fn table_key_package(key: &'static str) -> Option<&'static str> {
+    let bare = key.trim_start_matches(['(', '*']);
+    let after_slash = bare.rfind('/').map_or(0, |i| i + 1);
+    let path = match bare[after_slash..].find('.') {
+        Some(dot) => &bare[..after_slash + dot],
+        // A bare import path: the whole key is the package (`io/ioutil`).
+        None => bare,
+    };
+    // Belt and braces: a third-party key would carry a dot in its domain, and
+    // this table is stdlib-only by construction.
+    (!path.is_empty() && !path.contains('.')).then_some(path)
+}
+
 /// Package-doc `Deprecated:` text for stdlib packages that are only available
 /// via export data (no AST for `fact_deprecated`). Keys must also appear in
 /// [`stdlib_deprecations`]. Frozen from GOROOT package comments.
@@ -223,5 +260,72 @@ pub fn stdlib_package_deprecation_msg(path: &str) -> Option<&'static str> {
             "DSA is a legacy algorithm, and modern alternatives such as Ed25519 (implemented by package crypto/ed25519) should be used instead. Keys with 1024-bit moduli (L1024N160 parameters) are cryptographically weak, while bigger keys are not widely supported. Note that FIPS 186-5 no longer approves DSA for signature generation.",
         ),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The four key shapes upstream writes. Getting this wrong is silent: a
+    /// mis-parsed path just drops out of the scan set and SA1019 goes quiet for
+    /// that package, which is exactly the failure the 2026-08-17 report hit.
+    #[test]
+    fn table_key_package_handles_every_key_shape() {
+        assert_eq!(table_key_package("go/build.AllowBinary"), Some("go/build"));
+        assert_eq!(table_key_package("os.SEEK_SET"), Some("os"));
+        assert_eq!(
+            table_key_package("(crypto/ecdsa.PublicKey).X"),
+            Some("crypto/ecdsa")
+        );
+        assert_eq!(
+            table_key_package("(*archive/zip.FileHeader).ModTime"),
+            Some("archive/zip")
+        );
+        // A bare import path: the package itself is deprecated.
+        assert_eq!(table_key_package("io/ioutil"), Some("io/ioutil"));
+    }
+
+    #[test]
+    fn deprecated_package_set_covers_the_reported_cases() {
+        let pkgs = stdlib_deprecated_packages();
+        for path in [
+            "crypto/ecdsa",
+            "archive/zip",
+            "net",
+            "net/http",
+            "regexp",
+            "path/filepath",
+            "os",
+            "io/ioutil",
+        ] {
+            assert!(pkgs.contains(path), "{path} missing from the scan set");
+        }
+        // The bound has to stay a bound: a set that swallowed every stdlib
+        // package would put a GOROOT source scan behind `import "fmt"`.
+        // (`strings` *is* in the set — `strings.Title` is deprecated — so it
+        // makes a poor negative.)
+        assert!(!pkgs.contains("fmt"), "fmt has no deprecated API");
+        assert!(!pkgs.contains("context"));
+        assert!(!pkgs.contains("errors"));
+        assert!(
+            pkgs.len() < 120,
+            "scan set grew to {} packages — is table_key_package still \
+             extracting paths correctly?",
+            pkgs.len()
+        );
+    }
+
+    /// Every key in the table must yield a package, and every package must be a
+    /// stdlib import path — the set is the gate that decides which GOROOT
+    /// packages get opened.
+    #[test]
+    fn every_table_key_yields_a_stdlib_package() {
+        for (key, _) in TABLE {
+            let path = table_key_package(key)
+                .unwrap_or_else(|| panic!("no package extracted from {key:?}"));
+            assert!(!path.contains('.'), "{key:?} → {path:?} is not stdlib");
+            assert!(key.contains(path), "{key:?} → {path:?} is not a substring");
+        }
     }
 }

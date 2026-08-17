@@ -333,8 +333,27 @@ fn run_cmd(args: RunArgs, startup: Instant) -> Result<i32, RunError> {
         .collect();
     let analyzers = resolve_linters_with_settings(&real, settings, &mut |n| unknown.push(n.to_string()));
 
-    for name in &unknown {
-        eprintln!("guff: linter {name:?} is not available yet");
+    // Fail closed, like golangci-lint (`unknown linters: '...'`, exit 3).
+    //
+    // This used to warn and keep going, which meant a typo'd or not-yet-wired
+    // linter degraded into "silently not checked": the run exits 0 with no
+    // findings and nothing downstream can tell that apart from a clean tree.
+    // The 2026-08-17 field report (issue G) called it out as the thing that
+    // makes every other coverage gap hard to notice. guff resolves all 112
+    // golangci-lint v2 linter names plus any linked module plugin — gated by
+    // `cli_test::every_isolate_linter_name_resolves` — so a name that reaches
+    // here is genuinely not a linter.
+    if !unknown.is_empty() {
+        let names = unknown
+            .iter()
+            .map(|n| format!("'{n}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "guff: unknown linters: {names}, run 'guff linters' to see the list \
+             of supported linters"
+        );
+        return Ok(crate::EXIT_CONFIG_ERROR);
     }
 
     // An empty selection means the config asked for nothing — `default: none`

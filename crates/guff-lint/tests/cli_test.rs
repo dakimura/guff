@@ -750,3 +750,115 @@ fn cli_run_accepts_short_enable_and_disable() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// A linter name guff cannot resolve must stop the run, not warn and continue.
+///
+/// Regression test for the 2026-08-17 field report (issue G). guff used to
+/// print `linter "x" is not available yet` and lint on with whatever was left,
+/// so a typo — or a linter someone assumed was wired — turned into "silently
+/// not checked": exit 0, no findings, indistinguishable from a clean tree.
+/// golangci-lint validates the enable set first and exits 3
+/// (`unknown linters: 'x', run 'golangci-lint help linters' …`).
+///
+/// The finding-set tiers cannot express this: a tool that skips a linter and a
+/// tool that has nothing to report both print nothing.
+#[test]
+fn cli_run_rejects_unknown_linter_name() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(tmp.path().join("a.go"), "package a\n").unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "--no-config", "-E", "nosuchlinter", "./..."])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run -E nosuchlinter");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(guff_lint::EXIT_CONFIG_ERROR),
+        "guff must refuse to start, like golangci-lint\nstdout={}\nstderr={stderr}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    assert!(
+        stderr.contains("unknown linters: 'nosuchlinter'"),
+        "the message must name the offending linter; got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("guff linters"),
+        "the message must point at guff's own listing command; got:\n{stderr}"
+    );
+}
+
+/// Same, from a config file rather than `-E` — `linters.enable` is where a
+/// stale name actually shows up in the wild.
+#[test]
+fn cli_run_rejects_unknown_linter_from_config() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("go.mod"), "module example.com\n\ngo 1.24\n").unwrap();
+    std::fs::write(tmp.path().join("a.go"), "package a\n").unwrap();
+    std::fs::write(
+        tmp.path().join(".golangci.yml"),
+        "version: \"2\"\nlinters:\n  default: none\n  enable:\n    - errcheck\n    - nosuchlinter\n",
+    )
+    .unwrap();
+
+    let out = Command::new(bin())
+        .args(["run", "./..."])
+        .current_dir(tmp.path())
+        .output()
+        .expect("spawn guff run");
+    assert_eq!(
+        out.status.code(),
+        Some(guff_lint::EXIT_CONFIG_ERROR),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// Failing closed is only safe if guff resolves every name golangci-lint
+/// accepts. `compat/isolate/linters.txt` is the in-repo roster of those names
+/// (it carries one isolate target per golangci-lint v2 linter), so anything
+/// listed there must resolve to at least one analyzer — otherwise the check
+/// above would lock users out of a linter upstream runs happily.
+#[test]
+fn every_isolate_linter_name_resolves() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compat/isolate/linters.txt");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+
+    let mut missing = Vec::new();
+    let mut seen = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let name = line.split_whitespace().next().expect("non-empty line");
+        seen += 1;
+        if guff_lint::is_meta_linter(name) {
+            // nolintlint owns no analyzer of its own; the run wires it up from
+            // the `//nolint` comments the issue filter already parses.
+            continue;
+        }
+        if guff_fmt::is_formatter(name) {
+            // `golines` / `swaggo` have isolate targets but are formatters:
+            // `guff fmt` / `formatters.enable` own them, and upstream refuses
+            // them under `linters.enable` too (compat/reject/cases/
+            // formatter-under-linters).
+            continue;
+        }
+        if guff_lint::analyzers_for_linter(name).is_none() {
+            missing.push(name.to_string());
+        }
+    }
+
+    assert!(seen >= 110, "isolate roster looks truncated: {seen} names");
+    assert!(
+        missing.is_empty(),
+        "these linter names are in compat/isolate/linters.txt but resolve to \
+         nothing, so `guff run` now refuses configs golangci-lint accepts: {missing:?}"
+    );
+}

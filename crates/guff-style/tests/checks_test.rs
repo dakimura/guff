@@ -2264,16 +2264,34 @@ fn forbidigo_respects_custom_forbid_settings() {
             ..RunnerOptions::default()
         },
     );
+    // Exact text, not `contains`: upstream renders the configured message with
+    // `%q` — `fmt.Sprintf(" because %q", a.customMsg)` in forbidigo's
+    // `UsedIssue.Details` — so it is double-quoted, not backticked. guff used
+    // backticks, which the 2026-08-17 field report caught as a cosmetic but
+    // real output difference (issue F). A `contains` assertion cannot see it.
     assert!(
-        messages.iter().any(|m| {
-            m.contains("use of `fmt.Println` forbidden")
-                && m.contains("Do not commit print statements.")
-        }),
+        messages.iter().any(|m| m
+            == r#"use of `fmt.Println` forbidden because "Do not commit print statements.""#),
         "{messages:?}"
     );
     assert!(
         !messages.iter().any(|m| m.contains("`print`")),
         "builtin print should not match custom fmt-only pattern: {messages:?}"
+    );
+}
+
+/// The other half of `UsedIssue.Details`: with no custom message upstream falls
+/// back to ``" by pattern `%s`"`` — backticks there, and only there. Pinned so
+/// the `%q` fix above cannot be over-applied to this branch.
+#[test]
+fn forbidigo_pattern_explanation_keeps_backticks() {
+    let pkg = support::typecheck_fixture("forbidigo", "example.com/forbidigo", "bad.go");
+    let messages = support::run_analyzer(forbidigo(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "use of `fmt.Println` forbidden by pattern `^(fmt\\.Print(|f|ln)|print|println)$`"),
+        "{messages:?}"
     );
 }
 

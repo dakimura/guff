@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh staticcheck-sa1019-stdlib
+# Produced by running golangci-lint on compat/golden/cases/staticcheck-sa1019-stdlib/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+stdlib.go:26:40:staticcheck::SA1019: filepath.HasPrefix has been deprecated since Go 1.0 because it shouldn't be used: HasPrefix does not respect path boundaries and does not ignore case when required. 
+stdlib.go:29:50:staticcheck::SA1019: h.ModifiedTime has been deprecated since Go 1.10: Use Modified instead. 
+stdlib.go:32:53:staticcheck::SA1019: d.Cancel has been deprecated since Go 1.7: Use DialContext instead. 
+stdlib.go:35:54:staticcheck::SA1019: re.Copy has been deprecated since Go 1.12: In earlier releases, when using a [Regexp] in multiple goroutines, giving each goroutine its own copy helped to avoid lock contention. As of Go 1.12, using Copy is no longer necessary to avoid lock contention. Copy may still be appropriate if the reason for its use is to make two copies with different [Regexp.Longest] settings. 
+stdlib.go:38:58:staticcheck::SA1019: t.CancelRequest has been deprecated since Go 1.6 and an alternative has been available since Go 1.5: Use [Request.WithContext] to create a request with a cancelable context instead. CancelRequest cannot cancel HTTP/2 requests. This may become a no-op in a future release of Go. 
+stdlib.go:41:51:staticcheck::SA1019: p.X has been deprecated since Go 1.26 and an alternative has been available since Go 1.25: modifying the raw coordinates can produce invalid keys, and may invalidate internal optimizations; moreover, [big.Int] methods are not suitable for operating on cryptographic values. To encode and decode PublicKey values, use [PublicKey.Bytes] and [ParseUncompressedPublicKey] or [crypto/x509.MarshalPKIXPublicKey] and [crypto/x509.ParsePKIXPublicKey]. For ECDH, use [crypto/ecdh]. For lower-level elliptic curve operations, use a third-party module like filippo.io/nistec. 

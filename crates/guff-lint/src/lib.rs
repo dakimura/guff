@@ -86,6 +86,12 @@ pub fn version_banner() -> String {
 /// formatters (golangci-lint's "Running error: no linters enabled" uses 3).
 pub const EXIT_NO_LINTERS: i32 = 3;
 
+/// Exit code when guff refuses to start on the given configuration
+/// (golangci-lint's `exitcodes.Failure`). Same value as [`EXIT_NO_LINTERS`];
+/// named separately because "I will not run this config" and "this config runs
+/// nothing" are different answers to the user.
+pub const EXIT_CONFIG_ERROR: i32 = 3;
+
 /// Exit code when `--timeout` / `run.timeout` is exceeded (golangci-lint uses 4).
 pub const EXIT_TIMEOUT: i32 = 4;
 

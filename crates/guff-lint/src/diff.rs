@@ -40,6 +40,15 @@ pub struct DiffState {
     /// Normalized repo-relative path → new-side line ranges.
     pub(crate) lines: HashMap<String, Vec<(i64, i64)>>,
     pub(crate) changed_files: HashSet<String>,
+    /// Files git does not track yet (`git ls-files --others --exclude-standard`).
+    ///
+    /// revgrep seeds these into its changed-file map with a `nil` line list,
+    /// and `IsNew` reads a `nil` list as "the whole file is new" — so every
+    /// line of an untracked file is new, in line mode as well as under
+    /// `whole-files`. Without them a pre-commit / CI flow that lints before
+    /// `git add` lets brand-new files through with zero findings and a clean
+    /// exit code, which is the failure mode that looks like success.
+    pub(crate) new_files: HashSet<String>,
 }
 
 impl DiffState {
@@ -48,6 +57,11 @@ impl DiffState {
         let Some(rel) = self.rel_path(&issue.filename) else {
             return false;
         };
+        // An untracked file is new in its entirety: `whole-files` does not
+        // gate it, and no hunk covers it because it is in no patch.
+        if self.new_files.contains(&rel) && !self.changed_files.contains(&rel) {
+            return true;
+        }
         if self.whole_files {
             return self.changed_files.contains(&rel);
         }
@@ -103,6 +117,16 @@ pub fn build_diff_state(spec: &DiffFilterSpec) -> Result<Option<DiffState>, Stri
     let cwd = std::env::current_dir().map_err(|e| format!("cwd: {e}"))?;
     let repo_root = git_toplevel(&cwd)?;
 
+    // revgrep only collects untracked files when it derives the patch from git
+    // itself (`loadPatch` returns early when `Patch` is already set), so an
+    // explicit `new-from-patch` describes the change set on its own.
+    let from_patch_file = spec.new_from_patch.as_ref().is_some_and(|s| !s.is_empty());
+    let new_files = if from_patch_file {
+        HashSet::new()
+    } else {
+        git_untracked_files(&repo_root)?
+    };
+
     let patch = if let Some(path) = spec.new_from_patch.as_ref().filter(|s| !s.is_empty()) {
         std::fs::read_to_string(path).map_err(|e| format!("read new-from-patch {path}: {e}"))?
     } else if let Some(ref_name) = spec
@@ -132,9 +156,35 @@ pub fn build_diff_state(spec: &DiffFilterSpec) -> Result<Option<DiffState>, Stri
         whole_files: spec.whole_files,
         lines: HashMap::new(),
         changed_files: HashSet::new(),
+        new_files,
     };
     parse_unified_diff(&patch, &mut state);
     Ok(Some(state))
+}
+
+/// Files git knows nothing about yet, repo-root-relative.
+///
+/// Port of the `git ls-files --others --exclude-standard` half of revgrep's
+/// `GitPatch`. Directories (trailing `/`) are dropped there because ls-files
+/// sometimes lists an ignored directory rather than its files; the same guard
+/// is kept here so a directory name can never shadow a real path.
+fn git_untracked_files(repo_root: &Path) -> Result<HashSet<String>, String> {
+    let out = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| format!("git ls-files: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git ls-files --others --exclude-standard failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.replace('\\', "/"))
+        .filter(|l| !l.is_empty() && !l.ends_with('/'))
+        .collect())
 }
 
 fn git_toplevel(cwd: &Path) -> Result<PathBuf, String> {
@@ -390,6 +440,55 @@ index 111..222 100644
         assert!(!state.keeps(&issue("/repo/z.go", 2)));
         state.whole_files = true;
         assert!(state.keeps(&issue("/repo/z.go", 2)));
+    }
+
+    /// Untracked files are new in their entirety — the whole point of
+    /// revgrep's `NewFiles`. Regression test for the 2026-08-17 report: with
+    /// `new-from-merge-base` set, guff reported *nothing* for a file that git
+    /// did not track yet, so any pre-commit flow that lints before `git add`
+    /// passed brand-new files with a clean exit code.
+    #[test]
+    fn untracked_file_is_new_in_line_mode() {
+        let mut state = DiffState {
+            repo_root: PathBuf::from("/repo"),
+            whole_files: false,
+            ..DiffState::default()
+        };
+        state.new_files.insert("pkg/brand_new.go".into());
+        assert!(state.keeps(&issue("/repo/pkg/brand_new.go", 1)));
+        assert!(state.keeps(&issue("/repo/pkg/brand_new.go", 4242)));
+        assert!(state.keeps(&issue("pkg/brand_new.go", 7)));
+        assert!(!state.keeps(&issue("/repo/pkg/tracked.go", 1)));
+    }
+
+    #[test]
+    fn untracked_file_is_new_under_whole_files() {
+        let mut state = DiffState {
+            repo_root: PathBuf::from("/repo"),
+            whole_files: true,
+            ..DiffState::default()
+        };
+        state.new_files.insert("pkg/brand_new.go".into());
+        assert!(state.keeps(&issue("/repo/pkg/brand_new.go", 99)));
+        assert!(!state.keeps(&issue("/repo/pkg/tracked.go", 99)));
+    }
+
+    /// revgrep seeds `NewFiles` first and lets the patch overwrite the entry,
+    /// so a path that is somehow in both is judged by its hunks.
+    #[test]
+    fn patch_wins_over_untracked_for_the_same_path() {
+        let mut state = DiffState {
+            repo_root: PathBuf::from("/repo"),
+            whole_files: false,
+            ..DiffState::default()
+        };
+        parse_unified_diff(
+            "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -5,0 +6,1 @@\n+added\n",
+            &mut state,
+        );
+        state.new_files.insert("x.go".into());
+        assert!(state.keeps(&issue("/repo/x.go", 6)));
+        assert!(!state.keeps(&issue("/repo/x.go", 7)));
     }
 
     #[test]

@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    # Not a linter. golangci-lint validates the enable set before it loads a
+    # package and exits 3; guff used to warn `is not available yet` and lint on
+    # with what was left, so a typo — or a linter someone assumed was wired —
+    # became "silently not checked": exit 0, no findings, indistinguishable
+    # from a clean tree. Reported from the field on 2026-08-17 (issue G).
+    #
+    # The finding-set tiers cannot express this, which is the same reason the
+    # other cases here exist: a tool that skips a linter and a tool with
+    # nothing to report both print nothing.
+    - nosuchlinter
