@@ -56,6 +56,27 @@ def reason_guff(output: str) -> str | None:
     return m.group("reason") if m else None
 
 
+# Some refusals end by telling the user how to list the linters, and each tool
+# can only name its own command:
+#
+#   golangci-lint: … run 'golangci-lint help linters' to see the list …
+#   guff:          … run 'guff linters' to see the list …
+#
+# That tail is advice, not the reason, and guff printing `golangci-lint help
+# linters` at a user would be a bug rather than compatibility. Collapse both
+# spellings to one token so the comparison stays on what went wrong. This is
+# the *only* rewriting this tier does — everything else is compared verbatim,
+# which is the point of it.
+_HELP_POINTER = re.compile(r"run '(?:golangci-lint help linters|guff linters)'")
+
+
+def canonical_reason(reason: str | None) -> str | None:
+    """`reason` with each tool's own how-to-list-linters pointer collapsed."""
+    if reason is None:
+        return None
+    return _HELP_POINTER.sub("run '<tool> linters'", reason)
+
+
 def check_case(
     case: str, expected: str, guff_output: str, guff_rc: int, golangci_output: str, golangci_rc: int
 ) -> list[str]:
@@ -67,7 +88,7 @@ def check_case(
     got_gcl = reason_golangci(golangci_output)
     if golangci_rc == 0:
         problems.append(f"{case}: golangci-lint exited 0 — it no longer refuses this config")
-    elif got_gcl != expected:
+    elif canonical_reason(got_gcl) != canonical_reason(expected):
         problems.append(
             f"{case}: golangci-lint's reason moved\n"
             f"    expected {expected!r}\n"
@@ -78,7 +99,7 @@ def check_case(
     got_guff = reason_guff(guff_output)
     if guff_rc == 0:
         problems.append(f"{case}: guff exited 0 — it ran a config golangci-lint refuses")
-    elif got_guff != expected:
+    elif canonical_reason(got_guff) != canonical_reason(expected):
         problems.append(
             f"{case}: guff's reason differs\n"
             f"    golangci {expected!r}\n"

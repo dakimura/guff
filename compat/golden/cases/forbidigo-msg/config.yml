@@ -1,0 +1,37 @@
+# Golden case: forbidigo's *custom message* rendering.
+#
+# `forbidigo.UsedIssue.Details` builds the tail of the message two different
+# ways, and only one of them uses backticks:
+#
+#     explanation := fmt.Sprintf(` because %q`, a.customMsg)
+#     if a.customMsg == "" {
+#         explanation = fmt.Sprintf(" by pattern `%s`", a.pattern)
+#     }
+#
+# guff rendered the custom message with backticks too, so every finding from a
+# repo that configures `msg:` differed from golangci-lint by two characters —
+# invisible to `compat/normalize.py`, which keys on the message after
+# canonicalization, and reported from the field on 2026-08-17.
+#
+# The fixture carries one pattern of each kind so a fix cannot trade one
+# rendering for the other.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - forbidigo
+  settings:
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.Println$
+          msg: Please define util package and use util.Println "quoted" instead.
+        - pattern: ^fmt\.Printf$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

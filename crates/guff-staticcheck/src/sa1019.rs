@@ -29,8 +29,8 @@ use guff_types::arena::{ObjectData, TypeData};
 
 use crate::render::render_expr;
 use crate::stdlib_deprecations::{
-    stdlib_deprecations, stdlib_package_deprecation_msg, Deprecation, DEPRECATED_NEVER_USE,
-    DEPRECATED_USE_NO_LONGER,
+    stdlib_deprecated_packages, stdlib_deprecations, stdlib_package_deprecation_msg, Deprecation,
+    DEPRECATED_NEVER_USE, DEPRECATED_USE_NO_LONGER,
 };
 
 fn related_pkg_path(pass: &Pass<'_>, path: &str) -> bool {
@@ -301,21 +301,34 @@ fn worth_package_doc_scan(pkg_path: &str) -> bool {
     !is_stdlib_path(pkg_path)
 }
 
-/// Third-party / nested-module packages whose object/method docs we will
-/// PARSE_COMMENTS-scan even without a package-level deprecation.
+/// Packages whose object/method docs we will PARSE_COMMENTS-scan even without a
+/// package-level deprecation.
 ///
 /// `Deprecated` facts only reach us for packages analysed from source. A
 /// dependency read from export data carries no doc comments at all, so every
-/// `Deprecated:` in a third-party module is invisible without this scan —
-/// which used to be an allowlist of the handful of modules we had happened to
-/// hit. The stdlib is excluded because it is covered by the
-/// [`stdlib_deprecations`] table.
+/// `Deprecated:` in it is invisible without this scan — which used to be an
+/// allowlist of the handful of modules we had happened to hit.
+///
+/// The stdlib used to be excluded outright, on the theory that
+/// [`stdlib_deprecations`] covers it. It does not: that table carries the two
+/// *versions* in the message, not the deprecation's prose, and upstream prints
+/// both (`%s has been deprecated since Go %s and an alternative has been
+/// available since Go %s: %s`). With no fact there is no prose and no
+/// diagnostic, so guff reported nothing at all for `SA1019` on stdlib fields
+/// and methods — `p.X` on a `*ecdsa.PublicKey`, the case the 2026-08-17 field
+/// report filed as issue C. GOROOT sources are on disk; they only need reading.
 ///
 /// The scan is affordable because it is bounded by dependency *packages*, not
 /// call sites: `dep_facts` memoises each package process-wide, and each file is
 /// rejected by a byte-level `Deprecated:` probe before it is ever parsed.
+///
+/// For the stdlib that bound is not tight enough on its own — `net/http` is
+/// ~50 files and prometheus imports a couple of dozen such packages, which cost
+/// +0.23s of `./...` wall when this predicate was the only gate. The caller
+/// therefore narrows again, per *symbol*, against the knowledge table; this
+/// predicate only decides which packages are worth considering at all.
 fn worth_object_doc_scan(pkg_path: &str) -> bool {
-    !is_stdlib_path(pkg_path)
+    !is_stdlib_path(pkg_path) || stdlib_deprecated_packages().contains(pkg_path)
 }
 
 /// Deps whose sources are local replaces / nested modules / test stubs — not
@@ -392,7 +405,11 @@ fn dep_facts<'a>(
         }
     }
 
-    if is_stdlib_path(pkg_path) {
+    // Stdlib packages the knowledge table says nothing about can never produce
+    // an SA1019: `handle_deprecation` drops a stdlib object with no table
+    // entry. Short-circuit them rather than open GOROOT for nothing. The ones
+    // the table *does* name fall through and get scanned like any other dep.
+    if is_stdlib_path(pkg_path) && !stdlib_deprecated_packages().contains(pkg_path) {
         let empty = Arc::new(PkgDeprecatedFacts {
             objects_scanned: true,
             ..PkgDeprecatedFacts::default()
@@ -720,6 +737,30 @@ fn selector_diagnostic(
             || is_local_source_dep(pass, &pkg_path);
         if !allow_lazy {
             return None;
+        }
+        // For the stdlib, narrow "worth scanning" from the package to this
+        // exact symbol. `handle_deprecation` drops a stdlib selector the
+        // knowledge table does not name, so scanning GOROOT for one would buy
+        // nothing — and `net/http` alone is ~50 files. Gating at the package
+        // level instead cost **+0.23s** on prometheus `./...` (2.01s → 2.24s,
+        // measured against a clean-HEAD build on the same machine; the regress
+        // full profile went red on wall). Gating here keeps `import "net/http"`
+        // free and opens GOROOT only for the call sites that can report.
+        //
+        // `handle_deprecation` also falls back to the *rendered* name, but for
+        // the stdlib that can only match a `pkg.Name` key — and for those
+        // `knowledge_selector_name` produces the identical string, so this
+        // lookup is not narrower than the one that decides the diagnostic.
+        //
+        // Computed inside the `is_stdlib_path` arm on purpose:
+        // `knowledge_selector_name` renders the receiver type for a selection,
+        // and hoisting it above this block would put that allocation on every
+        // cross-package selector in the run to serve the stdlib ones.
+        if is_stdlib_path(&pkg_path) {
+            let key = knowledge_selector_name(pass, sel);
+            if stdlib_deprecations().get(key.trim_matches('"')).is_none() {
+                return None;
+            }
         }
         let name = obj.name(&artifacts.objects).to_string();
         let facts = dep_facts(pass, dep_cache, &pkg_path, true);

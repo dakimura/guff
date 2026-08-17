@@ -180,7 +180,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 | ベンチ | ✅ `benchmarks/` ハーネス（cold/warm・`fixture` / `local`・`results/RESULTS.md`）。cold/warm とも golangci-lint より高速 | 実 OSS は一部 expr/lvalue DEFERRED で FAIL しがち（→ R17 DEFERRED） |
 | 互換差分 | ✅ `compat/` ハーネス（guff vs golangci JSON → `file:line:linter:message`、P/R、allowlist、`.github/workflows/compat.yml` ゲート） | OSS コーパス拡張・local パリティ改善は継続 |
 | Prometheus 回帰 | ✅ `regress/` ローカルゲート（prometheus 本体 `.golangci.yml`・peak RSS / wall / finding-set を悪化のみ FAIL）。プロファイル: `tsdb`（`./tsdb/...` / `baseline.json` / RSS kill 12GiB）と `full`（`./...` / `baseline.full.json` / 18GiB）。暖機 GOCACHE・auto concurrency | CI 未接続。絶対一致は不要。hybrid 既定の full peak は ~10.7 GiB（export 経路の ~5.8 GB より高い） |
-| 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー | —（R1 完了） |
+| 終了コード | 0=クリーン / `--issues-exit-code`（既定 1）=指摘あり / 2=エラー / 3=起動拒否（何も走らせない設定・不明な linter 名） | —（R1 完了。3 は R27 で不明 linter 名にも拡張） |
 | autofix | ✅ `--fix`（SuggestedFix / TextEdit 適用、修正済み診断は出力から除外） | golangci の fix 範囲全体には未 |
 
 ---
@@ -696,6 +696,89 @@ guff-only 17 件。内訳と、なぜ guff だけが出すのか:
 `go list` と型検査が支配的なのでこの赤は動かない。詳細と phase 内訳は
 [`COMPAT-HARDENING.md`](COMPAT-HARDENING.md) §4 の 2026-08-09（2 本目）と
 [`PERF_TASKS_V2.md`](PERF_TASKS_V2.md) §1.3-post2 の追記。
+
+#### R27. 大規模 private モノレポ v0.5.0 評価レポート（2026-08-17）
+
+外部評価者から v0.5.0 の評価レポートを受領（golangci-lint 2.12.2 との比較、
+約 5,100 `.go` ファイル / 約 700 パッケージの非公開モノレポ。レポート本文は
+リポジトリに入れていない —— 非公開リポジトリの規模・構成が書かれているため）。
+**7 件の指摘のうち 5 件を手元で再現し、4 件を修正**した。コーパスは非公開なので、
+再現できた分は**すべて公開フィクスチャに落として PR ゲートに載せてある**（R26 と違い、
+症状メモではなくテストで残す）。
+
+**再現 → 修正済み:**
+
+| 症状 | 根本原因 | 直した場所 | ゲート |
+|------|----------|-----------|--------|
+| **A** `new-from-merge-base` 下で **git 未追跡ファイルの指摘が全部消える**（exit 0・0 findings で「きれい」に見える） | revgrep は `git diff` の他に `git ls-files --others --exclude-standard` を採り、その結果を「行リスト = nil」で changed map に入れる。`IsNew` は nil を「全行が新規」と読む（`whole-files` とは独立）。guff は `git diff` しか見ていなかった | `guff-lint/src/diff.rs`（`DiffState::new_files` + `git_untracked_files`） | `diff.rs` 単体 3 + `crates/guff-lint/tests/diff_untracked_test.rs` 6（実 git repo × 実バイナリ） |
+| **C** SA1019 が **stdlib の deprecation を 1 件も出さない**（`p.X` on `*ecdsa.PublicKey`） | SA1019 のメッセージは「バージョン 2 つ（knowledge テーブル）＋ deprecation の本文（doc コメント）」で構成される。stdlib は export data 経由で doc コメントを持たないので本文が無く、診断が組み立たない。ところが GOROOT のソースはディスク上にある | `guff-staticcheck/src/sa1019.rs`（`worth_object_doc_scan` / `dep_facts` の stdlib 早期 return）+ `stdlib_deprecations.rs`（`stdlib_deprecated_packages`） | `stdlib_deprecations` 単体 3 + `compat/golden/cases/staticcheck-sa1019-stdlib`（package-level func / struct field / pointer method の 3 形・計 6 件） |
+| **F**（cosmetic）forbidigo の設定メッセージが `` `…` `` | 上流 `UsedIssue.Details` は custom message だけ `%q`、pattern 側だけバッククォート | `guff-style/src/forbidigo.rs` | `checks_test` 2（完全一致）+ `compat/golden/cases/forbidigo-msg` |
+| **G** 未知の linter 名を**警告して続行**（exit 0 / 0 findings） | 「まだ実装していない linter」を素通しする設計だったが、実装は 112/112 揃っている。typo が「黙って検査されない」に化ける | `guff-lint/src/cli.rs`（`EXIT_CONFIG_ERROR` で fail closed） | `cli_test` 3（うち 1 つは「golangci が受ける名前を guff が全部解決できる」ことの担保）+ `compat/reject/cases/unknown-linter` |
+
+> **A が最優先だった理由**は件数ではなく方向。pre-commit / CI が `git add` の前に lint する
+> フローでは新規ファイルが丸ごと未検査で通り、しかも exit 0・0 findings なので
+> 下流からはクリーンなツリーと見分けが付かない。同じ理由で G も直した。
+
+> **C の性能（測り直した）**: 「テーブルが名指ししている stdlib パッケージなら doc スキャンを許す」という
+> **パッケージ単位**のゲートは prometheus `./...` で **wall +0.23s**（clean HEAD 2.010s → 2.240s、
+> 同一機で HEAD をビルドして A/B。`regress --profile full` が wall で赤くなった）。`net/http` だけで ~50 ファイルあり、
+> prometheus はその手の stdlib を 20 個以上 import する。**シンボル単位**に絞った
+> —— `handle_deprecation` はテーブルに無い stdlib セレクタをどのみち捨てるので、
+> 呼び出しサイトごとに `knowledge_selector_name` をテーブルに引いてから GOROOT を開く。
+> 静かな計測機で **1.970s / 上限 2.190s で PASS**、finding-set は 20/20/0/0 で不変。
+>
+> **単発の wall では判定できなかった**ので、`PERF_GUARD=0` で HEAD と交互に 3 往復した:
+>
+> | round | HEAD | 変更後 | Δ |
+> |---|---:|---:|---:|
+> | 1 | 2.020 | 2.090 | +0.070 |
+> | 2 | 2.190 | 2.230 | +0.040 |
+> | 3 | 2.880 | 2.940 | +0.060 |
+>
+> HEAD 自身が 2.02 → 2.88s と **0.86s** 動く一方、対の差は **+0.06s（±0.015）で一定**。
+> peak RSS は両者 1.87–1.89 GB で区別が付かない。つまり残コストは +0.06s（約 3%、epsilon 0.15s の内側）で、
+> 混んだ機械で出る単発の FAIL は機械の側。**絶対値ではなく対の差を見ること** —— この機械では
+> 単発の `regress --profile full` は HEAD でも赤くなる。
+> 「パッケージ単位で十分安いはず」は測る前の直感で、外れていた。
+
+> **G の副作用（意図的）**: `linters.settings.custom` で module plugin を宣言している設定を
+> **素の `guff`** で走らせると exit 3 になる。以前は 6 個の plugin linter を黙って外して走っていた。
+> 上流も同じで、`crates/guff-lint/tests/testdata/config_corpus/go-github.yml`（custom 6 個）を
+> 素の `golangci-lint` に食わせると `Error: build linters: plugin(structfield): plugin "structfield" not found`
+> で **exit 3**。どちらもカスタムバイナリ（`guff custom` / `golangci-lint custom`）を要求する、が正しい答え。
+
+**再現しなかった（追加情報待ち）:**
+
+- **D** `staticcheck.checks: ["all"]` の展開が golangci より広い（971 vs 20）— 小フィクスチャで
+  **両ツール完全一致**（S1000 / QF1012 / ST1000）。上流 `setupAnalyzers` は `all` を
+  SA/S/ST/QF 全部に展開しており、guff も同じ。既に
+  `compat/golden/cases/staticcheck-checks-{all,default,glob,not-s}` がこれを固定している。
+  レポート側の 951 件差は設定の別のキー（`exclusions.rules` 等）由来の疑いが濃い。
+- **E** protogetter 362 vs 0 / misspell 19 vs 0 / exhaustive 0 vs 6 — レポート自身が
+  「未 root-cause の生観測」としている。設定全文が要る。
+- **B** gosec G115（+ G703 の taint ケース）— 未実装。下の R27.1。
+- **peak RSS が `./...` 規模で golangci +33%** — 手元の corpus では再現条件が作れない
+  （`regress --profile full` が prometheus 規模の唯一のゲート）。
+
+##### R27.1 gosec G115（整数オーバーフロー変換）— 未着手
+
+R26.3 の 1 番から持ち越し。**素朴に実装すると誤検出だらけになる**ので、上流のレンジ解析まで
+含めて移植する必要がある、という判断は変わっていない。分量の実測:
+
+| 上流ファイル | 行数 | guff 側の受け皿 |
+|---|---:|---|
+| `analyzers/conversion_overflow.go` | 339 | 新規 `guff-style/src/gosec_g115.rs` |
+| `analyzers/range_analyzer.go` | 1,524 | 同上（`rangeResult` / `ResolveRange` / `getResultRangeForIfEdge`） |
+| `analyzers/util.go` の `GetIntTypeInfo` / `IsConstantInTypeRange` / `ExplicitValsInRange` 周辺 | ~150 | `gosec.rs` に同居させるか小 module |
+
+guff-ssa 側の前提は揃っている（`InstrData::Convert` / `Function::dom_preorder` / `Phi` / `If`、
+G602 が同じ形で 1,021 行の移植を済ませている）。手順は §5 の通常フローで、
+**完了条件は「`isolate-gosec` と golden の gosec ケースが増えた分ちょうどで一致し、
+`compat/run.sh --oss --tier pr,nightly` に guff-only が 1 件も増えないこと」**。
+上流が `#nosec G115` を自分のコードに 6 箇所置いている（`range_analyzer.go`）ことからも
+分かるとおり、レンジ解析の甘い実装は corpus 全体に誤検出をばらまく。段階導入するなら
+「safe と証明できない限り黙る」側に倒すこと（上流と逆向きの誤りになるが、
+guff のゲートは誤検出を FAIL にする設計なので、そちらの向きしか運用できない）。
 
 ---
 
