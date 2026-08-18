@@ -6,7 +6,7 @@
 //! Implemented checkers (defaults match upstream except noted):
 //! `blank-import`, `bool-compare`, `compares`, `contains`, `empty`,
 //! `encoded-compare`, `equal-values`, `error-is-as`, `error-nil`, `expected-actual`,
-//! `float-compare`, `formatter`, `go-require`, `len`, `mock-expect`, `negative-positive`,
+//! `float-compare`, `formatter`, `go-require`, `len`, `negative-positive`,
 //! `nil-compare`, `regexp`, `require-error`, `suite-broken-parallel`, `suite-dont-use-pkg`,
 //! `suite-extra-assert-call`, `suite-method-signature`, `suite-subtest-run`,
 //! `suite-thelper` (off by default), `time-compare`, `useless-assert`.
@@ -107,7 +107,6 @@ const IMPLEMENTED: &[&str] = &[
     "formatter",
     "go-require",
     "len",
-    "mock-expect",
     "negative-positive",
     "nil-compare",
     "regexp",
@@ -119,9 +118,16 @@ const IMPLEMENTED: &[&str] = &[
     "suite-subtest-run",
     "suite-thelper",
     "useless-assert",
-    // `time-compare` / `zero` exist in newer testifylint; golangci 2.12 vendors
-    // v1.6.4 which does not ship them. Keep them out of enable-all so configs
-    // match golangci.
+    // `mock-expect`, `time-compare` and `zero` exist in newer testifylint;
+    // golangci 2.12 vendors v1.6.4, whose registry has none of them. Keeping a
+    // name out of this list is what keeps it out of the default set *and* out
+    // of `enable-all`, so a config that matches golangci's enable-set produces
+    // golangci's findings.
+    //
+    // `mock-expect` is implemented below and reachable again the moment
+    // golangci-lint bumps testifylint — put the name back and nothing else
+    // changes. It was in this list once, and jaeger v2.20.0, which
+    // golangci-lint reports as entirely clean, came back with 354 of them.
 ];
 
 /// Upstream `DefaultExpectedVarPattern`.
@@ -140,6 +146,13 @@ fn default_enabled() -> HashSet<String> {
         .collect()
 }
 
+/// Checkers guff implements that the pinned upstream does not have.
+///
+/// Same shape as `guff_revive::config::AHEAD_OF_PIN_RULES`: excluded from the
+/// default set and from `enable-all`, so an enable-set that matches golangci's
+/// produces golangci's findings, but still runnable for anyone who names it.
+const AHEAD_OF_PIN: &[&str] = &["mock-expect"];
+
 fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
     let mut set = if opts.disable_all {
         HashSet::new()
@@ -149,7 +162,7 @@ fn enabled_checkers(opts: &TestifylintOptions) -> HashSet<String> {
         default_enabled()
     };
     for name in &opts.enable {
-        if IMPLEMENTED.contains(&name.as_str()) {
+        if IMPLEMENTED.contains(&name.as_str()) || AHEAD_OF_PIN.contains(&name.as_str()) {
             set.insert(name.clone());
         }
     }
@@ -492,25 +505,43 @@ fn is_json_raw_message_cast(pass: &Pass<'_>, ce: &CallExpr) -> bool {
     is_pkg_fn_call(pass, ce, "encoding/json", "RawMessage")
 }
 
+/// Port of upstream `analysisutil.IsJSONLike`.
+///
+/// Deliberately *not* a JSON parser. Upstream asks two syntactic questions —
+/// does the text start with an object or an array of objects, and does it
+/// contain a `"key":` followed by a value — and its own comment says a positive
+/// answer for invalid JSON is fine, because catching typos is half the point.
+///
+/// Parsing instead (as this used to, via `serde_json`) answers a different and
+/// wider question: `["test","test2"]` is valid JSON and is not JSON-*like* by
+/// this rule, because no `":` pair appears in it. jaeger's
+/// `internal/config/string_slice_test.go` compares exactly such strings, and
+/// golangci-lint says nothing about them.
 fn is_json_object_or_array(s: &str) -> bool {
-    let mut s = s.trim().to_string();
-    // Match Go `strconv.Unquote` best-effort for double-quoted inputs.
-    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        if let Ok(v) = serde_json::from_str::<String>(&s) {
-            s = v;
-        }
-    } else if s.len() >= 2 && s.starts_with('`') && s.ends_with('`') {
-        s = s[1..s.len() - 1].to_string();
-    }
-    let s = s.trim();
-    // Empty `{}` / `[]` alone are not treated as JSON-style (upstream skips).
-    if s == "{}" || s == "[]" {
+    // `unescape`: unescape `\"`, then strip any number of leading/trailing
+    // `"` or backticks (upstream's `unquote` is TrimLeft/TrimRight, not a
+    // balanced unquote).
+    let unescaped = s.replace(r#"\""#, "\"");
+    let unquoted = unescaped
+        .trim_end_matches('"')
+        .trim_start_matches('"')
+        .trim_end_matches('`')
+        .trim_start_matches('`');
+    // `whitespaceRemover`: literal newlines/tabs/spaces and the two-character
+    // escapes for them.
+    let text: String = unquoted
+        .replace("\\n", "")
+        .replace("\\t", "")
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\t' && *c != ' ')
+        .collect();
+
+    const STARTS: [&str; 6] = ["{{", "{[", "{\"", "[{{", "[{[", "[{\""];
+    if !STARTS.iter().any(|p| text.starts_with(p)) {
         return false;
     }
-    if s.is_empty() || !(s.starts_with('{') || s.starts_with('[')) {
-        return false;
-    }
-    serde_json::from_str::<serde_json::Value>(s).is_ok()
+    const KEY_VALUES: [&str; 3] = ["\":{", "\":[", "\":\""];
+    KEY_VALUES.iter().any(|kv| text.contains(kv))
 }
 
 fn words_re() -> &'static Regex {
@@ -2840,7 +2871,9 @@ fn check_suite_method_signature(
     if is_suite_test_method(method_name) {
         if n_params > 0 || n_results > 0 {
             pending.push((
-                fd.name.pos().0 as u32,
+                // Upstream reports the *ast.FuncDecl, whose Pos() is the `func`
+                // keyword — not the method name.
+                fd.ty.func.0 as u32,
                 "suite-method-signature: test method should not have any arguments or returning values"
                     .into(),
             ));
@@ -2862,7 +2895,7 @@ fn check_suite_method_signature(
     };
     if !implements_iface(pass, typ, iface) {
         pending.push((
-            fd.name.pos().0 as u32,
+            fd.ty.func.0 as u32,
             format!("suite-method-signature: method conflicts with suite.{iface_name} interface"),
         ));
     }
@@ -2974,7 +3007,7 @@ fn check_suite_thelper(pass: &Pass<'_>, fd: &FuncDecl, pending: &mut Vec<(u32, S
         return;
     }
     pending.push((
-        fd.name.pos().0 as u32,
+        fd.ty.func.0 as u32,
         format!("suite-thelper: suite helper method must start with {helper_call}"),
     ));
 }
@@ -3134,18 +3167,36 @@ fn mark_calls_in_no_error_sequence(calls_by_block: &HashMap<u32, Vec<usize>>, ca
     }
 }
 
+/// Upstream `needToSkipBasedOnContext`.
+///
+/// `func_idxs` is the enclosing function's calls in walk order and `pos_in_func`
+/// the current call's place in it — upstream's `otherCalls` / `currCallIndex`.
+/// Both halves of the final rule count **every** recorded call, not only the
+/// testify ones: `isLastCallInBlock` compares against `blockCalls[len-1]`, and
+/// the "anything after me" scan breaks on the first later call of any kind.
+///
+/// Filtering to testify calls (as this used to) makes an assertion look like
+/// the last thing the test does whenever the statements after it are ordinary
+/// calls — `assert.ErrorIs(t, err, errSentinel)` followed by `nop()` and three
+/// `go`/`wg.Go`/`http.HandlerFunc` closures was silent here and reported by
+/// golangci-lint. What upstream keeps out of the list instead is *nested*
+/// calls: it stops descending once a call is recognized as testify, so
+/// `assert.NoError(t, f())` never records `f()`.
 fn need_skip_require_error(
     calls: &[ReqErrCall<'_>],
-    curr_idx: usize,
+    func_idxs: &[usize],
+    pos_in_func: usize,
     block_idxs: &HashMap<u32, Vec<usize>>,
 ) -> bool {
+    let curr_idx = func_idxs[pos_in_func];
     let curr = &calls[curr_idx];
     if curr.in_if_cond || curr.in_bool_expr || curr.in_no_error_seq {
         return true;
     }
 
     if let Some(root_id) = curr.root_if_id {
-        for c in calls {
+        for &i in func_idxs {
+            let c = &calls[i];
             if c.root_if_id == Some(root_id) && c.in_if_cond {
                 return true;
             }
@@ -3158,27 +3209,13 @@ fn need_skip_require_error(
     let Some(block_calls) = block_idxs.get(&block.id) else {
         return false;
     };
-    // Only testify assertions in this block count. Nested CallExprs inside
-    // assertion args (e.g. `assert.NoError(t, f())`) and assertions in later
-    // test functions must not make this assertion look non-final.
-    let is_last = block_calls
-        .iter()
-        .rev()
-        .copied()
-        .find(|&i| calls[i].testify.is_some())
-        == Some(curr_idx);
+    let is_last = block_calls.last().copied() == Some(curr_idx);
 
     let mut no_calls_after = true;
     let block_ends_with_return = matches!(block.list.last(), Some(Stmt::ReturnStmt(_)));
     if !block_ends_with_return {
-        for &next_idx in block_calls {
-            if next_idx <= curr_idx {
-                continue;
-            }
+        for &next_idx in &func_idxs[pos_in_func + 1..] {
             let next = &calls[next_idx];
-            if next.testify.is_none() {
-                continue;
-            }
             let mut next_in_else = false;
             if let Some(p_if) = curr.parent_if {
                 if let Some(else_stmt) = &p_if.else_ {
@@ -3246,9 +3283,11 @@ fn check_require_error(
             in_no_error_seq: false,
         });
         calls_by_func.entry(fkey).or_default().push(idx);
-        // Upstream stops descending into asserts-in-asserts; we still walk but
-        // nested asserts are rare and still classified correctly.
-        true
+        // Upstream: `return testifyCall == nil` — "do not support asserts in
+        // asserts". `preorder_stack` prunes the subtree on false, so the walk
+        // continues with the siblings; what it stops is recording `f()` in
+        // `assert.NoError(t, f())` as a call of its own.
+        calls[idx].testify.is_none()
     });
 
     let mut calls_by_block: HashMap<u32, Vec<usize>> = HashMap::new();
@@ -3268,7 +3307,7 @@ fn check_require_error(
         if meta.is_test_cleanup || meta.is_goroutine || meta.is_http_handler {
             continue;
         }
-        for &i in idxs {
+        for (pos, &i) in idxs.iter().enumerate() {
             let c = &calls[i];
             let Some((is_assert, fn_name, trimmed)) = c.testify.as_ref() else {
                 continue;
@@ -3281,7 +3320,7 @@ fn check_require_error(
             if !is_require_error_fn(trimmed) {
                 continue;
             }
-            if need_skip_require_error(&calls, i, &calls_by_block) {
+            if need_skip_require_error(&calls, idxs, pos, &calls_by_block) {
                 continue;
             }
             if let Some(pat) = &fn_pat {
@@ -3414,12 +3453,13 @@ fn in_goroutine_running_test_func(pass: &Pass<'_>, stack: &[NodeRef<'_>]) -> Opt
                 }
             }
             NodeRef::CallExpr(ce) => {
-                if status.is_some() {
-                    if is_waitgroup_go(pass, ce) {
-                        status = Some(false);
-                    } else if is_subtest_run(pass, ce) {
-                        status = Some(true);
-                    }
+                // Only a `go` statement leaves the test's goroutine upstream.
+                // `wg.Go(func(){…})` does too in fact, but testifylint v1.6.4
+                // does not know it — its walk names `*ast.GoStmt` and nothing
+                // else — and knowing better here is a finding golangci-lint
+                // does not produce (jaeger `bad_test.go`).
+                if status.is_some() && is_subtest_run(pass, ce) {
+                    status = Some(true);
                 }
             }
             _ => {}
@@ -3580,9 +3620,6 @@ fn check_go_require_func(
         match n {
             NodeRef::GoStmt(_) => return false,
             NodeRef::CallExpr(ce) => {
-                if is_waitgroup_go(pass, ce) {
-                    return false;
-                }
                 if let Some(meta) = new_call_meta(pass, ce) {
                     let v = go_require_verdict(&meta);
                     if v != GoRequireVerdict::NoExit {
