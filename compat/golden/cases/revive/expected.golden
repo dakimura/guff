@@ -68,6 +68,12 @@ ctxallow/revivetest/context_allow.go:1:1:revive:warning:package-comments: should
 ctxallow/revivetest/context_allow.go:9:33:revive:warning:context-as-argument: context.Context should be the first parameter of a function
 ctxallow/revivetest/context_allow.go:15:35:revive:warning:context-as-argument: context.Context should be the first parameter of a function
 ctxallow/revivetest/context_allow.go:21:22:revive:warning:context-as-argument: context.Context should be the first parameter of a function
+directives/directives.go:6:1:revive:warning:file-header: the file doesn't have an appropriate header
+directives/directives.go:9:6:revive:warning:exported: type name will be used as directives.DirectivesKept by other packages, and that stutters; consider calling this Kept
+directives/directives.go:26:6:revive:warning:exported: type name will be used as directives.DirectivesAfterEnable by other packages, and that stutters; consider calling this AfterEnable
+directives/directives.go:29:6:revive:warning:exported: type name will be used as directives.DirectivesOtherRule by other packages, and that stutters; consider calling this OtherRule
+directives/sibling.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+directives/sibling.go:7:6:revive:warning:exported: type name will be used as directives.DirectivesSibling by other packages, and that stutters; consider calling this Sibling
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported

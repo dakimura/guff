@@ -62,3 +62,8 @@ badfile/bad file.go                         crates/guff-revive/tests/testdata/re
 # one, deep-exit must exempt TestMain, and redundant-test-main-exit must fire.
 istest/istest.go        crates/guff-revive/tests/testdata/revive/istest/istest.go
 istest/istest_test.go   crates/guff-revive/tests/testdata/revive/istest/istest_test.go
+
+# revive's own `//revive:disable` comments, and the second file that proves the
+# intervals are per file rather than per package.
+directives/directives.go   crates/guff-revive/tests/testdata/revive/directives/directives.go
+directives/sibling.go      crates/guff-revive/tests/testdata/revive/directives/sibling.go
