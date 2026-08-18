@@ -143,10 +143,13 @@ const RULES: &[RuleDef] = &[
     },
     RuleDef {
         id: "G404",
+        // gosec v2.26.1 `rules/rand.go`, verbatim. `Perm`, `Shuffle` and
+        // `ExpFloat64` are *not* on it — they were guff additions, and with
+        // the package-qualified match in place they were the only remaining
+        // way `rand.Perm(n)` could be a finding upstream is silent on.
         calls: &[
             ("math/rand", "New"),
             ("math/rand", "Read"),
-            ("math/rand", "ExpFloat64"),
             ("math/rand", "Float32"),
             ("math/rand", "Float64"),
             ("math/rand", "Int"),
@@ -156,12 +159,9 @@ const RULES: &[RuleDef] = &[
             ("math/rand", "Int63n"),
             ("math/rand", "Intn"),
             ("math/rand", "NormFloat64"),
-            ("math/rand", "Perm"),
-            ("math/rand", "Shuffle"),
             ("math/rand", "Uint32"),
             ("math/rand", "Uint64"),
             ("math/rand/v2", "New"),
-            ("math/rand/v2", "ExpFloat64"),
             ("math/rand/v2", "Float32"),
             ("math/rand/v2", "Float64"),
             ("math/rand/v2", "Int"),
@@ -172,9 +172,6 @@ const RULES: &[RuleDef] = &[
             ("math/rand/v2", "IntN"),
             ("math/rand/v2", "N"),
             ("math/rand/v2", "NormFloat64"),
-            ("math/rand/v2", "Perm"),
-            ("math/rand/v2", "Shuffle"),
-            ("math/rand/v2", "Uint"),
             ("math/rand/v2", "Uint32"),
             ("math/rand/v2", "Uint32N"),
             ("math/rand/v2", "Uint64"),
@@ -785,6 +782,34 @@ fn expr_mentions_ident(expr: &Expr, name: &str) -> bool {
 }
 
 /// Resolve `(package_path, func_or_type_name)` for a call / conversion.
+/// The `(selector, ident)` pair gosec's `CallList.ContainsPkgCallExpr` matches
+/// a rule against — which is **not** the declaring package of the callee.
+///
+/// `GetCallInfo` answers with the *syntax*: a call whose receiver is an
+/// identifier bound to a package gives `("rand", "Int")`, and everything else —
+/// a variable, a field, a nested selector — gives the receiver's *type string*,
+/// `"*math/rand.Rand"`. `ContainsPkgCallExpr` then resolves the first form
+/// through the file's imports and looks it up; the second contains a `.`, so it
+/// is used verbatim as the key and matches only a rule that registered a type
+/// (only G110 does, through a different matcher).
+///
+/// So `rand.Int()` is a G404 finding and `r.r.Int()` — a method on a
+/// `*rand.Rand` — is not, however clearly it is the same package's `Int`.
+/// Resolving the callee's package instead reported four of those on coredns,
+/// including the two in its own `plugin/pkg/rand` wrapper. `is_pkg_sel_call`
+/// had already been bolted onto G107 and G114 for one observed false positive
+/// each; this is the same rule, applied where upstream applies it.
+fn resolve_pkg_qualified_call(pass: &Pass<'_>, call: &CallExpr) -> Option<(String, String)> {
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return None;
+    };
+    let Expr::Ident(pkg_ident) = sel.x.as_ref() else {
+        return None;
+    };
+    let path = imported_pkg_path(pass, pkg_ident)?;
+    Some((path, sel.sel.name.clone()))
+}
+
 fn resolve_pkg_call(pass: &Pass<'_>, call: &CallExpr) -> Option<(String, String)> {
     if let Some(fq) = code::call_name(pass, &call.fun) {
         if let Some((pkg, name)) = split_fq_name(&fq) {
@@ -2526,7 +2551,10 @@ fn check_call(
     enabled: &HashSet<&'static str>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
+    // Every rule reached from here is a `MatchCallByPackage` /
+    // `ContainsPkgCallExpr` rule upstream, so the receiver has to be the
+    // package identifier itself — see [`resolve_pkg_qualified_call`].
+    let Some((pkg, name)) = resolve_pkg_qualified_call(pass, call) else {
         return;
     };
     for rule in RULES {

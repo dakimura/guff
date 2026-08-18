@@ -8,6 +8,7 @@ import (
 	"hash"
 	"html/template"
 	"io"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -161,3 +162,22 @@ func okG107NonIdentURL() {
 	_, _ = http.Post(base+"/ok", "text/plain", nil)
 }
 
+
+// G404's rule list is `math/rand`'s *package-level* functions. gosec resolves
+// the call by syntax (`GetCallInfo`), so a method on a `*rand.Rand` names the
+// receiver's type — `*math/rand.Rand` — and matches no rule. coredns wraps
+// math/rand in exactly this shape.
+type safeRand struct {
+	r *rand.Rand
+}
+
+func (s *safeRand) Int() int { return s.r.Int() }
+
+func (s *safeRand) Perm(n int) []int { return s.r.Perm(n) }
+
+// `Perm` and `Shuffle` are not on gosec's list even package-qualified.
+func okPerm(n int) []int { return rand.Perm(n) }
+
+func okShuffle(xs []int) {
+	rand.Shuffle(len(xs), func(i, j int) { xs[i], xs[j] = xs[j], xs[i] })
+}
