@@ -241,6 +241,35 @@ mod tests {
         );
     }
 
+    /// gofumpt v0.10.0 counts a single-source-line func whose printed form
+    /// exceeds 100 bytes as multi-line, and so puts a blank line between it and
+    /// its neighbours. **golangci-lint 2.12.2 pins v0.9.2**, which does not.
+    ///
+    /// dapr `pkg/actors/table/fake/fake.go` has a 100-byte one-line method
+    /// between two multi-line ones, and golangci-lint reports the file as
+    /// formatted while guff wanted two blank lines added.
+    #[test]
+    fn native_does_not_split_a_long_single_line_func() {
+        let fmt = Gofumpt::new(GofumptOptions::default());
+        let src = b"package p
+
+type Fake struct{ fn func(string, string) bool }
+
+func (f *Fake) WithGetOrCreate(fn func(string, string) bool) *Fake {
+	f.fn = fn
+	return f
+}
+func (f *Fake) WithActorExists(fn func(string, string) bool) *Fake { f.fn = fn; return f }
+";
+        let out = fmt.format("p.go", src).expect("gofumpt");
+        let s = String::from_utf8(out).unwrap();
+        assert_eq!(
+            s,
+            String::from_utf8(src.to_vec()).unwrap(),
+            "the pinned gofumpt leaves this alone; got:\n{s}"
+        );
+    }
+
     #[test]
     fn native_extra_rules_clothes_naked_return() {
         let fmt = Gofumpt::new(GofumptOptions {

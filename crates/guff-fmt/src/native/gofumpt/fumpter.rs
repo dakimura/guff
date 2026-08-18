@@ -199,12 +199,15 @@ impl Fumpter {
             .map(|decl| {
                 let pos = decl.pos();
                 let end = decl.end();
-                let mut multi = self.line(pos) < self.line(Pos(end.0.saturating_sub(1)));
-                if let Decl::FuncDecl(fn_) = decl {
-                    if !multi && fn_.body.is_some() && self.offset(end) - self.offset(pos) > 100 {
-                        multi = true;
-                    }
-                }
+                // gofumpt v0.10.0 also counts a single-source-line func whose
+                // printed form exceeds 100 bytes as multi-line, because
+                // go/printer's `funcBody` breaks the body onto its own lines
+                // past that width. golangci-lint 2.12.2 pins **v0.9.2**, which
+                // does not, so implementing it puts a blank line where upstream
+                // wants none — dapr `pkg/actors/table/fake/fake.go:69` is a
+                // 100-byte one-line method, and golangci-lint reports the file
+                // as formatted. Restore this when the pin moves.
+                let multi = self.line(pos) < self.line(Pos(end.0.saturating_sub(1)));
                 (pos, end, multi)
             })
             .collect();

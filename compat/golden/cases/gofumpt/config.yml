@@ -1,0 +1,27 @@
+# Golden case: gofumpt's decl separation, at the pinned version.
+#
+# gofumpt v0.10.0 counts a single-source-line func whose printed form exceeds
+# 100 bytes as multi-line — go/printer's `funcBody` breaks the body past that
+# width — and so puts a blank line between it and its multi-line neighbours.
+# **golangci-lint 2.12.2 pins v0.9.2**, which does not.
+#
+# The fixture is already formatted under the pin, so the expected golden is
+# empty *and* meaningful: a guff that implements the newer rule reports the file
+# as unformatted and the case fails. dapr `pkg/actors/table/fake/fake.go` is
+# where this was found — a 100-byte one-line method between two multi-line ones.
+version: "2"
+
+linters:
+  default: none
+
+formatters:
+  enable:
+    - gofumpt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
