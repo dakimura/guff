@@ -5,24 +5,33 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{is_pkg_dot_name, is_test_package, unparen};
+use crate::util::{file_is_test, is_pkg_dot_name, unparen};
 
 pub struct Checker {
+    skip_file: bool,
     failures: Vec<Failure>,
 }
 
 impl Checker {
-    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
-        let file = pass.files().first()?;
-        if !is_test_package(&file.name.name) {
-            return None;
-        }
+    pub fn try_new(_pass: &Pass<'_>) -> Option<Self> {
         Some(Self {
+            skip_file: true,
             failures: Vec::new(),
         })
     }
 
+    /// Upstream returns unless `file.IsTest()`, a filename check — so the rule
+    /// runs on `foo_test.go` in `package foo`, which asking the *package* name
+    /// answered "no" for. That is most internal test files, and this rule only
+    /// ever fires in one.
+    pub fn on_file(&mut self, file_is_test: bool) {
+        self.skip_file = !file_is_test;
+    }
+
     pub fn visit(&mut self, n: NodeRef<'_>) {
+        if self.skip_file {
+            return;
+        }
         let NodeRef::FuncDecl(f) = n else {
             return;
         };
@@ -64,6 +73,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         return Vec::new();
     };
     for file in pass.files() {
+        c.on_file(file_is_test(pass, file));
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
                 c.visit(n);

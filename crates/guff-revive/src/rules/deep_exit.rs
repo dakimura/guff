@@ -5,7 +5,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{is_pkg_dot_name, is_test_package, unparen};
+use crate::util::{file_is_test, is_pkg_dot_name, unparen};
 
 pub struct Checker {
     is_test: bool,
@@ -13,16 +13,18 @@ pub struct Checker {
 }
 
 impl Checker {
-    pub fn new(pass: &Pass<'_>) -> Self {
-        let is_test = pass
-            .files()
-            .first()
-            .map(|f| is_test_package(&f.name.name))
-            .unwrap_or(false);
+    pub fn new(_pass: &Pass<'_>) -> Self {
         Self {
-            is_test,
+            is_test: false,
             failures: Vec::new(),
         }
+    }
+
+    /// `must_ignore` consults `file.IsTest()`, which is a filename check — so
+    /// the TestMain/Example exemption applies to `foo_test.go` in `package foo`
+    /// too, and not to the package's other files.
+    pub fn on_file(&mut self, file_is_test: bool) {
+        self.is_test = file_is_test;
     }
 
     pub fn visit(&mut self, n: NodeRef<'_>) {
@@ -74,6 +76,7 @@ impl Checker {
 pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
     let mut c = Checker::new(pass);
     for file in pass.files() {
+        c.on_file(file_is_test(pass, file));
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
                 c.visit(n);

@@ -1060,3 +1060,47 @@ fn revive_unnecessary_stmt_skips_a_case_with_several_expressions() {
         );
     });
 }
+
+/// revive's `IsTest()` is a **filename** check, not a package name.
+///
+/// ```go
+/// func (f *File) IsTest() bool { return strings.HasSuffix(f.Name, "_test.go") }
+/// ```
+///
+/// `foo_test.go` declaring `package foo` — the ordinary internal test file — is
+/// a test file to every rule that asks, and asking whether the *package* name
+/// ends in `_test` answers "no" for it. That went wrong in both directions:
+/// rules that skip test files stopped skipping (unsecure-url-scheme fired on
+/// jaeger's `_test.go` constants ten times, deep-exit on a TestMain's
+/// `os.Exit`), and a rule that only runs in them stopped running
+/// (redundant-test-main-exit, which is only ever *about* a TestMain).
+#[test]
+fn revive_is_test_is_a_filename_not_a_package_name() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture_dir("revive", "istest", "example.com/revive/istest");
+        let messages = support::run_analyzer(revive(), &pkg);
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("unsecure-url-scheme") && m.contains("example.com/v1")),
+            "the non-test file is still reported: {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("unsecure-url-scheme") && m.contains("example.com/test")),
+            "the internal test file is skipped: {messages:?}"
+        );
+        assert!(
+            !messages.iter().any(|m| m.contains("deep-exit")),
+            "TestMain's os.Exit is exempt in a test file: {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("redundant-test-main-exit")),
+            "the rule that only runs in test files runs: {messages:?}"
+        );
+    });
+}

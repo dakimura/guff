@@ -257,6 +257,11 @@ footest/stutter_bad.go:4:6:revive:warning:exported: func name will be used as fo
 funclen/function_length_bad.go:7:1:revive:warning:file-header: the file doesn't have an appropriate header
 funclen/function_length_bad.go:9:1:revive:warning:function-length: maximum number of statements per function exceeded; max 50 but got 53
 funclen/function_length_bad.go:10:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+istest/istest.go:5:1:revive:warning:file-header: the file doesn't have an appropriate header
+istest/istest.go:8:18:revive:warning:unsecure-url-scheme: prefer secure protocol https over http in "http://example.com/v1"
+istest/istest_test.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
+istest/istest_test.go:4:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
+istest/istest_test.go:14:2:revive:warning:redundant-test-main-exit: redundant call to os.Exit in TestMain function, the test runner will handle it automatically as of Go 1.15
 ok/revivetest/ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 ok/revivetest/ok.go:16:7:revive:warning:unused-receiver: method receiver 'w' is not referenced in method's body, consider removing or renaming it as _
 ok/revivetest/ok.go:19:7:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
