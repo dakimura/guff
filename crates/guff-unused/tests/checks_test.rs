@@ -55,6 +55,35 @@ fn unused_flags_method_on_used_type() {
     assert!(messages[0].contains("unusedMethod is unused"));
 }
 
+/// A generic receiver is printed with its type parameter list.
+///
+/// honnef names a method by its receiver *type*, and `types` prints
+/// `holder[T]`, not `holder`. Dropping the list produced
+/// `func (*holder).run is unused` where golangci-lint says
+/// `func (*holder[T]).run is unused` — same finding, same line, different text,
+/// which is the kind of difference only a check-level gate sees.
+#[test]
+fn unused_prints_generic_receiver_type_arguments() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg(
+        "example.com/unused/genericmethod",
+        &dir.join("generic_method_bad.go"),
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "func (*holder[T]).run is unused"),
+        "pointer receiver keeps its type parameter: {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "func pair[K, V].key is unused"),
+        "value receiver keeps both, comma-separated: {messages:?}"
+    );
+}
+
 #[test]
 fn unused_keeps_interface_impl_methods() {
     let dir = support::testdata("basic");

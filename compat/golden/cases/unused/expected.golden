@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh unused
+# Produced by running golangci-lint on compat/golden/cases/unused/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/method_bad.go:7:17:unused::func usedType.unusedMethod is unused
+genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused
+genericmethod/generic_method_bad.go:15:21:unused::func pair[K, V].key is unused
+iface/iface_ok.go:13:19:unused::func (*syncBuf).trulyUnused is unused

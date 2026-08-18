@@ -46,6 +46,36 @@ fn is_exported(name: &str) -> bool {
 }
 
 /// Receiver type name for `T`, `*T`, or indexed `T[...]` / `*T[...]`.
+/// The receiver type as upstream prints it, type arguments included:
+/// `holder[T]` for `func (h *holder[T]) run()`, `pair[K, V]` for two.
+///
+/// honnef names a method by its receiver *type*, and `types` prints a generic
+/// receiver with its type parameter list. Dropping it — as using the base
+/// identifier alone does — makes the message `func (*holder).run is unused`
+/// where golangci-lint says `func (*holder[T]).run is unused`: same finding,
+/// same line, different text.
+fn recv_type_name(ty: &Expr) -> Option<String> {
+    match ty {
+        Expr::Ident(id) => Some(id.name.clone()),
+        Expr::StarExpr(s) => recv_type_name(&s.x),
+        Expr::ParenExpr(p) => recv_type_name(&p.x),
+        Expr::IndexExpr(i) => {
+            let base = recv_type_name(&i.x)?;
+            let arg = recv_type_name(&i.index)?;
+            Some(format!("{base}[{arg}]"))
+        }
+        Expr::IndexListExpr(i) => {
+            let base = recv_type_name(&i.x)?;
+            let args: Vec<String> = i.indices.iter().filter_map(recv_type_name).collect();
+            if args.len() != i.indices.len() {
+                return Some(base);
+            }
+            Some(format!("{base}[{}]", args.join(", ")))
+        }
+        _ => None,
+    }
+}
+
 fn recv_type_ident(ty: &Expr) -> Option<&Ident> {
     match ty {
         Expr::Ident(id) => Some(id),
@@ -154,10 +184,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     // `_UNUSED_METHOD_QUAL` was erasing along
                                     // with the whole qualifier.
                                     let ptr = matches!(ty, Expr::StarExpr(_));
+                                    let printed = recv_type_name(ty)
+                                        .unwrap_or_else(|| type_ident.name.clone());
                                     let qual = if ptr {
-                                        format!("(*{}).", type_ident.name)
+                                        format!("(*{printed}).")
                                     } else {
-                                        format!("{}.", type_ident.name)
+                                        format!("{printed}.")
                                     };
                                     method_display
                                         .insert(*obj, format!("{qual}{}", f.name.name));

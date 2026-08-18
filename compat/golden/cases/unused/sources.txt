@@ -1,0 +1,6 @@
+# The fixtures the Rust tests use, so the two cannot drift. One directory per
+# file: the Rust tests type-check each on its own, and combining them would
+# change what is reachable.
+genericmethod/generic_method_bad.go   crates/guff-unused/tests/testdata/basic/generic_method_bad.go
+bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/method_bad.go
+iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go

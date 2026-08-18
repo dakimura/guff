@@ -1,0 +1,25 @@
+# Golden case: the `unused` linter.
+#
+# `unused` had no check-level gate, and the thing a check-level gate sees that a
+# set-diff does not is the *text*: honnef names a method by its receiver type,
+# and `types` prints a generic receiver with its type parameter list, so
+# `func (*holder[T]).run is unused` and not `func (*holder).run is unused`.
+# Same finding, same line, different message.
+#
+# Each fixture is its own package directory because the Rust tests type-check
+# them one file at a time, and putting them together would change which objects
+# are reachable.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - unused
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
