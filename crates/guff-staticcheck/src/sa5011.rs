@@ -513,6 +513,19 @@ fn separated_by_branch(func: &Function, check_block: BlockId, deref_block: Block
     };
     match (region(check_block), region(deref_block)) {
         (Some(a), Some(b)) => a != b,
+        // The deref is dominated by the branch but by none of its successors,
+        // which is to say it sits *below the join* and is reached from more
+        // than one of them. Upstream's IR gives such a block a phi merging the
+        // sigmas from each edge, and a phi is a different `ir.Value` from the
+        // sigma the check compared — so SA5011, which is pure value identity,
+        // cannot match across it.
+        //
+        // `if err != nil || p == nil { … }; use p` is this shape and nothing
+        // else: the `err != nil` branch decides whether the `p == nil` check is
+        // reached at all, and the use below is reached either way. coredns
+        // `test/wildcard_test.go` writes fifteen of them, and they were the
+        // whole of its staticcheck diff.
+        (Some(_), None) => true,
         _ => false,
     }
 }

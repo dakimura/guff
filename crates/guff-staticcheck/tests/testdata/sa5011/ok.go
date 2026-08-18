@@ -105,3 +105,56 @@ func okNilCheckThenShortCircuitDeref() bool {
 	}
 	return err == nil && resp.StatusCode == 200
 }
+
+// `if a || b { … }` and a use below is the shape coredns writes fifteen times
+// in test/wildcard_test.go. The first branch decides whether the nil check is
+// reached at all, so upstream's IR gives the check's operand a sigma and the
+// block below a phi merging it with the other edge — a different `ir.Value`,
+// and SA5011 is pure value identity. What the branch body does is beside the
+// point: none of these are findings upstream.
+func okOrGuardThenUse(fail func(string)) int {
+	resp, err := get()
+	if err != nil || resp == nil {
+		fail("no reply")
+	}
+	return resp.StatusCode
+}
+
+func okOrGuardWithReturn() int {
+	resp, err := get()
+	if err != nil || resp == nil {
+		return 0
+	}
+	return resp.StatusCode
+}
+
+func exits() { panic("no") }
+
+func okOrGuardCallingHelper() int {
+	resp, err := get()
+	if err != nil || resp == nil {
+		exits()
+	}
+	return resp.StatusCode
+}
+
+func getR() (*R2, error) { return nil, nil }
+
+type R2 struct{ Complete bool }
+
+// Deref *first*, then an OR check — also silent, and for the same reason read
+// from the other end: the `err != nil` branch decides whether the `p == nil`
+// check is reached, so what the check compares is already a renamed value and
+// never the one the deref read. The single-check spelling of this
+// (`_ = p.F; if p == nil { … }`) *is* reported, and bad.go keeps it.
+func derefThenOrCheck() int {
+	p, err := getR()
+	n := p.Complete
+	if err != nil || p == nil {
+		return 0
+	}
+	if n {
+		return 1
+	}
+	return 0
+}
