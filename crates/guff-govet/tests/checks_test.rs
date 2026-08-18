@@ -306,6 +306,26 @@ fn errorsas_allows_pointer_target() {
     assert!(support::run_analyzer(errorsas_analyzer(), &pkg).is_empty());
 }
 
+/// A target whose underlying type is the empty interface is always allowed.
+///
+/// Upstream: `types.Identical(t.Underlying(), anyType)` — "a target of any is
+/// always allowed, since it often indicates a value forwarded from another
+/// source". `any` is an alias for `interface{}`, so the test is structural and
+/// a *named* empty interface passes too. guff compared the printed name
+/// against "any", which never matched (the underlying prints as
+/// `interface{}`), so every `func As(err error, target any) bool { return
+/// errors.As(err, target) }` wrapper was a finding — thanos has one.
+#[test]
+fn errorsas_allows_any_target() {
+    let dir = support::testdata("errorsas");
+    let pkg = support::typecheck_pkg("example.com/govet/errorsas/ok", &dir.join("ok.go"));
+    let messages = support::run_analyzer(errorsas_analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "any / interface{{}} / a named empty interface are all allowed: {messages:?}"
+    );
+}
+
 #[test]
 fn errorsas_allows_concrete_error_pointer() {
     let dir = support::testdata("errorsas");
