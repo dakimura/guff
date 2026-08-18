@@ -31,6 +31,15 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // cache is scoped to this package so its ASTs are dropped with it.
     crate::util::clear_reparse_cache();
     let failures = rules::run_enabled_rules(pass);
+    // `//revive:disable[...]` comments, read from the same reparse the
+    // comment-reading rules use, before the cache is dropped.
+    let enabled_rules: Vec<String> = config::all_rules()
+        .iter()
+        .filter(|r| config::rule_enabled(pass, r))
+        .map(|r| (*r).to_string())
+        .collect();
+    let directives = crate::directives::collect(pass, &enabled_rules);
+    let failures = crate::directives::filter(pass, &directives, failures);
     crate::util::clear_reparse_cache();
     for failure in failures {
         if failure.confidence() < settings.confidence_threshold() {

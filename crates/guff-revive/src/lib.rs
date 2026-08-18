@@ -8,6 +8,7 @@
 
 mod astfmt;
 mod config;
+mod directives;
 mod failure;
 mod ifelse;
 mod names;

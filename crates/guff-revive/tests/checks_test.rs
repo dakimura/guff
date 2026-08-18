@@ -1104,3 +1104,49 @@ fn revive_is_test_is_a_filename_not_a_package_name() {
         );
     });
 }
+
+/// revive honours its own `//revive:disable` comments.
+///
+/// Port of `lint.File.disabledIntervals` + `filterFailures`: a directive turns
+/// a rule off from its line to the end of the file, `-line` / `-next-line`
+/// narrow that to one line, and an `enable` closes the interval. Naming no rule
+/// applies it to every enabled rule.
+///
+/// guff had none of it, so gitea's fourteen `//revive:disable-line:exported`
+/// comments — the ordinary way to keep a name that stutters — were findings
+/// golangci-lint does not report.
+///
+/// The intervals are **per file**: the second fixture file is here because
+/// building them per package silences whatever line falls in the same range.
+#[test]
+fn revive_honours_its_own_disable_directives() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture_dir(
+            "revive",
+            "directives",
+            "example.com/revive/directives",
+        );
+        let stutters: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("stutters"))
+            .collect();
+
+        for kept in [
+            "DirectivesKept",
+            "DirectivesAfterEnable",
+            "DirectivesOtherRule",
+            "DirectivesSibling",
+        ] {
+            assert!(
+                stutters.iter().any(|m| m.contains(kept)),
+                "{kept} is not exempted: {stutters:?}"
+            );
+        }
+        for silenced in ["DirectivesLine", "DirectivesNextLine", "DirectivesBlock"] {
+            assert!(
+                !stutters.iter().any(|m| m.contains(silenced)),
+                "{silenced} is exempted by a directive: {stutters:?}"
+            );
+        }
+    });
+}
