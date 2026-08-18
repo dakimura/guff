@@ -32,6 +32,10 @@ use super::{
 
 /// Fan-out visitor: each enabled rule's checker sees every node; walk never prunes.
 struct SharedFileRules<'a> {
+    /// Whether the file currently being walked is a `*_test.go`. revive's
+    /// `lint.File.IsTest` is a filename check, so it is per file, not per
+    /// package, and `run_shared` sets it before each `on_file`.
+    file_is_test: bool,
     argument_limit: Option<argument_limit::Checker>,
     atomic: Option<atomic::Checker<'a>>,
     banned_characters: Option<banned_characters::Checker>,
@@ -129,6 +133,7 @@ impl<'a> SharedFileRules<'a> {
         let all = config::all_rules();
         let enabled = |name: &str| settings.rule_enabled(name, config::DEFAULT_RULES, all);
         Self {
+            file_is_test: false,
             argument_limit: enabled("argument-limit").then(argument_limit::Checker::new),
             atomic: enabled("atomic").then(|| atomic::Checker::try_new(pass)).flatten(),
             banned_characters: enabled("banned-characters")
@@ -367,6 +372,15 @@ impl<'a> SharedFileRules<'a> {
         if let Some(c) = &mut self.unexported_naming {
             c.on_file(file);
         }
+        if let Some(c) = &mut self.unsecure_url_scheme {
+            c.on_file(self.file_is_test);
+        }
+        if let Some(c) = &mut self.deep_exit {
+            c.on_file(self.file_is_test);
+        }
+        if let Some(c) = &mut self.redundant_test_main_exit {
+            c.on_file(self.file_is_test);
+        }
         if let Some(c) = &mut self.unnecessary_stmt {
             c.on_file(file);
         }
@@ -564,6 +578,7 @@ pub fn run_shared(pass: &Pass<'_>) -> HashMap<&'static str, Vec<Failure>> {
         return HashMap::new();
     }
     for file in pass.files() {
+        shared.file_is_test = crate::util::file_is_test(pass, file);
         shared.on_file(file);
         walk::walk(&mut shared, NodeRef::File(file));
     }

@@ -6,27 +6,32 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{basic_lit_string_value, is_test_package};
+use crate::util::{basic_lit_string_value, file_is_test};
 
 pub struct Checker {
+    /// Set per file: upstream's `if file.IsTest() { return nil }` is a
+    /// **filename** check, so `foo_test.go` in `package foo` is skipped and the
+    /// package's other files are not.
+    skip_file: bool,
     failures: Vec<Failure>,
 }
 
 impl Checker {
-    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
-        if pass
-            .files()
-            .first()
-            .is_some_and(|f| is_test_package(&f.name.name))
-        {
-            return None;
-        }
+    pub fn try_new(_pass: &Pass<'_>) -> Option<Self> {
         Some(Self {
+            skip_file: false,
             failures: Vec::new(),
         })
     }
 
+    pub fn on_file(&mut self, file_is_test: bool) {
+        self.skip_file = file_is_test;
+    }
+
     pub fn visit(&mut self, n: NodeRef<'_>) {
+        if self.skip_file {
+            return;
+        }
         let NodeRef::BasicLit(lit) = n else {
             return;
         };
@@ -76,6 +81,7 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
         return Vec::new();
     };
     for file in pass.files() {
+        c.on_file(file_is_test(pass, file));
         walk::inspect(NodeRef::File(file), |n| {
             if let Some(n) = n {
                 c.visit(n);

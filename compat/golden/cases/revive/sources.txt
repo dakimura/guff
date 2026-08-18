@@ -55,3 +55,10 @@ siblingok/siblingok.go                      crates/guff-revive/tests/testdata/re
 siblingok/helper.go                         crates/guff-revive/tests/testdata/revive/sibling_ok/helper.go
 
 badfile/bad file.go                         crates/guff-revive/tests/testdata/revive/bad file.go
+
+# `IsTest()` is a filename check, so an internal test file (`istest_test.go` in
+# `package istest`) is a test file and the package's other file is not. Both are
+# here: unsecure-url-scheme must report the non-test constant and skip the test
+# one, deep-exit must exempt TestMain, and redundant-test-main-exit must fire.
+istest/istest.go        crates/guff-revive/tests/testdata/revive/istest/istest.go
+istest/istest_test.go   crates/guff-revive/tests/testdata/revive/istest/istest_test.go

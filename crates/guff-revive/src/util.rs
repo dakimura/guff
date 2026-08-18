@@ -137,6 +137,28 @@ pub fn is_test_package(pkg_name: &str) -> bool {
     pkg_name.ends_with("_test")
 }
 
+/// revive's `lint.File.IsTest`, which is a **filename** check:
+///
+/// ```go
+/// func (f *File) IsTest() bool { return strings.HasSuffix(f.Name, "_test.go") }
+/// ```
+///
+/// Not the package name. `foo_test.go` declaring `package foo` — the ordinary
+/// internal test file — is a test file to every rule that asks, and asking
+/// [`is_test_package`] instead answers "no" for it. That mistake goes both
+/// ways: rules that *skip* test files stopped skipping (unsecure-url-scheme,
+/// deep-exit), and a rule that only *runs* on them stopped running
+/// (redundant-test-main-exit).
+pub fn file_is_test(pass: &Pass<'_>, file: &guff::ast::File) -> bool {
+    let Some(ft) = pass.fset().file(file.pos()) else {
+        return false;
+    };
+    Path::new(ft.name())
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|name| name.ends_with("_test.go"))
+}
+
 pub fn is_importable_package(pkg_name: &str) -> bool {
     pkg_name != "main" && !is_test_package(pkg_name)
 }
