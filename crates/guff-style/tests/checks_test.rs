@@ -5806,6 +5806,10 @@ fn modernize_flags_atomictypes() {
         !messages.iter().any(|m| m.contains("var z ")),
         "unsynchronized load must be skipped: {messages:?}"
     );
+    assert!(
+        !messages.iter().any(|m| m.contains("var n ")),
+        "a field named in an elided `[]*P{{…}}` literal must be skipped: {messages:?}"
+    );
 }
 
 #[test]

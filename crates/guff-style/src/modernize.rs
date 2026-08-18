@@ -5433,8 +5433,19 @@ fn atomictypes_has_kv_key_use(pass: &Pass<'_>, obj: ObjectId) -> bool {
             let Some(tav) = info.types.get(&lit.id) else {
                 return true;
             };
+            // `[]*T{{f: 1}}` elides `&T` — the literal's own type is `*T`, and
+            // the field it names still belongs to `T`. Upstream never asks what
+            // type the literal has (it walks the *uses of the field object* and
+            // rejects any whose parent edge is a KeyValueExpr key), so a
+            // pointer here must not end the search. coredns
+            // `plugin/errors/errors_test.go` is `[]*pattern{{count: 4, …}}`,
+            // and leaving it unpeeled made `count` look like a clean candidate.
             let typ = unalias_readonly(&artifacts.types, tav.typ);
-            let under = typ.underlying(&artifacts.types);
+            let mut under = typ.underlying(&artifacts.types);
+            if let TypeData::Pointer(p) = artifacts.types.get(under) {
+                let elem = unalias_readonly(&artifacts.types, p.elem());
+                under = elem.underlying(&artifacts.types);
+            }
             if !matches!(artifacts.types.get(under), TypeData::Struct(_)) {
                 return true;
             }

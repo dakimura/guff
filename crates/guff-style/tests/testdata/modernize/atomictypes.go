@@ -58,3 +58,23 @@ func (y Y) dontFix(x int32) (result int32) {
 	atomic.AddInt64(&w.z, 1)
 	return
 }
+
+type P struct {
+	n int32
+}
+
+type pHolder struct {
+	ps []*P
+}
+
+func atomicOnElidedPointerLiteralField(h *pHolder, i int) {
+	atomic.AddInt32(&h.ps[i].n, 1)
+}
+
+// `[]*P{{n: 1}}` elides `&P`, so the literal's own type is `*P` while the
+// field it names still belongs to `P`. Upstream rejects the candidate for
+// naming the field here; reading the literal's type without peeling the
+// pointer made `P.n` look clean (coredns `plugin/errors`).
+func newPHolder() *pHolder {
+	return &pHolder{ps: []*P{{n: 1}}}
+}
