@@ -1,0 +1,3 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+omitzerokubebuilder/omitzero_kubebuilder.go   crates/guff-style/tests/testdata/modernize/omitzero_kubebuilder.go
+omitzeroplain/omitzero_plain.go               crates/guff-style/tests/testdata/modernize/omitzero_plain.go

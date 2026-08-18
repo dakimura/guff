@@ -1003,6 +1003,52 @@ fn json_omitempty_span(tag_value: &str) -> Option<(usize, usize)> {
     None
 }
 
+/// Upstream's `usesKubebuilder`: does any comment in the *package* contain
+/// `+kubebuilder:`?
+///
+/// kubebuilder has its own interpretation of `omitzero` (go.dev/issue/76649),
+/// so `omitzero` reports nothing at all for such a package — not even the
+/// fields whose tags have nothing to do with a marker. dapr's `pkg/apis/**` are
+/// kubebuilder CRD types, which is 24 findings golangci-lint does not make.
+///
+/// Reads the retained source rather than `file.comments`, which the production
+/// load leaves empty (it parses without `PARSE_COMMENTS`), and scans comment
+/// text only — a string literal that happens to contain the marker is not one.
+fn package_uses_kubebuilder(pass: &Pass<'_>) -> bool {
+    let pkg = pass.pkg();
+    for i in 0..pkg.compiled_go_files.len() {
+        let path = &pkg.compiled_go_files[i];
+        // Retained source when the typechecker kept it, the file otherwise —
+        // `check_importcomment` re-reads the same way for the same reason.
+        let owned;
+        let src: &[u8] = match pkg.source_bytes(i) {
+            Some(bytes) => bytes,
+            None => match fs::read(path) {
+                Ok(bytes) => {
+                    owned = bytes;
+                    &owned
+                }
+                Err(_) => continue,
+            },
+        };
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let re_fset = FileSet::new();
+        let Ok(parsed) = parse_file(&re_fset, name, src, PARSE_COMMENTS) else {
+            continue;
+        };
+        for group in &parsed.comments {
+            for c in &group.list {
+                if c.text.contains("+kubebuilder:") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn check_omitzero(pass: &Pass<'_>, field: &Field, pending: &mut Vec<Diagnostic>) {
     if !field_type_is_struct(pass, field) {
         return;
@@ -5666,6 +5712,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         check_atomictypes(pass, &mut pending);
         stamp_category(&mut pending, _before, "atomictypes");
     }
+    // Computed once per package, like upstream's `sync.OnceValue`, and only
+    // when `omitzero` is on — it re-parses every file for comments.
+    let uses_kubebuilder = enabled(&options, "omitzero") && package_uses_kubebuilder(pass);
     for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
             check_plusbuild(file, &mut pending);
@@ -5813,7 +5862,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         stamp_category(&mut pending, _before, "newexpr");
                     }
                 }
-                NodeRef::StructType(StructType { fields, .. }) if enabled(&options, "omitzero") => {
+                NodeRef::StructType(StructType { fields, .. })
+                    if enabled(&options, "omitzero") && !uses_kubebuilder =>
+                {
                     for field in &fields.list {
                         check_omitzero(pass, field, &mut pending);
                     }
