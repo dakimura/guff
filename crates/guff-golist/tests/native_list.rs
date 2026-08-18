@@ -373,3 +373,82 @@ fn bails_on_vendor_without_modules_txt() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+/// `go list -test` reports the same `IgnoredGoFiles` on `P [P.test]` as on `P`.
+///
+/// Build constraints do not change because test files joined the package, and
+/// analyzers ask about them: modernize's `atomictypes` refuses to rewrite a
+/// package-level var or a struct field when the package has source it cannot
+/// see. Emptying the field on the test variant meant every package that has
+/// tests — which is most of them — looked as though nothing was excluded, and
+/// coredns's `plugin/forward` and `plugin/grpc` (each with a
+/// `//go:build gofuzz` file) were guff-only findings because of it.
+///
+/// The external test package is genuinely empty here: `go list` reports no
+/// `IgnoredGoFiles` for `P_test [P.test]`.
+#[test]
+fn test_variant_keeps_the_packages_ignored_files() {
+    let tmp = std::env::temp_dir().join(format!(
+        "guff-golist-ignored-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&tmp);
+    fs::create_dir_all(&tmp).unwrap();
+
+    write(&tmp.join("go.mod"), "module example.com/foo\n\ngo 1.22\n");
+    write(&tmp.join("foo.go"), "package foo\n\nfunc F() int { return 1 }\n");
+    write(
+        &tmp.join("foo_test.go"),
+        "package foo\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { if F() != 1 { t.Fatal() } }\n",
+    );
+    write(
+        &tmp.join("foo_ext_test.go"),
+        "package foo_test\n\nimport (\n\t\"testing\"\n\t\"example.com/foo\"\n)\n\nfunc TestExt(t *testing.T) { if foo.F() != 1 { t.Fatal() } }\n",
+    );
+    write(
+        &tmp.join("fuzz.go"),
+        "//go:build gofuzz\n\npackage foo\n\nfunc Fuzz(data []byte) int { return 0 }\n",
+    );
+
+    let cfg = ListConfig {
+        dir: tmp.clone(),
+        tests: true,
+        need_deps: true,
+        gomodcache: Some(tmp.join("empty-cache")),
+        ..ListConfig::default()
+    };
+    let resp = list_packages(&cfg, &[".".to_string()]).expect("list with tests");
+
+    let ignored_of = |id: &str| -> Vec<String> {
+        resp.packages
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("no package {id}"))
+            .ignored_files
+            .iter()
+            .map(|p| {
+                p.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect()
+    };
+
+    assert_eq!(ignored_of("example.com/foo"), vec!["fuzz.go".to_string()]);
+    assert_eq!(
+        ignored_of("example.com/foo [example.com/foo.test]"),
+        vec!["fuzz.go".to_string()],
+        "the internal test variant carries the same excluded files"
+    );
+    assert!(
+        ignored_of("example.com/foo_test [example.com/foo.test]").is_empty(),
+        "the external test package has none, as go list reports"
+    );
+
+    let _ = fs::remove_dir_all(&tmp);
+}

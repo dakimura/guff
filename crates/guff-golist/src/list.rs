@@ -426,7 +426,7 @@ fn process_listed_package(
                 dir: build_pkg.dir.clone(),
                 go_files: go_files_with_cgo.clone(),
                 compiled_go_files: compiled,
-                ignored_files: ignored,
+                ignored_files: ignored.clone(),
                 imports: import_list,
                 deps: Vec::new(), // filled below
                 module: list_mod.clone(),
@@ -481,7 +481,21 @@ fn process_listed_package(
                             dir: build_pkg.dir.clone(),
                             go_files: internal_files.clone(),
                             compiled_go_files: internal_files,
-                            ignored_files: Vec::new(),
+                            // `go list -test` reports the *same*
+                            // IgnoredGoFiles on `P [P.test]` as on `P` — the
+                            // build constraints that excluded a file do not
+                            // change because test files joined the package.
+                            // Emptying it here hid every analyzer that asks
+                            // whether the package has source it cannot see:
+                            // modernize's `atomictypes` refuses to rewrite a
+                            // package-level var or a field when it does, and
+                            // any package with tests looked to guff as though
+                            // it had nothing excluded.
+                            //
+                            // The external test package is different, and
+                            // stays empty: `go list` reports no
+                            // IgnoredGoFiles for `P_test [P.test]`.
+                            ignored_files: ignored.clone(),
                             imports: pairs,
                             deps: Vec::new(),
                             module: list_mod.clone(),

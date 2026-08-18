@@ -47,6 +47,19 @@ pub fn typecheck_with_deps(
     main_path: &Path,
     deps: &[(&str, &Path)],
 ) -> Arc<Package> {
+    typecheck_with_deps_ignored(pkg_id, main_path, deps, &[])
+}
+
+/// Like [`typecheck_with_deps`], plus the package's build-constraint-excluded
+/// files (`go list`'s `IgnoredGoFiles`). Analyzers that ask whether the package
+/// has files they cannot see — `modernize`'s `atomictypes` is one — have no
+/// other way to be reached from a fixture.
+pub fn typecheck_with_deps_ignored(
+    pkg_id: &str,
+    main_path: &Path,
+    deps: &[(&str, &Path)],
+    ignored_files: &[&str],
+) -> Arc<Package> {
     let fset = FileSet::new();
     let main_src = fs::read(main_path).expect("read main source");
     let main_name = main_path
@@ -116,6 +129,7 @@ pub fn typecheck_with_deps(
         dir: main_path.parent().unwrap_or(main_path).to_path_buf(),
         compiled_go_files: vec![main_path.to_path_buf()],
         go_files: vec![main_path.to_path_buf()],
+        ignored_files: ignored_files.iter().map(PathBuf::from).collect(),
         syntax: vec![main_file],
         fset: Some(fset),
         types: Some(check.pkg),
@@ -150,6 +164,22 @@ fn unquote_import_path(lit: &str) -> String {
 
 pub fn typecheck_pkg(pkg_id: &str, main_path: &Path) -> Arc<Package> {
     typecheck_with_deps(pkg_id, main_path, &[])
+}
+
+/// [`typecheck_fixture`] with the package's build-excluded file names attached.
+pub fn typecheck_fixture_with_ignored_files(
+    name: &str,
+    pkg_id: &str,
+    file: &str,
+    ignored_files: &[&str],
+) -> Arc<Package> {
+    let dir = testdata(name);
+    let stubs = collect_stubs(&dir);
+    let stub_refs: Vec<(&str, &Path)> = stubs
+        .iter()
+        .map(|(p, path)| (p.as_str(), path.as_path()))
+        .collect();
+    typecheck_with_deps_ignored(pkg_id, &dir.join(file), &stub_refs, ignored_files)
 }
 
 pub fn typecheck_fixture(name: &str, pkg_id: &str, file: &str) -> Arc<Package> {

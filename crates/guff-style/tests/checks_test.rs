@@ -5837,6 +5837,46 @@ fn modernize_flags_atomictypes() {
     );
 }
 
+/// `atomictypes` keeps only local vars once the package has files it cannot see.
+///
+/// Upstream: `if !isLocal(v) && len(pass.IgnoredFiles) > 0 { continue }`. A
+/// package-level var or a struct field can be used from a build-excluded file,
+/// so the rewrite the analyzer proposes might not compile there; a local var
+/// cannot be. coredns's `plugin/forward` and `plugin/grpc` each carry a
+/// `//go:build gofuzz` file, which is what makes their `robin uint32` fields
+/// silent upstream — guff reported both.
+#[test]
+fn modernize_atomictypes_drops_non_locals_when_the_package_has_ignored_files() {
+    let names = |pkg: &std::sync::Arc<guff_packages::Package>| -> Vec<String> {
+        support::run_analyzer(modernize(), pkg)
+            .into_iter()
+            .filter(|m| m.contains("may be simplified using atomic."))
+            .collect()
+    };
+
+    let clean = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/ignoredfiles",
+        "ignoredfiles.go",
+    );
+    let all = names(&clean);
+    assert_eq!(all.len(), 3, "field, package var and local var: {all:?}");
+
+    let with_ignored = support::typecheck_fixture_with_ignored_files(
+        "modernize",
+        "example.com/modernize/ignoredfiles",
+        "ignoredfiles.go",
+        &["ignoredfiles_gofuzz.go"],
+    );
+    let kept = names(&with_ignored);
+    assert_eq!(
+        kept.len(),
+        1,
+        "only the local var survives an ignored file: {kept:?}"
+    );
+    assert!(kept[0].contains("var n uint32"), "{kept:?}");
+}
+
 #[test]
 fn modernize_flags_testingcontext() {
     let pkg = support::typecheck_fixture(
