@@ -123,6 +123,31 @@ fn gosec_allows_strong_crypto() {
     assert!(messages.is_empty(), "{messages:?}");
 }
 
+/// G404 matches by syntax, not by the callee's declaring package.
+///
+/// gosec's `GetCallInfo` names the receiver: `rand.Int()` gives `("rand",
+/// "Int")` and resolves through the file's imports, while `s.r.Int()` gives
+/// the receiver's type string `"*math/rand.Rand"`, which matches no rule.
+/// coredns wraps `math/rand` in exactly that shape, and resolving the callee's
+/// package instead made every method on the wrapper a finding. `Perm` and
+/// `Shuffle` are not on gosec's list at all.
+#[test]
+fn gosec_g404_matches_only_package_qualified_calls() {
+    let ok = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");
+    let messages = support::run_analyzer(gosec(), &ok);
+    assert!(
+        !messages.iter().any(|m| m.starts_with("G404:")),
+        "methods on *rand.Rand, rand.Perm and rand.Shuffle are not G404: {messages:?}"
+    );
+
+    let bad = support::typecheck_fixture("gosec", "example.com/gosec/bad", "bad.go");
+    let bad_messages = support::run_analyzer(gosec(), &bad);
+    assert!(
+        bad_messages.iter().any(|m| m.starts_with("G404:")),
+        "package-qualified rand.Intn is still a finding: {bad_messages:?}"
+    );
+}
+
 #[test]
 fn gosec_severity_and_confidence_filter_findings() {
     use guff_style::GosecOptions;
