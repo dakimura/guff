@@ -39,6 +39,31 @@ fn nilnil_flags_nil_nil_return() {
     );
 }
 
+/// A `return` the rule declines to judge takes its subtree with it.
+///
+/// Upstream's callback `return false`s on every path out of the ReturnStmt arm
+/// — after reporting, and on each rejection before it — and
+/// `inspector.Nodes` reads that as "do not descend". So the `nil, nil` inside a
+/// func literal that is itself returned is never visited:
+///
+/// ```go
+/// return db.WithTx2(ctx, func(…) (*Comment, error) {
+///     return nil, nil          // the outer return has one result
+/// })
+/// ```
+///
+/// gitea writes six of those and golangci-lint reports none.
+#[test]
+fn nilnil_does_not_descend_into_a_rejected_return() {
+    let dir = support::testdata("nilnil");
+    let pkg = support::typecheck_pkg("example.com/nilnil/ok", &dir.join("ok.go"));
+    let messages = support::run_analyzer(nilnil(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "a nil,nil inside a returned func literal is not reached: {messages:?}"
+    );
+}
+
 #[test]
 fn nilnil_allows_valid_returns() {
     let dir = support::testdata("nilnil");
