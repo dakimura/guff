@@ -41,3 +41,14 @@ func badErrAssignedOnly() error {
 	}
 	return nil
 }
+
+// The error result is there and is returned nil, so the position check must not
+// widen into a way out of this one.
+func badNilInErrorPosition() (*int, error) {
+	err := do()
+	if err != nil {
+		return nil, nil
+	}
+	n := 1
+	return &n, nil
+}
