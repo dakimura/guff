@@ -71,7 +71,7 @@ ctxallow/revivetest/context_allow.go:21:22:revive:warning:context-as-argument: c
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
-extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  4% (11 comment lines for 249 code lines) but expected a minimum of 10%
+extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  5% (14 comment lines for 253 code lines) but expected a minimum of 10%
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
@@ -208,26 +208,30 @@ extended/util/extended_bad.go:377:7:revive:warning:add-constant: avoid magic num
 extended/util/extended_bad.go:378:13:revive:warning:add-constant: string literal "a" appears, at least, 3 times, create a named constant for it
 extended/util/extended_bad.go:379:3:revive:warning:unnecessary-stmt: omit unnecessary break at the end of case clause
 extended/util/extended_bad.go:379:3:revive:warning:useless-break: useless break in case clause
-extended/util/extended_bad.go:384:2:revive:warning:enforce-switch-style: switch must have a default case clause
-extended/util/extended_bad.go:385:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
-extended/util/extended_bad.go:386:3:revive:warning:useless-fallthrough: this "fallthrough" can be removed by consolidating this case clause with the next one
-extended/util/extended_bad.go:387:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
-extended/util/extended_bad.go:388:13:revive:warning:add-constant: string literal "b" appears, at least, 3 times, create a named constant for it
-extended/util/extended_bad.go:393:2:revive:warning:inefficient-map-lookup: inefficient lookup of map key
-extended/util/extended_bad.go:401:14:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
-extended/util/extended_bad.go:401:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
-extended/util/extended_bad.go:411:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
-extended/util/extended_bad.go:412:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
-extended/util/extended_bad.go:418:16:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
-extended/util/extended_bad.go:418:19:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
-extended/util/extended_bad.go:419:2:revive:warning:use-slices-sort: replace sort.Ints by slices.Sort
-extended/util/extended_bad.go:423:14:revive:warning:string-format: string must be ok
-extended/util/extended_bad.go:432:5:revive:warning:banned-characters: banned character found: K
-extended/util/extended_bad.go:434:21:revive:warning:enforce-map-style: use make(map[type]type) instead of map[type]type{}
-extended/util/extended_bad.go:436:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
-extended/util/extended_bad.go:440:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
-extended/util/extended_bad.go:445:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
-extended/util/extended_bad.go:463:0:revive:warning:file-length-limit: file length is 463 lines, which exceeds the limit of 350
+extended/util/extended_bad.go:387:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:388:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:388:10:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:388:13:revive:warning:add-constant: avoid magic numbers like '3', create a named constant for it
+extended/util/extended_bad.go:394:2:revive:warning:enforce-switch-style: switch must have a default case clause
+extended/util/extended_bad.go:395:7:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:396:3:revive:warning:useless-fallthrough: this "fallthrough" can be removed by consolidating this case clause with the next one
+extended/util/extended_bad.go:397:7:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:398:13:revive:warning:add-constant: string literal "b" appears, at least, 3 times, create a named constant for it
+extended/util/extended_bad.go:403:2:revive:warning:inefficient-map-lookup: inefficient lookup of map key
+extended/util/extended_bad.go:411:14:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:411:17:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:421:6:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:422:11:revive:warning:add-constant: avoid magic numbers like '0', create a named constant for it
+extended/util/extended_bad.go:428:16:revive:warning:add-constant: avoid magic numbers like '1', create a named constant for it
+extended/util/extended_bad.go:428:19:revive:warning:add-constant: avoid magic numbers like '2', create a named constant for it
+extended/util/extended_bad.go:429:2:revive:warning:use-slices-sort: replace sort.Ints by slices.Sort
+extended/util/extended_bad.go:433:14:revive:warning:string-format: string must be ok
+extended/util/extended_bad.go:442:5:revive:warning:banned-characters: banned character found: K
+extended/util/extended_bad.go:444:21:revive:warning:enforce-map-style: use make(map[type]type) instead of map[type]type{}
+extended/util/extended_bad.go:446:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
+extended/util/extended_bad.go:450:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
+extended/util/extended_bad.go:455:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
+extended/util/extended_bad.go:473:0:revive:warning:file-length-limit: file length is 473 lines, which exceeds the limit of 350
 fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
 fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID

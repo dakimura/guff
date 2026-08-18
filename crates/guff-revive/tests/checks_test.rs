@@ -1029,3 +1029,34 @@ fn revive_unused_parameter_and_receiver_honour_allow_regex() {
         "invalid allowRegex falls back to ^_$: {broken:?}"
     );
 }
+
+/// `unnecessary-stmt` skips a lone case that lists several expressions.
+///
+/// Upstream's `checkSwitchBody` has both guards — one clause, and
+/// `if len(cc.List) > 1 { return }` — because `switch x { case 1, 2, 3: … }`
+/// is not an if-then and the suggestion would not compile. guff had only the
+/// first, so coredns's four multi-expression switches came back as findings
+/// golangci-lint does not report.
+#[test]
+fn revive_unnecessary_stmt_skips_a_case_with_several_expressions() {
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let switches: Vec<String> = support::run_analyzer_at(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("switch with only one case"))
+            .collect();
+        assert_eq!(
+            switches.len(),
+            1,
+            "only the single-expression switch is a finding: {switches:?}"
+        );
+        assert!(
+            switches[0].starts_with("376:"),
+            "the finding is the `case 1:` switch, not the `case 1, 2, 3:` one: {switches:?}"
+        );
+    });
+}

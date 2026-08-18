@@ -82,9 +82,15 @@ fn check_switch_body(body: &BlockStmt, failures: &mut Vec<Failure>) {
     if body.list.len() != 1 {
         return;
     }
-    let Stmt::CaseClause(_) = &body.list[0] else {
+    let Stmt::CaseClause(case) = &body.list[0] else {
         return;
     };
+    // Upstream: `if len(cc.List) > 1 { return } // skip cases with multiple
+    // expressions`. `switch x { case A, B, C: … }` is not an if-then, so the
+    // suggestion would not compile — coredns writes four of them.
+    if case.list.len() > 1 {
+        return;
+    }
     failures.push(Failure {
         rule: "unnecessary-stmt",
         pos: body.lbrace.0 as u32,
