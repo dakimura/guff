@@ -5305,6 +5305,20 @@ fn atomictypes_skip_kind(pass: &Pass<'_>, obj: ObjectId) -> bool {
     )
 }
 
+/// Upstream's `isLocal`: the object's scope is four levels deep or more, which
+/// is to say it was declared inside a function. Receivers, parameters and
+/// results qualify there too, but [`atomictypes_skip_kind`] has already dropped
+/// those, so the survivors split cleanly into `Local` and everything else.
+fn atomictypes_is_local(pass: &Pass<'_>, obj: ObjectId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let ObjectData::Var(v) = artifacts.objects.get(obj) else {
+        return false;
+    };
+    matches!(v.kind(), VarKind::Local)
+}
+
 struct AtomicCand<'a> {
     func_name: String,
     import_prefix: String,
@@ -5530,7 +5544,20 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         });
     }
 
+    // Upstream: `if !isLocal(v) && len(pass.IgnoredFiles) > 0 { continue }`.
+    // A package-level var or a struct field can be used from a file the build
+    // constraints excluded, which the analyzer cannot see, so the rewrite it
+    // would propose might not compile there. A local var cannot be, so it is
+    // reported either way.
+    //
+    // coredns's `plugin/forward` and `plugin/grpc` each carry a
+    // `//go:build gofuzz` file, which is what makes their `robin uint32`
+    // fields silent upstream and reported here.
+    let package_has_ignored_files = !pass.pkg().ignored_files.is_empty();
     for (obj, cand) in cands {
+        if package_has_ignored_files && !atomictypes_is_local(pass, obj) {
+            continue;
+        }
         if atomictypes_has_kv_key_use(pass, obj) {
             continue;
         }
