@@ -42,3 +42,17 @@ func okErrBoxedIntoAny() error {
 	}
 	return nil
 }
+
+// A function with **no error result at all**. `return nil, false` returns nil
+// for a `*int`, and upstream counts only results that implement `error`
+// (`errorReturnValues == 0` → not a finding). guff typed the untyped nil as an
+// error and reported six of these in jaeger's
+// `internal/storage/elasticsearch/esclient/aggregation.go`.
+func okNoErrorResult() (*int, bool) {
+	err := do()
+	if err != nil {
+		return nil, false
+	}
+	n := 1
+	return &n, true
+}

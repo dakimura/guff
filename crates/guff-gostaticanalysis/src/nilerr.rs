@@ -110,6 +110,32 @@ fn bin_op_err_nil(
     }
 }
 
+/// Is the function's `i`-th result an error?
+///
+/// Stands in for the type go/ssa would have given the returned constant.
+fn result_position_is_error(
+    prog: &Program,
+    func: &Function,
+    cache: &mut ErrTypeCache,
+    i: usize,
+) -> bool {
+    let Some(sig) = func.signature else {
+        return false;
+    };
+    let results = guff_types::signature::signature_results(&prog.type_arena, sig);
+    if guff_types::tuple::tuple_len(&prog.type_arena, results) <= i {
+        return false;
+    }
+    let Some(results) = results else {
+        return false;
+    };
+    let obj = guff_types::tuple::tuple_at(&prog.type_arena, results, i);
+    let Some(typ) = obj.typ(&prog.object_arena) else {
+        return false;
+    };
+    cache.is_err_type(prog, typ)
+}
+
 fn is_return_nil(
     prog: &Program,
     func: &Function,
@@ -122,7 +148,7 @@ fn is_return_nil(
         return None;
     };
     let mut error_returns = 0;
-    for &res in results {
+    for (i, &res) in results.iter().enumerate() {
         let typ = value_type_of(prog, func, res);
         let is_nil = is_nil_const(prog, func, SsaValue::new(res));
         let is_err = cache.is_err_type(prog, typ);
@@ -132,9 +158,17 @@ fn is_return_nil(
                 return None;
             }
         } else if is_nil {
-            // guff may type `return nil` as untyped nil (go/ssa usually types it
-            // as error). Count it as a nil error return.
-            error_returns += 1;
+            // go/ssa types the constant in `return nil, err` as `error`;
+            // guff sometimes leaves it untyped, so the value's own type cannot
+            // answer "is this the error result". Ask the *signature* instead
+            // of counting every nil, which is what this used to do — and which
+            // made `return nil, false` out of a function with no error result
+            // at all look like a swallowed error. jaeger's
+            // `internal/storage/elasticsearch/esclient/aggregation.go` returns
+            // `(*float64, bool)` six times over.
+            if result_position_is_error(prog, func, cache, i) {
+                error_returns += 1;
+            }
         }
     }
     if error_returns == 0 {

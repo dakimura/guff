@@ -10,3 +10,4 @@ bad/bad.go:8:3:nilerr::error is not nil (line 6) but it returns nil
 bad/bad.go:16:3:nilerr::error is nil (line 14) but it returns error
 bad/bad.go:29:3:nilerr::error is not nil (line 25) but it returns nil
 bad/bad.go:40:3:nilerr::error is not nil (line 36) but it returns nil
+bad/bad.go:50:3:nilerr::error is not nil (line 48) but it returns nil

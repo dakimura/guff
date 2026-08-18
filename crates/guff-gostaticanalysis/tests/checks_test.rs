@@ -194,9 +194,38 @@ fn nilerr_use_of_the_error_is_read_off_the_call_arguments() {
             .iter()
             .filter(|m| m.contains("error is not nil (line "))
             .count(),
-        3,
-        "the two new blocks — err.Error() only, and err copied to a local — \
-         are findings alongside the original: {bad_messages:?}"
+        4,
+        "the three added blocks — err.Error() only, err copied to a local, and \
+         a nil in a real error position — are findings alongside the original: \
+         {bad_messages:?}"
+    );
+}
+
+/// A nil is only a swallowed error if it sits in an **error result position**.
+///
+/// Upstream counts `ret.Results` that implement `error`; a function with none —
+/// `func value(raw []byte) (*float64, bool)` returning `nil, false` — has
+/// `errorReturnValues == 0` and is not a finding. guff typed the untyped nil as
+/// an error and reported six of these in one jaeger file.
+#[test]
+fn nilerr_nil_must_be_in_an_error_result_position() {
+    let dir = support::testdata("nilerr");
+
+    let ok = support::typecheck_pkg("example.com/nilerr/ok", &dir.join("ok.go"));
+    assert!(
+        support::run_analyzer(nilerr(), &ok).is_empty(),
+        "a function with no error result is not a finding"
+    );
+
+    let bad = support::typecheck_pkg("example.com/nilerr", &dir.join("bad.go"));
+    let messages = support::run_analyzer(nilerr(), &bad);
+    assert!(
+        messages
+            .iter()
+            .filter(|m| m.contains("error is not nil"))
+            .count()
+            >= 4,
+        "a nil in a real error position still is: {messages:?}"
     );
 }
 
