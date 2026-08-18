@@ -93,3 +93,17 @@ func (s *SuiteOk) helperWithTHelper() {
 }
 
 var a, b int
+
+// encoded-compare is a *syntactic* JSON-likeness test upstream, not a parse:
+// the text must start with an object (or an array of objects) and contain a
+// `"key":` pair. A JSON array of scalars is valid JSON and is not JSON-like by
+// that rule, so none of these are findings. jaeger's
+// internal/config/string_slice_test.go compares exactly these shapes.
+func okEncodedCompareScalarArrays(t *testing.T) {
+	assert.Equal(t, "[]", stringSliceString())
+	assert.Equal(t, `["test"]`, stringSliceString())
+	assert.Equal(t, `["test","test2"]`, stringSliceString())
+	assert.Equal(t, "{}", stringSliceString())
+}
+
+func stringSliceString() string { return "[]" }

@@ -1,0 +1,18 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+mockexpect/mock_expect.go   crates/guff-style/tests/testdata/testifylint/mock_expect.go
+
+# bad.go is here so the case has teeth: a golden of zero keys looks the same
+# whether upstream found nothing or the module failed to build.
+bad/bad_test.go             crates/guff-style/tests/testdata/testifylint/bad.go
+
+# ok.go is the negatives half — including the JSON-ish strings that are valid
+# JSON and not JSON-*like*, which is the distinction encoded-compare draws.
+ok/ok_test.go               crates/guff-style/tests/testdata/testifylint/ok.go
+
+# The stub testify module the case replaces the real one with.
+testify/go.mod                 compat/golden/cases/testifylint-mock/testify.go.mod
+testify/testify.go             crates/guff-style/tests/testdata/testifylint/stub/github.com/stretchr/testify/testify.go
+testify/mock/mock.go           crates/guff-style/tests/testdata/testifylint/stub/github.com/stretchr/testify/mock/mock.go
+testify/assert/assert.go       crates/guff-style/tests/testdata/testifylint/stub/github.com/stretchr/testify/assert/assert.go
+testify/require/require.go     crates/guff-style/tests/testdata/testifylint/stub/github.com/stretchr/testify/require/require.go
+testify/suite/suite.go         crates/guff-style/tests/testdata/testifylint/stub/github.com/stretchr/testify/suite/suite.go

@@ -5292,14 +5292,56 @@ fn testifylint_flags_blank_imports() {
     );
 }
 
+/// `mock-expect` is off unless a config names it.
+///
+/// testifylint v1.6.4 — what golangci-lint 2.12.2 vendors — has no such
+/// checker: its registry stops at `useless-assert`. jaeger v2.20.0, which
+/// golangci-lint reports as entirely clean, came back with 354 of them.
 #[test]
-fn testifylint_flags_mock_expect() {
+fn testifylint_mock_expect_is_off_by_default() {
     let pkg = support::typecheck_fixture(
         "testifylint",
         "example.com/testifylint/mockexpect",
         "mock_expect.go",
     );
     let messages = support::run_analyzer(testifylint(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains("mock-expect")),
+        "the pinned testifylint has no mock-expect checker: {messages:?}"
+    );
+}
+
+#[test]
+fn testifylint_flags_mock_expect() {
+    use std::sync::Arc;
+
+    use guff_analysis::SettingsBag;
+    use guff_runner::RunnerOptions;
+    use guff_style::TestifylintOptions;
+
+    let pkg = support::typecheck_fixture(
+        "testifylint",
+        "example.com/testifylint/mockexpect",
+        "mock_expect.go",
+    );
+    // Ahead of the pin: reachable only when named. See `AHEAD_OF_PIN`.
+    let mut bag = SettingsBag::new();
+    bag.insert(
+        "testifylint",
+        TestifylintOptions {
+            disable_all: true,
+            enable: vec!["mock-expect".into()],
+            ..TestifylintOptions::default()
+        },
+    );
+    let messages = support::run_analyzer_with_settings(
+        testifylint(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(bag),
+            ..RunnerOptions::default()
+        },
+    );
     let mock_msgs: Vec<_> = messages
         .iter()
         .filter(|m| m.contains("mock-expect"))

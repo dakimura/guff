@@ -1,0 +1,30 @@
+# Golden case: testifylint's enable-set.
+#
+# The first ground-truth gate this linter has had, and it exists because of what
+# its absence cost. `mock-expect` is a checker guff implements and testifylint
+# v1.6.4 — what golangci-lint 2.12.2 vendors — does not have at all; its
+# registry stops at `useless-assert`. guff had the name in its default set, so
+# jaeger v2.20.0, a repo golangci-lint reports as entirely clean, came back with
+# 354 findings.
+#
+# `enable-all` is the point of the case: it asks both tools for *their* whole
+# checker list, so a checker guff has and upstream does not shows up as a diff
+# rather than as a silent extra.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - testifylint
+  settings:
+    testifylint:
+      enable-all: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

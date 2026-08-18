@@ -1,0 +1,56 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh testifylint-mock
+# Produced by running golangci-lint on compat/golden/cases/testifylint-mock/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad_test.go:37:2:testifylint::bool-compare: use assert.False
+bad/bad_test.go:38:2:testifylint::bool-compare: use assert.True
+bad/bad_test.go:39:2:testifylint::bool-compare: need to simplify the assertion
+bad/bad_test.go:40:2:testifylint::compares: use assert.Equal
+bad/bad_test.go:41:2:testifylint::empty: use assert.Empty
+bad/bad_test.go:42:2:testifylint::empty: use assert.Empty
+bad/bad_test.go:43:2:testifylint::error-nil: use assert.NoError
+bad/bad_test.go:44:2:testifylint::error-nil: use assert.NoError
+bad/bad_test.go:45:2:testifylint::nil-compare: use assert.Nil
+bad/bad_test.go:46:2:testifylint::len: use assert.Len
+bad/bad_test.go:47:2:testifylint::float-compare: use assert.InEpsilon (or InDelta)
+bad/bad_test.go:52:2:testifylint::negative-positive: use assert.Negative
+bad/bad_test.go:53:2:testifylint::negative-positive: use assert.Positive
+bad/bad_test.go:54:2:testifylint::useless-assert: asserting of the same variable
+bad/bad_test.go:55:2:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:56:2:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:58:2:testifylint::contains: use assert.Contains
+bad/bad_test.go:60:2:testifylint::equal-values: use assert.Equal
+bad/bad_test.go:61:2:testifylint::regexp: remove unnecessary regexp.MustCompile
+bad/bad_test.go:63:2:testifylint::error-is-as: invalid usage of assert.Error, use assert.ErrorIs instead
+bad/bad_test.go:63:2:testifylint::require-error: for error assertions use require
+bad/bad_test.go:64:2:testifylint::error-is-as: use assert.ErrorIs
+bad/bad_test.go:65:2:testifylint::error-is-as: use assert.ErrorIs or assert.ErrorAs depending on the case
+bad/bad_test.go:67:2:testifylint::encoded-compare: use assert.JSONEq
+bad/bad_test.go:68:2:testifylint::encoded-compare: use assert.JSONEq
+bad/bad_test.go:69:2:testifylint::encoded-compare: use assert.YAMLEq
+bad/bad_test.go:71:2:testifylint::expected-actual: need to reverse actual and expected values
+bad/bad_test.go:72:2:testifylint::expected-actual: need to reverse actual and expected values
+bad/bad_test.go:74:2:testifylint::formatter: remove unnecessary fmt.Sprintf
+bad/bad_test.go:76:2:testifylint::formatter: failure message is not a format string, use msgAndArgs instead
+bad/bad_test.go:79:2:testifylint::require-error: for error assertions use require
+bad/bad_test.go:81:2:testifylint::require-error: for error assertions use require
+bad/bad_test.go:83:2:testifylint::require-error: for error assertions use require
+bad/bad_test.go:88:3:testifylint::go-require: require must only be used in the goroutine running the test function
+bad/bad_test.go:89:3:testifylint::go-require: assert.FailNow must only be used in the goroutine running the test function
+bad/bad_test.go:90:3:testifylint::go-require: helperWithRequire contains assertions that must only be used in the goroutine running the test function
+bad/bad_test.go:94:3:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:97:3:testifylint::go-require: do not use require in http handlers
+bad/bad_test.go:98:3:testifylint::go-require: do not use assert.FailNow in http handlers
+bad/bad_test.go:116:2:testifylint::suite-extra-assert-call: need to simplify the assertion to s.True
+bad/bad_test.go:117:2:testifylint::suite-dont-use-pkg: use s.Equal
+bad/bad_test.go:118:2:testifylint::suite-subtest-run: use s.Run to run subtest
+bad/bad_test.go:123:1:testifylint::suite-method-signature: test method should not have any arguments or returning values
+bad/bad_test.go:124:2:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:127:1:testifylint::suite-method-signature: method conflicts with suite.SetupTestSuite interface
+bad/bad_test.go:130:2:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
+bad/bad_test.go:132:3:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
+bad/bad_test.go:136:1:testifylint::suite-thelper: suite helper method must start with s.T().Helper()
