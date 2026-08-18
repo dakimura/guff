@@ -49,6 +49,24 @@ fn is_errors_as(fun: &Expr) -> bool {
     }
 }
 
+/// True when `id`'s type set is all types — `interface{}`, `any`, or a named
+/// interface whose underlying is one of those.
+fn is_empty_interface(pass: &Pass<'_>, id: guff_types::TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if !matches!(artifacts.types.get(id), TypeData::Interface(_)) {
+        return false;
+    }
+    let mut types = artifacts.types.clone();
+    guff_types::interface::interface_empty(
+        &mut types,
+        &artifacts.objects,
+        &artifacts.packages,
+        id,
+    )
+}
+
 fn check_as_target(pass: &Pass<'_>, arg: &Expr) -> Option<&'static str> {
     let info = pass.types_info()?;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
@@ -58,14 +76,17 @@ fn check_as_target(pass: &Pass<'_>, arg: &Expr) -> Option<&'static str> {
         return None;
     }
     let u = t.underlying(&artifacts.types);
-    let type_name = guff_types::typestring::type_string(
-        &artifacts.types,
-        &artifacts.objects,
-        &artifacts.packages,
-        u,
-        None,
-    );
-    if type_name == "any" {
+    // Upstream: `types.Identical(t.Underlying(), anyType)` — "a target of any
+    // is always allowed, since it often indicates a value forwarded from
+    // another source". `any` is an alias for `interface{}`, so the test is
+    // structural: *any* type whose underlying is the empty interface passes,
+    // including a named one.
+    //
+    // Comparing the printed name against "any" (as this used to) never
+    // matched: the underlying of `any` prints as `interface{}`. Every
+    // `func As(err error, target any) bool { return errors.As(err, target) }`
+    // wrapper was a finding — thanos `pkg/errors/errors.go:134` is one.
+    if is_empty_interface(pass, u) {
         return None;
     }
     let (elem, ok) = match artifacts.types.get(u) {
