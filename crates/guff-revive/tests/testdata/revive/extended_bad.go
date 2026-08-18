@@ -380,6 +380,16 @@ func badUselessBreak(x int) {
 	}
 }
 
+// A single case listing several expressions is not an if-then, so upstream
+// skips it (`if len(cc.List) > 1 { return }`) and unnecessary-stmt is silent.
+// coredns writes four of these.
+func okSwitchOneCaseManyExprs(x int) {
+	switch x {
+	case 1, 2, 3:
+		fmt.Print("c")
+	}
+}
+
 func badUselessFallthrough(x int) {
 	switch x {
 	case 1:
