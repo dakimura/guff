@@ -6,6 +6,8 @@ type User struct {
 	Name    string
 	Age     int32
 	Address *Address
+	Meta    map[string]string
+	Names   []string
 }
 
 type Address struct {
@@ -29,6 +31,20 @@ func (x *User) GetAge() int32 {
 func (x *User) GetAddress() *Address {
 	if x != nil {
 		return x.Address
+	}
+	return nil
+}
+
+func (x *User) GetMeta() map[string]string {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *User) GetNames() []string {
+	if x != nil {
+		return x.Names
 	}
 	return nil
 }
