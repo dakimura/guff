@@ -1,0 +1,26 @@
+# Golden case: protogetter.
+#
+# The linter had no ground-truth gate, and the rule that needed one is its
+# `nil` comparison arm: `msg.Field == nil` is filtered when `GetField` returns
+# something that is not a pointer (the getter answers the question
+# identically), and reported when it does return one. guff filtered neither,
+# which is 80 findings on dapr v1.18.3 that golangci-lint does not produce.
+#
+# The filter is keyed on the *left* operand's position, so `nil == msg.Field`
+# filters the `nil` and the field is still reported. That quirk is in the case
+# on purpose: it is the difference between porting the rule and porting the
+# behaviour.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - protogetter
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

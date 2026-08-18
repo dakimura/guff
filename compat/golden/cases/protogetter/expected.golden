@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh protogetter
+# Produced by running golangci-lint on compat/golden/cases/protogetter/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:6:9:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead
+bad/bad.go:10:9:protogetter::avoid direct access to proto field u.Age, use u.GetAge() instead
+bad/bad.go:14:9:protogetter::avoid direct access to proto field u.Address.City, use u.GetAddress().GetCity() instead
+bad/bad.go:21:9:protogetter::avoid direct access to proto field u.Address, use u.GetAddress() instead
+bad/bad.go:27:16:protogetter::avoid direct access to proto field u.Meta, use u.GetMeta() instead

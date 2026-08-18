@@ -7249,6 +7249,38 @@ fn protogetter_ignores_getters_writes_and_non_proto() {
     assert!(messages.is_empty(), "{messages:?}");
 }
 
+/// `msg.Field == nil` is filtered when `GetField` returns a non-pointer.
+///
+/// Upstream's `BinaryExpr` arm: for a `==`/`!=` against `nil` on a proto
+/// message field, it asks whether the getter's first result is a pointer. If it
+/// is not — a map, a slice — the getter answers the question identically, so
+/// there is nothing to rewrite and the position is filtered. If it *is* a
+/// pointer, nothing is filtered and the ordinary selector rule reports it.
+///
+/// The filter is keyed on the **left** operand's position, so `nil == m.Field`
+/// filters the `nil` and the field is still reported. dapr writes 80 of the
+/// common spelling (`if req.Metadata == nil`).
+#[test]
+fn protogetter_nil_comparison_follows_the_getter_result_type() {
+    let ok = support::typecheck_fixture("protogetter", "example.com/protogetter/ok", "ok.go");
+    let ok_messages = support::run_analyzer(protogetter(), &ok);
+    assert!(
+        ok_messages.is_empty(),
+        "a non-pointer getter's nil comparison is filtered: {ok_messages:?}"
+    );
+
+    let bad = support::typecheck_fixture("protogetter", "example.com/protogetter", "bad.go");
+    let bad_messages = support::run_analyzer(protogetter(), &bad);
+    assert!(
+        bad_messages.iter().any(|m| m.contains("u.Address")),
+        "a pointer getter's nil comparison is still reported: {bad_messages:?}"
+    );
+    assert!(
+        bad_messages.iter().any(|m| m.contains("u.Meta")),
+        "`nil == u.Meta` filters the nil, not the field: {bad_messages:?}"
+    );
+}
+
 #[test]
 fn unqueryvet_flags_select_star() {
     let pkg = support::typecheck_fixture("unqueryvet", "example.com/unqueryvet", "bad.go");

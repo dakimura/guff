@@ -13,11 +13,13 @@
 //! `x++`/`x--`, and `&x.Field` (address-of, most likely a write through the
 //! pointer such as `sql.Scan`).
 //!
-//! DEFERRED (see DEVELOPMENT.md R13): proto2 pointer refinements
-//! (`getterResultHasPointer`, StarExpr getter-returns-value, nil comparisons),
-//! `append`/optional-proto argument filtering, `DeclStmt`/`ReturnStmt`/
-//! `KeyValueExpr` handling, generated-file skip by non-protoc prefixes, and
-//! SuggestedFix emission.
+//! `msg.Field == nil` is filtered too when `GetField` returns a non-pointer,
+//! and the first argument of `append` is filtered — both as upstream does.
+//!
+//! DEFERRED (see DEVELOPMENT.md R13): StarExpr getter-returns-value,
+//! optional-proto argument filtering, `DeclStmt`/`ReturnStmt`/`KeyValueExpr`
+//! handling, generated-file skip by non-protoc prefixes, and SuggestedFix
+//! emission.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -43,17 +45,33 @@ const PROTOC_PREFIXES: &[&str] = &[
 
 /// Returns the named type behind `expr`'s type, dereferencing one pointer.
 ///
-/// Port of `typesNamed`.
+/// Port of `typesNamed`, **including its blindness to aliases**:
+///
+/// ```go
+/// ptr, ok := t.Underlying().(*types.Pointer)
+/// if ok { t = ptr.Elem() }
+/// named, ok := t.(*types.Named)   // a plain assertion — no Unalias
+/// ```
+///
+/// Since Go 1.23 (`gotypesalias=1`) a type written through an alias is a
+/// `*types.Alias`, and that assertion fails on it. So a message reached as
+/// `*backend.WorkflowRuntimeState`, where `backend.WorkflowRuntimeState =
+/// protos.WorkflowRuntimeState`, is not a proto message to protogetter at all —
+/// no getters are suggested for any of its fields.
+///
+/// guff unaliased on both steps, which is the *correct* answer to the question
+/// "what named type is this" and the wrong answer to "what does protogetter
+/// do". dapr v1.18.3 reaches every durabletask message through such an alias:
+/// golangci-lint reports zero protogetter findings on the whole repo, and guff
+/// reported 54. The pointer step still uses the underlying type, as upstream
+/// does, so an alias *for a pointer* is dereferenced there.
 fn expr_named_type(pass: &Pass<'_>, expr: &Expr) -> Option<TypeId> {
     let info = pass.types_info()?;
     let artifacts = pass.pkg().type_artifacts.as_ref()?;
     let t = info.types.get(&expr.id())?.typ;
-    let t = unalias_readonly(&artifacts.types, t);
-    let t = match artifacts.types.get(t) {
-        TypeData::Pointer(_) => {
-            let elem = pointer_elem(&artifacts.types, t);
-            unalias_readonly(&artifacts.types, elem)
-        }
+    let under = t.underlying(&artifacts.types);
+    let t = match artifacts.types.get(under) {
+        TypeData::Pointer(_) => pointer_elem(&artifacts.types, under),
         _ => t,
     };
     match artifacts.types.get(t) {
@@ -80,6 +98,38 @@ fn method_exists(pass: &Pass<'_>, expr: &Expr, name: &str) -> bool {
         }
     }
     false
+}
+
+/// Port of `getterResultHasPointer`: does `Get<name>` on the named type behind
+/// `expr` return a pointer?
+///
+/// `None` when the question cannot be answered (no named type, no such getter,
+/// or a getter with no results) — upstream's `ok == false`, which is treated
+/// the same as a pointer result.
+fn getter_result_has_pointer(pass: &Pass<'_>, expr: &Expr, name: &str) -> Option<bool> {
+    let named = expr_named_type(pass, expr)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let want = format!("Get{name}");
+    let n = named_num_methods(&artifacts.types, named);
+    for i in 0..n {
+        let m = named_method(&artifacts.types, named, i);
+        if m.name(&artifacts.objects) != want {
+            continue;
+        }
+        let sig = m.typ(&artifacts.objects)?;
+        let results = guff_types::signature::signature_results(&artifacts.types, sig);
+        if guff_types::tuple::tuple_len(&artifacts.types, results) == 0 {
+            return None;
+        }
+        let first_obj = guff_types::tuple::tuple_at(&artifacts.types, results?, 0);
+        let first = first_obj.typ(&artifacts.objects)?;
+        let first = unalias_readonly(&artifacts.types, first);
+        return Some(matches!(
+            artifacts.types.get(first),
+            TypeData::Pointer(_)
+        ));
+    }
+    None
 }
 
 /// Port of `isProtoMessage`.
@@ -266,6 +316,47 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 }
                 NodeRef::UnaryExpr(u) if u.op == Token::AND => {
                     filtered.insert(u.x.pos().0);
+                }
+                // `append(msg.Field, x)` — the first argument is the slice
+                // being grown, and rewriting it to `msg.GetField()` changes
+                // what `append` may write in place. Upstream filters it unless
+                // `replace-first-arg-in-append` is set, which golangci leaves
+                // off by default (and guff does not expose yet).
+                NodeRef::CallExpr(c)
+                    if matches!(c.fun.as_ref(), Expr::Ident(id) if id.name == "append")
+                        && !c.args.is_empty() =>
+                {
+                    filtered.insert(c.args[0].pos().0);
+                }
+                // `msg.Field == nil` / `!= nil`, when `GetField` returns
+                // something that is not a pointer (a map, a slice), is a
+                // question the getter answers identically, so upstream filters
+                // the position rather than proposing a rewrite. A getter that
+                // *does* return a pointer is left alone here and reported by
+                // the SelectorExpr arm below — the asymmetry is upstream's.
+                //
+                // Upstream filters `x.X.Pos()`, the *left* operand, so the
+                // reversed spelling `nil == msg.Field` filters the `nil` and
+                // the field is still reported. That quirk is load-bearing:
+                // guff already matched it, and only the common spelling was
+                // wrong. dapr writes 80 of them (`if req.Metadata == nil`).
+                NodeRef::BinaryExpr(b) if b.op == Token::EQL || b.op == Token::NEQ => {
+                    let is_nil = |e: &Expr| matches!(e, Expr::Ident(id) if id.name == "nil");
+                    let x_is_nil = is_nil(&b.x);
+                    let y_is_nil = is_nil(&b.y);
+                    if !x_is_nil && !y_is_nil {
+                        return true;
+                    }
+                    let operand = if x_is_nil { &b.y } else { &b.x };
+                    let Expr::SelectorExpr(se) = operand.as_ref() else {
+                        return true;
+                    };
+                    if !is_proto_message(pass, &se.x) {
+                        return true;
+                    }
+                    if getter_result_has_pointer(pass, &se.x, &se.sel.name) == Some(false) {
+                        filtered.insert(b.x.pos().0);
+                    }
                 }
                 NodeRef::SelectorExpr(sel) => {
                     let node_pos = sel.x.pos().0;

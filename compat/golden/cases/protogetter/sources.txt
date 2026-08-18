@@ -1,0 +1,7 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+bad/bad.go   crates/guff-style/tests/testdata/protogetter/bad.go
+ok/ok.go     crates/guff-style/tests/testdata/protogetter/ok.go
+
+# The stub proto package, as its own module so `./...` does not lint it.
+pb/go.mod    compat/golden/cases/protogetter/pb.go.mod
+pb/pb.go     crates/guff-style/tests/testdata/protogetter/stub/example.com/pb/pb.go
