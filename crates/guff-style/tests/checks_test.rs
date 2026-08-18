@@ -5919,6 +5919,45 @@ fn modernize_atomictypes_drops_non_locals_when_the_package_has_ignored_files() {
     assert!(kept[0].contains("var n uint32"), "{kept:?}");
 }
 
+/// `omitzero` is off for a package that carries a kubebuilder marker.
+///
+/// kubebuilder has its own interpretation of the tag (go.dev/issue/76649), so
+/// upstream returns before reporting — for the whole package, not just the
+/// fields near a marker. dapr's `pkg/apis/**` are CRD types of exactly this
+/// shape: 24 findings golangci-lint does not make.
+///
+/// The marker lives in a comment, and the production load parses without
+/// `PARSE_COMMENTS`, so the check re-reads the retained source. The fixture
+/// keeps the marker on a doc comment two fields away from the tags it silences.
+#[test]
+fn modernize_omitzero_is_off_for_a_kubebuilder_package() {
+    let with_marker = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/omitzerokubebuilder",
+        "omitzero_kubebuilder.go",
+    );
+    let silenced = support::run_analyzer(modernize(), &with_marker);
+    assert!(
+        !silenced.iter().any(|m| m.contains("Omitempty")),
+        "a kubebuilder package reports no omitzero at all: {silenced:?}"
+    );
+
+    let plain = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/omitzeroplain",
+        "omitzero_plain.go",
+    );
+    let reported = support::run_analyzer(modernize(), &plain);
+    assert_eq!(
+        reported
+            .iter()
+            .filter(|m| m.contains("Omitempty has no effect on nested struct fields"))
+            .count(),
+        2,
+        "the same shape without a marker keeps both: {reported:?}"
+    );
+}
+
 #[test]
 fn modernize_flags_testingcontext() {
     let pkg = support::typecheck_fixture(

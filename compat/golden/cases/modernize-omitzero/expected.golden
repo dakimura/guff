@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize-omitzero
+# Produced by running golangci-lint on compat/golden/cases/modernize-omitzero/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+omitzeroplain/omitzero_plain.go:9:21:modernize::omitzero: Omitempty has no effect on nested struct fields
+omitzeroplain/omitzero_plain.go:10:21:modernize::omitzero: Omitempty has no effect on nested struct fields
