@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize-atomictypes
+# Produced by running golangci-lint on compat/golden/cases/modernize-atomictypes/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+atomictypes/atomictypes.go:11:2:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
+atomictypes/atomictypes.go:15:2:modernize::atomictypes: var y int64 may be simplified using atomic.Int64
+atomictypes/atomictypes.go:20:6:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
+atomictypes/atomictypes.go:26:6:modernize::atomictypes: var x int32 may be simplified using atomic.Int32
