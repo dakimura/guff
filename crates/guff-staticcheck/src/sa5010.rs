@@ -18,6 +18,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let ir = pass
             .result_of::<buildir::BuildIrResult>(buildir::analyzer())
             .ok_or_else(|| "SA5010 requires buildir analyzer".to_string())?;
+        // `identical` interns as it compares, so it needs a mutable arena.
+        // Cloned once for the whole run rather than per comparison.
+        let mut types_scratch = ir.prog.type_arena.clone();
 
         for &fid in ir.src_funcs_with_methods() {
             let func = ir.prog.functions.get(fid);
@@ -53,7 +56,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         };
                         let ml_sig = ml.typ(&ir.prog.object_arena).unwrap();
                         let mr_sig = mr.typ(&ir.prog.object_arena).unwrap();
-                        if !signatures_assignable(arena, &ir.prog.object_arena, ml_sig, mr_sig) {
+                        if !signatures_assignable(
+                            &mut types_scratch,
+                            &ir.prog.object_arena,
+                            &ir.prog.package_arena,
+                            ml_sig,
+                            mr_sig,
+                        ) {
                             wrong.push((ml, mr));
                         }
                     }
@@ -115,9 +124,22 @@ fn render_sig(
     render_type(arena, objects, packages, sig)
 }
 
+/// Upstream asks `types.AssignableTo(ml.Type(), mr.Type())` — whether the two
+/// *signatures* are assignable, which for signatures is identity, which ignores
+/// parameter names entirely.
+///
+/// guff compared `TypeId`s. Arena ids are not interned across the packages a
+/// method can come from, so `Read(p []byte) (n int, err error)` and
+/// `Read(buf []byte) (int, error)` — the same signature, named differently —
+/// were "wrong type for Read method", and so was every `w.(http.ResponseWriter)`
+/// on an `io.Writer`. gitea and thanos both write both.
+///
+/// A missing tuple and an empty one are the same thing here: a signature with
+/// no parameters may carry either.
 fn signatures_assignable(
-    arena: &guff_types::arena::TypeArena,
+    arena: &mut guff_types::arena::TypeArena,
     objects: &guff_types::arena::ObjectArena,
+    packages: &guff_types::arena::PackageArena,
     have: guff_types::TypeId,
     want: guff_types::TypeId,
 ) -> bool {
@@ -125,26 +147,35 @@ fn signatures_assignable(
     let want_params = signature_params(arena, want);
     let have_results = signature_results(arena, have);
     let want_results = signature_results(arena, want);
-    tuple_sig_equal_optional(arena, objects, have_params, want_params)
-        && tuple_sig_equal_optional(arena, objects, have_results, want_results)
+    tuple_sig_equal_optional(arena, objects, packages, have_params, want_params)
+        && tuple_sig_equal_optional(arena, objects, packages, have_results, want_results)
 }
 
 fn tuple_sig_equal_optional(
-    arena: &guff_types::arena::TypeArena,
+    arena: &mut guff_types::arena::TypeArena,
     objects: &guff_types::arena::ObjectArena,
+    packages: &guff_types::arena::PackageArena,
     a: Option<guff_types::TypeId>,
     b: Option<guff_types::TypeId>,
 ) -> bool {
+    let len = |arena: &guff_types::arena::TypeArena, t: Option<guff_types::TypeId>| {
+        t.map_or(0, |t| guff_types::tuple::tuple_len(arena, Some(t)))
+    };
+    let (na, nb) = (len(arena, a), len(arena, b));
+    if na != nb {
+        return false;
+    }
     match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => tuple_sig_equal(arena, objects, a, b),
-        _ => false,
+        (Some(a), Some(b)) => tuple_sig_equal(arena, objects, packages, a, b),
+        // Both empty (or absent): nothing to compare.
+        _ => true,
     }
 }
 
 fn tuple_sig_equal(
-    arena: &guff_types::arena::TypeArena,
+    arena: &mut guff_types::arena::TypeArena,
     objects: &guff_types::arena::ObjectArena,
+    packages: &guff_types::arena::PackageArena,
     a: guff_types::TypeId,
     b: guff_types::TypeId,
 ) -> bool {
@@ -156,7 +187,13 @@ fn tuple_sig_equal(
     (0..na).all(|i| {
         let ta = tuple_at(arena, a, i).typ(objects);
         let tb = tuple_at(arena, b, i).typ(objects);
-        ta == tb
+        match (ta, tb) {
+            (Some(ta), Some(tb)) => {
+                guff_types::predicates::identical(arena, objects, packages, ta, tb)
+            }
+            (None, None) => true,
+            _ => false,
+        }
     })
 }
 
