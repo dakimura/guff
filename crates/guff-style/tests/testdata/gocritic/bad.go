@@ -142,6 +142,20 @@ func underef(p *struct{ N int }) {
 	_ = (*p).N
 }
 
+// `checkStarExpr` refuses a pointer to an interface or to another pointer: the
+// dereference is not removable there. gitea keeps its indexers in an
+// `atomic.Pointer[Indexer]` over an interface and writes `(*p.Load()).Close()`
+// fourteen times, none of them a finding upstream.
+type underefIface interface{ Close() error }
+
+func underefPtrToInterface(p *underefIface) error {
+	return (*p).Close()
+}
+
+func underefPtrToPointer(p **struct{ N int }) int {
+	return (*p).N
+}
+
 func dupArg(a string) {
 	_ = strings.Contains(a, a)
 }

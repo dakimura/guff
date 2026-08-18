@@ -1,0 +1,3 @@
+# The same duplicate pair in two directories: one excluded by name, one not.
+pkg/plain/plain.go       crates/guff-dupl/tests/testdata/dupl/bad.go
+pkg/webhook/webhook.go   crates/guff-dupl/tests/testdata/dupl/bad.go

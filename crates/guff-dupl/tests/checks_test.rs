@@ -7,16 +7,24 @@ use guff_analysis::SettingsBag;
 use guff_dupl::{dupl, Options};
 use guff_runner::{run_on_packages, RunnerOptions};
 
+/// The duplicate's location is a **path**, not a basename.
+///
+/// Upstream renders it with `fsutils.ShortestRelPath(i.To.Filename(), "")` —
+/// relative to the working directory. The difference is invisible until a
+/// config excludes by `text`: gitea drops dupl findings matching `(?i)webhook`,
+/// which its `services/webhook/*.go` duplicates carry only because the path is
+/// in the message. Eight findings golangci-lint does not report.
 #[test]
 fn dupl_flags_duplicate_functions() {
     let pkg = support::typecheck_fixture("dupl", "example.com/dupl", "bad.go");
     let messages = run_dupl_with_threshold(&pkg, 30);
     assert!(
         messages.iter().any(|m| {
-            m.contains("3-34 lines are duplicate of `bad.go:36-67`")
-                || m.contains("36-67 lines are duplicate of `bad.go:3-34`")
+            m.contains("3-34 lines are duplicate of `tests/testdata/dupl/bad.go:36-67`")
+                || m.contains("36-67 lines are duplicate of `tests/testdata/dupl/bad.go:3-34`")
         }),
-        "{messages:?}"
+        "the message names the path relative to the working directory \
+         (`cargo test` runs in the crate dir): {messages:?}"
     );
 }
 

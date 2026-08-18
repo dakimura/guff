@@ -48,10 +48,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     for issue in issues {
         let pos = line_pos(pass, &issue.from.filename, issue.from.line_start);
-        let to_name = Path::new(&issue.to.filename)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(issue.to.filename.as_str());
+        // Upstream: `fsutils.ShortestRelPath(i.To.Filename(), "")` — the path
+        // relative to the working directory, not the basename. The difference
+        // is invisible until a config excludes by `text`: gitea drops dupl
+        // findings matching `(?i)webhook`, which its `services/webhook/*.go`
+        // duplicates carry only because the *path* is in the message. Eight
+        // findings golangci-lint does not report.
+        let to_name = shortest_rel_path(&issue.to.filename);
         let msg = format!(
             "{}-{} lines are duplicate of `{}:{}-{}`",
             issue.from.line_start,
@@ -62,12 +65,34 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         );
         pass.report(Diagnostic {
             pos,
+            // Upstream builds `token.Position{Filename, Line}` and never sets
+            // Column, so golangci prints column 0. Deriving it from the offset
+            // gives 1, which is a difference the finding-set diff does not key
+            // on and the check-level golden does.
+            column: Some(0),
             message: msg,
             ..Diagnostic::default()
         });
     }
 
     Ok(None)
+}
+
+/// Port of golangci-lint's `fsutils.ShortestRelPath(path, "")`: the path
+/// relative to the process working directory, with symlinks resolved. Falls
+/// back to the path as given when either step fails, as there is nothing better
+/// to say.
+fn shortest_rel_path(path: &str) -> String {
+    let p = Path::new(path);
+    let resolved = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let Ok(wd) = std::env::current_dir() else {
+        return path.to_string();
+    };
+    let wd = std::fs::canonicalize(&wd).unwrap_or(wd);
+    match resolved.strip_prefix(&wd) {
+        Ok(rel) => rel.to_string_lossy().into_owned(),
+        Err(_) => resolved.to_string_lossy().into_owned(),
+    }
 }
 
 fn line_pos(pass: &Pass<'_>, filename: &str, line: i32) -> u32 {
