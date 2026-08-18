@@ -328,7 +328,12 @@ fn run_format_checks_inner(
             "File is not properly formatted",
             "",
             "",
-            "error",
+            // golangci-lint leaves a formatter issue's severity empty — gosec
+            // is the only linter it attaches one to by default. Hardcoding
+            // "error" here made every formatter finding differ from upstream in
+            // a field the finding-set diff does not key on, so only the
+            // check-level golden could see it.
+            "",
         ));
     }
     match filter {

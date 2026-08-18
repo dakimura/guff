@@ -1,0 +1,3 @@
+# The fixture the Rust test uses, so the two cannot drift.
+longoneline/longoneline.go   crates/guff-fmt/testdata/gofumpt/longoneline.go
+unformatted/unformatted.go   crates/guff-fmt/testdata/gofumpt/unformatted.go
