@@ -1,0 +1,26 @@
+# Golden case: nilnil, and the traversal that decides what it sees.
+#
+# Upstream's callback `return false`s on every path out of the ReturnStmt arm —
+# after reporting, and on each of the rejections before it — and
+# `inspector.Nodes` reads that as "do not descend". So a `return` the rule
+# declines to judge takes its whole subtree with it, function literals included:
+#
+#     return db.WithTx2(ctx, func(…) (*Comment, error) {
+#         return nil, nil          // never visited: the outer return has one result
+#     })
+#
+# gitea v1.27.2 writes six of those and golangci-lint reports none of them.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - nilnil
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

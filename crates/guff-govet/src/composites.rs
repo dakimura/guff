@@ -83,6 +83,13 @@ fn is_same_package_type(pass: &Pass<'_>, typ: guff_types::TypeId) -> bool {
         // `promql_test` / `promql.test` → `promql` (upstream composite local-type rule).
         trim_test_suffix(raw.as_str()).to_string()
     };
+    // Upstream's `isLocalType` opens with `types.Unalias(typ)` — the comment on
+    // its `Obj()` arm reads "aliases were removed already". Without it a local
+    // alias (`type basic = BasicAuth`, which is how a table-driven test keeps
+    // its literals short) is neither a Struct, a Pointer nor a Named, so it
+    // fell through to "not local" and every `basic{...}` in the file was a
+    // finding. gitea `modules/auth/httpauth/httpauth_test.go` writes six.
+    let typ = guff_types::alias::unalias_readonly(types, typ);
     match types.get(typ) {
         TypeData::Struct(_) => true,
         TypeData::Pointer(p) => is_same_package_type(pass, p.elem()),

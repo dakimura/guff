@@ -197,14 +197,27 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for file in pass.files() {
         let mut stack = Vec::new();
         walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
-            if let NodeRef::ReturnStmt(ret) = n {
-                if let Some(ft) = enclosing_func_type(stack) {
-                    if let Some(diag) = check_return(pass, ft, ret, opts.only_two) {
-                        pending.push(diag);
-                    }
-                }
+            let NodeRef::ReturnStmt(ret) = n else {
+                return true;
+            };
+            // Upstream's callback `return false`s on **every** path out of the
+            // ReturnStmt arm — after reporting, and on each of the rejections
+            // before it — and `inspector.Nodes` reads that as "do not descend".
+            // So a `return` the rule declines to judge takes its whole subtree
+            // with it, function literals included:
+            //
+            //     return db.WithTx2(ctx, func(…) (*Comment, error) {
+            //         return nil, nil          // never visited: the outer
+            //     })                           // return has one result
+            //
+            // gitea writes six of those and golangci-lint reports none of them.
+            let Some(ft) = enclosing_func_type(stack) else {
+                return false;
+            };
+            if let Some(diag) = check_return(pass, ft, ret, opts.only_two) {
+                pending.push(diag);
             }
-            true
+            false
         });
     }
 
