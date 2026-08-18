@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh dupl-exclude-text
+# Produced by running golangci-lint on compat/golden/cases/dupl-exclude-text/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+pkg/plain/plain.go:3:0:dupl::3-34 lines are duplicate of `pkg/plain/plain.go:36-67`
+pkg/plain/plain.go:36:0:dupl::36-67 lines are duplicate of `pkg/plain/plain.go:3-34`

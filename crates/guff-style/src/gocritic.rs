@@ -2063,6 +2063,9 @@ fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, St
     let Expr::StarExpr(star) = paren.x.as_ref() else {
         return;
     };
+    if !underef_check_star_expr(pass, &star.x) {
+        return;
+    }
     let Some(inner) = expr_text(&star.x) else {
         return;
     };
@@ -2075,6 +2078,40 @@ fn check_underef(pass: &Pass<'_>, sel: &SelectorExpr, pending: &mut Vec<(u32, St
             sel.sel.name, sel.sel.name
         ),
     );
+}
+
+/// go-critic `checkStarExpr`: the dereferenced operand must be a pointer, and
+/// the pointee must be neither a pointer nor an **interface**.
+///
+/// ```go
+/// typ, ok := c.ctx.TypeOf(expr.X).Underlying().(*types.Pointer)
+/// if !ok { return false }
+/// switch typ.Elem().Underlying().(type) {
+/// case *types.Pointer, *types.Interface: return false
+/// default: return true
+/// }
+/// ```
+///
+/// guff had no equivalent, so `(*p).M` where `p` is a `*SomeInterface` was a
+/// finding. gitea keeps its indexers in an `atomic.Pointer[Indexer]` over an
+/// interface and writes `(*globalIndexer.Load()).Close()` fourteen times.
+fn underef_check_star_expr(pass: &Pass<'_>, x: &Expr) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(typ) = type_of(pass, x) else {
+        return false;
+    };
+    let u = typ.underlying(&artifacts.types);
+    let TypeData::Pointer(p) = artifacts.types.get(u) else {
+        return false;
+    };
+    let elem = p.elem();
+    let elem_u = elem.underlying(&artifacts.types);
+    !matches!(
+        artifacts.types.get(elem_u),
+        TypeData::Pointer(_) | TypeData::Interface(_)
+    )
 }
 
 /// True when `sel` is a method with a pointer receiver (go-critic
