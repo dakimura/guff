@@ -165,6 +165,41 @@ fn nilerr_flags_nil_returns() {
     );
 }
 
+/// What counts as "the block uses the error" is `callInstr.Call.Args`, peeled
+/// through `MakeInterface` / `ChangeInterface` / an invoke's receiver.
+///
+/// Boxing is the case that matters: any variadic call — `fmt.Sprintf("…: %v",
+/// err)`, `fmt.Errorf("…: %w", err)` — passes a `MakeInterface` wrapping the
+/// error, and without peeling it the block reads as though it never mentioned
+/// the error at all (25 findings on dapr that golangci-lint does not make).
+///
+/// The other direction is `err.Error()` on its own: an invoke call keeps its
+/// receiver in `Call.Value`, not in `Args`, so upstream does *not* count it,
+/// and counting it silenced a finding golangci-lint makes.
+#[test]
+fn nilerr_use_of_the_error_is_read_off_the_call_arguments() {
+    let dir = support::testdata("nilerr");
+
+    let ok = support::typecheck_pkg("example.com/nilerr/ok", &dir.join("ok.go"));
+    let ok_messages = support::run_analyzer(nilerr(), &ok);
+    assert!(
+        ok_messages.is_empty(),
+        "an error boxed into `any` for a variadic call is a use: {ok_messages:?}"
+    );
+
+    let bad = support::typecheck_pkg("example.com/nilerr", &dir.join("bad.go"));
+    let bad_messages = support::run_analyzer(nilerr(), &bad);
+    assert_eq!(
+        bad_messages
+            .iter()
+            .filter(|m| m.contains("error is not nil (line "))
+            .count(),
+        3,
+        "the two new blocks — err.Error() only, and err copied to a local — \
+         are findings alongside the original: {bad_messages:?}"
+    );
+}
+
 #[test]
 fn nilerr_allows_correct_returns() {
     let dir = support::testdata("nilerr");

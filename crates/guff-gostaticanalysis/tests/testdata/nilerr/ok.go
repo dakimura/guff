@@ -27,3 +27,18 @@ func okUseErr() error {
 	}
 	return nil
 }
+
+func logf(format string, args ...any) {}
+
+// Passing the error to anything variadic boxes it into an `any` first, so the
+// use is a `MakeInterface` wrapping it — `isUsedInValue` peels that. Without
+// the peel the block looks as though it never mentions the error, which is
+// what made dapr's 25 `fmt.Sprintf("…: %v", err)` blocks findings.
+func okErrBoxedIntoAny() error {
+	err := do()
+	if err != nil {
+		logf("failed: %v", err)
+		return nil
+	}
+	return nil
+}

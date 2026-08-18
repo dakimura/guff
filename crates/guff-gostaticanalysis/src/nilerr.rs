@@ -163,38 +163,33 @@ fn is_return_error(func: &Function, bid: BlockId, err_val: Value) -> Option<u32>
     Some(pos.0 as u32)
 }
 
-fn peel_value(func: &Function, value: Value) -> Value {
-    let mut cur = value;
-    for _ in 0..8 {
-        let Value::Instr(iid) = cur else {
-            return cur;
-        };
-        match func.instrs.get(iid) {
-            InstrData::ChangeType(ct) => cur = ct.x,
-            InstrData::UnOp(u) if u.op == Token::MUL => cur = u.x,
-            _ => return cur,
-        }
-    }
-    cur
-}
-
+/// Port of `isUsedInValue`, which is three cases and nothing else:
+///
+/// ```go
+/// case *ssa.ChangeInterface: return isUsedInValue(value.X, lookedFor)
+/// case *ssa.MakeInterface:   return isUsedInValue(value.X, lookedFor)
+/// case *ssa.Call:            if value.Call.IsInvoke() { … }
+/// ```
+///
+/// `MakeInterface` is the load-bearing one. Passing an `error` to anything
+/// variadic — `fmt.Sprintf("failed: %v", err)`, `fmt.Errorf("…: %w", err)` —
+/// boxes it first, so without peeling the box the block looks as though it
+/// never mentions the error and `nilerr` reports a return that deliberately
+/// swallowed it. dapr writes 25 of them.
 fn is_used_in_value(func: &Function, value: Value, looked_for: Value) -> bool {
-    if value == looked_for || peel_value(func, value) == peel_value(func, looked_for) {
+    if value == looked_for {
         return true;
     }
     let Value::Instr(iid) = value else {
         return false;
     };
     match func.instrs.get(iid) {
-        InstrData::ChangeType(ct) => is_used_in_value(func, ct.x, looked_for),
-        InstrData::Call(c) => {
-            if c.call.method.is_some() && is_used_in_value(func, c.call.value, looked_for) {
-                return true;
-            }
-            c.call
-                .args
-                .iter()
-                .any(|&a| is_used_in_value(func, a, looked_for))
+        InstrData::ChangeInterface(ci) => is_used_in_value(func, ci.x, looked_for),
+        InstrData::MakeInterface(mi) => is_used_in_value(func, mi.x, looked_for),
+        // `value.Call.IsInvoke()` — an interface method call, whose receiver is
+        // `Call.Value`. A static call is not looked through at all.
+        InstrData::Call(c) if c.call.method.is_some() => {
+            is_used_in_value(func, c.call.value, looked_for)
         }
         _ => false,
     }
@@ -205,20 +200,18 @@ fn uses_error_value(func: &Function, bid: BlockId, err_val: Value) -> bool {
     for &iid in &block.instrs {
         match func.instrs.get(iid) {
             InstrData::Call(call) => {
-                if call.call.method.is_some()
-                    && is_used_in_value(func, call.call.value, err_val)
-                {
-                    return true;
-                }
+                // Upstream looks at `callInstr.Call.Args` and nothing else. An
+                // *invoke* call keeps its receiver in `Call.Value`, not in
+                // `Args`, so `err.Error()` on its own does **not** count as
+                // using the error — while `x.Foo()` on a concrete receiver
+                // does, because there the receiver is `Args[0]`. That
+                // asymmetry is upstream's, and treating the invoke receiver as
+                // a use silenced a finding golangci-lint makes.
                 for &arg in &call.call.args {
                     if is_used_in_value(func, arg, err_val) {
                         return true;
                     }
                 }
-            }
-            InstrData::UnOp(u) if is_used_in_value(func, u.x, err_val) => {
-                // err.Error() may lower as call; also count other uses.
-                return true;
             }
             _ => {}
         }
