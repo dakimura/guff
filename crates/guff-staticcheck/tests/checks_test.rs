@@ -2043,6 +2043,33 @@ sa_check!(sa9004, sa9004_flags_mixed_const_types, sa9004_allows_uniform_const_ty
 sa_check!(sa9006, sa9006_flags_fixed_shift, sa9006_allows_variable_shift, "shift");
 sa_check!(sa9009, sa9009_flags_ineffectual_directive, sa9009_allows_valid_directive, "go:");
 
+/// `if a || b { … }` renames the pointer, in both directions.
+///
+/// honnef's IR is SSI: the `err != nil` branch decides whether the `p == nil`
+/// check is reached at all, so the check's operand is a sigma and the block
+/// below the join reads a phi merging both edges. SA5011 is pure value
+/// identity, so it cannot match across either — whatever the branch body does,
+/// and whichever side the deref is on. coredns writes fifteen of these in
+/// `test/wildcard_test.go` and they were the whole of its staticcheck diff.
+#[test]
+fn sa5011_or_guard_renames_the_pointer() {
+    let pkg = typecheck_rule("sa5011", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "every OR-guarded shape in ok.go is silent upstream: {messages:?}"
+    );
+
+    // The single-check spelling of the deref-first shape is still a finding.
+    let bad = typecheck_rule("sa5011", "bad.go");
+    let bad_messages = support::run_analyzer(sa5011::analyzer(), &bad);
+    assert!(
+        bad_messages.len() == 2,
+        "bad.go keeps both of its findings: {bad_messages:?}"
+    );
+}
+
 #[test]
 fn sa5001_flags_defer_before_error_check() {
     let pkg = typecheck_rule("sa5001", "bad.go");
