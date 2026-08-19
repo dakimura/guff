@@ -244,6 +244,10 @@ impl<'a> Builder<'a> {
 
         let anon_fid = crate::create::create_function(self.prog, anon_name, Some(parent_fid), pkg);
         self.prog.functions.get_mut(anon_fid).signature = sig;
+        // go/ssa records `pos: e.Type.Func` on the literal's Function; the
+        // `MakeClosure` it emits below is left with no position at all, so this
+        // is the only place a diagnostic on a closure can point at.
+        self.prog.functions.get_mut(anon_fid).decl_pos = fl.ty.func;
         self.prog.functions.get_mut(parent_fid).anon_funcs.push(anon_fid);
 
         // Build the anonymous function eagerly (re-borrows the program; the

@@ -108,21 +108,6 @@ fn instr_call_common(func: &Function, iid: InstrId) -> Option<&CallCommon> {
     }
 }
 
-/// Strips value-preserving `ChangeType` wrappers. Returning a func literal as a
-/// *named* function type (`return func(ns string) error {…}` from a
-/// `func() listFunc`) converts at the return, so the `Function` value sits one
-/// instruction in. (Go: the ChangeType `emitConv` inserts for a return operand.)
-fn unwrap_change_type(func: &Function, v: Value) -> Value {
-    let mut cur = v;
-    loop {
-        let Value::Instr(iid) = cur else { return cur };
-        match func.instrs.get(iid) {
-            InstrData::ChangeType(ct) => cur = ct.x,
-            _ => return cur,
-        }
-    }
-}
-
 fn ensure_ctx_fact_decoder() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -492,26 +477,6 @@ impl<'a> Runner<'a> {
             .find_map(|(fid, f)| (f.object == Some(obj)).then_some(fid))
     }
 
-    /// Callees to chase from `iid`: upstream Call/MakeClosure targets, plus bare
-    /// `Function` values returned by a `return` (go/ssa emits those for
-    /// non-capturing func lits; guff may also do so when free-var capture fails
-    /// under incomplete types — helm `RsListFromClient`).
-    fn instr_callees(&self, func: &Function, iid: InstrId) -> Vec<FuncId> {
-        if let Some(fid) = self.callee_func(func, iid) {
-            return vec![fid];
-        }
-        let InstrData::Return(ret) = func.instrs.get(iid) else {
-            return Vec::new();
-        };
-        ret.results
-            .iter()
-            .filter_map(|v| match unwrap_change_type(func, *v) {
-                Value::Function(fid) => Some(fid),
-                _ => None,
-            })
-            .collect()
-    }
-
     fn get_http_req_ctx(&self, f: &Function, least1: bool) -> Vec<Value> {
         let Some(referrers) = f.referrers.as_ref() else {
             return Vec::new();
@@ -824,11 +789,20 @@ impl<'a> Runner<'a> {
                     if !res.valid {
                         let chain: Vec<String> = res.funcs.iter().rev().cloned().collect();
                         let chain_str = chain.join("->");
-                        self.report_instr(
-                            f,
-                            iid,
-                            format!("Function `{chain_str}` should pass the context parameter"),
-                        );
+                        let msg =
+                            format!("Function `{chain_str}` should pass the context parameter");
+                        // go/ssa emits `MakeClosure` with no position, so a
+                        // capturing func literal has nowhere to report from.
+                        // Upstream falls back to the callee itself, whose
+                        // position is the literal's `func` token.
+                        if f.pos(iid).is_valid() {
+                            self.report_instr(f, iid, msg);
+                        } else if let Some(callee) = self.callee_func(f, iid) {
+                            let pos = self.prog.func_pos(callee);
+                            if pos.is_valid() {
+                                self.report(pos.0 as u32, msg);
+                            }
+                        }
                     }
                 }
             }
@@ -842,14 +816,16 @@ impl<'a> Runner<'a> {
 
         for (_, block) in f.live_blocks() {
             for &iid in &block.instrs {
-                // Upstream `getCtxType` is ok for CallInstruction / MakeClosure.
-                // Also walk `return fn` (bare Function) — go/ssa does this for
-                // non-capturing func lits; guff may too when free-var capture
-                // fails (helm `RsListFromClient` under incomplete client types).
-                let callees = self.instr_callees(f, iid);
+                // Upstream `getCtxType` is ok for CallInstruction / MakeClosure
+                // and nothing else. A `return fn` that hands back a bare
+                // `Function` — what go/ssa emits for a func literal with no
+                // free variables — is deliberately not followed: upstream
+                // reaches a returned literal through the `MakeClosure` its
+                // *capturing* form emits, and reports nothing when there is
+                // none.
+                let callees: Vec<FuncId> = self.callee_func(f, iid).into_iter().collect();
                 let is_call_like = instr_call_common(f, iid).is_some()
-                    || matches!(f.instrs.get(iid), InstrData::MakeClosure(_))
-                    || !callees.is_empty();
+                    || matches!(f.instrs.get(iid), InstrData::MakeClosure(_));
                 if !is_call_like {
                     continue;
                 }

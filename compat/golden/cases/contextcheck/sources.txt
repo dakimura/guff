@@ -1,0 +1,14 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The golden tier keeps no copy of these files: it points at the fixtures the
+# Rust unit tests already use, so the two can never drift. Each file is its own
+# package there (they are type-checked one at a time), so each gets its own
+# directory here.
+bad/bad.go                 crates/guff-context/tests/testdata/contextcheck/bad.go
+ok/ok.go                   crates/guff-context/tests/testdata/contextcheck/ok.go
+closures/closures.go       crates/guff-context/tests/testdata/contextcheck/closures.go
+closure/closure.go         crates/guff-context/tests/testdata/contextcheck_closure/closure.go
+nocapture/nocapture.go     crates/guff-context/tests/testdata/contextcheck_nocapture/nocapture.go
+httphandler_ok/ok.go       crates/guff-context/tests/testdata/contextcheck_httphandler/ok.go
+httphandler_bad/bad.go     crates/guff-context/tests/testdata/contextcheck_httphandler/bad.go
