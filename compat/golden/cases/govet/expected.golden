@@ -30,6 +30,11 @@ errorsas/concrete_bad/concrete_bad.go:12:2:govet::errorsas: second argument to e
 hostport/bad/bad.go:9:30:govet::hostport: address format "%s:%d" does not work with IPv6
 hostport/bad/bad.go:13:22:govet::hostport: address format "%s:%s" does not work with IPv6 (passed to net.Dial at L14)
 httpresponse/bad/bad.go:7:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:15:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:21:8:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:30:9:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:38:9:govet::httpresponse: using resp before checking for errors
+httpresponse/bad/bad.go:51:8:govet::httpresponse: using h before checking for errors
 ifaceassert/bad/bad.go:12:9:govet::ifaceassert: impossible type assertion: no type can implement both example.com/govet/ifaceassert/bad.I and example.com/govet/ifaceassert/bad.J (conflicting types for M method)
 inline/bad/bad.go:6:21:govet::inline: Constant reflect.Ptr should be inlined
 inline_local/bad/bad.go:9:9:govet::inline: Constant Legacy should be inlined

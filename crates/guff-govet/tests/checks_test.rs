@@ -917,8 +917,24 @@ fn httpresponse_flags_defer_before_error_check() {
         &[("net/http", &dir.join("stub/net/http/http.go"))],
     );
     let messages = support::run_analyzer(httpresponse_analyzer(), &pkg);
-    assert!(!messages.is_empty(), "{messages:?}");
-    assert!(messages.iter().any(|m| m.contains("before checking for errors")));
+    // Six, not one: the package-level call, the two http.Client methods, the
+    // two blocks nested in a loop and a func literal, and the selector whose
+    // root is `h`. Anything less means the walk stopped somewhere.
+    assert_eq!(messages.len(), 6, "{messages:?}");
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.as_str() == "using resp before checking for errors")
+            .count(),
+        5,
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "using h before checking for errors"),
+        "{messages:?}"
+    );
 }
 
 #[test]
