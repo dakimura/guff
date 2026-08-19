@@ -170,6 +170,7 @@ sa2003/bad/bad.go:8:2:staticcheck::SA2003: deferring Lock right after having loc
 sa3001/bad/bad.go:6:2:staticcheck::SA3001: should not assign to b.N
 sa4000/bad/bad.go:4:9:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
 sa4000/bad/bad.go:5:9:staticcheck::SA4000: identical expressions on the left and right side of the '==' operator
+sa4000/bad/bad.go:8:9:staticcheck::SA4000: identical expressions on the left and right side of the '|' operator
 sa4001/bad/bad.go:8:6:staticcheck::SA4001: &*x will be simplified to x. It will not copy x.
 sa4001/bad/bad.go:9:6:staticcheck::SA4001: *&x will be simplified to x. It will not copy x.
 sa4003/bad/bad.go:4:9:staticcheck::SA4003: no value of type uint is less than 0

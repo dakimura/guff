@@ -14,7 +14,7 @@ use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
 
-use crate::render::render_expr;
+use crate::render::render_node;
 
 fn is_float_type(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(info) = pass.types_info() else {
@@ -72,8 +72,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if std::mem::discriminant(&*op.x) != std::mem::discriminant(&*op.y) {
             return;
         }
-        if render_expr(&op.x) != render_expr(&op.y) {
-            return;
+        // Upstream compares `report.Render` of the two operands, i.e. the
+        // printed source. A node the printer cannot render is not a node we
+        // know to be identical to anything.
+        match (render_node(pass, &op.x), render_node(pass, &op.y)) {
+            (Some(x), Some(y)) if x == y => {}
+            _ => return,
         }
         if let Expr::CallExpr(c) = &*op.x {
             if let Some(n) = call_name(pass, &c.fun) {
