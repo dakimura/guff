@@ -36,6 +36,9 @@ struct SharedFileRules<'a> {
     /// `lint.File.IsTest` is a filename check, so it is per file, not per
     /// package, and `run_shared` sets it before each `on_file`.
     file_is_test: bool,
+    /// Index of the file currently being walked in `pass.files()`, for rules
+    /// that need to reach past the AST into the file's bytes.
+    file_index: usize,
     argument_limit: Option<argument_limit::Checker>,
     atomic: Option<atomic::Checker<'a>>,
     banned_characters: Option<banned_characters::Checker>,
@@ -73,7 +76,7 @@ struct SharedFileRules<'a> {
     identical_ifelseif_conditions: Option<identical_ifelseif_conditions::Checker<'a>>,
     identical_switch_branches: Option<identical_switch_branches::Checker<'a>>,
     identical_switch_conditions: Option<identical_switch_conditions::Checker<'a>>,
-    if_return: Option<if_return::Checker>,
+    if_return: Option<if_return::Checker<'a>>,
     import_alias_naming: Option<import_alias_naming::Checker>,
     imports_blocklist: Option<imports_blocklist::Checker>,
     increment_decrement: Option<increment_decrement::Checker>,
@@ -134,6 +137,7 @@ impl<'a> SharedFileRules<'a> {
         let enabled = |name: &str| settings.rule_enabled(name, config::DEFAULT_RULES, all);
         Self {
             file_is_test: false,
+            file_index: 0,
             argument_limit: enabled("argument-limit").then(argument_limit::Checker::new),
             atomic: enabled("atomic").then(|| atomic::Checker::try_new(pass)).flatten(),
             banned_characters: enabled("banned-characters")
@@ -194,7 +198,7 @@ impl<'a> SharedFileRules<'a> {
                 .then(|| identical_switch_branches::Checker::new(pass)),
             identical_switch_conditions: enabled("identical-switch-conditions")
                 .then(|| identical_switch_conditions::Checker::new(pass)),
-            if_return: enabled("if-return").then(if_return::Checker::new),
+            if_return: enabled("if-return").then(|| if_return::Checker::new(pass)),
             import_alias_naming: enabled("import-alias-naming").then(import_alias_naming::Checker::new),
             imports_blocklist: enabled("imports-blocklist")
                 .then(|| imports_blocklist::Checker::try_new(pass))
@@ -354,6 +358,9 @@ impl<'a> SharedFileRules<'a> {
     }
 
     fn on_file(&mut self, file: &'a File) {
+        if let Some(c) = &mut self.if_return {
+            c.on_file(self.file_index);
+        }
         if let Some(c) = &mut self.duplicated_imports {
             c.on_file(file);
         }
@@ -577,8 +584,9 @@ pub fn run_shared(pass: &Pass<'_>) -> HashMap<&'static str, Vec<Failure>> {
     if !shared.any_enabled() {
         return HashMap::new();
     }
-    for file in pass.files() {
+    for (index, file) in pass.files().iter().enumerate() {
         shared.file_is_test = crate::util::file_is_test(pass, file);
+        shared.file_index = index;
         shared.on_file(file);
         walk::walk(&mut shared, NodeRef::File(file));
     }

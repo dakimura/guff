@@ -568,3 +568,50 @@ func boolExprSimplifyExtra(x, y bool, a, b int) {
 func unlambdaExtra() {
 	_ = func(s string) string { return strings.TrimSpace(s) }
 }
+
+// badCall's rules compile to gogrep's opNonVariadicCallExpr, so a call that
+// spreads a slice never matches however few arguments it has written out.
+func filepathJoinVariadicExtra(elems []string) string {
+	return filepath.Join(elems...)
+}
+
+type mapKeyNamedString string
+
+type mapKeyStruct struct{ N int }
+
+// mapKey gates on the literal's type, not on `map[K]V` syntax.
+func mapKeyExtras(a *mapKeyStruct, ch chan string) {
+	// Pointer keys: a repeat here is the compiler's problem, not mapKey's.
+	_ = map[*mapKeyStruct]int{
+		a: 1,
+		a: 2,
+	}
+	// A named string key still has string kind underneath.
+	_ = map[mapKeyNamedString]int{
+		mapKeyNamedString(mapKeyIdent): 1,
+		mapKeyNamedString(mapKeyIdent): 2,
+	}
+	// Nested literal with an elided type: no type expression to read at all.
+	_ = map[string]map[string]int{
+		"outer": {
+			mapKeyIdent: 1,
+			mapKeyIdent: 2,
+		},
+	}
+	// Keys with side effects are skipped: two receives are not a duplicate.
+	_ = map[string]int{
+		<-ch: 1,
+		<-ch: 2,
+	}
+	// The whitespace walk gives up on this literal (two spaced keys), which
+	// must not take the duplicate walk down with it.
+	_ = map[string]int{
+		" lead":                1,
+		"trail ":               2,
+		mapKeyIdent:            3,
+		mapKeyIdent:            4,
+		string(mapKeyIdent[0]): 5,
+	}
+}
+
+var mapKeyIdent = "k"

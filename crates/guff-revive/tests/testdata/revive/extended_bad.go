@@ -471,3 +471,14 @@ func badForbiddenWgGo() {
 var _ = osdup.Args
 
 var _ = BadAlias.X
+
+// A comment anywhere between the `if` and the `return nil` is revive's signal
+// that the construct is deliberate (`containsComments`), so the pair below is
+// not a finding even though it is the same shape as `badIfReturn` above.
+func okIfReturnWithComment() error {
+	if err := errors.New("x"); err != nil {
+		return err
+	}
+	// Return nil when there was nothing to report.
+	return nil
+}

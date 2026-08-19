@@ -1369,6 +1369,15 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
         );
     }
 
+    // Every remaining badCall rule is a plain `f($_, ...)` pattern, and gogrep
+    // compiles those to opNonVariadicCallExpr: a call that spreads a slice with
+    // `...` carries a valid Ellipsis and never matches. `filepath.Join(elems...)`
+    // is the case that shows up in the wild — one arg syntactically, but not the
+    // one-element Join the rule is about.
+    if call.ellipsis.is_valid() {
+        return;
+    }
+
     let Some(name) = code::call_name(pass, &call.fun).or_else(|| call_qualified_name(call)) else {
         return;
     };
@@ -1676,46 +1685,77 @@ fn check_flag_name(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Str
     }
 }
 
-fn check_map_key(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
+/// go-critic's mapKey gate: the literal's *type* must be a map whose key kind
+/// is `string`.
+///
+/// Two things ride on using the type rather than the `map[K]V` syntax. A nested
+/// literal with an elided type (`map[string]map[string]int{"a": {…}}`) has no
+/// type expression at all and still counts, and `map[*User]T` is out however
+/// map-shaped it reads — the checker is about string keys, so a pointer key
+/// that happens to repeat is the compiler's business, not this checker's.
+fn is_string_keyed_map(pass: &Pass<'_>, lit: &CompositeLit) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&lit.id) else {
+        return false;
+    };
+    let under = tv.typ.underlying(&artifacts.types);
+    let TypeData::Map(m) = artifacts.types.get(under) else {
+        return false;
+    };
+    let key_under = m.key().underlying(&artifacts.types);
+    // `HasStringKind` is `Kind() == types.String` — untyped string does not
+    // reach a map key type, so the narrow test is the faithful one.
+    matches!(
+        artifacts.types.get(key_under),
+        TypeData::Basic(b) if b.kind() == BasicKind::String
+    )
+}
+
+fn check_map_key(pass: &Pass<'_>, lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
     if lit.elts.len() < 2 {
         return;
     }
-    let is_map = matches!(lit.ty.as_deref(), Some(Expr::MapType(_)));
-    if !is_map {
+    if !is_string_keyed_map(pass, lit) {
         return;
     }
+    // Upstream runs these as two independent walks, so a literal that makes
+    // `checkWhitespace` give up still gets its duplicate keys reported.
+    check_map_key_whitespace(lit, pending);
+    check_map_key_duplicates(pass, lit, pending);
+}
+
+fn check_map_key_whitespace(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
     let mut whitespace_key: Option<(u32, String)> = None;
-    let mut seen_non_basic = HashSet::new();
     for elt in &lit.elts {
         let Expr::KeyValueExpr(kv) = elt else {
             continue;
         };
-        if let Expr::BasicLit(lit) = kv.key.as_ref() {
-            let Some(s) = unquote_basic_string(&lit.value) else {
-                continue;
-            };
-            if s.len() < 1 || s == " " || !s.contains(' ') {
-                continue;
-            }
-            let bad = (s.starts_with(' ') && !s.starts_with("  "))
-                || (s.ends_with(' ') && !s.ends_with("  "));
-            if !bad {
-                return;
-            }
-            if whitespace_key.is_some() {
-                return; // more than one → not suspicious
-            }
-            whitespace_key = Some((kv.key.pos().0 as u32, expr_text(&kv.key).unwrap_or(s)));
-        } else if let Some(text) = expr_text(&kv.key) {
-            if !seen_non_basic.insert(text.clone()) {
-                report(
-                    pending,
-                    kv.key.pos().0 as u32,
-                    "mapKey",
-                    format!("suspicious duplicate {text} key"),
-                );
-            }
+        let Expr::BasicLit(basic) = kv.key.as_ref() else {
+            continue;
+        };
+        let Some(s) = unquote_basic_string(&basic.value) else {
+            continue;
+        };
+        if s.is_empty() || !s.contains(' ') {
+            continue;
         }
+        if whitespace_key.is_some() {
+            return; // already seen one → more than one is not suspicious
+        }
+        if s == " " {
+            return; // a space key: the map may be about spaces. Give up.
+        }
+        let bad = (s.starts_with(' ') && !s.starts_with("  "))
+            || (s.ends_with(' ') && !s.ends_with("  "));
+        if !bad {
+            return; // padding, or a legitimate part of the key. Give up.
+        }
+        whitespace_key = Some((kv.key.pos().0 as u32, expr_text(&kv.key).unwrap_or(s)));
     }
     if let Some((pos, key)) = whitespace_key {
         report(
@@ -1724,6 +1764,36 @@ fn check_map_key(lit: &CompositeLit, pending: &mut Vec<(u32, String)>) {
             "mapKey",
             format!("suspicious whitespace in {key} key"),
         );
+    }
+}
+
+fn check_map_key_duplicates(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    pending: &mut Vec<(u32, String)>,
+) {
+    let mut seen_non_basic = HashSet::new();
+    for elt in &lit.elts {
+        let Expr::KeyValueExpr(kv) = elt else {
+            continue;
+        };
+        if matches!(kv.key.as_ref(), Expr::BasicLit(_)) {
+            continue; // basic lits are the compiler's job
+        }
+        if !side_effect_free(pass, &kv.key) {
+            continue;
+        }
+        let Some(text) = expr_text(&kv.key) else {
+            continue;
+        };
+        if !seen_non_basic.insert(text.clone()) {
+            report(
+                pending,
+                kv.key.pos().0 as u32,
+                "mapKey",
+                format!("suspicious duplicate {text} key"),
+            );
+        }
     }
 }
 
@@ -8201,6 +8271,34 @@ fn expr_contains_float_cmp(pass: &Pass<'_>, expr: &Expr) -> bool {
     }
 }
 
+/// `typep.SideEffectFree`, the whitelist version: everything not listed is
+/// assumed to have side effects. Unlike [`expr_is_safe`] this needs types, for
+/// the one case where a call is safe — a conversion such as `MyString("a")`.
+fn side_effect_free(pass: &Pass<'_>, expr: &Expr) -> bool {
+    match expr {
+        Expr::BasicLit(_) | Expr::Ident(_) => true,
+        Expr::StarExpr(e) => side_effect_free(pass, &e.x),
+        Expr::BinaryExpr(e) => side_effect_free(pass, &e.x) && side_effect_free(pass, &e.y),
+        // Upstream rejects exactly one operator: a channel receive.
+        Expr::UnaryExpr(e) => e.op != Token::ARROW && side_effect_free(pass, &e.x),
+        Expr::SliceExpr(e) => {
+            side_effect_free(pass, &e.x)
+                && e.low.as_ref().is_none_or(|x| side_effect_free(pass, x))
+                && e.high.as_ref().is_none_or(|x| side_effect_free(pass, x))
+                && e.max.as_ref().is_none_or(|x| side_effect_free(pass, x))
+        }
+        Expr::IndexExpr(e) => side_effect_free(pass, &e.x) && side_effect_free(pass, &e.index),
+        Expr::SelectorExpr(e) => side_effect_free(pass, &e.x),
+        Expr::ParenExpr(e) => side_effect_free(pass, &e.x),
+        Expr::TypeAssertExpr(e) => side_effect_free(pass, &e.x),
+        Expr::CompositeLit(e) => e.elts.iter().all(|x| side_effect_free(pass, x)),
+        Expr::CallExpr(e) => {
+            is_type_expr(pass, &e.fun) && e.args.iter().all(|x| side_effect_free(pass, x))
+        }
+        _ => false,
+    }
+}
+
 /// Approximate `typep.SideEffectFree` for combineChecks / foldRanges.
 fn expr_is_safe(expr: &Expr) -> bool {
     match unparen_expr(expr) {
@@ -8826,7 +8924,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::CompositeLit(lit) if enabled(&set, "mapKey") => {
-                    check_map_key(lit, &mut pending);
+                    check_map_key(pass, lit, &mut pending);
                 }
                 NodeRef::FuncLit(fl) if enabled(&set, "unlambda") => {
                     check_unlambda(pass, fl, &mut pending);
