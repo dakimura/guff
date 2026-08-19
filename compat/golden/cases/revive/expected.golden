@@ -77,7 +77,7 @@ directives/sibling.go:7:6:revive:warning:exported: type name will be used as dir
 dot/dot.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 dot/dot.go:1:1:revive:warning:package-comments: should have a package comment
 dot/dot.go:3:7:revive:warning:exported: exported const X should have comment or be unexported
-extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  7% (18 comment lines for 258 code lines) but expected a minimum of 10%
+extended/util/extended_bad.go:2:1:revive:warning:comments-density: the file has a comment density of  8% (25 comment lines for 285 code lines) but expected a minimum of 10%
 extended/util/extended_bad.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 extended/util/extended_bad.go:2:9:revive:warning:package-naming: don't use "util" because it is a bad package name according to https://go.dev/blog/package-names#bad-package-names
 extended/util/extended_bad.go:14:8:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"
@@ -237,7 +237,10 @@ extended/util/extended_bad.go:444:21:revive:warning:enforce-map-style: use make(
 extended/util/extended_bad.go:446:23:revive:warning:enforce-slice-style: use make([]type) instead of []type{} (or declare nil slice)
 extended/util/extended_bad.go:450:3:revive:warning:datarace: potential datarace: return value result is captured (by-reference) in goroutine
 extended/util/extended_bad.go:455:30:revive:warning:enforce-repeated-arg-type-style: repeated argument type "int" can be omitted
-extended/util/extended_bad.go:484:0:revive:warning:file-length-limit: file length is 484 lines, which exceeds the limit of 350
+extended/util/extended_bad.go:493:1:revive:warning:cognitive-complexity: function okRangeIsNotNesting has cognitive complexity 28 (> max enabled 7)
+extended/util/extended_bad.go:515:1:revive:warning:cognitive-complexity: function badMixedNesting has cognitive complexity 28 (> max enabled 7)
+extended/util/extended_bad.go:523:8:revive:warning:max-control-nesting: control flow nesting exceeds 5
+extended/util/extended_bad.go:533:0:revive:warning:file-length-limit: file length is 533 lines, which exceeds the limit of 350
 fixtures/var_naming_lists.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 fixtures/var_naming_lists.go:1:1:revive:warning:package-comments: should have a package comment
 fixtures/var_naming_lists.go:5:2:revive:warning:var-naming: var customId should be customID

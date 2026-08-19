@@ -177,6 +177,9 @@ extras.go:569:6:gocritic::unlambda: replace `func(s string) string { return stri
 extras.go:592:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
 extras.go:598:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
 extras.go:612:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:637:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:638:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:639:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
 testfuncs.go:36:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:44:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:53:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)

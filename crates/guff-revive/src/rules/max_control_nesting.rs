@@ -69,12 +69,14 @@ impl Walker<'_> {
                 self.visit_block(&f.body);
                 self.nesting -= 1;
             }
-            Stmt::RangeStmt(r) => {
-                self.last_ctrl_pos = r.for_.0;
-                self.nesting += 1;
-                self.visit_block(&r.body);
-                self.nesting -= 1;
-            }
+            // `for … range` is not a nesting level. Upstream's visitor
+            // switches on IfStmt / ForStmt / CaseClause / CommClause / FuncLit
+            // and nothing else; a `*ast.RangeStmt` falls through to the default
+            // `return w`, so `ast.Walk` descends into its body with the counter
+            // untouched — and `lastCtrlStmt`, which is where the failure is
+            // reported, keeps pointing at the enclosing control statement.
+            // jaeger nests four `range` loops and gets no finding for it.
+            Stmt::RangeStmt(r) => self.visit_block(&r.body),
             Stmt::CaseClause(CaseClause { body, case, .. }) => {
                 self.last_ctrl_pos = case.0;
                 self.nesting += 1;

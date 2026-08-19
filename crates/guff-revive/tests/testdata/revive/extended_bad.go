@@ -482,3 +482,52 @@ func okIfReturnWithComment() error {
 	// Return nil when there was nothing to report.
 	return nil
 }
+
+const nestingZero = 0
+
+// `for … range` is not a nesting level for max-control-nesting: the visitor
+// switches on IfStmt / ForStmt / CaseClause / CommClause / FuncLit and a
+// `*ast.RangeStmt` falls through to the default, which descends with the
+// counter untouched. Six of them plus an `if` is one level, not seven.
+// (jaeger internal/storage/v2/memory, internal/storage/metricstore.)
+func okRangeIsNotNesting(xs [][][][][][]int) int {
+	total := nestingZero
+	for _, a := range xs {
+		for _, b := range a {
+			for _, c := range b {
+				for _, d := range c {
+					for _, e := range d {
+						for _, f := range e {
+							if f > nestingZero {
+								total += f
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return total
+}
+
+// A three-clause `for` does count, so this one is over the limit even though
+// the `range` loop around it is not.
+func badMixedNesting(xs [][]int, n int) int {
+	total := nestingZero
+	for _, a := range xs {
+		for i := nestingZero; i < n; i++ {
+			for j := nestingZero; j < n; j++ {
+				for k := nestingZero; k < n; k++ {
+					for l := nestingZero; l < n; l++ {
+						for m := nestingZero; m < n; m++ {
+							if m > nestingZero {
+								total += a[i] + a[j] + a[k] + a[l] + m
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return total
+}
