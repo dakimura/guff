@@ -435,8 +435,27 @@ fn structtag_flags_unexported_json() {
     let dir = support::testdata("structtag");
     let pkg = support::typecheck_pkg("example.com/govet/structtag", &dir.join("bad.go"));
     let messages = support::run_analyzer(structtag_analyzer(), &pkg);
-    assert_eq!(messages.len(), 1, "{messages:?}");
-    assert!(messages[0].contains("not exported"));
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    assert!(messages.iter().any(|m| m.contains("not exported")), "{messages:?}");
+    // Tag options are not part of the name, so `a,omitempty` collides with `a`.
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.contains(r#"struct field A2 repeats json tag "a" also at bad.go:10"#)),
+        "{messages:?}"
+    );
+    // XML attributes are their own namespace, and the key says so.
+    assert!(
+        messages.iter().any(
+            |m| m.contains(r#"struct field Kind2 repeats xml attribute tag "kind" also at bad.go:"#)
+        ),
+        "{messages:?}"
+    );
+    // `XMLName` is exempt: nothing reported for XMLNameIsExempt.
+    assert!(
+        !messages.iter().any(|m| m.contains("ticketing-milestone")),
+        "{messages:?}"
+    );
 }
 
 #[test]

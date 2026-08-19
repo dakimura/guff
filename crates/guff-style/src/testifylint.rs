@@ -379,12 +379,43 @@ fn is_bool_override(pass: &Pass<'_>, expr: &Expr) -> bool {
     }
 }
 
+/// `isUntypedTrue` / `isUntypedFalse`: object identity against
+/// `types.Universe.Lookup("true")`, not "an expression whose constant value is
+/// true".
+///
+/// A package's own `const developmentDependency = true` has a bool constant
+/// value and is still not the predeclared `true`, so `assert.Equal(t,
+/// developmentDependency, x)` is not the `assert.Equal(t, true, x)` that
+/// bool-compare rewrites — gitea's nuget metadata test has two of them. The
+/// universe is the objects with no package; a local `true` shadowing the
+/// predeclared one is a different object and does not qualify.
+fn is_universe_bool(pass: &Pass<'_>, expr: &Expr, want: bool) -> bool {
+    let Expr::Ident(ident) = expr else {
+        return false;
+    };
+    let predeclared = if want { "true" } else { "false" };
+    if ident.name != predeclared {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(obj_id) = info.uses.get(&ident.id).copied() else {
+        return false;
+    };
+    matches!(artifacts.objects.get(obj_id), ObjectData::Const(_))
+        && obj_id.pkg(&artifacts.objects).is_none()
+}
+
 fn is_untyped_true(pass: &Pass<'_>, expr: &Expr) -> bool {
-    code::is_bool_const(pass, expr) && code::bool_const(pass, expr)
+    is_universe_bool(pass, expr, true)
 }
 
 fn is_untyped_false(pass: &Pass<'_>, expr: &Expr) -> bool {
-    code::is_bool_const(pass, expr) && !code::bool_const(pass, expr)
+    is_universe_bool(pass, expr, false)
 }
 
 fn is_nil(pass: &Pass<'_>, expr: &Expr) -> bool {
