@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh revive-identical
+# Produced by running golangci-lint on compat/golden/cases/revive-identical/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+identical/identical.go:35:2:revive:warning:identical-branches: both branches of the if are identical
+identical/identical.go:67:2:revive:warning:identical-branches: both branches of the if are identical
+identical/identical.go:78:2:revive:warning:identical-branches: both branches of the if are identical
+identical/identical.go:108:2:revive:warning:identical-branches: both branches of the if are identical
+identical/identical.go:119:2:revive:warning:identical-switch-branches: "switch" with identical branches (lines 120 and 122)
+identical/identical.go:135:2:revive:warning:identical-switch-conditions: case clause at line 133 has the same condition
+identical/identical.go:143:12:revive:warning:identical-ifelseif-branches: "if...else if" chain with identical branches (lines 143 and 145)
+identical/identical.go:155:9:revive:warning:identical-ifelseif-conditions: "if...else if" chain with identical conditions (lines 153 and 155)

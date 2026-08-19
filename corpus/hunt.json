@@ -46,5 +46,69 @@
     "packages": "./pkg/...",
     "tier": "hunt",
     "timeout": "30m"
+  },
+  {
+    "name": "coredns",
+    "url": "https://github.com/coredns/coredns.git",
+    "ref": "v1.14.6",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "jaeger",
+    "url": "https://github.com/jaegertracing/jaeger.git",
+    "ref": "v2.20.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
+  },
+  {
+    "name": "thanos",
+    "url": "https://github.com/thanos-io/thanos.git",
+    "ref": "v0.42.4",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "prometheus",
+    "url": "https://github.com/prometheus/prometheus.git",
+    "ref": "v3.14.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "dapr",
+    "url": "https://github.com/dapr/dapr.git",
+    "ref": "v1.18.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "gitea",
+    "url": "https://github.com/go-gitea/gitea.git",
+    "ref": "v1.27.2",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "argo-cd",
+    "url": "https://github.com/argoproj/argo-cd.git",
+    "ref": "v3.5.1",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "30m"
+  },
+  {
+    "name": "atlas",
+    "url": "https://github.com/ariga/atlas.git",
+    "ref": "v1.3.0",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
   }
 ]

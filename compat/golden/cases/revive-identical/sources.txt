@@ -1,0 +1,10 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# The five `identical-*` rules had no gate of their own: `revive-enable-all-rules`
+# runs them, but over a 42-line fixture with no branches in it, so every one of
+# them reported nothing and kept reporting nothing while the renderer behind
+# them dropped `if` init statements and `else` arms (six false
+# `identical-branches` on gitea v1.27.2).
+
+identical/identical.go   crates/guff-revive/tests/testdata/revive/identical.go
