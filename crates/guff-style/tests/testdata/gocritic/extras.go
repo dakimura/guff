@@ -615,3 +615,26 @@ func mapKeyExtras(a *mapKeyStruct, ch chan string) {
 }
 
 var mapKeyIdent = "k"
+
+// stringXbytes carries `Where(m["b"].Type.Is("[]byte"))` on three of its rules,
+// and `Type.Is` is `types.Identical` against `[]byte` — a named type over a byte
+// slice is out, and a named *string* type is very much out. jaeger compares
+// `attribute.Key` values this way in three places.
+type attrKeyExtra string
+
+type byteSliceExtra []byte
+
+func stringXbytesTypedExtra(k, other attrKeyExtra, nb byteSliceExtra) {
+	_ = len(string(k))
+	_ = string(k) == ""
+	_ = string(k) == string(other)
+	// A named type over []byte is not `[]byte` either.
+	_ = len(string(nb))
+	_ = string(nb) == ""
+}
+
+func stringXbytesRealBytesExtra(b, c []byte) {
+	_ = len(string(b))
+	_ = string(b) == ""
+	_ = string(b) == string(c)
+}

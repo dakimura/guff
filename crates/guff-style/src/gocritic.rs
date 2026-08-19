@@ -68,7 +68,7 @@
 //! SuggestedFix, caseOrder expression-switch overlap,
 //! wrapperFunc/unlambda/typeSwitchVar full type-aware parity,
 //! sortSlice SideEffectFree full parity, sqlQuery embedded-field Exec walk,
-//! stringXbytes regexp method / bytes.Equal full type parity,
+//! stringXbytes regexp method parity,
 //! preferFprint true `types.Implements(io.Writer)` (arity heuristic like QF1012),
 //! redundantSprint true `fmt.Stringer` Implements (method-name heuristic),
 //! typeUnparen full astcopy/astequal pretty-print parity.
@@ -5222,6 +5222,15 @@ fn is_os_path_separator_string_conv(expr: &Expr) -> bool {
     )
 }
 
+/// go-critic's `Where(m["b"].Type.Is("[]byte"))` — `types.Identical` against
+/// `[]byte`, so a named type over a byte slice does not qualify and neither
+/// does anything else.
+///
+/// The three `stringXbytes` rules that carry this `Where` used to accept any
+/// identifier or selector as a fallback for it. That is not a weaker type test,
+/// it is no type test at all for the shapes the rule actually meets:
+/// `string(attr.Key) == string(semconv.HTTPResponseStatusCodeKey)` compares two
+/// `attribute.Key`, a named *string* type, and jaeger has three of them.
 fn is_byte_slice_typed(pass: &Pass<'_>, expr: &Expr) -> bool {
     let Some(typ) = type_of(pass, expr) else {
         return false;
@@ -5446,9 +5455,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
                 && call.args.len() == 1
             {
                 if let Some(b) = is_string_conv(&call.args[0]) {
-                    if is_byte_slice_typed(pass, b)
-                        || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
-                    {
+                    if is_byte_slice_typed(pass, b) {
                         // Suggest(`len($b)`), no Report — golangci renders a
                         // suggestion-only rule as `suggestion: <replacement>`.
                         if let Some(b_t) = node_text(pass, b) {
@@ -5504,9 +5511,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
             // string(b) == "" / != ""
             if matches!(bin.op, Token::EQL | Token::NEQ) {
                 if let (Some(b), true) = (is_string_conv(&bin.x), is_string_lit_empty(&bin.y)) {
-                    if is_byte_slice_typed(pass, b)
-                        || matches!(b, Expr::Ident(_) | Expr::SelectorExpr(_))
-                    {
+                    if is_byte_slice_typed(pass, b) {
                         let op = if bin.op == Token::EQL { "==" } else { "!=" };
                         // Suggest(`len($b) == 0`) / Suggest(`len($b) != 0`).
                         if let Some(b_t) = node_text(pass, b) {
@@ -5523,11 +5528,7 @@ fn check_string_xbytes(pass: &Pass<'_>, n: NodeRef<'_>, pending: &mut Vec<(u32, 
             // string(x) == string(y) for []byte
             if matches!(bin.op, Token::EQL | Token::NEQ) {
                 if let (Some(x), Some(y)) = (is_string_conv(&bin.x), is_string_conv(&bin.y)) {
-                    let both_bytes = (is_byte_slice_typed(pass, x)
-                        || matches!(x, Expr::Ident(_) | Expr::SelectorExpr(_)))
-                        && (is_byte_slice_typed(pass, y)
-                            || matches!(y, Expr::Ident(_) | Expr::SelectorExpr(_)));
-                    if both_bytes {
+                    if is_byte_slice_typed(pass, x) && is_byte_slice_typed(pass, y) {
                         // Suggest(`bytes.Equal($x, $y)`) / `!bytes.Equal(...)`.
                         let bang = if bin.op == Token::EQL { "" } else { "!" };
                         if let (Some(x_t), Some(y_t)) = (node_text(pass, x), node_text(pass, y)) {
