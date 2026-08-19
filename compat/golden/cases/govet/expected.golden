@@ -81,6 +81,9 @@ slog/bad/bad.go:6:2:govet::slog: call to slog.Info missing a final value
 stdmethods/bad/bad.go:7:16:govet::stdmethods: method Unwrap() should have signature Unwrap() error or Unwrap() []error
 stringintconv/bad/bad.go:4:6:govet::stringintconv: conversion from untyped int to string yields a string of one rune, not a string of digits
 structtag/bad/bad.go:4:2:govet::structtag: struct field x has json tag but is not exported
+structtag/bad/bad.go:11:2:govet::structtag: struct field A2 repeats json tag "a" also at bad.go:10
+structtag/bad/bad.go:24:2:govet::structtag: struct field Kind2 repeats xml attribute tag "kind" also at bad.go:23
+structtag/bad/bad.go:39:2:govet::structtag: struct field hidden has json tag but is not exported
 testinggoroutine/bad_test/bad_test.go:7:2:govet::testinggoroutine: call to (*testing.T).Fatal from a non-test goroutine
 testinggoroutine/bad_test/bad_test.go:11:3:govet::testinggoroutine: call to (*testing.T).Fatalf from a non-test goroutine
 testinggoroutine/bad_test/bad_test.go:19:2:govet::testinggoroutine: call to (*testing.T).FailNow from a non-test goroutine (fn calls (*testing.T).FailNow)

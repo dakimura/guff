@@ -13,13 +13,15 @@
 //! When true, also require a known consumption call (`io.Copy` / `ReadAll` /
 //! `json.NewDecoder` / `bufio.NewScanner`/`NewReader`) on the same body.
 //!
+//! `return resp.Body` counts as closed — see [`mark_returned_body`].
+//!
 //! DEFERRED: full SSA referrer / Phi / closure-capture / FieldAddr /
-//! `io.Closer` ChangeInterface / Return-as-ReadCloser parity.
+//! `io.Closer` ChangeInterface parity.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FieldList, FuncType, ValueSpec};
+use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FieldList, FuncType, ReturnStmt, ValueSpec};
 use guff::walk::{inspect, preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect as inspect_pass;
@@ -338,6 +340,29 @@ fn mark_escaped_arg(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
     }
 }
 
+/// `return resp.Body, nil` counts as closed.
+///
+/// bodyclose's `isCloseCall` has an `*ssa.Return` arm that answers yes when any
+/// result of the return has the static type `io.ReadCloser` — and a `Return`
+/// only reaches that arm as a referrer of the body load, i.e. when the body
+/// itself is one of the returned values. Handing the body to the caller is
+/// bodyclose's idea of handing over the close, which is what gitea does in five
+/// different download helpers.
+///
+/// `resp.Body` is an `io.ReadCloser` by construction, so returning it satisfies
+/// the type test on its own and there is nothing else to check. `consumed` is
+/// deliberately left alone: with `check-consumption` on, upstream still goes
+/// looking for a consumption call on the same body.
+fn mark_returned_body(ret: &ReturnStmt, usages: &mut HashMap<String, RespUsage>) {
+    for result in &ret.results {
+        if let Some(name) = body_field_var(result) {
+            if let Some(u) = usages.get_mut(name) {
+                u.closed = true;
+            }
+        }
+    }
+}
+
 fn is_response_composite(expr: &Expr) -> bool {
     match expr {
         Expr::UnaryExpr(u) if u.op == guff::token::Token::AND => {
@@ -407,6 +432,9 @@ fn check_body(
                 if check_consumption {
                     mark_consumption(pass, call, &mut usages);
                 }
+            }
+            NodeRef::ReturnStmt(ret) => {
+                mark_returned_body(ret, &mut usages);
             }
             NodeRef::DeferStmt(d) => {
                 handle_defer_close(&d.call, &mut usages);
