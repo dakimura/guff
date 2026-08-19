@@ -1,6 +1,8 @@
 //! Render Go expressions as source-like strings for diagnostic suggestions.
 
 use guff::ast::{CallExpr, Expr, IndexExpr, SelectorExpr, StarExpr, TypeAssertExpr};
+use guff::format;
+use guff::printer::PrintNode;
 use guff::token::Token;
 use guff_analysis::Pass;
 use guff_types::TypeId;
@@ -27,6 +29,26 @@ pub fn type_string_rel(pass: &Pass<'_>, typ: TypeId) -> Option<String> {
         typ,
         Some(&qf),
     ))
+}
+
+/// `report.Render`: `format.Node(&buf, pass.Fset, x)`.
+///
+/// [`render_expr`] below is a hand-written approximation that falls back to
+/// `"<expr>"` for the expression kinds it does not know. That is tolerable in a
+/// message about an expression the check has already recognised; it is wrong in
+/// a *comparison*, because every kind it does not know renders identically and
+/// so compares equal to every other. SA4000 compares, and gitea declares
+///
+/// ```text
+/// [T func(db.EngineMigration) error | func(context.Context, …) error]
+/// ```
+///
+/// whose two union terms are `*ast.FuncType` — two `"<expr>"` renders, and a
+/// false "identical expressions on the left and right side of the '|' operator".
+pub fn render_node(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    let mut buf = Vec::new();
+    format::node(&mut buf, pass.fset(), PrintNode::Expr(expr)).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Render an expression for use in diagnostic messages.
