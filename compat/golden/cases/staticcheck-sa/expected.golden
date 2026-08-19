@@ -252,7 +252,8 @@ sa5011/ok/ok.go:89:17:staticcheck::SA5011: possible nil pointer dereference
 sa5012/bad/bad.go:3:32:staticcheck::SA5012: variadic argument "oldnew" is expected to have even number of elements, but has 3 elements
 sa6000/bad/bad.go:7:3:staticcheck::SA6000: calling regexp.MatchString in a loop has poor performance, consider using regexp.Compile
 sa6000/ok/ok.go:13:5:staticcheck::SA4006: this value of match is never used
-sa6001/bad/bad.go:3:8:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
+sa6001/bad/bad.go:4:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
+sa6001/bad/bad.go:12:7:staticcheck::SA6001: m[string(key)] would be more efficient than k := string(key); m[k]
 sa6002/bad/bad.go:3:39:staticcheck::SA6002: argument should be pointer-like to avoid allocations
 sa6003/bad/bad.go:2:20:staticcheck::S1029: should range over string, not []rune(string)
 sa6003/bad/bad.go:2:20:staticcheck::SA6003: should range over string, not []rune(string)
