@@ -5,7 +5,7 @@
 //! order. Subtests passed only to `t.Run` / `b.Run` / `f.Fuzz` are filtered out
 //! (unless also referenced elsewhere).
 //!
-//! DEFERRED: `testing/synctest.Test`, full unwrap of subtest builders that return
+//! DEFERRED: full unwrap of subtest builders that return
 //! `func(*testing.T)`, and Selections-based method identity (AST name + receiver
 //! type heuristics are used instead).
 
@@ -16,6 +16,7 @@ use guff::ast::{BlockStmt, CallExpr, Expr, Field, FuncType, Stmt};
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_types::arena::ObjectData;
 
 use crate::options::{ThelperKindOptions, ThelperOptions};
 
@@ -313,6 +314,33 @@ fn func_def_position(pass: &Pass<'_>, expr: &Expr) -> u32 {
     }
 }
 
+/// `synctest.Test(t, func(*testing.T) { … })` — upstream's
+/// `extractSynctestExp`, which filters the literal exactly as `t.Run` does.
+///
+/// The identifier has to name the `testing/synctest` package: a local variable
+/// called `synctest` with a `Test` method is not this.
+fn extract_synctest_arg<'a>(pass: &Pass<'_>, call: &'a CallExpr) -> Option<&'a Expr> {
+    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
+        return None;
+    };
+    if sel.sel.name != "Test" || call.args.len() != 2 {
+        return None;
+    }
+    let Expr::Ident(pkg) = sel.x.as_ref() else {
+        return None;
+    };
+    let info = pass.types_info()?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let obj = info.uses.get(&pkg.id).copied()?;
+    let ObjectData::PkgName(pn) = artifacts.objects.get(obj) else {
+        return None;
+    };
+    if artifacts.packages.get(pn.imported()).path() != "testing/synctest" {
+        return None;
+    }
+    Some(&call.args[1])
+}
+
 fn extract_subtest_arg<'a>(call: &'a CallExpr, method: &str) -> Option<&'a Expr> {
     match method {
         "Run" if call.args.len() == 2 => Some(&call.args[1]),
@@ -382,8 +410,13 @@ fn unwrap_builder_funcs(pass: &Pass<'_>, expr: &Expr) -> Vec<u32> {
 }
 
 fn handle_call(pass: &Pass<'_>, call: &CallExpr, reports: &mut Reports) {
-    if let Some(method) = is_run_or_fuzz_call(call) {
-        if let Some(arg) = extract_subtest_arg(call, method) {
+    let subtest_arg = match is_run_or_fuzz_call(call) {
+        Some(method) => extract_subtest_arg(call, method),
+        None => None,
+    }
+    .or_else(|| extract_synctest_arg(pass, call));
+    {
+        if let Some(arg) = subtest_arg {
             let mut filtered = false;
             let builder_pos = unwrap_builder_funcs(pass, arg);
             if !builder_pos.is_empty() {
