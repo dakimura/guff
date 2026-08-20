@@ -76,6 +76,7 @@ nilfunc/bad/bad.go                                 crates/guff-govet/tests/testd
 nilfunc/ok/ok.go                                   crates/guff-govet/tests/testdata/nilfunc/ok.go
 printf/argcount/argcount.go                        crates/guff-govet/tests/testdata/printf/argcount.go
 printf/escapes/escapes.go                          crates/guff-govet/tests/testdata/printf/escapes.go
+printf/indexes/indexes.go                          crates/guff-govet/tests/testdata/printf/indexes.go
 printf/bad/bad.go                                  crates/guff-govet/tests/testdata/printf/bad.go
 printf/ok/ok.go                                    crates/guff-govet/tests/testdata/printf/ok.go
 printf/ok2/ok2.go                                  crates/guff-govet/tests/testdata/printf/ok2.go
