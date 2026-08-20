@@ -434,7 +434,7 @@ impl Runner {
             let name = name.to_string_lossy();
             let ft = entry.file_type().map_err(FormatError::Walk)?;
             if ft.is_dir() {
-                if skip_dir(&name) {
+                if skip_dir(&name) || is_nested_module(&path) {
                     continue;
                 }
                 self.walk(&path, stdout, stats)?;
@@ -837,7 +837,7 @@ fn collect_go_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), FormatErr
         let name = name.to_string_lossy();
         let ft = entry.file_type().map_err(FormatError::Walk)?;
         if ft.is_dir() {
-            if skip_dir(&name) {
+            if skip_dir(&name) || is_nested_module(&path) {
                 continue;
             }
             collect_go_files(&path, out)?;
@@ -929,6 +929,19 @@ fn map_flagged(files: &[PathBuf], flagged: &[PathBuf]) -> Option<Vec<PathBuf>> {
 fn skip_dir(name: &str) -> bool {
     matches!(name, "vendor" | "testdata" | "node_modules")
         || (name.starts_with('.') && name != ".")
+}
+
+/// A subdirectory that carries its own `go.mod` is a different module, and
+/// `./...` does not reach into one.
+///
+/// The linters get this for free — they analyse what `go list` returned. The
+/// formatters walk the tree themselves, so they got it wrong on their own:
+/// argo-cd vendors `gitops-engine` as a nested module, and guff reported
+/// `gitops-engine/pkg/diff/diff.go` unformatted where golangci-lint reports
+/// nothing anywhere under it. The walk root itself is never tested, so running
+/// inside the nested module still formats it.
+fn is_nested_module(dir: &Path) -> bool {
+    dir.join("go.mod").is_file()
 }
 
 fn is_go_path(path: &Path) -> bool {
@@ -1056,6 +1069,34 @@ mod tests {
             crate::golines::GolinesOptions::default(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn collect_go_files_stops_at_a_nested_module() {
+        let dir = std::env::temp_dir().join(format!(
+            "guff-fmt-nested-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("pkg")).unwrap();
+        fs::create_dir_all(dir.join("nested/pkg")).unwrap();
+        fs::write(dir.join("go.mod"), "module example.com/outer\n").unwrap();
+        fs::write(dir.join("pkg/a.go"), "package pkg\n").unwrap();
+        fs::write(dir.join("nested/go.mod"), "module example.com/nested\n").unwrap();
+        fs::write(dir.join("nested/pkg/b.go"), "package pkg\n").unwrap();
+
+        let mut files = Vec::new();
+        collect_go_files(&dir, &mut files).unwrap();
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        // `./...` does not reach into a module of its own, so neither does the
+        // formatter walk — argo-cd's vendored `gitops-engine`.
+        assert_eq!(names, vec!["pkg/a.go".to_string()], "{names:?}");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn gofumpt_available() -> bool {
