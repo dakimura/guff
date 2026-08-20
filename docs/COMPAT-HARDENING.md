@@ -6938,6 +6938,86 @@ thanos 3 / dapr 111 だった。**3 リポが完全一致、jaeger は容認済�
 
 ---
 
+### 2026-08-20（続き 3）— corpus が 14 リポになった分の初回掃除（#65–#68）と、SA5011 の「Exit ブロック」という土台差
+
+**前提の変化**: `compat/repos.txt` に go-redis / nats-server / rclone / restic / cli / traefik が
+加わっていて、hunt は 14 リポになっている。前半の 8 リポは片付いていたので、
+このセッションはほぼ新しい 6 リポの初回掃除になった。
+
+| PR | 何が壊れていたか | 効果 |
+|---|---|---|
+| #65 | **ST1023 と QF1011 が別々の近似だった**。上流は `sharedcheck.RedundantTypeInDeclarationChecker` を `flagHelpfulTypes` 違いで 2 回呼ぶ**1 つの関数**で、右辺を**文脈から切り離して型検査し直し**（`types.CheckExpr`）、untyped なら `types.Default` と宣言型を**同一性**で比べる。3 つ間違えていた: ① untyped rune の default は alias の `rune` であって `int32` ではないので `var v int32 = 'a'` は型を落とせない（guff の arena は alias を畳むので、宣言がどう綴っているかから復元する）② shift は左オペランドの型を取るので `var n uint = 1 << uint(x)` も落とせない ③ ST1023 は**typed 右辺**の `int64(k)*10` / `5*time.Second` / `b1 && b2` / `<-ch` / 名前付き typed 定数を全部取りこぼしていた（「名前付き定数の型は読み手を助ける」という除外は untyped 枝の**中**にしかない） | thanos guff-only 3 → 0（P 100.0%） |
+| #66 | printf の `%[2]*[1]s`: **index はそれを吸収した位置に属する**。幅の `*` が `[2]` を吸い、続く `[1]` は verb のもの。guff は directive ごとに index を 1 つしか持たず、しかも star より前に適用していたので幅と値が入れ替わり、rclone の `SizeStringField` を「`%s` に int」と報告していた。読みながら同じ関数の 3 つも直した: `*` のオペランドを型検査していなかった（`uses non-int … as argument of *`）、上流は**書式文字列ごとに 1 件**しか報告しない（しかも `fmtstr.Parse` が全体を先に読むので malformed があれば**それだけ**）、`[999999999999]` は「大きい」ではなく `ParseInt(…,10,32)` が弾く**不正な index**、`%[3d` は `is missing closing ]`、`%[1]` は `is missing verb at end of string` | rclone guff-only 5 → 3 |
+| #67 | **defer する関数の名前付き result は lift しない**（go/ssa `liftAlloc` 冒頭の `fn.Recover != nil`、honnef は `fn.hasDefer`）。deferred call が result に代入し得るからセルのまま残す必要がある。lift すると各代入が register 定義になり、「上書き前に読まれない値」に見える。SA4006 が rclone の `startRc`（`err` が名前付き result で、`defer serveMu.Unlock()` の前に書かれる）を撃っていた | rclone 3 → 2 / dapr 26 → 23 |
+| #68 | SA5011 の「この abort は本物か」を**囲む関数の引数**で見ていた（interface を取れば TB＝soft）。`func(k, v any) bool` コールバックは interface を取るので、中の `t.Fatalf` が全部 soft 扱いになる。決めるのは**レシーバ**（interface invoke は `method` が付き、static call は付かない）。加えて短絡形 `if a == nil \|\| b == nil { t.Fatalf(…) }` は abort がどちらの条件からも届くので dominance では届かない。名前だけでも足りない: ローカル型の `Fatal` は空実装でも noreturn ではなく、**上流は素通しで報告する**（`sa5011/ok.go` の `fataler`）。`os.Exit` / `runtime.Goexit` / `log.Fatal*` / `testing` の abort メソッド（具象レシーバ）だけを hard abort とした | nats-server 6 → 4 |
+
+**測ったが入れなかったもの — SA5011 の「Exit ブロック」**
+
+`if p == nil { return }` の**上**にある deref を、上流は報告しない。guff は報告する。
+これは σ ノードの話ではなく、**honnef IR が全 return を単一の `f.Exit` へ Jump で集める**ことの
+帰結だった。`jumpThreading` が「a→b→c で b がただの Jump なら a→c」を適用し、その結果
+`a.Succs[0] == a.Succs[1]` になった `If` は **Jump に置き換えられる**（`go/ir/blockopt.go:94`）。
+つまり `if p == nil { return }` が関数の末尾にあると **`If` 自体が消え、`maybeNil` に何も登録されない**。
+go/ssa 系の guff は `Return` を各ブロックに直接置くので b は「ただの Jump」にならず、`If` が残る。
+
+実測（golangci-lint 2.12.2、`checks: ["SA5011"]`）:
+
+| 形 | 上流 | 理由 |
+|---|---|---|
+| `fmt.Println(*x)` → `if x == nil { return }`（結果なし関数の末尾） | 黙る | `If` が Jump に畳まれる |
+| 同上だが `return 0`（結果あり） | 報告 | return ブロックが Store を含むので Jump 単体にならない |
+| 同上で `if` の後に文が続く | 報告 | 偽側の後続が Exit ではない |
+| `if x == nil { panic(…) }` | 報告 | panic は Jump ではない |
+| `if x == nil { t.Errorf(…) }` → deref | 報告 | 分岐が `x` を読まないので σ が刈られ、join の φ は自明に畳まれる |
+| `if x == nil { t.Errorf("%v", x) }` → deref | 黙る | σ が生き残り φ が畳まれない |
+
+guff 側で後者 2 行（Errorf の有無）を再現しようとして
+「非 nil 側後続が check からしか入れないこと」を dominance guard に足したら、
+**nats-server `accounts.go` の複合条件（`if a == nil && b == nil` / `(a == nil && b != nil) || …`）で
+偽陽性が 9 件出た**。そちらは分岐ブロック自身が `a` を読むので σ が生き残る側で、
+「pred のパスが値を読むか」を条件に足しても 9 件は消えなかった。**この方向は入れていない**。
+正しい直し方は当て木の積み増しではなく、**σ/φ の生存を 1 つの値について実際にシミュレートする**か、
+IR に Exit ブロックを入れることのどちらか。`staticcheck-sa` の ratchet は missing 3 / extra 1 のまま。
+
+**ゲート**
+
+- golden: `staticcheck-st` / `staticcheck-qf` に `isolated.go`（38 宣言、上流と 38/38 一致を確認してから regen）、
+  `govet` に `printf/indexes.go`（23 呼び出し、114/114 で ratchet なし）、
+  `staticcheck-sa` に `sa5011/testing_abort.go`（両形とも**どちらも報告しない**ので、退行は extra として出る）と
+  `sa4006/ok.go` への追加。
+- `crates/guff-ssa/tests/lift_named_results_test.rs`: 逆アセンブルを直接読み、defer する関数では
+  名前付き result が `local error (err)` を保ち、defer しない関数では消えることを固定（修正前に落ちることも確認）。
+
+**hunt の現在地（2026-08-20, #68 込み）**
+
+| リポ | guff | golangci | guff-only |
+|---|---:|---:|---|
+| prometheus / coredns / argo-cd / restic / go-redis | — | — | 0 |
+| thanos v0.42.4 | 431 | 434 | 0（golangci-only が unparam ×2 / staticcheck ×1） |
+| cli | 4 | 3 | nolintlint ×1（bodyclose の recall 由来） |
+| traefik | 70 | 69 | nilerr ×1 |
+| rclone | 5 | 3 | unused ×2 / staticcheck ×1 |
+| nats-server | 5 | 1 | staticcheck ×1 / unused ×2 / ineffassign ×1 |
+| atlas v1.3.0 | 2 | 0 | gosec G101 ×2 |
+| jaeger v2.20.0 | 2 | 0 | revive ×2（容認済み ratchet） |
+| gitea v1.27.2 | 5 | 0 | nolintlint ×5（unparam ×4 と SA4006 ×1 の recall が全部 nolintlint に化けている） |
+| dapr v1.18.3 | 1381 | 1364 | 23 |
+
+**次にやること**
+
+1. **gitea の 5 件は全部 nolintlint のカスケード**である。`//nolint:unparam` が 4 本、
+   `//nolint:staticcheck` が 1 本あり、guff が本体の finding を出さないので「この directive は不要」と
+   報告している。つまり **unparam の 2 系統（#前セッションの 1.）を実装すると gitea は 4 件消える**。
+2. **gitea `config_env.go:128` の正体が分かった**: `SA4006: this value of keyValue is never used` で、
+   **上流の偽陽性**（gitea 側のコメントも "false positive" と書いている）。
+   再現は `//nolint:staticcheck` を外して `golangci-lint run ./modules/setting/...`。
+   前セッションで「最小化できない」と書いたのは、最小形だと上流も黙るから。
+   bug-for-bug 互換の対象なので、σ/φ を実際に持つ必要がある側の話。
+3. **rclone の unused ×2** は build tag 付きファイル（`systemd_unsupported.go`）が絡む。
+4. **nats-server の ineffassign ×1**（`jetstream_cluster.go:10730`）と SA5011 ×1（`jetstream_cluster_3_test.go:8707`）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
@@ -7206,6 +7286,16 @@ if ce != nil { … }         // こちらは別の値 → 一致しない → �
 当て木（`short_circuit_guarded_derefs`）を当てていたもの。18 本目に
 `logicalBinop` を移植して当て木を削除した（§4 の 2026-08-14）。σ が無い件とは違い、
 これは CFG が足りていなかっただけである。
+
+**σ だけではない — honnef IR には単一の `Exit` ブロックがある（2026-08-20 追記）**。
+`return` は結果をセルへ Store して `f.Exit` へ Jump する形に落ちるので、
+結果を持たない関数の `return` は**ただの Jump 1 命令のブロック**になる。すると
+`jumpThreading` が畳み、`a.Succs[0] == a.Succs[1]` になった `If` は Jump に置き換えられる
+（`go/ir/blockopt.go:94`）。つまり `if p == nil { return }` が関数の末尾にあると
+**`If` が消えて `maybeNil` に何も登録されない** —— その `if` より上にある deref も報告されない。
+go/ssa 移植の guff は `Return` を各ブロックに直接置くので b が「ただの Jump」にならず、
+`If` が残り、上の deref を撃つ。σ を入れるにせよ入れないにせよ、**この差だけは別に埋める必要がある**
+（実測表は §4 の 2026-08-20（続き 3））。
 
 波及として、**`buildir` の `SrcFuncs` に既定でメソッドを入れられない**。
 上流は常に入れるが、入れた瞬間にこの SA5011 偽陽性がメソッド本体から噴き出して
