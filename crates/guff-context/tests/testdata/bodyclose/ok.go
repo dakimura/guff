@@ -103,3 +103,30 @@ func namedResponder() responder { return nil }
 func useNamedResponder() responder {
 	return namedResponder()
 }
+
+// A *nested* closure that closes the body is what upstream follows out of the
+// free variable: the `MakeClosure` among its referrers leads to
+// `calledInFunc`, which finds the `Close` on the `io.ReadCloser` and answers
+// "not open". dapr's outbox tests close inside `t.Cleanup(func(){…})`.
+func closureClosesInNestedClosure(run func(func()), cleanup func(func())) {
+	resp, err := http.Get("https://example.com/1")
+	if err != nil {
+		return
+	}
+	_ = resp.Body.Close()
+	run(func() {
+		req, rerr := http.NewRequest("GET", "https://example.com/2", nil)
+		if rerr != nil {
+			return
+		}
+		_ = req
+		resp, err = http.Get("https://example.com/2")
+		if err != nil {
+			return
+		}
+		cleanup(func() {
+			_ = resp.Body.Close()
+		})
+	})
+}
+
