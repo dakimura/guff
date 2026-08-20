@@ -56,7 +56,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{
-    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, Ident, ImportSpec, Spec, ValueSpec,
+    AssignStmt, BinaryExpr, CallExpr, CompositeLit, Decl, Expr, File, Ident, ImportSpec, Spec,
+    ValueSpec,
 };
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
@@ -277,7 +278,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G122", "G124", "G203",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G122", "G124", "G202",
+    "G203",
     "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
 ];
 
@@ -573,6 +575,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G115", Score::High, Score::Medium),
     ("G122", Score::High, Score::Medium),
     ("G124", Score::Medium, Score::High),
+    ("G202", Score::Medium, Score::High),
     ("G203", Score::Medium, Score::Low),
     ("G204", Score::Medium, Score::High),
     ("G301", Score::Medium, Score::High),
@@ -773,6 +776,280 @@ fn check_g122_walk_call(
         }
         true
     });
+}
+
+const G202_WHAT: &str = "SQL string concatenation";
+
+/// gosec's `sqlCallIdents`: the receiver's *type string* and method name, with
+/// the index of the argument that carries the query.
+///
+/// `GetCallInfo` answers with the receiver's type for a method call, which is
+/// why this is keyed the way it is rather than by the declaring package.
+const SQL_CALL_IDENTS: &[(&str, &str, usize)] = &[
+    ("*database/sql.Conn", "ExecContext", 1),
+    ("*database/sql.Conn", "QueryContext", 1),
+    ("*database/sql.Conn", "QueryRowContext", 1),
+    ("*database/sql.Conn", "PrepareContext", 1),
+    ("*database/sql.DB", "Exec", 0),
+    ("*database/sql.DB", "ExecContext", 1),
+    ("*database/sql.DB", "Query", 0),
+    ("*database/sql.DB", "QueryContext", 1),
+    ("*database/sql.DB", "QueryRow", 0),
+    ("*database/sql.DB", "QueryRowContext", 1),
+    ("*database/sql.DB", "Prepare", 0),
+    ("*database/sql.DB", "PrepareContext", 1),
+    ("*database/sql.Tx", "Exec", 0),
+    ("*database/sql.Tx", "ExecContext", 1),
+    ("*database/sql.Tx", "Query", 0),
+    ("*database/sql.Tx", "QueryContext", 1),
+    ("*database/sql.Tx", "QueryRow", 0),
+    ("*database/sql.Tx", "QueryRowContext", 1),
+    ("*database/sql.Tx", "Prepare", 0),
+    ("*database/sql.Tx", "PrepareContext", 1),
+];
+
+fn sql_keyword_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)(SELECT|DELETE|INSERT|UPDATE|INTO|FROM|WHERE)( |\n|\r|\t)").unwrap())
+}
+
+/// The receiver type string `GetCallInfo` would answer for a method call.
+///
+/// It is a small, specific set of receiver shapes, and the ones it leaves out
+/// are the point: `s.GetConnection(t).QueryContext(…)` has a call for a
+/// receiver whose own callee is a *selector*, which `getCallInfo` has no case
+/// for, so it returns an error and the rule never runs. dapr writes four of
+/// those, and asking the type checker for the receiver's type instead — which
+/// answers perfectly well — reports all four.
+fn g202_recv_type(pass: &Pass<'_>, file: &File, recv: &Expr) -> Option<String> {
+    match recv {
+        // `expr.Obj != nil && expr.Obj.Kind == ast.Var`: a variable the parser
+        // resolved *in this file*. Anything else yields the identifier's name,
+        // which never matches a `*database/sql.…` key.
+        Expr::Ident(id) => {
+            let obj = code::object_of(pass, id)?;
+            let artifacts = pass.pkg().type_artifacts.as_ref()?;
+            if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+                return None;
+            }
+            let pos = obj.pos(&artifacts.objects);
+            if pos < file.file_start.0 as u32 || pos > file.file_end.0 as u32 {
+                return None;
+            }
+            type_name_of(pass, recv)
+        }
+        // `ctx.Info.TypeOf(expr.Sel)` — the selected field or method.
+        Expr::SelectorExpr(sel) => g202_object_type_name(pass, &sel.sel),
+        Expr::CallExpr(inner) => match &*inner.fun {
+            Expr::Ident(id) if id.name == "new" && !inner.args.is_empty() => {
+                type_name_of(pass, &inner.args[0])
+            }
+            // `f().Method()` resolves through `f`'s declaration to its first
+            // result; a *method* call there does not resolve at all.
+            Expr::Ident(id) => g202_func_first_result_type(pass, file, id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn g202_object_type_name(pass: &Pass<'_>, id: &Ident) -> Option<String> {
+    let obj = code::object_of(pass, id)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let typ = obj.typ(&artifacts.objects)?;
+    Some(type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    ))
+}
+
+fn g202_func_first_result_type(pass: &Pass<'_>, file: &File, id: &Ident) -> Option<String> {
+    let obj = code::object_of(pass, id)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let decl_pos = obj.pos(&artifacts.objects);
+    if decl_pos < file.file_start.0 as u32 || decl_pos > file.file_end.0 as u32 {
+        return None;
+    }
+    for decl in &file.decls {
+        let Decl::FuncDecl(fd) = decl else {
+            continue;
+        };
+        if fd.name.pos().0 as u32 != decl_pos {
+            continue;
+        }
+        let results = fd.ty.results.as_ref()?;
+        let first = results.list.first()?;
+        let ty = first.ty.as_ref()?;
+        return type_name_of(pass, ty);
+    }
+    None
+}
+
+/// `findQueryArg`: the argument taking raw SQL, for a call this rule knows.
+fn g202_query_arg<'a>(pass: &Pass<'_>, file: &File, call: &'a CallExpr) -> Option<&'a Expr> {
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return None;
+    };
+    let recv = g202_recv_type(pass, file, &sel.x)?;
+    let idx = SQL_CALL_IDENTS
+        .iter()
+        .find(|(t, m, _)| *t == recv && *m == sel.sel.name)
+        .map(|(_, _, i)| *i)?;
+    call.args.get(idx)
+}
+
+/// `GetBinaryExprOperands`: the leaves of a chain of binary expressions, in
+/// source order. The operator is not consulted — upstream flattens any nesting.
+fn binary_expr_operands<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if let Expr::BinaryExpr(b) = e {
+        binary_expr_operands(&b.x, out);
+        binary_expr_operands(&b.y, out);
+    } else {
+        out.push(e);
+    }
+}
+
+/// gosec's `TryResolve`: can every value in this subtree be pinned to a
+/// constant?
+///
+/// `resolveIdent` is the load-bearing half and it is *syntactic*: an identifier
+/// whose `ast.Object` is absent or is not a `Var` resolves to true, which covers
+/// constants and — because Go's parser resolves objects per file — package-level
+/// variables declared in another file. A `Var` is followed to its declaration,
+/// and a parameter lands on an `*ast.Field`, which `TryResolve` has no case for
+/// and therefore does not resolve. That is what makes `"… "+tableName` a
+/// finding when `tableName` is a parameter.
+fn g202_try_resolve(pass: &Pass<'_>, file: &File, e: &Expr) -> bool {
+    match e {
+        Expr::BasicLit(_) => true,
+        Expr::BinaryExpr(b) => {
+            g202_try_resolve(pass, file, &b.x) && g202_try_resolve(pass, file, &b.y)
+        }
+        Expr::KeyValueExpr(kv) => {
+            g202_try_resolve(pass, file, &kv.key) && g202_try_resolve(pass, file, &kv.value)
+        }
+        Expr::IndexExpr(i) => g202_try_resolve(pass, file, &i.x),
+        Expr::SliceExpr(sl) => g202_try_resolve(pass, file, &sl.x),
+        Expr::CompositeLit(lit) => {
+            !lit.elts.is_empty() && lit.elts.iter().all(|el| g202_try_resolve(pass, file, el))
+        }
+        Expr::CallExpr(_) => false,
+        Expr::Ident(id) => g202_resolve_ident(pass, file, id),
+        _ => false,
+    }
+}
+
+fn g202_resolve_ident(pass: &Pass<'_>, file: &File, id: &guff::ast::Ident) -> bool {
+    let Some(obj) = code::object_of(pass, id) else {
+        return true;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return true;
+    };
+    if !matches!(artifacts.objects.get(obj), ObjectData::Var(_)) {
+        return true;
+    }
+    // `ast.Object` is filled by the parser, per file: a variable declared in
+    // another file of the package has none, and resolves.
+    let decl_pos = obj.pos(&artifacts.objects);
+    let file_start = file.file_start.0 as u32;
+    let file_end = file.file_end.0 as u32;
+    if decl_pos < file_start || decl_pos > file_end {
+        return true;
+    }
+    match g202_find_decl(file, decl_pos) {
+        Some(G202Decl::Assign(rhs)) => {
+            !rhs.is_empty() && rhs.iter().all(|e| g202_try_resolve(pass, file, e))
+        }
+        Some(G202Decl::Values(values)) => {
+            !values.is_empty() && values.iter().all(|e| g202_try_resolve(pass, file, e))
+        }
+        // A parameter, a receiver, a named result, a `range` clause: upstream
+        // reaches an `*ast.Field` or an `*ast.RangeStmt`, neither of which
+        // `TryResolve` answers for.
+        Some(G202Decl::Unresolvable) | None => false,
+    }
+}
+
+enum G202Decl<'a> {
+    Assign(&'a [Expr]),
+    Values(&'a [Expr]),
+    Unresolvable,
+}
+
+/// The declaration `ast.Object.Decl` would point at, found by position.
+fn g202_find_decl(file: &File, decl_pos: u32) -> Option<G202Decl<'_>> {
+    let mut found = None;
+    preorder(NodeRef::File(file), |n| {
+        if found.is_some() {
+            return false;
+        }
+        match n {
+            NodeRef::AssignStmt(a) if a.tok == Some(Token::DEFINE) => {
+                if a.lhs.iter().any(|l| ident_pos_is(l, decl_pos)) {
+                    found = Some(G202Decl::Assign(a.rhs.as_slice()));
+                }
+            }
+            NodeRef::ValueSpec(spec) => {
+                if spec.names.iter().any(|n| n.pos().0 as u32 == decl_pos) {
+                    found = Some(G202Decl::Values(spec.values.as_slice()));
+                }
+            }
+            NodeRef::Field(f) => {
+                if f.names.iter().any(|n| n.pos().0 as u32 == decl_pos) {
+                    found = Some(G202Decl::Unresolvable);
+                }
+            }
+            NodeRef::RangeStmt(r) => {
+                for e in [r.key.as_ref(), r.value.as_ref()].into_iter().flatten() {
+                    if ident_pos_is(e, decl_pos) {
+                        found = Some(G202Decl::Unresolvable);
+                    }
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    found
+}
+
+fn ident_pos_is(e: &Expr, pos: u32) -> bool {
+    matches!(e, Expr::Ident(id) if id.pos().0 as u32 == pos)
+}
+
+/// G202 — SQL string concatenation, the direct branch of upstream's
+/// `sqlStrConcat.checkQuery`.
+///
+/// DEFERRED: the identifier branch, where the query is built up in a variable
+/// (`q := "SELECT …"; q += tainted`) before the call.
+fn check_g202_call(pass: &Pass<'_>, file: &File, call: &CallExpr, pending: &mut Vec<(u32, String)>) {
+    let Some(query) = g202_query_arg(pass, file, call) else {
+        return;
+    };
+    if !matches!(query, Expr::BinaryExpr(_)) {
+        return;
+    }
+    let mut operands = Vec::new();
+    binary_expr_operands(query, &mut operands);
+    let Some(Expr::BasicLit(first)) = operands.first().copied() else {
+        return;
+    };
+    let Some(text) = string_lit_from_expr(&Expr::BasicLit(first.clone())) else {
+        return;
+    };
+    if !sql_keyword_re().is_match(&text) {
+        return;
+    }
+    for op in &operands[1..] {
+        if !g202_try_resolve(pass, file, op) {
+            pending.push((query.pos().0 as u32, format!("G202: {G202_WHAT}")));
+            return;
+        }
+    }
 }
 
 fn g122_sink_arg_indexes(pkg: &str, name: &str) -> Option<&'static [usize]> {
@@ -2864,11 +3141,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     // (not `go`/`defer`); match that node set for parity.
                     if let Expr::CallExpr(call) = &stmt.x {
                         check_g104_call(pass, call, &enabled, &mut pending);
+                        if enabled.contains("G202") {
+                            check_g202_call(pass, file, call, &mut pending);
+                        }
                     }
                 }
                 NodeRef::AssignStmt(stmt) => {
                     // G104 assign (`_ = f()`) is audit-mode only upstream; skip.
                     check_g402_assign(pass, stmt, &enabled, &mut pending);
+                    // G202's node set is the same two statements, and it looks
+                    // at the calls on an assignment's right-hand side.
+                    if enabled.contains("G202") {
+                        for rhs in &stmt.rhs {
+                            if let Expr::CallExpr(call) = rhs {
+                                check_g202_call(pass, file, call, &mut pending);
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

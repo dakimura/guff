@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
+	"database/sql"
 	"html/template"
 	"io"
 	"math/rand"
@@ -121,3 +122,25 @@ func bad() {
 }
 
 func returnsErr() error { return nil }
+
+// G202 — the leading literal carries a SQL keyword and an operand that cannot
+// be resolved to a constant is concatenated onto it. dapr builds six of these
+// out of a table name it reads at runtime.
+func sqlConcatFromParam(db *sql.DB, table string) error {
+	_, err := db.Exec("DELETE FROM " + table + " WHERE key = ?")
+	return err
+}
+
+// The statement form, and a *sql.Tx receiver.
+func sqlConcatExprStmt(tx *sql.Tx, table string) {
+	tx.Exec("SELECT value FROM " + table)
+}
+
+// A *field* receiver: `getCallInfo` answers with the field's type, so the rule
+// runs the same as for a local.
+type sqlHolder struct{ db *sql.DB }
+
+func sqlConcatFieldRecv(h *sqlHolder, table string) error {
+	_, err := h.db.Exec("DELETE FROM " + table + " WHERE key = ?")
+	return err
+}
