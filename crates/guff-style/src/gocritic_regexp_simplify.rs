@@ -69,6 +69,24 @@ impl Ctx {
                 self.out
                     .push_str(&format!("{}", Ast::class_unicode((**u).clone())));
             }
+            // `\<` / `\>` are word-boundary assertions to `regex-syntax` and
+            // plain escaped characters to the parser upstream uses, which then
+            // unescapes both — they are on its thirteen-character list. Answer
+            // as upstream does; the assertion reading is not available in Go's
+            // regexp anyway, where `\<` is just `<`.
+            Ast::Assertion(a)
+                if matches!(
+                    a.kind,
+                    AssertionKind::WordBoundaryStartAngle
+                        | AssertionKind::WordBoundaryEndAngle
+                ) =>
+            {
+                self.score += 1;
+                self.out.push(match a.kind {
+                    AssertionKind::WordBoundaryStartAngle => '<',
+                    _ => '>',
+                });
+            }
             Ast::Assertion(a) => self.out.push_str(assertion_str(&a.kind)),
             Ast::Flags(f) => {
                 self.out.push_str("(?");
@@ -82,11 +100,22 @@ impl Ctx {
     fn walk_literal(&mut self, lit: &Literal, in_class: bool) {
         match lit.kind {
             LiteralKind::Superfluous => {
-                self.score += 1;
-                if needs_escape_in_class(lit.c) && in_class {
+                // Same list as `Meta` below, and for the same reason: upstream
+                // names the thirteen characters it will unescape and writes
+                // every other `OpEscapeChar` back as it found it. `\ ` is the
+                // one that showed — argo-cd's `^gpg: Signature made
+                // ([a-zA-Z0-9\ :]+)$` got a rewrite suggestion from guff alone,
+                // for an escape upstream does not touch.
+                if can_unescape_meta(lit.c, in_class) {
+                    self.score += 1;
+                    if needs_escape_in_class(lit.c) && in_class {
+                        self.out.push('\\');
+                    }
+                    self.out.push(lit.c);
+                } else {
                     self.out.push('\\');
+                    self.out.push(lit.c);
                 }
-                self.out.push(lit.c);
             }
             LiteralKind::Meta => {
                 // regex-syntax marks many unnecessary escapes as Meta (e.g. `\ #`).
@@ -489,7 +518,14 @@ fn lit_kind_key(lit: &Literal) -> u8 {
 fn can_combine_threshold(x: &Ast, y: &Ast) -> Option<usize> {
     match (x, y) {
         (Ast::Dot(_), Ast::Dot(_)) => Some(3),
-        (Ast::Literal(a), Ast::Literal(b)) if a.c == b.c => {
+        // Upstream's `canCombine` starts with `x.Op != y.Op`, so a plain space
+        // (`OpChar`) never combines with an escaped one (`OpEscapeChar`):
+        // `a\  b` is left alone, where guff used to answer `a\ {2}b`.
+        (Ast::Literal(a), Ast::Literal(b))
+            if a.c == b.c
+                && matches!(a.kind, LiteralKind::Verbatim)
+                && matches!(b.kind, LiteralKind::Verbatim) =>
+        {
             if a.c == ' ' {
                 Some(1)
             } else {

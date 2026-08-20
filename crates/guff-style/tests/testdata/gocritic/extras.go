@@ -142,6 +142,17 @@ func regexpSimplifyExtra() {
 	regexp.MustCompile(`(?:a|b|c)`)
 	regexp.MustCompile(`foo|fo`)
 	regexp.MustCompile(`axx*y`)
+	// Upstream names thirteen characters it will unescape and writes every
+	// other escape back unchanged. A space is not one of them, in a character
+	// class or out of it (argo-cd `util/sourceintegrity/gpg.go`), and an
+	// escaped space does not combine with a plain one either — `canCombine`
+	// starts by comparing the two operators.
+	regexp.MustCompile(`^gpg: Signature made ([a-zA-Z0-9\ :]+)$`)
+	regexp.MustCompile(`a\ b`)
+	regexp.MustCompile(`a\  b`)
+	// These thirteen are the list, so they lose the backslash.
+	regexp.MustCompile(`a\&\#\!\@\%b`)
+	regexp.MustCompile(`a\<\>\:\;\/\,\=b`)
 }
 
 func sortSliceExtra() {
