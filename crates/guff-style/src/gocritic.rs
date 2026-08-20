@@ -6365,7 +6365,10 @@ fn check_equal_fold_strings(pass: &Pass<'_>, bin: &BinaryExpr, pending: &mut Vec
         (false, false) => return,
     };
 
-    if !side_effect_free_approx(x) || !side_effect_free_approx(y) {
+    // `.Where(m["x"].Pure && m["y"].Pure)`: ruleguard's `isPure` accepts a type
+    // conversion, and dapr compares `strings.ToLower(string(v.Protocol))` with
+    // `string(protocol)`.
+    if !side_effect_free(pass, x) || !side_effect_free(pass, y) {
         return;
     }
     let (Some(xt), Some(yt)) = (expr_text(x), expr_text(y)) else {

@@ -357,11 +357,16 @@ func badSyncOnceFuncExtra(f func()) {
 	sync.OnceFunc(f)()
 }
 
-func equalFoldExtra(x, y string, xb, yb []byte) {
+type protocolName string
+
+func equalFoldExtra(x, y string, xb, yb []byte, p protocolName) {
 	_ = strings.ToLower(x) == y
 	_ = strings.ToUpper(x) != y
 	_ = bytes.Equal(bytes.ToLower(xb), yb)
 	_ = strings.ToLower(x) == x
+	// `.Where(m["x"].Pure && m["y"].Pure)`: ruleguard's `isPure` accepts a type
+	// conversion, and dapr's `pkg/config/configuration.go` compares two of them.
+	_ = strings.ToLower(string(p)) == string(y)
 }
 
 func sprintfQuotedExtra(s string) {
