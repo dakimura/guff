@@ -149,6 +149,20 @@ impl Program {
     /// # Panics
     /// Panics if the arena has no such basic type. Any arena seeded from the
     /// type-checker universe contains all predeclared basics.
+    /// The source position of a function's declaration. (Go: `Function.Pos()`)
+    ///
+    /// A function literal carries it on the function itself; a named function's
+    /// lives on the type-checker object it was declared from.
+    pub fn func_pos(&self, fid: FuncId) -> guff::Pos {
+        let f = self.functions.get(fid);
+        if f.decl_pos.is_valid() {
+            return f.decl_pos;
+        }
+        f.object
+            .map(|obj| guff::Pos(obj.pos(&self.object_arena) as i64))
+            .unwrap_or(guff::NO_POS)
+    }
+
     pub fn basic_type(&self, kind: guff_types::BasicKind) -> TypeId {
         guff_types::lookup_basic(&self.type_arena, kind)
             .unwrap_or_else(|| panic!("no predeclared basic type {:?} in arena", kind))

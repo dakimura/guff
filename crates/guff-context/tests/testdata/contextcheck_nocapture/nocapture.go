@@ -10,8 +10,10 @@ func doList(ctx context.Context, ns string) error {
 	return nil
 }
 
-// Non-capturing func lit: SSA returns a bare Function (no MakeClosure).
-// contextcheck must still chase that return into the closure body.
+// Non-capturing func lit: SSA returns a bare Function (no MakeClosure), and
+// upstream's `getCtxType` answers only for calls and closures — so this return
+// is not followed and neither tool reports anything in this file. The capturing
+// twin next door (contextcheck_closure) is the one that is a finding.
 func fromClient() listFunc {
 	return func(ns string) error {
 		return doList(context.Background(), ns)

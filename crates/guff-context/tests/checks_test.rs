@@ -201,20 +201,42 @@ fn contextcheck_flags_closure_chain_like_helm() {
 }
 
 #[test]
-fn contextcheck_flags_noncapturing_closure_return() {
-    // Bare Function return (no free vars → no MakeClosure), same invalid chain.
+fn contextcheck_ignores_noncapturing_closure_return() {
+    // The same chain as the test above with the capture removed, which is the
+    // whole difference: with no free variables go/ssa returns the bare
+    // `*ssa.Function` and emits no `MakeClosure`, and upstream's `getCtxType`
+    // answers only for calls and closures — a `return fn` is not followed, so
+    // neither tool reports here. guff used to follow it, which cost a finding
+    // nothing upstream produces on every non-capturing literal handed back
+    // from a helper.
     let dir = support::testdata("contextcheck_nocapture");
     let pkg = support::typecheck_pkg(
         "example.com/contextcheck_nocapture",
         &dir.join("nocapture.go"),
     );
     let messages = support::run_analyzer(contextcheck(), &pkg);
-    assert!(
-        messages
-            .iter()
-            .any(|m| m.contains("should pass the context parameter")),
-        "{messages:?}"
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+#[test]
+fn contextcheck_flags_capturing_closures_in_a_ctx_function() {
+    // A func literal that captures anything becomes a `MakeClosure`, and
+    // go/ssa emits that instruction with no position — so the only way a
+    // diagnostic on it can land anywhere is the callee's own position.
+    // Five literals here, one per way of reaching one: defer, go, immediate
+    // call, assignment, and the non-capturing form that keeps its call's
+    // position instead.
+    let dir = support::testdata("contextcheck");
+    let pkg = support::typecheck_pkg(
+        "example.com/contextcheck_closures",
+        &dir.join("closures.go"),
     );
+    let messages = support::run_analyzer(contextcheck(), &pkg);
+    assert_eq!(messages.len(), 5, "{messages:?}");
+    for name in ["deferred", "spawned", "immediate", "assigned", "nocapture"] {
+        let want = format!("Function `{name}$1->helper` should pass the context parameter");
+        assert!(messages.iter().any(|m| *m == want), "{want}: {messages:?}");
+    }
 }
 
 #[test]

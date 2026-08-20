@@ -104,6 +104,14 @@ pub struct Function {
     /// functions. Used by source-level lookups to recover a function's
     /// declaring position/object. (Go: `Function.object`)
     pub object: Option<ObjectId>,
+    /// Source position of the function's declaration: the `func` token of a
+    /// function literal, and the declared identifier of a named function.
+    /// (Go: the `pos token.Pos` field behind `Function.Pos()`.)
+    ///
+    /// Only literals need it stored — a named function's position is reachable
+    /// through `object`, so [`crate::program::Program::func_pos`] is what
+    /// callers should ask.
+    pub decl_pos: Pos,
     /// basic blocks of the function; empty => external
     pub blocks: Arena<BlockId, BasicBlock>,
     /// instructions in this function
@@ -211,6 +219,7 @@ impl Function {
             pkg,
             signature: None,
             object: None,
+            decl_pos: NO_POS,
             blocks: Arena::new(),
             instrs: Arena::new(),
             params: Arena::new(),

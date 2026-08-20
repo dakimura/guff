@@ -1,0 +1,17 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh contextcheck
+# Produced by running golangci-lint on compat/golden/cases/contextcheck/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:12:7:contextcheck::Function `inner` should pass the context parameter
+bad/bad.go:16:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` instead
+closure/closure.go:25:15:contextcheck::Function `getThings->fromClient->fromClient$1` should pass the context parameter
+closures/closures.go:19:8:contextcheck::Function `deferred$1->helper` should pass the context parameter
+closures/closures.go:25:5:contextcheck::Function `spawned$1->helper` should pass the context parameter
+closures/closures.go:31:2:contextcheck::Function `immediate$1->helper` should pass the context parameter
+closures/closures.go:37:8:contextcheck::Function `assigned$1->helper` should pass the context parameter
+closures/closures.go:45:2:contextcheck::Function `nocapture$1->helper` should pass the context parameter
+httphandler_bad/bad.go:13:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead
