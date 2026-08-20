@@ -680,3 +680,17 @@ var walkerScopedSwitchInVarInit = func(a int) string {
 	}
 	return ""
 }
+
+// A block comment is handed to the comment checkers on its own, even when a
+// line comment sits directly above it in the same group: `visitCommentGroups`
+// splits the group at every `/*`, and `commentFormatting` returns as soon as a
+// group starts with one. So the literal below is a finding for neither tool.
+// dapr's `tests/apps/service_invocation` writes it.
+var commentGroupSplit = []int{
+	1,
+	// A line comment with a space, immediately followed by a block comment.
+	/*{
+		Verb: "CONNECT",
+	},*/
+	2,
+}

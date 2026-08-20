@@ -2662,6 +2662,37 @@ const COMMENT_FMT_PARTS: &[&str] = &[
     "//!",
 ];
 
+/// `astwalk.visitCommentGroups`: a block comment is handed to the visitor on
+/// its own, and it splits the run of line comments around it.
+///
+/// Every checker built on `WalkerForComment` / `WalkerForLocalComment` sees
+/// groups shaped this way, and `commentFormatting` opens by returning when the
+/// group's first comment starts with `/*` — so a block comment is *never* one
+/// of its findings, not even when a line comment sits directly above it in the
+/// same group. dapr's `tests/apps/service_invocation` writes exactly that.
+fn split_comment_groups(cg: &CommentGroup) -> Vec<CommentGroup> {
+    let mut out = Vec::new();
+    let mut run: Vec<guff::ast::Comment> = Vec::new();
+    for comment in &cg.list {
+        if comment.text.starts_with("/*") {
+            if !run.is_empty() {
+                out.push(CommentGroup {
+                    list: std::mem::take(&mut run),
+                });
+            }
+            out.push(CommentGroup {
+                list: vec![comment.clone()],
+            });
+        } else {
+            run.push(comment.clone());
+        }
+    }
+    if !run.is_empty() {
+        out.push(CommentGroup { list: run });
+    }
+    out
+}
+
 fn check_comment_formatting(cg: &CommentGroup, pending: &mut Vec<(u32, String)>) {
     if cg.list.first().is_some_and(|c| c.text.starts_with("/*")) {
         return;
@@ -2907,13 +2938,21 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         }
 
         if need_fmt {
-            for cg in &parsed.comments {
-                let mut local = Vec::new();
-                check_comment_formatting(cg, &mut local);
-                for (pos, msg) in local {
-                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
-                        .map(|p| p.0 as u32) {
-                        pending.push((mapped, msg));
+            for raw in &parsed.comments {
+                for cg in &split_comment_groups(raw) {
+                    let mut local = Vec::new();
+                    check_comment_formatting(cg, &mut local);
+                    for (pos, msg) in local {
+                        if let Some(mapped) = code::remap_reparsed_pos(
+                            pass.fset(),
+                            file.pos(),
+                            &re_fset,
+                            Pos(pos as i64),
+                        )
+                        .map(|p| p.0 as u32)
+                        {
+                            pending.push((mapped, msg));
+                        }
                     }
                 }
             }
@@ -2956,13 +2995,21 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         }
 
         if need_todo {
-            for cg in &parsed.comments {
-                let mut local = Vec::new();
-                check_todo_comment_without_detail(cg, &mut local);
-                for (pos, msg) in local {
-                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
-                        .map(|p| p.0 as u32) {
-                        pending.push((mapped, msg));
+            for raw in &parsed.comments {
+                for cg in &split_comment_groups(raw) {
+                    let mut local = Vec::new();
+                    check_todo_comment_without_detail(cg, &mut local);
+                    for (pos, msg) in local {
+                        if let Some(mapped) = code::remap_reparsed_pos(
+                            pass.fset(),
+                            file.pos(),
+                            &re_fset,
+                            Pos(pos as i64),
+                        )
+                        .map(|p| p.0 as u32)
+                        {
+                            pending.push((mapped, msg));
+                        }
                     }
                 }
             }
@@ -2980,13 +3027,21 @@ fn run_comment_checks(pass: &Pass<'_>, set: &HashSet<String>, pending: &mut Vec<
         }
 
         if need_why_nolint {
-            for cg in &parsed.comments {
-                let mut local = Vec::new();
-                check_why_no_lint(cg, &mut local);
-                for (pos, msg) in local {
-                    if let Some(mapped) = code::remap_reparsed_pos(pass.fset(), file.pos(), &re_fset, Pos(pos as i64))
-                        .map(|p| p.0 as u32) {
-                        pending.push((mapped, msg));
+            for raw in &parsed.comments {
+                for cg in &split_comment_groups(raw) {
+                    let mut local = Vec::new();
+                    check_why_no_lint(cg, &mut local);
+                    for (pos, msg) in local {
+                        if let Some(mapped) = code::remap_reparsed_pos(
+                            pass.fset(),
+                            file.pos(),
+                            &re_fset,
+                            Pos(pos as i64),
+                        )
+                        .map(|p| p.0 as u32)
+                        {
+                            pending.push((mapped, msg));
+                        }
                     }
                 }
             }
