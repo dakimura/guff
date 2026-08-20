@@ -2525,10 +2525,16 @@ fn usetesting_respects_os_setenv_and_temp_dir() {
         "example.com/usetesting/settings",
         "settings_extra.go",
     );
+    // golangci-lint's defaults, not ldez/usetesting's: `os-setenv` is on and
+    // `os-temp-dir` is off.
+    let defaults = support::run_analyzer(usetesting(), &pkg);
     assert!(
-        support::run_analyzer(usetesting(), &pkg).is_empty(),
-        "defaults should ignore Setenv/TempDir: {:?}",
-        support::run_analyzer(usetesting(), &pkg)
+        defaults.iter().any(|m| m.contains("os.Setenv()")),
+        "os-setenv defaults to on: {defaults:?}"
+    );
+    assert!(
+        !defaults.iter().any(|m| m.contains("os.TempDir()")),
+        "os-temp-dir defaults to off: {defaults:?}"
     );
 
     let mut bag = SettingsBag::new();

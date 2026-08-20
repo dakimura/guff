@@ -375,7 +375,8 @@ impl Default for CopyloopvarOptions {
 
 /// `linters.settings.usetesting` / `linters-settings.usetesting`.
 ///
-/// Defaults match upstream ldez/usetesting (not golangci's overridden defaults).
+/// Defaults are golangci-lint's (`pkg/config/linters_settings.go`), which
+/// differ from ldez/usetesting's own: `os-setenv` is on here.
 #[derive(Debug, Clone, Copy)]
 pub struct UsetestingOptions {
     pub os_create_temp: bool,
@@ -392,7 +393,7 @@ impl Default for UsetestingOptions {
         Self {
             os_create_temp: true,
             os_mkdir_temp: true,
-            os_setenv: false,
+            os_setenv: true,
             os_temp_dir: false,
             os_chdir: true,
             context_background: false,
