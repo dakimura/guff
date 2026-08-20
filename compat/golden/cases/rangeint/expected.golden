@@ -1,0 +1,41 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh rangeint
+# Produced by running golangci-lint on compat/golden/cases/rangeint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+intrange_bad/bad.go:8:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:8:6:modernize::rangeint: for loop can be modernized using range over int
+intrange_bad/bad.go:12:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:12:6:modernize::rangeint: for loop can be modernized using range over int
+intrange_bad/bad.go:15:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:19:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:23:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:23:6:modernize::rangeint: for loop can be modernized using range over int
+intrange_bad/bad.go:27:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:31:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+intrange_bad/bad.go:36:6:intrange::for loop can be changed to `i := range s`
+intrange_bad/bad.go:40:6:intrange::for loop can be changed to `range s`
+intrange_bad/bad.go:43:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is returned by a function or method, take care to consider side effects.
+intrange_bad/bad.go:48:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
+intrange_bad/bad.go:48:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:6:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:6:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:13:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:13:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:20:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:20:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:27:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:37:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:44:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:53:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:59:2:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:59:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:66:3:intrange::for loop can be changed to use an integer range (Go 1.22+)
+modernize/rangeint.go:77:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
+modernize/rangeint.go:85:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
+modernize/rangeint.go:85:6:modernize::rangeint: for loop can be modernized using range over int
+modernize/rangeint.go:93:2:intrange::for loop can be changed to use an integer range (Go 1.22+)\nBecause the key is not part of the loop's scope, take care to consider side effects.
+modernize/rangeint.go:93:6:modernize::rangeint: for loop can be modernized using range over int

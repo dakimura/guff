@@ -5703,10 +5703,13 @@ fn modernize_rangeint_skips_mutated_limits() {
         .iter()
         .filter(|m| m.contains("for loop can be modernized using range"))
         .collect();
+    // param/const/local/len, plus the two `for i = 0` loops whose index is not
+    // read after the loop. `nopeIndexReadAfterLoop` returns its index, so a
+    // range loop — which would leave it holding limit-1 — is not offered.
     assert_eq!(
         hits.len(),
-        4,
-        "expected 4 rangeint hits (param/const/local/len), got {} {messages:?}",
+        6,
+        "expected 6 rangeint hits, got {} {messages:?}",
         hits.len()
     );
     for bad in ["k", "incLimit", "addrLimit", "chks", "outer"] {

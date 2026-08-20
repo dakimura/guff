@@ -1,0 +1,25 @@
+# Golden case: the two linters that rewrite `for i := 0; i < n; i++`.
+#
+# They disagree about more than the message. `intrange` accepts `i <= n` only
+# when the limit is a *literal* — the fix has to write the limit plus one — and
+# `modernize`'s `rangeint` refuses the `for i = 0` spelling when the index is
+# read after the loop, since a range loop leaves it holding limit-1.
+#
+# The column matters here and only this tier compares it: `rangeint` reports the
+# init statement (`i := 0`), not the `for` keyword, so the two linters land four
+# columns apart on the same line.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - intrange
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

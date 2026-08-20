@@ -68,3 +68,33 @@ func nopeOuterLoopVar() {
 		}
 	}
 }
+
+// The `for i = 0` spelling: a range loop leaves `i` holding limit-1, so the
+// rewrite is only offered when nothing reads `i` afterwards. dapr's
+// `pkg/api/http/directmessaging.go` returns its index after the loop.
+func nopeIndexReadAfterLoop(n int) int {
+	var i int
+	for i = 0; i < n; i++ { // nope: i is read below
+		_ = i
+	}
+	return i
+}
+
+func assignIndexNotReadAfterLoop(n int) {
+	var i int
+	for i = 0; i < n; i++ { // want
+		_ = i
+	}
+}
+
+// A read *inside* the loop is not a read after it.
+func assignIndexReadInsideLoop(n int) int {
+	var i, found int
+	for i = 0; i < n; i++ { // want
+		if found > 0 {
+			return i
+		}
+		found++
+	}
+	return -1
+}

@@ -70,10 +70,15 @@ fn parse_int_lit(s: &str) -> Option<i64> {
     i64::from_str_radix(s.trim_start_matches("0x").trim_start_matches("0X"), 16).ok()
 }
 
+/// A number *literal*, syntactically — `3` or `int(3)`, not a named constant
+/// that happens to fold to one.
+///
+/// Only a literal lets the `i <= n` spelling be rewritten, since the fix has
+/// to write `n+1` and a constant's name would have to be spelled
+/// `maxRetries+1`, which upstream does not offer. Folding constants here made
+/// `for i := 0; i <= maxSideCarDetectionRetries; i++` a finding that
+/// golangci-lint does not make (dapr `tests/platforms/kubernetes`).
 fn is_number_lit(pass: &Pass<'_>, expr: &Expr) -> bool {
-    if code::expr_to_int(pass, expr).is_some() {
-        return true;
-    }
     match expr {
         Expr::BasicLit(BasicLit {
             kind: Some(Token::INT),
