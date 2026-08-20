@@ -1,0 +1,4 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+modernize/rangeint.go   crates/guff-style/tests/testdata/modernize/rangeint.go
+intrange/ok.go          crates/guff-style/tests/testdata/intrange/ok.go
+intrange_bad/bad.go     crates/guff-style/tests/testdata/intrange/bad.go

@@ -2537,7 +2537,13 @@ impl Parser {
                     (it.next(), it.next())
                 }
             };
-            let range_x = match as_stmt.rhs.into_iter().next().unwrap() {
+            // `Range: as.Rhs[0].Pos()` — the `range` keyword itself, which is
+            // the `UnaryExpr`'s operator position. Leaving it unset gave a
+            // key-less `for range len(s)` no position at all, and intrange
+            // reports there (it has no key ident to point at instead).
+            let rhs0 = as_stmt.rhs.into_iter().next().unwrap();
+            let range_pos = rhs0.pos();
+            let range_x = match rhs0 {
                 Expr::UnaryExpr(u) => *u.x,
                 other => other,
             };
@@ -2547,7 +2553,7 @@ impl Parser {
                 value,
                 tok_pos: as_stmt.tok_pos,
                 tok: as_stmt.tok,
-                range_: NO_POS,
+                range_: range_pos,
                 x: range_x,
                 body,
                 id: 0,

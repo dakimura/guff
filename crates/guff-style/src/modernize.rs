@@ -563,13 +563,48 @@ fn index_is_scalar_lvalue_in(body: &guff::ast::BlockStmt, index_name: &str) -> b
     found
 }
 
-fn index_used_after_loop(
-    _pass: &Pass<'_>,
-    _for_stmt: &ForStmt,
-    _index_name: &str,
-) -> bool {
-    // DEFERRED: full post-loop use analysis (upstream walks ancestor Preorder).
-    false
+/// Upstream's post-loop use check, for the `for i = 0; …` spelling only: a
+/// range loop leaves `i` holding `limit-1` rather than `limit`, so the rewrite
+/// is only offered when nothing reads `i` afterwards. With `i := 0` the
+/// variable is scoped to the loop and the question does not arise.
+///
+/// Keyed on the object rather than the name — upstream walks the loop's
+/// enclosing statement list and compares `info.Uses[id]` — so a different `i`
+/// in a later function is not mistaken for this one. dapr's
+/// `pkg/api/http/directmessaging.go` returns its `i` after the loop.
+///
+/// DEFERRED: upstream also rejects a `defer` *above* the loop that reads `i`,
+/// since it runs after the loop body. Position alone cannot see that one.
+fn index_used_after_loop(pass: &Pass<'_>, for_stmt: &ForStmt, index: &Expr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Expr::Ident(id) = index else {
+        return false;
+    };
+    let Some(obj) = info.uses.get(&id.id).copied() else {
+        return false;
+    };
+    let loop_end = for_stmt.body.end().0;
+    let mut used = false;
+    for file in pass.files() {
+        guff::walk::preorder(guff::walk::NodeRef::File(file), |n| {
+            if used {
+                return false;
+            }
+            if let guff::walk::NodeRef::Ident(ident) = n {
+                if ident.pos().0 > loop_end && info.uses.get(&ident.id).copied() == Some(obj) {
+                    used = true;
+                    return false;
+                }
+            }
+            true
+        });
+        if used {
+            break;
+        }
+    }
+    used
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -732,7 +767,7 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         return;
     }
     // Upstream: for `for i = 0; …` (ASSIGN), skip if `i` is used after the loop.
-    if init.tok == Some(Token::ASSIGN) && index_used_after_loop(pass, for_stmt, index_name) {
+    if init.tok == Some(Token::ASSIGN) && index_used_after_loop(pass, for_stmt, &init.lhs[0]) {
         return;
     }
     let Some(limit_text) = expr_text(y) else {
@@ -763,8 +798,13 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
         format!("for {index_name} = range {range_expr}")
     };
 
+    // Upstream reports the *init statement*, not the `for` keyword
+    // (`Pos: init.Pos()`, `End: loop.Post.End()`) — the range of text the fix
+    // rewrites. Four columns to the right of where guff was pointing.
+    let report_pos = init.lhs[0].pos().0 as u32;
+
     pending.push(Diagnostic {
-        pos,
+        pos: report_pos,
         end,
         category: String::new(),
         message: "for loop can be modernized using range over int".into(),

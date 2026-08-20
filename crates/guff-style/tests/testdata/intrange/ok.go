@@ -43,4 +43,13 @@ func ok() {
 	for i := 0; i <= n; i++ {
 		_ = i
 	}
+
+	// `<=` needs a literal limit: the fix has to write the limit plus one, and
+	// a named constant would have to be spelled `maxRetries+1`. dapr's
+	// `tests/platforms/kubernetes/appmanager.go` counts to a constant.
+	for i := 0; i <= maxRetries; i++ {
+		_ = i
+	}
 }
+
+const maxRetries = 3
