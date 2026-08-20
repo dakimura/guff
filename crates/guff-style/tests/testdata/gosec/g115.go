@@ -201,3 +201,16 @@ func parsedUnsigned(s string) uint16 {
 	}
 	return uint16(v) // silent
 }
+
+// --- go1.26's `new(expr)` ---------------------------------------------------
+//
+// `new` takes a value as well as a type since go1.26, and go/ssa stores that
+// value into the fresh cell (`builder.go`'s `case "new"`). The conversion is an
+// ordinary `Convert` in the SSA, so it is a finding wherever it would be one
+// outside the call. dapr writes `new(uint32(repetition))`.
+
+func newType() *int32 { return new(int32) } // silent — the argument is a type
+
+func newConverted(i int) *uint32 { return new(uint32(i)) } // FINDING int -> uint32
+
+func newWidened(u uint32) *uint64 { return new(uint64(u)) } // silent

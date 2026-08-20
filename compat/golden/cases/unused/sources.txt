@@ -6,3 +6,4 @@ bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/me
 iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go
 genericiface/generic_iface.go         crates/guff-unused/tests/testdata/basic/generic_iface.go
 lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go
+deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/dead_cycle.go

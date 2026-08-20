@@ -1,6 +1,6 @@
 module example.com/gosec
 
-go 1.24
+go 1.26
 
 // G106 / G406 / G506 / G507 are about `golang.org/x/crypto`, so the case has to
 // import it. It is replaced by a local stub module rather than required from

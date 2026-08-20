@@ -7179,6 +7179,119 @@ guff は「自分に named result があるときだけ」格納していたの�
 **効果**: gitea guff-only 5 → 1（残りは SA4006 の**上流の偽陽性**）、cli 1 → 0、
 traefik / thanos は 0 のまま（一度 2 件ずつ増やしてから、上記の除外条件で戻した）。
 
+### 2026-08-21（続き 7）— unused は「参照されたか」ではなく「根から辿り着くか」、そして go1.26 の `new(expr)`
+
+**#79 — unused の到達可能性**
+
+dapr の `//nolint:unused` が 1 件だけ「未使用のディレクティブ」に見えていた。剥がして
+単独で走らせると差は明白だった:
+
+```go
+func (w *workflowAccessPolicies) recompileAll() { … }   // 上流だけが報告
+func (w *workflowAccessPolicies) update(…)      { …; w.recompileAll() }
+func (w *workflowAccessPolicies) delete(…)      { …; w.recompileAll() }
+```
+
+`update` と `delete` を呼ぶものは無い。honnef の `unused` は
+**グラフを根（`NodeID(0)`）から色塗りする**（`unused.go` の `color`）ので、
+死んだ関数の中に書かれた呼び出しは対象を生かさない —— 3 つとも報告される。
+guff は `for obj in info.uses.values() { used.insert(obj) }` という
+**参照カウント**だったので、2 つしか出せず、3 つ目の nolint をカスケードで潰していた。
+
+移植したのは honnef の `g.use(used, by)` の `by` にあたる**帰属**:
+
+| 宣言 | 所有者（`by`） |
+|---|---|
+| `FuncDecl`（レシーバ・シグネチャ・本体・入れ子の `FuncLit` すべて） | その関数オブジェクト |
+| `TypeSpec` | その型オブジェクト |
+| `ValueSpec` | そのスペックが宣言する**全ての名前**（上流は `names[i]`↔`values[i]`。緩い側に倒してある） |
+
+根は「エクスポートされた宣言 / `init` / `main` パッケージの `main`」に加えて
+**生成ファイルの全オブジェクト**（`GeneratedIsUsed` は既定 on ＝ `g.use(obj, nil)`）。
+今までは生成ファイルを候補集めごとスキップしていたが、到達可能性の下では
+「候補でない」と「根である」は別物で、前者だと**そこから伸びる辺が全部切れる**。
+
+歩き切れなかった `*ast.Ident` は**根扱いにフォールバック**する。辺を落とすと偽陽性、
+根を増やしても報告漏れにしかならない、という非対称性がある。
+
+嵌まりどころが 2 つあった:
+
+1. **`used` を `roots` で初期化してはいけない**。BFS の中で `if !used.insert(obj) { continue }` と
+   書いていたので、根は最初の pop で「もう入っている」と判定され、**根から出る辺が一本も辿られなかった**。
+   結果、`func New() *t` があるのに `type t is unused` という偽陽性が出た。`used` は空から始める。
+2. **インスタンス化メソッドの名前キー規則が全部を根に戻していた**。
+   `used_methods`（`(レシーバ型名, メソッド名)`）はジェネリックの実体化コピーが
+   宣言と別 ObjectId になる件のための逃げ道なのに、無条件だったので
+   普通のメソッド呼び出し（宣言と同じ ObjectId）まで拾い、`recompileAll` を生かし続けていた。
+   **このパッケージの宣言でない使用にだけ**効かせる。
+
+3. **不動点ループが止まらなかった。** const グループ規則が「既に到達済み」のオブジェクトも
+   queue に積み直していたので、`queue.is_empty() && used.len() == before` という停止条件が
+   **永遠に成立しない**（積んだ直後に空でないと判定 → 次の周回で何も増えない → また積む）。
+   `unused_const_group_*` の 2 本が 198% CPU で数分回り続けた。規則側で
+   **未到達のものだけを積む**ようにして、`queue.is_empty()` そのものを不動点の定義にした。
+
+4. **空白識別子は「候補から外す」ではなく「根」**（honnef 9.9 "objects named the blank
+   identifier are used"）。参照カウントの下では区別が要らなかったが、到達可能性では
+   「候補でない」と「根である」は別物で、前者だと**そこから出る辺が切れる**:
+
+   ```go
+   var _ = initDebug()                    // restic internal/debug の 6 関数を生かしていた
+   var _ unwrapper = wrappedRetryError{}  // rclone fserrors
+   var _ credential = &otherKey{}         // nats certstore
+   var _ = _SoftwareRequiresGOVERSION1_12 // prometheus tsdb/goversion/init.go
+   ```
+
+   これで corpus の新規偽陽性 9 件（restic 6 / rclone 1 / nats 1 / prometheus 1）が
+   全部消えた。prometheus の 1 件は**定数と同じファイルを見ていても分からない**:
+   定数は `goversion.go`、それを生かす `var _` は隣の `init.go` にある。
+   「本当に誰も使っていないのか」は `go list -f '{{.GoFiles}}'` で
+   *パッケージ全体*のファイルを出してから言うこと。
+   honnef は const / type / var / `func _()` の 4 箇所すべてで `g.use(obj, by)` していて、
+   パッケージレベルなら `by` は nil ＝ 根。4 箇所とも合わせた。
+
+`iface_method_names` と `used_methods` は名前キーなので、到達可能性と**不動点で回す**
+（到達したメソッドがさらに何かを生かしうる）。名前集合には
+「このパッケージの候補でない使用済みオブジェクト」（＝インポート先・ローカル・フィールド）を
+そのまま残してある —— 旧実装の緩さのうち、到達可能性が正当に狭める部分だけを狭めたかった。
+
+**#79 — go1.26 の `new(expr)`**
+
+同じ dapr のもう 1 件は `//nolint:gosec`:
+
+```go
+repeats = new(uint32(repetition))   // G115: integer overflow conversion int -> uint32
+```
+
+go1.26 で `new` は型だけでなく**値**を取るようになった。go/ssa は
+
+```go
+case "new":
+    alloc := emitNew(fn, typeparams.MustDeref(typ), pos, "new")
+    if !fn.info.Types[args[0]].IsType() {
+        v := b.expr(fn, args[0])
+        emitStore(fn, alloc, v, pos)
+    }
+```
+
+と**引数を評価して格納する**。guff の `emit_new_builtin` は引数を丸ごと無視していたので、
+`new(...)` の中に書かれた変換は SSA に現れず、`Convert` を読む G115（と、原理的には
+`new(expr)` の中を見る全ての SSA チェック）から不可視だった。型検査は既に go1.26 形を
+通していた（`builtin_new` が型として試してから値として試す）ので、抜けていたのは SSA だけ。
+
+golden の gosec case は `go 1.24` だったので `go 1.26` に上げた。再生成した差分は
+新しい 1 行だけ —— 言語バージョンの引き上げで他の 79 件は 1 つも動かなかった。
+
+**まだ模していない根が 2 つ**（記録のみ）: `//go:linkname` の対象と
+`//go:cgo_export_*` を持つ関数。どちらも honnef は根にする。guff は
+「歩き切れなかった Ident は根」というフォールバックを持つが、linkname は
+Ident の使用ではなく**パッケージスコープの名前引き**なので、そこには掛からない。
+corpus 内の `go:linkname` は containerd の vendored `x/sys` だけ。
+
+**ゲート**: `unused` は `dead_cycle.go`（死んだ環＋生きた鎖を同じファイルに置く）を
+Rust の単体テストと golden の両方に。`gosec` は `g115.go` に `new(型)` / `new(変換)` /
+`new(拡大変換)` の 3 行。どちらも byte-exact 側で上流と突き合わせている。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
