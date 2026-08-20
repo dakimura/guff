@@ -100,6 +100,52 @@ fn printf_flags_arg_count() {
     assert!(messages.iter().any(|m| m.contains("needs 1 arg but has 2 args")));
 }
 
+/// An explicit index binds to the position that absorbs it, each `*` operand
+/// must be an int, a malformed directive is the only thing reported for its
+/// format string, and only the first mistake in a format string is reported.
+#[test]
+fn printf_binds_indexes_to_stars_and_verbs() {
+    let dir = support::testdata("printf");
+    let stub = dir.join("stub/fmt/print.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/govet/printf/indexes",
+        &dir.join("indexes.go"),
+        &[("fmt", &stub)],
+    );
+    let messages = support::run_analyzer(printf_analyzer(), &pkg);
+    assert_eq!(messages.len(), 16, "{messages:?}");
+    // rclone's line: the width is argument 2, the string argument 1, so
+    // nothing is wrong with it — only the `%d` twin below is reported.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("%[2]*[1]"))
+            .collect::<Vec<_>>(),
+        vec![&"fmt.Printf format %[2]*[1]d has arg str of wrong type string".to_string()],
+        "{messages:?}"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("as argument of *"))
+            .count(),
+        4,
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.ends_with("format has invalid argument index [999999999999]")),
+        "{messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|m| m.ends_with("format %[3d b %s is missing closing ]")),
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn printf_allows_stringer_and_composites() {
     let dir = support::testdata("printf");

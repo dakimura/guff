@@ -118,12 +118,23 @@ fn format_index(pass: &Pass<'_>, call: &CallExpr) -> usize {
 }
 
 /// A single `%…verb` directive parsed out of a format string.
+///
+/// An index binds to whichever position absorbs it, not to the directive as a
+/// whole: in `%[2]*[1]s` the width `*` takes argument 2 and the verb takes
+/// argument 1. Recording one index per directive read that as "argument 1,
+/// then the next one" and reported rclone's
+/// `fmt.Sprintf("%[2]*[1]s", str, rawWidth)` as an `int` printed with `%s`.
 struct Directive {
     verb: char,
-    /// Explicit 1-based operand index from `%[n]`, if any.
-    index: Option<usize>,
-    /// Number of `*` width/precision placeholders (each consumes one operand).
-    stars: usize,
+    /// `[n]` absorbed by the width `*`, e.g. `2` in `%[2]*d`.
+    width_index: Option<usize>,
+    has_width_star: bool,
+    /// `[n]` absorbed by the precision `*`, e.g. `2` in `%.[2]*d`.
+    prec_index: Option<usize>,
+    has_prec_star: bool,
+    /// `[n]` left for the verb — either written just before it, or written
+    /// earlier and never absorbed by a `*`.
+    verb_index: Option<usize>,
     /// Rendered directive text, e.g. `%d` or `%[2]*.3f`, for messages.
     text: String,
 }
@@ -155,24 +166,45 @@ enum IndexScan {
 /// verb when no index is still pending. `%-36[1]s` (cobra) only has one at the
 /// third position, so parsing the index solely after the flags leaves `[` to be
 /// read as the verb.
-fn parse_arg_index(format: &[u8], i: usize) -> IndexScan {
+///
+/// `op_start` is the offset of the `%`, which the two error messages quote:
+/// upstream builds them from `s.operation.Text`, still the whole rest of the
+/// format string at this point rather than this one directive.
+fn parse_arg_index(format: &[u8], op_start: usize, i: usize) -> IndexScan {
     if format.get(i) != Some(&b'[') {
         return IndexScan::Absent;
     }
     let open = i;
     let Some(close) = format[i..].iter().position(|&b| b == b']').map(|off| i + off) else {
-        return IndexScan::Bad("format has invalid argument index".into(), i + 1);
+        return IndexScan::Bad(
+            format!(
+                "format {} is missing closing ]",
+                guff_constant::decode_lossy(&format[op_start..])
+            ),
+            format.len(),
+        );
     };
-    let num = std::str::from_utf8(&format[open + 1..close])
+    let body = &format[open + 1..close];
+    // `scanNum` reads digits only, and `ParseInt(…, 10, 32)` rejects what
+    // overflows an int32, so `[-1]`, `[1x]` and `[999999999999]` are all
+    // spelled back to the user verbatim.
+    let num = std::str::from_utf8(body)
         .ok()
-        .and_then(|n| n.parse::<usize>().ok());
+        .filter(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|n| n.parse::<i32>().ok());
     match num {
         Some(n) if n >= 1 => IndexScan::Found(
-            n,
+            n as usize,
             guff_constant::decode_lossy(&format[open..=close]),
             close + 1,
         ),
-        _ => IndexScan::Bad("format has invalid argument index".into(), close + 1),
+        _ => IndexScan::Bad(
+            format!(
+                "format has invalid argument index [{}]",
+                guff_constant::decode_lossy(body)
+            ),
+            close + 1,
+        ),
     }
 }
 
@@ -183,10 +215,14 @@ fn parse_arg_index(format: &[u8], i: usize) -> IndexScan {
 /// verb itself.
 fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     let bytes = format;
+    let op_start = start - 1; // the '%' itself, quoted by the error messages
     let mut i = start; // index just after '%'
     let mut text = String::from("%");
-    let mut index: Option<usize> = None;
-    let mut stars = 0usize;
+    let mut width_index: Option<usize> = None;
+    let mut prec_index: Option<usize> = None;
+    let mut verb_index: Option<usize> = None;
+    let mut has_width_star = false;
+    let mut has_prec_star = false;
 
     // ASCII-only view, for the parts upstream reads as single bytes. A
     // non-ASCII byte here never matches any of them.
@@ -210,14 +246,13 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     // `indexPending` upstream: an index that no `*` has absorbed yet, which
     // therefore belongs to the verb. It is what stops the pre-verb
     // `parseIndex` from running a second time.
-    let mut index_pending = false;
+    let mut pending: Option<usize> = None;
 
     // Explicit argument index: %[n], first of three positions.
-    match parse_arg_index(format, i) {
+    match parse_arg_index(format, op_start, i) {
         IndexScan::Absent => {}
         IndexScan::Found(n, t, next) => {
-            index = Some(n);
-            index_pending = true;
+            pending = Some(n);
             text.push_str(&t);
             i = next;
         }
@@ -226,9 +261,9 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
 
     // Width: digits or '*'.
     if at(i) == Some('*') {
-        stars += 1;
+        has_width_star = true;
         // `parseSize` absorbs a pending index into the `*` operand.
-        index_pending = false;
+        width_index = pending.take();
         text.push('*');
         i += 1;
     } else {
@@ -242,19 +277,18 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     if at(i) == Some('.') {
         text.push('.');
         i += 1;
-        match parse_arg_index(format, i) {
+        match parse_arg_index(format, op_start, i) {
             IndexScan::Absent => {}
             IndexScan::Found(n, t, next) => {
-                index = Some(n);
-                index_pending = true;
+                pending = Some(n);
                 text.push_str(&t);
                 i = next;
             }
             IndexScan::Bad(msg, next) => return (Scan::Error(msg), next),
         }
         if at(i) == Some('*') {
-            stars += 1;
-            index_pending = false;
+            has_prec_star = true;
+            prec_index = pending.take();
             text.push('*');
             i += 1;
         } else {
@@ -266,23 +300,32 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     }
 
     // "Now a verb, possibly prefixed by an index (which we may already have)."
-    if !index_pending {
-        match parse_arg_index(format, i) {
+    if pending.is_none() {
+        match parse_arg_index(format, op_start, i) {
             IndexScan::Absent => {}
             IndexScan::Found(n, t, next) => {
-                index = Some(n);
+                verb_index = Some(n);
                 text.push_str(&t);
                 i = next;
             }
             IndexScan::Bad(msg, next) => return (Scan::Error(msg), next),
         }
+    } else {
+        // An index no `*` absorbed belongs to the verb.
+        verb_index = pending.take();
     }
 
     // The verb — `verb, w := utf8.DecodeRuneInString(s.format[s.i:])`. This is
     // the one place upstream decodes a rune rather than reading a byte, so
     // `%é` is one unknown verb and not the first byte of one.
     if i >= bytes.len() {
-        return (Scan::Error("format string ends with %".into()), i);
+        return (
+            Scan::Error(format!(
+                "format {} is missing verb at end of string",
+                guff_constant::decode_lossy(&format[op_start..])
+            )),
+            i,
+        );
     }
     let (decoded, width) = guff_constant::utf8::decode_rune(&bytes[i..]);
     let verb = decoded.unwrap_or(char::REPLACEMENT_CHARACTER);
@@ -292,8 +335,11 @@ fn scan_directive(format: &[u8], start: usize) -> (Scan, usize) {
     (
         Scan::Directive(Directive {
             verb,
-            index,
-            stars,
+            width_index,
+            has_width_star,
+            prec_index,
+            has_prec_star,
+            verb_index,
             text,
         }),
         i,
@@ -721,10 +767,10 @@ fn check_one(
     // call, and skips the leftover-argument check as well.
     let ellipsis = call.ellipsis.is_valid();
 
-    let mut arg_num = first_arg;
-    let mut max_arg_num = first_arg;
-    let mut any_index = false;
-
+    // Upstream parses the whole format string before checking a single
+    // argument (`fmtstr.Parse`), so a malformed directive is the only thing
+    // reported — the directives around it are never looked at.
+    let mut ops: Vec<(u32, Directive)> = Vec::new();
     let bytes = format;
     let mut i = 0;
     while i < bytes.len() {
@@ -735,26 +781,39 @@ fn check_one(
         let op_start = i;
         let (scan, next) = scan_directive(format, i + 1);
         i = next;
-        // Position of the "%v" substring inside the literal.
-        let pos = op_pos(format_arg, op_start);
-        let dir = match scan {
+        match scan {
             Scan::Literal => continue,
             Scan::Error(msg) => {
                 // ReportRangef(formatArg, "%s %s", name, err).
                 out.push((format_arg.pos().0 as u32, format!("{name} {msg}")));
-                continue;
+                return;
             }
-            Scan::Directive(d) => d,
-        };
+            // Position of the "%v" substring inside the literal.
+            Scan::Directive(d) => ops.push((op_pos(format_arg, op_start), d)),
+        }
+    }
 
-        // Explicit index resets the operand cursor.
-        if let Some(idx) = dir.index {
+    let mut arg_num = first_arg;
+    let mut max_arg_num = first_arg;
+    let mut any_index = false;
+
+    for (pos, dir) in ops {
+        if dir.width_index.is_some() || dir.prec_index.is_some() || dir.verb_index.is_some() {
             any_index = true;
-            arg_num = first_arg + idx - 1;
         }
 
-        // `*` width/precision each consume an integer operand.
-        for _ in 0..dir.stars {
+        // A `*` width or precision consumes an integer operand, and an index
+        // written just before it says which one.
+        for (idx, star) in [
+            (dir.width_index, dir.has_width_star),
+            (dir.prec_index, dir.has_prec_star),
+        ] {
+            if let Some(idx) = idx {
+                arg_num = first_arg + idx - 1;
+            }
+            if !star {
+                continue;
+            }
             if ellipsis && arg_num + 1 >= nargs {
                 return;
             }
@@ -769,10 +828,30 @@ fn check_one(
                         plural(nargs - first_arg)
                     ),
                 ));
-            } else {
-                arg_num += 1;
-                max_arg_num = max_arg_num.max(arg_num);
+                return;
             }
+            let arg = &call.args[arg_num];
+            arg_num += 1;
+            max_arg_num = max_arg_num.max(arg_num);
+            if let Some(typ) = expr_type(pass, arg) {
+                // `matchArgType(pass, argInt, arg)`: the operand behind a `*`
+                // is a width, so only an integer will do.
+                if !match_arg_type(pass, 'd', B_INT, typ, 0) {
+                    out.push((
+                        pos,
+                        format!(
+                            "{name} format {} uses non-int {} as argument of *",
+                            dir.text,
+                            describe_arg(pass, arg)
+                        ),
+                    ));
+                    return;
+                }
+            }
+        }
+
+        if let Some(idx) = dir.verb_index {
+            arg_num = first_arg + idx - 1;
         }
 
         if dir.verb == '%' {
@@ -795,7 +874,7 @@ fn check_one(
                     plural(nargs - first_arg)
                 ),
             ));
-            continue;
+            return;
         }
         let arg = &call.args[arg_num];
         arg_num += 1;
@@ -806,14 +885,14 @@ fn check_one(
                 pos,
                 format!("{name} format {} has unknown verb {}", dir.text, dir.verb),
             ));
-            continue;
+            return;
         };
         if dir.verb == 'w' && !is_errorf {
             out.push((
                 pos,
                 format!("{name} does not support error-wrapping directive %w"),
             ));
-            continue;
+            return;
         }
 
         if let Some(typ) = expr_type(pass, arg) {
@@ -827,6 +906,7 @@ fn check_one(
                         type_name(pass, typ)
                     ),
                 ));
+                return;
             }
         }
     }
@@ -867,6 +947,13 @@ pub fn analyzer() -> &'static Analyzer {
 mod tests {
     use super::*;
 
+    fn directive(format: &[u8]) -> Directive {
+        match scan_directive(format, 1).0 {
+            Scan::Directive(d) => d,
+            _ => panic!("expected directive"),
+        }
+    }
+
     #[test]
     fn scans_flags_width_precision() {
         let (scan, next) = scan_directive(b"%-+#0 12.34d", 1);
@@ -874,7 +961,8 @@ mod tests {
         match scan {
             Scan::Directive(d) => {
                 assert_eq!(d.verb, 'd');
-                assert_eq!(d.stars, 0);
+                assert!(!d.has_width_star);
+                assert!(!d.has_prec_star);
             }
             _ => panic!("expected directive"),
         }
@@ -882,14 +970,64 @@ mod tests {
 
     #[test]
     fn scans_stars_and_index() {
-        let (scan, _) = scan_directive(b"%[2]*.*d", 1);
-        match scan {
-            Scan::Directive(d) => {
-                assert_eq!(d.verb, 'd');
-                assert_eq!(d.index, Some(2));
-                assert_eq!(d.stars, 2);
+        let d = directive(b"%[2]*.*d");
+        assert_eq!(d.verb, 'd');
+        // The index belongs to the width `*`; the precision `*` and the verb
+        // take the arguments that follow it.
+        assert_eq!(d.width_index, Some(2));
+        assert!(d.has_width_star);
+        assert_eq!(d.prec_index, None);
+        assert!(d.has_prec_star);
+        assert_eq!(d.verb_index, None);
+    }
+
+    /// rclone's `fmt.Sprintf("%[2]*[1]s", str, rawWidth)`: the width is
+    /// argument 2 and the verb prints argument 1.
+    #[test]
+    fn index_binds_to_the_position_that_absorbs_it() {
+        let d = directive(b"%[2]*[1]s");
+        assert_eq!(d.width_index, Some(2));
+        assert!(d.has_width_star);
+        assert_eq!(d.verb_index, Some(1));
+    }
+
+    /// An index no `*` absorbs belongs to the verb, wherever it was written.
+    #[test]
+    fn unabsorbed_index_belongs_to_the_verb() {
+        let d = directive(b"%[2]3d");
+        assert_eq!(d.width_index, None);
+        assert!(!d.has_width_star);
+        assert_eq!(d.verb_index, Some(2));
+    }
+
+    #[test]
+    fn indexed_precision_star() {
+        let d = directive(b"%.[2]*[1]d");
+        assert_eq!(d.prec_index, Some(2));
+        assert!(d.has_prec_star);
+        assert_eq!(d.verb_index, Some(1));
+    }
+
+    #[test]
+    fn invalid_index_is_quoted_back() {
+        match scan_directive(b"%[x]d", 1).0 {
+            Scan::Error(msg) => assert_eq!(msg, "format has invalid argument index [x]"),
+            _ => panic!("expected error"),
+        }
+        // Rejected by `ParseInt(…, 10, 32)`, not by the digit scan.
+        match scan_directive(b"%[999999999999]d", 1).0 {
+            Scan::Error(msg) => {
+                assert_eq!(msg, "format has invalid argument index [999999999999]")
             }
-            _ => panic!("expected directive"),
+            _ => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn missing_closing_bracket_quotes_the_rest_of_the_format() {
+        match scan_directive(b"%[3d b %s", 1).0 {
+            Scan::Error(msg) => assert_eq!(msg, "format %[3d b %s is missing closing ]"),
+            _ => panic!("expected error"),
         }
     }
 
@@ -900,6 +1038,13 @@ mod tests {
 
     #[test]
     fn trailing_percent_is_error() {
-        assert!(matches!(scan_directive(b"%", 1).0, Scan::Error(_)));
+        match scan_directive(b"%", 1).0 {
+            Scan::Error(msg) => assert_eq!(msg, "format % is missing verb at end of string"),
+            _ => panic!("expected error"),
+        }
+        match scan_directive(b"%[1]", 1).0 {
+            Scan::Error(msg) => assert_eq!(msg, "format %[1] is missing verb at end of string"),
+            _ => panic!("expected error"),
+        }
     }
 }
