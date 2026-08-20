@@ -206,8 +206,21 @@ impl<'a> Runner<'a> {
         }
     }
 
+    /// The type-checker package a function belongs to, which is the key its
+    /// `CtxFact` is stored under.
+    ///
+    /// A function the SSA builder created on demand for an *imported* package
+    /// has no `Function.pkg` — only the package it was declared from was ever
+    /// built as an SSA package. Its declaring object still names one, and
+    /// without that fallback every cross-package callee looked like a function
+    /// with no fact: jaeger's `NewFactoryBase$1 -> (*FactoryBase).Close ->
+    /// (*esclient.BulkIndexer).Close`, where the last hop is the one that
+    /// passes `context.Background()`.
     fn func_type_pkg(&self, f: &Function) -> Option<TypePackageId> {
-        f.pkg.map(|pid| self.prog.packages.get(pid).type_pkg())
+        if let Some(pid) = f.pkg {
+            return Some(self.prog.packages.get(pid).type_pkg());
+        }
+        f.object.and_then(|obj| obj.pkg(&self.prog.object_arena))
     }
 
     fn get_value(&self, key: &str, f: &Function) -> Option<ResInfo> {

@@ -14,4 +14,5 @@ closures/closures.go:25:5:contextcheck::Function `spawned$1->helper` should pass
 closures/closures.go:31:2:contextcheck::Function `immediate$1->helper` should pass the context parameter
 closures/closures.go:37:8:contextcheck::Function `assigned$1->helper` should pass the context parameter
 closures/closures.go:45:2:contextcheck::Function `nocapture$1->helper` should pass the context parameter
+crosspkg/outer/outer.go:23:8:contextcheck::Function `New$1->Close->Close` should pass the context parameter
 httphandler_bad/bad.go:13:9:contextcheck::Non-inherited new context, use function like `context.WithXXX` or `r.Context` instead

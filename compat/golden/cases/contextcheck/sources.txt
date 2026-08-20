@@ -12,3 +12,6 @@ closure/closure.go         crates/guff-context/tests/testdata/contextcheck_closu
 nocapture/nocapture.go     crates/guff-context/tests/testdata/contextcheck_nocapture/nocapture.go
 httphandler_ok/ok.go       crates/guff-context/tests/testdata/contextcheck_httphandler/ok.go
 httphandler_bad/bad.go     crates/guff-context/tests/testdata/contextcheck_httphandler/bad.go
+# Two packages, because the bug is in how a fact crosses between them.
+crosspkg/inner/inner.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/inner/inner.go
+crosspkg/outer/outer.go    crates/guff-context/tests/testdata/contextcheck_crosspkg/outer/outer.go
