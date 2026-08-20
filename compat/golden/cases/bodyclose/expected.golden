@@ -11,3 +11,5 @@ bad/bad.go:14:10:bodyclose::response body must be closed
 bad/bad.go:23:22:bodyclose::response body must be closed
 bad/bad.go:34:20:bodyclose::response body must be closed
 bad/bad.go:41:17:bodyclose::response body must be closed
+bad/bad.go:55:24:bodyclose::response body must be closed
+bad/bad.go:61:20:bodyclose::response body must be closed
