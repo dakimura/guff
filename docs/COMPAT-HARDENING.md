@@ -6859,6 +6859,67 @@ golden には元々エントリが無い（`ok` の fixture なので）が、
 
 ---
 
+### 2026-08-20（続き）— 同じセッションの後半 8 本（#54–#61）と、比較対象のバージョンという落とし穴
+
+**追加で潰したもの**
+
+| PR | 何が壊れていたか | 効果 |
+|---|---|---|
+| #54 | `contextcheck` の `func_type_pkg` が `Function.pkg` しか見ていなかった。**import 先のために on-demand で作られた関数には SSA package が無い**ので、パッケージを跨いだ callee は「fact を誰も持っていない関数」に見えていた。宣言元 object から辿るフォールバックを追加。golden case は 2 パッケージ構成（fact がパッケージ間を渡ることは 1 パッケージでは再現できない） | jaeger 3 → 2（残り 2 は容認済み revive ratchet） |
+| #55 | `protogetter` が「getter が値を返すのにポインタ欄へ代入する」形（`Schedule: job.Schedule` で `*string` ← `GetSchedule() string`）を filter していなかった。上流は `hasPointerKeyWithoutPointerGetter`。guff の checker は複合リテラルのキーに型を記録しないので、リテラル自身の struct 型から欄を引く | dapr 108 → 92 |
+| #56 | `spancheck` の報告位置。上流は代入文と、CFG が辿り着いた `return` を指す。guff は右辺の call と**閉じ括弧**を指していた。加えて **span とその return の間に分岐があると上流は何も報告しない**（2 つのメッセージは 1 つの `if ret != nil` の下）。6 形を実測して構文で再現 | dapr 92 → 82 |
+| #57 | `unused` が**ジェネリックなインターフェース**のメソッド名も「実装したら使用」の集合に入れていた。staticcheck は型パラメータ付きインターフェースには実装エッジを張らないので、dapr の 10 個の streamer の 40 メソッドは全部 finding | dapr 82 → 43 |
+| #58 | `bodyclose` が「左辺が `*http.Response` なら追跡」だった。上流は **call の結果**だけを追う。チャネル受信・map・slice・コピー・フィールドは対象外。報告位置も call の `(` へ | dapr 43 → 39 |
+| #59 | `prealloc` の容量式が `go/printer` の空白規則に従っていなかった（`len(a)/2 + len(b)`）。`Cap` 側は従っていたが、**leaf は構築時に depth 1 で 1 度だけ描画**していたので、後から低優先度の演算子の下に入ると空白が残った | 同じ finding が「取りこぼし 1 + 誤検出 1」から「一致」へ |
+| #60 | gocritic のコメント walker が `astwalk.visitCommentGroups`（**ブロックコメントは単独のグループにする**）を持っていなかった。`commentFormatting` は「先頭が `/*` なら return」なので、行コメントの直後に置かれたブロックコメントが finding になっていた | dapr 39 → 38 |
+| #61 | `recvcheck` の組み込み除外リストが**逆**だった。v0.2.0 は Marshal 側、v0.3.0 は Unmarshal 側で、golangci-lint 2.12.2 が pin しているのは **v0.2.0** | dapr 38 → 33 |
+
+**比較対象のバージョンは `git show v2.12.2:go.mod` で確認する**
+
+`recvcheck` はこれで一度間違えた。手元の golangci-lint チェックアウトは `v2.12.2-65-g…` で、
+その `go.mod` は **リリース版バイナリより新しい依存**を指している。module cache に複数バージョンが
+あるときに `ls | tail -1` で選ぶのはもっと危険で、`go-critic` は 0.14.4 を読んでいた（該当ファイルは
+0.14.3 と同一だったので結果は無事）、`x/tools` は 0.46.0 を読んでいた（`httpresponse` の差分は
+`slices.Backward` への書き換えだけ）。`recvcheck` だけは v0.3.0 と v0.2.0 で**除外リストが入れ替わって
+いた**ので、読んだ版のまま実装すると全部逆になる。
+
+2026-08-20 時点の pin（`git show v2.12.2:go.mod`）:
+`gosec v2.26.1` / `go-critic v0.14.3` / `contextcheck v1.1.6` / `thelper v0.7.1` /
+`usetesting v0.5.0` / `protogetter v0.3.20` / `spancheck v0.6.5` / `prealloc v1.1.0` /
+`recvcheck v0.2.0` / `honnef.co/go/tools v0.7.0` / `x/tools v0.44.0`。
+
+**hunt の最終状態（2026-08-20, #61 込み）**
+
+| リポ | guff | golangci | guff-only | golangci-only |
+|---|---:|---:|---|---|
+| prometheus v3.14.0 | 20 | 20 | 0 | 0 |
+| coredns v1.14.6 | 3 | 3 | 0 | 0 |
+| argo-cd v3.5.1 | 3 | 3 | 0 | 0 |
+| jaeger v2.20.0 | 2 | 0 | revive ×2（容認済み ratchet） | 0 |
+| atlas v1.3.0 | 2 | 0 | gosec G101 ×2 | 0 |
+| gitea v1.27.2 | 5 | 0 | unparam ×4 / SA4006 ×1 | 0 |
+| thanos v0.42.4 | 432 | 434 | staticcheck ×1 | unparam ×2 / staticcheck ×1 |
+| dapr v1.18.3 | 1391 | 1364 | 33 件 | gosec ×6 |
+
+セッション開始時は prometheus 0 / coredns 1 / atlas 2 / jaeger 7 / argo-cd 7 / gitea 8 /
+thanos 3 / dapr 111 だった。**3 リポが完全一致、jaeger は容認済み ratchet だけ**になった。
+
+**次にやること（更新）**
+
+上の 1〜2 と 4 はそのまま。3（contextcheck）は #54 で解消。加えて:
+
+5. **dapr の残り 33**。内訳は `nolint:` カスケード 20（gosec 10 / bodyclose 5 / testifylint 2 /
+   gocritic 1 / unused 1 / usetesting 1）と直接 13。gosec カスケードの半分は
+   **G201/G202（SQL 文字列連結）が未実装**（`crates/guff-style/src/gosec.rs` の DEFERRED 行）で、
+   残り半分は G101 の entropy（上の 2 と同じ原因、ただし**取りこぼし側**: `AppAPITokenEnvVar =
+   "APP_API_TOKEN"` を上流は報告し guff はしない）。G101 は誤検出と取りこぼしの両方を出しており、
+   zxcvbn を入れると atlas 2 + dapr 4 + カスケード 6 が一度に動く。
+6. **bodyclose のカスケード 5**（dapr `tests/integration/suite/actors/http/ttl.go` ほか）。
+   #58 は誤検出側を直したが、`resp, err = client.Do(req)` を `t.Run` のクロージャ内で書く形は
+   まだ取りこぼす。最小化からやり直すこと（単純な再代入は #58 の fixture で一致している）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
