@@ -140,6 +140,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // at all (COMPAT-HARDENING §4, 15th session).
     for file in pass.files() {
         guff::walk::preorder_prune(guff::walk::NodeRef::File(file), |n| {
+            // A *generic* interface is skipped, and that is upstream's answer
+            // rather than a simplification. staticcheck's unused builds a graph
+            // edge from a concrete method to the interface method it implements,
+            // and for an interface with type parameters it does not: dapr's
+            //
+            //     type streamer[T differ.Resource] interface { list(…) … }
+            //     newResource[componentsapi.Component](…, new(components))
+            //
+            // leaves `(*components).list` unreachable, and golangci-lint reports
+            // all four methods of all ten streamers — forty findings dapr
+            // silences with `//nolint:unused`, which guff then called unused
+            // directives. The non-generic form still counts as a use, which the
+            // fixture pins beside this one.
+            if let guff::walk::NodeRef::TypeSpec(spec) = n {
+                if spec.type_params.is_some()
+                    && matches!(spec.ty, guff::ast::Expr::InterfaceType(_))
+                {
+                    return false;
+                }
+            }
             if let guff::walk::NodeRef::InterfaceType(iface) = n {
                 for field in &iface.methods.list {
                     for name in &field.names {

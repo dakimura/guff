@@ -7,6 +7,8 @@
 # golangci-lint: 2.12.2
 
 bad/method_bad.go:7:17:unused::func usedType.unusedMethod is unused
+genericiface/generic_iface.go:30:17:unused::func (*comps).list is unused
+genericiface/generic_iface.go:31:17:unused::func (*comps).closeIt is unused
 genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused
 genericmethod/generic_method_bad.go:15:21:unused::func pair[K, V].key is unused
 iface/iface_ok.go:13:19:unused::func (*syncBuf).trulyUnused is unused
