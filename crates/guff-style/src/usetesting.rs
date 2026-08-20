@@ -147,19 +147,21 @@ fn check_func_body(
     options: &UsetestingOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
+    // Upstream's `checkFunc` inspects the whole block, closures included, and
+    // keeps the *enclosing* function's name and test-argument name in the
+    // message. Stopping at a nested function instead meant a call inside a
+    // closure was only ever attributed to the closure — and a closure with no
+    // parameters has no test argument at all, so nothing was reported. gitea's
+    // `testUploadAttachmentDeleteTemp` wraps its `os.TempDir()` in exactly such
+    // a closure.
     walk::inspect(NodeRef::BlockStmt(body), |n| {
         let Some(n) = n else {
             return true;
         };
-        match n {
-            // Nested functions are handled when visited as their own FuncDecl/FuncLit.
-            NodeRef::FuncLit(_) | NodeRef::FuncDecl(_) => false,
-            NodeRef::CallExpr(call) => {
-                check_call(call, fn_info, ge_go124, options, pending);
-                true
-            }
-            _ => true,
+        if let NodeRef::CallExpr(call) = n {
+            check_call(call, fn_info, ge_go124, options, pending);
         }
+        true
     });
 }
 
@@ -188,10 +190,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
 
     for file in pass.files() {
-        walk::inspect(NodeRef::File(file), |n| {
-            let Some(n) = n else {
-                return true;
-            };
+        let mut stack: Vec<NodeRef<'_>> = Vec::new();
+        walk::preorder_stack(NodeRef::File(file), &mut stack, |n, enclosing| {
             match n {
                 NodeRef::FuncDecl(fd) => {
                     let Some(body) = fd.body.as_ref() else {
@@ -204,9 +204,18 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         return true;
                     };
                     check_func_body(body, &info, ge_go124, &options, &mut pending);
-                    true
                 }
                 NodeRef::FuncLit(fl) => {
+                    // `hasParentFunc`: a literal inside a function is already
+                    // covered by that function's own walk, and reporting it
+                    // again would name "anonymous function" where upstream
+                    // names the enclosing one.
+                    if enclosing
+                        .iter()
+                        .any(|p| matches!(p, NodeRef::FuncDecl(_) | NodeRef::FuncLit(_)))
+                    {
+                        return true;
+                    }
                     let Some(field) = first_param_field(&fl.ty) else {
                         return true;
                     };
@@ -214,10 +223,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         return true;
                     };
                     check_func_body(&fl.body, &info, ge_go124, &options, &mut pending);
-                    true
                 }
-                _ => true,
+                _ => {}
             }
+            true
         });
     }
 
