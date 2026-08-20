@@ -218,6 +218,7 @@ golangci-lint / staticcheck が土台にしている `go/analysis` 相当:
 #### 4.3.1 コミット前に回すゲート（省略しない）
 
 ```bash
+./scripts/target-hygiene.sh                  # ★ 最初に。理由は 4.3.2
 cargo build --release -p guff-lint
 cargo test --workspace
 ./compat/golden/run.sh                       # check 単位・列まで厳密
@@ -236,6 +237,33 @@ cargo test --workspace
 
 CI 側の対応は [`compat/README.md`](../compat/README.md) の「Which tiers run where」。
 `oss-nightly` は **main への push でのみ**走るので、**PR の前にローカルで回すのが本番**。
+
+#### 4.3.2 `cargo test` が「止まった」ように見えるとき —— まず `target/` のファイル数を疑う
+
+cargo は `target/<profile>/deps` と `.fingerprint` を**一度も掃除しない**。
+リビルドのたびに前回の `.rlib` / `.rmeta` / テストバイナリが別のハッシュ名で残り、
+消す者がいない。長く使ったチェックアウトでは数千が数十万まで育つ。
+
+**症状はディスクフルには見えない。「ビルドが始まらない」ように見える。**
+見分け方はひとつで、
+
+```bash
+pgrep -fl rustc | wc -l    # 0
+ps -Ao pcpu,comm -r | head # syspolicyd が上位
+```
+
+`rustc` が 1 つも走っていないのに macOS の Gatekeeper デーモン（`syspolicyd`、
+実行ファイルごとに問い合わせが飛ぶ）が CPU 上位にいたら、原因はコードではなくファイル数。
+このリポジトリでは 229k / 871k / 172k の 3 回踏んでいる。
+
+```bash
+./scripts/target-hygiene.sh          # 数えて、閾値（既定 40k）を超えたら fail
+./scripts/target-hygiene.sh --prune  # 7 日以上触っていない deps/fingerprint/incremental を削除
+```
+
+`--prune` は cargo が作り直せるものしか消さないので常に安全で、
+`cargo clean` と違って**温まった成果物を捨てない**。それでも減らないなら
+`rm -rf target/debug`（release ツリーは健全なことが多いので残す）。
 
 ---
 

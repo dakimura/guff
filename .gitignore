@@ -50,3 +50,6 @@ __pycache__/
 
 # `go build ./...` inside compat/gospans drops its binary next to the source.
 /compat/gospans/gospans
+
+# Claude Code session state: worktrees, local settings.
+.claude/
