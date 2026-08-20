@@ -8742,16 +8742,46 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         // closure only ever answered `return true` to — so half the calls were
         // pure overhead. The `Some` sequence is identical either way, and the
         // callback never returned `false`, so nothing was being pruned.
+        // Upstream's stmt / stmtList / localDef walkers iterate `f.Decls` and
+        // descend only into `*ast.FuncDecl` bodies (`astwalk.stmtWalker`), so a
+        // func literal in a package-level `var` initializer is invisible to all
+        // 27 checkers built on them. guff walks the file flat, so those
+        // checkers ask `scoped` instead of `enabled`, and argo-cd's
+        // `validatorsByGroup` — an if/else-if/else inside a literal in a `var`
+        // block — stops being an `ifElseChain` finding guff has alone.
+        //
+        // The other checkers in the same arms (`badLock`, `returnAfterHttpError`,
+        // `sliceClear`, …) are expr- or ruleguard-based and do see those
+        // initializers; they keep `enabled`.
+        let func_body_spans: Vec<(u32, u32)> = file
+            .decls
+            .iter()
+            .filter_map(|d| match d {
+                Decl::FuncDecl(f) => f
+                    .body
+                    .as_ref()
+                    .map(|b| (b.lbrace.0 as u32, b.rbrace.0 as u32)),
+                _ => None,
+            })
+            .collect();
+        let scoped = |name: &str, pos: guff::Pos| -> bool {
+            if !enabled(&set, name) {
+                return false;
+            }
+            let p = pos.0 as u32;
+            func_body_spans.iter().any(|&(lo, hi)| p >= lo && p <= hi)
+        };
+
         inspect.preorder_typed(WALKED_KINDS, std::slice::from_ref(file), |n| {
             match n {
                 NodeRef::IfStmt(s) => {
-                    if enabled(&set, "elseif") {
+                    if scoped("elseif", s.if_) {
                         check_elseif(s, &mut pending);
                     }
-                    if enabled(&set, "dupBranchBody") {
+                    if scoped("dupBranchBody", s.if_) {
                         check_dup_branch_body(s, &mut pending);
                     }
-                    if enabled(&set, "ifElseChain") {
+                    if scoped("ifElseChain", s.if_) {
                         let key = s as *const _ as usize;
                         if if_else_ptr.insert(key, ()).is_none() {
                             check_if_else_chain(
@@ -8762,16 +8792,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             );
                         }
                     }
-                    if enabled(&set, "nilValReturn") {
+                    if scoped("nilValReturn", s.if_) {
                         check_nil_val_return(pass, s, &mut pending);
                     }
-                    if enabled(&set, "initClause") {
+                    if scoped("initClause", s.if_) {
                         check_init_clause("if", s.init.as_deref(), s.if_.0 as u32, &mut pending);
                     }
-                    if enabled(&set, "typeAssertChain") {
+                    if scoped("typeAssertChain", s.if_) {
                         check_type_assert_chain(s, &mut type_assert_visited, &mut pending);
                     }
-                    if enabled(&set, "sloppyReassign") {
+                    if scoped("sloppyReassign", s.if_) {
                         check_sloppy_reassign(s, &mut pending);
                     }
                     if enabled(&set, "returnAfterHttpError") {
@@ -8782,22 +8812,22 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::SwitchStmt(s) => {
-                    if enabled(&set, "singleCaseSwitch") {
+                    if scoped("singleCaseSwitch", s.switch) {
                         check_single_case_switch(s, &mut pending);
                     }
-                    if enabled(&set, "defaultCaseOrder") {
+                    if scoped("defaultCaseOrder", s.switch) {
                         check_default_case_order(s, &mut pending);
                     }
                     if enabled(&set, "switchTrue") {
                         check_switch_true(s, &mut pending);
                     }
-                    if enabled(&set, "dupCase") {
+                    if scoped("dupCase", s.switch) {
                         check_dup_case_switch(s, &mut pending);
                     }
-                    if enabled(&set, "emptyFallthrough") {
+                    if scoped("emptyFallthrough", s.switch) {
                         check_empty_fallthrough(s, &mut pending);
                     }
-                    if enabled(&set, "initClause") {
+                    if scoped("initClause", s.switch) {
                         check_init_clause(
                             "switch",
                             s.init.as_deref(),
@@ -8807,13 +8837,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::TypeSwitchStmt(s) => {
-                    if enabled(&set, "singleCaseSwitch") {
+                    if scoped("singleCaseSwitch", s.switch) {
                         check_single_case_type_switch(s, &mut pending);
                     }
-                    if enabled(&set, "typeSwitchVar") {
+                    if scoped("typeSwitchVar", s.switch) {
                         check_type_switch_var(s, &mut pending);
                     }
-                    if enabled(&set, "caseOrder") {
+                    if scoped("caseOrder", s.switch) {
                         check_case_order(pass, s, &mut pending);
                     }
                 }
@@ -8821,7 +8851,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "badCond") {
                         check_bad_cond_for(s, &mut pending);
                     }
-                    if enabled(&set, "nestingReduce") {
+                    if scoped("nestingReduce", s.for_) {
                         check_nesting_reduce_for(&s.body, &mut pending);
                     }
                     if enabled(&set, "sliceClear") {
@@ -8829,19 +8859,19 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::RangeStmt(s) => {
-                    if enabled(&set, "rangeAppendAll") {
+                    if scoped("rangeAppendAll", s.for_) {
                         check_range_append_all(pass, s, &mut pending);
                     }
                     let in_test_func = test_func_bodies
                         .iter()
                         .any(|(lo, hi)| s.for_.0 as u32 >= *lo && (s.for_.0 as u32) <= *hi);
-                    if enabled(&set, "rangeExprCopy") && !in_test_func {
+                    if scoped("rangeExprCopy", s.for_) && !in_test_func {
                         check_range_expr_copy(pass, s, &mut pending);
                     }
-                    if enabled(&set, "rangeValCopy") && !in_test_func {
+                    if scoped("rangeValCopy", s.for_) && !in_test_func {
                         check_range_val_copy(pass, s, &mut pending);
                     }
-                    if enabled(&set, "nestingReduce") {
+                    if scoped("nestingReduce", s.for_) {
                         check_nesting_reduce_for(&s.body, &mut pending);
                     }
                 }
@@ -8939,13 +8969,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::AssignStmt(a) => {
-                    if enabled(&set, "appendAssign") {
+                    if scoped("appendAssign", a.tok_pos) {
                         check_append_assign(a, &mut pending);
                     }
                     if enabled(&set, "assignOp") {
                         check_assign_op(a, &mut pending);
                     }
-                    if enabled(&set, "sqlQuery") {
+                    if scoped("sqlQuery", a.tok_pos) {
                         check_sql_query(pass, a, &mut pending);
                     }
                     if enabled(&set, "badSorting") {
@@ -8981,7 +9011,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_too_many_results(f, params.too_many_results_max, &mut pending);
                     }
                 }
-                NodeRef::ReturnStmt(r) if enabled(&set, "evalOrder") => {
+                NodeRef::ReturnStmt(r) if scoped("evalOrder", r.return_) => {
                     check_eval_order(pass, r, &mut pending);
                 }
                 NodeRef::CallExpr(c) => {
@@ -9071,7 +9101,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     check_sloppy_type_assert(pass, a, &mut pending);
                 }
                 NodeRef::BlockStmt(b) => {
-                    if enabled(&set, "unnecessaryBlock") {
+                    if scoped("unnecessaryBlock", b.lbrace) {
                         check_unnecessary_block_in_list(&b.list, &mut pending);
                     }
                     if enabled(&set, "syncMapLoadAndDelete") {
@@ -9080,7 +9110,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if enabled(&set, "badSyncOnceFunc") {
                         check_bad_sync_once_func_stmts(pass, &b.list, &mut pending);
                     }
-                    if enabled(&set, "appendCombine") {
+                    if scoped("appendCombine", b.lbrace) {
                         check_append_combine(&b.list, &mut pending);
                     }
                     if enabled(&set, "badLock") {
@@ -9088,10 +9118,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::CaseClause(c) => {
-                    if enabled(&set, "unnecessaryBlock") {
+                    if scoped("unnecessaryBlock", c.case) {
                         check_unnecessary_block_case(&c.body, &mut pending);
                     }
-                    if enabled(&set, "appendCombine") {
+                    if scoped("appendCombine", c.case) {
                         check_append_combine(&c.body, &mut pending);
                     }
                     if enabled(&set, "badLock") {
@@ -9099,10 +9129,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::CommClause(c) => {
-                    if enabled(&set, "unnecessaryBlock") {
+                    if scoped("unnecessaryBlock", c.case) {
                         check_unnecessary_block_case(&c.body, &mut pending);
                     }
-                    if enabled(&set, "appendCombine") {
+                    if scoped("appendCombine", c.case) {
                         check_append_combine(&c.body, &mut pending);
                     }
                     if enabled(&set, "badLock") {

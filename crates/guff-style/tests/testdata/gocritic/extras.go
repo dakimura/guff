@@ -638,3 +638,34 @@ func stringXbytesRealBytesExtra(b, c []byte) {
 	_ = string(b) == ""
 	_ = string(b) == string(c)
 }
+
+// Upstream's stmt / stmtList / localDef walkers iterate `f.Decls` and descend
+// only into `*ast.FuncDecl` bodies, so nothing below is visited by any of the
+// 27 checkers built on them — not the if/else-if/else chain (`ifElseChain`),
+// not the one-case switch (`singleCaseSwitch`), not the redundant block
+// (`unnecessaryBlock`), not the `if` with an init clause (`initClause`). Every
+// one of them is a finding when the same code sits in a function. argo-cd's
+// `validatorsByGroup` is this shape and got an ifElseChain guff had alone.
+var walkerScopedInVarInit = func(a, b int) int {
+	if a > b {
+		return a
+	} else if a < b {
+		return b
+	} else {
+		return 0
+	}
+}
+
+var walkerScopedSwitchInVarInit = func(a int) string {
+	switch a {
+	case 1:
+		return "one"
+	}
+	{
+		_ = a
+	}
+	if v := a * 2; v > 4 {
+		return "big"
+	}
+	return ""
+}
