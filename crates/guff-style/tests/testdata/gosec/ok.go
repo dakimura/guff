@@ -228,3 +228,23 @@ func sqlConcatViaMethodRecv(h *sqlOkHolder, table string) error {
 	_, err := h.get().Exec("DELETE FROM " + table + " WHERE key = ?")
 	return err
 }
+
+// `buildssa.SrcFuncs` walks `file.Decls` for `*ast.FuncDecl`s, so the package
+// initializer — which has no declaration — is not a source function, and
+// neither is a func literal inside a package-level `var`. The conversions
+// below are invisible to every gosec analyzer, G115 included; the same two
+// lines inside a declared function are a finding. dapr's
+// `pkg/components/state/pluggable.go` is this shape.
+var g115InPackageVar = map[string]func(string, string) uint64{
+	"k": func(a, b string) uint64 {
+		x, err := strconv.Atoi(a)
+		if err != nil {
+			return 0
+		}
+		y, err := strconv.Atoi(b)
+		if err != nil {
+			return 0
+		}
+		return uint64(x) + uint64(y)
+	},
+}
