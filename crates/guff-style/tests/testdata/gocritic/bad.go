@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-//BadCommentFormatting has no space after //.
+// BadCommentFormatting has no space after //.
 var _ = 0
 
 // deprecated: use newer.
@@ -131,6 +131,23 @@ func badCall(s string) {
 	_ = append([]byte(nil))
 	_ = filepath.Join("only")
 	_ = strings.Replace(s, "a", "b", 0)
+}
+
+type execCtx struct{ id string }
+
+func (c execCtx) GetID() string { return c.id }
+
+// `.Where(m["x"].Pure)`: rewriting to `++` would call the getter once instead
+// of twice, so upstream leaves it alone (dapr `taskexecutionid/single.go`).
+func assignOpImpureIndex(m map[string]int, c execCtx) {
+	m[c.GetID()] = m[c.GetID()] + 1
+}
+
+// A conversion *is* pure, so this one is still a finding.
+type execCount int
+
+func assignOpConversionIndex(m map[execCount]int, k int) {
+	m[execCount(k)] = m[execCount(k)] + 1
 }
 
 func assignOp(x int) {

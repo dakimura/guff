@@ -35,7 +35,10 @@ fn is_slice_or_map(pass: &Pass<'_>, obj: guff_types::ObjectId) -> bool {
 }
 
 fn check_if(pass: &Pass<'_>, ifs: &IfStmt) -> Option<()> {
-    if ifs.init.is_some() {
+    // `(IfStmt nil cond [range] nil)` — the trailing `nil` is the else branch.
+    // With one, dropping the check is not the same program: dapr's
+    // `default_bulksub.go` runs the "all messages failed" path instead.
+    if ifs.init.is_some() || ifs.else_.is_some() {
         return None;
     }
     let Expr::BinaryExpr(BinaryExpr { x, op, y, .. }) = unparen(&ifs.cond) else {
