@@ -45,13 +45,6 @@ func returnsResponseNamed() (*http.Response, error) {
 	return resp, nil
 }
 
-func blankResponse() {
-	_, err := http.Get("https://example.com")
-	if err != nil {
-		return
-	}
-}
-
 func httptestResult() {
 	rec := &httptest.ResponseRecorder{}
 	resp := rec.Result()
@@ -89,4 +82,3 @@ func syntheticResponse() {
 	}
 	_ = res.StatusCode
 }
-

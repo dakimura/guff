@@ -501,7 +501,8 @@ fn check_body(
                             } else {
                                 MSG_CLOSE
                             };
-                            pending.push((call.pos().0 as u32, msg.to_string()));
+                            // go/ssa gives a call the position of its `(`.
+                            pending.push((call.lparen.0 as u32, msg.to_string()));
                         }
                     }
                 }
@@ -528,6 +529,18 @@ fn handle_assign(
             continue;
         };
         if name == "_" {
+            // A response assigned to the blank identifier has no `ssa.Extract`
+            // for `isopen` to follow, so upstream falls through to its default
+            // and reports. dapr writes `_, err = client.Do(req)` where only the
+            // error is wanted.
+            if discarded_response(pass, assign, i) {
+                let msg = if check_consumption {
+                    MSG_CLOSE_AND_CONSUME
+                } else {
+                    MSG_CLOSE
+                };
+                pending.push((assign_report_pos(assign, i), msg.to_string()));
+            }
             continue;
         }
 
@@ -576,6 +589,18 @@ fn handle_assign(
             );
         }
     }
+}
+
+/// The value at `lhs_index` is an `*http.Response` this call opened, and it is
+/// being thrown away.
+fn discarded_response(pass: &Pass<'_>, assign: &AssignStmt, lhs_index: usize) -> bool {
+    let Some(rhs) = rhs_for_index(assign, lhs_index) else {
+        return false;
+    };
+    if !is_call_expr(rhs) || is_httptest_result_call(pass, rhs) || is_response_composite(rhs) {
+        return false;
+    }
+    rhs_result_is_response(pass, assign, lhs_index)
 }
 
 fn handle_value_spec(
