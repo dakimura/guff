@@ -16,10 +16,13 @@
 //! `msg.Field == nil` is filtered too when `GetField` returns a non-pointer,
 //! and the first argument of `append` is filtered — both as upstream does.
 //!
+//! A pointer target whose getter returns a value is filtered too: assigning
+//! `u.GetNickname()` (a `string`) where a `*string` is wanted does not compile,
+//! so upstream does not propose it.
+//!
 //! DEFERRED (see DEVELOPMENT.md R13): StarExpr getter-returns-value,
-//! optional-proto argument filtering, `DeclStmt`/`ReturnStmt`/`KeyValueExpr`
-//! handling, generated-file skip by non-protoc prefixes, and SuggestedFix
-//! emission.
+//! optional-proto argument filtering, `DeclStmt`/`ReturnStmt` handling,
+//! generated-file skip by non-protoc prefixes, and SuggestedFix emission.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -98,6 +101,86 @@ fn method_exists(pass: &Pass<'_>, expr: &Expr, name: &str) -> bool {
         }
     }
     false
+}
+
+/// Upstream's `hasPointerKeyWithoutPointerGetter`: the place the value is going
+/// is a pointer, and the getter hands back a value.
+///
+/// `Schedule: job.Schedule` in a `*pb.Job` literal is the shape — the field is
+/// `*string`, `GetSchedule()` is `string`, and `Schedule: job.GetSchedule()`
+/// does not compile. Upstream filters the position; a getter that *does* return
+/// a pointer is reported as usual.
+fn pointer_target_without_pointer_getter(
+    pass: &Pass<'_>,
+    target: &Expr,
+    value: &guff::ast::SelectorExpr,
+) -> bool {
+    let Some(typ) = expr_or_object_type(pass, target) else {
+        return false;
+    };
+    pointer_type_without_pointer_getter(pass, typ, value)
+}
+
+fn pointer_type_without_pointer_getter(
+    pass: &Pass<'_>,
+    target: guff_types::TypeId,
+    value: &guff::ast::SelectorExpr,
+) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    if !matches!(artifacts.types.get(target), TypeData::Pointer(_)) {
+        return false;
+    }
+    getter_result_has_pointer(pass, &value.x, &value.sel.name) == Some(false)
+}
+
+/// The type of the struct field a composite-literal key names.
+///
+/// `types.Info.TypeOf` answers this from `Uses`, which records the field for a
+/// keyed struct literal. guff's checker does not record those keys, so the
+/// field is looked up in the literal's own struct type by name.
+fn struct_field_type(
+    pass: &Pass<'_>,
+    lit_ty: guff_types::TypeId,
+    name: &str,
+) -> Option<guff_types::TypeId> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let mut ty = guff_types::alias::unalias_readonly(&artifacts.types, lit_ty);
+    if let TypeData::Pointer(p) = artifacts.types.get(ty) {
+        ty = guff_types::alias::unalias_readonly(&artifacts.types, p.elem());
+    }
+    let under = ty.underlying(&artifacts.types);
+    let TypeData::Struct(st) = artifacts.types.get(under) else {
+        return None;
+    };
+    for i in 0..st.num_fields() {
+        let field = st.field(i);
+        if field.name(&artifacts.objects) == name {
+            return field.typ(&artifacts.objects);
+        }
+    }
+    None
+}
+
+/// The type of an expression, falling back to the object an identifier refers
+/// to — a composite literal's field key has no recorded expression type, only a
+/// `Uses` entry, and `types.Info.TypeOf` reads both.
+fn expr_or_object_type(pass: &Pass<'_>, expr: &Expr) -> Option<guff_types::TypeId> {
+    let info = pass.types_info()?;
+    if let Some(tv) = info.types.get(&expr.id()) {
+        return Some(tv.typ);
+    }
+    let Expr::Ident(id) = expr else {
+        return None;
+    };
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let obj = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).and_then(|o| *o))?;
+    obj.typ(&artifacts.objects)
 }
 
 /// Port of `getterResultHasPointer`: does `Get<name>` on the named type behind
@@ -304,9 +387,53 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         preorder(NodeRef::File(file), |n| {
             match n {
                 NodeRef::AssignStmt(a) => {
-                    for lhs in &a.lhs {
+                    for (i, lhs) in a.lhs.iter().enumerate() {
                         filtered.insert(lhs.pos().0);
                         if let Expr::StarExpr(se) = lhs {
+                            filtered.insert(se.x.pos().0);
+                        }
+                        if let Some(Expr::SelectorExpr(se)) = a.rhs.get(i) {
+                            if pointer_target_without_pointer_getter(pass, lhs, se) {
+                                filtered.insert(se.x.pos().0);
+                            }
+                        }
+                    }
+                }
+                // `&pb.Job{Schedule: job.Schedule}` where the *field* is
+                // `*string` and `GetSchedule()` returns `string`: the getter
+                // cannot be written there, so upstream filters the position
+                // instead of proposing a rewrite that would not compile. dapr
+                // fills sixteen optional proto fields this way.
+                NodeRef::KeyValueExpr(kv) => {
+                    if let Expr::SelectorExpr(se) = &*kv.value {
+                        if pointer_target_without_pointer_getter(pass, &kv.key, se) {
+                            filtered.insert(se.x.pos().0);
+                        }
+                    }
+                }
+                // Keyed *struct* literals go through the literal, because the
+                // key names a field and guff's checker records no type for it.
+                NodeRef::CompositeLit(lit) => {
+                    let Some(lit_ty) = pass
+                        .types_info()
+                        .and_then(|i| i.types.get(&lit.id))
+                        .map(|tv| tv.typ)
+                    else {
+                        return true;
+                    };
+                    for elt in &lit.elts {
+                        let Expr::KeyValueExpr(kv) = elt else {
+                            continue;
+                        };
+                        let (Expr::Ident(key), Expr::SelectorExpr(se)) =
+                            (&*kv.key, &*kv.value)
+                        else {
+                            continue;
+                        };
+                        let Some(field_ty) = struct_field_type(pass, lit_ty, &key.name) else {
+                            continue;
+                        };
+                        if pointer_type_without_pointer_getter(pass, field_ty, se) {
                             filtered.insert(se.x.pos().0);
                         }
                     }

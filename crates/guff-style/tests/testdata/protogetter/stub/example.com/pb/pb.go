@@ -8,6 +8,9 @@ type User struct {
 	Address *Address
 	Meta    map[string]string
 	Names   []string
+	// An `optional` proto3 field: the struct holds a pointer and the getter
+	// hands back the value.
+	Nickname *string
 }
 
 type Address struct {
@@ -47,6 +50,13 @@ func (x *User) GetNames() []string {
 		return x.Names
 	}
 	return nil
+}
+
+func (x *User) GetNickname() string {
+	if x != nil && x.Nickname != nil {
+		return *x.Nickname
+	}
+	return ""
 }
 
 func (x *User) ProtoReflect() {}

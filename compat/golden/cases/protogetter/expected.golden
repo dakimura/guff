@@ -11,3 +11,4 @@ bad/bad.go:10:9:protogetter::avoid direct access to proto field u.Age, use u.Get
 bad/bad.go:14:9:protogetter::avoid direct access to proto field u.Address.City, use u.GetAddress().GetCity() instead
 bad/bad.go:21:9:protogetter::avoid direct access to proto field u.Address, use u.GetAddress() instead
 bad/bad.go:27:16:protogetter::avoid direct access to proto field u.Meta, use u.GetMeta() instead
+bad/bad.go:34:27:protogetter::avoid direct access to proto field u.Name, use u.GetName() instead

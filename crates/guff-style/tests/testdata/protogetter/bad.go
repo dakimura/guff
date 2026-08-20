@@ -26,3 +26,10 @@ func nilComparePointerGetter(u *pb.User) bool {
 func nilCompareReversed(u *pb.User) bool {
 	return nil == u.Meta
 }
+
+// The pointer test is on the *target*, not on the field: a non-pointer target
+// keeps the finding even when the value is an optional field, because
+// `u.GetNickname()` fits there.
+func optionalIntoStringField(u *pb.User) *pb.Address {
+	return &pb.Address{City: u.Name}
+}

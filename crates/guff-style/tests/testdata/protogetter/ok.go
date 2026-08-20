@@ -47,3 +47,21 @@ type aliasUser = pb.User
 func viaAlias(u *aliasUser) string {
 	return u.Name
 }
+
+// `Nickname: u.Nickname` in a keyed literal: the field is `*string` and
+// `GetNickname()` is `string`, so the rewrite would not compile and upstream
+// filters the position (`hasPointerKeyWithoutPointerGetter`). dapr fills
+// sixteen optional proto fields this way, in `pkg/api/universal/jobs.go` above
+// all.
+func copyOptionalIntoLiteral(u *pb.User) *pb.User {
+	return &pb.User{
+		Nickname: u.Nickname,
+		Name:     u.GetName(),
+	}
+}
+
+// Same test on the left-hand side of an assignment.
+func copyOptionalIntoPointer(u *pb.User, dst *string) {
+	dst = u.Nickname
+	_ = dst
+}
