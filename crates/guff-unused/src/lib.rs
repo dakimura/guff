@@ -362,6 +362,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    let ignores = collect_lint_ignores(pass);
+
     let mut pending = Vec::new();
     for obj in candidates {
         if used.contains(&obj) {
@@ -369,6 +371,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
         let name = obj.name(&artifacts.objects);
         let pos = obj.pos(&artifacts.objects);
+        if ignores.covers(&fset, pos) {
+            continue;
+        }
         let display = method_display
             .get(&obj)
             .cloned()
@@ -385,6 +390,152 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         pass.reportf(pos, message);
     }
     Ok(None)
+}
+
+/// `//lint:ignore U1000 …` and `//lint:file-ignore U1000 …`, honnef's own
+/// suppression syntax: an object on an ignored line is *used*
+/// (`unused/unused.go`, "all objects annotated with a //lint:ignore U1000 are
+/// considered used").
+///
+/// Upstream keys on the line of the node the comment is attached to
+/// (`ast.NewCommentMap`) — for a trailing comment that is the comment's own
+/// line, for a doc comment the declaration below it — so both are recorded.
+/// rclone writes one of each in `cmd/serve/docker`, on a `var` and on a `func`
+/// that only the linux build uses.
+///
+/// The shared load parses without `PARSE_COMMENTS`, so the comments have to be
+/// read back out of the source; line numbers are the same in either parse, so
+/// only the file name has to line up.
+#[derive(Default)]
+struct LintIgnores {
+    lines: HashSet<(String, i64)>,
+    files: HashSet<String>,
+}
+
+impl LintIgnores {
+    fn is_empty(&self) -> bool {
+        self.lines.is_empty() && self.files.is_empty()
+    }
+
+    fn covers(&self, fset: &guff::position::FileSet, pos: u32) -> bool {
+        if self.is_empty() {
+            return false;
+        }
+        let p = fset.position_for(guff::position::Pos(pos as i64), false);
+        let base = base_name(&p.filename);
+        self.files.contains(&base) || self.lines.contains(&(base, p.line))
+    }
+}
+
+fn base_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn collect_lint_ignores(pass: &Pass<'_>) -> LintIgnores {
+    use guff::parser::{parse_file, PARSE_COMMENTS};
+    use guff::position::FileSet;
+
+    let mut out = LintIgnores::default();
+    for (index, path) in pass.pkg().compiled_go_files.iter().enumerate() {
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        // The type-checker already read this file; re-opening it makes the
+        // kernel do the work twice.
+        let owned;
+        let src: &[u8] = match pass.pkg().source_bytes(index) {
+            Some(b) => b,
+            None => match std::fs::read(path) {
+                Ok(b) => {
+                    owned = b;
+                    &owned
+                }
+                Err(_) => continue,
+            },
+        };
+        // Cheap reject before the reparse: most files have no directive.
+        if !src.windows(7).any(|w| w == b"//lint:") {
+            continue;
+        }
+        let rfset = FileSet::new();
+        let Ok(rfile) = parse_file(&rfset, name, src, PARSE_COMMENTS) else {
+            continue;
+        };
+        for group in &rfile.comments {
+            for comment in &group.list {
+                let Some(rest) = comment.text.strip_prefix("//lint:") else {
+                    continue;
+                };
+                let mut fields = rest.split(' ');
+                let command = fields.next().unwrap_or("");
+                let checks = fields.next().unwrap_or("");
+                if !checks.split(',').any(|c| c == "U1000") {
+                    continue;
+                }
+                match command {
+                    "file-ignore" => {
+                        out.files.insert(name.to_string());
+                    }
+                    "ignore" => {
+                        let at = rfset.position_for(comment.pos(), false);
+                        out.lines.insert((name.to_string(), at.line));
+                        // A doc comment belongs to the declaration below it; a
+                        // trailing one belongs to the code already on its line,
+                        // and must not reach down to the next declaration.
+                        if !is_trailing(src, at.offset) {
+                            if let Some(line) = next_decl_line(&rfile, &rfset, group.end()) {
+                                out.lines.insert((name.to_string(), line));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Whether anything but whitespace precedes `offset` on its line.
+fn is_trailing(src: &[u8], offset: i64) -> bool {
+    let mut i = offset as usize;
+    while i > 0 {
+        i -= 1;
+        match src.get(i) {
+            Some(b'\n') => return false,
+            Some(c) if c.is_ascii_whitespace() => {}
+            Some(_) => return true,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// Line of the first declaration or spec that starts at or after `pos`.
+fn next_decl_line(
+    file: &guff::ast::File,
+    fset: &guff::position::FileSet,
+    pos: guff::position::Pos,
+) -> Option<i64> {
+    let mut best: Option<guff::position::Pos> = None;
+    let mut consider = |p: guff::position::Pos| {
+        if p.0 >= pos.0 && best.is_none_or(|b| p.0 < b.0) {
+            best = Some(p);
+        }
+    };
+    for decl in &file.decls {
+        consider(decl.pos());
+        if let Decl::GenDecl(GenDecl { specs, .. }) = decl {
+            for spec in specs {
+                consider(spec.pos());
+            }
+        }
+    }
+    best.map(|p| fset.position_for(p, false).line)
 }
 
 fn make_analyzer(run_despite_errors: bool) -> Analyzer {
