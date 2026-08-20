@@ -181,3 +181,13 @@ func okPerm(n int) []int { return rand.Perm(n) }
 func okShuffle(xs []int) {
 	rand.Shuffle(len(xs), func(i, j int) { xs[i], xs[j] = xs[j], xs[i] })
 }
+
+// A variadic call is where upstream's taint stops: go/ssa packs the arguments
+// into a slice, and `pathDependsOn` has no case for one. `filepath.Join` is
+// variadic, so neither tool calls this a G122 — the tools agree, and the reason
+// is an artifact of the SSA shape rather than of the path.
+func g122VariadicHop() {
+	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		return os.Remove(filepath.Join(path, "sub"))
+	})
+}

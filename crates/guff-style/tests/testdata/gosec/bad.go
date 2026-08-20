@@ -97,6 +97,24 @@ func bad() {
 		return os.Remove(path)
 	})
 
+	// Upstream walks back from the sink argument through calls, so a path that
+	// has been through `filepath.Clean` is still the callback's path. coredns
+	// `plugin/auto/walk.go` is exactly this and guff used to miss it, because
+	// it matched the parameter's name and nothing derived from it.
+	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		cleanPath := filepath.Clean(path)
+		f, err := os.Open(cleanPath)
+		if err != nil {
+			return err
+		}
+		return f.Close()
+	})
+
+	// Two non-variadic hops still count.
+	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		return os.Remove(filepath.ToSlash(filepath.Clean(path)))
+	})
+
 	if envPath := os.Getenv("GUFF_GOSEC_G703"); envPath != "" {
 		_, _ = os.OpenFile(envPath, os.O_RDONLY, 0)
 	}

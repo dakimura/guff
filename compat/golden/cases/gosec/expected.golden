@@ -52,7 +52,9 @@ bad/bad.go:91:6:gosec:high:G109: Potential Integer overflow made by strconv.Atoi
 bad/bad.go:91:11:gosec:high:G115: integer overflow conversion int -> int32
 bad/bad.go:94:6:gosec:medium:G203: The used method does not auto-escape HTML. This can potentially lead to 'Cross-site Scripting' vulnerabilities, in case the attacker controls the input.
 bad/bad.go:97:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
-bad/bad.go:101:21:gosec:high:G703: Path traversal via taint analysis
+bad/bad.go:106:20:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:115:19:gosec:high:G122: Filesystem operation in filepath.Walk/WalkDir callback uses race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent symlink TOCTOU traversal
+bad/bad.go:119:21:gosec:high:G703: Path traversal via taint analysis
 g115/g115.go:24:39:gosec:high:G115: integer overflow conversion int -> int32
 g115/g115.go:26:45:gosec:high:G115: integer overflow conversion int64 -> int32
 g115/g115.go:28:44:gosec:high:G115: integer overflow conversion int -> uint8
