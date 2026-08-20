@@ -65,7 +65,16 @@ impl Op {
 #[derive(Debug)]
 struct Leaf {
     /// Rendered Go source, used in the diagnostic message.
+    ///
+    /// Rendered at depth 1, which is right when the leaf *is* the capacity and
+    /// wrong when it ends up nested under an operator of lower precedence —
+    /// `go/printer` drops the blanks around a `/` inside a `+`, and the leaf
+    /// cannot know that at construction. [`Self::expr`] is re-rendered at the
+    /// depth it turns out to sit at; `text` stays as the identity used for
+    /// comparison and for `subs`.
     text: String,
+    /// The expression this leaf was built from, when there was one.
+    expr: Option<Expr>,
     /// Identifier names reachable per upstream's `hasVarReference` (which skips
     /// selector fields, callee names, and composite-literal keys).
     refs: HashSet<String>,
@@ -304,7 +313,10 @@ fn render(cap: &Cap) -> String {
 fn render1(cap: &Cap, prec1: u8, depth: u32, out: &mut String) {
     match cap {
         Cap::Int(n) => out.push_str(&n.to_string()),
-        Cap::Leaf(l) => out.push_str(&l.text),
+        Cap::Leaf(l) => match &l.expr {
+            Some(e) => render_expr1(e, depth as i32, out),
+            None => out.push_str(&l.text),
+        },
         Cap::Len(x) => {
             out.push_str("len(");
             render1(x, 0, 1, out);
@@ -364,18 +376,108 @@ fn unparen(e: &Expr) -> &Expr {
     }
 }
 
+/// `go/printer.walkBinary`, over the AST rather than over a [`Cap`].
+fn expr_walk_binary(b: &guff::ast::BinaryExpr) -> (bool, bool, i32) {
+    let prec = b.op.precedence();
+    let mut has4 = prec == 4;
+    let mut has5 = prec == 5;
+    let mut max_problem = 0;
+
+    if let Expr::BinaryExpr(l) = &*b.x {
+        // A lower-precedence left operand gets parentheses, and upstream then
+        // treats it as a ParenExpr and stops.
+        if l.op.precedence() >= prec {
+            let (a, c, m) = expr_walk_binary(l);
+            has4 |= a;
+            has5 |= c;
+            max_problem = max_problem.max(m);
+        }
+    }
+    match &*b.y {
+        Expr::BinaryExpr(r) if r.op.precedence() > prec => {
+            let (a, c, m) = expr_walk_binary(r);
+            has4 |= a;
+            has5 |= c;
+            max_problem = max_problem.max(m);
+        }
+        Expr::StarExpr(_) if b.op == Token::QUO => max_problem = 5,
+        Expr::UnaryExpr(u) => {
+            // `/*` would open a comment, `&&` and `&^` would read as one
+            // operator, `++`/`--` as an increment.
+            match (token_text(b.op), token_text(u.op)) {
+                ("/", "*") | ("&", "&") | ("&", "^") => max_problem = 5,
+                ("+", "+") | ("-", "-") => max_problem = max_problem.max(4),
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+    (has4, has5, max_problem)
+}
+
+/// `go/printer.cutoff`.
+fn expr_cutoff(b: &guff::ast::BinaryExpr, depth: i32) -> i32 {
+    let (has4, has5, problem) = expr_walk_binary(b);
+    if problem > 0 {
+        return problem + 1;
+    }
+    if has4 && has5 {
+        return if depth == 1 { 5 } else { 4 };
+    }
+    if depth == 1 {
+        return 6;
+    }
+    if has4 || has5 {
+        return 5;
+    }
+    4
+}
+
 fn render_expr(e: &Expr) -> String {
+    let mut out = String::new();
+    render_expr1(e, 1, &mut out);
+    out
+}
+
+/// Renders like `go/printer` does, which for a binary expression means the
+/// blanks depend on how deeply it nests and on what precedences appear beneath
+/// it: `len(a)/2 + len(b)`, not `len(a) / 2 + len(b)`. The `Cap` renderer in
+/// this file already followed that rule; a capacity that stays an opaque leaf
+/// went through here instead and always printed blanks, which is dapr's
+/// `pkg/runtime/hotreload/differ` — one finding, spelled two ways.
+fn render_expr1(e: &Expr, depth: i32, out: &mut String) {
+    if let Expr::BinaryExpr(b) = e {
+        let prec = b.op.precedence();
+        let blank = prec < expr_cutoff(b, depth);
+        let ldepth = match &*b.x {
+            Expr::BinaryExpr(l) if l.op.precedence() == prec => depth,
+            _ => depth + 1,
+        };
+        render_expr1(&b.x, ldepth, out);
+        if blank {
+            out.push(' ');
+        }
+        out.push_str(token_text(b.op));
+        if blank {
+            out.push(' ');
+        }
+        render_expr1(&b.y, depth + 1, out);
+        return;
+    }
+    out.push_str(&render_expr_atom(e));
+}
+
+fn render_expr_atom(e: &Expr) -> String {
     match e {
         Expr::Ident(id) => id.name.clone(),
         Expr::BasicLit(l) => l.value.clone(),
         Expr::ParenExpr(p) => format!("({})", render_expr(&p.x)),
         Expr::UnaryExpr(u) => format!("{}{}", token_text(u.op), render_expr(&u.x)),
-        Expr::BinaryExpr(b) => format!(
-            "{} {} {}",
-            render_expr(&b.x),
-            token_text(b.op),
-            render_expr(&b.y)
-        ),
+        Expr::BinaryExpr(_) => {
+            let mut out = String::new();
+            render_expr1(e, 1, &mut out);
+            out
+        }
         Expr::SelectorExpr(s) => format!("{}.{}", render_expr(&s.x), s.sel.name),
         Expr::StarExpr(s) => format!("*{}", render_expr(&s.x)),
         Expr::IndexExpr(i) => format!("{}[{}]", render_expr(&i.x), render_expr(&i.index)),
@@ -571,6 +673,7 @@ fn leaf(e: &Expr) -> Cap {
     collect_subs(e, &mut subs);
     Cap::Leaf(Rc::new(Leaf {
         text: render_expr(e),
+        expr: Some(e.clone()),
         refs,
         subs,
         int: expr_int_value(e),
