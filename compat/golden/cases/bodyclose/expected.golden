@@ -1,0 +1,15 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh bodyclose
+# Produced by running golangci-lint on compat/golden/cases/bodyclose/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:6:23:bodyclose::response body must be closed
+bad/bad.go:14:10:bodyclose::response body must be closed
+bad/bad.go:23:22:bodyclose::response body must be closed
+bad/bad.go:34:20:bodyclose::response body must be closed
+bad/bad.go:41:17:bodyclose::response body must be closed
+bad/bad.go:55:24:bodyclose::response body must be closed
+bad/bad.go:61:20:bodyclose::response body must be closed

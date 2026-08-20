@@ -68,8 +68,8 @@ fn bodyclose_flags_missing_close() {
             .iter()
             .filter(|m| m.contains("response body must be closed"))
             .count()
-            >= 3,
-        "expected ≥3 diagnostics (missing + discarded + reassign): {messages:?}"
+            >= 5,
+        "expected ≥5 diagnostics (missing + discarded + reassign + two blanks): {messages:?}"
     );
 }
 

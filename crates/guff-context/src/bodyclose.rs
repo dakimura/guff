@@ -224,6 +224,20 @@ fn rhs_for_index(assign: &AssignStmt, lhs_index: usize) -> Option<&Expr> {
     }
 }
 
+/// `make` and `new` are lowered by go/ssa to `MakeChan`/`MakeMap`/`MakeSlice`
+/// and `Alloc`, so they are not `*ssa.Call` and `getReqCall` never sees them —
+/// `resp := new(http.Response)` opens nothing.
+fn is_make_or_new(expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(call) => is_make_or_new_call(call),
+        _ => false,
+    }
+}
+
+fn is_make_or_new_call(call: &CallExpr) -> bool {
+    matches!(call.fun.as_ref(), Expr::Ident(id) if id.name == "make" || id.name == "new")
+}
+
 fn is_call_expr(expr: &Expr) -> bool {
     match expr {
         Expr::CallExpr(_) => true,
@@ -442,6 +456,20 @@ fn check_body(
                 handle_value_spec(pass, spec, check_consumption, &mut usages, pending);
             }
             NodeRef::CallExpr(call) => {
+                // `getReqCall` accepts any call whose *type string* contains
+                // `*net/http.Response`, which is true of a call returning a
+                // `func(*http.Request) (*http.Response, error)` as well. No
+                // referrer of such a call is a response value, so `isopen`
+                // proves nothing and reports. cli's `httpmock.ScopesResponder`
+                // returns exactly that.
+                if mentions_response_indirectly(pass, call) {
+                    let msg = if check_consumption {
+                        MSG_CLOSE_AND_CONSUME
+                    } else {
+                        MSG_CLOSE
+                    };
+                    pending.push((call.lparen.0 as u32, msg.to_string()));
+                }
                 mark_close(call, &mut usages);
                 // `t.Cleanup(func() { resp.Body.Close() })` — common in tests;
                 // upstream SSA sees the close; scan no-arg Cleanup closures.
@@ -501,7 +529,8 @@ fn check_body(
                             } else {
                                 MSG_CLOSE
                             };
-                            pending.push((call.pos().0 as u32, msg.to_string()));
+                            // go/ssa gives a call the position of its `(`.
+                            pending.push((call.lparen.0 as u32, msg.to_string()));
                         }
                     }
                 }
@@ -528,6 +557,18 @@ fn handle_assign(
             continue;
         };
         if name == "_" {
+            // A response assigned to the blank identifier has no `ssa.Extract`
+            // for `isopen` to follow, so upstream falls through to its default
+            // and reports. dapr writes `_, err = client.Do(req)` where only the
+            // error is wanted.
+            if discarded_response(pass, assign, i) {
+                let msg = if check_consumption {
+                    MSG_CLOSE_AND_CONSUME
+                } else {
+                    MSG_CLOSE
+                };
+                pending.push((assign_report_pos(assign, i), msg.to_string()));
+            }
             continue;
         }
 
@@ -555,7 +596,8 @@ fn handle_assign(
         // were all findings for guff, which asked only what the *type* was.
         // dapr's `tests/integration/suite/daprd/shutdown/graceful` receives its
         // responses over a channel.
-        let from_call = rhs_for_index(assign, i).is_some_and(|e| is_call_expr(e));
+        let from_call = rhs_for_index(assign, i)
+            .is_some_and(|e| is_call_expr(e) && !is_make_or_new(e));
         let is_resp = !skip_httptest
             && !skip_composite
             && from_call
@@ -576,6 +618,72 @@ fn handle_assign(
             );
         }
     }
+}
+
+/// The call's type mentions `*net/http.Response` somewhere other than as a
+/// result of its own — a function type, a slice, a channel. Upstream's
+/// `getReqCall` is a substring test over the printed type, and its `getResVal`
+/// then needs the exact type, so nothing matches and the walk reports.
+fn mentions_response_indirectly(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(typ) = info.types.get(&call.id).map(|tv| tv.typ) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    // `make` and `new` are not calls in go/ssa — they lower to `MakeChan`,
+    // `MakeMap`, `MakeSlice` and `Alloc` — so `getReqCall`, which only looks at
+    // `*ssa.Call`, never sees them. dapr passes responses over a
+    // `make(chan *http.Response)`.
+    if is_make_or_new_call(call) {
+        return false;
+    }
+
+    // A result that *is* a response is the ordinary case, handled by the
+    // assignment and expression-statement paths.
+    let unaliased = unalias_readonly(&artifacts.types, typ);
+    if is_http_response_ptr(pass, unaliased) {
+        return false;
+    }
+    if matches!(artifacts.types.get(unaliased), TypeData::Tuple(_)) {
+        let n = tuple_len(&artifacts.types, Some(unaliased));
+        for i in 0..n {
+            let elem = tuple_at(&artifacts.types, unaliased, i);
+            if elem
+                .typ(&artifacts.objects)
+                .is_some_and(|t| is_http_response_ptr(pass, t))
+            {
+                return false;
+            }
+        }
+    }
+    let printed = guff_types::typestring::type_string(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        typ,
+        None,
+    );
+    printed.contains("*net/http.Response") && !printed.contains("net/http.ResponseController")
+}
+
+/// The value at `lhs_index` is an `*http.Response` this call opened, and it is
+/// being thrown away.
+fn discarded_response(pass: &Pass<'_>, assign: &AssignStmt, lhs_index: usize) -> bool {
+    let Some(rhs) = rhs_for_index(assign, lhs_index) else {
+        return false;
+    };
+    if !is_call_expr(rhs)
+        || is_make_or_new(rhs)
+        || is_httptest_result_call(pass, rhs)
+        || is_response_composite(rhs)
+    {
+        return false;
+    }
+    rhs_result_is_response(pass, assign, lhs_index)
 }
 
 fn handle_value_spec(

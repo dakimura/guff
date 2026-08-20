@@ -37,3 +37,5 @@ func (c *Client) Do(req *Request) (*Response, error) {
 func NewRequest(method, url string, body any) (*Request, error) {
 	return nil, nil
 }
+
+const StatusOK = 200

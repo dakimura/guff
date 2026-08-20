@@ -1,0 +1,3 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+bad/bad.go     crates/guff-context/tests/testdata/bodyclose/bad.go
+ok/ok.go       crates/guff-context/tests/testdata/bodyclose/ok.go

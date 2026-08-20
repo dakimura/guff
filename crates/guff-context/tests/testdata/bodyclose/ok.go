@@ -45,13 +45,6 @@ func returnsResponseNamed() (*http.Response, error) {
 	return resp, nil
 }
 
-func blankResponse() {
-	_, err := http.Get("https://example.com")
-	if err != nil {
-		return
-	}
-}
-
 func httptestResult() {
 	rec := &httptest.ResponseRecorder{}
 	resp := rec.Result()
@@ -90,3 +83,23 @@ func syntheticResponse() {
 	_ = res.StatusCode
 }
 
+// `make` and `new` are not calls in go/ssa — they lower to `MakeChan`,
+// `MakeMap`, `MakeSlice` and `Alloc` — so the substring test in `getReqCall`,
+// which only sees `*ssa.Call`, never reaches them. dapr passes responses over
+// exactly this channel in `daprd/shutdown/graceful`.
+func makeResponseChannel() {
+	respCh := make(chan *http.Response)
+	_ = respCh
+	resp := new(http.Response)
+	_ = resp
+}
+
+// A named function type does not print its underlying signature, so the
+// substring is not there either.
+type responder func(*http.Request) (*http.Response, error)
+
+func namedResponder() responder { return nil }
+
+func useNamedResponder() responder {
+	return namedResponder()
+}
