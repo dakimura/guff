@@ -1413,7 +1413,7 @@ fn check_bad_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(u32, Stri
     }
 }
 
-fn check_assign_op(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
+fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     if assign.tok != Some(Token::ASSIGN) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
         return;
     }
@@ -1424,11 +1424,11 @@ fn check_assign_op(assign: &AssignStmt, pending: &mut Vec<(u32, String)>) {
     if !exprs_equal(lhs, &bin.x) {
         return;
     }
-    // Only simple lhs (ident / selector / index) — treat as "pure" enough.
-    if !matches!(
-        lhs,
-        Expr::Ident(_) | Expr::SelectorExpr(_) | Expr::IndexExpr(_) | Expr::StarExpr(_)
-    ) {
+    // `.Where(m["x"].Pure)`: ruleguard's `isPure` walks the whole expression,
+    // and the only call it accepts is a type conversion. dapr writes
+    // `executionMap[ctx.GetTaskExecutionID()] = executionMap[…] + 1`, where
+    // rewriting to `++` would call the getter once instead of twice.
+    if !side_effect_free(pass, lhs) {
         return;
     }
     let Some(x_t) = expr_text(lhs) else {
@@ -9028,7 +9028,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         check_append_assign(a, &mut pending);
                     }
                     if enabled(&set, "assignOp") {
-                        check_assign_op(a, &mut pending);
+                        check_assign_op(pass, a, &mut pending);
                     }
                     if scoped("sqlQuery", a.tok_pos) {
                         check_sql_query(pass, a, &mut pending);

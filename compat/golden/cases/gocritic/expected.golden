@@ -32,22 +32,23 @@ bad.go:127:6:gocritic::flagDeref: immediate deref in *flag.Bool("b", false, "doc
 bad.go:131:6:gocritic::badCall: no-op append call, probably missing arguments
 bad.go:132:6:gocritic::badCall: suspicious Join on 1 argument
 bad.go:133:35:gocritic::badCall: suspicious arg 0, probably meant -1
-bad.go:137:2:gocritic::assignOp: replace `x = x + 1` with `x++`
-bad.go:138:2:gocritic::assignOp: replace `x = x * 2` with `x *= 2`
-bad.go:142:6:gocritic::underef: could simplify (*p).N to p.N
-bad.go:151:28:gocritic::ptrToRefParam: consider `p' to be of non-pointer type
-bad.go:160:6:gocritic::dupArg: suspicious duplicated args in strings.Contains(a, a)
-bad.go:164:2:gocritic::dupBranchBody: both branches in if statement have same body
-bad.go:172:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `<` operator
-bad.go:176:6:gocritic::flagName: flag name " foo " contains whitespace
-bad.go:182:3:gocritic::mapKey: suspicious whitespace in "bar " key
-bad.go:187:6:gocritic::offBy1: index expr always panics; maybe you wanted xs[len(xs)-1]?
-bad.go:191:2:gocritic::typeSwitchVar: 1 case can benefit from type switch with assignment
-bad.go:200:2:gocritic::badCond: `i > n` in loop; probably meant `i < n`?
-bad.go:206:6:gocritic::badCond: `x == a && x == b` condition is suspicious
-bad.go:214:9:gocritic::regexpMust: for const patterns like "abc", use regexp.MustCompile
-bad.go:218:6:gocritic::wrapperFunc: use strings.Split method in `strings.SplitN(s, ",", -1)`
-bad.go:223:6:gocritic::argOrder: "#" and s arguments order looks reversed
+bad.go:150:2:gocritic::assignOp: replace `m[execCount(k)] = m[execCount(k)] + 1` with `m[execCount(k)]++`
+bad.go:154:2:gocritic::assignOp: replace `x = x + 1` with `x++`
+bad.go:155:2:gocritic::assignOp: replace `x = x * 2` with `x *= 2`
+bad.go:159:6:gocritic::underef: could simplify (*p).N to p.N
+bad.go:168:28:gocritic::ptrToRefParam: consider `p' to be of non-pointer type
+bad.go:177:6:gocritic::dupArg: suspicious duplicated args in strings.Contains(a, a)
+bad.go:181:2:gocritic::dupBranchBody: both branches in if statement have same body
+bad.go:189:6:gocritic::dupSubExpr: suspicious identical LHS and RHS for `<` operator
+bad.go:193:6:gocritic::flagName: flag name " foo " contains whitespace
+bad.go:199:3:gocritic::mapKey: suspicious whitespace in "bar " key
+bad.go:204:6:gocritic::offBy1: index expr always panics; maybe you wanted xs[len(xs)-1]?
+bad.go:208:2:gocritic::typeSwitchVar: 1 case can benefit from type switch with assignment
+bad.go:217:2:gocritic::badCond: `i > n` in loop; probably meant `i < n`?
+bad.go:223:6:gocritic::badCond: `x == a && x == b` condition is suspicious
+bad.go:231:9:gocritic::regexpMust: for const patterns like "abc", use regexp.MustCompile
+bad.go:235:6:gocritic::wrapperFunc: use strings.Split method in `strings.SplitN(s, ",", -1)`
+bad.go:240:6:gocritic::argOrder: "#" and s arguments order looks reversed
 extras.go:5:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:6:2:gocritic::dupImport: package is imported 2 times under different aliases on lines 5 and 6
 extras.go:16:2:gocritic::commentedOutImport: remove commented-out "os" import

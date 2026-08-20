@@ -3080,10 +3080,15 @@ struct ReqErrCall<'a> {
     in_no_error_seq: bool,
 }
 
+/// The outermost `if` of the `if`/`else if` chain this call sits in.
+///
+/// `preorder_stack` hands over the ancestors only, so the whole stack is
+/// ancestry — skipping its last entry (which upstream does because there the
+/// last entry is the call itself) hid the `if` a condition call belongs to.
 fn find_root_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
     let mut nearest: Option<&IfStmt> = None;
     let mut nearest_idx = 0usize;
-    for (i, n) in stack.iter().enumerate().rev().skip(1) {
+    for (i, n) in stack.iter().enumerate().rev() {
         if let walk::NodeRef::IfStmt(s) = n {
             nearest = Some(s);
             nearest_idx = i;
@@ -3104,7 +3109,7 @@ fn find_root_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
 }
 
 fn find_nearest_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
-    for n in stack.iter().rev().skip(1) {
+    for n in stack.iter().rev() {
         if let walk::NodeRef::IfStmt(s) = n {
             return Some(s);
         }
@@ -3113,7 +3118,7 @@ fn find_nearest_if<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a IfStmt> {
 }
 
 fn find_nearest_block<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a BlockStmt> {
-    for n in stack.iter().rev().skip(1) {
+    for n in stack.iter().rev() {
         if let walk::NodeRef::BlockStmt(b) = n {
             return Some(b);
         }
@@ -3122,7 +3127,7 @@ fn find_nearest_block<'a>(stack: &[walk::NodeRef<'a>]) -> Option<&'a BlockStmt> 
 }
 
 fn find_surrounding_func_meta(pass: &Pass<'_>, stack: &[walk::NodeRef<'_>]) -> Option<(u32, FuncMeta)> {
-    for (i, n) in stack.iter().enumerate().rev().skip(1) {
+    for (i, n) in stack.iter().enumerate().rev() {
         match n {
             walk::NodeRef::FuncDecl(fd) => {
                 let mut meta = FuncMeta {
@@ -3288,11 +3293,17 @@ fn check_require_error(
         };
         func_meta.entry(fkey).or_insert(meta);
 
-        let prev_is_if = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::IfStmt(_)));
-        let prev_is_assign = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::AssignStmt(_)));
-        let prev_prev_is_if = matches!(stk.iter().rev().nth(2), Some(walk::NodeRef::IfStmt(_)));
+        // Upstream indexes a stack whose last entry is the call itself
+        // (`stack[len(stack)-2]` is its parent); `preorder_stack` hands over
+        // the ancestors only, so the parent is the last entry. Reading it as
+        // upstream does made every `if assert.NoError(t, err) {` a finding —
+        // and, through `root_if`, every assertion in that `if` body too
+        // (dapr `tests/integration/framework/process/daprd`).
+        let prev_is_if = matches!(stk.last(), Some(walk::NodeRef::IfStmt(_)));
+        let prev_is_assign = matches!(stk.last(), Some(walk::NodeRef::AssignStmt(_)));
+        let prev_prev_is_if = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::IfStmt(_)));
         let in_if_cond = prev_is_if || (prev_prev_is_if && prev_is_assign);
-        let in_bool_expr = matches!(stk.iter().rev().nth(1), Some(walk::NodeRef::BinaryExpr(_)));
+        let in_bool_expr = matches!(stk.last(), Some(walk::NodeRef::BinaryExpr(_)));
 
         let parent_if = find_nearest_if(stk);
         let root_if = find_root_if(stk);

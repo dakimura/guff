@@ -107,3 +107,15 @@ func okEncodedCompareScalarArrays(t *testing.T) {
 }
 
 func stringSliceString() string { return "[]" }
+
+// An assertion used as a condition is not converted to `require`: that would
+// change the control flow. Upstream skips the whole `if`/`else` chain when any
+// of its conditions is an assertion, so the ones in the body are left alone
+// too (dapr `tests/integration/framework/process/daprd`).
+func okAssertionInIfCond(t *testing.T, err error, b []byte) {
+	if assert.NoError(t, err) {
+		assert.NoError(t, err)
+		assert.NotEmpty(t, b)
+	}
+	assert.NotNil(t, b)
+}
