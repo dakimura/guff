@@ -743,11 +743,17 @@ fn recvcheck_flags_mixed_receivers() {
                 && m.contains("pointer receiver and non-pointer receiver")),
         "{messages:?}"
     );
-    assert_eq!(messages.len(), 1, "{messages:?}");
+    // `Period` too: a pointer `UnmarshalJSON` is not on the exclusion list that
+    // golangci-lint 2.12.2 pins, so it counts towards the mix.
+    assert!(
+        messages.iter().any(|m| m.contains("the methods of \"Period\"")),
+        "{messages:?}"
+    );
+    assert_eq!(messages.len(), 2, "{messages:?}");
 }
 
 #[test]
-fn recvcheck_allows_consistent_and_builtin_unmarshal() {
+fn recvcheck_allows_consistent_and_builtin_marshal() {
     let pkg = support::typecheck_fixture("recvcheck", "example.com/recvcheck/ok", "ok.go");
     let messages = support::run_analyzer(recvcheck(), &pkg);
     assert!(messages.is_empty(), "unexpected diagnostics: {messages:?}");
