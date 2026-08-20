@@ -120,15 +120,25 @@ fn attribute_uses(
     info: &guff_types::api::Info,
     node: guff::walk::NodeRef<'_>,
     owners: &[ObjectId],
-    edges: &mut HashMap<ObjectId, Vec<ObjectId>>,
+    local: &HashSet<ObjectId>,
+    edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
     attributed: &mut HashSet<u32>,
 ) {
     guff::walk::preorder(node, |n| {
         if let guff::walk::NodeRef::Ident(id) = n {
             if let Some(target) = info.uses.get(&id.id) {
+                // Mark it attributed either way: the "unreached ident is a
+                // root" fallback must key on whether the *walk* saw it, not on
+                // what it pointed at.
                 attributed.insert(id.id);
-                for owner in owners {
-                    edges.entry(*owner).or_default().push(*target);
+                // Only a package-level declaration of this package can be
+                // reached-or-not; an import, a local, a field is decided
+                // elsewhere and storing it would grow the graph by an order of
+                // magnitude for nothing.
+                if local.contains(target) {
+                    for owner in owners {
+                        edges.entry(*owner).or_default().insert(*target);
+                    }
                 }
             }
         }
@@ -387,8 +397,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // honnef's `by` argument to `g.use`. An `*ast.Ident` the walk does not
     // reach falls back to the old unconditional treatment: a lost edge would be
     // a false positive, while a spurious root only costs a missed report.
-    let mut edges: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
+    let mut edges: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
     let mut attributed: HashSet<u32> = HashSet::new();
+    let local: HashSet<ObjectId> = candidates.union(&roots).copied().collect();
     for file in pass.files() {
         // honnef sees the objects of a generated file like any others but marks
         // them used (`GeneratedIsUsed`, on by default), so what they reference
@@ -404,6 +415,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         info,
                         guff::walk::NodeRef::FuncDecl(f),
                         &[*obj],
+                        &local,
                         &mut edges,
                         &mut attributed,
                     );
@@ -422,6 +434,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     info,
                                     guff::walk::NodeRef::TypeSpec(ts),
                                     &[*obj],
+                                    &local,
                                     &mut edges,
                                     &mut attributed,
                                 );
@@ -442,6 +455,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     info,
                                     guff::walk::NodeRef::ValueSpec(vs),
                                     &owners,
+                                    &local,
                                     &mut edges,
                                     &mut attributed,
                                 );
