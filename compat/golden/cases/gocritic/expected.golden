@@ -80,106 +80,108 @@ extras.go:141:21:gocritic::regexpSimplify: can re-write `[0-9]+` as `\\d+`
 extras.go:142:21:gocritic::regexpSimplify: can re-write `(?:a|b|c)` as `[abc]`
 extras.go:143:21:gocritic::regexpSimplify: can re-write `foo|fo` as `foo?`
 extras.go:144:21:gocritic::regexpSimplify: can re-write `axx*y` as `ax+y`
-extras.go:151:10:gocritic::sortSlice: cmp func must use xs slice in comparison
-extras.go:175:11:gocritic::sqlQuery: use db.Exec() if returned result is not needed
-extras.go:176:11:gocritic::sqlQuery: ignoring Query() rows result may lead to a connection leak
-extras.go:181:2:gocritic::typeAssertChain: rewrite if-else to type switch statement
-extras.go:189:6:gocritic::truncateCmp: truncation in comparison 16->8 bit; cast the other operand to int16 instead
-extras.go:194:1:gocritic::typeDefFirst: definition of type 'typeDefFirstRecv' should appear before its methods
-extras.go:198:3:gocritic::deferInLoop: Possible resource leak, 'defer' is called in the 'for' loop
-extras.go:204:6:gocritic::hexLiteral: prefer 0x over 0X, s/0X12/0x12/
-extras.go:205:6:gocritic::hexLiteral: don't mix hex literal letter digits casing
-extras.go:210:3:gocritic::nestingReduce: invert if cond, replace body with `continue`, move old body after the statement
-extras.go:221:2:gocritic::todoCommentWithoutDetail: may want to add detail/assignee to this TODO/FIXME/BUG comment
-extras.go:226:1:gocritic::docStub: silencing go lint doc-comment warnings is unadvised
-extras.go:230:2:gocritic::unnecessaryBlock: block doesn't have definitions, can be simply deleted
-extras.go:237:5:gocritic::sloppyReassign: re-assignment to `err` can be replaced with `err := returnsErrorExtra()`
-extras.go:246:9:gocritic::httpNoBody: http.NoBody should be preferred to the nil request body
-extras.go:247:9:gocritic::httpNoBody: http.NoBody should be preferred to the nil request body
-extras.go:251:6:gocritic::preferDecodeRune: consider replacing []rune(s)[0] with utf8.DecodeRuneInString(s)
-extras.go:269:9:gocritic::preferWriteByte: consider writing single byte rune '\\n' with w.WriteByte('\\n')
-extras.go:276:6:gocritic::indexAlloc: consider replacing strings.Index(string(b), y) with bytes.Index(b, []byte(y))
-extras.go:280:6:gocritic::stringXbytes: can simplify `[]byte(s)` to `s`
-extras.go:281:6:gocritic::stringXbytes: suggestion: len(b) == 0
-extras.go:282:6:gocritic::stringXbytes: suggestion: len(b)
-extras.go:286:6:gocritic::preferFilepathJoin: filepath.Join(x, y) should be preferred to the x + string(os.PathSeparator) + y
-extras.go:290:6:gocritic::stringsCompare: suggestion: a == b
-extras.go:291:6:gocritic::stringsCompare: suggestion: a < b
-extras.go:295:6:gocritic::zeroByteRepeat: avoid bytes.Repeat([]byte{0}, n); consider using make([]byte, n) instead
-extras.go:299:2:gocritic::badSorting: suspicious sort.StringSlice usage, maybe sort.Strings was intended?
-extras.go:303:2:gocritic::sliceClear: rewrite as for-range so compiler can recognize this pattern
-extras.go:314:9:gocritic::preferFprint: fmt.Fprint(w, x) should be preferred to the w.Write([]byte(fmt.Sprint(x)))
-extras.go:314:9:gocritic::preferStringWriter: w.WriteString(fmt.Sprint(x)) should be preferred to the w.Write([]byte(fmt.Sprint(x)))
-extras.go:315:9:gocritic::preferFprint: suggestion: fmt.Fprintf(w, "%d", x)
-extras.go:316:9:gocritic::preferFprint: suggestion: fmt.Fprintln(w, x)
-extras.go:316:9:gocritic::preferStringWriter: w.WriteString(fmt.Sprintln(x)) should be preferred to the io.WriteString(w, fmt.Sprintln(x))
-extras.go:320:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the w.Write([]byte(s))
-extras.go:321:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the io.WriteString(w, s)
-extras.go:325:2:gocritic::syncMapLoadAndDelete: use m.LoadAndDelete to perform load+delete operations atomically
-extras.go:332:6:gocritic::dynamicFmtString: use errors.New(msg) or fmt.Errorf("%s", msg) instead
-extras.go:333:6:gocritic::dynamicFmtString: use errors.New(f()) or fmt.Errorf("%s", f()) instead
-extras.go:339:6:gocritic::stringConcatSimplify: suggestion: x + y
-extras.go:340:6:gocritic::stringConcatSimplify: suggestion: x + y + z
-extras.go:341:6:gocritic::stringConcatSimplify: suggestion: x + glue + y
-extras.go:345:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, sync.OnceFunc(f) result is not used
-extras.go:346:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, consider to assign sync.OnceFunc(f) to a variable
-extras.go:350:6:gocritic::equalFold: consider replacing with strings.EqualFold(x, y)
-extras.go:351:6:gocritic::equalFold: consider replacing with !strings.EqualFold(x, y)
-extras.go:352:6:gocritic::equalFold: consider replacing with bytes.EqualFold(xb, yb)
-extras.go:357:6:gocritic::sprintfQuotedString: use %q instead of "%s" for quoted strings
-extras.go:359:6:gocritic::redundantSprint: s is already string
-extras.go:363:6:gocritic::timeExprSimplify: use t.UnixMilli() instead of t.Unix() / 1000
-extras.go:364:6:gocritic::timeExprSimplify: use tp.UnixMicro() instead of tp.UnixNano() * 1000
-extras.go:369:2:gocritic::appendCombine: can combine chain of 2 appends into one
-extras.go:375:2:gocritic::unnecessaryDefer: defer appendCombineExtra() is placed just before return
-extras.go:384:6:gocritic::redundantSprint: s is already string
-extras.go:385:6:gocritic::redundantSprint: use w.String() instead
-extras.go:386:6:gocritic::redundantSprint: use w.String() instead
-extras.go:389:23:gocritic::typeUnparen: could simplify [](func()) to []func()
-extras.go:392:2:gocritic::importShadow: shadow of imported package 'filepath'
-extras.go:399:38:gocritic::importShadow: shadow of imported package 'sort'
-extras.go:424:3:gocritic::importShadow: shadow of imported package 'sort'
-extras.go:429:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:443:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
-extras.go:448:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
-extras.go:453:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
-extras.go:453:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
-extras.go:455:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
-extras.go:455:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:464:1:gocritic::unnamedResult: consider giving a name to these results
-extras.go:466:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
-extras.go:470:1:gocritic::unlabelStmt: label label1 is redundant
-extras.go:477:4:gocritic::unlabelStmt: change `continue outer` to `break`
-extras.go:484:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
-extras.go:489:2:gocritic::commentedOutCode: may want to remove commented-out code
-extras.go:494:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
-extras.go:499:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
-extras.go:505:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:509:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
-extras.go:513:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
-extras.go:517:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
-extras.go:521:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
-extras.go:525:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
-extras.go:530:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
-extras.go:535:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
-extras.go:541:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
-extras.go:542:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
-extras.go:543:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
-extras.go:544:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
-extras.go:546:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
-extras.go:547:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
-extras.go:548:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
-extras.go:549:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
-extras.go:551:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
-extras.go:552:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
-extras.go:563:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
-extras.go:569:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
-extras.go:592:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
-extras.go:598:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:612:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
-extras.go:637:6:gocritic::stringXbytes: suggestion: len(b)
-extras.go:638:6:gocritic::stringXbytes: suggestion: len(b) == 0
-extras.go:639:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
+extras.go:154:21:gocritic::regexpSimplify: can re-write `a\\&\\#\\!\\@\\%b` as `a&#!@%b`
+extras.go:155:21:gocritic::regexpSimplify: can re-write `a\\<\\>\\:\\;\\/\\,\\=b` as `a<>:;/,=b`
+extras.go:162:10:gocritic::sortSlice: cmp func must use xs slice in comparison
+extras.go:186:11:gocritic::sqlQuery: use db.Exec() if returned result is not needed
+extras.go:187:11:gocritic::sqlQuery: ignoring Query() rows result may lead to a connection leak
+extras.go:192:2:gocritic::typeAssertChain: rewrite if-else to type switch statement
+extras.go:200:6:gocritic::truncateCmp: truncation in comparison 16->8 bit; cast the other operand to int16 instead
+extras.go:205:1:gocritic::typeDefFirst: definition of type 'typeDefFirstRecv' should appear before its methods
+extras.go:209:3:gocritic::deferInLoop: Possible resource leak, 'defer' is called in the 'for' loop
+extras.go:215:6:gocritic::hexLiteral: prefer 0x over 0X, s/0X12/0x12/
+extras.go:216:6:gocritic::hexLiteral: don't mix hex literal letter digits casing
+extras.go:221:3:gocritic::nestingReduce: invert if cond, replace body with `continue`, move old body after the statement
+extras.go:232:2:gocritic::todoCommentWithoutDetail: may want to add detail/assignee to this TODO/FIXME/BUG comment
+extras.go:237:1:gocritic::docStub: silencing go lint doc-comment warnings is unadvised
+extras.go:241:2:gocritic::unnecessaryBlock: block doesn't have definitions, can be simply deleted
+extras.go:248:5:gocritic::sloppyReassign: re-assignment to `err` can be replaced with `err := returnsErrorExtra()`
+extras.go:257:9:gocritic::httpNoBody: http.NoBody should be preferred to the nil request body
+extras.go:258:9:gocritic::httpNoBody: http.NoBody should be preferred to the nil request body
+extras.go:262:6:gocritic::preferDecodeRune: consider replacing []rune(s)[0] with utf8.DecodeRuneInString(s)
+extras.go:280:9:gocritic::preferWriteByte: consider writing single byte rune '\\n' with w.WriteByte('\\n')
+extras.go:287:6:gocritic::indexAlloc: consider replacing strings.Index(string(b), y) with bytes.Index(b, []byte(y))
+extras.go:291:6:gocritic::stringXbytes: can simplify `[]byte(s)` to `s`
+extras.go:292:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:293:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:297:6:gocritic::preferFilepathJoin: filepath.Join(x, y) should be preferred to the x + string(os.PathSeparator) + y
+extras.go:301:6:gocritic::stringsCompare: suggestion: a == b
+extras.go:302:6:gocritic::stringsCompare: suggestion: a < b
+extras.go:306:6:gocritic::zeroByteRepeat: avoid bytes.Repeat([]byte{0}, n); consider using make([]byte, n) instead
+extras.go:310:2:gocritic::badSorting: suspicious sort.StringSlice usage, maybe sort.Strings was intended?
+extras.go:314:2:gocritic::sliceClear: rewrite as for-range so compiler can recognize this pattern
+extras.go:325:9:gocritic::preferFprint: fmt.Fprint(w, x) should be preferred to the w.Write([]byte(fmt.Sprint(x)))
+extras.go:325:9:gocritic::preferStringWriter: w.WriteString(fmt.Sprint(x)) should be preferred to the w.Write([]byte(fmt.Sprint(x)))
+extras.go:326:9:gocritic::preferFprint: suggestion: fmt.Fprintf(w, "%d", x)
+extras.go:327:9:gocritic::preferFprint: suggestion: fmt.Fprintln(w, x)
+extras.go:327:9:gocritic::preferStringWriter: w.WriteString(fmt.Sprintln(x)) should be preferred to the io.WriteString(w, fmt.Sprintln(x))
+extras.go:331:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the w.Write([]byte(s))
+extras.go:332:9:gocritic::preferStringWriter: w.WriteString(s) should be preferred to the io.WriteString(w, s)
+extras.go:336:2:gocritic::syncMapLoadAndDelete: use m.LoadAndDelete to perform load+delete operations atomically
+extras.go:343:6:gocritic::dynamicFmtString: use errors.New(msg) or fmt.Errorf("%s", msg) instead
+extras.go:344:6:gocritic::dynamicFmtString: use errors.New(f()) or fmt.Errorf("%s", f()) instead
+extras.go:350:6:gocritic::stringConcatSimplify: suggestion: x + y
+extras.go:351:6:gocritic::stringConcatSimplify: suggestion: x + y + z
+extras.go:352:6:gocritic::stringConcatSimplify: suggestion: x + glue + y
+extras.go:356:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, sync.OnceFunc(f) result is not used
+extras.go:357:2:gocritic::badSyncOnceFunc: possible sync.OnceFunc misuse, consider to assign sync.OnceFunc(f) to a variable
+extras.go:361:6:gocritic::equalFold: consider replacing with strings.EqualFold(x, y)
+extras.go:362:6:gocritic::equalFold: consider replacing with !strings.EqualFold(x, y)
+extras.go:363:6:gocritic::equalFold: consider replacing with bytes.EqualFold(xb, yb)
+extras.go:368:6:gocritic::sprintfQuotedString: use %q instead of "%s" for quoted strings
+extras.go:370:6:gocritic::redundantSprint: s is already string
+extras.go:374:6:gocritic::timeExprSimplify: use t.UnixMilli() instead of t.Unix() / 1000
+extras.go:375:6:gocritic::timeExprSimplify: use tp.UnixMicro() instead of tp.UnixNano() * 1000
+extras.go:380:2:gocritic::appendCombine: can combine chain of 2 appends into one
+extras.go:386:2:gocritic::unnecessaryDefer: defer appendCombineExtra() is placed just before return
+extras.go:395:6:gocritic::redundantSprint: s is already string
+extras.go:396:6:gocritic::redundantSprint: use w.String() instead
+extras.go:397:6:gocritic::redundantSprint: use w.String() instead
+extras.go:400:23:gocritic::typeUnparen: could simplify [](func()) to []func()
+extras.go:403:2:gocritic::importShadow: shadow of imported package 'filepath'
+extras.go:410:38:gocritic::importShadow: shadow of imported package 'sort'
+extras.go:435:3:gocritic::importShadow: shadow of imported package 'sort'
+extras.go:440:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:454:21:gocritic::hugeParam: x is heavy (800 bytes); consider passing it by pointer
+extras.go:459:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
+extras.go:464:25:gocritic::ptrToRefParam: consider `m' to be of non-pointer type
+extras.go:464:44:gocritic::ptrToRefParam: consider `ch' to be of non-pointer type
+extras.go:466:1:gocritic::tooManyResultsChecker: function has more than 5 results, consider to simplify the function
+extras.go:466:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:475:1:gocritic::unnamedResult: consider giving a name to these results
+extras.go:477:12:gocritic::evalOrder: may want to evaluate evalOrderMutate(&x) before the return statement
+extras.go:481:1:gocritic::unlabelStmt: label label1 is redundant
+extras.go:488:4:gocritic::unlabelStmt: change `continue outer` to `break`
+extras.go:495:14:gocritic::returnAfterHttpError: Possibly return is missed after the http.Error call
+extras.go:500:2:gocritic::commentedOutCode: may want to remove commented-out code
+extras.go:505:1:gocritic::exposedSyncMutex: don't embed sync.Mutex
+extras.go:510:1:gocritic::exposedSyncMutex: don't embed *sync.RWMutex
+extras.go:516:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:520:2:gocritic::badLock: defer is missing, mutex is unlocked immediately
+extras.go:524:8:gocritic::badLock: suspicious unlock, maybe Unlock was intended?
+extras.go:528:8:gocritic::badLock: suspicious unlock, maybe RUnlock was intended?
+extras.go:532:8:gocritic::badLock: maybe defer rw.Unlock() was intended?
+extras.go:536:8:gocritic::badLock: maybe defer rw.RUnlock() was intended?
+extras.go:541:2:gocritic::externalErrorReassign: suspicious reassignment of error from another package
+extras.go:546:5:gocritic::uncheckedInlineErr: err error is unchecked, maybe intended to check it instead of err2
+extras.go:552:6:gocritic::boolExprSimplify: can simplify `!!x` to `x`
+extras.go:553:6:gocritic::boolExprSimplify: can simplify `!(a >= b)` to `a < b`
+extras.go:554:6:gocritic::boolExprSimplify: can simplify `!x == !y` to `x == y`
+extras.go:555:6:gocritic::boolExprSimplify: can simplify `a > b || a == b` to `a >= b`
+extras.go:557:6:gocritic::boolExprSimplify: can simplify `a < b+1` to `a <= b`
+extras.go:558:6:gocritic::boolExprSimplify: can simplify `a+1 > b` to `a >= b`
+extras.go:559:6:gocritic::boolExprSimplify: can simplify `a >= b+1` to `a > b`
+extras.go:560:6:gocritic::boolExprSimplify: can simplify `!(a >= b+1)` to `a <= b`
+extras.go:562:6:gocritic::boolExprSimplify: can simplify `a > 10 && a < 12` to `a == 11`
+extras.go:563:6:gocritic::boolExprSimplify: can simplify `a < 11 || a > 11` to `a != 11`
+extras.go:574:5:gocritic::boolExprSimplify: can simplify `a+1 > b && x` to `a >= b && x`
+extras.go:580:6:gocritic::unlambda: replace `func(s string) string { return strings.TrimSpace(s) }` with `strings.TrimSpace`
+extras.go:603:3:gocritic::mapKey: suspicious duplicate mapKeyNamedString(mapKeyIdent) key
+extras.go:609:4:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:623:3:gocritic::mapKey: suspicious duplicate mapKeyIdent key
+extras.go:648:6:gocritic::stringXbytes: suggestion: len(b)
+extras.go:649:6:gocritic::stringXbytes: suggestion: len(b) == 0
+extras.go:650:6:gocritic::stringXbytes: suggestion: bytes.Equal(b, c)
 testfuncs.go:36:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:44:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)
 testfuncs.go:53:2:gocritic::rangeValCopy: each iteration copies 200 bytes (consider pointers or indexing)

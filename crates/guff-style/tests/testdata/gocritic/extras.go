@@ -142,6 +142,17 @@ func regexpSimplifyExtra() {
 	regexp.MustCompile(`(?:a|b|c)`)
 	regexp.MustCompile(`foo|fo`)
 	regexp.MustCompile(`axx*y`)
+	// Upstream names thirteen characters it will unescape and writes every
+	// other escape back unchanged. A space is not one of them, in a character
+	// class or out of it (argo-cd `util/sourceintegrity/gpg.go`), and an
+	// escaped space does not combine with a plain one either — `canCombine`
+	// starts by comparing the two operators.
+	regexp.MustCompile(`^gpg: Signature made ([a-zA-Z0-9\ :]+)$`)
+	regexp.MustCompile(`a\ b`)
+	regexp.MustCompile(`a\  b`)
+	// These thirteen are the list, so they lose the backslash.
+	regexp.MustCompile(`a\&\#\!\@\%b`)
+	regexp.MustCompile(`a\<\>\:\;\/\,\=b`)
 }
 
 func sortSliceExtra() {
@@ -637,4 +648,35 @@ func stringXbytesRealBytesExtra(b, c []byte) {
 	_ = len(string(b))
 	_ = string(b) == ""
 	_ = string(b) == string(c)
+}
+
+// Upstream's stmt / stmtList / localDef walkers iterate `f.Decls` and descend
+// only into `*ast.FuncDecl` bodies, so nothing below is visited by any of the
+// 27 checkers built on them — not the if/else-if/else chain (`ifElseChain`),
+// not the one-case switch (`singleCaseSwitch`), not the redundant block
+// (`unnecessaryBlock`), not the `if` with an init clause (`initClause`). Every
+// one of them is a finding when the same code sits in a function. argo-cd's
+// `validatorsByGroup` is this shape and got an ifElseChain guff had alone.
+var walkerScopedInVarInit = func(a, b int) int {
+	if a > b {
+		return a
+	} else if a < b {
+		return b
+	} else {
+		return 0
+	}
+}
+
+var walkerScopedSwitchInVarInit = func(a int) string {
+	switch a {
+	case 1:
+		return "one"
+	}
+	{
+		_ = a
+	}
+	if v := a * 2; v > 4 {
+		return "big"
+	}
+	return ""
 }
