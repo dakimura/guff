@@ -13,15 +13,22 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::RecvcheckOptions;
 
-/// Built-in method excludes (Unmarshal*/GobDecode) — upstream default when
-/// `disable-builtin` is false. See https://github.com/raeperd/recvcheck/issues/17
+/// Built-in method excludes — upstream's default when `disable-builtin` is
+/// false.
+///
+/// **Marshal**, not Unmarshal. golangci-lint 2.12.2 pins `recvcheck v0.2.0`,
+/// whose list is the encoding side (raeperd/recvcheck#7); v0.3.0 replaced it
+/// with the decoding side (#17). The two are near-mirror images, so taking the
+/// wrong one inverts the answer for every type that implements one half of an
+/// encoding interface: dapr's `ReminderPeriod` has value methods plus a pointer
+/// `UnmarshalJSON`, which is a finding for 2.12.2 and silence for v0.3.0.
 const BUILTIN_EXCLUSIONS: &[&str] = &[
-    "*.UnmarshalText",
-    "*.UnmarshalJSON",
-    "*.UnmarshalYAML",
-    "*.UnmarshalXML",
-    "*.UnmarshalBinary",
-    "*.GobDecode",
+    "*.MarshalText",
+    "*.MarshalJSON",
+    "*.MarshalYAML",
+    "*.MarshalXML",
+    "*.MarshalBinary",
+    "*.GobEncode",
 ];
 
 #[derive(Default)]
@@ -188,9 +195,11 @@ mod tests {
     #[test]
     fn builtin_exclusions_on_by_default() {
         let excluded = build_excluded(&RecvcheckOptions::default());
-        assert!(is_excluded(&excluded, "JSON", "UnmarshalJSON"));
-        assert!(is_excluded(&excluded, "Anything", "GobDecode"));
-        assert!(!is_excluded(&excluded, "JSON", "MarshalJSON"));
+        assert!(is_excluded(&excluded, "JSON", "MarshalJSON"));
+        assert!(is_excluded(&excluded, "Anything", "GobEncode"));
+        // The decoding half is *not* on the list golangci-lint 2.12.2 pins.
+        assert!(!is_excluded(&excluded, "JSON", "UnmarshalJSON"));
+        assert!(!is_excluded(&excluded, "Anything", "GobDecode"));
     }
 
     #[test]
@@ -199,7 +208,7 @@ mod tests {
             disable_builtin: true,
             exclusions: Vec::new(),
         });
-        assert!(!is_excluded(&excluded, "JSON", "UnmarshalJSON"));
+        assert!(!is_excluded(&excluded, "JSON", "MarshalJSON"));
     }
 
     #[test]
