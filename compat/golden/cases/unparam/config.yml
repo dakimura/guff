@@ -1,0 +1,23 @@
+# Golden case: unparam.
+#
+# Three of its four families need SSA and a call graph — `result N is always X`,
+# `result N is never used`, `param always receives X` — and each of them has a
+# skip that decides real findings: a body that only returns constants
+# (`dummyImpl`), a callee whose results another function returns directly
+# (`resultsRequiredBy`), an exported function, and a callee with fewer than four
+# call sites. The `ok` half of the fixture is those skips; nothing there may be
+# reported.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - unparam
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

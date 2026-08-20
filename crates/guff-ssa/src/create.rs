@@ -256,7 +256,9 @@ fn create_syntactic_params_from_functype(
 /// `createSyntacticParams`.)
 fn add_result_var(prog: &mut Program, fid: FuncId, entry: crate::ids::BlockId, obj: ObjectId) {
     let local = crate::emit::emit_local_var(prog, fid, entry, obj);
-    prog.functions.get_mut(fid).named_results.push(local);
+    let f = prog.functions.get_mut(fid);
+    f.named_results.push(local);
+    f.return_vars.push(obj);
 }
 
 /// Spill `obj` if it is a named parameter, else add it by value.

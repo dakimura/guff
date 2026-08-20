@@ -387,6 +387,11 @@ impl<'a> Builder<'a> {
         self.emit_store(addr, v, pos);
     }
 
+    /// Same as [`Self::lookup_var`], for the enclosing function's result cells.
+    pub(crate) fn lookup_result_var(&mut self, obj: guff_types::ObjectId) -> Value {
+        self.lookup_var(obj)
+    }
+
     fn lookup_var(&mut self, obj: guff_types::ObjectId) -> Value {
         if let Some(&v) = self.func().objects.get(&obj) {
             return v;

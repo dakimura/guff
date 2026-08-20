@@ -128,6 +128,10 @@ pub struct Function {
     /// deferred functions and naked returns observe the latest values.
     /// (Go: `Function.namedResults`.)
     pub named_results: Vec<Value>,
+    /// The result *objects*, in result order — what a nested function looks up
+    /// to store into the enclosing function's result cells. (Go:
+    /// `Function.returnVars`.)
+    pub return_vars: Vec<guff_types::ObjectId>,
     /// maps each type-checker object to its SSA value
     pub objects: HashMap<ObjectId, Value>,
     /// maps each value to instructions that use it
@@ -226,6 +230,7 @@ impl Function {
             freevars: Arena::new(),
             locals: Vec::new(),
             named_results: Vec::new(),
+            return_vars: Vec::new(),
             objects: HashMap::default(),
             referrers: None,
             reg_nums: HashMap::default(),

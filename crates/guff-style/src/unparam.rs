@@ -218,16 +218,29 @@ fn check_params(
     func_name: &str,
     params: &[guff::ast::Field],
     body: &guff::ast::BlockStmt,
+    always_const: &[Option<String>],
     pending: &mut Vec<(u32, String)>,
 ) {
     if is_stub_body(body) {
         return;
     }
     let used = collect_used_idents(body);
+    let mut index = 0usize;
     for field in params {
         for name in &field.names {
+            let i = index;
+            index += 1;
             let pname = &name.name;
             if is_blank_param(pname) {
+                continue;
+            }
+            // `reason` is "is unused" unless every call site passes the same
+            // constant, which upstream reports whether or not the body uses it.
+            if let Some(cnst) = always_const.get(i).and_then(|c| c.as_deref()) {
+                pending.push((
+                    name.name_pos.0 as u32,
+                    format!("{func_name} - {pname} always receives {cnst}"),
+                ));
                 continue;
             }
             if used.contains(pname) || intentional_keep(body, pname) {
@@ -630,6 +643,183 @@ fn collect_sign_required_methods(
     required
 }
 
+
+// ---------------------------------------------------------------- results
+
+/// The flattened result list of a signature: one entry per result, with the
+/// position upstream reports at (`types.Var.Pos()` — the name if there is one,
+/// otherwise the type expression) and the name if it has one.
+fn result_fields(ty: &guff::ast::FuncType) -> Vec<(u32, Option<String>)> {
+    let mut out = Vec::new();
+    let Some(results) = &ty.results else {
+        return out;
+    };
+    for field in &results.list {
+        if field.names.is_empty() {
+            let pos = field
+                .ty
+                .as_ref()
+                .map(|t| t.pos().0 as u32)
+                .unwrap_or_default();
+            out.push((pos, None));
+        } else {
+            for name in &field.names {
+                out.push((name.pos().0 as u32, Some(name.name.clone())));
+            }
+        }
+    }
+    out
+}
+
+/// `paramDesc`: the name, or `index (type)` when there is none.
+fn result_desc(
+    prog: &guff_ssa::program::Program,
+    index: usize,
+    name: Option<&str>,
+    typ: guff_types::TypeId,
+) -> String {
+    match name {
+        Some(n) if n != "_" => n.to_string(),
+        _ => format!(
+            "{index} ({})",
+            guff_types::typestring::type_string(
+                &prog.type_arena,
+                &prog.object_arena,
+                &prog.package_arena,
+                typ,
+                None,
+            )
+        ),
+    }
+}
+
+/// go/ssa normalizes a zero `Const` through `soleTypeKind`, so a zero of a
+/// numeric, boolean or string type reads back as `0` / `false` / `""` and only
+/// a nillable type reads back as nil. guff keeps the `None` (see
+/// `guff_ssa::const_val::Const`), so normalize here — the difference decides
+/// both the message and the `numRets == 1` exemption.
+fn const_repr(prog: &guff_ssa::program::Program, c: &guff_ssa::const_val::Const) -> (bool, String) {
+    use guff_types::arena::TypeData;
+    if let Some(v) = &c.val {
+        return (false, v.to_string());
+    }
+    let under = c.typ.underlying(&prog.type_arena);
+    match prog.type_arena.get(under) {
+        TypeData::Basic(b) => {
+            use guff_types::basic::{IS_BOOLEAN, IS_NUMERIC, IS_STRING};
+            let info = b.info();
+            if info.contains(IS_NUMERIC) {
+                (false, "0".to_string())
+            } else if info.contains(IS_BOOLEAN) {
+                (false, "false".to_string())
+            } else if info.contains(IS_STRING) {
+                (false, "\"\"".to_string())
+            } else {
+                (true, "nil".to_string())
+            }
+        }
+        _ => (true, "nil".to_string()),
+    }
+}
+
+/// `constValue`: the constant behind a value, peeling the interface boxing that
+/// `return nil` through an `error` result produces.
+fn const_of(
+    prog: &guff_ssa::program::Program,
+    func: &guff_ssa::function::Function,
+    v: guff_ssa::value::Value,
+) -> Option<guff_ssa::ids::ConstId> {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+    match v {
+        Value::Const(id) => Some(id),
+        Value::Instr(iid) => match func.instrs.get(iid) {
+            InstrData::MakeInterface(mi) => const_of(prog, func, mi.x),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `result N is always X` — every `return` in the function gives result `N` the
+/// same constant.
+fn check_constant_results(
+    prog: &guff_ssa::program::Program,
+    func: &guff_ssa::function::Function,
+    fname: &str,
+    fields: &[(u32, Option<String>)],
+    result_types: &[guff_types::TypeId],
+    pending: &mut Vec<(u32, String)>,
+) {
+    use guff_ssa::instr::InstrData;
+
+    let n = fields.len();
+    if n == 0 {
+        return;
+    }
+    // `sameConsts[i]`: Some(None) = not seen yet, Some(Some(c)) = agreed so far.
+    let mut same: Vec<Option<guff_ssa::ids::ConstId>> = vec![None; n];
+    let mut num_rets = 0usize;
+    for (_, block) in func.live_blocks() {
+        let Some(&last) = block.instrs.last() else {
+            continue;
+        };
+        let InstrData::Return(ret) = func.instrs.get(last) else {
+            continue;
+        };
+        if ret.results.len() != n {
+            return;
+        }
+        for (i, &val) in ret.results.iter().enumerate() {
+            let cnst = const_of(prog, func, val);
+            if num_rets == 0 {
+                same[i] = cnst;
+            } else if !consts_equal(prog, same[i], cnst) {
+                same[i] = None;
+            }
+        }
+        num_rets += 1;
+    }
+    if num_rets == 0 {
+        return;
+    }
+    for (i, slot) in same.iter().enumerate() {
+        let Some(cid) = slot else {
+            continue;
+        };
+        let (is_nil, repr) = const_repr(prog, prog.constants.get(*cid));
+        if !is_nil && num_rets == 1 {
+            // just one return and it's not an untyped nil (too many false
+            // positives)
+            continue;
+        }
+        let (pos, name) = &fields[i];
+        let desc = result_desc(prog, i, name.as_deref(), result_types[i]);
+        pending.push((*pos, format!("{fname} - result {desc} is always {repr}")));
+    }
+}
+
+/// `eqlConsts`, over the ids guff hands out.
+fn consts_equal(
+    prog: &guff_ssa::program::Program,
+    a: Option<guff_ssa::ids::ConstId>,
+    b: Option<guff_ssa::ids::ConstId>,
+) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return a.is_none() && b.is_none();
+    };
+    let (ca, cb) = (prog.constants.get(a), prog.constants.get(b));
+    if ca.typ != cb.typ {
+        return false;
+    }
+    match (&ca.val, &cb.val) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x.to_string() == y.to_string(),
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn check_func_decl(
     pass: &Pass<'_>,
     fd: &FuncDecl,
@@ -638,6 +828,8 @@ fn check_func_decl(
     sign_required_methods: &HashSet<String>,
     interface_methods: &HashSet<String>,
     types_implementing: &HashSet<String>,
+    decl_counts: &std::collections::HashMap<String, usize>,
+    ssa: Option<&SsaFuncs<'_>>,
     pending: &mut Vec<(u32, String)>,
 ) {
     if fd.name.name == "init" {
@@ -665,11 +857,675 @@ fn check_func_decl(
             }
         }
     }
+    let func_name = func_display_name(fd);
+
+    // Multiple implementations via build tags: a parameter unused in this one
+    // may well be used in the other.
+    if decl_counts
+        .get(&format!("{}{}", recv_prefix(fd.recv.as_ref()), fd.name.name))
+        .is_some_and(|&n| n > 1)
+    {
+        return;
+    }
+
+    // The result families need the SSA body: `result N is always X` reads every
+    // `return`, and the parameter and unused-result families read the call
+    // sites.
+    let mut always_const: Vec<Option<String>> = Vec::new();
+    if let Some(ssa) = ssa {
+        if let Some((fid, func)) = ssa.func_for(pass, fd) {
+            if dummy_impl(ssa.prog, func) {
+                return;
+            }
+            let fields = result_fields(&fd.ty);
+            let types = ssa.result_types(func);
+            // `return f(...)` in another function fixes f's results.
+            if fields.len() == types.len() && !ssa.results_required.contains(&fid) {
+                check_constant_results(ssa.prog, func, &func_name, &fields, &types, pending);
+                check_unused_results(
+                    ssa.prog,
+                    &ssa.sites,
+                    fid,
+                    func,
+                    &func_name,
+                    &fields,
+                    &types,
+                    pending,
+                );
+            }
+            always_const = always_received_consts(ssa, fid, fd);
+        }
+    }
+
     let Some(params) = &fd.ty.params else {
         return;
     };
-    let func_name = func_display_name(fd);
-    check_params(&func_name, &params.list, body, pending);
+    check_params(&func_name, &params.list, body, &always_const, pending);
+}
+
+
+/// Every call instruction in the package that targets each function, and
+/// whether the call's own value can be used (`site.Value()` is nil for a `go`
+/// or `defer`). (Go: `localCallSites`.)
+struct CallSites {
+    /// callee -> (enclosing function, instruction, has a value)
+    sites: std::collections::HashMap<
+        guff_ssa::ids::FuncId,
+        Vec<(guff_ssa::ids::FuncId, guff_ssa::ids::InstrId, bool)>,
+    >,
+}
+
+impl CallSites {
+    fn build(ir: &buildir::BuildIrResult) -> Self {
+        use guff_ssa::instr::InstrData;
+        use guff_ssa::value::Value;
+
+        let mut sites: std::collections::HashMap<_, Vec<_>> = std::collections::HashMap::new();
+        for &caller in ir.src_funcs_with_methods() {
+            let func = ir.prog.functions.get(caller);
+            for (_, block) in func.live_blocks() {
+                for &iid in &block.instrs {
+                    let (common, has_value) = match func.instrs.get(iid) {
+                        InstrData::Call(c) => (&c.call, true),
+                        InstrData::Go(g) => (&g.call, false),
+                        InstrData::Defer(d) => (&d.call, false),
+                        _ => continue,
+                    };
+                    if common.method.is_some() {
+                        continue; // interface invoke: no static callee
+                    }
+                    let Value::Function(callee) = common.value else {
+                        continue;
+                    };
+                    sites.entry(callee).or_default().push((caller, iid, has_value));
+                }
+            }
+        }
+        CallSites { sites }
+    }
+
+    fn for_func(
+        &self,
+        fid: guff_ssa::ids::FuncId,
+    ) -> &[(guff_ssa::ids::FuncId, guff_ssa::ids::InstrId, bool)] {
+        self.sites.get(&fid).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+}
+
+/// `result N is never used` — no call site reads result `N`, and at least two
+/// call sites ignore it.
+#[allow(clippy::too_many_arguments)]
+fn check_unused_results(
+    prog: &guff_ssa::program::Program,
+    sites: &CallSites,
+    fid: guff_ssa::ids::FuncId,
+    func: &guff_ssa::function::Function,
+    fname: &str,
+    fields: &[(u32, Option<String>)],
+    result_types: &[guff_types::TypeId],
+    pending: &mut Vec<(u32, String)>,
+) {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    let n = fields.len();
+    if n == 0 {
+        return;
+    }
+    // `allRetsExtracting`: every returned value comes straight out of another
+    // call, so the results are not this function's to change.
+    let mut all_rets_extracting = true;
+    let mut any_return = false;
+    for (_, block) in func.live_blocks() {
+        let Some(&last) = block.instrs.last() else {
+            continue;
+        };
+        let InstrData::Return(ret) = func.instrs.get(last) else {
+            continue;
+        };
+        any_return = true;
+        for &val in &ret.results {
+            let is_extract = matches!(val, Value::Instr(iid) if matches!(func.instrs.get(iid), InstrData::Extract(_)));
+            if !is_extract {
+                all_rets_extracting = false;
+            }
+        }
+    }
+    if !any_return || all_rets_extracting {
+        return;
+    }
+
+    'result: for i in 0..n {
+        if is_error_type(prog, result_types[i]) {
+            // "error is never used" is less useful, and it is errcheck's job.
+            continue;
+        }
+        let mut count = 0usize;
+        for &(caller, iid, has_value) in sites.for_func(fid) {
+            if !has_value {
+                count += 1;
+                continue;
+            }
+            let caller_fn = prog.functions.get(caller);
+            for rid in real_referrers(caller_fn, Value::Instr(iid)) {
+                let InstrData::Extract(ex) = caller_fn.instrs.get(rid) else {
+                    continue 'result; // direct, real use
+                };
+                if ex.index != i {
+                    continue;
+                }
+                if real_referrers(caller_fn, Value::Instr(rid)).next().is_some() {
+                    continue 'result; // real use after extraction
+                }
+            }
+            count += 1;
+        }
+        if count < 2 {
+            continue; // require ignoring at least twice
+        }
+        let (pos, name) = &fields[i];
+        let desc = result_desc(prog, i, name.as_deref(), result_types[i]);
+        pending.push((*pos, format!("{fname} - result {desc} is never used")));
+    }
+}
+
+/// Referrers as upstream sees them. `buildssa` builds with `ssa.BuilderMode(0)`,
+/// so there are no `DebugRef` instructions in the graph it walks; guff's SSA
+/// keeps them, and counting one as a use makes every call site look like a real
+/// use of the whole tuple.
+fn real_referrers<'a>(
+    func: &'a guff_ssa::function::Function,
+    value: guff_ssa::value::Value,
+) -> impl Iterator<Item = guff_ssa::ids::InstrId> + 'a {
+    guff_analysis::referrers(func, value)
+        .iter()
+        .copied()
+        .filter(|&rid| {
+            !matches!(
+                func.instrs.get(rid),
+                guff_ssa::instr::InstrData::DebugRef(_)
+            )
+        })
+}
+
+/// `alwaysReceivedConst`, one entry per declared parameter (receiver excluded,
+/// as in the AST): the constant every call site passes, described as upstream
+/// describes it.
+fn always_received_consts(
+    ssa: &SsaFuncs<'_>,
+    fid: guff_ssa::ids::FuncId,
+    fd: &FuncDecl,
+) -> Vec<Option<String>> {
+    let params: Vec<&guff::ast::Field> = fd
+        .ty
+        .params
+        .as_ref()
+        .map(|p| p.list.iter().collect())
+        .unwrap_or_default();
+    let count: usize = params.iter().map(|f| f.names.len().max(1)).sum();
+    let mut out = vec![None; count];
+
+    let sites = ssa.sites.for_func(fid);
+    if sites.len() < 4 {
+        // Too few calls to be sure; upstream would rather miss than guess.
+        return out;
+    }
+    if fd.name.is_exported() {
+        // We might not have every call site of an exported func.
+        return out;
+    }
+    // go/ast's `CallExpr.Args` does not include the receiver, go/ssa's does.
+    let recv_offset = usize::from(fd.recv.is_some());
+    // go/ssa packs variadic arguments into a slice, so the last parameter of a
+    // variadic function never *is* a constant there. thanos calls
+    // `zLabelSetFromStrings("a", "1")` fifteen times.
+    let variadic = fd
+        .ty
+        .params
+        .as_ref()
+        .and_then(|p| p.list.last())
+        .and_then(|f| f.ty.as_ref())
+        .is_some_and(|t| matches!(t, Expr::Ellipsis(_)));
+
+    for i in 0..count {
+        if variadic && i + 1 == count {
+            continue;
+        }
+        out[i] = ssa.const_received_at(sites, i + recv_offset, i);
+    }
+    out
+}
+
+/// `declCounts` + `multipleImpls`: how many times each function is declared in
+/// the package *directory*, build-tag-excluded files included. A name declared
+/// twice means a second implementation the analysis cannot see, where the
+/// parameter or result may well be used — thanos builds two
+/// `materializeForUnmarshal`s that way.
+fn decl_counts(pass: &Pass<'_>) -> std::collections::HashMap<String, usize> {
+    use guff::parser::{parse_file, Mode};
+    use guff::position::FileSet;
+
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let dir = &pass.pkg().dir;
+    let want = pass.pkg().name.clone();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return counts;
+    };
+    let fset = FileSet::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("go") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(src) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(file) = parse_file(&fset, name, &src, Mode::NONE) else {
+            continue;
+        };
+        // `parser.ParseDir` groups by package clause; only the one being
+        // analysed counts (its `_test` variant declares its own names).
+        if file.name.name != want {
+            continue;
+        }
+        for decl in &file.decls {
+            let Decl::FuncDecl(fd) = decl else {
+                continue;
+            };
+            let key = format!("{}{}", recv_prefix(fd.recv.as_ref()), fd.name.name);
+            *counts.entry(key).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// `recvPrefix`: `Foo.` for `func (*Foo) Bar()`, empty for a plain function.
+fn recv_prefix(recv: Option<&guff::ast::FieldList>) -> String {
+    let Some(recv) = recv else {
+        return String::new();
+    };
+    let Some(ty) = recv.list.first().and_then(|f| f.ty.as_ref()) else {
+        return String::new();
+    };
+    fn ident_name(e: &Expr) -> String {
+        match e {
+            Expr::Ident(id) => format!("{}.", id.name),
+            Expr::StarExpr(s) => ident_name(&s.x),
+            Expr::ParenExpr(p) => ident_name(&p.x),
+            Expr::IndexExpr(i) => ident_name(&i.x),
+            Expr::IndexListExpr(i) => ident_name(&i.x),
+            _ => String::new(),
+        }
+    }
+    ident_name(ty)
+}
+
+/// Functions whose *results* another function fixes by returning them
+/// directly — `return f(...)` means f's results cannot change. (Go:
+/// `resultsRequiredBy["return"]`, via `callExtract`.)
+fn collect_results_required(ir: &buildir::BuildIrResult) -> HashSet<guff_ssa::ids::FuncId> {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    let mut out = HashSet::new();
+    for &fid in ir.src_funcs_with_methods() {
+        let func = ir.prog.functions.get(fid);
+        for (_, block) in func.live_blocks() {
+            for &iid in &block.instrs {
+                let InstrData::Return(ret) = func.instrs.get(iid) else {
+                    continue;
+                };
+                let Some(call_iid) = call_extract(func, iid, &ret.results) else {
+                    continue;
+                };
+                let InstrData::Call(c) = func.instrs.get(call_iid) else {
+                    continue;
+                };
+                if let Value::Function(callee) = c.call.value {
+                    out.insert(callee);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `callExtract`: the single call these values all come out of, in order, and
+/// only when the call is *part of* the parent instruction rather than something
+/// assigned earlier —
+///
+/// ```ignore
+/// return fn()          // yes
+/// a, b := fn(); return a, b   // no: `prev.Pos() < parent.Pos()`
+/// ```
+fn call_extract(
+    func: &guff_ssa::function::Function,
+    parent: guff_ssa::ids::InstrId,
+    values: &[guff_ssa::value::Value],
+) -> Option<guff_ssa::ids::InstrId> {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    if values.len() == 1 {
+        if let Value::Instr(iid) = values[0] {
+            if matches!(func.instrs.get(iid), InstrData::Call(_)) {
+                return Some(iid);
+            }
+        }
+    }
+    let parent_pos = func.pos(parent);
+    let mut prev: Option<guff_ssa::ids::InstrId> = None;
+    for (i, val) in values.iter().enumerate() {
+        let Value::Instr(iid) = val else {
+            return None;
+        };
+        let InstrData::Extract(ex) = func.instrs.get(*iid) else {
+            return None;
+        };
+        if ex.index != i {
+            return None; // not extracted in the same order
+        }
+        let Value::Instr(tuple) = ex.tuple else {
+            return None;
+        };
+        if !matches!(func.instrs.get(tuple), InstrData::Call(_)) {
+            return None;
+        }
+        match prev {
+            None => prev = Some(tuple),
+            Some(p) if p != tuple => return None,
+            _ => {}
+        }
+    }
+    let call = prev?;
+    if func.pos(call).0 < parent_pos.0 {
+        // `a, b := fn()` then `return a, b`: the call is not part of the
+        // return, so the callee's results are not fixed by it.
+        return None;
+    }
+    Some(call)
+}
+
+/// `dummyImpl`: a first block that will almost immediately panic, throw, or
+/// return constants only. Upstream skips such a function entirely — which is
+/// why `func f() (int, error) { return 0, nil }` is not "result 1 is always
+/// nil", and why a body whose only call is to `errors.New` is not checked
+/// either.
+fn dummy_impl(prog: &guff_ssa::program::Program, func: &guff_ssa::function::Function) -> bool {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    let Some((_, block)) = func.live_blocks().next() else {
+        return false;
+    };
+    for &iid in &block.instrs {
+        if inserted_store(func, iid) {
+            continue; // inserted by go/ssa, not from the code
+        }
+        let data = func.instrs.get(iid);
+        if matches!(data, InstrData::DebugRef(_)) {
+            // `buildssa` builds without debug info, so upstream's block holds
+            // no `DebugRef`s at all.
+            continue;
+        }
+        let mut bad_operand = false;
+        data.for_each_operand(|v| {
+            if bad_operand {
+                return;
+            }
+            let ok = match v {
+                Value::Const(_) | Value::Function(_) | Value::Global(_) | Value::Param(_) => true,
+                Value::Instr(op) => matches!(
+                    func.instrs.get(*op),
+                    InstrData::ChangeType(_)
+                        | InstrData::Alloc(_)
+                        | InstrData::MakeInterface(_)
+                        | InstrData::MakeMap(_)
+                        | InstrData::IndexAddr(_)
+                        | InstrData::Slice(_)
+                        | InstrData::UnOp(_)
+                        // A call operand is neither accepted nor rejected
+                        // upstream: the switch simply ends.
+                        | InstrData::Call(_)
+                ),
+                _ => false,
+            };
+            if !ok {
+                bad_operand = true;
+            }
+        });
+        if bad_operand {
+            return false;
+        }
+        match data {
+            InstrData::Alloc(_)
+            | InstrData::Store(_)
+            | InstrData::UnOp(_)
+            | InstrData::BinOp(_)
+            | InstrData::MakeInterface(_)
+            | InstrData::MakeMap(_)
+            | InstrData::Extract(_)
+            | InstrData::IndexAddr(_)
+            | InstrData::FieldAddr(_)
+            | InstrData::Slice(_)
+            | InstrData::Lookup(_)
+            | InstrData::ChangeType(_)
+            | InstrData::TypeAssert(_)
+            | InstrData::Convert(_)
+            | InstrData::ChangeInterface(_) => {}
+            InstrData::Return(_) | InstrData::Panic(_) => return true,
+            InstrData::Call(c) => {
+                let name = call_target_name(prog, func, &c.call);
+                if is_harmless_call_name(&name) {
+                    continue;
+                }
+                return name.rsplit('.').next() == Some("throw");
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// `insertedStore`: a position-less store into an alloc that nothing else
+/// refers to — go/ssa's own spill, not the author's code.
+fn inserted_store(func: &guff_ssa::function::Function, iid: guff_ssa::ids::InstrId) -> bool {
+    use guff_ssa::instr::InstrData;
+    use guff_ssa::value::Value;
+
+    if func.pos(iid).is_valid() {
+        return false;
+    }
+    let InstrData::Store(store) = func.instrs.get(iid) else {
+        return false;
+    };
+    let Value::Instr(addr) = store.addr else {
+        return false;
+    };
+    if !matches!(func.instrs.get(addr), InstrData::Alloc(_)) {
+        return false;
+    }
+    guff_analysis::referrers(func, Value::Instr(addr)).len() == 1
+}
+
+/// The printed callee of a call, for `rxHarmlessCall`.
+fn call_target_name(
+    prog: &guff_ssa::program::Program,
+    func: &guff_ssa::function::Function,
+    common: &guff_ssa::instr::CallCommon,
+) -> String {
+    use guff_ssa::value::Value;
+    if let Some(obj) = common.method {
+        return obj.name(&prog.object_arena).to_string();
+    }
+    match common.value {
+        Value::Function(fid) => {
+            let callee = prog.functions.get(fid);
+            match callee.object.and_then(|o| o.pkg(&prog.object_arena)) {
+                Some(pkg) => format!(
+                    "{}.{}",
+                    prog.package_arena.get(pkg).path(),
+                    callee.name
+                ),
+                None => callee.name.clone(),
+            }
+        }
+        Value::Builtin(b) => prog.builtins.get(b).name.clone(),
+        _ => {
+            let _ = func;
+            String::new()
+        }
+    }
+}
+
+/// `nodeStr` for the expressions that appear as constant arguments.
+fn arg_text(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::BasicLit(lit) => lit.value.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", arg_text(&sel.x), sel.sel.name),
+        Expr::ParenExpr(p) => format!("({})", arg_text(&p.x)),
+        Expr::UnaryExpr(u) => format!("{}{}", u.op, arg_text(&u.x)),
+        Expr::CallExpr(c) if c.args.len() == 1 => {
+            format!("{}({})", arg_text(&c.fun), arg_text(&c.args[0]))
+        }
+        _ => String::new(),
+    }
+}
+
+fn is_error_type(prog: &guff_ssa::program::Program, typ: guff_types::TypeId) -> bool {
+    guff_types::typestring::type_string(
+        &prog.type_arena,
+        &prog.object_arena,
+        &prog.package_arena,
+        typ,
+        None,
+    ) == "error"
+}
+
+/// The package's SSA functions, keyed by the object they were declared as.
+struct SsaFuncs<'a> {
+    prog: &'a guff_ssa::program::Program,
+    by_object: std::collections::HashMap<guff_types::ObjectId, guff_ssa::ids::FuncId>,
+    sites: CallSites,
+    results_required: HashSet<guff_ssa::ids::FuncId>,
+    /// Rendered arguments of every call in the package, keyed by the position
+    /// go/ssa gives the call — its `(`. (Go: `callByPos`.)
+    call_by_pos: std::collections::HashMap<u32, Vec<String>>,
+}
+
+impl<'a> SsaFuncs<'a> {
+    fn build(ir: &'a buildir::BuildIrResult, files: &[guff::ast::File]) -> Self {
+        let mut by_object = std::collections::HashMap::new();
+        for &fid in ir.src_funcs_with_methods() {
+            if let Some(obj) = ir.prog.functions.get(fid).object {
+                by_object.entry(obj).or_insert(fid);
+            }
+        }
+        let mut call_by_pos = std::collections::HashMap::new();
+        for file in files {
+            walk::inspect(NodeRef::File(file), |n| {
+                if let Some(NodeRef::CallExpr(call)) = n {
+                    call_by_pos.insert(
+                        call.lparen.0 as u32,
+                        call.args.iter().map(arg_text).collect::<Vec<_>>(),
+                    );
+                }
+                true
+            });
+        }
+        SsaFuncs {
+            prog: &ir.prog,
+            by_object,
+            sites: CallSites::build(ir),
+            results_required: collect_results_required(ir),
+            call_by_pos,
+        }
+    }
+
+    fn func_for(
+        &self,
+        pass: &Pass<'_>,
+        fd: &FuncDecl,
+    ) -> Option<(guff_ssa::ids::FuncId, &guff_ssa::function::Function)> {
+        let info = pass.types_info()?;
+        let obj = (*info.defs.get(&fd.name.id)?)?;
+        let fid = *self.by_object.get(&obj)?;
+        Some((fid, self.prog.functions.get(fid)))
+    }
+
+    /// The constant argument every call site passes at `ssa_pos`, described as
+    /// upstream describes it: the source spelling when every site writes it the
+    /// same way, and the value in parentheses when the two differ.
+    fn const_received_at(
+        &self,
+        sites: &[(guff_ssa::ids::FuncId, guff_ssa::ids::InstrId, bool)],
+        ssa_pos: usize,
+        ast_pos: usize,
+    ) -> Option<String> {
+        use guff_ssa::instr::InstrData;
+
+        let mut seen: Option<guff_ssa::ids::ConstId> = None;
+        let mut seen_orig: Option<String> = None;
+        let mut first = true;
+        for &(caller, iid, _) in sites {
+            let caller_fn = self.prog.functions.get(caller);
+            let common = match caller_fn.instrs.get(iid) {
+                InstrData::Call(c) => &c.call,
+                InstrData::Go(g) => &g.call,
+                InstrData::Defer(d) => &d.call,
+                _ => return None,
+            };
+            if ssa_pos >= common.args.len() {
+                return None;
+            }
+            let cnst = const_of(self.prog, caller_fn, common.args[ssa_pos])?;
+            let orig = self
+                .call_by_pos
+                .get(&(caller_fn.pos(iid).0 as u32))
+                .and_then(|args| args.get(ast_pos))
+                .cloned()
+                .unwrap_or_default();
+            if first {
+                seen = Some(cnst);
+                seen_orig = Some(orig);
+                first = false;
+            } else {
+                if !consts_equal(self.prog, seen, Some(cnst)) {
+                    return None;
+                }
+                if seen_orig.as_deref() != Some(orig.as_str()) {
+                    seen_orig = Some(String::new());
+                }
+            }
+        }
+        let cid = seen?;
+        let (_, repr) = const_repr(self.prog, self.prog.constants.get(cid));
+        match seen_orig {
+            Some(orig) if !orig.is_empty() && orig != repr => Some(format!("{orig} ({repr})")),
+            _ => Some(repr),
+        }
+    }
+
+    fn result_types(&self, func: &guff_ssa::function::Function) -> Vec<guff_types::TypeId> {
+        let Some(sig) = func.signature else {
+            return Vec::new();
+        };
+        let arena = &self.prog.type_arena;
+        let results = guff_types::signature::signature_results(arena, sig);
+        let n = guff_types::tuple::tuple_len(arena, results);
+        let Some(results) = results else {
+            return Vec::new();
+        };
+        (0..n)
+            .filter_map(|i| {
+                guff_types::tuple::tuple_at(arena, results, i).typ(&self.prog.object_arena)
+            })
+            .collect()
+    }
 }
 
 fn check_func_lit(lit: &FuncLit, value_lits: &HashSet<u32>, pending: &mut Vec<(u32, String)>) {
@@ -680,7 +1536,7 @@ fn check_func_lit(lit: &FuncLit, value_lits: &HashSet<u32>, pending: &mut Vec<(u
     let Some(params) = &lit.ty.params else {
         return;
     };
-    check_params("<func literal>", &params.list, &lit.body, pending);
+    check_params("<func literal>", &params.list, &lit.body, &[], pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -699,6 +1555,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let sign_required_methods = collect_sign_required_methods(files, &call_fun_ids);
     let interface_methods = collect_interface_methods(files);
     let types_implementing = collect_types_implementing(pass);
+    let decl_counts = decl_counts(pass);
+    let ir = pass.result_of::<buildir::BuildIrResult>(buildir::analyzer());
+    let ssa = ir.as_ref().map(|ir| SsaFuncs::build(ir, files));
 
     let mut pending: Vec<(u32, String)> = Vec::new();
     for file in files {
@@ -714,6 +1573,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 &sign_required_methods,
                 &interface_methods,
                 &types_implementing,
+                &decl_counts,
+                ssa.as_ref(),
                 &mut pending,
             );
         }
