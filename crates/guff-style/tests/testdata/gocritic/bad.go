@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-// BadCommentFormatting has no space after //.
+//BadCommentFormatting has no space after //.
 var _ = 0
 
 // deprecated: use newer.

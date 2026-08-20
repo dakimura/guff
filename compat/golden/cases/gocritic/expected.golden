@@ -7,6 +7,7 @@
 # golangci-lint: 2.12.2
 
 bad.go:1:1:gocritic::codegenComment: comment should match `Code generated .* DO NOT EDIT.` regexp
+bad.go:14:1:gocritic::commentFormatting: put a space between `//` and comment text
 bad.go:17:1:gocritic::deprecatedComment: use `Deprecated: ` (note the casing) instead of `deprecated: `
 bad.go:32:2:gocritic::caseOrder: case orderConcrete must go before the orderIface case
 bad.go:38:9:gocritic::sloppyTypeAssert: type assertion from/to types are identical
