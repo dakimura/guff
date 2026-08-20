@@ -171,6 +171,7 @@ sa5010/bad/bad.go                            crates/guff-staticcheck/tests/testd
 sa5010/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa5010/ok.go
 sa5011/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa5011/bad.go
 sa5011/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa5011/ok.go
+sa5011/testing_abort/testing_abort.go        crates/guff-staticcheck/tests/testdata/sa5011/testing_abort.go
 sa5012/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa5012/bad.go
 sa5012/ok/ok.go                              crates/guff-staticcheck/tests/testdata/sa5012/ok.go
 sa6000/bad/bad.go                            crates/guff-staticcheck/tests/testdata/sa6000/bad.go
