@@ -201,6 +201,17 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // go/ssa sets the labelled statement's break/continue targets *before*
+        // building the body (`label._break = done`). Setting them after left
+        // every `break <label>` inside the body unresolved, and `branch_stmt`
+        // falls back to the label's goto block on a miss — so a labelled break
+        // jumped to the top of the loop it was trying to leave. Every CFG
+        // consumer saw the wrong edge; wastedassign saw the loop's own next
+        // store and called the assignment before the break wasted (gitea
+        // `services/gitdiff`).
+        if let Some(name) = label {
+            self.set_label_loop_targets(name, done, loop_);
+        }
         self.push_targets(done, loop_);
         for stmt in &s.body.list {
             self.stmt_with_label(stmt, None);
@@ -211,9 +222,6 @@ impl<'a> Builder<'a> {
             self.emit_jump(loop_);
         }
         self.set_block(Some(done));
-        if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
-        }
     }
 
     /// range_stmt translates a `for range` loop. (Go: `builder.rangeStmt`)
@@ -346,6 +354,17 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // go/ssa sets the labelled statement's break/continue targets *before*
+        // building the body (`label._break = done`). Setting them after left
+        // every `break <label>` inside the body unresolved, and `branch_stmt`
+        // falls back to the label's goto block on a miss — so a labelled break
+        // jumped to the top of the loop it was trying to leave. Every CFG
+        // consumer saw the wrong edge; wastedassign saw the loop's own next
+        // store and called the assignment before the break wasted (gitea
+        // `services/gitdiff`).
+        if let Some(name) = label {
+            self.set_label_loop_targets(name, done, loop_);
+        }
         self.push_targets(done, loop_);
         for stmt in &s.body.list {
             self.stmt_with_label(stmt, None);
@@ -356,9 +375,6 @@ impl<'a> Builder<'a> {
             self.emit_jump(loop_);
         }
         self.set_block(Some(done));
-        if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
-        }
     }
 
     /// range_iter emits the header for a loop over a map or string.
@@ -466,6 +482,17 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // go/ssa sets the labelled statement's break/continue targets *before*
+        // building the body (`label._break = done`). Setting them after left
+        // every `break <label>` inside the body unresolved, and `branch_stmt`
+        // falls back to the label's goto block on a miss — so a labelled break
+        // jumped to the top of the loop it was trying to leave. Every CFG
+        // consumer saw the wrong edge; wastedassign saw the loop's own next
+        // store and called the assignment before the break wasted (gitea
+        // `services/gitdiff`).
+        if let Some(name) = label {
+            self.set_label_loop_targets(name, done, loop_);
+        }
         self.push_targets(done, loop_);
         for stmt in &s.body.list {
             self.stmt_with_label(stmt, None);
@@ -476,9 +503,6 @@ impl<'a> Builder<'a> {
             self.emit_jump(loop_);
         }
         self.set_block(Some(done));
-        if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
-        }
     }
 
     /// Creates iteration variables for `for k, v := range x` (Go 1.22+:
@@ -655,6 +679,17 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // go/ssa sets the labelled statement's break/continue targets *before*
+        // building the body (`label._break = done`). Setting them after left
+        // every `break <label>` inside the body unresolved, and `branch_stmt`
+        // falls back to the label's goto block on a miss — so a labelled break
+        // jumped to the top of the loop it was trying to leave. Every CFG
+        // consumer saw the wrong edge; wastedassign saw the loop's own next
+        // store and called the assignment before the break wasted (gitea
+        // `services/gitdiff`).
+        if let Some(name) = label {
+            self.set_label_loop_targets(name, done, loop_);
+        }
         self.push_targets(done, loop_);
         for stmt in &s.body.list {
             self.stmt_with_label(stmt, None);
@@ -665,9 +700,6 @@ impl<'a> Builder<'a> {
             self.emit_jump(loop_);
         }
         self.set_block(Some(done));
-        if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
-        }
     }
 
     fn defer_stmt(&mut self, s: &DeferStmt) {
@@ -1222,6 +1254,17 @@ impl<'a> Builder<'a> {
         }
 
         self.set_block(Some(body));
+        // go/ssa sets the labelled statement's break/continue targets *before*
+        // building the body (`label._break = done`). Setting them after left
+        // every `break <label>` inside the body unresolved, and `branch_stmt`
+        // falls back to the label's goto block on a miss — so a labelled break
+        // jumped to the top of the loop it was trying to leave. Every CFG
+        // consumer saw the wrong edge; wastedassign saw the loop's own next
+        // store and called the assignment before the break wasted (gitea
+        // `services/gitdiff`).
+        if let Some(name) = label {
+            self.set_label_loop_targets(name, done, loop_);
+        }
         self.push_targets(done, loop_);
         self.stmt(&Stmt::BlockStmt(s.body.clone()));
         if let Some(post) = &s.post {
@@ -1233,9 +1276,6 @@ impl<'a> Builder<'a> {
         }
 
         self.set_block(Some(done));
-        if let Some(name) = label {
-            self.set_label_loop_targets(name, done, loop_);
-        }
     }
 
     /// assign_stmt translates an assignment or short variable declaration.

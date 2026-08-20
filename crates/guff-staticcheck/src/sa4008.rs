@@ -5,15 +5,63 @@
 //! Upstream only considers loops whose post is an `IncDecStmt`. Assign-form
 //! posts (`i += 2`, `t = next()`) are skipped — flagging them was a guff FP on
 //! stepped loops in prometheus `model/textparse`.
+//!
+//! The post statement is not the whole test. Upstream asks the IR what the
+//! condition variable *is*: a Phi of exactly a `Const` and a `Sigma` of itself,
+//! i.e. a variable that receives its initial value and then nothing else, ever.
+//! A body that assigns it — `for pos := 0; pos < len(data); i++ { … pos +=
+//! runeSize }`, gitea's `escapeStreamer.detectRunes` — fails that test and is
+//! not a finding, however wrong the post statement looks. guff has no sigma
+//! node to ask, so [`assigned_in`] answers the same question from the syntax:
+//! any assignment, `++`/`--`, or address-of on the variable inside the loop.
 
 use std::sync::OnceLock;
 
 use guff::ast::{Expr, ForStmt, Stmt};
 use guff::node_mask;
-use guff::walk::NodeRef;
+use guff::token::Token;
+use guff::walk::{preorder_prune, NodeRef};
 use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_types::ObjectId;
+
+/// Does anything under `body` change `obj`?
+///
+/// Assignment of any form, `++`/`--`, and `&x` (which hands the variable to
+/// something that can write through it). Func literals are walked: a closure
+/// that assigns the variable changes it just as much as the body does.
+fn assigned_in(pass: &Pass<'_>, body: &guff::ast::BlockStmt, obj: ObjectId) -> bool {
+    let mut found = false;
+    let is_target = |pass: &Pass<'_>, e: &Expr| -> bool {
+        matches!(e, Expr::Ident(id) if object_of(pass, id) == Some(obj))
+    };
+    preorder_prune(NodeRef::BlockStmt(body), |node| {
+        if found {
+            return false;
+        }
+        match node {
+            NodeRef::AssignStmt(a) => {
+                if a.lhs.iter().any(|e| is_target(pass, e)) {
+                    found = true;
+                }
+            }
+            NodeRef::IncDecStmt(s) => {
+                if is_target(pass, &s.x) {
+                    found = true;
+                }
+            }
+            NodeRef::UnaryExpr(u) => {
+                if u.op == Token::AND && is_target(pass, &u.x) {
+                    found = true;
+                }
+            }
+            _ => {}
+        }
+        !found
+    });
+    found
+}
 
 fn cond_var_never_incremented(pass: &Pass<'_>, loop_: &ForStmt) -> bool {
     let Some(init) = loop_.init.as_ref() else {
@@ -51,7 +99,10 @@ fn cond_var_never_incremented(pass: &Pass<'_>, loop_: &ForStmt) -> bool {
     let Expr::Ident(inc_id) = &inc.x else {
         return false;
     };
-    object_of(pass, inc_id) != Some(init_obj)
+    if object_of(pass, inc_id) == Some(init_obj) {
+        return false;
+    }
+    !assigned_in(pass, &loop_.body, init_obj)
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
