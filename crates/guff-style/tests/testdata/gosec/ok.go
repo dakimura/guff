@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
+	"database/sql"
 	"hash"
 	"html/template"
 	"io"
@@ -190,4 +191,40 @@ func g122VariadicHop() {
 	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
 		return os.Remove(filepath.Join(path, "sub"))
 	})
+}
+
+// G202 resolves what it can: a constant, and a package-level variable declared
+// in this file, are both pinned, so neither of these is a finding.
+const sqlFixedTable = "events"
+
+var sqlPkgTable = "events"
+
+func sqlConcatConst(db *sql.DB) error {
+	_, err := db.Exec("DELETE FROM " + sqlFixedTable + " WHERE key = ?")
+	return err
+}
+
+func sqlConcatPkgVar(db *sql.DB) error {
+	_, err := db.Exec("DELETE FROM " + sqlPkgTable + " WHERE key = ?")
+	return err
+}
+
+// No SQL keyword in the leading literal.
+func sqlNoKeyword(db *sql.DB, table string) error {
+	_, err := db.Exec("PRAGMA " + table)
+	return err
+}
+
+// A receiver that is itself a *method* call: `getCallInfo` has cases for
+// `new(T).M()` and `f().M()` where `f` is a plain function, and none for a
+// selector callee — so it errors out and the rule never runs, however clearly
+// the receiver is a `*sql.DB`. dapr writes four of these in
+// `tests/integration/framework/process/sqlite`.
+type sqlOkHolder struct{ db *sql.DB }
+
+func (h *sqlOkHolder) get() *sql.DB { return h.db }
+
+func sqlConcatViaMethodRecv(h *sqlOkHolder, table string) error {
+	_, err := h.get().Exec("DELETE FROM " + table + " WHERE key = ?")
+	return err
 }
