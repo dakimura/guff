@@ -7114,6 +7114,73 @@ Go はバイトで切って壊れた文字を残し、Rust は文字境界まで
 
 ---
 
+### 2026-08-20（続き 6）— bodyclose の「値が無い」経路（#75）と unparam の残り 3 系統（#76）
+
+**#75 — bodyclose**
+
+`isopen` は `ssa.Call` の referrer から `*http.Response` を運ぶ `ssa.Extract` を探し、
+その先の switch の各枝は「閉じられていることの証明」になっている。
+**証明する材料が無いときは `return true`（＝報告）** で終わる。3 つ直した:
+
+| 形 | 上流 | guff（修正前） |
+|---|---|---|
+| `_, err = client.Do(req)` | 報告（Extract が無い） | 黙る（blank を素通し） |
+| `return StatusScopesResponder(...)`（`func(*http.Request) (*http.Response, error)` を返す呼び出し） | 報告（`getReqCall` は**型文字列の部分一致**） | 黙る |
+| `http.Get(...)` の裸の文 | col = `(` の位置 | col = callee の先頭（4 桁ズレ） |
+
+逆方向も 2 つ: **`make` と `new` は go/ssa では Call ではない**（`MakeChan`/`MakeMap`/`MakeSlice`/`Alloc`）ので
+`resp := new(http.Response)` も `make(chan *http.Response)` も対象外。部分一致ルールを入れた瞬間に
+両方が finding になったので、同時に除外した。
+
+`bodyclose/ok.go` は「blank は finding ではない」と書いてあったが**測っていなかった**。実際は finding なので
+`bad.go` に移した。golden case を新設（isolate は column を正規化するうえ、これらの形の case が無かった）。
+
+**#76 — unparam**
+
+`unparam.rs` は「未使用パラメータ」だけで、ヘッダにも DEFERRED と書いてあった。
+gitea の 4 件（nolintlint のカスケードとして見えていた）は残り 3 系統:
+
+- **`result N is always X`** — 全 `return` が同じ定数を返す。ただし「return が 1 つで、定数が untyped nil でない」場合は
+  上流が「偽陽性が多すぎる」として除外。
+- **`result N is never used`** — どの呼び出し側も結果 N を読まず、無視している呼び出しが 2 つ以上ある。
+  `error` 型の結果は errcheck の仕事なので対象外。
+- **`param always receives X`** — 呼び出しが 4 つ以上あり全部同じ定数を渡す。本体で使っていても報告し、
+  **全呼び出しの綴りが一致すればソースの綴りで**（`statusOK (200)`）。
+
+**除外条件のほうが本体と同じくらい効く**（どれも corpus で実際に踏んだ）:
+
+- `dummyImpl`: 最初のブロックが定数を返すだけ、または harmless な呼び出し（`\berrors\b` を含む）だけなら**関数ごとスキップ**。
+  `func f() (int, error) { return 0, nil }` は "result 1 is always nil" ではない。
+- `resultsRequiredBy`: `return f(...)` は f の結果を固定する。ただし**呼び出しが return の一部であるときだけ** ——
+  `a, b := f(); return a, b` は `prev.Pos() < parent.Pos()` で弾かれる。gitea の `getStorageSectionByType` が
+  finding のままなのはこのおかげ。
+- `multipleImpls`: パッケージ**ディレクトリ**内に同名の宣言が 2 つ（＝ build tag で切り替わる別実装）ならスキップ。
+  ローダが渡してくれないファイルまで自分で `read_dir` して数える。thanos の `materializeForUnmarshal` がこれ。
+- 可変長引数: go/ssa は slice に詰めるので、可変長パラメータが定数になることは無い。
+
+**guff 固有の補正が 2 つ**（どちらも他の x/tools 系 analyzer 移植にも効く）:
+
+1. **guff の SSA は `DebugRef` 命令を持つ**。`buildssa` は `ssa.BuilderMode(0)` なので上流のグラフには無い。
+   referrer を歩く処理と `dummyImpl` の走査は DebugRef を飛ばさないと、全呼び出し側が「タプル全体の実使用」に見える。
+2. **ゼロ値の `Const` は `val: None` のまま**（go/ssa は `soleTypeKind` で `0`/`false`/`""` に正規化する）。
+   メッセージが `nil` になってしまうので読み出し側で正規化する。
+
+**土台の修正（#76 に同梱）: range-over-func の中の `return` が結果を捨てていた**
+
+go/ssa の `returnStmt` は**まず結果を格納**してから jump 変数を立てて `return false` する。
+yield クロージャには named result が無いので、格納先は
+`fn.lookup(fn.returnVars[i], false)` ——「囲む関数の結果セルを自由変数として引く」。
+guff は「自分に named result があるときだけ」格納していたので、**yield クロージャの `return` の値は消えていた**。
+外側の関数の `Return` には自分の末尾 `return` しか残らず、`Return.results` を読む全ての利用者が
+「3 つ return があるのに 1 つしか無い関数」を見ることになる。traefik の `lookupMiInstances` が
+"result 1 (error) is always nil" になったのはこれ（`for … range chunkIDs(…)` の中の
+`return nil, fmt.Errorf(…)` が 2 つとも見えていなかった）。`Function` に `return_vars` を追加した。
+
+**効果**: gitea guff-only 5 → 1（残りは SA4006 の**上流の偽陽性**）、cli 1 → 0、
+traefik / thanos は 0 のまま（一度 2 件ずつ増やしてから、上記の除外条件で戻した）。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
