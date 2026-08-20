@@ -31,6 +31,13 @@ pub struct RunnerOptions {
     pub settings: Arc<SettingsBag>,
     /// Optional persistent issues cache (`GUFF_CACHE` / `GOLANGCI_LINT_CACHE`).
     pub cache: Option<Arc<IssueCache>>,
+    /// Type-checked packages by id, for resolving an import stub to the
+    /// instance that can actually be analysed.
+    ///
+    /// See [`crate::action::analyze_with_typed_imports`]: without it a fact
+    /// producer scheduled on an import gets a metadata stub, is skipped, and its
+    /// package facts never reach the importer.
+    pub typed_by_id: Option<Arc<std::collections::HashMap<String, Arc<Package>>>>,
 }
 
 impl std::fmt::Debug for RunnerOptions {
@@ -51,6 +58,7 @@ impl Default for RunnerOptions {
             sequential: false,
             concurrency: None,
             release_memory: false,
+            typed_by_id: None,
             settings: Arc::new(SettingsBag::default()),
             cache: None,
         }
@@ -123,13 +131,14 @@ pub fn run_on_packages(
     let graph = if to_analyze.is_empty() {
         Graph::empty()
     } else {
-        analyze_with_settings(
+        crate::action::analyze_with_typed_imports(
             analyzers,
             &to_analyze,
             sequential,
             concurrency,
             Arc::clone(&opts.settings),
             opts.cache.clone(),
+            opts.typed_by_id.clone(),
         )?
     };
 
