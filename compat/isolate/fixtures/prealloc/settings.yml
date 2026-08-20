@@ -1,0 +1,4 @@
+# `for-loops` is off by default upstream, and the capacity expression only gets
+# rendered when there is one to render.
+for-loops: true
+simple: false
