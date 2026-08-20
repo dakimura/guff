@@ -18,7 +18,7 @@
 //! DEFERRED: full SSA referrer / Phi / closure-capture / FieldAddr /
 //! `io.Closer` ChangeInterface parity.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FieldList, FuncType, ReturnStmt, ValueSpec};
@@ -330,14 +330,14 @@ fn mark_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
     }
 }
 
-/// `t.Cleanup(func(){ … resp.Body.Close() … })` marks `resp` closed.
+/// A no-argument func literal passed to any call — `t.Cleanup(func(){ …
+/// resp.Body.Close() … })` and its like — marks `resp` closed.
+///
+/// Upstream reaches the same answer through the variable rather than the call:
+/// the closure's `MakeClosure` is a referrer of the alloc (or free variable),
+/// and `calledInFunc` walks into it and finds the `Close` on the
+/// `io.ReadCloser`. The callee's name plays no part, so neither does it here.
 fn mark_cleanup_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) {
-    let Expr::SelectorExpr(sel) = call.fun.as_ref() else {
-        return;
-    };
-    if sel.sel.name != "Cleanup" {
-        return;
-    }
     let Some(Expr::FuncLit(fun)) = call.args.first() else {
         return;
     };
@@ -435,6 +435,10 @@ fn handle_defer_close(call: &CallExpr, usages: &mut HashMap<String, RespUsage>) 
 fn check_body(
     pass: &Pass<'_>,
     body: &BlockStmt,
+    // Start of the enclosing function, so an assignment to a variable declared
+    // outside it can be told from one declared within.
+    func_start: u32,
+    closure_reassigned: &ClosureStores,
     check_consumption: bool,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -450,7 +454,15 @@ fn check_body(
 
         match n {
             NodeRef::AssignStmt(assign) => {
-                handle_assign(pass, assign, check_consumption, &mut usages, pending);
+                handle_assign(
+                    pass,
+                    assign,
+                    (func_start, body.rbrace.0 as u32),
+                    closure_reassigned,
+                    check_consumption,
+                    &mut usages,
+                    pending,
+                );
             }
             NodeRef::ValueSpec(spec) => {
                 handle_value_spec(pass, spec, check_consumption, &mut usages, pending);
@@ -548,6 +560,8 @@ fn check_body(
 fn handle_assign(
     pass: &Pass<'_>,
     assign: &AssignStmt,
+    func_span: (u32, u32),
+    closure_reassigned: &ClosureStores,
     check_consumption: bool,
     usages: &mut HashMap<String, RespUsage>,
     pending: &mut Vec<(u32, String)>,
@@ -605,6 +619,23 @@ fn handle_assign(
 
         if let Some(prev) = usages.remove(name) {
             prev.report(check_consumption, pending);
+        }
+
+        // Assigning into a variable the enclosing function owns stores through
+        // an `ssa.FreeVar`, and a free variable's referrers live inside the
+        // closure: there is no `MakeClosure` for `isopen` to follow and no
+        // field store either, so nothing proves the body is closed and the walk
+        // reports. A later `resp.Body.Close()` reads the variable rather than
+        // the call's result, so upstream never sees it. dapr silences four of
+        // these in `tests/integration/suite/actors/http/ttl.go`.
+        if is_resp && target_is_closure_reassigned(pass, lhs, func_span, closure_reassigned) {
+            let msg = if check_consumption {
+                MSG_CLOSE_AND_CONSUME
+            } else {
+                MSG_CLOSE
+            };
+            pending.push((assign_report_pos(assign, i), msg.to_string()));
+            continue;
         }
 
         if is_resp {
@@ -668,6 +699,165 @@ fn mentions_response_indirectly(pass: &Pass<'_>, call: &CallExpr) -> bool {
         None,
     );
     printed.contains("*net/http.Response") && !printed.contains("net/http.ResponseController")
+}
+
+/// Variables that a closure re-assigns a response into, and that the closure
+/// does not own.
+///
+/// Such a store goes through an `ssa.FreeVar`, whose referrers live inside the
+/// closure: `isopen` finds no `MakeClosure` to follow and no field store, so
+/// nothing proves the body is closed and it reports. The *outer* assignment to
+/// the same variable is reported too, because the variable's alloc there does
+/// have a `MakeClosure` referrer, and `calledInFunc` walks into the closure and
+/// finds that unprovable store — `isopen(b, i) || !called` is then true
+/// whatever the outer code does with the body. dapr's
+/// `tests/integration/suite/actors/http/ttl.go` silences four of these.
+fn collect_closure_reassigned(pass: &Pass<'_>) -> ClosureStores {
+    let mut out = ClosureStores::default();
+    let Some(info) = pass.types_info() else {
+        return out;
+    };
+    for file in pass.files() {
+        preorder(NodeRef::File(file), |n| {
+            let NodeRef::FuncLit(fl) = n else {
+                return true;
+            };
+            let span = (fl.ty.func.0 as u32, fl.body.rbrace.0 as u32);
+            // `calledInFunc` walks the closure's instructions and answers with
+            // `isopen(b, i) || !called` at the first one that is not a load, so
+            // the outer assignment is only reported when the closure *opens*
+            // there — its first statement being this very assignment.
+            let first_stmt_pos = fl
+                .body
+                .list
+                .first()
+                .map(|st| st.pos().0 as u32)
+                .unwrap_or_default();
+            preorder(NodeRef::BlockStmt(&fl.body), |inner| {
+                let NodeRef::AssignStmt(assign) = inner else {
+                    return true;
+                };
+                let is_first_stmt = assign
+                    .lhs
+                    .first()
+                    .map(|e| e.pos().0 as u32)
+                    .unwrap_or_default()
+                    == first_stmt_pos;
+                for (i, lhs) in assign.lhs.iter().enumerate() {
+                    let Expr::Ident(id) = lhs else {
+                        continue;
+                    };
+                    if id.name == "_" {
+                        continue;
+                    }
+                    let Some(obj) = info.uses.get(&id.id).copied() else {
+                        continue; // `:=` here declares its own
+                    };
+                    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+                        continue;
+                    };
+                    let pos = obj.pos(&artifacts.objects) as u32;
+                    if pos == 0 || (pos >= span.0 && pos <= span.1) {
+                        continue; // the closure owns it
+                    }
+                    let from_call = rhs_for_index(assign, i)
+                        .is_some_and(|e| is_call_expr(e) && !is_make_or_new(e));
+                    if from_call && rhs_result_is_response(pass, assign, i) {
+                        // A *nested* closure that closes the body is what
+                        // upstream follows out of the free variable: the
+                        // `MakeClosure` among its referrers leads to
+                        // `calledInFunc`, which finds the `Close` on an
+                        // `io.ReadCloser` and answers "not open". dapr's
+                        // `outbox` tests close inside `t.Cleanup(func(){…})`.
+                        if closed_by_nested_closure(&fl.body, &id.name) {
+                            continue;
+                        }
+                        out.inner.insert(obj);
+                        if is_first_stmt {
+                            out.outer.insert(obj);
+                        }
+                    }
+                }
+                true
+            });
+            true
+        });
+    }
+    out
+}
+
+/// Whether some func literal nested in `body` calls `<name>.Body.Close()`.
+fn closed_by_nested_closure(body: &BlockStmt, name: &str) -> bool {
+    let mut found = false;
+    preorder(NodeRef::BlockStmt(body), |n| {
+        if found {
+            return false;
+        }
+        let NodeRef::FuncLit(fl) = n else {
+            return true;
+        };
+        preorder(NodeRef::BlockStmt(&fl.body), |inner| {
+            if let NodeRef::CallExpr(call) = inner {
+                if body_close_var(call) == Some(name) {
+                    found = true;
+                    return false;
+                }
+            }
+            true
+        });
+        true
+    });
+    found
+}
+
+/// Where a closure re-assigns a response into a variable it does not own.
+#[derive(Default)]
+struct ClosureStores {
+    /// The variables themselves: the store inside the closure is reported.
+    inner: HashSet<guff_types::ObjectId>,
+    /// Those whose closure opens the response as its *first* statement, where
+    /// `calledInFunc` also condemns the assignment outside.
+    outer: HashSet<guff_types::ObjectId>,
+}
+
+/// The identifier names one of the variables a closure re-assigns a response
+/// into — see [`collect_closure_reassigned`]. Both the store inside the closure
+/// and the assignment outside it are reported.
+fn target_is_closure_reassigned(
+    pass: &Pass<'_>,
+    lhs: &Expr,
+    func_span: (u32, u32),
+    stores: &ClosureStores,
+) -> bool {
+    if stores.inner.is_empty() {
+        return false;
+    }
+    let Expr::Ident(id) = lhs else {
+        return false;
+    };
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(obj) = info
+        .uses
+        .get(&id.id)
+        .copied()
+        .or_else(|| info.defs.get(&id.id).and_then(|o| *o))
+    else {
+        return false;
+    };
+    if !stores.inner.contains(&obj) {
+        return false;
+    }
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    // The store inside the closure — the one that reaches a free variable — is
+    // always reported; the assignment where the variable lives only when the
+    // closure opens as its first statement.
+    let declared_at = obj.pos(&artifacts.objects) as u32;
+    let captured_here = declared_at != 0 && (declared_at < func_span.0 || declared_at > func_span.1);
+    captured_here || stores.outer.contains(&obj)
 }
 
 /// The value at `lhs_index` is an `*http.Response` this call opened, and it is
@@ -780,6 +970,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let check_consumption = options.check_consumption;
 
     let mut pending: Vec<(u32, String)> = Vec::new();
+    let closure_reassigned = collect_closure_reassigned(pass);
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             match n {
@@ -788,14 +979,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         return true;
                     }
                     if let Some(body) = &fd.body {
-                        check_body(pass, body, check_consumption, &mut pending);
+                        check_body(
+                            pass,
+                            body,
+                            fd.ty.func.0 as u32,
+                            &closure_reassigned,
+                            check_consumption,
+                            &mut pending,
+                        );
                     }
                 }
                 NodeRef::FuncLit(fl) => {
                     if func_returns_response(&fl.ty) {
                         return true;
                     }
-                    check_body(pass, &fl.body, check_consumption, &mut pending);
+                    check_body(
+                        pass,
+                        &fl.body,
+                        fl.ty.func.0 as u32,
+                        &closure_reassigned,
+                        check_consumption,
+                        &mut pending,
+                    );
                 }
                 _ => {}
             }

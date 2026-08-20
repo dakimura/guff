@@ -61,3 +61,47 @@ func useResponseChan() {
 	ch := responseChan()
 	_ = ch
 }
+
+// A response stored into a variable the *enclosing* function owns goes through
+// an `ssa.FreeVar`, whose referrers live inside the closure: there is no
+// `MakeClosure` to follow and no field store, so nothing proves the body is
+// closed — the `resp.Body.Close()` below reads the variable, not the call's
+// result. dapr silences four of these in
+// `tests/integration/suite/actors/http/ttl.go`.
+func closureReassigns(run func(func())) {
+	resp, err := http.Get("https://example.com/1")
+	if err != nil {
+		return
+	}
+	_ = resp.Body.Close()
+	run(func() {
+		req, rerr := http.NewRequest("GET", "https://example.com/2", nil)
+		if rerr != nil {
+			return
+		}
+		_ = req
+		resp, err = http.Get("https://example.com/2") // want
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	})
+}
+
+// When the closure *opens* as its first statement, `calledInFunc` answers
+// `isopen(b, i) || !called` there, and the assignment outside is reported too.
+func closureOpensFirst(run func(func())) {
+	resp, err := http.Get("https://example.com/1") // want
+	if err != nil {
+		return
+	}
+	_ = resp.Body.Close()
+	run(func() {
+		resp, err = http.Get("https://example.com/2") // want
+		if err != nil {
+			return
+		}
+		_ = resp.Body.Close()
+	})
+}
+
