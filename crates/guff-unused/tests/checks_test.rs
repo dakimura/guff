@@ -11,6 +11,26 @@ fn unused_flags_unexported_func() {
     assert!(messages[0].contains("is unused"));
 }
 
+/// `//lint:ignore U1000` marks an object used — honnef's own syntax, which
+/// golangci-lint honours for `unused` as well. Only the directive's own line
+/// (trailing) or the declaration under it (doc comment) is covered, and a
+/// directive naming some other check is not this one.
+#[test]
+fn unused_honours_lint_ignore() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg("example.com/unused/lintignore", &dir.join("lint_ignore.go"));
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(
+        messages.iter().any(|m| m.contains("reportedVar")),
+        "{messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("reportedFunc")),
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn unused_allows_referenced_func() {
     let dir = support::testdata("basic");

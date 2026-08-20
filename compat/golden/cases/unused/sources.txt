@@ -5,3 +5,4 @@ genericmethod/generic_method_bad.go   crates/guff-unused/tests/testdata/basic/ge
 bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/method_bad.go
 iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go
 genericiface/generic_iface.go         crates/guff-unused/tests/testdata/basic/generic_iface.go
+lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go

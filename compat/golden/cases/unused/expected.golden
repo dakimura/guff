@@ -12,3 +12,5 @@ genericiface/generic_iface.go:31:17:unused::func (*comps).closeIt is unused
 genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused
 genericmethod/generic_method_bad.go:15:21:unused::func pair[K, V].key is unused
 iface/iface_ok.go:13:19:unused::func (*syncBuf).trulyUnused is unused
+lintignore/lint_ignore.go:9:2:unused::var reportedVar is unused
+lintignore/lint_ignore.go:18:6:unused::func reportedFunc is unused
