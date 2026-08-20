@@ -6800,6 +6800,63 @@ golden には元々エントリが無い（`ok` の fixture なので）が、
    案: (a) `go list` が使った GOROOT と不一致なら警告 (b) それに従う。性能方針に触るので要判断。
 2. missing 3 の移植（20 本目の「次にやること」3 のまま）。
 
+### 2026-08-20 — hunt の 8 リポで 24 件を潰した: 3 件は linter ではなく土台の欠陥だった
+
+**やったこと**
+
+`compat/hunt.sh` の差分を 1 件ずつ上流ソースに突き合わせて 8 本の PR にした（#45–#52）。
+7 本は個別 check の移植ずれだが、**3 件は解析基盤の欠陥**で、症状が出た linter は
+たまたまそこを踏んだだけだった。
+
+| PR | 何が壊れていたか | 効果 |
+|---|---|---|
+| #45 | `httpresponse` が「呼び先が net/http なら対象」で判定。`http.MaxBytesReader` + `defer r.Body.Close()`（リクエストボディを縛る定型）が全部 finding に。上流は**シグネチャが `(*http.Response, error)` であること**が唯一の条件。走査も BlockStmt/IfStmt だけで、`for` 本体と func literal を見ていなかった | FP 5 形・取りこぼし 2 形 |
+| #46 | 変数を捕捉した func literal は `MakeClosure` になり、go/ssa は**この命令に位置を持たせない**。上流は `Reportf(ff)` に落として literal の `func` トークンを使うが、guff は位置なしの報告を黙って捨てていた。`guff_ssa::Function` に `decl_pos` を追加。逆に「捕捉なし func literal を `return` で追う」独自拡張は上流にない過剰報告で、削除 | jaeger 7 → 6 |
+| #47 | **`Package.imports` はドライバのメタデータ stub**。fact producer の action はそこに型情報が無いとスキップされるので、**contextcheck の package fact が import 元に一切届かない**。`rewire_typed_imports` はパス前のスナップショットに対して解決していたので、import 先の import は stub のまま。加えて `filter_duplicate_packages` が `P [P.test]` を残して `P` を消すため、`Imports["P"]` は存在しない id を指していた。runner 側に「id → 型検査済みパッケージ」表を渡す形に変更（Package を作り直すと `Vec<File>` 丸ごと複製で jaeger peak RSS +36%） | jaeger 6 → 3 |
+| #48 | **ラベル付き `break` が、抜けようとしているループの先頭へ飛んでいた**。5 つのループ builder が `set_label_loop_targets` を本体構築の**後**に呼ぶので、本体中の `break <label>` は解決に失敗し、`branch_stmt` のフォールバック（ラベルの goto ブロック）に落ちていた。go/ssa は本体の前に `label._break = done` を置く。CFG を読む全 analyzer に影響。ついでに SA4008 に「条件変数が本体で代入されるなら報告しない」を追加（上流の Phi/Sigma 判定の syntax 版） | gitea 8 → 6 |
+| #49 | gocritic の stmt / stmtList / localDef walker は `f.Decls` のうち **`*ast.FuncDecl` にしか降りない**。パッケージレベル `var` の func literal は 27 checker から不可視。guff は file を flat に歩くので全部見えていた。`regexpSimplify` のエスケープ解除リストも 13 文字ちょうどに（`\ ` は含まれない） | argo-cd 7 → 5 |
+| #50 | `thelper` が `synctest.Test(t, func(*testing.T))` の literal を helper 扱い（上流は `extractSubtestExp` と同様に filter）。**formatter の走査が nested module に入っていた** — argo-cd の `gitops-engine/` は自前の go.mod を持ち、`./...` は届かない。linter 側は `go list` 経由なので最初から正しかった | argo-cd 5 → 3 |
+| #51 | `G122` が callback の path 引数を**名前でしか**追っていなかった。上流の `pathDependsOn` は sink 引数から BinOp / Convert / UnOp / **呼び出し引数**を遡るので `filepath.Clean(path)` も path。ただし**可変長引数の呼び出しで止まる**（go/ssa が引数を slice に詰めるため）ので `filepath.Join(path, x)` は finding ではない | coredns 4 → 3（P = R = 100%） |
+| #52 | `usetesting` が「入れ子の関数は自分が訪問されたときに見る」としてネスト関数で走査を止めていた。上流は `*testing.T` を取る関数の**本体全体**を closure ごと見て、**囲む関数の名前**で報告する（引数を取らない closure は自分では対象にならないので、誰も中を見ていなかった） | gitea 6 → 5 |
+
+**ゲート**
+
+- golden case を 2 つ新設: `contextcheck`（isolate が `0 == 0` で何も保証していなかった §1 の 9 本のうちの 1 つ）と、既存 case への追加（govet の httpresponse 6 形、gosec の G122 3 形、gocritic のパッケージレベル literal 2 本と escape 2 本、staticcheck-sa の SA4008 ok 3 形）。
+- isolate fixture を 4 本強化: contextcheck（0 → 3 findings）、wastedassign（ラベル break の両方向）、thelper（synctest と、synctest を騙る同名メソッド）、usetesting（`settings.yml` で `os-temp-dir` を on にし、closure / subtest / パッケージレベル literal の 3 形）。
+- `crates/guff-ssa/tests/range_break_test.rs` に CFG 直接の pin: 無限ラベルループの exit には predecessor があり、それはラベル自身のブロックではない。
+
+**hunt の現在地（2026-08-20, #52 込み）**
+
+| リポ | guff | golangci | guff-only | golangci-only |
+|---|---:|---:|---|---|
+| prometheus v3.14.0 | 20 | 20 | 0 | 0 |
+| coredns v1.14.6 | 3 | 3 | 0 | 0 |
+| argo-cd v3.5.1 | 3 | 3 | 0 | 0 |
+| atlas v1.3.0 | 2 | 0 | gosec G101 ×2 | 0 |
+| jaeger v2.20.0 | 3 | 0 | revive ×2（容認済み ratchet）/ contextcheck ×1 | 0 |
+| gitea v1.27.2 | 5 | 0 | unparam ×4 / staticcheck ×1 | 0 |
+| thanos v0.42.4 | 432 | 434 | staticcheck ×1 | unparam ×2 / staticcheck ×1 |
+| dapr v1.18.3 | 1465 | 1364 | 108 件 | gosec ×6 / prealloc ×1 |
+
+**次にやること**
+
+1. **`unparam` の未実装 2 系統**（gitea ×4、thanos ×2）。`crates/guff-style/src/unparam.rs` は
+   「未使用パラメータ」だけの AST 近似で、ヘッダに DEFERRED と書いてある通り
+   **定数パラメータ（`x always receives "y"`）と未使用/定数 result（`result 1 (T) is always 0`）を
+   実装していない**。上流は SSA + callgraph。単発の移植ではなく一区切りの仕事。
+   再現: `cd corpus/cache/gitea && golangci-lint run --no-config --default=none -E unparam ./modules/...`
+   （4 件出る。guff は 0 件）。
+2. **gosec G101 の entropy**（atlas ×2）。上流は **zxcvbn**（辞書ベース）で
+   `isHighEntropyString` を判定し、guff は Shannon エントロピー × 長さの近似。
+   `TypeTimestampWTZ = "timestamp with time zone"` は名前に `pw` を含むため name pattern に当たり、
+   近似では per-char 3.125 ≥ 3.0 で通ってしまう。zxcvbn の移植か、別の判定が要る。
+3. **contextcheck の残り 1 件**（jaeger `internal/storage/v1/elasticsearch/factory.go:86`）。
+   #47 で package fact は届くようになったが、この 1 件は**パッケージ単体で走らせても出ない**ので
+   別の欠陥。`NewFactoryBase$1->Close->Close` の連鎖。
+4. **SA4006**（gitea `modules/setting/config_env.go:128`）。上流が出して guff が出さない。
+   最小化を試したが `keyValue := envValue` + 条件付き上書きの単純形では両者とも黙るので、
+   トリガはもう少し複雑（`staticcheck-sa` の ratchet は missing 3 / extra 1 のまま）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
