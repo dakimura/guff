@@ -9,3 +9,9 @@ func Walk(root string, fn func(path string, info os.FileInfo, err error) error) 
 func WalkDir(root string, fn func(path string, d os.DirEntry, err error) error) error {
 	return nil
 }
+
+func Clean(path string) string { return path }
+
+func ToSlash(path string) string { return path }
+
+func Join(elem ...string) string { return "" }

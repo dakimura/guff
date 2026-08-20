@@ -711,12 +711,65 @@ fn check_g122_walk_call(
     if path_param.is_empty() || path_param == "_" {
         return;
     }
-    let path_name = path_param.to_string();
+    // Upstream's `pathDependsOn` is a backward walk from the sink argument
+    // through BinOp / Convert / UnOp / **call arguments**, so anything derived
+    // from the callback's path is still the callback's path — `cleanPath :=
+    // filepath.Clean(path)` most of all, which is what coredns
+    // `plugin/auto/walk.go` writes before `os.Open(cleanPath)`. Matching the
+    // parameter's name alone saw none of it.
+    //
+    // Forward propagation over the body in source order stands in for the
+    // backward SSA walk: an assignment whose right side mentions a tainted name
+    // taints what it defines.
+    let mut tainted: HashSet<String> = HashSet::new();
+    tainted.insert(path_param.to_string());
     preorder(NodeRef::FuncLit(fl), |n| {
-        if let NodeRef::CallExpr(inner) = n {
-            if let Some(pos) = g122_sink_pos(pass, inner, &path_name) {
-                pending.push((pos, format!("G122: {G122_WHAT}")));
+        match n {
+            NodeRef::AssignStmt(assign) => {
+                if assign
+                    .rhs
+                    .iter()
+                    .any(|e| {
+                        tainted
+                            .iter()
+                            .any(|t| expr_mentions_ident_nonvariadic(pass, e, t))
+                    })
+                {
+                    for lhs in &assign.lhs {
+                        if let Expr::Ident(id) = lhs {
+                            if id.name != "_" {
+                                tainted.insert(id.name.clone());
+                            }
+                        }
+                    }
+                }
             }
+            NodeRef::ValueSpec(spec) => {
+                if spec
+                    .values
+                    .iter()
+                    .any(|e| {
+                        tainted
+                            .iter()
+                            .any(|t| expr_mentions_ident_nonvariadic(pass, e, t))
+                    })
+                {
+                    for id in &spec.names {
+                        if id.name != "_" {
+                            tainted.insert(id.name.clone());
+                        }
+                    }
+                }
+            }
+            NodeRef::CallExpr(inner) => {
+                for name in &tainted {
+                    if let Some(pos) = g122_sink_pos(pass, inner, name) {
+                        pending.push((pos, format!("G122: {G122_WHAT}")));
+                        break;
+                    }
+                }
+            }
+            _ => {}
         }
         true
     });
@@ -746,7 +799,7 @@ fn g122_sink_pos(pass: &Pass<'_>, call: &CallExpr, path_param: &str) -> Option<u
         let Some(arg) = call.args.get(idx) else {
             continue;
         };
-        if expr_mentions_ident(arg, path_param) {
+        if expr_mentions_ident_nonvariadic(pass, arg, path_param) {
             // `s.addIssue(instr.Pos())` on an `ssa.CallInstruction`, and
             // go/ssa sets a call's pos to the CallExpr's **Lparen**, not to
             // the callee. Same for G703 (taint's `call.Pos()`); the AST rules
@@ -755,6 +808,46 @@ fn g122_sink_pos(pass: &Pass<'_>, call: &CallExpr, path_param: &str) -> Option<u
         }
     }
     None
+}
+
+/// [`expr_mentions_ident`], except that it does not look inside the arguments
+/// of a **variadic** call.
+///
+/// Upstream's `pathDependsOn` walks a call's `ssa.Call.Args`, and go/ssa packs a
+/// variadic call's arguments into a slice first — `t1 = new [2]string; *… =
+/// cleanPath; t5 = slice t1[:]; t6 = filepath.Join(t5...)` — so the one argument
+/// it sees is an `*ssa.Slice`, which `pathDependsOn` has no case for. The chain
+/// ends there. `os.Remove(filepath.Join(path, "sub"))` is therefore not a G122
+/// for gosec, and `filepath.Clean(path)` is.
+fn expr_mentions_ident_nonvariadic(pass: &Pass<'_>, expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::CallExpr(c) if call_is_variadic(pass, c) => false,
+        Expr::CallExpr(c) => c
+            .args
+            .iter()
+            .any(|a| expr_mentions_ident_nonvariadic(pass, a, name)),
+        Expr::ParenExpr(p) => expr_mentions_ident_nonvariadic(pass, &p.x, name),
+        Expr::BinaryExpr(b) => {
+            expr_mentions_ident_nonvariadic(pass, &b.x, name)
+                || expr_mentions_ident_nonvariadic(pass, &b.y, name)
+        }
+        Expr::UnaryExpr(u) => expr_mentions_ident_nonvariadic(pass, &u.x, name),
+        Expr::StarExpr(st) => expr_mentions_ident_nonvariadic(pass, &st.x, name),
+        other => expr_mentions_ident(other, name),
+    }
+}
+
+fn call_is_variadic(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let Some(tv) = info.types.get(&call.fun.id()) else {
+        return false;
+    };
+    guff_types::signature::signature_variadic(&artifacts.types, tv.typ)
 }
 
 fn expr_mentions_ident(expr: &Expr, name: &str) -> bool {
