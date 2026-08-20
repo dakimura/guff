@@ -752,6 +752,25 @@ pub fn analyze(
     )
 }
 
+/// The type-checked package for an import stub, or the stub itself.
+///
+/// The second lookup is the one that is easy to miss:
+/// `guff_packages::filter_duplicate_packages` drops the plain `P` when
+/// `P [P.test]` is loaded beside it, so an importer's `Imports["P"]` names an id
+/// that no longer exists anywhere. The variant is P's files plus P's `_test.go`
+/// files in the same package — the same declarations, so the same facts.
+fn typed_import<'a>(
+    typed_by_id: Option<&'a std::collections::HashMap<String, Arc<Package>>>,
+    stub: &'a Arc<Package>,
+) -> &'a Arc<Package> {
+    let Some(map) = typed_by_id else {
+        return stub;
+    };
+    map.get(&stub.id)
+        .or_else(|| map.get(&guff_packages::same_package_test_variant_id(&stub.id)))
+        .unwrap_or(stub)
+}
+
 /// Like [`analyze`], but forwards a shared [`SettingsBag`] into every [`Pass`].
 pub fn analyze_with_settings(
     analyzers: &[&'static Analyzer],
@@ -760,6 +779,35 @@ pub fn analyze_with_settings(
     concurrency: Option<usize>,
     settings: Arc<SettingsBag>,
     cache: Option<Arc<IssueCache>>,
+) -> Result<Graph, ValidateError> {
+    analyze_with_typed_imports(
+        analyzers, packages, sequential, concurrency, settings, cache, None,
+    )
+}
+
+/// Like [`analyze_with_settings`], plus the table that resolves an import to the
+/// type-checked package of the same id.
+///
+/// `Package.imports` holds what the driver reported: metadata stubs with no
+/// syntax and no type artifacts. Fact producers need the type-checked instance —
+/// a stub cannot be analysed, so no action is scheduled for it and every package
+/// fact it would have exported is invisible to its importers. Resolving here
+/// rather than rewriting the packages themselves is deliberate: a `Package`
+/// carries its whole `Vec<File>` of syntax, and rebuilding one per import edge
+/// cost +36% peak RSS on jaeger.
+///
+/// A stub whose id is absent from the table resolves to `P [P.test]`, the
+/// same-package test variant, because that is the id
+/// `guff_packages::filter_duplicate_packages` keeps when both are loaded — and
+/// an importer's `Imports["P"]` still names the plain `P` that it dropped.
+pub fn analyze_with_typed_imports(
+    analyzers: &[&'static Analyzer],
+    packages: &[Arc<Package>],
+    sequential: bool,
+    concurrency: Option<usize>,
+    settings: Arc<SettingsBag>,
+    cache: Option<Arc<IssueCache>>,
+    typed_by_id: Option<Arc<std::collections::HashMap<String, Arc<Package>>>>,
 ) -> Result<Graph, ValidateError> {
     validate(analyzers)?;
     ensure_builtin_fact_decoders();
@@ -772,6 +820,7 @@ pub fn analyze_with_settings(
         package: Arc<Package>,
         settings: &Arc<SettingsBag>,
         cache: &Option<Arc<IssueCache>>,
+        typed_by_id: Option<&std::collections::HashMap<String, Arc<Package>>>,
         actions: &mut HashMap<(*const Analyzer, String), Arc<Action>>,
         all: &mut Vec<Arc<Action>>,
     ) -> Arc<Action> {
@@ -787,6 +836,7 @@ pub fn analyze_with_settings(
                 Arc::clone(&package),
                 settings,
                 cache,
+                typed_by_id,
                 actions,
                 all,
             ));
@@ -795,6 +845,7 @@ pub fn analyze_with_settings(
                 paths.sort();
                 for path in paths {
                     if let Some(dep_pkg) = package.imports.get(&path) {
+                        let dep_pkg = typed_import(typed_by_id, dep_pkg);
                         // Fact producers need a typechecked package (SSA). Skip
                         // export-only / not-yet-typed import stubs.
                         if dep_pkg.type_artifacts.is_none() {
@@ -805,6 +856,7 @@ pub fn analyze_with_settings(
                             Arc::clone(dep_pkg),
                             settings,
                             cache,
+                            typed_by_id,
                             actions,
                             all,
                         ));
@@ -818,6 +870,7 @@ pub fn analyze_with_settings(
             paths.sort();
             for path in paths {
                 if let Some(dep_pkg) = package.imports.get(&path) {
+                    let dep_pkg = typed_import(typed_by_id, dep_pkg);
                     if dep_pkg.type_artifacts.is_none() {
                         continue;
                     }
@@ -826,6 +879,7 @@ pub fn analyze_with_settings(
                         Arc::clone(dep_pkg),
                         settings,
                         cache,
+                        typed_by_id,
                         actions,
                         all,
                     ));
@@ -895,6 +949,7 @@ pub fn analyze_with_settings(
                 Arc::clone(pkg),
                 &settings,
                 &cache,
+                typed_by_id.as_deref(),
                 &mut actions,
                 &mut all,
             );
@@ -1426,6 +1481,45 @@ mod tests {
     use guff_analysis::{AnalysisResult, Pass, RunError};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::OnceLock;
+
+    fn pkg_stub(id: &str) -> Arc<Package> {
+        Arc::new(Package {
+            id: id.to_string(),
+            pkg_path: id.split(' ').next().unwrap_or(id).to_string(),
+            ..Package::default()
+        })
+    }
+
+    #[test]
+    fn typed_import_prefers_the_exact_id() {
+        let typed = pkg_stub("example.com/p");
+        let mut map = std::collections::HashMap::new();
+        map.insert("example.com/p".to_string(), Arc::clone(&typed));
+        let stub = pkg_stub("example.com/p");
+        assert!(Arc::ptr_eq(typed_import(Some(&map), &stub), &typed));
+    }
+
+    #[test]
+    fn typed_import_falls_back_to_the_same_package_test_variant() {
+        // What `filter_duplicate_packages` leaves behind: the importer still
+        // names `example.com/p`, and only `p [p.test]` was type-checked.
+        let variant = pkg_stub("example.com/p [example.com/p.test]");
+        let mut map = std::collections::HashMap::new();
+        map.insert(
+            "example.com/p [example.com/p.test]".to_string(),
+            Arc::clone(&variant),
+        );
+        let stub = pkg_stub("example.com/p");
+        assert!(Arc::ptr_eq(typed_import(Some(&map), &stub), &variant));
+    }
+
+    #[test]
+    fn typed_import_keeps_the_stub_when_nothing_matches() {
+        let map = std::collections::HashMap::new();
+        let stub = pkg_stub("example.com/q");
+        assert!(Arc::ptr_eq(typed_import(Some(&map), &stub), &stub));
+        assert!(Arc::ptr_eq(typed_import(None, &stub), &stub));
+    }
 
     static ORDER: AtomicUsize = AtomicUsize::new(0);
     static LOG: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());

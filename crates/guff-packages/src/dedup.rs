@@ -66,6 +66,17 @@ fn try_parse_same_package_test_variant(pkg: &Package) -> Option<String> {
     }
 }
 
+/// The id of `P`'s same-package test variant, `P [P.test]`.
+///
+/// [`filter_duplicate_packages`] drops the plain `P` whenever that variant is in
+/// the same load, so any *other* package's `Imports["P"]` then names an id that
+/// is no longer there. The variant is P's own files plus P's `_test.go` files in
+/// the same package, so for anything keyed on declarations — facts, above all —
+/// it stands in for P exactly.
+pub fn same_package_test_variant_id(id: &str) -> String {
+    format!("{id} [{id}.test]")
+}
+
 /// Removes non-test package entries when a same-package test-augmented variant
 /// exists (`P [P.test]`).
 ///

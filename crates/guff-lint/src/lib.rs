@@ -619,16 +619,27 @@ pub(crate) fn run_linters_on_graph(
     });
     let mut typed =
         typecheck_roots_with_prebuilt_seed(all_packages, &typecheck_ids, analysis_mode, &env, prebuilt);
-    let miss_roots: Vec<std::sync::Arc<guff_packages::Package>> = if need_fact_pkgs {
-        rewire_typed_imports(&mut typed);
-        let typed_by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> =
-            typed.iter().map(|p| (p.id.clone(), std::sync::Arc::clone(p))).collect();
-        root_miss_ids
+    // The runner resolves an import stub to the type-checked package of the same
+    // id through this table. Handing it the packages instead of rewriting each
+    // one's `imports` keeps `Package`'s `Vec<File>` of syntax un-cloned: doing
+    // the rewrite cost +36% peak RSS on jaeger, and doing it non-transitively —
+    // every import pointing at a pre-rewrite instance whose own imports were
+    // still stubs — did not even work.
+    let (miss_roots, typed_by_id): (
+        Vec<std::sync::Arc<guff_packages::Package>>,
+        Option<std::sync::Arc<HashMap<String, std::sync::Arc<guff_packages::Package>>>>,
+    ) = if need_fact_pkgs {
+        let by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> = typed
             .iter()
-            .filter_map(|id| typed_by_id.get(id).cloned())
-            .collect()
+            .map(|p| (p.id.clone(), std::sync::Arc::clone(p)))
+            .collect();
+        let roots = root_miss_ids
+            .iter()
+            .filter_map(|id| by_id.get(id).cloned())
+            .collect();
+        (roots, Some(std::sync::Arc::new(by_id)))
     } else {
-        typed
+        (typed, None)
     };
     if timing {
         eprintln!(
@@ -651,6 +662,7 @@ pub(crate) fn run_linters_on_graph(
             concurrency: opts.concurrency,
             settings: std::sync::Arc::clone(&opts.settings),
             cache,
+            typed_by_id,
             ..RunnerOptions::default()
         },
     )
@@ -747,73 +759,26 @@ fn expand_fact_typecheck_ids(
             if !root_modules.contains(&package_module_key(dep)) {
                 continue;
             }
-            if seen.insert(dep.id.clone()) {
-                out.push(dep.id.clone());
-                stack.push(dep.id.clone());
+            // The import names the plain `P`, which is exactly the id
+            // `filter_duplicate_packages` removes when `P [P.test]` is loaded
+            // too. Type-checking an id that is no longer in `all_packages`
+            // produces nothing at all, so ask for the variant that is there.
+            let dep_id = if by_id.contains_key(dep.id.as_str()) {
+                dep.id.clone()
+            } else {
+                let variant = guff_packages::same_package_test_variant_id(&dep.id);
+                if !by_id.contains_key(variant.as_str()) {
+                    continue;
+                }
+                variant
+            };
+            if seen.insert(dep_id.clone()) {
+                out.push(dep_id.clone());
+                stack.push(dep_id);
             }
         }
     }
     out
-}
-
-/// Point each typed package's `imports` at other typed packages (same id), so
-/// fact-producer actions see typechecked dependency `Arc`s rather than metadata stubs.
-///
-/// Important: [`Package`]'s [`Clone`] deliberately drops `type_artifacts` (cheap
-/// metadata clones). This helper must not go through `Arc::make_mut` while other
-/// `Arc`s to the same package exist, or SSA/buildir lose their arenas.
-fn rewire_typed_imports(typed: &mut [std::sync::Arc<guff_packages::Package>]) {
-    let by_id: HashMap<String, std::sync::Arc<guff_packages::Package>> = typed
-        .iter()
-        .map(|p| (p.id.clone(), std::sync::Arc::clone(p)))
-        .collect();
-    for slot in typed.iter_mut() {
-        let mut imports =
-            HashMap::with_capacity(slot.imports.len());
-        let mut changed = false;
-        for (path, imp) in &slot.imports {
-            if let Some(typed_imp) = by_id.get(&imp.id) {
-                if !std::sync::Arc::ptr_eq(imp, typed_imp) {
-                    changed = true;
-                }
-                imports.insert(path.clone(), std::sync::Arc::clone(typed_imp));
-            } else {
-                imports.insert(path.clone(), std::sync::Arc::clone(imp));
-            }
-        }
-        if !changed {
-            continue;
-        }
-        let p = slot.as_ref();
-        *slot = std::sync::Arc::new(guff_packages::Package {
-            id: p.id.clone(),
-            name: p.name.clone(),
-            pkg_path: p.pkg_path.clone(),
-            dir: p.dir.clone(),
-            errors: p.errors.clone(),
-            go_files: p.go_files.clone(),
-            compiled_go_files: p.compiled_go_files.clone(),
-            other_files: p.other_files.clone(),
-            embed_files: p.embed_files.clone(),
-            embed_patterns: p.embed_patterns.clone(),
-            ignored_files: p.ignored_files.clone(),
-            export_file: p.export_file.clone(),
-            target: p.target.clone(),
-            imports,
-            deps: p.deps.clone(),
-            module: p.module.clone(),
-            for_test: p.for_test.clone(),
-            has_cgo: p.has_cgo,
-            types: p.types,
-            type_artifacts: p.type_artifacts.clone(),
-            fset: p.fset.clone(),
-            ill_typed: p.ill_typed,
-            syntax: p.syntax.clone(),
-            source_files: p.source_files.clone(),
-            types_info: p.types_info.clone(),
-            types_sizes: p.types_sizes,
-        });
-    }
 }
 
 fn open_issue_cache(opts: &LintOptions) -> Option<IssueCache> {
