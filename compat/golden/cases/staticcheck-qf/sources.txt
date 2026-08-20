@@ -31,6 +31,7 @@ qf1009/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1009/ok.go
 qf1010/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1010/bad.go
 qf1010/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1010/ok.go
 qf1011/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1011/bad.go
+qf1011/isolated/isolated.go     crates/guff-staticcheck/tests/testdata/qf1011/isolated.go
 qf1011/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1011/ok.go
 qf1012/bad/bad.go          crates/guff-staticcheck/tests/testdata/qf1012/bad.go
 qf1012/ok/ok.go            crates/guff-staticcheck/tests/testdata/qf1012/ok.go

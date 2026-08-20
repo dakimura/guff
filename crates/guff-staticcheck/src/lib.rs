@@ -6,6 +6,7 @@
 
 mod fakejson;
 pub mod gostd;
+mod redundant_type_decl;
 mod render;
 mod structtag;
 mod stdlib_deprecations;

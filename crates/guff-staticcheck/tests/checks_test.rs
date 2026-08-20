@@ -2654,6 +2654,70 @@ fn st1023_flags_redundant_types() {
     assert!(messages.iter().any(|m| m.contains("omit type MyInt")));
 }
 
+/// The two axes of `sharedcheck.RedundantTypeInDeclarationChecker`: what the
+/// right-hand side's type is when re-checked on its own, and — only when that
+/// is untyped — which AST shapes survive `flagHelpfulTypes = false`. Counted by
+/// declared type; `compat/golden/cases/staticcheck-st` pins the exact lines.
+#[test]
+fn st1023_isolates_the_right_hand_side() {
+    let dir = support::testdata("st1023");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/st1023/isolated",
+        &dir.join("isolated.go"),
+        &[
+            ("math", &dir.join("stub/math/math.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(st1023::analyzer(), &pkg);
+    assert_eq!(messages.len(), 17, "{messages:?}");
+    let count = |t: &str| {
+        messages
+            .iter()
+            .filter(|m| m.contains(&format!("omit type {t} from")))
+            .count()
+    };
+    // A typed right-hand side is flagged whatever its shape: `5 * time.Second`
+    // and `<-ch` are as redundant as a bare identifier.
+    assert_eq!(count("time.Duration"), 2, "{messages:?}");
+    // `var v int32 = 'a'` keeps its type — the default type of an untyped rune
+    // is the alias `rune`, not `int32` — so the only two int32s here are the
+    // typed-constant ones.
+    assert_eq!(count("int32"), 2, "{messages:?}");
+    assert_eq!(count("bool"), 2, "{messages:?}");
+    assert_eq!(count("int"), 6, "{messages:?}");
+}
+
+#[test]
+fn qf1011_isolates_the_right_hand_side() {
+    let dir = support::testdata("qf1011");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1011/isolated",
+        &dir.join("isolated.go"),
+        &[
+            ("math", &dir.join("stub/math/math.go")),
+            ("time", &dir.join("stub/time/time.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(qf1011::analyzer(), &pkg);
+    assert_eq!(messages.len(), 27, "{messages:?}");
+    let count = |t: &str| {
+        messages
+            .iter()
+            .filter(|m| m.contains(&format!("omit type {t} from")))
+            .count()
+    };
+    // Helpful types are flagged too, so untyped expressions and named
+    // constants count here — but only where the default type still matches.
+    assert_eq!(count("rune"), 3, "{messages:?}");
+    assert_eq!(count("int32"), 2, "{messages:?}");
+    // `var n uint = 1 << uint(x)` stays: a shift takes its left operand's
+    // type, so the right-hand side is an untyped int whatever the count is.
+    assert_eq!(count("uint"), 0, "{messages:?}");
+}
+
 #[test]
 fn st1023_allows_necessary_types() {
     let dir = support::testdata("st1023");
