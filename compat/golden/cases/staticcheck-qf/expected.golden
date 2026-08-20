@@ -104,6 +104,51 @@ qf1011/bad/bad.go:19:8:staticcheck::ST1023: should omit type string from declara
 qf1011/bad/bad.go:20:8:staticcheck::QF1011: could omit type MyInt from declaration; it will be inferred from the right-hand side
 qf1011/bad/bad.go:20:8:staticcheck::ST1023: should omit type MyInt from declaration; it will be inferred from the right-hand side
 qf1011/bad/bad.go:21:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
+qf1011/isolated/isolated.go:27:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:27:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:29:10:staticcheck::QF1011: could omit type rune from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:29:10:staticcheck::ST1023: should omit type rune from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:32:10:staticcheck::QF1011: could omit type string from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:32:10:staticcheck::ST1023: should omit type string from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:33:10:staticcheck::QF1011: could omit type float64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:33:10:staticcheck::ST1023: should omit type float64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:34:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:36:10:staticcheck::QF1011: could omit type int32 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:36:10:staticcheck::ST1023: should omit type int32 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:37:10:staticcheck::QF1011: could omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:37:10:staticcheck::ST1023: should omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:38:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:39:10:staticcheck::QF1011: could omit type time.Duration from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:39:10:staticcheck::ST1023: should omit type time.Duration from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:40:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:40:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:41:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:42:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:43:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:45:10:staticcheck::QF1011: could omit type rune from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:47:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:47:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:48:10:staticcheck::QF1011: could omit type int64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:48:10:staticcheck::ST1023: should omit type int64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:49:10:staticcheck::QF1011: could omit type time.Duration from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:49:10:staticcheck::ST1023: should omit type time.Duration from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:50:10:staticcheck::QF1011: could omit type int32 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:50:10:staticcheck::ST1023: should omit type int32 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:51:10:staticcheck::QF1011: could omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:52:10:staticcheck::QF1011: could omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:52:10:staticcheck::ST1023: should omit type bool from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:53:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:53:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:54:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:54:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:55:10:staticcheck::QF1011: could omit type int64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:55:10:staticcheck::ST1023: should omit type int64 from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:58:10:staticcheck::QF1011: could omit type rune from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:59:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:61:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:63:10:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
+qf1011/isolated/isolated.go:63:10:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
 qf1011/ok/ok.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment
 qf1011/ok/ok.go:7:2:staticcheck::S1021: should merge variable declaration with assignment on next line
 qf1012/bad/bad.go:1:1:staticcheck::ST1000: at least one file in a package should have a package comment

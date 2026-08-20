@@ -50,4 +50,5 @@ st1021/ok/ok.go                          crates/guff-staticcheck/tests/testdata/
 st1022/bad/bad.go                        crates/guff-staticcheck/tests/testdata/st1022/bad.go
 st1022/ok/ok.go                          crates/guff-staticcheck/tests/testdata/st1022/ok.go
 st1023/bad/bad.go                        crates/guff-staticcheck/tests/testdata/st1023/bad.go
+st1023/isolated/isolated.go              crates/guff-staticcheck/tests/testdata/st1023/isolated.go
 st1023/ok/ok.go                          crates/guff-staticcheck/tests/testdata/st1023/ok.go
