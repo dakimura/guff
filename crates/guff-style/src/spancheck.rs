@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FuncDecl, FuncType, SelectorExpr};
+use guff::ast::{AssignStmt, BlockStmt, CallExpr, Expr, FuncDecl, FuncType, SelectorExpr, Stmt};
 use guff::walk::{inspect, preorder, NodeRef};
 use guff_analysis::code;
 use guff_analysis::passes::inspect as inspect_pass;
@@ -72,6 +72,12 @@ struct SpanVar {
     pos: u32,
     span_type: SpanType,
     assign_pos: u32,
+    /// Upstream reports the first message on `sv.stmt` — the whole assignment,
+    /// not the call on its right-hand side.
+    stmt_pos: u32,
+    /// The return upstream would name, or `None` when its CFG search finds
+    /// none and it reports nothing at all.
+    return_pos: Option<u32>,
 }
 
 fn default_start_span_signatures() -> Vec<(&'static str, SpanType)> {
@@ -266,6 +272,74 @@ fn ident_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// The return statement upstream's `getMissingSpanCalls` would name.
+///
+/// Upstream searches the CFG: if the span's own basic block ends in a `return`,
+/// that is the one; if the function falls off its end, go/cfg's synthetic
+/// return at the closing brace is; and if the block ends in a branch instead,
+/// the depth-first search that follows finds nothing for any of the shapes
+/// measured against golangci-lint 2.12.2 — a `for` or an `if` between the span
+/// and the return means **no finding at all**, both messages included.
+///
+/// Syntax says the same thing for those shapes: scan the statement list holding
+/// the assignment, stop at the first `return` (report there) or at the first
+/// control-flow statement (report nothing), and fall back to the closing brace
+/// only when the list is the function body's own.
+fn missing_return_pos(body: &BlockStmt, stmt_pos: u32) -> Option<u32> {
+    fn scan(list: &[Stmt], stmt_pos: u32, rbrace: Option<u32>) -> Option<Option<u32>> {
+        // Innermost first: a `for`/`if` in this list may *contain* the span, and
+        // then the block that matters is the one inside it, not this one.
+        for s in list {
+            let found = match s {
+                Stmt::BlockStmt(b) => scan(&b.list, stmt_pos, None),
+                Stmt::IfStmt(i) => scan(&i.body.list, stmt_pos, None).or_else(|| {
+                    match i.else_.as_deref() {
+                        Some(Stmt::BlockStmt(b)) => scan(&b.list, stmt_pos, None),
+                        Some(other) => scan(std::slice::from_ref(other), stmt_pos, None),
+                        None => None,
+                    }
+                }),
+                Stmt::ForStmt(f) => scan(&f.body.list, stmt_pos, None),
+                Stmt::RangeStmt(r) => scan(&r.body.list, stmt_pos, None),
+                Stmt::SwitchStmt(sw) => scan(&sw.body.list, stmt_pos, None),
+                Stmt::TypeSwitchStmt(sw) => scan(&sw.body.list, stmt_pos, None),
+                Stmt::SelectStmt(sel) => scan(&sel.body.list, stmt_pos, None),
+                Stmt::CaseClause(c) => scan(&c.body, stmt_pos, None),
+                Stmt::CommClause(c) => scan(&c.body, stmt_pos, None),
+                Stmt::LabeledStmt(l) => scan(std::slice::from_ref(&l.stmt), stmt_pos, None),
+                _ => None,
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+
+        // By range, not by start: a `var span = …` declaration is a `DeclStmt`
+        // whose position is the `var` keyword, while the span is found on the
+        // `ValueSpec` inside it.
+        let idx = list
+            .iter()
+            .position(|s| s.pos().0 as u32 <= stmt_pos && stmt_pos < s.end().0 as u32)?;
+        for s in &list[idx + 1..] {
+            match s {
+                Stmt::ReturnStmt(r) => return Some(Some(r.return_.0 as u32)),
+                Stmt::IfStmt(_)
+                | Stmt::ForStmt(_)
+                | Stmt::RangeStmt(_)
+                | Stmt::SwitchStmt(_)
+                | Stmt::TypeSwitchStmt(_)
+                | Stmt::SelectStmt(_)
+                | Stmt::LabeledStmt(_)
+                | Stmt::BranchStmt(_) => return Some(None),
+                _ => {}
+            }
+        }
+        Some(rbrace)
+    }
+
+    scan(&body.list, stmt_pos, Some(body.rbrace.0 as u32)).flatten()
+}
+
 fn assign_pos(assign: &AssignStmt, lhs_index: usize) -> u32 {
     if assign.rhs.len() == 1 {
         if let Expr::CallExpr(call) = &assign.rhs[0] {
@@ -403,6 +477,11 @@ fn check_body(
                         continue;
                     }
                     let pos = assign_pos(assign, i);
+                    let stmt_pos = assign
+                        .lhs
+                        .first()
+                        .map(|e| e.pos().0 as u32)
+                        .unwrap_or(assign.tok_pos.0 as u32);
                     spans.insert(
                         name.to_string(),
                         SpanVar {
@@ -410,6 +489,8 @@ fn check_body(
                             pos,
                             span_type,
                             assign_pos: pos,
+                            stmt_pos,
+                            return_pos: missing_return_pos(body, stmt_pos),
                         },
                     );
                     usage.insert(
@@ -443,6 +524,10 @@ fn check_body(
                         continue;
                     }
                     let pos = rhs.pos().0 as u32;
+                    // A `var span = tracer.Start(…)` declaration: the statement
+                    // upstream names is the `DeclStmt`, whose position is the
+                    // `var` keyword.
+                    let stmt_pos = spec.names.first().map(|n| n.pos().0 as u32).unwrap_or(pos);
                     spans.insert(
                         name.to_string(),
                         SpanVar {
@@ -450,6 +535,8 @@ fn check_body(
                             pos,
                             span_type,
                             assign_pos: pos,
+                            stmt_pos,
+                            return_pos: missing_return_pos(body, stmt_pos),
                         },
                     );
                     usage.insert(
@@ -541,19 +628,21 @@ fn check_body(
             continue;
         };
         if cfg.end_check && !u.ended {
-            pending.push((
-                sv.pos,
-                format!(
-                    "{}.End is not called on all paths, possible memory leak",
-                    sv.name
-                ),
-            ));
-            // Upstream also flags the function exit (closing `}`) when End is
-            // missing on some path — mirrors jjti/spancheck's dual report.
-            pending.push((
-                body.rbrace.0 as u32,
-                format!("return can be reached without calling {}.End", sv.name),
-            ));
+            // Both messages come from one `if ret != nil` upstream, so when the
+            // CFG search finds no return neither is reported.
+            if let Some(ret_pos) = sv.return_pos {
+                pending.push((
+                    sv.stmt_pos,
+                    format!(
+                        "{}.End is not called on all paths, possible memory leak",
+                        sv.name
+                    ),
+                ));
+                pending.push((
+                    ret_pos,
+                    format!("return can be reached without calling {}.End", sv.name),
+                ));
+            }
         }
         if has_error_ret && cfg.set_status_check && !u.set_status {
             pending.push((
