@@ -98,3 +98,20 @@ func chainedShortDecl() (chainable, int) {
 	c, extra := c.skip("a"), 2
 	return c, extra
 }
+
+func mu()                 {}
+func fs() (string, error) { return "", nil }
+
+// A deferred call can assign to a named result, so go/ssa keeps those cells
+// addressable in a function that defers — the overwritten value is reachable
+// through the cell and is not dead. Lifting them anyway reported rclone's
+// `cmd/serve/rc.go` `startRc`, whose `err` is a named result.
+func namedResultUnderDefer() (out int, err error) {
+	s, err := fs()
+	defer mu()
+	if s == "" {
+		return 0, err
+	}
+	err = nil
+	return 1, err
+}

@@ -40,6 +40,18 @@ pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
     let mut new_phis = HashMap::default();
     let mut num_allocs = 0;
 
+    // A deferred call can assign to a named result, so those cells stay
+    // addressable in a function that defers — their stores must survive as
+    // stores. (Go: `liftAlloc`'s `fn.Recover != nil` guard; honnef's IR spells
+    // the same condition `fn.hasDefer`.) Without this, SA4006 reads the
+    // overwritten value as dead and reports rclone's `startRc`.
+    let has_defer = f.blocks.iter().any(|(_, b)| {
+        !b.deleted
+            && b.instrs
+                .iter()
+                .any(|&id| matches!(f.instrs.get(id), InstrData::Defer(_)))
+    });
+
     // Determine which allocs we can lift and number them densely.
     let block_ids: Vec<_> = f
         .blocks
@@ -51,6 +63,9 @@ pub fn lift(prog: &mut Program, func_id: FuncId) -> bool {
         let instrs = f.blocks.get(block_id).instrs.clone();
         for instr_id in instrs {
             if let InstrData::Alloc(_) = f.instrs.get(instr_id) {
+                if has_defer && f.named_results.contains(&Value::Instr(instr_id)) {
+                    continue;
+                }
                 if lift_alloc(f, &prog.type_arena, &df, instr_id, &instr_to_block, &mut new_phis) {
                     if let InstrData::Alloc(alloc) = f.instrs.get_mut(instr_id) {
                         alloc.index = num_allocs;
