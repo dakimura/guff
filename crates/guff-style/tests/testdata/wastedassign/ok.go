@@ -103,3 +103,30 @@ func okCapturedByFuncLit(min int) {
 	n = min
 	_ = next()
 }
+
+// A labelled `break` leaves the labelled loop; the outer loop's condition then
+// reads the variable again, so the assignment before the break is live. guff's
+// SSA recorded the label's break target only *after* building the body, so the
+// break inside it resolved to nothing and `branch_stmt` fell back to the
+// label's goto block — the top of the loop being left. The next operation on
+// the variable was then that loop's own store, and this read like a wasted
+// assignment. gitea `services/gitdiff/gitdiff.go`.
+func okLabelledBreakOutOfSwitch(read func() string) int {
+	n := 0
+	line := read()
+	for {
+		if line == "" {
+			return n
+		}
+	curFileLoop:
+		for {
+			line = read()
+			n++
+			switch {
+			case line == "end":
+				line = read() + "!"
+				break curFileLoop
+			}
+		}
+	}
+}

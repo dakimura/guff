@@ -33,10 +33,10 @@ impl<'a> Builder<'a> {
         let loop_ = self.new_basic_block("rangefunc.loop".to_string());
         let done = self.new_basic_block("rangefunc.done".to_string());
 
-        self.push_targets(done, loop_);
         if let Some(name) = label {
             self.set_label_loop_targets(name, done, loop_);
         }
+        self.push_targets(done, loop_);
 
         self.emit_jump(loop_);
         self.set_block(Some(loop_));
