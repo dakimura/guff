@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh unparam
+# Produced by running golangci-lint on compat/golden/cases/unparam/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:11:24:unparam::example - unused is unused
+bad/bad.go:33:42:unparam::sectionByType - result 1 (example.com/unparam/bad.secKind) is always 0
+bad/bad.go:45:29:unparam::saveBlob - result 0 (string) is never used
+bad/bad.go:63:18:unparam::xmlResponse - status always receives statusOK (200)
