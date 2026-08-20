@@ -1816,6 +1816,26 @@ impl<'a> Builder<'a> {
         }
 
         if self.func().jump_var.is_some() {
+            // A `return` inside a range-over-func body still assigns the
+            // enclosing function's results; only the *transfer* is deferred to
+            // the `switch jump {…}` the loop lowers to. go/ssa stores them
+            // through `fn.lookup(fn.returnVars[i], false)`, which reaches the
+            // source function's cells as free variables. Without this the
+            // values are dropped, and every consumer of `Return.results` sees
+            // only the outer function's own returns — unparam read traefik's
+            // `lookupMiInstances` as "result 1 is always nil" because the two
+            // `return nil, fmt.Errorf(…)` inside its `for … range chunkIDs(…)`
+            // were invisible.
+            if let Some(src) = self.func().source_func {
+                let vars = self.prog.functions.get(src).return_vars.clone();
+                for (i, obj) in vars.iter().enumerate() {
+                    let Some(&r) = results.get(i) else {
+                        break;
+                    };
+                    let addr = self.lookup_result_var(*obj);
+                    self.emit_store(addr, r, s.return_);
+                }
+            }
             let e = self.return_exit(s.return_);
             let jump = self.func().jump_var.expect("yield function has jump_var");
             let exit_id = self.int_const(e.id);
