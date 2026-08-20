@@ -56,3 +56,20 @@ func okNoErrorResult() (*int, bool) {
 	n := 1
 	return &n, true
 }
+
+type writer struct{}
+
+func (writer) Write(p []byte) (int, error) { return len(p), nil }
+
+// `return w.Write(p)` returns whatever the call returns, error included — the
+// error is not swallowed. go/ssa returns the *components* of a multi-valued
+// call, so the error-typed result is right there in `Return.Results`; guff
+// returned the tuple itself, leaving no error-typed result for `isReturnNil`
+// to reject, and traefik's `compression_handler.go:242` became a finding.
+func okTailCallReturnsTheError(w writer, p []byte) (int, error) {
+	err := do()
+	if err != nil {
+		return w.Write(p)
+	}
+	return 0, nil
+}

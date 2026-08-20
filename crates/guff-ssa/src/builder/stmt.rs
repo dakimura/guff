@@ -1764,10 +1764,33 @@ impl<'a> Builder<'a> {
         crate::emit::emit_local_var(self.prog, self.func_id, block, obj_id)
     }
 
+    /// Number of values this function's signature returns.
+    fn func_result_count(&self) -> usize {
+        let Some(sig) = self.func().signature else {
+            return 0;
+        };
+        let results = guff_types::signature::signature_results(&self.prog.type_arena, sig);
+        guff_types::tuple::tuple_len(&self.prog.type_arena, results)
+    }
+
     fn return_stmt(&mut self, s: &ReturnStmt) {
         let mut results = Vec::with_capacity(s.results.len());
-        for r in &s.results {
-            results.push(self.expr(r));
+        // `return f()` where f returns several values: go/ssa returns the
+        // components, not the tuple, so a consumer reading `Return.results`
+        // sees one value per result. Returning the tuple made nilerr read
+        // traefik's `return r.rw.Write(p)` as a bare `return nil` — there was
+        // no error-typed result in the list to say otherwise.
+        // (Go: `builder.stmt`'s `len(s.Results) == 1 && sig.Results().Len() > 1`.)
+        let want = self.func_result_count();
+        if s.results.len() == 1 && want > 1 {
+            let tuple = self.expr_n(&s.results[0]);
+            for i in 0..want {
+                results.push(self.emit_extract(tuple, i));
+            }
+        } else {
+            for r in &s.results {
+                results.push(self.expr(r));
+            }
         }
 
         // If the function has named result variables, spill each returned value
