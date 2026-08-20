@@ -225,17 +225,24 @@ fn func_has_interface_param(prog: &Program, func: &Function) -> bool {
     false
 }
 
-/// Fatal/etc. in a function that receives an interface (TB). Call-site method
-/// lowering is unreliable for TB stubs (`method=None`, args[0] may be a
-/// basic arg), so gate on the enclosing function's parameter types instead.
+/// Fatal/etc. reached through an interface (`testing.TB`), which `ctrlflow`
+/// cannot resolve and so cannot prove non-returning: the block keeps its
+/// fall-through edge and the use below stays reported (vault
+/// `testhelpers.go:414`).
+///
+/// Keyed on the call itself. Gating on the enclosing function's parameter
+/// types instead called every abort inside a closure soft, because a
+/// `func(k, v any) bool` callback takes interfaces — nats-server
+/// `opts_test.go:2731` dereferences inside exactly such a callback, after
+/// `t.Fatalf` on a captured concrete `*testing.T`.
 fn block_has_soft_abort_call(prog: &Program, func: &Function, block: BlockId) -> bool {
-    if !func_has_interface_param(prog, func) {
-        return false;
-    }
     for &iid in &func.blocks.get(block).instrs {
         let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
             continue;
         };
+        if call.method.is_none() && matches!(call.value, Value::Function(_)) {
+            continue;
+        }
         let Some(name) = short_call_name(prog, call) else {
             continue;
         };
@@ -244,6 +251,84 @@ fn block_has_soft_abort_call(prog: &Program, func: &Function, block: BlockId) ->
         }
     }
     false
+}
+
+/// Calls whose block upstream's IR does not fall out of: `ctrlflow` proves
+/// they never return, and `emitCall` then jumps straight to the exit block.
+/// guff's SSA has no noreturn analysis, so name them here — the same
+/// name-based stand-in `govet`'s `lostcancel` uses.
+fn is_package_abort_call(prog: &Program, common: &guff_ssa::instr::CallCommon) -> bool {
+    let Value::Function(fid) = common.value else {
+        return false;
+    };
+    let f = prog.functions.get(fid);
+    let Some(obj) = f.object else {
+        return false;
+    };
+    let name = obj.name(&prog.object_arena);
+    let Some(pkg) = obj.pkg(&prog.object_arena) else {
+        return false;
+    };
+    match prog.package_arena.get(pkg).path() {
+        "os" => name == "Exit",
+        "runtime" => name == "Goexit",
+        "log" => name.starts_with("Fatal") || name.starts_with("Panic"),
+        _ => false,
+    }
+}
+
+/// True when `block` ends the path for real: `os.Exit`, `log.Fatal`, or
+/// `(*testing.T).Fatal` — the calls whose bodies reach `runtime.Goexit` or
+/// `os.Exit`, which is what `ctrlflow` proves before upstream's IR drops the
+/// edge out of the block.
+///
+/// The receiver has to be concrete: `ctrlflow` needs a static callee, which is
+/// the whole difference between `(*testing.T).Fatal` and the same call through
+/// the `testing.TB` interface (see [`block_has_soft_abort_call`]). A local
+/// type with a `Fatal` method of its own is *not* this — `sa5011/ok.go`'s
+/// `fataler` has an empty body and upstream duly reports through it.
+fn block_has_hard_abort_call(prog: &Program, func: &Function, block: BlockId) -> bool {
+    for &iid in &func.blocks.get(block).instrs {
+        let InstrData::Call(Call { call, .. }) = func.instrs.get(iid) else {
+            continue;
+        };
+        if is_package_abort_call(prog, call) || is_testing_abort_call(prog, call) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `t.Fatal` and friends on a concrete `*testing.T` / `*testing.B`: an
+/// interface invoke keeps `method` set, a static call does not.
+fn is_testing_abort_call(prog: &Program, common: &guff_ssa::instr::CallCommon) -> bool {
+    if common.method.is_some() {
+        return false;
+    }
+    let Value::Function(fid) = common.value else {
+        return false;
+    };
+    let Some(obj) = prog.functions.get(fid).object else {
+        return false;
+    };
+    if !is_soft_abort_name(obj.name(&prog.object_arena)) {
+        return false;
+    }
+    obj.pkg(&prog.object_arena)
+        .is_some_and(|pkg| prog.package_arena.get(pkg).path() == "testing")
+}
+
+/// Hard-abort block for `nil_block`, following a single goto into a shared body
+/// (the `a == nil || b == nil` short-circuit gives both checks the same body).
+fn hard_abort_block(prog: &Program, func: &Function, nil_block: BlockId) -> Option<BlockId> {
+    if block_has_hard_abort_call(prog, func, nil_block) {
+        return Some(nil_block);
+    }
+    let succs = &func.blocks.get(nil_block).succs;
+    if succs.len() == 1 && block_has_hard_abort_call(prog, func, succs[0]) {
+        return Some(succs[0]);
+    }
+    None
 }
 
 /// Soft-abort block for `nil_block`, following a single goto into a shared body.
@@ -566,6 +651,25 @@ fn is_guarded_by_non_nil(
             });
         if !soft_abort_fallthrough {
             return true;
+        }
+    }
+
+    // A nil branch that really aborts has no edge back into the code below, so
+    // that code is entered only from the non-nil side — and upstream's IR gives
+    // a block with one predecessor a sigma for every value live below it, which
+    // SA5011's value-identity test can never match. guff keeps the abort's
+    // fall-through edge, so ask reachability that avoids the abort instead.
+    //
+    // The short-circuit `if a == nil || b == nil { t.Fatalf(…) }` is the shape
+    // this matters for — the plain sequential one is already covered by
+    // dominance above — and nats-server writes it in three test files.
+    if check.eq_nil && check_bb.dominates(deref) {
+        if let Some(nil_block) = check.nil_block {
+            if hard_abort_block(prog, func, nil_block).is_some()
+                && reachable_avoiding(func, non_nil_block, deref_block, nil_block)
+            {
+                return true;
+            }
         }
     }
 

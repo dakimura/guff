@@ -2070,6 +2070,27 @@ fn sa5011_or_guard_renames_the_pointer() {
     );
 }
 
+/// `ctrlflow` proves `(*testing.T).Fatal` never returns, so the code below the
+/// `if` is entered only from the non-nil side and reads a sigma. The receiver
+/// decides whether the call aborts, not the enclosing function — nats-server
+/// dereferences inside a `func(k, v any) bool` callback after a `t.Fatalf` on a
+/// captured concrete `*testing.T`.
+#[test]
+fn sa5011_reads_the_abort_from_the_receiver() {
+    let dir = support::testdata("sa5011");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa5011/testing_abort",
+        &dir.join("testing_abort.go"),
+        &[("testing", &dir.join("stub/testing/testing.go"))],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5011::analyzer(), &pkg);
+    assert!(
+        messages.is_empty(),
+        "an abort on a concrete *testing.T guards both shapes: {messages:?}"
+    );
+}
+
 #[test]
 fn sa5001_flags_defer_before_error_check() {
     let pkg = typecheck_rule("sa5001", "bad.go");
