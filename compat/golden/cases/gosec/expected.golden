@@ -59,6 +59,10 @@ bad/bad.go:130:20:gosec:medium:G202: SQL string concatenation
 bad/bad.go:136:2:gosec:low:G104: Errors unhandled
 bad/bad.go:136:10:gosec:medium:G202: SQL string concatenation
 bad/bad.go:144:22:gosec:medium:G202: SQL string concatenation
+entropy/entropy.go:12:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:13:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:14:2:gosec:high:G101: Potential hardcoded credentials
+entropy/entropy.go:15:2:gosec:high:G101: Potential hardcoded credentials
 g115/g115.go:24:39:gosec:high:G115: integer overflow conversion int -> int32
 g115/g115.go:26:45:gosec:high:G115: integer overflow conversion int64 -> int32
 g115/g115.go:28:44:gosec:high:G115: integer overflow conversion int -> uint8

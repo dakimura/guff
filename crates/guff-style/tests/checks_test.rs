@@ -246,6 +246,21 @@ fn gosec_g101_pattern_override_replaces_default_names() {
     assert_eq!(g101.len(), 1, "expected exactly one G101: {messages:?}");
 }
 
+/// G101's gate is zxcvbn's dictionary-based entropy estimate, not the length
+/// or the character mix: a credential spelled out of English words scores low
+/// however long it is, and one that isn't scores high at half the length.
+#[test]
+fn gosec_g101_entropy_follows_zxcvbn() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/entropy", "entropy.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g101: Vec<&String> = messages.iter().filter(|m| m.contains("G101:")).collect();
+    assert_eq!(
+        g101.len(),
+        4,
+        "the four non-word credentials, and only those: {messages:?}"
+    );
+}
+
 #[test]
 fn gosec_respects_includes_excludes() {
     use guff_style::GosecOptions;

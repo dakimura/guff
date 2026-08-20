@@ -45,7 +45,7 @@ These upstreams are ported into guff and linked into the `guff` binary:
 - [uudashr/iface](https://github.com/uudashr/iface)
 - [yeya24/promlinter](https://github.com/yeya24/promlinter)
 
-## MIT (70)
+## MIT (71)
 
 - [4meepo/tagalign](https://github.com/4meepo/tagalign)
 - [Abirdcfly/dupword](https://github.com/Abirdcfly/dupword)
@@ -68,6 +68,7 @@ These upstreams are ported into guff and linked into the `guff` binary:
 - [butuzov/ireturn](https://github.com/butuzov/ireturn)
 - [butuzov/mirror](https://github.com/butuzov/mirror)
 - [catenacyber/perfsprint](https://github.com/catenacyber/perfsprint)
+- [ccojocar/zxcvbn-go](https://github.com/ccojocar/zxcvbn-go) — ported (entropy estimator behind gosec's G101), **including its frequency lists and adjacency graphs**, in `crates/guff-style/src/zxcvbn/`
 - [ckaznocha/intrange](https://github.com/ckaznocha/intrange)
 - [curioswitch/go-reassign](https://github.com/curioswitch/go-reassign)
 - [dominikh/go-tools](https://github.com/dominikh/go-tools)
