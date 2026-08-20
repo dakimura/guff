@@ -83,6 +83,7 @@
 //! (`guff-revive` / `guff-dupl`)
 //! and per-linter settings / SuggestedFix for the above.
 
+mod zxcvbn;
 mod options;
 
 mod asasalint;

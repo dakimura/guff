@@ -7018,6 +7018,102 @@ IR に Exit ブロックを入れることのどちらか。`staticcheck-sa` の
 
 ---
 
+### 2026-08-20（続き 4）— 残り 6 リポの掃除（#69–#73）と、SrcFuncs が「宣言から辿れる関数だけ」である件
+
+| PR | 何が壊れていたか | 効果 |
+|---|---|---|
+| #69 | **`return f()`（多値の末尾呼び出し）が tuple をそのまま返していた**。go/ssa は `len(s.Results) == 1 && sig.Results().Len() > 1` の枝で**要素を Extract して返す**。`Return.results` を読む側からは、宣言が複数の結果を持つのに値が 1 つ（tuple 型）しかないように見える。nilerr は「error 型の結果が全部 const nil か」を見るので、**error 型の結果が 1 つも無い** → traefik の `return r.rw.Write(p)` が「握り潰し」に化けた | traefik P = R = 100% |
+| #70 | **`//lint:ignore U1000` を読んでいなかった**。honnef の `unused` は自前の directive を読む（`unused.go` の "all objects annotated with a //lint:ignore U1000 are considered used"）。上流は**コメントが付いているノードの行**をキーにする（`ast.NewCommentMap`）ので、行末コメントならその行、doc コメントなら下の宣言の行。行末コメントから下の宣言まで伸ばすと 1 行下を黙らせてしまうので、コメントの左に何かあるかで区別する。共有ロードは `PARSE_COMMENTS` 無しなので、ソースから読み直す（`//lint:` を含まないファイルは部分文字列検索で弾く） | rclone P = R = 100% |
+| #71 | ループ 3 件 + パーサ 1 件。① `rangeint` の**報告位置が init 文ではなく `for`**（4 桁ズレ。column を見るのは golden tier だけで、`rangeint` の case が無かった）② `for i = 0` 綴りで**ループの後に i を読むなら報告しない**（range ループは `limit-1` を残す）—— guff はスタブで常に false ③ `intrange` の `i <= n` は**リテラル限定**（fix が「リテラル+1」を書くため）で、guff は定数畳み込みをしていた ④ 新 golden case が見つけた: **`RangeStmt.range_` が常に `NO_POS`**。go/parser は `Range: as.Rhs[0].Pos()` を入れる。key の無い `for range len(s)` は他に位置が無いので、intrange の finding が位置なしで捨てられていた | dapr 23 → 21 |
+| #72 | ① **S1031 が else 付きの nil チェックを報告**（パターンの末尾 `nil` は else 枝）② **gocritic assignOp が getter 呼び出しを消した**。`.Where(m["x"].Pure)` で、ruleguard の `isPure` が受け入れる呼び出しは型変換だけ ③ **testifylint が祖先スタックを 1 つずらして読んでいた**。上流のスタックは末尾が呼び出し自身（`stack[len-2]` が親）だが、`preorder_stack` は祖先だけを渡す。結果 `if assert.NoError(t, err) {` が全部 finding になり、`find_root_if` も同じズレで `if` を見失うので**その本体の assertion まで**報告していた（4 つのヘルパが同じ読み方だった） | dapr 21 → 16 |
+| #73 | **`buildssa.SrcFuncs` は `file.Decls` の `*ast.FuncDecl` から辿れる関数だけ**。パッケージ初期化関数には宣言が無いので、**パッケージレベル `var` の中の func literal は buildssa 系のどの analyzer からも見えない**。guff の gosec は `Package.members`（`init` を含む）から始めていたので、dapr の `pluggable.go` の `uint64(strconv.Atoi(…))` 2 つを G115 として報告していた。honnef の `buildir` は逆に `irpkg.Functions` から始めるので初期化関数を**含む** —— だから直したのは gosec 側のリストだけ | dapr 16 → 15 |
+
+**測って分かった、まだ直していないもの**
+
+1. **`unused` は「型が test ファイルで宣言され、かつ使われている」とき、そのメソッドを報告しない場合がある**（nats-server ×2）。
+   `func (c *cluster) zzWhatever()` を足しても上流は黙るが、`func (c *client) zzWhatever()`（`client` は非 test ファイル）や
+   `zzUsedType`（test ファイルで宣言し test で使う、その場で作った型）だと報告する。honnef の規則表（`unused.go` 冒頭）に
+   該当するものが見当たらず、`colorAndQuieten` の `owns` 伝播も**メソッドには張られていない**（`g.see(obj, nil)`）。
+   nats-server の `cluster` は約 100 メソッドを持つ巨大な test ヘルパ型。再現は `corpus/cache/nats-server` に
+   `func (c *cluster) zzA() {}` だけのファイルを置いて `golangci-lint run --no-config --default=none -E unused ./server/...`。
+2. ~~**gosec G101 の zxcvbn**~~ **→ #74 で移植した（下記）**。今回、**両方向で効いている**ことが分かった: dapr で guff-only の
+   G101 が 4 件（偽陽性）、**上流だけが出す G101 が 3 件**（`//nolint:gosec` が付いているので nolintlint のカスケードとして現れる）、
+   atlas で 2 件。合計 9 件で、corpus に残る単一項目としては最大。
+   `isHighEntropyString` は `len(str) >= 8` を満たす文字列の**先頭 16 文字**について
+   `zxcvbn.PasswordStrength(s, []string{}).Entropy` を取り、`Entropy >= 80 || (Entropy >= 40 && Entropy/len >= 3.0)`。
+   16 文字なら実質「エントロピー 48 以上」。zxcvbn は辞書（英単語・人名・パスワード・キーボード配列）を持つので、
+   移植は**データを含む一区切りの仕事**になる。
+3. **nats-server の ineffassign ×1**（`jetstream_cluster.go:10730`）。`goto RETRY` がラベルより後ろに 3 つあり、
+   `sreq = nil` はその経路で再び読まれる。最小化を 3 形試したが（後方 goto / select 内 goto / switch 内 goto）
+   どれも両者一致するので、トリガはこの関数の別の要素。
+
+**この時点の hunt（14 リポ）**
+
+| リポ | guff-only |
+|---|---|
+| prometheus / coredns / argo-cd / restic / go-redis / traefik / rclone / thanos | 0 |
+| cli | 1（nolintlint、bodyclose の recall 由来） |
+| jaeger | 2（容認済み revive ratchet） |
+| atlas | 2（gosec G101） |
+| nats-server | 4（unused ×2 / SA5011 ×1 / ineffassign ×1） |
+| gitea | 5（全部 nolintlint。unparam ×4 と SA4006 ×1 の recall） |
+| dapr | 15（nolintlint ×11 / gosec G101 ×4） |
+
+---
+
+### 2026-08-20（続き 5）— zxcvbn を移植した（#74）: G101 の判定は「長さ」でも「文字種」でもなく辞書だった
+
+**やったこと**
+
+`github.com/ccojocar/zxcvbn-go` v1.0.4 を Rust に移植し（`crates/guff-style/src/zxcvbn/`、
+約 1,000 行 + データ 688KB）、G101 の `isHighEntropyString` をそこに繋いだ。
+guff はそれまで Shannon エントロピー × 長さの近似で代用していた。
+
+上流の判定は
+`len(str) >= 8` を満たす文字列の**先頭 16 バイト**について
+`Entropy >= 80 || (Entropy >= 40 && Entropy/len >= 3.0)`。
+zxcvbn のエントロピーは**辞書ベース**なので、英単語で綴った文字列はどれだけ長くても低く、
+そうでない文字列は半分の長さでも高い。近似では原理的に分けられない:
+
+| 文字列（先頭 16 バイト） | エントロピー | 上流 |
+|---|---:|---|
+| `secretStoreName` | 26.148 | 出さない |
+| `mockSecretStore` | 28.713 | 出さない |
+| `local-secret-sto` | 36.087 | 出さない |
+| `timestamp with t` | 39.777 | 出さない |
+| `DAPR_API_TOKEN` | 55.449 | **出す** |
+| `/var/run/dapr/cr` | 77.833 | **出す** |
+
+**移植で写した「バグ」**（どれも実際の判定を動かす）
+
+- `l33tMatch` は各 match の**コピー**に extra l33t エントロピーを足して捨てるので、
+  l33t 由来の match は素の辞書エントロピーのまま。
+- `endUpperRx` は `^[^A-Z]+[A-Z]$'` —— アンカーの後ろに `'` があるので**何にもマッチしない**。
+- `CalculateAvgDegree` は隣接エントリの**文字数**を数える（`"2@"` は 2）。空エントリも母数に入る。
+- date match の `J` は end-exclusive（他の matcher は inclusive）。
+  `dateWithoutSepMatchHelper` の token はパスワード全体。
+
+**検証**
+
+corpus 7 リポの文字列リテラルから 20,023 本を抜き、Go 実装と Rust 実装のエントロピーを突き合わせた
+（`scratchpad/zx/`: Go 側は 40 行のドライバ、Rust 側は `ZXCVBN_IN`/`ZXCVBN_OUT` を読む
+`differential_dump` テスト）。**20,019 本が 0.001 以内で一致**。
+残る 4 本はすべて先頭 16 バイトの途中でマルチバイト文字が切れるもので、
+Go はバイトで切って壊れた文字を残し、Rust は文字境界まで戻る。
+**4 本とも高/低の判定は一致**しているので、差はエントロピー値だけ。
+
+**効果**
+
+| リポ | before | after |
+|---|---|---|
+| atlas | guff-only 2（G101） | **0（P = R = 100%）** |
+| dapr | guff-only 15 | **9**（G101 の偽陽性 4 と、`//nolint:gosec` のカスケード 2 が消えた。P 98.9% → 99.3%） |
+
+ゲートは `gosec/entropy.go`（報告される 4 本と、報告されない 6 本を並べた fixture）を golden tier に。
+辞書と隣接グラフを丸ごと持ち込んだので `THIRD_PARTY_LICENSES.md` に MIT として記載した。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
