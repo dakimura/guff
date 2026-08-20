@@ -214,16 +214,36 @@ impl RespUsage {
     }
 }
 
+/// The right-hand side that feeds `lhs_index`: the single multi-value call, or
+/// the expression in the same position.
+fn rhs_for_index(assign: &AssignStmt, lhs_index: usize) -> Option<&Expr> {
+    if assign.rhs.len() == 1 {
+        assign.rhs.first()
+    } else {
+        assign.rhs.get(lhs_index)
+    }
+}
+
+fn is_call_expr(expr: &Expr) -> bool {
+    match expr {
+        Expr::CallExpr(_) => true,
+        Expr::ParenExpr(p) => is_call_expr(&p.x),
+        _ => false,
+    }
+}
+
 fn assign_report_pos(assign: &AssignStmt, lhs_index: usize) -> u32 {
     if assign.rhs.len() == 1 {
         if let Expr::CallExpr(call) = &assign.rhs[0] {
-            return call.pos().0 as u32;
+            // go/ssa gives a call the position of its `(`, and upstream reports
+            // the `ssa.Call` itself.
+            return call.lparen.0 as u32;
         }
         return assign.rhs[0].pos().0 as u32;
     }
     if let Some(rhs) = assign.rhs.get(lhs_index) {
         if let Expr::CallExpr(call) = rhs {
-            return call.pos().0 as u32;
+            return call.lparen.0 as u32;
         }
         return rhs.pos().0 as u32;
     }
@@ -528,8 +548,17 @@ fn handle_assign(
             .is_some_and(is_response_composite)
             || assign.rhs.get(i).is_some_and(is_response_composite);
 
+        // Upstream works on `ssa.Call` instructions whose result carries an
+        // `*http.Response`, so a response that arrives any other way is not one
+        // this package opened: `resp := m[k]`, `resp := rs[0]`, `resp := in`,
+        // `resp := s.R`, and `case resp := <-respCh` are all silent for it and
+        // were all findings for guff, which asked only what the *type* was.
+        // dapr's `tests/integration/suite/daprd/shutdown/graceful` receives its
+        // responses over a channel.
+        let from_call = rhs_for_index(assign, i).is_some_and(|e| is_call_expr(e));
         let is_resp = !skip_httptest
             && !skip_composite
+            && from_call
             && (expr_is_response(pass, lhs) || rhs_result_is_response(pass, assign, i));
 
         if let Some(prev) = usages.remove(name) {
