@@ -81,6 +81,16 @@ pub(crate) fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> 
         ) {
             continue;
         }
+        // `buildssa` walks `file.Decls` for `*ast.FuncDecl`s, so the package
+        // initializer — which has no declaration — is not a source function,
+        // and neither is anything nested in it. A func literal in a
+        // package-level `var` therefore goes unanalysed: dapr's
+        // `pkg/components/state/pluggable.go` puts two `uint64(…)` conversions
+        // in one. (honnef's `buildir` differs here: it starts from
+        // `irpkg.Functions`, which does include the initializer.)
+        if f.synthetic.as_deref() == Some("package initializer") {
+            continue;
+        }
         if !seen.insert(fid) {
             continue;
         }
@@ -100,6 +110,9 @@ pub(crate) fn collect_src_funcs_with_methods(prog: &Program, pkg: PackageId) -> 
         .collect();
     top.sort_by(|(a, _), (b, _)| a.cmp(b));
     for (_, fid) in top {
+        if prog.functions.get(fid).synthetic.as_deref() == Some("package initializer") {
+            continue;
+        }
         if seen.insert(fid) {
             funcs.push(fid);
         }
