@@ -7682,6 +7682,85 @@ os.WriteFile(gpath, out, 0600)             // 上流は黙る
 
 ---
 
+### 2026-08-21（続き 13）— corpus に syncthing を足したら、modernize の 2 つが接頭辞なしで出荷されていた
+
+続き 10 の方法（**corpus を 1 本足す**）をもう一度回した。hunt の 15 リポは
+残差が 1 桁台まで落ちていたので、新しい形は新しいリポからしか出てこない。
+
+#### 候補の選び方と、比較が成立しなかった 1 本
+
+`.golangci.yml` が v2 で、かつ**有効な linter が多い**ものを探した。
+`syncthing` は `linters.default: all` から 42 を disable ＝ **約 75 linter**が実コードに当たる。
+promlinter / sloglint / godoclint / gosmopolitan / forcetypeassert / errchkjson / fatcontext は、
+**どの corpus リポでも実コードに当たったことが無い**。
+（otel-collector と bubbletea も試したが、root モジュールが小さく 0 vs 0 だった。）
+
+syncthing は**素のチェックアウトではビルドできない**。`lib/api/auto` の `Assets()` が
+生成ファイルにあるためで、**golangci-lint はコンパイルエラーがあると typecheck の 1 件だけを出して
+リポ中の finding を全部落とす**。初回はそれで「guff が 547 件でっち上げた」ように見えた。
+リポは `noassets` build tag をこのために持っているので、`hunt.json` に
+`build_tags` を持たせて **両方のツールに渡す**ようにした（`compat/hunt.sh`）。
+**生成器ではなくタグを運ぶ**ほうが安く、再現性も高い。
+
+#### 出てきたもの
+
+golangci-lint は modernize の finding を **`<modernizer>: <message>`** で描画する
+（Diagnostic の Category）。guff の 25 checker のうち **`any` と `plusbuild` の 2 つが
+Category を設定していなかった**ので、メッセージを素で出していた。syncthing だけで **118 件**、
+しかもテキストが違うので**差分の両側に同時に並ぶ**。`normalize.py` はこの接頭辞を
+剥がしていたが 2026-08-13 に測って外してあり、以来 8 日間これを捕まえるものが無かった。
+
+同じ fixture を初めて突き合わせて、さらに 4 つ:
+
+| check | guff | 上流 |
+|---|---|---|
+| `stringsseq` | `Ranging over strings.Split allocates a slice; consider using strings.SplitSeq` | `Ranging over SplitSeq is more efficient` |
+| `stringsseq` | 直接形のみ | `lines := strings.Split(…)` の下の range も（その変数の**唯一の使用**であるとき） |
+| `slicescontains` | `loop can be modernized using slices.Contains` | `Loop can be simplified using slices.Contains` |
+| `slicescontains` | `found := false` 形は代入文を報告 | どの形でも range 文を報告 |
+| `fmtappendf` | `[]byte(fmt.Sprintf) can be modernized using fmt.Appendf` | `Replace []byte(fmt.Sprintf...) with fmt.Appendf` |
+| `minmax` | `<` 演算子の位置 | 比較**式**の位置（`compare.Pos()`）—— 2 桁左 |
+
+#### あるべきだったゲート
+
+`crates/guff-style/tests/testdata/modernize/` の 28 fixture のうち golden を持っていたのは
+**6 つだけ**だった。残り 22 は「どれかのメッセージがこの部分文字列を含む」という
+Rust のアサーションで守られていて、それは
+**「golangci-lint がこの行をこう出力する」とは別の主張**である。
+`compat/golden/cases/modernize` を新設して 19 fixture を載せた。上の 6 バグは全部その中にある。
+
+意図的に外した 2 つ:
+
+- `plusbuild.go` は `//go:build linux`。他のマシンでは golangci-lint が何もコンパイルせず、
+  **golden が空ファイルの記録になる**（21 本目の教訓）。ケース側に環境非依存のコピーを置いた。
+- `newexpr.go` は **golangci-lint 2.12.2 自身がクラッシュする**
+  （`goanalysis_metalinter: newexpr: index out of range [0] with length 0`）。
+  上流の答えが存在しないので記録できない。`run.sh` は再現できなかった golden を書かない。
+
+**syncthing**: guff-only 141 → 20、golangci-only 188 → 66、P=96.5% R=89.4%。
+
+**次にやること**（syncthing が名指ししたもの）
+
+1. **`lib/model` が ill-typed**（`GUFF_DEBUG_ILL_TYPED=1` で 3 件）。
+   `*indexHandler does not satisfy suture.Service (wrong type for method Serve)` が 2 件
+   —— `have` が**空**なのでメソッドのシグネチャを解決できていない —— と
+   `model.go:3482: invalid append: argument S is not a slice`（型パラメータ）。
+   **この 1 パッケージで forcetypeassert 11 / godoclint 3 / sloglint 2 / fatcontext 1 /
+   unparam 1 が丸ごと落ちている**。hunt tier には health ゲートが無いので誰も落ちない。
+2. **`forcetypeassert` の column** —— 上流は `n.Pos()`（代入文の先頭）、guff は `tok_pos`（`:=`）。
+   行は一致するので isolate / OSS のキーでは見えない。golden ケースが要る。
+3. **SA4016 の偽陽性**（`lib/fs/filesystem.go:182`）。上流は `x | y` の `y` が
+   **`= iota` と書かれた同一パッケージの定数**か **整数リテラル 0** のときだけ撃つ
+   （`sa4016.go:55-100`）。`OptReadOnly = os.O_RDONLY` は値 0 だが spec の値が
+   SelectorExpr なので上流は黙る。
+4. gosec の未実装 taint 21 件（G702 / G703 / G706 / G710）と nolintlint のカスケード 6 件。
+5. **`uniq-by-line` と linter 順序**。syncthing のように 1 行に複数 linter が撃つリポでは、
+   どちらの finding が残るかが順序で決まる。guff は `from_linter` 名でソートしてから
+   落としているが、上流は metalinter の内部順序を経由する。再走で差分が動いた形跡があるので、
+   hunt の config で `uniq-by-line: false` にして**比較を順序非依存にする**のが先。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
