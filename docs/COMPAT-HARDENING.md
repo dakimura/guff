@@ -7373,6 +7373,91 @@ Rust の単体テストは同じ fixture をスタブ宇宙で通す
 G7xx の完全 taint エンジン。corpus の他リポで残る golangci-only は thanos の 3 件
 （unparam ×2 / staticcheck の malformed json tag ×1）だけになった。
 
+### 2026-08-21（続き 9）— SA5008 は「タグを読む」ところから間違っていた（穴 5 つ）、そして残る 2 件は unparam ではない
+
+続き 8 で recall gap は corpus 全体で 3 件になった。その 3 件を読んだら、**2 件は unparam の
+バグですらなかった**。
+
+#### 残り 2 件の正体: `ctrlflow` の noreturn が無い
+
+```
+thanos examples/interactive/interactive_test.go:49  unparam  exec - cmd always receives "sh"
+thanos test/e2e/compatibility_test.go:56            unparam  testPromQLCompliance - queryFrontend is unused
+```
+
+`queryFrontend` は 124 行目と 141 行目で**使われている**。それでも上流が "is unused" と言うのは、
+`buildssa` が `prog.SetNoReturn(cfgs.NoReturn)` を呼び、go/ssa の `emitCall` が
+**noreturn な静的呼び先の直後に `Panic` を置いて `unreachable.noreturn` ブロックに切り替える**
+から（x/tools v0.44.0 `go/ssa/emit.go:512-531`）。この関数は 1 行目が `t.Skip(...)` なので、
+**後ろが丸ごと消える**。guff には ctrlflow が無いのでブロックが生き残り、参照も残る。
+
+最小再現（両方 golangci-lint 2.12.2 は報告、guff は沈黙）:
+
+```go
+func helper(t *testing.T, flag bool) {
+    t.Skip("interactive")
+    if flag { t.Log("yes") }      // => helper - flag is unused
+}
+```
+
+`exec` のほうも同じ根。`interactive_test.go` のテスト関数は 1 つだけで、その 1 行目が
+`t.Skip(...)`。`exec("cp", …)` は全部その中なので、生きているのは `createData` の
+`exec("sh", …)` 4 本だけ ＝「cmd always receives "sh"」。こちらも最小再現を取った。
+
+**移植規模**: `go/cfg`（約 1100 行）＋ `ctrlflow`（278 行、fact ベースの手続き間解析）
+＋ go/ssa 側 12 行。**土台の変更で staticcheck / govet / unparam の findings が同時に動く**ので、
+単独セッション＋フルゲートでやること。`sa5011.rs` と `lostcancel.rs` は既にこの fact を
+**名前ベースで代用**していて、どちらも DEFERRED コメントで ctrlflow を名指ししている。
+移植すればそこも畳める。**まだやっていない。**
+
+#### 3 件目を直したら、SA5008 に穴が 5 つあった
+
+残る `malformed json tag` は素直な未移植だったが、上流
+（`honnef.co/go/tools@v0.7.0/staticcheck/sa5008/`）を guff と並べて読むと**5 つ**出てきた。
+そのうち **2 つは guff-only の偽陽性**で、どのゲートにも出ていなかった。
+
+| # | 種類 | 内容 |
+|---|---|---|
+| 1 | **精度** | `parse_struct_tag` が構造の壊れたタグで `Err` を返していた。上流は `break` して黙る |
+| 2 | **精度** | go-flags を import しているとき `choice` / `optional-value` / `default` の重複は免除される |
+| 3 | 再現性 | 手書きの `unquote` が `"` と `\` しか見ていなかった |
+| 4 | **再現性** | `validateJSONTag`（`jsonv2.go` 288 行）が丸ごと未実装 |
+| 5 | 一致 | 同じキーが複数値のとき上流は `v[0]` だけ検証する |
+
+**#1 が一番効く。** 上流の `parseStructTag` は `reflect.StructTag` のスキャナのコピーで、
+`name:"value"` に見えないものが来たら**走査を止めるだけ**。エラーになるのは
+`strconv.Unquote` が失敗したときだけ。guff は前者もエラーにしていたので、
+
+```go
+`notatag`            `json:"b" trailing`            `json`            `json:"e`
+```
+
+の 4 形すべてに `unparseable struct tag: malformed struct tag` を出していた。上流は全部沈黙。
+**普通のコードに出る偽陽性**である（`json:"b" trailing` のような形は珍しくない）。
+
+**#3 はタダで直った。** `crates/guff-staticcheck/src/gostd/strconv.rs` に
+Go の `strconv` の移植（SA100x のオラクルでゲート済み）が既にあったので、手書きを捨てて
+`strconv::unquote` を呼ぶだけ。エラー文言が `invalid syntax` で上流と一致するのもこれのおかげ。
+
+**#2 は corpus では絶対に捕まらない。** 14 リポに go-flags を使うものが無い。
+上流のソースを guff と並べて読んで初めて出た。**「corpus を増やすのが効く」の実例。**
+
+#### 意図的に残したもの
+
+- `fakexml.StructFieldInfo` の `invalid XML tag: %s`（`fakexml` ＋ `fakereflect` で約 920 行）。
+  DEFERRED、モジュールヘッダに記録。
+- `invalid UTF-8 in JSON object name` は **Rust では到達不能**。Go の `strconv.Unquote` は
+  不正なバイト（`ÿ`）を含む文字列を返せるが、Rust の `String` は持てず、`gostd` の移植は
+  対応する `char` にデコードする。分岐は上流と形を揃えるために残してある。
+
+**ゲート**: `sa5008/bad.go` と `ok.go` を書き足して、golden の `staticcheck-sa` が
+golangci-lint 2.12.2 と byte 単位で突き合わせる（SA5008 が 1 件 → 16 件）。
+go-flags の免除だけは外部モジュールが要るので Rust の単体テスト＋スタブで。
+なお fixture の doc コメントは**型名で始めてある** —— この case は ST も走るので、
+ST1021 が SA5008 の findings を埋めてしまうため。
+
+**thanos**: guff=432 golangci=434 P=100.0%（golangci-only は上記 unparam 2 件だけ）。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

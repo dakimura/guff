@@ -157,6 +157,7 @@ pub mod sa5004;
 pub mod sa5005;
 pub mod sa5007;
 pub mod sa5008;
+mod sa5008_json;
 pub mod sa5009;
 pub mod sa5010;
 pub mod sa5011;
