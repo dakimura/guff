@@ -8,11 +8,12 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{match_pos, AnalysisResult, Analyzer, RunError, RunFn, Pass};
 
 
-use guff::ast::Expr;
+use guff::ast::{Decl, Expr, GenDecl, Spec};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::code::is_integer_literal;
+use guff_types::arena::ObjectId;
 
 use guff_types::arena::TypeData;
 use guff_types::basic::BasicKind;
@@ -32,22 +33,116 @@ fn is_integer(pass: &Pass<'_>, expr: &Expr) -> bool {
     matches!(artifacts.types.get(u), TypeData::Basic(b) if matches!(b.kind(), BasicKind::Int | BasicKind::Int8 | BasicKind::Int16 | BasicKind::Int32 | BasicKind::Int64 | BasicKind::Uint | BasicKind::Uint8 | BasicKind::Uint16 | BasicKind::Uint32 | BasicKind::Uint64 | BasicKind::Uintptr))
 }
 
+/// `pattern.IntegerLiteral`: "a constant expression made up of only integer
+/// basic literals and the `+` and `-` unary operators"
+/// (honnef `pattern/pattern.go:318`, matched by
+/// `(Or (BasicLit "INT" _) (UnaryExpr (Or "+" "-") (IntegerLiteral _)))`).
+///
+/// guff's `code::is_integer_literal` evaluates the *constant value* of any
+/// expression, which is a wider question — a named constant answers it. Upstream
+/// gives named constants their own branch below, with a different message and a
+/// much narrower condition, so this check has to ask for the shape as well.
+fn is_integer_literal_shape(expr: &Expr) -> bool {
+    match expr {
+        Expr::BasicLit(lit) => lit.kind == Some(Token::INT),
+        Expr::UnaryExpr(u) => {
+            matches!(u.op, Token::ADD | Token::SUB) && is_integer_literal_shape(&u.x)
+        }
+        _ => false,
+    }
+}
+
+/// Constants of this package declared as exactly `name = iota` — one name, one
+/// value, and that value the identifier `iota`.
+///
+/// Upstream reaches the spec with `astutil.PathEnclosingInterval` from the
+/// object's position (`sa4016.go:66-83`); collecting them once per package is
+/// the same set. Membership also answers upstream's `obj.Pkg() != pass.Pkg`
+/// guard, since only this package's files are walked.
+fn iota_consts(pass: &Pass<'_>) -> std::collections::HashSet<ObjectId> {
+    let mut out = std::collections::HashSet::new();
+    let Some(info) = pass.types_info() else {
+        return out;
+    };
+    for file in pass.files() {
+        for decl in &file.decls {
+            let Decl::GenDecl(GenDecl { tok, specs, .. }) = decl else {
+                continue;
+            };
+            if *tok != Some(Token::CONST) {
+                continue;
+            }
+            for spec in specs {
+                let Spec::ValueSpec(vs) = spec else { continue };
+                // "TODO(dh): we could support this" — upstream declines a spec
+                // that declares or assigns more than one thing.
+                if vs.names.len() != 1 || vs.values.len() != 1 {
+                    continue;
+                }
+                if !matches!(&vs.values[0], Expr::Ident(id) if id.name == "iota") {
+                    continue;
+                }
+                if let Some(Some(obj)) = info.defs.get(&vs.names[0].id) {
+                    out.insert(*obj);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let inspect = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "SA4016 requires inspect analyzer".to_string())?
         .clone();
+    let iota_zero = iota_consts(pass);
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(BinaryExpr), pass.files(), |node| {
         let NodeRef::BinaryExpr(bin) = node else { return };
         if !matches!(bin.op, Token::AND | Token::OR | Token::XOR) { return; }
         if !is_integer(pass, &bin.x) { return; }
+        // The right operand must evaluate to zero either way.
         if !is_integer_literal(pass, &bin.y, 0) { return; }
+
         let rendered = render_expr(&Expr::BinaryExpr(bin.clone()));
-        let msg = match bin.op {
-            Token::AND => format!("{rendered} always equals 0"),
-            Token::OR | Token::XOR => format!("{rendered} always equals {}", render_expr(&bin.x)),
-            _ => return,
+        let y_rendered = render_expr(&bin.y);
+
+        // Branch 1: `x | FLAG` where FLAG is one of *this* package's constants
+        // written `FLAG = iota`. Upstream reads that as a likely mistake for
+        // `1 << iota` and says so.
+        let is_iota_const = matches!(&*bin.y, Expr::Ident(id) if pass
+            .types_info()
+            .and_then(|info| info.uses.get(&id.id).copied())
+            .is_some_and(|obj| iota_zero.contains(&obj)));
+
+        let msg = if is_iota_const {
+            match bin.op {
+                Token::AND => format!(
+                    "{rendered} always equals 0; {y_rendered} is defined as iota and has value 0, \
+                     maybe {y_rendered} is meant to be 1 << iota?"
+                ),
+                Token::OR | Token::XOR => format!(
+                    "{rendered} always equals {}; {y_rendered} is defined as iota and has value 0, \
+                     maybe {y_rendered} is meant to be 1 << iota?",
+                    render_expr(&bin.x)
+                ),
+                _ => return,
+            }
+        } else if is_integer_literal_shape(&bin.y) {
+            match bin.op {
+                Token::AND => format!("{rendered} always equals 0"),
+                Token::OR | Token::XOR => {
+                    format!("{rendered} always equals {}", render_expr(&bin.x))
+                }
+                _ => return,
+            }
+        } else {
+            // A named constant that is zero for some other reason — syncthing's
+            // `OptReadOnly = os.O_RDONLY`. Upstream's ident branch requires the
+            // spec's value to be literally `iota`, and its literal branch
+            // requires a literal, so neither fires and it stays silent.
+            return;
         };
         // Upstream reports the BinaryExpr node; its position is the start of
         // the left operand, not the operator.

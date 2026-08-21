@@ -160,6 +160,14 @@ fn token_str(op: Token) -> &'static str {
         Token::LAND => "&&",
         Token::OR => "|",
         Token::AND => "&",
+        // The four that were missing. `_ => "?"` is silent about it, so
+        // `x ^ flagA` rendered as `x ? flagA` in every message that quotes the
+        // expression — SA4016's own, among others. Found by writing a fixture
+        // that exercised all three of its operators rather than just `|` and `&`.
+        Token::XOR => "^",
+        Token::SHL => "<<",
+        Token::SHR => ">>",
+        Token::AndNot => "&^",
         Token::ADD => "+",
         Token::SUB => "-",
         Token::MUL => "*",
