@@ -133,6 +133,8 @@ mod grouper;
 mod ireturn;
 mod gosec;
 mod gosec_g115;
+mod gosec_g118;
+mod gosec_g123;
 mod gosec_g602;
 mod gosec_ssa;
 mod tagliatelle;

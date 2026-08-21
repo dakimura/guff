@@ -31,7 +31,9 @@ pub(crate) fn check_ssa_analyzers(
 ) {
     let want_g602 = enabled.contains("G602");
     let want_g115 = enabled.contains("G115");
-    if !want_g602 && !want_g115 {
+    let want_g118 = enabled.contains("G118");
+    let want_g123 = enabled.contains("G123");
+    if !want_g602 && !want_g115 && !want_g118 && !want_g123 {
         return;
     }
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -41,7 +43,7 @@ pub(crate) fn check_ssa_analyzers(
     if files.is_empty() {
         return;
     }
-    let Ok(built) = build_package_for_analysis(
+    let Ok(mut built) = build_package_for_analysis(
         artifacts.snapshot(),
         files,
         pass.fset().clone(),
@@ -50,13 +52,21 @@ pub(crate) fn check_ssa_analyzers(
         return;
     };
 
+    let src_funcs = collect_src_funcs_with_methods(&built.prog, built.pkg);
+    // G118 first, and it alone takes `&mut Program`: `types.Identical` has to
+    // compute an interface's type set, which the arena caches in place.
+    if want_g118 {
+        crate::gosec_g118::collect_g118(&mut built.prog, &src_funcs, pending);
+    }
     let prog = &built.prog;
-    let src_funcs = collect_src_funcs_with_methods(prog, built.pkg);
     if want_g602 {
         crate::gosec_g602::collect_g602(prog, &src_funcs, pending);
     }
     if want_g115 {
         crate::gosec_g115::collect_g115(prog, &src_funcs, pending);
+    }
+    if want_g123 {
+        crate::gosec_g123::collect_g123(prog, &src_funcs, pending);
     }
 }
 

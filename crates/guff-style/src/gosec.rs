@@ -18,7 +18,12 @@
 //! - **G114** — `net/http` serve helpers without timeouts
 //! - **G115** — integer overflow conversion (SSA + range analysis; see
 //!   `gosec_g115`)
+//! - **G118** — context propagation failure: an uncalled `cancel`, a goroutine on
+//!   `context.Background`/`TODO`, or a non-terminating loop with no `ctx.Done()`
+//!   guard (SSA; see `gosec_g118`)
 //! - **G122** — `filepath.Walk`/`WalkDir` callback path into race-prone `os` sinks (AST approx of SSA)
+//! - **G123** — `tls.Config` sets `VerifyPeerCertificate` but leaves session
+//!   resumption able to skip it (SSA; see `gosec_g123`)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
 //! - **G202** — SQL string concatenation
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
@@ -43,7 +48,7 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G113, G116–G121, G123, G201, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G201, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
 //! full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
@@ -279,7 +284,8 @@ const RULES: &[RuleDef] = &[
 
 /// Synthetic rule ids handled outside [`RULES`] (arg-sensitive / AST-pattern).
 const EXTRA_RULE_IDS: &[&str] = &[
-    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G122", "G124", "G202",
+    "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G118", "G122", "G124",
+    "G123", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
 ];
@@ -574,6 +580,9 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G112", Score::Medium, Score::Low),
     ("G114", Score::Medium, Score::High),
     ("G115", Score::High, Score::Medium),
+    // G118 grades each of its three checks separately; see `issue_scores`.
+    ("G118", Score::Medium, Score::High),
+    ("G123", Score::High, Score::High),
     ("G122", Score::High, Score::Medium),
     ("G124", Score::Medium, Score::High),
     ("G202", Score::Medium, Score::High),
@@ -612,6 +621,16 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
 fn issue_scores(rule: &str, msg: &str) -> (Score, Score) {
     if rule == "G402" && msg.contains("may be set to true") {
         return (Score::High, Score::Low);
+    }
+    if rule == "G118" {
+        // One analyzer id, three checks, three grades — the table's entry is
+        // the lost-cancel one, so only the other two need naming here.
+        if msg == crate::gosec_g118::MSG_BACKGROUND {
+            return (Score::High, Score::Medium);
+        }
+        if msg == crate::gosec_g118::MSG_LOOP_WITHOUT_DONE {
+            return (Score::High, Score::Low);
+        }
     }
     RULE_SCORES
         .iter()

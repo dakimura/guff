@@ -78,6 +78,20 @@ g115/g115.go:163:44:gosec:high:G115: integer overflow conversion int -> int32
 g115/g115.go:165:43:gosec:high:G115: integer overflow conversion int -> uint8
 g115/g115.go:194:14:gosec:high:G115: integer overflow conversion int64 -> int32
 g115/g115.go:214:53:gosec:high:G115: integer overflow conversion int -> uint32
+g118/g118.go:22:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:33:28:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:38:34:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:49:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:61:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:136:33:gosec:medium:G118: context cancellation function returned by WithCancel/WithTimeout/WithDeadline is not called
+g118/g118.go:147:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
+g118/g118.go:151:2:gosec:high:G118: Goroutine uses context.Background/TODO while request-scoped context is available
+g118/g118.go:176:13:gosec:high:G118: Long-running loop performs calls without a ctx.Done() cancellation guard
+g123/g123.go:26:24:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:46:4:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:70:21:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:71:46:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
+g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while session resumption may remain enabled and VerifyConnection is not set; resumed sessions can bypass custom certificate checks
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range
 g602/g602.go:22:10:gosec:low:G602: slice index out of range
