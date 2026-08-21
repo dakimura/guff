@@ -1,0 +1,28 @@
+# Golden case: the `modernize` linter, at check level.
+#
+# Twenty-eight fixtures under crates/guff-style/tests/testdata/modernize/ and
+# only six of them had a golden: atomictypes (x2), omitzero (x2) and rangeint.
+# The other twenty-two were gated by Rust assertions of the form
+# "some message contains this substring", which is a different claim from
+# "golangci-lint prints exactly this line".
+#
+# The gap was not hypothetical. golangci-lint renders every modernize finding as
+# `<modernizer>: <message>` from the diagnostic's Category, and two of guff's
+# twenty-five checks — `any` and `plusbuild` — never set it, so they shipped
+# their messages bare. `normalize.py` used to strip the prefix off upstream's
+# side and was removed on 2026-08-13 once measured; nothing then caught these two
+# until syncthing joined the corpus and produced 118 of them in one repo.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - modernize
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

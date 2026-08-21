@@ -33,6 +33,10 @@ cargo build --release -p guff-lint
 # Ad-hoc OSS bug hunt (extra repos in corpus/hunt.json; not a CI gate)
 ./compat/hunt.sh
 ./compat/hunt.sh --name cobra
+# A hunt entry may carry "build_tags": ["noassets"] when the repo does not build
+# from a plain checkout. Both tools get the tags. Without them golangci-lint
+# reports the compile error *and nothing else*, so the whole repo reads as
+# "guff invented N findings" (syncthing, 2026-08-21).
 
 # Refresh allowlists from current diffs (merges; review before committing)
 ./compat/run.sh --oss --tier pr --update-allowlist

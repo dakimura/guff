@@ -1,0 +1,53 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh modernize
+# Produced by running golangci-lint on compat/golden/cases/modernize/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:9:16:modernize::any: interface{} can be replaced by any
+bad/bad.go:12:6:modernize::rangeint: for loop can be modernized using range over int
+bad/bad.go:19:5:modernize::minmax: if/else statement can be modernized using min
+bad/bad.go:28:9:modernize::fmtappendf: Replace []byte(fmt.Sprintf...) with fmt.Appendf
+bad/bad.go:32:2:modernize::slicessort: sort.Slice can be modernized using slices.Sort
+bad/bad.go:37:3:modernize::forvar: copying variable is unneeded
+bad/bad.go:43:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+bad/bad.go:50:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+bad/bad.go:59:24:modernize::omitzero: Omitempty has no effect on nested struct fields
+bloop/bloop.go:93:6:modernize::rangeint: for loop can be modernized using range over int
+mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
+plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed
+reflecttypefor/reflecttypefor.go:13:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+reflecttypefor/reflecttypefor.go:17:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
+slicesbackward/slicesbackward.go:7:6:modernize::slicesbackward: backward loop over slice can be modernized using slices.Backward
+slicescontains/slicescontains.go:4:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:13:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:23:2:modernize::slicescontains: Loop can be simplified using slices.ContainsFunc
+slicescontains/slicescontains.go:32:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+slicescontains/slicescontains.go:42:2:modernize::slicescontains: Loop can be simplified using slices.Contains
+stditerators/stditerators.go:9:2:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
+stditerators/stditerators.go:16:11:modernize::stditerators: NumFields/Field loop can simplified using Struct.Fields iteration
+stditerators/stditerators.go:23:2:modernize::stditerators: Len/At loop can simplified using Tuple.Variables iteration
+stditerators/stditerators.go:40:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:7:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:8:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:17:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:18:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:26:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:27:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:38:3:modernize::stringsbuilder: using string += string in a loop is inefficient
+stringsbuilder/stringsbuilder.go:54:7:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:65:6:modernize::rangeint: for loop can be modernized using range over int
+stringsbuilder/stringsbuilder.go:77:6:modernize::rangeint: for loop can be modernized using range over int
+stringscutprefix/stringscutprefix.go:9:5:modernize::stringscutprefix: TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:16:5:modernize::stringscutprefix: TrimSuffix can be simplified to CutSuffix
+stringscutprefix/stringscutprefix.go:23:5:modernize::stringscutprefix: HasPrefix + TrimPrefix can be simplified to CutPrefix
+stringscutprefix/stringscutprefix.go:30:5:modernize::stringscutprefix: HasSuffix + TrimSuffix can be simplified to CutSuffix
+stringsseq/stringsseq.go:8:23:modernize::stringsseq: Ranging over SplitSeq is more efficient
+stringsseq/stringsseq.go:14:23:modernize::stringsseq: Ranging over FieldsSeq is more efficient
+testingcontext/testingcontext.go:11:17:modernize::testingcontext: context.WithCancel can be modernized using t.Context
+unsafefuncs/unsafefuncs.go:6:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+unsafefuncs/unsafefuncs.go:10:24:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+unsafefuncs/unsafefuncs.go:16:12:modernize::unsafefuncs: pointer + integer can be simplified using unsafe.Add
+waitgroupgo/waitgroupgo.go:9:2:modernize::waitgroupgo: Goroutine creation can be simplified using WaitGroup.Go

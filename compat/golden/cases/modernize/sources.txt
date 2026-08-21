@@ -1,0 +1,33 @@
+# The fixtures the Rust tests use, so the two cannot drift. One directory per
+# file: the Rust tests type-check each on its own against testdata/modernize/stub,
+# and combining them would change what each check sees.
+#
+# plusbuild.go is not here: its constraint is `//go:build linux`, so on any other
+# machine golangci-lint compiles nothing and the golden would record an empty
+# file (COMPAT-HARDENING, 21st session). The case carries its own
+# platform-neutral copy instead.
+#
+# newexpr.go is not here either, for a different reason: golangci-lint 2.12.2
+# *crashes* on it — "goanalysis_metalinter: newexpr: index out of range [0] with
+# length 0" — so there is no upstream answer to record. `run.sh` refuses to write
+# a golden it could not reproduce, which is the behaviour we want.
+bad/bad.go                          crates/guff-style/tests/testdata/modernize/bad.go
+ok/ok.go                            crates/guff-style/tests/testdata/modernize/ok.go
+stringsseq/stringsseq.go            crates/guff-style/tests/testdata/modernize/stringsseq.go
+mapsloop/mapsloop.go                crates/guff-style/tests/testdata/modernize/mapsloop.go
+bloop/bloop.go                      crates/guff-style/tests/testdata/modernize/bloop.go
+errorsastype/errorsastype.go        crates/guff-style/tests/testdata/modernize/errorsastype.go
+importcomment/importcomment.go      crates/guff-style/tests/testdata/modernize/importcomment.go
+reflecttypeassert/reflecttypeassert.go  crates/guff-style/tests/testdata/modernize/reflecttypeassert.go
+reflecttypefor/reflecttypefor.go    crates/guff-style/tests/testdata/modernize/reflecttypefor.go
+slicesbackward/slicesbackward.go    crates/guff-style/tests/testdata/modernize/slicesbackward.go
+slicescontains/slicescontains.go    crates/guff-style/tests/testdata/modernize/slicescontains.go
+slicesdelete/slicesdelete.go        crates/guff-style/tests/testdata/modernize/slicesdelete.go
+stditerators/stditerators.go        crates/guff-style/tests/testdata/modernize/stditerators.go
+stringsbuilder/stringsbuilder.go    crates/guff-style/tests/testdata/modernize/stringsbuilder.go
+stringscut/stringscut.go            crates/guff-style/tests/testdata/modernize/stringscut.go
+stringscutprefix/stringscutprefix.go  crates/guff-style/tests/testdata/modernize/stringscutprefix.go
+testingcontext/testingcontext.go    crates/guff-style/tests/testdata/modernize/testingcontext.go
+unsafefuncs/unsafefuncs.go          crates/guff-style/tests/testdata/modernize/unsafefuncs.go
+waitgroupgo/waitgroupgo.go          crates/guff-style/tests/testdata/modernize/waitgroupgo.go
+plusbuild/plusbuild.go              compat/golden/cases/modernize/plusbuild.go.txt

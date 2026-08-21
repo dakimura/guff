@@ -118,5 +118,16 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "20m"
+  },
+  {
+    "name": "syncthing",
+    "url": "https://github.com/syncthing/syncthing.git",
+    "ref": "v2.1.3",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m",
+    "build_tags": [
+      "noassets"
+    ]
   }
 ]
