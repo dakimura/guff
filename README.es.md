@@ -47,8 +47,8 @@ Esperar importa.
 **guff vuelve a hacer rápido el lint de Go.**
 
 ```
-golangci-lint: 290s
-guff:           18s
+golangci-lint: 280s
+guff:            20s
 
 Mismo repositorio.
 Misma configuración.
@@ -63,14 +63,14 @@ Repositorios open source reales con sus configuraciones existentes de `golangci-
 
 | Repository | golangci-lint | guff | Speedup |
 |---|---:|---:|---:|
-| grafana | 290.4s | **17.8s** | **16× faster** |
-| consul | 39.4s | **4.7s** | **8× faster** |
-| helm | 17.4s | **1.3s** | **13× faster** |
-| k9s | 14.3s | **2.1s** | **7× faster** |
-| caddy | 8.7s | **0.91s** | **10× faster** |
-| containerd | 4.1s | **0.40s** | **10× faster** |
-| gin | 3.9s | **0.37s** | **11× faster** |
-| cobra | 1.4s | **0.22s** | **6× faster** |
+| grafana | 279.8s | **19.8s** | **14× faster** |
+| consul | 38.0s | **5.2s** | **7× faster** |
+| helm | 17.5s | **1.4s** | **13× faster** |
+| k9s | 14.6s | **2.2s** | **7× faster** |
+| caddy | 9.1s | **0.85s** | **11× faster** |
+| containerd | 5.2s | **0.37s** | **14× faster** |
+| gin | 3.9s | **0.38s** | **10× faster** |
+| cobra | 1.4s | **0.23s** | **6× faster** |
 
 Benchmarks en frío en Darwin arm64.
 
@@ -264,7 +264,7 @@ jobs:
         with:
           go-version: stable
 
-      - uses: dakimura/guff@v0.5.0
+      - uses: dakimura/guff@v0.6.0
         with:
           args: run --out-format=github-actions ./...
 ```
@@ -287,7 +287,7 @@ La imagen oficial de Docker ya incluye Go.
 docker run --rm \
   -v "$PWD":/app \
   -w /app \
-  ghcr.io/dakimura/guff:0.5.0 \
+  ghcr.io/dakimura/guff:0.6.0 \
   run ./...
 ```
 
@@ -301,7 +301,7 @@ docker run --rm \
   -v "$(go env GOCACHE)":/root/.cache/go-build \
   -e GOMODCACHE=/go/pkg/mod \
   -e GOCACHE=/root/.cache/go-build \
-  ghcr.io/dakimura/guff:0.5.0 \
+  ghcr.io/dakimura/guff:0.6.0 \
   run ./...
 ```
 
