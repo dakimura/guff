@@ -7908,6 +7908,60 @@ hunt tier に足したリポは、パッケージが丸ごと落ちていても�
 
 ---
 
+### 2026-08-22（続き 17）— SA4016 は上流の 2 分岐のうち 1 つしか無く、`^` が `?` と描画されていた
+
+続き 13 の「次にやること」3。syncthing の `lib/fs` に
+
+```go
+const (
+    OptAppend    = os.O_APPEND
+    OptCreate    = os.O_CREATE
+    OptReadOnly  = os.O_RDONLY   // 0
+    …
+)
+flags := OptAppend | OptCreate | OptExclusive | OptReadOnly | …
+```
+
+があり、guff は「always equals OptAppend | OptCreate | OptExclusive」と撃っていた。
+上流は黙る。理由は**分岐が 2 つある**こと（`staticcheck/sa4016/sa4016.go:55-100`）:
+
+1. 右オペランドが**このパッケージの**定数を指す `*ast.Ident` で、値が 0 で、
+   **かつその spec が文字どおり `name = iota` と書かれている**とき ——
+   `1 << iota` の書き間違いだろうと読んで、メッセージにそう書く;
+2. 右オペランドが整数リテラルのとき —— `pattern.IntegerLiteral` は
+   「整数の basic literal と単項 `+` `-` **だけ**」（`pattern/pattern.go:318`）。
+
+guff は 2 だけを持ち、しかも `code::is_integer_literal` を訊いていた。
+あれは**任意の式の定数値**を評価するので、名前付き定数も「0 である」と答えてしまう。
+他に 11 箇所の呼び手があり、そちらでは正しい問いなので**共有ヘルパは触らず**、
+この check 側で「形」も訊き、欠けていた ident 分岐を足した。
+
+#### `^` が `?` になっていた
+
+`render.rs` の演算子表に `XOR` / `SHL` / `SHR` / `AndNot` が無く、
+`_ => "?"` が黙ってそれを飲んでいた。**式を引用するメッセージ全部**で
+`x ^ flagA` が `x ? flagA` と出ていた。
+
+そこにあった fixture は
+
+```go
+func main() {
+    var x int = 1
+    _ = x & 0
+}
+```
+
+—— **演算子 1 つ、finding 1 件**。だからどちらの欠陥も見えなかった。
+`fired` ≠ 検証済みが今週これで 3 度目である（goheader → forcetypeassert → SA4016）。
+
+**ゲート**: fixture は SA4016 の 3 演算子すべてを両分岐に通す。`ok.go` には
+黙るべきものを並べた —— `= iota` でなく 0 になる定数（syncthing の形）、
+上流が declines する `pairA, pairB = iota, iota`、`= iota` だが 0 でない定数、
+非ゼロのオペランド。`staticcheck-sa` の golden に 7 キー、ratchet の baseline は不変
+（missing 3 / extra 1）。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
