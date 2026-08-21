@@ -61,21 +61,19 @@ fn is_call_expr(expr: &Expr) -> bool {
 
 fn check_assign(pass: &Pass<'_>, n: &AssignStmt) -> Option<(u32, String)> {
     let tae = find_type_assertion(&n.rhs)?;
+    // `pass.Reportf(n.Pos(), …)` — an `*ast.AssignStmt`'s `Pos()` is its first
+    // left-hand expression, not the `:=`. guff pointed at the token, which is
+    // the same *line* and so invisible to every gate whose key stops there.
+    let pos = n.lhs.first().map(|e| e.pos().0 as u32).unwrap_or(n.tok_pos.0 as u32);
     if n.rhs.len() == 1 && is_call_expr(&n.rhs[0]) {
-        return Some((
-            n.tok_pos.0 as u32,
-            "right hand must be only type assertion".into(),
-        ));
+        return Some((pos, "right hand must be only type assertion".into()));
     }
     if n.rhs.len() > 1 {
-        return Some((
-            n.tok_pos.0 as u32,
-            "right hand must be only type assertion".into(),
-        ));
+        return Some((pos, "right hand must be only type assertion".into()));
     }
     if n.lhs.len() != 2 {
         if tae.ty.as_ref().is_some_and(|t| !is_any(pass, t)) {
-            return Some((n.tok_pos.0 as u32, "type assertion must be checked".into()));
+            return Some((pos, "type assertion must be checked".into()));
         }
     }
     None
@@ -103,7 +101,9 @@ fn check_type_assert(pass: &Pass<'_>, n: &TypeAssertExpr) -> Option<(u32, String
     if is_any(pass, ty) {
         return None;
     }
-    Some((n.lparen.0 as u32, "type assertion must be checked".into()))
+    // Same rule: an `*ast.TypeAssertExpr`'s `Pos()` is its operand's, not the
+    // `(` of the assertion.
+    Some((n.x.pos().0 as u32, "type assertion must be checked".into()))
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

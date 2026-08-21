@@ -7813,6 +7813,38 @@ guff は `code::same_non_dynamic` を使っていた。あれは「2 つの式�
 
 ---
 
+### 2026-08-22（続き 15）— `fired` は「検証済み」ではない、二度目: forcetypeassert の fixture は 6 行だった
+
+続き 13 の「次にやること」2。`docs/COVERAGE.md` は forcetypeassert を `fired` と数えている。
+それを撃たせていたのはこれである:
+
+```go
+func bad() {
+    var a any
+    _ = a.(int)
+}
+```
+
+finding 1 件と、対になる 3 行の `ok.go`。**Phase 3 が単一 check の linter について
+名指ししている状況そのもの** —— `fired` は「check が起きた」であって
+「上流と一致する」ではない（§3 の goheader と同じ）。
+
+一致していなかった。上流は**どこでも `n.Pos()`** を報告する ——
+`*ast.AssignStmt` の最初の左辺、`*ast.ValueSpec` の最初の名前、
+裸の `*ast.TypeAssertExpr` のオペランド。guff は `:=` トークンと assertion の `(` を
+報告していた。**毎回同じ行**なので、isolate のキー（`path:line:linter:message`）でも
+OSS のキーでも見えない。syncthing はこの形を 44 回書く。
+
+fixture は 8 件に置き換えた —— 報告に至る経路を全部通る（blank 代入 /
+index 式を経由する `:=` と `=` / `var` spec / 条件中の裸の assertion / 引数中の裸の assertion /
+"right hand must be only type assertion" の 2 通り（呼び出しに埋もれる・右辺が 2 値））——
+そして黙るべき 4 つを並べた（comma-ok の 2 綴り、`any` への assertion（上流の `isAny`）、
+そして `TypeAssertExpr` が `Type` を持たない type switch）。
+
+`compat/golden/cases/forcetypeassert` が column ごと固定する。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
