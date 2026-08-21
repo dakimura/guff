@@ -7508,6 +7508,94 @@ fixture は「撃つ」形しか書かれていないので、**偽陽性はゲ�
 見つかったのは corpus に 1 本足したからである。続き 9 の
 `corpus/shapes.py`（言語の形）とは別の軸——**実在するコードの書き癖**——が効いた。
 
+### 2026-08-21（続き 11）— `//lint:file-ignore` はファイルで止まらない
+
+続き 10 と同じ形の続きで、**hunt を 15 リポ全部回した**ら nats-server に guff-only が
+3 件出た。うち 1 件は `unused` で、**どのゲートにも一度も出ていなかった**新しい形である。
+
+```
+server/raft_helpers_test.go:232  unused  func (*cluster).addRaftNode is unused
+```
+
+`addRaftNode` は本当にどこからも呼ばれていない（リポ全体を grep して宣言 1 件のみ）。
+それでも上流が黙るのは、**`type cluster` を宣言している別のファイル**
+`jetstream_helpers_test.go` の先頭に
+
+```go
+//lint:file-ignore U1000 Avoid detecting as unused code
+```
+
+があるからで、上流の該当箇所は「ファイル内のオブジェクトを used にする」で終わっていない:
+
+```go
+if obj, ok := obj.(*types.TypeName); ok {
+    if typ, ok := types.Unalias(obj.Type()).(*types.Named); ok {
+        for method := range typ.Methods() { g.use(method, nil) }   // ← ファイルを跨ぐ
+    }
+    if typ, ok := obj.Type().Underlying().(*types.Struct); ok {
+        for field := range typ.Fields() { g.use(field, nil) }
+    }
+}
+```
+
+`types.Named.Methods()` は**そのファイルに書かれたメソッドではなく、その名前付き型の
+メソッド全部**を返す。nats-server はメソッドを兄弟の `*_test.go` に散らしているので、
+「メソッド自身の位置」で濾していた guff は素通りさせられなかった。
+
+#### 濾すのと根に置くのは別のこと
+
+guff は `collect_lint_ignores` の結果を**報告直前のフィルタ**として使っていた。
+上流は `g.use(obj, nil)` ＝ **到達可能性グラフの根**に置く。差は 2 つ出る:
+
+| | 濾すだけ | 根に置く |
+|---|---|---|
+| 無視された型のメソッド（別ファイル） | 報告される | used |
+| 無視された宣言が**参照しているもの** | 到達不能のままで報告される | used |
+
+2 行目は fixture の `keptAlive` が押さえている。無視された関数からしか呼ばれない関数は、
+上流では生きていて guff では死んでいた。**同じ 1 行の修正で両方消える**ので、
+フィルタをやめて根に積む形に直した。
+
+**ゲート**: `crates/guff-unused/tests/testdata/fileignore/` に **2 ファイル 1 パッケージ**の
+fixture を置いた。directive のあるファイルに型、無いファイルにメソッド —— nats-server の形
+そのままである。golden の `cases/unused` に `sources.txt` 経由で載せてあり、
+golangci-lint 2.12.2 が撃つ 2 件（`(*plain).unusedMethod` と `unusedFree`）と
+byte 単位で一致する。**撃つ側と黙る側を同じファイルに並べてある**のが要で、
+「全部黙らせる」修正では通らない。修正前のバイナリでこの fixture を回すと
+guff だけが 4 件（`inPlainFile` と `keptAlive` が余分）出る。
+
+Rust 側の単体テストも同じ fixture を使う。1 ファイル 1 パッケージ前提だった
+`support::typecheck_pkg` に複数ファイル版を足してある —— **ファイルを跨ぐ規則は
+1 ファイルのハーネスでは書けない**ため。
+
+**nats-server**: `unused` は 0 件で golangci-lint と一致（`./server/...` を単独 config で実測）。
+残る guff-only は ineffassign ×1 と SA5011 ×1 で、どちらも続き 7 に記録済みのもの。
+
+#### hunt 15 リポの現在地（2026-08-21）
+
+| target | 残り |
+|---|---|
+| go-redis / restic / rclone / cli / traefik / coredns / prometheus / dapr / argo-cd / atlas | **差分なし** |
+| nats-server | ineffassign ×1 / SA5011 ×1（この回で unused ×1 を解消） |
+| jaeger | revive ×2 —— **§6 の「revive の importer 盲目には追従しない」そのもの**（`time-naming` / `epoch-naming`）。恒久差分 |
+| thanos | unparam ×2 —— ctrlflow の noreturn 未移植（続き 9） |
+| gitea | nolintlint ×1 —— 上流 SA4006 の偽陽性のカスケード（続き 7） |
+| authelia | wsl_v5 ×2 / gosec ×1 / nolintlint ×15 |
+
+**次にやること**
+
+1. authelia の wsl_v5 ×2。上流 `checkError` の 2 つの分岐が guff に無い ——
+   (a) `previousIdents` は `*ast.AssignStmt` と `*ast.DeclStmt` からしか作らない
+   （`if uri, err = …; err == nil {}` は交差を作らない）、
+   (b) 代入と `if` の間のコメントが**別の行**にあれば return。
+2. authelia の gosec G703 ×1（`cmd_adr.go:131`）。上流の taint 設定は
+   `os.ReadFile` を source にも sink にもしているので、どちらの経路で汚れているかを
+   最小再現で切り分ける。
+3. `ctrlflow` / `go/cfg` の移植（続き 9）。thanos の 2 件と、`sa5011.rs` /
+   `lostcancel.rs` の名前ベース代用が同時に畳める。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

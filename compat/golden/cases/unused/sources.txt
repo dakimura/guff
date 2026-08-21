@@ -1,9 +1,13 @@
 # The fixtures the Rust tests use, so the two cannot drift. One directory per
-# file: the Rust tests type-check each on its own, and combining them would
-# change what is reachable.
+# package: the Rust tests type-check each package on its own, and merging two of
+# them would change what is reachable.
 genericmethod/generic_method_bad.go   crates/guff-unused/tests/testdata/basic/generic_method_bad.go
 bad/method_bad.go                     crates/guff-unused/tests/testdata/basic/method_bad.go
 iface/iface_ok.go                     crates/guff-unused/tests/testdata/basic/iface_ok.go
 genericiface/generic_iface.go         crates/guff-unused/tests/testdata/basic/generic_iface.go
 lintignore/lint_ignore.go             crates/guff-unused/tests/testdata/basic/lint_ignore.go
 deadcycle/dead_cycle.go               crates/guff-unused/tests/testdata/basic/dead_cycle.go
+# Two files, one package: the directive is in the first, the methods of the
+# type it covers are in the second (nats-server's jetstream_helpers_test.go).
+fileignore/types.go                   crates/guff-unused/tests/testdata/fileignore/types.go
+fileignore/methods.go                 crates/guff-unused/tests/testdata/fileignore/methods.go
