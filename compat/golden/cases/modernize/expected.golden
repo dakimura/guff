@@ -17,6 +17,12 @@ bad/bad.go:50:2:modernize::slicescontains: Loop can be simplified using slices.C
 bad/bad.go:59:24:modernize::omitzero: Omitempty has no effect on nested struct fields
 bloop/bloop.go:93:6:modernize::rangeint: for loop can be modernized using range over int
 mapsloop/mapsloop.go:7:3:modernize::mapsloop: Replace m[k]=v loop with maps.Copy
+minmax/minmax.go:8:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:17:5:modernize::minmax: if statement can be modernized using max
+minmax/minmax.go:29:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:71:5:modernize::minmax: if/else statement can be modernized using min
+minmax/minmax.go:85:5:modernize::minmax: if statement can be modernized using min
+minmax/minmax.go:96:5:modernize::minmax: if statement can be modernized using min
 plusbuild/plusbuild.go:6:1:modernize::plusbuild: +build line is no longer needed
 reflecttypefor/reflecttypefor.go:13:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor
 reflecttypefor/reflecttypefor.go:17:9:modernize::reflecttypefor: reflect.TypeOf call can be simplified using TypeFor

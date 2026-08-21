@@ -15,6 +15,7 @@ bad/bad.go                          crates/guff-style/tests/testdata/modernize/b
 ok/ok.go                            crates/guff-style/tests/testdata/modernize/ok.go
 stringsseq/stringsseq.go            crates/guff-style/tests/testdata/modernize/stringsseq.go
 mapsloop/mapsloop.go                crates/guff-style/tests/testdata/modernize/mapsloop.go
+minmax/minmax.go                    crates/guff-style/tests/testdata/modernize/minmax.go
 bloop/bloop.go                      crates/guff-style/tests/testdata/modernize/bloop.go
 errorsastype/errorsastype.go        crates/guff-style/tests/testdata/modernize/errorsastype.go
 importcomment/importcomment.go      crates/guff-style/tests/testdata/modernize/importcomment.go

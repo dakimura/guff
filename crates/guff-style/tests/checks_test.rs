@@ -5763,6 +5763,36 @@ fn modernize_flags_common_patterns() {
     );
 }
 
+/// minmax's **pattern 2**: `v := x` immediately above `if v > y { v = y }`,
+/// with no else. Upstream words it "if statement", where pattern 1 says
+/// "if/else statement", so the two are told apart by that word alone.
+#[test]
+fn modernize_minmax_matches_the_assignment_above_the_if() {
+    let pkg = support::typecheck_fixture("modernize", "example.com/modernize/minmax", "minmax.go");
+    let messages = support::run_analyzer(modernize(), &pkg);
+    let mut got: Vec<&String> = messages.iter().collect();
+    got.sort();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.starts_with("if statement can be modernized using"))
+            .count(),
+        5,
+        "{got:?}"
+    );
+    // The if/else control still fires, and the three silent shapes stay silent:
+    // a different variable above, operands unrelated to it, and floats.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.starts_with("if/else statement can be modernized using"))
+            .count(),
+        1,
+        "{got:?}"
+    );
+    assert_eq!(messages.len(), 6, "{got:?}");
+}
+
 #[test]
 fn modernize_rangeint_skips_mutated_limits() {
     let pkg =
