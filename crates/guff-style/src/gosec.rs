@@ -2,7 +2,7 @@
 //! (golangci-lint wrapper in `pkg/golinters/gosec`).
 //!
 //! Implemented rules (AST / types-info only):
-//! - **G101** — potential hardcoded credentials (name pattern + Shannon entropy approx /
+//! - **G101** — potential hardcoded credentials (name pattern + zxcvbn entropy /
 //!   known secret regexes on AssignStmt / ValueSpec / BinaryExpr / CompositeLit)
 //! - **G102** — bind to all interfaces (`net.Listen` / `crypto/tls.Listen` address)
 //! - **G103** — `unsafe` calls (`Pointer` / `String` / `StringData` / `Slice` / `SliceData`)
@@ -20,6 +20,7 @@
 //!   `gosec_g115`)
 //! - **G122** — `filepath.Walk`/`WalkDir` callback path into race-prone `os` sinks (AST approx of SSA)
 //! - **G124** — `http.Cookie` missing Secure / HttpOnly / SameSite (AST approx of SSA rule)
+//! - **G202** — SQL string concatenation
 //! - **G203** — `html/template` non-escaping helpers with non-literal args
 //! - **G204** — subprocess launched with non-literal args (`os/exec` / `syscall` / `execabs`;
 //!   full `resolve.go` `TryResolve`, incl. the parameter/field exemption in the
@@ -42,9 +43,9 @@
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
-//! DEFERRED: remaining rules (G113, G116–G118, G201–G202, G304–G305, G307
+//! DEFERRED: remaining rules (G113, G116–G121, G123, G201, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
-//! G101 zxcvbn entropy / full `gosec:disable` block directives / per-rule
+//! full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
 //! string-lit TryResolve, G102 Ident const resolution, concurrency.
 //!
