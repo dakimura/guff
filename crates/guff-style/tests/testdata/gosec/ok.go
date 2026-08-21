@@ -302,3 +302,25 @@ func okG703TaintKilledByReassignment(dir string) error {
 
 	return os.WriteFile(c, raw, 0o600)
 }
+
+// The other side of the same rule: a call with **no static callee** — here a
+// func-typed parameter — does not carry its arguments' taint to its result, so
+// the `os.WriteFile` below is clean. grafana's
+// pkg/services/store/kind/dashboard/summary_test.go is this shape (`reader` is a
+// local variable holding a builder function), and treating every call as
+// transparent reports it two hops later.
+func okG703CallWithoutStaticCallee(dir string, build func(string, []byte) ([]byte, error)) error {
+	p := filepath.Join(dir, "in.json")
+
+	body, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+
+	out, err := build(p, body)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(p, out, 0o600)
+}

@@ -7639,6 +7639,36 @@ if err != nil {
 収集専用パスには無かったので、`internal/suites/utils.go:270` の `//nolint:gosec` が
 書かれた理由である G703 を guff も出すようになり、カスケードしていた nolintlint も消えた。
 
+#### 「呼び出しを通す」は 3 種類ある（nightly が教えてくれた）
+
+最初の実装は**代入の右辺にある呼び出しを無条件に通した**。PR の `oss-nightly` が
+grafana で落ちて分かったのは、上流がここを 3 つに分けていること
+（`taint/taint.go:583-630`）:
+
+| 呼び先 | 引数の taint は戻り値へ |
+|---|---|
+| 外部（本体が無い＝ stdlib など） | **流れる** |
+| 内部（本体がある） | `doTaintedArgsFlowToReturn` が認めたときだけ |
+| static callee が無い（関数型の変数） | **流れない** |
+
+grafana の `summary_test.go` は 3 行目そのもので、
+
+```go
+body, err := os.ReadFile(path)             // source
+summary, _, err := reader(ctx, uid, body)  // reader はローカル変数
+out, err := json.MarshalIndent(summary, …)
+os.WriteFile(gpath, out, 0600)             // 上流は黙る
+```
+
+無条件に通すと 2 ホップ先の sink で撃ってしまう。guff は手続き間解析を持たないので
+**1 行目だけを採用し、残り 2 つは通さない**（型変換 `string(b)` / `[]byte(s)` は
+上流の `*ssa.Convert` に当たるので通す）。**sink 側の述語は従来どおり**で、
+そちらは呼び出しの中を見てよい（`os.Stat(f(os.Getenv(…)))`）。
+
+**教訓**: ローカルの `--oss --tier pr,nightly` を**その PR のブランチで**回すこと。
+この回は syncthing のブランチ（main 由来）で回していたので、G703 の変更が
+入っていないバイナリを測っていた。
+
 **ゲート**:
 
 - `compat/golden/cases/wsl-v5` を新設。wsl_v5 は isolate しか持っておらず、

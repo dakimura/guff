@@ -2440,6 +2440,76 @@ fn collect_g703_valuespec_events<'a>(
     }
 }
 
+/// Does assigning `value` to a variable make that variable tainted?
+///
+/// Narrower than [`path_arg_is_g703_tainted`], which answers the question at a
+/// *sink* and may look through any call written there. Upstream's engine
+/// distinguishes three kinds of callee (`taint/taint.go:583-630`):
+///
+/// | callee | taint of a tainted argument |
+/// |---|---|
+/// | external, no body (stdlib) | flows to the result |
+/// | internal, body available | flows only if `doTaintedArgsFlowToReturn` says so |
+/// | no static callee (a func-typed variable) | does not flow |
+///
+/// guff has no interprocedural pass, so it takes the first row and declines the
+/// other two. grafana's `summary_test.go` is why the middle ground is not safe:
+///
+/// ```go
+/// body, err := os.ReadFile(path)      // source
+/// summary, _, err := reader(ctx, uid, body)   // `reader` is a local variable
+/// out, err := json.MarshalIndent(summary, …)
+/// os.WriteFile(gpath, out, 0600)      // upstream: silent
+/// ```
+///
+/// `reader` has no static callee, so upstream stops at `summary`. Propagating
+/// through every call reaches `out` and reports a sink two hops later.
+fn assignment_taints(pass: &Pass<'_>, value: &Expr, tainted: &HashSet<ObjectId>) -> bool {
+    if is_g703_source_expr(pass, value) {
+        return true;
+    }
+    match value {
+        Expr::Ident(id) => object_of(pass, id).is_some_and(|obj| tainted.contains(&obj)),
+        Expr::ParenExpr(p) => assignment_taints(pass, &p.x, tainted),
+        Expr::BinaryExpr(b) if b.op == Token::ADD => {
+            assignment_taints(pass, &b.x, tainted) || assignment_taints(pass, &b.y, tainted)
+        }
+        Expr::CallExpr(call) => {
+            if !g703_call_propagates(pass, call) {
+                return false;
+            }
+            call.args.iter().any(|a| assignment_taints(pass, a, tainted))
+        }
+        _ => false,
+    }
+}
+
+/// A conversion (`string(b)`, `[]byte(s)`, `T(x)`) or a call into another
+/// package — the two shapes whose result upstream lets a tainted argument reach.
+fn g703_call_propagates(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    // `[]byte(x)` / `[]rune(x)`: the callee is a type expression, never an ident.
+    if matches!(&*call.fun, Expr::ArrayType(_)) {
+        return true;
+    }
+    if let Expr::Ident(id) = &*call.fun {
+        // `string(b)` and friends: a conversion, which upstream models as
+        // `*ssa.Convert` and propagates through.
+        if let (Some(obj), Some(artifacts)) =
+            (object_of(pass, id), pass.pkg().type_artifacts.as_ref())
+        {
+            if matches!(artifacts.objects.get(obj), ObjectData::TypeName(_)) {
+                return true;
+            }
+        }
+    }
+    match resolve_pkg_call(pass, call) {
+        // A function of *this* package has a body upstream would look inside;
+        // guff cannot, so it declines rather than guesses.
+        Some((pkg, _)) => pkg != cut_vendor(&pass.pkg().pkg_path),
+        None => false,
+    }
+}
+
 fn path_arg_is_g703_tainted(
     pass: &Pass<'_>,
     arg: &Expr,
@@ -2768,9 +2838,7 @@ fn check_g703(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
     for event in &events {
         match event {
             G703Event::Assign { obj, value, .. } => {
-                if is_g703_source_expr(pass, value)
-                    || path_arg_is_g703_tainted(pass, value, &tainted)
-                {
+                if assignment_taints(pass, value, &tainted) {
                     tainted.insert(*obj);
                 } else {
                     tainted.remove(obj);

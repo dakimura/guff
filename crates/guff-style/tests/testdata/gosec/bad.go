@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/crypto/md4"
@@ -158,4 +159,22 @@ func g703ReadFileContentIntoWriteFile(dir string) error {
 	}
 
 	return os.WriteFile(c, raw, 0o600)
+}
+
+// G703 — taint through an *external* call. `strings.ReplaceAll` has no body in
+// this build, and upstream's engine lets a tainted argument reach the result of
+// any callee it cannot look inside (`taint/taint.go:620`). authelia's
+// internal/suites/utils.go writes exactly this and silences it with
+// `//nolint:gosec`.
+func g703TaintThroughStdlibCall(dir string) error {
+	p := filepath.Join(dir, "in.txt")
+
+	body, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+
+	content := strings.ReplaceAll(string(body), "a", "b")
+
+	return os.WriteFile(p, []byte(content), 0o600)
 }
