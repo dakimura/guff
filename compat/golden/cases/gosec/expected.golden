@@ -59,6 +59,7 @@ bad/bad.go:130:20:gosec:medium:G202: SQL string concatenation
 bad/bad.go:136:2:gosec:low:G104: Errors unhandled
 bad/bad.go:136:10:gosec:medium:G202: SQL string concatenation
 bad/bad.go:144:22:gosec:medium:G202: SQL string concatenation
+bad/bad.go:160:21:gosec:high:G703: Path traversal via taint analysis
 entropy/entropy.go:12:2:gosec:high:G101: Potential hardcoded credentials
 entropy/entropy.go:13:2:gosec:high:G101: Potential hardcoded credentials
 entropy/entropy.go:14:2:gosec:high:G101: Potential hardcoded credentials

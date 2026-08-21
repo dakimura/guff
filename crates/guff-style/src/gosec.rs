@@ -2353,15 +2353,50 @@ fn is_g703_args_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
     imported_pkg_path(pass, pkg).as_deref() == Some("os")
 }
 
-fn collect_g703_tainted_from_assign(
-    pass: &Pass<'_>,
-    assign: &AssignStmt,
-    tainted: &mut HashSet<ObjectId>,
-) {
-    for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
-        if !is_g703_source_expr(pass, rhs) {
-            continue;
+/// One thing that happens to the taint state, in source order.
+///
+/// Upstream's taint analysis runs on SSA, where a variable assigned twice is
+/// two values: `raw, _ = os.ReadFile(p)` (a declared source) and
+/// `raw, _ = json.Marshal(cfg)` (not one) never share a node, so the second
+/// assignment does not carry the first's taint. A flat "has this name ever been
+/// assigned a source" set has no way to say that, and authelia's
+/// `cmd/authelia-gen/cmd_adr.go` is exactly the shape it gets wrong: read the
+/// config file, unmarshal it, marshal it back, write it out.
+///
+/// Replaying the events in position order gives the same answer for
+/// straight-line code without an SSA form: a later assignment from something
+/// untainted *kills* the taint.
+enum G703Event<'a> {
+    /// `obj = value`, at the end of the statement — after any sink inside the
+    /// right-hand side has been judged with the state that preceded it.
+    Assign {
+        pos: i64,
+        obj: ObjectId,
+        value: &'a Expr,
+    },
+    /// A call to one of `G703_SINKS`, at its `Lparen` (upstream's `call.Pos()`).
+    Sink { pos: i64, call: &'a CallExpr },
+}
+
+impl G703Event<'_> {
+    fn pos(&self) -> i64 {
+        match self {
+            G703Event::Assign { pos, .. } | G703Event::Sink { pos, .. } => *pos,
         }
+    }
+}
+
+fn collect_g703_assign_events<'a>(
+    pass: &Pass<'_>,
+    assign: &'a AssignStmt,
+    events: &mut Vec<G703Event<'a>>,
+) {
+    let end = assign
+        .rhs
+        .last()
+        .map(|e| e.end().0)
+        .unwrap_or(assign.tok_pos.0);
+    for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
         let Expr::Ident(id) = lhs else {
             continue;
         };
@@ -2369,25 +2404,38 @@ fn collect_g703_tainted_from_assign(
             continue;
         }
         if let Some(obj) = object_of(pass, id) {
-            tainted.insert(obj);
+            events.push(G703Event::Assign {
+                pos: end,
+                obj,
+                value: rhs,
+            });
         }
     }
 }
 
-fn collect_g703_tainted_from_valuespec(
+fn collect_g703_valuespec_events<'a>(
     pass: &Pass<'_>,
-    vs: &guff::ast::ValueSpec,
-    tainted: &mut HashSet<ObjectId>,
+    vs: &'a guff::ast::ValueSpec,
+    events: &mut Vec<G703Event<'a>>,
 ) {
     if vs.values.is_empty() {
         return;
     }
+    let end = vs
+        .values
+        .last()
+        .map(|e| e.end().0)
+        .unwrap_or_else(|| vs.names.first().map(|n| n.pos().0).unwrap_or(0));
     for (name, val) in vs.names.iter().zip(vs.values.iter()) {
-        if name.name == "_" || !is_g703_source_expr(pass, val) {
+        if name.name == "_" {
             continue;
         }
         if let Some(obj) = object_of(pass, name) {
-            tainted.insert(obj);
+            events.push(G703Event::Assign {
+                pos: end,
+                obj,
+                value: val,
+            });
         }
     }
 }
@@ -2417,16 +2465,18 @@ fn path_arg_is_g703_tainted(
     }
 }
 
+fn is_g703_sink_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
+    resolve_pkg_call(pass, call)
+        .is_some_and(|(pkg, name)| G703_SINKS.iter().any(|(p, n)| *p == pkg && *n == name))
+}
+
 fn check_g703_sink_call(
     pass: &Pass<'_>,
     call: &CallExpr,
     tainted: &HashSet<ObjectId>,
     pending: &mut Vec<(u32, String)>,
 ) {
-    let Some((pkg, name)) = resolve_pkg_call(pass, call) else {
-        return;
-    };
-    if !G703_SINKS.iter().any(|(p, n)| *p == pkg && *n == name) {
+    if !is_g703_sink_call(pass, call) {
         return;
     }
     // Upstream PathTraversal sinks omit CheckArgs ⇒ every argument is checked
@@ -2690,26 +2740,46 @@ fn check_g703(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
     if !enabled.contains("G703") {
         return;
     }
-    let mut tainted: HashSet<ObjectId> = HashSet::new();
+    let mut events: Vec<G703Event<'_>> = Vec::new();
     for file in pass.files() {
         preorder(NodeRef::File(file), |n| {
             match n {
-                NodeRef::AssignStmt(a) => collect_g703_tainted_from_assign(pass, a, &mut tainted),
-                NodeRef::ValueSpec(vs) => {
-                    collect_g703_tainted_from_valuespec(pass, vs, &mut tainted)
+                NodeRef::AssignStmt(a) => collect_g703_assign_events(pass, a, &mut events),
+                NodeRef::ValueSpec(vs) => collect_g703_valuespec_events(pass, vs, &mut events),
+                NodeRef::CallExpr(c) => {
+                    if is_g703_sink_call(pass, c) {
+                        events.push(G703Event::Sink {
+                            pos: c.lparen.0,
+                            call: c,
+                        });
+                    }
                 }
                 _ => {}
             }
             true
         });
     }
-    for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
-            if let NodeRef::CallExpr(c) = n {
-                check_g703_sink_call(pass, c, &tainted, pending);
+    // Positions are byte offsets in one FileSet, so sorting is file order and
+    // then source order within a file. `sort_by_key` is stable, which keeps the
+    // several `Assign`s of one multi-name statement in their written order.
+    events.sort_by_key(G703Event::pos);
+
+    let mut tainted: HashSet<ObjectId> = HashSet::new();
+    for event in &events {
+        match event {
+            G703Event::Assign { obj, value, .. } => {
+                if is_g703_source_expr(pass, value)
+                    || path_arg_is_g703_tainted(pass, value, &tainted)
+                {
+                    tainted.insert(*obj);
+                } else {
+                    tainted.remove(obj);
+                }
             }
-            true
-        });
+            G703Event::Sink { call, .. } => {
+                check_g703_sink_call(pass, call, &tainted, pending);
+            }
+        }
     }
 }
 

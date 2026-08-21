@@ -144,3 +144,18 @@ func sqlConcatFieldRecv(h *sqlHolder, table string) error {
 	_, err := h.db.Exec("DELETE FROM " + table + " WHERE key = ?")
 	return err
 }
+
+// G703 — the control for `okG703TaintKilledByReassignment` in ok.go. `os.ReadFile`
+// is a declared *source* as well as a sink, and PathTraversal's sinks name no
+// `CheckArgs`, so every argument of `os.WriteFile` is judged: here the content
+// argument arrives straight from the read and is still tainted.
+func g703ReadFileContentIntoWriteFile(dir string) error {
+	c := filepath.Join(dir, "cfg.json")
+
+	raw, err := os.ReadFile(c)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(c, raw, 0o600)
+}

@@ -455,6 +455,52 @@ fn assign_defines_err(stmt: &Stmt, err_name: &str) -> bool {
     find_lhs(stmt).iter().any(|n| n == err_name)
 }
 
+/// `checkError`'s own `previousIdents`, which is **not** `identsFromNode`:
+/// upstream builds it from the left-hand side of an `*ast.AssignStmt` and the
+/// names of a `*ast.DeclStmt`, and from nothing else (wsl v5.8.0 `wsl.go:777`).
+/// So an `if` above whose *init* assigns `err` contributes no idents, the
+/// intersection is empty, and upstream returns before reporting anything.
+///
+/// authelia's `parseAttributeURI` is exactly that shape:
+///
+/// ```go
+/// if uri, err = url.ParseRequestURI(value); err == nil {
+///     …
+/// }
+///
+/// if err != nil {
+/// ```
+///
+/// `find_lhs` answers the wider question (it reaches into an `if` cond), which
+/// is right for `checkCuddlingMaxAllowed` and wrong here.
+fn err_declared_directly_above(stmt: &Stmt, err_name: &str) -> bool {
+    match stmt {
+        Stmt::AssignStmt(_) | Stmt::DeclStmt(_) => {
+            find_lhs(stmt).iter().any(|n| n == err_name)
+        }
+        _ => false,
+    }
+}
+
+/// Upstream bails out of `checkError` when a comment sits between the error
+/// assignment and the `if`, unless that comment ends on the assignment's own
+/// last line — i.e. unless it is a trailing comment (wsl v5.8.0 `wsl.go:803`).
+/// A comment on its own line is content the author put there deliberately, and
+/// removing the blank line would move it.
+///
+/// Compared by line, not position: the production typecheck parses without
+/// comments, so `comment_lines` comes from a re-parse with its own `FileSet`
+/// (see `check_leading_trailing` for the same constraint).
+fn comment_blocks_err_cuddle(
+    comment_lines: &[(i64, i64)],
+    prev_end_line: i64,
+    if_line: i64,
+) -> bool {
+    comment_lines.iter().any(|&(cg_start, cg_end)| {
+        cg_start >= prev_end_line && cg_start < if_line && cg_end != prev_end_line
+    })
+}
+
 fn check_leading_trailing(
     fset: &FileSet,
     comment_lines: &[(i64, i64)],
@@ -520,6 +566,7 @@ fn check_leading_trailing(
 
 fn check_err_cuddle(
     fset: &FileSet,
+    comment_lines: &[(i64, i64)],
     stmts: &[Stmt],
     i: usize,
     options: &WslV5Options,
@@ -533,15 +580,24 @@ fn check_err_cuddle(
         return;
     };
     let prev = &stmts[i - 1];
-    if !assign_defines_err(prev, &err_name) {
+    if !err_declared_directly_above(prev, &err_name) {
         return;
     }
-    // Gap between err assign and if → remove whitespace.
-    if stmt_end(fset, prev) + 1 < stmt_start(fset, stmt) {
-        pending.push((
-            prev.pos().0 as u32,
-            format!("{MSG_REMOVE} (err)"),
-        ));
+    let prev_end_line = stmt_end(fset, prev);
+    let if_line = stmt_start(fset, stmt);
+    if comment_blocks_err_cuddle(comment_lines, prev_end_line, if_line) {
+        return;
+    }
+    // Gap between err assign and if → remove whitespace. Upstream reports the
+    // *removal range*, whose start is `file.LineStart(previousEndLine + 1)` —
+    // column 1 of the first blank line, not the assignment above it
+    // (wsl v5.8.0 `wsl.go:827`).
+    if prev_end_line + 1 < if_line {
+        let pos = fset
+            .file(prev.pos())
+            .map(|f| f.line_start(prev_end_line as usize + 1))
+            .unwrap_or_else(|| prev.pos());
+        pending.push((pos.0 as u32, format!("{MSG_REMOVE} (err)")));
     }
 }
 
@@ -687,7 +743,7 @@ fn check_statements(
         if i == 0 {
             continue;
         }
-        check_err_cuddle(fset, stmts, i, options, pending);
+        check_err_cuddle(fset, comment_lines, stmts, i, options, pending);
 
         let prev = &stmts[i - 1];
         let cuddled = stmt_end(fset, prev) + 1 == stmt_start(fset, stmt);

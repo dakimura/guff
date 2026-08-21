@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"hash"
 	"html/template"
 	"io"
@@ -265,4 +266,39 @@ var g115InPackageVar = map[string]func(string, string) uint64{
 		}
 		return uint64(x) + uint64(y)
 	},
+}
+
+// gosec's taint analysis runs on SSA, where two assignments to one name are two
+// values: `raw` is tainted by `os.ReadFile` (a declared source) and then
+// *reassigned* from `json.Marshal`, which is not one, so the `os.WriteFile`
+// below sees clean bytes. A flat "was this name ever assigned a source" set
+// cannot say that. authelia's cmd/authelia-gen/cmd_adr.go is exactly this
+// shape — read the config, unmarshal it, bump a counter, marshal it back, write
+// it out — and it was guff's only G703 finding anywhere in the corpus.
+//
+// The firing half of the pair is `g703ReadFileContentIntoWriteFile` in bad.go.
+func okG703TaintKilledByReassignment(dir string) error {
+	c := filepath.Join(dir, "cfg.json")
+
+	var raw []byte
+
+	var err error
+
+	if raw, err = os.ReadFile(c); err != nil {
+		return err
+	}
+
+	var config struct{ NextID int }
+
+	if err = json.Unmarshal(raw, &config); err != nil {
+		return err
+	}
+
+	config.NextID++
+
+	if raw, err = json.Marshal(config); err != nil {
+		return err
+	}
+
+	return os.WriteFile(c, raw, 0o600)
 }
