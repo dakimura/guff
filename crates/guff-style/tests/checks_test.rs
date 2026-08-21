@@ -116,6 +116,54 @@ fn gosec_g115_reports_only_unbounded_conversions() {
     );
 }
 
+/// G118 is the third SSA analyzer. It is one id over three checks; the fixture
+/// marks every `context.With…` call and every `go` statement `// FINDING` or
+/// `// silent`, and `compat/golden/cases/gosec` gates those marks against
+/// golangci-lint 2.12.2.
+#[test]
+fn gosec_g118_reports_only_uncalled_cancels_and_detached_goroutines() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g118", "g118.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let count = |needle: &str| messages.iter().filter(|m| m.as_str() == needle).count();
+
+    assert_eq!(
+        (
+            count(
+                "G118: context cancellation function returned by \
+                 WithCancel/WithTimeout/WithDeadline is not called"
+            ),
+            count(
+                "G118: Goroutine uses context.Background/TODO while request-scoped \
+                 context is available"
+            ),
+            count("G118: Long-running loop performs calls without a ctx.Done() cancellation guard"),
+        ),
+        (6, 2, 1),
+        "{messages:?}"
+    );
+    // Nothing else: every other case in the fixture is one of the escapes the
+    // walk has to recognise, and the `// silent` marks say which.
+    assert_eq!(
+        messages.iter().filter(|m| m.starts_with("G118:")).count(),
+        9,
+        "{messages:?}"
+    );
+}
+
+/// G123 is the fourth SSA analyzer: an inventory of `tls.Config` field stores
+/// rather than a dataflow. The fixture marks every config `// FINDING` or
+/// `// silent`, gated by `compat/golden/cases/gosec`.
+#[test]
+fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g123", "g123.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    assert_eq!(
+        messages.iter().filter(|m| m.starts_with("G123:")).count(),
+        5,
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");

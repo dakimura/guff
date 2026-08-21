@@ -7302,6 +7302,77 @@ corpus 内の `go:linkname` は containerd の vendored `x/sys` だけ。
 Rust の単体テストと golden の両方に。`gosec` は `g115.go` に `new(型)` / `new(変換)` /
 `new(拡大変換)` の 3 行。どちらも byte-exact 側で上流と突き合わせている。
 
+### 2026-08-21（続き 8）— precision から recall へ: gosec G118 / G123 を移植した
+
+前セッションで corpus 全体の guff-only は 6 件まで落ち、**残る差は「上流だけが出す」側**
+——つまり未実装ルール——になっていた。dapr の golangci-only 6 件はその全部が gosec で、
+内訳は **G118 が 5 件、G123 が 1 件**。両方入れて dapr は 1364/1364 の完全一致になった。
+
+**G118（context propagation）** は 1 つの analyzer id に**無関係な 3 つの検査**が入っていて、
+severity / confidence もそれぞれ違う。`issue_scores` が G402 に続いて 2 例目の
+「メッセージを見て採点する」ルールになった。
+
+| 検査 | 採点 | corpus での出現 |
+|---|---|---|
+| cancel が呼ばれていない | Medium/High | dapr ×4 |
+| `go` の先が `context.Background`/`TODO` | High/Medium | dapr ×1 |
+| 出口の無いループに `ctx.Done()` が無い | High/Low | 0 |
+
+移植の分量はほぼ全部が **「cancel は呼ばれていないが、それでいい」形の列挙**である
+（返す／クロージャが捕捉する／構造体フィールドに置いて別メソッドが呼ぶ／
+パッケージ変数に置く）。ルール本体は 3 行しかない。
+
+上流の挙動で**バグに見えるが仕様として写した**ものが 3 つある。どれも実際に findings を決める:
+
+1. **ジェネリック型は `types.Identical` を通らない。** `func New[T any]() *Conn[T]` の
+   複合リテラルの型は*インスタンス* `Conn[T]`、`(*Conn[T]).Close` のレシーバは
+   **型引数を持たない origin**。`Identical` は型引数の本数が違う時点で false を返すので、
+   `Close` が `c.cancel()` を呼んでいてもフィールド走査は届かない。
+   dapr の `pluggable.GRPCConnector[TClient]` がまさにこれで報告されている。
+2. **map に入れた cancel は追わない。** 走査の命令集合に `MapUpdate` が無い。
+   dapr の `subscriber.retrySubscription`（`s.retryCancel[name] = cancel`）が該当。
+3. **`c, _ := context.WithCancel(ctx)` は報告される。** go/ssa は blank lvalue に捨てる前に
+   `Extract #1` を発行するので、参照 0 の cancel として見える。
+   fixture で一番「偽陽性に見える」行なので、そう書いて置いてある。
+
+「出口の無いループ」検査は Tarjan の SCC で、**SCC の外に出る辺が 1 本でもあれば対象外**。
+`for { … return … }` は return ブロックへの辺を持つので落ちる ＝ 本当に終わらないループだけが残る。
+corpus 14 リポで 0 件なのはそのため。再帰の Tarjan は**フレームを明示したループ**に置き換えたが、
+後続の訪問順（＝ SCC 内のブロック順＝報告位置）が変わらないように書いてある。
+
+**土台の欠落を 1 つ見つけた。** go/ssa の `CreatePackage` は syntax の無いパッケージに対し、
+export data から**メソッドも Member として作る**（`named.Method(i)` を回している）。
+guff は import の member を遅延生成し、しかも**パッケージレベルのオブジェクトだけ**なので、
+`object_method` 経由で作られるメソッドは `pkg: None` の合成シェルになる。
+その結果 `(*http.Request).Context` が `net/http` のものだと分からず、
+**`http.Handler` の中の `go` が丸ごと黙っていた**。宣言パッケージは
+型検査オブジェクト側に残っているので、`f.pkg` が無いときは `f.object.pkg()` を見るようにした
+（`gosec_g118::func_pkg_path`）。SSA 側を直すのが本筋だが、それは
+`buildir` を含む全 analyzer の member 集合を動かすので、ここでは踏み込んでいない。
+
+**G123（TLS 再開が `VerifyPeerCertificate` を迂回する）** は短い。
+`tls.Config` の 5 フィールドへの `Store` を数える**在庫表**であって dataflow ではない:
+`VerifyPeerCertificate` が入っていて、`VerifyConnection` も
+`SessionTicketsDisabled: true` も無ければ報告。再開されたセッションは証明書チェーンを
+提示しないので、そのコールバックは走らない。
+
+在庫表なので、**config が別の関数で組まれると追えない**。
+`GetConfigForClient: func(…) { return direct(), nil }` は上流も報告しない
+（`direct()` の Store は別の関数の値をキーにしている）。
+クロージャの中で組めば両方報告される。fixture はその 2 つを並べて置いた。
+
+**ゲート**: `gosec` の golden case に fixture を 2 本足した（`g118.go` / `g123.go`）。
+どちらも 1 行ごとに `// FINDING` / `// silent` を書いてあり、その印は
+golangci-lint 2.12.2 の実行結果と byte 単位で突き合わせている。
+Rust の単体テストは同じ fixture をスタブ宇宙で通す
+（`context` / `crypto/x509` のスタブと、`*http.Request` の `Context()` を足した）。
+
+**dapr**: guff=1364 golangci=1364 both=1364 P=100.0% R=100.0%。
+
+**次**: gosec の未実装は G113 / G116–G117 / G119–G121 / G201 / G304–G305 / G307 と
+G7xx の完全 taint エンジン。corpus の他リポで残る golangci-only は thanos の 3 件
+（unparam ×2 / staticcheck の malformed json tag ×1）だけになった。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
