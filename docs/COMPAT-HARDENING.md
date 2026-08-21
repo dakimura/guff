@@ -7845,6 +7845,69 @@ index 式を経由する `:=` と `=` / `var` spec / 条件中の裸の assertio
 
 ---
 
+### 2026-08-22（続き 16）— ill-typed は差分に出ない、三度目: syncthing の `lib/model`
+
+続き 13 の「次にやること」1。`GUFF_DEBUG_ILL_TYPED=1` で syncthing を回すと
+`lib/model` に **`go build` が受理する 3 件のエラー**が出ていた。
+**ill-typed は差分ではない** —— ill-typed パッケージで走らない analyzer はただ黙るだけなので、
+hunt では「golangci-only」としてしか見えない: forcetypeassert ×11 / godoclint ×3 /
+sloglint ×2 / fatcontext ×1 / unparam ×1、**全部この 1 パッケージから**。
+
+原因は 2 つ。
+
+#### 1. `append` が欲しいのは core type であって underlying ではない
+
+```go
+func without[E comparable, S ~[]E](s S, e E) S {
+    …
+    return append(s[:i], s[i+1:]...)
+}
+```
+
+型パラメータの *underlying* は制約インターフェースであり、
+「全メンバーがスライスか」を答えるのは**型集合**のほうである。go/types はここで
+`coreType(S)` を訊く。guff は `under(S)` を訊いて
+「argument S is not a slice」と答えていた。`clear` / `delete` / `close` にも
+同じ `DEFERRED: underIs` が付いていた。**`common_under` は既にあった**
+（`unsafe.Slice` / `unsafe.String` が使っている）ので、4 つともそれを使う。
+
+#### 2. 制約の検証はメソッドを待たなければならない
+
+```go
+type box[S Service] struct{ v S }
+type handler struct{}
+func (h *handler) Serve(ctx context.Context) error { … }
+type registry struct { h *box[*handler] }   // ← ここで検査される
+```
+
+インターフェース制約の充足には型引数の**メソッド**が要る。そしてメソッドのシグネチャは
+**そのメソッド自身のオブジェクト宣言**で解決される —— インスタンス化が
+*別の型の宣言の中*に書かれている時点では、まだ走っていない。
+guff はここをインラインで検証していたので `*handler` の `Serve` を型が付く前に読み、
+`wrong type for method Serve; have <空>` と報告していた。**`have` が空なのが目印**である。
+
+同じ形でも**値の位置**（`func New() *box[*handler]`）なら常に通っていた ——
+関数本体は最後に検査されるからで、これが「たまに出る」ように見えていた理由。
+
+Go はこれを遅延する（`typexpr.go` の `check.later(func() { … verify … })`）。
+guff のコメント自身が「verify だけが遅延を要する部分だが、インラインでやっている」と
+書いてあった。**遅延した。** `mono.record_instance` も一緒に動かし、
+AST の借用より長生きするので位置を受け取る変種を足した。
+
+**結果**: syncthing の `lib/model` は ill-typed 3 → **0**。
+hunt の golangci-only は forcetypeassert 11 → **0**、godoclint 4 → 1、
+sloglint 2 → 0、fatcontext 1 → 0。**R = 90.5% → 93.2%**。
+
+**ゲート**: `crates/guff-types/tests/check_files.rs` に 4 本。
+struct フィールドのインスタンス化が通ること、**本物の制約違反はいまも報告されること**、
+4 つの builtin が制約付き型パラメータを受けること、そして
+**型集合がスライスだけでない型パラメータは `append` がいまも拒むこと**。
+
+**教訓**: `compat/health.py` の ill-typed ゲートは OSS tier にしか掛かっていない。
+hunt tier に足したリポは、パッケージが丸ごと落ちていても誰も落ちない。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

@@ -134,11 +134,33 @@ impl MonoGraph {
         targs: &[TypeId],
         xlist: &[Expr],
     ) {
+        let positions: Vec<u32> = xlist.iter().map(|e| e.pos().0 as u32).collect();
+        self.record_instance_at(
+            types, objects, scopes, packages, pkg, pos, tparams, targs, &positions,
+        );
+    }
+
+    /// Same, for callers that no longer hold the argument expressions — the
+    /// deferred constraint check in `typexpr.rs` runs after the AST borrow is
+    /// gone, so it carries the positions instead.
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_instance_at(
+        &mut self,
+        types: &TypeArena,
+        objects: &ObjectArena,
+        scopes: &ScopeArena,
+        packages: &PackageArena,
+        pkg: PackageId,
+        pos: u32,
+        tparams: &[TypeId],
+        targs: &[TypeId],
+        positions: &[u32],
+    ) {
         for (i, &tpar) in tparams.iter().enumerate() {
             if i >= targs.len() {
                 break;
             }
-            let pos = xlist.get(i).map(|e| e.pos().0 as u32).unwrap_or(pos);
+            let pos = positions.get(i).copied().unwrap_or(pos);
             self.assign(types, objects, scopes, packages, pkg, pos, tpar, targs[i]);
         }
     }

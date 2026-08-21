@@ -447,24 +447,51 @@ impl Checker {
 
         // Check type constraints. A violation is a soft error: we still build
         // and return the instance (matching Go's `softErrorf` + return inst).
-        if let Some((i, cause)) = self.verify_targs(&tparams, &targs) {
-            let at = xlist.get(i).map(|e| e.pos().0 as u32).unwrap_or(pos);
-            self.error(at, Code::InvalidTypeArg, cause);
-        } else {
-            // Record the instantiation in the monomorphization flow graph
-            // (Go does this in the deferred `verify` closure's success path).
-            self.mono.record_instance(
-                &self.types,
-                &self.objects,
-                &self.scopes,
-                &self.packages,
-                self.pkg,
-                pos,
-                &tparams,
-                &targs,
-                xlist,
-            );
-        }
+        //
+        // **Deferred**, as in Go (`typexpr.go`'s `check.later(func() { … verify
+        // … })`). Satisfying an interface constraint needs the type argument's
+        // methods, and a method's signature is resolved by its own object
+        // declaration — which has not run yet when the instantiation is written
+        // inside another type's declaration:
+        //
+        //     type box[S Service] struct{ v S }
+        //     type handler struct{}
+        //     func (h *handler) Serve(ctx context.Context) error { … }
+        //     type registry struct { h *box[*handler] }   // ← checked here
+        //
+        // Verifying inline reads `*handler`'s `Serve` before it has a type and
+        // reports "wrong type for method Serve; have <nothing>". The same shape
+        // in a value position (`func New() *box[*handler]`) was always fine,
+        // because function bodies are checked last. syncthing's
+        // `serviceMap[string, *indexHandler]` is the struct-field spelling, and
+        // it made guff call the whole of `lib/model` ill-typed — which silently
+        // drops every analyzer that declines ill-typed packages.
+        let name_for_later = name.clone();
+        let tparams_for_later = tparams.clone();
+        let targs_for_later = targs.clone();
+        // The closure outlives the AST, so keep positions rather than `xlist`.
+        let arg_positions: Vec<u32> = xlist.iter().map(|e| e.pos().0 as u32).collect();
+        self.later(move |c| {
+            let _ = &name_for_later;
+            if let Some((i, cause)) = c.verify_targs(&tparams_for_later, &targs_for_later) {
+                let at = arg_positions.get(i).copied().unwrap_or(pos);
+                c.error(at, Code::InvalidTypeArg, cause);
+            } else {
+                // Record the instantiation in the monomorphization flow graph
+                // (Go does this in the same closure's success path).
+                c.mono.record_instance_at(
+                    &c.types,
+                    &c.objects,
+                    &c.scopes,
+                    &c.packages,
+                    c.pkg,
+                    pos,
+                    &tparams_for_later,
+                    &targs_for_later,
+                    &arg_positions,
+                );
+            }
+        });
 
         let inst = instantiate(
             &mut self.types,
