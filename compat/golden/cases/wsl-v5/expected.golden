@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh wsl-v5
+# Produced by running golangci-lint on compat/golden/cases/wsl-v5/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:6:2:wsl_v5::missing whitespace above this line (too many statements above if)
+bad/bad.go:10:3:wsl_v5::missing whitespace above this line (too many lines above return)
+bad/bad.go:12:2:wsl_v5::missing whitespace above this line (invalid statement above assign)
+bad/bad.go:83:1:wsl_v5::unnecessary whitespace (err)

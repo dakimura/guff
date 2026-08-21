@@ -42,3 +42,50 @@ func CommentFirstInBlock(c *cfg) {
 type cfg struct{ value int }
 
 func report(int) {}
+
+// The two shapes below are also silent upstream, and were guff-only false
+// positives in authelia. `checkError` has two early returns guff did not.
+
+// `previousIdents` comes from an `*ast.AssignStmt`'s LHS or an `*ast.DeclStmt`'s
+// names, and from nothing else: an `if` above whose *init* assigns err
+// contributes no idents, so the intersection is empty and upstream returns.
+func ErrAssignedInIfInit(v string) error {
+	var err error
+
+	if _, err = parse(v); err == nil {
+		_ = v
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// A comment between the assignment and the check is content. Upstream only
+// removes the blank line when the comment ends on the assignment's own line.
+func ErrWithCommentBetween(v string) error {
+	_, err := parse(v)
+
+	// Deliberate: the reason for checking is worth a line of its own.
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// The positive control for both: no comment, plain assignment above, so the
+// blank line *is* reported. Silencing everything does not pass this fixture.
+func ErrWithBlankLine(v string) error {
+	_, err := parse(v)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func parse(string) (int, error) { return 0, nil }

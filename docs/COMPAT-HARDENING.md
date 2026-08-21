@@ -7596,6 +7596,92 @@ Rust 側の単体テストも同じ fixture を使う。1 ファイル 1 パッ�
 
 ---
 
+### 2026-08-21（続き 12）— authelia の残り 3 件: wsl_v5 の 2 つの早期 return と、死なない taint
+
+続き 11 の「次にやること」1・2。authelia の guff-only 18 件のうち guff 自身の欠陥は 3 件で、
+残り 15 件は「guff が出さない finding」に nolintlint がカスケードしたものだった。
+
+#### wsl_v5 —— `checkError` は 3 か所ずれていた
+
+上流 `checkError`（wsl v5.8.0 `wsl.go:752`）は「err 代入と `if err != nil` の間の空行」を消す
+指示を出す。guff に無かった早期 return が 2 つ、報告位置が 1 つ違っていた。
+
+| # | 上流 | guff |
+|---|---|---|
+| 1 | `previousIdents` は `*ast.AssignStmt` の LHS と `*ast.DeclStmt` の名前**だけ**から作る | `find_lhs` が `if` の cond まで見ていた |
+| 2 | 代入と `if` の間のコメントが**自分の行**にあれば return（trailing のときだけ空行を消す） | コメントを見ていなかった |
+| 3 | 報告位置は削除範囲の先頭 `file.LineStart(previousEndLine + 1)` ＝ **最初の空行の 1 桁目** | 上の代入文の先頭 |
+
+#1 は authelia の `parseAttributeURI` の
+
+```go
+if uri, err = url.ParseRequestURI(value); err == nil { … }
+
+if err != nil {
+```
+
+で、`if` の init が err を代入していても上流の交差は空になる。
+
+**#3 は fixture に「撃つ側」を足して初めて出た。** それまでの `wsl_v5` fixture には
+`err` の finding が 1 件も無く、この check は**報告に到達しない 2 形だけ**でゲートされていた。
+
+#### gosec G703 —— SSA では 2 つの値、名前では 1 つ
+
+上流の taint は SSA 上で動く。`raw, _ = os.ReadFile(p)`（宣言された source）と
+`raw, _ = json.Marshal(cfg)`（source ではない）は**別の値**なので、後者は前者の taint を
+運ばない。guff は「この名前に source を代入したことがあるか」の平坦な集合を持っていて、
+それでは表現できない。authelia の `cmd/authelia-gen/cmd_adr.go` がまさにその形である
+（config を読む → unmarshal → カウンタを増やす → marshal → 書き戻す）。
+
+代入と sink を**位置順に再生**すれば、SSA を持たなくても直線コードでは同じ答えになる:
+後の代入が汚れていなければ taint は**死ぬ**。同じ再生で真陽性が 1 件増えた ——
+代入を通じた伝播（`content := strings.ReplaceAll(string(data), …)`）は
+収集専用パスには無かったので、`internal/suites/utils.go:270` の `//nolint:gosec` が
+書かれた理由である G703 を guff も出すようになり、カスケードしていた nolintlint も消えた。
+
+#### 「呼び出しを通す」は 3 種類ある（nightly が教えてくれた）
+
+最初の実装は**代入の右辺にある呼び出しを無条件に通した**。PR の `oss-nightly` が
+grafana で落ちて分かったのは、上流がここを 3 つに分けていること
+（`taint/taint.go:583-630`）:
+
+| 呼び先 | 引数の taint は戻り値へ |
+|---|---|
+| 外部（本体が無い＝ stdlib など） | **流れる** |
+| 内部（本体がある） | `doTaintedArgsFlowToReturn` が認めたときだけ |
+| static callee が無い（関数型の変数） | **流れない** |
+
+grafana の `summary_test.go` は 3 行目そのもので、
+
+```go
+body, err := os.ReadFile(path)             // source
+summary, _, err := reader(ctx, uid, body)  // reader はローカル変数
+out, err := json.MarshalIndent(summary, …)
+os.WriteFile(gpath, out, 0600)             // 上流は黙る
+```
+
+無条件に通すと 2 ホップ先の sink で撃ってしまう。guff は手続き間解析を持たないので
+**1 行目だけを採用し、残り 2 つは通さない**（型変換 `string(b)` / `[]byte(s)` は
+上流の `*ssa.Convert` に当たるので通す）。**sink 側の述語は従来どおり**で、
+そちらは呼び出しの中を見てよい（`os.Stat(f(os.Getenv(…)))`）。
+
+**教訓**: ローカルの `--oss --tier pr,nightly` を**その PR のブランチで**回すこと。
+この回は syncthing のブランチ（main 由来）で回していたので、G703 の変更が
+入っていないバイナリを測っていた。
+
+**ゲート**:
+
+- `compat/golden/cases/wsl-v5` を新設。wsl_v5 は isolate しか持っておらず、
+  そのキーには **column が無い**。golden は `path:line:col:linter:severity:text` を
+  正規化なしで見る。fixture は `compat/isolate/fixtures/wsl_v5/bad.go` を共有していて、
+  そこに**黙る形と撃つ形を並べて**ある。
+- gosec の golden に `bad/bad.go:160`（taint が生き残る）を足し、ok.go の再代入形
+  （taint が死ぬ）と対にした。**片方だけでは「全部黙らせる」修正が通る。**
+
+**authelia**: guff-only 18 → 14（全部 nolintlint のカスケード）。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
