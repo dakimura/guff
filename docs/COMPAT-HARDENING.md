@@ -7761,6 +7761,58 @@ Rust のアサーションで守られていて、それは
 
 ---
 
+### 2026-08-22（続き 14）— minmax は上流の 2 パターンのうち 1 つしか無く、「等しい」の定義も違った
+
+続き 13 の残り。syncthing が `minmax: if statement can be modernized using min/max` を
+**9 件**出していて guff は 0 件だった。**文言が手掛かり**である ——
+guff のメッセージは "if/else statement"、上流の 2 つ目のパターンは "if statement"。
+
+#### パターン 2
+
+```go
+v := x
+if v > y {
+    v = y
+}
+```
+
+`lhs0 = rhs0` が `if a < b { lhs = rhs }` の**直前**にあり、else が無い形
+（x/tools `modernize/minmax.go:139-207`）。`if` の**上**の文が要るので
+`IfStmt` ノードではなくブロックを走る。上流が明示的に弾く
+`select` の comm clause（`case v := <-ch:`）は、その代入がブロックの文リストではなく
+clause の `Comm` なので**自動的に外れる**。
+
+照合では `lhs0` が `rhs0` の代わりを務めてよいが、**fix は `v = min(v, y)` と書いてはいけない**
+—— `=` が `:=` だったかもしれないため。
+
+#### `astutil.EqualSyntax` は「同じ値」ではない
+
+パターン 2 だけでは 9 件のうち 4 件しか戻らなかった。残り 5 件は「等しい」の定義で詰まる:
+
+```go
+count := len(a)
+if len(b) < len(a) {
+    count = len(b)
+}
+```
+
+上流はオペランドを `astutil.EqualSyntax` で照合する ——
+**書かれた形**、識別子は**名前**で比較 —— なので `len(a)` は `len(a)` と一致する。
+guff は `code::same_non_dynamic` を使っていた。あれは「2 つの式が**同じ値**を表すか」を問うので
+呼び出しを問答無用で拒み、しかも 4 種類のノードしか見ないので
+`len(buf)-written` と `len(buf) - written` すら一致しなかった。
+
+`code::equal_syntax` がその移植である。**両方のパターンが今はこれを使う**（上流と同じ）。
+
+**ゲート**: `crates/guff-style/tests/testdata/modernize/minmax.go` を新設し、
+`modernize` の golden ケースに載せた。**撃つ 5 形と黙る 3 形**（上が別の変数 /
+オペランドが代入と無関係 / float（`maybeNaN`））、それにパターン 1 の対照を並べてある。
+6 キーすべてが golangci-lint 2.12.2 と byte 単位で一致。
+
+**syncthing**: modernize の golangci-only 11 → 4、P=96.6% R=90.5%。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
