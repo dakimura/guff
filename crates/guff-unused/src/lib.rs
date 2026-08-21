@@ -484,6 +484,36 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // "already there" and skip their outgoing edges.
     let mut used: HashSet<ObjectId> = HashSet::new();
     let mut queue: Vec<ObjectId> = roots.iter().copied().collect();
+
+    // `//lint:ignore U1000` / `//lint:file-ignore U1000` is a *root*, not a
+    // report-time filter. Upstream calls `g.use(obj, nil)` on every object the
+    // directive covers, and then — for a `*types.TypeName` — on every method of
+    // the named type and every field of the struct, wherever those are declared
+    // (`unused/unused.go`, "use methods and fields of ignored types").
+    //
+    // nats-server puts `//lint:file-ignore U1000` at the top of
+    // `jetstream_helpers_test.go`, which is where `type cluster` lives. Its
+    // methods are spread over the other `*_test.go` files, so filtering by the
+    // *method's* own position — which is all guff did — left
+    // `(*cluster).addRaftNode` reported while golangci-lint stayed silent.
+    // Seeding instead of filtering also fixes the other half: whatever an
+    // ignored declaration references is now reachable, as upstream has it.
+    let ignores = collect_lint_ignores(pass);
+    if !ignores.is_empty() {
+        for obj in local.iter().copied() {
+            if ignores.covers(&fset, obj.pos(&artifacts.objects)) {
+                queue.push(obj);
+            }
+        }
+        // Methods of an ignored named type, declared in any file of the
+        // package. (Struct fields are not modelled as candidates here, so the
+        // field half of upstream's loop has nothing to do.)
+        for (method, recv_ty) in &method_recv_type {
+            if ignores.covers(&fset, recv_ty.pos(&artifacts.objects)) {
+                queue.push(*method);
+            }
+        }
+    }
     for (id, obj) in &info.uses {
         if !attributed.contains(id) {
             queue.push(*obj);
@@ -554,8 +584,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             break;
         }
     }
-
-    let ignores = collect_lint_ignores(pass);
 
     let mut pending = Vec::new();
     for obj in candidates {

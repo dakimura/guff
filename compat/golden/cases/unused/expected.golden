@@ -10,6 +10,8 @@ bad/method_bad.go:7:17:unused::func usedType.unusedMethod is unused
 deadcycle/dead_cycle.go:11:20:unused::func (*policies).recompileAll is unused
 deadcycle/dead_cycle.go:13:20:unused::func (*policies).update is unused
 deadcycle/dead_cycle.go:15:20:unused::func (*policies).delete is unused
+fileignore/methods.go:13:17:unused::func (*plain).unusedMethod is unused
+fileignore/methods.go:15:6:unused::func unusedFree is unused
 genericiface/generic_iface.go:30:17:unused::func (*comps).list is unused
 genericiface/generic_iface.go:31:17:unused::func (*comps).closeIt is unused
 genericmethod/generic_method_bad.go:8:21:unused::func (*holder[T]).run is unused

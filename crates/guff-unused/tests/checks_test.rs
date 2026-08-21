@@ -31,6 +31,34 @@ fn unused_honours_lint_ignore() {
     );
 }
 
+/// `//lint:file-ignore U1000` covers the *file* it is written in, but upstream
+/// does not stop at the file: an ignored `*types.TypeName` is marked used and
+/// then every method of the named type is too, wherever it was declared
+/// (`unused/unused.go`, "use methods and fields of ignored types"). And an
+/// ignored object is a root, not a silenced report, so what it references stays
+/// alive. nats-server needs both — the directive sits on
+/// `jetstream_helpers_test.go`, `type cluster` with it, and the methods are
+/// spread over the sibling `*_test.go` files.
+#[test]
+fn unused_file_ignore_reaches_methods_declared_elsewhere() {
+    let dir = support::testdata("fileignore");
+    let types = dir.join("types.go");
+    let methods = dir.join("methods.go");
+    let pkg = support::typecheck_pkg_files(
+        "example.com/unused/fileignore",
+        &[types.as_path(), methods.as_path()],
+    );
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    let mut got: Vec<&String> = messages.iter().collect();
+    got.sort();
+    // `(*cluster).inPlainFile` (method of an ignored type) and `keptAlive`
+    // (reached only from an ignored function) must not be here.
+    assert_eq!(messages.len(), 2, "{got:?}");
+    for want in ["unusedMethod", "unusedFree"] {
+        assert!(messages.iter().any(|m| m.contains(want)), "{got:?}");
+    }
+}
+
 #[test]
 fn unused_allows_referenced_func() {
     let dir = support::testdata("basic");
