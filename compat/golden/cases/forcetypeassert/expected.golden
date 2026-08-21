@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh forcetypeassert
+# Produced by running golangci-lint on compat/golden/cases/forcetypeassert/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:8:2:forcetypeassert::type assertion must be checked
+bad/bad.go:12:2:forcetypeassert::type assertion must be checked
+bad/bad.go:20:2:forcetypeassert::type assertion must be checked
+bad/bad.go:26:6:forcetypeassert::type assertion must be checked
+bad/bad.go:31:9:forcetypeassert::type assertion must be checked
+bad/bad.go:35:10:forcetypeassert::type assertion must be checked
+bad/bad.go:41:2:forcetypeassert::right hand must be only type assertion
+bad/bad.go:47:2:forcetypeassert::right hand must be only type assertion

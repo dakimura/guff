@@ -1,0 +1,25 @@
+# Golden case: forcetypeassert.
+#
+# The linter counted as `fired` in docs/COVERAGE.md on the strength of a
+# six-line fixture with one finding in it, which is the situation
+# COMPAT-HARDENING Phase 3 calls out: for a single-check linter, `fired` says the
+# check woke up, not that it agrees with upstream.
+#
+# It does not. Upstream reports `n.Pos()` — the start of the assignment, the
+# first name of the spec, the operand of a bare assertion — and guff reported the
+# `:=` token and the `(`. Same line every time, so the isolate key
+# (path:line:linter:message) and the OSS key cannot see it; this tier can.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - forcetypeassert
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

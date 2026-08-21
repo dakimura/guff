@@ -2,6 +2,15 @@ mod support;
 
 use guff_gostaticanalysis::{forcetypeassert, makezero, mirror, nilerr, nilnesserr, nilnil};
 
+/// Every path that reports: a blank assignment, a `:=` and a `=` whose operand
+/// is an index expression, a `var` spec, a bare assertion in a condition and one
+/// in an argument, and the two ways to earn "right hand must be only type
+/// assertion" (buried in a call, or two values on the right).
+///
+/// The columns are what this fixture is really for, and only the golden case
+/// (`compat/golden/cases/forcetypeassert`) compares them — upstream reports
+/// `n.Pos()` throughout, which is the same *line* as the `:=` guff used to
+/// point at.
 #[test]
 fn forcetypeassert_flags_unchecked() {
     let dir = support::testdata("forcetypeassert");
@@ -10,12 +19,29 @@ fn forcetypeassert_flags_unchecked() {
         &dir.join("bad.go"),
     );
     let messages = support::run_analyzer(forcetypeassert(), &pkg);
-    assert!(
-        messages.iter().any(|m| m.contains("type assertion must be checked")),
-        "{messages:?}"
+    let mut got: Vec<&String> = messages.iter().collect();
+    got.sort();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.as_str() == "type assertion must be checked")
+            .count(),
+        6,
+        "{got:?}"
     );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.as_str() == "right hand must be only type assertion")
+            .count(),
+        2,
+        "{got:?}"
+    );
+    assert_eq!(messages.len(), 8, "{got:?}");
 }
 
+/// The silent side: both comma-ok spellings, an assertion to `any` (upstream's
+/// `isAny`), and a type switch, whose `TypeAssertExpr` has no `Type` at all.
 #[test]
 fn forcetypeassert_allows_checked() {
     let dir = support::testdata("forcetypeassert");
@@ -23,7 +49,8 @@ fn forcetypeassert_allows_checked() {
         "example.com/forcetypeassert/ok",
         &dir.join("ok.go"),
     );
-    assert!(support::run_analyzer(forcetypeassert(), &pkg).is_empty());
+    let messages = support::run_analyzer(forcetypeassert(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
 }
 
 #[test]
