@@ -201,10 +201,13 @@ sa4015/bad/bad.go:14:6:staticcheck::SA4015: calling math.Ceil on a converted int
 sa4015/bad/bad.go:15:6:staticcheck::SA4015: calling math.Floor on a converted integer is pointless
 sa4015/bad/bad.go:16:6:staticcheck::SA4015: calling math.IsNaN on a converted integer is pointless
 sa4015/bad/bad.go:17:6:staticcheck::SA4015: calling math.Ceil on a converted integer is pointless
-sa4016/bad/bad.go:4:8:staticcheck::QF1011: could omit type int from declaration; it will be inferred from the right-hand side
-sa4016/bad/bad.go:4:8:staticcheck::ST1023: should omit type int from declaration; it will be inferred from the right-hand side
-sa4016/bad/bad.go:5:6:staticcheck::SA4016: x & 0 always equals 0
-sa4016/ok/ok.go:2:19:staticcheck::SA4000: identical expressions on the left and right side of the '&' operator
+sa4016/bad/bad.go:18:9:staticcheck::SA4016: x | flagA always equals x; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:18:20:staticcheck::SA4016: x & flagA always equals 0; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:18:31:staticcheck::SA4016: x ^ flagA always equals x; flagA is defined as iota and has value 0, maybe flagA is meant to be 1 << iota?
+sa4016/bad/bad.go:24:9:staticcheck::SA4016: x | 0 always equals x
+sa4016/bad/bad.go:24:16:staticcheck::SA4016: x & 0 always equals 0
+sa4016/bad/bad.go:24:23:staticcheck::SA4016: x ^ 0 always equals x
+sa4016/bad/bad.go:24:30:staticcheck::SA4016: x | +0 always equals x
 sa4017/bad/bad.go:20:2:staticcheck::SA4017: ToLower doesn't have side effects and its return value is ignored
 sa4017/bad/bad.go:21:2:staticcheck::SA4017: add doesn't have side effects and its return value is ignored
 sa4017/bad/bad.go:22:2:staticcheck::SA4017: double doesn't have side effects and its return value is ignored
