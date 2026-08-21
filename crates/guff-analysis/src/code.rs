@@ -440,6 +440,86 @@ fn call_refers_to(pass: &Pass<'_>, call: &guff::ast::CallExpr, obj: ObjectId) ->
     refers_to(pass, &call.fun, obj) || call.args.iter().any(|a| refers_to(pass, a, obj))
 }
 
+/// `astutil.EqualSyntax` (x/tools `internal/astutil/equal.go:32`): the two
+/// expressions have the same shape, with identifiers compared **by name** and
+/// positions ignored.
+///
+/// This is not [`same_non_dynamic`], which asks whether two expressions denote
+/// the same *value* and therefore refuses anything it cannot prove pure. Several
+/// x/tools analyzers ask the syntactic question instead, and get a different
+/// answer: `count := len(a); if len(b) < len(a) { count = len(b) }` is a minmax
+/// candidate upstream because `len(a)` is written twice, and was not for guff
+/// because a call is dynamic. Two syncthing files and three others in the corpus
+/// hang on exactly that.
+///
+/// Composite and type-literal operands (`func(){}`, `struct{…}`, an interface
+/// literal) answer `false`: upstream compares them structurally, but no caller
+/// here needs it and a wrong `true` is the dangerous direction.
+pub fn equal_syntax(a: &Expr, b: &Expr) -> bool {
+    use guff::ast::Expr as E;
+    match (a, b) {
+        (E::Ident(x), E::Ident(y)) => x.name == y.name,
+        (E::BasicLit(x), E::BasicLit(y)) => x.kind == y.kind && x.value == y.value,
+        (E::ParenExpr(x), E::ParenExpr(y)) => equal_syntax(&x.x, &y.x),
+        (E::SelectorExpr(x), E::SelectorExpr(y)) => {
+            x.sel.name == y.sel.name && equal_syntax(&x.x, &y.x)
+        }
+        (E::IndexExpr(x), E::IndexExpr(y)) => {
+            equal_syntax(&x.x, &y.x) && equal_syntax(&x.index, &y.index)
+        }
+        (E::IndexListExpr(x), E::IndexListExpr(y)) => {
+            equal_syntax(&x.x, &y.x) && equal_syntax_list(&x.indices, &y.indices)
+        }
+        (E::SliceExpr(x), E::SliceExpr(y)) => {
+            x.slice3 == y.slice3
+                && equal_syntax(&x.x, &y.x)
+                && equal_syntax_opt(x.low.as_deref(), y.low.as_deref())
+                && equal_syntax_opt(x.high.as_deref(), y.high.as_deref())
+                && equal_syntax_opt(x.max.as_deref(), y.max.as_deref())
+        }
+        (E::TypeAssertExpr(x), E::TypeAssertExpr(y)) => {
+            equal_syntax(&x.x, &y.x)
+                && equal_syntax_opt(x.ty.as_deref(), y.ty.as_deref())
+        }
+        (E::CallExpr(x), E::CallExpr(y)) => {
+            x.ellipsis.is_valid() == y.ellipsis.is_valid()
+                && equal_syntax(&x.fun, &y.fun)
+                && equal_syntax_list(&x.args, &y.args)
+        }
+        (E::StarExpr(x), E::StarExpr(y)) => equal_syntax(&x.x, &y.x),
+        (E::UnaryExpr(x), E::UnaryExpr(y)) => x.op == y.op && equal_syntax(&x.x, &y.x),
+        (E::BinaryExpr(x), E::BinaryExpr(y)) => {
+            x.op == y.op && equal_syntax(&x.x, &y.x) && equal_syntax(&x.y, &y.y)
+        }
+        (E::KeyValueExpr(x), E::KeyValueExpr(y)) => {
+            equal_syntax(&x.key, &y.key) && equal_syntax(&x.value, &y.value)
+        }
+        (E::Ellipsis(x), E::Ellipsis(y)) => {
+            equal_syntax_opt(x.elt.as_deref(), y.elt.as_deref())
+        }
+        (E::ArrayType(x), E::ArrayType(y)) => {
+            equal_syntax_opt(x.len.as_deref(), y.len.as_deref()) && equal_syntax(&x.elt, &y.elt)
+        }
+        (E::MapType(x), E::MapType(y)) => {
+            equal_syntax(&x.key, &y.key) && equal_syntax(&x.value, &y.value)
+        }
+        (E::ChanType(x), E::ChanType(y)) => x.dir == y.dir && equal_syntax(&x.value, &y.value),
+        _ => false,
+    }
+}
+
+fn equal_syntax_opt(a: Option<&Expr>, b: Option<&Expr>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => equal_syntax(x, y),
+        _ => false,
+    }
+}
+
+fn equal_syntax_list(a: &[Expr], b: &[Expr]) -> bool {
+    a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| equal_syntax(x, y))
+}
+
 /// Reports whether two expressions denote the same non-dynamic value.
 ///
 /// Port of the `sameNonDynamic` helper in `simple/s1017`.

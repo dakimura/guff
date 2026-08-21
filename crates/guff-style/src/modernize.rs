@@ -819,6 +819,131 @@ fn check_rangeint(pass: &Pass<'_>, for_stmt: &ForStmt, pending: &mut Vec<Diagnos
     });
 }
 
+/// `isSimpleAssign` (x/tools `modernize/minmax.go:275`): `lhs = rhs` **or**
+/// `lhs := rhs`, one name and one value.
+fn simple_assign(stmt: &Stmt) -> Option<&AssignStmt> {
+    match stmt {
+        Stmt::AssignStmt(a)
+            if matches!(a.tok, Some(Token::ASSIGN | Token::DEFINE))
+                && a.lhs.len() == 1
+                && a.rhs.len() == 1 =>
+        {
+            Some(a)
+        }
+        _ => None,
+    }
+}
+
+/// minmax's **pattern 2** (x/tools `modernize/minmax.go:139-207`), which guff
+/// did not have at all:
+///
+/// ```go
+/// v := x
+/// if v > y {
+///     v = y
+/// }
+/// ```
+///
+/// It needs the statement *above* the `if`, so it runs over blocks rather than
+/// over `IfStmt` nodes. Its message says "if statement", where pattern 1's says
+/// "if/else statement" — the two are told apart by that word alone, and
+/// syncthing writes the second form nine times.
+///
+/// A `select` comm clause (`case v := <-ch:`) cannot be rewritten and upstream
+/// rejects it explicitly; here it is excluded for free, because that assignment
+/// is the clause's `Comm`, not a statement in a block's list.
+fn check_minmax_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
+    for i in 1..block.list.len() {
+        let Stmt::IfStmt(if_stmt) = &block.list[i] else {
+            continue;
+        };
+        if if_stmt.init.is_some() || if_stmt.else_.is_some() {
+            continue;
+        }
+        if !go_at_least(pass, if_stmt.if_.0 as u32, "go1.21") {
+            continue;
+        }
+        let Expr::BinaryExpr(compare) = &if_stmt.cond else {
+            continue;
+        };
+        let Some(mut sign) = inequality_sign(compare.op) else {
+            continue;
+        };
+        let Some(tassign) = is_assign_block(&if_stmt.body) else {
+            continue;
+        };
+        let Some(fassign) = simple_assign(&block.list[i - 1]) else {
+            continue;
+        };
+        let lhs = &tassign.lhs[0];
+        let rhs = &tassign.rhs[0];
+        let lhs0 = &fassign.lhs[0];
+        let rhs0 = &fassign.rhs[0];
+        if !code::equal_syntax(lhs, lhs0) {
+            continue;
+        }
+        let mut a = compare.x.as_ref();
+        let mut b = compare.y.as_ref();
+        if code::equal_syntax(rhs, a)
+            && (code::equal_syntax(rhs0, b) || code::equal_syntax(lhs0, b))
+        {
+            // keep sign
+        } else if (code::equal_syntax(rhs0, a) || code::equal_syntax(lhs0, a))
+            && code::equal_syntax(rhs, b)
+        {
+            sign = -sign;
+        } else {
+            continue;
+        }
+        // `maybeNaN(tLHS)` — upstream asks the *assigned* variable's type, once,
+        // before either pattern runs.
+        if is_float_expr(pass, lhs) {
+            continue;
+        }
+        // `lhs0` was allowed to stand in for `rhs0` in the matching above, but
+        // the fix must not write `v = min(v, y)`: the `=` could have been a `:=`.
+        if code::equal_syntax(lhs0, a) {
+            a = rhs0;
+        } else if code::equal_syntax(lhs0, b) {
+            b = rhs0;
+        }
+        let sym = if sign < 0 { "min" } else { "max" };
+        let (Some(lhs_text), Some(a_text), Some(b_text)) =
+            (expr_text(lhs), expr_text(a), expr_text(b))
+        else {
+            continue;
+        };
+        let tok_text = if fassign.tok == Some(Token::DEFINE) {
+            ":="
+        } else {
+            "="
+        };
+        let fix_pos = lhs0.pos().0 as u32;
+        let fix_end = if_stmt.body.rbrace.0 as u32 + 1;
+        pending.push(Diagnostic {
+            // `Pos: compare.Pos()`, like pattern 1.
+            pos: compare.x.pos().0 as u32,
+            end: compare.y.end().0 as u32,
+            category: String::new(),
+            message: format!("if statement can be modernized using {sym}"),
+            suggested_fixes: vec![SuggestedFix {
+                // Upstream's two patterns have their fix messages the other way
+                // round from their diagnostics; this is theirs, not a slip.
+                message: format!("Replace if/else with {sym}"),
+                text_edits: vec![TextEdit {
+                    pos: fix_pos,
+                    end: fix_end,
+                    new_text: format!("{lhs_text} {tok_text} {sym}({a_text}, {b_text})"),
+                }],
+            }],
+            related: Vec::new(),
+            url: String::new(),
+            severity: String::new(),
+            ..Diagnostic::default()
+        });
+    }
+}
+
 fn is_assign_block(body: &guff::ast::BlockStmt) -> Option<&AssignStmt> {
     if body.list.len() != 1 {
         return None;
@@ -864,16 +989,19 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
     let Some(fassign) = is_assign_block(fblock) else {
         return;
     };
-    if !code::same_non_dynamic(pass, &tassign.lhs[0], &fassign.lhs[0]) {
+    // `astutil.EqualSyntax`, not "same value": upstream compares the written
+    // shape, so `len(a)` written twice matches itself even though a call is not
+    // provably pure (x/tools `modernize/minmax.go:95-101`).
+    if !code::equal_syntax(&tassign.lhs[0], &fassign.lhs[0]) {
         return;
     }
     let a = compare.x.as_ref();
     let b = compare.y.as_ref();
     let rhs = &tassign.rhs[0];
     let rhs2 = &fassign.rhs[0];
-    if code::same_non_dynamic(pass, rhs, a) && code::same_non_dynamic(pass, rhs2, b) {
+    if code::equal_syntax(rhs, a) && code::equal_syntax(rhs2, b) {
         // keep sign
-    } else if code::same_non_dynamic(pass, rhs2, a) && code::same_non_dynamic(pass, rhs, b) {
+    } else if code::equal_syntax(rhs2, a) && code::equal_syntax(rhs, b) {
         sign = -sign;
     } else {
         return;
@@ -5971,6 +6099,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::BlockStmt(b) => {
+                    if enabled(&options, "minmax") {
+                        let _before = pending.len();
+                        check_minmax_block(pass, b, &mut pending);
+                        stamp_category(&mut pending, _before, "minmax");
+                    }
                     if enabled(&options, "stringsseq") {
                         let _before = pending.len();
                         check_stringsseq_block(pass, b, &mut pending);
