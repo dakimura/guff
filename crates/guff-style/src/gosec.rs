@@ -746,8 +746,18 @@ fn check_g122_walk_call(
     // taints what it defines.
     let mut tainted: HashSet<String> = HashSet::new();
     tainted.insert(path_param.to_string());
+    let root = fl.body.pos();
     preorder(NodeRef::FuncLit(fl), |n| {
         match n {
+            // Upstream scans the callback's *own* blocks
+            // (`scanCallbackForRaceSinks` walks `fn.Blocks`). A nested function
+            // literal is a separate `ssa.Function` there, and the callback's
+            // path parameter reaches it as a free variable, not as
+            // `cb.Params[0]` — so `pathDependsOn` never matches and the sink is
+            // not reported. authelia's `templates/util_test.go` puts its
+            // `os.ReadFile(path)` inside a `t.Run(…, func(t *testing.T){ … })`
+            // for exactly this shape.
+            NodeRef::FuncLit(inner) if inner.body.pos() != root => return false,
             NodeRef::AssignStmt(assign) => {
                 if assign
                     .rhs

@@ -157,6 +157,24 @@ func okWalkNoSink() error {
 	})
 }
 
+// A sink inside a *nested* function literal is not a G122 finding: upstream
+// scans the walk callback's own blocks (`scanCallbackForRaceSinks` walks
+// `fn.Blocks`), and a nested literal is a separate `ssa.Function` where the
+// callback's path arrives as a free variable rather than `cb.Params[0]`, so
+// `pathDependsOn` never matches. authelia's templates/util_test.go is this
+// shape — an `os.ReadFile(path)` inside a `t.Run(…, func(){…})`.
+func okG122SinkInNestedFuncLit() {
+	_ = filepath.Walk("/tmp", func(path string, info os.FileInfo, err error) error {
+		run(func() {
+			_, _ = os.ReadFile(path)
+		})
+
+		return nil
+	})
+}
+
+func run(f func()) { f() }
+
 func okG107NonIdentURL() {
 	base := "https://example.com"
 	_, _ = http.Get(base + "/ok")
