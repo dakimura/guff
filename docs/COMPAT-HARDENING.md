@@ -7458,6 +7458,56 @@ ST1021 が SA5008 の findings を埋めてしまうため。
 
 **thanos**: guff=432 golangci=434 P=100.0%（golangci-only は上記 unparam 2 件だけ）。
 
+### 2026-08-21（続き 10）— corpus を 1 本足したら wsl_v5 の偽陽性が 176 件出た
+
+続き 9 で「negative space（撃たないこと）を保証しているものが無い」と書いた。
+その直後に **corpus に authelia を 1 本足した**ら、いきなり
+**guff-only 193 件**（wsl_v5 176 / nolintlint 15 / gosec 2）が出た。
+golangci はこのリポで **0 件**である。既存の 14 リポでも golden でも isolate でも、
+どのゲートにも一度も出ていなかった。
+
+wsl_v5 の 176 件は **3 つのバグ**に分かれた。3 つとも「上流は黙るのに guff が撃つ」形で、
+3 つとも上流のソースを guff と並べて読んで初めて分かった。
+
+| # | 上流の挙動 | guff | 件数 |
+|---|---|---|---:|
+| 1 | 既定の check 集合（`assign-expr` は **off**）では、**識別子を共有していれば** assign が expr 文に cuddle してよい | 無条件に「invalid statement above assign」 | ~30 |
+| 2 | `checkExprStmt` は `checkCuddling(..., enforceLimit=false)` を渡すので、**expr に cuddle 上限を課さない** | `cuddle-max-statements` を課していた | ~109 |
+| 3 | `{` と最初の文の間のコメントは**内容**であって空行ではない | コメント行を空行と見て leading-whitespace | ~35 |
+
+#1 の根拠は wsl v5.8.0 `wsl.go` の
+
+```go
+if _, ok := w.config.Checks[CheckAssignExpr]; !ok {
+    if _, ok := previousNode.(*ast.ExprStmt); ok && w.hasIntersection(stmt, previousNode) {
+        prevIsValidType = prevIsValidType || ok
+    }
+}
+```
+
+`hasIntersection` は両文の識別子集合の交差で、**型名・universe 定数・`nil`・パッケージ名・`_` を除く**
+（`identsFromNode` / `isTypeOrPredeclConst`）。この除外は型情報が要るので、guff 側は
+`Info.Uses` / `Info.Defs` から「落とす ident の node id 集合」を 1 パッケージにつき 1 回作って渡している
+（`ident_skip_set`）。除外を省くと交差しやすくなり、**今度は撃つべき所で黙る**ので手は抜けない。
+
+#3 で土台の制約を 1 つ踏んだ: **本番の typecheck は `PARSE_COMMENTS` なしでパースするので
+`File::comments` は空**。`funlen` が同じ問題を「必要なときだけ `COMMENTS_ONLY` で再パース」で
+解いていたので同じ手を使ったが、**再パースは自前の `FileSet` を持つ**ため、
+コメントの `Pos` を文の `Pos` と比較できない。同じソースを 2 回パースしても**行番号は一致する**ので、
+比較を行番号に寄せてある。
+
+**結果**: authelia の guff-only は 193 → 19。残りは `//nolint:gosec` のカスケード 15
+（上流の gosec が撃つ所で guff の DEFERRED ルールが撃たない）と gosec の偽陽性 2。
+
+**ゲート**: `compat/isolate/fixtures/wsl_v5/bad.go` に 3 形を追記した。
+どれも**上流が黙る**形なので、fixture としては「findings が増えないこと」を見ている
+（guff=3 golangci=3 で一致）。これが崩れたら isolate が落ちる。
+
+**教訓**: golden も isolate も 99/99・116/116 で緑のまま、この 176 件は存在していた。
+fixture は「撃つ」形しか書かれていないので、**偽陽性はゲートでは見つからない**。
+見つかったのは corpus に 1 本足したからである。続き 9 の
+`corpus/shapes.py`（言語の形）とは別の軸——**実在するコードの書き癖**——が効いた。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

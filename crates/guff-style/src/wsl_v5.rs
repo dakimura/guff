@@ -11,12 +11,17 @@
 //! (`maybeGroupDecl`); Lock/Unlock heuristics; comment-map nuance.
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use guff::ast::{BlockStmt, Decl, Expr, Spec, Stmt};
+use guff::walk::{preorder, stmt_ref, NodeRef};
+use guff::parser::{parse_file, COMMENTS_ONLY};
 use guff::position::{FileSet, Pos};
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+
+use guff_types::arena::{ObjectData, ObjectId};
 
 use crate::options::{WslV5Check, WslV5Options};
 
@@ -247,6 +252,104 @@ fn whole_block_idents(stmt: &Stmt) -> Vec<String> {
     out
 }
 
+/// wsl's `identsFromNode(node, skipBlock=true)`: every identifier a statement
+/// mentions, minus the ones upstream drops — type names, universe constants,
+/// `nil`, package qualifiers and `_`. `skip` holds the node ids of those, built
+/// once per package from the type-checker's `Uses`/`Defs` (see `ident_skip_set`);
+/// an identifier the checker never resolved is *kept*, as upstream keeps it.
+///
+/// Nested blocks are not descended into, which is what `skipBlock` means: a
+/// func literal's body does not contribute the caller's identifiers.
+/// `(start_line, end_line)` for every comment group in `path`.
+///
+/// Mirrors `funlen`'s on-demand re-parse: the production typecheck runs without
+/// `PARSE_COMMENTS`, so `File::comments` is empty in a pass. The re-parse gets
+/// its own `FileSet`, which is why callers compare lines rather than positions.
+fn reparse_comment_lines(path: &Path, cached: Option<&[u8]>) -> Option<Vec<(i64, i64)>> {
+    let owned;
+    let src: &[u8] = match cached {
+        Some(b) => b,
+        None => {
+            owned = std::fs::read(path).ok()?;
+            &owned
+        }
+    };
+    let name = path.file_name()?.to_str()?;
+    let fset = FileSet::new();
+    let file = parse_file(&fset, name, src, COMMENTS_ONLY).ok()?;
+    Some(
+        file.comments
+            .iter()
+            .map(|cg| (line(&fset, cg.pos()), line(&fset, cg.end())))
+            .collect(),
+    )
+}
+
+fn stmt_all_idents(stmt: &Stmt, skip: &HashSet<u32>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    preorder(stmt_ref(stmt), |n| {
+        match n {
+            // `skipBlock`: do not descend into a nested block.
+            NodeRef::BlockStmt(_) => return false,
+            NodeRef::Ident(id) => {
+                if id.name.is_empty() || id.name == "_" || skip.contains(&id.id) {
+                    return true;
+                }
+                if seen.insert(id.name.clone()) {
+                    out.push(id.name.clone());
+                }
+            }
+            _ => {}
+        }
+        true
+    });
+    out
+}
+
+/// wsl's `hasIntersection`: do the two statements name a common identifier?
+fn has_intersection(a: &Stmt, b: &Stmt, skip: &HashSet<u32>) -> bool {
+    lists_overlap(&stmt_all_idents(a, skip), &stmt_all_idents(b, skip))
+}
+
+/// The node ids of identifiers `identsFromNode` filters out —
+/// `isTypeOrPredeclConst` plus `*types.Nil` and `*types.PkgName`.
+///
+/// Without this an assignment cuddled with a call that merely shares a *type*
+/// name would read as sharing a variable, and the `assign` check would go
+/// quiet where upstream reports.
+fn ident_skip_set(pass: &Pass<'_>) -> HashSet<u32> {
+    let mut skip = HashSet::new();
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return skip;
+    };
+    let objects = &artifacts.objects;
+    let mut consider = |node: u32, obj: ObjectId| {
+        let drop = match objects.get(obj) {
+            ObjectData::TypeName(_) => true,
+            ObjectData::Nil(_) => true,
+            ObjectData::PkgName(_) => true,
+            // Only the universe constants (`true`, `false`, `iota`), not every
+            // named constant.
+            ObjectData::Const(_) => obj.parent(objects).is_none(),
+            _ => false,
+        };
+        if drop {
+            skip.insert(node);
+        }
+    };
+    for (node, obj) in &info.uses {
+        consider(*node, *obj);
+    }
+    for (node, obj) in &info.defs {
+        if let Some(obj) = obj {
+            consider(*node, *obj);
+        }
+    }
+    skip
+}
+
 fn is_assign_or_inc(stmt: &Stmt) -> bool {
     matches!(stmt, Stmt::AssignStmt(_) | Stmt::IncDecStmt(_))
 }
@@ -354,6 +457,7 @@ fn assign_defines_err(stmt: &Stmt, err_name: &str) -> bool {
 
 fn check_leading_trailing(
     fset: &FileSet,
+    comment_lines: &[(i64, i64)],
     block: &BlockStmt,
     options: &WslV5Options,
     pending: &mut Vec<(u32, String)>,
@@ -367,10 +471,44 @@ fn check_leading_trailing(
         return;
     }
     let first = &block.list[0];
-    if check_enabled(options, WslV5Check::LeadingWhitespace)
-        && stmt_start(fset, first) > start + 1
-    {
-        pending.push((block.lbrace.0 as u32 + 1, MSG_BLOCK_START.into()));
+    if check_enabled(options, WslV5Check::LeadingWhitespace) {
+        // A comment between `{` and the first statement is *content*, so the
+        // gap is measured to the comment, not past it. Upstream then makes a
+        // second check for a blank line between the comments and the first
+        // statement. Without this, `func f() {` followed by `//nolint:…` and
+        // then the first statement reads as a leading blank line.
+        // (wsl v5.8.0 `wsl.go` checkLeadingNewline.)
+        let first_stmt_line = stmt_start(fset, first);
+        // Comments are compared by *line*, not position: the production
+        // typecheck parses without comments, so these come from a re-parse
+        // with its own `FileSet` (see `run`). Line numbers agree between two
+        // parses of the same source; raw positions do not.
+        let mut first_content_line = first_stmt_line;
+        let mut last_comment_end_line = start;
+        let mut saw_comment = false;
+        for &(cg_start, cg_end) in comment_lines {
+            if cg_start <= start || cg_start >= first_stmt_line {
+                continue;
+            }
+            saw_comment = true;
+            if cg_start < first_content_line {
+                first_content_line = cg_start;
+            }
+            if cg_end > last_comment_end_line {
+                last_comment_end_line = cg_end;
+            }
+        }
+        if first_content_line > start + 1 {
+            pending.push((block.lbrace.0 as u32 + 1, MSG_BLOCK_START.into()));
+        }
+        // A blank line between the leading comments and the first statement is
+        // its own diagnostic upstream.
+        if saw_comment
+            && last_comment_end_line > start
+            && first_stmt_line > last_comment_end_line + 1
+        {
+            pending.push((block.lbrace.0 as u32 + 1, MSG_BLOCK_START.into()));
+        }
     }
     let last = block.list.last().unwrap();
     if check_enabled(options, WslV5Check::TrailingWhitespace)
@@ -407,11 +545,19 @@ fn check_err_cuddle(
     }
 }
 
+/// `checkCuddlingMaxAllowed`.
+///
+/// `enforce_limit` is upstream's parameter of the same name, and only
+/// `checkExprStmt` passes it `false` (wsl v5.8.0 `wsl.go:867`). It gates *both*
+/// the `err`-precedence branch and the `cuddle-max-statements` limit, so an
+/// expression statement is never reported for having too many statements above
+/// it — only for cuddling an invalid type or sharing no identifier.
 fn check_cuddle_blockish(
     fset: &FileSet,
     stmts: &[Stmt],
     i: usize,
     check_name: &str,
+    enforce_limit: bool,
     options: &WslV5Options,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -436,6 +582,10 @@ fn check_cuddle_blockish(
     {
         // Decl above may also contribute names via find_lhs.
         pending.push((stmt.pos().0 as u32, msg_no_shared(check_name)));
+        return;
+    }
+
+    if !enforce_limit {
         return;
     }
 
@@ -466,6 +616,8 @@ fn check_cuddle_blockish(
 
 fn check_statements(
     fset: &FileSet,
+    skip: &HashSet<u32>,
+    comment_lines: &[(i64, i64)],
     stmts: &[Stmt],
     options: &WslV5Options,
     pending: &mut Vec<(u32, String)>,
@@ -473,61 +625,61 @@ fn check_statements(
     for (i, stmt) in stmts.iter().enumerate() {
         match stmt {
             Stmt::IfStmt(ifs) => {
-                check_block(fset, &ifs.body, options, pending);
+                check_block(fset, skip, comment_lines, &ifs.body, options, pending);
                 if let Some(else_) = &ifs.else_ {
-                    walk_else(fset, else_, options, pending);
+                    walk_else(fset, skip, comment_lines, else_, options, pending);
                 }
             }
-            Stmt::RangeStmt(r) => check_block(fset, &r.body, options, pending),
-            Stmt::ForStmt(f) => check_block(fset, &f.body, options, pending),
+            Stmt::RangeStmt(r) => check_block(fset, skip, comment_lines, &r.body, options, pending),
+            Stmt::ForStmt(f) => check_block(fset, skip, comment_lines, &f.body, options, pending),
             Stmt::SwitchStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CaseClause(cc) = c {
-                        check_statements(fset, &cc.body, options, pending);
+                        check_statements(fset, skip, comment_lines, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::TypeSwitchStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CaseClause(cc) = c {
-                        check_statements(fset, &cc.body, options, pending);
+                        check_statements(fset, skip, comment_lines, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::SelectStmt(s) => {
                 for c in &s.body.list {
                     if let Stmt::CommClause(cc) = c {
-                        check_statements(fset, &cc.body, options, pending);
+                        check_statements(fset, skip, comment_lines, &cc.body, options, pending);
                     }
                 }
             }
             Stmt::AssignStmt(a) => {
                 for r in &a.rhs {
                     if let Expr::FuncLit(fl) = r {
-                        check_block(fset, &fl.body, options, pending);
+                        check_block(fset, skip, comment_lines, &fl.body, options, pending);
                     }
                 }
             }
             Stmt::ExprStmt(e) => {
                 if let Expr::CallExpr(c) = &e.x {
                     if let Expr::FuncLit(fl) = &*c.fun {
-                        check_block(fset, &fl.body, options, pending);
+                        check_block(fset, skip, comment_lines, &fl.body, options, pending);
                     }
                 }
             }
             Stmt::DeferStmt(d) => {
                 if let Expr::FuncLit(fl) = &*d.call.fun {
-                    check_block(fset, &fl.body, options, pending);
+                    check_block(fset, skip, comment_lines, &fl.body, options, pending);
                 }
             }
             Stmt::GoStmt(g) => {
                 if let Expr::FuncLit(fl) = &*g.call.fun {
-                    check_block(fset, &fl.body, options, pending);
+                    check_block(fset, skip, comment_lines, &fl.body, options, pending);
                 }
             }
             Stmt::LabeledStmt(l) => {
                 // Labels recurse into labeled statement.
-                check_statements(fset, std::slice::from_ref(l.stmt.as_ref()), options, pending);
+                check_statements(fset, skip, comment_lines, std::slice::from_ref(l.stmt.as_ref()), options, pending);
             }
             _ => {}
         }
@@ -545,7 +697,7 @@ fn check_statements(
 
         match stmt {
             Stmt::IfStmt(_) if check_enabled(options, WslV5Check::If) => {
-                check_cuddle_blockish(fset, stmts, i, "if", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "if", true, options, pending);
             }
             Stmt::ReturnStmt(_) if check_enabled(options, WslV5Check::Return) => {
                 if stmts.is_empty() {
@@ -594,7 +746,18 @@ fn check_statements(
                     continue;
                 }
                 if matches!(prev, Stmt::ExprStmt(_)) {
-                    // Consecutive expr→assign is invalid under default assign.
+                    // Upstream only rejects expr→assign outright once the
+                    // (non-default) `assign-expr` check is on. With the default
+                    // set, an assignment may cuddle an expression statement
+                    // *when the two share an identifier* — the common
+                    // `assert.Equal(t, …, c.Now())` / `c.now = …` shape.
+                    // (wsl v5.8.0 `wsl.go` checkAssign: the `CheckAssignExpr`
+                    // guard around `hasIntersection`.)
+                    if !check_enabled(options, WslV5Check::AssignExpr)
+                        && has_intersection(stmt, prev, skip)
+                    {
+                        continue;
+                    }
                     pending.push((stmt.pos().0 as u32, msg_invalid("assign")));
                     continue;
                 }
@@ -628,7 +791,7 @@ fn check_statements(
                 if matches!(prev, Stmt::ExprStmt(_)) {
                     continue;
                 }
-                check_cuddle_blockish(fset, stmts, i, "expr", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "expr", false, options, pending);
             }
             Stmt::DeferStmt(_) if check_enabled(options, WslV5Check::Defer) => {
                 if matches!(prev, Stmt::DeferStmt(_)) {
@@ -647,31 +810,31 @@ fn check_statements(
                         }
                     }
                 }
-                check_cuddle_blockish(fset, stmts, i, "defer", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "defer", true, options, pending);
             }
             Stmt::GoStmt(_) if check_enabled(options, WslV5Check::Go) => {
                 if matches!(prev, Stmt::GoStmt(_)) {
                     continue;
                 }
-                check_cuddle_blockish(fset, stmts, i, "go", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "go", true, options, pending);
             }
             Stmt::RangeStmt(_) if check_enabled(options, WslV5Check::Range) => {
-                check_cuddle_blockish(fset, stmts, i, "range", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "range", true, options, pending);
             }
             Stmt::ForStmt(_) if check_enabled(options, WslV5Check::For) => {
-                check_cuddle_blockish(fset, stmts, i, "for", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "for", true, options, pending);
             }
             Stmt::SwitchStmt(_) if check_enabled(options, WslV5Check::Switch) => {
-                check_cuddle_blockish(fset, stmts, i, "switch", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "switch", true, options, pending);
             }
             Stmt::TypeSwitchStmt(_) if check_enabled(options, WslV5Check::TypeSwitch) => {
-                check_cuddle_blockish(fset, stmts, i, "type-switch", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "type-switch", true, options, pending);
             }
             Stmt::SelectStmt(_) if check_enabled(options, WslV5Check::Select) => {
-                check_cuddle_blockish(fset, stmts, i, "select", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "select", true, options, pending);
             }
             Stmt::SendStmt(_) if check_enabled(options, WslV5Check::Send) => {
-                check_cuddle_blockish(fset, stmts, i, "send", options, pending);
+                check_cuddle_blockish(fset, stmts, i, "send", true, options, pending);
             }
             Stmt::LabeledStmt(_) if check_enabled(options, WslV5Check::Label) => {
                 pending.push((stmt.pos().0 as u32, msg_never("label")));
@@ -681,13 +844,20 @@ fn check_statements(
     }
 }
 
-fn walk_else(fset: &FileSet, else_: &Stmt, options: &WslV5Options, pending: &mut Vec<(u32, String)>) {
+fn walk_else(
+    fset: &FileSet,
+    skip: &HashSet<u32>,
+    comment_lines: &[(i64, i64)],
+    else_: &Stmt,
+    options: &WslV5Options,
+    pending: &mut Vec<(u32, String)>,
+) {
     match else_ {
-        Stmt::BlockStmt(b) => check_block(fset, b, options, pending),
+        Stmt::BlockStmt(b) => check_block(fset, skip, comment_lines, b, options, pending),
         Stmt::IfStmt(e) => {
-            check_block(fset, &e.body, options, pending);
+            check_block(fset, skip, comment_lines, &e.body, options, pending);
             if let Some(next) = &e.else_ {
-                walk_else(fset, next, options, pending);
+                walk_else(fset, skip, comment_lines, next, options, pending);
             }
         }
         _ => {}
@@ -696,12 +866,14 @@ fn walk_else(fset: &FileSet, else_: &Stmt, options: &WslV5Options, pending: &mut
 
 fn check_block(
     fset: &FileSet,
+    skip: &HashSet<u32>,
+    comment_lines: &[(i64, i64)],
     block: &BlockStmt,
     options: &WslV5Options,
     pending: &mut Vec<(u32, String)>,
 ) {
-    check_leading_trailing(fset, block, options, pending);
-    check_statements(fset, &block.list, options, pending);
+    check_leading_trailing(fset, comment_lines, block, options, pending);
+    check_statements(fset, skip, comment_lines, &block.list, options, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -716,11 +888,32 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     let mut pending = Vec::new();
     let fset = pass.fset().clone();
-    for file in pass.files() {
+    let skip = ident_skip_set(pass);
+    let want_comments = check_enabled(&options, WslV5Check::LeadingWhitespace);
+    let paths = pass.pkg().compiled_go_files.clone();
+    for (i, file) in pass.files().iter().enumerate() {
+        // `leading-whitespace` has to know where the comments are, and the
+        // production typecheck parses without them, so the file is re-parsed
+        // comments-only — but only when that check is on.
+        let comment_lines: Vec<(i64, i64)> = if want_comments {
+            if file.comments.is_empty() {
+                paths
+                    .get(i)
+                    .and_then(|p| reparse_comment_lines(p, pass.pkg().source_bytes(i)))
+                    .unwrap_or_default()
+            } else {
+                file.comments
+                    .iter()
+                    .map(|cg| (line(&fset, cg.pos()), line(&fset, cg.end())))
+                    .collect()
+            }
+        } else {
+            Vec::new()
+        };
         for decl in &file.decls {
             if let Decl::FuncDecl(f) = decl {
                 if let Some(body) = &f.body {
-                    check_block(&fset, body, &options, &mut pending);
+                    check_block(&fset, &skip, &comment_lines, body, &options, &mut pending);
                 }
             }
         }

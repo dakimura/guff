@@ -110,5 +110,13 @@
     "packages": "./...",
     "tier": "hunt",
     "timeout": "20m"
+  },
+  {
+    "name": "authelia",
+    "url": "https://github.com/authelia/authelia.git",
+    "ref": "v4.39.20",
+    "packages": "./...",
+    "tier": "hunt",
+    "timeout": "20m"
   }
 ]
