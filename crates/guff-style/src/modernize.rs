@@ -898,7 +898,10 @@ fn check_minmax(pass: &Pass<'_>, if_stmt: &IfStmt, pending: &mut Vec<Diagnostic>
         .map(|e| e.end().0 as u32)
         .unwrap_or(if_stmt.body.rbrace.0 as u32);
     pending.push(Diagnostic {
-        pos: compare.op_pos.0 as u32,
+        // `Pos: compare.Pos()` (x/tools `modernize/minmax.go:121`) — the start of
+        // `a < b`, not the `<`. Two columns apart on the same line, which only
+        // the golden tier compares.
+        pos: compare.x.pos().0 as u32,
         end: compare.y.end().0 as u32,
         category: String::new(),
         message: format!("if/else statement can be modernized using {sym}"),
@@ -996,11 +999,14 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
         end,
         category: String::new(),
         message: format!(
-            "[]byte(fmt.{}) can be modernized using fmt.{append_name}",
+            "Replace []byte(fmt.{}...) with fmt.{append_name}",
             { name.strip_prefix("fmt.").unwrap_or(&name) }
         ),
         suggested_fixes: vec![SuggestedFix {
-            message: format!("Replace with fmt.{append_name}"),
+            message: format!(
+                "Replace []byte(fmt.{}...) with fmt.{append_name}",
+                { name.strip_prefix("fmt.").unwrap_or(&name) }
+            ),
             text_edits: vec![TextEdit {
                 pos,
                 end,
@@ -1732,7 +1738,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
         };
         let contains = format!("slices.{func_name}({slice_text}, {arg2_text})");
         let last = body.last().unwrap();
-        let msg = format!("loop can be modernized using slices.{func_name}");
+        let msg = format!("Loop can be simplified using slices.{func_name}");
 
         // Special case: body={ return true/false } next={ return false/true }
         if let Stmt::ReturnStmt(ret_last) = last {
@@ -1762,7 +1768,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                 category: String::new(),
                                 message: msg.clone(),
                                 suggested_fixes: vec![SuggestedFix {
-                                    message: format!("Replace loop with slices.{func_name}"),
+                                    message: format!("Replace loop by call to slices.{func_name}"),
                                     text_edits: vec![TextEdit {
                                         pos,
                                         end,
@@ -1787,7 +1793,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                 category: String::new(),
                 message: msg,
                 suggested_fixes: vec![SuggestedFix {
-                    message: format!("Replace loop with if slices.{func_name}"),
+                    message: format!("Replace loop by call to slices.{func_name}"),
                     text_edits: vec![
                         TextEdit {
                             pos,
@@ -1843,13 +1849,17 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
                                             let end = rng.body.end().0 as u32;
                                             let prev_pos = prev.lhs[0].pos().0 as u32;
                                             pending.push(Diagnostic {
-                                                pos: prev_pos,
+                                                // `Pos: rng.Pos()` for every
+                                                // spelling. The fix starts at
+                                                // `found := false`; the finding
+                                                // does not.
+                                                pos,
                                                 end,
                                                 category: String::new(),
                                                 message: msg.clone(),
                                                 suggested_fixes: vec![SuggestedFix {
                                                     message: format!(
-                                                        "Replace loop with slices.{func_name}"
+                                                        "Replace loop by call to slices.{func_name}"
                                                     ),
                                                     text_edits: vec![TextEdit {
                                                         pos: prev_pos,
@@ -1884,7 +1894,7 @@ fn check_slicescontains(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Di
             category: String::new(),
             message: msg,
             suggested_fixes: vec![SuggestedFix {
-                message: format!("Replace loop with if slices.{func_name}"),
+                message: format!("Replace loop by call to slices.{func_name}"),
                 text_edits: vec![
                     TextEdit {
                         pos,
@@ -2053,28 +2063,141 @@ fn check_stringsseq(pass: &Pass<'_>, range_stmt: &RangeStmt, pending: &mut Vec<D
     } else {
         seq_name.to_string()
     };
-    let end = call.fun.end().0 as u32;
+    let _ = new_fun;
+    let old_fn_name = fun_text.rsplit_once('.').map_or(fun_text.as_str(), |p| p.1);
+    report_stringsseq(range_stmt, call, old_fn_name, seq_name, pending);
+}
+
+/// The report both spellings share. Upstream names only the *function*, not the
+/// qualified selector: `Ranging over SplitSeq is more efficient`, never
+/// `strings.SplitSeq` (x/tools v0.44.0 `modernize/stringsseq.go:126`).
+fn report_stringsseq(
+    range_stmt: &RangeStmt,
+    call: &CallExpr,
+    old_fn_name: &str,
+    seq_name: &str,
+    pending: &mut Vec<Diagnostic>,
+) {
+    let Expr::SelectorExpr(sel) = &*call.fun else {
+        return;
+    };
+    // The fix first deletes the blank key: `for _, line :=` → `for line :=`,
+    // `for _ :=` → `for`.
+    let mut text_edits = Vec::new();
+    if let Some(key) = range_stmt.key.as_ref() {
+        let end = range_stmt
+            .value
+            .as_ref()
+            .map(|v| v.pos())
+            .unwrap_or(range_stmt.range_);
+        text_edits.push(TextEdit {
+            pos: key.pos().0 as u32,
+            end: end.0 as u32,
+            new_text: String::new(),
+        });
+    }
+    text_edits.push(TextEdit {
+        pos: sel.sel.pos().0 as u32,
+        end: sel.sel.end().0 as u32,
+        new_text: seq_name.to_string(),
+    });
     pending.push(Diagnostic {
         pos: call.fun.pos().0 as u32,
-        end,
+        end: call.fun.end().0 as u32,
         category: String::new(),
-        message: format!(
-            "Ranging over {} allocates a slice; consider using {}",
-            fun_text, new_fun
-        ),
+        message: format!("Ranging over {seq_name} is more efficient"),
         suggested_fixes: vec![SuggestedFix {
-            message: format!("Replace with {new_fun}"),
-            text_edits: vec![TextEdit {
-                pos: call.fun.pos().0 as u32,
-                end,
-                new_text: new_fun,
-            }],
+            message: format!("Replace {old_fn_name} with {seq_name}"),
+            text_edits,
         }],
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),
         ..Diagnostic::default()
     });
+}
+
+/// The *indirect* spelling, which guff did not have at all:
+///
+/// ```go
+/// lines := strings.Split(s, "\n")
+/// for _, line := range lines {
+/// ```
+///
+/// Upstream accepts it when the range operand is an identifier defined by the
+/// immediately preceding `:=` in the same block, that statement has exactly one
+/// name and one value, and the range is the variable's **sole** use — otherwise
+/// rewriting the call would change what the other uses see
+/// (`stringsseq.go:72-92`, `soleUseIs`). syncthing writes it seven times, and
+/// two of those are this form.
+fn check_stringsseq_block(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
+    for i in 1..block.list.len() {
+        let Stmt::RangeStmt(range_stmt) = &block.list[i] else {
+            continue;
+        };
+        if !go_at_least(pass, range_stmt.for_.0 as u32, "go1.24") {
+            continue;
+        }
+        if let Some(key) = range_stmt.key.as_ref() {
+            if ident_name(key) != Some("_") {
+                continue;
+            }
+        }
+        let Expr::Ident(operand) = &range_stmt.x else {
+            continue;
+        };
+        let Stmt::AssignStmt(assign) = &block.list[i - 1] else {
+            continue;
+        };
+        if assign.tok != Some(Token::DEFINE) || assign.lhs.len() != 1 || assign.rhs.len() != 1 {
+            continue;
+        }
+        let Expr::Ident(defined) = &assign.lhs[0] else {
+            continue;
+        };
+        let Expr::CallExpr(call) = &assign.rhs[0] else {
+            continue;
+        };
+        let Some(info) = pass.types_info() else {
+            return;
+        };
+        let Some(def_obj) = info.defs.get(&defined.id).copied().flatten() else {
+            continue;
+        };
+        if info.uses.get(&operand.id).copied() != Some(def_obj) {
+            continue;
+        }
+        if !sole_use_is(pass, def_obj, operand.id) {
+            continue;
+        }
+        let Some(seq_name) = split_or_fields_seq_name(pass, call) else {
+            continue;
+        };
+        let Some(fun_text) = expr_text(&call.fun) else {
+            continue;
+        };
+        let old_fn_name = fun_text.rsplit_once('.').map_or(fun_text.as_str(), |p| p.1);
+        report_stringsseq(range_stmt, call, old_fn_name, seq_name, pending);
+    }
+}
+
+/// `soleUseIs` (x/tools `modernize/testingcontext.go:162`): `obj` is used, and
+/// every use of it is `ident_id`.
+fn sole_use_is(pass: &Pass<'_>, obj: ObjectId, ident_id: u32) -> bool {
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    let mut seen = false;
+    for (id, used) in &info.uses {
+        if *used != obj {
+            continue;
+        }
+        if *id != ident_id {
+            return false;
+        }
+        seen = true;
+    }
+    seen
 }
 
 fn is_named_pkg_type(pass: &Pass<'_>, typ: TypeId, pkg: &str, name: &str) -> bool {
@@ -5757,7 +5880,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let uses_kubebuilder = enabled(&options, "omitzero") && package_uses_kubebuilder(pass);
     for (file_idx, file) in pass.files().iter().enumerate() {
         if enabled(&options, "plusbuild") && go_at_least(pass, file.package.0 as u32, "go1.18") {
+            let _before = pending.len();
             check_plusbuild(file, &mut pending);
+            stamp_category(&mut pending, _before, "plusbuild");
         }
         if enabled(&options, "testingcontext") {
             let _before = pending.len();
@@ -5785,7 +5910,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             };
             match n {
                 NodeRef::InterfaceType(iface) if enabled(&options, "any") => {
+                    let _before = pending.len();
                     check_any(pass, iface, &mut pending);
+                    stamp_category(&mut pending, _before, "any");
                 }
                 NodeRef::RangeStmt(s) => {
                     if enabled(&options, "forvar") {
@@ -5844,6 +5971,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                 }
                 NodeRef::BlockStmt(b) => {
+                    if enabled(&options, "stringsseq") {
+                        let _before = pending.len();
+                        check_stringsseq_block(pass, b, &mut pending);
+                        stamp_category(&mut pending, _before, "stringsseq");
+                    }
                     if enabled(&options, "slicescontains") {
                         let _before = pending.len();
                         check_slicescontains(pass, b, &mut pending);

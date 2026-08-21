@@ -115,9 +115,13 @@ n = 0
 for r in repos:
     if want and r["name"] != want:
         continue
+    # "-" for an absent optional field, not "": tab is IFS whitespace, so bash's
+    # `read` collapses a run of tabs into one delimiter and an empty column in
+    # the middle would shift every column after it.
     print("\t".join([
         r["name"], r["url"], r["ref"], r.get("packages") or "./...",
-        r.get("timeout") or "15m", r.get("config") or "",
+        r.get("timeout") or "15m", r.get("config") or "-",
+        ",".join(r.get("build_tags") or []) or "-",
     ]))
     n += 1
 if n == 0:
@@ -128,8 +132,10 @@ then
   die "no hunt targets selected"
 fi
 
-while IFS=$'\t' read -r name url ref packages timeout config_override; do
+while IFS=$'\t' read -r name url ref packages timeout config_override build_tags; do
   [[ -z "${name:-}" ]] && continue
+  [[ "$config_override" == "-" ]] && config_override=""
+  [[ "$build_tags" == "-" ]] && build_tags=""
   dir="$CACHE/$name"
   echo "=== prepare $name ($ref) ==="
   if [[ -d "$dir/.git" ]]; then
@@ -151,7 +157,11 @@ while IFS=$'\t' read -r name url ref packages timeout config_override; do
   if [[ "$WARM" -eq 1 ]]; then
     echo "  warming modules..."
     (cd "$dir" && go mod download >/dev/null 2>&1 || true)
-    (cd "$dir" && go list $packages >/dev/null 2>&1 || true)
+    if [[ -n "${build_tags:-}" ]]; then
+      (cd "$dir" && go list -tags "$build_tags" $packages >/dev/null 2>&1 || true)
+    else
+      (cd "$dir" && go list $packages >/dev/null 2>&1 || true)
+    fi
   fi
 
   run_config="$RUN_DIR/${name}.config.yml"
@@ -167,6 +177,22 @@ if "${base-path}" in text:
     cfg.write_text(text.replace("${base-path}", str(root)), encoding="utf-8")
 PY
 
+  # Some repos do not build from a plain checkout: syncthing's `lib/api/auto`
+  # gets its `Assets()` from a generated file, and without it golangci-lint
+  # reports the compile error *and nothing else* — one typecheck issue in place
+  # of every finding in the repo, which reads as "guff invented 547 findings".
+  # The repo ships a `noassets` build tag for exactly this, so the tier carries
+  # the tags rather than the generator.
+  #
+  # A plain string, not an array: macOS ships bash 3.2, where `"${a[@]}"` on an
+  # empty array is an unbound-variable error under `set -u`. Tag lists are
+  # comma-separated and contain no spaces, so word splitting is exact here.
+  tag_flag=""
+  if [[ -n "${build_tags:-}" ]]; then
+    tag_flag="--build-tags $build_tags"
+    echo "  build tags: $build_tags"
+  fi
+
   guff_json="$RUN_DIR/${name}.guff.json"
   gcl_json="$RUN_DIR/${name}.golangci.json"
   guff_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-hunt-guff.XXXXXX")"
@@ -178,7 +204,7 @@ PY
     cd "$dir"
     env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
       "$GUFF" run -c "$run_config" --out-format json --issues-exit-code 0 \
-      --timeout "$timeout" --no-cache $packages
+      $tag_flag --timeout "$timeout" --no-cache $packages
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr"; then
     echo "  guff FAILED — see $RUN_DIR/${name}.guff.stderr" >&2
     tail -40 "$RUN_DIR/${name}.guff.stderr" >&2 || true
@@ -192,8 +218,8 @@ PY
     cd "$dir"
     env "GOLANGCI_LINT_CACHE=$gcl_cache" "GUFF_CACHE=$gcl_cache" \
       "$GOLANGCI" run -c "$run_config" --output.json.path=stdout --path-mode abs \
-      --issues-exit-code 0 --timeout="$timeout" --max-issues-per-linter=0 \
-      --max-same-issues=0 --allow-parallel-runners $packages
+      $tag_flag --issues-exit-code 0 --timeout="$timeout" \
+      --max-issues-per-linter=0 --max-same-issues=0 --allow-parallel-runners $packages
   ) >"$gcl_json" 2>"$RUN_DIR/${name}.golangci.stderr"; then
     echo "  golangci FAILED — see $RUN_DIR/${name}.golangci.stderr" >&2
     tail -40 "$RUN_DIR/${name}.golangci.stderr" >&2 || true

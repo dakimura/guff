@@ -5758,7 +5758,7 @@ fn modernize_flags_common_patterns() {
     assert!(
         messages
             .iter()
-            .any(|m| m.contains("loop can be modernized using slices.Contains")),
+            .any(|m| m.contains("Loop can be simplified using slices.Contains")),
         "{messages:?}"
     );
 }
