@@ -2034,6 +2034,70 @@ sa_check!(sa5004, sa5004_flags_empty_default_select, sa5004_allows_nonempty_defa
 sa_check!(sa5005, sa5005_flags_finalizer_self_ref, sa5005_allows_safe_finalizer, "finalizer closes over");
 sa_check!(sa5007, sa5007_flags_infinite_recursion, sa5007_allows_terminating_recursion, "infinite recursive call");
 sa_check!(sa5008, sa5008_flags_invalid_struct_tag, sa5008_allows_valid_struct_tag, "invalid XML tag");
+
+/// SA5008's JSON half is the full `encoding/json/v2` tag grammar
+/// (honnef's `jsonv2.go`). The fixtures mark every case, and
+/// `compat/golden/cases/staticcheck-sa` runs golangci-lint 2.12.2 over the same
+/// files — this pins the finding set so a change to the grammar shows up here
+/// too.
+#[test]
+fn sa5008_validates_the_whole_json_tag_grammar() {
+    let pkg = typecheck_rule("sa5008", "bad.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    let has = |needle: &str| {
+        assert!(
+            messages.iter().any(|m| m.contains(needle)),
+            "missing {needle:?} in {messages:?}"
+        );
+    };
+    // The thanos `pkg/api/api.go` shape, which guff used to miss entirely.
+    has("malformed `json` tag: invalid trailing ',' character");
+    // A mutant of a real option is named rather than called unknown.
+    has("invalid appearance of `omitEmpty` tag option; specify `omitempty` instead");
+    has("invalid appearance of unknown `bogus` tag option");
+    has("duplicate appearance of `omitempty` tag option");
+    has("field cannot have both `inline` and `unknown` specified");
+    has("missing value for `case` tag option");
+    has("invalid appearance of unknown `case:loud` tag value");
+    has("`format` tag option was not specified last");
+    has("invalid appearance of `string` tag option");
+    has("unexported struct field cannot have non-ignored `json:\"lower\"` tag");
+    // The one value that genuinely will not unquote.
+    has("unparseable struct tag: invalid syntax");
+}
+
+/// Malformed tag *structure* ends upstream's scan without a diagnostic — its
+/// `parseStructTag` breaks rather than erroring. guff reported
+/// `unparseable struct tag: malformed struct tag` on all four of these.
+#[test]
+fn sa5008_is_silent_on_tags_that_are_not_tags() {
+    let pkg = typecheck_rule("sa5008", "ok.go");
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    assert!(messages.is_empty(), "{messages:?}");
+}
+
+/// go-flags repeats `choice` / `optional-value` / `default` by design, so
+/// upstream exempts those three in any package that imports it. Without the
+/// exemption guff reports `duplicate struct tag "choice"` — a false positive no
+/// corpus repo could catch, since none of the 14 uses go-flags.
+#[test]
+fn sa5008_exempts_go_flags_repeated_tags() {
+    let dir = support::testdata("sa5008");
+    let stub = dir.join("stub/github.com/jessevdk/go-flags/flags.go");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/sa5008/goflags",
+        &dir.join("goflags.go"),
+        &[("github.com/jessevdk/go-flags", &stub)],
+    );
+    support::assert_well_typed(&pkg);
+    let messages = support::run_analyzer(sa5008::analyzer(), &pkg);
+    assert!(
+        !messages.iter().any(|m| m.contains("duplicate struct tag")),
+        "{messages:?}"
+    );
+}
 sa_check!(sa5010, sa5010_flags_impossible_assertion, sa5010_allows_possible_assertion, "type assertion");
 sa_check!(sa5011, sa5011_flags_possible_nil_deref, sa5011_allows_guarded_deref, "possible nil pointer dereference");
 sa_check!(sa6003, sa6003_flags_rune_range, sa6003_allows_string_range, "range over string");

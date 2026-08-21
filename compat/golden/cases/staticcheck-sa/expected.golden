@@ -243,7 +243,22 @@ sa5002/bad/bad.go:2:12:staticcheck::SA5002: this loop will spin, using 100% CPU
 sa5003/bad/bad.go:2:18:staticcheck::SA5003: defers in this infinite loop will never run
 sa5004/bad/bad.go:9:3:staticcheck::SA5004: should not have an empty default case in a for+select loop; the loop will spin
 sa5007/bad/bad.go:2:12:staticcheck::SA5007: infinite recursive call
-sa5008/bad/bad.go:2:23:staticcheck::SA5008: invalid XML tag: unknown option "unknown"
+sa5008/bad/bad.go:15:8:staticcheck::SA5008: invalid XML tag: unknown option "unknown"
+sa5008/bad/bad.go:21:11:staticcheck::SA5008: unparseable struct tag: invalid syntax
+sa5008/bad/bad.go:28:14:staticcheck::SA5008: malformed `json` tag: invalid trailing ',' character
+sa5008/bad/bad.go:34:8:staticcheck::SA5008: invalid appearance of `omitEmpty` tag option; specify `omitempty` instead
+sa5008/bad/bad.go:35:8:staticcheck::SA5008: invalid appearance of `omit_empty` tag option; specify `omitempty` instead
+sa5008/bad/bad.go:36:8:staticcheck::SA5008: invalid appearance of unknown `bogus` tag option
+sa5008/bad/bad.go:37:8:staticcheck::SA5008: duplicate appearance of `omitempty` tag option
+sa5008/bad/bad.go:38:8:staticcheck::SA5008: field cannot have both `inline` and `unknown` specified
+sa5008/bad/bad.go:39:8:staticcheck::SA5008: missing value for `case` tag option; specify `case:ignore` or `case:strict` instead
+sa5008/bad/bad.go:40:8:staticcheck::SA5008: invalid appearance of unknown `case:loud` tag value
+sa5008/bad/bad.go:41:8:staticcheck::SA5008: `format` tag option was not specified last
+sa5008/bad/bad.go:42:8:staticcheck::SA5008: missing value for `format` tag option
+sa5008/bad/bad.go:48:24:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/bad/bad.go:49:24:staticcheck::SA5008: invalid appearance of `string` tag option; it is only intended for fields of numeric types or pointers to those
+sa5008/bad/bad.go:54:12:staticcheck::SA5008: unexported struct field cannot have non-ignored `json:"lower"` tag
+sa5008/bad/bad.go:55:12:staticcheck::SA5008: should encoding/json ignore this field or name it "-"? Either use `json:"-"` to ignore the field or use `json:"'-',omitempty"` to specify "-" as the name
 sa5009/bad/bad.go:3:23:staticcheck::SA5009: Printf format %s reads arg #1, but call has only 0 args
 sa5010/bad/bad.go:4:19:staticcheck::SA5010: impossible type assertion; A and B contradict each other:\n	wrong type for M method\n		have func()\n		want func() int
 sa5011/bad/bad.go:6:8:staticcheck::SA5011: possible nil pointer dereference

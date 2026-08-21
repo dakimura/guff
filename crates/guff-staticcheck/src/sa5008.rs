@@ -9,11 +9,10 @@ use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
-use guff_types::object::is_exported;
 
 use crate::structtag;
 
-fn check_xml_tag(pass: &Pass<'_>, field: &Field, tag: &str, pending: &mut Vec<(u32, String)>) {
+fn check_xml_tag(_pass: &Pass<'_>, field: &Field, tag: &str, pending: &mut Vec<(u32, String)>) {
     let parts: Vec<&str> = tag.split(',').collect();
     let mut counts = std::collections::HashMap::new();
     for part in parts.iter().skip(1) {
@@ -42,19 +41,15 @@ fn check_xml_tag(pass: &Pass<'_>, field: &Field, tag: &str, pending: &mut Vec<(u
 }
 
 fn check_json_tag(pass: &Pass<'_>, field: &Field, tag: &str, pending: &mut Vec<(u32, String)>) {
+    // encoding/json knows what it is doing, and it tests itself.
     let pkg = pass.pkg().pkg_path.as_str();
-    if pkg.starts_with("encoding/json") {
+    if matches!(
+        pkg,
+        "encoding/json" | "encoding/json_test" | "encoding/json/v2" | "encoding/json/v2_test"
+    ) {
         return;
     }
-    if tag.is_empty() {
-        return;
-    }
-    if !field.names.is_empty() && !is_exported(&field.names[0].name) && tag != "-" {
-        pending.push((
-            field.tag.as_ref().map(|t| t.value_pos.0 as u32).unwrap_or(0),
-            format!("unexported struct field cannot have non-ignored `json:{tag:?}` tag"),
-        ));
-    }
+    crate::sa5008_json::validate_json_tag(pass, field, tag, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -63,12 +58,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "SA5008 requires inspect analyzer".to_string())?
         .clone();
 
+    let go_flags = imports_go_flags(pass);
     let mut pending = Vec::new();
     inspect.preorder_typed(node_mask!(StructType), pass.files(), |n| {
         let NodeRef::StructType(st) = n else {
             return;
         };
-        check_struct(pass, st, &mut pending);
+        check_struct(pass, st, go_flags, &mut pending);
     });
     for (pos, msg) in pending {
         pass.report_unless_generated(pos, msg);
@@ -76,7 +72,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     Ok(None)
 }
 
-fn check_struct(pass: &Pass<'_>, st: &StructType, pending: &mut Vec<(u32, String)>) {
+fn check_struct(
+    pass: &Pass<'_>,
+    st: &StructType,
+    imports_go_flags: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
     for field in &st.fields.list {
         let Some(tag_lit) = &field.tag else {
             continue;
@@ -93,23 +94,40 @@ fn check_struct(pass: &Pass<'_>, st: &StructType, pending: &mut Vec<(u32, String
             )),
             Ok(tags) => {
                 for (k, v) in &tags {
-                    if v.len() > 1 {
+                    // `go-flags` repeats these three by design, so upstream
+                    // exempts them in any package that imports it.
+                    let is_go_flags_tag = imports_go_flags
+                        && matches!(k.as_str(), "choice" | "optional-value" | "default");
+                    if v.len() > 1 && !is_go_flags_tag {
                         pending.push((
                             tag_lit.value_pos.0 as u32,
                             format!("duplicate struct tag {k:?}"),
                         ));
                     }
-                    for val in v {
-                        match k.as_str() {
-                            "json" => check_json_tag(pass, field, val, pending),
-                            "xml" => check_xml_tag(pass, field, val, pending),
-                            _ => {}
-                        }
+                    // Only the first value is validated, as upstream does.
+                    let Some(val) = v.first() else {
+                        continue;
+                    };
+                    match k.as_str() {
+                        "json" => check_json_tag(pass, field, val, pending),
+                        "xml" => check_xml_tag(pass, field, val, pending),
+                        _ => {}
                     }
                 }
             }
         }
     }
+}
+
+/// Upstream reads the *syntax* rather than `(*types.Package).Imports` to work
+/// around vendored paths in GOPATH mode, so this does too.
+fn imports_go_flags(pass: &Pass<'_>) -> bool {
+    pass.files().iter().any(|f| {
+        f.imports.iter().any(|imp| {
+            let v = imp.path.value.as_str();
+            v.len() >= 2 && &v[1..v.len() - 1] == "github.com/jessevdk/go-flags"
+        })
+    })
 }
 
 fn sa5008_analyzer_impl() -> Analyzer {
