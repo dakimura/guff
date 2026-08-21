@@ -215,8 +215,11 @@ impl Checker {
     /// `close(c)` — `c` must be a sendable channel.
     fn builtin_close(&mut self, x: &mut Operand) -> bool {
         let typ = x.typ.unwrap_or_else(|| self.invalid_type());
-        // DEFERRED: type-parameter channel (underIs) — use the underlying type.
-        let u = typ.underlying(&self.types);
+        // `commonUnder(x.typ, …)`: a type parameter constrained to channels is
+        // closeable, and its own underlying type is the constraint interface.
+        let u = common_under(&mut self.types, &self.objects, &self.packages, typ, None)
+            .0
+            .unwrap_or_else(|| self.invalid_type());
         match self.types.get(u) {
             TypeData::Chan(_) => {
                 if crate::chan::chan_dir(&self.types, u) == crate::chan::ChanDir::RecvOnly {
@@ -973,8 +976,10 @@ impl Checker {
     /// `delete(m, k)`.
     fn builtin_delete<'a>(&mut self, x: &mut Operand<'a>, args: &[Operand<'a>]) -> bool {
         let map_typ = x.typ.unwrap_or_else(|| self.invalid_type());
-        // DEFERRED: type-parameter map (underIs) — use the underlying type.
-        let u = map_typ.underlying(&self.types);
+        // `commonUnder`, for the same reason as `close`.
+        let u = common_under(&mut self.types, &self.objects, &self.packages, map_typ, None)
+            .0
+            .unwrap_or_else(|| self.invalid_type());
         let key = match self.types.get(u) {
             TypeData::Map(_) => crate::map::map_key(&self.types, u),
             _ => {
@@ -1000,8 +1005,10 @@ impl Checker {
     /// `clear(m)` / `clear(s)` — clears a map or slice.
     fn builtin_clear(&mut self, x: &mut Operand) -> bool {
         let typ = x.typ.unwrap_or_else(|| self.invalid_type());
-        // DEFERRED: type-parameter (underIs) — use the underlying type.
-        let u = typ.underlying(&self.types);
+        // The message already says "(or constrained by)"; now it is true.
+        let u = common_under(&mut self.types, &self.objects, &self.packages, typ, None)
+            .0
+            .unwrap_or_else(|| self.invalid_type());
         if !matches!(self.types.get(u), TypeData::Map(_) | TypeData::Slice(_)) {
             let xs = self.operand_str(x);
             self.error(
@@ -1204,8 +1211,19 @@ impl Checker {
 
     /// The element type of a slice operand's type, or `None` if it isn't a
     /// slice. Simplified `sliceElem` (type-parameter type sets deferred).
-    fn slice_elem_of(&self, t: TypeId) -> Option<TypeId> {
-        let u = t.underlying(&self.types);
+    /// Element type of `t` when `t` is a slice — **or is constrained to be one**.
+    ///
+    /// `append`, `copy` and friends ask go/types for `coreType(S)`, not
+    /// `under(S)`: a type parameter's underlying type is its constraint
+    /// interface, and only its *type set* says whether every member is a slice.
+    /// syncthing's `func without[E comparable, S ~[]E](s S, e E) S` is the shape
+    /// that makes the difference — with `under` the `append(s[:i], …)` inside it
+    /// is "argument S is not a slice", the package is ill-typed, and every
+    /// analyzer that refuses ill-typed packages goes quiet for the whole of
+    /// `lib/model`.
+    fn slice_elem_of(&mut self, t: TypeId) -> Option<TypeId> {
+        let (u, _) = common_under(&mut self.types, &self.objects, &self.packages, t, None);
+        let u = u?;
         match self.types.get(u) {
             TypeData::Slice(_) => Some(slice_elem(&self.types, u)),
             _ => None,

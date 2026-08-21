@@ -1076,3 +1076,90 @@ fn single_multi_valued_argument_is_spread() {
         bad.errors
     );
 }
+
+/// A generic type instantiated **inside another type's declaration**. Verifying
+/// the constraint needs the type argument's methods, and a method's signature is
+/// resolved by its own object declaration — which has not run yet at that point.
+/// Go defers the check (`typexpr.go`'s `check.later(func() { … verify … })`);
+/// guff ran it inline and read `*handler`'s `Serve` before it had a type, so the
+/// error read "wrong type for method Serve; have <nothing>".
+///
+/// The same shape in a value position was always fine, because function bodies
+/// are checked last. syncthing's `serviceMap[string, *indexHandler]` is the
+/// struct-field spelling, and it made guff call the whole of `lib/model`
+/// ill-typed.
+#[test]
+fn constraint_is_verified_after_methods_resolve() {
+    let check = check_src(
+        "package p\n\
+         type service interface{ serve() error }\n\
+         type box[S service] struct{ v S }\n\
+         type handler struct{ n int }\n\
+         func (h *handler) serve() error { return nil }\n\
+         type registry struct{ h *box[*handler] }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// The constraint really is checked — deferring it must not turn it off.
+#[test]
+fn constraint_violation_is_still_reported_when_deferred() {
+    let check = check_src(
+        "package p\n\
+         type service interface{ serve() error }\n\
+         type box[S service] struct{ v S }\n\
+         type handler struct{ n int }\n\
+         type registry struct{ h *box[*handler] }\n",
+    );
+    assert!(
+        check.errors.iter().any(|e| e.msg.contains("serve")),
+        "expected a missing-method error, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// `append` asks go/types for `coreType(S)`, not `under(S)`: a type parameter's
+/// underlying type is its constraint interface, and only its *type set* says
+/// whether every member is a slice. syncthing's
+/// `func without[E comparable, S ~[]E](s S, e E) S` is the shape that makes the
+/// difference — `clear` and `delete` had the same gap.
+#[test]
+fn builtins_accept_a_type_parameter_constrained_to_a_slice() {
+    let check = check_src(
+        "package p\n\
+         func without[E comparable, S ~[]E](s S, e E) S {\n\
+         \tfor i, x := range s {\n\
+         \t\tif x == e {\n\
+         \t\t\treturn append(s[:i], s[i+1:]...)\n\
+         \t\t}\n\
+         \t}\n\
+         \treturn s\n\
+         }\n\
+         func wipe[S ~[]int](s S) { clear(s) }\n\
+         func drop[K comparable, M ~map[K]int](m M, k K) { delete(m, k) }\n\
+         func shut[C ~chan int](c C) { close(c) }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// And a type parameter whose type set is *not* all slices still fails.
+#[test]
+fn append_rejects_a_type_parameter_that_is_not_all_slices() {
+    let check = check_src(
+        "package p\n\
+         func bad[S ~[]int | ~map[int]int](s S) S { return append(s, 1) }\n",
+    );
+    assert!(
+        check.errors.iter().any(|e| e.msg.contains("not a slice")),
+        "expected an append error, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
