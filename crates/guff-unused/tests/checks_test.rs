@@ -66,6 +66,25 @@ fn unused_const_group_with_exported_marks_unexported_siblings() {
     assert!(messages.is_empty(), "{messages:?}");
 }
 
+/// honnef's graph is reachability from a root, not a reference count: a call
+/// written inside a function nothing calls does not keep its target alive.
+#[test]
+fn unused_does_not_let_dead_code_keep_its_callees_alive() {
+    let dir = support::testdata("basic");
+    let pkg = support::typecheck_pkg("example.com/unused/deadcycle", &dir.join("dead_cycle.go"));
+    let messages = support::run_analyzer(analyzer(), &pkg);
+    let mut got: Vec<&String> = messages.iter().collect();
+    got.sort();
+    assert_eq!(messages.len(), 3, "{got:?}");
+    for want in ["recompileAll", "update", "delete"] {
+        assert!(messages.iter().any(|m| m.contains(want)), "{got:?}");
+    }
+    // `Reload` is exported, so everything it reaches stays used.
+    for live in ["reachable", "alsoReachable"] {
+        assert!(!messages.iter().any(|m| m.contains(live)), "{got:?}");
+    }
+}
+
 #[test]
 fn unused_flags_method_on_used_type() {
     let dir = support::testdata("basic");

@@ -104,14 +104,14 @@ fn gosec_g115_reports_only_unbounded_conversions() {
             count("G115: integer overflow conversion int -> uint32"),
             count("G115: integer overflow conversion uint64 -> int"),
         ),
-        (4, 2, 6, 1, 1),
+        (4, 2, 6, 2, 1),
         "{messages:?}"
     );
     // Nothing else: every other conversion in the fixture is bounded, and the
     // fixture's `// silent` marks say which.
     assert_eq!(
         messages.iter().filter(|m| m.starts_with("G115:")).count(),
-        14,
+        15,
         "{messages:?}"
     );
 }

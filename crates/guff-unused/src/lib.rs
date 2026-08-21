@@ -42,7 +42,10 @@ fn object_kind(objects: &ObjectArena, types: &TypeArena, obj: ObjectId) -> &'sta
 }
 
 fn is_exported(name: &str) -> bool {
-    name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+    name.chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
 }
 
 /// Receiver type name for `T`, `*T`, or indexed `T[...]` / `*T[...]`.
@@ -109,6 +112,40 @@ fn method_recv_base_name(
     }
 }
 
+/// Charge every use written under `node` to `owners` — honnef's `by` argument.
+///
+/// `attributed` records which `*ast.Ident`s were reached, so a use the walk
+/// never visits can be treated as a root instead of silently losing its edge.
+fn attribute_uses(
+    info: &guff_types::api::Info,
+    node: guff::walk::NodeRef<'_>,
+    owners: &[ObjectId],
+    local: &HashSet<ObjectId>,
+    edges: &mut HashMap<ObjectId, HashSet<ObjectId>>,
+    attributed: &mut HashSet<u32>,
+) {
+    guff::walk::preorder(node, |n| {
+        if let guff::walk::NodeRef::Ident(id) = n {
+            if let Some(target) = info.uses.get(&id.id) {
+                // Mark it attributed either way: the "unreached ident is a
+                // root" fallback must key on whether the *walk* saw it, not on
+                // what it pointed at.
+                attributed.insert(id.id);
+                // Only a package-level declaration of this package can be
+                // reached-or-not; an import, a local, a field is decided
+                // elsewhere and storing it would grow the graph by an order of
+                // magnitude for nothing.
+                if local.contains(target) {
+                    for owner in owners {
+                        edges.entry(*owner).or_default().insert(*target);
+                    }
+                }
+            }
+        }
+        true
+    });
+}
+
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let info = match pass.types_info() {
         Some(i) => i,
@@ -173,6 +210,39 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
 
     for file in pass.files() {
         if is_generated_at(pass, file.file_start.0 as u32) {
+            // `GeneratedIsUsed` (on by default) makes honnef `g.use(obj, nil)`
+            // every object declared in a generated file — a root, not an
+            // absence. Under reachability the difference is visible: dropping
+            // them would strand everything they reference.
+            for decl in &file.decls {
+                match decl {
+                    Decl::FuncDecl(f) => {
+                        if let Some(Some(obj)) = info.defs.get(&f.name.id) {
+                            roots.insert(*obj);
+                        }
+                    }
+                    Decl::GenDecl(GenDecl { specs, .. }) => {
+                        for spec in specs {
+                            match spec {
+                                Spec::TypeSpec(TypeSpec { name, .. }) => {
+                                    if let Some(Some(obj)) = info.defs.get(&name.id) {
+                                        roots.insert(*obj);
+                                    }
+                                }
+                                Spec::ValueSpec(ValueSpec { names, .. }) => {
+                                    for id in names {
+                                        if let Some(Some(obj)) = info.defs.get(&id.id) {
+                                            roots.insert(*obj);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
             continue;
         }
         for decl in &file.decls {
@@ -186,11 +256,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             if let Some(ty) = field.ty.as_ref() {
                                 if let Some(type_ident) = recv_type_ident(ty) {
                                     // Receiver type Idents are usually uses, not defs.
-                                    let type_obj = info
-                                        .uses
-                                        .get(&type_ident.id)
-                                        .copied()
-                                        .or_else(|| {
+                                    let type_obj =
+                                        info.uses.get(&type_ident.id).copied().or_else(|| {
                                             info.defs.get(&type_ident.id).and_then(|d| *d)
                                         });
                                     if let Some(type_obj) = type_obj {
@@ -211,19 +278,21 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                     } else {
                                         format!("{printed}.")
                                     };
-                                    method_display
-                                        .insert(*obj, format!("{qual}{}", f.name.name));
+                                    method_display.insert(*obj, format!("{qual}{}", f.name.name));
                                 }
                             }
                         }
-                        if is_exported(&f.name.name) {
+                        if f.name.name == "_" || is_exported(&f.name.name) {
                             roots.insert(*obj);
                         } else {
                             candidates.insert(*obj);
                         }
                         continue;
                     }
-                    if f.name.name == "init" || is_exported(&f.name.name) {
+                    if f.name.name == "_"
+                        || f.name.name == "init"
+                        || is_exported(&f.name.name)
+                    {
                         roots.insert(*obj);
                         continue;
                     }
@@ -263,7 +332,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 let Some(Some(obj)) = info.defs.get(&name.id) else {
                                     continue;
                                 };
-                                if is_exported(&name.name) {
+                                if name.name == "_" || is_exported(&name.name) {
                                     roots.insert(*obj);
                                 } else {
                                     candidates.insert(*obj);
@@ -274,12 +343,23 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                             }
                             Spec::ValueSpec(ValueSpec { names, .. }) => {
                                 for id in names {
-                                    if id.name == "_" {
-                                        continue;
-                                    }
                                     let Some(Some(obj)) = info.defs.get(&id.id) else {
                                         continue;
                                     };
+                                    // honnef (9.9): an object named the blank
+                                    // identifier is used — `g.use(obj, by)`.
+                                    // Under reachability that has to be a root:
+                                    // restic's
+                                    //
+                                    //     var _ = initDebug()
+                                    //
+                                    // is the only thing keeping six functions in
+                                    // `internal/debug` alive, and skipping the
+                                    // blank name outright dropped that edge.
+                                    if id.name == "_" {
+                                        roots.insert(*obj);
+                                        continue;
+                                    }
                                     if is_exported(&id.name) {
                                         roots.insert(*obj);
                                     } else {
@@ -305,60 +385,173 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    let mut used = roots;
+    // honnef's graph is *reachability from a root* (`unused.go`'s `color`),
+    // not a flat "is this referenced anywhere" count: a reference written
+    // inside a dead function does not keep its target alive. dapr's
+    // `recompileAll` is called only by `update` and `delete`, and nothing calls
+    // those, so upstream reports all three; guff counted references, reported
+    // only two, and then called the `//nolint:unused` over the third an unused
+    // directive.
+    //
+    // Every use is attributed to the top-level declaration it sits in — that is
+    // honnef's `by` argument to `g.use`. An `*ast.Ident` the walk does not
+    // reach falls back to the old unconditional treatment: a lost edge would be
+    // a false positive, while a spurious root only costs a missed report.
+    let mut edges: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
+    let mut attributed: HashSet<u32> = HashSet::new();
+    let local: HashSet<ObjectId> = candidates.union(&roots).copied().collect();
+    for file in pass.files() {
+        // honnef sees the objects of a generated file like any others but marks
+        // them used (`GeneratedIsUsed`, on by default), so what they reference
+        // stays alive. Skipping the file outright, as the candidate sweep below
+        // does, would strand those edges.
+        for decl in &file.decls {
+            match decl {
+                Decl::FuncDecl(f) => {
+                    let Some(Some(obj)) = info.defs.get(&f.name.id) else {
+                        continue;
+                    };
+                    attribute_uses(
+                        info,
+                        guff::walk::NodeRef::FuncDecl(f),
+                        &[*obj],
+                        &local,
+                        &mut edges,
+                        &mut attributed,
+                    );
+                }
+                Decl::GenDecl(GenDecl { tok, specs, .. }) => {
+                    if !matches!(tok, Some(Token::VAR | Token::CONST | Token::TYPE)) {
+                        continue;
+                    }
+                    for spec in specs {
+                        match spec {
+                            Spec::TypeSpec(ts) => {
+                                let Some(Some(obj)) = info.defs.get(&ts.name.id) else {
+                                    continue;
+                                };
+                                attribute_uses(
+                                    info,
+                                    guff::walk::NodeRef::TypeSpec(ts),
+                                    &[*obj],
+                                    &local,
+                                    &mut edges,
+                                    &mut attributed,
+                                );
+                            }
+                            Spec::ValueSpec(vs) => {
+                                // honnef pairs `names[i]` with `values[i]`;
+                                // charging the whole spec to every name it
+                                // declares only ever keeps more alive.
+                                let owners: Vec<ObjectId> = vs
+                                    .names
+                                    .iter()
+                                    .filter_map(|id| info.defs.get(&id.id).copied().flatten())
+                                    .collect();
+                                if owners.is_empty() {
+                                    continue;
+                                }
+                                attribute_uses(
+                                    info,
+                                    guff::walk::NodeRef::ValueSpec(vs),
+                                    &owners,
+                                    &local,
+                                    &mut edges,
+                                    &mut attributed,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // Calls through an *instantiated* generic receiver (`streamer[T].nextBatch`)
     // record the substituted method copy in `Uses`, which is a different
     // ObjectId from the declaration. `Func` has no `Origin()` to map it back
     // (R18 DEFERRED), so remember (receiver type name, method name) too.
     let mut used_methods: HashSet<(String, String)> = HashSet::new();
-    for obj in info.uses.values() {
-        used.insert(*obj);
-        if let Some(recv) = method_recv_base_name(&artifacts.types, &artifacts.objects, *obj) {
-            used_methods.insert((recv, obj.name(&artifacts.objects).to_string()));
+    // Names that reachability can never retract: everything used that is not a
+    // package-level declaration of this package — imported objects, locals,
+    // fields. The receiver-type rules below match on names, and these were part
+    // of the old flat set.
+    let mut foreign_used_names: HashSet<String> = HashSet::new();
+    // `used` starts empty and the roots go through the queue like any other
+    // node: seeding it with them would make the very first `used.insert` say
+    // "already there" and skip their outgoing edges.
+    let mut used: HashSet<ObjectId> = HashSet::new();
+    let mut queue: Vec<ObjectId> = roots.iter().copied().collect();
+    for (id, obj) in &info.uses {
+        if !attributed.contains(id) {
+            queue.push(*obj);
         }
-    }
-
-    for group in const_groups {
-        if group.iter().any(|obj| used.contains(obj)) {
-            for obj in group {
-                used.insert(obj);
+        // Both name-keyed sets take only uses that are *not* one of this
+        // package's own declarations. A plain method call records the
+        // declaration's own ObjectId and the reachability edge above already
+        // carries it; letting the name rule fire there too would put every
+        // called method back on the root set, which is what kept dapr's
+        // `recompileAll` alive.
+        if !candidates.contains(obj) {
+            foreign_used_names.insert(obj.name(&artifacts.objects).to_string());
+            if let Some(recv) = method_recv_base_name(&artifacts.types, &artifacts.objects, *obj) {
+                used_methods.insert((recv, obj.name(&artifacts.objects).to_string()));
             }
         }
     }
 
-    // Methods that implement a package interface are used when their receiver
-    // type is used (even if never called by name). Compare by type *name* so
-    // hybrid typecheck ObjectId identity mismatches don't miss the link.
-    let used_type_names: HashSet<String> = used
-        .iter()
-        .map(|obj| obj.name(&artifacts.objects).to_string())
-        .collect();
-    for (method, recv_ty) in &method_recv_type {
-        if !candidates.contains(method) {
-            continue;
+    // Reachability, then the two name-keyed rules, to a fixed point: an
+    // interface-satisfying method that becomes reachable can itself keep more
+    // of the package alive.
+    let mut used_type_names: HashSet<String> = HashSet::new();
+    loop {
+        while let Some(obj) = queue.pop() {
+            if !used.insert(obj) {
+                continue;
+            }
+            used_type_names.insert(obj.name(&artifacts.objects).to_string());
+            if let Some(next) = edges.get(&obj) {
+                queue.extend(next.iter().copied());
+            }
         }
-        let recv_name = recv_ty.name(&artifacts.objects);
-        if !used_type_names.contains(recv_name) {
-            continue;
-        }
-        let name = method.name(&artifacts.objects);
-        if iface_method_names.contains(name) {
-            used.insert(*method);
-        }
-    }
 
-    // Second pass over the same map, this time matching the instantiated-method
-    // uses collected above.
-    for (method, recv_ty) in &method_recv_type {
-        if !candidates.contains(method) {
-            continue;
+        // Both rules below queue only objects that are not used yet, so an
+        // empty queue here *is* the fixed point. Re-queueing something already
+        // reached would spin forever: the drain above would add nothing, the
+        // rules would queue it again, and the loop would never see an empty
+        // queue. (It did — two `unused` fixtures ran for minutes at 200% CPU.)
+        for group in &const_groups {
+            if group.iter().any(|obj| used.contains(obj)) {
+                queue.extend(group.iter().copied().filter(|obj| !used.contains(obj)));
+            }
         }
-        let key = (
-            recv_ty.name(&artifacts.objects).to_string(),
-            method.name(&artifacts.objects).to_string(),
-        );
-        if used_methods.contains(&key) {
-            used.insert(*method);
+
+        // Methods that implement a package interface are used when their
+        // receiver type is used (even if never called by name). Compare by type
+        // *name* so hybrid typecheck ObjectId identity mismatches don't miss the
+        // link.
+        for (method, recv_ty) in &method_recv_type {
+            if used.contains(method) || !candidates.contains(method) {
+                continue;
+            }
+            let recv_name = recv_ty.name(&artifacts.objects);
+            let known =
+                used_type_names.contains(recv_name) || foreign_used_names.contains(recv_name);
+            let name = method.name(&artifacts.objects);
+            if known && iface_method_names.contains(name) {
+                queue.push(*method);
+                continue;
+            }
+            let key = (recv_name.to_string(), name.to_string());
+            if used_methods.contains(&key) {
+                queue.push(*method);
+            }
+        }
+
+        if queue.is_empty() {
+            break;
         }
     }
 

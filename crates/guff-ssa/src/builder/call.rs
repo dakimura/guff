@@ -334,7 +334,20 @@ impl<'a> Builder<'a> {
         let elem = guff_types::pointer::pointer_elem(&self.prog.type_arena, ptr);
         let block = self.block.expect("no current block");
         let fid = self.func_id;
-        crate::emit::emit_new(self.prog, fid, block, elem, e.lparen, "new".to_string())
+        let alloc = crate::emit::emit_new(self.prog, fid, block, elem, e.lparen, "new".to_string());
+        // go1.26's `new(expr)` allocates *and initialises*: the argument is a
+        // value, not a type, and go/ssa stores it into the fresh cell. Skipping
+        // it left the expression out of the SSA entirely, so gosec's G115 —
+        // which reads `Convert` instructions — never saw dapr's
+        // `new(uint32(repetition))`.
+        if let Some(arg) = e.args.first() {
+            if !self.is_type_expr(arg) {
+                let v = self.expr(arg);
+                let block = self.block.expect("no current block");
+                crate::emit::emit_store(self.prog, fid, block, alloc, v, e.lparen);
+            }
+        }
+        alloc
     }
 
     fn emit_make(&mut self, e: &CallExpr) -> Value {
