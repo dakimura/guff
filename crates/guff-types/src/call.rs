@@ -630,7 +630,21 @@ impl Checker {
                 // Step 3 promotes an untyped argument to its default type, and
                 // untyped nil has none — Go excludes it explicitly
                 // (`!arg.isNil()`), so it contributes nothing to either step.
-                untyped_types.push((a.mode == OperandMode::Constant).then_some(a.typ).flatten());
+                //
+                // "Untyped" is not "untyped *constant*", here either: a
+                // comparison yields an untyped **bool value**, and it has a
+                // default type like any other untyped operand. Requiring
+                // `mode == Constant` dropped it from step 3 as well as step 1,
+                // so `optional.Some(n > 0)` — `func Some[T any](v T) Option[T]`
+                // — could not infer `T` at all and took its package with it
+                // (three of gitea's).
+                let is_untyped_nil = a.typ.is_some_and(|t| {
+                    matches!(
+                        self.types.get(t),
+                        TypeData::Basic(b) if b.kind() == crate::basic::BasicKind::UntypedNil
+                    )
+                });
+                untyped_types.push(if is_untyped_nil { None } else { a.typ });
             } else {
                 arg_types.push(a.typ);
                 untyped_types.push(None);

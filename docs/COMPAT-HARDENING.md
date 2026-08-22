@@ -8222,17 +8222,35 @@ go/types は `x.mode = variable` を**無条件に**セットする。thanos / a
 
 **hunt の ill-typed 33 → 20**（jaeger 9 → 0、thanos 4 → 2、argo-cd 3 → 2、cli 2 → 1）。
 
-**次にやること**（この 20 件の内訳）
+#### E の一部 —— 推論の「untyped」は「untyped *定数*」ではない
+
+```go
+opts.IsScopedRun = optional.Some(workflowSourceRepoID > 0)   // func Some[T any](v T) Option[T]
+```
+
+比較の結果は **untyped bool の「値」**であって定数ではない。guff は step 3
+（untyped 実引数を既定型に昇格して型引数を決める）に渡す条件を
+`mode == Constant` にしていたので、この実引数は step 1 からも step 3 からも落ち、
+`T` が決まらなかった。Go が除くのは untyped **nil** だけ（既定型を持たないため）で、
+step 1 の guard についてはコードのすぐ上のコメントが既にそう書いていた ——
+**同じ読み違いが 2 行下に残っていた**。gitea の 3 パッケージがこれで、
+`ill-typed 20 → 16`（gitea 6 → 2）。
+
+**次にやること**（この 16 件の内訳）
 
 1. **C: `export_test.go`（7 件）** —— `package storage_test` が import する
    `.../storage` は、**同パッケージの `_test.go` を含んだ test variant** でなければ
    ならない。guff は素のパッケージに解決している。authelia / dapr / gitea / thanos /
-   rclone。パッケージロード側の話で、型検査ではない。
+   rclone。`dedup::import_path_of_id` が `Q [P.test]` を `Q` に潰しているのは
+   seed（production ファイルだけを compile する）には正しいが、
+   `P [P.test]` —— P 自身の `_test.go` を含む variant —— には正しくない。
+   コメント自身が「解析にとっては別パッケージである」と書いてある。
+   **パッケージロード側の話で、型検査ではない**ので単独のタスクにすること。
 2. **D: 埋め込んだジェネリックインスタンス（5 件）** ——
    `type ingressRoutes struct { *gentype.ClientWithListAndApply[A, B, C] }` の
    メソッド昇格。export data 越しのインスタンスのメソッドセットが要る。
    traefik / argo-cd / prometheus、いずれも k8s 系のコード生成物。
-3. **E: 残り** —— gitea の `cannot infer type arguments in call` ほか個別。
+3. **E: 残り 4 件** —— `cannot convert untyped string to type any`（gitea / cli）ほか個別。
 
 ---
 
