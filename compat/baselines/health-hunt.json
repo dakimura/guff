@@ -14,14 +14,11 @@
     "authelia": {
       "ill_typed": 1
     },
-    "cli": {
-      "ill_typed": 1
-    },
     "dapr": {
       "ill_typed": 1
     },
     "gitea": {
-      "ill_typed": 2
+      "ill_typed": 1
     },
     "prometheus": {
       "ill_typed": 3

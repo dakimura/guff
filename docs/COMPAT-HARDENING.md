@@ -8236,7 +8236,29 @@ step 1 の guard についてはコードのすぐ上のコメントが既にそ
 **同じ読み違いが 2 行下に残っていた**。gitea の 3 パッケージがこれで、
 `ill-typed 20 → 16`（gitea 6 → 2）。
 
-**次にやること**（この 16 件の内訳）
+#### E の残り —— untyped 定数を interface へ変換するのは「表現可能か」ではない
+
+```go
+ctxNew := context.WithValue(context.Background(), any("key"), "value")
+_ = interface{}("bug-fix")
+```
+
+untyped 定数が interface として**表現可能**かを訊いても意味がない（どれも表現できない）。
+Go は `implicitTypeAndValue` の `*Interface` の腕で**既定型**を通して変換し、
+**空 interface のときだけ**受け入れる。guff の `assignable_to` は untyped の枝で
+`representable` を訊いていたので、`any("key")` を拒んで gitea の `cmd/cmdtest` と
+cli の `pkg/cmd/pr/list` を落としていた。
+
+述語の選び方も同じくらい効いた: `Interface.Empty()` は `typeSet().IsAll()`
+（**すべての型**の集合）であって、`is_empty()`（何も満たさない集合）ではない。
+間違えたまま最初に直したときは `interface{}` リテラルだけが通った ——
+そちらは型集合がまだ計算されていなかったからで、`MyAny` / `any` は計算済みで落ちた。
+**`cached_typeset()` が `None` を「空」と読むコードは他にもある**（`predicates.rs:343`、
+`check_expr_const.rs` の interface の腕）。触っていないが、同じ読み違いの候補である。
+
+`ill-typed 16 → 14`（gitea 2 → 1、cli 1 → 0）。
+
+**次にやること**（この 14 件の内訳）
 
 1. **C: `export_test.go`（7 件）** —— `package storage_test` が import する
    `.../storage` は、**同パッケージの `_test.go` を含んだ test variant** でなければ
@@ -8250,7 +8272,7 @@ step 1 の guard についてはコードのすぐ上のコメントが既にそ
    `type ingressRoutes struct { *gentype.ClientWithListAndApply[A, B, C] }` の
    メソッド昇格。export data 越しのインスタンスのメソッドセットが要る。
    traefik / argo-cd / prometheus、いずれも k8s 系のコード生成物。
-3. **E: 残り 4 件** —— `cannot convert untyped string to type any`（gitea / cli）ほか個別。
+3. **E: 残り 2 件** —— gitea 1（未調査）と dapr 1（`export_test.go` 系）。
 
 ---
 
