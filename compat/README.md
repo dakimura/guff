@@ -33,10 +33,14 @@ cargo build --release -p guff-lint
 # Ad-hoc OSS bug hunt (extra repos in corpus/hunt.json; not a CI gate)
 ./compat/hunt.sh
 ./compat/hunt.sh --name cobra
+./compat/hunt.sh --update-baseline   # re-record baselines/health-hunt.json
 # A hunt entry may carry "build_tags": ["noassets"] when the repo does not build
 # from a plain checkout. Both tools get the tags. Without them golangci-lint
 # reports the compile error *and nothing else*, so the whole repo reads as
 # "guff invented N findings" (syncthing, 2026-08-21).
+# hunt runs the same panic / ill-typed gate as the OSS tier, against its own
+# baseline file — without it a hunt repo can lose a whole package's findings
+# and the diff shows only "golangci-only" (syncthing lib/model, 2026-08-22).
 
 # Refresh allowlists from current diffs (merges; review before committing)
 ./compat/run.sh --oss --tier pr --update-allowlist
@@ -106,7 +110,7 @@ cargo build --release -p guff-lint
 | `reject/` | Configs upstream refuses to start on — the tier a finding-set diff cannot express ([README](reject/README.md)) |
 | `oracles/` | Go-stdlib ground truth for the `gostd` ports ([README](oracles/README.md)) |
 | `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |
-| `baselines/` | Ill-typed package counts per target (panics are never baselined) |
+| `baselines/` | Ill-typed package counts per target: `health.json` (OSS/CI), `health-hunt.json` (hunt). Panics are never baselined |
 | `filesets.py` / `filesets.sh` | Do both tools analyze the same `.go` files? |
 | `repos.txt` | Deprecated stub — use [`../corpus/repos.json`](../corpus/repos.json) |
 | `tests/` | Harness unit tests (`test_normalize.py`, `test_isolate.py`) |
@@ -226,7 +230,10 @@ before pushing**: `./compat/run.sh --oss --tier pr,nightly`.
   findings were never produced: a panicking analyzer unwinds its worker, and an
   ill-typed package is skipped whole. Panics always fail; ill-typed counts may
   shrink but not grow (`health.py`, `baselines/health.json`). Both were found
-  passing at P = R = 100% on all eight OSS targets.
+  passing at P = R = 100% on all eight OSS targets. `golden/run.sh` and
+  `hunt.sh` run the same gate — every tier that points guff at real Go must,
+  since the failure mode is precisely that nothing looks wrong
+  (`tests/test_health.py::WiringTests`).
 - `filesets.sh` compares the *input*: it runs both tools with a `goheader`
   template that cannot match, so each reports once per analyzed file. Blind
   spot: goheader ignores files whose first comment is a `//go:` directive, so

@@ -2,13 +2,15 @@
 # compat/hunt.sh — clone hunt-tier OSS repos and diff guff vs golangci-lint.
 #
 # Usage:
-#   ./compat/hunt.sh                 # all entries in corpus/hunt.json
-#   ./compat/hunt.sh --name restic   # one repo
-#   ./compat/hunt.sh --no-warm       # skip go mod download / go list
+#   ./compat/hunt.sh                    # all entries in corpus/hunt.json
+#   ./compat/hunt.sh --name restic      # one repo
+#   ./compat/hunt.sh --no-warm          # skip go mod download / go list
+#   ./compat/hunt.sh --update-baseline  # re-record the ill-typed baselines
 #
 # Results land under compat/results/hunt-<stamp>/ (not the CI gate).
-# Unexpected diffs are printed; exit 1 if any target has unexpected diffs
-# or a tool failure. Prefer fixing guff + isolate fixtures over allowlists.
+# Unexpected diffs are printed; exit 1 if any target has unexpected diffs,
+# a tool failure, or a panic / ill-typed regression. Prefer fixing guff +
+# isolate fixtures over allowlists.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,17 +21,24 @@ NORMALIZE="$COMPAT_DIR/normalize.py"
 PATCH_UNLIMITED="$ROOT/corpus/patch_unlimited_issues.py"
 RESULTS_DIR="$COMPAT_DIR/results"
 ALLOWLIST_DIR="$COMPAT_DIR/allowlists"
+HEALTH="$COMPAT_DIR/health.py"
+# Hunt keeps its own baseline file. The OSS one is a CI gate whose rows are
+# rewritten by `run.sh --update-baseline`; mixing the two tiers into it would
+# let a hunt refresh silently move a gated OSS number.
+HEALTH_BASELINE="$COMPAT_DIR/baselines/health-hunt.json"
 mkdir -p "$CACHE" "$RESULTS_DIR" "$ALLOWLIST_DIR"
 
 NAME_FILTER=""
 WARM=1
+UPDATE_BASELINE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) NAME_FILTER="$2"; shift 2 ;;
     --name=*) NAME_FILTER="${1#*=}"; shift ;;
     --no-warm) WARM=0; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    --update-baseline) UPDATE_BASELINE=1; shift ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -59,6 +68,7 @@ command -v python3 >/dev/null || die "python3 not found"
 [[ -f "$HUNT_JSON" ]] || die "missing $HUNT_JSON"
 [[ -f "$NORMALIZE" ]] || die "missing $NORMALIZE"
 [[ -f "$PATCH_UNLIMITED" ]] || die "missing $PATCH_UNLIMITED"
+[[ -f "$HEALTH" ]] || die "missing $HEALTH"
 
 is_v2_config() {
   python3 - "$1" <<'PY'
@@ -105,6 +115,7 @@ echo
 
 FAILED=0
 UNEXPECTED=0
+HEALTH_FAILED=0
 
 HUNT_TSV="$(mktemp "${TMPDIR:-/tmp}/guff-hunt-list.XXXXXX")"
 if ! python3 - "$HUNT_JSON" "$NAME_FILTER" >"$HUNT_TSV" <<'PY'
@@ -164,8 +175,15 @@ while IFS=$'\t' read -r name url ref packages timeout config_override build_tags
     fi
   fi
 
+  # `--uniq-by-line false`: the key is ON by default and keeps one finding per
+  # (file, line) across all linters — so on any line two linters both report,
+  # the survivor depends on arrival order, and a single missing finding on
+  # either side swaps it and moves the diff somewhere unrelated. Both tools get
+  # the same patched config, so turning it off makes the repo-scale comparison
+  # independent of the order. The order itself is gated exactly, on pinned
+  # finding sets, by compat/golden/cases/issues-uniq-by-line*.
   run_config="$RUN_DIR/${name}.config.yml"
-  python3 "$PATCH_UNLIMITED" "$config" -o "$run_config"
+  python3 "$PATCH_UNLIMITED" "$config" -o "$run_config" --uniq-by-line false
   # golangci resolves ${base-path} relative to the config file location. The
   # patched copy lives under results/, so rewrite to the repo root (rclone
   # ruleguard `${base-path}/bin/rules.go`, etc.).
@@ -199,10 +217,15 @@ PY
   gcl_cache="$(mktemp -d "${TMPDIR:-/tmp}/guff-hunt-gcl.XXXXXX")"
 
   echo "=== run $name ==="
+  # GUFF_DEBUG_ILL_TYPED makes guff name the packages every analyzer skipped;
+  # health.py reads them (and any panic) back out of stderr below. Without it
+  # a hunt repo can lose a whole package's findings and the diff shows only
+  # "golangci-only" — which is how syncthing's lib/model hid five linters.
   # shellcheck disable=SC2086
   if ! (
     cd "$dir"
     env "GUFF_CACHE=$guff_cache" "GOLANGCI_LINT_CACHE=$guff_cache" \
+      "GUFF_DEBUG_ILL_TYPED=1" \
       "$GUFF" run -c "$run_config" --out-format json --issues-exit-code 0 \
       $tag_flag --timeout "$timeout" --no-cache $packages
   ) >"$guff_json" 2>"$RUN_DIR/${name}.guff.stderr"; then
@@ -230,6 +253,19 @@ PY
 
   rm -rf "$guff_cache" "$gcl_cache"
   printf '%s\t%s\t%s\t%s\n' "$name" "$dir" "$guff_json" "$gcl_json" >>"$MANIFEST"
+
+  # Silent recall losses: a panicking analyzer drops its findings, and an
+  # ill-typed package is skipped whole. Neither shows up in the set-diff — an
+  # ill-typed package reads as a run of golangci-only findings with no linter
+  # in common, and a panic reads as nothing at all.
+  health_args=(check --target "$name" --stderr "$RUN_DIR/${name}.guff.stderr"
+    --baseline "$HEALTH_BASELINE")
+  if [[ "$UPDATE_BASELINE" -eq 1 ]]; then
+    health_args+=(--update)
+  fi
+  if ! python3 "$HEALTH" "${health_args[@]}"; then
+    HEALTH_FAILED=$((HEALTH_FAILED + 1))
+  fi
 
   python3 "$NORMALIZE" diff \
     --target "$name" \
@@ -284,7 +320,12 @@ python3 "$NORMALIZE" report "$MANIFEST" \
   || true
 
 echo "Hunt complete: $RUN_DIR"
-echo "  failures=$FAILED unexpected=$UNEXPECTED"
-if [[ "$FAILED" -gt 0 || "$UNEXPECTED" -gt 0 ]]; then
+echo "  failures=$FAILED unexpected=$UNEXPECTED health=$HEALTH_FAILED"
+if [[ "$HEALTH_FAILED" -gt 0 && "$UPDATE_BASELINE" -eq 0 ]]; then
+  echo "FAIL: $HEALTH_FAILED target(s) failed the panic / ill-typed gate" >&2
+  echo "See compat/health.py; hunt baselines live in $HEALTH_BASELINE" >&2
+fi
+if [[ "$FAILED" -gt 0 || "$UNEXPECTED" -gt 0 ]] \
+  || [[ "$HEALTH_FAILED" -gt 0 && "$UPDATE_BASELINE" -eq 0 ]]; then
   exit 1
 fi
