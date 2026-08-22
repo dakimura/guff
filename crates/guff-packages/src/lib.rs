@@ -28,8 +28,9 @@ mod typecheck;
 
 pub use config::Config;
 pub use dedup::{
-    filter_duplicate_packages, filter_test_main_packages, import_path_dep_graph,
-    package_for_import_path, same_package_test_variant_id,
+    external_test_package_under_test, filter_duplicate_packages, filter_test_main_packages,
+    import_path_dep_graph, package_for_import_path, paths_with_external_test_package,
+    same_package_test_variant_id,
 };
 pub use driver::{default_driver, offline_only_driver, AutoDriver, Driver, GoListDriver};
 pub use golist::{
