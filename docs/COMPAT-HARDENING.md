@@ -8268,10 +8268,38 @@ cli の `pkg/cmd/pr/list` を落としていた。
    `P [P.test]` —— P 自身の `_test.go` を含む variant —— には正しくない。
    コメント自身が「解析にとっては別パッケージである」と書いてある。
    **パッケージロード側の話で、型検査ではない**ので単独のタスクにすること。
-2. **D: 埋め込んだジェネリックインスタンス（5 件）** ——
+2. **D: 埋め込んだジェネリックインスタンス（7 件）** ——
    `type ingressRoutes struct { *gentype.ClientWithListAndApply[A, B, C] }` の
-   メソッド昇格。export data 越しのインスタンスのメソッドセットが要る。
-   traefik / argo-cd / prometheus、いずれも k8s 系のコード生成物。
+   メソッド昇格。traefik / argo-cd / prometheus、いずれも k8s 系のコード生成物。
+   **最小再現と、原因の絞り込みまではできている**（2026-08-22）:
+
+   ```go
+   // gentype パッケージ（別パッケージであること）
+   type Client[T any] struct{ name string }
+   func (c *Client[T]) Get(name string) (T, error) { var z T; return z, nil }
+
+   // 利用側
+   type noCtor struct{ *gentype.Client[*Route] }
+   type OnlyGet interface{ Get(name string) (*Route, error) }
+   func B() OnlyGet { return &noCtor{} }   // guff: cannot use *noCtor value as OnlyGet value
+   ```
+
+   **同じパッケージのどこかに 1 つでも「式の文脈」でそのインスタンスが現れると、
+   パッケージ全体が直る。**
+
+   | 追加した行 | 文脈 | 結果 |
+   |---|---|---|
+   | `gentype.NewClient[*Route]("r")` | 式 | **通る** |
+   | `var _ = (*gentype.Client[*Route])(nil)` | 式（変換） | **通る** |
+   | `var _ *gentype.Client[*Route]` | 型式 | 落ちる |
+
+   つまり **型式の文脈で作られたインスタンスにはメソッドが無く、式の文脈のものには有る**。
+   `Context` のインスタンスキャッシュは (origin, targs) で引くので、
+   **先に作られたほうがパッケージ全体の答えを決める**。インスタンス側は
+   `named_lookup_method` で origin を引く遅延方式なので、疑うべきは
+   `typexpr::instantiated_type` の `generic_type(x)` が返す **origin そのもの** ——
+   import が完全に解決される前の版を掴んでいる可能性が高い。
+   importer とジェネリクスの境目の話なので単独のタスクにすること。
 3. **E: 残り 2 件** —— gitea 1（未調査）と dapr 1（`export_test.go` 系）。
 
 ---
