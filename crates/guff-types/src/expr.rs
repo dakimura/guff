@@ -110,6 +110,15 @@ impl Checker {
     ///
     /// Equivalent to `Checker.exprOrType` (without the `allowGeneric` path).
     pub(crate) fn expr_or_type<'a>(&mut self, x: &mut Operand<'a>, e: &'a Expr) {
+        // Probing as a type is not free: `typ` *reports* on the way, so
+        // `(*p)()` — a call through a `*func()` variable, which is syntactically
+        // a pointer conversion — left "p is not a type" behind even though the
+        // value path below then handled it, and the whole package went
+        // ill-typed for it. Nothing in a finding-set diff shows that
+        // (`compat/health.py`); rclone's `lib/atexit` and `fs/rc/jobs` are two
+        // packages of exactly this shape. Roll the probe's diagnostics back,
+        // the way `builtin_new` already does for `new(x)`.
+        let mark = self.errors.len();
         let t = self.typ(e);
         if is_valid(&self.types, t) {
             x.mode = OperandMode::TypeExpr;
@@ -117,6 +126,7 @@ impl Checker {
             x.expr = Some(e);
             self.record_type_and_value(e, OperandMode::TypeExpr, t, None);
         } else {
+            self.errors.truncate(mark);
             self.expr(x, e);
         }
     }
