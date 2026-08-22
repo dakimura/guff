@@ -8304,6 +8304,149 @@ cli の `pkg/cmd/pr/list` を落としていた。
 
 ---
 
+### 2026-08-23（続き 20）— 埋め込んだジェネリックインスタンス: 「別パッケージ」は縮約の副産物で、原因は 1 つ隣の関数だった
+
+続き 19 の「次にやること」2。7 件のうち **5 件が 1 つの再帰の欠落**で、残り 2 件は
+D ではなく C 系だった。そして**続き 19 が書いた絞り込みは、2 つのうち 1 つが間違っていた**。
+
+#### 「別パッケージであること」は再現に要らなかった
+
+続き 19 の 6 行の再現は `gentype` と利用側の 2 パッケージに分かれていて、
+そこから「importer とジェネリクスの境目」「`generic_type(x)` が返す origin が
+import 解決前の版」という筋を立てていた。**同じ 6 行を 1 パッケージに貼ると、
+同じ 1 行で同じように落ちる。**
+
+```go
+package p
+type Route struct{ N int }
+type Client[T any] struct{ name string }
+func (c *Client[T]) Get(name string) (T, error) { var z T; return z, nil }
+type OnlyGet interface{ Get(name string) (*Route, error) }
+type noCtor struct{ *Client[*Route] }
+func a() OnlyGet { return &noCtor{} }   // guff: cannot use *noCtor value as OnlyGet value
+```
+
+分けたのは縮約の途中でそうなっただけで、importer は一度も関与していない。
+**縮約が保った構造と、縮約が保った偶然を、区別する手順が要る** ——
+ここでは「境界を 1 つ消してもまだ落ちるか」を 1 度訊くだけで済んだ。
+続き 19 のもう一方の観察（下の表）は正しく、そちらだけで原因に届く。
+
+#### 原因 —— 展開の再帰が、解決の再帰と食い違っていた
+
+`Checker::prepare_method_set` は 2 段で、interface 充足を訊くすべての入口が通る:
+
+1. `ensure_method_sigs` —— メソッドのシグネチャを `obj_decl` で解決する。
+   **埋め込みフィールドを降りる**（`ensure_method_sigs_rec`）。
+2. `expand_instance_methods` —— インスタンスのメソッド表を、型引数を代入した
+   コピーで埋める。**降りていなかった。**
+
+`noCtor` 自身はインスタンスではないので 2 は即 return し、埋め込まれた
+`Client[*Route]` は空のまま残る。すると `named_lookup_method` は
+「インスタンスにメソッドが無ければ origin を引く」経路に落ち、
+`lookup_field_or_method` は **origin の `Get`** ——
+`func(string) (T, error)`、`T` は `Client` 自身の型パラメータのまま —— を昇格する。
+`Get(string) (*Route, error)` と比べれば当然合わない。
+
+1 の側には**まったく同じ形のコメントが既に付いていた**（kubernetes の
+`apimachinery/pkg/api/meta` から縮約した `struct{ Multi }`、Phase 4）:
+「メソッド集合は自分のメソッドだけではない」。**対になる 2 つの歩き方のうち、
+片方だけが直された**というのがこのバグの正体で、`prepare_method_set` の
+2 行を並べて読めば見えるところにあった。
+
+そして続き 19 の表は、これで全部説明が付く:
+
+| 追加した行 | 何が起きるか | 結果 |
+|---|---|---|
+| `NewClient[*Route]("r")` | `*Client[*Route]` **自体**に interface 検査が走り、共有インスタンスが展開される | 通る |
+| `(*Client[*Route])(nil)` | 同上（変換の充足検査） | 通る |
+| `var _ *Client[*Route]` | 型式。interface 検査が無いので誰も展開しない | 落ちる |
+
+「型式で作られたインスタンスにはメソッドが無い」のではなく、
+**誰かが一度でも展開すれば、以後そのインスタンスは全員に対して正しい**。
+インスタンスが (origin, targs) で共有されているという続き 19 の観察は正しく、
+向きが逆だっただけである。
+
+#### 直し方
+
+`expand_instance_methods` を `ensure_method_sigs_rec` と同じ形の再帰にした ——
+`deref` して `seen` に入れ、自分がインスタンスなら展開し、underlying が struct なら
+埋め込みフィールドを降りる。**2 段の順序は保つ**: 解決の歩きを最後まで済ませてから
+展開の歩きを始める。展開は一度きり（`num_methods() > 0` で降りる）なので、
+未解決のシグネチャを掴んだまま展開すると**永久に直らない**からである
+（`prepare_method_set` のコメントが既にそう書いている）。
+
+ただし **`check_assign::assignable_to` はこの 2 つを逆順に呼んでいる**
+（`expand_instance_methods` → `ensure_method_sigs`）。今回そこが壊れないのは、
+`expand_one_method` が origin のメソッドに**自分で `obj_decl` を掛けてから**
+シグネチャを読むからで、順序の不変条件は 1 箇所でしか守られていない。
+埋め込みを降りるようになった分だけこの当てにしている範囲は広がったので、
+`prepare_method_set` に寄せるのは別タスクとして残しておく。
+
+#### ゲート
+
+`check_files.rs` に 3 本。
+
+- **`embedded_generic_instance_promotes_substituted_methods`** —— 撃つ形と黙る形を
+  **別々の `check_src` に分けてある**。インスタンスは (origin, targs) で共有されるので、
+  同じパッケージに `NewClient[*Route]("r")` を 1 行置くと**それが被験体を治してしまう**
+  —— 1 パッケージに両方入れた最初の版は、修正前のコードでも通った。
+  昇格したメソッドの**結果型**も見る（`func b(n *wrap) *Route { r, _ := n.Get("x"); return r }`）:
+  代入が通ることだけを見ていると、`T` のままでも通る形が残る。
+- **`..._promotes_through_nested_embedding`** —— 型引数 3 つ、埋め込み 2 段
+  （k8s の `ClientWithListAndApply` の形）、各段が 1 メソッドずつ出す。
+- **`..._still_reports_a_method_set_that_does_not_match`** —— 展開が
+  「昇格したメソッドなら何でも通る」に化けていないこと。落ちる理由が 4 つとも違う:
+  型引数違い（`Client[*Other]`）、**値**埋め込みごしのポインタレシーバ、
+  そもそも無いメソッド、そして昇格結果が `*Route` であること（`*Other` に代入して落ちる）。
+  エラーは**ちょうど 4 件**を要求する。この 3 本目は修正の前後どちらでも通る ——
+  それがこの 1 本の役目である。
+
+**hunt の ill-typed 14 → 9**: traefik 2 → 0、argo-cd 2 → 0、prometheus 3 → 2。
+続き 19 が D に数えた 7 件のうち**実際に D だったのは 5 件**で、prometheus に残る 2 つは
+どちらも `cannot use invalid type value as *promql.Engine value`。片方は
+`promql_test` そのもの（＝クラス C）で、もう片方の `cmd/promtool` は
+**`./cmd/promtool` だけ、あるいは `./cmd/promtool ./promql` の 2 つだけをロードすると落ちない**
+—— モジュール全体をロードしたときだけ `promql.Engine` が invalid になるので、
+C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰すときに一緒に確かめること。
+
+**残る 9 件の内訳**（baseline 更新後の `GUFF_DEBUG_ILL_TYPED=1` から）
+
+| パッケージ | クラス |
+|---|---|
+| gitea `modules/markup_test` | C |
+| authelia `internal/storage_test` | C |
+| dapr `pkg/diagnostics_test` | C |
+| prometheus `promql_test` | C |
+| rclone `backend/cache_test` / `backend/union_test` | C |
+| thanos `internal/cortex/chunk/cache_test` | C |
+| prometheus `cmd/promtool` | C の巻き添えと推定（上記） |
+| thanos `pkg/promclient` | E（下記） |
+
+**7 件がきれいに `_test` で終わる** —— C を潰せば残りは 2 件になる。
+
+**次にやること**
+
+1. **C: `export_test.go` / 外部テストパッケージ（7 件）** —— 続き 19 の記述のまま。
+   `dedup::import_path_of_id` が `P [P.test]` を `P` に潰している。
+   authelia / dapr / gitea / thanos / rclone / prometheus。パッケージロード側の話。
+   `cmd/promtool` が道連れになっていないかも同時に見る。
+2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 上記のとおり `prepare_method_set` と逆。
+   今は `expand_one_method` の `obj_decl` が支えているだけなので、寄せる。
+6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行。
+
+   ```go
+   int64(4.8 * float64(time.Hour))   // guff: cannot convert float64 to type int64
+   ```
+
+   `float64(time.Hour)` は**定数**（`time.Hour` は typed constant）なので積も
+   float64 定数で、値が整数なら `int64` への変換は spec 上通る。
+   guff は小数点を持つ float 定数の変換をまとめて拒んでいる疑いがある。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

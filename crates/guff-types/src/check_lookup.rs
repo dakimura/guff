@@ -553,12 +553,68 @@ impl Checker {
     /// can precede method-signature resolution for struct-field instances).
     /// Once populated, `named_lookup_method` finds the substituted methods
     /// directly, so `missing_method` compares the instantiated signatures.
+    ///
+    /// Follows embedded fields, for the same reason `ensure_method_sigs_rec`
+    /// does: a method set is not only the type's own methods. The instance may
+    /// sit one struct down,
+    ///
+    /// ```go
+    /// type Client[T any] struct{ name string }
+    /// func (c *Client[T]) Get(name string) (T, error) { ... }
+    /// type noCtor struct{ *Client[*Route] }
+    /// var _ OnlyGet = &noCtor{}   // ← checked here
+    /// ```
+    ///
+    /// and `noCtor` itself is not an instance, so stopping at it left
+    /// `Client[*Route]` unexpanded. `lookup_field_or_method` then promoted
+    /// `Get` out of the *origin* — signature `func(string) (T, error)`, with
+    /// `T` still `Client`'s own type parameter — and comparing that against
+    /// `Get(string) (*Route, error)` reported a wrong signature. As with
+    /// `ensure_method_sigs_rec`, the tell was an order dependence: any
+    /// expression elsewhere in the package that forced an interface check on
+    /// `*Client[*Route]` itself (`NewClient[*Route]("r")`,
+    /// `(*Client[*Route])(nil)`) expanded the shared instance and made the
+    /// whole package pass, while `var _ *Client[*Route]` — a type context, no
+    /// interface check — did not. The k8s generated clients
+    /// (`gentype.ClientWithListAndApply[...]` embedded in a wrapper struct)
+    /// are this shape: traefik, argo-cd and prometheus, 5 ill-typed packages.
     pub fn expand_instance_methods(&mut self, v: TypeId) {
-        let (base, _) = crate::lookup::deref(&self.types, v);
-        let named = match crate::lookup::as_named(&self.types, base) {
-            Some(n) => n,
-            None => return,
-        };
+        let mut seen = crate::hash::HashSet::default();
+        self.expand_instance_methods_rec(v, &mut seen);
+    }
+
+    /// `expand_instance_methods`, following embedded fields.
+    fn expand_instance_methods_rec(&mut self, v: TypeId, seen: &mut crate::hash::HashSet<TypeId>) {
+        let (base, _) = deref(&self.types, v);
+        if !seen.insert(base) {
+            return;
+        }
+        if let Some(named) = as_named(&self.types, base) {
+            self.expand_one_instance(named);
+        }
+
+        // Descend through embedded fields. Snapshot first: the expansion above
+        // and the recursion below both mutate the arenas.
+        let u = base.underlying(&self.types);
+        if !matches!(self.types.get(u), crate::arena::TypeData::Struct(_)) {
+            return;
+        }
+        let embedded: Vec<TypeId> = (0..crate::r#struct::struct_num_fields(&self.types, u))
+            .map(|i| crate::r#struct::struct_field(&self.types, u, i))
+            .filter(|f| match self.objects.get(*f) {
+                ObjectData::Var(var) => var.embedded(),
+                _ => false,
+            })
+            .filter_map(|f| f.typ(&self.objects))
+            .collect();
+        for e in embedded {
+            self.expand_instance_methods_rec(e, seen);
+        }
+    }
+
+    /// Expand `named`'s own method list, if it is a not-yet-expanded instance.
+    /// No-op otherwise.
+    fn expand_one_instance(&mut self, named: TypeId) {
         let targs: Vec<TypeId> = match crate::named::named_type_args(&self.types, named) {
             Some(list) => list.list().to_vec(),
             None => return, // not an instance

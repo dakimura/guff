@@ -1477,3 +1477,123 @@ fn append_rejects_a_type_parameter_that_is_not_all_slices() {
         check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
     );
 }
+
+/// A generic instance reached through an embedded field has to have its
+/// methods expanded too. `expand_instance_methods` stopped at the outer type,
+/// so `noCtor` promoted `Get` out of `Client`'s *origin* — signature
+/// `func(string) (T, error)`, `T` unsubstituted — and the interface comparison
+/// called it a wrong signature. The shape is the k8s generated client
+/// (`gentype.ClientWithListAndApply[...]` embedded in a wrapper struct):
+/// traefik, argo-cd and prometheus, 5 ill-typed packages.
+///
+/// The two halves have to be checked as **separate packages**. The instance is
+/// shared per (origin, type arguments), so the control half cures the subject
+/// if they sit in one package — which is how the bug hid for so long, and made
+/// the first single-package version of this fixture pass unfixed.
+#[test]
+fn embedded_generic_instance_promotes_substituted_methods() {
+    const PRELUDE: &str = "package p\n\
+         type Route struct{ N int }\n\
+         type Client[T any] struct{ name string }\n\
+         func (c *Client[T]) Get(name string) (T, error) { var z T; return z, nil }\n\
+         func NewClient[T any](name string) *Client[T] { return &Client[T]{name: name} }\n\
+         type OnlyGet interface{ Get(name string) (*Route, error) }\n\
+         type wrap struct{ *Client[*Route] }\n\
+         func a() OnlyGet { return &wrap{} }\n\
+         func b(n *wrap) *Route { r, _ := n.Get(\"x\"); return r }\n";
+
+    // Nothing else in the package ever names `Client[*Route]` in an expression.
+    let alone = check_src(PRELUDE);
+    assert!(
+        alone.errors.is_empty(),
+        "expected no errors, got {:?}",
+        alone.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+
+    // The control: an interface check on `*Client[*Route]` itself expands the
+    // shared instance, so this half passed even before the fix.
+    let with_ctor = check_src(&format!("{PRELUDE}var _ = NewClient[*Route](\"r\")\n"));
+    assert!(
+        with_ctor.errors.is_empty(),
+        "expected no errors, got {:?}",
+        with_ctor.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// The promotion is not one level deep, and the type arguments are not one.
+/// `ClientWithList` is the three-parameter k8s shape, embedded two structs
+/// down, with one method contributed at each level.
+#[test]
+fn embedded_generic_instance_promotes_through_nested_embedding() {
+    let check = check_src(
+        "package p\n\
+         type Route struct{ N int }\n\
+         type RouteList struct{ Items []Route }\n\
+         type Opts struct{ Limit int }\n\
+         type Client[T any, L any, O any] struct{ name string }\n\
+         func (c *Client[T, L, O]) Get(name string) (T, error) { var z T; return z, nil }\n\
+         func (c *Client[T, L, O]) List(o O) (L, error) { var z L; return z, nil }\n\
+         type inner struct{ *Client[*Route, *RouteList, Opts] }\n\
+         type outer struct{ inner }\n\
+         type GetList interface {\n\
+         \tGet(name string) (*Route, error)\n\
+         \tList(o Opts) (*RouteList, error)\n\
+         }\n\
+         func f() GetList { return &outer{} }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// Expanding the embedded instance must not turn the check into "any promoted
+/// method will do". Four shapes that upstream rejects, each for a different
+/// reason: the wrong type argument (`*Other`, so the substituted result type
+/// does not match), a pointer-receiver method promoted through a *value*
+/// embedded field (not in `wrapVal`'s method set), a method the instance
+/// simply does not have, and the promoted method's result type read directly.
+/// This test passes both before and after the fix — that is its job.
+#[test]
+fn embedded_generic_instance_still_reports_a_method_set_that_does_not_match() {
+    let check = check_src(
+        "package p\n\
+         type Route struct{ N int }\n\
+         type Other struct{ M int }\n\
+         type Client[T any] struct{ name string }\n\
+         func (c *Client[T]) Get(name string) (T, error) { var z T; return z, nil }\n\
+         type OnlyGet interface{ Get(name string) (*Route, error) }\n\
+         type Watcher interface{ Watch() error }\n\
+         type wrongArg struct{ *Client[*Other] }\n\
+         func a() OnlyGet { return &wrongArg{} }\n\
+         type wrapVal struct{ Client[*Route] }\n\
+         func b() OnlyGet { return wrapVal{} }\n\
+         type noWatch struct{ *Client[*Route] }\n\
+         func c() Watcher { return &noWatch{} }\n\
+         type ok struct{ *Client[*Route] }\n\
+         func d(n *ok) *Other { r, _ := n.Get(\"x\"); return r }\n",
+    );
+    let msgs: Vec<&String> = check.errors.iter().map(|e| &e.msg).collect();
+    for subject in [
+        // Wrong type argument: the substituted result is `*Other`, not `*Route`.
+        "*wrongArg",
+        // Pointer receiver, value embedded field: `Get` is not in the method set.
+        "wrapVal",
+        // The instance has no `Watch` at all.
+        "*noWatch",
+        // The promotion yields `*Route` — not `T`, and not `*Other`. Without
+        // this line the three above would also pass on an expansion that
+        // substituted the *wrong* arguments, or none at all.
+        "*Route value as *Other",
+    ] {
+        assert_eq!(
+            msgs.iter()
+                .filter(|m| m.contains(subject) && m.contains("cannot use"))
+                .count(),
+            1,
+            "expected exactly one rejection mentioning {subject}, got {msgs:?}"
+        );
+    }
+    assert_eq!(msgs.len(), 4, "expected exactly four errors, got {msgs:?}");
+}
