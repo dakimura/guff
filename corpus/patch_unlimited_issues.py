@@ -6,6 +6,18 @@
      issues.max-same-issues: 0
    so identical-message truncation cannot rotate keys.
 
+   ``--uniq-by-line false`` additionally sets ``issues.uniq-by-line: false``.
+   That key is ON by default and keeps **one** finding per (file, line) across
+   all linters — the first to arrive. Upstream's arrival order is linter name
+   order with ``nolintlint`` last (``combineGoAnalysisLinters`` sorts the
+   metalinter's linters that way, and in golangci-lint 2.12.2 every linter is
+   inside the metalinter). guff reproduces that order, but "who wins this line"
+   is still a function of *both* tools reporting the same set on the line: one
+   missing finding on either side silently swaps the survivor and the diff
+   moves somewhere unrelated. Turning the key off makes a repo-scale comparison
+   independent of it; `compat/golden/cases/issues-uniq-by-line*` gates the
+   ordering itself, on fixtures whose finding sets are pinned exactly.
+
 2. Strips Go ``.so`` custom plugins from ``linters.enable`` /
    ``linters.disable`` and removes matching ``linters.settings.custom``
    entries that have a ``path:`` (goplugin) without ``type: module``.
@@ -19,6 +31,7 @@ scalars (kubernetes hack/golangci.yaml) stay intact.
 
 Usage:
   python3 corpus/patch_unlimited_issues.py INPUT.yml -o OUTPUT.yml
+  python3 corpus/patch_unlimited_issues.py INPUT.yml -o OUT.yml --uniq-by-line false
 """
 from __future__ import annotations
 
@@ -36,7 +49,7 @@ def indent_width(line: str) -> int:
     return len(line) - len(line.lstrip(" \t"))
 
 
-def patch_issue_caps(text: str) -> str:
+def patch_issue_caps(text: str, uniq_by_line: bool | None = None) -> str:
     lines = text.splitlines(keepends=True)
     issues_idx = None
     for i, line in enumerate(lines):
@@ -48,14 +61,15 @@ def patch_issue_caps(text: str) -> str:
         "max-issues-per-linter": "  max-issues-per-linter: 0\n",
         "max-same-issues": "  max-same-issues: 0\n",
     }
+    if uniq_by_line is not None:
+        keys["uniq-by-line"] = f"  uniq-by-line: {str(uniq_by_line).lower()}\n"
 
     if issues_idx is None:
         if lines and not lines[-1].endswith("\n"):
             lines[-1] = lines[-1] + "\n"
         lines.append("\n")
         lines.append("issues:\n")
-        lines.append(keys["max-issues-per-linter"])
-        lines.append(keys["max-same-issues"])
+        lines.extend(keys.values())
         return "".join(lines)
 
     end = issues_idx + 1
@@ -387,7 +401,7 @@ def _filter_rule_lines(rule_lines: list[str], names: set[str]) -> list[str] | No
     return rewritten
 
 
-def patch(text: str) -> str:
+def patch(text: str, uniq_by_line: bool | None = None) -> str:
     names = find_custom_goplugins(text)
     if names:
         print(
@@ -398,16 +412,23 @@ def patch(text: str) -> str:
         text = strip_enable_names(text, name_set)
         text = strip_custom_entries(text, name_set)
         text = strip_exclude_rules_for_plugins(text, name_set)
-    return patch_issue_caps(text)
+    return patch_issue_caps(text, uniq_by_line)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("input")
     ap.add_argument("-o", "--output", required=True)
+    ap.add_argument(
+        "--uniq-by-line",
+        choices=("true", "false"),
+        default=None,
+        help="force issues.uniq-by-line (default: leave the config's own value)",
+    )
     args = ap.parse_args(argv)
+    uniq = None if args.uniq_by_line is None else args.uniq_by_line == "true"
     src = Path(args.input).read_text(encoding="utf-8", errors="replace")
-    Path(args.output).write_text(patch(src), encoding="utf-8")
+    Path(args.output).write_text(patch(src, uniq), encoding="utf-8")
     return 0
 
 

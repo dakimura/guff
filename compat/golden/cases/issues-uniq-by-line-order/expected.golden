@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh issues-uniq-by-line-order
+# Produced by running golangci-lint on compat/golden/cases/issues-uniq-by-line-order/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+order/order.go:26:1:revive:warning:exported: exported function Exported should have comment or be unexported
+order/order.go:32:6:unused::func unusedFn is unused
+order/order.go:40:1:revive:warning:exported: exported function Both should have comment or be unexported
+order/order.go:41:11:errcheck::Error return value of `os.Setenv` is not checked
