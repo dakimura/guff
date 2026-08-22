@@ -12,13 +12,13 @@
       "ill_typed": 1
     },
     "consul": {
-      "ill_typed": 4
+      "ill_typed": 2
     },
     "gin": {
       "ill_typed": 1
     },
     "grafana": {
-      "ill_typed": 13
+      "ill_typed": 11
     }
   }
 }
