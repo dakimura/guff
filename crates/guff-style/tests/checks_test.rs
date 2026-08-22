@@ -164,6 +164,49 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
+/// The taint engine — G702 / G703 / G706 / G710 — over one fixture whose every
+/// function is marked `// fires` or `// silent`.
+///
+/// The counts alone would pass on a rule that reports everything, so the
+/// fixture is built the other way round: each firing shape is paired with the
+/// nearest silent one (a sanitizer on the same source, a constant in the
+/// argument the sink actually checks, a second assignment that kills the
+/// taint), and `compat/golden/cases/gosec` pins every line and column of both
+/// halves against golangci-lint 2.12.2.
+#[test]
+fn gosec_taint_rules_report_only_reachable_sources() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let count = |id: &str| {
+        messages
+            .iter()
+            .filter(|m| m.starts_with(&format!("{id}: ")))
+            .count()
+    };
+    assert_eq!(
+        (count("G702"), count("G703"), count("G706"), count("G710")),
+        (7, 5, 5, 2),
+        "{messages:?}"
+    );
+}
+
+/// The half of the taint engine that is easiest to lose: a `string` parameter
+/// is not a source of anything, and only the call graph can say it carries a
+/// request. gosec's graph is `cha.CallGraph`, whose node set is
+/// `ssautil.AllFunctions` — package-level functions, methods of *exported*
+/// types, and methods of types that reach `RuntimeTypes` by being converted to
+/// an interface. The fixture holds the same three lines twice, on an unexported
+/// type that is boxed and one that is not.
+#[test]
+fn gosec_taint_crosses_a_call_only_when_the_caller_is_in_the_call_graph() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g706: Vec<&String> = messages.iter().filter(|m| m.starts_with("G706: ")).collect();
+    // Five, not six: `plainRec.plainLog` is the twin of `boxedRec.boxedLog` and
+    // its caller is not a node, so its `id` never learns where it came from.
+    assert_eq!(g706.len(), 5, "{messages:?}");
+}
+
 #[test]
 fn gosec_allows_strong_crypto() {
     let pkg = support::typecheck_fixture("gosec", "example.com/gosec/ok", "ok.go");

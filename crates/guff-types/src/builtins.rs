@@ -1124,7 +1124,21 @@ impl Checker {
             }
             TypeData::Slice(_) | TypeData::Chan(_) => mode = OperandMode::Value,
             TypeData::Map(_) if id == BuiltinId::Len => mode = OperandMode::Value,
-            // DEFERRED: type-parameter (Interface/underIs) operands.
+            // A type parameter's underlying is its *constraint*, which is an
+            // interface — never a slice. The question "is this lengthable" has
+            // to be asked of the type **set**, one term at a time (Go's
+            // `underIs`), and it is weaker than `commonUnder`: `~[]int |
+            // ~[]string` has no common underlying and `len` still works on it.
+            //
+            // Without this, `func f[E any, S ~[]E](s S) { _ = len(s) }` is
+            // ill-typed and the whole package it lives in is skipped by every
+            // analyzer — syncthing's `lib/sliceutil` is three of these, and
+            // nothing in a finding-set diff can show it (`compat/health.py`).
+            TypeData::Interface(_) if crate::predicates::is_type_param(&self.types, xtyp) => {
+                if self.len_cap_holds_for_typeset(xtyp, id) {
+                    mode = OperandMode::Value;
+                }
+            }
             _ => {}
         }
 
@@ -1232,6 +1246,38 @@ impl Checker {
 
     /// If `t` is a pointer to an array, return that array type; else `t`.
     /// `t` is expected to be an underlying type. Mirrors `arrayPtrDeref`.
+    /// `underIs` for `len` / `cap`: every term of `t`'s type set must be
+    /// something the builtin accepts, after the `*[N]T` → `[N]T` deref that
+    /// applies to each term individually.
+    fn len_cap_holds_for_typeset(&mut self, t: TypeId, id: BuiltinId) -> bool {
+        let mut unders: Vec<Option<TypeId>> = Vec::new();
+        crate::under::under_is(
+            &mut self.types,
+            &self.objects,
+            &self.packages,
+            t,
+            |u| {
+                unders.push(u);
+                true
+            },
+        );
+        if unders.is_empty() {
+            return false;
+        }
+        unders.iter().all(|u| {
+            // A term-less set (`any`) yields `None`, and Go's predicate
+            // returns false for it.
+            let Some(u) = *u else { return false };
+            let d = self.array_ptr_deref(u);
+            match self.types.get(d) {
+                TypeData::Basic(_) => is_string(&self.types, d) && id == BuiltinId::Len,
+                TypeData::Array(_) | TypeData::Slice(_) | TypeData::Chan(_) => true,
+                TypeData::Map(_) => id == BuiltinId::Len,
+                _ => false,
+            }
+        })
+    }
+
     fn array_ptr_deref(&self, t: TypeId) -> TypeId {
         if matches!(self.types.get(t), TypeData::Pointer(_)) {
             let base = pointer_elem(&self.types, t).underlying(&self.types);

@@ -90,17 +90,62 @@ class CheckTests(unittest.TestCase):
 
 
 class BaselineFileTests(unittest.TestCase):
+    BASELINES = ("health.json", "health-hunt.json")
+
     def test_missing_baseline_reads_as_empty(self):
         self.assertEqual(load_baseline("/nonexistent/health.json"), {"targets": {}})
 
-    def test_committed_baseline_is_wellformed(self):
-        path = ROOT / "baselines" / "health.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
-        self.assertIn("targets", data)
-        for target, entry in data["targets"].items():
-            self.assertIsInstance(entry.get("ill_typed"), int, target)
-            # Zero is the default, so an explicit zero row is dead weight.
-            self.assertGreater(entry["ill_typed"], 0, target)
+    def test_committed_baselines_are_wellformed(self):
+        for name in self.BASELINES:
+            data = json.loads((ROOT / "baselines" / name).read_text(encoding="utf-8"))
+            self.assertIn("targets", data, name)
+            for target, entry in data["targets"].items():
+                self.assertIsInstance(entry.get("ill_typed"), int, f"{name}:{target}")
+                # Zero is the default, so an explicit zero row is dead weight.
+                self.assertGreater(entry["ill_typed"], 0, f"{name}:{target}")
+
+    def test_tiers_do_not_share_baseline_rows(self):
+        """A hunt refresh must not be able to rewrite a gated OSS number."""
+        rows = []
+        for name in self.BASELINES:
+            data = json.loads((ROOT / "baselines" / name).read_text(encoding="utf-8"))
+            rows.append(set(data["targets"]))
+        self.assertEqual(rows[0] & rows[1], set())
+
+
+class WiringTests(unittest.TestCase):
+    """Every tier that runs guff over real Go must reach this gate.
+
+    An analyzer that panics, and a package that fails type checking, both lose
+    findings *without producing a diff*: the set-diff shows a run of
+    golangci-only findings with no linter in common, or nothing at all. The
+    gate exists precisely because that is invisible, so the way it fails is by
+    not being wired into a tier at all — which is what happened to `hunt.sh`
+    from the day the tier was added until 2026-08-22, and cost five linters'
+    findings on syncthing's `lib/model` before anyone looked.
+    """
+
+    TIERS = ("run.sh", "hunt.sh", "golden/run.sh")
+
+    def script(self, rel: str) -> str:
+        return (ROOT / rel).read_text(encoding="utf-8")
+
+    def test_every_tier_asks_guff_to_name_ill_typed_packages(self):
+        for rel in self.TIERS:
+            self.assertIn("GUFF_DEBUG_ILL_TYPED=1", self.script(rel), rel)
+
+    def test_every_tier_checks_the_stderr_it_captured(self):
+        for rel in self.TIERS:
+            text = self.script(rel)
+            self.assertIn("health.py", text, rel)
+            self.assertIn("check", text, rel)
+
+    def test_every_tier_fails_the_run_on_a_health_failure(self):
+        """Counting a failure and then exiting 0 would be worse than no gate."""
+        for rel in ("run.sh", "hunt.sh"):
+            text = self.script(rel)
+            self.assertIn("HEALTH_FAILED=$((HEALTH_FAILED + 1))", text, rel)
+            self.assertRegex(text, r"HEALTH_FAILED.*-gt 0", rel)
 
 
 if __name__ == "__main__":

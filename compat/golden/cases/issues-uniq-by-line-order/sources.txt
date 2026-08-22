@@ -1,0 +1,9 @@
+# Source files materialized into the case work dir before each run.
+# Format: <dest-name>  <repo-relative-source-path>   (two or more spaces between)
+#
+# One package, one file. Upper-bound cases (`max-issues-per-linter`) had to be
+# kept to one file because revive lints a package's files in parallel and the
+# arrival order is a race; the same reasoning applies here, and more strongly —
+# this case is *about* arrival order.
+
+order/order.go  crates/guff-lint/tests/testdata/uniqbylinesem/order/order.go

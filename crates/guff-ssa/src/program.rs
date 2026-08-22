@@ -181,17 +181,105 @@ impl Program {
     }
 
     /// Returns types for which a runtime type descriptor may be required.
-    /// (Go: `(*Program).RuntimeTypes`.)
+    /// (Go: `(*Program).RuntimeTypes`, whose contents `needMethodsOf` builds.)
     ///
-    /// The full go/ssa implementation also walks element types via reflection;
-    /// we return the recorded conversion operands until `MakeInterface` is
-    /// fully wired.
-    pub fn runtime_types(&self) -> Vec<TypeId> {
+    /// Boxing a value into an interface makes its *whole shape* reachable
+    /// through reflection, not just the boxed type: go/ssa's `needMethods`
+    /// recurses into element, field, key, parameter and result types, and into
+    /// `*T` for every named `T`. That closure is the difference between
+    /// "`*CLI` was converted to an interface" and "every method of every type
+    /// hanging off `CLI` is reachable" — which is what
+    /// [`crate::ssautil::all_functions`] turns into call-graph nodes.
+    /// syncthing's `(*serveCmd).monitorMain` is reached only this way: nothing
+    /// boxes `serveCmd`, but the kong CLI struct that holds it is boxed.
+    ///
+    /// The `skip` flag mirrors go/ssa: a named type's *underlying* is visited
+    /// so its components are reached, but is not itself a runtime type (its
+    /// method set is empty by construction, and `RuntimeTypes` omits it).
+    pub fn runtime_types(&mut self) -> Vec<TypeId> {
+        let seeds: Vec<TypeId> = self.make_interface_types.iter().copied().collect();
+        // `visited` maps a type to the `skip` it was recorded with, so a type
+        // first seen as an underlying (skip) is re-visited if it is later
+        // reached in its own right.
+        let mut visited: crate::hash::HashMap<TypeId, bool> = Default::default();
+        let mut out: Vec<TypeId> = Vec::new();
+        let mut stack: Vec<(TypeId, bool)> = seeds.into_iter().map(|t| (t, false)).collect();
+        // A pathological generic instantiation can grow this without bound;
+        // the cap is far above any real package and keeps the walk linear.
+        const MAX_RUNTIME_TYPES: usize = 100_000;
+        while let Some((t, skip)) = stack.pop() {
+            if visited.len() > MAX_RUNTIME_TYPES {
+                break;
+            }
+            match visited.get(&t) {
+                // Already visited at least as thoroughly as this.
+                Some(&prev) if !prev || skip => continue,
+                _ => {}
+            }
+            visited.insert(t, skip);
+            if !skip {
+                out.push(t);
+            }
+            let resolved = guff_types::alias::unalias_readonly(&self.type_arena, t);
+            if resolved != t {
+                stack.push((resolved, skip));
+                continue;
+            }
+            match self.type_arena.get(t) {
+                guff_types::TypeData::Basic(_)
+                | guff_types::TypeData::Interface(_)
+                | guff_types::TypeData::TypeParam(_)
+                | guff_types::TypeData::Union(_)
+                | guff_types::TypeData::Alias(_) => {}
+                guff_types::TypeData::Pointer(p) => stack.push((p.elem(), false)),
+                guff_types::TypeData::Slice(sl) => stack.push((sl.elem(), false)),
+                guff_types::TypeData::Array(a) => stack.push((a.elem(), false)),
+                guff_types::TypeData::Chan(c) => stack.push((c.elem(), false)),
+                guff_types::TypeData::Map(m) => {
+                    stack.push((m.key(), false));
+                    stack.push((m.elem(), false));
+                }
+                guff_types::TypeData::Struct(st) => {
+                    let fields: Vec<guff_types::ObjectId> =
+                        (0..st.num_fields()).map(|i| st.field(i)).collect();
+                    for f in fields {
+                        if let Some(ft) = f.typ(&self.object_arena) {
+                            stack.push((ft, false));
+                        }
+                    }
+                }
+                guff_types::TypeData::Tuple(tp) => {
+                    let vars: Vec<guff_types::ObjectId> =
+                        (0..tp.len()).map(|i| tp.at(i)).collect();
+                    for v in vars {
+                        if let Some(vt) = v.typ(&self.object_arena) {
+                            stack.push((vt, false));
+                        }
+                    }
+                }
+                guff_types::TypeData::Signature(sig) => {
+                    let params = sig.params();
+                    let results = sig.results();
+                    for tup in [params, results].into_iter().flatten() {
+                        stack.push((tup, false));
+                    }
+                }
+                guff_types::TypeData::Named(_) => {
+                    let under = t.underlying(&self.type_arena);
+                    let ptr = guff_types::new_pointer(&mut self.type_arena, t);
+                    stack.push((ptr, false));
+                    stack.push((under, true));
+                }
+            }
+        }
         // Deterministic order for callers that walk these (ssautil::all_functions).
         // TypeId has no public Ord; Debug is stable for a given arena id.
-        let mut types: Vec<TypeId> = self.make_interface_types.iter().copied().collect();
-        types.sort_by_key(|t| format!("{t:?}"));
-        types
+        // `sort_by_cached_key` renders each id once rather than at every
+        // comparison — the closure now runs over the whole reflective closure,
+        // not just the handful of directly-boxed types.
+        out.sort_by_cached_key(|t| format!("{t:?}"));
+        out.dedup();
+        out
     }
 
     /// emit_const returns a constant with the specified value and type.

@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Ill-typed package counts per hunt-tier target (corpus/hunt.json).",
+    "Separate from health.json so a hunt refresh cannot rewrite an OSS row:",
+    "the OSS file is a CI gate, this one records an ad-hoc bug-hunt tier.",
+    "Counts may shrink freely; growth fails the gate. Targets absent here",
+    "are gated strictly at 0. Panics are never baselined \u2014 they always fail.",
+    "Re-record with: ./compat/hunt.sh --update-baseline"
+  ],
+  "targets": {
+    "argo-cd": {
+      "ill_typed": 3
+    },
+    "authelia": {
+      "ill_typed": 1
+    },
+    "cli": {
+      "ill_typed": 2
+    },
+    "dapr": {
+      "ill_typed": 1
+    },
+    "gitea": {
+      "ill_typed": 6
+    },
+    "jaeger": {
+      "ill_typed": 9
+    },
+    "prometheus": {
+      "ill_typed": 3
+    },
+    "rclone": {
+      "ill_typed": 2
+    },
+    "thanos": {
+      "ill_typed": 4
+    },
+    "traefik": {
+      "ill_typed": 2
+    }
+  }
+}

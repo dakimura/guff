@@ -1150,6 +1150,107 @@ fn builtins_accept_a_type_parameter_constrained_to_a_slice() {
     );
 }
 
+/// `(*p)()` — a call through a variable of pointer-to-func type — is
+/// syntactically indistinguishable from the pointer conversion `(*T)(x)`, so
+/// `exprOrType` probes it as a type first. The probe *reports* on the way, and
+/// its "p is not a type" survived even though the value path then handled the
+/// call correctly: `go build` accepted the file and guff called the package
+/// ill-typed, which is not a finding-set difference — only every analyzer
+/// going quiet (`compat/health.py`). rclone's `lib/atexit` and `fs/rc/jobs`
+/// are two packages of this shape.
+#[test]
+fn a_call_through_a_pointer_to_func_is_not_a_conversion() {
+    let check = check_src(
+        "package p\n\
+         var fn *func()\n\
+         var fns = map[*func()]bool{}\n\
+         func run() {\n\
+         \t(*fn)()\n\
+         \tfor h := range fns {\n\
+         \t\t(*h)()\n\
+         \t}\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// And the conversion it is confused with still works, still reports when its
+/// target does not exist, and reports it **once**.
+#[test]
+fn a_pointer_conversion_is_still_a_conversion() {
+    let ok = check_src(
+        "package p\n\
+         type T int\n\
+         func f(x *int) *T { return (*T)(x) }\n",
+    );
+    assert!(
+        ok.errors.is_empty(),
+        "expected no errors, got {:?}",
+        ok.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+
+    let bad = check_src("package p\nfunc f(x *int) { _ = (*Nope)(x) }\n");
+    let msgs: Vec<&String> = bad.errors.iter().map(|e| &e.msg).collect();
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Nope")).count(),
+        1,
+        "expected exactly one report, got {msgs:?}"
+    );
+}
+
+/// `len` / `cap` ask the same question, and the answer is `underIs`, not
+/// `coreType`: every term of the type set has to be lengthable, but they need
+/// not agree on *what* they are. syncthing's `lib/sliceutil` is three `len(s)`
+/// on an `S ~[]E`, and while they were rejected the package was ill-typed —
+/// which is not a finding-set difference, only five linters going quiet
+/// (`compat/health.py`).
+#[test]
+fn len_and_cap_accept_a_type_parameter_whose_terms_are_all_lengthable() {
+    let check = check_src(
+        "package p\n\
+         func removeAndZero[E any, S ~[]E](s S, i int) S {\n\
+         \tcopy(s[i:], s[i+1:])\n\
+         \ts[len(s)-1] = *new(E)\n\
+         \treturn s[:len(s)-1]\n\
+         }\n\
+         func room[S ~[]int](s S) int { return cap(s) }\n\
+         func size[M ~map[string]int](m M) int { return len(m) }\n\
+         func chars[T ~string](t T) int { return len(t) }\n\
+         func queued[C ~chan int](c C) int { return len(c) + cap(c) }\n\
+         func mixed[S ~[]int | ~[]string](s S) int { return len(s) }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// `underIs` is weaker than `commonUnder` but it is not "anything goes": a set
+/// with one term that has no length still fails, and `cap` refuses a map even
+/// though `len` accepts one.
+#[test]
+fn len_and_cap_still_reject_terms_that_have_no_length() {
+    let check = check_src(
+        "package p\n\
+         func bad[S ~[]int | ~int](s S) int { return len(s) }\n\
+         func capMap[M ~map[string]int](m M) int { return cap(m) }\n\
+         func anySet[T any](t T) int { return len(t) }\n",
+    );
+    let msgs: Vec<&String> = check.errors.iter().map(|e| &e.msg).collect();
+    assert_eq!(
+        msgs.iter()
+            .filter(|m| m.contains("for built-in len") || m.contains("for built-in cap"))
+            .count(),
+        3,
+        "expected three rejections, got {msgs:?}"
+    );
+}
+
 /// And a type parameter whose type set is *not* all slices still fails.
 #[test]
 fn append_rejects_a_type_parameter_that_is_not_all_slices() {

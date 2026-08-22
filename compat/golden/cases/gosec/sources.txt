@@ -9,8 +9,9 @@
 # Of guff's 39 gosec rules, four are SSA analyzers and get a file each:
 # g602/ (slice bounds), g115/ (integer overflow conversion, whose fixture is
 # mostly *silent* cases — see the header there for why those are the ones worth
-# gating), g118/ (context propagation) and g123/ (TLS resumption vs
-# VerifyPeerCertificate). The rest share the files below.
+# gating), g118/ (context propagation), g123/ (TLS resumption vs
+# VerifyPeerCertificate) and g7xx/ (the taint engine's four rules, which share
+# one analysis and so want one package). The rest share the files below.
 bad/bad.go            crates/guff-style/tests/testdata/gosec/bad.go
 ok/ok.go              crates/guff-style/tests/testdata/gosec/ok.go
 scores/scores.go      crates/guff-style/tests/testdata/gosec/scores.go
@@ -19,6 +20,7 @@ g602/g602.go          crates/guff-style/tests/testdata/gosec/g602.go
 g115/g115.go          crates/guff-style/tests/testdata/gosec/g115.go
 g118/g118.go          crates/guff-style/tests/testdata/gosec/g118.go
 g123/g123.go          crates/guff-style/tests/testdata/gosec/g123.go
+g7xx/g7xx.go          crates/guff-style/tests/testdata/gosec/g7xx.go
 
 # The stub `golang.org/x/crypto` module (see the replace in go.mod). Its go.mod
 # is case scaffolding and so lives in the case directory; the packages under it

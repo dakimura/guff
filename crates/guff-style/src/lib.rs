@@ -137,6 +137,7 @@ mod gosec_g118;
 mod gosec_g123;
 mod gosec_g602;
 mod gosec_ssa;
+mod gosec_taint;
 mod tagliatelle;
 mod reassign;
 mod recvcheck;

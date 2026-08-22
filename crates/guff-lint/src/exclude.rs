@@ -355,6 +355,14 @@ impl IssueFilter {
         // linter produced it, and `max-same-issues` keeps the first N. guff
         // produces diagnostics in analyzer×package graph order instead, so sort
         // here — stably, to leave each linter's own order alone.
+        //
+        // Name order is the whole rule for everything that reaches this point.
+        // Upstream's two exceptions do not apply: `DoesChangeTypes` (which
+        // would move `unused` to the end) only orders the *top-level* linter
+        // list, and in golangci-lint 2.12.2 every linter is inside the one
+        // metalinter, whose own sort is by name; and `linter.LastLinter`
+        // (nolintlint) is handled where nolintlint's findings are born, which
+        // is after this sort — see `NolintIndex::filter_issues`.
         issues.sort_by(|a, b| a.from_linter.cmp(&b.from_linter));
 
         // golangci Cgo processor: drop issues under GOCACHE / _cgo_gotypes.go.

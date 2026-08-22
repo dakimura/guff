@@ -241,6 +241,16 @@ impl NolintIndex {
     /// Drop issues covered by a nolint directive. Records matched linters.
     ///
     /// When `report_unused`, unused directives become `nolintlint` issues.
+    ///
+    /// Every nolintlint finding leaves here **behind** every other linter's,
+    /// and that ordering is observable: `issues.uniq-by-line` is on by default
+    /// and keeps whichever finding on a line arrived first, so a directive that
+    /// shares its line with a real finding must lose. Upstream gets the same
+    /// answer from `linter.LastLinter` — nolintlint runs last because it reads
+    /// the other linters' results — which `combineGoAnalysisLinters` sorts
+    /// behind every other linter whatever its name. A plain name sort would put
+    /// it ahead of `revive`, `staticcheck` and `unused`.
+    /// Gated by `compat/golden/cases/issues-uniq-by-line-order`.
     pub fn filter_issues(&mut self, issues: Vec<Issue>, report_unused: bool) -> Vec<Issue> {
         let mut normal = Vec::new();
         let mut nolintlint_issues = Vec::new();

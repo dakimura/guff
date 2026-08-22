@@ -27,7 +27,9 @@ bad/bad.go:52:6:gosec:medium:G114: Use of net/http serve function that has no su
 bad/bad.go:53:9:gosec:medium:G102: Binds to all network interfaces
 bad/bad.go:54:9:gosec:medium:G102: Binds to all network interfaces
 bad/bad.go:61:6:gosec:medium:G204: Subprocess launched with variable
+bad/bad.go:61:18:gosec:high:G702: Command injection via taint analysis
 bad/bad.go:62:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+bad/bad.go:62:18:gosec:high:G702: Command injection via taint analysis
 bad/bad.go:64:2:gosec:high:G101: Potential hardcoded credentials
 bad/bad.go:66:2:gosec:high:G101: Potential hardcoded credentials: AWS API Key
 bad/bad.go:69:2:gosec:low:G104: Errors unhandled
@@ -97,6 +99,35 @@ g123/g123.go:82:8:gosec:high:G123: tls.Config uses VerifyPeerCertificate while s
 g602/g602.go:10:8:gosec:low:G602: slice bounds out of range
 g602/g602.go:16:10:gosec:low:G602: slice index out of range
 g602/g602.go:22:10:gosec:low:G602: slice index out of range
+g7xx/g7xx.go:31:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:31:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:36:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:36:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:44:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:44:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:49:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:49:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:56:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:56:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:63:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:63:18:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:74:6:gosec:medium:G204: Subprocess launched with a potential tainted input or cmd arguments
+g7xx/g7xx.go:87:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:96:6:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:112:9:gosec:medium:G204: Subprocess launched with variable
+g7xx/g7xx.go:112:21:gosec:high:G702: Command injection via taint analysis
+g7xx/g7xx.go:119:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:138:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:144:16:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:156:17:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:168:21:gosec:high:G703: Path traversal via taint analysis
+g7xx/g7xx.go:183:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:199:11:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:210:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:215:13:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:247:12:gosec:low:G706: Log injection via taint analysis
+g7xx/g7xx.go:260:15:gosec:medium:G710: Open redirect via taint analysis
+g7xx/g7xx.go:276:15:gosec:medium:G710: Open redirect via taint analysis
 scores/scores.go:3:8:gosec:medium:G501: Blocklisted import crypto/md5: weak cryptographic primitive
 scores/scores.go:7:7:gosec:high:G101: Potential hardcoded credentials
 scores/scores.go:13:6:gosec:medium:G401: Use of weak cryptographic primitive

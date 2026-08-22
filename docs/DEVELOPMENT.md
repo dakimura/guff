@@ -785,7 +785,7 @@ guff-only 17 件。内訳と、なぜ guff だけが出すのか:
   レポート側の 951 件差は設定の別のキー（`exclusions.rules` 等）由来の疑いが濃い。
 - **E** protogetter 362 vs 0 / misspell 19 vs 0 / exhaustive 0 vs 6 — レポート自身が
   「未 root-cause の生観測」としている。設定全文が要る。
-- **B の残り** G703 の taint ケース 1 件 — G115 は上の表で解消。`G703` は現状の「local-assign 近似」で届かない形（全 taint エンジンは DEFERRED のまま）。
+- ~~**B の残り** G703 の taint ケース 1 件~~ — G115 は上の表で解消。G703 は 2026-08-22 に上流の taint エンジンごと SSA へ移植し、G702 / G706 / G710 も同じエンジンに載せた（`gosec_taint.rs`、COMPAT-HARDENING §4 の続き 18）。残るのは表を持たない taint ルール（G701 / G704 / **G705** / G707–G709）。
 - **peak RSS が `./...` 規模で golangci +33%** — 手元の corpus では再現条件が作れない
   （`regress --profile full` が prometheus 規模の唯一のゲート）。
 
