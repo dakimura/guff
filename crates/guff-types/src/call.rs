@@ -99,10 +99,21 @@ impl Checker {
                 // indexing yielding a function value, or an invalid operand).
             }
             Expr::IndexListExpr(ie) => {
+                let mark = self.errors.len();
                 self.expr(x, &ie.x);
                 if self.is_generic_func_value(x) {
                     partial_targs =
                         self.func_inst(x, &ie.x, &ie.indices, ie.x.pos().0 as u32, false);
+                } else if x.mode == OperandMode::TypeExpr {
+                    // `T[A, B](v)` — a conversion to an instantiated generic
+                    // *type*, not a call. The single-argument form reaches this
+                    // through `index_expr`, which instantiates; the multi-index
+                    // form had only the generic-function branch, so
+                    // `iter.Seq2[[]T, error](fn)` was reported as "cannot index
+                    // iter.Seq2[K, V any]" and took its package with it. Nine of
+                    // jaeger's packages are that one line.
+                    self.errors.truncate(mark);
+                    self.expr_or_type(x, &call.fun);
                 } else if x.mode != OperandMode::Invalid {
                     // A multi-index on a non-generic operand is not a valid call
                     // target (ordinary indexing takes a single index).

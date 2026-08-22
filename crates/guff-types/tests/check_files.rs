@@ -1150,6 +1150,116 @@ fn builtins_accept_a_type_parameter_constrained_to_a_slice() {
     );
 }
 
+/// `T[A, B](v)` is a conversion to an instantiated generic type, and it took
+/// the generic-*function* path because nothing else handled a multi-index
+/// callee. The single-argument form `T[A](v)` was fine — it goes through
+/// `index_expr`, which instantiates — so the bug only ever showed on two or
+/// more type arguments. `iter.Seq2[[]ptrace.Traces, error](fn)` is one line in
+/// nine of jaeger's packages, and each one went ill-typed for it.
+#[test]
+fn a_conversion_to_a_generic_type_may_take_several_type_arguments() {
+    let check = check_src(
+        "package p\n\
+         type F1[T any] func(T)\n\
+         type F2[K, V any] func(K, V)\n\
+         type F3[A, B, C any] func(A, B, C)\n\
+         func f() {\n\
+         \t_ = F1[int](func(int) {})\n\
+         \t_ = F2[int, string](func(int, string) {})\n\
+         \t_ = F3[int, string, bool](func(int, string, bool) {})\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// And what the multi-index branch was written for still works: explicit
+/// instantiation of a generic *function* in call position, including the
+/// partial form the inference has to finish.
+#[test]
+fn explicit_instantiation_of_a_generic_function_still_works() {
+    let check = check_src(
+        "package p\n\
+         func pair[K, V any](k K, v V) (K, V) { return k, v }\n\
+         func f() {\n\
+         \t_, _ = pair[int, string](1, \"a\")\n\
+         \t_, _ = pair[int](1, \"a\")\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+
+    // A multi-index on an operand that is neither a generic function nor a
+    // generic type is still an error — the branch's original job.
+    let bad = check_src(
+        "package p\n\
+         func plain(i int) int { return i }\n\
+         func g() { _ = plain[int, string](1) }\n",
+    );
+    assert!(
+        bad.errors.iter().any(|e| e.msg.contains("cannot index")),
+        "expected a 'cannot index', got {:?}",
+        bad.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// A pointer indirection is addressable whatever the pointer expression was —
+/// the spec lists it beside "a variable", and go/types sets `x.mode = variable`
+/// unconditionally. guff required the *operand* to be addressable, so a deref
+/// of a conversion or of a call result could not be assigned to. thanos,
+/// argo-cd and cli have five ill-typed packages between them from this.
+#[test]
+fn a_pointer_indirection_is_always_addressable() {
+    let check = check_src(
+        "package p\n\
+         import \"unsafe\"\n\
+         type S struct{ V float64 }\n\
+         func at(s *S) *float64 { return &s.V }\n\
+         func f(ptr unsafe.Pointer, s *S, ss []*S) {\n\
+         \t*(*S)(ptr) = S{V: 1}\n\
+         \t*at(s) = 2\n\
+         \t*ss[0] = S{V: 3}\n\
+         \t(*s).V = 4\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// Addressability is not blanket, though: what is *not* a pointer indirection
+/// still cannot be assigned to.
+#[test]
+fn assigning_to_something_that_is_not_addressable_is_still_an_error() {
+    let check = check_src(
+        "package p\n\
+         type S struct{ V int }\n\
+         func mk() S { return S{} }\n\
+         func f(m map[string]S) {\n\
+         \tmk().V = 1\n\
+         \tm[\"k\"].V = 2\n\
+         }\n",
+    );
+    assert_eq!(
+        check
+            .errors
+            .iter()
+            .filter(|e| e.msg.contains("cannot assign to"))
+            .count(),
+        2,
+        "got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
 /// `(*p)()` — a call through a variable of pointer-to-func type — is
 /// syntactically indistinguishable from the pointer conversion `(*T)(x)`, so
 /// `exprOrType` probes it as a type first. The probe *reports* on the way, and

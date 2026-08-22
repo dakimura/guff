@@ -263,7 +263,6 @@ impl Checker {
             x.typ = Some(crate::pointer::new_pointer(&mut self.types, elem));
             return;
         }
-        let addressable = x.mode == OperandMode::Variable;
         let typ = x.typ.unwrap_or_else(|| self.invalid_type());
         if !is_pointer(&self.types, typ) {
             let xs = self.operand_str(x);
@@ -275,13 +274,14 @@ impl Checker {
             x.mode = OperandMode::Invalid;
             return;
         }
-        // Dereferencing an addressable pointer operand yields an addressable
-        // lvalue (Go: `operand.isAddressable()` after `*x`).
-        x.mode = if addressable {
-            OperandMode::Variable
-        } else {
-            OperandMode::Value
-        };
+        // A pointer indirection is addressable **whatever the pointer
+        // expression was** — the spec lists it alongside "a variable" and "a
+        // slice indexing operation", and go/types sets `x.mode = variable`
+        // unconditionally here. Requiring the operand itself to be addressable
+        // rejected `*(*Sample)(ptr) = …` (deref of a conversion) and
+        // `*getPtrFunc(app) = …` (deref of a call result), which are five
+        // ill-typed packages across thanos, argo-cd and cli.
+        x.mode = OperandMode::Variable;
         x.typ = Some(pointer_elem(&self.types, typ));
     }
 

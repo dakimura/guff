@@ -8163,9 +8163,7 @@ hunt の refresh がそこを書き換えられる形にはしない。
 
 **次にやること**
 
-1. **hunt の ill-typed 33 件**。いちばん数が多い jaeger（9）/ gitea（6）/ thanos（4）は
-   まだ中身を見ていない。**1 パッケージが丸ごと黙る**ので、finding 1 件あたりの
-   価値は他のどの残差より高い。`GUFF_DEBUG_ILL_TYPED=1` で名前が出る。
+1. ~~**hunt の ill-typed 33 件**~~ —— 続き 19 で 20 件まで落とした。残りは下記。
 2. **G705（XSS）** —— 5 本目の taint ルール。エンジンと表の形はもう在るが、これだけは
    `Receiver` sink（`(net/http.ResponseWriter).Write`）と `ArgTypeGuards`
    （`fmt.Fprintf` の書き手が `http.ResponseWriter` を実装するときだけ sink）が要る。
@@ -8175,6 +8173,66 @@ hunt の refresh がそこを書き換えられる形にはしない。
 4. **複合リテラルの lowering** —— go/ssa は addressable な複合リテラルをその場に書く。
    guff の `complit` 一時変数は §2 の当て木を必要にしている唯一の理由で、
    直せば当て木は消える。全 SSA analyzer に効くので単独のタスクにすること。
+
+---
+
+### 2026-08-22（続き 19）— ill-typed 33 件を数え直したら、上位 2 クラスは 1 行ずつだった
+
+続き 18 の「次にやること」1。baseline に載った 33 件を**エラーメッセージで分類**した
+（`GUFF_DEBUG_ILL_TYPED=1` の出力をリポ横断で見るだけ）。5 クラスに割れて、
+**上位 2 つは型検査の 1 行ずつ**だった。
+
+| クラス | 件数 | 内容 |
+|---|---|---|
+| A `cannot index T[K, V any]` | 9 | 型引数 2 つ以上の**ジェネリック型への変換** |
+| B `cannot assign to X (neither addressable …)` | 5 | ポインタ間接参照の addressability |
+| C `undefined: pkg.X` | 7 | `export_test.go`（外部テストパッケージ） |
+| D `cannot use *T value as I value` | 5 | 埋め込んだジェネリックインスタンスのメソッド昇格 |
+| E その他 | 7 | 個別 |
+
+#### A —— `T[A, B](v)` は変換であって呼び出しではない
+
+```go
+_ = iter.Seq2[[]ptrace.Traces, error](func(yield func([]ptrace.Traces, error) bool) { … })
+```
+
+`call_expr` の `IndexListExpr` の腕は**ジェネリック関数の明示的インスタンス化**しか
+知らず、それ以外は "cannot index" にしていた。**型引数 1 つの形は通っていた** ——
+そちらは `index_expr` を通り、そこがインスタンス化するため。だから
+「2 つ以上のときだけ落ちる」形で、jaeger の 9 パッケージが全部この 1 行である。
+基底が型に評価されたら `expr_or_type` に流す（探りの診断は続き 18 と同じく巻き戻す）。
+
+#### B —— ポインタ間接参照は「常に」addressable
+
+```go
+*(*Sample)(ptr) = Sample{…}     // 変換の deref
+*getPtrFunc(app) = test.fieldVal // 呼び出し結果の deref
+```
+
+`star_expr` は「被演算子が addressable なら結果も addressable」と書いていた。
+spec は "a pointer indirection" を "a variable" と**並べて**挙げており、
+go/types は `x.mode = variable` を**無条件に**セットする。thanos / argo-cd / cli の
+5 パッケージがこれ。
+
+**ゲート**: `check_files.rs` に 4 本。A は 1・2・3 引数の変換が通ることと、
+**この腕が本来守っていたもの**（ジェネリック関数の明示的インスタンス化、部分的な
+型引数、そして非ジェネリックへの多重添字は今も "cannot index"）。B は
+変換・呼び出し・スライス要素・`(*s).V` の deref が通ることと、
+**addressable でないものは今も拒む**こと（`mk().V = 1`、`m["k"].V = 2`）。
+
+**hunt の ill-typed 33 → 20**（jaeger 9 → 0、thanos 4 → 2、argo-cd 3 → 2、cli 2 → 1）。
+
+**次にやること**（この 20 件の内訳）
+
+1. **C: `export_test.go`（7 件）** —— `package storage_test` が import する
+   `.../storage` は、**同パッケージの `_test.go` を含んだ test variant** でなければ
+   ならない。guff は素のパッケージに解決している。authelia / dapr / gitea / thanos /
+   rclone。パッケージロード側の話で、型検査ではない。
+2. **D: 埋め込んだジェネリックインスタンス（5 件）** ——
+   `type ingressRoutes struct { *gentype.ClientWithListAndApply[A, B, C] }` の
+   メソッド昇格。export data 越しのインスタンスのメソッドセットが要る。
+   traefik / argo-cd / prometheus、いずれも k8s 系のコード生成物。
+3. **E: 残り** —— gitea の `cannot infer type arguments in call` ほか個別。
 
 ---
 
