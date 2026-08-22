@@ -9,22 +9,19 @@
   ],
   "targets": {
     "argo-cd": {
-      "ill_typed": 3
+      "ill_typed": 2
     },
     "authelia": {
       "ill_typed": 1
     },
     "cli": {
-      "ill_typed": 2
+      "ill_typed": 1
     },
     "dapr": {
       "ill_typed": 1
     },
     "gitea": {
-      "ill_typed": 6
-    },
-    "jaeger": {
-      "ill_typed": 9
+      "ill_typed": 2
     },
     "prometheus": {
       "ill_typed": 3
@@ -33,7 +30,7 @@
       "ill_typed": 2
     },
     "thanos": {
-      "ill_typed": 4
+      "ill_typed": 2
     },
     "traefik": {
       "ill_typed": 2

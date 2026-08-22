@@ -1150,6 +1150,60 @@ fn builtins_accept_a_type_parameter_constrained_to_a_slice() {
     );
 }
 
+/// Inference step 3 promotes an untyped argument to its default type, and
+/// "untyped" is not "untyped *constant*": a comparison yields an untyped
+/// **bool value**, which has a default type like any other untyped operand.
+/// Requiring a constant dropped it from step 3 as well as step 1, so
+/// `optional.Some(n > 0)` against `func Some[T any](v T) Option[T]` could not
+/// infer `T` at all — and the package went ill-typed for it. Three of gitea's
+/// were this line.
+#[test]
+fn inference_learns_from_an_untyped_value_that_is_not_a_constant() {
+    let check = check_src(
+        "package p\n\
+         type Option[T any] struct{ v T }\n\
+         func Some[T any](v T) Option[T] { return Option[T]{v} }\n\
+         func f(n int64, s string) {\n\
+         \t_ = Some(n > 0)\n\
+         \t_ = Some(s == \"x\")\n\
+         \t_ = Some(1)\n\
+         \t_ = Some(\"x\")\n\
+         \t_ = Some(n)\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// Untyped **nil** is the one untyped operand with no default type, and it must
+/// still contribute nothing — to step 1, so another argument can supply the
+/// type parameter, and to step 3, so it cannot invent one.
+#[test]
+fn untyped_nil_still_contributes_nothing_to_inference() {
+    let ok = check_src(
+        "package p\n\
+         type T struct{}\n\
+         func kind[O any](o O, extra any) O { return o }\n\
+         func f() { _ = kind(&T{}, nil) }\n",
+    );
+    assert!(
+        ok.errors.is_empty(),
+        "expected no errors, got {:?}",
+        ok.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+
+    // With nothing else to learn from, inference still fails.
+    let bad = check_src(
+        "package p\n\
+         func only[T any](v T) T { return v }\n\
+         func g() { _ = only(nil) }\n",
+    );
+    assert!(!bad.errors.is_empty(), "expected inference to fail on a lone nil");
+}
+
 /// `T[A, B](v)` is a conversion to an instantiated generic type, and it took
 /// the generic-*function* path because nothing else handled a multi-index
 /// callee. The single-argument form `T[A](v)` was fine — it goes through
