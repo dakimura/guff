@@ -10,8 +10,9 @@
 #
 # `includes` is applied to rules *and* analyzers by golangci's wrapper
 # (pkg/golinters/gosec/gosec.go: createRuleFilters + createAnalyzerFilters), so
-# G115 / G118 / G122 / G123 / G124 / G602 / G703 — the seven SSA analyzers in
-# the list — are selected the same way as the AST rules.
+# G115 / G118 / G122 / G123 / G124 / G602 and the four taint rules
+# (G702 / G703 / G706 / G710) — the ten SSA analyzers in the list — are
+# selected the same way as the AST rules.
 #
 # This is the first case in this tier whose findings carry a **severity**:
 # golangci maps gosec's per-issue score to "low" / "medium" / "high"
@@ -64,7 +65,10 @@ linters:
         - G506
         - G507
         - G602
+        - G702
         - G703
+        - G706
+        - G710
 
 issues:
   max-issues-per-linter: 0

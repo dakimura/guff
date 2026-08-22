@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"net/url"
 	"time"
 )
 
@@ -10,9 +11,22 @@ type Handler interface {
 }
 
 type ResponseWriter interface{}
-type Request struct{}
 
-func (r *Request) Context() context.Context { return context.Background() }
+type Request struct {
+	Method     string
+	Host       string
+	RemoteAddr string
+	URL        *url.URL
+}
+
+func (r *Request) Context() context.Context    { return context.Background() }
+func (r *Request) FormValue(key string) string { return "" }
+
+const StatusFound = 302
+
+func Redirect(w ResponseWriter, r *Request, urlStr string, code int) {}
+func ServeFile(w ResponseWriter, r *Request, name string)            {}
+func NotFound(w ResponseWriter, r *Request)                          {}
 
 type Conn interface{}
 type FileSystem interface{}

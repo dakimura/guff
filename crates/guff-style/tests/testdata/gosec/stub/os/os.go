@@ -19,6 +19,21 @@ func Remove(name string) error                                       { return ni
 func RemoveAll(path string) error                                    { return nil }
 func Getenv(key string) string                                       { return "" }
 func ReadFile(name string) ([]byte, error)                           { return nil, nil }
+func Open(name string) (*File, error)                                { return nil, nil }
+func Stat(name string) (FileInfo, error)                             { return nil, nil }
+func Lstat(name string) (FileInfo, error)                            { return nil, nil }
+func Rename(oldpath, newpath string) error                           { return nil }
+func Chown(name string, uid, gid int) error                          { return nil }
+func Environ() []string                                              { return nil }
+func StartProcess(name string, argv []string, attr interface{}) (*Process, error) {
+	return nil, nil
+}
+
+type Process struct{}
+
+// Args is a *source* for every taint rule: the key is "os.Args", matched on the
+// package-level variable itself (gosec's `*ssa.Global` arm).
+var Args []string
 
 const O_RDONLY = 0
 

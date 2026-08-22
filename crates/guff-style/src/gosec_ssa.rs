@@ -33,7 +33,12 @@ pub(crate) fn check_ssa_analyzers(
     let want_g115 = enabled.contains("G115");
     let want_g118 = enabled.contains("G118");
     let want_g123 = enabled.contains("G123");
-    if !want_g602 && !want_g115 && !want_g118 && !want_g123 {
+    let taint_rules: Vec<&'static crate::gosec_taint::TaintRule> = crate::gosec_taint::TAINT_RULES
+        .iter()
+        .copied()
+        .filter(|r| enabled.contains(r.id))
+        .collect();
+    if !want_g602 && !want_g115 && !want_g118 && !want_g123 && taint_rules.is_empty() {
         return;
     }
     let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
@@ -53,6 +58,18 @@ pub(crate) fn check_ssa_analyzers(
     };
 
     let src_funcs = collect_src_funcs_with_methods(&built.prog, built.pkg);
+    // `cha.CallGraph`'s node set, which the taint engine reads directly: a
+    // method of an unexported type that is never boxed into an interface is
+    // not in it, and so never learns taint from its callers. Computed here
+    // because it needs `&mut Program` (it may build methods on demand) while
+    // the analyzers below want `&Program`.
+    let reachable: HashSet<FuncId> = if taint_rules.is_empty() {
+        HashSet::new()
+    } else {
+        guff_ssa::ssautil::all_functions(&mut built.prog)
+            .into_iter()
+            .collect()
+    };
     // G118 first, and it alone takes `&mut Program`: `types.Identical` has to
     // compute an interface's type set, which the arena caches in place.
     if want_g118 {
@@ -68,6 +85,8 @@ pub(crate) fn check_ssa_analyzers(
     if want_g123 {
         crate::gosec_g123::collect_g123(prog, &src_funcs, pending);
     }
+    // G702 / G703 / G706 / G710 share one engine and one call graph.
+    crate::gosec_taint::collect_taint(prog, &src_funcs, reachable, &taint_rules, pending);
 }
 
 /// `buildssa.SrcFuncs`: the functions of this package that came from syntax,

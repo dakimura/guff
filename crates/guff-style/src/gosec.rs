@@ -42,14 +42,16 @@
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
 //! - **G602** — slice index / bounds out of range (SSA; see `gosec_g602`)
-//! - **G703** — path traversal via env/args/`ReadFile` into sinks (all args,
-//!   matching empty `CheckArgs`; local-assign approx of SSA taint; full engine
-//!   + sanitizers DEFERRED)
+//! - **G702 / G703 / G706 / G710** — command injection, path traversal, log
+//!   injection and open redirect: one taint engine over four tables of
+//!   sources, sinks and sanitizers (SSA; see `gosec_taint`)
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
 //! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G201, G304–G305, G307
-//! config-gated, G402 MinVersion/CipherSuites, G601, full G7xx taint SSA),
+//! config-gated, G402 MinVersion/CipherSuites, G601, and the taint rules the
+//! engine has no table for — G701 SQL, G704 SSRF, **G705 XSS** (which alone
+//! needs `Receiver` sinks and `ArgTypeGuards`), G707–G709),
 //! full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
 //! string-lit TryResolve, G102 Ident const resolution, concurrency.
@@ -287,38 +289,9 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G101", "G102", "G104", "G107", "G109", "G110", "G111", "G112", "G115", "G118", "G122", "G124",
     "G123", "G202",
     "G203",
-    "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602", "G703",
-];
-
-const G703_WHAT: &str = "Path traversal via taint analysis";
-
-/// Function sources that always produce tainted path data (gosec PathTraversal).
-const G703_SOURCE_FUNCS: &[(&str, &str)] = &[
-    ("os", "Getenv"),
-    ("os", "ReadFile"),
-];
-
-/// Path sinks from gosec G703 (path argument is index 0 unless noted).
-const G703_SINKS: &[(&str, &str)] = &[
-    ("os", "Open"),
-    ("os", "OpenFile"),
-    ("os", "Create"),
-    ("os", "ReadFile"),
-    ("os", "WriteFile"),
-    ("os", "Remove"),
-    ("os", "RemoveAll"),
-    ("os", "Rename"),
-    ("os", "Mkdir"),
-    ("os", "MkdirAll"),
-    ("os", "Stat"),
-    ("os", "Lstat"),
-    ("os", "Chmod"),
-    ("os", "Chown"),
-    ("io/ioutil", "ReadFile"),
-    ("io/ioutil", "WriteFile"),
-    ("io/ioutil", "ReadDir"),
-    ("path/filepath", "Walk"),
-    ("path/filepath", "WalkDir"),
+    "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602",
+    // The taint engine's four rules (`gosec_taint`), all SSA analyzers.
+    "G702", "G703", "G706", "G710",
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -608,8 +581,13 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     ("G507", Score::Medium, Score::High),
     ("G602", Score::Low, Score::High),
     // taint/analyzer.go grades every taint finding `rule.Severity` /
-    // `issue.High`, and `PathTraversalRule.Severity` is "HIGH".
+    // `issue.High`; the severities are the four `taint.RuleInfo`s in
+    // `analyzers/analyzerslist.go`. "CRITICAL" maps to High — gosec has no
+    // fourth score.
+    ("G702", Score::High, Score::High),
     ("G703", Score::High, Score::High),
+    ("G706", Score::Low, Score::High),
+    ("G710", Score::Medium, Score::High),
 ];
 
 /// Severity/confidence for one finding.
@@ -2326,243 +2304,6 @@ fn check_g109(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Ve
     }
 }
 
-fn is_g703_source_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
-    match expr {
-        Expr::CallExpr(call) => resolve_pkg_call(pass, call).is_some_and(|(pkg, name)| {
-            G703_SOURCE_FUNCS
-                .iter()
-                .any(|(p, n)| *p == pkg && *n == name)
-        }),
-        // os.Args[i] / os.Args
-        Expr::IndexExpr(idx) => is_g703_args_expr(pass, idx.x.as_ref()),
-        Expr::SliceExpr(sl) => is_g703_args_expr(pass, sl.x.as_ref()),
-        _ => is_g703_args_expr(pass, expr),
-    }
-}
-
-fn is_g703_args_expr(pass: &Pass<'_>, expr: &Expr) -> bool {
-    let Expr::SelectorExpr(sel) = expr else {
-        return false;
-    };
-    if sel.sel.name != "Args" {
-        return false;
-    }
-    let Expr::Ident(pkg) = sel.x.as_ref() else {
-        return false;
-    };
-    imported_pkg_path(pass, pkg).as_deref() == Some("os")
-}
-
-/// One thing that happens to the taint state, in source order.
-///
-/// Upstream's taint analysis runs on SSA, where a variable assigned twice is
-/// two values: `raw, _ = os.ReadFile(p)` (a declared source) and
-/// `raw, _ = json.Marshal(cfg)` (not one) never share a node, so the second
-/// assignment does not carry the first's taint. A flat "has this name ever been
-/// assigned a source" set has no way to say that, and authelia's
-/// `cmd/authelia-gen/cmd_adr.go` is exactly the shape it gets wrong: read the
-/// config file, unmarshal it, marshal it back, write it out.
-///
-/// Replaying the events in position order gives the same answer for
-/// straight-line code without an SSA form: a later assignment from something
-/// untainted *kills* the taint.
-enum G703Event<'a> {
-    /// `obj = value`, at the end of the statement — after any sink inside the
-    /// right-hand side has been judged with the state that preceded it.
-    Assign {
-        pos: i64,
-        obj: ObjectId,
-        value: &'a Expr,
-    },
-    /// A call to one of `G703_SINKS`, at its `Lparen` (upstream's `call.Pos()`).
-    Sink { pos: i64, call: &'a CallExpr },
-}
-
-impl G703Event<'_> {
-    fn pos(&self) -> i64 {
-        match self {
-            G703Event::Assign { pos, .. } | G703Event::Sink { pos, .. } => *pos,
-        }
-    }
-}
-
-fn collect_g703_assign_events<'a>(
-    pass: &Pass<'_>,
-    assign: &'a AssignStmt,
-    events: &mut Vec<G703Event<'a>>,
-) {
-    let end = assign
-        .rhs
-        .last()
-        .map(|e| e.end().0)
-        .unwrap_or(assign.tok_pos.0);
-    for (lhs, rhs) in assign.lhs.iter().zip(assign.rhs.iter()) {
-        let Expr::Ident(id) = lhs else {
-            continue;
-        };
-        if id.name == "_" {
-            continue;
-        }
-        if let Some(obj) = object_of(pass, id) {
-            events.push(G703Event::Assign {
-                pos: end,
-                obj,
-                value: rhs,
-            });
-        }
-    }
-}
-
-fn collect_g703_valuespec_events<'a>(
-    pass: &Pass<'_>,
-    vs: &'a guff::ast::ValueSpec,
-    events: &mut Vec<G703Event<'a>>,
-) {
-    if vs.values.is_empty() {
-        return;
-    }
-    let end = vs
-        .values
-        .last()
-        .map(|e| e.end().0)
-        .unwrap_or_else(|| vs.names.first().map(|n| n.pos().0).unwrap_or(0));
-    for (name, val) in vs.names.iter().zip(vs.values.iter()) {
-        if name.name == "_" {
-            continue;
-        }
-        if let Some(obj) = object_of(pass, name) {
-            events.push(G703Event::Assign {
-                pos: end,
-                obj,
-                value: val,
-            });
-        }
-    }
-}
-
-/// Does assigning `value` to a variable make that variable tainted?
-///
-/// Narrower than [`path_arg_is_g703_tainted`], which answers the question at a
-/// *sink* and may look through any call written there. Upstream's engine
-/// distinguishes three kinds of callee (`taint/taint.go:583-630`):
-///
-/// | callee | taint of a tainted argument |
-/// |---|---|
-/// | external, no body (stdlib) | flows to the result |
-/// | internal, body available | flows only if `doTaintedArgsFlowToReturn` says so |
-/// | no static callee (a func-typed variable) | does not flow |
-///
-/// guff has no interprocedural pass, so it takes the first row and declines the
-/// other two. grafana's `summary_test.go` is why the middle ground is not safe:
-///
-/// ```go
-/// body, err := os.ReadFile(path)      // source
-/// summary, _, err := reader(ctx, uid, body)   // `reader` is a local variable
-/// out, err := json.MarshalIndent(summary, …)
-/// os.WriteFile(gpath, out, 0600)      // upstream: silent
-/// ```
-///
-/// `reader` has no static callee, so upstream stops at `summary`. Propagating
-/// through every call reaches `out` and reports a sink two hops later.
-fn assignment_taints(pass: &Pass<'_>, value: &Expr, tainted: &HashSet<ObjectId>) -> bool {
-    if is_g703_source_expr(pass, value) {
-        return true;
-    }
-    match value {
-        Expr::Ident(id) => object_of(pass, id).is_some_and(|obj| tainted.contains(&obj)),
-        Expr::ParenExpr(p) => assignment_taints(pass, &p.x, tainted),
-        Expr::BinaryExpr(b) if b.op == Token::ADD => {
-            assignment_taints(pass, &b.x, tainted) || assignment_taints(pass, &b.y, tainted)
-        }
-        Expr::CallExpr(call) => {
-            if !g703_call_propagates(pass, call) {
-                return false;
-            }
-            call.args.iter().any(|a| assignment_taints(pass, a, tainted))
-        }
-        _ => false,
-    }
-}
-
-/// A conversion (`string(b)`, `[]byte(s)`, `T(x)`) or a call into another
-/// package — the two shapes whose result upstream lets a tainted argument reach.
-fn g703_call_propagates(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    // `[]byte(x)` / `[]rune(x)`: the callee is a type expression, never an ident.
-    if matches!(&*call.fun, Expr::ArrayType(_)) {
-        return true;
-    }
-    if let Expr::Ident(id) = &*call.fun {
-        // `string(b)` and friends: a conversion, which upstream models as
-        // `*ssa.Convert` and propagates through.
-        if let (Some(obj), Some(artifacts)) =
-            (object_of(pass, id), pass.pkg().type_artifacts.as_ref())
-        {
-            if matches!(artifacts.objects.get(obj), ObjectData::TypeName(_)) {
-                return true;
-            }
-        }
-    }
-    match resolve_pkg_call(pass, call) {
-        // A function of *this* package has a body upstream would look inside;
-        // guff cannot, so it declines rather than guesses.
-        Some((pkg, _)) => pkg != cut_vendor(&pass.pkg().pkg_path),
-        None => false,
-    }
-}
-
-fn path_arg_is_g703_tainted(
-    pass: &Pass<'_>,
-    arg: &Expr,
-    tainted: &HashSet<ObjectId>,
-) -> bool {
-    if is_g703_source_expr(pass, arg) {
-        return true;
-    }
-    match arg {
-        Expr::Ident(id) => object_of(pass, id).is_some_and(|obj| tainted.contains(&obj)),
-        // gosec PathTraversal follows taint through path-building helpers
-        // (e.g. `os.Stat(config.SkinFileFromName(os.Getenv(...)))`).
-        Expr::CallExpr(call) => call
-            .args
-            .iter()
-            .any(|a| path_arg_is_g703_tainted(pass, a, tainted)),
-        Expr::BinaryExpr(b) if b.op == Token::ADD => {
-            path_arg_is_g703_tainted(pass, &b.x, tainted)
-                || path_arg_is_g703_tainted(pass, &b.y, tainted)
-        }
-        Expr::ParenExpr(p) => path_arg_is_g703_tainted(pass, &p.x, tainted),
-        _ => false,
-    }
-}
-
-fn is_g703_sink_call(pass: &Pass<'_>, call: &CallExpr) -> bool {
-    resolve_pkg_call(pass, call)
-        .is_some_and(|(pkg, name)| G703_SINKS.iter().any(|(p, n)| *p == pkg && *n == name))
-}
-
-fn check_g703_sink_call(
-    pass: &Pass<'_>,
-    call: &CallExpr,
-    tainted: &HashSet<ObjectId>,
-    pending: &mut Vec<(u32, String)>,
-) {
-    if !is_g703_sink_call(pass, call) {
-        return;
-    }
-    // Upstream PathTraversal sinks omit CheckArgs ⇒ every argument is checked
-    // (e.g. `WriteFile(path, dataFromReadFile, …)` fires on the content arg).
-    // ServeFile / ServeFileFS use explicit indices; we only list all-args sinks.
-    if call
-        .args
-        .iter()
-        .any(|a| path_arg_is_g703_tainted(pass, a, tainted))
-    {
-        // `SinkPos: call.Pos()` on an `*ssa.Call` — the CallExpr's Lparen.
-        // See the note in `g122_sink_pos`.
-        pending.push((call.lparen.0 as u32, format!("G703: {G703_WHAT}")));
-    }
-}
-
 /// The node the parser would hang off an identifier's `Obj.Decl`, for the two
 /// kinds `TryResolve`'s switch knows how to walk.
 enum DeclNode<'a> {
@@ -2802,51 +2543,6 @@ fn check_g204_call(
                     .to_string(),
             ));
             return;
-        }
-    }
-}
-
-fn check_g703(pass: &Pass<'_>, enabled: &HashSet<&'static str>, pending: &mut Vec<(u32, String)>) {
-    if !enabled.contains("G703") {
-        return;
-    }
-    let mut events: Vec<G703Event<'_>> = Vec::new();
-    for file in pass.files() {
-        preorder(NodeRef::File(file), |n| {
-            match n {
-                NodeRef::AssignStmt(a) => collect_g703_assign_events(pass, a, &mut events),
-                NodeRef::ValueSpec(vs) => collect_g703_valuespec_events(pass, vs, &mut events),
-                NodeRef::CallExpr(c) => {
-                    if is_g703_sink_call(pass, c) {
-                        events.push(G703Event::Sink {
-                            pos: c.lparen.0,
-                            call: c,
-                        });
-                    }
-                }
-                _ => {}
-            }
-            true
-        });
-    }
-    // Positions are byte offsets in one FileSet, so sorting is file order and
-    // then source order within a file. `sort_by_key` is stable, which keeps the
-    // several `Assign`s of one multi-name statement in their written order.
-    events.sort_by_key(G703Event::pos);
-
-    let mut tainted: HashSet<ObjectId> = HashSet::new();
-    for event in &events {
-        match event {
-            G703Event::Assign { obj, value, .. } => {
-                if assignment_taints(pass, value, &tainted) {
-                    tainted.insert(*obj);
-                } else {
-                    tainted.remove(obj);
-                }
-            }
-            G703Event::Sink { call, .. } => {
-                check_g703_sink_call(pass, call, &tainted, pending);
-            }
         }
     }
 }
@@ -3285,7 +2981,6 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     check_g110(pass, &enabled, &mut pending);
     check_g124_cookie_params(pass, &enabled, &mut pending);
     check_g204(pass, &enabled, &mut pending);
-    check_g703(pass, &enabled, &mut pending);
     crate::gosec_ssa::check_ssa_analyzers(pass, &enabled, &mut pending);
 
     for file in pass.files() {
