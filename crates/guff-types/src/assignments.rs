@@ -124,6 +124,32 @@ pub fn assignable_to(
                 },
             };
         }
+        // T is an interface: Go does not ask whether the untyped value is
+        // *representable* as an interface — nothing is — it converts through
+        // the operand's **default type** (`implicitTypeAndValue`'s `*Interface`
+        // arm), and accepts when the interface is empty. `any("key")` and
+        // `interface{}("bug-fix")` are that conversion, and rejecting them took
+        // gitea's `cmd/cmdtest` and cli's `pkg/cmd/pr/list` with them.
+        //
+        // A *non-empty* interface is still refused: an untyped constant has no
+        // methods, so there is nothing for it to implement.
+        if matches!(arena.get(tu), TypeData::Interface(_)) && !x.is_nil() {
+            // `Interface.Empty()` is `typeSet().IsAll()` — the *set of all
+            // types* — not `is_empty()`, which is the set nothing satisfies.
+            crate::interface::interface_compute_typeset(arena, oarena, parena, tu);
+            let empty = match arena.get(tu) {
+                TypeData::Interface(i) => i.cached_typeset().is_some_and(|ts| ts.is_all()),
+                _ => false,
+            };
+            return AssignableResult {
+                ok: empty,
+                code: if empty {
+                    None
+                } else {
+                    Some(Code::IncompatibleAssign)
+                },
+            };
+        }
         let ok = representable(arena, x, t);
         return AssignableResult {
             ok,

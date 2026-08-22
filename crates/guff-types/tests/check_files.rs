@@ -1150,6 +1150,55 @@ fn builtins_accept_a_type_parameter_constrained_to_a_slice() {
     );
 }
 
+/// Converting an untyped constant to an interface does not ask whether the
+/// constant is *representable* as one — nothing is. Go converts through the
+/// operand's **default type** and accepts when the interface is the empty one
+/// (`implicitTypeAndValue`'s `*Interface` arm). `any("key")` is that
+/// conversion, and rejecting it took gitea's `cmd/cmdtest` and cli's
+/// `pkg/cmd/pr/list` with it.
+///
+/// The predicate matters as much as the arm: `Interface.Empty()` is
+/// `typeSet().IsAll()` — the set of *all* types — while `is_empty()` is the set
+/// nothing satisfies. With the wrong one only the `interface{}` literal passed,
+/// because its type set had not been computed yet.
+#[test]
+fn an_untyped_constant_converts_to_an_empty_interface() {
+    let check = check_src(
+        "package p\n\
+         type myany = interface{}\n\
+         type MyAny interface{}\n\
+         func f() {\n\
+         \t_ = interface{}(\"a\")\n\
+         \t_ = myany(\"b\")\n\
+         \t_ = MyAny(\"c\")\n\
+         \t_ = any(\"d\")\n\
+         \t_ = any(1)\n\
+         \t_ = any(nil)\n\
+         }\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// A *non-empty* interface still refuses: an untyped constant has no methods,
+/// so there is nothing for it to implement, and `go build` says so too.
+#[test]
+fn an_untyped_constant_does_not_convert_to_a_non_empty_interface() {
+    let check = check_src(
+        "package p\n\
+         type Stringer interface{ String() string }\n\
+         func f() { _ = Stringer(\"e\") }\n",
+    );
+    assert!(
+        check.errors.iter().any(|e| e.msg.contains("cannot convert")),
+        "expected a conversion error, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
 /// Inference step 3 promotes an untyped argument to its default type, and
 /// "untyped" is not "untyped *constant*": a comparison yields an untyped
 /// **bool value**, which has a default type like any other untyped operand.
