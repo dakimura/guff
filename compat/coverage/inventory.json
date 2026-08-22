@@ -192,7 +192,22 @@
     },
     {
       "declared_in": "guff-style/src/gosec.rs",
+      "id": "G702",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
       "id": "G703",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G706",
+      "linter": "gosec"
+    },
+    {
+      "declared_in": "guff-style/src/gosec.rs",
+      "id": "G710",
       "linter": "gosec"
     },
     {
@@ -2831,7 +2846,7 @@
       "gomodguard": 1,
       "gomodguard_v2": 1,
       "goprintffuncname": 1,
-      "gosec": 39,
+      "gosec": 42,
       "gosmopolitan": 1,
       "govet": 34,
       "grouper": 1,
@@ -2899,7 +2914,7 @@
       "wsl_v5": 1,
       "zerologlint": 1
     },
-    "total": 555
+    "total": 558
   },
   "linters": [
     "arangolint",

@@ -7962,6 +7962,222 @@ func main() {
 
 ---
 
+### 2026-08-22（続き 18）— taint は 4 ルールで 1 エンジン、その節点集合は「全関数」ではない
+
+続き 13 の「次にやること」4 と 5、そして続き 16 の教訓（health ゲートが hunt tier に無い）。
+3 つのうち **2 つはゲートの欠落**で、コードの欠陥はそこから出てきた。
+
+#### 1. gosec の未実装 taint —— G702 / G706 / G710 を足し、G703 を SSA に載せ替えた
+
+上流 gosec v2.26.1 は `taint/taint.go` の**ひとつのエンジン**を 4 つの表で駆動する
+（`analyzers/{commandinjection,pathtraversal,loginjection,openredirect}.go`）。
+guff にあったのは G703 だけ、しかも**位置順再生の AST 近似**（続き 12）だった。
+`crates/guff-style/src/gosec_taint.rs` にエンジンを SSA へ移植し、表を 4 本置いて
+AST 版を削除した。移植して初めて分かったことが 3 つある。
+
+**(a) source は 2 種類ある。** `os.Getenv` / `os.ReadFile` / `os.Args` は
+**関数 source** で、呼べばそこが汚れる。`*http.Request` / `*url.URL` /
+`url.Values` / `*bufio.Reader` / `*bufio.Scanner` は**型 source** で、
+それ自体は何も汚さない —— **仮引数がその型のときだけ**汚れる。
+`http.NewRequest` にハードコードした URL を渡しても source にならないのがこの区別の目的で、
+上流のコメントもそう書いている。
+
+**(b) 型 source の仮引数が汚れるかは call graph が決める。そして上流の call graph の
+節点集合は `ssautil.AllFunctions` —— 「全関数」ではなく到達可能性の集合である。**
+種は 3 つ: パッケージレベル関数、**exported** な型のメソッド、
+`Program.RuntimeTypes()`（= どこかで interface に変換された型）のメソッド。したがって
+
+```go
+type rec struct{}
+func (p *rec) log(id string)  { log.Printf("got %s", id) }        // 黙る
+func (p *rec) serve(w http.ResponseWriter, r *http.Request) { p.log(r.URL.Path) }
+```
+
+`rec` は unexported で、どこでも interface に変換されていない。すると `serve` は
+**節点ですらない**ので `log` に入る辺が無く、`id` は自分がリクエスト由来だと知る術がない。
+`rec` を exported にするか `http.Handler` として登録するか（syncthing の
+`crashReceiver` はこれ）した瞬間に、同じコードが撃つ。
+
+**(c) 例外がひとつあり、実リポの findings の半分はそれである。** 型 source の
+**仮引数のフィールド読み**は call graph に何も訊かずに汚れる
+（`isFieldAccessTainted` の CASE 1）。syncthing の `rhost := r.RemoteAddr` がその形で、
+G706 の 9 件のうち 4 件はこれ。
+
+sanitizer（G703 の `filepath.Clean` / `path.Base` / `strconv.Atoi`、G706 の
+`strings.ReplaceAll` / `strconv.Quote`、G710 の `url.QueryEscape`）と `CheckArgs`
+（`http.Redirect` は URL だけ、`http.ServeFile` はパスだけ、`slog.Warn` は
+**メッセージだけ** —— 属性値は両ハンドラがエスケープするため）は、AST 版に 1 つも無かった。
+
+**可変長引数だけは意図的に違う。** go/ssa は可変長実引数を配列に詰めて `*ssa.Slice` を
+1 つ渡すが、guff は個別に渡して `CallCommon::ellipsis` に記録する。全引数を見る sink では
+答えが一致する（上流は配列の `Alloc` の referrer を辿って要素に届く）。`CheckArgs` を持つ
+sink では添字がずれうるが、4 ルールが名指しする添字は**すべて固定引数**
+（`slog.Warn` の `msg`、`http.Redirect` の `url`）なので問題にならない。
+
+#### 2. 節点集合を合わせるのに、土台を 2 つ直した
+
+移植した直後、syncthing の taint 15 件のうち 6 件しか出なかった。残りは全部 (b) である。
+
+**`Program::runtime_types()` が推移的でなかった。** go/ssa の `needMethodsOf` は
+boxed な型から**要素型・フィールド型・キー型・引数型・結果型・`*T`** へ再帰する ——
+reflection から届く範囲が全部 runtime type だからである。guff は
+`make_interface_types`（直接 box された型）をそのまま返していた。
+syncthing の `(*serveCmd).monitorMain` はこの推移閉包でしか届かない: `serveCmd` 自体は
+box されないが、それを保持する kong の CLI 構造体が box される。
+`skip` フラグ（named の underlying は「訪れるが runtime type ではない」）ごと移植した。
+
+**CHA の 3 種類目の辺が無かった。** `cha.CallGraph` は callee を 3 通りに解決する:
+static callee、interface invoke（同名メソッド全部）、そして**関数型の値ごしの呼び出し**
+（`funcsBySig` —— シグネチャが一致する bare 関数全部）。3 つ目は特殊ケースではない ——
+syncthing の `unixConfigDir(…, fileExists)` は `os.Lstat` を**仮引数ごしに**呼ぶので、
+この辺が無いと sink に届く経路が存在しない。
+
+そのシグネチャ比較で 1 つ踏んだ: **Go の `Type.String()` は仮引数名を含む**ので、
+`fileExists` 自身の型は `func(path string) bool`、それを受ける仮引数の型は
+`func(string) bool` と描画され、同一なのに一致しない。`types.Identical` は名前を見ない
+（`typeutil.Map` が使うのはそちら）。引数型と結果型と可変長フラグだけからキーを組み立てた。
+
+**guff-ssa の差を 1 つ当て木した。** go/ssa は addressable な複合リテラルを**その場に**書く
+（`t1 = &t0.cmd; *t1 = os.Getenv(…)`）が、guff は `complit` 一時変数に組んでから
+構造体ごとコピーする。すると `h` 自身の referrer に**フィールド store が 1 つも無く**、
+上流の walk（`FieldAddr` の store しか見ない）は何も見つけない。`stores_to_field` で
+「構造体まるごとの store」を辿って元のセルに戻る形にした。**本来は `builder` を直すべき差**
+だが、そこは全 SSA analyzer が共有しているので taint 側の当て木に留めてある。
+
+#### 3. ゲートを足したら、その場で 1 パッケージ落ちていた
+
+`compat/hunt.sh` に health ゲート（下記 5）を入れた最初の実行が、syncthing の
+`lib/sliceutil` を ill-typed で落とした。中身は
+
+```go
+func RemoveAndZero[E any, S ~[]E](s S, i int) S {
+	s[len(s)-1] = *new(E)          // invalid argument: s for built-in len
+	return s[:len(s)-1]
+}
+```
+
+続き 16 の `append` と**同じ族**で、`builtins.rs` の `len` / `cap` に
+`// DEFERRED: type-parameter (Interface/underIs) operands.` が残っていた。
+ただし訊くべき述語は `append` とは違う: `append` は `coreType`（＝ `commonUnder`）だが、
+`len` は **`underIs`** —— 型集合の各項が個別に「長さを持つ」ことだけを要求する。
+`~[]int | ~[]string` は共通の underlying を持たないが `len` は通る。
+`crates/guff-types/tests/check_files.rs` に 2 本足した（通る 6 形と、
+`~[]int | ~int` / `cap` on map / `any` の 3 つの拒否）。
+
+そして baseline を記録するために hunt を 16 リポ回したら、**同じ形がもう 1 つ**出た。
+rclone の `lib/atexit` と `fs/rc/jobs`、6 行に縮む:
+
+```go
+var fn *func()
+func run() { (*fn)() }        // guff: p is not a type
+```
+
+`(*p)()` は**構文としてはポインタ変換 `(*T)(x)` と区別が付かない**ので、
+`expr_or_type` はまず型として評価してみる。ところがその探りは**途中で報告してしまう** ——
+値としての経路がそのあと正しく処理しても、"p is not a type" は残り、パッケージは ill-typed。
+`builtin_new` が `new(x)` のために既に持っていた「探りの診断を巻き戻す」形
+（`let mark = self.errors.len(); … self.errors.truncate(mark);`）を `expr_or_type` にも入れた。
+テストは 2 本 —— 通るべき `(*fn)()` と、**変換の側が壊れていないこと**
+（`(*T)(x)` は通り、`(*Nope)(x)` は**ちょうど 1 回**報告する）。
+
+#### ゲート
+
+- `crates/guff-style/tests/testdata/gosec/g7xx.go` —— 1 パッケージ、
+  すべての関数に `// fires` / `// silent` を付けた。件数だけなら「全部撃つ」実装でも通るので、
+  **撃つ形の隣に必ず黙る形を置いてある**: 同じ source に sanitizer を掛けたもの、
+  sink が実際に見る引数だけ定数にしたもの、再代入で taint を殺したもの、そして (b) の
+  **箱に入れた型と入れない型の、同じ 3 行**。
+- `compat/golden/cases/gosec` が 127 キーを行・桁・severity ごと固定する
+  （G702 は既存の `bad.go:61/62` にも 2 件増えた —— AST 版が一度も出せなかったもの）。
+  `stub/` に `bufio` / `log` / `log/slog` / `net/url` / `strings` / `syscall` / `path` を足した。
+- `checks_test.rs` に 2 本。片方は件数、もう片方は **(b) の対**だけを見る。
+
+**syncthing**: taint の guff-only 0、golangci-only 15 → **0**。
+P=98.3% / **R=93.2% → 95.6%**。残る gosec 差分は G705（XSS、5 本目の taint ルール・未実装）
+×3、G402 の cipher suite ×1、G102 ×2、G115 の**文言**差（`rune -> byte` vs
+`int32 -> uint8`）×2 —— どれも taint とは別件である。
+
+#### 4. `uniq-by-line` の linter 順序 —— guff は合っていて、ゲートが無かった
+
+続き 13 は「再走で差分が動いた形跡がある」と書いていた。上流の順序を実装から確定させた:
+
+- `UniqByLine` は (file, line) ごとに**最初に届いた 1 件**を残す。`SortResults` は
+  **全プロセッサの最後**なので、並べ替えは効かない。
+- `Runner.Run` は linter を順に回して issues を append する。その順序は
+  `GetOptimizedLinters` の並びだが、**2.12.2 では全 linter が 1 つの
+  `goanalysis_metalinter` に入る**（`default: all` で「Combined 115」）。
+  効くのは `combineGoAnalysisLinters` 内の並べ替えだけで、それは
+  **名前順 + `nolintlint`（`linter.LastLinter`）が最後**。
+- 上位リストの `DoesChangeTypes`（`unused` を末尾へ回す規則）は、その `unused` も
+  metalinter の中にいるので**一度も適用されない**。
+
+guff はこの順序を既に再現していた（`exclude.rs` の名前ソート＋
+`NolintIndex::filter_issues` が nolintlint を末尾に回す）。**無かったのはゲートである** ——
+`cases/issues-uniq-by-line` の衝突ペアは errcheck/gosec/govet/revive/staticcheck だけで、
+**全部アルファベット順に一致する**ので、素の名前ソートでも通ってしまう。
+
+`compat/golden/cases/issues-uniq-by-line-order` を新設した。1 パッケージ 1 ファイルで
+（上限系の fixture と同じ理由 —— 到着順がレースする linter を混ぜない）、名前順と上流順が
+**食い違う 2 組**を置く: revive vs nolintlint、unused vs nolintlint。対照として
+errcheck vs gosec vs nolintlint を 1 行に並べた。fixture のコメントには
+「exported 関数に doc コメントを付けてはいけない」と書いてある —— revive の `exported` は
+コメントがあると**コメントの位置**に報告するので、finding が対象行から外れて
+ケースが黙って無力化される。
+
+そのうえで**リポ規模の比較は順序に依存させない**: `corpus/patch_unlimited_issues.py` に
+`--uniq-by-line` を足し、`compat/hunt.sh` が `false` を渡す。両ツールが同じ config を読むので、
+片側の 1 件の欠落が「どちらが残るか」を入れ替えて無関係な場所に差分を動かす形が消える。
+OSS tier は allowlist が上流既定の下で記録されているので**触っていない**
+（`compat/tests/test_patch_config.py` がその 2 つを両方とも表明する）。
+
+#### 5. health ゲートが hunt tier に無かった
+
+続き 16 の教訓そのもの。`compat/hunt.sh` に `GUFF_DEBUG_ILL_TYPED=1` と
+`health.py check` を足し、`--update-baseline` を付けた。baseline は
+`compat/baselines/health-hunt.json` に分けてある —— OSS 側は CI ゲートの記録なので、
+hunt の refresh がそこを書き換えられる形にはしない。
+
+**ゲートのゲート**も足した: `compat/tests/test_health.py::WiringTests` が、guff を実 Go に
+向ける tier（`run.sh` / `hunt.sh` / `golden/run.sh`）**すべて**について
+(a) `GUFF_DEBUG_ILL_TYPED=1` を渡すこと、(b) `health.py check` を呼ぶこと、
+(c) 失敗を数えたうえで**実際に exit 1 すること**を表明する。
+この gate の壊れ方は「何も起きない」なので、tier に配線し忘れる以外の壊れ方が無い。
+そして実際、入れた最初の実行が上の §3 を落とした。
+
+**記録された初回の baseline は 16 リポで 38 パッケージ**だった —— この 5 日間、
+誰も見ていなかった量である。上の 2 つの型検査修正で **33**（10 リポ）まで落ちた:
+
+| target | ill-typed | 主な内訳 |
+|---|---|---|
+| jaeger | 9 | 未調査 |
+| gitea | 6 | 未調査（deref で 7 → 6） |
+| thanos | 4 | 未調査 |
+| argo-cd / prometheus | 3 / 3 | 未調査 |
+| rclone | 2 | build tag 付きテストファイル（`PurgeTempUploads` / `MakeTestDirs` undefined） |
+| cli / traefik | 2 / 2 | `cannot assign to struct{…}`、untyped → `interface{}` |
+| authelia / dapr | 1 / 1 | 未調査 |
+
+**残りは baseline に載っているので、あとは縮むだけである。** 続き 16 の教訓
+（「ill-typed は差分に出ない」）に対する構造的な答えがこれで、リポを 1 本足したときに
+**その場で数が出る**ようになった。
+
+**次にやること**
+
+1. **hunt の ill-typed 33 件**。いちばん数が多い jaeger（9）/ gitea（6）/ thanos（4）は
+   まだ中身を見ていない。**1 パッケージが丸ごと黙る**ので、finding 1 件あたりの
+   価値は他のどの残差より高い。`GUFF_DEBUG_ILL_TYPED=1` で名前が出る。
+2. **G705（XSS）** —— 5 本目の taint ルール。エンジンと表の形はもう在るが、これだけは
+   `Receiver` sink（`(net/http.ResponseWriter).Write`）と `ArgTypeGuards`
+   （`fmt.Fprintf` の書き手が `http.ResponseWriter` を実装するときだけ sink）が要る。
+   syncthing に 3 件。
+3. **G115 の文言** —— `rune -> byte` と `int32 -> uint8`。上流は宣言された別名で綴り、
+   guff は basic kind で綴る。行も桁も一致するので、差分の両側に同時に並ぶ。
+4. **複合リテラルの lowering** —— go/ssa は addressable な複合リテラルをその場に書く。
+   guff の `complit` 一時変数は §2 の当て木を必要にしている唯一の理由で、
+   直せば当て木は消える。全 SSA analyzer に効くので単独のタスクにすること。
+
+---
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳
