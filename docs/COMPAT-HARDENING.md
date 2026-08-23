@@ -8449,6 +8449,91 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
 
 ---
 
+### 2026-08-23（続き 23）— メソッドの名前を作れる関数が 1 つも共有されておらず、5 か所が同じ回避を書いていた
+
+syncthing の gcl-only を linter 別に数えると errchkjson が 7 件で 2 番目に大きい。
+**7 件とも `(*encoding/json.Encoder).Encode`** で、`json.Marshal` のほうは 4/4 一致していた
+（`errchkjson: guff 4 / golangci 11 / both 4 → P 100% R 36.4%`）。
+
+#### 原因 —— `call_name` はメソッドに対して Go が作らない名前を返す
+
+上流 errchkjson は `types.Func.FullName()` で分岐するので、表はこう書かれている:
+
+```go
+case "encoding/json.Marshal", "encoding/json.MarshalIndent": …
+case "(*encoding/json.Encoder).Encode": …
+```
+
+guff の `marshal_fn_name` は `code::call_name` を使っていた。
+`call_name` は最後に `func_name`（**パッケージパス + オブジェクト名**）へ落ちるので、
+メソッドは `encoding/json.Encode` になる —— **Go が決して作らない綴り**であり、
+上流のどの表にも載っていない文字列である。だから Encoder の腕は一度も一致せず、
+`Marshal` の腕（パッケージ関数なので同じ綴り）だけが動いていた。
+**linter は生きているように見え、コーパスからは Encode が丸ごと消えていた。**
+
+```
+call_name        = Some("encoding/json.Encode")             ← Go が作らない
+callee_full_name = Some("(*encoding/json.Encoder).Encode")  ← 表が書いてある綴り
+```
+
+#### 同じ穴を 5 か所が別々に埋めていた
+
+`call_name` は doc コメントで「fully-qualified name」と名乗っているが、
+メソッドについてはそうではない。そして**それを必要とした移植は全部、横で作り直していた**:
+
+| 場所 | やっていること |
+|---|---|
+| `noctx::full_call_name` | `call_name` を呼んでから、同じ obj を引き直して `type_func_name` を取る |
+| `errcheck`（`lib.rs:451`） | `call_name` の結果と `type_func_name` の結果を**両方** names に積む |
+| `musttag::callee_name` | `call_name` を使わず最初から `type_func_name` |
+| `govet waitgroup` | `is_call_to(…, "(*sync.WaitGroup).Add")` が**死んでいて**、その下に「セレクタが `Add` で受け手が `sync.WaitGroup`」の 3 行が置いてある |
+| `staticcheck SA2000` | 同上（同じ 3 行がコピーされている） |
+
+後ろの 2 つは**フォールバックが救っているので緑のまま**で、
+死んでいる 1 行があることは誰にも見えない。errchkjson だけがフォールバックを書かなかった。
+
+`code::callee_full_name`（＝ `Func.FullName()`）を足して errchkjson をそれに向けた。
+**`call_name` 自体は触っていない** —— 15 前後の analyzer が結果を文字列として使っており
+（`printf` は `rsplit('.')`、`wrapcheck` は `format!("{n}(")` して設定パターンと突き合わせる、など）、
+中央で直すなら**その全部を読む**必要がある。下記「次にやること」に分けた。
+
+#### isolate の fixture が 1 件しか比較していなかった
+
+`compat/isolate/fixtures/errchkjson/bad.go` は `json.Marshal` 1 件だけで、
+上流も guff も 1/1 で一致していた。§1 が数えた「**72 linter が 1 件だけ比較している**」
+の一例がそのまま今回の穴を通した形になる。
+呼び出しの 3 形（式文・blank 代入・変数レシーバ）と unsafe 型、
+それに**黙るべき 2 形**（`return` と `if err :=`）を足して、上流の答えは 1 → **5 件**になった。
+
+#### 結果
+
+syncthing の errchkjson は **4/11 → 11/11、R 36.4% → 100%**（gcl-only 7 → 0）。
+syncthing の unexpected は **42 → 33**、他の 15 ターゲットは 1 件も動いていない。
+
+#### ゲート
+
+- `compat/isolate/fixtures/errchkjson/bad.go` —— 上記のとおり 5 件。**上流と実行比較される。**
+- `crates/guff-error/tests/testdata/errchkjson/encoder.go` +
+  `errchkjson_flags_unchecked_encoder_encode` —— 4 件ちょうどを要求する
+  （黙るべき 2 形を数に含めない形で書いてある）。**両方向で確認**:
+  `callee_full_name` を `call_name` に戻すと 0 件になって落ちる。
+
+**次にやること**
+
+1. **`call_name` をメソッドについても `Func.FullName()` にする（中央の修正）** ——
+   `is_call_to` / `is_call_to_any` に渡っている文字列リテラルは 34 種で、
+   **`(*sync.WaitGroup).Add` 以外は全部パッケージ関数か組み込み**なので、
+   直しても比較の意味は変わらず、死んでいる 1 行が生き返って
+   上の 3 行のフォールバックが 2 か所で消せる。危険なのは
+   **結果を文字列として使っている側**で、`printf.rs`（3 か所）/ `wrapcheck.rs` /
+   `bodyclose.rs` / `st1013.rs` / `inline.rs` / `copylocks.rs` / `atomic.rs` ×2 /
+   `defers.rs` / `sa6005.rs` を読む必要がある。単独のタスクにすること。
+2. **他の linter にも同じ穴が無いか** —— 判定基準は
+   「上流が `FullName()` で分岐しているか」であって「メソッドを扱うか」ではない。
+   `grep -rn 'call_name' crates/` の結果を 1 つずつ上流と突き合わせる。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、
