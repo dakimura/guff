@@ -8435,15 +8435,10 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
 4. **複合リテラルの lowering** —— 続き 18 の 4。
 5. **`assignable_to` の 2 段の順序** —— 上記のとおり `prepare_method_set` と逆。
    今は `expand_one_method` の `obj_decl` が支えているだけなので、寄せる。
-6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行。
-
-   ```go
-   int64(4.8 * float64(time.Hour))   // guff: cannot convert float64 to type int64
-   ```
-
-   `float64(time.Hour)` は**定数**（`time.Hour` は typed constant）なので積も
-   float64 定数で、値が整数なら `int64` への変換は spec 上通る。
-   guff は小数点を持つ float 定数の変換をまとめて拒んでいる疑いがある。
+6. ~~**E: 浮動小数定数の整数への変換**~~ —— 続き 22 で解消（hunt の ill-typed 9 → 8）。
+   **疑いは外れていた**: guff は「小数点を持つ float 定数の変換をまとめて拒んで」は
+   いない（`int64(1.5*hour)` は通る）。落ちていたのは**演算のたびの丸めが無かった**
+   ためで、型付き定数どうしの積が厳密な有理数のまま残っていた。
 
 ---
 
@@ -8595,6 +8590,109 @@ guff:     seed dep github.com/prometheus/prometheus/promql/promqltest — 19 err
 5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。`prepare_method_set` に寄せる。
 6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行（続き 20 の 6）。
    **hunt に残る ill-typed 3 件のうちの 1 件**で、他の 2 件は上記 1。
+
+---
+
+### 2026-08-23（続き 22）— 型付き定数は「使うとき」ではなく「演算のたび」に丸められる
+
+続き 20 の「次にやること」6（クラス E）。thanos `pkg/promclient` の 1 行。
+
+```go
+testutil.Equals(t, int64(2*time.Hour), int64(flags.TSDBMinTime))          // 通る
+testutil.Equals(t, int64(4.8*float64(time.Hour)), int64(flags.TSDBMaxTime)) // guff: cannot convert float64 to type int64
+```
+
+#### 「4.8 だけが落ちる」は係数の話であって、型の話ではないように見えた
+
+| 式 | 修正前 |
+|---|---|
+| `int64(2.0 * float64(time.Hour))` | 通る |
+| `int64(float64(time.Hour) * 1.5)` | 通る |
+| `int64(4.8 * float64(time.Hour))` | **落ちる** |
+| `int64(float64(time.Hour) * 4.8)` | **落ちる** |
+| `int64(4.8 * 3600000000000.0)` | 通る（untyped どうし） |
+
+分かれ目は**係数が 2 進で正確に表せるか**である。1.5 と 2.0 は表せる。4.8 は表せない。
+そして最後の行が効いていて、**同じ 4.8 でも untyped どうしなら通る** ——
+つまり問題は乗算でも定数の値でもなく、**型が付いていること**にある。
+
+#### 原因 —— 4 か所の `// DEFERRED: check.overflow(x)`
+
+Go の規則は「型付き定数はその型で表現可能でなければならない —— **演算のたびに**」で、
+go/types は `constant.BinaryOp` の直後に `check.overflow` を呼び、
+そこから `representable` が値を**その場で丸め直す**。
+guff は `basic_lit` / `unary` / `binary` / `shift` の 4 か所すべてに
+`// DEFERRED: check.overflow(x)` を置いたまま出荷していた。
+
+丸めないと、float64 定数どうしの積は**厳密な有理数**のまま残る。
+4.8 の float64 表現は 5404319552844595/2^50 なので、
+
+```
+4.8 * 3.6e12 = 2374945115996159912109375 / 2^37     ← 整数ではない → int64 は truncation
+round_float64(それ) = 17280000000000                ← 整数 → int64 は通る
+```
+
+untyped どうしなら丸める型が無いので厳密な 24/5 × 3.6e12 = 17280000000000 のまま通る。
+**同じ係数が、型が付いた瞬間にだけ問題になる**のはこのためで、
+「1.5 は通って 4.8 は落ちる」という見え方は原因ではなく症状だった。
+
+#### `overflow` は 2 つのことをする
+
+1. **型付き定数** —— `representable` で丸める（表現できなければその場でエラー）。
+2. **untyped 整数** —— Go の定数精度 512 bit を超えたらエラーにして Unknown にする。
+
+2 は副産物で、`const big = 1 << 1000` を guff は**黙って受けていた**。
+文言は上流と 1 文字違わない `constant shift overflow`
+（`opName` が入れる演算子の語まで含めて一致する）。
+
+#### ゲート
+
+`check_files.rs` に 5 本。**両方向で確かめた** ——
+`overflow` を早期 return にすると 3 本が落ち、
+「丸めをやめる」「丸めを広げる」のどちらに転んでも残りの 2 本が捕まえる。
+
+- **`a_typed_float_constant_is_rounded_after_each_operation`** —— 修正そのもの。
+  上の表の 5 行をそのまま入れてある（通っていた 3 行も含む）。
+- **`rounding_neither_manufactures_nor_destroys_representability`** ——
+  `int64(4.7 * hour / 7.0)` は float64 で本当に小数なので**今も落ちる**。
+  丸めを結果側に効かせて整数に寄せる実装は 1 本目を通してここで落ちる。
+  同じテストの後半で untyped の側（丸める型が無い）も押さえる。
+- **`a_typed_constant_that_overflows_its_type_is_rejected_at_the_operation`** ——
+  `const x int8 = 100; const y = x * 2` が **`x * 2` の位置で** 1 件。
+- **`an_untyped_integer_constant_may_not_grow_past_the_constant_precision`** ——
+  `1 << 1000` は落ち、`1 << 511`（ちょうど 512 bit）は通る。上限は `>` であって `>=` ではない。
+- **`complementing_a_typed_unsigned_constant_survives_the_round`** ——
+  `^uint(0)` は**型付き**なので新しく丸めを通る。符号付きに丸めれば `-1` が戻り、
+  `1 << (^uint(0) >> 63)`（runtime 自身のイディオム）が `u64::MAX` ビットのシフトになる。
+  `unary` のマスク処理のコメントが警告しているのがこの経路である。
+
+#### 結果
+
+**hunt の ill-typed 9 → 8**（thanos 2 → 1。`pkg/promclient` が消え、
+残るのは `internal/cortex/chunk/cache_test` ＝ クラス C）。
+**差分は 1 件も動いていない**: 16 ターゲットすべてで guff / golangci / both / unexpected が
+続き 20 の hunt（`hunt-20260822T165933Z`）と完全一致。golden 103/103、isolate 116/116。
+定数を丸めることは、どの check が読む値も変えなかった。
+
+> **注意（マージ順）**: 続き 21（外部テストパッケージ）が thanos の `cache_test` を
+> 潰すので、**両方が main に入った時点で thanos は 0 になり、
+> `compat/baselines/health-hunt.json` の thanos 行は消してよい**。
+> どちらの PR も単独では 1 までしか下げられないので、両方とも 1 を記録している。
+> 減るのは自由なのでゲートは緑のままだが、行は古くなる。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+2. **G705（XSS）** —— 続き 18 の 2。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。`rune -> byte` と `int32 -> uint8`。
+   **上流は `byte` / `rune` を「名前の違う別の `*Basic`」として持っている**
+   （`go/types` の `aliases` 配列）のに対し、guff の `byte` / `rune` は
+   `uint8` / `int32` と**同じ TypeId を指す TypeName** なので、
+   「ソースが `byte` と書いた」という情報が型の側に残っていない。
+   `basic.rs` の `BYTE` / `RUNE` は「同じ数値の別名」というコメントつきで
+   そう決めてあるので、直すならモデルを変える話になる。単独のタスクにすること。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
 
 ---
 
