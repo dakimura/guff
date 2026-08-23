@@ -24,6 +24,13 @@ ILL = (
     "  /x/y.go:1:2: nope (Type)\n"
     "guff: ill_typed k8s.io/apimachinery/pkg/runtime (1 errors):\n"
 )
+CYCLE = (
+    "guff: seed dep cycle github.com/p/tsdb -> github.com/p/util/teststorage\n"
+    "guff: seed dep cycle ... and 4 more\n"
+    "guff: seed order is not topological; some packages may be reported "
+    "ill-typed. This is a guff bug, not a problem with the code being linted.\n"
+)
+CLEAN: dict = {"panics": [], "ill_typed": [], "seed_cycles": []}
 
 
 def write(text: str) -> str:
@@ -54,38 +61,70 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(len(scan(write(PANIC))["panics"]), 1)
 
     def test_clean_stderr(self):
-        self.assertEqual(scan(write("")), {"panics": [], "ill_typed": []})
+        self.assertEqual(scan(write("")), CLEAN)
 
     def test_missing_file_is_not_an_error(self):
-        self.assertEqual(scan("/nonexistent/nope.stderr"), {"panics": [], "ill_typed": []})
+        self.assertEqual(scan("/nonexistent/nope.stderr"), CLEAN)
+
+    def test_extracts_seed_dep_cycle_edges(self):
+        got = scan(write(CYCLE))
+        self.assertEqual(
+            got["seed_cycles"],
+            [
+                "... and 4 more",
+                "github.com/p/tsdb -> github.com/p/util/teststorage",
+            ],
+        )
+
+    def test_seed_cycle_line_is_not_read_as_an_ill_typed_package(self):
+        got = scan(write(CYCLE))
+        self.assertEqual(got["ill_typed"], [])
+
+    def test_the_prose_line_is_not_counted_as_an_edge(self):
+        """guff prints one sentence of explanation after the edges; it carries a
+        different prefix precisely so it does not inflate the count here."""
+        self.assertEqual(len(scan(write(CYCLE))["seed_cycles"]), 2)
 
 
 class CheckTests(unittest.TestCase):
     BASE = {"targets": {"consul": {"ill_typed": 14}}}
 
     def test_panic_always_fails_even_with_headroom(self):
-        found = {"panics": ["a.rs:1:1"], "ill_typed": []}
+        found = {"panics": ["a.rs:1:1"], "ill_typed": [], "seed_cycles": []}
         ok, problems = check("consul", found, self.BASE)
         self.assertFalse(ok)
         self.assertIn("panic", problems[0])
 
+    def test_seed_cycle_always_fails_even_with_headroom(self):
+        """No baseline field: a non-topological seed order is never allowed."""
+        found = {"panics": [], "ill_typed": [], "seed_cycles": ["a -> b"]}
+        ok, problems = check("consul", found, self.BASE)
+        self.assertFalse(ok)
+        self.assertIn("seed dep cycle", problems[0])
+
+    def test_seed_cycle_fails_a_target_that_is_otherwise_clean(self):
+        """The wrong wave order costs findings on runs where nothing is yet
+        ill-typed — that is the run this gate exists for."""
+        found = {"panics": [], "ill_typed": [], "seed_cycles": ["a -> b"]}
+        self.assertFalse(check("brand-new", found, self.BASE)[0])
+
     def test_ill_typed_growth_fails(self):
-        found = {"panics": [], "ill_typed": [f"p{i}" for i in range(15)]}
+        found = {"panics": [], "ill_typed": [f"p{i}" for i in range(15)], "seed_cycles": []}
         ok, _ = check("consul", found, self.BASE)
         self.assertFalse(ok)
 
     def test_ill_typed_at_baseline_passes(self):
-        found = {"panics": [], "ill_typed": [f"p{i}" for i in range(14)]}
+        found = {"panics": [], "ill_typed": [f"p{i}" for i in range(14)], "seed_cycles": []}
         self.assertTrue(check("consul", found, self.BASE)[0])
 
     def test_ill_typed_shrink_passes(self):
-        found = {"panics": [], "ill_typed": ["p0"]}
+        found = {"panics": [], "ill_typed": ["p0"], "seed_cycles": []}
         self.assertTrue(check("consul", found, self.BASE)[0])
 
     def test_unknown_target_is_strict(self):
         """A new target starts at zero rather than silently unbounded."""
         self.assertEqual(baseline_for(self.BASE, "brand-new"), 0)
-        found = {"panics": [], "ill_typed": ["p0"]}
+        found = {"panics": [], "ill_typed": ["p0"], "seed_cycles": []}
         self.assertFalse(check("brand-new", found, self.BASE)[0])
 
 

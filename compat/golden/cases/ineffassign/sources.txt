@@ -1,0 +1,9 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+composite/composite_ok.go          crates/guff-ineffassign/tests/testdata/basic/composite_ok.go
+compositekey/composite_key_bad.go  crates/guff-ineffassign/tests/testdata/basic/composite_key_bad.go
+dead/bad.go                        crates/guff-ineffassign/tests/testdata/basic/bad.go
+ifbranch/if_bad.go                 crates/guff-ineffassign/tests/testdata/basic/if_bad.go
+fallthrough/switch_bad.go          crates/guff-ineffassign/tests/testdata/basic/switch_bad.go
+namedreturn/named_return_bad.go    crates/guff-ineffassign/tests/testdata/basic/named_return_bad.go
+gotook/goto_ok.go                  crates/guff-ineffassign/tests/testdata/basic/goto_ok.go
+zeroinit/zero_init_ok.go           crates/guff-ineffassign/tests/testdata/basic/zero_init_ok.go

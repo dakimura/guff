@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh ineffassign
+# Produced by running golangci-lint on compat/golden/cases/ineffassign/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+compositekey/composite_key_bad.go:8:3:ineffassign::ineffectual assignment to lookback
+dead/bad.go:4:2:ineffassign::ineffectual assignment to x
+fallthrough/switch_bad.go:9:3:ineffassign::ineffectual assignment to x
+ifbranch/if_bad.go:4:2:ineffassign::ineffectual assignment to x
+namedreturn/named_return_bad.go:4:2:ineffassign::ineffectual assignment to x

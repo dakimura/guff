@@ -14,9 +14,16 @@ at P = R = 100%, and on kubernetes it was truncating the run badly enough that
 **Ill-typed packages.** A package that fails type checking is skipped whole by
 every analyzer without `run_despite_errors`, and its findings quietly become 0.
 
-Panics are never acceptable, so they fail unconditionally. Ill-typed counts are
-a property of the corpus as much as of guff, so they gate against a recorded
-baseline: they may shrink freely, never grow.
+**Seed dependency cycles.** The seed's dependency graph is acyclic whenever
+guff reads each import path's edges off the same variant whose files it
+compiles. When it does not, the wave scheduler stops being topological and
+dependencies get merged after the packages that needed them — which shows up,
+one step later, as an ill-typed package. This catches it at the cause, and on
+the runs where the wrong order happens not to break anything yet.
+
+Panics and seed cycles are never acceptable, so they fail unconditionally.
+Ill-typed counts are a property of the corpus as much as of guff, so they gate
+against a recorded baseline: they may shrink freely, never grow.
 
 Requires `GUFF_DEBUG_ILL_TYPED=1` in the environment of the guff run whose
 stderr is being scanned — `compat/run.sh` sets it.
@@ -32,6 +39,7 @@ from pathlib import Path
 
 _PANIC = re.compile(r"panicked at ([^\n]+?):\s*$|panicked at ([^\n]+)")
 _ILL_TYPED = re.compile(r"^guff: ill_typed (\S+) \((\d+) errors\):")
+_SEED_CYCLE = re.compile(r"^guff: seed dep cycle (.+)$")
 
 DEFAULT_BASELINE = Path(__file__).resolve().parent / "baselines" / "health.json"
 
@@ -40,20 +48,30 @@ def scan(stderr_path: Path | str) -> dict:
     """Extract panic sites and ill-typed packages from one guff stderr dump."""
     panics: list[str] = []
     ill_typed: list[str] = []
+    seed_cycles: list[str] = []
+    empty: dict = {"panics": [], "ill_typed": [], "seed_cycles": []}
     try:
         text = Path(stderr_path).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return {"panics": [], "ill_typed": []}
+        return empty
     for line in text.splitlines():
         m = _ILL_TYPED.match(line)
         if m:
             ill_typed.append(m.group(1))
             continue
+        m = _SEED_CYCLE.match(line)
+        if m:
+            seed_cycles.append(m.group(1))
+            continue
         if "panicked at " in line:
             site = line.split("panicked at ", 1)[1].strip().rstrip(":")
             panics.append(site)
     # Same package can be reported by several analyzers; count distinct.
-    return {"panics": panics, "ill_typed": sorted(set(ill_typed))}
+    return {
+        "panics": panics,
+        "ill_typed": sorted(set(ill_typed)),
+        "seed_cycles": sorted(set(seed_cycles)),
+    }
 
 
 def load_baseline(path: Path | str) -> dict:
@@ -78,6 +96,11 @@ def check(target: str, found: dict, baseline: dict) -> tuple[bool, list[str]]:
     if found["panics"]:
         sites = sorted(set(found["panics"]))
         problems.append(f"{len(found['panics'])} worker panic(s): " + ", ".join(sites[:5]))
+    if found.get("seed_cycles"):
+        edges = found["seed_cycles"]
+        problems.append(
+            f"{len(edges)} seed dep cycle edge(s): " + "; ".join(edges[:3])
+        )
     if n_ill > allowed:
         new = found["ill_typed"][:5]
         problems.append(
@@ -126,9 +149,14 @@ def main(argv: list[str] | None = None) -> int:
         baseline_path.write_text(
             json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        if found["panics"]:
-            # Never bake a panic into a baseline — there is no field for it.
-            print(f"  {args.target}: PANIC still present; baseline not a fix", file=sys.stderr)
+        if found["panics"] or found.get("seed_cycles"):
+            # Never bake a panic or a broken seed order into a baseline — there
+            # is no field for either.
+            print(
+                f"  {args.target}: PANIC / seed dep cycle still present; "
+                "baseline not a fix",
+                file=sys.stderr,
+            )
             return 1
         print(f"  {args.target}: ill_typed baseline {old} -> {n}")
         return 0
