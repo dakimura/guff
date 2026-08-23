@@ -940,10 +940,16 @@ fn conversions_to_type_literals_are_checked() {
     );
 
     // ... and the conversion's type is now known, so a bad use is reported.
+    //
+    // `[]byte`, not `[]uint8`: `byte` is its own predeclared Basic with its own
+    // name (go/types' `aliases` array), so a type written `[]byte` renders that
+    // way. Go says "cannot use []byte(s) (value of type []byte) as int value in
+    // variable declaration" here; this asserted `[]uint8` while the two
+    // spellings shared one Basic.
     let bad = check_src("package p\nfunc a(s string) { var z int = []byte(s); _ = z }\n");
     assert!(
-        bad.errors.iter().any(|e| e.msg.contains("[]uint8")),
-        "expected a type error mentioning []uint8, got: {:?}",
+        bad.errors.iter().any(|e| e.msg.contains("[]byte")),
+        "expected a type error mentioning []byte, got: {:?}",
         bad.errors
     );
 }

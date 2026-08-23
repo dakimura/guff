@@ -192,6 +192,35 @@ pub fn lookup_basic(arena: &TypeArena, kind: BasicKind) -> Option<TypeId> {
 /// need them.
 ///
 /// Equivalent to the `Typ = [...]*Basic{...}` table in `universe.go`.
+/// Allocate the two predeclared **alias** basics, returning `(byte, rune)`.
+///
+/// go/types keeps these as separate `*Basic` values — its `aliases` array —
+/// carrying the same kinds as `uint8` / `int32` but their own names. They are
+/// `identical` to the canonical entries because [`identical`] compares kinds,
+/// so nothing about assignability or conversion changes; what they preserve is
+/// **which spelling the source used**, and that is what a type name printed in
+/// a diagnostic shows. gosec's G115 prints
+/// `instr.X.Type().Underlying().(*types.Basic).Name()`, so a conversion written
+/// `byte(l)` from a `rune` has to say `rune -> byte` and not `int32 -> uint8`.
+///
+/// Only the spelling survives locally: export data encodes a basic by kind, so
+/// a `byte` crossing a package boundary decodes as `uint8` — in Go as well.
+///
+/// [`identical`]: crate::predicates::identical
+pub fn init_alias_basics(arena: &mut TypeArena) -> (TypeId, TypeId) {
+    let byte = arena.alloc(TypeData::Basic(Basic {
+        kind: BYTE,
+        info: IS_INTEGER | IS_UNSIGNED,
+        name: "byte".to_string(),
+    }));
+    let rune = arena.alloc(TypeData::Basic(Basic {
+        kind: RUNE,
+        info: IS_INTEGER,
+        name: "rune".to_string(),
+    }));
+    (byte, rune)
+}
+
 pub fn init_universe() -> (TypeArena, [TypeId; BASIC_KIND_COUNT]) {
     let mut arena = TypeArena::new();
     // Allocate the predeclared Basic types in BasicKind discriminant order so
