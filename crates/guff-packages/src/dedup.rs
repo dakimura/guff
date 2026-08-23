@@ -7,15 +7,20 @@ use std::sync::Arc;
 use crate::hash::{HashMap, HashSet};
 use crate::package::Package;
 
+/// A `go list -test` bracket id split into its two halves: `P [U.test]` →
+/// `("P", "U")`. `None` when `id` is a plain import path.
+fn split_bracket_test_id(id: &str) -> Option<(&str, &str)> {
+    let open = id.find(" [")?;
+    let close = id.rfind(".test]")?;
+    if close <= open + 2 {
+        return None;
+    }
+    Some((&id[..open], &id[open + 2..close]))
+}
+
 /// True when `id` looks like `… [….test]` (any for-test / test-augmented id).
 fn is_bracket_test_id(id: &str) -> bool {
-    let Some(open) = id.find(" [") else {
-        return false;
-    };
-    let Some(close) = id.rfind(".test]") else {
-        return false;
-    };
-    close > open + 2
+    split_bracket_test_id(id).is_some()
 }
 
 /// The import path a `go list -test` **id** names: `Q [P.test]` → `Q`.
@@ -28,16 +33,16 @@ fn is_bracket_test_id(id: &str) -> bool {
 /// second, differently-named copy of `pkg/cluster` in the seed, and then
 /// `pkg/manager`, whose source says `import ".../pkg/cluster"`, cannot find one.
 ///
-/// Collapsing the two is exactly right *for the seed*, which compiles only
-/// production files (`_test.go` is filtered before a dependency is checked), so
-/// `Q [P.test]` and `Q` are the same bytes. It would not be right for analysis,
-/// where the test variant is a genuinely different package.
+/// Collapsing the two is right *for the seed*, which compiles a dependency's
+/// production files, so `Q [P.test]` and `Q` are the same bytes. The one
+/// exception is [`paths_with_external_test_package`], where the seed compiles
+/// `P [P.test]` and the two are *not* the same bytes — but it still registers
+/// that under the plain path, because that is the name `import` statements
+/// spell. Collapsing would not be right for analysis, where the test variant is
+/// a genuinely different package.
 pub fn import_path_of_id(id: &str) -> &str {
-    if !is_bracket_test_id(id) {
-        return id;
-    }
-    match id.find(" [") {
-        Some(open) => &id[..open],
+    match split_bracket_test_id(id) {
+        Some((plain, _)) => plain,
         None => id,
     }
 }
@@ -51,19 +56,8 @@ pub fn import_path_of_id(id: &str) -> &str {
 /// when `Q` is itself a pattern root (consul: services/resource +
 /// internal/resource), or write.go never gets analyzed.
 fn try_parse_same_package_test_variant(pkg: &Package) -> Option<String> {
-    let id = &pkg.id;
-    let open = id.find(" [")?;
-    let close = id.rfind(".test]")?;
-    if close <= open + 2 {
-        return None;
-    }
-    let plain = &id[..open];
-    let under_test = &id[open + 2..close];
-    if under_test == plain {
-        Some(plain.to_string())
-    } else {
-        None
-    }
+    let (plain, under_test) = split_bracket_test_id(&pkg.id)?;
+    (under_test == plain).then(|| plain.to_string())
 }
 
 /// The id of `P`'s same-package test variant, `P [P.test]`.
@@ -75,6 +69,38 @@ fn try_parse_same_package_test_variant(pkg: &Package) -> Option<String> {
 /// it stands in for P exactly.
 pub fn same_package_test_variant_id(id: &str) -> String {
     format!("{id} [{id}.test]")
+}
+
+/// The package under test when `id` names an **external** test package.
+///
+/// `go list -test` spells that one `P_test [P.test]`: the `package p_test`
+/// files, compiled as a package of their own that imports P. The bracket alone
+/// does not identify it — a for-test dep `Q [P.test]` wears the same brackets
+/// and is some *other* package recompiled into P's test binary. What separates
+/// them is that the external test package's own path is P's plus `_test`.
+pub fn external_test_package_under_test(id: &str) -> Option<&str> {
+    let (plain, under_test) = split_bracket_test_id(id)?;
+    let stem = plain.strip_suffix("_test")?;
+    (stem == under_test).then_some(under_test)
+}
+
+/// Import paths whose seeded copy must include their own in-package `_test.go`
+/// files, because this load holds their external test package.
+///
+/// Inside P's test binary, `import ".../p"` names the test-augmented variant
+/// `P [P.test]` — P's files **plus** its in-package `_test.go`. Widening P is
+/// the entire job of `export_test.go`, so a production-only copy of P leaves
+/// every identifier it adds `undefined:` for `package p_test`. That is not a
+/// visible diff: the external test package goes ill-typed, and an ill-typed
+/// package runs no analyzers at all, so its findings drop to zero in silence.
+pub fn paths_with_external_test_package(
+    by_id: &HashMap<String, Arc<Package>>,
+) -> HashSet<String> {
+    by_id
+        .keys()
+        .filter_map(|id| external_test_package_under_test(id))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Removes non-test package entries when a same-package test-augmented variant
@@ -131,8 +157,14 @@ pub fn package_for_import_path<'a>(
 /// typechecks `P` before its imports — embedded field types become Invalid
 /// (cli `api.HTTPError` / govet errorsas FPs under multi-root load).
 ///
-/// Prefer plain `id == pkg_path` deps when both plain and test-variant exist.
+/// Prefer plain `id == pkg_path` deps when both plain and test-variant exist —
+/// except for the paths in [`paths_with_external_test_package`], where the seed
+/// compiles the test variant's files and so needs the test variant's imports
+/// (`testing`, testify, …) in the graph. A path whose seeded files and seeded
+/// edges come from different variants gets its `_test.go` imports resolved by
+/// the fallback importer or not at all.
 pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, Vec<String>> {
+    let augmented = paths_with_external_test_package(by_id);
     let mut dep_graph = HashMap::default();
     for pkg in by_id.values() {
         // The values need normalizing as much as the keys do, and for longer:
@@ -145,7 +177,12 @@ pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<S
             .map(|d| import_path_of_id(d).to_string())
             .collect();
         let key = pkg.pkg_path.clone();
-        if pkg.id == pkg.pkg_path {
+        let authoritative = if augmented.contains(&key) {
+            pkg.id == same_package_test_variant_id(&key)
+        } else {
+            pkg.id == key
+        };
+        if authoritative {
             dep_graph.insert(key, deps);
         } else {
             dep_graph.entry(key).or_insert(deps);

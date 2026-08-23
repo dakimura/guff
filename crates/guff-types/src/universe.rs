@@ -26,7 +26,9 @@ use guff_constant::{make_bool, make_int64};
 
 use crate::alias::new_alias;
 use crate::arena::{ObjectArena, PackageArena, ScopeArena, TypeArena};
-use crate::basic::{init_universe as init_basic_universe, BasicKind, BASIC_KIND_COUNT, BYTE, RUNE};
+use crate::basic::{
+    init_alias_basics, init_universe as init_basic_universe, BasicKind, BASIC_KIND_COUNT,
+};
 use crate::interface::{interface_compute_typeset, interface_set_comparable, new_interface_type};
 use crate::named::{new_named, set_underlying};
 use crate::object::builtin::{new_builtin, BuiltinId, PREDECLARED_FUNCS};
@@ -186,10 +188,15 @@ pub fn init_universe_full() -> Universe {
         }
     }
 
-    // byte / rune TypeName aliases pointing to the canonical uint8 / int32.
-    let byte_typename = new_type_name(&mut o_arena, "byte", Some(typ[BYTE as usize]));
+    // `byte` and `rune` are their own Basic values, `identical` to uint8 /
+    // int32 but keeping their own names — go/types' `aliases` array. Pointing
+    // the TypeNames at the canonical entries instead would be simpler and is
+    // what this did before, at the cost of losing which spelling the source
+    // used; see `basic::init_alias_basics`.
+    let (byte_typ, rune_typ) = init_alias_basics(&mut t_arena);
+    let byte_typename = new_type_name(&mut o_arena, "byte", Some(byte_typ));
     def(byte_typename, &mut o_arena, &mut s_arena, &p_arena);
-    let rune_typename = new_type_name(&mut o_arena, "rune", Some(typ[RUNE as usize]));
+    let rune_typename = new_type_name(&mut o_arena, "rune", Some(rune_typ));
     def(rune_typename, &mut o_arena, &mut s_arena, &p_arena);
 
     // any = alias of interface{}.

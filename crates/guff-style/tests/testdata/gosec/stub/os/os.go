@@ -5,6 +5,15 @@ type FileMode uint32
 const ModePerm FileMode = 0777
 
 type File struct{}
+
+// Only `Write`: enough to be an `io.Writer`, and deliberately *not* enough to
+// be an `http.ResponseWriter`. G705's guard turns on exactly that difference.
+func (f *File) Write(p []byte) (int, error) { return 0, nil }
+
+var (
+	Stdout *File
+	Stderr *File
+)
 type FileInfo interface{}
 type DirEntry interface{}
 
