@@ -1,0 +1,7 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go               compat/isolate/fixtures/spancheck/bad.go
+
+# The stub module, replaced in so `./...` never lints it.
+otel/go.mod          compat/golden/cases/spancheck/otel.go.mod
+otel/otel.go         crates/guff-style/tests/testdata/spancheck/stub/go.opentelemetry.io/otel/otel.go
+otel/trace/trace.go  crates/guff-style/tests/testdata/spancheck/stub/go.opentelemetry.io/otel/trace/trace.go

@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh wsl
+# Produced by running golangci-lint on compat/golden/cases/wsl/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:7:2:wsl::only one cuddle assignment allowed before if statement
+bad.go:10:3:wsl::return statements should not be cuddled if block has more than two lines
+bad.go:12:2:wsl::assignments should only be cuddled with other assignments

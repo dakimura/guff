@@ -321,7 +321,15 @@ fn analyze_test_function(
     }
 
     let func_name = &func_decl.name.name;
-    let func_pos = func_decl.name.pos().0 as u32;
+    // `pass.Reportf(funcDecl.Pos(), …)` — the `func` keyword.
+    //
+    // Four of upstream's five messages end with a literal `\n`, which reaches
+    // the user's terminal as a blank line. It looks like a typo and is not one
+    // to us: the tiers that normalize strip trailing whitespace, so nothing but
+    // the golden key can see it. The `t.Cleanup` message below is the one that
+    // does *not* have it — copying the newline onto all five would be as wrong
+    // as dropping it from all five.
+    let func_pos = func_decl.ty.pos().0 as u32;
 
     if !opts.ignore_missing
         && !analysis.func_has_parallel_method
@@ -329,7 +337,7 @@ fn analyze_test_function(
     {
         reports.push(PendingReport {
             pos: func_pos,
-            message: format!("Function {func_name} missing the call to method parallel"),
+            message: format!("Function {func_name} missing the call to method parallel\n"),
         });
     }
 
@@ -343,7 +351,7 @@ fn analyze_test_function(
                 reports.push(PendingReport {
                     pos: range_pos,
                     message: format!(
-                        "Range statement for test {func_name} missing the call to method parallel in test Run"
+                        "Range statement for test {func_name} missing the call to method parallel in test Run\n"
                     ),
                 });
             }
@@ -360,7 +368,7 @@ fn analyze_test_function(
             reports.push(PendingReport {
                 pos,
                 message: format!(
-                    "Function {func_name} missing the call to method parallel in the test run"
+                    "Function {func_name} missing the call to method parallel in the test run\n"
                 ),
             });
         }

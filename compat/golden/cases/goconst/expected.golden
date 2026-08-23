@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goconst
+# Produced by running golangci-lint on compat/golden/cases/goconst/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:6:7:goconst::string `repeated` has 3 occurrences, make it a constant
+bad.go:10:13:goconst::string `nested` has 3 occurrences, make it a constant

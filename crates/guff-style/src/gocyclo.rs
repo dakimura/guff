@@ -107,7 +107,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 Decl::FuncDecl(f) => {
                     report_if_high(
                         &func_name(f),
-                        f.name.name_pos.0 as u32,
+                        // `addStatIfNotIgnored(decl, …)` records `node.Pos()`.
+                        f.ty.pos().0 as u32,
                         NodeRef::FuncDecl(f),
                         min_complexity,
                         &mut pending,
@@ -127,11 +128,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                                 .first()
                                 .map(|n| n.name.as_str())
                                 .unwrap_or("<func lit>");
-                            let pos = vs
-                                .names
-                                .first()
-                                .map(|n| n.name_pos.0 as u32)
-                                .unwrap_or(lit.ty.pos().0 as u32);
+                            // The *name* comes from the ValueSpec, but the
+                            // position does not: upstream passes the FuncLit as
+                            // `node` and records `node.Pos()`.
+                            let pos = lit.ty.pos().0 as u32;
                             report_if_high(name, pos, NodeRef::FuncLit(lit), min_complexity, &mut pending);
                         }
                     }

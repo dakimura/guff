@@ -76,7 +76,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             sum += c as f64;
             if c > max_complexity {
                 pending.push((
-                    f.name.name_pos.0 as u32,
+                    // `pass.Reportf(node.Pos(), …)` — `node` is the FuncDecl,
+                    // so this is the `func` keyword, not the name after it.
+                    // `Decl::FuncDecl.pos()` is `d.ty.pos()`, as in go/ast.
+                    f.ty.pos().0 as u32,
                     format!(
                         "calculated cyclomatic complexity for function {} is {c}, max is {max_complexity}",
                         f.name.name

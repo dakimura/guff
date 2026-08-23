@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh varnamelen
+# Produced by running golangci-lint on compat/golden/cases/varnamelen/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:7:2:varnamelen::variable name 'n' is too short for the scope of its usage

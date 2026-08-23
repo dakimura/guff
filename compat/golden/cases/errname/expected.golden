@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errname
+# Produced by running golangci-lint on compat/golden/cases/errname/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:6:errname::the error type name `BadErrorType` should conform to the `XxxError` format
+bad.go:7:5:errname::the sentinel error name `EndOfFileError` should conform to the `ErrXxx` format

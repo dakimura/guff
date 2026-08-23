@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh asasalint
+# Produced by running golangci-lint on compat/golden/cases/asasalint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:8:11:asasalint::pass []any as any to func A func(args ...interface{}) int

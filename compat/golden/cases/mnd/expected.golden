@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh mnd
+# Produced by running golangci-lint on compat/golden/cases/mnd/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:4:9:mnd::Magic number: 42, in <condition> detected
+bad.go:8:7:mnd::Magic number: 7, in <case> detected
+bad.go:11:14:mnd::Magic number: 99, in <return> detected

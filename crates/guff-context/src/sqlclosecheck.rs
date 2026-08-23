@@ -176,16 +176,22 @@ impl SqlUsage {
     }
 }
 
+    // Upstream reports an **SSA instruction's** position, not an AST node's:
+    // `pass.Reportf(instr.Pos(), …)`. go/ssa sets a call's position to the
+    // *left parenthesis* — `c.pos = e.Lparen` in `builder.go`, returned by
+    // `(*Call).Pos()` — so `db.Query("…")` is reported at the `(`, eight
+    // columns right of where the expression starts. Reconstructing the
+    // instruction from the AST means reconstructing that convention too.
 fn assign_report_pos(assign: &AssignStmt, lhs_index: usize) -> u32 {
     if assign.rhs.len() == 1 {
         if let Expr::CallExpr(call) = &assign.rhs[0] {
-            return call.pos().0 as u32;
+            return call.lparen.0 as u32;
         }
         return assign.rhs[0].pos().0 as u32;
     }
     if let Some(rhs) = assign.rhs.get(lhs_index) {
         if let Expr::CallExpr(call) = rhs {
-            return call.pos().0 as u32;
+            return call.lparen.0 as u32;
         }
         return rhs.pos().0 as u32;
     }
@@ -308,7 +314,9 @@ fn check_body(pass: &Pass<'_>, body: &BlockStmt, pending: &mut Vec<(u32, String)
                             is_target_type(pass, typ)
                         };
                         if is_tgt {
-                            pending.push((call.pos().0 as u32, MSG_NOT_CLOSED.to_string()));
+                            // go/ssa call position: the `(`. See
+                            // `assign_report_pos`.
+                            pending.push((call.lparen.0 as u32, MSG_NOT_CLOSED.to_string()));
                         }
                     }
                 }

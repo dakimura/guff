@@ -82,6 +82,19 @@ jobs:
             | sh -s -- -b "$HOME/.local/bin" "v$V"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # cases/golines and cases/swaggo need the binaries: guff shells out to
+      # them, so without these two the golden gate reports a *file* error
+      # (`./bad.go: No such file or directory`) for a missing formatter and
+      # every other case still passes — a green tier with two linters silently
+      # unmeasured. The isolate job installs the same pair for the same reason;
+      # the versions live in compat/pins.json so bumping one is visibly a
+      # decision about golangci-lint's embedded copy too.
+      - name: Install golines and swag (versions golangci-lint embeds)
+        run: |
+          read -r GOLINES SWAG < <(python3 -c 'import json;p=json.load(open("compat/pins.json"));print(p["golines"],p["swag_commit"])')
+          go install "github.com/golangci/golines@$GOLINES"
+          go install "github.com/swaggo/swag/cmd/swag@$SWAG"
+
       - name: Unit-test normalize / isolate harness
         run: python3 -m unittest discover -s compat/tests -v
 

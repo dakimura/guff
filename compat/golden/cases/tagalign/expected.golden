@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh tagalign
+# Produced by running golangci-lint on compat/golden/cases/tagalign/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:4:10:tagalign::tag is not aligned, should be: json:"foo" yaml:"foo"
+bad.go:5:10:tagalign::tag is not aligned, should be: json:"bar" yaml:"bar"
+bad.go:6:10:tagalign::tag is not aligned, should be: json:"baz" xml:"baz"  yaml:"baz"

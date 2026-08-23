@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh perfsprint
+# Produced by running golangci-lint on compat/golden/cases/perfsprint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:6:6:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
+bad.go:7:9:perfsprint::integer-format: fmt.Sprintf can be replaced with faster strconv.Itoa

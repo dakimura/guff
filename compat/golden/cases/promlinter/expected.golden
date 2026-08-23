@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh promlinter
+# Produced by running golangci-lint on compat/golden/cases/promlinter/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:6:28:promlinter::Metric: requests Error: counter metrics should have "_total" suffix

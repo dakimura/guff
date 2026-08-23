@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nosprintfhostport
+# Produced by running golangci-lint on compat/golden/cases/nosprintfhostport/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:6:9:nosprintfhostport::host:port in url should be constructed with net.JoinHostPort and not directly with fmt.Sprintf

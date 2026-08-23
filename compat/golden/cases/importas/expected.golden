@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh importas
+# Produced by running golangci-lint on compat/golden/cases/importas/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:8:importas::import "fmt" imported as "f" but must be "fmtpkg" according to config

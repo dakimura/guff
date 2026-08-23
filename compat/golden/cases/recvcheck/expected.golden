@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh recvcheck
+# Produced by running golangci-lint on compat/golden/cases/recvcheck/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:6:recvcheck::the methods of "RPC" use pointer receiver and non-pointer receiver.
+bad.go:21:6:recvcheck::the methods of "Period" use pointer receiver and non-pointer receiver.

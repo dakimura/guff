@@ -103,9 +103,12 @@ impl Formatter for Golines {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // See the note in `swaggo.rs`: a spawn failure is about the binary, and
+        // naming the source file here made "golines is not installed" look like
+        // a missing input.
         let mut child = cmd.spawn().map_err(|e| FormatError::Io {
             formatter: NAME.to_string(),
-            path: filename.to_string(),
+            path: bin.to_string(),
             source: e,
         })?;
 

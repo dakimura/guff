@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh iface
+# Produced by running golangci-lint on compat/golden/cases/iface/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:7:6:iface::identical: interface 'Reader' contains identical methods or type constraints with another interface, causing redundancy (see: Fetcher)
+bad.go:11:6:iface::identical: interface 'Fetcher' contains identical methods or type constraints with another interface, causing redundancy (see: Reader)

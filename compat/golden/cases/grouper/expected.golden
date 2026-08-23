@@ -1,0 +1,12 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh grouper
+# Produced by running golangci-lint on compat/golden/cases/grouper/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:1:grouper::should only use grouped global 'const' declarations
+bad.go:5:1:grouper::should only use grouped global 'var' declarations
+bad.go:7:1:grouper::should only use a single global 'const' declaration, 2 found
+bad.go:9:1:grouper::should only use a single global 'var' declaration, 2 found

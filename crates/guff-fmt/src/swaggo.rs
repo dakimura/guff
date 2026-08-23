@@ -50,9 +50,14 @@ impl Formatter for Swaggo {
         cmd.arg("fmt").arg("-d").arg(&dir.0);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
+        // Spawning is where "the binary is not installed" shows up, and until
+        // 2026-08-24 it was reported against `filename` — so a missing `swag`
+        // read as `guff: swaggo: ./bad.go: No such file or directory`, which
+        // sends the reader to look at a file that is sitting right there. Name
+        // the binary instead; `stage_dir` above already covers the real file.
         let output = cmd.output().map_err(|e| FormatError::Io {
             formatter: NAME.to_string(),
-            path: filename.to_string(),
+            path: bin.to_string(),
             source: e,
         })?;
 

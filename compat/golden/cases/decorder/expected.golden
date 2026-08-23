@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh decorder
+# Produced by running golangci-lint on compat/golden/cases/decorder/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:5:1:decorder::const must not be placed after func (desired order: type,const,var,func)
+bad.go:7:1:decorder::var must not be placed after func (desired order: type,const,var,func)
+bad.go:9:1:decorder::type must not be placed after const (desired order: type,const,var,func)

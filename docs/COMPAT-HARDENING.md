@@ -18,7 +18,7 @@
 | 観測 | 実測値 |
 |---|---|
 | isolate ゲート（114 linter 全部）が比較している finding | **合計 178 件** |
-| うち `both == 0` の空振り合格 | **9 linter**: prealloc, usestdlibvars, maintidx, mirror, musttag, iface, varnamelen, contextcheck, sloglint |
+| うち `both == 0` の空振り合格 | **9 linter**: prealloc, usestdlibvars, maintidx, mirror, musttag, iface, varnamelen, contextcheck, sloglint<br>→ **0 になった**（続き 30。最後の 7 つは fixture がその linter の発火条件を満たしていなかった） |
 | うち `both == 1` の 1 件だけ比較 | **72 linter** |
 | isolate fixture 総行数 | 1,255 行 / 114 linter ≒ **11 行/linter**<br>（gocritic は 13 行で 104 checker、staticcheck は 82 行で 167 analyzer） |
 | OSS 8 リポで実際に発火した linter | **7 種類だけ**: errcheck, gosec, govet, ineffassign, modernize, staticcheck, unused<br>（caddy と grafana は `0 vs 0`。436 findings のうち 416 は consul + vault） |
@@ -84,6 +84,12 @@ ST1023/QF1011 の言い回し、末尾ピリオド、govet の Go バージョ�
   理由と日付つきで除外されています。
 - **比較キーの穴**: `compat/normalize.py` は OSS 比較で column / severity / SuggestedFix を見ません（§1）。
   **golden だけがそこまで見ます**。つまり **golden に入っていない check は、列がずれても CI は緑です。**
+  linter 単位では 2026-08-24（続き 30）に **116/116 が golden case を持つ**状態になり、
+  `compat/tests/test_golden_coverage.py` がそれをゲートにしています
+  （新しい linter が golden 無しで入ってきたら落ちる）。
+  **check 単位ではまだ穴があります** —— 1 linter に多数 check を持つ
+  staticcheck / gocritic / revive / govet / gosec の中身と、
+  各 linter の「腕」の網羅は別の話です（続き 30 の「次にやること」1）。
 
 ---
 
@@ -9594,6 +9600,183 @@ func B(x int) S { v := x; if v < 0 { v = 42 }; return S{oth: x} }  // 両者と�
    `guff-error/src/util.rs` / `nonamedreturns.rs` に別々の近似がある。
 3. **`compat/results/` を tier ごとに分ける** —— 続き 28 の指摘。
    `--tier pr` を回すと nightly の行が黙って消える（このセッションでも踏んだ）。
+4. **gocritic の ruleguard `$`** —— 続き 28。`expr_text` 118 箇所、単独タスク。
+
+---
+
+### 2026-08-24（続き 30）— 116 linter 中 84 は「桁を見るゲート」を一度も通っていなかった
+
+golden tier のカバレッジ（続き 29 の「次にやること」1）。
+
+#### 数えると、無いのは 84 だった
+
+golden の case は 109 あったが、**`linters.enable` に現れる linter は 32** ——
+残り 84 は **golden case が 1 つも無い**。他の tier は
+`compat/normalize.py` を通した `path:line:linter:message` で突き合わせるので、
+**column も severity も、normalize が消す文言差も、構造的に見えない**（§1）。
+つまりこの 84 について、**桁と severity は誰も検証していなかった**。
+
+isolate fixture は 116 全部にあるので、**それを `sources.txt` で golden に載せるだけ**で
+84 が塞がる。fixture は両 tier が同じファイルを読むので、
+片方のために広げた形はもう片方でも測られる。
+
+#### 1 周目で 13 件出た。桁だけの欠陥である
+
+75 case（stdlib だけで足りるもの）を足して guff を当てると、**13 case が不一致**。
+全部「1 対 1 で match=0」＝ **同じ finding を違う桁で報告していた**。
+
+**クラス A — 関数宣言の位置（5 linter、1 つの原因）**
+
+`cyclop` / `gocognit` / `gocyclo` / `ireturn` / `paralleltest`。
+上流はどれも **`FuncDecl.Pos()`** を報告する（go/ast ではこれは
+`d.Type.Pos()` ＝ **`func` キーワード**）。guff は 5 つとも
+`fd.name` を報告していた ―― `func Bad()` なら 1 桁目ではなく 6 桁目。
+続き 28 の nonamedreturns とまったく同じ形で、**5 か所が別々に同じ間違いをしていた**。
+後から `maintidx` が 6 つ目として加わった（下記）。
+
+**クラス B — 式のどこを指すか（各 linter 固有。上流を読むしかない）**
+
+| linter | 上流 | guff が指していたもの |
+|---|---|---|
+| `durationcheck` | `expr.Pos()`（BinaryExpr ＝ 左オペランド） | 演算子 |
+| `err113` | `ce.Pos()`（CallExpr ＝ `Fun.Pos()`） | `(`（#106 の wrapcheck と同じ） |
+| `exhaustruct` | `lit.Pos()`（CompositeLit ＝ 型があれば `Type.Pos()`） | `{` |
+| `fatcontext` | `assignStmt.Pos()`（＝ 左辺の先頭） | `=` |
+| `varnamelen` | `variable.assign.Pos()`（同上） | `:=` |
+| `gosmopolitan` | `*ast.Ident` を歩いて `n.Pos()` ＝ **`Local`** | `time`（セレクタの根） |
+| `rowserrcheck` / `sqlclosecheck` | **SSA 命令**の `Pos()` | 呼び出し式の先頭 |
+| `nestif` | **golangci のラッパが桁を捨てる** | `if` |
+
+2 つだけ説明を足す。
+
+**`rowserrcheck` / `sqlclosecheck`** は `pass.Reportf(instr.Pos(), …)` ―― AST ではなく
+**go/ssa の命令**の位置である。go/ssa は呼び出しの位置を**左括弧**にする
+（`builder.go` の `c.pos = e.Lparen`、`(*Call).Pos()` がそれを返す）。
+AST から命令を組み直すなら、**この規約ごと組み直す**必要がある。
+両ファイルに同じ `assign_report_pos` の写しがあり、両方が同じ間違いをしていた。
+
+**`nestif`** は上流と違う場所を報告するのが正解、という珍しい形。
+nestif 自身は `fset.Position(stmt.Pos())`（＝ `if`）を記録するが、
+**golangci のラッパが `f.LineStart(issue.Pos.Line)` に差し替える** ――
+行頭、つまり**桁 1**。nestif の finding はすべてインデントの中にあるので、
+`if` を報告すると**この linter が出す全 finding が 1 タブ分ずれる**。
+
+**クラス C — 文言（`paralleltest`）**
+
+上流の 5 つのメッセージのうち **4 つが `\n` で終わる**。
+正規化する tier は末尾の空白を落とすので、**golden の key 以外に見えるものが無い**。
+`t.Cleanup` の 1 つだけは `\n` が無く、5 つ全部に付けるのは全部から落とすのと同じくらい違う。
+
+#### 依存が要る 9 件も、stub モジュールで塞いだ
+
+`ginkgolinter` / `spancheck` / `promlinter` / `zerologlint` / `exptostd` /
+`arangolint` / `clickhouselint` / `gomodguard` / `gomodguard_v2` は
+外部モジュールを import する。golden は smoke ジョブ（速い側）で回るので、
+**`replace` で差し込む入れ子モジュール**にした ―― `cases/protogetter` と
+`cases/gosec` が既に使っている形で、`./...` は入れ子モジュールを飛ばすから
+どちらのツールも stub を lint しないし、ネットワークも要らない。
+6 つは `crates/*/tests/testdata/<linter>/stub/` の既存 stub をそのまま使える。
+
+**`gomodguard` は go.mod を読む linter**なので、`require` 行さえあれば
+`replace` されていても撃つ（実測）。
+
+#### `ginkgolinter` が 0 件を書いた ―― そして「0 件の golden」という穴が見つかった
+
+`ginkgolinter` の golden は最初 **0 key** で書かれた。**これが通ってしまうのが問題**である:
+0 件の golden は「上流が何も報告しなかった」と
+「**モジュールが壊れていて実行が空振りした**」の区別が付かない。
+
+原因は上流の `GetGomegaHandler`：
+**`github.com/onsi/gomega/types` パッケージが到達可能で、そこに
+`Assertion` / `AsyncAssertion` / `GomegaMatcher` の 3 インターフェースが居る**
+ことを最初に確かめ、無ければ **handler ごと nil を返して何もしない**。
+共有 stub には `types` サブパッケージが無かった。
+`types` を足し、`OmegaMatcher` / `Assertion` / `AsyncAssertion` を本物と同じく
+そのエイリアスにしたら **6 件**（isolate の 6/6 と一致）。Rust 側のテストも通ったままである。
+
+そこで **`compat/tests/test_golden_coverage.py` に「空の golden は落とす」を入れた**。
+意図的に 0 件にしたい case は config.yml に `golden-may-be-empty` と書く。
+
+#### 空の golden を弾いたら、7 件が引っかかった ―― §1 が数えた「空振り合格」である
+
+`iface` / `maintidx` / `mirror` / `musttag` / `sloglint` / `usestdlibvars` /
+`varnamelen`。**§1 が 2026-08-07 に「`both == 0` の空振り合格 9 linter」と
+書いたもののうち 7 つ**が、そのまま残っていた。fixture がその linter の
+発火条件を満たしていない ―― 「撃つこと」すら確かめていない側である。
+
+上流を読んで 7 つとも撃つように直した:
+
+| linter | 撃たなかった理由 |
+|---|---|
+| `iface` | 既定で有効なのは `identical` **だけ**。fixture は非公開メソッドを持つ interface 1 つで、どの analyzer も見ない |
+| `musttag` | 型ではなく **`json.Marshal` の呼び出し**に撃つ。struct だけでは不可視 |
+| `mirror` | `Args` に挙がった引数が**全部** `string(…)` 変換でないと撃たない。片方が文字列リテラルだと黙る |
+| `sloglint` | 既定は `no-mixed-args` のみ。key-value と `slog.Attr` を**混ぜる**必要がある |
+| `usestdlibvars` | 「GET に見える文字列」ではなく**特定の呼び出し位置**を見る（`http.NewRequest` の第 1 引数、`WriteHeader` の引数） |
+| `varnamelen` | 長さだけでなく**距離**。`max-distance` は 5 で、宣言のすぐ隣で使う `i` は黙る |
+| `maintidx` | 既定の閾値 20 は数百行の関数でないと下回らない。fixture 側で `under: 100` にした |
+
+そして **7 つを撃たせた時点で `varnamelen` と `maintidx` の桁違いが出た**（上表）。
+`maintidx` はクラス A の 6 つ目である。
+**「fixture が空である」ことは、欠陥を隠す**。
+
+#### 結果
+
+| | before | after |
+|---|---|---|
+| golden case | 109 | **193** |
+| golden case を持つ linter | 32 / 116 | **116 / 116** |
+| isolate で `both == 0` の target | 7 | **0** |
+| この tier で見つけた欠陥 | —— | **16**（位置 15 本 ＋ formatter のエラー文言 1 本、原因クラス 9 つ） |
+| golden 全体の実行時間 | —— | 68 秒（guff のみ。golden が上流の答えを持っている） |
+
+#### CI で初めて落ちた 2 件 —— 「開発機に入っているから通っていた」
+
+`golines` と `swaggo` は **guff が外部バイナリに shell out する** formatter である。
+手元では両方 `~/go/bin` に入っているので 193/193 が緑だったが、
+**CI の smoke ジョブは入れていない**（isolate ジョブだけが入れている）ので落ちた。
+`PATH` から `go/bin` を外すと手元でも同じように落ちる。
+
+そのときのメッセージがこれだった:
+
+```
+guff: golines: ./bad.go: No such file or directory (os error 2)
+```
+
+**「ファイルが無い」と読める。無いのは `golines` のほうである。**
+`Command::new(bin)` の spawn 失敗を `FormatError::Io { path: filename }` で
+包んでいたので、**存在するファイルの名前で「無い」と言っていた**。
+`path` を**バイナリ名**に変えた（`golines.rs` / `swaggo.rs`）。
+実行ファイルが無いときに読む唯一の行なので、ここが指す先は重要である。
+
+smoke ジョブにも isolate と同じ install ステップを足した。
+**入れないという選択は「2 linter を黙って測らない」と同じ**である ——
+guff がエラーで落ちるので気付けたが、そこは harness が
+「guff failed for <case>」で落とす作りだったからで、
+0 件の golden（上記 ginkgolinter）だったら通り抜けていた。
+
+#### CI
+
+golden gate は元から `smoke` ジョブに載っている（guff しか実行しないので速い）ので、
+**case を足した分はそのまま CI のカバレッジになる**。加えて
+`compat/tests/test_golden_coverage.py` を足した（同じジョブが
+`python3 -m unittest discover -s compat/tests` で拾う）:
+
+- **linters.txt の全 linter に golden case があること** ―― 新しい linter が
+  golden 無しで入ってきたら、backlog に積まれるのではなく**そこで落ちる**。
+- **golden が空でないこと**（上記。`golden-may-be-empty` で明示可）。
+- 各 case が `max-issues-per-linter` / `max-same-issues` を書いていること
+  （run.sh も見ているが、速いジョブ側でも落ちるように）。
+- `sources.txt` の参照先が実在すること。
+
+**次にやること**
+
+1. **深さ**。193 case のうち多くは finding 1 件である。今回は
+   「116 全部に桁のゲートを付ける」までで、**各 linter の腕を網羅してはいない** ——
+   続き 28 の usetesting（9 腕のうち fixture に居たのは合っている 8 つだけ）が
+   その形。fixture を広げるのが次の投資先で、広げた分は両 tier が測る。
+2. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目、まだ 3 コピーある。
+3. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29。
 4. **gocritic の ruleguard `$`** —— 続き 28。`expr_text` 118 箇所、単独タスク。
 
 ---

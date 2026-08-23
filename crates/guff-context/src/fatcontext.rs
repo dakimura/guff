@@ -228,6 +228,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 return true;
             };
             let category = category_for(n);
+            // `Pos: assignStmt.Pos()` — the statement's first LHS operand, not
+            // the `=` between the sides.
+            let report_pos = assign
+                .lhs
+                .first()
+                .map(|e| e.pos().0 as u32)
+                .unwrap_or(assign.tok_pos.0 as u32);
             let start = assign.tok_pos.0 as u32;
             let end = assign
                 .rhs
@@ -235,9 +242,16 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 .map(|e| e.end().0 as u32)
                 .unwrap_or(start);
             // Suggested fix: replace `=` with `:=` (tok span).
+            //
+            // KNOWN DIFFERENCE: upstream's edit spans the *whole* statement
+            // (`assignStmt.Pos()`..`End()`) and substitutes a re-rendered copy
+            // with `Tok: token.DEFINE`. The visible result is the same text for
+            // every shape we have, and no tier compares replacements — §1 of
+            // docs/COMPAT-HARDENING.md lists SuggestedFix as uncompared — so
+            // this is recorded rather than ported blind.
             let tok_end = start + 1; // "="
             pending.push(Diagnostic {
-                pos: start,
+                pos: report_pos,
                 end,
                 message: category.into(),
                 suggested_fixes: vec![SuggestedFix {

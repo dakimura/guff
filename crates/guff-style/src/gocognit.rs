@@ -428,7 +428,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             if c > min_complexity {
                 let name = func_name(f);
                 pending.push((
-                    f.name.name_pos.0 as u32,
+                    // gocognit records `fn.Pos()` — the `func` keyword.
+                    f.ty.pos().0 as u32,
                     format!(
                         "cognitive complexity {c} of func {} is high (> {min_complexity})",
                         format_code(&name)

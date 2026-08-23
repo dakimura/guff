@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nilnesserr
+# Produced by running golangci-lint on compat/golden/cases/nilnesserr/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:13:3:nilnesserr::return a nil value error after check error
