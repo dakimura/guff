@@ -8426,26 +8426,273 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
 
 **次にやること**
 
-1. **C: `export_test.go` / 外部テストパッケージ（7 件）** —— 続き 19 の記述のまま。
-   `dedup::import_path_of_id` が `P [P.test]` を `P` に潰している。
-   authelia / dapr / gitea / thanos / rclone / prometheus。パッケージロード側の話。
-   `cmd/promtool` が道連れになっていないかも同時に見る。
+1. ~~**C: `export_test.go` / 外部テストパッケージ（7 件）**~~ —— 続き 21 で 6 件を消化
+   （ill-typed 9 → 3）。**筋書きは外れていた**: `dedup::import_path_of_id` は無罪で、
+   seed が依存を production ファイルだけで組んでいたのが原因。
+   prometheus の 2 件はそもそも C ではなく、seed の wave スケジューラの欠陥だった。
 2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
 3. **G115 の文言** —— 続き 18 の 3。
 4. **複合リテラルの lowering** —— 続き 18 の 4。
 5. **`assignable_to` の 2 段の順序** —— 上記のとおり `prepare_method_set` と逆。
    今は `expand_one_method` の `obj_decl` が支えているだけなので、寄せる。
-6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行。
-
-   ```go
-   int64(4.8 * float64(time.Hour))   // guff: cannot convert float64 to type int64
-   ```
-
-   `float64(time.Hour)` は**定数**（`time.Hour` は typed constant）なので積も
-   float64 定数で、値が整数なら `int64` への変換は spec 上通る。
-   guff は小数点を持つ float 定数の変換をまとめて拒んでいる疑いがある。
+6. ~~**E: 浮動小数定数の整数への変換**~~ —— 続き 22 で解消（hunt の ill-typed 9 → 8）。
+   **疑いは外れていた**: guff は「小数点を持つ float 定数の変換をまとめて拒んで」は
+   いない（`int64(1.5*hour)` は通る）。落ちていたのは**演算のたびの丸めが無かった**
+   ためで、型付き定数どうしの積が厳密な有理数のまま残っていた。
 
 ---
+
+---
+
+### 2026-08-23（続き 21）— `export_test.go` は「別のパッケージ」ではなく「同じパッケージの広い版」だった
+
+続き 20 の「次にやること」1。C の 7 件のうち **6 件が seed の 1 つの条件**で片付き、
+残る prometheus の 2 件は **C ではなかった**。そして続き 19 が名指しした
+`dedup::import_path_of_id` は**無罪**である —— あれは `Q [P.test]` を `Q` に潰す関数で、
+潰していること自体は正しい。潰した先で**どのファイルを読むか**が違っていた。
+
+#### 原因 —— seed は依存を production ファイルだけで組む
+
+`package p_test` は P のテストバイナリに入るので、そこでの `import ".../p"` が指すのは
+**test variant `P [P.test]`** —— P 自身のファイル**＋P の同一パッケージ `_test.go`** である。
+`export_test.go` の存在意義はその variant を広げることそのものなので、
+production ファイルだけで組んだ P には広げた分が無い:
+
+```go
+// p/export_test.go —— package p。T の非公開フィールドに触るので p にしか置けない
+func Reveal(t T) int { return t.x }
+
+// p/ext_test.go —— package p_test
+p.Reveal(p.New(7))        // guff: undefined: p.Reveal
+```
+
+`build_source_seed_inner` は依存の `compiled_go_files` から `_test.go` を**無条件に**
+落としていた（3 箇所）。**その判断自体は正しい** —— 全依存に効かせると
+prometheus `./...` で型アリーナの RSS がおよそ 2 倍になる、とコメントが測って書いてある。
+足りなかったのは条件で、**その load に P の外部テストパッケージが居るときだけ**
+P の seed を `P [P.test]` のファイルで組む。
+
+#### 外部テストパッケージの見分け方は括弧ではない
+
+`go list -test` の id は 3 種類が同じ括弧を着る。
+
+| id | 中身 |
+|---|---|
+| `P [P.test]` | P 自身のテスト variant（production + 同一パッケージ `_test.go`） |
+| `Q [P.test]` | **別の**パッケージ Q を P のテストバイナリ向けに再コンパイルしたもの |
+| `P_test [P.test]` | **外部テストパッケージ**（`package p_test` のファイル） |
+
+見分けるのは括弧ではなく「自分の path が P に `_test` を足したものか」。
+`external_test_package_under_test` がこれで、`paths_with_external_test_package` が
+load 全体からその P を集める。**これがゲートの全部**であり、広げすぎないための唯一の仕掛けである。
+
+#### seed のファイルと seed の辺は同じ variant から採る
+
+`import_path_dep_graph` は「plain `id == pkg_path` を優先」だった。
+P を test variant で組むなら辺もそちらから採らないと、`_test.go` の import
+（`testing`、testify …）が graph に載らず、seed の中で解決先を失う。同じ集合を両方が読む。
+
+**縮約された seed に P は 1 つしか置けない**ので、広げた P は `q` のような production の
+importer からも見える。これは意図的な選択で、`q.Describe(t p.T)` に外部テストパッケージが
+自分の `p.T` を渡す形が通るのは、両者が**同じ** `p.T` を見ているからである。
+代償は、production のコードが test 限定の識別子に触っても guff が型エラーにしないこと ——
+そのコードは `go build` が通らないので実在しない。
+
+#### 結果
+
+**hunt の ill-typed 9 → 3**: authelia 1 → 0、dapr 1 → 0、gitea 1 → 0、rclone 2 → 0、
+thanos 2 → 1（`internal/cortex/chunk/cache_test` が消え、残るのは E の `pkg/promclient`）。
+`compat/baselines/health-hunt.json` は 6 行から **prometheus 2 / thanos 1 の 2 行**になった。
+
+**差分は 1 件も増えていない。** 同じコーパス・同じ golangci-lint 2.12.2 で、
+続き 20 の hunt（`hunt-20260822T165933Z`）と今回（`…T225919Z`）の 16 ターゲットを
+突き合わせると、guff / golangci / both が動いたのは syncthing だけで、
+そこも**上流側**が 654 → 656 に増えて guff が既に持っていた 2 件と一致した
+（unexpected 42 → 40）。ill-typed だった 6 パッケージは、
+分析されるようになっても**どちらのツールも何も報告しない**中身だった ——
+つまり今回の回収は finding ではなく、**黙って落ちる面積**のほうである。
+
+**コストは測れない。** prometheus `./...` を base / fixed 交互に 5 回ずつ:
+real 2.03–2.20 / 1.99–2.21 秒、user 8.83–9.60 / 8.86–9.60 秒、
+maxRSS 1828–1858 / 1818–1853 MB。広げるのは外部テストパッケージを持つ path だけで、
+seed の依存は `ignore_func_bodies` で組むので、増える `_test.go` は宣言しか置いていかない。
+
+#### ゲート
+
+`crates/guff-packages/tests/external_test_package_seed.rs` に 5 本。
+`go` も export data も要らない手組みの `Package` と、`tests/testdata/xtest` の実ファイル。
+
+- **`external_test_package_sees_export_test_symbols`** —— 修正そのもの。
+  dedup 前（plain `P` が居る）と dedup 後（`P [P.test]` だけ）の**両方の形**で回す。
+  被験体は `p.Reveal` だけでなく `q.Describe(v)` も呼ぶ: P を「production の写しと
+  test variant の写し」に割る実装は `undefined:` を消したうえでこちらで落ちる。
+- **`a_package_without_an_external_test_package_is_seeded_production_only`** ——
+  広げすぎの検出。`r` は同一パッケージ `_test.go` を持つが外部テストパッケージを持たないので、
+  `user` から `r.Hidden` は今も `undefined`。**一番安い直し方（dedup を生き残った
+  パッケージのファイルをそのまま seed に使う）はこの 1 本だけが落とす。**
+- **`a_production_importer_of_an_augmented_package_still_checks`** —— `q` は素通り。
+- **`only_p_test_brackets_p_names_an_external_test_package`** —— 上の表そのもの。
+- **`augmented_paths_take_their_edges_from_the_test_variant`** —— ファイルと辺の出所が一致すること。
+
+**両方向で確かめた**: `paths_with_external_test_package` を空集合にすると 1 と 5 が
+`undefined: p.Reveal` で落ち、逆に「dedup を生き残った全部」に広げると 2 と 5 が落ちる。
+
+#### prometheus の 2 件は C ではなく、seed の wave スケジューラの欠陥だった
+
+`promql_test` と `cmd/promtool` はどちらも
+`cannot use invalid type value as *promql.Engine value`。続き 20 は promtool を
+「C の巻き添えと推定」と書いていたが、両方とも C ではない。
+`GUFF_DEBUG_SEED_ERRORS=1` が一行で答えを出す:
+
+```
+guff:     seed dep github.com/prometheus/prometheus/promql/promqltest — 19 error(s), first: undefined: promql
+```
+
+`promqltest` が seed で型検査されたとき `promql` がまだ merge されていない。
+`NewTestEngine` の戻り型 `*promql.Engine` が invalid になり、
+それを使う**2 つ隣のパッケージ**が ill-typed になる。原因は 3 段:
+
+1. `import_path_dep_graph` は辺を**括弧を剥がして**張る（`Q [P.test] -> Q`）。
+   これで **Go では非巡回な組が巡回になる**: prometheus では
+   `util/teststorage` の test variant が `tsdb` に依存し、
+   `tsdb` の test variant が `util/teststorage` に依存する。
+   dedup が plain を両方落とすので、**どちらの key も test variant から辺を採る**。
+2. `dep_load_order` の `visiting` ガードが片方の辺を黙って落として walk を終える。
+   `order` はもう位相順ではない。
+3. `height` のパス 2 はその `order` を信じているので、
+   **まだ訪れていない consumer を持つパッケージの height を読む**。
+   prometheus `./...` では back-edge 5 本に対して
+   **`wave(dep) < wave(consumer)` を破る辺が 16 本**でき、
+   その 1 本が `promql/promqltest -> promql`（どちらも wave 12）である。
+
+**素直な直し（`order` の中で後ろを向く辺だけで伝播する）は試して捨てた。**
+`promql` は正しく分かれた（wave 12 / 15、破る辺 16 → 0）が、そのとき落ちる辺は
+`teststorage -> tsdb` の**実在する方**なので、`teststorage` が `tsdb` より先に組まれ、
+`promtool` / `web` / `web/api/v1` / `promqltest` の 4 パッケージが
+`teststorage.TestStorage has no field or method Dir` で ill-typed になる。
+**1 件直して 4 件壊す。** 巡回が偽物である以上、直すべきはスケジューラではない ——
+**seed が production ファイルを組むなら production の辺を渡す**、つまり
+パッケージロード側である。`typecheck.rs` の当該箇所にこの経緯をコメントで残した。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる（上記）** —— 非 augment の path では
+   plain `P` の deps を使う。難所は供給源で、`filter_duplicate_packages` が plain を
+   `all` から落とした後なのでもう手元に無く、`go list -test ./...` は
+   for-test dep variant（`Q [P.test]`）を**トップレベルには出さない**
+   （Deps の文字列の中にしか現れない）。**パッケージロード側の設計変更**になるので
+   単独のタスクにすること。再現は prometheus `./...` の 2 件、
+   観測は `GUFF_DEBUG_SEED_ERRORS=1` の 1 行、
+   検算は `dep_graph` を Python で組み直して破る辺を数えるだけで足りる。
+2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。syncthing の `deviceid.go:191/209` に今も両側で並ぶ。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。`prepare_method_set` に寄せる。
+6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行（続き 20 の 6）。
+   **hunt に残る ill-typed 3 件のうちの 1 件**で、他の 2 件は上記 1。
+
+---
+
+### 2026-08-23（続き 22）— 型付き定数は「使うとき」ではなく「演算のたび」に丸められる
+
+続き 20 の「次にやること」6（クラス E）。thanos `pkg/promclient` の 1 行。
+
+```go
+testutil.Equals(t, int64(2*time.Hour), int64(flags.TSDBMinTime))          // 通る
+testutil.Equals(t, int64(4.8*float64(time.Hour)), int64(flags.TSDBMaxTime)) // guff: cannot convert float64 to type int64
+```
+
+#### 「4.8 だけが落ちる」は係数の話であって、型の話ではないように見えた
+
+| 式 | 修正前 |
+|---|---|
+| `int64(2.0 * float64(time.Hour))` | 通る |
+| `int64(float64(time.Hour) * 1.5)` | 通る |
+| `int64(4.8 * float64(time.Hour))` | **落ちる** |
+| `int64(float64(time.Hour) * 4.8)` | **落ちる** |
+| `int64(4.8 * 3600000000000.0)` | 通る（untyped どうし） |
+
+分かれ目は**係数が 2 進で正確に表せるか**である。1.5 と 2.0 は表せる。4.8 は表せない。
+そして最後の行が効いていて、**同じ 4.8 でも untyped どうしなら通る** ——
+つまり問題は乗算でも定数の値でもなく、**型が付いていること**にある。
+
+#### 原因 —— 4 か所の `// DEFERRED: check.overflow(x)`
+
+Go の規則は「型付き定数はその型で表現可能でなければならない —— **演算のたびに**」で、
+go/types は `constant.BinaryOp` の直後に `check.overflow` を呼び、
+そこから `representable` が値を**その場で丸め直す**。
+guff は `basic_lit` / `unary` / `binary` / `shift` の 4 か所すべてに
+`// DEFERRED: check.overflow(x)` を置いたまま出荷していた。
+
+丸めないと、float64 定数どうしの積は**厳密な有理数**のまま残る。
+4.8 の float64 表現は 5404319552844595/2^50 なので、
+
+```
+4.8 * 3.6e12 = 2374945115996159912109375 / 2^37     ← 整数ではない → int64 は truncation
+round_float64(それ) = 17280000000000                ← 整数 → int64 は通る
+```
+
+untyped どうしなら丸める型が無いので厳密な 24/5 × 3.6e12 = 17280000000000 のまま通る。
+**同じ係数が、型が付いた瞬間にだけ問題になる**のはこのためで、
+「1.5 は通って 4.8 は落ちる」という見え方は原因ではなく症状だった。
+
+#### `overflow` は 2 つのことをする
+
+1. **型付き定数** —— `representable` で丸める（表現できなければその場でエラー）。
+2. **untyped 整数** —— Go の定数精度 512 bit を超えたらエラーにして Unknown にする。
+
+2 は副産物で、`const big = 1 << 1000` を guff は**黙って受けていた**。
+文言は上流と 1 文字違わない `constant shift overflow`
+（`opName` が入れる演算子の語まで含めて一致する）。
+
+#### ゲート
+
+`check_files.rs` に 5 本。**両方向で確かめた** ——
+`overflow` を早期 return にすると 3 本が落ち、
+「丸めをやめる」「丸めを広げる」のどちらに転んでも残りの 2 本が捕まえる。
+
+- **`a_typed_float_constant_is_rounded_after_each_operation`** —— 修正そのもの。
+  上の表の 5 行をそのまま入れてある（通っていた 3 行も含む）。
+- **`rounding_neither_manufactures_nor_destroys_representability`** ——
+  `int64(4.7 * hour / 7.0)` は float64 で本当に小数なので**今も落ちる**。
+  丸めを結果側に効かせて整数に寄せる実装は 1 本目を通してここで落ちる。
+  同じテストの後半で untyped の側（丸める型が無い）も押さえる。
+- **`a_typed_constant_that_overflows_its_type_is_rejected_at_the_operation`** ——
+  `const x int8 = 100; const y = x * 2` が **`x * 2` の位置で** 1 件。
+- **`an_untyped_integer_constant_may_not_grow_past_the_constant_precision`** ——
+  `1 << 1000` は落ち、`1 << 511`（ちょうど 512 bit）は通る。上限は `>` であって `>=` ではない。
+- **`complementing_a_typed_unsigned_constant_survives_the_round`** ——
+  `^uint(0)` は**型付き**なので新しく丸めを通る。符号付きに丸めれば `-1` が戻り、
+  `1 << (^uint(0) >> 63)`（runtime 自身のイディオム）が `u64::MAX` ビットのシフトになる。
+  `unary` のマスク処理のコメントが警告しているのがこの経路である。
+
+#### 結果
+
+**hunt の ill-typed 9 → 8**（thanos 2 → 1。`pkg/promclient` が消え、
+残るのは `internal/cortex/chunk/cache_test` ＝ クラス C）。
+**差分は 1 件も動いていない**: 16 ターゲットすべてで guff / golangci / both / unexpected が
+続き 20 の hunt（`hunt-20260822T165933Z`）と完全一致。golden 103/103、isolate 116/116。
+定数を丸めることは、どの check が読む値も変えなかった。
+
+> **注意（マージ順）**: 続き 21（外部テストパッケージ）が thanos の `cache_test` を
+> 潰すので、**両方が main に入った時点で thanos は 0 になり、
+> `compat/baselines/health-hunt.json` の thanos 行は消してよい**。
+> どちらの PR も単独では 1 までしか下げられないので、両方とも 1 を記録している。
+> 減るのは自由なのでゲートは緑のままだが、行は古くなる。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+2. **G705（XSS）** —— 続き 18 の 2。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。`rune -> byte` と `int32 -> uint8`。
+   **上流は `byte` / `rune` を「名前の違う別の `*Basic`」として持っている**
+   （`go/types` の `aliases` 配列）のに対し、guff の `byte` / `rune` は
+   `uint8` / `int32` と**同じ TypeId を指す TypeName** なので、
+   「ソースが `byte` と書いた」という情報が型の側に残っていない。
+   `basic.rs` の `BYTE` / `RUNE` は「同じ数値の別名」というコメントつきで
+   そう決めてあるので、直すならモデルを変える話になる。単独のタスクにすること。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
 
 ---
 
