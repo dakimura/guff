@@ -8555,6 +8555,42 @@ OSS の gated な数字を動かせる形にはしない」）とまったく同
 results 側は分けられていない。この回は手で戻した。
 tier ごとにファイルを分けるべきである。
 
+#### `local` の gocritic 72/72 —— 署名は当たったが、直さなかった
+
+`--all-linters` で summary が出たもう 1 つのターゲット `local` は
+**gocritic が 72/72**。開くと 1 つの欠陥が 72 回出ているだけだった:
+
+```
+guff  assignOp: replace `sum = sum + k * 2` with `sum += k * 2`
+gcl   assignOp: replace `sum = sum + k*2`   with `sum += k*2`
+```
+
+上流の `assignOp` は **ruleguard のルール**（`checkers/rules/rules.go`）で、
+
+```go
+m.Match(`$x = $x + $y`).Where(m["x"].Pure).Report("replace `$$` with `$x += $y`")
+```
+
+`$$` / `$x` / `$y` は**書かれたとおりのソース片**に置換される。
+だから `k*2` と書いてあれば `k*2`、`(k + n)` と書いてあれば `(k + n)` が出る。
+
+guff は AST から**印字し直して**いる。`node_text`（＝ guff の go/printer 移植、
+`walkBinary` / `cutoff` まで入っている）に替えても直らない ——
+**部分式を単独で印字すると `k * 2` が正しい**からである。
+go/printer は深さ 1 で優先順位が 1 種類しか無いとき空白を入れ、
+混在した式の中でだけ落とす。`sum + k*2` 全体を印字すれば `k*2` になるが、
+`$y` は単独で置換される。
+
+**直していない。** 正しい直し方は
+「ruleguard 系のチェックはソースを切り出して置換する」で、
+`expr_text` の呼び出し箇所は **118 か所**ある。単独のタスクにすること。
+値段は測ってある: **合成ターゲット `local` で 72 件、cobra では 0 件**
+（cobra の gocritic 差分は 0/0）。実リポでの実害は今のところ確認できていない。
+`gocritic.rs` の該当箇所にこの経緯をコメントで残した。
+
+**「署名が当たる」と「直す価値がある」は別**である。72 という数は大きく見えるが、
+中身は 1 つの欠陥 × 合成ファイル 72 個だった。
+
 ---
 
 ## 5. 既知の「暗黙 allowlist」台帳

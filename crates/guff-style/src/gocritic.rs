@@ -1431,6 +1431,20 @@ fn check_assign_op(pass: &Pass<'_>, assign: &AssignStmt, pending: &mut Vec<(u32,
     if !side_effect_free(pass, lhs) {
         return;
     }
+    // KNOWN DIFFERENCE: these are re-printed from the AST, and upstream echoes
+    // the **original source text**. gocritic's assignOp is a ruleguard rule
+    // (`checkers/rules/rules.go`) whose `Report("replace `$$` with `$x += $y`")`
+    // substitutes each captured node with the bytes it was written as, so
+    // `sum = sum + k*2` reports `k*2` while re-printing the operand on its own
+    // gives `k * 2` — go/printer uses blanks at depth 1 when only one
+    // precedence level is present, and only drops them in a mixed expression.
+    // Switching to `node_text` (guff's real go/printer port) does not fix it
+    // for the same reason.
+    //
+    // The fix is a source-slicing renderer for the ruleguard-backed checks, and
+    // `expr_text` has 118 call sites, so it wants its own pass. Measured at 72
+    // findings on the synthetic `local` target and **0 on cobra**. See
+    // docs/COMPAT-HARDENING.md §4 (2026-08-23, 続き 28).
     let Some(x_t) = expr_text(lhs) else {
         return;
     };
