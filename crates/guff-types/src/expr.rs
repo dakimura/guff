@@ -317,7 +317,7 @@ impl Checker {
             return;
         }
         // expr set by raw_expr
-        // DEFERRED: check.overflow(x) — integer over/underflow recheck.
+        self.overflow(x, e.value_pos.0 as u32, "");
     }
 
     /// Type-check a type assertion `x.(T)`.
@@ -500,7 +500,7 @@ impl Checker {
                     };
                     x.val = Some(unary_op(op, v.clone(), prec));
                     // expr set by raw_expr
-                    // DEFERRED: check.overflow(x).
+                    self.overflow(x, e.op_pos.0 as u32, op_name_unary(op));
                     return;
                 }
             }
@@ -607,7 +607,7 @@ impl Checker {
             };
             x.val = Some(binary_op(xv, fold_op, yv));
             // expr set by raw_expr
-            // DEFERRED: check.overflow(x).
+            self.overflow(x, e.op_pos.0 as u32, op_name_binary(op));
             return;
         }
 
@@ -766,6 +766,7 @@ impl Checker {
             let (count, _) = uint64_val(&yv);
             x.val = Some(shift(xv, op, count as u32));
             // expr set by raw_expr
+            self.overflow(x, e.op_pos.0 as u32, op_name_binary(Token::SHL));
             // If x was untyped, it stays untyped int here (default applied
             // later). x.typ is unchanged.
             return;
@@ -970,6 +971,26 @@ fn is_comparison_op(op: Token) -> bool {
 ///
 /// The predicates are the type-set-aware `allX` family, so a type parameter
 /// whose constraint admits only numeric terms supports `+` and friends.
+/// The operator names Go's `opName` puts into a "constant … overflow" message.
+/// Anything absent from Go's two tables yields `""`, which drops the word.
+fn op_name_unary(op: Token) -> &'static str {
+    match op {
+        Token::XOR => "bitwise complement",
+        _ => "",
+    }
+}
+
+fn op_name_binary(op: Token) -> &'static str {
+    match op {
+        Token::ADD => "addition",
+        Token::SUB => "subtraction",
+        Token::XOR => "bitwise XOR",
+        Token::MUL => "multiplication",
+        Token::SHL => "shift",
+        _ => "",
+    }
+}
+
 fn binary_op_ok(
     arena: &mut crate::arena::TypeArena,
     objects: &crate::arena::ObjectArena,

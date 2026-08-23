@@ -226,6 +226,74 @@ impl Checker {
         }
     }
 
+    /// Recheck a just-folded constant against its own type, and stop untyped
+    /// integers growing without bound.
+    ///
+    /// Go's rule is that a **typed** constant must be representable in its type
+    /// after *every* operation, not merely where it is finally used — so a
+    /// float64 product is rounded back to float64 the moment it folds.
+    /// Skipping the round leaves the exact rational, which generally carries
+    /// more precision than the type can hold, and the difference is visible to
+    /// anything that asks a later yes/no question about the value:
+    ///
+    /// ```go
+    /// int64(4.8 * float64(time.Hour))   // thanos pkg/promclient
+    /// ```
+    ///
+    /// `4.8` rounds to float64 as 5404319552844595/2^50, so the exact product
+    /// is 2374945115996159912109375/2^37 — **not** an integer, and converting
+    /// *that* to `int64` is a truncation error. Rounded to float64 the product
+    /// is exactly 17280000000000, and the conversion is fine. Go takes the
+    /// second reading; before this, guff took the first and the whole package
+    /// went ill-typed. `2.0 * float64(time.Hour)` was unaffected, because a
+    /// coefficient that is already exact in binary needs no rounding — which is
+    /// why this looked like it depended on the literal rather than on the type.
+    ///
+    /// Equivalent to `Checker.overflow`. `op_name` names the operator for the
+    /// untyped-overflow message (Go's `opName`); pass `""` where Go would.
+    pub fn overflow(&mut self, x: &mut Operand, op_pos: u32, op_name: &str) {
+        debug_assert_eq!(x.mode, OperandMode::Constant);
+
+        let val = match &x.val {
+            Some(v) => v.clone(),
+            None => return,
+        };
+        if val.kind() == Kind::Unknown {
+            self.error(
+                op_pos,
+                Code::InvalidConstVal,
+                "constant result is not representable",
+            );
+            return;
+        }
+
+        // Typed constants: `representable` rounds `x.val` in place, or reports
+        // the overflow. A type parameter cannot be a constant type, and every
+        // other typed constant has a Basic underlying — guard rather than
+        // assert, since a malformed type here would otherwise be read as "not
+        // representable" and turn into a spurious error.
+        let xt = x.typ.unwrap_or_else(|| self.invalid_type());
+        if is_typed(&self.types, xt) {
+            let under = xt.underlying(&self.types);
+            if matches!(self.types.get(under), TypeData::Basic(_)) {
+                self.representable(x, xt);
+            }
+            return;
+        }
+
+        // Untyped integers must not grow arbitrarily. Go's constant precision.
+        const PREC: usize = 512;
+        if val.kind() == Kind::Int && guff_constant::bit_len(&val) > PREC {
+            let sep = if op_name.is_empty() { "" } else { " " };
+            self.error(
+                op_pos,
+                Code::InvalidConstVal,
+                format!("constant {op_name}{sep}overflow"),
+            );
+            x.val = Some(Value::Unknown);
+        }
+    }
+
     /// Choose the error code for a failed representation, mirroring
     /// `representation`'s numeric-conversion classification.
     fn representation_error_code(&self, x_typ: Option<TypeId>, typ: TypeId) -> Code {
