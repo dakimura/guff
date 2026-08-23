@@ -10,7 +10,16 @@ type Handler interface {
 	ServeHTTP(ResponseWriter, *Request)
 }
 
-type ResponseWriter interface{}
+type Header map[string][]string
+
+// A real method set: the ArgTypeGuards on G705's `fmt` sinks ask whether the
+// writer implements this, and an empty interface is implemented by everything —
+// which would silently turn the guard into a no-op.
+type ResponseWriter interface {
+	Header() Header
+	Write([]byte) (int, error)
+	WriteHeader(statusCode int)
+}
 
 type Request struct {
 	Method     string

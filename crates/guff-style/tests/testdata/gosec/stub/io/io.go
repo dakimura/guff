@@ -19,3 +19,7 @@ func CopyBuffer(dst Writer, src Reader, buf []byte) (int64, error) {
 func CopyN(dst Writer, src Reader, n int64) (int64, error) {
 	return 0, nil
 }
+
+func WriteString(w Writer, s string) (int, error) {
+	return 0, nil
+}

@@ -1,4 +1,4 @@
-//! Gosec's taint engine — **G702 / G703 / G706 / G710** (SSA).
+//! Gosec's taint engine — **G702 / G703 / G705 / G706 / G710** (SSA).
 //!
 //! Port of securego/gosec v2.26.1 `taint/taint.go` plus the four rule
 //! configurations that drive it (`analyzers/commandinjection.go`,
@@ -10,6 +10,7 @@
 //! | G702 | Command injection | `os/exec.Command*`, `syscall.Exec` / `ForkExec` / `StartProcess`, `os.StartProcess` |
 //! | G703 | Path traversal | the `os` / `io/ioutil` / `path/filepath` file API, plus `http.ServeFile{,FS}` |
 //! | G706 | Log injection | `log.*`, and `log/slog`'s four level functions — **message argument only** |
+//! | G705 | XSS | `(http.ResponseWriter).Write`, the `fmt.Fprint*` / `io.WriteString` family **when the writer is an `http.ResponseWriter`**, and the `html/template` unsafe-string conversions |
 //! | G710 | Open redirect | `http.Redirect`, **URL argument only** |
 //!
 //! ## What a source is
@@ -66,6 +67,21 @@
 //! syncthing's `unixConfigDir(…, fileExists)` calls `os.Lstat` through a
 //! parameter, and without those edges the path never reaches the sink.
 //!
+//! ## Deliberate difference: an invoke that matches no receiver sink
+//!
+//! `isSinkCall` tries the invoke branch and then **falls through** to the
+//! static-callee one. For an invoke `StaticCallee()` is nil, so the variables it
+//! would have set keep the values the invoke branch left in them — the
+//! *interface's* package and the method name — and the final loop can then
+//! match a **package-level** sink against a method call. `(pkg.I).Open` would
+//! satisfy a `pkg.Open` sink.
+//!
+//! This stops at the invoke branch instead. Across the five tables the
+//! difference is unreachable: every sink names a stdlib package, and no stdlib
+//! interface has a method whose name matches a package-level sink in the same
+//! package. Adding a table that broke that would be the thing to re-read this
+//! for.
+//!
 //! ## Deliberate difference: variadic arguments
 //!
 //! go/ssa packs a variadic call's arguments into a fresh array and passes one
@@ -86,7 +102,9 @@ use guff_ssa::ids::{FuncId, InstrId};
 use guff_ssa::instr::{CallCommon, InstrData};
 use guff_ssa::program::{value_type_of, Program};
 use guff_ssa::value::Value;
-use guff_types::arena::TypeData;
+use guff_types::api_predicates::api_implements;
+use guff_types::arena::{ObjectData, TypeData};
+use guff_types::pointer::new_pointer;
 use guff_types::TypeId;
 
 /// `maxTaintDepth`.
@@ -109,11 +127,64 @@ struct FuncSource {
 
 struct Sink {
     pkg: &'static str,
+    /// Receiver type name for a method sink (`ResponseWriter`); empty for a
+    /// package-level function. Upstream's key is `(pkg.Recv).Method` vs
+    /// `pkg.Method`, and the two are matched by different branches: a method
+    /// sink on an *interface* is an SSA invoke, which has no static callee at
+    /// all.
+    receiver: &'static str,
     method: &'static str,
+    /// The method sink is declared on `*T` rather than `T`. Only consulted for
+    /// a static method call; upstream's invoke branch ignores it, because an
+    /// interface method has no pointer-ness to compare against — and G705's one
+    /// method sink is on an interface, so **nothing here sets it yet**. It is
+    /// carried because the static branch compares it, and dropping it would let
+    /// a `(T).M` sink match a `(*T).M` call. The rules that would set it are
+    /// upstream's SQL ones (`(*database/sql.DB).Query`), which are not ported.
+    pointer: bool,
     /// Argument positions to check. Empty means every argument, which is what
     /// most of gosec's sinks say — `os.WriteFile(path, data, perm)` fires on
     /// tainted *content* as much as on a tainted path.
+    ///
+    /// For a **static** method call the receiver is `args[0]`, so a method
+    /// sink's indices are shifted by one. For an **invoke** it is not an
+    /// argument at all (`CallCommon::value`), which is why upstream's
+    /// `ResponseWriter.Write` names no indices and checks everything.
     check_args: &'static [usize],
+    /// `(argument index, "import/path.TypeName")`. The call only counts as a
+    /// sink when every named argument's type implements (or, for a concrete
+    /// type, equals) the named one. `fmt.Fprintf` is a sink when it writes to
+    /// an `http.ResponseWriter` and not when it writes to `os.Stderr`, and no
+    /// amount of taint on the *format* argument changes that.
+    arg_type_guards: &'static [(usize, &'static str)],
+}
+
+impl Sink {
+    /// A package-level function: `pkg.Method`.
+    const fn func(pkg: &'static str, method: &'static str, check_args: &'static [usize]) -> Sink {
+        Sink { pkg, receiver: "", method, pointer: false, check_args, arg_type_guards: &[] }
+    }
+
+    /// A method named by its receiver type: `(pkg.Receiver).Method`.
+    const fn method(
+        pkg: &'static str,
+        receiver: &'static str,
+        method: &'static str,
+        check_args: &'static [usize],
+    ) -> Sink {
+        Sink { pkg, receiver, method, pointer: false, check_args, arg_type_guards: &[] }
+    }
+
+    /// A package-level function that is only a sink when its arguments carry
+    /// the named types.
+    const fn guarded(
+        pkg: &'static str,
+        method: &'static str,
+        check_args: &'static [usize],
+        arg_type_guards: &'static [(usize, &'static str)],
+    ) -> Sink {
+        Sink { pkg, receiver: "", method, pointer: false, check_args, arg_type_guards }
+    }
 }
 
 struct Sanitizer {
@@ -157,12 +228,12 @@ static G702: TaintRule = TaintRule {
     // Detected at command *creation*, not execution, so one `exec.Command` that
     // is later `Run`, `Start`ed and `Wait`ed is one finding.
     sinks: &[
-        Sink { pkg: "os/exec", method: "Command", check_args: &[] },
-        Sink { pkg: "os/exec", method: "CommandContext", check_args: &[] },
-        Sink { pkg: "os", method: "StartProcess", check_args: &[] },
-        Sink { pkg: "syscall", method: "Exec", check_args: &[] },
-        Sink { pkg: "syscall", method: "ForkExec", check_args: &[] },
-        Sink { pkg: "syscall", method: "StartProcess", check_args: &[] },
+        Sink::func("os/exec", "Command", &[]),
+        Sink::func("os/exec", "CommandContext", &[]),
+        Sink::func("os", "StartProcess", &[]),
+        Sink::func("syscall", "Exec", &[]),
+        Sink::func("syscall", "ForkExec", &[]),
+        Sink::func("syscall", "StartProcess", &[]),
     ],
     sanitizers: &[],
 };
@@ -183,30 +254,30 @@ static G703: TaintRule = TaintRule {
         FuncSource { pkg: "os", name: "ReadFile" },
     ],
     sinks: &[
-        Sink { pkg: "os", method: "Open", check_args: &[] },
-        Sink { pkg: "os", method: "OpenFile", check_args: &[] },
-        Sink { pkg: "os", method: "Create", check_args: &[] },
-        Sink { pkg: "os", method: "ReadFile", check_args: &[] },
-        Sink { pkg: "os", method: "WriteFile", check_args: &[] },
-        Sink { pkg: "os", method: "Remove", check_args: &[] },
-        Sink { pkg: "os", method: "RemoveAll", check_args: &[] },
-        Sink { pkg: "os", method: "Rename", check_args: &[] },
-        Sink { pkg: "os", method: "Mkdir", check_args: &[] },
-        Sink { pkg: "os", method: "MkdirAll", check_args: &[] },
-        Sink { pkg: "os", method: "Stat", check_args: &[] },
-        Sink { pkg: "os", method: "Lstat", check_args: &[] },
-        Sink { pkg: "os", method: "Chmod", check_args: &[] },
-        Sink { pkg: "os", method: "Chown", check_args: &[] },
-        Sink { pkg: "io/ioutil", method: "ReadFile", check_args: &[] },
-        Sink { pkg: "io/ioutil", method: "WriteFile", check_args: &[] },
-        Sink { pkg: "io/ioutil", method: "ReadDir", check_args: &[] },
-        Sink { pkg: "path/filepath", method: "Walk", check_args: &[] },
-        Sink { pkg: "path/filepath", method: "WalkDir", check_args: &[] },
+        Sink::func("os", "Open", &[]),
+        Sink::func("os", "OpenFile", &[]),
+        Sink::func("os", "Create", &[]),
+        Sink::func("os", "ReadFile", &[]),
+        Sink::func("os", "WriteFile", &[]),
+        Sink::func("os", "Remove", &[]),
+        Sink::func("os", "RemoveAll", &[]),
+        Sink::func("os", "Rename", &[]),
+        Sink::func("os", "Mkdir", &[]),
+        Sink::func("os", "MkdirAll", &[]),
+        Sink::func("os", "Stat", &[]),
+        Sink::func("os", "Lstat", &[]),
+        Sink::func("os", "Chmod", &[]),
+        Sink::func("os", "Chown", &[]),
+        Sink::func("io/ioutil", "ReadFile", &[]),
+        Sink::func("io/ioutil", "WriteFile", &[]),
+        Sink::func("io/ioutil", "ReadDir", &[]),
+        Sink::func("path/filepath", "Walk", &[]),
+        Sink::func("path/filepath", "WalkDir", &[]),
         // Only the path: arg 1 is the *http.Request that made the parameter
         // tainted in the first place, and checking it would fire on every
         // handler that serves a constant file.
-        Sink { pkg: "net/http", method: "ServeFile", check_args: &[2] },
-        Sink { pkg: "net/http", method: "ServeFileFS", check_args: &[3] },
+        Sink::func("net/http", "ServeFile", &[2]),
+        Sink::func("net/http", "ServeFileFS", &[3]),
     ],
     sanitizers: &[
         Sanitizer { pkg: "path/filepath", method: "Clean" },
@@ -239,23 +310,23 @@ static G706: TaintRule = TaintRule {
         FuncSource { pkg: "os", name: "Getenv" },
     ],
     sinks: &[
-        Sink { pkg: "log", method: "Print", check_args: &[] },
-        Sink { pkg: "log", method: "Printf", check_args: &[] },
-        Sink { pkg: "log", method: "Println", check_args: &[] },
-        Sink { pkg: "log", method: "Fatal", check_args: &[] },
-        Sink { pkg: "log", method: "Fatalf", check_args: &[] },
-        Sink { pkg: "log", method: "Fatalln", check_args: &[] },
-        Sink { pkg: "log", method: "Panic", check_args: &[] },
-        Sink { pkg: "log", method: "Panicf", check_args: &[] },
-        Sink { pkg: "log", method: "Panicln", check_args: &[] },
+        Sink::func("log", "Print", &[]),
+        Sink::func("log", "Printf", &[]),
+        Sink::func("log", "Println", &[]),
+        Sink::func("log", "Fatal", &[]),
+        Sink::func("log", "Fatalf", &[]),
+        Sink::func("log", "Fatalln", &[]),
+        Sink::func("log", "Panic", &[]),
+        Sink::func("log", "Panicf", &[]),
+        Sink::func("log", "Panicln", &[]),
         // `func Warn(msg string, args ...any)`: both handlers escape the
         // attribute *values*, and only `msg` reaches the output verbatim. So
         // `slog.Warn("static", "path", tainted)` is silent and
         // `slog.Warn(tainted)` is not.
-        Sink { pkg: "log/slog", method: "Info", check_args: &[0] },
-        Sink { pkg: "log/slog", method: "Warn", check_args: &[0] },
-        Sink { pkg: "log/slog", method: "Error", check_args: &[0] },
-        Sink { pkg: "log/slog", method: "Debug", check_args: &[0] },
+        Sink::func("log/slog", "Info", &[0]),
+        Sink::func("log/slog", "Warn", &[0]),
+        Sink::func("log/slog", "Error", &[0]),
+        Sink::func("log/slog", "Debug", &[0]),
     ],
     sanitizers: &[
         Sanitizer { pkg: "strings", method: "ReplaceAll" },
@@ -284,7 +355,7 @@ static G710: TaintRule = TaintRule {
     ],
     func_sources: &[],
     // `http.Redirect(w, r, url, code)`: only the redirect target.
-    sinks: &[Sink { pkg: "net/http", method: "Redirect", check_args: &[2] }],
+    sinks: &[Sink::func("net/http", "Redirect", &[2])],
     sanitizers: &[
         Sanitizer { pkg: "net/url", method: "PathEscape" },
         Sanitizer { pkg: "net/url", method: "QueryEscape" },
@@ -297,7 +368,76 @@ static G710: TaintRule = TaintRule {
     ],
 };
 
-pub(crate) static TAINT_RULES: &[&TaintRule] = &[&G702, &G703, &G706, &G710];
+/// `analyzers/xss.go`. The first rule here whose sinks are not all plain
+/// package functions, and the reason `Sink` grew a receiver and type guards.
+///
+/// Two shapes upstream needs and the other four rules never did:
+///
+/// - `(net/http.ResponseWriter).Write` — a method on an **interface**, so the
+///   call is an SSA invoke with no static callee. The receiver scopes it
+///   completely; nothing else is required.
+/// - `fmt.Fprint*` / `io.WriteString` — package functions that are only sinks
+///   when they write *to* an HTTP response. Writing to `os.Stderr` or a
+///   `bytes.Buffer` is not XSS however tainted the text is, and without the
+///   guard this rule would fire on most logging in a web server.
+///
+/// `CheckArgs: 1..=10` on the `fmt` sinks is upstream's literal list: argument
+/// 0 is the writer (already spoken for by the guard) and the rest are format
+/// and data. guff passes variadic arguments individually rather than packing
+/// them into a slice, so those indices line up here the same way.
+static G705: TaintRule = TaintRule {
+    id: "G705",
+    what: "XSS via taint analysis",
+    type_sources: &[
+        TypeSource { pkg: "net/http", name: "Request" },
+        TypeSource { pkg: "net/url", name: "Values" },
+        TypeSource { pkg: "bufio", name: "Reader" },
+        TypeSource { pkg: "bufio", name: "Scanner" },
+    ],
+    func_sources: &[FuncSource { pkg: "os", name: "Args" }],
+    sinks: &[
+        Sink::method("net/http", "ResponseWriter", "Write", &[]),
+        Sink::guarded("fmt", "Fprintf", FMT_DATA_ARGS, RESPONSE_WRITER_ARG0),
+        Sink::guarded("fmt", "Fprint", FMT_DATA_ARGS, RESPONSE_WRITER_ARG0),
+        Sink::guarded("fmt", "Fprintln", FMT_DATA_ARGS, RESPONSE_WRITER_ARG0),
+        Sink::guarded("io", "WriteString", &[1], RESPONSE_WRITER_ARG0),
+        // Conversions that hand a string to html/template as already-safe
+        // markup: the whole point of the type is to skip escaping.
+        Sink::func("html/template", "HTML", &[]),
+        Sink::func("html/template", "HTMLAttr", &[]),
+        Sink::func("html/template", "JS", &[]),
+        Sink::func("html/template", "CSS", &[]),
+    ],
+    sanitizers: &[
+        Sanitizer { pkg: "html", method: "EscapeString" },
+        Sanitizer { pkg: "html/template", method: "HTMLEscapeString" },
+        Sanitizer { pkg: "html/template", method: "JSEscapeString" },
+        Sanitizer { pkg: "html/template", method: "URLQueryEscaper" },
+        Sanitizer { pkg: "net/url", method: "QueryEscape" },
+        Sanitizer { pkg: "net/url", method: "PathEscape" },
+        // JSON is structurally safe and is not served as text/html.
+        Sanitizer { pkg: "encoding/json", method: "Marshal" },
+        Sanitizer { pkg: "encoding/json", method: "MarshalIndent" },
+        // A number cannot carry a payload.
+        Sanitizer { pkg: "strconv", method: "Atoi" },
+        Sanitizer { pkg: "strconv", method: "Itoa" },
+        Sanitizer { pkg: "strconv", method: "ParseInt" },
+        Sanitizer { pkg: "strconv", method: "ParseUint" },
+        Sanitizer { pkg: "strconv", method: "ParseFloat" },
+        Sanitizer { pkg: "strconv", method: "FormatInt" },
+        Sanitizer { pkg: "strconv", method: "FormatUint" },
+        Sanitizer { pkg: "strconv", method: "FormatFloat" },
+    ],
+};
+
+/// `CheckArgs: []int{1,…,10}` — upstream writes the list out rather than
+/// saying "everything but argument 0", and out-of-range indices are skipped.
+static FMT_DATA_ARGS: &[usize] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+/// `ArgTypeGuards: map[int]string{0: "net/http.ResponseWriter"}`.
+static RESPONSE_WRITER_ARG0: &[(usize, &str)] = &[(0, "net/http.ResponseWriter")];
+
+pub(crate) static TAINT_RULES: &[&TaintRule] = &[&G702, &G703, &G705, &G706, &G710];
 
 // ---------------------------------------------------------------------------
 // Call graph
@@ -482,6 +622,19 @@ struct Taint<'a> {
     /// `paramTaintCache`. Only `true` results are cached, exactly as upstream:
     /// a `false` may become `true` once a different caller is explored.
     param_cache: HashSet<(FuncId, usize)>,
+    /// Cloned on first use by the `ArgTypeGuards` test: `api_implements`
+    /// memoizes type sets and so needs `&mut TypeArena`, while the SSA program
+    /// is shared read-only. Only G705 declares guards, and only its `fmt` and
+    /// `io` sinks reach the test, so most runs never pay for this.
+    guard_types: Option<guff_types::TypeArena>,
+    /// `(argument type, required type path)` → satisfied. One `fmt.Fprintf`
+    /// shape repeats across a package.
+    guard_cache: HashMap<(TypeId, &'static str), bool>,
+    /// `lookup_named_type` walks the whole object arena, so its answer — one
+    /// per *rule*, not one per call site — is kept. Without this the walk runs
+    /// once per distinct writer type per package, and the arena is the whole
+    /// program's.
+    named_type_cache: HashMap<&'static str, Option<TypeId>>,
 }
 
 pub(crate) fn collect_taint(
@@ -501,6 +654,9 @@ pub(crate) fn collect_taint(
             rule,
             cg: &cg,
             param_cache: HashSet::new(),
+        guard_types: None,
+        guard_cache: HashMap::new(),
+        named_type_cache: HashMap::new(),
         };
         for &fid in src_funcs {
             taint.analyze_function_sinks(fid, pending);
@@ -520,7 +676,7 @@ impl Taint<'_> {
         }
         // Collected first: the instruction arena is borrowed from `self.prog`,
         // and judging an argument needs `&mut self` for the parameter cache.
-        let mut candidates: Vec<(InstrId, Vec<Value>)> = Vec::new();
+        let mut candidates: Vec<(InstrId, &'static Sink, Vec<Value>)> = Vec::new();
         for (_, block) in func.live_blocks() {
             for &iid in &block.instrs {
                 // `analyzeFunctionSinks` looks at `*ssa.Call` only: a `go` or
@@ -528,22 +684,28 @@ impl Taint<'_> {
                 let InstrData::Call(call) = func.instrs.get(iid) else {
                     continue;
                 };
-                let Some(sink) = self.sink_of(&call.call) else {
+                let Some(sink) = self.sink_of(fid, &call.call) else {
                     continue;
                 };
-                let args: Vec<Value> = if sink.check_args.is_empty() {
-                    call.call.args.clone()
-                } else {
-                    sink.check_args
-                        .iter()
-                        .filter_map(|&i| call.call.args.get(i).copied())
-                        .collect()
-                };
-                candidates.push((iid, args));
+                candidates.push((iid, sink, call.call.args.clone()));
             }
         }
         let mut hits: Vec<InstrId> = Vec::new();
-        for (iid, args) in candidates {
+        for (iid, sink, all_args) in candidates {
+            // `guardsSatisfied` runs before the argument selection, not after:
+            // a guarded sink whose writer is `os.Stderr` is not a sink at all,
+            // however tainted the rest of the call is.
+            if !self.guards_satisfied(fid, sink, &all_args) {
+                continue;
+            }
+            let args: Vec<Value> = if sink.check_args.is_empty() {
+                all_args
+            } else {
+                sink.check_args
+                    .iter()
+                    .filter_map(|&i| all_args.get(i).copied())
+                    .collect()
+            };
             if args
                 .into_iter()
                 .any(|arg| self.is_tainted(arg, fid, &mut HashSet::new(), 0))
@@ -577,18 +739,197 @@ impl Taint<'_> {
         ))
     }
 
-    /// `isSinkCall`, for the function sinks these four rules declare. None of
-    /// them names a `Receiver`, and upstream's function branch requires the
-    /// callee to have none either.
-    fn sink_of(&self, common: &CallCommon) -> Option<&'static Sink> {
-        let (pkg, name, has_recv) = self.callee_of(common)?;
-        if has_recv {
+    /// `isSinkCall`.
+    ///
+    /// Upstream tries the invoke branch first because an interface method call
+    /// has **no static callee** — `(net/http.ResponseWriter).Write` is only
+    /// reachable this way. The receiver is `CallCommon::value`, not an
+    /// argument, and the pointer flag is not consulted: an interface method has
+    /// no pointer-ness to compare against.
+    fn sink_of(&self, fid: FuncId, common: &CallCommon) -> Option<&'static Sink> {
+        if let Some(m) = common.method {
+            let name = m.name(&self.prog.object_arena);
+            let recv_typ = value_type_of(self.prog, self.func(fid), common.value);
+            if let Some((pkg, recv)) = self.named_of(recv_typ) {
+                if let Some(sink) = self.rule.sinks.iter().find(|s| {
+                    !s.receiver.is_empty() && s.pkg == pkg && s.receiver == recv && s.method == name
+                }) {
+                    return Some(sink);
+                }
+            }
             return None;
         }
-        self.rule
-            .sinks
-            .iter()
-            .find(|s| s.pkg == pkg && s.method == name)
+
+        let (pkg, name, recv) = self.static_callee_parts(common)?;
+        self.rule.sinks.iter().find(|s| match (&recv, s.receiver.is_empty()) {
+            // A package-level sink requires a callee with no receiver, and vice
+            // versa: `os.Open` must not match a method someone named `Open`.
+            (None, true) => s.pkg == pkg && s.method == name,
+            (Some((rname, rptr)), false) => {
+                s.pkg == pkg && s.receiver == *rname && s.method == name && s.pointer == *rptr
+            }
+            _ => false,
+        })
+    }
+
+    /// `guardsSatisfied`. An empty guard list always passes.
+    ///
+    /// The argument type is resolved back through implicit interface
+    /// conversions first: by the time `fmt.Fprintf(w, …)` is built, an
+    /// `http.ResponseWriter` has been widened to the `io.Writer` the parameter
+    /// declares, and asking whether *that* implements `http.ResponseWriter`
+    /// answers no for every call. `resolveOriginalType` is what makes the guard
+    /// mean "what the caller passed" rather than "what the callee accepts".
+    fn guards_satisfied(&mut self, fid: FuncId, sink: &Sink, args: &[Value]) -> bool {
+        if sink.arg_type_guards.is_empty() {
+            return true;
+        }
+        for &(idx, want) in sink.arg_type_guards {
+            let Some(&arg) = args.get(idx) else {
+                return false;
+            };
+            let actual = self.resolve_original_type(fid, arg);
+            if let Some(&ok) = self.guard_cache.get(&(actual, want)) {
+                if !ok {
+                    return false;
+                }
+                continue;
+            }
+            let Some(required) = self.lookup_named_type(want) else {
+                // The program never loaded the type, so the guard cannot be
+                // satisfied — upstream returns false rather than skipping it.
+                return false;
+            };
+            let is_iface = matches!(
+                self.prog
+                    .type_arena
+                    .get(required.underlying(&self.prog.type_arena)),
+                TypeData::Interface(_)
+            );
+            let ok = if is_iface {
+                // "or `*T` implements it" is upstream's, and it matters: a
+                // handler holding a value receiver still writes through a
+                // pointer method set.
+                let types = self
+                    .guard_types
+                    .get_or_insert_with(|| self.prog.type_arena.clone());
+                api_implements(types, &self.prog.object_arena, &self.prog.package_arena, actual, required)
+                    || {
+                        let ptr = new_pointer(types, actual);
+                        api_implements(
+                            types,
+                            &self.prog.object_arena,
+                            &self.prog.package_arena,
+                            ptr,
+                            required,
+                        )
+                    }
+            } else {
+                actual == required
+            };
+            self.guard_cache.insert((actual, want), ok);
+            if !ok {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// `resolveOriginalType`: walk back through the interface conversions guff
+    /// emits so the guard sees the concrete type the caller had.
+    fn resolve_original_type(&self, fid: FuncId, v: Value) -> TypeId {
+        let func = self.func(fid);
+        let mut v = v;
+        for _ in 0..8 {
+            let Value::Instr(iid) = v else { break };
+            match func.instrs.get(iid) {
+                InstrData::ChangeInterface(ci) => v = ci.x,
+                InstrData::MakeInterface(mi) => return value_type_of(self.prog, func, mi.x),
+                _ => break,
+            }
+        }
+        value_type_of(self.prog, func, v)
+    }
+
+    /// `lookupNamedType`: `"net/http.ResponseWriter"` → the type. Upstream
+    /// walks `prog.AllPackages()` and looks the name up in each package scope;
+    /// the SSA program here carries no scopes, so the equivalent walk is over
+    /// the type-name objects.
+    fn lookup_named_type(&mut self, path: &'static str) -> Option<TypeId> {
+        if let Some(&hit) = self.named_type_cache.get(path) {
+            return hit;
+        }
+        let found = self.lookup_named_type_uncached(path);
+        self.named_type_cache.insert(path, found);
+        found
+    }
+
+    fn lookup_named_type_uncached(&self, path: &str) -> Option<TypeId> {
+        let (pkg_path, name) = path.rsplit_once('.')?;
+        for id in self.prog.object_arena.ids() {
+            if !matches!(self.prog.object_arena.get(id), ObjectData::TypeName(_)) {
+                continue;
+            }
+            if id.name(&self.prog.object_arena) != name {
+                continue;
+            }
+            let Some(pkg) = id.pkg(&self.prog.object_arena) else {
+                continue;
+            };
+            if self.prog.package_arena.get(pkg).path() == pkg_path {
+                return id.typ(&self.prog.object_arena);
+            }
+        }
+        None
+    }
+
+    /// The `(package path, type name)` of a named type, peeling pointers — the
+    /// half of [`Self::is_source_type`] that the sink tables also need.
+    fn named_of(&self, t: TypeId) -> Option<(String, String)> {
+        let mut t = guff_types::alias::unalias_readonly(&self.prog.type_arena, t);
+        let mut hops = 0;
+        while let TypeData::Pointer(ptr) = self.prog.type_arena.get(t) {
+            t = guff_types::alias::unalias_readonly(&self.prog.type_arena, ptr.elem());
+            hops += 1;
+            if hops > 8 {
+                return None;
+            }
+        }
+        let TypeData::Named(n) = self.prog.type_arena.get(t) else {
+            return None;
+        };
+        let obj = n.obj();
+        let pkg = obj.pkg(&self.prog.object_arena)?;
+        Some((
+            self.prog.package_arena.get(pkg).path().to_string(),
+            obj.name(&self.prog.object_arena).to_string(),
+        ))
+    }
+
+    /// `(package path, name, receiver)` of a static callee, where `receiver` is
+    /// `(type name, is pointer)` for a method and `None` for a bare function.
+    fn static_callee_parts(
+        &self,
+        common: &CallCommon,
+    ) -> Option<(String, String, Option<(String, bool)>)> {
+        let fid = static_callee(common)?;
+        let f = self.prog.functions.get(fid);
+        let obj = f.object?;
+        let pkg = obj.pkg(&self.prog.object_arena)?;
+        let recv = func_recv_type(self.prog, f).and_then(|rt| {
+            let is_ptr = matches!(
+                self.prog
+                    .type_arena
+                    .get(guff_types::alias::unalias_readonly(&self.prog.type_arena, rt)),
+                TypeData::Pointer(_)
+            );
+            self.named_of(rt).map(|(_, name)| (name, is_ptr))
+        });
+        Some((
+            self.prog.package_arena.get(pkg).path().to_string(),
+            obj.name(&self.prog.object_arena).to_string(),
+            recv,
+        ))
     }
 
     fn is_sanitizer_call(&self, common: &CallCommon) -> bool {
