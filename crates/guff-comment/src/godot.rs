@@ -20,7 +20,8 @@ use regex::Regex;
 
 use crate::options::GodotOptions;
 use crate::util::{
-    comment_group_raw_text, declaration_docs, line_pos, reparse_with_comments,
+    block_comments, comment_group_raw_text, declaration_docs, line_pos,
+    reparse_with_comments,
 };
 
 const NO_PERIOD: &str = "Comment should end in a period";
@@ -209,13 +210,22 @@ fn check_capital(text: &str, is_decl: bool) -> bool {
 }
 
 fn collect_comment_groups<'a>(
+    fset: &guff::FileSet,
     parsed: &'a guff::ast::File,
     scope: &str,
 ) -> Vec<&'a CommentGroup> {
     match scope {
         "all" => parsed.comments.iter().collect(),
+        // godot's `declarations` scope is `getBlockComments() ++
+        // getDeclarationComments()` — the docs of top-level decls *and* the
+        // comments inside `var (` / `const (` groups.
+        //
         // DEFERRED: toplevel / noinline — fall back to declarations.
-        _ => declaration_docs(parsed),
+        _ => {
+            let mut out = block_comments(fset, parsed);
+            out.extend(declaration_docs(parsed));
+            out
+        }
     }
 }
 
@@ -245,7 +255,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         else {
             continue;
         };
-        for doc in collect_comment_groups(&parsed, &options.scope) {
+        for doc in collect_comment_groups(&re_fset, &parsed, &options.scope) {
             if comment_group_raw_text(doc).trim().is_empty() {
                 continue;
             }

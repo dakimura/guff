@@ -311,3 +311,24 @@ fn godoclint_respects_enable_disable_settings() {
         "deprecated disabled: {messages:?}"
     );
 }
+
+/// godot's `declarations` scope is `getBlockComments() ++
+/// getDeclarationComments()`, and guff had only the second half — a documented
+/// spec inside a `var (` or `const (` group was never looked at.
+///
+/// The column rule is the part worth pinning, because it is upstream's and not
+/// something the shape suggests: a comment inside a block counts only at column
+/// **exactly 2**. The block itself is top level, so only its immediate contents
+/// are; one nested a level deeper is deliberately skipped. The fixture holds
+/// that case, a free-floating comment owned by no spec (which does count), and
+/// a single-line `const` with no `Lparen` to be inside of.
+#[test]
+fn godot_checks_comments_inside_top_level_blocks() {
+    let pkg = support::typecheck_fixture("godot", "example.com/godot", "bad.go");
+    let found = support::run_analyzer(godot(), &pkg);
+    // Every godot message is the same string, so the count is all a
+    // message-level test can say: three top-level decl docs, plus the two block
+    // comments the old code never looked at. `compat/golden/cases/godot` pins
+    // which five, line and column, against golangci-lint.
+    assert_eq!(found.len(), 5, "{found:?}");
+}

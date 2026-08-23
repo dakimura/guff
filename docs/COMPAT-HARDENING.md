@@ -8449,6 +8449,60 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
 
 ---
 
+### 2026-08-23（続き 27）— `DEFERRED` と書いてあることと、値段が付いていることは別である
+
+続き 26 の「次にやること」1。`godot` の `getBlockComments` 欠落は
+`util.rs` と `godot.rs` の**両方にコメントで書いてあった**。
+書いていなかったのは、それがいくらの findings に相当するかである。
+
+22 行の fixture で **上流 4 件 / guff 2 件**。
+`var (` と `const (` の中の doc コメントを丸ごと見ていなかった。
+
+#### 上流の `declarations` は 2 つの和である
+
+```go
+case DeclScope:
+    comments = append(pf.getBlockComments(exclude), decl...)
+```
+
+guff は `decl`（＝ `getDeclarationComments`）の側しか持っていなかった。
+`tetafro/godot` はローカルに checkout があるので、`getBlockComments` を
+そのまま移植した。効いている条件は 3 つで、**どれも形から推測できない**:
+
+1. **`Lparen` があるものだけ** —— `const C = 3` は 1 行なので「中」が無い。
+2. **走るのは `file.Comments`** であって spec の `Doc` ではない。
+   だから**どの spec のものでもない浮いたコメント**も入る。
+3. **桁がちょうど 2 のものだけ**。上流のコメントが理由を書いている ——
+   ブロック自体がトップレベルなので、その**直下**だけが対象になる。
+   もう 1 段深いコメント（桁 3）は**意図的に**捨てられる。
+
+3 番目は特に、読まずに書いたら確実に落とす。
+
+#### ゲート
+
+- **`compat/golden/cases/godot` を新設**（golden は **104 → 105 case**。
+  続き 26 の 2 つと合わせて **103 → 106**）。
+  fixture は 5 件を pin する: トップレベルの decl doc 3 つと、
+  ブロックの中の 2 つ。そして**黙るべき 3 つ**を同じファイルに置いてある ——
+  桁 3 のコメント（複合リテラルの中）、func 本体の中のコメント、
+  そして `Lparen` の無い 1 行 `const`。
+- **両方向で確認**: `block_comments` を外すと golden が
+  `bad/bad.go:15` と `:20` を落として fail する。
+- `godot_checks_comments_inside_top_level_blocks` ——
+  godot のメッセージは全部同じ文字列なので、
+  **単体テストで言えるのは件数だけ**（3 → 5）。
+  どの 5 件かは golden が行と桁で pin する。そう書いてある。
+
+#### この 2 回で分かったこと
+
+続き 26 と 27 は同じ場所（`crates/guff-comment`）の別の欠陥で、
+**片方は誰も知らず、もう片方は 2 箇所にコメントで書いてあった**。
+見つかり方は同じ —— **上流と 1 件ずつ突き合わせる fixture を作った**だけである。
+`DEFERRED` は「後で見る」の印であって「今いくら損しているか」ではないので、
+棚卸しするなら**値段を付けて回る**のが先になる。
+
+---
+
 ## 5. 既知の「暗黙 allowlist」台帳
 
 `compat/normalize.py` が消している差分。Phase 3 の golden tier では正規化しないので、

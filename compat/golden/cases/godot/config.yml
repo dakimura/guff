@@ -1,0 +1,28 @@
+# Golden case: godot.
+#
+# godot's `declarations` scope is `getBlockComments() ++
+# getDeclarationComments()`. guff implemented only the second half, so a
+# documented spec inside a `var (` or `const (` group was never checked — a
+# recall gap the code recorded as `DEFERRED: getBlockComments` without a price
+# on it. On the fixture below it is worth two findings out of five.
+#
+# The column rule is upstream's and is the part worth pinning: a comment inside
+# a block counts only at column **exactly 2**, because the block itself is top
+# level and only its immediate contents are. The fixture holds a comment at
+# column 3 (nested inside a composite literal) that must stay silent, a
+# free-floating comment owned by no spec that must not, and a single-line
+# `const` with no `Lparen` at all.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - godot
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m
