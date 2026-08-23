@@ -8164,10 +8164,10 @@ hunt の refresh がそこを書き換えられる形にはしない。
 **次にやること**
 
 1. ~~**hunt の ill-typed 33 件**~~ —— 続き 19 で 20 件まで落とした。残りは下記。
-2. **G705（XSS）** —— 5 本目の taint ルール。エンジンと表の形はもう在るが、これだけは
-   `Receiver` sink（`(net/http.ResponseWriter).Write`）と `ArgTypeGuards`
-   （`fmt.Fprintf` の書き手が `http.ResponseWriter` を実装するときだけ sink）が要る。
-   syncthing に 3 件。
+2. ~~**G705（XSS）**~~ —— 続き 24 で解消。syncthing の gcl-only 3 → 1
+   （残る 1 件は表ではなく呼び出しグラフの半分）。ついでに authelia の
+   nolintlint 偽陽性が 1 件消えた —— そのディレクティブのコメントが
+   「TODO: Run this line through taint analysis」だった。
 3. **G115 の文言** —— `rune -> byte` と `int32 -> uint8`。上流は宣言された別名で綴り、
    guff は basic kind で綴る。行も桁も一致するので、差分の両側に同時に並ぶ。
 4. **複合リテラルの lowering** —— go/ssa は addressable な複合リテラルをその場に書く。
@@ -8426,29 +8426,706 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
 
 **次にやること**
 
-1. **C: `export_test.go` / 外部テストパッケージ（7 件）** —— 続き 19 の記述のまま。
-   `dedup::import_path_of_id` が `P [P.test]` を `P` に潰している。
-   authelia / dapr / gitea / thanos / rclone / prometheus。パッケージロード側の話。
-   `cmd/promtool` が道連れになっていないかも同時に見る。
-2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
+1. ~~**C: `export_test.go` / 外部テストパッケージ（7 件）**~~ —— 続き 21 で 6 件を消化
+   （ill-typed 9 → 3）。**筋書きは外れていた**: `dedup::import_path_of_id` は無罪で、
+   seed が依存を production ファイルだけで組んでいたのが原因。
+   prometheus の 2 件はそもそも C ではなく、seed の wave スケジューラの欠陥だった。
+2. ~~**G705（XSS）**~~ —— 続き 24 で解消（syncthing の gcl-only 3 → 1）。
 3. **G115 の文言** —— 続き 18 の 3。
 4. **複合リテラルの lowering** —— 続き 18 の 4。
 5. **`assignable_to` の 2 段の順序** —— 上記のとおり `prepare_method_set` と逆。
    今は `expand_one_method` の `obj_decl` が支えているだけなので、寄せる。
-6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行。
+6. ~~**E: 浮動小数定数の整数への変換**~~ —— 続き 22 で解消（hunt の ill-typed 9 → 8）。
+   **疑いは外れていた**: guff は「小数点を持つ float 定数の変換をまとめて拒んで」は
+   いない（`int64(1.5*hour)` は通る）。落ちていたのは**演算のたびの丸めが無かった**
+   ためで、型付き定数どうしの積が厳密な有理数のまま残っていた。
 
-   ```go
-   int64(4.8 * float64(time.Hour))   // guff: cannot convert float64 to type int64
+---
+
+---
+
+### 2026-08-23（続き 21）— `export_test.go` は「別のパッケージ」ではなく「同じパッケージの広い版」だった
+
+続き 20 の「次にやること」1。C の 7 件のうち **6 件が seed の 1 つの条件**で片付き、
+残る prometheus の 2 件は **C ではなかった**。そして続き 19 が名指しした
+`dedup::import_path_of_id` は**無罪**である —— あれは `Q [P.test]` を `Q` に潰す関数で、
+潰していること自体は正しい。潰した先で**どのファイルを読むか**が違っていた。
+
+#### 原因 —— seed は依存を production ファイルだけで組む
+
+`package p_test` は P のテストバイナリに入るので、そこでの `import ".../p"` が指すのは
+**test variant `P [P.test]`** —— P 自身のファイル**＋P の同一パッケージ `_test.go`** である。
+`export_test.go` の存在意義はその variant を広げることそのものなので、
+production ファイルだけで組んだ P には広げた分が無い:
+
+```go
+// p/export_test.go —— package p。T の非公開フィールドに触るので p にしか置けない
+func Reveal(t T) int { return t.x }
+
+// p/ext_test.go —— package p_test
+p.Reveal(p.New(7))        // guff: undefined: p.Reveal
+```
+
+`build_source_seed_inner` は依存の `compiled_go_files` から `_test.go` を**無条件に**
+落としていた（3 箇所）。**その判断自体は正しい** —— 全依存に効かせると
+prometheus `./...` で型アリーナの RSS がおよそ 2 倍になる、とコメントが測って書いてある。
+足りなかったのは条件で、**その load に P の外部テストパッケージが居るときだけ**
+P の seed を `P [P.test]` のファイルで組む。
+
+#### 外部テストパッケージの見分け方は括弧ではない
+
+`go list -test` の id は 3 種類が同じ括弧を着る。
+
+| id | 中身 |
+|---|---|
+| `P [P.test]` | P 自身のテスト variant（production + 同一パッケージ `_test.go`） |
+| `Q [P.test]` | **別の**パッケージ Q を P のテストバイナリ向けに再コンパイルしたもの |
+| `P_test [P.test]` | **外部テストパッケージ**（`package p_test` のファイル） |
+
+見分けるのは括弧ではなく「自分の path が P に `_test` を足したものか」。
+`external_test_package_under_test` がこれで、`paths_with_external_test_package` が
+load 全体からその P を集める。**これがゲートの全部**であり、広げすぎないための唯一の仕掛けである。
+
+#### seed のファイルと seed の辺は同じ variant から採る
+
+`import_path_dep_graph` は「plain `id == pkg_path` を優先」だった。
+P を test variant で組むなら辺もそちらから採らないと、`_test.go` の import
+（`testing`、testify …）が graph に載らず、seed の中で解決先を失う。同じ集合を両方が読む。
+
+**縮約された seed に P は 1 つしか置けない**ので、広げた P は `q` のような production の
+importer からも見える。これは意図的な選択で、`q.Describe(t p.T)` に外部テストパッケージが
+自分の `p.T` を渡す形が通るのは、両者が**同じ** `p.T` を見ているからである。
+代償は、production のコードが test 限定の識別子に触っても guff が型エラーにしないこと ——
+そのコードは `go build` が通らないので実在しない。
+
+#### 結果
+
+**hunt の ill-typed 9 → 3**: authelia 1 → 0、dapr 1 → 0、gitea 1 → 0、rclone 2 → 0、
+thanos 2 → 1（`internal/cortex/chunk/cache_test` が消え、残るのは E の `pkg/promclient`）。
+`compat/baselines/health-hunt.json` は 6 行から **prometheus 2 / thanos 1 の 2 行**になった。
+
+**差分は 1 件も増えていない。** 同じコーパス・同じ golangci-lint 2.12.2 で、
+続き 20 の hunt（`hunt-20260822T165933Z`）と今回（`…T225919Z`）の 16 ターゲットを
+突き合わせると、guff / golangci / both が動いたのは syncthing だけで、
+そこも**上流側**が 654 → 656 に増えて guff が既に持っていた 2 件と一致した
+（unexpected 42 → 40）。ill-typed だった 6 パッケージは、
+分析されるようになっても**どちらのツールも何も報告しない**中身だった ——
+つまり今回の回収は finding ではなく、**黙って落ちる面積**のほうである。
+
+**コストは測れない。** prometheus `./...` を base / fixed 交互に 5 回ずつ:
+real 2.03–2.20 / 1.99–2.21 秒、user 8.83–9.60 / 8.86–9.60 秒、
+maxRSS 1828–1858 / 1818–1853 MB。広げるのは外部テストパッケージを持つ path だけで、
+seed の依存は `ignore_func_bodies` で組むので、増える `_test.go` は宣言しか置いていかない。
+
+#### ゲート
+
+`crates/guff-packages/tests/external_test_package_seed.rs` に 5 本。
+`go` も export data も要らない手組みの `Package` と、`tests/testdata/xtest` の実ファイル。
+
+- **`external_test_package_sees_export_test_symbols`** —— 修正そのもの。
+  dedup 前（plain `P` が居る）と dedup 後（`P [P.test]` だけ）の**両方の形**で回す。
+  被験体は `p.Reveal` だけでなく `q.Describe(v)` も呼ぶ: P を「production の写しと
+  test variant の写し」に割る実装は `undefined:` を消したうえでこちらで落ちる。
+- **`a_package_without_an_external_test_package_is_seeded_production_only`** ——
+  広げすぎの検出。`r` は同一パッケージ `_test.go` を持つが外部テストパッケージを持たないので、
+  `user` から `r.Hidden` は今も `undefined`。**一番安い直し方（dedup を生き残った
+  パッケージのファイルをそのまま seed に使う）はこの 1 本だけが落とす。**
+- **`a_production_importer_of_an_augmented_package_still_checks`** —— `q` は素通り。
+- **`only_p_test_brackets_p_names_an_external_test_package`** —— 上の表そのもの。
+- **`augmented_paths_take_their_edges_from_the_test_variant`** —— ファイルと辺の出所が一致すること。
+
+**両方向で確かめた**: `paths_with_external_test_package` を空集合にすると 1 と 5 が
+`undefined: p.Reveal` で落ち、逆に「dedup を生き残った全部」に広げると 2 と 5 が落ちる。
+
+#### prometheus の 2 件は C ではなく、seed の wave スケジューラの欠陥だった
+
+`promql_test` と `cmd/promtool` はどちらも
+`cannot use invalid type value as *promql.Engine value`。続き 20 は promtool を
+「C の巻き添えと推定」と書いていたが、両方とも C ではない。
+`GUFF_DEBUG_SEED_ERRORS=1` が一行で答えを出す:
+
+```
+guff:     seed dep github.com/prometheus/prometheus/promql/promqltest — 19 error(s), first: undefined: promql
+```
+
+`promqltest` が seed で型検査されたとき `promql` がまだ merge されていない。
+`NewTestEngine` の戻り型 `*promql.Engine` が invalid になり、
+それを使う**2 つ隣のパッケージ**が ill-typed になる。原因は 3 段:
+
+1. `import_path_dep_graph` は辺を**括弧を剥がして**張る（`Q [P.test] -> Q`）。
+   これで **Go では非巡回な組が巡回になる**: prometheus では
+   `util/teststorage` の test variant が `tsdb` に依存し、
+   `tsdb` の test variant が `util/teststorage` に依存する。
+   dedup が plain を両方落とすので、**どちらの key も test variant から辺を採る**。
+2. `dep_load_order` の `visiting` ガードが片方の辺を黙って落として walk を終える。
+   `order` はもう位相順ではない。
+3. `height` のパス 2 はその `order` を信じているので、
+   **まだ訪れていない consumer を持つパッケージの height を読む**。
+   prometheus `./...` では back-edge 5 本に対して
+   **`wave(dep) < wave(consumer)` を破る辺が 16 本**でき、
+   その 1 本が `promql/promqltest -> promql`（どちらも wave 12）である。
+
+**素直な直し（`order` の中で後ろを向く辺だけで伝播する）は試して捨てた。**
+`promql` は正しく分かれた（wave 12 / 15、破る辺 16 → 0）が、そのとき落ちる辺は
+`teststorage -> tsdb` の**実在する方**なので、`teststorage` が `tsdb` より先に組まれ、
+`promtool` / `web` / `web/api/v1` / `promqltest` の 4 パッケージが
+`teststorage.TestStorage has no field or method Dir` で ill-typed になる。
+**1 件直して 4 件壊す。** 巡回が偽物である以上、直すべきはスケジューラではない ——
+**seed が production ファイルを組むなら production の辺を渡す**、つまり
+パッケージロード側である。`typecheck.rs` の当該箇所にこの経緯をコメントで残した。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる（上記）** —— 非 augment の path では
+   plain `P` の deps を使う。難所は供給源で、`filter_duplicate_packages` が plain を
+   `all` から落とした後なのでもう手元に無く、`go list -test ./...` は
+   for-test dep variant（`Q [P.test]`）を**トップレベルには出さない**
+   （Deps の文字列の中にしか現れない）。**パッケージロード側の設計変更**になるので
+   単独のタスクにすること。再現は prometheus `./...` の 2 件、
+   観測は `GUFF_DEBUG_SEED_ERRORS=1` の 1 行、
+   検算は `dep_graph` を Python で組み直して破る辺を数えるだけで足りる。
+2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。syncthing の `deviceid.go:191/209` に今も両側で並ぶ。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。`prepare_method_set` に寄せる。
+6. **E: 浮動小数定数の整数への変換** —— thanos `pkg/promclient` の 1 行（続き 20 の 6）。
+   **hunt に残る ill-typed 3 件のうちの 1 件**で、他の 2 件は上記 1。
+
+---
+
+### 2026-08-23（続き 22）— 型付き定数は「使うとき」ではなく「演算のたび」に丸められる
+
+続き 20 の「次にやること」6（クラス E）。thanos `pkg/promclient` の 1 行。
+
+```go
+testutil.Equals(t, int64(2*time.Hour), int64(flags.TSDBMinTime))          // 通る
+testutil.Equals(t, int64(4.8*float64(time.Hour)), int64(flags.TSDBMaxTime)) // guff: cannot convert float64 to type int64
+```
+
+#### 「4.8 だけが落ちる」は係数の話であって、型の話ではないように見えた
+
+| 式 | 修正前 |
+|---|---|
+| `int64(2.0 * float64(time.Hour))` | 通る |
+| `int64(float64(time.Hour) * 1.5)` | 通る |
+| `int64(4.8 * float64(time.Hour))` | **落ちる** |
+| `int64(float64(time.Hour) * 4.8)` | **落ちる** |
+| `int64(4.8 * 3600000000000.0)` | 通る（untyped どうし） |
+
+分かれ目は**係数が 2 進で正確に表せるか**である。1.5 と 2.0 は表せる。4.8 は表せない。
+そして最後の行が効いていて、**同じ 4.8 でも untyped どうしなら通る** ——
+つまり問題は乗算でも定数の値でもなく、**型が付いていること**にある。
+
+#### 原因 —— 4 か所の `// DEFERRED: check.overflow(x)`
+
+Go の規則は「型付き定数はその型で表現可能でなければならない —— **演算のたびに**」で、
+go/types は `constant.BinaryOp` の直後に `check.overflow` を呼び、
+そこから `representable` が値を**その場で丸め直す**。
+guff は `basic_lit` / `unary` / `binary` / `shift` の 4 か所すべてに
+`// DEFERRED: check.overflow(x)` を置いたまま出荷していた。
+
+丸めないと、float64 定数どうしの積は**厳密な有理数**のまま残る。
+4.8 の float64 表現は 5404319552844595/2^50 なので、
+
+```
+4.8 * 3.6e12 = 2374945115996159912109375 / 2^37     ← 整数ではない → int64 は truncation
+round_float64(それ) = 17280000000000                ← 整数 → int64 は通る
+```
+
+untyped どうしなら丸める型が無いので厳密な 24/5 × 3.6e12 = 17280000000000 のまま通る。
+**同じ係数が、型が付いた瞬間にだけ問題になる**のはこのためで、
+「1.5 は通って 4.8 は落ちる」という見え方は原因ではなく症状だった。
+
+#### `overflow` は 2 つのことをする
+
+1. **型付き定数** —— `representable` で丸める（表現できなければその場でエラー）。
+2. **untyped 整数** —— Go の定数精度 512 bit を超えたらエラーにして Unknown にする。
+
+2 は副産物で、`const big = 1 << 1000` を guff は**黙って受けていた**。
+文言は上流と 1 文字違わない `constant shift overflow`
+（`opName` が入れる演算子の語まで含めて一致する）。
+
+#### ゲート
+
+`check_files.rs` に 5 本。**両方向で確かめた** ——
+`overflow` を早期 return にすると 3 本が落ち、
+「丸めをやめる」「丸めを広げる」のどちらに転んでも残りの 2 本が捕まえる。
+
+- **`a_typed_float_constant_is_rounded_after_each_operation`** —— 修正そのもの。
+  上の表の 5 行をそのまま入れてある（通っていた 3 行も含む）。
+- **`rounding_neither_manufactures_nor_destroys_representability`** ——
+  `int64(4.7 * hour / 7.0)` は float64 で本当に小数なので**今も落ちる**。
+  丸めを結果側に効かせて整数に寄せる実装は 1 本目を通してここで落ちる。
+  同じテストの後半で untyped の側（丸める型が無い）も押さえる。
+- **`a_typed_constant_that_overflows_its_type_is_rejected_at_the_operation`** ——
+  `const x int8 = 100; const y = x * 2` が **`x * 2` の位置で** 1 件。
+- **`an_untyped_integer_constant_may_not_grow_past_the_constant_precision`** ——
+  `1 << 1000` は落ち、`1 << 511`（ちょうど 512 bit）は通る。上限は `>` であって `>=` ではない。
+- **`complementing_a_typed_unsigned_constant_survives_the_round`** ——
+  `^uint(0)` は**型付き**なので新しく丸めを通る。符号付きに丸めれば `-1` が戻り、
+  `1 << (^uint(0) >> 63)`（runtime 自身のイディオム）が `u64::MAX` ビットのシフトになる。
+  `unary` のマスク処理のコメントが警告しているのがこの経路である。
+
+#### 結果
+
+**hunt の ill-typed 9 → 8**（thanos 2 → 1。`pkg/promclient` が消え、
+残るのは `internal/cortex/chunk/cache_test` ＝ クラス C）。
+**差分は 1 件も動いていない**: 16 ターゲットすべてで guff / golangci / both / unexpected が
+続き 20 の hunt（`hunt-20260822T165933Z`）と完全一致。golden 103/103、isolate 116/116。
+定数を丸めることは、どの check が読む値も変えなかった。
+
+> **注意（マージ順）**: 続き 21（外部テストパッケージ）が thanos の `cache_test` を
+> 潰すので、**両方が main に入った時点で thanos は 0 になり、
+> `compat/baselines/health-hunt.json` の thanos 行は消してよい**。
+> どちらの PR も単独では 1 までしか下げられないので、両方とも 1 を記録している。
+> 減るのは自由なのでゲートは緑のままだが、行は古くなる。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+2. **G705（XSS）** —— 続き 18 の 2。syncthing に 3 件。
+3. **G115 の文言** —— 続き 18 の 3。`rune -> byte` と `int32 -> uint8`。
+   **上流は `byte` / `rune` を「名前の違う別の `*Basic`」として持っている**
+   （`go/types` の `aliases` 配列）のに対し、guff の `byte` / `rune` は
+   `uint8` / `int32` と**同じ TypeId を指す TypeName** なので、
+   「ソースが `byte` と書いた」という情報が型の側に残っていない。
+   `basic.rs` の `BYTE` / `RUNE` は「同じ数値の別名」というコメントつきで
+   そう決めてあるので、直すならモデルを変える話になる。単独のタスクにすること。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
+
+---
+
+### 2026-08-23（続き 23）— メソッドの名前を作れる関数が 1 つも共有されておらず、5 か所が同じ回避を書いていた
+
+syncthing の gcl-only を linter 別に数えると errchkjson が 7 件で 2 番目に大きい。
+**7 件とも `(*encoding/json.Encoder).Encode`** で、`json.Marshal` のほうは 4/4 一致していた
+（`errchkjson: guff 4 / golangci 11 / both 4 → P 100% R 36.4%`）。
+
+#### 原因 —— `call_name` はメソッドに対して Go が作らない名前を返す
+
+上流 errchkjson は `types.Func.FullName()` で分岐するので、表はこう書かれている:
+
+```go
+case "encoding/json.Marshal", "encoding/json.MarshalIndent": …
+case "(*encoding/json.Encoder).Encode": …
+```
+
+guff の `marshal_fn_name` は `code::call_name` を使っていた。
+`call_name` は最後に `func_name`（**パッケージパス + オブジェクト名**）へ落ちるので、
+メソッドは `encoding/json.Encode` になる —— **Go が決して作らない綴り**であり、
+上流のどの表にも載っていない文字列である。だから Encoder の腕は一度も一致せず、
+`Marshal` の腕（パッケージ関数なので同じ綴り）だけが動いていた。
+**linter は生きているように見え、コーパスからは Encode が丸ごと消えていた。**
+
+```
+call_name        = Some("encoding/json.Encode")             ← Go が作らない
+callee_full_name = Some("(*encoding/json.Encoder).Encode")  ← 表が書いてある綴り
+```
+
+#### 同じ穴を 5 か所が別々に埋めていた
+
+`call_name` は doc コメントで「fully-qualified name」と名乗っているが、
+メソッドについてはそうではない。そして**それを必要とした移植は全部、横で作り直していた**:
+
+| 場所 | やっていること |
+|---|---|
+| `noctx::full_call_name` | `call_name` を呼んでから、同じ obj を引き直して `type_func_name` を取る |
+| `errcheck`（`lib.rs:451`） | `call_name` の結果と `type_func_name` の結果を**両方** names に積む |
+| `musttag::callee_name` | `call_name` を使わず最初から `type_func_name` |
+| `govet waitgroup` | `is_call_to(…, "(*sync.WaitGroup).Add")` が**死んでいて**、その下に「セレクタが `Add` で受け手が `sync.WaitGroup`」の 3 行が置いてある |
+| `staticcheck SA2000` | 同上（同じ 3 行がコピーされている） |
+
+後ろの 2 つは**フォールバックが救っているので緑のまま**で、
+死んでいる 1 行があることは誰にも見えない。errchkjson だけがフォールバックを書かなかった。
+
+`code::callee_full_name`（＝ `Func.FullName()`）を足して errchkjson をそれに向けた。
+**`call_name` 自体は触っていない** —— 15 前後の analyzer が結果を文字列として使っており
+（`printf` は `rsplit('.')`、`wrapcheck` は `format!("{n}(")` して設定パターンと突き合わせる、など）、
+中央で直すなら**その全部を読む**必要がある。下記「次にやること」に分けた。
+
+#### isolate の fixture が 1 件しか比較していなかった
+
+`compat/isolate/fixtures/errchkjson/bad.go` は `json.Marshal` 1 件だけで、
+上流も guff も 1/1 で一致していた。§1 が数えた「**72 linter が 1 件だけ比較している**」
+の一例がそのまま今回の穴を通した形になる。
+呼び出しの 3 形（式文・blank 代入・変数レシーバ）と unsafe 型、
+それに**黙るべき 2 形**（`return` と `if err :=`）を足して、上流の答えは 1 → **5 件**になった。
+
+#### 結果
+
+syncthing の errchkjson は **4/11 → 11/11、R 36.4% → 100%**（gcl-only 7 → 0）。
+syncthing の unexpected は **42 → 33**、他の 15 ターゲットは 1 件も動いていない。
+
+#### ゲート
+
+- `compat/isolate/fixtures/errchkjson/bad.go` —— 上記のとおり 5 件。**上流と実行比較される。**
+- `crates/guff-error/tests/testdata/errchkjson/encoder.go` +
+  `errchkjson_flags_unchecked_encoder_encode` —— 4 件ちょうどを要求する
+  （黙るべき 2 形を数に含めない形で書いてある）。**両方向で確認**:
+  `callee_full_name` を `call_name` に戻すと 0 件になって落ちる。
+
+**次にやること**
+
+1. **`call_name` をメソッドについても `Func.FullName()` にする（中央の修正）** ——
+   `is_call_to` / `is_call_to_any` に渡っている文字列リテラルは 34 種で、
+   **`(*sync.WaitGroup).Add` 以外は全部パッケージ関数か組み込み**なので、
+   直しても比較の意味は変わらず、死んでいる 1 行が生き返って
+   上の 3 行のフォールバックが 2 か所で消せる。危険なのは
+   **結果を文字列として使っている側**で、`printf.rs`（3 か所）/ `wrapcheck.rs` /
+   `bodyclose.rs` / `st1013.rs` / `inline.rs` / `copylocks.rs` / `atomic.rs` ×2 /
+   `defers.rs` / `sa6005.rs` を読む必要がある。単独のタスクにすること。
+2. **他の linter にも同じ穴が無いか** —— 判定基準は
+   「上流が `FullName()` で分岐しているか」であって「メソッドを扱うか」ではない。
+   `grep -rn 'call_name' crates/` の結果を 1 つずつ上流と突き合わせる。
+
+---
+
+### 2026-08-23（続き 24）— G705: 上流の表に載っている sink のうち 4 つは、上流でも一度も撃てない
+
+続き 18 の「次にやること」2。syncthing の gcl-only に G705 が 3 件。
+コメントは「これだけは `Receiver` sink と `ArgTypeGuards` が要る」と書いてあり、
+その 2 つが実際に何なのかを最初に確かめた。
+
+#### 上流のソースがローカルにある
+
+`~/projects/src/github.com/securego/gosec`（v2.27.1-9-g8495706）に checkout がある。
+**表を推測せずに移植できる**ので、まず `analyzers/xss.go` と `taint/taint.go` を読んだ。
+必要だったのは 2 つの機構だけで、残りは既存のエンジンがそのまま使える。
+
+| 機構 | 何が違うか |
+|---|---|
+| `Receiver` sink | `(net/http.ResponseWriter).Write` は**インターフェースのメソッド**なので、SSA では invoke であり **static callee が無い**。`static_callee` しか見ない matcher は 1 件も見つけられない |
+| `ArgTypeGuards` | `fmt.Fprintf` は「**HTTP レスポンスに書くとき**だけ」sink。これが無いと、web サーバの `Fprintf(os.Stderr, …)` がほぼ全部 finding になる |
+
+#### 先に上流の答えを 14 形について取った
+
+移植する前に、撃つ形・黙る形を 14 個並べたモジュールを golangci-lint に食わせた。
+**7 fires / 7 silent**。これが仕様書になり、そのまま fixture の骨格になった。
+
+その中で 1 つ、表を読んだだけでは出てこない事実が出た:
+
+```go
+func templateHTML(r *http.Request) template.HTML {
+	return template.HTML(r.FormValue("q"))   // G705: 黙る
+}
+```
+
+`xss.go` の表には `html/template` の `HTML` / `HTMLAttr` / `JS` / `CSS` が
+sink として並んでいる。しかし**これらは型変換であって呼び出しではない**ので、
+`analyzeFunctionSinks` が見る `*ssa.Call` には決してならない。
+**上流でも一度も撃てない 4 行**である。表には忠実に入れたうえで、
+fixture に `// silent` の実例として置き、コメントにそう書いた。
+なお**その行が無警戒なわけではない**: 同じ形を AST 側の **G203** が撃っていて、
+golden がその 1 件を pin している。
+
+もう 1 つ、`resolveOriginalType` が飾りではないこと:
+
+```go
+var out io.Writer = w                       // w は http.ResponseWriter
+fmt.Fprintf(out, "<p>%s</p>", r.FormValue("q"))   // 撃つ
+```
+
+sink に届く時点で writer は `io.Writer` に広がっているので、
+**`io.Writer` が `ResponseWriter` を実装するか**を訊くと必ず no になる。
+インターフェース変換を遡って「呼び出し側が何を渡したか」に戻す必要がある。
+
+#### stub の `ResponseWriter` が `interface{}` だった
+
+`crates/guff-style/tests/testdata/gosec/stub/net/http/http.go` の
+`type ResponseWriter interface{}` は**空インターフェース**で、
+つまり**あらゆる型が実装している**。この stub のままなら
+`ArgTypeGuards` は単体テストの中で**常に真になる no-op** で、
+「guard が効いている」ことを一度も確かめられなかった。
+3 メソッドの本物にした。ついでに **`os.Stderr` が stub に存在しなかった**ので、
+最初の実行では guard が invalid 型を訊いていて 9 件（正解 7 件）出た ——
+**stub の穴が、guard のバグと同じ顔で出る。**
+`*os.File` には `Write` だけを持たせてある: `io.Writer` ではあるが
+`http.ResponseWriter` ではない、という差が G705 の guard そのものだからである。
+
+#### ゲート
+
+- `compat/golden/cases/gosec` —— includes に G705 を足し、上流から再生成。
+  **142 キー**を `path:line:col:linter:severity:text` で正規化なしに比較する。
+  G705 の 8 件は severity `medium`（taint は `RuleInfo.Severity`、confidence は常に High）。
+- `crates/guff-style/tests/testdata/gosec/g7xx.go` に **8 fires / 10 silent**。
+  silent の中身が本体である:
+  - 4 つは guard で落ちる `fmt` / `io` 呼び出し。**guard を消すと finding になる。**
+  - 2 つは**他のルールの source**（`*url.URL` と `os.Getenv`）。どちらも
+    G703 / G706 / G710 では source で、G705 では source ではない ——
+    5 つの表を 1 つに畳んだ実装はここで落ちる。同じ fixture の 40 行上で
+    `r.URL.Path` が G703 と G706 を撃っているので、対比がその場にある。
+    その隣に `os.Args`（G705 の source **である**ほう）を置いてある。
+- `gosec_g705_needs_the_invoke_sink_and_the_writer_guard` ——
+  invoke sink と guard を「落とすと何が壊れるか」で書いた 1 本。
+- 既存の 4 ルールの本数 (7, 5, 5, 2) は動いていない。
+
+#### 上流との差分実測
+
+移植の途中で 3 セット、計 **32 形**を golangci-lint と 1 件ずつ突き合わせた:
+14 形の sink/silent（上記）、**12 の sanitizer 全部**（両ツールとも 0 件）、
+**6 の source**（`os.Args` / `bufio.Scanner` / `bufio.Reader` は撃ち、
+`*url.URL` / `os.Getenv` / 素の `string` 引数は黙る）。
+すべて行・列まで一致。
+
+#### 一つだけ上流と意図的に変えた
+
+`isSinkCall` は invoke の腕で一致しなかったとき **static callee の腕に落ちる**。
+invoke では `StaticCallee()` が nil なので、invoke の腕が置いていった値
+（**インターフェースの**パッケージとメソッド名）がそのまま残り、
+最後のループが**パッケージ関数の sink** に一致しうる ——
+`(pkg.I).Open` が `pkg.Open` の sink を満たしてしまう。
+guff は invoke の腕で止める。5 つの表の範囲では到達不能で
+（sink は全部 stdlib のパッケージで、同じパッケージの
+インターフェースに同名のメソッドは無い）、その前提が崩れる表を足したときに
+読み直すべき箇所としてモジュールのコメントに書いてある。
+
+#### 性能
+
+`lookup_named_type` は**オブジェクトアリーナ全体を歩く**（上流が
+`prog.AllPackages()` のスコープを歩くのと同じ）。guard の答えを
+`(実引数の型, 要求する型)` でキャッシュしただけでは、
+**種類の違う writer ごとにパッケージ 1 つあたり 1 回**その歩きが走る。
+アリーナはプログラム全体のものなので、`want` 単位でも memo する
+（1 ルールにつき 1 回）。G705 の `want` は `net/http.ResponseWriter` の 1 つだけである。
+
+#### 結果
+
+**syncthing の gcl-only G705 は 3 → 1**、gosec 全体で
+guff 97 / golangci 101 / both 95（P 97.9% / R 94.1%）。unexpected は 42 → 40。
+**guff-only は 1 件も増えていない**（他の 15 ターゲットは完全に不変）。
+
+そして **authelia が 16 → 15 に減った**。減ったのは finding ではなく
+**guff の偽陽性**である:
+
+```go
+// internal/handlers/handler_oauth2_oidc_userinfo.go:202
+//nolint:gosec // TODO: Run this line through taint analysis.
+```
+
+このディレクティブは G705 が無いあいだ「使われていない」ので
+nolintlint が撃っていた。G705 が実装された瞬間に**ディレクティブが仕事を始め**、
+偽陽性が 1 件消えた。**コメントが欠けている実装の名前をそのまま書いていた**。
+
+#### 残り 1 件は G705 の表の問題ではない
+
+`lib/api/api.go:1030` の
+
+```go
+func (*service) flushResponse(resp string, w http.ResponseWriter) {
+	w.Write([]byte(resp + "\n"))
+}
+// 呼び出し側: s.flushResponse(`{"ok": "resetting folder `+folder+`"}`, w)
+```
+
+は `resp` が**素の string 引数**なので、taint は**呼び出しグラフ経由**
+（`isParameterTainted`）でしか届かない。同じ形を 30 行に縮めた再現を作ると
+**上流も黙る** —— つまり差が出るのはこの形そのものではなく、
+syncthing の規模での**グラフの種**（`AllFunctions` / `RuntimeTypes` の到達）である。
+続き 18 が `plainRec` / `boxedRec` で fixture 化したのと同じ半分で、
+G702 / G703 / G706 / G710 と共有している。単独のタスクにすること。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+2. **G115 の文言（`rune -> byte`）** —— 続き 18 の 3。
+   gosec は `instr.X.Type().Underlying().(*types.Basic).Name()` を出す。
+   go/types は `byte` / `rune` を **`aliases` 配列の別の `*Basic`**
+   （kind は `Uint8` / `Int32`、name は `"byte"` / `"rune"`）として持ち、
+   `range` 文字列や `byte(x)` 変換がその別名のほうを伝播させる。
+   guff の `byte` / `rune` は `uint8` / `int32` と**同じ TypeId を指す TypeName**
+   なので、「ソースが `byte` と書いた」情報が型に残らない。
+   `Basic { kind, info, name }` という形は上流と同じなので、
+   **kind が同じで name が違うアリーナ要素を 2 つ足す**のが素直な直し方になる。
+   危ないのは basic を **TypeId で比較している**箇所で、そこを洗う必要がある。
+   syncthing の `deviceid.go:191/209` が両側に並んでいる 2 行で、
+   直せば gcl-only 2 と guff-only 2 が同時に消える。単独のタスクにすること。
+3. **`call_name` の中央修正** —— 続き 23 の 1。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
+### 2026-08-23（続き 25）— `byte` と `rune` は「同じ型の別名」ではなく「名前の違う別の型」
+
+続き 24 の「次にやること」2。syncthing の `lib/protocol/deviceid.go:191/209` が
+**両側に同時に並んでいた**唯一の差分:
+
+```
++guff  G115: integer overflow conversion int32 -> uint8
++gcl   G115: integer overflow conversion rune -> byte
+```
+
+行も列も同じで、**綴りだけが違う**。
+
+#### 原因 —— TypeName が 2 つ、Basic は 1 つ
+
+gosec は `instr.X.Type().Underlying().(*types.Basic).Name()` を出す。
+go/types は `byte` / `rune` を **`aliases` 配列の別の `*Basic`**
+（kind は `Uint8` / `Int32`、name は `"byte"` / `"rune"`）として持っていて、
+`identical` は **kind で比べる**ので代入も変換も何も変わらない。
+別々の値が保っているのは**ソースがどちらの綴りを書いたか**だけであり、
+診断に出るのはその名前のほうである。
+
+guff は `byte` / `rune` を **`uint8` / `int32` と同じ TypeId を指す TypeName**
+にしていた。`basic.rs` の `BYTE` / `RUNE` は
+「`Uint8` / `Int32` と同じ数値の別名」というコメントつきでそう決めてあり、
+**そこまでは正しい（kind は本当に同じ）**。取りこぼしていたのは
+「kind が同じでも `*Basic` は別」という上流の一段である。
+
+#### 直し方は 2 要素の追加で済んだ
+
+`Basic { kind, info, name }` という形は最初から上流と同じで、
+`identical` も既に `a.kind() == b.kind()` で比べていた。
+なので**アリーナに 2 つ足して TypeName の向き先を変えるだけ**で、
+型検査のロジックには 1 行も触っていない。
+
+**ワークスペース全体のテストが通り、直したテストは 2 本だけ**だった:
+
+1. `universe.rs::byte_and_rune_aliases_point_to_uint8_and_int32` ——
+   古いモデルそのものを表明していたので、新しいモデル
+   （**TypeId は別・kind は同じ・`identical` は真**）を表明するように書き直した。
+2. `check_files.rs::conversions_to_type_literals_are_checked` ——
+   `var z int = []byte(s)` のエラーが `[]uint8` を含むことを要求していた。
+   **Go は `[]byte` と言う**:
+
+   ```
+   cannot use []byte(s) (value of type []byte) as int value in variable declaration
    ```
 
-   `float64(time.Hour)` は**定数**（`time.Hour` は typed constant）なので積も
-   float64 定数で、値が整数なら `int64` への変換は spec 上通る。
-   guff は小数点を持つ float 定数の変換をまとめて拒んでいる疑いがある。
+   つまりこのテストは**上流より不正確な綴りを固定していた**。
+   狙っていた 1 件のほかに、この小さな不一致も一緒に消えた。
 
----
+#### 綴りが残るのはパッケージ内だけ
 
----
+export data は basic を **kind で**符号化するので、
+パッケージ境界を越えた `byte` は `uint8` として復号される —— **Go でも同じ**。
+syncthing の該当行は `luhn32` が同じ `lib/protocol` で
+`(rune, error)` を返しているので、綴りが残る側に入っている。
 
+#### 結果
+
+`deviceid.go:191:27` / `209:27` が両方とも
+`G115: integer overflow conversion rune -> byte` になり、上流と一致。
+**gcl-only 2 件と guff-only 2 件が同時に消える** —— 同じ 2 行が
+差分の両側に立っていたので、片側だけ直しても数は減らなかった。
+golden 103/103、isolate 116/116 は不変（他のどのメッセージも綴りが動いていない）。
+### 2026-08-23（続き 26）— 桁だけが違う欠陥は、桁を見るゲートを作らないと永久に見えない
+
+続き 25 で syncthing の `deviceid.go` の 2 行を突き合わせていたら、
+**すぐ上の行で godoclint が桁だけずれている**のが目に入った。
+
+```
+guff  lib/protocol/deviceid.go:22:1: godoc should start with symbol name ("ShortIDStringLength")
+gcl   lib/protocol/deviceid.go:22:2: godoc should start with symbol name ("ShortIDStringLength")
+```
+
+#### 15 行に縮めると、左端かどうかで割れていた
+
+```go
+// WrongTop is misdocumented at column 1.
+func TopLevel() {}          // 両方 3:1 —— 一致
+
+const (
+	A = 1
+	// WrongInner is misdocumented, indented by a tab.
+	Inner = 7               // guff 8:1 / gcl 8:2 —— ずれる
+)
+```
+
+`godoclint` は**コメントを残したまま 2 度目のパース**をしていて、
+2 つの `FileSet` は位置を独立に採番するので、
+持ち帰れる共通の座標は (行, 桁) しかない。
+guff は**行だけ**を持ち帰って `line_pos`（＝その行の先頭）を撃っていた。
+左端の宣言では偶然それが正解になるので、
+**`const (` や `var (` の中でインデントされた doc コメントだけがずれる。**
+
+#### どのゲートにも写らない形だった
+
+- **isolate の fixture は トップレベルの func が 1 つ**。両側とも桁 1 で一致する。
+- **isolate と OSS/hunt の比較キーは `path:line:linter:message`** ——
+  §1 が最初に数えた「column を一切比較していない」がそのまま効いている。
+
+つまり**桁を見る tier が無い check は、桁がずれていても永久に緑**である。
+`compat/golden/cases/forcetypeassert/config.yml` が同じことを書いている ——
+あの case はまさにこの理由で作られている。
+
+#### hunt は 1 ターゲットも動かない —— それがこの話の証明である
+
+修正後の hunt は **16 ターゲット全部が完全に不変**（failures=0 / health=0）。
+出力は実際に変わっているのに、**hunt のキーには桁が無いので写らない**。
+「桁を見るゲートを作らないと永久に見えない」は比喩ではなく、
+この 0 という数字がそれである。
+
+#### 直し方とゲート
+
+`reparsed_pos` を 1 つ置いて、再パース側の `Position` から
+**行と桁の両方**を持ち帰るようにした（`column` は 1 始まりのバイト桁、
+`line_start` はバイトオフセットなので足し算は近似ではなく厳密）。
+パッケージ doc の側も同じ経路に寄せた。
+
+- **`compat/golden/cases/godoclint` を新設**（golden は **103 → 104 case**）。
+  `path:line:col:linter:severity:text` を正規化なしで比較する唯一の tier で、
+  fixture に**左端の宣言と、`const (` / `var (` の中の宣言の両方**を入れてある。
+  上流の答えは `bad/bad.go:17:2` と `28:2`。
+- **`godoclint_reports_the_column_the_doc_comment_starts_at`** ——
+  メッセージではなく `line:column` を表明する。
+  `support::run_analyzer_positions` を足した（位置が欠陥である check 用）。
+  **両方向で確認**: 桁を捨てて行頭に戻すと `17:1` になって落ちる。
+
+#### 棚卸ししたら、同じ形が隣に 1 つ、別の欠陥が 1 つ出た
+
+**golden に case がある linter は 116 中 21 だけ。残る 95 は桁が構造的に自由である。**
+
+```
+comm -23 <(ls compat/isolate/fixtures/ | sort) \
+         <(ls compat/golden/cases/ | sed 's/-.*//' | sort -u) | wc -l   # 95
+```
+
+優先順位は「位置を自前で計算しているか」で付く。
+**行番号から復元している**（＝今回と同じ形の）check は
+`grep -rln "line_pos(" crates/*/src/` で 6 つ:
+`dupl` / `dupword` / `godoclint` / `godot` / `godox` / `gomoddirectives`。
+
+その 3 つを 22 行の fixture で上流と突き合わせたら、**2 件出た**:
+
+1. **`dupword` は同じ桁の欠陥を持っていた（この回で一緒に直した）。**
+   `var (` の中のコメントで guff `13:1` / 上流 `13:2`。
+   `dupword` 自身の fixture のコメントが func の中でインデントされているので、
+   **最初からずっと外していた** —— 誰も桁を見ていなかっただけである。
+   文字列リテラル側（`check_string_lit`）は `lit.value_pos` を
+   解析側の `FileSet` から直接読むので**一度も影響を受けていない**。
+   golden case はその 2 つを並べて pin してある（`4:2` のコメントと
+   `5:10` のリテラル）。
+2. **`godot` は `var (` / `const (` の中の doc コメントを見ていない。**
+   22 行の fixture で上流 4 件に対し guff 2 件（8 行目と 13 行目を落とす）。
+   これは桁ではなく **recall** で、`util.rs` と `godot.rs` に
+   `DEFERRED: getBlockComments` として**既に書いてある**既知の欠落である。
+   書いてあることと、いくらの値段が付いているかは別なので、ここに値段を記録する。
+
+#### `line_pos` 一族は 6 つとも測った —— 欠陥は 2 つ
+
+| check | 結果 |
+|---|---|
+| `godoclint` | **欠陥**。この回で修正 |
+| `dupword` | **欠陥**（コメント側のみ）。この回で修正 |
+| `godox` | 正しい。`line_start + start_col` を足していて、しかも**上流の `+1` の癖**（golangci の wrapper が `i.Pos.Column + 1` を出す）までコメントに書いてある |
+| `dupl` | 正しい。そもそも桁を出さない（`a.go:3:`） |
+| `gomoddirectives` | 正しい。go.mod のディレクティブは本当に桁 1 |
+
+**「行から復元している」は疑いの根拠であって、欠陥の証拠ではない** ——
+6 つのうち 4 つは正しく、うち 1 つは正しさの理由をコメントに書いてあった。
+測るまでは分からない、というのがこの表の中身である。
+
+**次にやること**
+
+1. **`godot` の `getBlockComments`** —— 上の実測つき（22 行で 4 対 2）。recall 側。
+2. **golden case の拡充** —— 残り 93。位置を自前で計算している側から。
+   `line_pos` 一族は尽きたので、次の切り口は
+   「ノードではなくトークンを撃っている」「オフセット演算をしている」側
+   （`grep -rlnE "pos \+ [0-9]|\.0 as u32 \+ "` で 14 ファイル）。
+2. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+3. **`call_name` の中央修正** —— 続き 23 の 1。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
+6. **G705 の残り 1 件（呼び出しグラフ）** —— 続き 24。
 ### 2026-08-23（続き 27）— `DEFERRED` と書いてあることと、値段が付いていることは別である
 
 続き 26 の「次にやること」1。`godot` の `getBlockComments` 欠落は
@@ -8540,6 +9217,15 @@ golangci-lint が 4 回走って一度も同じ finding 集合を返さなかっ
 **思いついた形しか入っていない fixture は、その形以外については無いのと同じ**である。
 fixture に 2 行コメント・空行を含むコメント・末尾が空行のコメントを足した
 （golden は 5 → 8 件）。
+
+---
+
+
+---
+
+
+---
+
 
 ---
 

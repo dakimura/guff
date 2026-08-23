@@ -4,7 +4,7 @@ use guff_constant::{bool_val, int64_val};
 use guff_types::{
     init_universe_full, interface_is_comparable, interface_method, interface_num_methods,
     named_underlying, signature_params, signature_results, signature_variadic, tuple_at, tuple_len,
-    unalias, BasicKind, BuiltinId, ObjectData, TypeData, TypeKind,
+    identical, unalias, BasicKind, BuiltinId, ObjectData, TypeData, TypeKind,
 };
 
 #[test]
@@ -16,19 +16,43 @@ fn lookup_returns_predeclared_basics() {
     assert_eq!(int_typ, u.typ[BasicKind::Int as usize]);
 }
 
+/// `byte` and `rune` are their **own** Basic values, not the `uint8` / `int32`
+/// entries — go/types' `aliases` array. They carry the same kinds, so
+/// `identical` says yes and nothing about assignability or conversion changes;
+/// what the separate values keep is the *name*, and the name is what a
+/// diagnostic prints. gosec's G115 says `rune -> byte` for a conversion the
+/// source wrote that way, and `int32 -> uint8` if the two are collapsed.
 #[test]
-fn byte_and_rune_aliases_point_to_uint8_and_int32() {
-    let u = init_universe_full();
-    let byte_obj = u.lookup("byte").unwrap();
-    let rune_obj = u.lookup("rune").unwrap();
-    assert_eq!(
-        byte_obj.typ(&u.object_arena),
-        Some(u.typ[BasicKind::Uint8 as usize])
-    );
-    assert_eq!(
-        rune_obj.typ(&u.object_arena),
-        Some(u.typ[BasicKind::Int32 as usize])
-    );
+fn byte_and_rune_are_distinct_basics_identical_to_uint8_and_int32() {
+    let mut u = init_universe_full();
+    let byte_typ = u.lookup("byte").unwrap().typ(&u.object_arena).unwrap();
+    let rune_typ = u.lookup("rune").unwrap().typ(&u.object_arena).unwrap();
+    let uint8_typ = u.typ[BasicKind::Uint8 as usize];
+    let int32_typ = u.typ[BasicKind::Int32 as usize];
+
+    assert_ne!(byte_typ, uint8_typ, "byte must not be the uint8 entry");
+    assert_ne!(rune_typ, int32_typ, "rune must not be the int32 entry");
+
+    for (alias, canonical, name, kind) in [
+        (byte_typ, uint8_typ, "byte", BasicKind::Uint8),
+        (rune_typ, int32_typ, "rune", BasicKind::Int32),
+    ] {
+        let TypeData::Basic(b) = u.type_arena.get(alias) else {
+            panic!("{name} is not a Basic");
+        };
+        assert_eq!(b.name(), name);
+        assert_eq!(b.kind(), kind);
+        assert!(
+            identical(
+                &mut u.type_arena,
+                &u.object_arena,
+                &u.package_arena,
+                alias,
+                canonical
+            ),
+            "{name} must be identical to its canonical spelling"
+        );
+    }
 }
 
 #[test]

@@ -8,23 +8,11 @@
     "Re-record with: ./compat/hunt.sh --update-baseline"
   ],
   "targets": {
-    "authelia": {
-      "ill_typed": 1
-    },
-    "dapr": {
-      "ill_typed": 1
-    },
-    "gitea": {
-      "ill_typed": 1
-    },
     "prometheus": {
       "ill_typed": 2
     },
-    "rclone": {
-      "ill_typed": 2
-    },
     "thanos": {
-      "ill_typed": 2
+      "ill_typed": 1
     }
   }
 }

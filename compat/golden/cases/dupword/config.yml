@@ -1,0 +1,24 @@
+# Golden case: dupword.
+#
+# Same reason as `godoclint`: dupword recovers a comment's position from the
+# comment-preserving re-parse by *line* and then reported the start of that
+# line, so every finding came out at column 1. Its own fixture's comment is
+# indented inside a func, so the case was always wrong here — nothing looked.
+#
+# The isolate and OSS keys are `path:line:linter:message`, with no column field
+# (COMPAT-HARDENING §1). This tier compares `path:line:col:linter:severity:text`
+# with no normalization and is the only place the difference is visible.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - dupword
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

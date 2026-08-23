@@ -1,0 +1,2 @@
+# The fixtures the Rust tests use, so the two cannot drift.
+bad/bad.go   crates/guff-comment/tests/testdata/dupword/bad.go

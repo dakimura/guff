@@ -164,8 +164,8 @@ fn gosec_g123_reports_verifypeer_without_a_resumption_guard() {
     );
 }
 
-/// The taint engine — G702 / G703 / G706 / G710 — over one fixture whose every
-/// function is marked `// fires` or `// silent`.
+/// The taint engine — G702 / G703 / G705 / G706 / G710 — over one fixture whose
+/// every function is marked `// fires` or `// silent`.
 ///
 /// The counts alone would pass on a rule that reports everything, so the
 /// fixture is built the other way round: each firing shape is paired with the
@@ -184,10 +184,37 @@ fn gosec_taint_rules_report_only_reachable_sources() {
             .count()
     };
     assert_eq!(
-        (count("G702"), count("G703"), count("G706"), count("G710")),
-        (7, 5, 5, 2),
+        (
+            count("G702"),
+            count("G703"),
+            count("G705"),
+            count("G706"),
+            count("G710")
+        ),
+        (7, 5, 8, 5, 2),
         "{messages:?}"
     );
+}
+
+/// G705's two shapes that no other taint rule has, stated as the thing that
+/// breaks if either is dropped.
+///
+/// A `Receiver` sink on an interface is an SSA **invoke**: there is no static
+/// callee, so a matcher that only asks `static_callee` finds nothing and
+/// `w.Write(tainted)` — the most direct XSS there is — reports nothing.
+/// `ArgTypeGuards` are the opposite failure: without them `fmt.Fprintf` is a
+/// sink wherever it is called, and every `Fprintf(os.Stderr, …)` of a request
+/// value in a web server becomes a finding.
+#[test]
+fn gosec_g705_needs_the_invoke_sink_and_the_writer_guard() {
+    let pkg = support::typecheck_fixture("gosec", "example.com/gosec/g7xx", "g7xx.go");
+    let messages = support::run_analyzer(gosec(), &pkg);
+    let g705: Vec<&String> = messages.iter().filter(|m| m.starts_with("G705: ")).collect();
+    // Eight firing shapes; the ten silent ones are what the count is really
+    // pinning — four are guarded `fmt` / `io` calls a missing guard would turn
+    // into findings, and two are sources that belong to the *other* taint rules
+    // and would fire here if the five tables were collapsed into one.
+    assert_eq!(g705.len(), 8, "{messages:?}");
 }
 
 /// The half of the taint engine that is easiest to lose: a `string` parameter

@@ -52,6 +52,33 @@ pub fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
     Some(ft.line_start(line as usize).0 as u32)
 }
 
+/// Map a position from the comment-preserving **re-parse** back into the
+/// analysis `FileSet`, keeping the column.
+///
+/// The two FileSets number positions independently, so the only shared
+/// coordinate is (line, column). Recovering just the line and taking
+/// `line_pos` — the line's *start* — reports column 1 for every doc comment,
+/// which is right only for declarations at the left margin. A doc comment
+/// inside a `const (` group is indented, and upstream reports where it actually
+/// begins: syncthing's `deviceid.go:22` is `:2` there and was `:1` here.
+///
+/// Nothing could see it. godoclint's isolate fixture is a single top-level
+/// func, where both answers are 1, and the OSS/hunt comparison key has no
+/// column field at all (§1).
+///
+/// `Position::column` is a 1-based byte column and `line_start` a byte offset,
+/// so the arithmetic is exact rather than an approximation for ASCII.
+pub fn reparsed_pos(
+    fset: &guff::FileSet,
+    file_pos: guff::Pos,
+    re_fset: &guff::FileSet,
+    pos: guff::Pos,
+) -> Option<u32> {
+    let p = re_fset.position(pos);
+    let line_start = line_pos(fset, file_pos, p.line)?;
+    Some(line_start + u32::try_from(p.column.max(1) - 1).unwrap_or(0))
+}
+
 /// Collect declaration doc comments (godot default `declarations` scope).
 ///
 /// Matches upstream `getDeclarationComments`: top-level `GenDecl` / `FuncDecl`
