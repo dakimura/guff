@@ -374,8 +374,15 @@ fn handle_json_marshal(
 }
 
 /// Returns `(fn_name, force_omit_safe)`. Encode always forces omit-safe (upstream).
+///
+/// Upstream keys off `types.Func.FullName()`, so the Encoder arm below is
+/// spelled with a receiver — which is why this must not use `code::call_name`:
+/// that returns `encoding/json.Encode` for the method and the arm never
+/// matched. Every `(*encoding/json.Encoder).Encode` in the corpus went
+/// unreported (7 on syncthing alone) while the `Marshal` arms, being package
+/// functions, looked perfectly healthy.
 fn marshal_fn_name(pass: &Pass<'_>, call: &CallExpr) -> Option<(String, bool)> {
-    let name = code::call_name(pass, &call.fun)?;
+    let name = code::callee_full_name(pass, call)?;
     match name.as_str() {
         "encoding/json.Marshal" | "encoding/json.MarshalIndent" => Some((name, false)),
         "(*encoding/json.Encoder).Encode" => Some((name, true)),
