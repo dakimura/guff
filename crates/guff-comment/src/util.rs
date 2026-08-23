@@ -106,6 +106,48 @@ pub fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
     out
 }
 
+/// Comments inside a top-level `var (` / `const (` block.
+///
+/// Port of godot's `getBlockComments`. Its `declarations` scope is
+/// `getBlockComments() ++ getDeclarationComments()`, and guff had only the
+/// second half, so a documented spec inside a group was never checked at all.
+///
+/// Three details are upstream's and are load-bearing:
+///
+/// - only a `GenDecl` with a real `Lparen` counts — `const A = 1` on one line
+///   has no block to be inside of;
+/// - the walk is over **`file.Comments`**, not the specs' `Doc` fields, so a
+///   free-floating comment in the block is included and a spec's doc is found
+///   by position rather than by ownership;
+/// - the column must be **exactly 2**. Upstream says why: the block itself is
+///   top level, so its immediate contents sit one level in. A comment indented
+///   twice is deliberately skipped, and so is one at the margin.
+pub fn block_comments<'a>(fset: &FileSet, file: &'a File) -> Vec<&'a CommentGroup> {
+    let mut out = Vec::new();
+    for decl in &file.decls {
+        let Decl::GenDecl(d) = decl else {
+            continue;
+        };
+        if d.lparen.0 == 0 {
+            continue;
+        }
+        for c in &file.comments {
+            if c.list.is_empty() {
+                continue;
+            }
+            let pos = c.pos();
+            if d.lparen > pos || pos > d.rparen {
+                continue;
+            }
+            if fset.position(pos).column != 2 {
+                continue;
+            }
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// Plain multiline text of a comment group with markers stripped.
 pub fn comment_group_raw_text(cg: &CommentGroup) -> String {
     let mut parts = Vec::new();
