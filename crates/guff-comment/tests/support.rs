@@ -114,6 +114,32 @@ pub fn run_analyzer(
     run_analyzer_with_settings(analyzer, pkg, &RunnerOptions::default())
 }
 
+/// Diagnostics as `line:column  message`, for the checks whose bug is a
+/// position rather than a message.
+pub fn run_analyzer_positions(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<String> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    let fset = pkg.fset.as_ref().expect("fset");
+    result
+        .diagnostics()
+        .into_iter()
+        .map(|(_, d)| {
+            let p = fset.position(guff::Pos(d.pos as i64));
+            format!("{}:{}  {}", p.line, p.column, d.message)
+        })
+        .collect()
+}
+
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

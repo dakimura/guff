@@ -940,10 +940,16 @@ fn conversions_to_type_literals_are_checked() {
     );
 
     // ... and the conversion's type is now known, so a bad use is reported.
+    //
+    // `[]byte`, not `[]uint8`: `byte` is its own predeclared Basic with its own
+    // name (go/types' `aliases` array), so a type written `[]byte` renders that
+    // way. Go says "cannot use []byte(s) (value of type []byte) as int value in
+    // variable declaration" here; this asserted `[]uint8` while the two
+    // spellings shared one Basic.
     let bad = check_src("package p\nfunc a(s string) { var z int = []byte(s); _ = z }\n");
     assert!(
-        bad.errors.iter().any(|e| e.msg.contains("[]uint8")),
-        "expected a type error mentioning []uint8, got: {:?}",
+        bad.errors.iter().any(|e| e.msg.contains("[]byte")),
+        "expected a type error mentioning []byte, got: {:?}",
         bad.errors
     );
 }
@@ -1596,4 +1602,139 @@ fn embedded_generic_instance_still_reports_a_method_set_that_does_not_match() {
         );
     }
     assert_eq!(msgs.len(), 4, "expected exactly four errors, got {msgs:?}");
+}
+
+/// A typed constant must be representable in its type after **every**
+/// operation, not only where it is finally used.
+///
+/// The exact product of two float64 constants generally carries more precision
+/// than float64 holds, and whether it does depends on the *coefficient*, not on
+/// anything visible in the types — which is why this reads as a rounding bug
+/// only once you pick a literal that is not exact in binary. `4.8` rounds to
+/// 5404319552844595/2^50, so `4.8 * hour` is exactly 2374945115996159912109375
+/// / 2^37 and `int64(…)` of that is a truncation error; rounded back to float64
+/// it is exactly 17280000000000 and the conversion is fine. `2.0 * hour` is
+/// unaffected either way. thanos' `pkg/promclient` went ill-typed on the first
+/// form (`int64(4.8 * float64(time.Hour))`) while `2*time.Hour` on the line
+/// above it was accepted.
+#[test]
+fn a_typed_float_constant_is_rounded_after_each_operation() {
+    let check = check_src(
+        "package p\n\
+         const hour float64 = 3600000000000\n\
+         var a = int64(4.8 * hour)\n\
+         var b = int64(hour * 4.8)\n\
+         var c = int64(2.0 * hour)\n\
+         var d = int64(hour * 1.5)\n\
+         var e = int64(hour)\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// Rounding must not manufacture an integer. `4.7 * hour / 7` is genuinely
+/// fractional in float64, and Go rejects the conversion — a "fix" that stopped
+/// asking the question, or that rounded the *result* toward an integer, passes
+/// the test above and fails here.
+///
+/// The untyped half is the other direction: with no type to round to, the
+/// product stays exact, so the same coefficient that needed rounding above
+/// needs none here.
+#[test]
+fn rounding_neither_manufactures_nor_destroys_representability() {
+    let fractional = check_src(
+        "package p\n\
+         const hour float64 = 3600000000000\n\
+         var w = int64(4.7 * hour / 7.0)\n",
+    );
+    assert_eq!(
+        fractional.errors.len(),
+        1,
+        "expected one truncation error, got {:?}",
+        fractional.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+
+    let untyped = check_src(
+        "package p\n\
+         var u = int64(4.8 * 3600000000000.0)\n",
+    );
+    assert!(
+        untyped.errors.is_empty(),
+        "expected no errors, got {:?}",
+        untyped.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// The other half of the same rule: rounding a typed constant can *fail*, and
+/// the failure belongs to the operation that produced it, not to some later
+/// use. `x * 2` is where Go reports, and `y` is never mentioned.
+#[test]
+fn a_typed_constant_that_overflows_its_type_is_rejected_at_the_operation() {
+    let check = check_src(
+        "package p\n\
+         const x int8 = 100\n\
+         const y = x * 2\n",
+    );
+    assert_eq!(
+        check.errors.len(),
+        1,
+        "expected one overflow error, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+    assert!(
+        check.errors[0].msg.contains("overflows int8"),
+        "msg: {}",
+        check.errors[0].msg
+    );
+}
+
+/// Untyped integers have no type to round to, so the only bound is Go's 512-bit
+/// constant precision. The message is upstream's verbatim, operator word and
+/// all (`opName` → "shift").
+#[test]
+fn an_untyped_integer_constant_may_not_grow_past_the_constant_precision() {
+    let over = check_src(
+        "package p\n\
+         const big = 1 << 1000\n",
+    );
+    assert_eq!(
+        over.errors.len(),
+        1,
+        "expected one overflow error, got {:?}",
+        over.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+    assert_eq!(over.errors[0].msg, "constant shift overflow");
+
+    // 512 bits exactly is still fine; the cap is `>`, not `>=`.
+    let at_limit = check_src(
+        "package p\n\
+         const ok = 1 << 511\n",
+    );
+    assert!(
+        at_limit.errors.is_empty(),
+        "expected no errors, got {:?}",
+        at_limit.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
+}
+
+/// The guard the bitwise-complement masking in `unary` exists for: `^uint(0)`
+/// is a *typed* constant, so it now also goes through the post-operation round.
+/// Rounding it to something signed would put `-1` back, and `1 << (^uint(0) >>
+/// 63)` — runtime's own idiom — would try to shift by `u64::MAX`.
+#[test]
+fn complementing_a_typed_unsigned_constant_survives_the_round() {
+    let check = check_src(
+        "package p\n\
+         const u = ^uint(0)\n\
+         const s = u >> 63\n\
+         var v = 1 << s\n",
+    );
+    assert!(
+        check.errors.is_empty(),
+        "expected no errors, got {:?}",
+        check.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
+    );
 }

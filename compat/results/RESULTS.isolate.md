@@ -75,7 +75,7 @@
 | isolate-varnamelen | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | isolate-godoclint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-nilnesserr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-errchkjson | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-errchkjson | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-bodyclose | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-rowserrcheck | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-sqlclosecheck | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -557,7 +557,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| errchkjson | 1 | 1 | 1 | 100.0% | 100.0% |
+| errchkjson | 5 | 5 | 5 | 100.0% | 100.0% |
 
 ## isolate-bodyclose
 

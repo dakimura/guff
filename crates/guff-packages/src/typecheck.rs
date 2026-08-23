@@ -714,6 +714,53 @@ fn build_export_seed(
     Some(Arc::new(check.capture_export_seed()))
 }
 
+/// The loaded package whose files the seed compiles for import path `path`,
+/// paired with whether its `_test.go` files are part of that compilation.
+///
+/// Production files only, with one exception. When `augment` holds `path` — the
+/// load contains `path`'s *external* test package — the seed compiles the
+/// same-package test variant `P [P.test]` instead: P's own files **plus** its
+/// in-package `_test.go`. That is the package `import ".../p"` names inside P's
+/// test binary, and widening it is the whole purpose of `export_test.go`, so a
+/// production-only P leaves `package p_test` staring at `undefined:` and the
+/// external test package goes ill-typed — which runs no analyzers at all.
+///
+/// Everything else stays production-only on purpose: `_test.go` across the
+/// whole seed roughly doubles type-arena RSS on prometheus `./...`.
+fn seed_package_for<'a>(
+    by_id: &'a HashMap<String, Arc<Package>>,
+    path: &str,
+    augment: &HashSet<String>,
+) -> Option<(&'a Arc<Package>, bool)> {
+    if augment.contains(path) {
+        if let Some(variant) = by_id.get(&crate::dedup::same_package_test_variant_id(path)) {
+            if !variant.compiled_go_files.is_empty() {
+                return Some((variant, true));
+            }
+        }
+    }
+    crate::dedup::package_for_import_path(by_id, path).map(|pkg| (pkg, false))
+}
+
+fn is_test_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.ends_with("_test.go"))
+}
+
+/// Whether [`seed_package_for`] leaves the seed anything to compile for `path`.
+fn seed_has_source_files(
+    by_id: &HashMap<String, Arc<Package>>,
+    path: &str,
+    augment: &HashSet<String>,
+) -> bool {
+    seed_package_for(by_id, path, augment).is_some_and(|(pkg, with_tests)| {
+        pkg.compiled_go_files
+            .iter()
+            .any(|f| with_tests || !is_test_file(f))
+    })
+}
+
 /// Build a shared [`ExportSeed`] by type-checking the targets' dependency
 /// closure **from source** (no export data), for the cold path where `go list`
 /// runs without `-export`. Returns `None` when there is nothing to preload.
@@ -755,6 +802,11 @@ fn build_source_seed_inner(
     fset: &Arc<FileSet>,
     env: &TypecheckEnv,
 ) -> Option<Arc<ExportSeed>> {
+    // Which import paths the seed must compile *with* their in-package tests.
+    // Derived from `by_id` rather than passed in, so every consumer of the seed
+    // agrees with `import_path_dep_graph`, which reads the same set.
+    let augment = crate::dedup::paths_with_external_test_package(by_id);
+
     // Transitive dependency closure of the targets (leaves included).
     let mut needed: Vec<String> = Vec::new();
     let mut seen = HashSet::default();
@@ -789,18 +841,10 @@ fn build_source_seed_inner(
     }
     // After filter_duplicate_packages, plain `P` is gone and only `P [P.test]`
     // remains — resolve by pkg_path so importers (e.g. consul flags→QF1012) see
-    // real types. Seed production files only: `_test.go` in the cold seed
-    // roughly doubles type-arena RSS on prometheus `./...`.
-    needed.retain(|p| {
-        export_paths.contains_key(p)
-            || crate::dedup::package_for_import_path(by_id, p).is_some_and(|pk| {
-                pk.compiled_go_files.iter().any(|f| {
-                    f.file_name()
-                        .and_then(|n| n.to_str())
-                        .is_none_or(|n| !n.ends_with("_test.go"))
-                })
-            })
-    });
+    // real types. Which files that resolution yields is `seed_package_for`'s
+    // call: production only, except for the packages whose external test
+    // package is in this load.
+    needed.retain(|p| export_paths.contains_key(p) || seed_has_source_files(by_id, p, &augment));
     needed.sort();
     if needed.is_empty() {
         return None;
@@ -881,14 +925,7 @@ fn build_source_seed_inner(
         .iter()
         .map(String::as_str)
         .filter(|p| {
-            !export_paths.contains_key(*p)
-                && crate::dedup::package_for_import_path(by_id, p).is_some_and(|pk| {
-                    pk.compiled_go_files.iter().any(|f| {
-                        f.file_name()
-                            .and_then(|n| n.to_str())
-                            .is_none_or(|n| !n.ends_with("_test.go"))
-                    })
-                })
+            !export_paths.contains_key(*p) && seed_has_source_files(by_id, p, &augment)
         })
         .collect();
 
@@ -917,6 +954,19 @@ fn build_source_seed_inner(
     // that depends on `P`. Walking `order` in reverse visits every consumer of
     // `P` before `P` itself, so `height` is final by the time we read it — no
     // reverse graph needed.
+    //
+    // KNOWN BROKEN when `dep_graph` has a cycle, which bracket normalization can
+    // manufacture out of an acyclic Go graph: prometheus' `util/teststorage`
+    // test variant depends on `tsdb`, `tsdb`'s test variant depends on
+    // `util/teststorage`, and after dedup drops both plain packages each key
+    // takes its edges from a test variant. `dep_load_order`'s `visiting` guard
+    // then drops an edge to finish the walk, `order` is no longer topological,
+    // and the heights below come out inconsistent — 16 edges violating
+    // `wave(dep) < wave(consumer)` on prometheus `./...`. See
+    // docs/COMPAT-HARDENING.md §4 (2026-08-23, 続き 21) for why the fix belongs
+    // in the loader (the seed compiles production files, so it wants production
+    // edges) and not here: restricting these passes to the edges the DFS kept
+    // reorders `promql` correctly and breaks `teststorage` instead.
     let mut height: HashMap<&str, u32> = HashMap::default();
     for p in order.iter().rev() {
         if !source_set.contains(p.as_str()) {
@@ -1067,15 +1117,11 @@ fn build_source_seed_inner(
             let dep_secs = |t: Option<std::time::Instant>| {
                 t.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0)
             };
-            let pkg = crate::dedup::package_for_import_path(by_id, path)?;
+            let (pkg, with_tests) = seed_package_for(by_id, path, &augment)?;
             let seed_files: Vec<PathBuf> = pkg
                 .compiled_go_files
                 .iter()
-                .filter(|f| {
-                    f.file_name()
-                        .and_then(|n| n.to_str())
-                        .is_none_or(|n| !n.ends_with("_test.go"))
-                })
+                .filter(|f| with_tests || !is_test_file(f))
                 .cloned()
                 .collect();
             if seed_files.is_empty() {

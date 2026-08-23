@@ -3,15 +3,15 @@
 # Every rule guff implements is named explicitly in `includes` rather than
 # leaving gosec on its defaults, for the same reason the govet case lists its
 # analyzers: gosec v2.26.1 (the version golangci-lint 2.12.2 pins) ships 39
-# rules and 22 SSA analyzers, and guff implements 39 of those 61. Running the
+# rules and 22 SSA analyzers, and guff implements 40 of those 61. Running the
 # rest would fill the golden with findings from checks guff has never claimed,
 # turning a known scope decision into a permanent diff. Adding a rule to guff
 # means adding it here.
 #
 # `includes` is applied to rules *and* analyzers by golangci's wrapper
 # (pkg/golinters/gosec/gosec.go: createRuleFilters + createAnalyzerFilters), so
-# G115 / G118 / G122 / G123 / G124 / G602 and the four taint rules
-# (G702 / G703 / G706 / G710) — the ten SSA analyzers in the list — are
+# G115 / G118 / G122 / G123 / G124 / G602 and the five taint rules
+# (G702 / G703 / G705 / G706 / G710) — the eleven SSA analyzers in the list — are
 # selected the same way as the AST rules.
 #
 # This is the first case in this tier whose findings carry a **severity**:
@@ -67,6 +67,7 @@ linters:
         - G602
         - G702
         - G703
+        - G705
         - G706
         - G710
 

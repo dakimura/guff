@@ -52,6 +52,33 @@ pub fn line_pos(fset: &FileSet, file_pos: Pos, line: i64) -> Option<u32> {
     Some(ft.line_start(line as usize).0 as u32)
 }
 
+/// Map a position from the comment-preserving **re-parse** back into the
+/// analysis `FileSet`, keeping the column.
+///
+/// The two FileSets number positions independently, so the only shared
+/// coordinate is (line, column). Recovering just the line and taking
+/// `line_pos` — the line's *start* — reports column 1 for every doc comment,
+/// which is right only for declarations at the left margin. A doc comment
+/// inside a `const (` group is indented, and upstream reports where it actually
+/// begins: syncthing's `deviceid.go:22` is `:2` there and was `:1` here.
+///
+/// Nothing could see it. godoclint's isolate fixture is a single top-level
+/// func, where both answers are 1, and the OSS/hunt comparison key has no
+/// column field at all (§1).
+///
+/// `Position::column` is a 1-based byte column and `line_start` a byte offset,
+/// so the arithmetic is exact rather than an approximation for ASCII.
+pub fn reparsed_pos(
+    fset: &guff::FileSet,
+    file_pos: guff::Pos,
+    re_fset: &guff::FileSet,
+    pos: guff::Pos,
+) -> Option<u32> {
+    let p = re_fset.position(pos);
+    let line_start = line_pos(fset, file_pos, p.line)?;
+    Some(line_start + u32::try_from(p.column.max(1) - 1).unwrap_or(0))
+}
+
 /// Collect declaration doc comments (godot default `declarations` scope).
 ///
 /// Matches upstream `getDeclarationComments`: top-level `GenDecl` / `FuncDecl`
@@ -74,6 +101,48 @@ pub fn declaration_docs(file: &File) -> Vec<&CommentGroup> {
                 }
             }
             Decl::BadDecl(_) => {}
+        }
+    }
+    out
+}
+
+/// Comments inside a top-level `var (` / `const (` block.
+///
+/// Port of godot's `getBlockComments`. Its `declarations` scope is
+/// `getBlockComments() ++ getDeclarationComments()`, and guff had only the
+/// second half, so a documented spec inside a group was never checked at all.
+///
+/// Three details are upstream's and are load-bearing:
+///
+/// - only a `GenDecl` with a real `Lparen` counts — `const A = 1` on one line
+///   has no block to be inside of;
+/// - the walk is over **`file.Comments`**, not the specs' `Doc` fields, so a
+///   free-floating comment in the block is included and a spec's doc is found
+///   by position rather than by ownership;
+/// - the column must be **exactly 2**. Upstream says why: the block itself is
+///   top level, so its immediate contents sit one level in. A comment indented
+///   twice is deliberately skipped, and so is one at the margin.
+pub fn block_comments<'a>(fset: &FileSet, file: &'a File) -> Vec<&'a CommentGroup> {
+    let mut out = Vec::new();
+    for decl in &file.decls {
+        let Decl::GenDecl(d) = decl else {
+            continue;
+        };
+        if d.lparen.0 == 0 {
+            continue;
+        }
+        for c in &file.comments {
+            if c.list.is_empty() {
+                continue;
+            }
+            let pos = c.pos();
+            if d.lparen > pos || pos > d.rparen {
+                continue;
+            }
+            if fset.position(pos).column != 2 {
+                continue;
+            }
+            out.push(c);
         }
     }
     out

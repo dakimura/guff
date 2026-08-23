@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godot
+# Produced by running golangci-lint on compat/golden/cases/godot/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:3:1:godot::Comment should end in a period
+bad/bad.go:8:1:godot::Comment should end in a period
+bad/bad.go:15:1:godot::Comment should end in a period
+bad/bad.go:20:1:godot::Comment should end in a period
+bad/bad.go:32:1:godot::Comment should end in a period
+bad/bad.go:41:1:godot::Comment should end in a period
+bad/bad.go:47:1:godot::Comment should end in a period
+bad/bad.go:52:1:godot::Comment should end in a period

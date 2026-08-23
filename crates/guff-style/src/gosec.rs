@@ -42,16 +42,15 @@
 //! - **G406** — deprecated weak hash (`golang.org/x/crypto/{md4,ripemd160}`)
 //! - **G501–G507** — blocklisted imports
 //! - **G602** — slice index / bounds out of range (SSA; see `gosec_g602`)
-//! - **G702 / G703 / G706 / G710** — command injection, path traversal, log
-//!   injection and open redirect: one taint engine over four tables of
+//! - **G702 / G703 / G705 / G706 / G710** — command injection, path traversal,
+//!   XSS, log injection and open redirect: one taint engine over five tables of
 //!   sources, sinks and sanitizers (SSA; see `gosec_taint`)
 //!
 //! Message format matches golangci: `"Gxxx: <what>"`.
 //!
 //! DEFERRED: remaining rules (G113, G116–G117, G119–G121, G201, G304–G305, G307
 //! config-gated, G402 MinVersion/CipherSuites, G601, and the taint rules the
-//! engine has no table for — G701 SQL, G704 SSRF, **G705 XSS** (which alone
-//! needs `Receiver` sinks and `ArgTypeGuards`), G707–G709),
+//! engine has no table for — G701 SQL, G704 SSRF, G707–G709),
 //! full `gosec:disable` block directives / per-rule
 //! `config` map, G104 audit mode + config allowlist extensions, G107 local
 //! string-lit TryResolve, G102 Ident const resolution, concurrency.
@@ -290,8 +289,8 @@ const EXTRA_RULE_IDS: &[&str] = &[
     "G123", "G202",
     "G203",
     "G204", "G301", "G302", "G303", "G306", "G402", "G403", "G602",
-    // The taint engine's four rules (`gosec_taint`), all SSA analyzers.
-    "G702", "G703", "G706", "G710",
+    // The taint engine's five rules (`gosec_taint`), all SSA analyzers.
+    "G702", "G703", "G705", "G706", "G710",
 ];
 
 const G301_MODE: i64 = 0o750;
@@ -586,6 +585,7 @@ const RULE_SCORES: &[(&str, Score, Score)] = &[
     // fourth score.
     ("G702", Score::High, Score::High),
     ("G703", Score::High, Score::High),
+    ("G705", Score::Medium, Score::High),
     ("G706", Score::Low, Score::High),
     ("G710", Score::Medium, Score::High),
 ];
