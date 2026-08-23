@@ -19,7 +19,7 @@ use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::DupwordOptions;
-use crate::util::{line_pos, reparse_with_comments};
+use crate::util::{reparse_with_comments, reparsed_pos};
 
 fn exclude_word(word: &str, ignore: &HashSet<&str>) -> bool {
     let word = word.strip_suffix(',').unwrap_or(word);
@@ -184,8 +184,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         if let Some(words) =
                             find_duplicates(&c.text, &options.keywords, &ignore)
                         {
-                            let line = re_fset.position(c.slash).line;
-                            if let Some(pos) = line_pos(&fset, file.pos(), line) {
+                            if let Some(pos) =
+                                reparsed_pos(&fset, file.pos(), &re_fset, c.slash)
+                            {
                                 pending.push((
                                     pos,
                                     format!("Duplicate words ({words}) found"),
