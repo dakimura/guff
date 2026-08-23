@@ -1,0 +1,11 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh wrapcheck
+# Produced by running golangci-lint on compat/golden/cases/wrapcheck/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:7:9:wrapcheck::error returned from external package is unwrapped: sig: func os.Open(name string) (*os.File, error)
+bad/bad.go:15:9:wrapcheck::error returned from external package is unwrapped: sig: func (*os.File).Close() error
+bad/bad.go:20:9:wrapcheck::error returned from external package is unwrapped: sig: func (*os.File).Sync() error

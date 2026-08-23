@@ -1,0 +1,27 @@
+# Golden case: nonamedreturns.
+#
+# Three defects, and the isolate fixture — one top-level func returning `int` —
+# could reach none of them:
+#
+#   - the message prints the type as `go/types.ExprString` renders it. A
+#     function type came out as the placeholder `func(...)` and a directional
+#     channel lost its arrow. The isolate key carries the message, so it *could*
+#     have caught these, with a fixture that had either shape in it.
+#   - the position is the `func` keyword (`(*ast.FuncDecl).Pos()`, and the same
+#     for a literal), not the named return's identifier. The isolate and OSS
+#     keys have no column, so only this tier can see that one — the last case
+#     below is inside a `var x = func()`, where the two answers differ.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - nonamedreturns
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

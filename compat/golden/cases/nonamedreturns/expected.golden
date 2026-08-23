@@ -1,0 +1,16 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nonamedreturns
+# Produced by running golangci-lint on compat/golden/cases/nonamedreturns/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:3:1:nonamedreturns::named return "n" with type "int" found
+bad/bad.go:14:1:nonamedreturns::named return "f" with type "func(*Command) error" found
+bad/bad.go:16:1:nonamedreturns::named return "g" with type "func(a int, b string) (bool, error)" found
+bad/bad.go:18:1:nonamedreturns::named return "h" with type "func()" found
+bad/bad.go:20:1:nonamedreturns::named return "c" with type "<-chan int" found
+bad/bad.go:22:1:nonamedreturns::named return "c" with type "chan<- int" found
+bad/bad.go:24:1:nonamedreturns::named return "c" with type "chan int" found
+bad/bad.go:28:14:nonamedreturns::named return "f" with type "func(*Command) error" found

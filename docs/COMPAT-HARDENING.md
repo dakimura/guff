@@ -9217,6 +9217,150 @@ golangci-lint が 4 回走って一度も同じ finding 集合を返さなかっ
 **思いついた形しか入っていない fixture は、その形以外については無いのと同じ**である。
 fixture に 2 行コメント・空行を含むコメント・末尾が空行のコメントを足した
 （golden は 5 → 8 件）。
+### 2026-08-23（続き 28）— 「guff-only と gcl-only が同数」は偶然ではなく署名である
+
+続き 27 の追記で `--all-linters` を回したとき、cobra の差分を linter 別に並べると
+**guff-only と gcl-only が同数**の組がいくつも出た。
+`godot` 11/11、`wrapcheck` 7/7、`usetesting` 5/5、`nonamedreturns` 2/2、`nlreturn` 2/2。
+
+**同数は「実装が無い」ではなく「同じ場所を違う綴り・違う位置で報告している」の署名**である
+—— 1 件の食い違いが差分の両側に 1 件ずつ立つので、数が揃う。
+`godot` を開いて 2 件出た（続き 27 の追記）。残りも開いた。
+
+#### `wrapcheck` —— レシーバが消えていた（#101 と同じ根）
+
+```
+guff  sig: func os/exec.StdinPipe() (io.WriteCloser, error)
+gcl   sig: func (*os/exec.Cmd).StdinPipe() (io.WriteCloser, error)
+```
+
+上流は `types.Func.String()` を出す。go/types の `writeFuncName` は
+**メソッドを `(RecvType).Name` と書く**（レシーバがインターフェースなら
+`(interface).Name`）。guff は `obj.pkg()` からパッケージ修飾を組み立てていたので、
+メソッドが `os/exec.StdinPipe` になっていた —— **Go が決して出さない綴り**である。
+
+これは errchkjson（#101、続き 23）と**同じ根**で、
+**`code::type_func_name` がまさにその関数**であり、既にあった。
+続き 23 が数えた「別々に作り直していた 5 か所」に **wrapcheck が 6 番目として加わる**
+——「必要としたのに、既にある 1 つを使わなかった」側で 3 例目。
+影響はメッセージだけではない: 利用者が `ignoreSigs` に書くパターンも
+この文字列と突き合わされるので、**設定が効かない**。
+
+位置も違った。上流は `call.Pos()`（CallExpr では `Fun.Pos()`）を報告し、
+guff は `call.lparen` を報告していた。**セレクタ呼び出しのときだけ**ずれるので、
+`return f()` は一致して `return x.M()` はずれる。
+
+**cobra の wrapcheck: 7 件の綴り違い + 5 件の桁違い → 31 対 31 で完全一致。**
+
+#### `nonamedreturns` —— 型が「型ではない文字列」だった
+
+```
+guff  named return "f" with type "func(...)" found
+gcl   named return "f" with type "func(*Command) error" found
+```
+
+上流はメッセージに `go/types.ExprString` の出力を入れる。
+guff の `nonamedreturns.rs` には**自前の**「Approximate `go/types.ExprString`」があり、
+`FuncType` の腕が `"func(...)"` という**誰も書いていない文字列**を返していた。
+ついでにチャネルの向き（`<-chan` / `chan<-`）も落としていた。
+`writeSigExpr` / `writeFieldList` を移植した。
+
+位置も違った。上流は **`func` キーワード**（`(*ast.FuncDecl).Pos()`、
+リテラルも同じ）を報告し、guff は名前付き戻り値の識別子を報告していた。
+**左端の宣言では偶然一致する**ので、`var x = func() (f …)` の中でだけ割れる。
+
+**cobra の nonamedreturns: 10 対 10 で完全一致。**
+
+#### `expr_string` が 3 つある
+
+`nonamedreturns` の「近似 ExprString」は 1 つではない。
+`guff-revive/src/util.rs` と `guff-error/src/util.rs` にも別の `expr_string` があり、
+**どれも上流の `types.ExprString` の一部しか持っていない**。
+続き 23 の `call_name` と同じ形（1 つの上流関数を、複数の移植が別々に近似する）で、
+これで 2 例目である。中央に 1 つ置く価値がある。
+
+#### fixture は 3 つとも「届かない」形だった
+
+| linter | isolate fixture | 届かなかった理由 |
+|---|---|---|
+| `wrapcheck` | 8 行・1 件 | **メソッド呼び出しが 1 つも無い** |
+| `nonamedreturns` | 6 行・1 件 | 戻り値が `int` だけ |
+| `godot`（続き 27） | —— | 単一行コメントだけ |
+
+3 つとも「その linter が撃つこと」は確かめていて、
+**「何を撃つか」は一度も確かめていない**。§1 が数えた 72 件の中身がこれである。
+それぞれ 3 件 / 8 件に増やし、桁を見る golden case を足した
+（この 2 つで golden は **103 → 105 case**。続き 26 の 2 つと続き 27 の 1 つを
+合わせると 108 になるが、それらは別の枝にある）。
+
+#### `usetesting` —— 5/5 も同じ署名だった
+
+```
+guff  os.CreateTemp("", ...) could be replaced by t.TempDir() in TestX
+gcl   os.CreateTemp("", ...) could be replaced by os.CreateTemp(t.TempDir(), ...) in TestX
+```
+
+`os.CreateTemp` は**このリンタで唯一「呼び出しを残す」提案**である ——
+一時ファイルは作るので、変えるのは第 1 引数だけ。
+他の 6 つは `pkg.Name() could be replaced by t.Name()` という同じ形なので、
+guff はそれを流用していた。
+
+**9 つの腕を全部測った**（`CreateTemp` / `MkdirTemp` / `TempDir` / `Setenv` /
+`Chdir` / `context.Background` / `context.TODO`、`t` と `b` の両方）。
+**違っていたのは `CreateTemp` の 1 つだけ**で、残り 8 つは文言も桁も一致していた ——
+差分に出た 1 つだけを直して終わりにしない、というのはこのためである。
+
+isolate の fixture は `MkdirTemp` と `TempDir` を持っていて `CreateTemp` を持っていなかった。
+**合っている腕だけが入っていた。** これで 4 つ目である。
+
+#### ついでに: `--all-linters` は gated tier の記録を上書きする
+
+`./compat/run.sh --oss --tier pr --all-linters` は
+**`compat/results/RESULTS.md` に書く** —— 通常の OSS tier（CI ゲート）と同じファイルである。
+つまり発見用の tier を 1 回回すと、**ゲートされている tier の記録が黙って差し替わる**。
+`hunt.sh` が `health-hunt.json` を分けている理由（「hunt の refresh が
+OSS の gated な数字を動かせる形にはしない」）とまったく同じ話で、
+results 側は分けられていない。この回は手で戻した。
+tier ごとにファイルを分けるべきである。
+
+#### `local` の gocritic 72/72 —— 署名は当たったが、直さなかった
+
+`--all-linters` で summary が出たもう 1 つのターゲット `local` は
+**gocritic が 72/72**。開くと 1 つの欠陥が 72 回出ているだけだった:
+
+```
+guff  assignOp: replace `sum = sum + k * 2` with `sum += k * 2`
+gcl   assignOp: replace `sum = sum + k*2`   with `sum += k*2`
+```
+
+上流の `assignOp` は **ruleguard のルール**（`checkers/rules/rules.go`）で、
+
+```go
+m.Match(`$x = $x + $y`).Where(m["x"].Pure).Report("replace `$$` with `$x += $y`")
+```
+
+`$$` / `$x` / `$y` は**書かれたとおりのソース片**に置換される。
+だから `k*2` と書いてあれば `k*2`、`(k + n)` と書いてあれば `(k + n)` が出る。
+
+guff は AST から**印字し直して**いる。`node_text`（＝ guff の go/printer 移植、
+`walkBinary` / `cutoff` まで入っている）に替えても直らない ——
+**部分式を単独で印字すると `k * 2` が正しい**からである。
+go/printer は深さ 1 で優先順位が 1 種類しか無いとき空白を入れ、
+混在した式の中でだけ落とす。`sum + k*2` 全体を印字すれば `k*2` になるが、
+`$y` は単独で置換される。
+
+**直していない。** 正しい直し方は
+「ruleguard 系のチェックはソースを切り出して置換する」で、
+`expr_text` の呼び出し箇所は **118 か所**ある。単独のタスクにすること。
+値段は測ってある: **合成ターゲット `local` で 72 件、cobra では 0 件**
+（cobra の gocritic 差分は 0/0）。実リポでの実害は今のところ確認できていない。
+`gocritic.rs` の該当箇所にこの経緯をコメントで残した。
+
+**「署名が当たる」と「直す価値がある」は別**である。72 という数は大きく見えるが、
+中身は 1 つの欠陥 × 合成ファイル 72 個だった。
+
+---
+
 
 ---
 
