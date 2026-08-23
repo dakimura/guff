@@ -10,9 +10,6 @@
   "targets": {
     "prometheus": {
       "ill_typed": 2
-    },
-    "thanos": {
-      "ill_typed": 1
     }
   }
 }
