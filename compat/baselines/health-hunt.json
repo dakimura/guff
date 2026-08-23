@@ -7,9 +7,5 @@
     "are gated strictly at 0. Panics are never baselined \u2014 they always fail.",
     "Re-record with: ./compat/hunt.sh --update-baseline"
   ],
-  "targets": {
-    "prometheus": {
-      "ill_typed": 2
-    }
-  }
+  "targets": {}
 }

@@ -1,0 +1,32 @@
+# Golden case: ineffassign.
+#
+# ineffassign had no golden case at all, so nothing pinned its columns — and
+# the whole linter is one message with one position, which makes the column the
+# only thing a reader distinguishes two findings by.
+#
+# The shape worth pinning is the composite-literal key. gordonklaus/ineffassign
+# has no `CompositeLit` or `KeyValueExpr` case, so its walk reaches the key like
+# any other expression and resolves it through `id.Obj` — go/parser's lexical
+# scopes, which cannot tell `T{v: x}` (a field name) from `map[K]V{v: x}` (a
+# read of `v`). A struct field key therefore binds to a local of the same name
+# and counts as a *use*. go/types knows better, and following it reported an
+# assignment upstream calls used: grafana's `storage_backend.go:247`, invisible
+# until that package stopped being ill-typed (COMPAT-HARDENING 続き 29).
+#
+# `composite/` holds that shape; `compositekey/` holds the same function with a
+# key naming a *different* field, where the store really is dead. A change that
+# silences the second is as wrong as one that reports the first.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - ineffassign
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+
+run:
+  timeout: 5m

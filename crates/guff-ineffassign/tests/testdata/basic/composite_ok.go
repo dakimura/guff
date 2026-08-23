@@ -51,3 +51,19 @@ func steppedLoop(xs []int) int {
 	}
 	return sum
 }
+
+// shadowedFieldKey mirrors grafana's kvStorageBackend: a local named exactly
+// like a struct field, dead after its last assignment, in a function whose
+// return literal keys that field. go/parser cannot tell a field name from a
+// map key, so it binds the key ident to the local in scope — and upstream
+// ineffassign reads `id.Obj`, so it counts the key as a use and stays quiet.
+// go/types knows better; following it here reports what upstream does not.
+func shadowedFieldKey(opts struct{ Lookback int }) *B {
+	lookback := opts.Lookback
+	if lookback < 0 {
+		lookback = 1
+	}
+	return &B{lookback: opts.Lookback}
+}
+
+type B struct{ lookback int }

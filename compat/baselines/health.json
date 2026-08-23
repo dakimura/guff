@@ -7,18 +7,5 @@
     "are gated strictly at 0. Panics are never baselined \u2014 they always fail.",
     "Re-record with: ./compat/run.sh --oss --tier <t> --update-baseline"
   ],
-  "targets": {
-    "caddy": {
-      "ill_typed": 1
-    },
-    "consul": {
-      "ill_typed": 2
-    },
-    "gin": {
-      "ill_typed": 1
-    },
-    "grafana": {
-      "ill_typed": 11
-    }
-  }
+  "targets": {}
 }

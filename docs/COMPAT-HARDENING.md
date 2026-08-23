@@ -9361,6 +9361,243 @@ go/printer は深さ 1 で優先順位が 1 種類しか無いとき空白を入
 
 ---
 
+### 2026-08-23（続き 29）— seed が組むファイルと、seed を並べる辺が、別の写しから来ていた
+
+続き 21 の「次にやること」1。prometheus `./...` の ill-typed 2 件
+（`promql_test` と `cmd/promtool`、どちらも
+`cannot use invalid type value as *promql.Engine value`）。
+
+続き 21 の診断は当たっていた —— **seed は依存を production ファイルで組むのに、
+並べる辺を test variant から採っていた**。外していたのは直す場所で、
+「パッケージロード側の設計変更」ではなく `import_path_dep_graph` の
+**写しの選び方 1 つ**だった。
+
+#### `go list -test` の括弧 id は 3 種類あり、ファイルも辺も違う
+
+| id | ファイル | 辺 |
+|---|---|---|
+| `P` | production | production |
+| `P [Q.test]` | production（Q のテストバイナリ向けに再コンパイルしただけ） | production |
+| `P [P.test]` | production **＋** P の同一パッケージ `_test.go` | production ＋ **テストの import** |
+
+`filter_duplicate_packages` は `P [P.test]` が居ると plain `P` を落とす。
+`./...` のリポではテストを持つパッケージがほとんどなので、
+**ほぼ全部の path が「括弧つきの写しのどれか」を選ばされる**。
+そこで `P [P.test]` を採ると、テストの import が辺に混ざる ——
+そしてテストの import は**リポの中へ戻ってくる**。
+
+prometheus:
+
+- `tsdb` の同一パッケージテストが `util/teststorage` を import する
+- `util/teststorage` の同一パッケージテストが `tsdb` を import する
+
+production 側はどちらも相手を import していないので Go は通る
+（それぞれのテストバイナリの中では相手が production の写しになる）。
+両方の key が test variant から辺を採って初めて、**Go に存在しない循環**ができる。
+
+#### 循環が何を壊すか
+
+`dep_load_order` の `visiting` ガードが辺を 1 本落として walk を終える。
+`order` はもう位相順ではなく、`height` のパス 2 は
+**まだ確定していない consumer の height を読む**。prometheus `./...` で
+`wave(dep) < wave(consumer)` を破る辺が **39 本**（consumer は 38 本が `tsdb`、
+残り 1 本が `promql/promqltest`）。
+
+`GUFF_DEBUG_SEED_ERRORS=1` が 2 行で言う:
+
+```
+guff:     seed dep github.com/prometheus/prometheus/tsdb — 73 error(s), first: undefined: index
+guff:     seed dep github.com/prometheus/prometheus/promql/promqltest — 19 error(s), first: undefined: promql
+```
+
+どちらも「自分の依存がまだ merge されていない」である。
+seed の依存の診断は報告されない（利用者のコードではない）ので、
+**見えるのは 2 つ隣で ill-typed になったパッケージだけ** ——
+`promql_test` と `cmd/promtool` の
+`cannot use invalid type value as *promql.Engine value` である。
+
+#### 直し方 —— 辺は「seed が組むファイルを持つ写し」から採る
+
+`seed_variant_rank` が path ごとに 1 つの写しを選び、
+`seed_package_for`（ファイル）と `import_path_dep_graph`（辺）が**同じ関数**を読む。
+順位は「ファイルが空でない」→ 次の種別:
+
+| path | 1 位 | 2 位 | 3 位 |
+|---|---|---|---|
+| 外部テストパッケージを持つ（＝ seed が `_test.go` も組む） | `P [P.test]` | `P` | その他 |
+| それ以外（＝ seed は production だけ組む） | `P` | `P [Q.test]` | `P [P.test]` |
+
+**`P [Q.test]` は production の写しそのもの**なので、production の辺を持っている。
+「plain `P` はもう手元に無い」の答えは、
+**別の名前で同じものが既に手元にあった**だった。
+
+残るのは「`P [P.test]` しか無い」形 —— 誰のテストバイナリも P を再コンパイル
+していない path。ここだけは写しが無いので、`filter_duplicate_packages` が
+plain を落とす**直前**に plain の `deps` を survivor へ写す
+（`carry_production_deps` / `Package::production_deps`）。
+dapr の `pkg/runtime/pubsub` と rclone の `backend/local` がこの形で、
+それぞれ **9 本 / 19 本**の破れた辺を出していた（どちらも ill-typed には至っていない）。
+
+#### 選択が HashMap の反復順に乗っていた
+
+旧コードの非 authoritative 側は `or_insert` で、
+**FxHashMap の反復順で先に来た写しが勝つ**。同じロードでは再現するが、
+**パッケージが 1 つ増減しただけで別の写しが勝ちうる** ——
+つまり「直したつもりが隣のリポで再発する」側の欠陥である。
+続き 21 が同じ prometheus で破れた辺を 16 本と数え、今日は 39 本だった ——
+間に続き 21 の augment 修正が入って id 集合が動いている以上、
+**同じリポの同じパターンでも数が変わる**のは驚くことではない
+（どちらの数が正しいという話ではなく、どちらも「その日の反復順」の値である）。
+新しい選択は (ファイルの有無, 種別, id) の**全順序**なので、反復順に依存しない。
+
+`package_for_import_path` の `values().find()` も同じ穴だった ——
+**ファイルの出所が反復順で決まっていた**。今は `seed_variant_for` に寄せてあり、
+`files_and_edges_are_read_off_the_same_variant` がその一致を撃つ。
+
+#### ゲート —— 「循環は起きた」を常時出す
+
+seed の dep graph は、この修正のもとでは**構造的に非巡回**である:
+同一パッケージの `_test.go` も `package p` なので、Go の import cycle 禁止が
+そのまま効く（`p` を import するものを `p` のテストは import できない）。
+外部テストパッケージ `p_test` は別の key なので巻き込まない。
+つまり **back-edge が 1 本でも出たら guff のバグ**であり、リンタ対象の性質ではない。
+
+`dep_load_order` が落とした back-edge を返し、`guff: seed dep cycle A -> B` を
+**常時 stderr に出す**（先頭 3 本＋残り件数）。`compat/health.py` はこれを
+**panic と同じ扱い**にした —— baseline に載せる欄は無く、無条件で落ちる。
+ill-typed のように「baseline より増えたら」ではないのは、
+**ill-typed になるのは 2 つ隣のパッケージで、順序が偶然通っている回は何も起きない**からで、
+原因の側で撃たないと「今日は緑」が保証にならない。
+
+コーパス 27 リポ（hunt 16 + repos 11）で **back-edge 0 本**。
+
+#### 測定
+
+| | base | 修正後 |
+|---|---|---|
+| prometheus 破れた辺 | 39 | **0** |
+| prometheus ill-typed | 2 | **0** |
+| prometheus seed 深さ | 56 | 52 |
+| dapr / rclone 破れた辺 | 9 / 19 | **0 / 0** |
+| grafana ill-typed | 9 | **0** |
+| コーパス 27 リポの back-edge | —— | **0** |
+
+**両方の health baseline が空になった。**
+
+- `health-hunt.json`: prometheus 2 → 0。**hunt 16 ターゲット全部が 0**。
+- `health.json`: grafana 11 → 0（実測は 9）、caddy 1 / consul 2 / gin 1 → 0。
+  **OSS 10 ターゲット全部が 0。**
+
+行が 1 つも無い＝全部が厳密に 0 でゲートされる。
+ただし **caddy / consul / gin の 3 行は本修正とは関係なく、base バイナリでも 0 だった** ——
+以前のセッションで直ったまま行が残っていた**古い許容**である。
+grafana の 9 だけが本当に隠れていて、そこから下の偽陽性が出た（次節）。
+
+#### 差分は 2 ターゲットで減り、残り 14 は 1 バイトも動いていない
+
+`hunt-20260823T035454Z`（前回の全体走査）と突き合わせた:
+
+| target | before | after |
+|---|---|---|
+| authelia | guff 16 / gcl 0、**ill-typed 1** | guff 15 / gcl 0、**0** |
+| syncthing | 638 / 654 / both 625（unexpected 42） | **647 / 654 / both 636（29）** |
+| 他 14 | —— | 完全一致 |
+
+authelia の ill-typed は `internal/storage_test`（30 errors）——
+**外部テストパッケージ**で、まさにこのクラスである。
+syncthing は ill-typed が 0 のまま **both が 11 増えた**。
+
+**syncthing の guff 側の件数は、コードを変えていない回どうしでも
+638 / 640 / 645 と揺れていた**（`hunt-20260822T112822Z` 以降の 11 回）。
+今回の 647 は記録上の最良で、unexpected 29 も最小である。
+揺れの説明は 1 つに絞れていないが、**写しの選択が反復順に乗っていたこと**は
+候補として矛盾しない —— C-7 の投機 seed（`peeked_graph_shape` の推測グラフ）と
+本番のロードでは id 集合が違い、どちらが間に合うかは**タイミング**で決まるので、
+2 つの経路が別の写しを選びうる。両方に `carry_production_deps` を通してある。
+**断定はできない**（この揺れを直接測ってはいない）が、
+次に syncthing の件数が揺れたらここを最初に疑うこと。
+
+#### 直したら 1 件出てきた —— grafana の ill-typed 9 件が黙らせていた偽陽性
+
+**OSS nightly の grafana は `0 vs 0` で通っていた。** 実際には
+`pkg/storage/unified/{sql,search,resource}` など **9 パッケージが ill-typed** で、
+そこは誰も解析していなかっただけである（`compat/baselines/health.json` の
+grafana 行は 11 を許していた）。修正後は **0** になり、
+そこで 1 件の **guff 側の偽陽性**が出てきた:
+
+```
+pkg/storage/unified/resource/storage_backend.go:247:3:
+  ineffectual assignment to searchLookback
+```
+
+読むと guff のほうが「正しい」—— 245 で作った local は 247 で上書きされ、
+その後どこからも読まれない（284 の構造体リテラルが読むのは `opts.SearchLookback`）。
+しかし上流は撃たない。理由は上流の walk にある:
+
+```go
+// gordonklaus/ineffassign: CompositeLit も KeyValueExpr も case が無い
+case *ast.Ident:
+    bld.use(n)
+```
+
+`case` が無いので既定の walk が `KeyValueExpr` の**キーにも入り**、
+`bld.use(id)` は **`id.Obj` ＝ go/parser のスコープ解決**で引く。
+go/parser は `T{v: x}`（フィールド名）と `map[K]V{v: x}`（`v` の読み出し）を
+**区別できない**ので、同名の local が見えていればキーをそれに束ねる
+（go.dev/issue/45160 と同じ曖昧さ）。だから上流にとって 247 の代入は「使われている」。
+
+guff は go/types の `uses` で引いていた —— そちらはキーが**フィールド**だと知っている。
+**正しいほうを見たせいで、上流が撃たないものを撃っていた。**
+
+guff のパーサは上流と同じ解決をしている（`parser_resolver::walk_composite_lit` が
+`resolve(id, false)`）ので、キーだけ `Ident.obj` で引き直す
+（`decl_ident_id` が Object の宣言側 Ident の node id を返し、`Info.defs` を通して
+`ObjectId` に戻す）。最小再現:
+
+```go
+func A(x int) S { v := x; if v < 0 { v = 42 }; return S{v: x} }    // 両者とも撃たない
+func B(x int) S { v := x; if v < 0 { v = 42 }; return S{oth: x} }  // 両者とも撃つ
+```
+
+ゲートは 3 つ: Rust テスト 2 本（両向き）、**golden case `ineffassign`**
+（この linter には golden が 1 つも無く、**桁が一度も検証されていなかった** ——
+1 メッセージ 1 位置の linter なので、桁は読み手が 2 件を見分ける唯一の手掛かりである。
+108 → **109 case**）、isolate fixture を 8 行 1 件から 2 件に広げた。
+
+**「ill-typed を直すと差分が出る」の実例**である（続き 6 / 続き 16 と同じ形）。
+`0 vs 0` は「一致している」ではなく「**どちらも何も言っていない**」でもありうる。
+
+#### テスト
+
+- `dedup.rs`: `a_for_test_dep_copy_outranks_the_test_augmented_one`（prometheus の
+  形を縮めた 4 パッケージ）、`carried_production_deps_stand_in_for_the_dropped_plain_package`、
+  `an_augmented_path_keeps_its_test_variant_edges_after_a_carry`（続き 21 の回帰止め）、
+  `nothing_is_carried_when_the_plain_package_survives`、
+  `files_and_edges_are_read_off_the_same_variant`。
+  **旧実装をそのまま戻して 2 本が落ちることを確認した**（片方向だけでは、
+  新しい実装が新しいテストに合っているという以上のことを言わない）。
+- `typecheck.rs`: `dep_load_order_reports_the_back_edge_it_had_to_drop` /
+  `a_diamond_is_not_a_cycle`（共有と循環の区別）/
+  `dep_load_order_is_leaves_first_and_reports_no_cycle`。
+- `compat/tests/test_health.py`: seed cycle は headroom があっても落ちること、
+  **ill-typed が 0 の target でも落ちること**。
+- `guff-ineffassign`: `ineffassign_treats_a_field_key_spelled_like_a_local_as_a_use` と
+  `ineffassign_still_flags_a_dead_store_when_the_key_names_another_field`。
+  **後者が無いと「複合リテラルの近くの代入は撃たない」に退化しても誰も気付かない。**
+
+**次にやること**
+
+1. **golden tier のカバレッジ** —— 116 linter 中 94 に golden case が無く、
+   column と severity が構造的に未検証。#104 / #105 / #106 と、今回の ineffassign も
+   この穴から出た。
+2. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目。`guff-revive/src/util.rs` /
+   `guff-error/src/util.rs` / `nonamedreturns.rs` に別々の近似がある。
+3. **`compat/results/` を tier ごとに分ける** —— 続き 28 の指摘。
+   `--tier pr` を回すと nightly の行が黙って消える（このセッションでも踏んだ）。
+4. **gocritic の ruleguard `$`** —— 続き 28。`expr_text` 118 箇所、単独タスク。
+
+---
+
 
 ---
 

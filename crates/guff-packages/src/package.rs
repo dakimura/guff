@@ -91,6 +91,16 @@ pub struct Package {
     pub module: Option<Module>,
     /// Package under test, if any (`ForTest` in go list JSON).
     pub for_test: String,
+    /// [`Self::deps`] of the plain `P` that [`crate::filter_duplicate_packages`]
+    /// dropped in favour of this `P [P.test]` — i.e. the dependencies of P's
+    /// **production** files alone.
+    ///
+    /// `None` for every other package, including a plain `P` that survived (its
+    /// own `deps` already are the production ones). Only the seed reads it: the
+    /// seed compiles production files for every path but the augmented ones, so
+    /// it needs production edges to order them, and `P [P.test]`'s own `deps`
+    /// carry whatever the tests import. See `dedup::seed_variant_rank`.
+    pub production_deps: Option<Vec<String>>,
     /// True when the package has cgo sources (`CgoFiles`). Used by C-3e to
     /// decide which packages need a `go list -compiled=true` attach.
     pub has_cgo: bool,
@@ -161,6 +171,7 @@ impl Clone for Package {
             deps: self.deps.clone(),
             module: self.module.clone(),
             for_test: self.for_test.clone(),
+            production_deps: self.production_deps.clone(),
             has_cgo: self.has_cgo,
             types: self.types,
             type_artifacts: None,

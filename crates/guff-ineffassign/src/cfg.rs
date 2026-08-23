@@ -57,6 +57,28 @@ pub fn package_level_var_objs(
     out
 }
 
+/// The node id of the identifier that declared `obj`.
+///
+/// `Info.defs` is keyed on that id, so this is the bridge from a go/parser
+/// [`Object`](guff::scope::Object) — which owns a *clone* of its declaring
+/// node, ids and all — back to a go/types object. Mirrors
+/// `ast::scope::Object::pos()`, which picks the same identifier out of the
+/// same declarations; only the kinds that can declare a function-local are
+/// worth following, because upstream's `bld.vars` holds nothing else.
+fn decl_ident_id(obj: &guff::scope::Object) -> Option<u32> {
+    use guff::scope::ObjDecl;
+    let name = obj.name.as_str();
+    match &obj.decl {
+        ObjDecl::Field(d) => d.names.iter().find(|n| n.name == name).map(|n| n.id),
+        ObjDecl::ValueSpec(d) => d.names.iter().find(|n| n.name == name).map(|n| n.id),
+        ObjDecl::AssignStmt(d) => d.lhs.iter().find_map(|x| match x {
+            Expr::Ident(id) if id.name == name => Some(id.id),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
 fn resolve_obj_maps(
     defs: &HashMap<u32, Option<ObjectId>>,
     uses: &HashMap<u32, ObjectId>,
@@ -591,20 +613,57 @@ impl CfgBuilder {
             // Composite-literal elements carry real value uses (and escapes,
             // e.g. `&T{F: &x}`). Without this arm those idents are invisible,
             // so a live variable used only inside a composite literal is
-            // falsely flagged ineffectual. Walk each element; for keyed
-            // elements walk both sides (map keys may reference locals; struct
-            // field-name keys resolve to non-local field objects, harmless).
+            // falsely flagged ineffectual. Walk each element; keyed elements
+            // walk both sides, the key through `walk_composite_key`.
             Expr::CompositeLit(cl) => {
                 for elt in &cl.elts {
                     self.walk_expr(elt);
                 }
             }
             Expr::KeyValueExpr(kv) => {
-                self.walk_expr(&kv.key);
+                self.walk_composite_key(&kv.key);
                 self.walk_expr(&kv.value);
             }
             _ => {}
         }
+    }
+
+    /// The key of a keyed composite-literal element.
+    ///
+    /// Upstream has no `CompositeLit` or `KeyValueExpr` case at all, so its
+    /// walk reaches the key like any other expression and `bld.use(id)` looks
+    /// it up by `id.Obj` — **go/parser's lexical resolution**, not go/types'.
+    /// go/parser cannot tell `T{v: x}` (field name) from `map[K]V{v: x}` (a
+    /// read of `v`), so it resolves the key against the enclosing scopes and
+    /// binds a struct field key to the local variable of the same name when
+    /// one is in scope (go.dev/issue/45160 is the same ambiguity).
+    ///
+    /// Following go/types instead — which knows the key is a field — makes
+    /// guff report an assignment upstream considers used. grafana's
+    /// `NewKVStorageBackend` is exactly that shape: a local `searchLookback`
+    /// assigned in an `if`, then never read, in a function whose return
+    /// literal has a `searchLookback:` **field**.
+    ///
+    /// guff's parser runs the same resolution (`parser_resolver`
+    /// `walk_composite_lit`), so the faithful lookup is `Ident.obj` — mapped
+    /// back to an `ObjectId` through the id of the identifier that declared it.
+    fn walk_composite_key(&mut self, key: &Expr) {
+        if let Expr::Ident(id) = key {
+            if let Some(obj) = self.scope_resolved_obj(id) {
+                self.new_op_for(obj, id, false);
+                return;
+            }
+        }
+        self.walk_expr(key);
+    }
+
+    /// The `ObjectId` of whatever go/parser's scopes bound `id` to, or `None`
+    /// when it bound nothing this analysis tracks (a package from another file,
+    /// a func, a type — upstream's `bld.vars` lookup misses those too).
+    fn scope_resolved_obj(&self, id: &Ident) -> Option<ObjectId> {
+        let obj = id.obj.lock().ok()?.clone()?;
+        let decl_id = decl_ident_id(&obj)?;
+        self.defs.get(&decl_id).and_then(|o| *o)
     }
 
     fn walk_field_list(&mut self, fl: &guff::ast::FieldList) {
@@ -661,12 +720,16 @@ impl CfgBuilder {
     }
 
     fn new_op(&mut self, id: &Ident, assign: bool) {
-        if id.name == "_" {
-            return;
-        }
         let Some(obj) = self.resolve_obj(id) else {
             return;
         };
+        self.new_op_for(obj, id, assign);
+    }
+
+    fn new_op_for(&mut self, obj: ObjectId, id: &Ident, assign: bool) {
+        if id.name == "_" {
+            return;
+        }
         let v = self.vars.entry(obj).or_default();
         v.escapes = v.escapes || v.fundept > 0 || self.block.is_none();
         if let Some(b) = self.block {

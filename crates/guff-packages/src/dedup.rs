@@ -149,6 +149,148 @@ pub fn package_for_import_path<'a>(
     by_id.values().find(|p| p.pkg_path == path)
 }
 
+/// Copy each dropped plain `P`'s `deps` onto the `P [P.test]` that replaced it.
+///
+/// [`filter_duplicate_packages`] leaves the load with no production copy of any
+/// package that has tests, and `Package.deps` is the only record of what that
+/// copy imported. The seed still compiles production files for those paths (see
+/// [`seed_variant_rank`]), so it still needs production edges; without this the
+/// only edges left to order them by are the test variant's, which reach back
+/// into the repo and can close a cycle the Go graph does not have.
+///
+/// Call it with the id set [`filter_duplicate_packages`] kept, *before*
+/// narrowing the map to that set — afterwards the plain package is gone and its
+/// `deps` with it.
+pub fn carry_production_deps(by_id: &mut HashMap<String, Arc<Package>>, keep: &HashSet<String>) {
+    let carried: Vec<(String, Vec<String>)> = by_id
+        .values()
+        .filter(|pkg| pkg.id == pkg.pkg_path && !keep.contains(&pkg.id))
+        .filter_map(|pkg| {
+            let variant = same_package_test_variant_id(&pkg.id);
+            keep.contains(&variant).then(|| (variant, pkg.deps.clone()))
+        })
+        .collect();
+    for (variant, deps) in carried {
+        if let Some(pkg) = by_id.get_mut(&variant) {
+            Arc::make_mut(pkg).production_deps = Some(deps);
+        }
+    }
+}
+
+/// The dependency edges of the files the seed compiles for `path`.
+///
+/// [`Package::production_deps`] is the plain package's own `deps`, recorded
+/// before it was dropped; it is exactly right for a production-only build and
+/// exactly wrong for an augmented one, where the seed *does* compile the tests.
+fn seed_edges<'a>(pkg: &'a Package, path: &str, augmented: &HashSet<String>) -> &'a [String] {
+    match pkg.production_deps.as_deref() {
+        Some(prod) if !augmented.contains(path) => prod,
+        _ => &pkg.deps,
+    }
+}
+
+/// How well a loaded package stands in for the import path `path` when the
+/// seed needs *one* variant of it. Lower is better; ties break on the id, so
+/// nothing here depends on `HashMap` iteration order.
+///
+/// `go list -test` spells three different things with the same brackets, and
+/// they do not hold the same files:
+///
+/// | id | files |
+/// |---|---|
+/// | `P` | production |
+/// | `P [Q.test]` | production, recompiled into Q's test binary |
+/// | `P [P.test]` | production **plus** P's in-package `_test.go` |
+///
+/// The seed compiles production files for every path but the ones in
+/// [`paths_with_external_test_package`], where it compiles `P [P.test]`. Its
+/// edges have to come from a variant holding *those* files: `P [P.test]`'s
+/// `deps` carry the imports of P's tests (`testing`, testify, whatever the
+/// tests reach for), and those are not edges of the package the seed builds.
+///
+/// That distinction is not cosmetic. [`filter_duplicate_packages`] drops plain
+/// `P` whenever `P [P.test]` is in the load, so on a `./...` run over a repo
+/// with tests almost every path is left choosing between bracketed variants —
+/// and test imports reach *back* into the repo. On prometheus `./...`,
+/// `tsdb [tsdb.test]` imports `util/teststorage` and
+/// `util/teststorage [util/teststorage.test]` imports `tsdb`: a cycle that does
+/// not exist in the Go graph, manufactured entirely out of test edges. A cycle
+/// makes `dep_load_order` drop an edge to finish its walk, which costs the
+/// topological order, which costs the wave assignment — 39 edges scheduling a
+/// dependency no earlier than its consumer, and the two packages on the far end
+/// of them (`promql/promqltest`, `tsdb`) type-checked against an `invalid` type
+/// they should have seen whole.
+fn seed_variant_rank(pkg: &Package, path: &str, augmented: &HashSet<String>) -> (u8, u8) {
+    // A copy with nothing to compile is no copy at all: `go list` emits such
+    // entries for packages resolved from export data, and for a test variant
+    // whose files never made it into the response. Rank it behind every variant
+    // that has files, in both branches.
+    let empty = u8::from(pkg.compiled_go_files.is_empty());
+    (empty, seed_variant_kind(&pkg.id, path, augmented))
+}
+
+fn seed_variant_kind(id: &str, path: &str, augmented: &HashSet<String>) -> u8 {
+    let augmented_variant = id == same_package_test_variant_id(path);
+    if augmented.contains(path) {
+        // The seed compiles P's in-package tests here, so their imports *are*
+        // edges of what it builds. Take them from the variant that has them.
+        if augmented_variant {
+            0
+        } else if id == path {
+            1
+        } else {
+            2
+        }
+    } else if id == path {
+        0
+    } else if !augmented_variant {
+        // `P [Q.test]` — production files, so production edges.
+        1
+    } else {
+        // The only copy left is the test-augmented one. Its files are still
+        // filtered down to production, and its edges come from
+        // [`Package::production_deps`] — the plain package's own `deps`, kept
+        // by [`carry_production_deps`] before it was dropped.
+        2
+    }
+}
+
+/// The single variant of `path` that the seed's files *and* edges both come
+/// from. `None` when the load holds no package for `path` at all.
+///
+/// Ties inside a rank break on the id so the choice does not ride on
+/// `HashMap` iteration order — the previous `values().find()` let two runs of
+/// the same load disagree about which `_test.go`-carrying copy of a package the
+/// graph described.
+pub fn seed_variant_for<'a>(
+    by_id: &'a HashMap<String, Arc<Package>>,
+    path: &str,
+    augmented: &HashSet<String>,
+) -> Option<&'a Arc<Package>> {
+    if let Some(pkg) = by_id.get(path) {
+        // Fast path: for anything but an augmented path the plain id is the
+        // best rank there is, so the scan below cannot beat it.
+        if !augmented.contains(path) && !pkg.compiled_go_files.is_empty() {
+            return Some(pkg);
+        }
+    }
+    let mut best: Option<((u8, u8), &Arc<Package>)> = None;
+    for pkg in by_id.values() {
+        if pkg.pkg_path != path {
+            continue;
+        }
+        let rank = seed_variant_rank(pkg, path, augmented);
+        let better = match best {
+            None => true,
+            Some((r, cur)) => (rank, &pkg.id) < (r, &cur.id),
+        };
+        if better {
+            best = Some((rank, pkg));
+        }
+    }
+    best.map(|(_, pkg)| pkg)
+}
+
 /// Import-path → deps graph for hybrid seed ordering.
 ///
 /// Seed waves / `dep_load_order` look up by **import path** (from `Package.deps`
@@ -157,36 +299,35 @@ pub fn package_for_import_path<'a>(
 /// typechecks `P` before its imports — embedded field types become Invalid
 /// (cli `api.HTTPError` / govet errorsas FPs under multi-root load).
 ///
-/// Prefer plain `id == pkg_path` deps when both plain and test-variant exist —
-/// except for the paths in [`paths_with_external_test_package`], where the seed
-/// compiles the test variant's files and so needs the test variant's imports
-/// (`testing`, testify, …) in the graph. A path whose seeded files and seeded
-/// edges come from different variants gets its `_test.go` imports resolved by
-/// the fallback importer or not at all.
+/// One entry per import path, taken from the variant [`seed_variant_rank`]
+/// picks — the same one `seed_package_for` compiles, so a path's seeded files
+/// and its seeded edges can never come from different variants.
 pub fn import_path_dep_graph(by_id: &HashMap<String, Arc<Package>>) -> HashMap<String, Vec<String>> {
     let augmented = paths_with_external_test_package(by_id);
-    let mut dep_graph = HashMap::default();
+    let mut chosen: HashMap<&str, ((u8, u8), &str)> = HashMap::default();
     for pkg in by_id.values() {
+        let path = pkg.pkg_path.as_str();
+        let rank = seed_variant_rank(pkg, path, &augmented);
+        let id = pkg.id.as_str();
+        match chosen.get(path) {
+            Some(&(r, cur)) if (r, cur) <= (rank, id) => {}
+            _ => {
+                chosen.insert(path, (rank, id));
+            }
+        }
+    }
+
+    let mut dep_graph = HashMap::default();
+    for (path, (_, id)) in chosen {
         // The values need normalizing as much as the keys do, and for longer:
         // an external test package's `deps` are **ids**, so a graph whose edges
         // point at `Q [P.test]` sends the seed off to type-check a package under
         // a name no `import` statement can ever spell. See `import_path_of_id`.
-        let deps: Vec<String> = pkg
-            .deps
+        let deps: Vec<String> = seed_edges(&by_id[id], path, &augmented)
             .iter()
             .map(|d| import_path_of_id(d).to_string())
             .collect();
-        let key = pkg.pkg_path.clone();
-        let authoritative = if augmented.contains(&key) {
-            pkg.id == same_package_test_variant_id(&key)
-        } else {
-            pkg.id == key
-        };
-        if authoritative {
-            dep_graph.insert(key, deps);
-        } else {
-            dep_graph.entry(key).or_insert(deps);
-        }
+        dep_graph.insert(path.to_string(), deps);
     }
     dep_graph
 }
@@ -347,6 +488,172 @@ mod tests {
             "seed must see lib→ext after plain lib was dropped for lib [lib.test]"
         );
         assert!(graph.get(&lib.id).is_none());
+    }
+
+    fn with_deps(id: &str, pkg_path: &str, deps: &[&str]) -> Arc<Package> {
+        Arc::new(Package {
+            id: id.to_string(),
+            pkg_path: pkg_path.to_string(),
+            deps: deps.iter().map(|d| d.to_string()).collect(),
+            ..Package::default()
+        })
+    }
+
+    fn by_id_of(pkgs: Vec<Arc<Package>>) -> HashMap<String, Arc<Package>> {
+        let mut by_id = HashMap::default();
+        for p in pkgs {
+            by_id.insert(p.id.clone(), p);
+        }
+        by_id
+    }
+
+    /// prometheus, reduced: `tsdb`'s in-package tests import `util/teststorage`
+    /// and `util/teststorage`'s in-package tests import `tsdb`. Neither
+    /// *production* package imports the other, so Go is happy — each test
+    /// binary sees the other side production-only. `filter_duplicate_packages`
+    /// then drops both plain packages, and if the graph takes what is left, the
+    /// two test variants point at each other and the seed has a cycle that does
+    /// not exist in any Go build.
+    fn mutually_test_importing_pair() -> Vec<Arc<Package>> {
+        vec![
+            with_deps(
+                "example.com/m/tsdb [example.com/m/tsdb.test]",
+                "example.com/m/tsdb",
+                &["example.com/m/util/teststorage"],
+            ),
+            // The copy of tsdb recompiled into teststorage's test binary:
+            // production files, production edges.
+            with_deps(
+                "example.com/m/tsdb [example.com/m/util/teststorage.test]",
+                "example.com/m/tsdb",
+                &["example.com/m/tsdb/index"],
+            ),
+            with_deps(
+                "example.com/m/util/teststorage [example.com/m/util/teststorage.test]",
+                "example.com/m/util/teststorage",
+                &["example.com/m/tsdb"],
+            ),
+            with_deps(
+                "example.com/m/util/teststorage [example.com/m/tsdb.test]",
+                "example.com/m/util/teststorage",
+                &[],
+            ),
+        ]
+    }
+
+    /// The seed compiles production files for a path with no external test
+    /// package, so it has to be ordered by production edges. `P [Q.test]` is
+    /// that same production build, recompiled for someone else's test binary.
+    #[test]
+    fn a_for_test_dep_copy_outranks_the_test_augmented_one() {
+        let graph = import_path_dep_graph(&by_id_of(mutually_test_importing_pair()));
+        assert_eq!(
+            graph.get("example.com/m/tsdb"),
+            Some(&vec!["example.com/m/tsdb/index".to_string()]),
+            "tsdb's edges must come from the production copy, not its test variant",
+        );
+        assert_eq!(
+            graph.get("example.com/m/util/teststorage"),
+            Some(&vec![]),
+            "and so must teststorage's — otherwise the two point at each other",
+        );
+    }
+
+    /// The invariant the whole selection exists for: whatever variant supplies
+    /// a path's *files* must be the one that supplies its *edges*. They were
+    /// picked by two different functions — `package_for_import_path`, which
+    /// takes whatever `HashMap` iteration hands it first, and a rank that
+    /// preferred a plain package no longer in the load — so a path could be
+    /// compiled from one variant and ordered by another's imports.
+    #[test]
+    fn files_and_edges_are_read_off_the_same_variant() {
+        let by_id = by_id_of(mutually_test_importing_pair());
+        let augmented = paths_with_external_test_package(&by_id);
+        for path in ["example.com/m/tsdb", "example.com/m/util/teststorage"] {
+            let files_from = seed_variant_for(&by_id, path, &augmented).expect("a variant");
+            let edges = import_path_dep_graph(&by_id).remove(path).expect("edges");
+            let want: Vec<String> = seed_edges(files_from, path, &augmented)
+                .iter()
+                .map(|d| import_path_of_id(d).to_string())
+                .collect();
+            assert_eq!(edges, want, "{path}: edges are not {}'s", files_from.id);
+        }
+    }
+
+    /// When the only copy left is `P [P.test]` — nobody else's test binary
+    /// recompiled P — the production edges come from the plain package
+    /// `filter_duplicate_packages` dropped, carried over before it went.
+    #[test]
+    fn carried_production_deps_stand_in_for_the_dropped_plain_package() {
+        let variant = "example.com/m/local [example.com/m/local.test]";
+        let mut by_id = by_id_of(vec![
+            with_deps("example.com/m/local", "example.com/m/local", &["example.com/m/fs"]),
+            with_deps(variant, "example.com/m/local", &["example.com/m/fs", "example.com/m/fstest"]),
+        ]);
+        let keep: HashSet<String> = filter_duplicate_packages(by_id.values().cloned().collect())
+            .into_iter()
+            .map(|p| p.id.clone())
+            .collect();
+        assert_eq!(keep, HashSet::from_iter([variant.to_string()]));
+
+        carry_production_deps(&mut by_id, &keep);
+        by_id.retain(|id, _| keep.contains(id));
+
+        let graph = import_path_dep_graph(&by_id);
+        assert_eq!(
+            graph.get("example.com/m/local"),
+            Some(&vec!["example.com/m/fs".to_string()]),
+            "fstest is a test-only import and not an edge of what the seed builds",
+        );
+    }
+
+    /// …but not for a path whose *external* test package is in the load: there
+    /// the seed really does compile the in-package `_test.go`, so their imports
+    /// really are edges. Regression guard for the `export_test.go` fix.
+    #[test]
+    fn an_augmented_path_keeps_its_test_variant_edges_after_a_carry() {
+        let variant = "example.com/m/promql [example.com/m/promql.test]";
+        let mut by_id = by_id_of(vec![
+            with_deps("example.com/m/promql", "example.com/m/promql", &["example.com/m/parser"]),
+            with_deps(variant, "example.com/m/promql", &["example.com/m/parser", "example.com/m/testutil"]),
+            with_deps(
+                "example.com/m/promql_test [example.com/m/promql.test]",
+                "example.com/m/promql_test",
+                &[variant],
+            ),
+        ]);
+        let keep: HashSet<String> = by_id
+            .keys()
+            .filter(|id| *id != "example.com/m/promql")
+            .cloned()
+            .collect();
+        carry_production_deps(&mut by_id, &keep);
+        by_id.retain(|id, _| keep.contains(id));
+
+        let graph = import_path_dep_graph(&by_id);
+        assert!(
+            graph["example.com/m/promql"].contains(&"example.com/m/testutil".to_string()),
+            "augmented: the seed compiles the tests, so their imports are edges: {:?}",
+            graph["example.com/m/promql"],
+        );
+    }
+
+    /// `carry_production_deps` must not fire when the plain package survived —
+    /// its own `deps` already are the production ones, and a stale copy on some
+    /// other variant would outlive an edit.
+    #[test]
+    fn nothing_is_carried_when_the_plain_package_survives() {
+        let mut by_id = by_id_of(vec![
+            with_deps("example.com/m/q", "example.com/m/q", &["example.com/m/a"]),
+            with_deps(
+                "example.com/m/q [example.com/m/p.test]",
+                "example.com/m/q",
+                &["example.com/m/a"],
+            ),
+        ]);
+        let keep: HashSet<String> = by_id.keys().cloned().collect();
+        carry_production_deps(&mut by_id, &keep);
+        assert!(by_id.values().all(|p| p.production_deps.is_none()));
     }
 
     #[test]

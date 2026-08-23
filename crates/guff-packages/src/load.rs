@@ -115,6 +115,7 @@ fn refine(
     clear_unrequested_fields(&mut by_id, requested_mode.implied());
 
     let keep = surviving_ids(&by_id);
+    crate::dedup::carry_production_deps(&mut by_id, &keep);
     by_id.retain(|id, _| keep.contains(id));
     response.roots.retain(|id| keep.contains(id));
 
@@ -185,6 +186,7 @@ pub(crate) fn peeked_graph_shape(
     connect_imports(&mut by_id);
 
     let keep = surviving_ids(&by_id);
+    crate::dedup::carry_production_deps(&mut by_id, &keep);
     by_id.retain(|id, _| keep.contains(id));
 
     let mut roots: Vec<String> = response

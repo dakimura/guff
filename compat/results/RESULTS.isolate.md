@@ -3,7 +3,7 @@
 | Target | guff | golangci | both | P | R | unexpected |
 |--------|-----:|---------:|-----:|--:|--:|-----------:|
 | isolate-errcheck | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-ineffassign | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-ineffassign | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-unused | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-govet | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-staticcheck | 11 | 11 | 11 | 100.0% | 100.0% | 0 |
@@ -32,7 +32,7 @@
 | isolate-nilnil | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-recvcheck | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-interfacebloat | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-nonamedreturns | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-nonamedreturns | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-inamedparam | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-forbidigo | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-perfsprint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -63,7 +63,7 @@
 | isolate-intrange | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-mirror | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
 | isolate-nilerr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-wrapcheck | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-wrapcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-fatcontext | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-noctx | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-musttag | 0 | 0 | 0 | 100.0% | 100.0% | 0 |
@@ -93,7 +93,7 @@
 | isolate-testpackage | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-paralleltest | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-tparallel | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-usetesting | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
+| isolate-usetesting | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-gocheckcompilerdirectives | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-gochecksumtype | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-gosmopolitan | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
@@ -131,7 +131,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| ineffassign | 1 | 1 | 1 | 100.0% | 100.0% |
+| ineffassign | 2 | 2 | 2 | 100.0% | 100.0% |
 
 ## isolate-unused
 
@@ -304,7 +304,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| nonamedreturns | 1 | 1 | 1 | 100.0% | 100.0% |
+| nonamedreturns | 8 | 8 | 8 | 100.0% | 100.0% |
 
 ## isolate-inamedparam
 
@@ -488,7 +488,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| wrapcheck | 1 | 1 | 1 | 100.0% | 100.0% |
+| wrapcheck | 3 | 3 | 3 | 100.0% | 100.0% |
 
 ## isolate-fatcontext
 
@@ -664,7 +664,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| usetesting | 4 | 4 | 4 | 100.0% | 100.0% |
+| usetesting | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-gocheckcompilerdirectives
 

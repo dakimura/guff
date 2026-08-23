@@ -727,19 +727,23 @@ fn build_export_seed(
 ///
 /// Everything else stays production-only on purpose: `_test.go` across the
 /// whole seed roughly doubles type-arena RSS on prometheus `./...`.
+///
+/// The variant is picked by `dedup::seed_variant_for`, which is also what
+/// `import_path_dep_graph` keys its edges on, so a path's seeded files and its
+/// seeded edges are always read off the same package.
 fn seed_package_for<'a>(
     by_id: &'a HashMap<String, Arc<Package>>,
     path: &str,
     augment: &HashSet<String>,
 ) -> Option<(&'a Arc<Package>, bool)> {
-    if augment.contains(path) {
-        if let Some(variant) = by_id.get(&crate::dedup::same_package_test_variant_id(path)) {
-            if !variant.compiled_go_files.is_empty() {
-                return Some((variant, true));
-            }
-        }
-    }
-    crate::dedup::package_for_import_path(by_id, path).map(|pkg| (pkg, false))
+    let pkg = crate::dedup::seed_variant_for(by_id, path, augment)?;
+    // `seed_variant_for` puts `P [P.test]` first for an augmented path and last
+    // for every other one, where its `_test.go` entries are filtered back out
+    // below. So the tests are in the compilation exactly when the path is
+    // augmented *and* that variant is the one that won.
+    let with_tests =
+        augment.contains(path) && pkg.id == crate::dedup::same_package_test_variant_id(path);
+    Some((pkg, with_tests))
 }
 
 fn is_test_file(path: &Path) -> bool {
@@ -920,7 +924,8 @@ fn build_source_seed_inner(
     // (1455 source deps, 13.1s of type-check CPU) this takes the cold seed build
     // from 3.40s to 2.65s. Dropping the barriers entirely would only reach 2.2s
     // — see docs/PERF_TASKS.md §1.8 for why that is not worth its cost.
-    let order = dep_load_order(&needed, dep_graph, &loadable);
+    let (order, back_edges) = dep_load_order(&needed, dep_graph, &loadable);
+    report_seed_cycles(&back_edges);
     let source_set: HashSet<&str> = order
         .iter()
         .map(String::as_str)
@@ -1296,52 +1301,108 @@ fn build_source_seed_inner(
     Some(Arc::new(seed))
 }
 
+/// Print the back-edges [`dep_load_order`] had to drop, once per seed build.
+///
+/// Unconditional, because there is no run in which this is fine and no other
+/// symptom to notice: the packages it costs go ill-typed, and an ill-typed
+/// package produces no findings rather than wrong ones. `compat/health.py`
+/// gates on these lines the way it gates on worker panics — never baselined.
+/// Capped at three edges; one broken variant choice tends to produce a run of
+/// them all naming the same package.
+fn report_seed_cycles(back_edges: &[(String, String)]) {
+    if back_edges.is_empty() {
+        return;
+    }
+    let mut seen: Vec<&(String, String)> = back_edges.iter().collect();
+    seen.sort();
+    seen.dedup();
+    for (from, to) in seen.iter().take(3) {
+        eprintln!("guff: seed dep cycle {from} -> {to}");
+    }
+    if seen.len() > 3 {
+        eprintln!("guff: seed dep cycle ... and {} more", seen.len() - 3);
+    }
+    // Deliberately a different prefix: `compat/health.py` counts the edge lines
+    // above, and this one is prose for whoever is reading a terminal.
+    eprintln!(
+        "guff: seed order is not topological; some packages may be reported ill-typed. \
+         This is a guff bug, not a problem with the code being linted."
+    );
+}
+
 /// Leaves-first (post-order) topological order over the loadable dependency
 /// closure: a package's deps are always emitted before the package itself, and
 /// `deps` are walked in sorted order for determinism (so the seed is built in a
 /// stable order regardless of `HashMap` iteration). `unsafe`/`C` and
-/// non-loadable paths are skipped. The
-/// graph is a DAG (Go forbids import cycles); a stack guard keeps a malformed
-/// graph from recursing forever.
+/// non-loadable paths are skipped.
+///
+/// The second return value is the back-edges the walk had to drop. Go forbids
+/// import cycles, and `import_path_dep_graph` reads each path's edges off the
+/// same variant whose files the seed compiles — an in-package `_test.go` is
+/// still `package p`, so it cannot import anything that imports `p` either.
+/// The graph is therefore acyclic, and a non-empty second return value is a
+/// guff bug, not a property of the code being linted. It is worth surfacing
+/// because of what it costs downstream: the stack guard below drops an edge to
+/// finish the walk, `order` stops being topological, and the heights the wave
+/// scheduler reads off it come out inconsistent — dependencies land in the same
+/// wave as their consumers, or later, and get merged into the seed after the
+/// package that needed them has already been checked against an `invalid` type.
+/// Nothing about that reaches a finding diff: the affected packages go
+/// ill-typed and every analyzer skips them in silence.
 fn dep_load_order(
     needed: &[String],
     dep_graph: &HashMap<String, Vec<String>>,
     loadable: &HashSet<String>,
-) -> Vec<String> {
-    let mut order = Vec::new();
-    let mut done = HashSet::default();
-    let mut visiting: Vec<String> = Vec::new();
+) -> (Vec<String>, Vec<(String, String)>) {
+    let mut walk = DepLoadWalk::default();
     for id in needed {
-        dep_load_order_visit(id, dep_graph, loadable, &mut done, &mut visiting, &mut order);
+        walk.visit(id, dep_graph, loadable);
     }
-    order
+    (walk.order, walk.back_edges)
 }
 
-fn dep_load_order_visit(
-    path: &str,
-    dep_graph: &HashMap<String, Vec<String>>,
-    loadable: &HashSet<String>,
-    done: &mut HashSet<String>,
-    visiting: &mut Vec<String>,
-    order: &mut Vec<String>,
-) {
-    if path == "unsafe" || path == "C" || done.contains(path) || !loadable.contains(path) {
-        return;
-    }
-    if visiting.iter().any(|p| p == path) {
-        return;
-    }
-    visiting.push(path.to_string());
-    if let Some(deps) = dep_graph.get(path) {
-        let mut deps: Vec<&str> = deps.iter().map(String::as_str).collect();
-        deps.sort_unstable();
-        for dep in deps {
-            dep_load_order_visit(dep, dep_graph, loadable, done, visiting, order);
+/// Mutable state of one [`dep_load_order`] walk.
+#[derive(Default)]
+struct DepLoadWalk {
+    done: HashSet<String>,
+    /// The current DFS stack, for cycle detection.
+    visiting: Vec<String>,
+    order: Vec<String>,
+    back_edges: Vec<(String, String)>,
+}
+
+impl DepLoadWalk {
+    fn visit(
+        &mut self,
+        path: &str,
+        dep_graph: &HashMap<String, Vec<String>>,
+        loadable: &HashSet<String>,
+    ) {
+        if path == "unsafe" || path == "C" || self.done.contains(path) || !loadable.contains(path) {
+            return;
         }
-    }
-    visiting.pop();
-    if done.insert(path.to_string()) {
-        order.push(path.to_string());
+        if self.visiting.iter().any(|p| p == path) {
+            // Go has no import cycles, and the seed's edges are read off the
+            // same variant whose files it compiles (`dedup::seed_variant_rank`),
+            // so this is unreachable in a correct graph — see
+            // [`dep_load_order`].
+            if let Some(from) = self.visiting.last() {
+                self.back_edges.push((from.clone(), path.to_string()));
+            }
+            return;
+        }
+        self.visiting.push(path.to_string());
+        if let Some(deps) = dep_graph.get(path) {
+            let mut deps: Vec<&str> = deps.iter().map(String::as_str).collect();
+            deps.sort_unstable();
+            for dep in deps {
+                self.visit(dep, dep_graph, loadable);
+            }
+        }
+        self.visiting.pop();
+        if self.done.insert(path.to_string()) {
+            self.order.push(path.to_string());
+        }
     }
 }
 
@@ -1448,6 +1509,63 @@ mod tests {
     use std::sync::Arc;
 
     use guff::ast::Decl;
+
+    fn graph(edges: &[(&str, &[&str])]) -> HashMap<String, Vec<String>> {
+        let mut g: HashMap<String, Vec<String>> = HashMap::default();
+        for (from, to) in edges {
+            g.insert(
+                (*from).to_string(),
+                to.iter().map(|t| (*t).to_string()).collect(),
+            );
+        }
+        g
+    }
+
+    /// A DAG needs no back-edge, and every node comes out after its deps.
+    #[test]
+    fn dep_load_order_is_leaves_first_and_reports_no_cycle() {
+        let g = graph(&[("a", &["b", "c"]), ("b", &["c"]), ("c", &[])]);
+        let loadable: HashSet<String> =
+            ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        assert_eq!(order, vec!["c", "b", "a"]);
+        assert!(back_edges.is_empty(), "clean graph reported {back_edges:?}");
+    }
+
+    /// The signal `report_seed_cycles` prints and `compat/health.py` gates on.
+    /// The walk still terminates and still returns an order — that is exactly
+    /// the problem, because the order is no longer topological and nothing
+    /// downstream can tell. Before this was reported, the only symptom was a
+    /// package two hops away going ill-typed, which produces no findings rather
+    /// than wrong ones.
+    #[test]
+    fn dep_load_order_reports_the_back_edge_it_had_to_drop() {
+        let g = graph(&[("a", &["b"]), ("b", &["a"])]);
+        let loadable: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        let needed: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        assert_eq!(order.len(), 2, "the walk still finishes: {order:?}");
+        assert_eq!(back_edges, vec![("b".to_string(), "a".to_string())]);
+    }
+
+    /// Only cycles are reported. A path visited twice through different
+    /// consumers is ordinary sharing, not a back-edge.
+    #[test]
+    fn a_diamond_is_not_a_cycle() {
+        let g = graph(&[("top", &["l", "r"]), ("l", &["leaf"]), ("r", &["leaf"]), ("leaf", &[])]);
+        let loadable: HashSet<String> = ["top", "l", "r", "leaf"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let needed: Vec<String> = ["top"].iter().map(|s| s.to_string()).collect();
+
+        let (order, back_edges) = dep_load_order(&needed, &g, &loadable);
+        assert!(back_edges.is_empty(), "diamond reported {back_edges:?}");
+        assert_eq!(order.first().map(String::as_str), Some("leaf"));
+    }
 
     fn testdata(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
