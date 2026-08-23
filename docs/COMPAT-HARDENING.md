@@ -8943,6 +8943,73 @@ G702 / G703 / G706 / G710 と共有している。単独のタスクにするこ
 3. **`call_name` の中央修正** —— 続き 23 の 1。
 4. **複合リテラルの lowering** —— 続き 18 の 4。
 5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
+### 2026-08-23（続き 25）— `byte` と `rune` は「同じ型の別名」ではなく「名前の違う別の型」
+
+続き 24 の「次にやること」2。syncthing の `lib/protocol/deviceid.go:191/209` が
+**両側に同時に並んでいた**唯一の差分:
+
+```
++guff  G115: integer overflow conversion int32 -> uint8
++gcl   G115: integer overflow conversion rune -> byte
+```
+
+行も列も同じで、**綴りだけが違う**。
+
+#### 原因 —— TypeName が 2 つ、Basic は 1 つ
+
+gosec は `instr.X.Type().Underlying().(*types.Basic).Name()` を出す。
+go/types は `byte` / `rune` を **`aliases` 配列の別の `*Basic`**
+（kind は `Uint8` / `Int32`、name は `"byte"` / `"rune"`）として持っていて、
+`identical` は **kind で比べる**ので代入も変換も何も変わらない。
+別々の値が保っているのは**ソースがどちらの綴りを書いたか**だけであり、
+診断に出るのはその名前のほうである。
+
+guff は `byte` / `rune` を **`uint8` / `int32` と同じ TypeId を指す TypeName**
+にしていた。`basic.rs` の `BYTE` / `RUNE` は
+「`Uint8` / `Int32` と同じ数値の別名」というコメントつきでそう決めてあり、
+**そこまでは正しい（kind は本当に同じ）**。取りこぼしていたのは
+「kind が同じでも `*Basic` は別」という上流の一段である。
+
+#### 直し方は 2 要素の追加で済んだ
+
+`Basic { kind, info, name }` という形は最初から上流と同じで、
+`identical` も既に `a.kind() == b.kind()` で比べていた。
+なので**アリーナに 2 つ足して TypeName の向き先を変えるだけ**で、
+型検査のロジックには 1 行も触っていない。
+
+**ワークスペース全体のテストが通り、直したテストは 2 本だけ**だった:
+
+1. `universe.rs::byte_and_rune_aliases_point_to_uint8_and_int32` ——
+   古いモデルそのものを表明していたので、新しいモデル
+   （**TypeId は別・kind は同じ・`identical` は真**）を表明するように書き直した。
+2. `check_files.rs::conversions_to_type_literals_are_checked` ——
+   `var z int = []byte(s)` のエラーが `[]uint8` を含むことを要求していた。
+   **Go は `[]byte` と言う**:
+
+   ```
+   cannot use []byte(s) (value of type []byte) as int value in variable declaration
+   ```
+
+   つまりこのテストは**上流より不正確な綴りを固定していた**。
+   狙っていた 1 件のほかに、この小さな不一致も一緒に消えた。
+
+#### 綴りが残るのはパッケージ内だけ
+
+export data は basic を **kind で**符号化するので、
+パッケージ境界を越えた `byte` は `uint8` として復号される —— **Go でも同じ**。
+syncthing の該当行は `luhn32` が同じ `lib/protocol` で
+`(rune, error)` を返しているので、綴りが残る側に入っている。
+
+#### 結果
+
+`deviceid.go:191:27` / `209:27` が両方とも
+`G115: integer overflow conversion rune -> byte` になり、上流と一致。
+**gcl-only 2 件と guff-only 2 件が同時に消える** —— 同じ 2 行が
+差分の両側に立っていたので、片側だけ直しても数は減らなかった。
+golden 103/103、isolate 116/116 は不変（他のどのメッセージも綴りが動いていない）。
+
+---
+
 
 ---
 
