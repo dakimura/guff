@@ -155,18 +155,18 @@ fn call_sig(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
         _ => return code::call_name(pass, &call.fun).map(|n| format!("{n}(")),
     };
     let typ = obj.typ(&artifacts.objects)?;
-    let name = obj.name(&artifacts.objects).to_string();
-    let pkg_qual = match obj.pkg(&artifacts.objects) {
-        Some(pkg) => {
-            let path = artifacts.packages.get(pkg).path();
-            if path.is_empty() {
-                String::new()
-            } else {
-                format!("{path}.")
-            }
-        }
-        None => String::new(),
-    };
+    // go/types' `writeFuncName`: a method is `(RecvType).Name` with the
+    // receiver written out, and only a bare function is `path.Name`. Building
+    // the name from `obj.pkg()` alone gave `os/exec.StdinPipe` for a method,
+    // dropping the receiver — a name Go never prints, so wrapcheck's message
+    // and every `ignoreSigs` pattern matched against it were both wrong.
+    // `code::type_func_name` is that function, including its interface case.
+    let qualified_name = code::type_func_name(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        obj,
+    );
     let qf = |pkg_id, parena: &guff_types::arena::PackageArena| {
         parena.get(pkg_id).name().to_string()
     };
@@ -182,7 +182,7 @@ fn call_sig(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
     };
     // go/types prints the `byte`/`rune` aliases; guff's Basic table uses uint8/int32.
     let sig = sig.replace("[]uint8", "[]byte").replace("[]int32", "[]rune");
-    Some(format!("func {pkg_qual}{name}{sig}"))
+    Some(format!("func {qualified_name}{sig}"))
 }
 
 fn object_of_ident(pass: &Pass<'_>, id: &Ident) -> Option<ObjectId> {
@@ -378,7 +378,11 @@ fn check_return(
     for expr in &ret.results {
         if let Expr::CallExpr(call) = unparen(expr) {
             if call_returns_error(pass, call) {
-                report_unwrapped(pass, call, call.lparen.0 as u32, opts, pending);
+                // `call.Pos()`, which for a CallExpr is `Fun.Pos()` — the
+                // start of `flags.SetAnnotation(…)`, not its `(`. Upstream
+                // reports there, and the two only differ once the callee is a
+                // selector, so `return f()` agreed and `return x.M()` did not.
+                report_unwrapped(pass, call, call.pos().0 as u32, opts, pending);
             }
             continue;
         }

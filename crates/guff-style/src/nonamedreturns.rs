@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use guff::ast::{BlockStmt, CallExpr, Decl, Expr, FieldList, Spec, Stmt};
+use guff::ast::{BlockStmt, CallExpr, ChanDir, Decl, Expr, FieldList, Spec, Stmt};
 use guff::token::Token;
 use guff::walk::{decl_ref, preorder, stmt_ref, NodeRef};
 use guff_analysis::code::object_of;
@@ -73,6 +73,55 @@ fn is_exactly_error(pass: &Pass<'_>, ty: &Expr) -> bool {
     types_are_identical(pass, typ, err)
 }
 
+/// `go/types.writeSigExpr`: `(params)`, then the results — bare when there is
+/// exactly one unnamed result, parenthesised otherwise.
+fn sig_string(ft: &guff::ast::FuncType) -> String {
+    let params = ft
+        .params
+        .as_ref()
+        .map(|f| field_list_string(f))
+        .unwrap_or_default();
+    let mut out = format!("({params})");
+    let Some(res) = ft.results.as_ref() else {
+        return out;
+    };
+    let n: usize = res.list.iter().map(|f| f.names.len().max(1)).sum();
+    if n == 0 {
+        return out;
+    }
+    out.push(' ');
+    if n == 1 && res.list.len() == 1 && res.list[0].names.is_empty() {
+        if let Some(t) = res.list[0].ty.as_ref() {
+            out.push_str(&expr_string(t));
+        }
+        return out;
+    }
+    out.push('(');
+    out.push_str(&field_list_string(res));
+    out.push(')');
+    out
+}
+
+/// `go/types.writeFieldList` with `", "` and `iface = false`.
+fn field_list_string(fields: &guff::ast::FieldList) -> String {
+    let mut parts = Vec::new();
+    for f in &fields.list {
+        let names = f
+            .names
+            .iter()
+            .map(|n| n.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let ty = f.ty.as_ref().map(expr_string).unwrap_or_default();
+        parts.push(if names.is_empty() {
+            ty
+        } else {
+            format!("{names} {ty}")
+        });
+    }
+    parts.join(", ")
+}
+
 /// Approximate `go/types.ExprString` for common type expressions.
 fn expr_string(e: &Expr) -> String {
     match e {
@@ -85,10 +134,25 @@ fn expr_string(e: &Expr) -> String {
             Some(len) => format!("[{}]{}", expr_string(len), expr_string(&a.elt)),
         },
         Expr::MapType(m) => format!("map[{}]{}", expr_string(&m.key), expr_string(&m.value)),
-        Expr::ChanType(c) => format!("chan {}", expr_string(&c.value)),
+        // `ChanDir` is a bitset: a bidirectional channel carries both bits, so
+        // the one-way cases are the ones missing a bit.
+        Expr::ChanType(c) => {
+            let send = c.dir.0 & ChanDir::SEND.0 != 0;
+            let recv = c.dir.0 & ChanDir::RECV.0 != 0;
+            let value = expr_string(&c.value);
+            match (send, recv) {
+                (false, true) => format!("<-chan {value}"),
+                (true, false) => format!("chan<- {value}"),
+                _ => format!("chan {value}"),
+            }
+        }
         Expr::InterfaceType(it) if it.methods.list.is_empty() => "interface{}".into(),
         Expr::StructType(st) if st.fields.list.is_empty() => "struct{}".into(),
-        Expr::FuncType(_) => "func(...)".into(),
+        // `writeSigExpr`. This was `"func(...)"`, which is not a type anyone
+        // wrote — nonamedreturns prints this string, so cobra's
+        // `func(*Command) error` came out as `func(...)` and stood on both
+        // sides of the diff at once.
+        Expr::FuncType(ft) => format!("func{}", sig_string(ft)),
         Expr::Ellipsis(el) => match &el.elt {
             Some(t) => format!("...{}", expr_string(t)),
             None => "...".into(),
@@ -1018,6 +1082,12 @@ fn check_results(
     pass: &Pass<'_>,
     results: &FieldList,
     body: &BlockStmt,
+    // Upstream reports the **function**, not the named return: `func_pos` is
+    // the `func` keyword, which is `(*ast.FuncDecl).Pos()` and
+    // `(*ast.FuncLit).Pos()` alike. Reporting the identifier put every finding
+    // a dozen columns to the right — invisible to the isolate and OSS keys,
+    // which carry no column.
+    func_pos: u32,
     opts: &NonamedreturnsOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -1045,7 +1115,7 @@ fn check_results(
                 };
                 if referenced.contains(&obj) || *has_naked {
                     pending.push((
-                        name.pos().0 as u32,
+                        func_pos,
                         format!(
                             "named return \"{}\" with type \"{}\" must not be referenced or used by a naked return",
                             name.name, ty_str
@@ -1090,7 +1160,7 @@ fn check_results(
             }
 
             pending.push((
-                name.pos().0 as u32,
+                func_pos,
                 format!(
                     "named return \"{}\" with type \"{}\" found",
                     name.name, ty_str
@@ -1104,6 +1174,7 @@ fn check_func(
     pass: &Pass<'_>,
     results: Option<&FieldList>,
     body: Option<&BlockStmt>,
+    func_pos: u32,
     opts: &NonamedreturnsOptions,
     pending: &mut Vec<(u32, String)>,
 ) {
@@ -1113,7 +1184,7 @@ fn check_func(
     let Some(results) = results else {
         return;
     };
-    check_results(pass, results, body, opts, pending);
+    check_results(pass, results, body, func_pos, opts, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -1134,6 +1205,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     pass,
                     fd.ty.results.as_ref(),
                     fd.body.as_ref(),
+                    fd.ty.func.0 as u32,
                     &opts,
                     &mut pending,
                 );
@@ -1144,6 +1216,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     pass,
                     fl.ty.results.as_ref(),
                     Some(&fl.body),
+                    fl.ty.func.0 as u32,
                     &opts,
                     &mut pending,
                 );
