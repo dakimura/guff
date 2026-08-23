@@ -8522,7 +8522,28 @@ guff の `nonamedreturns.rs` には**自前の**「Approximate `go/types.ExprStr
 3 つとも「その linter が撃つこと」は確かめていて、
 **「何を撃つか」は一度も確かめていない**。§1 が数えた 72 件の中身がこれである。
 それぞれ 3 件 / 8 件に増やし、桁を見る golden case を足した
-（golden は **103 → 108 case**）。
+（この 2 つで golden は **103 → 105 case**。続き 26 の 2 つと続き 27 の 1 つを
+合わせると 108 になるが、それらは別の枝にある）。
+
+#### `usetesting` —— 5/5 も同じ署名だった
+
+```
+guff  os.CreateTemp("", ...) could be replaced by t.TempDir() in TestX
+gcl   os.CreateTemp("", ...) could be replaced by os.CreateTemp(t.TempDir(), ...) in TestX
+```
+
+`os.CreateTemp` は**このリンタで唯一「呼び出しを残す」提案**である ——
+一時ファイルは作るので、変えるのは第 1 引数だけ。
+他の 6 つは `pkg.Name() could be replaced by t.Name()` という同じ形なので、
+guff はそれを流用していた。
+
+**9 つの腕を全部測った**（`CreateTemp` / `MkdirTemp` / `TempDir` / `Setenv` /
+`Chdir` / `context.Background` / `context.TODO`、`t` と `b` の両方）。
+**違っていたのは `CreateTemp` の 1 つだけ**で、残り 8 つは文言も桁も一致していた ——
+差分に出た 1 つだけを直して終わりにしない、というのはこのためである。
+
+isolate の fixture は `MkdirTemp` と `TempDir` を持っていて `CreateTemp` を持っていなかった。
+**合っている腕だけが入っていた。** これで 4 つ目である。
 
 #### ついでに: `--all-linters` は gated tier の記録を上書きする
 

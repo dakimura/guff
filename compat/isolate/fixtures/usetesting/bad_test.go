@@ -34,3 +34,15 @@ func TestSubtest(t *testing.T) {
 var _ = func(t *testing.T) {
 	_ = os.TempDir()
 }
+
+// `os.CreateTemp` is the one arm whose message keeps the surrounding call —
+// `os.CreateTemp(t.TempDir(), ...)`, not `t.TempDir()` — because the call still
+// has to happen, just with a directory. Every other arm reads
+// `pkg.Name() could be replaced by t.Name()`, and this fixture had only those.
+func TestCreateTemp(t *testing.T) {
+	_, _ = os.CreateTemp("", "x")
+}
+
+func BenchmarkCreateTemp(b *testing.B) {
+	_, _ = os.CreateTemp("", "x")
+}

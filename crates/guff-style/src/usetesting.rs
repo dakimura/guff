@@ -107,7 +107,12 @@ fn check_call(
             pending.push((
                 call.pos().0 as u32,
                 format!(
-                    "os.CreateTemp(\"\", ...) could be replaced by {}.TempDir() in {}",
+                    // Alone among the arms, this one suggests replacing the
+                    // *argument* rather than the call: `os.CreateTemp` still
+                    // has to be called, just with a directory. The other six
+                    // read `pkg.Name() could be replaced by t.Name()`, and
+                    // sharing that shape here dropped the surrounding call.
+                    "os.CreateTemp(\"\", ...) could be replaced by os.CreateTemp({}.TempDir(), ...) in {}",
                     fn_info.arg_name, fn_info.name
                 ),
             ));
