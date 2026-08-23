@@ -104,6 +104,34 @@ pub fn func_name(
     }
 }
 
+/// Go's `types.Func.FullName()` for the callee of `call`: `encoding/json.Marshal`
+/// for a package function, `(*encoding/json.Encoder).Encode` for a method.
+///
+/// [`call_name`] cannot answer this. It ends in [`func_name`], which is package
+/// path plus object name, so a method comes back as `encoding/json.Encode` — a
+/// name Go never produces and no upstream rule table ever spells. Every port
+/// that needs to recognise a method call has therefore rebuilt this on the
+/// side: `noctx::full_call_name` and errcheck both call `call_name` and then
+/// redo the lookup for the method form, `musttag::callee_name` skips
+/// `call_name` entirely, and `waitgroup` / SA2000 each carry the same
+/// three-line "selector says Add and the receiver is a sync.WaitGroup"
+/// fallback under a dead `is_call_to(…, "(*sync.WaitGroup).Add")`. errchkjson
+/// is the one that did not, and lost every `(*encoding/json.Encoder).Encode`
+/// in the corpus without a diff to show for it.
+pub fn callee_full_name(pass: &Pass<'_>, call: &CallExpr) -> Option<String> {
+    let obj = call_target_object(pass, &call.fun)?;
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    if !matches!(artifacts.objects.get(obj), ObjectData::Func(_)) {
+        return None;
+    }
+    Some(type_func_name(
+        &artifacts.types,
+        &artifacts.objects,
+        &artifacts.packages,
+        obj,
+    ))
+}
+
 /// Reports whether `call` invokes the named function (`"time.Sleep"`, `"len"`, …).
 pub fn is_call_to(pass: &Pass<'_>, call: &CallExpr, name: &str) -> bool {
     call_name(pass, &call.fun).as_deref() == Some(name)
