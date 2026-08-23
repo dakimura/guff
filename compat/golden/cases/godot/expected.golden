@@ -11,3 +11,6 @@ bad/bad.go:8:1:godot::Comment should end in a period
 bad/bad.go:15:1:godot::Comment should end in a period
 bad/bad.go:20:1:godot::Comment should end in a period
 bad/bad.go:32:1:godot::Comment should end in a period
+bad/bad.go:41:1:godot::Comment should end in a period
+bad/bad.go:47:1:godot::Comment should end in a period
+bad/bad.go:52:1:godot::Comment should end in a period

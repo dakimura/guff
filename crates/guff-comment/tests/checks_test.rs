@@ -327,8 +327,11 @@ fn godot_checks_comments_inside_top_level_blocks() {
     let pkg = support::typecheck_fixture("godot", "example.com/godot", "bad.go");
     let found = support::run_analyzer(godot(), &pkg);
     // Every godot message is the same string, so the count is all a
-    // message-level test can say: three top-level decl docs, plus the two block
-    // comments the old code never looked at. `compat/golden/cases/godot` pins
-    // which five, line and column, against golangci-lint.
-    assert_eq!(found.len(), 5, "{found:?}");
+    // message-level test can say: three top-level decl docs, the two block
+    // comments the old code never looked at, and three multi-line comments
+    // whose *line* was wrong rather than missing. `compat/golden/cases/godot`
+    // pins which eight, line and column, against golangci-lint — and the three
+    // multi-line ones are there because a fixture of single-line comments
+    // passed this check while both position bugs were live.
+    assert_eq!(found.len(), 8, "{found:?}");
 }

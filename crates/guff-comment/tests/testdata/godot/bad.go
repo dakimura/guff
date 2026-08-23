@@ -36,3 +36,18 @@ func hasBody() {
 	// Inside a func body, which is not a top-level block
 	_ = 1
 }
+
+// Multi does a thing
+// across two comment lines
+func Multi() {}
+
+// Blank does a thing
+//
+// Deprecated: the blank line above is a line, and the last non-empty one is
+// this one
+func Blank() {}
+
+// Trailing does a thing
+//
+// and then a blank comment line follows
+func Trailing() {}

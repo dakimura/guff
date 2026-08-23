@@ -134,7 +134,19 @@ fn comment_check_text(cg: &CommentGroup, excludes: &[Regex]) -> String {
         } else {
             raw.strip_prefix("//").unwrap_or(raw).to_string()
         };
-        for line in stripped.lines() {
+        // A `//` comment is exactly one line, and `"".lines()` yields **zero**
+        // items — so splitting dropped a bare `//` entirely and every line
+        // after it in the group shifted up by one. Upstream joins one entry per
+        // comment, blank included. The blank lines are not decoration here:
+        // `check_period` reports the last non-empty line by index, and
+        // `check_capital`'s state machine treats a newline as a sentence
+        // boundary.
+        let lines: Vec<&str> = if is_block {
+            stripped.lines().collect()
+        } else {
+            vec![stripped.as_str()]
+        };
+        for line in lines {
             let check_line = if is_block {
                 line.to_string()
             } else {
@@ -150,29 +162,43 @@ fn comment_check_text(cg: &CommentGroup, excludes: &[Regex]) -> String {
     text_lines.join("\n")
 }
 
-fn check_period(text: &str) -> bool {
+/// The **last non-empty line** of the comment, as a 1-based index into `text`,
+/// when that line does not end a sentence.
+///
+/// Upstream reports there rather than at the comment's start, which for a
+/// multi-line doc comment is a different line — `checkPeriod` walks the lines
+/// backwards and builds its position from the one it stops on. guff reported
+/// the comment's first line, so every multi-line comment godot flagged was
+/// misplaced: 11 on cobra alone, counted once as a guff-only finding and again
+/// as a golangci-only one.
+fn check_period(text: &str) -> Option<usize> {
     if text.is_empty() {
-        return false;
+        return None;
     }
     let has_letters = text.chars().any(|c| c.is_alphabetic());
     if !has_letters {
-        return false;
+        return None;
     }
 
     let lines: Vec<&str> = text.lines().collect();
-    let mut last_nonempty: Option<&str> = None;
-    for line in lines.iter().rev() {
+    let mut found: Option<(usize, &str)> = None;
+    for (i, line) in lines.iter().enumerate().rev() {
         let trimmed = line.trim_end();
         if !trimmed.is_empty() {
-            last_nonempty = Some(trimmed);
+            found = Some((i + 1, trimmed));
             break;
         }
     }
-    let Some(last) = last_nonempty else {
-        return false;
-    };
-    !has_suffix(last, LAST_CHARS)
+    let (idx, last) = found?;
+    (!has_suffix(last, LAST_CHARS)).then_some(idx)
 }
+
+// godot also computes a *column* — one past the end of the offending line,
+// shifted back out to the raw source by
+// `pos.column += strings.Index(c.lines[…], …)` — and golangci-lint throws it
+// away: its JSON reports column 1 for every godot finding, checked against
+// cobra. Only the line survives, so only the line is computed here. `godox`
+// carries the same note for the same reason, one function up.
 
 /// Returns true if any sentence after the first should start with a capital
 /// and currently starts with lowercase (declaration docs skip the first word).
@@ -260,20 +286,28 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             }
             let text = comment_check_text(doc, &excludes);
-            let mut messages = Vec::new();
-            if options.period && check_period(&text) {
-                messages.push(NO_PERIOD.to_string());
-            }
-            if options.capital && check_capital(&text, is_decl_scope) {
-                messages.push(NO_CAPITAL.to_string());
-            }
-            if messages.is_empty() {
+            let start_line = re_fset.position(doc.pos()).line;
+            let period_at = if options.period {
+                check_period(&text)
+            } else {
+                None
+            };
+            // DEFERRED: `checkCapital` returns a position per sentence too;
+            // `capital` is off by default, so this still reports it at the
+            // comment's start.
+            let capital = options.capital && check_capital(&text, is_decl_scope);
+            if period_at.is_none() && !capital {
                 continue;
             }
-            let line = re_fset.position(doc.pos()).line;
-            if let Some(pos) = line_pos(&fset, file.pos(), line) {
-                for message in messages {
-                    pending.push((pos, message));
+            if let Some(idx) = period_at {
+                let line = start_line + idx as i64 - 1;
+                if let Some(pos) = line_pos(&fset, file.pos(), line) {
+                    pending.push((pos, NO_PERIOD.to_string()));
+                }
+            }
+            if capital {
+                if let Some(pos) = line_pos(&fset, file.pos(), start_line) {
+                    pending.push((pos, NO_CAPITAL.to_string()));
                 }
             }
         }
