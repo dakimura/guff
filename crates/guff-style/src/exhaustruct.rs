@@ -366,7 +366,14 @@ fn check_lit(
         return;
     }
 
-    let pos = lit.lbrace.0 as u32;
+    // `lv.pass.Reportf(*pos, …)` with `pos := lv.lit.Pos()`. A
+    // `CompositeLit`'s `Pos()` is its `Type.Pos()` when it has one, and only
+    // falls back to the brace for an elided type (`[]T{{…}}`).
+    let pos = lit
+        .ty
+        .as_ref()
+        .map(|t| t.pos().0 as u32)
+        .unwrap_or(lit.lbrace.0 as u32);
     let msg = if missing.len() == 1 {
         format!("{} is missing field {}", info.short(), missing[0])
     } else {

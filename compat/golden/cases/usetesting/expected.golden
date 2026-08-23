@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh usetesting
+# Produced by running golangci-lint on compat/golden/cases/usetesting/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad_test.go:9:9:usetesting::os.MkdirTemp() could be replaced by t.TempDir() in TestBad
+bad_test.go:18:10:usetesting::os.TempDir() could be replaced by t.TempDir() in testHelperWithClosure
+bad_test.go:28:7:usetesting::os.TempDir() could be replaced by t.TempDir() in TestSubtest
+bad_test.go:35:6:usetesting::os.TempDir() could be replaced by t.TempDir() in anonymous function
+bad_test.go:43:9:usetesting::os.CreateTemp("", ...) could be replaced by os.CreateTemp(t.TempDir(), ...) in TestCreateTemp
+bad_test.go:47:9:usetesting::os.CreateTemp("", ...) could be replaced by os.CreateTemp(b.TempDir(), ...) in BenchmarkCreateTemp

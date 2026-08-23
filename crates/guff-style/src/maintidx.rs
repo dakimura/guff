@@ -276,7 +276,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let (cyc, vol, mi) = analyze_func(&fset, fd);
             if mi < under as i32 {
                 pending.push((
-                    fd.name.name_pos.0 as u32,
+                    // `pass.Reportf(n.Pos(), …)` where `n` is the FuncDecl:
+                    // the `func` keyword, not the name it prints in the message.
+                    fd.ty.pos().0 as u32,
                     format!(
                         "Function name: {}, Cyclomatic Complexity: {}, Halstead Volume: {:.2}, Maintainability Index: {}",
                         fd.name.name, cyc, vol, mi

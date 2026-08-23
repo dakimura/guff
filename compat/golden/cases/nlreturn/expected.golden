@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh nlreturn
+# Produced by running golangci-lint on compat/golden/cases/nlreturn/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:8:2:nlreturn::return with no blank line before

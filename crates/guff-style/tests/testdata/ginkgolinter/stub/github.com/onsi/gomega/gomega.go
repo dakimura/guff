@@ -1,39 +1,29 @@
 package gomega
 
-type OmegaMatcher interface{}
+import "github.com/onsi/gomega/types"
 
-func Expect(actual interface{}, extra ...interface{}) Assertion { return Assertion{} }
+// Real gomega aliases these to the `types` package, and ginkgolinter depends on
+// that: it resolves `types.Assertion` / `types.AsyncAssertion` /
+// `types.GomegaMatcher` and asks whether the expression's type implements them.
+// A local `interface{}` would leave every assertion here unrecognised.
+type OmegaMatcher = types.GomegaMatcher
+
+type Assertion = types.Assertion
+
+type AsyncAssertion = types.AsyncAssertion
+
+func Expect(actual interface{}, extra ...interface{}) Assertion { return nil }
 func ExpectWithOffset(offset int, actual interface{}, extra ...interface{}) Assertion {
-	return Assertion{}
+	return nil
 }
 func Eventually(actual interface{}, intervals ...interface{}) AsyncAssertion {
-	return AsyncAssertion{}
+	return nil
 }
 func Consistently(actual interface{}, intervals ...interface{}) AsyncAssertion {
-	return AsyncAssertion{}
+	return nil
 }
 
-type Assertion struct{}
 
-func (Assertion) To(matcher OmegaMatcher, optionalDescription ...interface{}) bool   { return true }
-func (Assertion) ToNot(matcher OmegaMatcher, optionalDescription ...interface{}) bool { return true }
-func (Assertion) NotTo(matcher OmegaMatcher, optionalDescription ...interface{}) bool { return true }
-func (Assertion) Should(matcher OmegaMatcher, optionalDescription ...interface{}) bool {
-	return true
-}
-func (Assertion) ShouldNot(matcher OmegaMatcher, optionalDescription ...interface{}) bool {
-	return true
-}
-func (Assertion) WithOffset(offset int) Assertion { return Assertion{} }
-
-type AsyncAssertion struct{}
-
-func (AsyncAssertion) Should(matcher OmegaMatcher, optionalDescription ...interface{}) bool {
-	return true
-}
-func (AsyncAssertion) ShouldNot(matcher OmegaMatcher, optionalDescription ...interface{}) bool {
-	return true
-}
 
 func Equal(expected interface{}) OmegaMatcher                         { return nil }
 func BeNil() OmegaMatcher                                             { return nil }

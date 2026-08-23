@@ -148,7 +148,9 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr, pending: &mut Vec<(u32, Stri
     }
     if is_unacceptable(pass, &expr.x) && is_unacceptable(pass, &expr.y) {
         pending.push((
-            expr.op_pos.0 as u32,
+            // `pass.Reportf(expr.Pos(), …)`, and `BinaryExpr.Pos()` is
+            // `X.Pos()` — the left operand, not the operator between them.
+            expr.x.pos().0 as u32,
             format!(
                 "Multiplication of durations: `{} {} {}`",
                 expr_string(&expr.x),

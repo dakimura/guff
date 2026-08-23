@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh ginkgolinter
+# Produced by running golangci-lint on compat/golden/cases/ginkgolinter/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad_test.go:12:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(HaveLen(1))` instead
+bad_test.go:13:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(BeEmpty())` instead
+bad_test.go:14:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(s).Should(BeEmpty())` instead
+bad_test.go:15:3:ginkgolinter::ginkgo-linter: wrong nil assertion. Consider using `Expect(x).Should(BeNil())` instead
+bad_test.go:16:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(true).Should(BeTrue())` instead
+bad_test.go:17:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"

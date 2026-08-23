@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh errchkjson
+# Produced by running golangci-lint on compat/golden/cases/errchkjson/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:10:9:errchkjson::Error return value of `encoding/json.Marshal` is not checked: unsafe type `float64` found
+bad.go:19:2:errchkjson::Error return value of `(*encoding/json.Encoder).Encode` is not checked
+bad.go:20:6:errchkjson::Error return value of `(*encoding/json.Encoder).Encode` is not checked
+bad.go:24:2:errchkjson::Error return value of `(*encoding/json.Encoder).Encode` is not checked
+bad.go:29:2:errchkjson::Error return value of `(*encoding/json.Encoder).Encode` is not checked: unsafe type `float64` found

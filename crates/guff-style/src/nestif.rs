@@ -244,10 +244,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
+    // golangci-lint does not report where nestif says. Its wrapper takes the
+    // issue's *line* and reports `f.LineStart(line)` — column 1 — throwing the
+    // column away entirely. nestif itself records `fset.Position(stmt.Pos())`,
+    // the `if` keyword, and every one of those is indented; keeping it would
+    // put guff a tab to the right of upstream on every finding this linter has
+    // ever produced. (`AdjustPos` in the wrapper only matters under `//line`
+    // directives, which move the *line*, not the column.)
     for (pos, message) in pending {
-        pass.reportf(pos, message);
+        let at = line_start_of(pass, pos).unwrap_or(pos);
+        pass.reportf(at, message);
     }
     Ok(None)
+}
+
+/// Column 1 of the line containing `pos`, as `token.File.LineStart` returns.
+fn line_start_of(pass: &Pass<'_>, pos: u32) -> Option<u32> {
+    let fset = pass.fset();
+    let file = fset.file(guff::position::Pos(pos as i64))?;
+    let line = file.position(guff::position::Pos(pos as i64)).line;
+    Some(file.line_start(line as usize).0 as u32)
 }
 
 pub fn analyzer() -> &'static Analyzer {

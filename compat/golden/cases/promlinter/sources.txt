@@ -1,0 +1,6 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go                         compat/isolate/fixtures/promlinter/bad.go
+
+# The stub module, replaced in so `./...` never lints it.
+prom/go.mod                    compat/golden/cases/promlinter/prom.go.mod
+prom/prometheus/prometheus.go  crates/guff-style/tests/testdata/promlinter/stub/github.com/prometheus/client_golang/prometheus/prometheus.go

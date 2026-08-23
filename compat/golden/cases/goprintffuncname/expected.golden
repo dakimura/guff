@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh goprintffuncname
+# Produced by running golangci-lint on compat/golden/cases/goprintffuncname/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:1:goprintffuncname::printf-like formatting function 'printfLikeFunc' should be named 'printfLikeFuncf'

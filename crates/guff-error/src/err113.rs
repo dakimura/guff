@@ -184,7 +184,10 @@ fn check_definition(
         return;
     }
     pending.push((
-        call.lparen.0 as u32,
+        // `pass.Reportf(ce.Pos(), …)`. `CallExpr.Pos()` is `Fun.Pos()`, so this
+        // is `errors` in `errors.New(…)`, not the `(`. Same distinction that
+        // wrapcheck got wrong in #106.
+        call.pos().0 as u32,
         format!(
             "do not define dynamic errors, use wrapped static errors instead: \"{}\"",
             expr_string(&Expr::CallExpr(call.clone())).replace('"', "\\\"")

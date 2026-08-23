@@ -1,0 +1,2 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go  compat/isolate/fixtures/iface/bad.go

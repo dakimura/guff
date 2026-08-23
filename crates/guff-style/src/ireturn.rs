@@ -340,7 +340,9 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             }
             let func_name = fd.name.name.as_str();
-            let pos = fd.name.pos().0 as u32;
+            // `IFace.Enrich` records `f.Pos()` — the `func` keyword, not the
+            // name. `FuncDecl.Pos()` is `d.Type.Pos()` in go/ast.
+            let pos = fd.ty.pos().0 as u32;
             let mut seen = std::collections::HashSet::new();
             for issue in collect_results(pass, fd) {
                 if validator.is_valid(&issue) {

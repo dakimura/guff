@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh thelper
+# Produced by running golangci-lint on compat/golden/cases/thelper/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad_test.go:8:6:thelper::test helper function should start from t.Helper()
+bad_test.go:33:19:thelper::test helper function should start from t.Helper()

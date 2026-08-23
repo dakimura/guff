@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh ireturn
+# Produced by running golangci-lint on compat/golden/cases/ireturn/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:5:1:ireturn::Bad returns interface (github.com/dakimura/guff/compat/isolate/fixtures/ireturn.I)

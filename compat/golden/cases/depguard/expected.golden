@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh depguard
+# Produced by running golangci-lint on compat/golden/cases/depguard/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:8:depguard::import 'fmt' is not allowed from list 'main': banned for isolate

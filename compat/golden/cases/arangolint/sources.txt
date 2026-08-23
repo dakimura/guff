@@ -1,0 +1,6 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go                       compat/isolate/fixtures/arangolint/bad.go
+
+# The stub modules, replaced in so `./...` never lints them.
+arango/go.mod                compat/golden/cases/arangolint/arango.go.mod
+arango/arangodb/arangodb.go  crates/guff-style/tests/testdata/arangolint/stub/github.com/arangodb/go-driver/v2/arangodb/arangodb.go

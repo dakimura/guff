@@ -1,0 +1,26 @@
+# Golden case: spancheck.
+#
+# Seeded from the isolate fixture, which the OSS-style tiers already run — but
+# they compare `path:line:linter:message` after normalization, so this linter's
+# **column** and **severity** had never been checked by anything. Both are in
+# the key here, byte for byte.
+#
+# otel is stubbed at its real import path — spancheck matches the package path of the type `Start` returns, not what it does. The stub is a nested module
+# `replace`d in, as cases/protogetter does: `./...` skips a nested module, so
+# neither tool lints the stub and neither needs the network.
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - spancheck
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
+  uniq-by-line: false
+
+run:
+  timeout: 5m
+  tests: true

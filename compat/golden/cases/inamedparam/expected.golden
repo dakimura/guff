@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh inamedparam
+# Produced by running golangci-lint on compat/golden/cases/inamedparam/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:4:5:inamedparam::interface method Do must have named param for type int
+bad.go:4:10:inamedparam::interface method Do must have named param for type string

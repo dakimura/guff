@@ -1,0 +1,9 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh gomodguard_v2
+# Produced by running golangci-lint on compat/golden/cases/gomodguard_v2/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:3:8:gomodguard_v2::import of package `github.com/sirupsen/logrus` is blocked because the module is in the blocked modules list. use log/slog.

@@ -1,0 +1,9 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad_test.go            compat/isolate/fixtures/ginkgolinter/bad_test.go
+
+# The stub modules, replaced in so `./...` never lints them.
+ginkgo/go.mod          compat/golden/cases/ginkgolinter/ginkgo.go.mod
+ginkgo/ginkgo.go       crates/guff-style/tests/testdata/ginkgolinter/stub/github.com/onsi/ginkgo/v2/ginkgo.go
+gomega/go.mod          compat/golden/cases/ginkgolinter/gomega.go.mod
+gomega/gomega.go       crates/guff-style/tests/testdata/ginkgolinter/stub/github.com/onsi/gomega/gomega.go
+gomega/types/types.go  crates/guff-style/tests/testdata/ginkgolinter/stub/github.com/onsi/gomega/types/types.go

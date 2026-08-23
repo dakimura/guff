@@ -380,7 +380,14 @@ fn collect_decls(
                             name: ident.name.clone(),
                             typ,
                             kind: DeclKind::Variable,
-                            report_pos: assign.tok_pos.0 as u32,
+                            // `pass.Reportf(variable.assign.Pos(), …)` — the
+                            // AssignStmt's first LHS operand, i.e. the name
+                            // being complained about, not the `:=` after it.
+                            report_pos: assign
+                                .lhs
+                                .first()
+                                .map(|e| e.pos().0 as u32)
+                                .unwrap_or(assign.tok_pos.0 as u32),
                             decl_line: line_of(fset, assign.tok_pos),
                             assign_ok: ok,
                         });

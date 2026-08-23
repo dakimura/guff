@@ -1,0 +1,10 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh copyloopvar
+# Produced by running golangci-lint on compat/golden/cases/copyloopvar/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:5:3:copyloopvar::The copy of the 'for' variable "i" can be deleted (Go 1.22+)
+bad.go:6:3:copyloopvar::The copy of the 'for' variable "v" can be deleted (Go 1.22+)

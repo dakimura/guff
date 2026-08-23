@@ -163,7 +163,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     if sel.sel.name == "Local"
                         && selector_name(pass, sel).as_deref() == Some("time.Local")
                     {
-                        pending.push((sel.x.pos().0 as u32, "usage of time.Local".to_string()));
+                        // Upstream walks `*ast.Ident` nodes and reports
+                        // `n.Pos()`. The ident whose object is `time.Local` is
+                        // `Local`; `time` is a PkgName and does not match.
+                        pending.push((
+                            sel.sel.name_pos.0 as u32,
+                            "usage of time.Local".to_string(),
+                        ));
                     }
                 }
                 true

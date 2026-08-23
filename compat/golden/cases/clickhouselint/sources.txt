@@ -1,0 +1,6 @@
+# The isolate fixture, so the two tiers cannot drift.
+bad.go                           compat/isolate/fixtures/clickhouselint/bad.go
+
+# The stub modules, replaced in so `./...` never lints them.
+clickhouse/go.mod                compat/golden/cases/clickhouselint/clickhouse.go.mod
+clickhouse/lib/driver/driver.go  crates/guff-style/tests/testdata/clickhouselint/stub/github.com/ClickHouse/clickhouse-go/v2/lib/driver/driver.go

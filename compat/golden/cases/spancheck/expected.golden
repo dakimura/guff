@@ -1,0 +1,14 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh spancheck
+# Produced by running golangci-lint on compat/golden/cases/spancheck/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad.go:10:2:spancheck::span.End is not called on all paths, possible memory leak
+bad.go:12:1:spancheck::return can be reached without calling span.End
+bad.go:18:2:spancheck::span.End is not called on all paths, possible memory leak
+bad.go:20:2:spancheck::return can be reached without calling span.End
+bad.go:49:3:spancheck::span.End is not called on all paths, possible memory leak
+bad.go:51:3:spancheck::return can be reached without calling span.End
