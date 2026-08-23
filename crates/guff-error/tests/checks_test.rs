@@ -509,3 +509,32 @@ fn rowserrcheck_packages_setting_enables_sqlx() {
         "expected one sqlx missing-Err diagnostic: {messages:?}"
     );
 }
+
+/// `(*encoding/json.Encoder).Encode` is a **method**, and upstream's rule table
+/// keys off `types.Func.FullName()`, which spells methods with a receiver.
+/// `code::call_name` cannot produce that — it ends in `func_name`, which is
+/// package path plus object name, so the callee came back as
+/// `encoding/json.Encode` and the arm never matched. Every Encoder call in the
+/// corpus went unreported (7 on syncthing) while the `Marshal` arms, being
+/// package functions, kept working and made the linter look healthy.
+#[test]
+fn errchkjson_flags_unchecked_encoder_encode() {
+    let dir = support::testdata("errchkjson");
+    let pkg = support::typecheck_pkg("example.com/errchkjson/encoder", &dir.join("encoder.go"));
+    let messages = support::run_analyzer(errchkjson(), &pkg);
+
+    let encodes: Vec<_> = messages
+        .iter()
+        .filter(|m| m.contains("(*encoding/json.Encoder).Encode"))
+        .collect();
+    assert_eq!(
+        encodes.len(),
+        4,
+        "expected one per unchecked shape (call result, blank assign, variable, \
+         unsafe payload) and none for the two checked ones: {messages:?}"
+    );
+    assert!(
+        encodes.iter().any(|m| m.contains("unsafe type")),
+        "Encode forces omit-safe, so the float64 payload keeps its suffix: {messages:?}"
+    );
+}
