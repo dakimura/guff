@@ -1,6 +1,6 @@
 // Package g7xx is gosec's taint engine: G702 (command injection), G703 (path
-// traversal), G706 (log injection) and G710 (open redirect). One engine, four
-// tables of sources, sinks and sanitizers.
+// traversal), G705 (XSS), G706 (log injection) and G710 (open redirect). One
+// engine, five tables of sources, sinks and sanitizers.
 //
 // Every function is marked `// fires` or `// silent`, and the silent ones are
 // the point: a taint rule that reports everything is easy, and gosec's answer
@@ -10,6 +10,12 @@ package g7xx
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"html"
+	"html/template"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -274,4 +280,122 @@ func G710RedirectEscaped(w http.ResponseWriter, r *http.Request) {
 // fires — url.Values is a source type, and it is not a pointer one.
 func g710ValuesSource(w http.ResponseWriter, r *http.Request, v url.Values) {
 	http.Redirect(w, r, v.Get("next"), http.StatusFound)
+}
+
+// --- G705: XSS --------------------------------------------------------------
+//
+// The only rule here whose sinks are not all package functions. Two shapes the
+// other four never needed:
+//
+//   - `(http.ResponseWriter).Write` is a method on an *interface*, so the call
+//     is an SSA invoke with no static callee at all.
+//   - the `fmt.Fprint*` family and `io.WriteString` are sinks only when they
+//     write *to* an HTTP response. Without that guard this rule would fire on
+//     most logging in a web server, and the tainted-ness of the text is not
+//     what decides it.
+
+// fires — the invoke shape. Nothing but the receiver scopes this sink.
+func G705Write(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(r.FormValue("q")))
+}
+
+// fires — guarded sink, and the writer really is the response.
+func G705Fprintf(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "<p>%s</p>", r.FormValue("q"))
+}
+
+// fires — the rest of the family.
+func G705FprintFamily(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, r.FormValue("q"))
+	fmt.Fprintln(w, r.FormValue("q"))
+}
+
+// fires — `io.WriteString` names argument 1 only; argument 0 is the writer the
+// guard already spoke for.
+func G705IoWriteString(w http.ResponseWriter, r *http.Request) {
+	io.WriteString(w, r.FormValue("q"))
+}
+
+// fires — the writer reaches the sink as a plain `io.Writer`. By then it has
+// been widened, and asking whether *`io.Writer`* implements `ResponseWriter`
+// answers no; the guard has to resolve back through the conversion to what the
+// caller actually passed.
+func G705ViaWriterParam(w http.ResponseWriter, r *http.Request) {
+	var out io.Writer = w
+	fmt.Fprintf(out, "<p>%s</p>", r.FormValue("q"))
+}
+
+// fires — url.Values is a source type here as well, and not a pointer one.
+func G705ValuesSource(w http.ResponseWriter, v url.Values) {
+	w.Write([]byte(v.Get("q")))
+}
+
+// silent — stderr is not an HTTP response, however tainted the text is. This is
+// the case the guard exists for.
+func g705FprintfStderr(r *http.Request) {
+	fmt.Fprintf(os.Stderr, "<p>%s</p>", r.FormValue("q"))
+}
+
+// silent — same, for a concrete writer rather than another interface.
+func g705FprintfBuffer(r *http.Request) {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "<p>%s</p>", r.FormValue("q"))
+}
+
+// silent — `io.WriteString` obeys the same guard.
+func g705IoWriteStringStderr(r *http.Request) {
+	io.WriteString(os.Stderr, r.FormValue("q"))
+}
+
+// silent — `html.EscapeString` is a sanitizer.
+func g705Escaped(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "<p>%s</p>", html.EscapeString(r.FormValue("q")))
+}
+
+// silent — a number cannot carry a payload.
+func g705Numeric(w http.ResponseWriter, r *http.Request) {
+	n, _ := strconv.Atoi(r.FormValue("n"))
+	fmt.Fprintf(w, "<p>%d</p>", n)
+}
+
+// silent — JSON is structurally safe and is not served as text/html.
+func g705Json(w http.ResponseWriter, r *http.Request) {
+	b, _ := json.Marshal(r.FormValue("q"))
+	w.Write(b)
+}
+
+// silent — nothing tainted reaches either sink.
+func g705Constant(w http.ResponseWriter) {
+	w.Write([]byte("<p>hello</p>"))
+	fmt.Fprintf(w, "<p>hi</p>")
+}
+
+// silent — `*url.URL` is a source for G703, G706 and G710, and **not** for
+// G705. Nothing distinguishes the two cases except which table is being read,
+// which is what makes a shared source list an easy mistake: this same fixture
+// has `r.URL.Path` firing G703 and G706 forty lines up.
+func g705URLIsNotAnXSSSource(w http.ResponseWriter, u *url.URL) {
+	fmt.Fprintf(w, "<p>%s</p>", u.Path)
+}
+
+// silent — same story for `os.Getenv`, a function source of G702, G703 and
+// G706 but not of G705. `os.Args`, one line apart in gosec's tables, *is* one.
+func g705GetenvIsNotAnXSSSource(w http.ResponseWriter) {
+	fmt.Fprintf(w, "<p>%s</p>", os.Getenv("HOME"))
+}
+
+// fires — and this is the pair to the two above: `os.Args` is on G705's list.
+func G705ArgsSource(w http.ResponseWriter) {
+	fmt.Fprintf(w, "<p>%s</p>", os.Args[1])
+}
+
+// silent *for G705*, and not because of a sanitizer. gosec's XSS table lists
+// `html/template.HTML` (and HTMLAttr / JS / CSS) as sinks, but those are type
+// **conversions**, and the taint engine only ever looks at `*ssa.Call`. They
+// cannot fire upstream either. The line is not unwatched, though — the golden
+// pins a **G203** here, from the AST rule that covers the same mistake — so
+// this case records both what those four table entries are worth (nothing) and
+// which rule actually catches the shape.
+func g705TemplateHTML(r *http.Request) template.HTML {
+	return template.HTML(r.FormValue("q"))
 }

@@ -8164,10 +8164,10 @@ hunt の refresh がそこを書き換えられる形にはしない。
 **次にやること**
 
 1. ~~**hunt の ill-typed 33 件**~~ —— 続き 19 で 20 件まで落とした。残りは下記。
-2. **G705（XSS）** —— 5 本目の taint ルール。エンジンと表の形はもう在るが、これだけは
-   `Receiver` sink（`(net/http.ResponseWriter).Write`）と `ArgTypeGuards`
-   （`fmt.Fprintf` の書き手が `http.ResponseWriter` を実装するときだけ sink）が要る。
-   syncthing に 3 件。
+2. ~~**G705（XSS）**~~ —— 続き 24 で解消。syncthing の gcl-only 3 → 1
+   （残る 1 件は表ではなく呼び出しグラフの半分）。ついでに authelia の
+   nolintlint 偽陽性が 1 件消えた —— そのディレクティブのコメントが
+   「TODO: Run this line through taint analysis」だった。
 3. **G115 の文言** —— `rune -> byte` と `int32 -> uint8`。上流は宣言された別名で綴り、
    guff は basic kind で綴る。行も桁も一致するので、差分の両側に同時に並ぶ。
 4. **複合リテラルの lowering** —— go/ssa は addressable な複合リテラルをその場に書く。
@@ -8430,7 +8430,7 @@ C と同じ test variant の潰れが上流にいる疑いが濃い。C を潰�
    （ill-typed 9 → 3）。**筋書きは外れていた**: `dedup::import_path_of_id` は無罪で、
    seed が依存を production ファイルだけで組んでいたのが原因。
    prometheus の 2 件はそもそも C ではなく、seed の wave スケジューラの欠陥だった。
-2. **G705（XSS）** —— 続き 18 の 2。`Receiver` sink と `ArgTypeGuards`。syncthing に 3 件。
+2. ~~**G705（XSS）**~~ —— 続き 24 で解消（syncthing の gcl-only 3 → 1）。
 3. **G115 の文言** —— 続き 18 の 3。
 4. **複合リテラルの lowering** —— 続き 18 の 4。
 5. **`assignable_to` の 2 段の順序** —— 上記のとおり `prepare_method_set` と逆。
@@ -8778,6 +8778,171 @@ syncthing の unexpected は **42 → 33**、他の 15 ターゲットは 1 件�
 2. **他の linter にも同じ穴が無いか** —— 判定基準は
    「上流が `FullName()` で分岐しているか」であって「メソッドを扱うか」ではない。
    `grep -rn 'call_name' crates/` の結果を 1 つずつ上流と突き合わせる。
+
+---
+
+### 2026-08-23（続き 24）— G705: 上流の表に載っている sink のうち 4 つは、上流でも一度も撃てない
+
+続き 18 の「次にやること」2。syncthing の gcl-only に G705 が 3 件。
+コメントは「これだけは `Receiver` sink と `ArgTypeGuards` が要る」と書いてあり、
+その 2 つが実際に何なのかを最初に確かめた。
+
+#### 上流のソースがローカルにある
+
+`~/projects/src/github.com/securego/gosec`（v2.27.1-9-g8495706）に checkout がある。
+**表を推測せずに移植できる**ので、まず `analyzers/xss.go` と `taint/taint.go` を読んだ。
+必要だったのは 2 つの機構だけで、残りは既存のエンジンがそのまま使える。
+
+| 機構 | 何が違うか |
+|---|---|
+| `Receiver` sink | `(net/http.ResponseWriter).Write` は**インターフェースのメソッド**なので、SSA では invoke であり **static callee が無い**。`static_callee` しか見ない matcher は 1 件も見つけられない |
+| `ArgTypeGuards` | `fmt.Fprintf` は「**HTTP レスポンスに書くとき**だけ」sink。これが無いと、web サーバの `Fprintf(os.Stderr, …)` がほぼ全部 finding になる |
+
+#### 先に上流の答えを 14 形について取った
+
+移植する前に、撃つ形・黙る形を 14 個並べたモジュールを golangci-lint に食わせた。
+**7 fires / 7 silent**。これが仕様書になり、そのまま fixture の骨格になった。
+
+その中で 1 つ、表を読んだだけでは出てこない事実が出た:
+
+```go
+func templateHTML(r *http.Request) template.HTML {
+	return template.HTML(r.FormValue("q"))   // G705: 黙る
+}
+```
+
+`xss.go` の表には `html/template` の `HTML` / `HTMLAttr` / `JS` / `CSS` が
+sink として並んでいる。しかし**これらは型変換であって呼び出しではない**ので、
+`analyzeFunctionSinks` が見る `*ssa.Call` には決してならない。
+**上流でも一度も撃てない 4 行**である。表には忠実に入れたうえで、
+fixture に `// silent` の実例として置き、コメントにそう書いた。
+なお**その行が無警戒なわけではない**: 同じ形を AST 側の **G203** が撃っていて、
+golden がその 1 件を pin している。
+
+もう 1 つ、`resolveOriginalType` が飾りではないこと:
+
+```go
+var out io.Writer = w                       // w は http.ResponseWriter
+fmt.Fprintf(out, "<p>%s</p>", r.FormValue("q"))   // 撃つ
+```
+
+sink に届く時点で writer は `io.Writer` に広がっているので、
+**`io.Writer` が `ResponseWriter` を実装するか**を訊くと必ず no になる。
+インターフェース変換を遡って「呼び出し側が何を渡したか」に戻す必要がある。
+
+#### stub の `ResponseWriter` が `interface{}` だった
+
+`crates/guff-style/tests/testdata/gosec/stub/net/http/http.go` の
+`type ResponseWriter interface{}` は**空インターフェース**で、
+つまり**あらゆる型が実装している**。この stub のままなら
+`ArgTypeGuards` は単体テストの中で**常に真になる no-op** で、
+「guard が効いている」ことを一度も確かめられなかった。
+3 メソッドの本物にした。ついでに **`os.Stderr` が stub に存在しなかった**ので、
+最初の実行では guard が invalid 型を訊いていて 9 件（正解 7 件）出た ——
+**stub の穴が、guard のバグと同じ顔で出る。**
+`*os.File` には `Write` だけを持たせてある: `io.Writer` ではあるが
+`http.ResponseWriter` ではない、という差が G705 の guard そのものだからである。
+
+#### ゲート
+
+- `compat/golden/cases/gosec` —— includes に G705 を足し、上流から再生成。
+  **142 キー**を `path:line:col:linter:severity:text` で正規化なしに比較する。
+  G705 の 8 件は severity `medium`（taint は `RuleInfo.Severity`、confidence は常に High）。
+- `crates/guff-style/tests/testdata/gosec/g7xx.go` に **8 fires / 10 silent**。
+  silent の中身が本体である:
+  - 4 つは guard で落ちる `fmt` / `io` 呼び出し。**guard を消すと finding になる。**
+  - 2 つは**他のルールの source**（`*url.URL` と `os.Getenv`）。どちらも
+    G703 / G706 / G710 では source で、G705 では source ではない ——
+    5 つの表を 1 つに畳んだ実装はここで落ちる。同じ fixture の 40 行上で
+    `r.URL.Path` が G703 と G706 を撃っているので、対比がその場にある。
+    その隣に `os.Args`（G705 の source **である**ほう）を置いてある。
+- `gosec_g705_needs_the_invoke_sink_and_the_writer_guard` ——
+  invoke sink と guard を「落とすと何が壊れるか」で書いた 1 本。
+- 既存の 4 ルールの本数 (7, 5, 5, 2) は動いていない。
+
+#### 上流との差分実測
+
+移植の途中で 3 セット、計 **32 形**を golangci-lint と 1 件ずつ突き合わせた:
+14 形の sink/silent（上記）、**12 の sanitizer 全部**（両ツールとも 0 件）、
+**6 の source**（`os.Args` / `bufio.Scanner` / `bufio.Reader` は撃ち、
+`*url.URL` / `os.Getenv` / 素の `string` 引数は黙る）。
+すべて行・列まで一致。
+
+#### 一つだけ上流と意図的に変えた
+
+`isSinkCall` は invoke の腕で一致しなかったとき **static callee の腕に落ちる**。
+invoke では `StaticCallee()` が nil なので、invoke の腕が置いていった値
+（**インターフェースの**パッケージとメソッド名）がそのまま残り、
+最後のループが**パッケージ関数の sink** に一致しうる ——
+`(pkg.I).Open` が `pkg.Open` の sink を満たしてしまう。
+guff は invoke の腕で止める。5 つの表の範囲では到達不能で
+（sink は全部 stdlib のパッケージで、同じパッケージの
+インターフェースに同名のメソッドは無い）、その前提が崩れる表を足したときに
+読み直すべき箇所としてモジュールのコメントに書いてある。
+
+#### 性能
+
+`lookup_named_type` は**オブジェクトアリーナ全体を歩く**（上流が
+`prog.AllPackages()` のスコープを歩くのと同じ）。guard の答えを
+`(実引数の型, 要求する型)` でキャッシュしただけでは、
+**種類の違う writer ごとにパッケージ 1 つあたり 1 回**その歩きが走る。
+アリーナはプログラム全体のものなので、`want` 単位でも memo する
+（1 ルールにつき 1 回）。G705 の `want` は `net/http.ResponseWriter` の 1 つだけである。
+
+#### 結果
+
+**syncthing の gcl-only G705 は 3 → 1**、gosec 全体で
+guff 97 / golangci 101 / both 95（P 97.9% / R 94.1%）。unexpected は 42 → 40。
+**guff-only は 1 件も増えていない**（他の 15 ターゲットは完全に不変）。
+
+そして **authelia が 16 → 15 に減った**。減ったのは finding ではなく
+**guff の偽陽性**である:
+
+```go
+// internal/handlers/handler_oauth2_oidc_userinfo.go:202
+//nolint:gosec // TODO: Run this line through taint analysis.
+```
+
+このディレクティブは G705 が無いあいだ「使われていない」ので
+nolintlint が撃っていた。G705 が実装された瞬間に**ディレクティブが仕事を始め**、
+偽陽性が 1 件消えた。**コメントが欠けている実装の名前をそのまま書いていた**。
+
+#### 残り 1 件は G705 の表の問題ではない
+
+`lib/api/api.go:1030` の
+
+```go
+func (*service) flushResponse(resp string, w http.ResponseWriter) {
+	w.Write([]byte(resp + "\n"))
+}
+// 呼び出し側: s.flushResponse(`{"ok": "resetting folder `+folder+`"}`, w)
+```
+
+は `resp` が**素の string 引数**なので、taint は**呼び出しグラフ経由**
+（`isParameterTainted`）でしか届かない。同じ形を 30 行に縮めた再現を作ると
+**上流も黙る** —— つまり差が出るのはこの形そのものではなく、
+syncthing の規模での**グラフの種**（`AllFunctions` / `RuntimeTypes` の到達）である。
+続き 18 が `plainRec` / `boxedRec` で fixture 化したのと同じ半分で、
+G702 / G703 / G706 / G710 と共有している。単独のタスクにすること。
+
+**次にやること**
+
+1. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+2. **G115 の文言（`rune -> byte`）** —— 続き 18 の 3。
+   gosec は `instr.X.Type().Underlying().(*types.Basic).Name()` を出す。
+   go/types は `byte` / `rune` を **`aliases` 配列の別の `*Basic`**
+   （kind は `Uint8` / `Int32`、name は `"byte"` / `"rune"`）として持ち、
+   `range` 文字列や `byte(x)` 変換がその別名のほうを伝播させる。
+   guff の `byte` / `rune` は `uint8` / `int32` と**同じ TypeId を指す TypeName**
+   なので、「ソースが `byte` と書いた」情報が型に残らない。
+   `Basic { kind, info, name }` という形は上流と同じなので、
+   **kind が同じで name が違うアリーナ要素を 2 つ足す**のが素直な直し方になる。
+   危ないのは basic を **TypeId で比較している**箇所で、そこを洗う必要がある。
+   syncthing の `deviceid.go:191/209` が両側に並んでいる 2 行で、
+   直せば gcl-only 2 と guff-only 2 が同時に消える。単独のタスクにすること。
+3. **`call_name` の中央修正** —— 続き 23 の 1。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
 
 ---
 
