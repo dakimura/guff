@@ -24,7 +24,7 @@ use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use regex::Regex;
 
 use crate::options::GodoclintOptions;
-use crate::util::{line_pos, reparse_with_comments};
+use crate::util::{reparse_with_comments, reparsed_pos};
 
 fn is_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
@@ -268,8 +268,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if !skip_tests {
             if let Some(pkg_doc) = &parsed.doc {
                 if let Some(text) = doc_text(pkg_doc) {
-                    let line = re_fset.position(pkg_doc.pos()).line;
-                    if let Some(pos) = line_pos(&fset, file.pos(), line) {
+                    if let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, pkg_doc.pos()) {
                         if check_single {
                             pkg_docs
                                 .entry(pkg_name.to_string())
@@ -308,8 +307,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(text) = doc_text(sym.doc) else {
                 continue;
             };
-            let line = re_fset.position(sym.doc.pos()).line;
-            let Some(pos) = line_pos(&fset, file.pos(), line) else {
+            let Some(pos) = reparsed_pos(&fset, file.pos(), &re_fset, sym.doc.pos()) else {
                 continue;
             };
 

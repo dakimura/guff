@@ -9007,6 +9007,128 @@ syncthing の該当行は `luhn32` が同じ `lib/protocol` で
 **gcl-only 2 件と guff-only 2 件が同時に消える** —— 同じ 2 行が
 差分の両側に立っていたので、片側だけ直しても数は減らなかった。
 golden 103/103、isolate 116/116 は不変（他のどのメッセージも綴りが動いていない）。
+### 2026-08-23（続き 26）— 桁だけが違う欠陥は、桁を見るゲートを作らないと永久に見えない
+
+続き 25 で syncthing の `deviceid.go` の 2 行を突き合わせていたら、
+**すぐ上の行で godoclint が桁だけずれている**のが目に入った。
+
+```
+guff  lib/protocol/deviceid.go:22:1: godoc should start with symbol name ("ShortIDStringLength")
+gcl   lib/protocol/deviceid.go:22:2: godoc should start with symbol name ("ShortIDStringLength")
+```
+
+#### 15 行に縮めると、左端かどうかで割れていた
+
+```go
+// WrongTop is misdocumented at column 1.
+func TopLevel() {}          // 両方 3:1 —— 一致
+
+const (
+	A = 1
+	// WrongInner is misdocumented, indented by a tab.
+	Inner = 7               // guff 8:1 / gcl 8:2 —— ずれる
+)
+```
+
+`godoclint` は**コメントを残したまま 2 度目のパース**をしていて、
+2 つの `FileSet` は位置を独立に採番するので、
+持ち帰れる共通の座標は (行, 桁) しかない。
+guff は**行だけ**を持ち帰って `line_pos`（＝その行の先頭）を撃っていた。
+左端の宣言では偶然それが正解になるので、
+**`const (` や `var (` の中でインデントされた doc コメントだけがずれる。**
+
+#### どのゲートにも写らない形だった
+
+- **isolate の fixture は トップレベルの func が 1 つ**。両側とも桁 1 で一致する。
+- **isolate と OSS/hunt の比較キーは `path:line:linter:message`** ——
+  §1 が最初に数えた「column を一切比較していない」がそのまま効いている。
+
+つまり**桁を見る tier が無い check は、桁がずれていても永久に緑**である。
+`compat/golden/cases/forcetypeassert/config.yml` が同じことを書いている ——
+あの case はまさにこの理由で作られている。
+
+#### hunt は 1 ターゲットも動かない —— それがこの話の証明である
+
+修正後の hunt は **16 ターゲット全部が完全に不変**（failures=0 / health=0）。
+出力は実際に変わっているのに、**hunt のキーには桁が無いので写らない**。
+「桁を見るゲートを作らないと永久に見えない」は比喩ではなく、
+この 0 という数字がそれである。
+
+#### 直し方とゲート
+
+`reparsed_pos` を 1 つ置いて、再パース側の `Position` から
+**行と桁の両方**を持ち帰るようにした（`column` は 1 始まりのバイト桁、
+`line_start` はバイトオフセットなので足し算は近似ではなく厳密）。
+パッケージ doc の側も同じ経路に寄せた。
+
+- **`compat/golden/cases/godoclint` を新設**（golden は **103 → 104 case**）。
+  `path:line:col:linter:severity:text` を正規化なしで比較する唯一の tier で、
+  fixture に**左端の宣言と、`const (` / `var (` の中の宣言の両方**を入れてある。
+  上流の答えは `bad/bad.go:17:2` と `28:2`。
+- **`godoclint_reports_the_column_the_doc_comment_starts_at`** ——
+  メッセージではなく `line:column` を表明する。
+  `support::run_analyzer_positions` を足した（位置が欠陥である check 用）。
+  **両方向で確認**: 桁を捨てて行頭に戻すと `17:1` になって落ちる。
+
+#### 棚卸ししたら、同じ形が隣に 1 つ、別の欠陥が 1 つ出た
+
+**golden に case がある linter は 116 中 21 だけ。残る 95 は桁が構造的に自由である。**
+
+```
+comm -23 <(ls compat/isolate/fixtures/ | sort) \
+         <(ls compat/golden/cases/ | sed 's/-.*//' | sort -u) | wc -l   # 95
+```
+
+優先順位は「位置を自前で計算しているか」で付く。
+**行番号から復元している**（＝今回と同じ形の）check は
+`grep -rln "line_pos(" crates/*/src/` で 6 つ:
+`dupl` / `dupword` / `godoclint` / `godot` / `godox` / `gomoddirectives`。
+
+その 3 つを 22 行の fixture で上流と突き合わせたら、**2 件出た**:
+
+1. **`dupword` は同じ桁の欠陥を持っていた（この回で一緒に直した）。**
+   `var (` の中のコメントで guff `13:1` / 上流 `13:2`。
+   `dupword` 自身の fixture のコメントが func の中でインデントされているので、
+   **最初からずっと外していた** —— 誰も桁を見ていなかっただけである。
+   文字列リテラル側（`check_string_lit`）は `lit.value_pos` を
+   解析側の `FileSet` から直接読むので**一度も影響を受けていない**。
+   golden case はその 2 つを並べて pin してある（`4:2` のコメントと
+   `5:10` のリテラル）。
+2. **`godot` は `var (` / `const (` の中の doc コメントを見ていない。**
+   22 行の fixture で上流 4 件に対し guff 2 件（8 行目と 13 行目を落とす）。
+   これは桁ではなく **recall** で、`util.rs` と `godot.rs` に
+   `DEFERRED: getBlockComments` として**既に書いてある**既知の欠落である。
+   書いてあることと、いくらの値段が付いているかは別なので、ここに値段を記録する。
+
+#### `line_pos` 一族は 6 つとも測った —— 欠陥は 2 つ
+
+| check | 結果 |
+|---|---|
+| `godoclint` | **欠陥**。この回で修正 |
+| `dupword` | **欠陥**（コメント側のみ）。この回で修正 |
+| `godox` | 正しい。`line_start + start_col` を足していて、しかも**上流の `+1` の癖**（golangci の wrapper が `i.Pos.Column + 1` を出す）までコメントに書いてある |
+| `dupl` | 正しい。そもそも桁を出さない（`a.go:3:`） |
+| `gomoddirectives` | 正しい。go.mod のディレクティブは本当に桁 1 |
+
+**「行から復元している」は疑いの根拠であって、欠陥の証拠ではない** ——
+6 つのうち 4 つは正しく、うち 1 つは正しさの理由をコメントに書いてあった。
+測るまでは分からない、というのがこの表の中身である。
+
+**次にやること**
+
+1. **`godot` の `getBlockComments`** —— 上の実測つき（22 行で 4 対 2）。recall 側。
+2. **golden case の拡充** —— 残り 93。位置を自前で計算している側から。
+   `line_pos` 一族は尽きたので、次の切り口は
+   「ノードではなくトークンを撃っている」「オフセット演算をしている」側
+   （`grep -rlnE "pos \+ [0-9]|\.0 as u32 \+ "` で 14 ファイル）。
+2. **seed の辺を「組むファイル」に合わせる** —— 続き 21 の 1。prometheus の 2 件。
+3. **`call_name` の中央修正** —— 続き 23 の 1。
+4. **複合リテラルの lowering** —— 続き 18 の 4。
+5. **`assignable_to` の 2 段の順序** —— 続き 20 の 5。
+6. **G705 の残り 1 件（呼び出しグラフ）** —— 続き 24。
+
+---
+
 
 ---
 

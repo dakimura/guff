@@ -1,0 +1,13 @@
+# Golden finding set — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/golden/regen.sh godoclint
+# Produced by running golangci-lint on compat/golden/cases/godoclint/.
+# key = path:line:col:linter:severity:text  (no normalization; \n is escaped)
+
+# golangci-lint: 2.12.2
+
+bad/bad.go:1:1:godoclint::package godoc should start with "Package example "
+bad/bad.go:7:1:godoclint::godoc should start with symbol name ("Foo")
+bad/bad.go:10:1:godoclint::deprecation note should be formatted as "Deprecated: "
+bad/bad.go:17:2:godoclint::godoc should start with symbol name ("Beta")
+bad/bad.go:28:2:godoclint::godoc should start with symbol name ("Gamma")
