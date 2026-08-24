@@ -72,6 +72,11 @@ impl Checker {
                 continue;
             }
             let m = new_func(&mut self.objects, name.name.clone(), Some(typ));
+            // `check.recordDef(name, m)` in go/types' `interface.go`. Without
+            // it an interface method's declaring identifier is absent from
+            // `Info.Defs`, so anything that starts from `Defs` cannot see the
+            // method at all.
+            self.record_def(name, Some(m));
             m.set_pkg(&mut self.objects, self.pkg);
             methods.push(m);
         }
