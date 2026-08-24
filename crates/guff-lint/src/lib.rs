@@ -235,7 +235,7 @@ fn run_format_checks_inner(
     };
 
     if cfg.fix {
-        let meta = MetaFormatter::new(
+        let meta = guff_fmt::MetaFormatter::new(
             &cfg.enable,
             cfg.gofmt.clone(),
             cfg.gofumpt.clone(),
@@ -922,7 +922,18 @@ impl LintResult {
         let Some(fset) = self.packages.iter().find_map(|p| p.fset.as_ref()) else {
             return Ok((issues, 0));
         };
-        apply_fixes(fset, &issues)
+        // No formatter config reaches this API, so use the default meta —
+        // which is upstream's `format.Source` fallback.
+        let meta = guff_fmt::MetaFormatter::new(
+            &[],
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+        .ok();
+        apply_fixes(fset, &issues, meta.as_ref())
     }
 }
 
@@ -1082,7 +1093,22 @@ fn run_and_write_inner(
         let filtered = result.filter_issues(issues);
         if opts.fix {
             if let Some(fset) = result.packages.iter().find_map(|p| p.fset.as_ref()) {
-                apply_fixes(fset, &filtered)?
+                {
+                    // Same formatters the `formatters:` config selects, so a
+                    // repo configured for gofumpt gets gofumpt after a fix —
+                    // matching golangci's `NewMetaFormatter(cfg.Formatters)`.
+                    let fmt_cfg = opts.formatters.as_ref();
+                    let meta = guff_fmt::MetaFormatter::new(
+                        fmt_cfg.map(|c| c.enable.as_slice()).unwrap_or(&[]),
+                        fmt_cfg.map(|c| c.gofmt.clone()).unwrap_or_default(),
+                        fmt_cfg.map(|c| c.gofumpt.clone()).unwrap_or_default(),
+                        fmt_cfg.map(|c| c.goimports.clone()).unwrap_or_default(),
+                        fmt_cfg.map(|c| c.gci.clone()).unwrap_or_default(),
+                        fmt_cfg.map(|c| c.golines.clone()).unwrap_or_default(),
+                    )
+                    .ok();
+                    apply_fixes(fset, &filtered, meta.as_ref())?
+                }
             } else {
                 (filtered, 0)
             }

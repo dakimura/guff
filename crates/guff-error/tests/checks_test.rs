@@ -538,3 +538,44 @@ fn errchkjson_flags_unchecked_encoder_encode() {
         "Encode forces omit-safe, so the float64 payload keeps its suffix: {messages:?}"
     );
 }
+
+#[test]
+fn errorlint_suggests_errors_as_for_type_assertions() {
+    // errorlint's `errors.As` rewrite, `lint.go` ~470-608. Four shapes, and the
+    // replacement text is built with errorlint's own `exprToString` walker
+    // rather than go/printer.
+    //
+    // No compat tier can see any of this: the golden key is
+    // `path:line:col:linter:severity:text` and carries no suggested-fix body.
+    // Verified separately by running `golangci-lint --fix` and `guff run --fix`
+    // over the same file and diffing the results, which are byte-identical.
+    let dir = support::testdata("errorlint");
+    let pkg = support::typecheck_pkg("example.com/errorlint/as", &dir.join("errors_as.go"));
+    let fixes: Vec<String> = support::run_analyzer_diagnostics(errorlint(), &pkg)
+        .into_iter()
+        .filter(|d| d.message.starts_with("type assertion on error"))
+        .flat_map(|d| d.suggested_fixes)
+        .flat_map(|f| f.text_edits)
+        .map(|e| e.new_text)
+        .collect();
+
+    for want in [
+        // Pointer target composes a value; the declared name is kept.
+        "target := &myErr{}\nok := errors.As(err, &target)",
+        // The "ok" variable's own name survives.
+        "e := &myErr{}\nwasFound := errors.As(err, &e)",
+        // `_` is replaced by a name derived from the type, first letter lowered.
+        "myErr := &myErr{}\nok := errors.As(err, &myErr)",
+        // As an if-initializer, the head of the if is rewritten too.
+        "target := &myErr{}\nif errors.As(err, &target)",
+        // A non-pointer target is declared, not composed.
+        "var target valErr\nok := errors.As(err, &target)",
+        // Standalone becomes an immediately-called function literal.
+        "func() *myErr {\n\ttarget := &myErr{}\n\t_ = errors.As(err, &target)\n\treturn target\n}()",
+    ] {
+        assert!(
+            fixes.iter().any(|f| f == want),
+            "missing fix {want:?} in {fixes:#?}"
+        );
+    }
+}

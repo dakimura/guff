@@ -169,6 +169,31 @@ pub fn run_analyzer(
     run_analyzer_with_settings(analyzer, pkg, &RunnerOptions::default())
 }
 
+/// Like [`run_analyzer`] but keeps the whole diagnostic, so a test can assert
+/// on `suggested_fixes` — which no compat tier can see (the golden key stops at
+/// the message text).
+#[allow(dead_code)]
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

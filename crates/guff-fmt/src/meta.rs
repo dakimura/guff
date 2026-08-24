@@ -64,6 +64,22 @@ impl MetaFormatter {
     }
 
     pub fn format(&self, filename: &str, src: &[u8]) -> Result<Vec<u8>, FormatError> {
+        // golangci's `MetaFormatter.Format` runs `format.Source` — plain gofmt
+        // — when no formatter is configured, and only falls back to the input
+        // on error. `cli.rs::validate_formatters` already documents that
+        // ("MetaFormatter falls back to gofmt"); the branch itself was missing,
+        // so a file fixed by `--fix` kept whatever indentation the replacement
+        // text happened to carry.
+        if self.formatters.is_empty() {
+            let gofmt = crate::Gofmt::new(crate::GofmtOptions::default());
+            return match gofmt.format(filename, src) {
+                Ok(data) => Ok(data),
+                Err(e) => {
+                    eprintln!("guff fmt: (fmt) formatting {filename}: {e}");
+                    Ok(src.to_vec())
+                }
+            };
+        }
         let mut data = src.to_vec();
         for formatter in &self.formatters {
             match formatter.format(filename, &data) {

@@ -223,7 +223,7 @@ fn apply_fixes_sa1004_rewrites_sleep_literal() {
     assert_eq!(issues.len(), 2, "{issues:?}");
 
     let bad = dir.path().join("bad.go");
-    let (remaining, n) = apply_fixes(fset, &issues).unwrap();
+    let (remaining, n) = apply_fixes(fset, &issues, None).unwrap();
     assert_eq!(n, 2);
     assert!(remaining.is_empty());
 
