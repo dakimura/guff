@@ -1,0 +1,8 @@
+# Each tag family is configured separately; without naming them only `json` is
+# checked and three of the four conventions below are unreachable.
+case:
+  rules:
+    json: camel
+    yaml: snake
+    xml: kebab
+    mapstructure: upperSnake

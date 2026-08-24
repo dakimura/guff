@@ -6,4 +6,8 @@
 
 # golangci-lint: 2.12.2
 
+bad_test.go:9:16:testableexamples::missing output for example, go test can't validate it
+bad_test.go:13:19:testableexamples::missing output for example, go test can't validate it
+bad_test.go:19:17:testableexamples::missing output for example, go test can't validate it
+bad_test.go:23:24:testableexamples::missing output for example, go test can't validate it
 example_test.go:5:20:testableexamples::missing output for example, go test can't validate it

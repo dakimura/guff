@@ -13,6 +13,14 @@ linters:
   default: none
   enable:
     - tagliatelle
+  settings:
+    tagliatelle:
+      case:
+        rules:
+          json: camel
+          yaml: snake
+          xml: kebab
+          mapstructure: upperSnake
 
 issues:
   max-issues-per-linter: 0

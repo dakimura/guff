@@ -6,5 +6,12 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:6:predeclared::function len has same name as predeclared identifier
-bad.go:6:2:predeclared::variable error has same name as predeclared identifier
+bad.go:7:6:predeclared::function len has same name as predeclared identifier
+bad.go:9:6:predeclared::type copy has same name as predeclared identifier
+bad.go:11:7:predeclared::const cap has same name as predeclared identifier
+bad.go:13:5:predeclared::variable recover has same name as predeclared identifier
+bad.go:16:2:predeclared::variable error has same name as predeclared identifier
+bad.go:19:6:predeclared::variable new has same name as predeclared identifier
+bad.go:27:17:predeclared::param min has same name as predeclared identifier
+bad.go:27:26:predeclared::param max has same name as predeclared identifier
+bad.go:29:13:predeclared::method delete has same name as predeclared identifier

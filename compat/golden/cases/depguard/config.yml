@@ -21,6 +21,12 @@ linters:
           deny:
           - pkg: fmt
             desc: banned for isolate
+        strict:
+          list-mode: strict
+          files:
+          - $all
+          allow:
+          - strings
 
 issues:
   max-issues-per-linter: 0

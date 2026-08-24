@@ -1838,14 +1838,25 @@ fn canonicalheader_flags_non_canonical_keys() {
                 || m.contains("instead use: \"Testheadervalue\"")),
         "{messages:?}"
     );
+    // `etag` is **not** reported. Upstream's `canonicalHeaderKey` returns
+    // `isWellKnown` when the MIME-canonical form is in the initialism table,
+    // and its caller returns on that — so the table only ever suppresses:
+    //
+    //     if argValue == headerKeyCanonical || isWellKnown { return }
+    //
+    // This test used to assert the opposite, and no tier could see it: the
+    // isolate fixture reached the linter through `content-type` alone.
     assert!(
-        messages
+        !messages.iter().any(|m| m.contains("\"etag\"")),
+        "etag canonicalizes into the initialism table, so upstream is silent: {messages:?}"
+    );
+    assert!(
+        !messages
             .iter()
-            .any(|m| m.contains("non-canonical header \"etag\"")
-                || m.contains("instead use: \"ETag\"")),
+            .any(|m| m.contains("\"www-authenticate\"")),
         "{messages:?}"
     );
-    assert!(messages.len() >= 8, "{messages:?}");
+    assert!(messages.len() >= 6, "{messages:?}");
 }
 
 #[test]

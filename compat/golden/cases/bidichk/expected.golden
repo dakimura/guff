@@ -6,4 +6,12 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:4:12:bidichk::found dangerous unicode character sequence RIGHT-TO-LEFT-OVERRIDE
+bad.go:7:12:bidichk::found dangerous unicode character sequence RIGHT-TO-LEFT-OVERRIDE
+bad.go:8:12:bidichk::found dangerous unicode character sequence LEFT-TO-RIGHT-OVERRIDE
+bad.go:9:12:bidichk::found dangerous unicode character sequence LEFT-TO-RIGHT-EMBEDDING
+bad.go:10:12:bidichk::found dangerous unicode character sequence RIGHT-TO-LEFT-EMBEDDING
+bad.go:11:12:bidichk::found dangerous unicode character sequence POP-DIRECTIONAL-FORMATTING
+bad.go:12:12:bidichk::found dangerous unicode character sequence LEFT-TO-RIGHT-ISOLATE
+bad.go:13:12:bidichk::found dangerous unicode character sequence RIGHT-TO-LEFT-ISOLATE
+bad.go:14:12:bidichk::found dangerous unicode character sequence FIRST-STRONG-ISOLATE
+bad.go:15:12:bidichk::found dangerous unicode character sequence POP-DIRECTIONAL-ISOLATE

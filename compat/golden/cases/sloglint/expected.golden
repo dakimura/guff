@@ -6,4 +6,13 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:8:27:sloglint::key-value pairs and attributes should not be mixed
+bad.go:14:19:sloglint::the "k" key should be a constant
+bad.go:14:27:sloglint::key-value pairs and attributes should not be mixed
+bad.go:14:36:sloglint::the "n" key should be a constant
+bad.go:19:12:sloglint::message should be a string literal or a constant
+bad.go:24:19:sloglint::the "raw" key should be a constant
+bad.go:29:28:sloglint::keys should be written in snake_case
+bad.go:29:28:sloglint::the "notSnake" key should be a constant
+bad.go:34:28:sloglint::the "banned" key is forbidden and should not be used
+bad.go:34:28:sloglint::the "banned" key should be a constant
+bad.go:40:7:sloglint::InfoContext should be used instead

@@ -8,3 +8,7 @@
 
 bad_test.go:8:6:thelper::test helper function should start from t.Helper()
 bad_test.go:33:19:thelper::test helper function should start from t.Helper()
+bad_test.go:43:6:thelper::test helper function should start from b.Helper()
+bad_test.go:52:6:thelper::parameter *testing.T should have name t
+bad_test.go:62:6:thelper::parameter *testing.T should be the first or after context.Context
+bad_test.go:72:6:thelper::test helper function should start from tb.Helper()

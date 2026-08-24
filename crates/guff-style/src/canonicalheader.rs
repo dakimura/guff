@@ -142,12 +142,28 @@ fn initialism() -> &'static HashMap<&'static str, &'static str> {
     })
 }
 
-fn canonical_header_key(s: &str) -> String {
+/// Upstream `canonicalHeaderKey`, including its second return value.
+///
+/// The bool says the MIME-canonical form was found in the initialism table —
+/// and upstream's caller treats that as a reason to **stay silent**:
+///
+/// ```go
+/// headerKeyCanonical, isWellKnown := canonicalHeaderKey(argValue, wellKnownHeaders)
+/// if argValue == headerKeyCanonical || isWellKnown {
+///     return
+/// }
+/// ```
+///
+/// So the table only ever suppresses. `h.Set("x-request-id", …)` canonicalizes
+/// to `X-Request-Id`, which is a key in the table, so upstream reports nothing
+/// at all — it never gets as far as suggesting `X-Request-ID`. Using the mapped
+/// value as the suggestion, as guff did, turns a silent case into a finding.
+fn canonical_header_key(s: &str) -> (String, bool) {
     let canonical = canonical_mime_header_key(s);
-    initialism()
-        .get(canonical.as_str())
-        .map(|s| (*s).to_string())
-        .unwrap_or(canonical)
+    match initialism().get(canonical.as_str()) {
+        Some(mapped) => ((*mapped).to_string(), true),
+        None => (canonical, false),
+    }
 }
 
 fn is_header_method(pass: &Pass<'_>, call: &CallExpr) -> bool {
@@ -293,8 +309,13 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Pending>) {
     let Some(arg) = key_arg(pass, &call.args[0]) else {
         return;
     };
-    let canonical = canonical_header_key(arg.value());
-    if arg.value() == canonical {
+    // Upstream checks the plain MIME-canonical form first and returns when the
+    // argument already matches it, *then* consults the table.
+    if arg.value() == canonical_mime_header_key(arg.value()) {
+        return;
+    }
+    let (canonical, is_well_known) = canonical_header_key(arg.value());
+    if arg.value() == canonical || is_well_known {
         return;
     }
     let message = format!(
@@ -374,8 +395,14 @@ mod tests {
 
     #[test]
     fn initialism_overrides_etag() {
-        assert_eq!(canonical_header_key("etag"), "ETag");
-        assert_eq!(canonical_header_key("www-authenticate"), "WWW-Authenticate");
-        assert_eq!(canonical_header_key("Test-HEader"), "Test-Header");
+        assert_eq!(canonical_header_key("etag"), ("ETag".to_string(), true));
+        assert_eq!(
+            canonical_header_key("www-authenticate"),
+            ("WWW-Authenticate".to_string(), true)
+        );
+        assert_eq!(
+            canonical_header_key("Test-HEader"),
+            ("Test-Header".to_string(), false)
+        );
     }
 }

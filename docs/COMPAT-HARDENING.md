@@ -9873,6 +9873,113 @@ fixture にはその形を残してある —— 上流が黙るので guff も�
 
 ---
 
+### 2026-08-24（続き 32）— 20 linter を広げて 4 件。うち 1 件は**単体テストが誤りを主張していた**
+
+続き 31 の続き。同じ手順 —— 上流の `Reportf` を数える、腕ごとに fixture を足す、
+既定 off の設定を書く。
+
+#### 広げた 20 linter（21 → 76 finding）
+
+| linter | before → after | |
+|---|---|---|
+| `sloglint` | 1 → 10 | 12 ルール中 6 |
+| `bidichk` | 1 → 9 | **名前が 9 種類**あり、メッセージはその名前を出す |
+| `predeclared` | 2 → 9 | func / type / const / var / param / method / ローカル変数 |
+| `thelper` | 2 → 6 | 3 メッセージ × 3 subject（t / b / tb） |
+| `loggercheck` | 1 → 6 | 3 メッセージ（2 つは既定 off） |
+| `funcorder` | 1 → 6 | **6 メッセージ**（下記の 1 つを除く） |
+| `testableexamples` | 1 → 5 | package / func / type / method の 4 種 |
+| `prealloc` | 4 → 5 | range ループを追加（下記の事故つき） |
+| `perfsprint` | 2 → 5 | 13 ルール中 4 |
+| `canonicalheader` | 1 → 4 | Get / Set / Add / Del / Values ＋ **負のケース** |
+| `tagliatelle` | 1 → 4 | json / yaml / xml / mapstructure |
+| `nlreturn` | 1 → 4 | return / break / continue / goto |
+| `unqueryvet` | 1 → 4 | リテラル / 定数 / 引数 / raw |
+| `musttag` | 1 → 3 | json Marshal / Unmarshal / xml |
+| `depguard` | 1 → 3 | deny 側と allow-list 側（別の文） |
+| `containedctx` | 1 → 3 | 名前つき / 埋め込み / 無名 struct |
+| `dogsled` | 1 → 3 | 個数がメッセージに入るので 3 と 4 は別 |
+| `interfacebloat` | 1 → 2 | **埋め込みは 1 と数える**（これを外すと 10 で黙る） |
+| `reassign` | 1 → 2 | |
+| `noinlineerr` | 1 → 1 | switch / for は**上流が黙る**ので負のケースとして残した |
+
+**linter case のうち 2 件以下は 64 → 52。**
+
+#### 欠陥 4 件
+
+1. **`sloglint` の case 名**。上流は `caseFn(caseName + " case")` ——
+   **命名関数を「文」に適用する**ので `snake_case` / `kebab-case` /
+   `camelCase` / `PascalCase` になる。guff は `snake case` と出していた。
+   原因は guff の case 関数が**空白を語の区切りとして扱っていなかった**こと
+   （上流が使う `github.com/ettle/strcase` は扱う）。4 つとも実測して直した。
+2. **`loggercheck` の引数描画**。上流は `renderNodeEllipsis` ＝ go/printer で
+   印字して 20 runes で切り、`...`（3 点）を付ける。guff は固定の `"…"` を
+   出していたので、**どの引数の話か読み手に分からなかった**。
+3. **`canonicalheader` の偽陽性**（下記）。
+4. **`funcorder` の 7 件目**（下記。欠陥ではなくピンとのズレ）。
+
+#### `canonicalheader` —— 単体テストが偽陽性を要求していた
+
+`h.Get("etag")` に guff は `instead use: "ETag"` を出す。**上流は何も言わない。**
+
+```go
+headerKeyCanonical, isWellKnown := canonicalHeaderKey(argValue, wellKnownHeaders)
+if argValue == headerKeyCanonical || isWellKnown {
+    return
+}
+```
+
+initialism の表（`Etag` → `ETag`、`X-Request-Id` → `X-Request-ID` …）は
+**抑制にしか使われない**。MIME 正規形が表にあれば上流は黙る。
+guff は表の値を「提案」として出していた。
+
+**そして `crates/guff-style/tests/checks_test.rs` がその誤りを assert していた**
+（`instead use: "ETag"` を要求）。どの tier もそれを否定できなかった ——
+isolate fixture は `content-type` だけで linter に届いていたからである。
+§1 が 2,848 件の crate テストについて言っていることの実例:
+**「guff が撃つ」の確認は「正しく撃つ」の確認ではない。**
+テストを黙ることの assert に直し、fixture に 3 つの負のケースを足した。
+
+#### `funcorder` の 7 件目 —— ピンに無い設定
+
+guff は `funcorder.function` を解釈する。**golangci-lint 2.12.2 の
+`FuncOrderSettings` にそのキーは無い**（ピンより後に入った）。
+同梱の funcorder v0.6.0 にはチェック自体があるが、2.12.2 には**有効にする手段が無く**、
+キーを黙って無視する。つまり guff が**ピンより先に進んでいる**。
+fixture から設定を外し、形は負のケースとして残した。
+ピンが追いつくのを見るのは `compat/drift.py` の仕事である。
+
+**上流のソースを読むときはピンのタグを読むこと。**
+`~/projects/src/github.com/golangci/golangci-lint` は HEAD なので、
+`git show v2.12.2:pkg/config/linters_settings.go` でないと今回の差は見えない。
+
+#### 事故: **広げるつもりで置き換えていた** 2 件
+
+`prealloc` と `funlen` の fixture を**書き直して**しまい、
+`prealloc` の golden は 4 → 2 に**減った**。消えたのは
+go/printer の優先順位描画（`len(a)/2 + len(b)` は `/` の空白が落ちる ——
+dapr の `pkg/runtime/hotreload/differ` が実例）を pin していた 4 つで、
+これは case の説明文に「置き換えるな、広げろ」と自分で書いた直後の話である。
+
+見つけ方は**セッション開始時のコミットと関数の数を突き合わせる**だけだった:
+
+```bash
+git show ceb40019:compat/isolate/fixtures/<l>/bad.go | grep -c '^func '
+```
+
+広げた fixture すべてでこれを回し、減っている 2 件を復元した
+（`prealloc` は 4 → 5、`funlen` は元の空関数の回帰ケースを戻した）。
+**広げる作業には「減っていないこと」の確認が要る。**
+
+#### 次にやること
+
+1. **まだ 52 の linter case が 2 件以下。** 同じ手順で続く。
+2. **`Info.Defs` の穴を横断で見る**（続き 31 の 2）。
+3. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目。
+4. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29 / 30。
+
+---
+
 
 ---
 

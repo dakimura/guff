@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:2:reassign::reassigning variable EOF in other package io
+bad.go:12:2:reassign::reassigning variable ErrUnexpectedEOF in other package io

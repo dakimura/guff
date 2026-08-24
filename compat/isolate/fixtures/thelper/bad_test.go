@@ -34,3 +34,45 @@ func TestLookalike(t *testing.T) {
 		t.Log("not in a bubble")
 	})
 }
+
+// thelper says three different things and checks four different subjects
+// (test / benchmark / tb / fuzz). The three messages below are the whole
+// vocabulary; a fixture with one `*testing.T` helper reaches one of them.
+
+// "test helper function should start from b.Helper()" — the benchmark subject.
+func benchHelper(b *testing.B) {
+	b.Fatal("x")
+}
+
+func BenchmarkMissingHelper(b *testing.B) {
+	benchHelper(b)
+}
+
+// "parameter *testing.T should have name t" — right type, wrong name.
+func wrongName(x *testing.T) {
+	x.Helper()
+	x.Fatal("x")
+}
+
+func TestWrongParamName(t *testing.T) {
+	wrongName(t)
+}
+
+// "parameter *testing.T should be the first or after context.Context".
+func wrongPosition(msg string, t *testing.T) {
+	t.Helper()
+	t.Fatal(msg)
+}
+
+func TestWrongParamPosition(t *testing.T) {
+	wrongPosition("x", t)
+}
+
+// The `testing.TB` subject is checked separately from `*testing.T`.
+func tbHelper(tb testing.TB) {
+	tb.Fatal("x")
+}
+
+func TestTBHelper(t *testing.T) {
+	tbHelper(t)
+}

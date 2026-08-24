@@ -13,6 +13,10 @@ linters:
   default: none
   enable:
     - loggercheck
+  settings:
+    loggercheck:
+      require-string-key: true
+      no-printf-like: true
 
 issues:
   max-issues-per-linter: 0

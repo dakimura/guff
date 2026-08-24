@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:10:interfacebloat::the interface has more than 10 methods: 11
+bad.go:3:10:interfacebloat::the interface has more than 10 methods: 12
+bad.go:27:19:interfacebloat::the interface has more than 10 methods: 11

@@ -6,4 +6,9 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:6:19:loggercheck::odd number of arguments passed as key-value pairs for logging
+bad.go:10:19:loggercheck::odd number of arguments passed as key-value pairs for logging
+bad.go:14:19:loggercheck::logging keys are expected to be inlined constant strings, please replace "42" provided with string
+bad.go:18:16:loggercheck::odd number of arguments passed as key-value pairs for logging
+bad.go:23:12:loggercheck::logging message should not use format specifier "%s"
+bad.go:23:24:loggercheck::logging keys are expected to be inlined constant strings, please replace "name" provided with string
+bad.go:23:24:loggercheck::odd number of arguments passed as key-value pairs for logging

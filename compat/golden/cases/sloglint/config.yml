@@ -13,6 +13,15 @@ linters:
   default: none
   enable:
     - sloglint
+  settings:
+    sloglint:
+      no-mixed-args: true
+      static-msg: true
+      no-raw-keys: true
+      key-naming-case: snake
+      context: scope
+      forbidden-keys:
+      - banned
 
 issues:
   max-issues-per-linter: 0

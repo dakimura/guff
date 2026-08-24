@@ -6,4 +6,7 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:4:13:tagliatelle::json(camel): got 'UserId' want 'userId'
+bad.go:8:17:tagliatelle::json(camel): got 'UserId' want 'userId'
+bad.go:9:17:tagliatelle::yaml(snake): got 'UserAge' want 'user_age'
+bad.go:10:17:tagliatelle::xml(kebab): got 'Name' want 'name'
+bad.go:11:17:tagliatelle::mapstructure(upperSnake): got 'Extra' want 'EXTRA'

@@ -6,4 +6,7 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:8:2:nlreturn::return with no blank line before
+bad.go:11:2:nlreturn::return with no blank line before
+bad.go:18:4:nlreturn::break with no blank line before
+bad.go:27:4:nlreturn::continue with no blank line before
+bad.go:35:2:nlreturn::goto with no blank line before

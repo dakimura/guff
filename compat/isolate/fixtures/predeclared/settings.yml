@@ -1,0 +1,3 @@
+# `qualified-name` (`q`) makes the checker look at struct fields and method
+# names too, which is a whole class of declaration the default skips.
+qualified-name: true

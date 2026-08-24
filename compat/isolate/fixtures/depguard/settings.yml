@@ -1,6 +1,15 @@
 rules:
+  # `lax` denies what it lists; the message quotes the `desc`.
   main:
     list-mode: lax
     deny:
       - pkg: "fmt"
         desc: "banned for isolate"
+  # `strict` allows only what it lists, and the message for everything else is a
+  # different sentence — unreachable with a deny-only rule.
+  strict:
+    list-mode: strict
+    files:
+      - "$all"
+    allow:
+      - "strings"

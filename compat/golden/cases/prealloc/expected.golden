@@ -10,3 +10,4 @@ bad.go:4:6:prealloc::Consider preallocating out with capacity n
 bad.go:17:6:prealloc::Consider preallocating out with capacity len(a)/2 + len(b)
 bad.go:25:6:prealloc::Consider preallocating out with capacity n*2 + len(a)
 bad.go:34:6:prealloc::Consider preallocating out with capacity len(a) - 1
+bad.go:45:6:prealloc::Consider preallocating out with capacity len(xs)
