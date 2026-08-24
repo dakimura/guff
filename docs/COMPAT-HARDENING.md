@@ -10805,3 +10805,93 @@ golden 193/193、`cargo test --workspace` 通過。
    広げる対象は「linter の腕を fixture が踏んでいない case」であって
    「件数が少ない case」ではない。上流の `Reportf` を数えるほうが速い。
 4. `compat/results/` の tier 別分割（続き 28/29/30/33）。
+
+---
+
+### 2026-08-24（続き 36）— 「1 ターゲットだけ回すと結果が壊れる」は tier 分割の話ではなく、**ガードの取りこぼし 1 行**だった
+
+続き 28/29/30/33 が 4 回にわたって
+「`compat/results/` を tier 別に分割する」と書いてきた問題を、
+今回**実際に踏んで**原因を見た。分割の話は半分しか当たっていない。
+
+`compat/run.sh` には既にガードがある:
+
+```sh
+# A --name run covers one target, so it must not overwrite the committed
+# whole-corpus snapshot with a one-line report.
+if [[ -z "$NAME_FILTER" ]] && [[ "$ISOLATE" -eq 1 || "$SMOKE" -eq 0 ]]; then
+  cp "$REPORT" "$RESULT_SNAPSHOT"
+```
+
+**が、isolate モードの 1 ターゲット指定は `--name` ではなく `--linter`**。
+run.sh 自身が 140 行目でそう書いている
+（`--name requires --oss (isolate mode uses --linter)`）。
+つまり `NAME_FILTER` は **isolate では絶対に立たない**変数で、
+`./compat/run.sh --isolate --linter X` は毎回、
+コミット済みの `RESULTS.isolate.md`（116 ターゲット・818 行）を
+**1 linter 分の 13 行で上書きしていた**。
+
+このセッション中に 2 回踏んだ。1 回目は commit 直前の `git status` で気づいて
+戻したが、**気づかなければそのまま入っていた** —— 差分は
+「results ファイルが更新された」に見えるので、レビューでも止まりにくい。
+
+両方向で確かめた:
+
+| | `RESULTS.isolate.md` |
+|---|---|
+| 修正あり + `--linter err113` | 818 行、**md5 まで一致** |
+| 修正なし + `--linter err113` | **13 行**（再現） |
+| 修正あり + フル `--isolate` | 更新される（ガードが常に閉じてはいない） |
+
+3 行目が要る。**書かなくなったガードは、壊れたガードより悪い。**
+
+CI 側は**影響ゼロ**であることも確かめた。`compat.yml` が run.sh を呼ぶのは
+4 箇所（`--isolate` / `--oss --tier pr` / `--oss --tier nightly`）で、
+**`--linter` を使うものは 1 つも無い** ——
+この修正が変えるのはローカルの 1 linter 実行だけ。
+
+#### tier の側は「分割」で合っているが、まだ決めていない
+
+同じ形の穴がもう 1 つある。`TIER` の既定値は `pr` で、
+ガードは `TIER` を見ていない。一方コミット済みの `RESULTS.md` には
+consul（nightly ターゲット）の行が入っている。
+つまり **`./compat/run.sh --oss` を既定のまま回すと、
+nightly の行が黙って消える**。
+
+ただしこちらは**設計判断**なので、この PR では触っていない:
+
+- `RESULTS.<tier>.md` に割る（＝ doc が 4 回書いてきた「tier 別分割」）と、
+  コミット済みの結合 `RESULTS.md` の置き場が無くなり、
+  CI の upload ステップと読む側の両方が変わる。
+- あるいは `--name` / `--linter` と同じく
+  「部分集合の実行では上書きしない」に倒す。
+  documented workflow（`--tier pr,nightly` が「毎セッション回すもの」で、
+  `--tier pr` は速い反復用）とは整合する。
+
+どちらも妥当で、**片方を黙って選ぶべき変更ではない**。
+判断材料だけ置く: 既定 tier は `pr`、コミット済み `RESULTS.md` は
+pr+nightly を含む、`--tier all` は prepare 側で有効な値。
+
+#### ついでに見つかった: **コミット済み snapshot に鮮度ゲートが無い**
+
+`RESULTS.isolate.md` を full run で作り直したら、
+3 行が古いままだった —— `nestif 2→3` / `err113 3→6` /
+`ginkgolinter 6→8`、いずれも **#114 で fixture を広げた分**。
+つまり #113 と #114 は snapshot を更新し忘れていた。
+（#110/#111/#112 は更新している。慣習はあるが、**強制されていない**。）
+
+CI の `compat.yml` で `RESULTS.isolate.md` / `RESULTS.md` が出てくるのは
+**upload ステップだけ**で、比較は 1 つも無い
+（`git diff --exit-code` の類はリポジトリ全体で 0 件）。
+workflow 自身のコメントも 339 行目で
+「A regression could sit in main undated」と書いている ——
+**知られてはいるが、塞がれていない。**
+
+塞ぐなら、isolate ジョブは既に full run を回しているので
+その後に `git diff --exit-code compat/results/RESULTS.isolate.md` を足すだけで
+ゲートになる。ただしこれは
+「件数が動く PR は必ず snapshot 更新コミットを要求される」
+という**ワークフローの変更**なので、tier の件と同じく決め打ちにしない。
+
+`0` は合格ではなく質問、と同じ形：
+**誰も比較していないファイルは、緑でも何も保証していない。**

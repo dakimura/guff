@@ -21,7 +21,7 @@
 | isolate-goconst | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-usestdlibvars | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-goprintffuncname | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-nestif | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
+| isolate-nestif | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-lll | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-asciicheck | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
 | isolate-unconvert | 4 | 4 | 4 | 100.0% | 100.0% | 0 |
@@ -32,10 +32,10 @@
 | isolate-nilnil | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-recvcheck | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-interfacebloat | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
-| isolate-nonamedreturns | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
+| isolate-nonamedreturns | 14 | 14 | 14 | 100.0% | 100.0% | 0 |
 | isolate-inamedparam | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
 | isolate-forbidigo | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
-| isolate-perfsprint | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
+| isolate-perfsprint | 7 | 7 | 7 | 100.0% | 100.0% | 0 |
 | isolate-tagalign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-modernize | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-wastedassign | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
@@ -44,7 +44,7 @@
 | isolate-maintidx | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-forcetypeassert | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-makezero | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
-| isolate-err113 | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
+| isolate-err113 | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-errorlint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-predeclared | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
 | isolate-noinlineerr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -110,7 +110,7 @@
 | isolate-zerologlint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-spancheck | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-promlinter | 5 | 5 | 5 | 100.0% | 100.0% | 0 |
-| isolate-ginkgolinter | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
+| isolate-ginkgolinter | 8 | 8 | 8 | 100.0% | 100.0% | 0 |
 | isolate-clickhouselint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-arangolint | 2 | 2 | 2 | 100.0% | 100.0% | 0 |
 | isolate-nolintlint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
@@ -239,7 +239,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| nestif | 2 | 2 | 2 | 100.0% | 100.0% |
+| nestif | 3 | 3 | 3 | 100.0% | 100.0% |
 
 ## isolate-lll
 
@@ -305,7 +305,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| nonamedreturns | 8 | 8 | 8 | 100.0% | 100.0% |
+| nonamedreturns | 14 | 14 | 14 | 100.0% | 100.0% |
 
 ## isolate-inamedparam
 
@@ -323,7 +323,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| perfsprint | 5 | 5 | 5 | 100.0% | 100.0% |
+| perfsprint | 7 | 7 | 7 | 100.0% | 100.0% |
 
 ## isolate-tagalign
 
@@ -377,7 +377,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| err113 | 3 | 3 | 3 | 100.0% | 100.0% |
+| err113 | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-errorlint
 
@@ -773,7 +773,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| ginkgolinter | 6 | 6 | 6 | 100.0% | 100.0% |
+| ginkgolinter | 8 | 8 | 8 | 100.0% | 100.0% |
 
 ## isolate-clickhouselint
 
