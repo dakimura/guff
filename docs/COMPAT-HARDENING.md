@@ -10982,6 +10982,21 @@ golden の key は `path:line:col:linter:severity:text` で
 `errorlint_suggests_errors_as_for_type_assertions`（fix 本文を直接 assert）と
 `fix.rs` の 6 本の unit test（衝突・同値重複・複数 fix・message-only）だけ。
 
+#### `--fix` を比べる tier を作るなら
+
+3 を直した副産物として、**fixture が gofmt 済みである必要は無くなった**。
+golangci は fix 適用後に必ず整形するので、
+guff が整形していなかった頃は入力が gofmt 違反だとそれだけで差が出た
+（probe で空行を 2 つ作って一度引っかかった）。
+いまは**両方が同じ正規化を掛ける**ので、
+わざと gofmt 違反にした入力でも出力は**バイト一致**する（実測）。
+
+ただし golangci の**キャッシュには注意**。
+同じ内容のファイルを別ディレクトリで測ると、
+**存在しないディレクトリのパスを警告に出しながら**前回の結果を返してくる。
+probe を書いたとき、これで一度「golangci が何も直さない」という
+偽の結果を出した。`GOLANGCI_LINT_CACHE` をターゲットごとに分けること。
+
 既存テストを 1 本**書き換えた**: `overlapping_edits_keep_first_in_descending_order`
 は go/analysis の「start が大きいほうが勝つ」を pin していた。
 上流の規則ではそれは間違いなので、
