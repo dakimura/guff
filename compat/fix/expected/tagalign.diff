@@ -1,0 +1,23 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh tagalign
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/tagalign/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,7 +1,7 @@
+ package p
+ 
+ type Example struct {
+-	Foo int `json:"foo"        yaml:"foo"`
+-	Bar int `yaml:"bar"  json:"bar"`
+-	Baz int `json:"baz" xml:"baz" yaml:"baz"`
++	Foo int `json:"foo" yaml:"foo"`
++	Bar int `json:"bar" yaml:"bar"`
++	Baz int `json:"baz" xml:"baz"  yaml:"baz"`
+ }

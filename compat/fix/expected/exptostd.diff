@@ -1,0 +1,32 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh exptostd
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/exptostd/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,6 +1,6 @@
+ package p
+ 
+-import "golang.org/x/exp/maps"
++import "maps"
+ 
+ func Bad(m map[string]string) {
+ 	_ = maps.Clone(m)
+@@ -9,9 +9,9 @@
+ // exptostd names the stdlib replacement, so each x/exp function is its own
+ // sentence.
+ func Keys(m map[string]string) {
+-	_ = maps.Keys(m)
++	_ = slices.AppendSeq(make([]FIXME, 0, len(m)), maps.Keys(m))
+ }
+ 
+ func Values(m map[string]string) {
+-	_ = maps.Values(m)
++	_ = slices.AppendSeq(make([]FIXME, 0, len(m)), maps.Values(m))
+ }

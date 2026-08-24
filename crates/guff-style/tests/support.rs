@@ -200,6 +200,33 @@ pub fn run_analyzer(
     run_analyzer_with_settings(analyzer, pkg, &RunnerOptions::default())
 }
 
+/// The diagnostics themselves, not just their messages.
+///
+/// A suggested fix's replacement text and span appear in no compat key — the
+/// golden tier's is `path:line:col:linter:severity:text` — so a check whose
+/// `--fix` writes the wrong bytes is invisible to every finding-set comparison.
+/// Asserting on them here is the only unit-level net under `compat/fix/`.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}
+
 pub fn run_analyzer_with_settings(
     analyzer: &'static guff_analysis::Analyzer,
     pkg: &Arc<Package>,

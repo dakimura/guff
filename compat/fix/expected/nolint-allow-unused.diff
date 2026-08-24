@@ -1,0 +1,31 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh nolint-allow-unused
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/nolint-allow-unused/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/group/group.go
++++ b/group/group.go
+@@ -12,6 +12,6 @@
+ 	// Inside the function body: still covered, we recieve that too.
+ }
+ 
+-// B is documented here, in a comment group of its own: this recieve is
++// B is documented here, in a comment group of its own: this receive is
+ // reported.
+ func B() {}
+--- a/inline/inline.go
++++ b/inline/inline.go
+@@ -30,7 +30,7 @@
+ func LeadingSpace() {
+ 	// `strings.TrimLeft(text, "/ ")` in the filter means this still suppresses,
+ 	// while nolintlint reports it as not machine-readable.
+-	mkerr() // nolint:errcheck
++	mkerr() //nolint:errcheck
+ }
+ 
+ func UpperCase() {

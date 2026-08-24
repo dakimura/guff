@@ -1,0 +1,437 @@
+# What guff's `--fix` writes TODAY for modernize — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/modernize.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending modernize
+--- a/bloop/bloop.go
++++ b/bloop/bloop.go
+@@ -90,7 +90,7 @@
+ 		wg.Done()
+ 	}
+ 	wg.Add(2)
+-	for i := 0; i < 2; i++ {
++	for i := range 2 {
+ 		go poster()
+ 	}
+ 	wg.Wait()
+--- a/mapsloop/mapsloop.go
++++ b/mapsloop/mapsloop.go
+@@ -3,7 +3,5 @@
+ package modernize
+ 
+ func copyMap(dst, src map[int]string) {
+-	for k, v := range src {
+-		dst[k] = v
+-	}
++	maps.Copy(dst, src)
+ }
+--- a/minmax/minmax.go
++++ b/minmax/minmax.go
+@@ -4,19 +4,13 @@
+ // `lhs0 = rhs0` immediately above `if a < b { lhs = rhs }` with no else, and it
+ // says "if statement", where pattern 1 says "if/else statement".
+ func clampMin(x, y int) int {
+-	v := x
+-	if v > y {
+-		v = y
+-	}
++	v := min(x, y)
+ 
+ 	return v
+ }
+ 
+ func clampMax(x, y int) int {
+-	v := x
+-	if v < y {
+-		v = y
+-	}
++	v := max(x, y)
+ 
+ 	return v
+ }
+@@ -25,10 +19,7 @@
+ func clampPlainAssign(x, y int) int {
+ 	var v int
+ 
+-	v = x
+-	if v > y {
+-		v = y
+-	}
++	v = min(x, y)
+ 
+ 	return v
+ }
+@@ -68,11 +59,7 @@
+ func withElse(x, y int) int {
+ 	var v int
+ 
+-	if x > y {
+-		v = y
+-	} else {
+-		v = x
+-	}
++	v = min(x, y)
+ 
+ 	return v
+ }
+@@ -81,10 +68,7 @@
+ // name — and not "the same value", so `len(a)` matches `len(a)` although a call
+ // is not provably pure. syncthing writes this five times.
+ func clampToLen(a, b []string) int {
+-	count := len(a)
+-	if len(b) < len(a) {
+-		count = len(b)
+-	}
++	count := min(len(b), len(a))
+ 
+ 	return count
+ }
+@@ -92,10 +76,7 @@
+ // And the two spellings of one expression differ only in spacing, which is not
+ // part of the syntax.
+ func clampArith(buf []byte, written, chunk int) int {
+-	toWrite := chunk
+-	if toWrite > len(buf)-written {
+-		toWrite = len(buf) - written
+-	}
++	toWrite := min(chunk, len(buf)-written)
+ 
+ 	return toWrite
+ }
+--- a/plusbuild/plusbuild.go
++++ b/plusbuild/plusbuild.go
+@@ -3,7 +3,6 @@
+ // golden records the same finding wherever it is regenerated.
+ 
+ //go:build go1.18
+-// +build go1.18
+ 
+ package plusbuild
+ 
+--- a/reflecttypefor/reflecttypefor.go
++++ b/reflecttypefor/reflecttypefor.go
+@@ -10,11 +10,11 @@
+ 
+ func typeofVar() reflect.Type {
+ 	var zero MyStruct
+-	return reflect.TypeOf(zero)
++	return reflect.TypeFor[MyStruct]()
+ }
+ 
+ func typeofElem() reflect.Type {
+-	return reflect.TypeOf((*MyStruct)(nil)).Elem()
++	return reflect.TypeFor[MyStruct]()
+ }
+ 
+ // Interface-typed args are dynamic; must not suggest TypeFor.
+--- a/slicesbackward/slicesbackward.go
++++ b/slicesbackward/slicesbackward.go
+@@ -4,8 +4,8 @@
+ 
+ func sumBackward(s []int) int {
+ 	sum := 0
+-	for i := len(s) - 1; i >= 0; i-- {
+-		sum += s[i]
++	for _, v := range slices.Backward(s) {
++		sum += v
+ 	}
+ 	return sum
+ }
+--- a/slicescontains/slicescontains.go
++++ b/slicescontains/slicescontains.go
+@@ -1,50 +1,26 @@
+ package slicescontains
+ 
+ func containsReturn(s []int, needle int) bool {
+-	for _, v := range s {
+-		if v == needle {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(s, needle)
+ }
+ 
+ func containsIndexElem(s []int, needle int) bool {
+-	for i := range s {
+-		if s[i] == needle {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.Contains(s, needle)
+ }
+ 
+ func containsFuncPred(s []int) bool {
+ 	pred := func(v int) bool { return v > 0 }
+-	for _, v := range s {
+-		if pred(v) {
+-			return true
+-		}
+-	}
+-	return false
++	return slices.ContainsFunc(s, pred)
+ }
+ 
+ func containsBreakBody(s []int, needle int) {
+-	for _, v := range s {
+-		if v == needle {
+-			println("found")
+-			break
+-		}
++	if slices.Contains(s, needle) {
++		println("found")
+ 	}
+ }
+ 
+ func containsFoundAssign(s []int, needle int) bool {
+-	found := false
+-	for _, v := range s {
+-		if v == needle {
+-			found = true
+-			break
+-		}
+-	}
++	found = slices.Contains(s, needle)
+ 	return found
+ }
+ 
+--- a/stditerators/stditerators.go
++++ b/stditerators/stditerators.go
+@@ -6,22 +6,22 @@
+ 
+ // C-style loop over Struct.{NumFields,Field} -> Struct.Fields iteration.
+ func useStruct(s *types.Struct) {
+-	for i := 0; i < s.NumFields(); i++ {
+-		_ = s.Field(i)
++	for field := range s.Fields() {
++		_ = field
+ 	}
+ }
+ 
+ // range-over-int form: for i := range s.NumFields().
+ func useStructRange(s *types.Struct) {
+-	for i := range s.NumFields() {
+-		_ = s.Field(i)
++	for field := range s.Fields() {
++		_ = field
+ 	}
+ }
+ 
+ // Tuple.{Len,At} -> Tuple.Variables iteration.
+ func useTuple(t *types.Tuple) {
+-	for i := 0; i < t.Len(); i++ {
+-		_ = t.At(i)
++	for v := range t.Variables() {
++		_ = v
+ 	}
+ }
+ 
+@@ -37,7 +37,7 @@
+ 
+ // Not modernizable: no matching table type.
+ func plainSlice(xs []int) {
+-	for i := 0; i < len(xs); i++ {
++	for i := range xs {
+ 		_ = xs[i]
+ 	}
+ }
+--- a/stringsbuilder/stringsbuilder.go
++++ b/stringsbuilder/stringsbuilder.go
+@@ -2,42 +2,43 @@
+ 
+ // basic: var + loop += + rvalue use
+ func builderBasic() {
+-	var s string
+-	s += "before"
+-	for i := 0; i < 10; i++ {
+-		s += "in"
++	var s strings.Builder
++	s.WriteString("before")
++	for i := range 10 {
++		s.WriteString("in")
+ 	}
+-	s += "after"
+-	print(s)
++	s.WriteString("after")
++	print(s.String())
+ }
+ 
+ // short decl
+ func builderShort() {
+-	s := "a"
+-	for i := 0; i < 10; i++ {
+-		s += "b"
++	var s strings.Builder
++	s.WriteString("a")
++	for i := range 10 {
++		s.WriteString("b")
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // empty short decl
+ func builderEmptyShort() {
+-	s := ""
+-	for i := 0; i < 10; i++ {
+-		s += "b"
++	var s strings.Builder
++	for i := range 10 {
++		s.WriteString("b")
+ 	}
+-	print(s)
++	print(s.String())
+ }
+ 
+ // paren var decl where s is last
+ func builderParenLast(slice []string) string {
+ 	var (
+-		msg string
++		msg strings.Builder
+ 	)
+ 	for _, s := range slice {
+-		msg += s
++		msg.WriteString(s)
+ 	}
+-	return msg
++	return msg.String()
+ }
+ 
+ // nope: += only outside a loop
+@@ -51,7 +52,7 @@
+ // nope: declaration in if init (not an unrestricted stmt list)
+ func builderIfInit() {
+ 	if s := "a"; true {
+-		for i := 0; i < 10; i++ {
++		for i := range 10 {
+ 			s += "x"
+ 		}
+ 		print(s)
+@@ -62,7 +63,7 @@
+ func builderDirectAssign(x string) string {
+ 	var s string
+ 	s = x
+-	for i := 0; i < 3; i++ {
++	for i := range 3 {
+ 		s += x
+ 	}
+ 	return s
+@@ -74,7 +75,7 @@
+ 		str   = "hello"
+ 		after int
+ 	)
+-	for i := 0; i < 100; i++ {
++	for i := range 100 {
+ 		str += "!"
+ 	}
+ 	println(str, after)
+--- a/stringscutprefix/stringscutprefix.go
++++ b/stringscutprefix/stringscutprefix.go
+@@ -6,29 +6,29 @@
+ )
+ 
+ func pattern2TrimPrefix(s, pre string) string {
+-	if after := strings.TrimPrefix(s, pre); after != s {
++	if after, ok := strings.CutPrefix(s, pre); ok {
+ 		return after
+ 	}
+ 	return s
+ }
+ 
+ func pattern2TrimSuffix(s, suf string) string {
+-	if before := strings.TrimSuffix(s, suf); before != s {
++	if before, ok := strings.CutSuffix(s, suf); ok {
+ 		return before
+ 	}
+ 	return s
+ }
+ 
+ func bytesHasPrefix(b, pre []byte) []byte {
+-	if bytes.HasPrefix(b, pre) {
+-		return bytes.TrimPrefix(b, pre)
++	if after, ok := bytes.CutPrefix(b, pre); ok {
++		return after
+ 	}
+ 	return b
+ }
+ 
+ func bytesHasSuffix(b, suf []byte) []byte {
+-	if bytes.HasSuffix(b, suf) {
+-		return bytes.TrimSuffix(b, suf)
++	if before, ok := bytes.CutSuffix(b, suf); ok {
++		return before
+ 	}
+ 	return b
+ }
+--- a/stringsseq/stringsseq.go
++++ b/stringsseq/stringsseq.go
+@@ -5,13 +5,13 @@
+ import "strings"
+ 
+ func rangeSplit(s string) {
+-	for _, part := range strings.Split(s, ",") {
++	for part := range strings.SplitSeq(s, ",") {
+ 		_ = part
+ 	}
+ }
+ 
+ func rangeFields(s string) {
+-	for _, part := range strings.Fields(s) {
++	for part := range strings.FieldsSeq(s) {
+ 		_ = part
+ 	}
+ }
+--- a/testingcontext/testingcontext.go
++++ b/testingcontext/testingcontext.go
+@@ -8,7 +8,6 @@
+ )
+ 
+ func TestWithCancel(t *testing.T) {
+-	ctx, cancel := context.WithCancel(context.Background())
+-	defer cancel()
++	ctx := t.Context()
+ 	_ = ctx
+ }
+--- a/unsafefuncs/unsafefuncs.go
++++ b/unsafefuncs/unsafefuncs.go
+@@ -3,17 +3,17 @@
+ import "unsafe"
+ 
+ func addConst(ptr unsafe.Pointer) unsafe.Pointer {
+-	return unsafe.Pointer(uintptr(ptr) + 1)
++	return unsafe.Add(ptr, 1)
+ }
+ 
+ func addVar(ptr unsafe.Pointer, n int) unsafe.Pointer {
+-	return unsafe.Pointer(uintptr(ptr) + uintptr(n))
++	return unsafe.Add(ptr, n)
+ }
+ 
+ type uP = unsafe.Pointer
+ 
+ func addAlias(ptr uP) uP {
+-	return uP(uintptr(ptr) + 1)
++	return unsafe.Add(ptr, 1)
+ }
+ 
+ type namedUP unsafe.Pointer
+--- a/waitgroupgo/waitgroupgo.go
++++ b/waitgroupgo/waitgroupgo.go
+@@ -5,9 +5,9 @@
+ import "sync"
+ 
+ func spawn(wg *sync.WaitGroup) {
+-	wg.Add(1)
+-	go func() {
+-		defer wg.Done()
++	
++	wg.Go(func() {
++		
+ 		_ = 1
+ 	}()
+ }

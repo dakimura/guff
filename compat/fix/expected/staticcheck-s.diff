@@ -1,0 +1,281 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-s
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-s/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/s1001/bad/bad.go
++++ b/s1001/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(dst, src []int) {
+-	for i, v := range src {
+-		dst[i] = v
+-	}
++	copy(dst, src)
+ }
+--- a/s1002/bad/bad.go
++++ b/s1002/bad/bad.go
+@@ -1,10 +1,10 @@
+ package main
+ 
+ func f(x bool) {
+-	if x == true {
++	if x {
+ 		_ = x
+ 	}
+-	if x == false {
++	if !x {
+ 		_ = x
+ 	}
+ }
+--- a/s1003/bad/bad.go
++++ b/s1003/bad/bad.go
+@@ -6,12 +6,12 @@
+ )
+ 
+ func f(s string, b []byte) {
+-	if strings.Index(s, "x") != -1 {
++	if strings.Contains(s, "x") {
+ 	}
+-	if strings.Index(s, "x") == -1 {
++	if !strings.Contains(s, "x") {
+ 	}
+-	if strings.IndexRune(s, 'x') > -1 {
++	if strings.ContainsRune(s, 'x') {
+ 	}
+-	if bytes.Index(b, []byte("x")) >= 0 {
++	if bytes.Contains(b, []byte("x")) {
+ 	}
+ }
+--- a/s1004/bad/bad.go
++++ b/s1004/bad/bad.go
+@@ -3,5 +3,5 @@
+ import "bytes"
+ 
+ func f(a, b []byte) bool {
+-	return bytes.Compare(a, b) == 0
++	return bytes.Equal(a, b)
+ }
+--- a/s1005/bad/bad.go
++++ b/s1005/bad/bad.go
+@@ -1,5 +1,5 @@
+ package main
+ 
+ func f(ch chan int) {
+-	_ = <-ch
++	<-ch
+ }
+--- a/s1010/bad/bad.go
++++ b/s1010/bad/bad.go
+@@ -1,3 +1,3 @@
+ package main
+ 
+-func f(s []int) []int { return s[1:len(s)] }
++func f(s []int) []int { return s[1:] }
+--- a/s1011/bad/bad.go
++++ b/s1011/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(x, y []int) {
+-	for _, e := range y {
+-		x = append(x, e)
+-	}
++	x = append(x, y...)
+ }
+--- a/s1012/bad/bad.go
++++ b/s1012/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "time"
+ 
+-func f(t time.Time) time.Duration { return time.Now().Sub(t) }
++func f(t time.Time) time.Duration { return time.Since(t) }
+--- a/s1016/bad/bad.go
++++ b/s1016/bad/bad.go
+@@ -1,8 +1,14 @@
+ package main
+ 
+-type T1 struct{ A int; B string }
+-type T2 struct{ A int; B string }
++type T1 struct {
++	A int
++	B string
++}
++type T2 struct {
++	A int
++	B string
++}
+ 
+ func f(x T1) T2 {
+-	return T2{A: x.A, B: x.B}
++	return T2(x)
+ }
+--- a/s1018/bad/bad.go
++++ b/s1018/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(bs []byte, offset, n int) {
+-	for i := 0; i < n; i++ {
+-		bs[i] = bs[offset+i]
+-	}
++	copy(bs[:n], bs[offset:])
+ }
+--- a/s1021/bad/bad.go
++++ b/s1021/bad/bad.go
+@@ -1,8 +1,7 @@
+ package main
+ 
+ func f() {
+-	var x uint
+-	x = 1
++	var x uint = 1
+ 	_ = x
+ 
+ 	var y int
+--- a/s1024/bad/bad.go
++++ b/s1024/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "time"
+ 
+-func f(t time.Time) time.Duration { return t.Sub(time.Now()) }
++func f(t time.Time) time.Duration { return time.Until(t) }
+--- a/s1025/bad/bad.go
++++ b/s1025/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f(s string) string { return fmt.Sprintf("%s", s) }
++func f(s string) string { return s }
+--- a/s1028/bad/bad.go
++++ b/s1028/bad/bad.go
+@@ -1,5 +1,8 @@
+ package main
+ 
+-import ("errors"; "fmt")
++import (
++	"errors"
++	"fmt"
++)
+ 
+ func f() error { return errors.New(fmt.Sprintf("x")) }
+--- a/s1030/bad/bad.go
++++ b/s1030/bad/bad.go
+@@ -2,10 +2,10 @@
+ 
+ import "bytes"
+ 
+-func f(buf bytes.Buffer) string { return string(buf.Bytes()) }
++func f(buf bytes.Buffer) string { return buf.String() }
+ 
+-func g(buf *bytes.Buffer) []byte { return []byte(buf.String()) }
++func g(buf *bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func h(buf bytes.Buffer) []byte { return []byte(buf.String()) }
++func h(buf bytes.Buffer) []byte { return buf.Bytes() }
+ 
+-func sel(w struct{ B bytes.Buffer }) string { return string(w.B.Bytes()) }
++func sel(w struct{ B bytes.Buffer }) string { return w.B.String() }
+--- a/s1033/bad/bad.go
++++ b/s1033/bad/bad.go
+@@ -1,7 +1,5 @@
+ package main
+ 
+ func f(m map[string]int, k string) {
+-	if _, ok := m[k]; ok {
+-		delete(m, k)
+-	}
++	delete(m, k)
+ }
+--- a/s1034/bad/bad.go
++++ b/s1034/bad/bad.go
+@@ -1,8 +1,8 @@
+ package main
+ 
+ func f(i interface{}) {
+-	switch i.(type) {
++	switch i := i.(type) {
+ 	case int:
+-		_ = i.(int)
++		_ = i
+ 	}
+ }
+--- a/s1035/bad/bad.go
++++ b/s1035/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "net/http"
+ 
+-func f(h http.Header) { h.Set(http.CanonicalHeaderKey("X"), "v") }
++func f(h http.Header) { h.Set("X", "v") }
+--- a/s1036/bad/bad.go
++++ b/s1036/bad/bad.go
+@@ -1,11 +1,7 @@
+ package main
+ 
+ func f(m map[string][]int, k string, v int) {
+-	if _, ok := m[k]; ok {
+-		m[k] = append(m[k], v)
+-	} else {
+-		m[k] = []int{v}
+-	}
++	m[k] = append(m[k], v)
+ }
+ 
+ // The `+=` and `++` alternatives of upstream's query. Both were unreachable in
+@@ -13,15 +9,7 @@
+ // *node id*, which two distinct nodes never share, so the arms could not fire
+ // and no fixture noticed (COMPAT-HARDENING §4).
+ func counters(m map[string]int, k string, v int) {
+-	if _, ok := m[k]; ok {
+-		m[k] += v
+-	} else {
+-		m[k] = v
+-	}
++	m[k] += v
+ 
+-	if _, ok := m[k]; ok {
+-		m[k]++
+-	} else {
+-		m[k] = 1
+-	}
++	m[k]++
+ }
+--- a/s1037/bad/bad.go
++++ b/s1037/bad/bad.go
+@@ -7,9 +7,7 @@
+ // clause. The body may be empty or not — upstream only uses that to decide
+ // whether it can offer a fix.
+ func f() {
+-	select {
+-	case <-time.After(time.Second):
+-	}
++	time.Sleep(time.Second)
+ }
+ 
+ func g() {
+--- a/s1038/bad/bad.go
++++ b/s1038/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f() { fmt.Print(fmt.Sprintf("hi")) }
++func f() { fmt.Print("hi") }
+--- a/s1039/bad/bad.go
++++ b/s1039/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "fmt"
+ 
+-func f() { _ = fmt.Sprint("hi") }
++func f() { _ = "hi" }

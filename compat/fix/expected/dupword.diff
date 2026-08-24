@@ -1,0 +1,46 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh dupword
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/dupword/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,16 +1,16 @@
+ package p
+ 
+ func process() {
+-	// This is is a duplicate
+-	line := "the the word"
++	// This is a duplicate
++	line := "the word"
+ 	_ = line
+ }
+ 
+ // dupword names the word it saw twice, so each duplicated word is a different
+ // sentence. It reads comments, strings and the raw source alike.
+ func more() {
+-	// and and again
+-	s := "a a b"
++	// and again
++	s := "a "
+ 	_ = s
+-	/* block block comment */
++	/* block comment */
+ }
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -1,7 +1,7 @@
+ package example
+ 
+ func process() {
+-	// This is is a comment with duplicate words
+-	line := "the the duplicate"
++	// This is a comment with duplicate words
++	line := "the duplicate"
+ 	_ = line
+ }

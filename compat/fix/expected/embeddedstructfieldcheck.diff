@@ -1,0 +1,19 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh embeddedstructfieldcheck
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/embeddedstructfieldcheck/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -19,5 +19,6 @@
+ type Ok struct {
+ 	A
+ 	B
++
+ 	V int
+ }

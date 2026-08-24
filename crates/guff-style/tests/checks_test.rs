@@ -6108,6 +6108,69 @@ fn modernize_atomictypes_drops_non_locals_when_the_package_has_ignored_files() {
     assert!(kept[0].contains("var n uint32"), "{kept:?}");
 }
 
+/// omitzero offers **two** fixes, and they deliberately conflict.
+///
+/// Upstream reports a deletion and a replacement over the same span, so
+/// golangci-lint's fixer sees an overlap and drops every modernize edit in the
+/// file — a user running `--fix` gets nothing here. guff emitted only the
+/// `omitzero` half, which had nothing to conflict with, so it silently rewrote
+/// the tag: `omitempty` -> `omitzero` is a change to what the encoder puts on
+/// the wire, made without asking.
+///
+/// The spans are asserted relative to the tag literal (the diagnostic's own
+/// Pos), because that is where the old code was wrong in the other direction:
+/// it replaced the *whole literal* rather than the `,omitempty` run inside it.
+#[test]
+fn modernize_omitzero_offers_a_removal_and_a_replacement() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/omitzeroshapes",
+        "omitzero_shapes.go",
+    );
+    let mut spans: Vec<(u32, u32, String)> = Vec::new();
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("Omitempty has no effect") {
+            continue;
+        }
+        assert_eq!(
+            d.suggested_fixes.len(),
+            2,
+            "both alternatives are reported: {:?}",
+            d.suggested_fixes
+        );
+        assert_eq!(d.suggested_fixes[0].message, "Remove redundant omitempty tag");
+        assert_eq!(
+            d.suggested_fixes[1].message,
+            "Replace omitempty with omitzero (behavior change)"
+        );
+        for fix in &d.suggested_fixes {
+            let edit = &fix.text_edits[0];
+            spans.push((edit.pos - d.pos, edit.end - edit.pos, edit.new_text.clone()));
+        }
+    }
+
+    // Offsets from the start of the tag literal; lengths in source bytes.
+    // Confirmed against golangci-lint 2.12.2 on the same fixture.
+    assert_eq!(
+        spans,
+        vec![
+            // `"json:\"value,omitempty\""` — the escaped quote is two source
+            // bytes for one value byte, so the run starts at 13, not 11.
+            (13, 10, String::new()),
+            (13, 10, ",omitzero".to_string()),
+            // `` `json:",omitempty"` `` — json carries nothing else, so the
+            // removal takes the literal whole, backquotes included.
+            (0, 19, String::new()),
+            (7, 10, ",omitzero".to_string()),
+            // Another key follows, so only the json tag goes — and the regex's
+            // trailing `\s?` takes the space with it.
+            (1, 18, String::new()),
+            (7, 10, ",omitzero".to_string()),
+        ],
+        "upstream's spans, per omitzero.go and astutil.RangeInStringLiteral"
+    );
+}
+
 /// `omitzero` is off for a package that carries a kubebuilder marker.
 ///
 /// kubebuilder has its own interpretation of the tag (go.dev/issue/76649), so

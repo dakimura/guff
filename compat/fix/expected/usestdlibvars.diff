@@ -1,0 +1,42 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh usestdlibvars
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/usestdlibvars/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -13,24 +13,24 @@
+ // reported nothing at all.
+ 
+ func Method() (*http.Request, error) {
+-	return http.NewRequest("GET", "http://example.com", nil)
++	return http.NewRequest(http.MethodGet, "http://example.com", nil)
+ }
+ 
+ func StatusCode(w http.ResponseWriter) {
+-	w.WriteHeader(200)
++	w.WriteHeader(http.StatusOK)
+ }
+ 
+ func Weekday(t time.Time) bool {
+-	return t.Weekday().String() == "Sunday"
++	return t.Weekday().String() == time.Sunday.String()
+ }
+ 
+ func Month(t time.Time) bool {
+-	return t.Month().String() == "January"
++	return t.Month().String() == time.January.String()
+ }
+ 
+ func CryptoHash() crypto.Hash {
+ 	var h crypto.Hash
+-	if h.String() == "MD5" {
++	if h.String() == crypto.MD5.String() {
+ 		return h
+ 	}
+ 	return h

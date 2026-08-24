@@ -1,0 +1,35 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh issues-uniq-by-line-order
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/issues-uniq-by-line-order/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/order/order.go
++++ b/order/order.go
+@@ -23,13 +23,13 @@
+ // Alphabetically `nolintlint` wins; upstream keeps revive, because nolintlint
+ // is last whatever its name.
+ 
+-func Exported() {} //nolint:errcheck
++func Exported() {}
+ 
+ // unused (col 6) vs nolintlint, the same disagreement — and this line also
+ // pins that `unused` is *not* moved to the end: it is inside the metalinter,
+ // so it sorts by name like everything else.
+ 
+-func unusedFn() {} //nolint:errcheck
++func unusedFn() {}
+ 
+ // The control. gosec (col 2) and errcheck (col 11) both report the unchecked
+ // call and nolintlint reports the directive, all three on one line, and here
+@@ -38,5 +38,5 @@
+ // Without the two declarations above, a plain name sort would pass this case.
+ 
+ func Both() {
+-	os.Setenv("A", "B") //nolint:staticcheck
++	os.Setenv("A", "B")
+ }

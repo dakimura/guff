@@ -1,0 +1,42 @@
+# What guff's `--fix` writes TODAY for parens — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/parens.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending parens
+--- a/parens/parens.go
++++ b/parens/parens.go
+@@ -76,7 +76,7 @@
+ // honnef's pattern matcher unwraps ParenExpr, so both of these still match and
+ // the message renders the *unwrapped* condition.
+ func S1008ParenCond(b bool) bool {
+-	if (b == true) {
++	if b == true {
+ 		return true
+ 	}
+ 	return false
+@@ -131,9 +131,10 @@
+ 
+ // The control: reported.
+ func QF1003Plain(x int) string {
+-	if x == 1 {
++	switch x {
++	case 1:
+ 		return "one"
+-	} else if x == 2 {
++	case 2:
+ 		return "two"
+ 	}
+ 	return "other"
+@@ -193,7 +194,7 @@
+ // errorlint's `isNil` is a bare `ex.(*ast.Ident)` assertion, so `(nil)` is not
+ // a nil comparison to it and the comparison is reported like any other.
+ func ErrorlintParenNil(err error) bool {
+-	return err != (nil)
++	return !errors.Is(err, (nil))
+ }
+ 
+ // The control: silent, because this one *is* a nil comparison.

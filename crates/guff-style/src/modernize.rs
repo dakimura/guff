@@ -98,6 +98,7 @@ use guff_types::signature::{
 use guff_types::tuple::{tuple_at, tuple_len};
 use guff_types::typestring::type_string;
 use guff_types::{ObjectId, OperandMode, TypeId};
+use regex::Regex;
 
 use crate::options::ModernizeOptions;
 
@@ -1148,33 +1149,187 @@ fn check_fmtappendf(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnost
     });
 }
 
-fn json_omitempty_span(tag_value: &str) -> Option<(usize, usize)> {
-    // tag_value includes surrounding quotes, e.g. `"json:\"foo,omitempty\""`
-    let unquoted = if (tag_value.starts_with('"') && tag_value.ends_with('"'))
-        || (tag_value.starts_with('`') && tag_value.ends_with('`'))
-    {
-        &tag_value[1..tag_value.len() - 1]
-    } else {
-        tag_value
-    };
-    // Decode simple Go string escapes for \" inside double-quoted tags.
-    let decoded = if tag_value.starts_with('"') {
-        unquoted.replace("\\\"", "\"").replace("\\\\", "\\")
-    } else {
-        unquoted.to_string()
-    };
-    for part in decoded.split_whitespace() {
-        let Some(rest) = part.strip_prefix("json:") else {
-            continue;
-        };
-        let val = rest.trim_matches('"');
-        if let Some(idx) = val.find(",omitempty") {
-            // Report on the whole tag literal; SuggestedFix replaces omitempty → omitzero in raw.
-            let _ = idx;
-            return Some((0, tag_value.len()));
+/// Upstream's `omitemptyRegex` (`modernize.go`), matched against the tag
+/// literal's *unquoted* value. Group 1 is the `,omitempty` run itself, which is
+/// what both suggested fixes are cut from.
+fn omitempty_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?:^json| json):"[^"]*(,omitempty)(?:"|,[^"]*")\s?"#).unwrap()
+    })
+}
+
+/// Go's `strconv.UnquoteChar`: one character off the front of a literal's
+/// interior, plus the rest.
+///
+/// `quote` is the literal's delimiter, and a backtick is passed through here
+/// exactly as upstream passes it — which means a backslash inside a *raw*
+/// string is decoded as an escape even though Go itself would not. That is
+/// upstream's behaviour in `walkStringLiteral` and this is a position mapper,
+/// so matching it is the point; a struct tag with a backslash in a raw string
+/// would otherwise get fix spans golangci-lint does not produce.
+fn unquote_char(s: &str, quote: u8) -> Option<(char, &str)> {
+    let bytes = s.as_bytes();
+    let first = *bytes.first()?;
+    if first != b'\\' {
+        let c = s.chars().next()?;
+        return Some((c, &s[c.len_utf8()..]));
+    }
+    let esc = *bytes.get(1)?;
+    let simple = |c: char, n: usize| Some((c, &s[n..]));
+    match esc {
+        b'a' => simple('\u{7}', 2),
+        b'b' => simple('\u{8}', 2),
+        b'f' => simple('\u{c}', 2),
+        b'n' => simple('\n', 2),
+        b'r' => simple('\r', 2),
+        b't' => simple('\t', 2),
+        b'v' => simple('\u{b}', 2),
+        b'\\' => simple('\\', 2),
+        // Go rejects `\'` in a double-quoted string and `\"` in a single-quoted
+        // one; both are accepted here because upstream *ignores* UnquoteChar's
+        // error and walks on with a zero rune, which would silently stop the
+        // mapping mid-literal instead of at the offset asked for.
+        b'\'' | b'"' => simple(esc as char, 2),
+        b'x' | b'u' | b'U' => {
+            let width = match esc {
+                b'x' => 2,
+                b'u' => 4,
+                _ => 8,
+            };
+            let digits = s.get(2..2 + width)?;
+            let v = u32::from_str_radix(digits, 16).ok()?;
+            let c = if esc == b'x' {
+                // \xNN is a *byte*, not a rune; only the ASCII range can be
+                // one char, and a tag outside it is not worth guessing at.
+                char::from_u32(v).filter(|c| c.is_ascii())?
+            } else {
+                char::from_u32(v)?
+            };
+            Some((c, &s[2 + width..]))
+        }
+        b'0'..=b'7' => {
+            let digits = s.get(1..4)?;
+            let v = u32::from_str_radix(digits, 8).ok()?;
+            Some((char::from_u32(v)?, &s[4..]))
+        }
+        _ => None,
+    }
+}
+
+/// Go's `strconv.Unquote` for the two literal forms a struct tag can take.
+///
+/// A raw string keeps every byte except carriage returns; an interpreted one is
+/// walked escape by escape, which is the same decoding the position mapper
+/// above does — the two have to agree or an offset means different things to
+/// each of them.
+fn unquote_literal(value: &str) -> Option<String> {
+    if value.len() < 2 {
+        return None;
+    }
+    let quote = value.as_bytes()[0];
+    let body = &value[1..value.len() - 1];
+    if quote == b'`' {
+        if !value.ends_with('`') {
+            return None;
+        }
+        return Some(body.replace('\r', ""));
+    }
+    if quote != b'"' || !value.ends_with('"') {
+        return None;
+    }
+    let mut out = String::new();
+    let mut rest = body;
+    while !rest.is_empty() {
+        let (c, next) = unquote_char(rest, b'"')?;
+        out.push(c);
+        rest = next;
+    }
+    Some(out)
+}
+
+/// Port of `internal/astutil.PosInStringLiteral`: map a byte offset in a string
+/// literal's cooked value back to a position in the source literal.
+///
+/// The two are not the same offset the moment the literal contains an escape —
+/// `\"` is two bytes of source and one of value — and a struct tag written as an
+/// interpreted string (`"json:\"a,omitempty\""`) is exactly that shape. Cutting
+/// the fix out of the cooked offsets would land it several bytes early.
+fn pos_in_string_literal(value: &str, lit_pos: u32, lit_end: u32, offset: usize) -> Option<u32> {
+    if value.len() < 2 {
+        return None;
+    }
+    let quote = value.as_bytes()[0];
+    // `norm`: the source span is longer than the literal's value, which happens
+    // when a raw string's \r\n was normalized to \n by the scanner.
+    let norm = (lit_end - lit_pos) as usize > value.len();
+    let mut raw = &value[1..value.len() - 1];
+    let mut i = 0usize;
+    let mut pos = lit_pos + 1;
+    while !raw.is_empty() {
+        let (r, rest) = unquote_char(raw, quote)?;
+        let sz = (raw.len() - rest.len()) as u32;
+        let mut next_pos = pos + sz;
+        if norm && r == '\n' {
+            next_pos += 1;
+        }
+        let next_i = i + r.len_utf8();
+        if next_pos > lit_end || next_i > offset {
+            break;
+        }
+        raw = rest;
+        i = next_i;
+        pos = next_pos;
+    }
+    Some(pos)
+}
+
+/// Go's `reflect.StructTag.Get`, which upstream uses to ask whether the json tag
+/// is *exactly* `,omitempty`.
+///
+/// Deliberately not `musttag`'s `lookup_struct_tag`, which reads a value as
+/// `trim_matches('"')`: that is an approximation good enough for a name lookup
+/// and wrong for an equality test, because it cannot tell `json:",omitempty"`
+/// from a value that merely contains quotes.
+fn struct_tag_get(tag: &str, key: &str) -> Option<String> {
+    let mut rest = tag;
+    loop {
+        rest = rest.trim_start_matches(' ');
+        if rest.is_empty() {
+            return None;
+        }
+        let name_end = rest.find(':')?;
+        let name = &rest[..name_end];
+        if name.is_empty() || name.contains(' ') || name.contains('\t') || name.contains('"') {
+            return None;
+        }
+        rest = &rest[name_end + 1..];
+        if !rest.starts_with('"') {
+            return None;
+        }
+        // Scan to the closing quote, skipping escaped ones.
+        let bytes = rest.as_bytes();
+        let mut i = 1;
+        while i < bytes.len() && bytes[i] != b'"' {
+            i += if bytes[i] == b'\\' { 2 } else { 1 };
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        let quoted = &rest[..i + 1];
+        rest = &rest[i + 1..];
+        if name == key {
+            // The value is a Go quoted string; unquote it the same way.
+            let mut out = String::new();
+            let mut body = &quoted[1..quoted.len() - 1];
+            while !body.is_empty() {
+                let (c, next) = unquote_char(body, b'"')?;
+                out.push(c);
+                body = next;
+            }
+            return Some(out);
         }
     }
-    None
 }
 
 /// Upstream's `usesKubebuilder`: does any comment in the *package* contain
@@ -1234,24 +1389,75 @@ fn check_omitzero(pass: &Pass<'_>, field: &Field, pending: &mut Vec<Diagnostic>)
     if !go_at_least(pass, pos, "go1.24") {
         return;
     }
-    if json_omitempty_span(&tag.value).is_none() {
-        return;
-    }
     let end = tag.end().0 as u32;
-    let new_tag = tag.value.replace(",omitempty", ",omitzero");
+
+    // `strconv.Unquote(tag.Value)` — upstream ignores the error, which leaves
+    // an empty string that the regex cannot match, so failing is the same as
+    // not matching.
+    let Some(tagconv) = unquote_literal(&tag.value) else {
+        return;
+    };
+    let Some(caps) = omitempty_regex().captures(&tagconv) else {
+        return;
+    };
+    let whole = caps.get(0).map(|m| m.range()).unwrap_or_default();
+    let Some(omitempty) = caps.get(1).map(|m| m.range()) else {
+        return;
+    };
+
+    let Some(oe_pos) = pos_in_string_literal(&tag.value, pos, end, omitempty.start) else {
+        return;
+    };
+    let Some(oe_end) = pos_in_string_literal(&tag.value, pos, end, omitempty.end) else {
+        return;
+    };
+
+    // Two alternatives on the same span, and that is the whole point: the
+    // deletion and the replacement overlap, so golangci-lint's fixer sees a
+    // conflict and drops *every* modernize edit in the file
+    // (`pkg/result/processors/fixer.go`, ported in guff-lint/src/fix.rs).
+    // Emitting only the `omitzero` half — which guff did — turned a finding
+    // upstream never acts on into a silent rewrite of a struct tag, and
+    // `omitempty` -> `omitzero` changes what the encoder puts on the wire.
+    let mut remove = (oe_pos, oe_end);
+    if struct_tag_get(&tagconv, "json").as_deref() == Some(",omitempty") {
+        if whole.len() == tagconv.len() {
+            // json is the only tag: take the literal, quotes and all.
+            remove = (pos, end);
+        } else {
+            match (
+                pos_in_string_literal(&tag.value, pos, end, whole.start),
+                pos_in_string_literal(&tag.value, pos, end, whole.end),
+            ) {
+                (Some(a), Some(b)) => remove = (a, b),
+                _ => return,
+            }
+        }
+    }
+
     pending.push(Diagnostic {
         pos,
         end,
         category: "omitzero".into(),
         message: "Omitempty has no effect on nested struct fields".into(),
-        suggested_fixes: vec![SuggestedFix {
-            message: "Replace omitempty with omitzero (behavior change)".into(),
-            text_edits: vec![TextEdit {
-                pos,
-                end,
-                new_text: new_tag,
-            }],
-        }],
+        suggested_fixes: vec![
+            SuggestedFix {
+                message: "Remove redundant omitempty tag".into(),
+                text_edits: vec![TextEdit {
+                    pos: remove.0,
+                    end: remove.1,
+                    new_text: String::new(),
+                }],
+            },
+            SuggestedFix {
+                message: "Replace omitempty with omitzero (behavior change)".into(),
+                text_edits: vec![TextEdit {
+                    pos: oe_pos,
+                    end: oe_end,
+                    new_text: ",omitzero".into(),
+                }],
+            },
+        ],
         related: Vec::new(),
         url: String::new(),
         severity: String::new(),

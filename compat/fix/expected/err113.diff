@@ -1,0 +1,42 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh err113
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/err113/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -29,11 +29,11 @@
+ // "do not compare errors directly …, use … instead" — both directions of the
+ // comparison, since the message renders the operator it saw.
+ func CompareEqual(err error) bool {
+-	return err == ErrSentinel
++	return errors.Is(err, ErrSentinel)
+ }
+ 
+ func CompareNotEqual(err error) bool {
+-	return err != ErrSentinel
++	return !errors.Is(err, ErrSentinel)
+ }
+ 
+ // The two halves of the message do NOT share a renderer: the quoted original is
+@@ -42,7 +42,7 @@
+ // …)` — it drops every argument. So this one comparison has to print the same
+ // call two different ways.
+ func CompareCall(err error, ctx string) bool {
+-	return err != wrap(ctx, ErrSentinel)
++	return !errors.Is(err, wrap())
+ }
+ 
+ // `rawString` handles only Ident, SelectorExpr and CallExpr; everything else
+@@ -52,5 +52,5 @@
+ // neither reproducible as a golden nor meaningful to match.
+ 
+ func CompareField(err error, b box) bool {
+-	return err != b.err
++	return !errors.Is(err, b.err)
+ }

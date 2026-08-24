@@ -1,0 +1,98 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh rangeint
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/rangeint/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/intrange_bad/bad.go
++++ b/intrange_bad/bad.go
+@@ -5,11 +5,11 @@
+ }
+ 
+ func bad() {
+-	for i := 0; i < 10; i++ {
++	for i := range 10 {
+ 		_ = i
+ 	}
+ 
+-	for i := 0; i < 10; i++ {
++	for range 10 {
+ 	}
+ 
+ 	for i := 0; i <= 9; i++ {
+@@ -20,7 +20,7 @@
+ 		_ = i
+ 	}
+ 
+-	for i := 0; i < 10; i += 1 {
++	for i := range 10 {
+ 		_ = i
+ 	}
+ 
+@@ -45,7 +45,7 @@
+ 	}
+ 
+ 	i := 0
+-	for i = 0; i < 10; i++ {
++	for i = range 10 {
+ 		_ = i
+ 	}
+ }
+--- a/modernize/rangeint.go
++++ b/modernize/rangeint.go
+@@ -3,21 +3,21 @@
+ // Cases mirroring golang.org/x/tools/.../modernize rangeint limit invariance.
+ 
+ func rangeOverParam(n int) {
+-	for i := 0; i < n; i++ { // want
++	for i := range n { // want
+ 		_ = i
+ 	}
+ }
+ 
+ func rangeOverConst() {
+ 	const c = 10
+-	for i := 0; i < c; i++ { // want
++	for i := range c { // want
+ 		_ = i
+ 	}
+ }
+ 
+ func rangeOverLocal() {
+ 	limit := 10
+-	for i := 0; i < limit; i++ { // want
++	for i := range limit { // want
+ 		_ = i
+ 	}
+ }
+@@ -56,7 +56,7 @@
+ }
+ 
+ func rangeOverLen(slice []int) {
+-	for i := 0; i < len(slice); i++ { // want
++	for i := range slice { // want
+ 		_ = slice[i]
+ 	}
+ }
+@@ -82,7 +82,7 @@
+ 
+ func assignIndexNotReadAfterLoop(n int) {
+ 	var i int
+-	for i = 0; i < n; i++ { // want
++	for i = range n { // want
+ 		_ = i
+ 	}
+ }
+@@ -90,7 +90,7 @@
+ // A read *inside* the loop is not a read after it.
+ func assignIndexReadInsideLoop(n int) int {
+ 	var i, found int
+-	for i = 0; i < n; i++ { // want
++	for i = range n { // want
+ 		if found > 0 {
+ 			return i
+ 		}

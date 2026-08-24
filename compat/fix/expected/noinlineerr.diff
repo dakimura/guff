@@ -1,0 +1,22 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh noinlineerr
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/noinlineerr/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,7 +3,8 @@
+ func do() error { return nil }
+ 
+ func Bad() {
+-	if err := do(); err != nil {
++	err := do()
++	if err != nil {
+ 		panic(err)
+ 	}
+ }

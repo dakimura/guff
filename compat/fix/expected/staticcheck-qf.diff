@@ -1,0 +1,405 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-qf
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-qf/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/qf1002/bad/bad.go
++++ b/qf1002/bad/bad.go
+@@ -4,18 +4,18 @@
+ 	var x, y int
+ 	var a bool
+ 
+-	switch {
+-	case x == 4:
+-	case x == 1 || x == 2, x == 3:
++	switch x {
++	case 4:
++	case 1, 2, 3:
+ 	}
+ 
+-	switch {
+-	case x == 1 || x == 2, x == 3:
+-	case x == 4:
++	switch x {
++	case 1, 2, 3:
++	case 4:
+ 	default:
+ 	}
+ 
+-	switch {
+-	case a == (x == y) || a == (x != y):
++	switch a {
++	case x == y, x != y:
+ 	}
+ }
+--- a/qf1003/bad/bad.go
++++ b/qf1003/bad/bad.go
+@@ -4,22 +4,26 @@
+ 	var x, y int
+ 	var a bool
+ 
+-	if x == 1 || x == 2 {
+-	} else if x == 3 {
++	switch x {
++	case 1, 2:
++	case 3:
+ 	}
+ 
+-	if x == 1 || x == 2 {
+-	} else if x == 3 {
+-	} else {
++	switch x {
++	case 1, 2:
++	case 3:
++	default:
+ 	}
+ 
+-	if a == (x == y) {
+-	} else if a == (x != y) {
++	switch a {
++	case x == y:
++	case x != y:
+ 	}
+ 
+ 	for {
+-		if x == 1 || x == 2 {
+-		} else if x == 3 {
++		switch x {
++		case 1, 2:
++		case 3:
+ 		}
+ 	}
+ }
+--- a/qf1004/bad/bad.go
++++ b/qf1004/bad/bad.go
+@@ -6,11 +6,11 @@
+ )
+ 
+ func fn() {
+-	strings.Replace("", "", "", -1)
++	strings.ReplaceAll("", "", "")
+ 	strings.Replace("", "", "", 0)
+-	strings.SplitN("", "", -1)
+-	strings.SplitAfterN("", "", -1)
+-	bytes.Replace(nil, nil, nil, -1)
+-	bytes.SplitN(nil, nil, -1)
+-	bytes.SplitAfterN(nil, nil, -1)
++	strings.Split("", "")
++	strings.SplitAfter("", "")
++	bytes.ReplaceAll(nil, nil, nil)
++	bytes.Split(nil, nil)
++	bytes.SplitAfter(nil, nil)
+ }
+--- a/qf1004/renamed/renamed.go
++++ b/qf1004/renamed/renamed.go
+@@ -6,6 +6,6 @@
+ )
+ 
+ func renamed() {
+-	s.Replace("", "", "", -1)
+-	b.Replace(nil, nil, nil, -1)
++	strings.ReplaceAll("", "", "")
++	bytes.ReplaceAll(nil, nil, nil)
+ }
+--- a/qf1005/bad/bad.go
++++ b/qf1005/bad/bad.go
+@@ -4,12 +4,12 @@
+ 
+ func fn() {
+ 	var x float64
+-	_ = math.Pow(x, 0)
+-	_ = math.Pow(x, 1)
+-	_ = math.Pow(x, 2)
+-	_ = math.Pow(x, 3)
+-	_ = math.Pow(2, 2)
+-	_ = math.Pow(2, 3)
++	_ = 1.0
++	_ = x
++	_ = x * x
++	_ = x * x * x
++	_ = float64(2 * 2)
++	_ = float64(2 * 2 * 2)
+ 	_ = math.Pow(x, 6)
+ 	_ = math.Pow(x, x)
+ 	_ = math.Pow(x, -1)
+--- a/qf1006/bad/bad.go
++++ b/qf1006/bad/bad.go
+@@ -6,34 +6,24 @@
+ var x bool
+ 
+ func fn() {
+-	for {
+-		if done() {
+-			break
+-		}
++	for !done() {
++
+ 	}
+ 
+-	for {
+-		if !done() {
+-			break
+-		}
++	for done() {
++
+ 	}
+ 
+-	for {
+-		if a > b || b > a {
+-			break
+-		}
++	for a <= b && b <= a {
++
+ 	}
+ 
+-	for {
+-		if x && (a == b) {
+-			break
+-		}
++	for !x || !(a == b) {
++
+ 	}
+ 
+-	for {
+-		if done() {
+-			break
+-		}
++	for !done() {
++
+ 		println()
+ 	}
+ }
+--- a/qf1007/bad/bad.go
++++ b/qf1007/bad/bad.go
+@@ -6,15 +6,9 @@
+ var baz bool
+ 
+ func fn() {
+-	x := false
+-	if foo() || (bar && !baz) {
+-		x = true
+-	}
++	x := foo() || (bar && !baz)
+ 
+-	b := true
+-	if foo() {
+-		b = false
+-	}
++	b := !foo()
+ 
+ 	y := false
+ 	if true {
+--- a/qf1008/bad/bad.go
++++ b/qf1008/bad/bad.go
+@@ -5,5 +5,5 @@
+ 
+ func fn() {
+ 	var basic BasicOuter
+-	_ = basic.BasicInner.F1
++	_ = basic.F1
+ }
+--- a/qf1008/call/call.go
++++ b/qf1008/call/call.go
+@@ -9,7 +9,7 @@
+ 
+ func fnCall() {
+ 	var call FunctionCallOuter
+-	_ = call.FunctionCallInner.F8().FunctionCallContinuedInner.F9
++	_ = call.F8().F9
+ 	_ = call.F8().F9
+ }
+ 
+@@ -20,5 +20,5 @@
+ 
+ func fnMethodCall() {
+ 	var o MethodOuter
+-	_ = o.MethodInner.M()
++	_ = o.M()
+ }
+--- a/qf1008/nested/nested.go
++++ b/qf1008/nested/nested.go
+@@ -28,7 +28,7 @@
+ 	var o NestedOuter
+ 	// The argument's `o.NestedInner.F1` is enclosed by the outer selector and so
+ 	// not flagged; the outer `sink(…).NestedInner.F1` segment is.
+-	_ = sink(o.NestedInner.F1).NestedInner.F1
++	_ = sink(o.NestedInner.F1).F1
+ }
+ 
+ type sinkResult = NestedOuter
+@@ -40,7 +40,7 @@
+ 	h := harness{
+ 		afterStart: func() {
+ 			// No enclosing selector — flagged.
+-			_ = o.NestedInner.F1
++			_ = o.F1
+ 		},
+ 	}
+ 	_ = h
+--- a/qf1009/bad/bad.go
++++ b/qf1009/bad/bad.go
+@@ -7,8 +7,8 @@
+ 
+ func fn() {
+ 	var t1, t2 time.Time
+-	if t1 == t2 {
++	if t1.Equal(t2) {
+ 	}
+-	if foo() == bar() {
++	if foo().Equal(bar()) {
+ 	}
+ }
+--- a/qf1010/bad/bad.go
++++ b/qf1010/bad/bad.go
+@@ -8,8 +8,8 @@
+ 	var b2 ByteSlice
+ 	var s string
+ 
+-	fmt.Print(1, b1, 2, []byte(""), b2, s)
+-	fmt.Fprint(nil, 1, b1, 2, []byte(""), b2, s)
++	fmt.Print(1, string(b1), 2, string([]byte("")), string(b2), s)
++	fmt.Fprint(nil, 1, string(b1), 2, string([]byte("")), string(b2), s)
+ 	fmt.Print()
+ 	fmt.Fprint(nil)
+ 	fmt.Println(s)
+--- a/qf1011/bad/bad.go
++++ b/qf1011/bad/bad.go
+@@ -10,14 +10,14 @@
+ var global int = gen1() // package-level: not flagged
+ 
+ func fn() {
+-	var _ int = gen1()
+-	var a int = Y
+-	var b int = 1
++	var _ = gen1()
++	var a = Y
++	var b = 1
+ 	var c int = 1.0
+ 	var d MyInt = 1
+-	var h bool = true
+-	var i string = ""
+-	var j MyInt = gen3()
+-	var m int = (Y + Y) / 2
++	var h = true
++	var i = ""
++	var j = gen3()
++	var m = (Y + Y) / 2
+ 	_, _, _, _, _, _, _, _ = a, b, c, d, h, i, j, m
+ }
+--- a/qf1011/isolated/isolated.go
++++ b/qf1011/isolated/isolated.go
+@@ -24,43 +24,43 @@
+ // literals and predeclared identifiers, and only while the right-hand side is
+ // untyped. A typed right-hand side is flagged whatever its shape.
+ func shapes(x, y int, ch chan int, b1, b2 bool) {
+-	var c01 int = 1
++	var c01 = 1
+ 	var c02 int64 = 1
+-	var c03 rune = 'a'
++	var c03 = 'a'
+ 	var c04 int32 = 'a'
+ 	var c05 byte = 'a'
+-	var c06 string = "s"
+-	var c07 float64 = 1.5
+-	var c08 int = untypedInt
++	var c06 = "s"
++	var c07 = 1.5
++	var c08 = untypedInt
+ 	var c09 int64 = untypedInt
+-	var c10 int32 = typedInt32
+-	var c11 bool = true
+-	var c12 int = math.MaxInt8
+-	var c13 time.Duration = time.Second
+-	var c14 int = x
+-	var c15 int = (1)
+-	var c16 int = -1
+-	var c17 int = 1 + 1
++	var c10 = typedInt32
++	var c11 = true
++	var c12 = math.MaxInt8
++	var c13 = time.Second
++	var c14 = x
++	var c15 = (1)
++	var c16 = -1
++	var c17 = 1 + 1
+ 	var c18 int64 = 1 + 1
+-	var c19 rune = 'a' + 1
++	var c19 = 'a' + 1
+ 	var c20 int32 = 'a' + 1
+-	var c21 int = x + y
+-	var c22 int64 = int64(untypedInt) * 10
+-	var c23 time.Duration = 5 * time.Second
+-	var c24 int32 = typedInt32 * 2
+-	var c25 bool = x == y
+-	var c26 bool = b1 && b2
+-	var c27 int = <-ch
+-	var c28 int = len("abc")
+-	var c29 int64 = int64(x)
++	var c21 = x + y
++	var c22 = int64(untypedInt) * 10
++	var c23 = 5 * time.Second
++	var c24 = typedInt32 * 2
++	var c25 = x == y
++	var c26 = b1 && b2
++	var c27 = <-ch
++	var c28 = len("abc")
++	var c29 = int64(x)
+ 	var c30 float64 = 1
+ 	var c31 int32 = untypedRune
+-	var c32 rune = untypedRune
+-	var c33 int = 1 << 3
++	var c32 = untypedRune
++	var c33 = 1 << 3
+ 	var c34 uint = 1 << uint(x)
+-	var _ int = 1
++	var _ = 1
+ 	var c35 *int = nil
+-	var c36 int = int(untypedInt)
++	var c36 = int(untypedInt)
+ 	_, _, _, _, _, _, _, _, _, _ = c01, c02, c03, c04, c05, c06, c07, c08, c09, c10
+ 	_, _, _, _, _, _, _, _, _, _ = c11, c12, c13, c14, c15, c16, c17, c18, c19, c20
+ 	_, _, _, _, _, _, _, _, _, _ = c21, c22, c23, c24, c25, c26, c27, c28, c29, c30
+--- a/qf1011/ok/ok.go
++++ b/qf1011/ok/ok.go
+@@ -4,8 +4,7 @@
+ 
+ func fn() {
+ 	var a = gen1()
+-	var b int
+-	b = gen1()
++	var b int = gen1()
+ 	// Explicit int64 is required: bare `-1` defaults to int, not int64.
+ 	var originalQuota int64 = -1
+ 	var alsoNeeded int64 = +1
+--- a/qf1012/bad/bad.go
++++ b/qf1012/bad/bad.go
+@@ -14,18 +14,18 @@
+ 	var w Writer
+ 	var w2 NotAWriter
+ 
+-	w.Write([]byte(fmt.Sprint("abc", "de")))
+-	w.Write([]byte(fmt.Sprintf("%T", w)))
+-	w.Write([]byte(fmt.Sprintln("abc", "de")))
++	fmt.Fprint(w, "abc", "de")
++	fmt.Fprintf(w, "%T", w)
++	fmt.Fprintln(w, "abc", "de")
+ 
+ 	w2.Write([]byte(fmt.Sprint("abc", "de")))
+ }
+ 
+ func fn2() {
+ 	var buf Buffer
+-	buf.WriteString(fmt.Sprint("abc", "de"))
+-	buf.WriteString(fmt.Sprintf("%T", 0))
+-	buf.WriteString(fmt.Sprintln("abc", "de"))
++	fmt.Fprint(&buf, "abc", "de")
++	fmt.Fprintf(&buf, "%T", 0)
++	fmt.Fprintln(&buf, "abc", "de")
+ }
+ 
+ type Buffer struct{}

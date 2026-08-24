@@ -50,6 +50,10 @@ cargo build --release -p guff-lint
 ./compat/golden/run.sh
 ./compat/golden/regen.sh gocritic
 
+# What the two tools *write*: --fix over the same cases, diffed byte for byte
+./compat/fix/run.sh
+./compat/fix/regen.sh godot
+
 # Configs golangci-lint refuses to start on — both tools must refuse, alike
 ./compat/reject/run.sh
 ./compat/reject/run.sh --regen
@@ -107,6 +111,8 @@ cargo build --release -p guff-lint
 | `all_linters.py` / `allowlists-all/` | `--all-linters` config rewrite + its own (empty) allowlist |
 | `isolate/` | Per-linter isolate fixtures + configs ([README](isolate/README.md)) |
 | `golden/` | Check-level goldens, exact match, no allowlist ([README](golden/README.md)) |
+| `fix/` | `--fix` output, diffed byte for byte — the tier a finding key cannot express ([README](fix/README.md)) |
+| `golden/materialize.sh` | What a case *is* (go.mod + sources.txt + env), shared by the golden and fix tiers |
 | `reject/` | Configs upstream refuses to start on — the tier a finding-set diff cannot express ([README](reject/README.md)) |
 | `oracles/` | Go-stdlib ground truth for the `gostd` ports ([README](oracles/README.md)) |
 | `health.py` | Panic / ill-typed gate — failures that never reach the set-diff |

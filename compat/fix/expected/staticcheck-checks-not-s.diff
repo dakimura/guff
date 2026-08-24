@@ -1,0 +1,43 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-checks-not-s
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-checks-not-s/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/checks/checks.go
++++ b/checks/checks.go
+@@ -19,12 +19,12 @@
+ // SACategory calls a printf-style function with a dynamic format string and no
+ // arguments: SA1006.
+ func SACategory(s string) {
+-	fmt.Printf(s)
++	fmt.Print(s)
+ }
+ 
+ // STCategory writes the comparison the wrong way round: ST1017.
+ func STCategory(x int) bool {
+-	if 1 == x {
++	if x == 1 {
+ 		return true
+ 	}
+ 	return false
+@@ -32,11 +32,12 @@
+ 
+ // QFCategory can have its `if/else if` chain rewritten: QF1003.
+ func QFCategory(x int) string {
+-	if x == 1 {
++	switch x {
++	case 1:
+ 		return "one"
+-	} else if x == 2 {
++	case 2:
+ 		return "two"
+-	} else if x == 3 {
++	case 3:
+ 		return "three"
+ 	}
+ 	return fmt.Sprint(x)

@@ -1,3 +1,7 @@
 # The fixtures the Rust tests use, so the two cannot drift.
 omitzerokubebuilder/omitzero_kubebuilder.go   crates/guff-style/tests/testdata/modernize/omitzero_kubebuilder.go
 omitzeroplain/omitzero_plain.go               crates/guff-style/tests/testdata/modernize/omitzero_plain.go
+# The tag spellings that decide where the two fixes are cut from. The golden
+# key cannot see a fix, but compat/fix/ can: upstream's two alternatives overlap,
+# so the recorded answer for this case is that --fix writes nothing at all.
+omitzeroshapes/omitzero_shapes.go             crates/guff-style/tests/testdata/modernize/omitzero_shapes.go

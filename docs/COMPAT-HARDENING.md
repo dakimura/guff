@@ -30,7 +30,8 @@
 
 - **column** — 一切比較していない
 - **severity** — 比較していない
-- **`--fix` の置換内容（SuggestedFix / Replacement）** — 比較していない
+- **`--fix` の置換内容（SuggestedFix / Replacement）** — `compat/normalize.py` も golden も見ない。
+  **書き込まれたバイトを比べる `compat/fix/` を 2026-08-24（続き 38）に追加**（193 case、143 一致 / 49 pending）
 - **staticcheck のチェックコード** — `_STATICCHECK_CODE` が両側から `SA1234: ` を剥がすため、
   guff が `S1003`、golangci が `S1004` と言っていても同じキーになる
 
@@ -89,7 +90,9 @@ ST1023/QF1011 の言い回し、末尾ピリオド、govet の Go バージョ�
   実例: errorlint の `exprToString` は suggested fix の本文にしか使われないので、
   移植の穴（`TypeAssertExpr` 腕の欠落、既定腕の文言違い）を golden で発見できず、
   **上流の腕を直接 pin する unit test** で塞ぎました（続き 35）。
-  `--fix` の出力を差分する tier を足せば、この穴は埋まります。
+  この穴は **`compat/fix/`（続き 38）が埋めました** —— 同じ 193 case に `--fix` を掛け、
+  **書き込まれた木の unified diff をバイトで**比べます。初回の測定で 50 件が不一致、
+  うち 2 件は「上流より多く書き換える」向きでした（1 件は上流が 0 行）。
 
   そして **golden に入っていない check は、列がずれても CI は緑です。**
   linter 単位では 2026-08-24（続き 30）に **116/116 が golden case を持つ**状態になり、
@@ -11013,3 +11016,149 @@ probe を書いたとき、これで一度「golangci が何も直さない」�
 guff は報告を残す。revive の `importer.Default()` 盲目に対して
 `ratchet.json` が書いている判断と同じ:
 **真陽性を落とす上流の欠陥まで真似る価値は無い。**
+
+---
+
+### 2026-08-24（続き 38）— `--fix` を比べる tier。193 case 中 50 件が不一致、そのうち **7 件はコンパイルが通らない木**を書く
+
+続き 37 の「`--fix` を比べる tier を作るなら」を実際に作った。
+`compat/fix/`。corpus は **golden と同じ 193 case** で、
+問う質問だけが違う —— golden は**言うこと**、fix は**書くこと**。
+
+#### 何を鍵にするか
+
+木を 2 つ materialize して片方ずつに `--fix` を掛け、
+pristine との **unified diff をバイトで**比べる。
+`diff -u` と 1 バイトも違わない出力を出すことを unit test で pin してある
+（`compat/tests/test_fixdiff.py`、14 本）——
+記録は人間が diff としてレビューするので、**diff でなければならない**。
+
+**ファイルが無い＝上流は何も書き換えない、guff も書き換えてはならない。**
+空ファイルで「変更なし」を表すと
+「まだ誰も regen していない case」と区別が付かなくなる。
+`compat/health.py` の baseline が 0 の行を書かないのと同じ判断
+（行が残っていると 1 件の劣化を許し続ける、という続き 12 の話の裏返し）。
+
+#### 初回測定
+
+| | |
+|---|---|
+| 一致 | **143 / 193** |
+| 不一致 | **50** |
+| うち guff が何も書かない | 34（`DEFERRED: SuggestedFix` が 15 linter 分ある） |
+| うち途中まで書く（0 < guff < 上流） | 12 |
+| うち**件数は同じで中身が違う** | 2 |
+| うち**上流より多く書き換える** | **2**（片方は上流が 0 行） |
+
+#### 直したのは「上流より多く書き換える」ほう
+
+`modernize` の `omitzero`。上流は**同じ span に 2 つの代替 fix**を出す:
+
+| | span | 内容 |
+|---|---|---|
+| Remove redundant omitempty tag | `,omitempty` | 削除 |
+| Replace omitempty with omitzero (behavior change) | `,omitempty` | `,omitzero` |
+
+**この 2 つは重なる**。だから続き 37 で移植した衝突規則
+（`pkg/result/processors/fixer.go`）が発火して、
+**そのファイルの modernize の edit は全部捨てられる** —— 上流は 0 行書き換える。
+
+guff は **`omitzero` 側の 1 つしか作っていなかった**。
+衝突する相手が居ないので、そのまま適用される。
+`omitempty` → `omitzero` は **encoder が線に載せるものが変わる**変更で、
+それを黙って書き込んでいた。
+
+測り直すと `modernize-omitzero` は **13 行 → 0 行**で一致、
+`modernize` は **496 → 428 行**（上流 440）——
+**書き過ぎは消えたが、こんどは足りない**。残りは下の `AddImport` の話。
+tier としての着地は **144 一致 / 49 pending**
+（何も書かないのが 34、途中まで書くのが 15）。
+
+移植で 3 つ直った:
+
+1. **fix が 2 つになった**（重なる ⇒ 捨てられる ⇒ 上流と一致）
+2. **span がタグリテラル全体ではなく `,omitempty` の run になった**。
+   上流は `astutil.RangeInStringLiteral` で
+   **cooked offset を raw offset に写して**いる ——
+   `"json:\"value,omitempty\""` は `\"` が
+   **ソース 2 バイト・値 1 バイト**なので、写さないと 2 バイト早い位置を切る。
+   `PosInStringLiteral` / `walkStringLiteral` をそのまま移植した
+   （raw string 内のバックスラッシュを escape として解釈する上流の癖ごと。
+   これは位置写像なので、癖まで合わせないと golangci が出さない span が出る）。
+3. **削除側の span は json タグの中身次第で広がる**。
+   `json:",omitempty"` のように json が option しか持たないなら、
+   他にタグが無ければ**リテラルごと**（バッククォート込み）、
+   あれば **json タグの部分**（正規表現末尾の `\s?` が続く空白も連れて行く）。
+
+`musttag` の `lookup_struct_tag` は**使わなかった**。
+値を `trim_matches('"')` で読む近似で、名前引きには十分でも
+**等値判定には足りない**（続き 34 と同じ判断: 寄せると近似が正しい移植を上書きする）。
+
+fixture は 3 つの綴りを足した（`omitzero_shapes.go`）:
+escape 付きリテラル / json だけ / json＋他キー。
+**golden case にも同じファイルを載せた** ——
+golden はキーに fix を持たないので 3 件の finding が増えるだけだが、
+fix tier 側では「上流は 3 件とも何も書かない」が pin される。
+unit test は**上流の span をそのままの数字で** assert している
+（`(13, 10)` / `(0, 19)` / `(1, 18)`）。
+
+#### 「pending」は allowlist ではない
+
+残り 49 件は `compat/fix/pending/<case>.diff` に
+**今日 guff が書くバイトを記録**して保持する。
+毎回こう出る:
+
+```
+importas: pending — upstream writes 19 diff line(s), guff writes 13
+```
+
+隠していない —— **上流との差は毎回全文が出る**。
+そして **どちらに動いても落ちる**: guff が直っても落ちる
+（ledger が defect より長生きしないように）。
+初日から 50 件で赤いゲートは 1 週間で切られるし、
+無視するゲートは何も測らない。その間を取った。
+
+#### `go build` を足したら、**上流の `--fix` が壊す木**が 3 つ出た
+
+「import を足し忘れた fix」は finding の集合では表現できないし、
+diff を読んでも**足りない行に気付いた読者にしか**見えない。
+だから直した木で `go build ./...` を回して数える
+（pristine が通る木だけ —— わざと通らない fixture がある。
+「未使用変数が finding」の case で、壊すものが元から無い）。
+
+7 件が通らない。**うち 3 件は golangci-lint の出力とバイト一致**:
+
+| case | 通らない理由 | |
+|---|---|---|
+| `dotimport` | dot-import の使用箇所を書き換えて `errors` を足さない | 上流と一致 |
+| `perfsprint` | `strconv.Itoa` に書き換えて `strconv` を足さない（上流の `fiximports` は既定 off） | 上流と一致 |
+| `err113` | 書き換え後の呼び出しが引数不足 | 上流と一致 |
+| `importas` / `modernize` / `rangeint` / `staticcheck-qf` | guff 側の穴 | |
+
+**上流の `--fix` はコンパイルを壊す**。
+だからこれはゲートにしない —— ゲートにすると
+「guff は上流と**非互換**であれ」と要求することになる。
+数えて出すだけにした。
+
+#### 副産物: 「case とは何か」が 1 箇所になった
+
+`materialize`（go.mod + sources.txt + optional env）を
+`compat/golden/materialize.sh` に出して golden と fix の両方が source する。
+2 つの tier が同じ 193 case に別の質問をするので、
+**「case とは何か」の答えは 1 つでなければならない** ——
+golden が 3 ファイルで読む case を fix が 2 ファイルで lint する、が起きる。
+
+#### 次にやること
+
+1. **`AddImport`**（`modernize.rs:2831` の DEFERRED）。
+   `modernize` / `rangeint` / `staticcheck-qf` の
+   「コンパイルが通らない」3 件はこれが本体。
+   `perfsprint` の `fiximports` も同じ機構を要る。
+2. **pending 49 件を減らす**。`DEFERRED: SuggestedFix` が 15 linter。
+   値段は `compat/fix/pending/` に全部書いてある
+   （`staticcheck-s` 271 行、`testifylint-mock` 97 行、`govet` 88 行…）。
+3. **不一致 14 件の「途中まで書く」ほう**を読む。
+   件数が同じで中身が違う 2 件（`rangeint` 88 対 88、
+   `modernize-atomictypes` 41 対 41）は、
+   **数だけ見ると一致に見える**ので先に見る価値がある。
+4. `compat/results/` の tier 別分割（続き 28/29/30/33/35）。

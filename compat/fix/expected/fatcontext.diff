@@ -1,0 +1,30 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh fatcontext
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/fatcontext/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -8,7 +8,7 @@
+ // categoryInLoop
+ func InLoop(ctx context.Context, xs []string) {
+ 	for _, x := range xs {
+-		ctx = context.WithValue(ctx, "k", x)
++		ctx := context.WithValue(ctx, "k", x)
+ 		_ = ctx
+ 	}
+ }
+@@ -16,7 +16,7 @@
+ // categoryInFuncLit
+ func InFuncLit(ctx context.Context) func() {
+ 	return func() {
+-		ctx = context.WithValue(ctx, "k", "v")
++		ctx := context.WithValue(ctx, "k", "v")
+ 		_ = ctx
+ 	}
+ }

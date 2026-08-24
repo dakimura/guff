@@ -1,0 +1,24 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh usetesting
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/usetesting/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad_test.go
++++ b/bad_test.go
+@@ -40,9 +40,9 @@
+ // has to happen, just with a directory. Every other arm reads
+ // `pkg.Name() could be replaced by t.Name()`, and this fixture had only those.
+ func TestCreateTemp(t *testing.T) {
+-	_, _ = os.CreateTemp("", "x")
++	_, _ = os.CreateTemp(t.TempDir(), "x")
+ }
+ 
+ func BenchmarkCreateTemp(b *testing.B) {
+-	_, _ = os.CreateTemp("", "x")
++	_, _ = os.CreateTemp(b.TempDir(), "x")
+ }

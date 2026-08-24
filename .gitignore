@@ -30,6 +30,7 @@
 
 # Golden cases are materialized from their canonical sources on every run.
 /compat/golden/.work/
+/compat/fix/.work/
 
 # golangci-lint binaries compat/drift.py downloads to compare versions.
 /compat/.tools/

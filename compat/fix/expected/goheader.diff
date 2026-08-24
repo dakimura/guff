@@ -1,0 +1,120 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh goheader
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/goheader/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,3 +1,6 @@
++// Copyright 2020 Example Corp
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
++
+ package goheader
+ 
+ func Bad() {}
+--- a/block_mismatch.go
++++ b/block_mismatch.go
+@@ -1,6 +1,6 @@
+ /*
+ Copyright 2020 Example Corp
+-SPDX-Licence-Identifier: Apache-2.0
++SPDX-License-Identifier: (Apache-2\.0|MIT)
+ */
+ 
+ package goheader
+--- a/empty_block.go
++++ b/empty_block.go
+@@ -1,4 +1,5 @@
+-/* */
++Copyright 2020 Example Corp
++SPDX-License-Identifier: (Apache-2\.0|MIT)/* */
+ 
+ package goheader
+ 
+--- a/line2_mismatch.go
++++ b/line2_mismatch.go
+@@ -1,5 +1,5 @@
+ // Copyright 2020 Example Corp
+-// SPDX-Licence-Identifier: Apache-2.0
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/mismatch.go
++++ b/mismatch.go
+@@ -1,5 +1,5 @@
+-// Copyright 2019 Wrong Corp
+-// SPDX-License-Identifier: MIT
++// Copyright 2020 Example Corp
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/offset_header.go
++++ b/offset_header.go
+@@ -1,7 +1,5 @@
+-
+-
+-// Copyright 2020 Wrong Corp
+-// SPDX-License-Identifier: Apache-2.0
++// Copyright 2020 Example Corp
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/regexp_bad.go
++++ b/regexp_bad.go
+@@ -1,5 +1,5 @@
+ // Copyright 2020 Example Corp
+-// SPDX-License-Identifier: GPL-3.0
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/star_block.go
++++ b/star_block.go
+@@ -1,7 +1,7 @@
+ /*
+- * Copyright 2020 Example Corp
+- * SPDX-License-Identifier: Apache-2.0
+- */
++ Copyright 2020 Example Corp
++ SPDX-License-Identifier: (Apache-2\.0|MIT)
++*/
+ 
+ package goheader
+ 
+--- a/text_mismatch.go
++++ b/text_mismatch.go
+@@ -1,5 +1,5 @@
+-// Copyright 2020 Wrong Corp
+-// SPDX-License-Identifier: Apache-2.0
++// Copyright 2020 Example Corp
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/too_long.go
++++ b/too_long.go
+@@ -1,6 +1,5 @@
+ // Copyright 2020 Example Corp
+-// SPDX-License-Identifier: Apache-2.0
+-// Extra trailing line.
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 
+--- a/too_short.go
++++ b/too_short.go
+@@ -1,4 +1,5 @@
+-// Copyright 2020 Example
++// Copyright 2020 Example Corp
++// SPDX-License-Identifier: (Apache-2\.0|MIT)
+ 
+ package goheader
+ 

@@ -1,0 +1,56 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh golines
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/golines/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -4,7 +4,12 @@
+ 
+ // Over the 60-column budget in three different ways: a long signature, a long
+ // call chain, and a long struct tag line.
+-func LongSignature(alpha string, beta string, gamma string, delta string) string {
++func LongSignature(
++	alpha string,
++	beta string,
++	gamma string,
++	delta string,
++) string {
+ 	return alpha + beta + gamma + delta
+ }
+ 
+@@ -13,7 +18,13 @@
+ }
+ 
+ func Chained(values []string) string {
+-	return fmt.Sprintf("%s-%s-%s-%s", values[0], values[1], values[2], values[3])
++	return fmt.Sprintf(
++		"%s-%s-%s-%s",
++		values[0],
++		values[1],
++		values[2],
++		values[3],
++	)
+ }
+ 
+ // A second over-long line does **not** add a finding: golines is a formatter,
+@@ -22,5 +33,13 @@
+ // covers a long call chain as well as a long signature — same finding, more
+ // reformatting behind it.
+ func LongCall(alpha string, beta string) string {
+-	return fmt.Sprintf("%s-%s-%s-%s-%s-%s", alpha, beta, alpha, beta, alpha, beta)
++	return fmt.Sprintf(
++		"%s-%s-%s-%s-%s-%s",
++		alpha,
++		beta,
++		alpha,
++		beta,
++		alpha,
++		beta,
++	)
+ }

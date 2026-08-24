@@ -1,0 +1,69 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh godot
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/godot/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -1,23 +1,23 @@
+ package example
+ 
+-// Sum adds two integers
++// Sum adds two integers.
+ func Sum(a, b int) int {
+ 	return a + b
+ }
+ 
+-// Bad lacks a period at the end
++// Bad lacks a period at the end.
+ func Bad() {}
+ 
+ // godot's `declarations` scope is getBlockComments() ++ getDeclarationComments().
+ // guff had only the second half, so nothing below this line was ever checked.
+ 
+ const (
+-	// One tab in, so column 2 — checked
++	// One tab in, so column 2 — checked.
+ 	A = 1
+ )
+ 
+ var (
+-	// Free-floating in the block, owned by no spec — still checked
++	// Free-floating in the block, owned by no spec — still checked.
+ 	D = 4
+ 
+ 	E = struct {
+@@ -29,7 +29,7 @@
+ 	}
+ )
+ 
+-// A single-line const has no Lparen, so no block to be inside of
++// A single-line const has no Lparen, so no block to be inside of.
+ const C = 3
+ 
+ func hasBody() {
+@@ -38,16 +38,16 @@
+ }
+ 
+ // Multi does a thing
+-// across two comment lines
++// across two comment lines.
+ func Multi() {}
+ 
+ // Blank does a thing
+ //
+ // Deprecated: the blank line above is a line, and the last non-empty one is
+-// this one
++// this one.
+ func Blank() {}
+ 
+ // Trailing does a thing
+ //
+-// and then a blank comment line follows
++// and then a blank comment line follows.
+ func Trailing() {}

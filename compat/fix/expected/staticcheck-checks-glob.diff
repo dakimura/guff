@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh staticcheck-checks-glob
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/staticcheck-checks-glob/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/checks/checks.go
++++ b/checks/checks.go
+@@ -10,7 +10,7 @@
+ 
+ // SCategory has an `== true` comparison: S1002.
+ func SCategory(b bool) bool {
+-	if b == true {
++	if b {
+ 		return true
+ 	}
+ 	return false

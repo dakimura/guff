@@ -1,0 +1,39 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh ginkgolinter
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/ginkgolinter/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad_test.go
++++ b/bad_test.go
+@@ -9,11 +9,11 @@
+ 	It("bad", func() {
+ 		s := []int{1}
+ 		var x *int
+-		Expect(len(s)).Should(Equal(1))
+-		Expect(len(s)).Should(BeZero())
+-		Expect(s).Should(HaveLen(0))
+-		Expect(x).Should(Equal(nil))
+-		Expect(true).Should(Equal(true))
++		Expect(s).Should(HaveLen(1))
++		Expect(s).Should(BeEmpty())
++		Expect(s).Should(BeEmpty())
++		Expect(x).Should(BeNil())
++		Expect(true).Should(BeTrue())
+ 		Expect(s)
+ 
+ 		// The subject is rendered into the message with `GoFmtFormatter`
+@@ -23,7 +23,7 @@
+ 		// an approximation puts blanks around every operator.
+ 		t := []int{1, 2, 3}
+ 		u := []int{4}
+-		Expect(len(t[len(u)/2+1:])).Should(Equal(1))
+-		Expect(t[len(u)-1 : len(t)]).Should(HaveLen(0))
++		Expect(t[len(u)/2+1:]).Should(HaveLen(1))
++		Expect(t[len(u)-1 : len(t)]).Should(BeEmpty())
+ 	})
+ })
