@@ -10072,6 +10072,105 @@ git show <base>:compat/isolate/fixtures/<l>/bad.go | grep -cE '^(func|type|const
 
 ---
 
+### 2026-08-24（続き 34）— `Info.Defs` の穴を**数えて**探したら、2 つ増えた
+
+続き 31 の「次にやること」2。あそこで見つかった 2 件（関数の中の `const` と
+型パラメータ）は **varnamelen が偶然踏んだ**だけである。
+`Defs` から出発する解析は多く、**入っていないことは沈黙**なので、
+次を偶然に任せない形にした。
+
+#### やったこと: go/types の `recordDef` 呼び出しを列挙して突き合わせた
+
+```bash
+grep -rn "recordDef" "$(go env GOROOT)/src/go/types/"*.go
+```
+
+`decl.go` / `assignments.go` / `range.go` / `interface.go` / `labels.go` /
+`resolver.go` の 6 ファイル。guff 側は `record_def` が 17 箇所。
+**宣言の形を全部並べた 1 ファイル**を型検査して、
+`Info.defs` に宣言側の識別子が入っているかを名前で確かめる
+（`crates/guff-types/tests/defs_coverage.rs`）。
+
+#### 穴 3 つ目: **interface のメソッド名**
+
+```go
+type Iface interface {
+	IfaceMethod(ifaceParam int) error
+}
+```
+
+go/types は `interface.go:210` で `check.recordDef(name, m)` を呼ぶ。
+guff は `Func` オブジェクトを作って **`record_def` を呼んでいなかった** ——
+つまり **interface のメソッドは `Defs` からは存在しない**。
+`interface_check.rs` に 1 行足して解消。
+
+#### 穴 4 つ目: **ラベル** —— これは名前を付けて残した
+
+go/types は `labels.go` で `*Label` オブジェクトを作って記録する。
+guff のラベル処理は名前と位置の `HashMap` だけで、
+**`ObjectData` に `Label` のバリアントが無い**。
+足すとオブジェクトアリーナとそのサイズガードに触ることになり、
+**今のところ読む側が居ない**ので、`KNOWN_MISSING` に理由つきで置いた。
+
+これは ratchet である: `known_gaps_are_still_gaps` は
+**塞がったときに落ちる**ので、実装したら `EXPECTED` に移して
+`KNOWN_MISSING` の行を消すことが強制される。放置された穴の説明が
+実態より長生きしない。
+
+#### 測定
+
+`EXPECTED` に並べた宣言の形（26 個）:
+パッケージレベルの const / var / type / func、メソッド、関数本体の const / var、
+`:=`、range の 2 変数、`if` / `switch` の init、型スイッチの変数、
+クロージャとその引数、レシーバ、型パラメータ、構造体フィールド、
+**interface のメソッド**、引数 / 可変長引数 / 名前つき戻り値。
+
+golden 193/193・isolate 116/116 は**変わらない** ——
+`Defs` に足すのは情報の追加であって、既存の finding を動かさない。
+**動かないから見つからなかった**、というのがこの穴の性質である。
+
+#### `Implicits` も数えた —— **穴は無かった**。そして危うく誤報するところだった
+
+go/types の `recordImplicit` は 4 箇所（無名 import / 無名レシーバ /
+無名引数 / 型スイッチの case 節）。guff も 4 箇所あり、**全部埋まっている**。
+
+危なかったのはテストのほうである。最初に「7 件以上」と**当て推量で**書いたら
+guff は 4 件を返した。**これを穴と呼ぶ前に**、同じソースを
+本物の go/types に通す小さな Go プログラムを書いたら —— **go/types も 4 件**だった。
+
+型スイッチの case 節が implicit になるのは
+**変数を束縛したときだけ**（`switch tv := v.(type)`）で、
+`switch v.(type)` は何も宣言しない。束縛する形を fixture に足すと両者 7 件で一致する。
+
+**自分の期待との差は、上流との差ではない。** テストは実測値の 7 を
+`assert_eq!` で固定し、当て推量が外れた理由をコメントに残した。
+
+#### 次にやること
+
+1. **~~`Implicits`~~** —— 上記のとおり済み。穴は無かった。
+2. **残り 27 の linter case**（続き 33）。
+3. **`expr_string` を 1 つにする —— ただし寄せ先は `ExprString` ではない。**
+   続き 28 は「`types.ExprString` の私的な近似が 3 つ」と書いたが、数え直すと
+   **4 つ**あり（`guff-error/util.rs` / `guff-revive/util.rs` /
+   `ginkgolinter.rs` / `nestif.rs`、うち 3 つは**バイト単位で同一**）、
+   **上流はどれも `go/printer` を使っている**:
+
+   | linter | 上流 |
+   |---|---|
+   | `nestif` | `printer.Config{}.Fprint` |
+   | `durationcheck` | `format.Node` |
+   | `err113` | `printer.Fprint` |
+   | `ginkgolinter` | `printer.Fprint` |
+
+   しかも `guff_types::exprstring`（`go/types/exprstring.go` の完全な移植）は
+   **既にある**し、`go/printer` の移植も `guff::printer::fprint` としてある。
+   足りないのは**共有の入口**で、gocritic の `node_text` と loggercheck の
+   `render_node_ellipsis` がそれぞれ private に包んでいる。
+   `guff-analysis` に 1 つ置いて 6 箇所を寄せる。近似が消えるので
+   **描画が変わる可能性があり、golden がそれを見る**。
+4. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29 / 30。
+---
+
 
 ---
 
