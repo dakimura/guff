@@ -6,4 +6,8 @@
 
 # golangci-lint: 2.12.2
 
-bad_test.go:5:1:paralleltest::Function TestBad missing the call to method parallel\n
+bad_test.go:10:1:paralleltest::Function TestMissingParallel missing the call to method parallel\n
+bad_test.go:20:2:paralleltest::Function TestRunsMissingParallel missing the call to method parallel in the test run\n
+bad_test.go:23:2:paralleltest::Function TestRunsMissingParallel missing the call to method parallel in the test run\n
+bad_test.go:34:2:paralleltest::Range statement for test TestRangeMissingParallel missing the call to method parallel in test Run\n
+bad_test.go:63:2:paralleltest::Function TestDeferWithParallel uses defer with t.Parallel, use t.Cleanup instead to ensure cleanup runs after parallel subtests complete

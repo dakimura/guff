@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:12:2:exhaustive::missing cases in switch of type p.Color: p.Blue
+bad.go:16:2:exhaustive::missing cases in switch of type p.Color: p.Blue
+bad.go:25:13:exhaustive::missing keys in map of key type p.Color: p.Blue

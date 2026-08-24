@@ -6,4 +6,7 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:6:20:noctx::net/http.Get must not be called. use net/http.NewRequestWithContext and (*net/http.Client).Do(*http.Request)
+bad.go:13:20:noctx::net/http.Get must not be called. use net/http.NewRequestWithContext and (*net/http.Client).Do(*http.Request)
+bad.go:18:27:noctx::net/http.NewRequest must not be called. use net/http.NewRequestWithContext
+bad.go:23:20:noctx::(*database/sql.DB).Query must not be called. use (*database/sql.DB).QueryContext
+bad.go:28:19:noctx::(*database/sql.DB).Exec must not be called. use (*database/sql.DB).ExecContext

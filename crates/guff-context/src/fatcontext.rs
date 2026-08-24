@@ -17,6 +17,30 @@ use guff_types::selection::SelectionKind;
 
 const CATEGORY_IN_LOOP: &str = "nested context in loop";
 const CATEGORY_IN_FUNC_LIT: &str = "nested context in function literal";
+const CATEGORY_IN_STRUCT_POINTER: &str = "potential nested context in struct pointer";
+const CATEGORY_UNSUPPORTED: &str = "unsupported nested context type";
+
+/// Pass-time options from `linters.settings.fatcontext`.
+///
+/// Upstream's three flags gate the three reportable categories, and only one of
+/// them is off by default — which is why the struct-pointer category needs a
+/// configuration to be reachable at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FatcontextOptions {
+    pub check_struct_pointers: bool,
+    pub check_loops: bool,
+    pub check_function_literals: bool,
+}
+
+impl Default for FatcontextOptions {
+    fn default() -> Self {
+        Self {
+            check_struct_pointers: false,
+            check_loops: true,
+            check_function_literals: true,
+        }
+    }
+}
 
 fn type_string(pass: &Pass<'_>, e: &Expr) -> Option<String> {
     let info = pass.types_info()?;
@@ -178,12 +202,13 @@ fn find_nested_context<'a>(
         if !name.is_empty() && reset.contains(&name) {
             continue;
         }
-        // Upstream `check-struct-pointers` defaults to false, so a field on a
-        // pointer receiver is not a nested context. guff has no wiring for
-        // that setting yet, so follow the default.
-        if is_pointer_sel(pass, &assign.lhs[0]) {
-            continue;
-        }
+        // A pointer-indirected field used to be skipped here, standing in for
+        // the `check-struct-pointers` flag guff had no wiring for. It is a
+        // *category* upstream, not an exclusion: `getCategory` names it and
+        // `shouldIgnoreReport` drops it when the flag is off. Deciding it here
+        // instead also changed which assignment gets found — upstream takes the
+        // first nested context in the body and then classifies that one, so
+        // skipping it would report a later one upstream never looks at.
         // Locals defined inside this For/FuncLit/FuncDecl may be reassigned.
         if is_defined_within(pass, &assign.lhs[0], enclosing) {
             continue;
@@ -193,23 +218,66 @@ fn find_nested_context<'a>(
     None
 }
 
-/// Upstream filters on ForStmt / RangeStmt / FuncLit only. Including FuncDecl
-/// reports every `mw.ctx, mw.cancel = context.WithCancel(...)` written in a
-/// plain method as a nested context.
+/// The bodies upstream's node filter covers.
+///
+/// FuncDecl was left out here on the grounds that it reports every
+/// `mw.ctx, mw.cancel = context.WithCancel(…)` written in a plain method. It
+/// does — as `potential nested context in struct pointer`, which is off by
+/// default. Dropping the node dropped the whole category with it.
 fn body_of(n: NodeRef<'_>) -> Option<&BlockStmt> {
     match n {
         NodeRef::ForStmt(ForStmt { body, .. }) => Some(body),
         NodeRef::RangeStmt(RangeStmt { body, .. }) => Some(body),
         NodeRef::FuncLit(FuncLit { body, .. }) => Some(body),
+        // Upstream's node filter is ForStmt / RangeStmt / FuncLit / **FuncDecl**.
+        // Without the last one an assignment in a plain function body is never
+        // looked at, which is exactly where the struct-pointer category lives:
+        // `getCategory` only reaches the pointer test when the enclosing node is
+        // not a loop, and a FuncLit is the only non-loop node that was reaching
+        // it here.
+        NodeRef::FuncDecl(fd) => fd.body.as_ref(),
         _ => None,
     }
 }
 
-fn category_for(n: NodeRef<'_>) -> &'static str {
+/// Port of upstream `getCategory`.
+///
+/// The order matters and is not obvious: the enclosing node decides first, so
+/// an assignment to a struct pointer field *inside a loop* is
+/// `nested context in loop`, not the struct-pointer category. Only when the
+/// enclosing node is not a loop does the pointer test get a turn.
+fn category_for(pass: &Pass<'_>, n: NodeRef<'_>, assign: &AssignStmt) -> &'static str {
+    if matches!(n, NodeRef::ForStmt(_) | NodeRef::RangeStmt(_)) {
+        return CATEGORY_IN_LOOP;
+    }
+    if assign.lhs.first().is_some_and(|e| is_pointer(pass, e)) {
+        return CATEGORY_IN_STRUCT_POINTER;
+    }
     match n {
-        NodeRef::ForStmt(_) | NodeRef::RangeStmt(_) => CATEGORY_IN_LOOP,
-        NodeRef::FuncLit(_) => CATEGORY_IN_FUNC_LIT,
-        _ => CATEGORY_IN_LOOP,
+        NodeRef::FuncLit(_) | NodeRef::FuncDecl(_) => CATEGORY_IN_FUNC_LIT,
+        _ => CATEGORY_UNSUPPORTED,
+    }
+}
+
+/// Upstream `isPointer`: a selector whose selection required indirection.
+fn is_pointer(pass: &Pass<'_>, e: &Expr) -> bool {
+    if !matches!(e, Expr::SelectorExpr(_)) {
+        return false;
+    }
+    let Some(info) = pass.types_info() else {
+        return false;
+    };
+    // `Info.selections` is keyed on the SelectorExpr's own node id.
+    info.selections.get(&e.id()).is_some_and(|s| s.indirect())
+}
+
+/// Upstream `shouldIgnoreReport`: each category has its own flag.
+fn category_enabled(category: &str, opts: &FatcontextOptions) -> bool {
+    match category {
+        CATEGORY_IN_LOOP => opts.check_loops,
+        CATEGORY_IN_FUNC_LIT => opts.check_function_literals,
+        CATEGORY_IN_STRUCT_POINTER => opts.check_struct_pointers,
+        _ => true,
     }
 }
 
@@ -217,6 +285,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let _ = pass
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "fatcontext requires inspect analyzer".to_string())?;
+
+    let opts = pass
+        .settings::<FatcontextOptions>("fatcontext")
+        .copied()
+        .unwrap_or_default();
 
     let mut pending = Vec::new();
     for file in pass.files() {
@@ -227,7 +300,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let Some(assign) = find_nested_context(pass, &body.list, n) else {
                 return true;
             };
-            let category = category_for(n);
+            let category = category_for(pass, n, assign);
+            if !category_enabled(category, &opts) {
+                return true;
+            }
             // `Pos: assignStmt.Pos()` — the statement's first LHS operand, not
             // the `=` between the sides.
             let report_pos = assign
@@ -250,18 +326,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             // docs/COMPAT-HARDENING.md lists SuggestedFix as uncompared — so
             // this is recorded rather than ported blind.
             let tok_end = start + 1; // "="
-            pending.push(Diagnostic {
-                pos: report_pos,
-                end,
-                message: category.into(),
-                suggested_fixes: vec![SuggestedFix {
+            // `getSuggestedFixes` returns nil for these two: rewriting `=` to
+            // `:=` would not be correct for a field, and there is nothing to
+            // suggest for a shape upstream does not recognise.
+            let fixes = if matches!(category, CATEGORY_IN_STRUCT_POINTER | CATEGORY_UNSUPPORTED) {
+                Vec::new()
+            } else {
+                vec![SuggestedFix {
                     message: "replace `=` with `:=`".into(),
                     text_edits: vec![TextEdit {
                         pos: start,
                         end: tok_end,
                         new_text: ":=".into(),
                     }],
-                }],
+                }]
+            };
+            pending.push(Diagnostic {
+                pos: report_pos,
+                end,
+                message: category.into(),
+                suggested_fixes: fixes,
                 ..Diagnostic::default()
             });
             true

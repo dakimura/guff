@@ -6,4 +6,9 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:7:2:varnamelen::variable name 'n' is too short for the scope of its usage
+bad.go:13:2:varnamelen::variable name 'n' is too short for the scope of its usage
+bad.go:24:8:varnamelen::constant name 'c' is too short for the scope of its usage
+bad.go:34:16:varnamelen::parameter name 'p' is too short for the scope of its usage
+bad.go:44:21:varnamelen::return value name 'r' is too short for the scope of its usage
+bad.go:55:20:varnamelen::type parameter name 'T' is too short for the scope of its usage
+bad.go:55:27:varnamelen::parameter name 'v' is too short for the scope of its usage

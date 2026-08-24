@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad_test.go:5:6:tparallel::TestBad's subtests should call t.Parallel
+bad_test.go:8:6:tparallel::TestSubtestsMissing's subtests should call t.Parallel
+bad_test.go:16:6:tparallel::TestTopLevelMissing should call t.Parallel on the top level as well as its subtests
+bad_test.go:24:6:tparallel::TestDeferNotCleanup should use t.Cleanup instead of defer

@@ -1,0 +1,6 @@
+# Two of the five kinds are off by default. `return value` and `type parameter`
+# have their own message and their own position (the Field, not the assignment),
+# and without these flags no configuration reaches them — so no tier measures
+# two of the five things this linter says.
+check-return: true
+check-type-param: true

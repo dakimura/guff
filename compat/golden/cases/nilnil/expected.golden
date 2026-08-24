@@ -6,4 +6,10 @@
 
 # golangci-lint: 2.12.2
 
+bad.go:9:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
+bad.go:13:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
+bad.go:17:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
+bad.go:21:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
+bad.go:25:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
+bad.go:29:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead
 bad/bad.go:6:2:nilnil::return both a `nil` error and an invalid value: use a sentinel error instead

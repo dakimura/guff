@@ -15,9 +15,12 @@ linters:
     - importas
   settings:
     importas:
+      no-unaliased: true
       alias:
       - pkg: fmt
         alias: fmtpkg
+      - pkg: strings
+        alias: str
 
 issues:
   max-issues-per-linter: 0

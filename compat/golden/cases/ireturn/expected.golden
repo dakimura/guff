@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:5:1:ireturn::Bad returns interface (github.com/dakimura/guff/compat/isolate/fixtures/ireturn.I)
+bad.go:9:1:ireturn::Bad returns interface (github.com/dakimura/guff/compat/isolate/fixtures/ireturn.I)
+bad.go:14:1:ireturn::OfTypeParam returns generic interface (T) of type param M()
+bad.go:22:1:ireturn::Method returns interface (github.com/dakimura/guff/compat/isolate/fixtures/ireturn.I)

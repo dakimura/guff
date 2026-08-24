@@ -51,6 +51,8 @@ pub struct LinterSettings {
     pub wrapcheck: WrapcheckSettings,
     pub rowserrcheck: RowserrcheckSettings,
     pub bodyclose: BodycloseSettings,
+    pub fatcontext: FatcontextSettings,
+    pub makezero: MakezeroSettings,
     pub godot: GodotSettings,
     pub godox: GodoxSettings,
     pub dupword: DupwordSettings,
@@ -849,6 +851,48 @@ pub struct BodycloseSettings {
     /// Default: false (golangci-lint parity).
     #[serde(default, rename = "check-consumption")]
     pub check_consumption: bool,
+}
+
+/// `linters.settings.makezero` / `linters-settings.makezero`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct MakezeroSettings {
+    /// Upstream `-always`: report every non-empty slice initialization, not
+    /// only those a later `append` reaches. Default: false.
+    #[serde(default)]
+    pub always: bool,
+}
+
+impl MakezeroSettings {
+    pub fn to_guff_makezero(&self) -> guff_gostaticanalysis::MakezeroOptions {
+        guff_gostaticanalysis::MakezeroOptions {
+            always: self.always,
+        }
+    }
+}
+
+/// `linters.settings.fatcontext` / `linters-settings.fatcontext`.
+///
+/// Three flags, one per reportable category. `check-struct-pointers` is the one
+/// that is off by default, so the "potential nested context in struct pointer"
+/// message is unreachable until someone asks for it.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct FatcontextSettings {
+    #[serde(default, rename = "check-struct-pointers")]
+    pub check_struct_pointers: bool,
+    #[serde(default = "default_true", rename = "check-loops")]
+    pub check_loops: bool,
+    #[serde(default = "default_true", rename = "check-function-literals")]
+    pub check_function_literals: bool,
+}
+
+impl Default for FatcontextSettings {
+    fn default() -> Self {
+        Self {
+            check_struct_pointers: false,
+            check_loops: true,
+            check_function_literals: true,
+        }
+    }
 }
 
 /// `linters.settings.godot` / `linters-settings.godot`.
@@ -2268,6 +2312,16 @@ impl LinterSettings {
                 out.rowserrcheck = s;
             }
         }
+        if let Some(v) = map.get(serde_yaml::Value::String("makezero".into())) {
+            if let Some(s) = parse_settings::<MakezeroSettings>("makezero", v) {
+                out.makezero = s;
+            }
+        }
+        if let Some(v) = map.get(serde_yaml::Value::String("fatcontext".into())) {
+            if let Some(s) = parse_settings::<FatcontextSettings>("fatcontext", v) {
+                out.fatcontext = s;
+            }
+        }
         if let Some(v) = map.get(serde_yaml::Value::String("bodyclose".into())) {
             if let Some(s) = parse_settings::<BodycloseSettings>("bodyclose", v) {
                 out.bodyclose = s;
@@ -2552,6 +2606,8 @@ impl LinterSettings {
         bag.insert("wrapcheck", self.wrapcheck.to_guff_wrapcheck());
         bag.insert("rowserrcheck", self.rowserrcheck.to_guff_rowserrcheck());
         bag.insert("bodyclose", self.bodyclose.to_guff_bodyclose());
+        bag.insert("fatcontext", self.fatcontext.to_guff_fatcontext());
+        bag.insert("makezero", self.makezero.to_guff_makezero());
         bag.insert("godot", self.godot.to_guff_godot());
         bag.insert("godox", self.godox.to_guff_godox());
         bag.insert("dupword", self.dupword.to_guff_dupword());
@@ -3433,6 +3489,16 @@ impl RowserrcheckSettings {
     pub fn to_guff_rowserrcheck(&self) -> guff_error::RowserrcheckOptions {
         guff_error::RowserrcheckOptions {
             packages: self.packages.clone(),
+        }
+    }
+}
+
+impl FatcontextSettings {
+    pub fn to_guff_fatcontext(&self) -> guff_context::FatcontextOptions {
+        guff_context::FatcontextOptions {
+            check_struct_pointers: self.check_struct_pointers,
+            check_loops: self.check_loops,
+            check_function_literals: self.check_function_literals,
         }
     }
 }

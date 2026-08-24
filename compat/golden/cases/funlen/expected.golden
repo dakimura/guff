@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:6:funlen::Function 'Bad' has too many statements (16 > 10)
+bad.go:6:6:funlen::Function 'TooLong' is too long (14 > 10)
+bad.go:23:6:funlen::Function 'TooManyStatements' has too many statements (24 > 10)

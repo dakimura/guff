@@ -6,5 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:6:errname::the error type name `BadErrorType` should conform to the `XxxError` format
-bad.go:7:5:errname::the sentinel error name `EndOfFileError` should conform to the `ErrXxx` format
+bad.go:11:6:errname::the error type name `BadErrorType` should conform to the `XxxError` format
+bad.go:16:5:errname::the sentinel error name `EndOfFileError` should conform to the `ErrXxx` format

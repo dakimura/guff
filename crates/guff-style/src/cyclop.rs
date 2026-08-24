@@ -62,7 +62,10 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for file in pass.files() {
         if pkg_name.is_empty() {
             pkg_name = file.name.name.clone();
-            pkg_pos = file.name.name_pos.0 as u32;
+            // `pkgPos = node.Pos()` where `node` is the `*ast.File`, and
+            // `File.Pos()` is the `package` keyword — column 1, not the package
+            // name nine columns to its right.
+            pkg_pos = file.package.0 as u32;
         }
         for decl in &file.decls {
             let Decl::FuncDecl(f) = decl else {
@@ -94,8 +97,12 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if avg > package_average {
             pending.push((
                 pkg_pos,
+                // Upstream renders both numbers with `%f`, which is six
+                // decimal places — `12.000000`, not `12`. Rust's default
+                // `Display` for f64 prints the shortest round-tripping form,
+                // so the two only agree on values that happen to need six.
                 format!(
-                    "the average complexity for the package {pkg_name} is {avg}, max is {package_average}"
+                    "the average complexity for the package {pkg_name} is {avg:.6}, max is {package_average:.6}"
                 ),
             ));
         }

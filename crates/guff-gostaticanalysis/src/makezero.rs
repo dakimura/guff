@@ -72,29 +72,44 @@ fn use_object(pass: &Pass<'_>, ident: &Ident) -> Option<ObjectId> {
     info.uses.get(&ident.id).copied()
 }
 
-fn record_nonzero_make(pass: &Pass<'_>, lhs: &Expr, call: &CallExpr, out: &mut HashSet<ObjectId>) {
+/// Pass-time options from `linters.settings.makezero`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MakezeroOptions {
+    /// Upstream `-always` / `initLenMustBeZero`: report every non-empty slice
+    /// initialization, not only the ones a later `append` reaches.
+    pub always: bool,
+}
+
+fn record_nonzero_make(pass: &Pass<'_>, lhs: &Expr, call: &CallExpr, out: &mut HashSet<ObjectId>) -> bool {
     // Only `make([]T, len)` (exactly 2 args). Cap-only form has 3 args.
     if call.args.len() != 2 {
-        return;
+        return false;
     }
     let Some(elem_ty) = type_of(pass, &call.args[0]) else {
-        return;
+        return false;
     };
     if !is_slice_type(pass, elem_ty) {
-        return;
+        return false;
     }
     if is_explicit_zero_len(&call.args[1]) {
-        return;
+        return false;
     }
     let Expr::Ident(ident) = unparen(lhs) else {
-        return;
+        return false;
     };
     if let Some(obj) = def_object(pass, ident).or_else(|| use_object(pass, ident)) {
         out.insert(obj);
     }
+    true
 }
 
-fn check_assign(pass: &Pass<'_>, s: &AssignStmt, nonzero: &mut HashSet<ObjectId>) {
+fn check_assign(
+    pass: &Pass<'_>,
+    s: &AssignStmt,
+    nonzero: &mut HashSet<ObjectId>,
+    always: bool,
+    pending: &mut Vec<(u32, String)>,
+) {
     for (i, right) in s.rhs.iter().enumerate() {
         let Some(call) = is_make_call(right) else {
             continue;
@@ -102,7 +117,22 @@ fn check_assign(pass: &Pass<'_>, s: &AssignStmt, nonzero: &mut HashSet<ObjectId>
         let Some(left) = s.lhs.get(i) else {
             continue;
         };
-        record_nonzero_make(pass, left, call, nonzero);
+        let recorded = record_nonzero_make(pass, left, call, nonzero);
+        // `MustHaveNonZeroInitLenIssue` — upstream's second message, raised
+        // for the same shape the first one only reaches through a later
+        // `append`. Its position is `node.Pos()` where `node` is the whole
+        // AssignStmt, so it lands on the name being assigned.
+        if recorded && always {
+            if let Expr::Ident(ident) = unparen(left) {
+                pending.push((
+                    s.lhs
+                        .first()
+                        .map(|e| e.pos().0 as u32)
+                        .unwrap_or(s.tok_pos.0 as u32),
+                    format!("slice `{}` does not have non-zero initial length", ident.name),
+                ));
+            }
+        }
     }
 }
 
@@ -141,6 +171,11 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "makezero requires inspect analyzer".to_string())?;
 
+    let opts = pass
+        .settings::<MakezeroOptions>("makezero")
+        .copied()
+        .unwrap_or_default();
+
     let mut nonzero: HashSet<ObjectId> = HashSet::new();
     let mut pending = Vec::new();
 
@@ -150,7 +185,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     for file in pass.files() {
         walk::preorder(NodeRef::File(file), |n| {
             if let NodeRef::AssignStmt(s) = n {
-                check_assign(pass, s, &mut nonzero);
+                check_assign(pass, s, &mut nonzero, opts.always, &mut pending);
             }
             true
         });

@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:6:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:10:23:sqlclosecheck::Rows/Stmt/NamedStmt was not closed
+bad.go:27:12:sqlclosecheck::Close should use defer
+bad.go:33:25:sqlclosecheck::Rows/Stmt/NamedStmt was not closed

@@ -13,6 +13,10 @@ linters:
   default: none
   enable:
     - whitespace
+  settings:
+    whitespace:
+      multi-if: true
+      multi-func: true
 
 issues:
   max-issues-per-linter: 0

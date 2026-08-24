@@ -13,6 +13,10 @@ linters:
   default: none
   enable:
     - cyclop
+  settings:
+    cyclop:
+      max-complexity: 10
+      package-average: 0.5
 
 issues:
   max-issues-per-linter: 0

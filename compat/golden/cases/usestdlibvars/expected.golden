@@ -6,5 +6,8 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:10:25:usestdlibvars::"GET" can be replaced by http.MethodGet
-bad.go:14:16:usestdlibvars::"200" can be replaced by http.StatusOK
+bad.go:16:25:usestdlibvars::"GET" can be replaced by http.MethodGet
+bad.go:20:16:usestdlibvars::"200" can be replaced by http.StatusOK
+bad.go:24:33:usestdlibvars::"Sunday" can be replaced by time.Sunday.String()
+bad.go:28:31:usestdlibvars::"January" can be replaced by time.January.String()
+bad.go:33:19:usestdlibvars::"MD5" can be replaced by crypto.MD5.String()

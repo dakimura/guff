@@ -1,0 +1,4 @@
+# `check-struct-pointers` is off by default, so the third category
+# ("potential nested context in struct pointer") is unreachable without it —
+# and an arm no configuration reaches is an arm no tier measures.
+check-struct-pointers: true
