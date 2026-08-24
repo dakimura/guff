@@ -517,9 +517,13 @@ if [[ "$ISOLATE" -eq 1 ]]; then
   RESULT_SNAPSHOT="$RESULTS_DIR/RESULTS.isolate.md"
 fi
 # Snapshot non-smoke multi-target runs, and all isolate runs (incl. isolate --smoke).
-# A --name run covers one target, so it must not overwrite the committed
-# whole-corpus snapshot with a one-line report.
-if [[ -z "$NAME_FILTER" ]] && [[ "$ISOLATE" -eq 1 || "$SMOKE" -eq 0 ]]; then
+# A single-target run must not overwrite the committed whole-corpus snapshot
+# with a one-line report. The two modes spell that filter differently: --name
+# for OSS, --linter for isolate (see the --name/--linter guards above). Only
+# NAME_FILTER was checked here, and NAME_FILTER can never be set in isolate
+# mode — so every `--isolate --linter X` silently replaced the committed
+# RESULTS.isolate.md with a one-linter report.
+if [[ -z "$NAME_FILTER" && -z "$LINTER_FILTER" ]] && [[ "$ISOLATE" -eq 1 || "$SMOKE" -eq 0 ]]; then
   cp "$REPORT" "$RESULT_SNAPSHOT"
 fi
 
