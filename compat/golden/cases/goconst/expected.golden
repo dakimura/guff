@@ -8,3 +8,4 @@
 
 bad.go:6:7:goconst::string `repeated` has 3 occurrences, make it a constant
 bad.go:10:13:goconst::string `nested` has 3 occurrences, make it a constant
+bad.go:19:7:goconst::string `another` has 3 occurrences, make it a constant

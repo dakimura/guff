@@ -12,3 +12,12 @@ func Bad() string {
 	f([]string{"nested"})
 	return a + b + c
 }
+
+// goconst counts occurrences and names the string, so a second repeated string
+// is a second sentence. Numbers are a separate switch (`numbers: true`).
+func AlsoRepeated() {
+	x := "another"
+	y := "another"
+	z := "another"
+	_, _, _ = x, y, z
+}

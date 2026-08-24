@@ -14,10 +14,23 @@ pub struct GoMod {
     pub requires: Vec<String>,
     pub replaces: Vec<Replace>,
     pub retracts: Vec<Retract>,
-    pub excludes: Vec<String>,
-    pub tools: Vec<String>,
-    pub toolchain: Option<String>,
-    pub godebugs: Vec<String>,
+    pub excludes: Vec<Directive>,
+    pub tools: Vec<Directive>,
+    pub toolchain: Option<Directive>,
+    pub godebugs: Vec<Directive>,
+}
+
+/// A one-line go.mod directive and the line it sits on.
+///
+/// The line is the point: gomoddirectives reports each of these at its own
+/// position, and reporting them all at line 1 puts every finding on the
+/// `module` line — which is where guff put them until the fixture grew a second
+/// directive to disagree with.
+#[derive(Debug, Clone)]
+pub struct Directive {
+    #[allow(dead_code)]
+    pub value: String,
+    pub line: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -76,7 +89,10 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
             continue;
         }
         if let Some(rest) = line.strip_prefix("toolchain ") {
-            out.toolchain = Some(rest.trim().to_string());
+            out.toolchain = Some(Directive {
+                value: rest.trim().to_string(),
+                line: line_no,
+            });
             continue;
         }
         if line.starts_with("go ") {
@@ -130,27 +146,33 @@ pub fn parse_gomod_str(path: &Path, text: &str) -> GoMod {
         if let Some(block) = parse_block_header(line, "exclude") {
             consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
-                    out.excludes.push((*p).to_string());
+                    out.excludes.push(Directive {
+                        value: (*p).to_string(),
+                        line: ln,
+                    });
                 }
-                let _ = ln;
             });
             continue;
         }
         if let Some(block) = parse_block_header(line, "tool") {
             consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
-                    out.tools.push((*p).to_string());
+                    out.tools.push(Directive {
+                        value: (*p).to_string(),
+                        line: ln,
+                    });
                 }
-                let _ = ln;
             });
             continue;
         }
         if let Some(block) = parse_block_header(line, "godebug") {
             consume_block(&mut lines, block, line_no, |toks, ln| {
                 if let Some(p) = toks.first() {
-                    out.godebugs.push((*p).to_string());
+                    out.godebugs.push(Directive {
+                        value: (*p).to_string(),
+                        line: ln,
+                    });
                 }
-                let _ = ln;
             });
             continue;
         }

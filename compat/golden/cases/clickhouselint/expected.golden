@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:13:6:clickhouselint::chrowserrcheck: clickhouse rows.Err() must be checked after rows.Next()
+bad.go:21:6:clickhouselint::chrowserrcheck: clickhouse rows.Err() must be checked after rows.Next()

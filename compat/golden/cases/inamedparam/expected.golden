@@ -8,3 +8,6 @@
 
 bad.go:4:5:inamedparam::interface method Do must have named param for type int
 bad.go:4:10:inamedparam::interface method Do must have named param for type string
+bad.go:10:6:inamedparam::interface method One must have named param for type int
+bad.go:11:6:inamedparam::interface method Two must have named param for type string
+bad.go:11:14:inamedparam::interface method Two must have named param for type bool

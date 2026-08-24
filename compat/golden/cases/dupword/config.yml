@@ -18,7 +18,9 @@ linters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Full finding-set compare (avoid SA#### vs S#### order winning uniq-by-line).
   uniq-by-line: false
 
 run:
   timeout: 5m
+  tests: true

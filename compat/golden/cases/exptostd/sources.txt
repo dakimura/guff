@@ -1,7 +1,7 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go                          compat/isolate/fixtures/exptostd/bad.go
 
-# The stub modules, replaced in so `./...` never lints them.
+# The stub module, replaced in so `./...` never lints it.
 exp/go.mod                      compat/golden/cases/exptostd/exp.go.mod
 exp/maps/maps.go                crates/guff-style/tests/testdata/exptostd/stub/golang.org/x/exp/maps/maps.go
 exp/slices/slices.go            crates/guff-style/tests/testdata/exptostd/stub/golang.org/x/exp/slices/slices.go

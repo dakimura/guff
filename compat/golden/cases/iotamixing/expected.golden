@@ -7,3 +7,5 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:iotamixing::iota mixing. keep iotas in separate blocks to consts with r-val
+bad.go:11:1:iotamixing::iota mixing. keep iotas in separate blocks to consts with r-val
+bad.go:17:1:iotamixing::iota mixing. keep iotas in separate blocks to consts with r-val

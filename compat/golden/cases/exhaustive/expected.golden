@@ -8,3 +8,4 @@
 
 bad.go:16:2:exhaustive::missing cases in switch of type p.Color: p.Blue
 bad.go:25:13:exhaustive::missing keys in map of key type p.Color: p.Blue
+bad.go:41:2:exhaustive::missing cases in switch of type p.Size: p.Medium, p.Large

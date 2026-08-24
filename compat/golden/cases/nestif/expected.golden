@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:4:1:nestif::`if a` has complex nested blocks (complexity: 6)
+bad.go:18:1:nestif::`if x || y` has complex nested blocks (complexity: 6)

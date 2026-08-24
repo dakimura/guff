@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:5:2:nakedret::naked return in func `Bad` with 3 lines of code
+bad.go:14:2:nakedret::naked return in func `AlsoBad` with 5 lines of code

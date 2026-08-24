@@ -8,3 +8,5 @@
 
 bad.go:5:3:copyloopvar::The copy of the 'for' variable "i" can be deleted (Go 1.22+)
 bad.go:6:3:copyloopvar::The copy of the 'for' variable "v" can be deleted (Go 1.22+)
+bad.go:15:3:copyloopvar::The copy of the 'for' variable "i" can be deleted (Go 1.22+)
+bad.go:22:3:copyloopvar::The copy of the 'for' variable "i" can be deleted (Go 1.22+)

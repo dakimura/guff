@@ -14,3 +14,19 @@ func Bad() error {
 	}
 	return nil
 }
+
+// nilnesserr names the call, so a second wrong-error return reads the same but
+// sits at a different position — and a variadic call is the other arm.
+func AlsoBad() error {
+	err := do()
+	if err != nil {
+		return err
+	}
+
+	err3 := do2()
+	if err3 != nil {
+		return err
+	}
+
+	return nil
+}

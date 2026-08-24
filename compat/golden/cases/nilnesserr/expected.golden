@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:13:3:nilnesserr::return a nil value error after check error
+bad.go:28:3:nilnesserr::return a nil value error after check error

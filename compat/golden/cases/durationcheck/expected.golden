@@ -7,3 +7,5 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:9:durationcheck::Multiplication of durations: `d * time.Second`
+bad.go:12:9:durationcheck::Multiplication of durations: `time.Second * d`
+bad.go:16:9:durationcheck::Multiplication of durations: `a * b`

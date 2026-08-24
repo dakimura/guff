@@ -13,6 +13,15 @@ linters:
   default: none
   enable:
     - gomoddirectives
+  settings:
+    gomoddirectives:
+      replace-allow-list: []
+      replace-local: true
+      exclude-forbidden: true
+      retract-allow-no-explanation: false
+      toolchain-forbidden: true
+      tool-forbidden: true
+      go-debug-forbidden: true
 
 issues:
   max-issues-per-linter: 0

@@ -7,3 +7,5 @@
 # golangci-lint: 2.12.2
 
 bad.go:9:2:embeddedstructfieldcheck::embedded fields should be listed before regular fields
+bad.go:16:2:embeddedstructfieldcheck::embedded fields should be listed before regular fields
+bad.go:21:2:embeddedstructfieldcheck::there must be an empty line separating embedded fields from regular fields

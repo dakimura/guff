@@ -1,7 +1,7 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go              compat/isolate/fixtures/zerologlint/bad.go
 
-# The stub modules, replaced in so `./...` never lints them.
+# The stub module, replaced in so `./...` never lints it.
 zerolog/go.mod      compat/golden/cases/zerologlint/zerolog.go.mod
 zerolog/zerolog.go  crates/guff-style/tests/testdata/zerologlint/stub/github.com/rs/zerolog/zerolog.go
 zerolog/log/log.go  crates/guff-style/tests/testdata/zerologlint/stub/github.com/rs/zerolog/log/log.go

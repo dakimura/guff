@@ -6,5 +6,10 @@
 
 # golangci-lint: 2.12.2
 
+bad.go:4:2:dupword::Duplicate words (is) found
+bad.go:5:10:dupword::Duplicate words (the) found
+bad.go:12:2:dupword::Duplicate words (and) found
+bad.go:13:7:dupword::Duplicate words (a) found
+bad.go:15:2:dupword::Duplicate words (block) found
 bad/bad.go:4:2:dupword::Duplicate words (is) found
 bad/bad.go:5:10:dupword::Duplicate words (the) found

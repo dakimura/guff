@@ -8,3 +8,5 @@
 
 bad.go:3:8:exptostd::Import statement 'golang.org/x/exp/maps' may be replaced by 'maps'
 bad.go:6:6:exptostd::golang.org/x/exp/maps.Clone() can be replaced by maps.Clone()
+bad.go:12:6:exptostd::golang.org/x/exp/maps.Keys() can be replaced by slices.AppendSeq(make([]T, 0, len(data)), maps.Keys(data))
+bad.go:16:6:exptostd::golang.org/x/exp/maps.Values() can be replaced by slices.AppendSeq(make([]T, 0, len(data)), maps.Values(data))

@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:23:rowserrcheck::rows.Err must be checked
+bad.go:19:23:rowserrcheck::rows.Err must be checked

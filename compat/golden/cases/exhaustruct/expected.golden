@@ -8,3 +8,5 @@
 
 bad.go:15:9:exhaustruct::p.T is missing field B
 bad.go:20:9:exhaustruct::p.T is missing fields B, C
+bad.go:31:9:exhaustruct::p.Outer is missing field N
+bad.go:35:10:exhaustruct::p.T is missing field C
