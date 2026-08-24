@@ -14,7 +14,7 @@ use guff_analysis::{
 use guff_constant::string_val_lossy;
 use guff_types::arena::ObjectData;
 
-use crate::util::{expr_string, is_pure_error, type_of, unparen};
+use crate::util::{is_pure_error, type_of, unparen};
 
 fn is_nil_expr(pass: &Pass<'_>, e: &Expr) -> bool {
     code::is_nil(pass, e)
@@ -78,6 +78,25 @@ fn enclosing_is_method(stack: &[NodeRef<'_>], pass: &Pass<'_>) -> bool {
     false
 }
 
+/// Upstream's `rawString` — deliberately *not* `go/printer`.
+///
+/// It is a three-arm walker, and the `CallExpr` arm is `fmt.Sprintf("%s()",
+/// rawString(t.Fun))`: it drops every argument. Anything outside the three arms
+/// falls through to `fmt.Sprintf("%s", x)` on the `ast.Expr` itself, which
+/// prints a Go struct dump containing absolute `token.Pos` integers. Those
+/// depend on the whole `FileSet` layout, so there is nothing to match there —
+/// we render the node instead and accept the divergence on that shape alone.
+fn raw_string(pass: &Pass<'_>, x: &Expr) -> String {
+    match x {
+        Expr::Ident(id) => id.name.clone(),
+        Expr::SelectorExpr(sel) => format!("{}.{}", raw_string(pass, &sel.x), sel.sel.name),
+        Expr::CallExpr(call) => format!("{}()", raw_string(pass, &call.fun)),
+        // No faithful answer exists here, so render the real source rather
+        // than borrow errorlint's unrelated walker.
+        other => code::node_text(pass, other).unwrap_or_default(),
+    }
+}
+
 fn check_comparison(
     pass: &Pass<'_>,
     be: &BinaryExpr,
@@ -93,13 +112,22 @@ fn check_comparison(
     if enclosing_is_method(stack, pass) {
         return;
     }
-    let old = format!("{} {} {}", expr_string(&be.x), be.op, expr_string(&be.y));
+    // The two halves of this message do not share a renderer, and that is not
+    // an accident to be tidied away:
+    //
+    //   oldExpr := render(pass.Fset, be)                       // go/printer
+    //   newExpr := fmt.Sprintf("%s%s.Is(%s, %s)", negate, "errors",
+    //                          rawString(be.X), rawString(be.Y))
+    //
+    // so the same call can appear twice in one message spelled two ways —
+    // `wrap(ctx, ErrSentinel)` on the left and `wrap()` on the right.
+    let old = code::node_text(pass, &Expr::BinaryExpr(be.clone())).unwrap_or_default();
     let negate = if be.op == Token::NEQ { "!" } else { "" };
     let new = format!(
         "{}errors.Is({}, {})",
         negate,
-        expr_string(&be.x),
-        expr_string(&be.y)
+        raw_string(pass, &be.x),
+        raw_string(pass, &be.y)
     );
     let start = be.x.pos().0 as u32;
     let end = be.y.end().0 as u32;
@@ -190,7 +218,9 @@ fn check_definition(
         call.pos().0 as u32,
         format!(
             "do not define dynamic errors, use wrapped static errors instead: \"{}\"",
-            expr_string(&Expr::CallExpr(call.clone())).replace('"', "\\\"")
+            code::node_text(pass, &Expr::CallExpr(call.clone()))
+                .unwrap_or_default()
+                .replace('"', "\\\"")
         ),
     ));
 }

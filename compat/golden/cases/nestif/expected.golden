@@ -8,3 +8,4 @@
 
 bad.go:4:1:nestif::`if a` has complex nested blocks (complexity: 6)
 bad.go:18:1:nestif::`if x || y` has complex nested blocks (complexity: 6)
+bad.go:35:1:nestif::`if len(a)/2+len(b) > 0` has complex nested blocks (complexity: 10)

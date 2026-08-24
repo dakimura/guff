@@ -82,6 +82,17 @@ pub fn is_pure_error(pass: &Pass<'_>, expr: &Expr) -> bool {
     code::type_with_name(pass, typ, "error")
 }
 
+/// errorlint's `exprToString` — a hand-rolled walker, **not** `go/printer`.
+///
+/// Its `BinaryExpr` arm is `X + " " + Op + " " + Y`, so it always puts blanks
+/// around an operator where `go/printer` would drop them by precedence. That is
+/// the upstream behaviour and must not be "fixed" by pointing it at
+/// [`guff_analysis::code::node_text`]; durationcheck and err113 used to borrow
+/// this function and *were* wrong to, because both of those render with
+/// `go/printer` upstream.
+///
+/// Reaches only errorlint's suggested-fix text, never a message — which is why
+/// the golden tier cannot see it.
 pub fn expr_string(e: &Expr) -> String {
     match e {
         Expr::Ident(id) => id.name.clone(),
@@ -96,7 +107,13 @@ pub fn expr_string(e: &Expr) -> String {
         Expr::BinaryExpr(b) => format!("{} {} {}", expr_string(&b.x), b.op, expr_string(&b.y)),
         Expr::IndexExpr(i) => format!("{}[{}]", expr_string(&i.x), expr_string(&i.index)),
         Expr::BasicLit(l) => l.value.clone(),
-        _ => "<expr>".into(),
+        Expr::TypeAssertExpr(t) => format!(
+            "{}.({})",
+            expr_string(&t.x),
+            t.ty.as_deref().map(expr_string).unwrap_or_default()
+        ),
+        // Upstream's default arm is this literal string, comment syntax and all.
+        _ => "/* complex expression */".into(),
     }
 }
 
@@ -106,4 +123,38 @@ pub fn unparen(e: &Expr) -> &Expr {
         cur = &p.x;
     }
     cur
+}
+
+#[cfg(test)]
+mod expr_string_tests {
+    use super::expr_string;
+    use guff::parser_interface::parse_expr;
+
+    /// `exprToString` reaches only errorlint's suggested-fix text, so no golden
+    /// case can see it. Pin it against upstream's arms directly instead.
+    ///
+    /// Source: go-errorlint@v1.8.0 `errorlint/lint.go:358`.
+    #[test]
+    fn matches_upstream_arms() {
+        for (src, want) in [
+            ("err", "err"),
+            ("io.EOF", "io.EOF"),
+            ("*p", "*p"),
+            ("-n", "-n"),
+            // Always blanks, even where go/printer would drop them by
+            // precedence — upstream concatenates with literal spaces.
+            ("a/2 + b", "a / 2 + b"),
+            ("wrap(ctx, e)", "wrap(ctx, e)"),
+            ("(err)", "(err)"),
+            ("errs[0]", "errs[0]"),
+            (r#""lit""#, r#""lit""#),
+            ("err.(*MyErr)", "err.(*MyErr)"),
+            // Outside the handled arms upstream emits this literal string.
+            ("func() error { return nil }", "/* complex expression */"),
+            ("[]error{err}", "/* complex expression */"),
+        ] {
+            let expr = parse_expr(src).unwrap_or_else(|e| panic!("parse {src}: {e:?}"));
+            assert_eq!(expr_string(&expr), want, "rendering {src}");
+        }
+    }
 }

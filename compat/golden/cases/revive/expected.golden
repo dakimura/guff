@@ -307,6 +307,28 @@ siblingok/helper.go:1:1:revive:warning:comments-density: the file has a comment 
 siblingok/helper.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 siblingok/siblingok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
 sortableok/sortable_ok.go:2:1:revive:warning:file-header: the file doesn't have an appropriate header
+typerender/type_rendering_bad.go:12:1:revive:warning:file-header: the file doesn't have an appropriate header
+typerender/type_rendering_bad.go:20:18:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:20:20:revive:warning:enforce-repeated-arg-type-style: repeated argument type "map[string]int" can be omitted
+typerender/type_rendering_bad.go:20:36:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:23:19:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:23:21:revive:warning:enforce-repeated-arg-type-style: repeated argument type "chan int" can be omitted
+typerender/type_rendering_bad.go:23:31:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:26:19:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:26:21:revive:warning:enforce-repeated-arg-type-style: repeated argument type "func(int) error" can be omitted
+typerender/type_rendering_bad.go:26:38:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:29:20:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:29:22:revive:warning:enforce-repeated-arg-type-style: repeated argument type "interface{ Foo() int }" can be omitted
+typerender/type_rendering_bad.go:29:46:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:32:23:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:32:25:revive:warning:enforce-repeated-arg-type-style: repeated argument type "[]*time.Time" can be omitted
+typerender/type_rendering_bad.go:32:39:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:41:22:revive:warning:unused-parameter: parameter 'a' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:41:24:revive:warning:enforce-repeated-arg-type-style: repeated argument type "Pair[string, int]" can be omitted
+typerender/type_rendering_bad.go:41:43:revive:warning:unused-parameter: parameter 'b' seems to be unused, consider removing or renaming it as _
+typerender/type_rendering_bad.go:54:8:revive:warning:var-declaration: should omit type map[string]int from declaration of var m; it will be inferred from the right-hand side
+typerender/type_rendering_bad.go:54:25:revive:warning:enforce-map-style: use make(map[type]type) instead of map[type]type{}
+typerender/type_rendering_bad.go:55:8:revive:warning:var-declaration: should omit type chan struct{} from declaration of var c; it will be inferred from the right-hand side
 utiltest/extended_bad_test.go:1:1:revive:warning:comments-density: the file has a comment density of  0% (0 comment lines for 3 code lines) but expected a minimum of 10%
 utiltest/extended_bad_test.go:1:1:revive:warning:file-header: the file doesn't have an appropriate header
 utiltest/extended_bad_test.go:4:2:revive:warning:imports-blocklist: should not use the following blocklisted import: "os"

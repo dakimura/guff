@@ -22,6 +22,7 @@ use std::sync::OnceLock;
 use guff::ast::{CallExpr, Expr, File, ImportSpec};
 use guff::token::Token;
 use guff::walk::{preorder, NodeRef};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
@@ -45,22 +46,12 @@ fn missing_assertion_msg(actual_func: &str) -> String {
     )
 }
 
-fn expr_string(e: &Expr) -> String {
-    match e {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::CallExpr(c) => {
-            let args: Vec<String> = c.args.iter().map(expr_string).collect();
-            format!("{}({})", expr_string(&c.fun), args.join(", "))
-        }
-        Expr::ParenExpr(p) => format!("({})", expr_string(&p.x)),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        Expr::UnaryExpr(u) => format!("{}{}", u.op, expr_string(&u.x)),
-        Expr::BinaryExpr(b) => format!("{} {} {}", expr_string(&b.x), b.op, expr_string(&b.y)),
-        Expr::IndexExpr(i) => format!("{}[{}]", expr_string(&i.x), expr_string(&i.index)),
-        Expr::BasicLit(l) => l.value.clone(),
-        _ => "<expr>".into(),
-    }
+/// ginkgolinter renders with `GoFmtFormatter`
+/// (`internal/formatter/formatter.go`), which is `printer.Fprint` — go/printer,
+/// not an approximation. The walker this replaced always put blanks around a
+/// binary operator and answered `"<expr>"` for everything outside nine arms.
+fn expr_string(pass: &Pass<'_>, e: &Expr) -> String {
+    code::node_text(pass, e).unwrap_or_default()
 }
 
 fn suggest_assert(actual_func: &str, subject: &str, assert_method: &str, matcher: &str) -> String {
@@ -332,6 +323,7 @@ fn check_focus(call: &CallExpr, imports: ImportInfo<'_>, pending: &mut Vec<(u32,
 }
 
 fn check_len_rule(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     actual: &Expr,
     matcher: &Expr,
@@ -348,7 +340,7 @@ fn check_len_rule(
 
     // Expect(len(x)).To(Equal(...)) / BeZero() / BeNumerically(...)
     if let Some(inner) = len_inner(actual) {
-        let subject = expr_string(inner);
+        let subject = expr_string(pass, inner);
         let push_len = |pending: &mut Vec<(u32, String)>, matcher_sug: &str| {
             let sug = suggest_assert(assertion.actual_func, &subject, assert_method, matcher_sug);
             pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
@@ -360,7 +352,7 @@ fn check_len_rule(
                         if is_zero_lit(arg) {
                             push_len(pending, "BeEmpty()");
                         } else {
-                            push_len(pending, &format!("HaveLen({})", expr_string(arg)));
+                            push_len(pending, &format!("HaveLen({})", expr_string(pass, arg)));
                         }
                         return true;
                     }
@@ -475,11 +467,11 @@ fn check_len_rule(
                 (bin.y.as_ref(), bin.x.as_ref())
             };
             if let Some(inner) = len_inner(len_side) {
-                let subject = expr_string(inner);
+                let subject = expr_string(pass, inner);
                 let matcher_sug = if is_zero_lit(other) {
                     "BeEmpty()".to_string()
                 } else {
-                    format!("HaveLen({})", expr_string(other))
+                    format!("HaveLen({})", expr_string(pass, other))
                 };
                 let use_neg = matches!(bin.op, Token::NEQ)
                     ^ matches!(mname, "BeFalse")
@@ -510,6 +502,7 @@ fn check_len_rule(
 }
 
 fn check_havelen0(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
@@ -529,7 +522,7 @@ fn check_havelen0(
     if c.args.first().map(is_zero_lit).unwrap_or(false) {
         let subject = assertion
             .actual_arg
-            .map(expr_string)
+            .map(|e| expr_string(pass, e))
             .unwrap_or_else(|| "<expr>".into());
         let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeEmpty()");
         pending.push((assertion.pos, with_suggestion(MSG_LEN, &sug)));
@@ -539,6 +532,7 @@ fn check_havelen0(
 }
 
 fn check_equal_nil(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     opts: &GinkgolinterOptions,
@@ -558,7 +552,7 @@ fn check_equal_nil(
     if c.args.first().map(is_nil_ident).unwrap_or(false) {
         let subject = assertion
             .actual_arg
-            .map(expr_string)
+            .map(|e| expr_string(pass, e))
             .unwrap_or_else(|| "<expr>".into());
         let sug = suggest_assert(assertion.actual_func, &subject, assert_method, "BeNil()");
         pending.push((assertion.pos, with_suggestion(MSG_NIL, &sug)));
@@ -568,6 +562,7 @@ fn check_equal_nil(
 }
 
 fn check_equal_bool(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     matcher: &Expr,
     pending: &mut Vec<(u32, String)>,
@@ -592,7 +587,7 @@ fn check_equal_bool(
     };
     let subject = assertion
         .actual_arg
-        .map(expr_string)
+        .map(|e| expr_string(pass, e))
         .unwrap_or_else(|| "<expr>".into());
     let sug = suggest_assert(assertion.actual_func, &subject, assert_method, bool_matcher);
     pending.push((assertion.pos, with_suggestion(MSG_BOOL, &sug)));
@@ -600,6 +595,7 @@ fn check_equal_bool(
 }
 
 fn check_nil_compare(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     actual: &Expr,
     matcher: &Expr,
@@ -630,9 +626,9 @@ fn check_nil_compare(
         return false;
     }
     let subject = if is_nil_ident(bin.x.as_ref()) {
-        expr_string(bin.y.as_ref())
+        expr_string(pass, bin.y.as_ref())
     } else {
-        expr_string(bin.x.as_ref())
+        expr_string(pass, bin.x.as_ref())
     };
     let use_neg = matches!(bin.op, Token::NEQ)
         ^ matches!(mname, "BeFalse")
@@ -656,6 +652,7 @@ fn check_nil_compare(
 }
 
 fn check_assertion(
+    pass: &Pass<'_>,
     assertion: &ParsedAssertion<'_>,
     opts: &GinkgolinterOptions,
     pending: &mut Vec<(u32, String)>,
@@ -689,19 +686,19 @@ fn check_assertion(
     };
 
     // Order mirrors upstream: len → nil-compare → matcher-only (HaveLen0 / EqualBool / EqualNil).
-    if check_len_rule(assertion, actual, matcher, opts, pending) {
+    if check_len_rule(pass, assertion, actual, matcher, opts, pending) {
         return;
     }
-    if check_nil_compare(assertion, actual, matcher, opts, pending) {
+    if check_nil_compare(pass, assertion, actual, matcher, opts, pending) {
         return;
     }
-    if check_havelen0(assertion, matcher, opts, pending) {
+    if check_havelen0(pass, assertion, matcher, opts, pending) {
         return;
     }
-    if check_equal_bool(assertion, matcher, pending) {
+    if check_equal_bool(pass, assertion, matcher, pending) {
         return;
     }
-    let _ = check_equal_nil(assertion, matcher, opts, pending);
+    let _ = check_equal_nil(pass, assertion, matcher, opts, pending);
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
@@ -743,7 +740,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     {
                         return true;
                     }
-                    check_assertion(&assertion, &opts, &mut pending);
+                    check_assertion(pass, &assertion, &opts, &mut pending);
                 }
                 _ => {}
             }

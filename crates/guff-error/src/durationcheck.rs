@@ -5,11 +5,12 @@ use std::sync::OnceLock;
 use guff::ast::{AssignStmt, BinaryExpr, CallExpr, Expr, Ident, SelectorExpr};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::TypeId;
 
-use crate::util::{expr_string, type_of, unparen};
+use crate::util::{type_of, unparen};
 
 fn has_time_import(pass: &Pass<'_>) -> bool {
     if pass.pkg().imports.contains_key("time") {
@@ -151,11 +152,14 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr, pending: &mut Vec<(u32, Stri
             // `pass.Reportf(expr.Pos(), …)`, and `BinaryExpr.Pos()` is
             // `X.Pos()` — the left operand, not the operator between them.
             expr.x.pos().0 as u32,
+            // `pass.Reportf(…, "Multiplication of durations: `%s`", formatNode(expr))`
+            // — the *whole* BinaryExpr through `format.Node`, which is
+            // go/printer. Rebuilding it as "{x} {op} {y}" agrees on `d *
+            // time.Second` and diverges wherever go/printer's precedence rule
+            // drops the blanks.
             format!(
-                "Multiplication of durations: `{} {} {}`",
-                expr_string(&expr.x),
-                expr.op,
-                expr_string(&expr.y)
+                "Multiplication of durations: `{}`",
+                code::node_text(pass, &Expr::BinaryExpr(expr.clone())).unwrap_or_default()
             ),
         ));
     }

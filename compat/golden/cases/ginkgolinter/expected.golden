@@ -12,3 +12,5 @@ bad_test.go:14:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider u
 bad_test.go:15:3:ginkgolinter::ginkgo-linter: wrong nil assertion. Consider using `Expect(x).Should(BeNil())` instead
 bad_test.go:16:3:ginkgolinter::ginkgo-linter: wrong boolean assertion. Consider using `Expect(true).Should(BeTrue())` instead
 bad_test.go:17:3:ginkgolinter::ginkgo-linter: "Expect": missing assertion method. Expected "To()", "ToNot()" or "NotTo()"
+bad_test.go:26:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(t[len(u)/2+1:]).Should(HaveLen(1))` instead
+bad_test.go:27:3:ginkgolinter::ginkgo-linter: wrong length assertion. Consider using `Expect(t[len(u)-1 : len(t)]).Should(BeEmpty())` instead

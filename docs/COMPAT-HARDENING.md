@@ -83,7 +83,15 @@ ST1023/QF1011 の言い回し、末尾ピリオド、govet の Go バージョ�
 - **allowlist**: `compat/allowlists/*.txt` に記録した OSS の既知差分（例: consul 3 件）は
   理由と日付つきで除外されています。
 - **比較キーの穴**: `compat/normalize.py` は OSS 比較で column / severity / SuggestedFix を見ません（§1）。
-  **golden だけがそこまで見ます**。つまり **golden に入っていない check は、列がずれても CI は緑です。**
+  **golden は column と severity までは見ますが、SuggestedFix の本文は見ません** ——
+  golden のキーは `path:line:col:linter:severity:text` で、**fix のテキストは入っていない**。
+  つまり **fix にしか届かない描画は、どの tier からも構造的に見えません**。
+  実例: errorlint の `exprToString` は suggested fix の本文にしか使われないので、
+  移植の穴（`TypeAssertExpr` 腕の欠落、既定腕の文言違い）を golden で発見できず、
+  **上流の腕を直接 pin する unit test** で塞ぎました（続き 35）。
+  `--fix` の出力を差分する tier を足せば、この穴は埋まります。
+
+  そして **golden に入っていない check は、列がずれても CI は緑です。**
   linter 単位では 2026-08-24（続き 30）に **116/116 が golden case を持つ**状態になり、
   `compat/tests/test_golden_coverage.py` がそれをゲートにしています
   （新しい linter が golden 無しで入ってきたら落ちる）。
@@ -10609,3 +10617,166 @@ func Recv[T interface{ ~chan int }](c T) int     { return <-c }
 §4（2026-08-07）に既出。上流は `git log` のコミット日時を優先し、guff は
 ファイルの mtime を使う。ファイルごとに git を起動するコストが見合わないため。
 **golden fixture ではこの 2 つの値を使わない。**
+
+---
+
+### 2026-08-24（続き 35）— `expr_string` は「重複」ではなかった。**7 つあり、上流は 3 系統**
+
+続き 34 の「次にやること」3。あそこで「4 つあり、上流はどれも `go/printer`」と
+書いたが、**両方とも間違っていた**。数え直すと **7 つ**あり
+（`guff-error/util.rs` / `guff-revive/util.rs` / `ginkgolinter.rs` /
+`nestif.rs` / `perfsprint.rs` / `nonamedreturns.rs` / `testifylint.rs`）、
+上流の寄せ先は 1 つではなく **3 系統**ある:
+
+| 系統 | 上流の実体 | guff 側 |
+|---|---|---|
+| **go/printer** | `printer.Fprint` | `nestif`, `revive`, `ginkgolinter`, `durationcheck`, `err113`(片側) |
+| **手書きウォーカー（`go/printer` ではない）** | errorlint `exprToString`, err113 `rawString` | `guff-error/util.rs` |
+| **`format.Node`**（= go/printer + gofmt の設定） | perfsprint `formatNode`, testifylint `analysisutil.NodeString` | `perfsprint.rs`, `testifylint.rs` |
+| **未調査** | — | `nonamedreturns.rs`（上流を checkout していない） |
+
+**「同じに見えるから 1 つに寄せる」をやっていたら、errorlint を壊していた。**
+`exprToString` の `BinaryExpr` 腕は `X + " " + Op + " " + Y` ——
+**常に空白**で、`go/printer` が優先順位で空白を落とす形とは違う答えを返す。
+これは上流の挙動であって直す対象ではない。
+`guff-error/util.rs::expr_string` は errorlint の正しい移植であり、
+**それを durationcheck と err113 が借りていたのが誤り**だった。
+
+寄せる前に**上流を 1 本ずつ読む**。読まずに寄せると、
+正しい移植が近似で上書きされる。
+
+#### 見つかった欠陥 7 件
+
+1. **`nestif` が条件式を常に空白付きで描画していた。**
+   上流は `makeMessage` が `printer.Config{}.Fprint`。
+   `if len(a)/2+len(b) > 0` を guff は `if len(a) / 2 + len(b) > 0` と出す。
+   fixture が `if a` と `if x || y` しか持っていなかったので**見えなかった**。
+
+2. **`durationcheck` が式を `{x} {op} {y}` で組み立てていた。**
+   上流は `formatNode(expr)` —— **BinaryExpr 全体**を `go/printer` に通す。
+
+3. **`err113` の 1 メッセージが 2 つの描画器を使い分けている。**
+   `oldExpr := render(fset, be)`（go/printer）に対し
+   `newExpr` は `rawString` —— **`CallExpr` 腕が引数を捨てる**
+   (`fmt.Sprintf("%s()", …)`)。つまり同じ呼び出しが 1 行に 2 通りで出る:
+
+   ```
+   do not compare errors directly "err != wrap(ctx, ErrSentinel)",
+   use "!errors.Is(err, wrap())" instead
+   ```
+
+   `rawString` は 3 腕しか持たず、外れると `fmt.Sprintf("%s", x)` ——
+   `token.Pos` の生の整数が入った Go の構造体ダンプになる。
+   **これは fixture に入れない**: Pos は FileSet 全体の配置に依存するので
+   golden として再現しないし、合わせる意味もない。実測して確認したうえで外した。
+
+4. **`errorlint` の移植に 2 つの穴。** `TypeAssertExpr` 腕が無く、
+   既定腕が `"<expr>"`（上流は `"/* complex expression */"` という
+   **リテラル文字列**、コメント構文ごと）。
+
+5. **revive が型を `"<type>"` と描画していた。**
+   上流は `gofmt`(`rule/utils.go`) と `file.Render`(`lint/file.go`) ——
+   どちらも `printer.Fprint`。guff の 5 腕ウォーカーは
+   **map / chan / func / 可変長 / ジェネリック**を全部 `"<type>"` にし、
+   中身のある `interface{ Foo() int }` を `interface{}` に潰していた。
+   これは `time-equal` / `var-declaration` /
+   `enforce-repeated-arg-type-style` の**メッセージ**と、
+   `context-as-argument` の allow-list 照合に届く
+   ——後者は、ユーザの `allow-types-before` が**永久に一致しなくなる**。
+
+6. **`var-declaration` が型の同一性を id 比較していた。**
+   上流は `types.Identical(lhsTyp, rhsTyp)` —— **構造的**同一性。
+   id 比較は「たまたま同じ entry に intern された綴り」でしか一致しないので、
+   **無名の複合型が丸ごと取りこぼし**だった:
+   `var c chan struct{} = make(chan struct{})` は黙り、
+   `var m map[string]int = map[string]int{}` は報告する、という形で割れる。
+   `types_identical` は既に 5 箇所で使われている定型があった。
+
+7. **`time-equal` の演算子が `EQL`** と出ていた。
+   上流は `%q` を `expr.Op`(`token.Token`) に当てるので `"=="`。
+
+#### golden tier に**構造的に見えない**もの
+
+今回はっきりした。golden の key は
+`path:line:col:linter:severity:text` で、**suggested fix の本文は入らない**。
+`errorlint` の `exprToString` は fix にしか届かないので、
+**どんな case を足しても golden からは見えない**。
+列と severity の穴（#104〜#106 の出所）と同じ形の穴が、もう 1 つあった。
+
+代わりに**上流の腕を直接 pin する unit test** を置いた
+（`guff-error/src/util.rs` の `expr_string_tests`）。
+golden で見えないものには、見えないと書いたうえで別の網を張る。
+
+#### fixture を足す先を間違えた
+
+`extended_bad.go` に 12 個の関数を足したら、
+既存の `revive_flags_extended_rule_violations` が落ちた ——
+新しい `exported:` の指摘がメッセージ列を押し出して
+`comment-spacings:` の assertion が見つからなくなった。
+**共有 fixture への追記は、無関係な assertion を静かに壊す。**
+`type_rendering_bad.go` として独立させた。
+
+#### ratchet の中に fixture を置いてしまった
+
+`time-equal` の形を `type_rendering_bad.go` に入れて regen したら、
+`missing=2 extra=7` —— ratchet（`missing:1 extra:4`）を割った。
+原因は既に §6 に書いてあった: 上流の `time-equal` は
+`file.Pkg.TypeCheck() != nil` で丸ごと gate されており、
+その type-check は `importer.Default()` ——
+`.a` を見つけられず**全 import が invalid** になるので、
+**上流では何を書いても発火しない**。
+
+**ratchet が「既知の恒久差」と書いている領域に fixture を置いてはいけない。**
+そこは golden が答えを持たない領域で、置けば ratchet を割るだけになる。
+形を外し、`"=="` の綴りは unit test で pin した（golden では検証できない、
+と test のコメントに理由ごと残してある）。
+
+#### 設定のドリフトが 1 件
+
+`compat/golden/cases/revive/config.yml` は
+「arguments は `extended_test_settings` を写している」と書いているが、
+`enforce-repeated-arg-type-style` は golden 側だけが `["short"]` を持ち、
+Rust 側は引数無し —— **引数が無いとこの rule は bail する**ので、
+Rust テストからは**一度も到達できていなかった**。
+`extended_test_arguments` に足して塞いだ。
+「mirror している」と書いてある対は、**書いてあるだけでは mirror ではない**。
+
+#### 検証
+
+近似を消したので描画が変わる。**変わったことを golden に見せる**ため、
+判別できる形を fixture に足した:
+
+| case | 足した形 | 上流の答え |
+|---|---|---|
+| `nestif` | `if len(a)/2+len(b) > 0` | 空白なし |
+| `err113` | `err != wrap(ctx, ErrSentinel)` | 左は引数あり、右は `wrap()` |
+| `err113` | `fmt.Errorf("%s: %d", name, n*2+1)` | `n*2+1` |
+| `ginkgolinter` | `t[len(u)/2+1:]` | 空白なし（旧実装は `<expr>`） |
+| `ginkgolinter` | `t[len(u)-1 : len(t)]` | `:` の**両側に空白**（添字が二項式のとき） |
+| `revive` | map / chan / func / `interface{ Foo() int }` / `[]*time.Time` / `Pair[string, int]` | 綴りそのまま |
+
+`nestif` は**両方向**で確かめた: 修正を stash して release を建て直すと
+`match=2 missing=1 extra=1` になり、戻すと `match=3`。
+**消したコードが本当に間違っていたことを、消す前に見る。**
+
+golden 193/193、`cargo test --workspace` 通過。
+
+#### 次にやること
+
+1. **残り 3 つの `expr_string`** —— `perfsprint` / `testifylint` /
+   `nonamedreturns`。上流は読んだ: perfsprint の `formatNode` も
+   testifylint の `analysisutil.NodeString` も **`format.Node`**
+   （`go/printer` に gofmt の設定を当てたもの。1 行の式なら
+   `printer.Fprint` と同じ出力）。
+   つまり `testifylint.rs` の `CallExpr` 腕 `fun()` は
+   **`rawString` のような忠実な移植ではなく、ただの近似**だった ——
+   ここは寄せてよい。ただし testifylint のこの関数は
+   メッセージ本文ではなく**部分式どうしの同一性比較**にも使われている
+   （`expr_string(&ce.fun)` など）ので、
+   寄せると比較の粒度が変わる。判別できる形を fixture に足してから動かす。
+   `nonamedreturns` だけは上流が手元に無く未確認。
+2. **suggested fix の本文を見る tier があるか**。
+   `--fix` の出力差分を取る tier は、
+   列・severity と同じ「構造的に見えない」穴を 1 つ埋める。
+3. **残り 27 の linter case**（続き 33）。
+4. `compat/results/` の tier 別分割（続き 28/29/30/33）。

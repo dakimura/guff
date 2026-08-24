@@ -429,6 +429,10 @@ fn extended_test_arguments(name: &str) -> Vec<RuleArgument> {
         "comments-density" => vec![RuleArgument::Integer(10)],
         "enforce-map-style" => vec![RuleArgument::String("make".into())],
         "enforce-slice-style" => vec![RuleArgument::String("make".into())],
+        // Without an argument this rule bails, so the Rust tests could not
+        // reach it at all while compat/golden/cases/revive had it configured —
+        // the golden config's claim to mirror these arguments was stale.
+        "enforce-repeated-arg-type-style" => vec![RuleArgument::String("short".into())],
         _ => Vec::new(),
     }
 }
