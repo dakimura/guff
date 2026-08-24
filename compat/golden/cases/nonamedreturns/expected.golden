@@ -14,3 +14,9 @@ bad/bad.go:20:1:nonamedreturns::named return "c" with type "<-chan int" found
 bad/bad.go:22:1:nonamedreturns::named return "c" with type "chan<- int" found
 bad/bad.go:24:1:nonamedreturns::named return "c" with type "chan int" found
 bad/bad.go:28:14:nonamedreturns::named return "f" with type "func(*Command) error" found
+bad/bad.go:39:1:nonamedreturns::named return "s" with type "struct{A int}" found
+bad/bad.go:41:1:nonamedreturns::named return "i" with type "interface{Foo() int}" found
+bad/bad.go:43:1:nonamedreturns::named return "p" with type "Pair[string, int]" found
+bad/bad.go:45:1:nonamedreturns::named return "p" with type "*Pair[string, []int]" found
+bad/bad.go:47:1:nonamedreturns::named return "m" with type "map[string]func(int) error" found
+bad/bad.go:49:1:nonamedreturns::named return "a" with type "[3]<-chan struct{B bool}" found

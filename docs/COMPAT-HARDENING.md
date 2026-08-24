@@ -10620,20 +10620,20 @@ func Recv[T interface{ ~chan int }](c T) int     { return <-c }
 
 ---
 
-### 2026-08-24（続き 35）— `expr_string` は「重複」ではなかった。**7 つあり、上流は 3 系統**
+### 2026-08-24（続き 35）— `expr_string` は「重複」ではなかった。**7 つあり、上流は 4 系統**
 
 続き 34 の「次にやること」3。あそこで「4 つあり、上流はどれも `go/printer`」と
 書いたが、**両方とも間違っていた**。数え直すと **7 つ**あり
 （`guff-error/util.rs` / `guff-revive/util.rs` / `ginkgolinter.rs` /
 `nestif.rs` / `perfsprint.rs` / `nonamedreturns.rs` / `testifylint.rs`）、
-上流の寄せ先は 1 つではなく **3 系統**ある:
+上流の寄せ先は 1 つではなく **4 系統**ある:
 
 | 系統 | 上流の実体 | guff 側 |
 |---|---|---|
 | **go/printer** | `printer.Fprint` | `nestif`, `revive`, `ginkgolinter`, `durationcheck`, `err113`(片側) |
 | **手書きウォーカー（`go/printer` ではない）** | errorlint `exprToString`, err113 `rawString` | `guff-error/util.rs` |
 | **`format.Node`**（= go/printer + gofmt の設定） | perfsprint `formatNode`, testifylint `analysisutil.NodeString` | `perfsprint.rs`, `testifylint.rs` |
-| **未調査** | — | `nonamedreturns.rs`（上流を checkout していない） |
+| **`types.ExprString`** | nonamedreturns `analyzer.go:89` | `nonamedreturns.rs` |
 
 **「同じに見えるから 1 つに寄せる」をやっていたら、errorlint を壊していた。**
 `exprToString` の `BinaryExpr` 腕は `X + " " + Op + " " + Y` ——
@@ -10754,6 +10754,9 @@ Rust テストからは**一度も到達できていなかった**。
 | `ginkgolinter` | `t[len(u)/2+1:]` | 空白なし（旧実装は `<expr>`） |
 | `ginkgolinter` | `t[len(u)-1 : len(t)]` | `:` の**両側に空白**（添字が二項式のとき） |
 | `revive` | map / chan / func / `interface{ Foo() int }` / `[]*time.Time` / `Pair[string, int]` | 綴りそのまま |
+| `nonamedreturns` | `struct{ A int }` / `interface{ Foo() int }` / `Pair[string, int]` / `[3]<-chan struct{ B bool }` | **`struct{A int}`**（内側に空白なし。`go/printer` とは別綴り） |
+| `perfsprint` | `w.errs[i*2+j]` | 空白なし |
+| `testifylint` | `genericHelperWithRequire[int]`（IndexExpr） | 綴りそのまま（旧実装は `<expr>`） |
 
 `nestif` は**両方向**で確かめた: 修正を stash して release を建て直すと
 `match=2 missing=1 extra=1` になり、戻すと `match=3`。
@@ -10763,20 +10766,42 @@ golden 193/193、`cargo test --workspace` 通過。
 
 #### 次にやること
 
-1. **残り 3 つの `expr_string`** —— `perfsprint` / `testifylint` /
-   `nonamedreturns`。上流は読んだ: perfsprint の `formatNode` も
-   testifylint の `analysisutil.NodeString` も **`format.Node`**
-   （`go/printer` に gofmt の設定を当てたもの。1 行の式なら
-   `printer.Fprint` と同じ出力）。
-   つまり `testifylint.rs` の `CallExpr` 腕 `fun()` は
-   **`rawString` のような忠実な移植ではなく、ただの近似**だった ——
-   ここは寄せてよい。ただし testifylint のこの関数は
-   メッセージ本文ではなく**部分式どうしの同一性比較**にも使われている
-   （`expr_string(&ce.fun)` など）ので、
-   寄せると比較の粒度が変わる。判別できる形を fixture に足してから動かす。
-   `nonamedreturns` だけは上流が手元に無く未確認。
+1. **~~残り 3 つの `expr_string`~~** —— 続く PR で済ませた（#115）。
+   系統は**もう 1 つ増えて 4 つ**になった:
+   perfsprint と testifylint は `format.Node`、
+   **`nonamedreturns` だけが `types.ExprString`** だった
+   （`analyzer.go:89` が `types.ExprString(p.Type)` を直接呼んでいる）。
+   ここを `go/printer` に寄せていたら**壊していた** ——
+   `ExprString` は `struct{A int}` と綴り、`go/printer` は
+   `struct{ A int }` と綴る。上流を読まずに「同じ描画だろう」と
+   寄せた場合に**実際に出ていた差**がこれ。
+   guff には `guff_types::exprstring` に完全な移植が既にあったので、
+   private な部分移植を捨ててそれを指すだけで済んだ ——
+   **寄せる前に「正しい移植が既に別の場所にあるか」も見る。**
+
+   ここも判別できる形を fixture に足して確かめた:
+   `nonamedreturns` に `struct{ A int }` /
+   `interface{ Foo() int }` / `Pair[string, int]` /
+   `[3]<-chan struct{ B bool }`（旧実装は全部 `<expr>`）、
+   `perfsprint` に `w.errs[i*2+j]`、
+   `testifylint` に `genericHelperWithRequire[int]`
+   （`ce.Fun` が IndexExpr になる形。上流は `go-require` で
+   `analysisutil.NodeString(pass.Fset, ce.Fun)` を出す）。
+   `testifylint` の 13 本の既存 golden 行は
+   受け手も呼び先も**ただの識別子**なので、
+   近似と go/printer が一致してしまい**判別にならなかった** ——
+   「その check が golden に載っている」ことと
+   「その描画を golden が見分けられる」ことは別。
 2. **suggested fix の本文を見る tier があるか**。
    `--fix` の出力差分を取る tier は、
    列・severity と同じ「構造的に見えない」穴を 1 つ埋める。
-3. **残り 27 の linter case**（続き 33）。
+3. **残り 27 の linter case**（続き 33）。ただし**数え方に注意**:
+   `expected.golden` が 1〜2 件の case を機械的に数えると 52 件出るが、
+   その多くは**設定 case** —— `run-tests-off` / `govet-disable-all` /
+   `revive-confidence-095` / `gocritic-disable-all` / `generated-lax` /
+   `run-build-tags-none` など、
+   「その設定で件数が変わること」を pin するのが目的で、
+   **1 件のままが正しい**（続き 33 と同じ話）。
+   広げる対象は「linter の腕を fixture が踏んでいない case」であって
+   「件数が少ない case」ではない。上流の `Reportf` を数えるほうが速い。
 4. `compat/results/` の tier 別分割（続き 28/29/30/33）。

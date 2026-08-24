@@ -119,21 +119,14 @@ fn is_concatable(verb: &str) -> bool {
     (has_prefix || has_suffix) && !(has_prefix && has_suffix)
 }
 
-fn expr_string(e: &Expr) -> String {
-    match e {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::CallExpr(c) => {
-            let args: Vec<String> = c.args.iter().map(expr_string).collect();
-            format!("{}({})", expr_string(&c.fun), args.join(", "))
-        }
-        Expr::ParenExpr(p) => format!("({})", expr_string(&p.x)),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        Expr::UnaryExpr(u) => format!("{}{}", u.op, expr_string(&u.x)),
-        Expr::BasicLit(l) => l.value.clone(),
-        Expr::IndexExpr(i) => format!("{}[{}]", expr_string(&i.x), expr_string(&i.index)),
-        _ => "<expr>".into(),
-    }
+/// perfsprint renders with `formatNode` (`analyzer/analyzer.go`), which is
+/// `format.Node` — go/printer with gofmt's config.
+///
+/// Most of its uses are suggested-fix text, which no tier can see, but
+/// `err-error` puts the rendering in the *message*:
+/// `fn+" can be replaced with "+errMethodCall`.
+fn expr_string(pass: &Pass<'_>, e: &Expr) -> String {
+    guff_analysis::code::node_text(pass, e).unwrap_or_default()
 }
 
 fn as_string_lit(expr: &Expr) -> Option<&BasicLit> {
@@ -307,7 +300,7 @@ fn check_call(
                 vec![replace_call_prefix(call, value, "errors.New")],
             );
         } else {
-            let text = expr_string(value);
+            let text = expr_string(pass, value);
             report(
                 "string-format",
                 format!("{fn_name} can be replaced with just using the string"),
@@ -319,7 +312,7 @@ fn check_call(
 
     // Known false positive if err is nil: fmt.Sprint(nil) does not panic like nil.Error().
     if implements_error(pass, value_type) && one_of(verb_ref, &["%v", "%s"]) {
-        let err_call = format!("{}.Error()", expr_string(value));
+        let err_call = format!("{}.Error()", expr_string(pass, value));
         report(
             "err-error",
             format!("{fn_name} can be replaced with {err_call}"),
@@ -503,7 +496,7 @@ fn check_call(
         if !options.strconcat {
             return;
         }
-        let val = expr_string(value);
+        let val = expr_string(pass, value);
         let fix = if let Some(prefix) = verb_ref.strip_suffix("%s") {
             format!("{}+{}", go_quote(&prefix.replace("%%", "%")), val)
         } else if let Some(prefix) = verb_ref.strip_suffix("%[1]s") {

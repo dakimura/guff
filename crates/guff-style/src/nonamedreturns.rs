@@ -22,6 +22,12 @@ use guff_analysis::code::object_of;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 use guff_types::arena::ObjectData;
+// nonamedreturns reports `types.ExprString(p.Type)` (`analyzer.go:89`) — *not*
+// `go/printer`. guff already ports `types.ExprString` in full, so this uses it
+// rather than the partial walker that used to live in this file: that one fell
+// back to `"<expr>"` for non-empty structs and interfaces, generic
+// instantiations (`IndexListExpr`), slice expressions and func literals.
+use guff_types::exprstring::expr_string;
 use guff_types::predicates::identical as types_identical;
 use guff_types::{ObjectId, TypeId};
 
@@ -120,46 +126,6 @@ fn field_list_string(fields: &guff::ast::FieldList) -> String {
         });
     }
     parts.join(", ")
-}
-
-/// Approximate `go/types.ExprString` for common type expressions.
-fn expr_string(e: &Expr) -> String {
-    match e {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        Expr::ParenExpr(p) => format!("({})", expr_string(&p.x)),
-        Expr::ArrayType(a) => match &a.len {
-            None => format!("[]{}", expr_string(&a.elt)),
-            Some(len) => format!("[{}]{}", expr_string(len), expr_string(&a.elt)),
-        },
-        Expr::MapType(m) => format!("map[{}]{}", expr_string(&m.key), expr_string(&m.value)),
-        // `ChanDir` is a bitset: a bidirectional channel carries both bits, so
-        // the one-way cases are the ones missing a bit.
-        Expr::ChanType(c) => {
-            let send = c.dir.0 & ChanDir::SEND.0 != 0;
-            let recv = c.dir.0 & ChanDir::RECV.0 != 0;
-            let value = expr_string(&c.value);
-            match (send, recv) {
-                (false, true) => format!("<-chan {value}"),
-                (true, false) => format!("chan<- {value}"),
-                _ => format!("chan {value}"),
-            }
-        }
-        Expr::InterfaceType(it) if it.methods.list.is_empty() => "interface{}".into(),
-        Expr::StructType(st) if st.fields.list.is_empty() => "struct{}".into(),
-        // `writeSigExpr`. This was `"func(...)"`, which is not a type anyone
-        // wrote — nonamedreturns prints this string, so cobra's
-        // `func(*Command) error` came out as `func(...)` and stood on both
-        // sides of the diff at once.
-        Expr::FuncType(ft) => format!("func{}", sig_string(ft)),
-        Expr::Ellipsis(el) => match &el.elt {
-            Some(t) => format!("...{}", expr_string(t)),
-            None => "...".into(),
-        },
-        Expr::BasicLit(l) => l.value.clone(),
-        _ => "<expr>".into(),
-    }
 }
 
 fn mark_assigned(pass: &Pass<'_>, expr: &Expr, assigned: &mut HashSet<ObjectId>) {

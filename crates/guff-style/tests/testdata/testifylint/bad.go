@@ -88,6 +88,10 @@ func TestBad(t *testing.T) {
 		require.NoError(t, err)
 		assert.FailNow(t, "boom!")
 		helperWithRequire(t)
+		// The message renders `ce.Fun` with `analysisutil.NodeString`. A
+		// generic helper's `Fun` is an IndexExpr, which is outside the arms of
+		// any partial walker — the one this replaced answered "<expr>".
+		genericHelperWithRequire[int](t)
 	}()
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -100,6 +104,10 @@ func TestBad(t *testing.T) {
 }
 
 func helperWithRequire(t *testing.T) {
+	require.Fail(t, "boom!")
+}
+
+func genericHelperWithRequire[T any](t *testing.T) {
 	require.Fail(t, "boom!")
 }
 

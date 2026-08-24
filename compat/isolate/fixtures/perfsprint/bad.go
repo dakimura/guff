@@ -35,3 +35,17 @@ func BoolFormat(b bool) string {
 func ErrorsNew() error {
 	return errors.New(fmt.Sprintf("x"))
 }
+
+// `err-error` puts the rendered value in the *message*
+// (`fn+" can be replaced with "+errMethodCall`), so a value the two renderers
+// spell differently is what makes the rendering verifiable. perfsprint uses
+// `format.Node`, which drops the blanks around a higher-precedence operator.
+type wrapper struct{ errs []error }
+
+func ErrErrorIndexed(w wrapper, i, j int) string {
+	return fmt.Sprintf("%v", w.errs[i*2+j])
+}
+
+func ErrErrorCalled(f func() error) string {
+	return fmt.Sprintf("%s", f())
+}
