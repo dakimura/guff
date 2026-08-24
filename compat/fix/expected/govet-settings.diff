@@ -1,0 +1,26 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh govet-settings
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/govet-settings/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/settings/bad.go
++++ b/settings/bad.go
+@@ -13,7 +13,6 @@
+ package settings
+ 
+ func Assign(x int) int {
+-	x = x // assign
+ 	return x
+ }
+ 
+@@ -24,5 +23,4 @@
+ 
+ func Unreachable() int {
+ 	return 1
+-	return 2 // unreachable
+ }

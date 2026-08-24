@@ -1,0 +1,44 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh nlreturn
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/nlreturn/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -8,6 +8,7 @@
+ 		return 1
+ 	}
+ 	x := 2
++
+ 	return x
+ }
+ 
+@@ -15,6 +16,7 @@
+ 	for _, x := range xs {
+ 		if x > 0 {
+ 			_ = x
++
+ 			break
+ 		}
+ 	}
+@@ -24,6 +26,7 @@
+ 	for _, x := range xs {
+ 		if x > 0 {
+ 			_ = x
++
+ 			continue
+ 		}
+ 	}
+@@ -32,6 +35,7 @@
+ func Goto() {
+ 	i := 0
+ 	_ = i
++
+ 	goto end
+ end:
+ }

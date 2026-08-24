@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh revive-confidence-085
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/revive-confidence-085/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/settings/settings.go
++++ b/settings/settings.go
+@@ -30,7 +30,7 @@
+ 
+ // Wrap builds an error the long way (errorf).
+ func Wrap(name string) error {
+-	return errors.New(fmt.Sprintf("bad %s", name))
++	return fmt.Errorf("bad %s", name)
+ }
+ 
+ // The declaration below is undocumented on purpose: `exported` is one of

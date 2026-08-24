@@ -1,0 +1,34 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh canonicalheader
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/canonicalheader/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,7 +3,7 @@
+ import "net/http"
+ 
+ func Bad(h http.Header) {
+-	_ = h.Get("content-type")
++	_ = h.Get("Content-Type")
+ }
+ 
+ // The message quotes the header it saw and the canonical spelling, so every
+@@ -11,9 +11,9 @@
+ // sites upstream matches, not just `Get`.
+ func More(h http.Header) {
+ 	h.Set("x-request-id", "1")
+-	h.Add("accept-encoding", "gzip")
+-	h.Del("user-agent")
+-	_ = h.Values("if-none-match")
++	h.Add("Accept-Encoding", "gzip")
++	h.Del("User-Agent")
++	_ = h.Values("If-None-Match")
+ }
+ 
+ // Negatives: a header whose MIME-canonical form is in upstream's initialism

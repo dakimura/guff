@@ -1,0 +1,28 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh wsl
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/wsl/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -3,12 +3,15 @@
+ func Bad() {
+ 	one := 1
+ 	two := 2
++
+ 	three := 3
+ 	if three == 3 {
+ 		_ = one
+ 		_ = two
++
+ 		return
+ 	}
++
+ 	four := 4
+ 	_ = four
+ }

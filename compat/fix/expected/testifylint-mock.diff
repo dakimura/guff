@@ -1,0 +1,107 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh testifylint-mock
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/testifylint-mock/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad/bad_test.go
++++ b/bad/bad_test.go
+@@ -34,44 +34,44 @@
+ 	conf := "k: v"
+ 	expected := 42
+ 
+-	assert.Equal(t, false, result)
+-	assert.Equal(t, true, result)
+-	assert.True(t, result == true)
+-	assert.True(t, a == b)
+-	assert.Equal(t, 0, len(arr))
+-	assert.Equal(t, "", str)
+-	assert.Nil(t, err)
+-	assert.Equal(t, nil, err)
+-	assert.Equal(t, nil, ptr)
+-	assert.Equal(t, 3, len(arr))
++	assert.False(t, result)
++	assert.True(t, result)
++	assert.True(t, result)
++	assert.Equal(t, a, b)
++	assert.Empty(t, arr)
++	assert.Empty(t, str)
++	assert.NoError(t, err)
++	assert.NoError(t, err)
++	assert.Nil(t, ptr)
++	assert.Len(t, arr, 3)
+ 	assert.Equal(t, 1.5, f)
+ 
+ 	assert.Equal(t, time.Time{}, ts)
+ 	assert.True(t, ts.IsZero())
+ 	assert.Equal(t, t1, t2)
+-	assert.Less(t, signed, 0)
+-	assert.Greater(t, pos, 0)
++	assert.Negative(t, signed)
++	assert.Positive(t, pos)
+ 	assert.Equal(t, signed, signed)
+ 	assert.Zero(t, 42)
+ 	assert.True(t, true)
+ 
+-	assert.True(t, strings.Contains(str, "hi"))
++	assert.Contains(t, str, "hi")
+ 	assert.Contains(t, arr, 1, 2)
+-	assert.EqualValues(t, 42, pos)
+-	assert.Regexp(t, regexp.MustCompile(`hi`), str)
++	assert.Equal(t, 42, pos)
++	assert.Regexp(t, `hi`, str)
+ 
+-	assert.Error(t, err, errSentinel)
+-	assert.True(t, errors.Is(err, errSentinel))
++	assert.ErrorIs(t, err, errSentinel)
++	assert.ErrorIs(t, err, errSentinel)
+ 	assert.IsType(t, err, errSentinel)
+ 
+-	assert.Equal(t, `{"foo":"bar"}`, body)
+-	assert.Equal(t, expectedJSON, body)
+-	assert.Equal(t, expectedYML, conf)
++	assert.JSONEq(t, `{"foo":"bar"}`, body)
++	assert.JSONEq(t, expectedJSON, body)
++	assert.YAMLEq(t, expectedYML, conf)
+ 
+-	assert.Equal(t, pos, expected)
+-	assert.Equal(t, pos, 42)
++	assert.Equal(t, expected, pos)
++	assert.Equal(t, 42, pos)
+ 
+-	assert.Equal(t, 1, 2, fmt.Sprintf("msg"))
++	assert.Equal(t, 1, 2, "msg")
+ 	assert.Equal(t, 1, 2, 42)
+ 	assert.Fail(t, "case [%d] failed", 1)
+ 
+@@ -121,8 +121,8 @@
+ 	var result any
+ 	b := true
+ 
+-	s.Assert().True(b)
+-	assert.Equal(s.T(), 42, result)
++	s.True(b)
++	s.Equal(42, result)
+ 	s.T().Run("sub", func(t *testing.T) {
+ 		assert.Equal(t, 1, 2)
+ 	})
+@@ -135,13 +135,13 @@
+ func (s *SuiteBad) SetupTest(_ int) {}
+ 
+ func (s *SuiteBad) TestParallelBroken() {
+-	s.T().Parallel()
+ 	s.Run("sub", func() {
+-		s.T().Parallel()
+ 	})
+ }
+ 
+ func (s *SuiteBad) helperWithoutTHelper() {
++	s.T().Helper()
++
+ 	s.Equal(1, 2)
+ }
+ 

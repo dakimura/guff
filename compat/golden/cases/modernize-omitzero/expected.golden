@@ -8,3 +8,6 @@
 
 omitzeroplain/omitzero_plain.go:9:21:modernize::omitzero: Omitempty has no effect on nested struct fields
 omitzeroplain/omitzero_plain.go:10:21:modernize::omitzero: Omitempty has no effect on nested struct fields
+omitzeroshapes/omitzero_shapes.go:17:20:modernize::omitzero: Omitempty has no effect on nested struct fields
+omitzeroshapes/omitzero_shapes.go:23:19:modernize::omitzero: Omitempty has no effect on nested struct fields
+omitzeroshapes/omitzero_shapes.go:28:20:modernize::omitzero: Omitempty has no effect on nested struct fields

@@ -1,0 +1,19 @@
+# What guff's `--fix` writes TODAY for nolint-strict — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/nolint-strict.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending nolint-strict
+--- a/group/group.go
++++ b/group/group.go
+@@ -12,6 +12,6 @@
+ 	// Inside the function body: still covered, we recieve that too.
+ }
+ 
+-// B is documented here, in a comment group of its own: this recieve is
++// B is documented here, in a comment group of its own: this receive is
+ // reported.
+ func B() {}

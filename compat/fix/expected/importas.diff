@@ -1,0 +1,29 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh importas
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/importas/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -1,12 +1,12 @@
+ package p
+ 
+ import (
+-	f "fmt"
+-	"strings"
++	fmtpkg "fmt"
++	str "strings"
+ )
+ 
+ // importas has two messages: one for an import aliased to the wrong thing, one
+ // for an import that carries no alias where the config requires one. They read
+ // differently and only the first names the alias that was found.
+-var _ = f.Sprintf
+-var _ = strings.Contains
++var _ = fmtpkg.Sprintf
++var _ = str.Contains

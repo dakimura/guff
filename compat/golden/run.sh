@@ -75,31 +75,10 @@ echo "  mode:     $([[ "$REGEN" -eq 1 ]] && echo regenerate || echo check)"
 echo "  results:  $RUN_DIR"
 echo
 
-# Materialize a case into $WORK_ROOT/<name>: go.mod + the sources listed in
-# sources.txt, copied from their canonical location in the repo.
-materialize() {
-  local name="$1" case_dir="$2" work="$3"
-  rm -rf "$work"
-  mkdir -p "$work"
-  cp "$case_dir/go.mod" "$work/go.mod"
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    local line dest src
-    line="${raw%%#*}"
-    line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    [[ -z "$line" ]] && continue
-    # The two columns are separated by a run of two or more spaces, not by a
-    # single one: either path may itself contain a space (revive's
-    # filename-format fixture is literally named "bad file.go").
-    if [[ "$line" =~ ^(.*[^[:space:]])[[:space:]][[:space:]]+(.+)$ ]]; then
-      dest="${BASH_REMATCH[1]}"; src="${BASH_REMATCH[2]}"
-    else
-      die "$name: sources.txt needs two or more spaces between the columns: $raw"
-    fi
-    [[ -f "$ROOT/$src" ]] || die "$name: missing source $src"
-    mkdir -p "$(dirname "$work/$dest")"
-    cp "$ROOT/$src" "$work/$dest"
-  done <"$case_dir/sources.txt"
-}
+# A case is go.mod + sources.txt + optional env, and the fix tier reads the
+# same three. Both definitions live in materialize.sh.
+# shellcheck source=compat/golden/materialize.sh
+source "$GOLDEN_DIR/materialize.sh"
 
 FAILED=0
 SELECTED=0
@@ -124,27 +103,10 @@ for case_dir in "$CASES_DIR"/*/; do
   SELECTED=$((SELECTED + 1))
 
   work="$WORK_ROOT/$name"
-  materialize "$name" "$case_dir" "$work"
+  materialize_case "$name" "$case_dir" "$work" "$ROOT"
   golden="$case_dir/expected.golden"
 
-  # Optional `cases/<name>/env`: KEY=VALUE lines applied to *both* tools. A
-  # check whose behaviour depends on the target platform (SA1027 returns early
-  # unless the word size is 4) is unreachable on the host arch and needs
-  # GOOS/GOARCH to be compared at all.
-  case_env=()
-  case_goos=""
-  case_goarch=""
-  if [[ -f "$case_dir/env" ]]; then
-    while IFS= read -r raw || [[ -n "$raw" ]]; do
-      line="${raw%%#*}"
-      line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      [[ -z "$line" ]] && continue
-      [[ "$line" == *=* ]] || die "$name: env line is not KEY=VALUE: $raw"
-      case_env+=("$line")
-      [[ "$line" == GOOS=* ]] && case_goos="${line#GOOS=}"
-      [[ "$line" == GOARCH=* ]] && case_goarch="${line#GOARCH=}"
-    done <"$case_dir/env"
-  fi
+  read_case_env "$name" "$case_dir"
 
   # A fixture whose build constraints resolve differently on darwin and on the
   # runner makes the golden a recording of one machine, and the difference

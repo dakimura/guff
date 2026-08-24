@@ -122,6 +122,14 @@ jobs:
       - name: Golden gate (check-level)
         run: ./compat/golden/run.sh
 
+      # What the two tools *write*, not what they say: --fix over the same
+      # cases, diffed byte for byte. Runs guff only — golangci-lint's answer is
+      # already recorded under compat/fix/expected — plus a `go build` over each
+      # rewritten tree, because a fix that drops the import it now needs is a
+      # gate no finding key can express (compat/fix/README.md).
+      - name: Fix gate (what --fix writes)
+        run: ./compat/fix/run.sh
+
       # The other direction: configs golangci-lint validates and refuses to
       # start on. A finding-set tier cannot express "upstream exited before
       # linting", and a tool that runs such a config lints with an enable set

@@ -1,0 +1,81 @@
+# What guff's `--fix` writes TODAY for staticcheck-sa — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/staticcheck-sa.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending staticcheck-sa
+--- a/sa1004/bad/bad.go
++++ b/sa1004/bad/bad.go
+@@ -3,6 +3,6 @@
+ import "time"
+ 
+ func main() {
+-	time.Sleep(1)
+-	time.Sleep(42)
++	time.Sleep(1 * time.Nanosecond)
++	time.Sleep(42 * time.Nanosecond)
+ }
+--- a/sa1018/ok/ok.go
++++ b/sa1018/ok/ok.go
+@@ -3,6 +3,6 @@
+ import "strings"
+ 
+ func main() {
+-	strings.Replace("abc", "a", "b", -1)
++	strings.ReplaceAll("abc", "a", "b")
+ 	strings.Replace("abc", "a", "b", 1)
+ }
+--- a/sa4014/bad/bad.go
++++ b/sa4014/bad/bad.go
+@@ -1,7 +1,9 @@
+ package main
++
+ func main() {
+-    x := 1
+-    if x == 1 {
+-    } else if x == 1 {
+-    }
++	x := 1
++	switch x {
++	case 1:
++	case 1:
++	}
+ }
+--- a/sa4014/ok/ok.go
++++ b/sa4014/ok/ok.go
+@@ -1,7 +1,9 @@
+ package main
++
+ func main() {
+-    x := 1
+-    if x == 1 {
+-    } else if x == 2 {
+-    }
++	x := 1
++	switch x {
++	case 1:
++	case 2:
++	}
+ }
+--- a/sa4032/ok/ok.go
++++ b/sa4032/ok/ok.go
+@@ -1,12 +1,13 @@
+ //go:build !plan9
+ 
+ package main
++
+ import "runtime"
+ 
+ const plan9 = "plan9"
+ 
+ func main() {
+-    _ = runtime.GOOS == "linux"
+-    _ = "plan9" == runtime.GOOS
+-    _ = runtime.GOOS == plan9
++	_ = runtime.GOOS == "linux"
++	_ = runtime.GOOS == "plan9"
++	_ = runtime.GOOS == plan9
+ }

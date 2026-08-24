@@ -1,0 +1,28 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh sloglint
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/sloglint/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -26,7 +26,7 @@
+ 
+ // key-naming-case: snake
+ func WrongKeyCase() {
+-	slog.Info("msg", slog.Int("notSnake", 1))
++	slog.Info("msg", slog.Int("not_snake", 1))
+ }
+ 
+ // forbidden-keys
+@@ -37,5 +37,5 @@
+ // context: scope — a context is in scope but the non-Context call was used.
+ func MissingContext(ctx context.Context) {
+ 	_ = ctx
+-	slog.Info("msg")
++	slog.InfoContext(ctx, "msg")
+ }

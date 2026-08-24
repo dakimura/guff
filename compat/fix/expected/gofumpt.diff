@@ -1,0 +1,20 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh gofumpt
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/gofumpt/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/unformatted/unformatted.go
++++ b/unformatted/unformatted.go
+@@ -4,7 +4,6 @@
+ package unformatted
+ 
+ func f() {
+-
+ 	x := 1
+ 	println(x)
+ }

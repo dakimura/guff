@@ -1,0 +1,61 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh perfsprint
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/perfsprint/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad.go
++++ b/bad.go
+@@ -9,11 +9,11 @@
+ // replacement it wants — so each is its own sentence, not a repeat.
+ 
+ func StringFormat(s string) string {
+-	return fmt.Sprintf("%s", s)
++	return s
+ }
+ 
+ func IntFormat(n int) string {
+-	return fmt.Sprintf("%d", n)
++	return strconv.Itoa(n)
+ }
+ 
+ func ErrorNew(s string) error {
+@@ -21,7 +21,7 @@
+ }
+ 
+ func ErrorfNoArgs() error {
+-	return fmt.Errorf("constant message")
++	return errors.New("constant message")
+ }
+ 
+ func SprintConcat(a, b string) string {
+@@ -29,11 +29,11 @@
+ }
+ 
+ func BoolFormat(b bool) string {
+-	return fmt.Sprintf("%v", b)
++	return strconv.FormatBool(b)
+ }
+ 
+ func ErrorsNew() error {
+-	return errors.New(fmt.Sprintf("x"))
++	return errors.New("x")
+ }
+ 
+ // `err-error` puts the rendered value in the *message*
+@@ -43,9 +43,9 @@
+ type wrapper struct{ errs []error }
+ 
+ func ErrErrorIndexed(w wrapper, i, j int) string {
+-	return fmt.Sprintf("%v", w.errs[i*2+j])
++	return w.errs[i*2+j].Error()
+ }
+ 
+ func ErrErrorCalled(f func() error) string {
+-	return fmt.Sprintf("%s", f())
++	return f().Error()
+ }

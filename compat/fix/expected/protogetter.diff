@@ -1,0 +1,52 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh protogetter
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/protogetter/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/bad/bad.go
++++ b/bad/bad.go
+@@ -3,33 +3,33 @@
+ import "example.com/pb"
+ 
+ func useName(u *pb.User) string {
+-	return u.Name
++	return u.GetName()
+ }
+ 
+ func useAge(u *pb.User) int32 {
+-	return u.Age
++	return u.GetAge()
+ }
+ 
+ func useChain(u *pb.User) string {
+-	return u.Address.City
++	return u.GetAddress().GetCity()
+ }
+ 
+ // A getter that *does* return a pointer is left alone by the nil-comparison
+ // filter and reported by the ordinary selector rule. The asymmetry is
+ // upstream's.
+ func nilComparePointerGetter(u *pb.User) bool {
+-	return u.Address == nil
++	return u.GetAddress() == nil
+ }
+ 
+ // Upstream filters the *left* operand's position, so the reversed spelling
+ // filters the `nil` and the field is still reported.
+ func nilCompareReversed(u *pb.User) bool {
+-	return nil == u.Meta
++	return nil == u.GetMeta()
+ }
+ 
+ // The pointer test is on the *target*, not on the field: a non-pointer target
+ // keeps the finding even when the value is an optional field, because
+ // `u.GetNickname()` fits there.
+ func optionalIntoStringField(u *pb.User) *pb.Address {
+-	return &pb.Address{City: u.Name}
++	return &pb.Address{City: u.GetName()}
+ }

@@ -1,0 +1,21 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh modernize-atomictypes-ignored
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/modernize-atomictypes-ignored/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/ignoredfiles/ignoredfiles.go
++++ b/ignoredfiles/ignoredfiles.go
+@@ -20,6 +20,6 @@
+ }
+ 
+ func localVar() uint32 {
+-	var n uint32
+-	return atomic.AddUint32(&n, 1)
++	var n atomic.Uint32
++	return n.Add(1)
+ }

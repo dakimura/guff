@@ -1,0 +1,144 @@
+# What guff's `--fix` writes TODAY for staticcheck-st — generated, do not hand-edit.
+#
+# A pending baseline, not an allowlist: the case's real expectation is
+# expected/staticcheck-st.diff, and it is printed in full on every run. This file only
+# keeps CI green while the gap is worked down, and it fails the gate if guff's
+# output moves in *either* direction — including once guff gets it right, so the
+# ledger cannot quietly outlive the defect it records.
+#
+# Re-record with: ./compat/fix/regen.sh --pending staticcheck-st
+--- a/st1013/bad/bad.go
++++ b/st1013/bad/bad.go
+@@ -3,10 +3,10 @@
+ import "net/http"
+ 
+ func fn() {
+-	http.Error(nil, "", 506)
+-	http.Redirect(nil, nil, "", 506)
+-	http.StatusText(506)
+-	http.RedirectHandler("", 506)
++	http.Error(nil, "", http.StatusVariantAlsoNegotiates)
++	http.Redirect(nil, nil, "", http.StatusVariantAlsoNegotiates)
++	http.StatusText(http.StatusVariantAlsoNegotiates)
++	http.RedirectHandler("", http.StatusVariantAlsoNegotiates)
+ 
+ 	http.StatusText(600)
+ 	http.StatusText(http.StatusAccepted)
+--- a/st1017/bad/bad.go
++++ b/st1017/bad/bad.go
+@@ -1,15 +1,15 @@
+ package pkg
+ 
+ func fn(x string, y int) {
+-	if "" == x {
++	if x == "" {
+ 	}
+-	if 0 == y {
++	if y == 0 {
+ 	}
+ 	if 0 > y {
+ 	}
+ 	if "" == "" {
+ 	}
+ 
+-	if "" == "" || 0 == y {
++	if "" == "" || y == 0 {
+ 	}
+ }
+--- a/st1023/bad/bad.go
++++ b/st1023/bad/bad.go
+@@ -10,14 +10,14 @@
+ var global int = gen1() // package-level: not flagged
+ 
+ func fn() {
+-	var _ int = gen1()
+-	var a int = Y
+-	var b int = 1
++	var _ = gen1()
++	var a = Y
++	var b = 1
+ 	var c int = 1.0
+ 	var d MyInt = 1
+-	var h bool = true
+-	var i string = ""
+-	var j MyInt = gen3()
+-	var m int = (Y + Y) / 2
++	var h = true
++	var i = ""
++	var j = gen3()
++	var m = (Y + Y) / 2
+ 	_, _, _, _, _, _, _, _ = a, b, c, d, h, i, j, m
+ }
+--- a/st1023/isolated/isolated.go
++++ b/st1023/isolated/isolated.go
+@@ -24,43 +24,43 @@
+ // literals and predeclared identifiers, and only while the right-hand side is
+ // untyped. A typed right-hand side is flagged whatever its shape.
+ func shapes(x, y int, ch chan int, b1, b2 bool) {
+-	var c01 int = 1
++	var c01 = 1
+ 	var c02 int64 = 1
+-	var c03 rune = 'a'
++	var c03 = 'a'
+ 	var c04 int32 = 'a'
+ 	var c05 byte = 'a'
+-	var c06 string = "s"
+-	var c07 float64 = 1.5
+-	var c08 int = untypedInt
++	var c06 = "s"
++	var c07 = 1.5
++	var c08 = untypedInt
+ 	var c09 int64 = untypedInt
+-	var c10 int32 = typedInt32
+-	var c11 bool = true
+-	var c12 int = math.MaxInt8
+-	var c13 time.Duration = time.Second
+-	var c14 int = x
+-	var c15 int = (1)
+-	var c16 int = -1
+-	var c17 int = 1 + 1
++	var c10 = typedInt32
++	var c11 = true
++	var c12 = math.MaxInt8
++	var c13 = time.Second
++	var c14 = x
++	var c15 = (1)
++	var c16 = -1
++	var c17 = 1 + 1
+ 	var c18 int64 = 1 + 1
+-	var c19 rune = 'a' + 1
++	var c19 = 'a' + 1
+ 	var c20 int32 = 'a' + 1
+-	var c21 int = x + y
+-	var c22 int64 = int64(untypedInt) * 10
+-	var c23 time.Duration = 5 * time.Second
+-	var c24 int32 = typedInt32 * 2
+-	var c25 bool = x == y
+-	var c26 bool = b1 && b2
+-	var c27 int = <-ch
+-	var c28 int = len("abc")
+-	var c29 int64 = int64(x)
++	var c21 = x + y
++	var c22 = int64(untypedInt) * 10
++	var c23 = 5 * time.Second
++	var c24 = typedInt32 * 2
++	var c25 = x == y
++	var c26 = b1 && b2
++	var c27 = <-ch
++	var c28 = len("abc")
++	var c29 = int64(x)
+ 	var c30 float64 = 1
+ 	var c31 int32 = untypedRune
+-	var c32 rune = untypedRune
+-	var c33 int = 1 << 3
++	var c32 = untypedRune
++	var c33 = 1 << 3
+ 	var c34 uint = 1 << uint(x)
+-	var _ int = 1
++	var _ = 1
+ 	var c35 *int = nil
+-	var c36 int = int(untypedInt)
++	var c36 = int(untypedInt)
+ 	_, _, _, _, _, _, _, _, _, _ = c01, c02, c03, c04, c05, c06, c07, c08, c09, c10
+ 	_, _, _, _, _, _, _, _, _, _ = c11, c12, c13, c14, c15, c16, c17, c18, c19, c20
+ 	_, _, _, _, _, _, _, _, _, _ = c21, c22, c23, c24, c25, c26, c27, c28, c29, c30

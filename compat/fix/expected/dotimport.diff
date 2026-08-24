@@ -1,0 +1,19 @@
+# Expected `--fix` result — generated, do not hand-edit.
+#
+# Regenerate with: ./compat/fix/regen.sh dotimport
+# Produced by running `golangci-lint run --fix` on compat/golden/cases/dotimport/
+# and diffing the materialized tree before -> after.
+#
+# An absent file for a case means upstream's --fix changes nothing there, and
+# guff must change nothing either.
+# golangci-lint: 2.12.2
+
+--- a/two.go
++++ b/two.go
+@@ -27,5 +27,5 @@
+ // both sides, so this line is a second type-aware anchor.
+ func Four() bool {
+ 	err := doWork()
+-	return err == ErrGone
++	return errors.Is(err, ErrGone)
+ }
