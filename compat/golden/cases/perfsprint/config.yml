@@ -13,6 +13,14 @@ linters:
   default: none
   enable:
     - perfsprint
+  settings:
+    perfsprint:
+      errorf: true
+      sprintf1: true
+      strconcat: true
+      err-error: true
+      hex-format: true
+      int-conversion: true
 
 issues:
   max-issues-per-linter: 0

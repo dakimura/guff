@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:13:22:musttag::the given struct should be annotated with the `json` tag
+bad.go:18:22:musttag::the given struct should be annotated with the `json` tag
+bad.go:22:30:musttag::the given struct should be annotated with the `json` tag
+bad.go:26:21:musttag::the given struct should be annotated with the `xml` tag

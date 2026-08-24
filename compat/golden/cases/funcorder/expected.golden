@@ -6,4 +6,9 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:1:funcorder::constructor "NewT" for struct "T" should be placed after the struct declaration
+bad.go:7:1:funcorder::constructor "NewT" for struct "T" should be placed after the struct declaration
+bad.go:15:1:funcorder::unexported method "unexported" for struct "T" should be placed after the exported method "AlsoExported"
+bad.go:17:1:funcorder::method "AlsoExported" for struct "T" should be placed before method "Exported"
+bad.go:24:1:funcorder::constructor "NewU" for struct "U" should be placed before struct method "Method"
+bad.go:31:1:funcorder::constructor "NewV" for struct "V" should be placed before constructor "NewVFromString"
+bad.go:38:1:funcorder::method "Alpha" for struct "W" should be placed before method "Zeta"

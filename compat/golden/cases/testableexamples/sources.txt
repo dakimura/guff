@@ -1,3 +1,4 @@
 # The isolate fixture, so the two tiers cannot drift.
+bad_test.go      compat/isolate/fixtures/testableexamples/bad_test.go
 doc.go           compat/isolate/fixtures/testableexamples/doc.go
 example_test.go  compat/isolate/fixtures/testableexamples/example_test.go

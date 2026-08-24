@@ -46,3 +46,10 @@ func TooManyStatements() {
 	a11 := 11
 	_ = a11
 }
+
+// Short / empty bodies must not be flagged (regression: i64 underflow →
+// usize::MAX). Restored after being dropped while widening — the two counter
+// arms above are additions, not a replacement.
+func OneLine() string { return "ok" }
+
+func Empty() {}

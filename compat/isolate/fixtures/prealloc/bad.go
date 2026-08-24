@@ -37,3 +37,15 @@ func SingleLevel(a []int) []int {
 	}
 	return out
 }
+
+// A range loop is the shape `range-loops` (on by default) reaches; the four
+// above are `for-loops`. Added while widening — the precedence cases are the
+// point of this fixture and were restored after being overwritten.
+func RangeLoop(xs []int) []int {
+	var out []int
+	for _, x := range xs {
+		out = append(out, x)
+	}
+
+	return out
+}

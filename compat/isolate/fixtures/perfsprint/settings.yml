@@ -1,0 +1,9 @@
+# perfsprint carries thirteen rules and turns most on by default, but `errorf`,
+# `sprintf1` and `strconcat` are the ones a fixture never reaches without
+# asking — each replaces a different call with a different suggestion.
+errorf: true
+sprintf1: true
+strconcat: true
+err-error: true
+hex-format: true
+int-conversion: true

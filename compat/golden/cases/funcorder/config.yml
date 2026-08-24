@@ -13,6 +13,11 @@ linters:
   default: none
   enable:
     - funcorder
+  settings:
+    funcorder:
+      struct-method: true
+      constructor: true
+      alphabetical: true
 
 issues:
   max-issues-per-linter: 0

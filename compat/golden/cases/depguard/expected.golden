@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:8:depguard::import 'fmt' is not allowed from list 'main': banned for isolate
+bad.go:4:2:depguard::import 'fmt' is not allowed from list 'main': banned for isolate
+bad.go:4:2:depguard::import 'fmt' is not allowed from list 'strict'
+bad.go:5:2:depguard::import 'os/exec' is not allowed from list 'strict'

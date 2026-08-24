@@ -7,3 +7,5 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:2:containedctx::found a struct that contains a context.Context field
+bad.go:12:2:containedctx::found a struct that contains a context.Context field
+bad.go:17:3:containedctx::found a struct that contains a context.Context field

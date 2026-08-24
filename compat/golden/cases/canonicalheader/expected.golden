@@ -7,3 +7,6 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:12:canonicalheader::non-canonical header "content-type", instead use: "Content-Type"
+bad.go:14:8:canonicalheader::non-canonical header "accept-encoding", instead use: "Accept-Encoding"
+bad.go:15:8:canonicalheader::non-canonical header "user-agent", instead use: "User-Agent"
+bad.go:16:15:canonicalheader::non-canonical header "if-none-match", instead use: "If-None-Match"

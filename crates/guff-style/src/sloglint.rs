@@ -218,11 +218,20 @@ fn is_const_key(pass: &Pass<'_>, key: &Expr) -> bool {
     matches!(artifacts.objects.get(obj), ObjectData::Const(_))
 }
 
+/// Whitespace is a word separator for `github.com/ettle/strcase`, which is what
+/// upstream sloglint uses. It matters beyond keys with spaces in them: the
+/// message itself is built as `caseFn(caseName + " case")`, so the case
+/// function has to turn `snake case` into `snake_case` — apply it to a string
+/// that treats the space as content and the sentence comes out unchanged.
+fn is_strcase_space(c: char) -> bool {
+    c == ' ' || c == '\t' || c == '\n' || c == '\r' || (c as u32 >= 128 && c.is_whitespace())
+}
+
 fn to_snake(s: &str) -> String {
     let mut out = String::new();
     let chars: Vec<char> = s.chars().collect();
     for (i, &c) in chars.iter().enumerate() {
-        if c == '-' || c == '_' {
+        if c == '-' || c == '_' || is_strcase_space(c) {
             if !out.ends_with('_') {
                 out.push('_');
             }
@@ -252,7 +261,7 @@ fn to_pascal(s: &str) -> String {
     let mut out = String::new();
     let mut upper = true;
     for c in s.chars() {
-        if c == '_' || c == '-' {
+        if c == '_' || c == '-' || is_strcase_space(c) {
             upper = true;
             continue;
         }
@@ -357,7 +366,12 @@ fn analyze_key(
             if name != cf(&name) {
                 pending.push((
                     key.pos().0 as u32,
-                    format!("keys should be written in {case_name} case"),
+                    // Upstream builds this as `caseFn(caseName + " case")` —
+                    // the naming function is applied to the *sentence*, so the
+                    // message reads `snake_case`, `kebab-case`, `camelCase`,
+                    // `PascalCase`. Printing the raw setting plus " case"
+                    // agrees with none of them.
+                    format!("keys should be written in {}", cf(&format!("{case_name} case"))),
                 ));
             }
         }

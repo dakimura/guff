@@ -404,10 +404,15 @@ fn check_call(
                     ));
                 }
             } else {
+                // `renderNodeEllipsis`: print the argument with go/printer and
+                // truncate to 20 runes, appending three dots. A fixed "…" here
+                // named nothing — every non-constant key read the same, so the
+                // message could not tell the reader which argument to look at.
+                let rendered = render_node_ellipsis(pass, arg);
                 pending.push((
                     arg.pos().0 as u32,
                     format!(
-                        "logging keys are expected to be inlined constant strings, please replace \"…\" provided with string"
+                        "logging keys are expected to be inlined constant strings, please replace {rendered:?} provided with string"
                     ),
                 ));
             }
@@ -427,6 +432,22 @@ fn check_call(
             }
         }
     }
+}
+
+/// Port of upstream `renderNodeEllipsis`: print the node with `go/printer`,
+/// then truncate to 20 runes with a literal `...` (three dots — not `…`).
+fn render_node_ellipsis(pass: &Pass<'_>, expr: &Expr) -> String {
+    const MAX_LEN: usize = 20;
+    let mut buf: Vec<u8> = Vec::new();
+    if guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).is_err() {
+        return String::new();
+    }
+    let s = String::from_utf8(buf).unwrap_or_default();
+    if s.chars().count() <= MAX_LEN {
+        return s;
+    }
+    let keep: String = s.chars().take(MAX_LEN - 3).collect();
+    format!("{keep}...")
 }
 
 fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {

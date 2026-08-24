@@ -7,3 +7,5 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:2:dogsled::declaration has 4 blank identifiers
+bad.go:14:2:dogsled::declaration has 3 blank identifiers
+bad.go:20:2:dogsled::declaration has 4 blank identifiers

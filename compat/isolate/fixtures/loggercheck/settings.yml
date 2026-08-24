@@ -1,0 +1,5 @@
+# `require-string-key` and `no-printf-like` are two more messages this linter
+# can say, and both are off by default — so a fixture that only makes an odd
+# number of arguments reaches one of three.
+require-string-key: true
+no-printf-like: true
