@@ -11,3 +11,5 @@ bad.go:16:9:perfsprint::integer-format: fmt.Sprintf can be replaced with faster 
 bad.go:24:9:perfsprint::error-format: fmt.Errorf can be replaced with errors.New
 bad.go:32:9:perfsprint::bool-format: fmt.Sprintf can be replaced with faster strconv.FormatBool
 bad.go:36:20:perfsprint::string-format: fmt.Sprintf can be replaced with just using the string
+bad.go:46:9:perfsprint::error-format: fmt.Sprintf can be replaced with w.errs[i*2+j].Error()
+bad.go:50:9:perfsprint::error-format: fmt.Sprintf can be replaced with f().Error()

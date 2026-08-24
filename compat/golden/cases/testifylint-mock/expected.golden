@@ -42,15 +42,16 @@ bad/bad_test.go:83:2:testifylint::require-error: for error assertions use requir
 bad/bad_test.go:88:3:testifylint::go-require: require must only be used in the goroutine running the test function
 bad/bad_test.go:89:3:testifylint::go-require: assert.FailNow must only be used in the goroutine running the test function
 bad/bad_test.go:90:3:testifylint::go-require: helperWithRequire contains assertions that must only be used in the goroutine running the test function
-bad/bad_test.go:94:3:testifylint::useless-assert: meaningless assertion
-bad/bad_test.go:97:3:testifylint::go-require: do not use require in http handlers
-bad/bad_test.go:98:3:testifylint::go-require: do not use assert.FailNow in http handlers
-bad/bad_test.go:116:2:testifylint::suite-extra-assert-call: need to simplify the assertion to s.True
-bad/bad_test.go:117:2:testifylint::suite-dont-use-pkg: use s.Equal
-bad/bad_test.go:118:2:testifylint::suite-subtest-run: use s.Run to run subtest
-bad/bad_test.go:123:1:testifylint::suite-method-signature: test method should not have any arguments or returning values
-bad/bad_test.go:124:2:testifylint::useless-assert: meaningless assertion
-bad/bad_test.go:127:1:testifylint::suite-method-signature: method conflicts with suite.SetupTestSuite interface
-bad/bad_test.go:130:2:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
-bad/bad_test.go:132:3:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
-bad/bad_test.go:136:1:testifylint::suite-thelper: suite helper method must start with s.T().Helper()
+bad/bad_test.go:94:3:testifylint::go-require: genericHelperWithRequire[int] contains assertions that must only be used in the goroutine running the test function
+bad/bad_test.go:98:3:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:101:3:testifylint::go-require: do not use require in http handlers
+bad/bad_test.go:102:3:testifylint::go-require: do not use assert.FailNow in http handlers
+bad/bad_test.go:124:2:testifylint::suite-extra-assert-call: need to simplify the assertion to s.True
+bad/bad_test.go:125:2:testifylint::suite-dont-use-pkg: use s.Equal
+bad/bad_test.go:126:2:testifylint::suite-subtest-run: use s.Run to run subtest
+bad/bad_test.go:131:1:testifylint::suite-method-signature: test method should not have any arguments or returning values
+bad/bad_test.go:132:2:testifylint::useless-assert: meaningless assertion
+bad/bad_test.go:135:1:testifylint::suite-method-signature: method conflicts with suite.SetupTestSuite interface
+bad/bad_test.go:138:2:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
+bad/bad_test.go:140:3:testifylint::suite-broken-parallel: testify v1 does not support suite's parallel tests and subtests
+bad/bad_test.go:144:1:testifylint::suite-thelper: suite helper method must start with s.T().Helper()

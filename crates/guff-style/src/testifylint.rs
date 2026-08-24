@@ -234,15 +234,17 @@ fn expr_pretty(expr: &Expr) -> String {
     }
 }
 
-fn expr_string(expr: &Expr) -> String {
-    match expr {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::CallExpr(c) => format!("{}()", expr_string(&c.fun)),
-        Expr::ParenExpr(p) => expr_string(&p.x),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        _ => "?".into(),
-    }
+/// testifylint renders with `analysisutil.NodeString`
+/// (`internal/analysisutil/format.go`), which is `format.Node` — go/printer
+/// with gofmt's config, identical to `printer.Fprint` for a one-line
+/// expression. Its own doc comment calls it "a more powerful analogue of
+/// types.ExprString".
+///
+/// The walker this replaced answered `"<expr>"` outside four arms, and its
+/// `CallExpr` arm dropped the arguments — which happens to be what err113's
+/// `rawString` does deliberately, but here it was only an approximation.
+fn expr_string(pass: &Pass<'_>, expr: &Expr) -> String {
+    guff_analysis::code::node_text(pass, expr).unwrap_or_default()
 }
 
 fn parse_testify_callee(name: &str) -> Option<(bool, bool, String)> {
@@ -2791,7 +2793,7 @@ fn check_suite_extra_assert_call(
                 call,
                 &format!(
                     "need to simplify the assertion to {}.{}",
-                    expr_string(&se.x),
+                    expr_string(pass, &se.x),
                     call.fn_name
                 ),
                 pending,
@@ -2821,7 +2823,7 @@ fn check_suite_subtest_run(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<(
             call.pos().0 as u32,
             format!(
                 "suite-subtest-run: use {}.Run to run subtest",
-                expr_string(&t_sel.x)
+                expr_string(pass, &t_sel.x)
             ),
         ));
     }
@@ -3747,7 +3749,7 @@ fn check_go_require(
                     if check_go_require_func(pass, fd, &tests, &mut processed)
                         != GoRequireVerdict::NoExit
                     {
-                        let caller = expr_string(&ce.fun);
+                        let caller = expr_string(pass, &ce.fun);
                         pending.push((
                             ce.pos().0 as u32,
                             format!(
