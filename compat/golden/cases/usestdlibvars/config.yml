@@ -13,6 +13,15 @@ linters:
   default: none
   enable:
     - usestdlibvars
+  settings:
+    usestdlibvars:
+      time-weekday: true
+      time-month: true
+      crypto-hash: true
+      sql-isolation-level: true
+      tls-signature-scheme: true
+      constant-kind: true
+      default-rpc-path: true
 
 issues:
   max-issues-per-linter: 0

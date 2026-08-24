@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:9:9:exhaustruct::p.T is missing field B
+bad.go:15:9:exhaustruct::p.T is missing field B
+bad.go:20:9:exhaustruct::p.T is missing fields B, C

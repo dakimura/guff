@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:3:8:importas::import "fmt" imported as "f" but must be "fmtpkg" according to config
+bad.go:4:2:importas::import "fmt" imported as "f" but must be "fmtpkg" according to config
+bad.go:5:2:importas::import "strings" imported without alias but must be with alias "str" according to config

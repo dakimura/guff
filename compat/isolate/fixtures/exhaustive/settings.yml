@@ -1,1 +1,6 @@
 default-signifies-exhaustive: false
+# `check` defaults to switch statements only, so the map-literal message is
+# unreachable without naming it — a second sentence this linter can say.
+check:
+  - switch
+  - map

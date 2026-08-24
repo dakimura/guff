@@ -13,6 +13,9 @@ linters:
   default: none
   enable:
     - makezero
+  settings:
+    makezero:
+      always: true
 
 issues:
   max-issues-per-linter: 0

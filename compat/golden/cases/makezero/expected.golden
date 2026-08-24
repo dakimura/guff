@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:5:6:makezero::append to slice `x` with non-zero initialized length
+bad.go:7:2:makezero::slice `x` does not have non-zero initial length
+bad.go:8:6:makezero::append to slice `x` with non-zero initialized length
+bad.go:14:2:makezero::slice `y` does not have non-zero initial length

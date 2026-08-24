@@ -16,6 +16,9 @@ linters:
   settings:
     exhaustive:
       default-signifies-exhaustive: false
+      check:
+      - switch
+      - map
 
 issues:
   max-issues-per-linter: 0

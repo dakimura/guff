@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:6:9:err113::do not define dynamic errors, use wrapped static errors instead: "errors.New(\\"dynamic\\")"
+bad.go:11:9:err113::do not define dynamic errors, use wrapped static errors instead: "errors.New(\\"dynamic\\")"
+bad.go:19:9:err113::do not compare errors directly "err == ErrSentinel", use "errors.Is(err, ErrSentinel)" instead
+bad.go:23:9:err113::do not compare errors directly "err != ErrSentinel", use "!errors.Is(err, ErrSentinel)" instead

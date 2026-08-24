@@ -13,6 +13,10 @@ linters:
   default: none
   enable:
     - varnamelen
+  settings:
+    varnamelen:
+      check-return: true
+      check-type-param: true
 
 issues:
   max-issues-per-linter: 0

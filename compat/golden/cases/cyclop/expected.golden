@@ -6,4 +6,5 @@
 
 # golangci-lint: 2.12.2
 
+bad.go:1:1:cyclop::the average complexity for the package p is 12.000000, max is 0.500000
 bad.go:3:1:cyclop::calculated cyclomatic complexity for function Bad is 12, max is 10

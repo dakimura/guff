@@ -1,0 +1,3 @@
+# `always` turns on the second message ("slice … does not have zero initial
+# length"); with the default only the append form is reachable.
+always: true

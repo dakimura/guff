@@ -6,4 +6,6 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:7:3:fatcontext::nested context in loop
+bad.go:11:3:fatcontext::nested context in loop
+bad.go:19:3:fatcontext::nested context in function literal
+bad.go:36:2:fatcontext::potential nested context in struct pointer

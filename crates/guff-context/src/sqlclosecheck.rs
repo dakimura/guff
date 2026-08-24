@@ -220,7 +220,10 @@ fn mark_close(call: &CallExpr, deferred: bool, usages: &mut HashMap<String, SqlU
             if deferred {
                 u.deferred = true;
             }
-            u.close_pos = Some(call.pos().0 as u32);
+            // `pass.Reportf(instr.Pos(), "Close should use defer")` — the same
+            // go/ssa convention as `assign_report_pos`: a call's position is
+            // its `(`, not where the expression starts.
+            u.close_pos = Some(call.lparen.0 as u32);
         }
     }
 }

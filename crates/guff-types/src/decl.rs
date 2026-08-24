@@ -372,6 +372,15 @@ impl Checker {
                         );
                         obj.set_pkg(&mut self.objects, self.pkg);
                         obj.set_pos(&mut self.objects, name.pos().0 as u32);
+                        // Record the defining identifier, as the `var` arm below
+                        // does and as go/types' `declare` does for both. Without
+                        // it `Info.Defs` has no entry for a **local** constant —
+                        // package-level ones come through `resolver.rs` — and
+                        // every analyzer that starts from `Defs` simply cannot
+                        // see it. varnamelen was the one that noticed: it
+                        // reported `const g` at file scope and said nothing
+                        // about the identical `const c` inside a function.
+                        self.record_def(name, Some(obj));
                         lhs.push(obj);
                         let init = last_values.get(i).copied();
                         self.const_decl(obj, last_type, init, inherited);
@@ -786,6 +795,12 @@ impl Checker {
         type_name_set_typ(&mut self.objects, tname, tpar);
         tname.set_pkg(&mut self.objects, self.pkg);
         tname.set_pos(&mut self.objects, name.pos().0 as u32);
+        // go/types' `declare(scope, id, obj, pos)` records the defining
+        // identifier when it has one, and `declareTypeParam` passes `name`.
+        // guff's `declare` takes no ident, so the recording has to happen here
+        // or `Info.Defs` has no entry for `T` in `func f[T any]()` at all —
+        // varnamelen's `check-type-param` arm reported nothing because of it.
+        self.record_def(name, Some(tname));
         self.declare(scope, tname, scope_pos);
         tpar
     }

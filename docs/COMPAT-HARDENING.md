@@ -19,7 +19,7 @@
 |---|---|
 | isolate ゲート（114 linter 全部）が比較している finding | **合計 178 件** |
 | うち `both == 0` の空振り合格 | **9 linter**: prealloc, usestdlibvars, maintidx, mirror, musttag, iface, varnamelen, contextcheck, sloglint<br>→ **0 になった**（続き 30。最後の 7 つは fixture がその linter の発火条件を満たしていなかった） |
-| うち `both == 1` の 1 件だけ比較 | **72 linter** |
+| うち `both == 1` の 1 件だけ比較 | **72 linter**<br>→ golden 側では 2026-08-24（続き 31）に 18 linter を広げて 75 → 64（linter case で finding 2 件以下のもの） |
 | isolate fixture 総行数 | 1,255 行 / 114 linter ≒ **11 行/linter**<br>（gocritic は 13 行で 104 checker、staticcheck は 82 行で 167 analyzer） |
 | OSS 8 リポで実際に発火した linter | **7 種類だけ**: errcheck, gosec, govet, ineffassign, modernize, staticcheck, unused<br>（caddy と grafana は `0 vs 0`。436 findings のうち 416 は consul + vault） |
 | `crates/*/tests` の 2,848 テスト | `assert!(messages.contains("G101:"))` 形式 = **「guff が撃つこと」の確認**であって<br>**「golangci-lint と同じものを撃つこと」の確認ではない**（ground truth を持たない） |
@@ -9778,6 +9778,98 @@ golden gate は元から `smoke` ジョブに載っている（guff しか実行
 2. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目、まだ 3 コピーある。
 3. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29。
 4. **gocritic の ruleguard `$`** —— 続き 28。`expr_text` 118 箇所、単独タスク。
+
+---
+
+### 2026-08-24（続き 31）— fixture を広げたら、7 件のうち 2 件は linter ではなく型検査器だった
+
+続き 30 の「次にやること」1。golden は 116 linter 全部に付いたが、
+**105 の linter case のうち 75 が finding 2 件以下**で、多くは 1 件だった ——
+「桁のゲートを 1 本付けた」であって「その linter が言えることを測った」ではない。
+
+#### 広げた 18 linter（17 → 60 finding）
+
+| linter | before → after | 何が増えたか |
+|---|---|---|
+| `nilnil` | 1 → 7 | 検査する型の種類ごとに 1 件（ptr / map / chan / func / iface / uintptr） |
+| `varnamelen` | 1 → 6 | **5 種類**（variable / constant / parameter / return value / type parameter） |
+| `paralleltest` | 1 → 5 | **5 メッセージ**のうち 4 つ（5 つ目は下記） |
+| `usestdlibvars` | 2 → 5 | 10 個ある対応表のうち 5 つ |
+| `noctx` | 1 → 4 | net/http 系と database/sql 系 |
+| `fatcontext` | 1 → 3 | **3 カテゴリ**（loop / func literal / struct pointer） |
+| `err113` | 1 → 3 | 定義側と比較側（比較は `==` と `!=` で文言が変わる） |
+| `sqlclosecheck` | 1 → 3 | 2 メッセージ（not closed / should use defer） |
+| `ireturn` | 1 → 3 | 3 メッセージ（interface / generic interface / of type param） |
+| `tparallel` | 1 → 3 | 3 メッセージ |
+| `makezero` | 1 → 3 | 2 メッセージ（append 側と `always` 側） |
+| `whitespace` | 2 → 3 | 3 メッセージ（leading / trailing / multi-line） |
+| `exhaustive` | 1 → 2 | switch と map literal |
+| `funlen` | 1 → 2 | 行数と文数（片方だけ超える関数を 2 本） |
+| `importas` | 1 → 2 | 別名が違う／別名が無い（別の文） |
+| `cyclop` | 1 → 2 | 関数ごとの複雑度とパッケージ平均 |
+| `exhaustruct` | 1 → 2 | 単数形と複数形 |
+| `errname` | 2 → 2 | 型と sentinel |
+
+**`linter case のうち 2 件以下` は 75 → 64。**
+
+#### 見つかった欠陥 7 件のうち 2 件は `Info.Defs` の穴だった
+
+`varnamelen` の 5 種類のうち 2 つが撃てなかった。**varnamelen は無罪**で、
+`Info.Defs` にその識別子が入っていなかった:
+
+1. **関数の中の `const`**。`decl_stmt` の `var` の腕には `record_def` があり、
+   **`const` の腕には無かった**。パッケージレベルの定数は resolver 側が記録するので、
+   **ファイル直下の `const g` は撃てて、まったく同じ `const c` が関数の中だと見えない**。
+   `Defs` から出発する解析すべてに効く穴である。
+2. **型パラメータ**。go/types は `declare(scope, id, obj, pos)` の中で
+   `recordDef` を呼び、`declareTypeParam` が `name` を渡す。
+   guff の `declare` は ident を取らないので、`func f[T any]()` の `T` は
+   **`Defs` にどこからも入らない**。
+
+どちらも「linter の腕が 1 本しか無い fixture」に隠れていた。
+
+#### 残り 5 件
+
+- **`fatcontext`**: カテゴリが 2 つしか無く、`check-struct-pointers` /
+  `check-loops` / `check-function-literals` の 3 フラグも無かった。
+  さらに**ポインタ経由のフィールド代入を「除外」として実装していた** ——
+  上流はそれを**カテゴリ**として名前を付け、フラグで落とす。
+  除外にすると、上流が見る「本体の最初の nested context」ではなく
+  **その次の代入**を報告してしまう。node filter に `FuncDecl` が無かったのも同じ根で、
+  上流の 4 種類のうち 1 つを落とすとカテゴリが 1 つ丸ごと消える。
+- **`cyclop` のパッケージ平均**: 位置が**パッケージ名**（上流は `File.Pos()` ＝
+  `package` キーワード、桁 1）、数値が `12` / `0.5`（上流は `%f` で
+  `12.000000` / `0.500000`）。1 行に 2 つ。
+- **`sqlclosecheck` の 2 つ目**: 「Close should use defer」も SSA 命令の位置 ＝
+  **左括弧**。続き 30 で直した 1 つ目と同じ規約で、同じファイルの別の行だった。
+- **`makezero` の `always`**: 未実装。2 メッセージのうち 1 つが存在しなかった。
+
+#### 見つけた形: **足りない腕はたいてい「既定で off の設定」の裏にある**
+
+今回追加した設定は 9 つ —— `check-struct-pointers` / `check-return` /
+`check-type-param` / `check-cleanup` / `no-unaliased` / `always` / `multi-if` /
+`package-average` / `check: [map]`。
+**既定値だけを使う fixture は、既定値だけをテストする。**
+`varnamelen` の 2 種類も `fatcontext` の 1 カテゴリも `makezero` の 1 メッセージも、
+「設定を書かないと到達できない」ために誰も測っていなかった。
+
+#### 到達できないと分かった腕は、負のケースとして残す
+
+`paralleltest` の 5 つ目
+（`Range statement for test %s does not reinitialise the variable %s`）は
+**golangci-lint 経由では現代のモジュールから到達できない**:
+ラッパが Go バージョン >= 1.22 のとき `ignoreloopVar = true` を立てる
+（ループ変数が反復ごとになったので）。guff 側の `DEFERRED` は**値段ゼロ**である。
+fixture にはその形を残してある —— 上流が黙るので guff も黙らなければならない。
+
+#### 次にやること
+
+1. **まだ 64 の linter case が 2 件以下**。今回と同じやり方で続けられる:
+   上流の `Reportf` を全部数える → 腕ごとに fixture を足す → 既定 off の設定を書く。
+2. **`Info.Defs` の穴を横断で見る**。今回の 2 件は varnamelen が偶然見つけた。
+   `record_def` の呼び出し漏れが他にもないか、go/types の `declare` 相当と突き合わせる。
+3. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目、まだ 3 コピー。
+4. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29 / 30。
 
 ---
 

@@ -18,6 +18,7 @@ mod nilnil;
 
 pub use forcetypeassert::analyzer as forcetypeassert;
 pub use makezero::analyzer as makezero;
+pub use makezero::MakezeroOptions;
 pub use mirror::analyzer as mirror;
 pub use nilerr::analyzer as nilerr;
 pub use nilnesserr::analyzer as nilnesserr;

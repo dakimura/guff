@@ -1,3 +1,12 @@
+# `no-unaliased` gates the second message ("imported without alias but must be
+# with alias"): without it an unaliased import is simply accepted, and one of
+# the two sentences this linter can say is unreachable.
+no-unaliased: true
 alias:
   - pkg: fmt
     alias: fmtpkg
+  # `strings` is imported without an alias below, which is the second message
+  # ("imported without alias but must be with alias") — a different sentence,
+  # not a different value in the same one.
+  - pkg: strings
+    alias: str

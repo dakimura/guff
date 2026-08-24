@@ -13,6 +13,9 @@ linters:
   default: none
   enable:
     - fatcontext
+  settings:
+    fatcontext:
+      check-struct-pointers: true
 
 issues:
   max-issues-per-linter: 0

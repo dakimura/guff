@@ -13,6 +13,9 @@ linters:
   default: none
   enable:
     - paralleltest
+  settings:
+    paralleltest:
+      check-cleanup: true
 
 issues:
   max-issues-per-linter: 0

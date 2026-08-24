@@ -15,6 +15,7 @@ pub use bodyclose::analyzer as bodyclose;
 pub use bodyclose::BodycloseOptions;
 pub use contextcheck::analyzer as contextcheck;
 pub use fatcontext::analyzer as fatcontext;
+pub use fatcontext::FatcontextOptions;
 pub use noctx::analyzer as noctx;
 pub use sqlclosecheck::analyzer as sqlclosecheck;
 

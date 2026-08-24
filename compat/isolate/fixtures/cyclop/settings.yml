@@ -1,0 +1,5 @@
+# `package-average` is 0 by default, which turns the second of the two messages
+# ("the average complexity for the package …") off entirely. Setting it low
+# makes both reachable from one fixture.
+max-complexity: 10
+package-average: 0.5
