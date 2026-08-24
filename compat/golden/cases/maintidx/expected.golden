@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:maintidx::Function name: Bad, Cyclomatic Complexity: 7, Halstead Volume: 195.99, Maintainability Index: 53
+bad.go:28:1:maintidx::Function name: AlsoBad, Cyclomatic Complexity: 5, Halstead Volume: 219.62, Maintainability Index: 56

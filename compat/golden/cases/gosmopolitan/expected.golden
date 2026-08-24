@@ -8,3 +8,4 @@
 
 bad.go:5:10:gosmopolitan::string literal contains rune in Han script
 bad.go:8:11:gosmopolitan::usage of time.Local
+bad.go:16:20:gosmopolitan::string literal contains rune in Han script

@@ -118,17 +118,29 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         }
     }
 
-    if opts.exclude_forbidden && !gomod.excludes.is_empty() {
-        pending.push((line_pos(1), REASON_EXCLUDE.to_string()));
+    // Each of these is reported at the directive's own line. `line_pos(1)` put
+    // them all on the `module` line, which no fixture could see while it held
+    // one directive: with one finding there is nothing for the line to be wrong
+    // relative to.
+    if opts.exclude_forbidden {
+        for excl in &gomod.excludes {
+            pending.push((line_pos(excl.line), REASON_EXCLUDE.to_string()));
+        }
     }
-    if opts.toolchain_forbidden && gomod.toolchain.is_some() {
-        pending.push((line_pos(1), REASON_TOOLCHAIN.to_string()));
+    if opts.toolchain_forbidden {
+        if let Some(tc) = &gomod.toolchain {
+            pending.push((line_pos(tc.line), REASON_TOOLCHAIN.to_string()));
+        }
     }
-    if opts.tool_forbidden && !gomod.tools.is_empty() {
-        pending.push((line_pos(1), REASON_TOOL.to_string()));
+    if opts.tool_forbidden {
+        for tool in &gomod.tools {
+            pending.push((line_pos(tool.line), REASON_TOOL.to_string()));
+        }
     }
-    if opts.go_debug_forbidden && !gomod.godebugs.is_empty() {
-        pending.push((line_pos(1), REASON_GODEBUG.to_string()));
+    if opts.go_debug_forbidden {
+        for dbg in &gomod.godebugs {
+            pending.push((line_pos(dbg.line), REASON_GODEBUG.to_string()));
+        }
     }
 
     for (pos, message) in pending {

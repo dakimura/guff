@@ -6,5 +6,8 @@
 
 # golangci-lint: 2.12.2
 
-bad.go:7:6:iface::identical: interface 'Reader' contains identical methods or type constraints with another interface, causing redundancy (see: Fetcher)
-bad.go:11:6:iface::identical: interface 'Fetcher' contains identical methods or type constraints with another interface, causing redundancy (see: Reader)
+bad.go:7:6:iface::identical: interface 'Reader' contains identical methods or type constraints with another interface, causing redundancy (see: Fetcher, Loader)
+bad.go:11:6:iface::identical: interface 'Fetcher' contains identical methods or type constraints with another interface, causing redundancy (see: Loader, Reader)
+bad.go:17:6:iface::identical: interface 'Loader' contains identical methods or type constraints with another interface, causing redundancy (see: Fetcher, Reader)
+bad.go:21:6:iface::identical: interface 'Writer' contains identical methods or type constraints with another interface, causing redundancy (see: Saver)
+bad.go:25:6:iface::identical: interface 'Saver' contains identical methods or type constraints with another interface, causing redundancy (see: Writer)

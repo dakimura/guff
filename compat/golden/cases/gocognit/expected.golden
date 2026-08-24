@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:gocognit::cognitive complexity 16 of func `Bad` is high (> 5)
+bad.go:27:1:gocognit::cognitive complexity 7 of func `AlsoBad` is high (> 5)

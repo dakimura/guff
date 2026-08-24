@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:gocyclo::cyclomatic complexity 6 of func `Bad` is high (> 5)
+bad.go:25:11:gocyclo::cyclomatic complexity 6 of func `Lit` is high (> 5)

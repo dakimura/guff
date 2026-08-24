@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:gochecknoinits::don't use `init` function
+bad.go:10:1:gochecknoinits::don't use `init` function

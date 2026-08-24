@@ -29,3 +29,11 @@ type Encoded struct{ raw string }
 
 func (e Encoded) MarshalJSON() ([]byte, error) { return nil, nil }
 func (e *Encoded) Set(v string)                { e.raw = v }
+
+// recvcheck names the type, so a second type mixing receivers is a second
+// sentence.
+type Mixed struct{ n int }
+
+func (m Mixed) Value() int { return m.n }
+
+func (m *Mixed) Set(n int) { m.n = n }

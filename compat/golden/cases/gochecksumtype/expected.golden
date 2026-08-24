@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:13:2:gochecksumtype::exhaustiveness check failed for sum type "S" (from bad.go:4:6): missing cases for B
+bad.go:33:2:gochecksumtype::exhaustiveness check failed for sum type "T" (from bad.go:22:6): missing cases for X, Y

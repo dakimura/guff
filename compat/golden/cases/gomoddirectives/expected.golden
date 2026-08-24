@@ -6,4 +6,7 @@
 
 # golangci-lint: 2.12.2
 
-go.mod:5:1:gomoddirectives::local replacement are not allowed: example.com/x
+go.mod:10:1:gomoddirectives::replacement are not allowed: example.com/y
+go.mod:12:1:gomoddirectives::exclude directive is not allowed
+go.mod:14:1:gomoddirectives::a comment is mandatory to explain why the version has been retracted
+go.mod:16:1:gomoddirectives::toolchain directive is not allowed

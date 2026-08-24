@@ -402,14 +402,27 @@ fn missing_members(
         remaining_by_val.remove(val);
     }
 
+    // Upstream groups the remaining members by constant value and sorts both the
+    // members inside a group and the groups themselves by **AST position**
+    // (`astBefore`), not by name. `names` is already in declaration order, so
+    // the group order follows from the first appearance of each value there.
+    // Sorting alphabetically instead reads `p.Large, p.Medium` where upstream
+    // says `p.Medium, p.Large` — same set, different sentence.
     let mut missing = Vec::new();
-    for names in remaining_by_val.values() {
+    let mut emitted: HashSet<&String> = HashSet::new();
+    for name in &enum_info.members.names {
+        let Some(val) = enum_info.members.name_to_value.get(name) else {
+            continue;
+        };
+        let Some(names) = remaining_by_val.get(val) else {
+            continue;
+        };
         // Report one representative per constant value (first declared).
-        if let Some(name) = names.first() {
-            missing.push(name.clone());
+        let Some(first) = names.first() else { continue };
+        if emitted.insert(first) {
+            missing.push(first.clone());
         }
     }
-    missing.sort();
     missing
 }
 

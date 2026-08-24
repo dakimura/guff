@@ -26,3 +26,21 @@ var names = map[Color]string{
 	Red:   "r",
 	Green: "g",
 }
+
+// The message lists every missing member, so a switch missing two is a
+// different sentence from one missing one.
+type Size int
+
+const (
+	Small Size = iota
+	Medium
+	Large
+)
+
+func MissingTwo(s Size) string {
+	switch s {
+	case Small:
+		return "s"
+	}
+	return ""
+}

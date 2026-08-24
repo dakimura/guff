@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:9:nosprintfhostport::host:port in url should be constructed with net.JoinHostPort and not directly with fmt.Sprintf
+bad.go:12:9:nosprintfhostport::host:port in url should be constructed with net.JoinHostPort and not directly with fmt.Sprintf

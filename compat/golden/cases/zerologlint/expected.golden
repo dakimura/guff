@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:6:10:zerologlint::must be dispatched by Msg or Send method
+bad.go:12:11:zerologlint::must be dispatched by Msg or Send method

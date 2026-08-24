@@ -7,3 +7,6 @@
 # golangci-lint: 2.12.2
 
 bad.go:4:6:asciicheck::identifier "Ä" contain non-ASCII character: U+00C4 'Ä'
+bad.go:10:6:asciicheck::identifier "Ünicode" contain non-ASCII character: U+00DC 'Ü'
+bad.go:11:2:asciicheck::identifier "Naïve" contain non-ASCII character: U+00EF 'ï'
+bad.go:14:6:asciicheck::identifier "Café" contain non-ASCII character: U+00E9 'é'

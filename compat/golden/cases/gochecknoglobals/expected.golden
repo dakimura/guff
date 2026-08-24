@@ -7,3 +7,6 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:5:gochecknoglobals::MyGlobal is a global variable
+bad.go:13:2:gochecknoglobals::Second is a global variable
+bad.go:14:2:gochecknoglobals::third is a global variable
+bad.go:17:5:gochecknoglobals::table is a global variable

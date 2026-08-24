@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:3:1:goprintffuncname::printf-like formatting function 'printfLikeFunc' should be named 'printfLikeFuncf'
+bad.go:7:1:goprintffuncname::printf-like formatting function 'Warn' should be named 'Warnf'

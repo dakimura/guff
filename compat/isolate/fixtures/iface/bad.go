@@ -11,3 +11,17 @@ type Reader interface {
 type Fetcher interface {
 	Read() error
 }
+
+// A third interface identical to the first two makes the message name a
+// different neighbour, and a second identical pair is a second group.
+type Loader interface {
+	Read() error
+}
+
+type Writer interface {
+	Write() error
+}
+
+type Saver interface {
+	Write() error
+}

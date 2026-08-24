@@ -7,3 +7,4 @@
 # golangci-lint: 2.12.2
 
 bad.go:10:69:arangolint::missing AllowImplicit option
+bad.go:18:5:arangolint::missing AllowImplicit option

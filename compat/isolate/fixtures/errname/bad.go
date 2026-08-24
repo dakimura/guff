@@ -20,3 +20,11 @@ var EndOfFileError = errors.New("eof")
 type notMatchingError struct{}
 
 func (*notMatchingError) Error() string { return "x" }
+
+// The third message names *several* acceptable forms rather than one: a type
+// whose name could conform in more than one way gets the plural sentence.
+type errNotMatching struct{}
+
+func (errNotMatching) Error() string { return "x" }
+
+var badSentinel = errors.New("x")

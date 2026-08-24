@@ -8,3 +8,5 @@
 
 bad.go:11:6:errname::the error type name `BadErrorType` should conform to the `XxxError` format
 bad.go:16:5:errname::the sentinel error name `EndOfFileError` should conform to the `ErrXxx` format
+bad.go:26:6:errname::the error type name `errNotMatching` should conform to the `xxxError` format
+bad.go:30:5:errname::the sentinel error name `badSentinel` should conform to the `errXxx` format

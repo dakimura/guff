@@ -8,3 +8,4 @@
 
 bad.go:3:6:recvcheck::the methods of "RPC" use pointer receiver and non-pointer receiver.
 bad.go:21:6:recvcheck::the methods of "Period" use pointer receiver and non-pointer receiver.
+bad.go:35:6:recvcheck::the methods of "Mixed" use pointer receiver and non-pointer receiver.

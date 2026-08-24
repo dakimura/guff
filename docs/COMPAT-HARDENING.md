@@ -9980,6 +9980,98 @@ git show ceb40019:compat/isolate/fixtures/<l>/bad.go | grep -c '^func '
 
 ---
 
+### 2026-08-24（続き 33）— さらに 33 linter。**「1 件のままが正しい」も結論である**
+
+続き 32 の続き。同じ手順を残りに当てた。
+
+#### 広げた 33 linter（合計 82 linter、finding 2 件以下の case は 75 → 28）
+
+| linter | before → after | | linter | before → after |
+|---|---|---|---|---|
+| `dupword` | 2 → 7 | | `errname` | 2 → 4 |
+| `promlinter` | 1 → 5 | | `exhaustruct` | 2 → 4 |
+| `inamedparam` | 2 → 5 | | `unconvert` | 1 → 4 |
+| `iface` | 2 → 5 | | `asciicheck` | 1 → 4 |
+| `gochecknoglobals` | 1 → 4 | | `copyloopvar` | 2 → 4 |
+| `exptostd` | 2 → 4 | | `cyclop` | 2 → 3 |
+| `durationcheck` | 1 → 3 | | `goconst` | 2 → 3 |
+| `embeddedstructfieldcheck` | 1 → 3 | | `exhaustive` | 2 → 3 |
+| `gosmopolitan` | 2 → 3 | | `iotamixing` | 1 → 3 |
+| `recvcheck` | 2 → 3 | | 他 12 本 | 1 → 2 |
+
+#### 欠陥: `exhaustive` の**並び順**
+
+```
+golden  missing cases in switch of type p.Size: p.Medium, p.Large
+guff    missing cases in switch of type p.Size: p.Large, p.Medium
+```
+
+guff は `missing.sort()`（アルファベット順）。上流は残ったメンバを定数値でグループ化し、
+**グループの中もグループ同士も `astBefore`（宣言順）で並べる**。
+集合は同じで**文が違う**。
+**メンバが 2 つ欠けた switch でないと見えない** —— 1 つ欠けの fixture では
+順序という概念が現れないからである。
+
+#### 欠陥: `gomoddirectives` は 4 種類を**全部 go.mod の 1 行目**に置いていた
+
+`exclude` / `toolchain` / `tool` / `godebug` の 4 つが `line_pos(1)` ——
+つまり `module` 行 —— で報告されていた。go.mod のパーサは行番号を
+クロージャに渡しておきながら `let _ = ln;` で捨てていた。
+
+**1 件の fixture では原理的に見えない**: finding が 1 つしか無いとき、
+その行が「何に対して」間違っているかが存在しない。
+directive を 2 つ書いた瞬間に**2 件が同じ行に載り**、それは正しくありえない。
+
+go.mod の 1 行 directive に `Directive { value, line }` を持たせて 4 つとも直した。
+`gomoddirectives` は 1 → 4 件（local replace / module replace / exclude / retract）。
+
+#### 「1 件のままが正しい」3 件
+
+広げても finding が増えなかったものがある。**これは失敗ではなく測定結果**で、
+fixture のコメントをそちらに直した。
+
+- `golines` は**ファイルごとに 1 件**（`File is not properly formatted`）。
+  formatter は「直す場所ごと」には報告しない。
+- `gomodguard` / `gomodguard_v2` は **`import` 文ごとに 1 件**。
+  ブロックされたモジュールを 2 回呼んでも 2 件にはならない。
+- `testpackage` / `asasalint` も同様に 1 件で正しい。
+
+**自分の仮説がコメントに書いてあるとき、走らせた結果がそれを否定したら、
+コメントのほうを直す。**
+
+#### stub が足りないと golden は**型エラーを 1 件として記録する**
+
+`zerologlint` の fixture に `log.Error().Int(...)` を足したら、golden に
+
+```
+bad.go:1:0:typecheck::: # example.com/zerologlint\n./bad.go:12:14: log.Error().Int undefined …
+```
+
+が入った。**これは tier の自衛が働いた形**である ——
+続き 30 で足した「空の golden を落とす」ガードと guff の非ゼロ終了に続いて 3 つ目で、
+**stub の不足は沈黙ではなく finding として出る**。stub に `Int` / `Bool` を足した。
+
+#### 「減っていないこと」の確認を毎回やった
+
+続き 32 で fixture を 2 本置き換えてしまった反省から、バッチごとに回した:
+
+```bash
+git show <base>:compat/isolate/fixtures/<l>/bad.go | grep -cE '^(func|type|const|var) '
+```
+
+61 fixture を突き合わせて**減少ゼロ**。
+
+#### 次にやること
+
+1. **残り 27 の linter case**。ただしここから先は「1 件が正しい」ものが増える
+   （`gomoddirectives` / `swaggo` / `mirror` / `noinlineerr` …）ので、
+   **数を追うのではなく上流の `Reportf` を数えて突き合わせる**こと。
+2. **`Info.Defs` の穴を横断で見る**（続き 31 の 2）。
+3. **`expr_string` を 1 つにする** —— 続き 28 の 2 例目。
+4. **`compat/results/` を tier ごとに分ける** —— 続き 28 / 29 / 30。
+
+---
+
 
 ---
 

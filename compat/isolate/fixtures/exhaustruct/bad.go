@@ -19,3 +19,18 @@ func MissingOne() T {
 func MissingTwo() T {
 	return T{A: 1}
 }
+
+// A nested literal and a pointer literal are separate composite literals, so
+// each is its own finding at its own type.
+type Outer struct {
+	In T
+	N  int
+}
+
+func Nested() Outer {
+	return Outer{In: T{A: 1, B: "x", C: true}}
+}
+
+func Pointer() *T {
+	return &T{A: 1, B: "x"}
+}

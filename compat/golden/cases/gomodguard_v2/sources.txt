@@ -1,7 +1,6 @@
 # The isolate fixture, so the two tiers cannot drift.
 bad.go            compat/isolate/fixtures/gomodguard_v2/bad.go
 
-# The blocked module itself, stubbed and replaced in so the case needs no
-# network. gomodguard reads the `require` line, which the replace leaves alone.
+# The stub module, replaced in so `./...` never lints it.
 logrus/go.mod     compat/golden/cases/gomodguard_v2/logrus.go.mod
 logrus/logrus.go  compat/golden/cases/gomodguard_v2/logrus.go.txt

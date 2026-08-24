@@ -7,3 +7,6 @@
 # golangci-lint: 2.12.2
 
 bad.go:4:12:unconvert::unnecessary conversion
+bad.go:10:9:unconvert::unnecessary conversion
+bad.go:11:12:unconvert::unnecessary conversion
+bad.go:12:9:unconvert::unnecessary conversion
