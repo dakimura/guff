@@ -457,17 +457,7 @@ fn enabled(set: &HashSet<String>, name: &str) -> bool {
 /// a hand-rolled approximation that renders `f(a, b)` as `f(...)` and puts
 /// blanks around every binary operator, so any message that embeds a node must
 /// go through here instead to stay byte-identical with upstream.
-fn node_text(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
-    let mut buf: Vec<u8> = Vec::new();
-    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).ok()?;
-    String::from_utf8(buf).ok()
-}
-
-fn node_text_stmt(pass: &Pass<'_>, stmt: &Stmt) -> Option<String> {
-    let mut buf: Vec<u8> = Vec::new();
-    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Stmt(stmt)).ok()?;
-    String::from_utf8(buf).ok()
-}
+use guff_analysis::code::{node_text, stmt_text as node_text_stmt};
 
 /// [`node_text`] for a call the checker only holds as a `&CallExpr`. This is
 /// what the ruleguard rules spell `$$` when the matched pattern is a call.

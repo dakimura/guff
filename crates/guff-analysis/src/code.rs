@@ -1063,6 +1063,31 @@ pub fn remap_reparsed_pos(
     Some(Pos(ft.line_start(p.line as usize).0 + (p.column - 1).max(0)))
 }
 
+/// Render `expr` exactly as `go/printer` would.
+///
+/// Upstream linters reach for `printer.Fprint` / `format.Node` when they need
+/// an expression's *source text* in a message; several guff ports had grown a
+/// hand-rolled walker instead. Those walkers put blanks around every binary
+/// operator, while go/printer drops them around an operator nested under a
+/// lower-precedence one (`len(a)/2 + len(b)`), and they answered a placeholder
+/// string for every node kind they did not enumerate.
+///
+/// Not to be confused with [`guff_types::exprstring::expr_string`], the port of
+/// `types.ExprString` — that one shortens deliberately (`…` for composite
+/// literals) and is a different renderer with different callers.
+pub fn node_text(pass: &Pass<'_>, expr: &Expr) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).ok()?;
+    String::from_utf8(buf).ok()
+}
+
+/// [`node_text`] for a statement.
+pub fn stmt_text(pass: &Pass<'_>, stmt: &guff::ast::Stmt) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Stmt(stmt)).ok()?;
+    String::from_utf8(buf).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

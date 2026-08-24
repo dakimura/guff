@@ -9,28 +9,11 @@ use std::sync::OnceLock;
 
 use guff::ast::{Decl, Expr, Stmt};
 use guff::walk::{self, NodeRef};
+use guff_analysis::code;
 use guff_analysis::passes::inspect;
 use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
 
 use crate::options::NestifOptions;
-
-fn expr_string(e: &Expr) -> String {
-    match e {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::CallExpr(c) => {
-            let args: Vec<String> = c.args.iter().map(expr_string).collect();
-            format!("{}({})", expr_string(&c.fun), args.join(", "))
-        }
-        Expr::ParenExpr(p) => format!("({})", expr_string(&p.x)),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        Expr::UnaryExpr(u) => format!("{}{}", u.op, expr_string(&u.x)),
-        Expr::BinaryExpr(b) => format!("{} {} {}", expr_string(&b.x), b.op, expr_string(&b.y)),
-        Expr::IndexExpr(i) => format!("{}[{}]", expr_string(&i.x), expr_string(&i.index)),
-        Expr::BasicLit(l) => l.value.clone(),
-        _ => "<expr>".into(),
-    }
-}
 
 struct NestVisitor {
     complexity: usize,
@@ -187,7 +170,11 @@ impl NestVisitor {
     }
 }
 
-fn check_if(stmt: &guff::ast::IfStmt, min_complexity: usize) -> Option<(u32, String)> {
+fn check_if(
+    pass: &Pass<'_>,
+    stmt: &guff::ast::IfStmt,
+    min_complexity: usize,
+) -> Option<(u32, String)> {
     let mut v = NestVisitor::new();
     v.visit_if(stmt);
     if v.complexity < min_complexity {
@@ -196,20 +183,30 @@ fn check_if(stmt: &guff::ast::IfStmt, min_complexity: usize) -> Option<(u32, Str
     Some((
         stmt.if_.0 as u32,
         format!(
+            // nestif renders the condition with `printer.Config{}.Fprint`
+            // (`makeMessage`), so this has to be go/printer and not an
+            // approximation: the walker that used to live here put blanks
+            // around every binary operator, where go/printer drops them around
+            // one nested under a lower-precedence operator.
             "`if {}` has complex nested blocks (complexity: {})",
-            expr_string(&stmt.cond),
+            code::node_text(pass, &stmt.cond).unwrap_or_default(),
             v.complexity
         ),
     ))
 }
 
-fn find_root_ifs(stmt: &Stmt, min_complexity: usize, pending: &mut Vec<(u32, String)>) {
+fn find_root_ifs(
+    pass: &Pass<'_>,
+    stmt: &Stmt,
+    min_complexity: usize,
+    pending: &mut Vec<(u32, String)>,
+) {
     walk::inspect(walk::stmt_ref(stmt), |n| {
         let Some(n) = n else {
             return true;
         };
         if let NodeRef::IfStmt(if_stmt) = n {
-            if let Some(issue) = check_if(if_stmt, min_complexity) {
+            if let Some(issue) = check_if(pass, if_stmt, min_complexity) {
                 pending.push(issue);
             }
             return false;
@@ -239,7 +236,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                 continue;
             };
             for stmt in &body.list {
-                find_root_ifs(stmt, min_complexity, &mut pending);
+                find_root_ifs(pass, stmt, min_complexity, &mut pending);
             }
         }
     }

@@ -34,6 +34,10 @@ sortableok/sortable_ok.go                   crates/guff-revive/tests/testdata/re
 footest/stutter_bad.go                      crates/guff-revive/tests/testdata/revive/stutter_bad.go
 funclen/function_length_bad.go              crates/guff-revive/tests/testdata/revive/function_length_bad.go
 
+# Every type form that revive renders into a message, in a package of its own:
+# these are the shapes the old approximation answered "<type>" for.
+typerender/type_rendering_bad.go            crates/guff-revive/tests/testdata/revive/type_rendering_bad.go
+
 fixtures/var_naming_lists.go                crates/guff-revive/tests/testdata/revive/var_naming_lists.go
 fixtures/var_naming_skip_initialism.go      crates/guff-revive/tests/testdata/revive/var_naming_skip_initialism.go
 fixtures/var_naming_upper_case_const.go     crates/guff-revive/tests/testdata/revive/var_naming_upper_case_const.go

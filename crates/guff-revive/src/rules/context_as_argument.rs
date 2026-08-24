@@ -16,16 +16,18 @@ use guff_analysis::Pass;
 use crate::config;
 use crate::failure::Failure;
 use crate::settings::RuleArgument;
-use crate::util::{expr_string, is_pkg_dot_type};
+use crate::util::{is_pkg_dot_type, render_node};
 
-pub struct Checker {
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
     allow_types: HashSet<String>,
     failures: Vec<Failure>,
 }
 
-impl Checker {
-    pub fn new(pass: &Pass<'_>) -> Self {
+impl<'a> Checker<'a> {
+    pub fn new(pass: &'a Pass<'a>) -> Self {
         Self {
+            pass,
             allow_types: allow_types_before(pass),
             failures: Vec::new(),
         }
@@ -35,7 +37,7 @@ impl Checker {
         let NodeRef::FuncDecl(f) = n else {
             return;
         };
-        check_func(f, &self.allow_types, &mut self.failures);
+        check_func(self.pass, f, &self.allow_types, &mut self.failures);
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -83,7 +85,12 @@ fn allow_types_before(pass: &Pass<'_>) -> HashSet<String> {
     allow
 }
 
-fn check_func(f: &FuncDecl, allow_types: &HashSet<String>, failures: &mut Vec<Failure>) {
+fn check_func(
+    pass: &Pass<'_>,
+    f: &FuncDecl,
+    allow_types: &HashSet<String>,
+    failures: &mut Vec<Failure>,
+) {
     let Some(params) = &f.ty.params else {
         return;
     };
@@ -107,7 +114,10 @@ fn check_func(f: &FuncDecl, allow_types: &HashSet<String>, failures: &mut Vec<Fa
             break;
         }
         if let Some(ty) = &field.ty {
-            let rendered = expr_string(ty);
+            // Upstream compares `gofmt(arg.Type)` against the configured
+            // allow-list, so an approximation here silently stops a user's
+            // `allow-types-before` entry from ever matching.
+            let rendered = render_node(pass, ty);
             ctx_allowed = allow_types.contains(&rendered);
         } else {
             ctx_allowed = false;

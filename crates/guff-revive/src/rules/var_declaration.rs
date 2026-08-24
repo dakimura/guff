@@ -7,6 +7,7 @@ use guff_analysis::Pass;
 use guff_types::arena::{ObjectData, TypeData};
 use guff_types::basic::BasicKind;
 use guff_types::predicates::is_untyped;
+use guff_types::TypeId;
 
 use crate::failure::Failure;
 use crate::util::{is_blank, is_ident, is_interface_type_expr, type_of, unparen};
@@ -41,6 +42,16 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 
+/// `types.Identical` — structural, not id equality. See the gate in
+/// [`check_value_spec`].
+fn types_identical(pass: &Pass<'_>, a: TypeId, b: TypeId) -> bool {
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let mut types = artifacts.types.clone();
+    guff_types::predicates::identical(&mut types, &artifacts.objects, &artifacts.packages, a, b)
+}
+
 fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>) {
     if vs.names.len() != 1 || vs.ty.is_none() || vs.values.is_empty() {
         return;
@@ -72,7 +83,12 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
     let Some(rhs_typ) = type_of(pass, rhs) else {
         return;
     };
-    if lhs_typ != rhs_typ {
+    // Upstream's gate is `!types.Identical(lhsTyp, rhsTyp)` — *structural*
+    // identity. A raw id comparison agrees only where the checker happens to
+    // intern the two spellings to the same entry, so every anonymous composite
+    // type was a silent miss: `var c chan struct{} = make(chan struct{})` went
+    // unreported while `var m map[string]int = map[string]int{}` did not.
+    if !types_identical(pass, lhs_typ, rhs_typ) {
         return;
     }
     // Upstream's gate above `IsUntypedConst` is
@@ -119,7 +135,7 @@ fn check_value_spec(pass: &Pass<'_>, vs: &ValueSpec, failures: &mut Vec<Failure>
         ty.pos().0 as u32,
         format!(
             "should omit type {} from declaration of var {}; it will be inferred from the right-hand side",
-            crate::util::expr_string(ty),
+            crate::util::render_node(pass, ty),
             name.name
         ),
     ));

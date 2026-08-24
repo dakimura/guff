@@ -520,22 +520,20 @@ pub fn is_ident_dot_name(fun: &Expr, recv: &str, name: &str) -> bool {
     matches!(unparen(x), Expr::Ident(Ident { name: n, .. }) if n == recv) && sel.name == name
 }
 
-pub fn expr_string(e: &Expr) -> String {
-    match e {
-        Expr::Ident(id) => id.name.clone(),
-        Expr::SelectorExpr(sel) => format!("{}.{}", expr_string(&sel.x), sel.sel.name),
-        Expr::StarExpr(s) => format!("*{}", expr_string(&s.x)),
-        Expr::ArrayType(a) => {
-            let len = a
-                .len
-                .as_ref()
-                .map(|e| expr_string(e))
-                .unwrap_or_default();
-            format!("[{len}]{}", expr_string(&a.elt))
-        }
-        Expr::InterfaceType(_) => "interface{}".into(),
-        _ => "<type>".into(),
-    }
+/// revive's `gofmt` (`rule/utils.go`) and `file.Render` (`lint/file.go`) —
+/// both are `printer.Fprint`, so this is `go/printer` and not an
+/// approximation.
+///
+/// Named for the node, not the type: `time-equal` renders the compared
+/// *expressions* through the same helper.
+///
+/// It reaches the *message* of `time-equal`, `var-declaration` and
+/// `enforce-repeated-arg-type-style`, and the allow-list comparison of
+/// `context-as-argument`. The hand-rolled walker this replaced answered
+/// `"<type>"` for map, chan, func, variadic and generic types, and collapsed a
+/// non-empty `interface{ ... }` to `interface{}`.
+pub fn render_node(pass: &Pass<'_>, e: &Expr) -> String {
+    guff_analysis::code::node_text(pass, e).unwrap_or_default()
 }
 
 /// Start of an import spec: the local name when the import has one (`.`, `_`,

@@ -6,7 +6,7 @@ use guff::walk::{self, NodeRef};
 use guff_analysis::Pass;
 
 use crate::failure::Failure;
-use crate::util::{expr_string, is_named_type, type_of};
+use crate::util::{is_named_type, render_node, type_of};
 
 pub struct Checker<'a> {
     pass: &'a Pass<'a>,
@@ -61,9 +61,11 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr, failures: &mut Vec<Failure>)
         rule: "time-equal",
         pos: expr.x.pos().0 as u32,
         message: format!(
-            "use {negate}{}.Equal({}) instead of {:?} operator",
-            expr_string(&expr.x),
-            expr_string(&expr.y),
+            // `%q` on a `token.Token` quotes its `String()`, so this is
+            // `"=="` / `"!="` — not the token's Go identifier.
+            "use {negate}{}.Equal({}) instead of \"{}\" operator",
+            render_node(pass, &expr.x),
+            render_node(pass, &expr.y),
             op
         ),
         ..Failure::default()

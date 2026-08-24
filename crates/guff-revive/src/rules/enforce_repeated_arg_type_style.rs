@@ -7,7 +7,7 @@ use guff_analysis::Pass;
 use crate::config;
 use crate::failure::Failure;
 use crate::settings::RuleArgument;
-use crate::util::expr_string;
+use crate::util::render_node;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RepeatedTypeStyle {
@@ -16,14 +16,15 @@ enum RepeatedTypeStyle {
     Full,
 }
 
-pub struct Checker {
+pub struct Checker<'a> {
+    pass: &'a Pass<'a>,
     arg_style: RepeatedTypeStyle,
     ret_style: RepeatedTypeStyle,
     failures: Vec<Failure>,
 }
 
-impl Checker {
-    pub fn try_new(pass: &Pass<'_>) -> Option<Self> {
+impl<'a> Checker<'a> {
+    pub fn try_new(pass: &'a Pass<'a>) -> Option<Self> {
         let args = config::rule_arguments(pass, "enforce-repeated-arg-type-style");
         if args.is_empty() {
             return None;
@@ -47,6 +48,7 @@ impl Checker {
             _ => return None,
         };
         Some(Self {
+            pass,
             arg_style,
             ret_style,
             failures: Vec::new(),
@@ -57,7 +59,7 @@ impl Checker {
         let NodeRef::FuncDecl(f) = n else {
             return;
         };
-        check_func(f, self.arg_style, self.ret_style, &mut self.failures);
+        check_func(self.pass, f, self.arg_style, self.ret_style, &mut self.failures);
     }
 
     pub fn into_failures(self) -> Vec<Failure> {
@@ -81,23 +83,25 @@ pub fn apply(pass: &Pass<'_>) -> Vec<Failure> {
 }
 
 fn check_func(
+    pass: &Pass<'_>,
     f: &FuncDecl,
     arg_style: RepeatedTypeStyle,
     ret_style: RepeatedTypeStyle,
     failures: &mut Vec<Failure>,
 ) {
     if let Some(params) = &f.ty.params {
-        check_fields(&params.list, arg_style, "argument", false, failures);
+        check_fields(pass, &params.list, arg_style, "argument", false, failures);
     }
     if let Some(results) = &f.ty.results {
         // Upstream's results branch carries an extra `field.Names != nil`
         // guard that its params branch does not: `func f() (int, int)` cannot
         // drop a type, since there is no name to attach the shared one to.
-        check_fields(&results.list, ret_style, "return", true, failures);
+        check_fields(pass, &results.list, ret_style, "return", true, failures);
     }
 }
 
 fn check_fields(
+    pass: &Pass<'_>,
     fields: &[guff::ast::Field],
     style: RepeatedTypeStyle,
     kind: &str,
@@ -127,7 +131,7 @@ fn check_fields(
                 let current = field
                     .ty
                     .as_ref()
-                    .map(|ty| (expr_string(ty), ty.pos().0 as u32));
+                    .map(|ty| (render_node(pass, ty), ty.pos().0 as u32));
                 if let (Some((prev_ty, prev_pos)), Some((cur_ty, _))) =
                     (prev.as_ref(), current.as_ref())
                 {

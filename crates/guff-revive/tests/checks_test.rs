@@ -1150,3 +1150,75 @@ fn revive_honours_its_own_disable_directives() {
         }
     });
 }
+
+#[test]
+fn revive_renders_types_with_go_printer_not_an_approximation() {
+    // Upstream renders a type into a message with `gofmt` (`rule/utils.go`) and
+    // `file.Render` (`lint/file.go`), both `printer.Fprint`. guff approximated
+    // that with a five-arm walker whose fallback was the literal string
+    // "<type>", so map, chan, func, variadic and generic types all came out as
+    // "<type>" and a non-empty `interface{ Foo() int }` came out as
+    // `interface{}`.
+    //
+    // Every rendering below is one of those former holes. The strings are what
+    // go/printer produces, which is also what golangci-lint 2.12.2 emits — see
+    // compat/golden/cases/revive.
+    let settings = guff_revive::extended_test_settings();
+    guff_revive::with_settings(settings, || {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/typerender",
+            "type_rendering_bad.go",
+        );
+        let messages = support::run_analyzer(revive(), &pkg);
+        let joined = messages.join("\n");
+        for needle in [
+            "repeated argument type \"map[string]int\"",
+            "repeated argument type \"chan int\"",
+            "repeated argument type \"func(int) error\"",
+            "repeated argument type \"interface{ Foo() int }\"",
+            "repeated argument type \"[]*time.Time\"",
+            "repeated argument type \"Pair[string, int]\"",
+            // `types.Identical`, not id equality: an anonymous composite type
+            // is spelled twice here and interns as two entries.
+            "should omit type map[string]int",
+            "should omit type chan struct{}",
+        ] {
+            assert!(joined.contains(needle), "missing {needle:?} in:\n{joined}");
+        }
+        // The old fallback would have shown up as this literal.
+        assert!(
+            !joined.contains("<type>"),
+            "a type rendered as the fallback placeholder:\n{joined}"
+        );
+    });
+}
+
+#[test]
+fn revive_time_equal_quotes_the_operator_not_its_token_name() {
+    // Upstream: `fmt.Sprintf("... instead of %q operator", expr.Op)`. `%q` on a
+    // `token.Token` quotes its `String()`, so the message carries `"=="`, not
+    // the token's Go identifier. guff printed `EQL`.
+    //
+    // No golden case can see this: upstream gates time-equal behind
+    // `file.Pkg.TypeCheck() != nil`, and under golangci-lint that check uses
+    // `importer.Default()`, which resolves every import to invalid — so
+    // `time.Time` is never recognised and the rule never fires upstream.
+    // compat/golden/cases/revive/ratchet.json carries guff's finding here as an
+    // accepted extra; this test is what pins its wording.
+    guff_revive::with_extended_rules(|| {
+        let pkg = support::typecheck_fixture(
+            "revive",
+            "example.com/revive/extended",
+            "extended_bad.go",
+        );
+        let found: Vec<String> = support::run_analyzer(revive(), &pkg)
+            .into_iter()
+            .filter(|m| m.contains("time-equal:"))
+            .collect();
+        assert_eq!(
+            found,
+            vec!["time-equal: use a.Equal(b) instead of \"==\" operator".to_string()]
+        );
+    });
+}

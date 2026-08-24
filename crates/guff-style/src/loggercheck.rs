@@ -438,11 +438,7 @@ fn check_call(
 /// then truncate to 20 runes with a literal `...` (three dots — not `…`).
 fn render_node_ellipsis(pass: &Pass<'_>, expr: &Expr) -> String {
     const MAX_LEN: usize = 20;
-    let mut buf: Vec<u8> = Vec::new();
-    if guff::printer::fprint(&mut buf, pass.fset(), guff::printer::PrintNode::Expr(expr)).is_err() {
-        return String::new();
-    }
-    let s = String::from_utf8(buf).unwrap_or_default();
+    let s = guff_analysis::code::node_text(pass, expr).unwrap_or_default();
     if s.chars().count() <= MAX_LEN {
         return s;
     }
