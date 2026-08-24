@@ -10895,3 +10895,106 @@ workflow 自身のコメントも 339 行目で
 
 `0` は合格ではなく質問、と同じ形：
 **誰も比較していないファイルは、緑でも何も保証していない。**
+
+---
+
+### 2026-08-24（続き 37）— `--fix` は**3 つ**壊れていた。1 つ直しても差は縮まない
+
+続き 35 の「次にやること」2（suggested fix を見る tier）を probe で試したら、
+**同じ入力・同じ config で golangci が 0 行、guff が 4 行**書き換えた。
+原因を 1 つだと思って直したが、**3 つあった**。3 つ揃って初めて一致する。
+
+#### 1. 衝突したときの捨て方（`fix.rs`）
+
+- **golangci** (`pkg/result/processors/fixer.go`): 1 組でも重なったら
+  **その linter のそのファイル分の edit を全部捨てる**。
+  linter 対どうしの衝突も見て、**アルファベット順で小さいほう**を除外する。
+- **guff**: start の降順に並べて重ならないものだけ適用 ——
+  **重なった片方だけ黙って捨てて残りは適用**。
+
+`fix.rs` の module doc は最初から
+「Port of golangci-lint `pkg/result/processors/fixer.go`」と書いてあった。
+**書いてあることと、していることが違った。**
+
+ついでに 2 つ:
+`issue.SuggestedFixes` を guff は `.first()` しか見ていない（上流は全部）。
+`validateEdits` の**同値 edit の重複排除**が無い ——
+上流はこれを「`P` と `P [P.test]` で同じ fix が 2 回来る」ための処置だと
+コメントに書いている。
+
+#### 2. `errors.As` の fix が丸ごと無かった（`errorlint.rs`）
+
+そして 1 を直しても **probe の差は縮まなかった**。
+guff の型アサーション検査は `(pos, message)` を push するだけで、
+**suggested fix を 1 つも作っていなかった**から、
+そもそも衝突する 2 つ目の edit が存在しない。
+
+**「原因はこれだ」と決めた後に測り直したから分かった。**
+直して測らなければ、直ったつもりで 4 対 0 のままだった。
+
+上流の 4 分岐を移植（`lint.go` ~470-608）:
+
+| 形 | 置換 |
+|---|---|
+| `target, ok := err.(*T)` | `target := &T{}` + `ok := errors.As(err, &target)` |
+| `e, wasFound := err.(*T)` | **`ok` の名前を保つ** |
+| `_, ok := err.(*T)` | 名前を型から作る（先頭小文字）`myErr := &myErr{}` |
+| `if target, ok := err.(*T); ok {` | **if の頭ごと**置換 |
+| 非ポインタ `err.(T)` | `var target T`（合成ではなく宣言） |
+| 単独 | 即時実行の関数リテラルで包む |
+
+置換テキストは `exprToString`（errorlint 自前のウォーカー）で作る ——
+続き 35 で「これは `go/printer` ではない」と書いて残したあの関数で、
+**そこで足した `TypeAssertExpr` 腕がここで効く**。
+
+#### 3. fix 適用後に整形していなかった（`meta.rs`）
+
+これで中身は一致したが、**インデントだけ**割れた。
+golangci は fix を当てたファイルに `p.formatter.Format` を通し、
+formatter が 1 つも有効でないときは **`format.Source`（＝ gofmt）**を掛ける。
+
+guff の `MetaFormatter::format` には**その分岐が無かった**。
+しかも `cli.rs::validate_formatters` のコメントには
+「Empty is OK (MetaFormatter falls back to gofmt)」と**書いてある**。
+1 と同じ形 —— **doc が主張している移植が、実装されていない**。
+
+この分岐を足しても `guff fmt` 側の挙動は変わらない。
+formatter が空のときは呼ぶ前に早期 return する場所が 3 つあり
+（`cli.rs:491` / `lib.rs:224` / `runner.rs:558`）、
+**空の MetaFormatter が `format()` に届くのは fixer からだけ**だから。
+共有コードを直したが、影響範囲は測ってある。
+
+#### 測り直した結果
+
+| | golangci | guff | |
+|---|---|---|---|
+| 衝突なし（4 分岐すべて） | 6 行 | 6 行 | **バイト一致** |
+| 衝突あり | 0 行 | 0 行 | **バイト一致** |
+
+最初の 4 対 0 が 0 対 0 になった。
+
+#### この差はどの tier からも見えない
+
+golden の key は `path:line:col:linter:severity:text` で
+**fix の本文が入らない**（§1.5、続き 35）。
+だから 3 つとも golden では捕まらないし、
+今回足した fixture でも捕まらない —— 網は
+`errorlint_suggests_errors_as_for_type_assertions`（fix 本文を直接 assert）と
+`fix.rs` の 6 本の unit test（衝突・同値重複・複数 fix・message-only）だけ。
+
+既存テストを 1 本**書き換えた**: `overlapping_edits_keep_first_in_descending_order`
+は go/analysis の「start が大きいほうが勝つ」を pin していた。
+上流の規則ではそれは間違いなので、
+`overlapping_edits_from_one_linter_are_all_dropped` に直し、
+**古い期待値をコメントに残した**（消すと、何が変わったのか読めなくなる）。
+
+#### 1 つ意図的に上流と違える
+
+上流の `Process` は `notFixableIssues` に
+**text edit を持たない issue しか入れない**。
+つまり衝突で除外された linter の finding は
+**適用もされず、報告もされない —— 消える**。
+（probe でも `0 issues.` と出て 0 行しか変わらなかった。）
+guff は報告を残す。revive の `importer.Default()` 盲目に対して
+`ratchet.json` が書いている判断と同じ:
+**真陽性を落とす上流の欠陥まで真似る価値は無い。**

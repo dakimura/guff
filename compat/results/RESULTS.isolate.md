@@ -45,7 +45,7 @@
 | isolate-forcetypeassert | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-makezero | 3 | 3 | 3 | 100.0% | 100.0% | 0 |
 | isolate-err113 | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
-| isolate-errorlint | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
+| isolate-errorlint | 6 | 6 | 6 | 100.0% | 100.0% | 0 |
 | isolate-predeclared | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
 | isolate-noinlineerr | 1 | 1 | 1 | 100.0% | 100.0% | 0 |
 | isolate-bidichk | 9 | 9 | 9 | 100.0% | 100.0% | 0 |
@@ -383,7 +383,7 @@ Precision = |intersection| / |guff|; Recall = |intersection| / |golangci|. `unex
 
 | Linter | guff | golangci | both | P | R |
 |--------|-----:|---------:|-----:|--:|--:|
-| errorlint | 1 | 1 | 1 | 100.0% | 100.0% |
+| errorlint | 6 | 6 | 6 | 100.0% | 100.0% |
 
 ## isolate-predeclared
 

@@ -393,7 +393,7 @@ fn check_type_assert(
     pass: &Pass<'_>,
     ta: &TypeAssertExpr,
     stack: &[NodeRef<'_>],
-    pending: &mut Vec<(u32, String)>,
+    pending: &mut Vec<Diagnostic>,
 ) {
     let Some(ty) = ta.ty.as_deref() else {
         return;
@@ -410,11 +410,149 @@ fn check_type_assert(
     if !implements_error(pass, target_typ) {
         return;
     }
-    pending.push((
-        ta.lparen.0 as u32,
-        "type assertion on error will fail on wrapped errors. Use errors.As to check for specific errors"
-            .into(),
-    ));
+    let message =
+        "type assertion on error will fail on wrapped errors. Use errors.As to check for specific errors";
+    let fix = type_assert_fix(ta, ty, stack);
+    pending.push(Diagnostic {
+        pos: ta.lparen.0 as u32,
+        message: message.into(),
+        suggested_fixes: fix.into_iter().collect(),
+        ..Diagnostic::default()
+    });
+}
+
+/// `generateErrorVarName`: keep the name the code already used, and invent one
+/// from the type only when it was `_`.
+fn generate_error_var_name(original: &str, type_name: &str) -> String {
+    if original != "_" {
+        return original.to_string();
+    }
+    let bare = match type_name.rfind('.') {
+        Some(i) => &type_name[i + 1..],
+        None => type_name,
+    };
+    let mut chars = bare.chars();
+    match chars.next() {
+        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
+        None => "anErr".into(),
+    }
+}
+
+/// errorlint's `errors.As` rewrite for a type assertion on an error.
+///
+/// Four shapes, in upstream's order (`lint.go` ~470-608). All of them render
+/// the type and the asserted expression with [`expr_string`] — errorlint's own
+/// walker, *not* `go/printer` — so the spelling of the replacement follows
+/// that walker's arms.
+fn type_assert_fix(
+    ta: &TypeAssertExpr,
+    ty: &Expr,
+    stack: &[NodeRef<'_>],
+) -> Option<SuggestedFix> {
+    const FIX_MESSAGE: &str = "Use errors.As() for type assertions on errors";
+
+    let target_type = expr_string(ty);
+    let err_expr = expr_string(&ta.x);
+    let (base_type, is_pointer) = match target_type.strip_prefix('*') {
+        Some(rest) => (rest.to_string(), true),
+        None => (target_type.clone(), false),
+    };
+    let decl = |var: &str| {
+        if is_pointer {
+            format!("{var} := &{base_type}{{}}")
+        } else {
+            format!("var {var} {base_type}")
+        }
+    };
+
+    let parent = stack.last();
+
+    // `targetErr, ok := err.(*SomeError)` — with or without an enclosing `if`.
+    if let Some(NodeRef::AssignStmt(assign)) = parent {
+        if assign.lhs.len() == 2 {
+            if let Expr::Ident(id) = &assign.lhs[0] {
+                let var = generate_error_var_name(&id.name, &base_type);
+
+                // `if targetErr, ok := err.(*SomeError); ok {` replaces the
+                // whole head of the if statement, up to the opening brace.
+                if let Some(NodeRef::IfStmt(if_stmt)) = stack.get(stack.len().wrapping_sub(2)) {
+                    // Upstream's condition is `ifParent.Init == assign`, i.e.
+                    // this very statement is the if's initializer — not merely
+                    // some assignment inside it.
+                    let is_init = matches!(
+                        if_stmt.init.as_deref(),
+                        Some(Stmt::AssignStmt(init)) if std::ptr::eq(init, *assign)
+                    );
+                    if is_init {
+                        return Some(SuggestedFix {
+                            message: FIX_MESSAGE.into(),
+                            text_edits: vec![TextEdit {
+                                pos: if_stmt.if_.0 as u32,
+                                end: if_stmt.body.lbrace.0 as u32,
+                                new_text: format!(
+                                    "{}\nif errors.As({err_expr}, &{var})",
+                                    decl(&var)
+                                ),
+                            }],
+                        });
+                    }
+                }
+
+                // Upstream keeps whatever the second variable was called.
+                let ok_name = match assign.lhs.get(1) {
+                    Some(Expr::Ident(ok)) if ok.name != "_" => ok.name.clone(),
+                    _ => "ok".to_string(),
+                };
+                return Some(SuggestedFix {
+                    message: FIX_MESSAGE.into(),
+                    text_edits: vec![TextEdit {
+                        // `AssignStmt.Pos()` is `Lhs[0].Pos()` and `End()` is
+                        // `Rhs[len-1].End()`.
+                        pos: assign.lhs[0].pos().0 as u32,
+                        end: assign
+                            .rhs
+                            .last()
+                            .map(|e| e.end().0 as u32)
+                            .unwrap_or(assign.tok_pos.0 as u32),
+                        new_text: format!(
+                            "{}\n{ok_name} := errors.As({err_expr}, &{var})",
+                            decl(&var)
+                        ),
+                    }],
+                });
+            }
+        }
+    }
+
+    // A type assertion sitting directly in an `if` condition. Ported for
+    // fidelity; it needs the asserted type to be `bool`, which cannot also
+    // implement `error`, so upstream's branch looks unreachable too.
+    if let Some(NodeRef::IfStmt(_)) = parent {
+        let var = generate_error_var_name("target", &base_type);
+        return Some(SuggestedFix {
+            message: FIX_MESSAGE.into(),
+            text_edits: vec![TextEdit {
+                pos: ta.x.pos().0 as u32,
+                end: (ta.rparen.0 + 1) as u32,
+                new_text: format!("{}\nif errors.As({err_expr}, &{var})", decl(&var)),
+            }],
+        });
+    }
+
+    // Standalone: wrap the assertion in an immediately-called function.
+    let var = generate_error_var_name("target", &base_type);
+    Some(SuggestedFix {
+        message: FIX_MESSAGE.into(),
+        text_edits: vec![TextEdit {
+            // `TypeAssertExpr.Pos()` is `X.Pos()`, `End()` is `Rparen + 1`.
+            pos: ta.x.pos().0 as u32,
+            end: (ta.rparen.0 + 1) as u32,
+            new_text: format!(
+                "func() {target_type} {{\n\t{}\n\t_ = errors.As({err_expr}, &{var})\n\treturn {var}\n}}()",
+                decl(&var)
+            ),
+        }],
+    })
 }
 
 fn check_type_switch(
@@ -552,7 +690,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             walk::preorder_stack(NodeRef::File(file), &mut stack, |n, stack| {
                 match n {
                     NodeRef::BinaryExpr(be) => check_comparison(pass, &idx, be, stack, &mut diags),
-                    NodeRef::TypeAssertExpr(ta) => check_type_assert(pass, ta, stack, &mut msgs),
+                    NodeRef::TypeAssertExpr(ta) => check_type_assert(pass, ta, stack, &mut diags),
                     NodeRef::TypeSwitchStmt(ts) => check_type_switch(pass, ts, stack, &mut msgs),
                     NodeRef::SwitchStmt(sw) => check_value_switch(pass, &idx, sw, stack, &mut msgs),
                     _ => {}
