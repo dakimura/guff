@@ -20,9 +20,12 @@
  	wg.Wait()
 --- a/mapsloop/mapsloop.go
 +++ b/mapsloop/mapsloop.go
-@@ -3,7 +3,5 @@
+@@ -2,8 +2,8 @@
+ 
  package modernize
  
++import "maps"
++
  func copyMap(dst, src map[int]string) {
 -	for k, v := range src {
 -		dst[k] = v
@@ -130,8 +133,12 @@
  // Interface-typed args are dynamic; must not suggest TypeFor.
 --- a/slicesbackward/slicesbackward.go
 +++ b/slicesbackward/slicesbackward.go
-@@ -4,8 +4,8 @@
+@@ -2,10 +2,12 @@
  
+ package modernize
+ 
++import "slices"
++
  func sumBackward(s []int) int {
  	sum := 0
 -	for i := len(s) - 1; i >= 0; i-- {
@@ -143,9 +150,11 @@
  }
 --- a/slicescontains/slicescontains.go
 +++ b/slicescontains/slicescontains.go
-@@ -1,50 +1,26 @@
+@@ -1,50 +1,28 @@
  package slicescontains
  
++import "slices"
++
  func containsReturn(s []int, needle int) bool {
 -	for _, v := range s {
 -		if v == needle {
@@ -242,7 +251,10 @@
  }
 --- a/stringsbuilder/stringsbuilder.go
 +++ b/stringsbuilder/stringsbuilder.go
-@@ -2,42 +2,43 @@
+@@ -1,43 +1,46 @@
+ package modernize
++
++import "strings"
  
  // basic: var + loop += + rvalue use
  func builderBasic() {
@@ -303,7 +315,7 @@
  }
  
  // nope: += only outside a loop
-@@ -51,7 +52,7 @@
+@@ -51,7 +54,7 @@
  // nope: declaration in if init (not an unrestricted stmt list)
  func builderIfInit() {
  	if s := "a"; true {
@@ -312,7 +324,7 @@
  			s += "x"
  		}
  		print(s)
-@@ -62,7 +63,7 @@
+@@ -62,7 +65,7 @@
  func builderDirectAssign(x string) string {
  	var s string
  	s = x
@@ -321,7 +333,7 @@
  		s += x
  	}
  	return s
-@@ -74,7 +75,7 @@
+@@ -74,7 +77,7 @@
  		str   = "hello"
  		after int
  	)

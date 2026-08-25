@@ -77,8 +77,14 @@ cannot outlive the defect it records.
 
 First measurement (2026-08-24): 143 of 193 cases matched. One of the 50 — the
 one where guff *added* edits upstream does not make — was fixed in the same
-change, so the tier lands at **144 matching, 49 pending**: 34 where guff writes
+change, so the tier landed at **144 matching, 49 pending**: 34 where guff writes
 nothing at all, 15 where it writes some of the edits.
+
+After the `refactor.AddImport` port (2026-08-25): **145 matching, 48 pending**
+— 34 that write nothing at all, 14 that write some of the edits.
+`modernize-atomictypes` reached upstream's exact bytes and its ledger file was
+deleted; `modernize` moved and was re-recorded, gaining the four import
+insertions it had been leaving out.
 
 ## Does it still build?
 
@@ -92,13 +98,20 @@ It asks the pristine tree first: several fixtures are deliberately un-buildable
 that was already broken.
 
 The count is printed, not enforced, and the reason is the measurement itself.
-Seven cases leave an un-buildable tree, and **three of them are byte-identical
+Eight cases leave an un-buildable tree, and **four of them are byte-identical
 to what golangci-lint wrote** — `dotimport` (rewrites a dot-import usage without
 adding `errors`), `perfsprint` (`strconv` — upstream's own `fiximports` option
-is off by default), `err113`. Upstream's `--fix` breaks the build on those
-fixtures, guff reproduces it exactly, and a hard gate would be demanding that
-guff be *incompatible*. The other four are guff's own: `importas`, `modernize`,
-`rangeint`, `staticcheck-qf`.
+is off by default), `err113`, and `modernize-atomictypes` (rewrites the only use
+of an aliased second import of `sync/atomic`, leaving `myatomic` imported and
+unused). Upstream's `--fix` breaks the build on those fixtures, guff reproduces
+it exactly, and a hard gate would be demanding that guff be *incompatible*.
+The other four are guff's own: `importas`, `modernize`, `rangeint`,
+`staticcheck-qf`.
+
+`modernize-atomictypes` joined that list by being *fixed*: it used to write a
+prefix guff invented, which happened to keep the alias used. Matching upstream
+made the tree stop building. The count going up is not always the direction it
+looks like, which is exactly why it is printed rather than gated.
 
 ## Two traps worth knowing
 

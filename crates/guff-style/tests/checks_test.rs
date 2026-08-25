@@ -6108,6 +6108,71 @@ fn modernize_atomictypes_drops_non_locals_when_the_package_has_ignored_files() {
     assert!(kept[0].contains("var n uint32"), "{kept:?}");
 }
 
+/// A fix that names a package has to add the import, and has to name the
+/// package the way *this file* can.
+///
+/// `mapsloop.go` does not import `maps` at all, so the fix must carry the
+/// import edit or `--fix` writes a file that does not compile. That is not
+/// visible in any finding-set comparison: the message says `maps.Copy` either
+/// way (COMPAT-HARDENING, `compat/fix/`).
+#[test]
+fn modernize_mapsloop_fix_adds_the_maps_import() {
+    let pkg =
+        support::typecheck_fixture("modernize", "example.com/modernize/mapsloop", "mapsloop.go");
+    let mut fixes = 0;
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("maps.Copy") {
+            continue;
+        }
+        fixes += 1;
+        let edits = &d.suggested_fixes[0].text_edits;
+        assert_eq!(edits.len(), 2, "import edit + replacement: {edits:?}");
+        // The import edit comes first and is an insertion.
+        assert_eq!(edits[0].pos, edits[0].end);
+        assert_eq!(edits[0].new_text, "import \"maps\"\n\n");
+        assert_eq!(edits[1].new_text, "maps.Copy(dst, src)");
+    }
+    assert_eq!(fixes, 1, "one loop in the fixture");
+}
+
+/// The prefix comes from the declaration's imports, not from the call site's
+/// alias.
+///
+/// `atomictypes.go` imports `sync/atomic` twice — once plainly and once as
+/// `myatomic` — and one function reaches the package through the alias. guff
+/// used to copy the alias into the *declaration*, writing
+/// `var x myatomic.Int32`; upstream writes `atomic.Int32`, because the name it
+/// picks is the one `AddImport` finds in scope at the declaration, and the
+/// plain import is the first spec in the file.
+#[test]
+fn modernize_atomictypes_fix_names_the_package_the_declaration_can_see() {
+    let pkg = support::typecheck_fixture(
+        "modernize",
+        "example.com/modernize/atomictypes",
+        "atomictypes.go",
+    );
+    let mut type_edits: Vec<String> = Vec::new();
+    for d in support::run_analyzer_diagnostics(modernize(), &pkg) {
+        if !d.message.contains("may be simplified using atomic.") {
+            continue;
+        }
+        for edit in &d.suggested_fixes[0].text_edits {
+            assert!(
+                !edit.new_text.starts_with("import "),
+                "sync/atomic is already imported; nothing to add: {edit:?}"
+            );
+            if edit.new_text.starts_with("atomic.") || edit.new_text.starts_with("myatomic.") {
+                type_edits.push(edit.new_text.clone());
+            }
+        }
+    }
+    assert!(!type_edits.is_empty(), "the fixture reports something");
+    assert!(
+        type_edits.iter().all(|t| t.starts_with("atomic.")),
+        "the alias must not reach the declaration: {type_edits:?}"
+    );
+}
+
 /// omitzero offers **two** fixes, and they deliberately conflict.
 ///
 /// Upstream reports a deletion and a replacement over the same span, so

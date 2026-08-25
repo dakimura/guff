@@ -37,6 +37,10 @@ pub fn stamp_node_ids(file: &mut File) {
     for d in &mut file.decls {
         stamp_decl(d);
     }
+    // The parser's `File.imports` are clones taken before this pass ran, so
+    // they still carry id 0. Re-take them now that the decls are stamped, or a
+    // `file.imports` loop can never find its spec in `Info.Implicits`.
+    file.rebuild_imports();
 }
 
 /// Assign ids to every unstamped node in a standalone expression (used by the
