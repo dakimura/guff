@@ -7,3 +7,35 @@
 # ledger cannot quietly outlive the defect it records.
 #
 # Re-record with: ./compat/fix/regen.sh --pending staticcheck-s
+--- a/s1002/bad/bad.go
++++ b/s1002/bad/bad.go
+@@ -1,10 +1,10 @@
+ package main
+ 
+ func f(x bool) {
+-	if x == true {
++	if x {
+ 		_ = x
+ 	}
+-	if x == false {
++	if !x {
+ 		_ = x
+ 	}
+ }
+--- a/s1004/bad/bad.go
++++ b/s1004/bad/bad.go
+@@ -3,5 +3,5 @@
+ import "bytes"
+ 
+ func f(a, b []byte) bool {
+-	return bytes.Compare(a, b) == 0
++	return bytes.Equal(a, b)
+ }
+--- a/s1012/bad/bad.go
++++ b/s1012/bad/bad.go
+@@ -2,4 +2,4 @@
+ 
+ import "time"
+ 
+-func f(t time.Time) time.Duration { return time.Now().Sub(t) }
++func f(t time.Time) time.Duration { return time.Since(t) }

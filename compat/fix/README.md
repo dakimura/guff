@@ -120,6 +120,10 @@ After gocritic's first three fixes (2026-08-26): still 162 matching, 30 pending
 — the case needs a fourth thing guff will not do. Inside it, guff went from 0 to
 29 of upstream's 76 diff lines.
 
+After staticcheck's S1002 / S1004 / S1012 (2026-08-26): **163 matching, 29
+pending**. Three checks closed a *fourth* case, `staticcheck-checks-glob`, which
+enables a narrower set that those three happen to cover.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

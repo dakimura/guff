@@ -8,9 +8,11 @@ use guff::ast::{BinaryExpr, Expr};
 use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
-use guff_analysis::code::{bool_const, is_bool_const};
+use guff_analysis::code::{self, bool_const, is_bool_const};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_analysis::Pass;
 use guff_types::predicates::is_boolean;
 
@@ -75,7 +77,7 @@ fn simplified_condition(op: Token, const_val: bool, other: &Expr) -> String {
     }
 }
 
-fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String)> {
+fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String, TextEdit)> {
     if expr.op != Token::EQL && expr.op != Token::NEQ {
         return None;
     }
@@ -96,11 +98,20 @@ fn check_binary(pass: &Pass<'_>, expr: &BinaryExpr) -> Option<(u32, String)> {
         return None;
     }
     let simplified = simplified_condition(expr.op, val, other);
+    // `edit.ReplaceWithString(expr, r)` where `r` is the same string the
+    // message quotes — the whole comparison goes and the simplified condition
+    // takes its place.
+    let edit = TextEdit {
+        pos: expr.x.pos().0 as u32,
+        end: expr.y.end().0 as u32,
+        new_text: simplified.clone(),
+    };
     Some((
         expr.x.pos().0 as u32,
         format!(
             "should omit comparison to bool constant, can be simplified to {simplified}"
         ),
+        edit,
     ))
 }
 
@@ -110,7 +121,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .ok_or_else(|| "S1002 requires inspect analyzer".to_string())?
         .clone();
 
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    let mut pending: Vec<(u32, String, TextEdit)> = Vec::new();
     // Upstream `simple/s1002` skips `_test.go` (`code.IsInTest`).
     let compiled = &pass.pkg().compiled_go_files;
     for (fi, file) in pass.files().iter().enumerate() {
@@ -124,13 +135,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
             let NodeRef::BinaryExpr(expr) = n else {
                 return;
             };
-            if let Some((pos, msg)) = check_binary(pass, expr) {
-                pending.push((pos, msg));
+            if let Some((pos, msg, edit)) = check_binary(pass, expr) {
+                pending.push((pos, msg, edit));
             }
         });
     }
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, edit) in pending {
+        // `report.FilterGenerated()`: same gate as `reportf`, spelled out here
+        // because the diagnostic carries a fix.
+        if code::is_generated_at(pass, pos) {
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Simplify bool comparison".into(),
+                text_edits: vec![edit],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
