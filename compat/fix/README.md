@@ -114,6 +114,8 @@ trailing `// comment` was being stranded on a line whose statement had gone.
 
 After `godot` (2026-08-26): **161 matching, 31 pending**.
 
+After `whitespace` (2026-08-26): **162 matching, 30 pending**.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add

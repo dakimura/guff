@@ -12104,3 +12104,61 @@ golden **193/193**。
 2. `whitespace`（22）は削除と挿入の両方があり、`nlreturn`（34）は挿入のみ。
    どちらも行単位なので `godot` と同じ形で書ける。
 3. `inline` / `inline_local` は別規模のまま。
+
+---
+
+### 2026-08-26（続き 50）— `whitespace`。**整形は整形器に任せる**
+
+`godot` に続いて 1 回でバイト一致。22 行。
+
+#### 3 つの形
+
+| 診断 | edit |
+|---|---|
+| `unnecessary leading newline` | `[Lbrace+1, first.Pos())` を `"\n"` に |
+| `unnecessary trailing newline` | `[last.End(), Rbrace)` を `"\n"` に |
+| `multi-line statement should be followed by a newline` | `stmt.List[0].Pos()` に `"\n"` を挿入 |
+
+前 2 つは潰す方向、3 つ目は**入れる方向**。同じ linter の中で逆を向く。
+
+#### インデントごと消す
+
+leading の置換範囲は `[Lbrace+1, first.Pos())` ——
+つまり**改行だけでなく次の文のインデントも含む**。`"\n"` 1 個に潰すと
+
+```
+{\n\n\t_ = 1   →   {\n_ = 1
+```
+
+でインデントが消えるが、`--fix` の後に走る formatter（続き 37）が戻す。
+
+インデントを残そうとすると「何文字残すか」を推測することになり、
+**上流はそれをしていない**。
+続き 45 の「保守的に見える選択が保守的とは限らない」と同じ構図で、
+ここでは**整形は整形器の仕事**という切り分けがそれに当たる。
+
+#### `nlreturn` は見送った
+
+同じ「行を入れる」形で 34 行あるが、
+`ssgreg/nlreturn` は**モジュールキャッシュに無い**。
+続き 43 で `reflecttypefor` を HEAD から移植しかけて
+**逆の実装になるところだった**ので、
+ソースを読めない linter は差分から推測しない。
+
+#### 測った
+
+| | 続き 49 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 161 | **162** |
+| pending | 31 | **30** |
+
+golden **193/193**。
+
+#### 次にやること
+
+1. pending 30 件。0 バイト組は `staticcheck-s` 271 / `goheader` 110 /
+   `testifylint-mock` 97 / `gocritic` 76 / `protogetter` 42 / `dupword` 36 /
+   `nlreturn` 34 / `ginkgolinter` 29 / `wsl-v5` 26 …
+2. ソースが手元にあるもの（`gocritic`＝go-critic、`testifylint`＝Antonboom、
+   `ginkgolinter`＝nunnatsa、`staticcheck`＝dominikh）を優先する。
+3. `nlreturn` / `protogetter` などは**上流を取得できてから**。
