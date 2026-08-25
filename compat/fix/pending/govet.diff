@@ -15,6 +15,15 @@
  	var x int
 -	x = x
  }
+--- a/composites/bad/bad.go
++++ b/composites/bad/bad.go
+@@ -3,5 +3,5 @@
+ import "example.com/govet/composites/other"
+ 
+ func bad() {
+-	_ = other.Config{nil}
++	_ = other.Config{Err: nil}
+ }
 --- a/sigchanyzer/bad/bad.go
 +++ b/sigchanyzer/bad/bad.go
 @@ -6,6 +6,6 @@
@@ -24,6 +33,17 @@
 -	c := make(chan os.Signal)
 +	c := make(chan os.Signal, 1)
  	signal.Notify(c, os.Interrupt)
+ }
+--- a/stringintconv/bad/bad.go
++++ b/stringintconv/bad/bad.go
+@@ -1,5 +1,7 @@
+ package main
+ 
++import "fmt"
++
+ func main() {
+-	_ = string(65)
++	_ = fmt.Sprint(rune(65))
  }
 --- a/timeformat/bad/bad.go
 +++ b/timeformat/bad/bad.go

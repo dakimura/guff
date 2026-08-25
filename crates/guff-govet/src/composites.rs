@@ -10,7 +10,9 @@ use guff::commentmap;
 use guff::node_mask;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 use guff_types::arena::TypeData;
 use guff_types::lookup::deref;
 use guff_types::named::named_obj;
@@ -128,6 +130,39 @@ fn has_keyed_element(lit: &CompositeLit) -> bool {
     lit.elts.iter().any(|e| matches!(unparen(e), Expr::KeyValueExpr(_)))
 }
 
+/// The `Name: ` insertions that key an unkeyed struct literal.
+///
+/// Upstream offers the fix only when the literal supplies exactly one element
+/// per field — a short literal has no field to name the trailing values after —
+/// and abandons it on the first unexported field, since a name that is not
+/// visible here cannot be written here.
+fn keying_edits(
+    pass: &Pass<'_>,
+    lit: &CompositeLit,
+    strct: guff_types::TypeId,
+) -> Option<Vec<TextEdit>> {
+    let artifacts = pass.pkg().type_artifacts.as_ref()?;
+    let types = &artifacts.types;
+    if lit.elts.len() != guff_types::struct_num_fields(types, strct) {
+        return None;
+    }
+    let mut edits = Vec::with_capacity(lit.elts.len());
+    for (i, e) in lit.elts.iter().enumerate() {
+        let field = guff_types::struct_field(types, strct, i);
+        let name = field.name(&artifacts.objects).to_string();
+        if !guff_types::object::is_exported(&name) {
+            return None;
+        }
+        let at = e.pos().0 as u32;
+        edits.push(TextEdit {
+            pos: at,
+            end: at,
+            new_text: format!("{name}: "),
+        });
+    }
+    Some(edits)
+}
+
 fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
     if lit.elts.is_empty() || has_keyed_element(lit) {
         return None;
@@ -151,9 +186,7 @@ fn check_literal(pass: &Pass<'_>, lit: &CompositeLit) -> Option<String> {
     if is_whitelisted_type(&type_name) {
         return None;
     }
-    if struct_type(&artifacts.types, typ).is_none() {
-        return None;
-    }
+    struct_type(&artifacts.types, typ)?;
     Some(format!("{type_name} struct literal uses unkeyed fields"))
 }
 
@@ -171,12 +204,38 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if let Some(message) = check_literal(pass, lit) {
             // Upstream reports at cl.Pos() (the literal's type, when it has
             // one), not at its opening brace.
-            pending.push((commentmap::node_pos(NodeRef::CompositeLit(lit)).0 as u32, message));
+            let edits = pass
+                .pkg()
+                .type_artifacts
+                .as_ref()
+                .and_then(|a| {
+                    let typ = pass.types_info()?.types.get(&lit.id)?.typ;
+                    struct_type(&a.types, typ)
+                })
+                .and_then(|strct| keying_edits(pass, lit, strct))
+                .unwrap_or_default();
+            pending.push((
+                commentmap::node_pos(NodeRef::CompositeLit(lit)).0 as u32,
+                message,
+                edits,
+            ));
         }
     });
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, text_edits) in pending {
+        if text_edits.is_empty() {
+            pass.reportf(pos, message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Add field names to struct literal".into(),
+                text_edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
