@@ -274,6 +274,51 @@ fn importas_flags_wrong_aliases() {
     );
 }
 
+/// Renaming the alias without renaming its uses writes code that does not
+/// compile.
+///
+/// `import f "fmt"` becomes `import fmtpkg "fmt"`, so every `f.Sprintf` has to
+/// become `fmtpkg.Sprintf` in the same fix. guff used to emit the import line
+/// alone, and `undefined: f` is invisible to every finding-set gate — the
+/// diagnostic is identical either way (COMPAT-HARDENING, `compat/fix/`).
+#[test]
+fn importas_fix_renames_the_use_sites_too() {
+    let pkg = support::typecheck_fixture("importas", "example.com/importas/bad", "bad.go");
+    let diags = support::run_analyzer_diagnostics(
+        importas(),
+        &pkg,
+        &RunnerOptions {
+            settings: Arc::new(importas_alias_bag()),
+            ..RunnerOptions::default()
+        },
+    );
+    let mut checked = 0;
+    for d in &diags {
+        let (want_import, want_use) = if d.message.contains("\"fmt\"") {
+            ("fmtpkg \"fmt\"", "fmtpkg")
+        } else if d.message.contains("\"os\"") {
+            ("ospkg \"os\"", "ospkg")
+        } else {
+            continue;
+        };
+        let edits = &d.suggested_fixes[0].text_edits;
+        assert_eq!(
+            edits[0].new_text, want_import,
+            "the import line comes first: {edits:?}"
+        );
+        assert_eq!(
+            edits.len(),
+            2,
+            "one import line plus its single use site: {edits:?}"
+        );
+        assert_eq!(edits[1].new_text, want_use, "{edits:?}");
+        // A rename, not a deletion: the span is the old qualifier alone.
+        assert!(edits[1].end > edits[1].pos, "{edits:?}");
+        checked += 1;
+    }
+    assert_eq!(checked, 2, "both imports are misaliased: {diags:?}");
+}
+
 #[test]
 fn importas_allows_correct_aliases() {
     let pkg = support::typecheck_fixture("importas", "example.com/importas/ok", "ok.go");

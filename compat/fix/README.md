@@ -90,6 +90,10 @@ After rangeint / slicescontains / waitgroupgo (2026-08-25): **146 matching,
 47 pending** — 34 that write nothing, 13 partial. `rangeint` reached upstream's
 bytes and its ledger file was deleted.
 
+After importas (2026-08-25): **147 matching, 46 pending**. `importas` is the
+first case to *leave* the un-buildable list by being fixed rather than join it —
+it renamed the import and not its uses.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -102,7 +106,7 @@ It asks the pristine tree first: several fixtures are deliberately un-buildable
 that was already broken.
 
 The count is printed, not enforced, and the reason is the measurement itself.
-Eight cases leave an un-buildable tree, and **five of them are byte-identical
+Seven cases leave an un-buildable tree, and **five of them are byte-identical
 to what golangci-lint wrote**:
 
 | case | why the fixed tree does not build |
@@ -114,8 +118,8 @@ to what golangci-lint wrote**:
 | `rangeint` | `for i = 0` whose body never reads `i` becomes `for i = range n`, leaving `var i int` unread |
 
 Upstream's `--fix` breaks the build on all five, guff reproduces it exactly, and
-a hard gate would be demanding that guff be *incompatible*. The other three are
-guff's own: `importas`, `modernize`, `staticcheck-qf`.
+a hard gate would be demanding that guff be *incompatible*. The other two are
+guff's own: `modernize` and `staticcheck-qf`.
 
 Two of the five joined that list by being *fixed*. `modernize-atomictypes` used
 to write a prefix guff invented, which happened to keep the alias used;

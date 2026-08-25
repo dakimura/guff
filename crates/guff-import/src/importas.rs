@@ -2,16 +2,18 @@
 //! (golangci-lint wrapper in `pkg/golinters/importas`).
 //!
 //! Enforces consistent import aliases from `linters.settings.importas`.
-//! SuggestedFix rewrites the import line only; use-site renames via
-//! `types.Info.Uses` are DEFERRED (see DEVELOPMENT.md R13).
+//! SuggestedFix rewrites the import line *and* every qualified identifier that
+//! denotes it — renaming the alias alone leaves the old name undefined.
 
 use std::sync::OnceLock;
 
 use guff::ast::ImportSpec;
+use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
 use guff_analysis::{
     AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
 };
+use guff_types::arena::ObjectData;
 use regex::Regex;
 
 use crate::options::{ImportasAlias, ImportasOptions};
@@ -108,7 +110,68 @@ fn import_line_text(path: &str, required: &str) -> String {
     }
 }
 
+/// The qualifier that replaces the old one at every use site.
+///
+/// Upstream falls back to the import path's last segment when the rule only
+/// asks for the alias to go. That is an approximation — `gopkg.in/yaml.v3`
+/// declares package `yaml`, not `yaml.v3` — but it is the approximation
+/// golangci-lint ships, and this tier compares bytes.
+fn package_replacement<'a>(import_path: &'a str, required: &'a str, original: &'a str) -> &'a str {
+    if !required.is_empty() {
+        return required;
+    }
+    // `strings.Split` never yields an empty slice, so upstream's `original`
+    // fallback is unreachable; it is kept for the same reason it is there.
+    import_path.rsplit('/').next().unwrap_or(original)
+}
+
+/// Every identifier in the package that denotes the package `imp_pos` imports.
+///
+/// Upstream walks `types.Info.Uses` directly: Go keys that map by `*ast.Ident`,
+/// so each entry already carries the position to edit. guff keys it by node id,
+/// so the identifiers have to come from a syntax walk and the map answers which
+/// object each one denotes.
+///
+/// The `PkgName`'s own position is what ties a use back to one import spec —
+/// two files can both spell it `f` and mean different packages.
+fn use_site_edits(pass: &Pass<'_>, imp_pos: u32, replacement: &str) -> Vec<TextEdit> {
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return Vec::new();
+    };
+    let mut edits = Vec::new();
+    for file in pass.files() {
+        walk::inspect(NodeRef::File(file), |n| {
+            let Some(NodeRef::Ident(id)) = n else {
+                return true;
+            };
+            let Some(obj) = info.uses.get(&id.id).copied() else {
+                return true;
+            };
+            if !matches!(artifacts.objects.get(obj), ObjectData::PkgName(_)) {
+                return true;
+            }
+            if obj.pos(&artifacts.objects) != imp_pos {
+                return true;
+            }
+            let pos = id.pos().0 as u32;
+            let mut end = id.end().0 as u32;
+            let mut new_text = replacement.to_string();
+            if replacement == "." {
+                // A dot import carries no qualifier, so the name and the `.`
+                // after it both go.
+                new_text.clear();
+                end += 1;
+            }
+            edits.push(TextEdit { pos, end, new_text });
+            true
+        });
+    }
+    edits
+}
+
 fn visit_import(
+    pass: &Pass<'_>,
     opts: &ImportasOptions,
     rules: &[CompiledRule],
     imp: &ImportSpec,
@@ -148,11 +211,19 @@ fn visit_import(
                 message,
                 suggested_fixes: vec![SuggestedFix {
                     message: "Use correct alias".into(),
-                    text_edits: vec![TextEdit {
-                        pos,
-                        end,
-                        new_text: import_line_text(path, &required),
-                    }],
+                    text_edits: {
+                        let mut edits = vec![TextEdit {
+                            pos,
+                            end,
+                            new_text: import_line_text(path, &required),
+                        }];
+                        edits.extend(use_site_edits(
+                            pass,
+                            pos,
+                            package_replacement(path, &required, alias),
+                        ));
+                        edits
+                    },
                 }],
                 ..Diagnostic::default()
             });
@@ -164,11 +235,15 @@ fn visit_import(
             message: format!("import {path:?} has alias {alias:?} which is not part of config"),
             suggested_fixes: vec![SuggestedFix {
                 message: "remove alias".into(),
-                text_edits: vec![TextEdit {
-                    pos,
-                    end,
-                    new_text: import_line_text(path, ""),
-                }],
+                text_edits: {
+                    let mut edits = vec![TextEdit {
+                        pos,
+                        end,
+                        new_text: import_line_text(path, ""),
+                    }];
+                    edits.extend(use_site_edits(pass, pos, package_replacement(path, "", alias)));
+                    edits
+                },
             }],
             ..Diagnostic::default()
         });
@@ -195,7 +270,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     let mut pending = Vec::new();
     for file in pass.files() {
         for imp in &file.imports {
-            visit_import(&opts, &rules, imp, &mut pending);
+            visit_import(pass, &opts, &rules, imp, &mut pending);
         }
     }
 

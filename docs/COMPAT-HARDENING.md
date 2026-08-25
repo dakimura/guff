@@ -11422,3 +11422,87 @@ golden と fix の expected を両方 regen（上流 2 回一致を確認して�
    直すと `perfsprint` の `fiximports` と同じで、パリティから外れる。
 4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
 5. pending 47 件。`DEFERRED: SuggestedFix` が 15 linter。
+
+---
+
+### 2026-08-25（続き 41）— `importas` は alias を書き換えて、**使っている側を書き換えなかった**
+
+続き 40 で残った「guff 固有の非ビルド」3 件のうち 1 件。
+
+```go
+import ( f "fmt" )
+var _ = f.Sprintf
+```
+
+guff の `--fix` は import 行を `fmtpkg "fmt"` にして、**そこで止まっていた**。
+`f.Sprintf` はそのまま残るので **`undefined: f`**。
+
+上流（`julz/importas` v0.2.0 の `findEdits`）は edit を 2 種類出す:
+import 行 1 本と、**`Info.Uses` のうち `PkgName` の位置がその
+ImportSpec と一致する識別子 1 つにつき 1 本**。
+guff は前者しか作っていなかった（13 行 対 19 行）。
+
+移植で 1 箇所だけ形が変わる。
+Go の `Uses` は `*ast.Ident` がキーなので、
+map を回すだけで書き換える位置が手に入る。
+guff は**ノード id** がキーなので、識別子は walk から取り、
+map には「この識別子が何を指すか」だけを訊く。
+`exptostd` が既に使っている形。
+
+`PkgName` の位置で照合するのは上流と同じ理由:
+**別のファイルの `f` は別の package を指しうる。**
+
+#### 上流の近似はそのまま持ってきた
+
+rule が「alias を消せ」としか言わないとき、
+上流は **import path の最後のセグメント**を新しい qualifier にする。
+`gopkg.in/yaml.v3` は package `yaml` を宣言するのに `yaml.v3` になる ——
+**間違っているが、golangci-lint が出荷しているのはこれ**で、
+この tier はバイトを比べる。`perfsprint` の `fiximports` と同じ判断。
+
+#### fixture が**発火していなかった**
+
+最初に書いたテストは通った。**何も検査せずに通った。**
+
+`guff-import` の harness は `Config::default()` ——
+**importer が無い**。importer が無いと `import f "fmt"` は解決できず、
+`PkgName` オブジェクトが**そもそも作られない**ので
+`Info.Uses` は空。use-site の walk は 0 件を返し、
+「import 行 1 本」だけを assert していたテストは緑のままだった。
+
+続き 30 の「0 件の golden／発火しない fixture」の 2 番目そのもの。
+`guff-style` の harness が持っている stub 機構
+（`testdata/<case>/stub/<import path>/*.go` を
+`add_dependency_source` に流す）を `guff-import` にも足し、
+`fmt` / `os` の stub を置いて初めて 2 件が出た。
+
+**「テストが通った」と「テストが検査した」は別**。
+edit の**本数**を assert していたから気付いた
+（`edits.len() == 2`）。「1 本以上ある」なら気付けなかった。
+
+#### 測った
+
+| | 続き 40 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 146 | **147** |
+| pending | 47 | 46 |
+| ビルドが通らない木 | 8 | **7** |
+| うち上流とバイト一致 | 5 | 5 |
+| guff 固有の非ビルド | 3 | **2**（`modernize` / `staticcheck-qf`） |
+
+golden **193/193**。
+**`importas` は「直って非ビルドの表から出た」最初の case** ——
+続き 39/40 では `modernize-atomictypes` と `rangeint` が
+「直って表に**入った**」（上流が同じバイトを書くので）。
+同じ数字が両方向に動く。だから数える対象は
+「通らない木の数」ではなく「**上流と違う木の数**」のほうだった。
+
+#### 次にやること
+
+1. `staticcheck-qf` の非ビルド。guff 固有で残り 2 件のうち 1 件。
+2. **`refactor.DeleteStmt`**（`waitgroupgo` の空白行）。
+   コメント位置が要るので続き 39 のソース走査を一般化する。
+3. `reflecttypefor` の未使用 var 削除。**pin 版の x/tools を取ってから**
+   （HEAD は `usesNonTypeSymbol` で fix 自体を出さない）。
+4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
+5. pending 46 件。`DEFERRED: SuggestedFix` が 15 linter。
