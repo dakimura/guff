@@ -15,6 +15,25 @@
  	var x int
 -	x = x
  }
+--- a/sigchanyzer/bad/bad.go
++++ b/sigchanyzer/bad/bad.go
+@@ -6,6 +6,6 @@
+ )
+ 
+ func f() {
+-	c := make(chan os.Signal)
++	c := make(chan os.Signal, 1)
+ 	signal.Notify(c, os.Interrupt)
+ }
+--- a/timeformat/bad/bad.go
++++ b/timeformat/bad/bad.go
+@@ -3,5 +3,5 @@
+ import "time"
+ 
+ func f() {
+-	_, _ = time.Parse("2006-02-01", "2020-01-15")
++	_, _ = time.Parse("2006-01-02", "2020-01-15")
+ }
 --- a/unreachable/bad/bad.go
 +++ b/unreachable/bad/bad.go
 @@ -2,5 +2,4 @@

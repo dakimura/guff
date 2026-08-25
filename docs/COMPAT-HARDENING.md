@@ -11871,3 +11871,57 @@ golden **193/193**。
 2. pending 32 件。`staticcheck-s` 271 行が最大。
 3. `assign` の run 形（一部だけ自己代入）。カンマの扱いが要る。
 4. QF1005 は `types.CheckExpr` 相当が要る（**構文的近似はしない**）。
+
+---
+
+### 2026-08-25（続き 46）— govet に fix を 2 つ追加。`sigchanyzer` は**印字し直す**
+
+続き 45 の残り。`govet` ケースは 88 対 16 だった。
+
+#### `timeformat` は 3 行で済んだ
+
+上流は `2006-02-01` → `2006-01-02` を、リテラル内の
+`arg.Pos() + badAt + 1`（`+1` は開き引用符を飛ばす）から
+`+ len(badFormat)` までを置換する。
+**guff はこの `pos` を既に同じ式で計算していた** ——
+診断位置として使っていただけで、`end` と fix を足せば終わりだった。
+
+BasicLit でないときは fix を出さない分岐も既にある
+（文字列の中に書き換える span が無いので上流も報告だけで止まる）。
+
+#### `sigchanyzer` は差し込みではなく再レンダリング
+
+`make(chan os.Signal)` → `make(chan os.Signal, 1)`。
+上流は CallExpr を**複製して** `1` を足し、go/printer で印字する。
+複製は AST を書き換えないためだけの措置（golang/go#46129）。
+
+guff では複製せず、`fun` と `args[0]` を個別に印字して組み立てた。
+**ソース文字列に `, 1` を差し込む手は採らなかった**:
+上流は再レンダリングなので `make( chan os.Signal )` のような書き方だと
+結果が変わる。tier はバイトで比べる。
+
+#### 測った
+
+| | 続き 45 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 160 | 160 |
+| pending | 32 | 32 |
+| `govet` ケースが書く行数 | 16 / 88 | **35 / 88** |
+
+golden **193/193**。
+
+**一致数は動いていない。** `govet` は残り 5 analyzer が埋まるまで閉じない。
+それでも 2 つの analyzer の fix は利用者に届く ——
+**ケース単位の数字は、linter 単位の進捗を隠す。**
+`compat/fix/pending/govet.diff` の行数が動いているのはそのため。
+
+#### 残り 5 つの見立て
+
+| analyzer | 形 |
+|---|---|
+| `composites` | 複合リテラルにフィールド名を足す |
+| `hostport` | `net.JoinHostPort` への書き換え |
+| `stringintconv` | **代替 fix 2 つ**（`fmt.Sprint` + import / `string(rune(x))`）。続き 37 の衝突規則との相互作用を先に確かめる |
+| `inline` / `inline_local` | gopls のインライナ。別規模 |
+
+`govet` ケースが閉じるのは `inline` 次第で、それは当面先になる。

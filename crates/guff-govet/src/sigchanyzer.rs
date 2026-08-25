@@ -6,10 +6,12 @@ use guff::ast::{AssignStmt, CallExpr, Expr, Ident, ValueSpec};
 use guff::node_mask;
 use guff::walk::{self, NodeRef};
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix, TextEdit,
+};
 
 use crate::expreq::unparen;
-use crate::govet_util::{imports_package, is_builtin_named};
+use crate::govet_util::{format_expr, imports_package, is_builtin_named};
 
 fn is_signal_notify(pass: &Pass<'_>, call: &CallExpr) -> bool {
     let Expr::SelectorExpr(sel) = unparen(&call.fun) else {
@@ -106,7 +108,8 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         .result_of::<inspect::InspectResult>(inspect::analyzer())
         .ok_or_else(|| "sigchanyzer requires inspect analyzer".to_string())?
         .clone();
-    let mut pending: Vec<(u32, String)> = Vec::new();
+    // (report pos, report end, message, decl pos, decl end, replacement)
+    let mut pending: Vec<(u32, u32, String, u32, u32, String)> = Vec::new();
     inspect.preorder_typed(node_mask!(CallExpr), pass.files(), |n| {
         let NodeRef::CallExpr(call) = n else {
             return;
@@ -139,13 +142,40 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if chan_decl.args.len() != 1 {
             return;
         }
+        // Upstream copies the `make(chan T)` call, appends a `1`, and prints
+        // the copy — so the replacement is the *rendered* two-argument call,
+        // not the original text with something spliced in. Rendering the two
+        // parts here reaches the same bytes without cloning the AST, which
+        // upstream only does to avoid mutating it (golang/go#46129).
+        let buffered = format!(
+            "{}({}, 1)",
+            format_expr(pass, &chan_decl.fun),
+            format_expr(pass, &chan_decl.args[0])
+        );
         pending.push((
             call.pos().0 as u32,
+            call.end().0 as u32,
             "misuse of unbuffered os.Signal channel as argument to signal.Notify".into(),
+            chan_decl.pos().0 as u32,
+            chan_decl.end().0 as u32,
+            buffered,
         ));
     });
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, end, message, decl_pos, decl_end, buffered) in pending {
+        pass.report(Diagnostic {
+            pos,
+            end,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Change to buffer channel".into(),
+                text_edits: vec![TextEdit {
+                    pos: decl_pos,
+                    end: decl_end,
+                    new_text: buffered,
+                }],
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }
