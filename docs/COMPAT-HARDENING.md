@@ -11794,3 +11794,80 @@ golden **193/193**。
 2. `staticcheck-qf` の残り 2 hunk。3 つ目は直さない（続き 42）。
 3. revive の `range` rule も `ReplacementLine` を持つ。機構はもうある。
 4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
+
+---
+
+### 2026-08-25（続き 45）— govet に fix を 2 つ。そして**単体テストが間違った期待値を固定していた**のを tier が捕まえた
+
+pending 36 件のうち **govet が 5 件**（1 linter × 5 config）。
+`revive` と同じ構図なので次はここ。
+
+#### 上流は 2 つとも `refactor.DeleteStmt` を呼ぶ
+
+- `assign`: `x = x`。**全ペアが自己代入のとき**文ごと削除
+  （一部だけのときは lhs/rhs の run を間のカンマごと切る別処理。こちらは未実装）
+- `unreachable`: 到達しない文を削除
+
+どちらも続き 43 で移植した `delete_with_line` がそのまま使える。
+**移植の投資が別 crate で回収された。**
+`enclosing_file` は modernize と govet で要るので `refactor` に集約
+（上流も `astutil.EnclosingFile` 一つ）。
+
+#### `govet-disable` が上流より **1 行多く** 書いた
+
+```
+	return 2 // unreachable     ← 上流は行ごと消す
+	 // unreachable             ← guff が残していた
+```
+
+続き 43 で `delete_with_line` を書いたとき、
+「行に空白以外があれば narrow 削除」を**安全側**だと判断し、
+`one() // why` は**コメントを守るために行を残す**と単体テストに書いた。
+
+**逆だった。** 上流の `DeleteStmt` の doc には最初からこう書いてある:
+
+> it removes whole lines like `stmt // comment`
+
+`rightComments` の分岐は「コメント一般を守る」ためではなく、
+**そのコメントが隣の文のものかもしれない**場合のためのものだった。
+読み違えたまま、その読み違えをテストで固定していた。
+
+結果として guff は**コードの消えた行にコメントを取り残していた**。
+`// why` を守ったつもりが、何も説明していないコメントを残していた ——
+**保守的に見える選択が保守的とは限らない。**
+
+判定を「範囲の前は空白のみ／後ろは空白か `//` コメント」に直したら、
+`govet-disable` がバイト一致になり、
+**さらに `govet-enable-all` / `govet-enable-wins` / `govet-settings` も一致**した
+（`unreachable` の fix が同じ行形だったため 1 つの修正が 4 件に効いた）。
+
+**単体テストは自分の理解を固定する。理解が誤っていれば、誤りを固定する。**
+これを捕まえたのは tier のほうで、単体テストではなかった。
+続き 38 で `--fix` を比べる tier を作った理由がこれ。
+
+#### 非ビルド木は 6→7、ただし中身は上流一致
+
+`govet` の木が `declared and not used: x` で通らなくなった。
+`x = x` を消すと `var x int` が未使用になるからで、
+**上流も同じ 1 行だけを消して同じエラーを残す**（expected の hunk がそれ）。
+続き 40 の `rangeint`、続き 39 の `modernize-atomictypes` と同じ
+「正しく再現した結果として表に入った」。**guff 固有は 0 のまま。**
+
+#### 測った
+
+| | 続き 44 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 156 | **160** |
+| pending | 36 | 32 |
+| 意図的乖離 | 1 | 1 |
+| ビルドが通らない木 | 6 | 7（**全部上流一致**） |
+
+golden **193/193**。
+
+#### 次にやること
+
+1. govet の残り 7 analyzer（composites / hostport / inline / inline_local /
+   sigchanyzer / stringintconv / timeformat）。`govet` ケースは 88 対 16。
+2. pending 32 件。`staticcheck-s` 271 行が最大。
+3. `assign` の run 形（一部だけ自己代入）。カンマの扱いが要る。
+4. QF1005 は `types.CheckExpr` 相当が要る（**構文的近似はしない**）。

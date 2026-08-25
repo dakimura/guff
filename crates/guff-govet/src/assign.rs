@@ -9,7 +9,9 @@ use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, RunError, RunFn, Pass};
+use guff_analysis::{
+    refactor, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix,
+};
 use guff_types::arena::TypeData;
 
 use crate::expreq::{expr_equal, same_node_kind, unparen};
@@ -69,14 +71,51 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         if exprs.is_empty() {
             return;
         }
+        // Upstream removes the whole statement when *every* part of it is a
+        // self-assignment, and edits the redundant lhs/rhs runs otherwise.
+        // Only the first is done here: the run form has to splice out
+        // intervening commas, and getting that half-right writes worse code
+        // than leaving the finding unfixed.
+        let span = (exprs.len() == lhs.len())
+            .then(|| {
+                Some((
+                    lhs[0].pos().0 as u32,
+                    rhs.last()?.end().0 as u32,
+                ))
+            })
+            .flatten();
         pending.push((
             lhs[0].pos().0 as u32,
             format!("self-assignment of {}", exprs.join(", ")),
+            span,
         ));
     });
 
-    for (pos, message) in pending {
-        pass.reportf(pos, message);
+    for (pos, message, span) in pending {
+        let text_edits = span
+            .and_then(|(from, to)| {
+                let file = refactor::enclosing_file(pass, from)?;
+                Some(refactor::delete_with_line(
+                    file,
+                    refactor::file_source(pass, file),
+                    from,
+                    to,
+                ))
+            })
+            .unwrap_or_default();
+        if text_edits.is_empty() {
+            pass.reportf(pos, message);
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            message,
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove self-assignment".into(),
+                text_edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

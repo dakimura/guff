@@ -2132,18 +2132,6 @@ fn body_has_free_branch(stmts: &[Stmt], skip_last: bool) -> bool {
 /// Upstream builds each fix as `append(importEdits, ...)`; the import edits
 /// come first and every fix in the file carries the same copy. golangci's
 /// fixer deduplicates equivalent edits, so the import is inserted once.
-/// The file whose extent covers `pos`.
-///
-/// Equivalent to `astutil.EnclosingFile`, which upstream reaches for whenever a
-/// fix is computed from an object rather than from a syntax walk — the
-/// declaration and the use that triggered the finding can be in different
-/// files.
-fn enclosing_file<'p>(pass: &'p Pass<'_>, pos: u32) -> Option<&'p File> {
-    pass.files()
-        .iter()
-        .find(|f| f.file_start.0 as u32 <= pos && pos < f.file_end.0 as u32)
-}
-
 fn with_imports(import_edits: &[TextEdit], rest: Vec<TextEdit>) -> Vec<TextEdit> {
     let mut edits = import_edits.to_vec();
     edits.extend(rest);
@@ -6483,7 +6471,7 @@ fn check_atomictypes(pass: &Pass<'_>, pending: &mut Vec<Diagnostic>) {
         // imports it plainly. The import edits matter for the same reason —
         // after the fix the need for `sync/atomic` moves from the use to the
         // declaration, which may be in a file that did not import it.
-        let Some(decl_file) = enclosing_file(pass, pos) else {
+        let Some(decl_file) = refactor::enclosing_file(pass, pos) else {
             continue;
         };
         let Some((prefix, import_edits)) =

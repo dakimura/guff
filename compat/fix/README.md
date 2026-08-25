@@ -107,6 +107,11 @@ deliberately divergent**. Nine `revive-*` cases are one linter under nine
 configs, so a single mechanism closed all nine — and turned up the divergence
 below.
 
+After govet's `assign` / `unreachable` (2026-08-25): **160 matching, 32
+pending**. Both are `refactor.DeleteStmt` upstream, so the port from the
+modernize work carried straight over — and the tier caught a defect in it: a
+trailing `// comment` was being stranded on a line whose statement had gone.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
