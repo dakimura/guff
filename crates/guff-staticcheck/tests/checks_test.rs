@@ -3253,6 +3253,43 @@ fn qf1012_flags_write_sprintf() {
     assert!(messages.iter().any(|m| m.contains("Fprintln")));
 }
 
+/// The fix has to pass what the interface check accepted.
+///
+/// `Buffer`'s `Write` has a pointer receiver, so upstream checks `*Buffer` for
+/// `io.Writer` and writes `&buf` to match. guff did the check and not the `&`,
+/// so `fmt.Fprint(buf, ...)` did not compile. An interface receiver is already
+/// the right type and takes no address.
+#[test]
+fn qf1012_fix_takes_the_address_of_a_pointer_receiver_value() {
+    let dir = support::testdata("qf1012");
+    let pkg = support::typecheck_with_deps(
+        "example.com/staticcheck/qf1012",
+        &dir.join("bad.go"),
+        &[
+            ("fmt", &dir.join("stub/fmt/fmt.go")),
+            ("io", &dir.join("stub/io/io.go")),
+        ],
+    );
+    support::assert_well_typed(&pkg);
+    let mut addressed = 0;
+    let mut plain = 0;
+    for d in support::run_analyzer_diagnostics(qf1012::analyzer(), &pkg) {
+        let new_text = &d.suggested_fixes[0].text_edits[0].new_text;
+        if new_text.contains("(&buf") {
+            addressed += 1;
+        } else if new_text.contains("(w,") || new_text.contains("(w2,") {
+            // `w` is an interface value and `w2`'s Write has a value receiver:
+            // neither needs its address taken.
+            assert!(!new_text.contains('&'), "{new_text}");
+            plain += 1;
+        } else {
+            panic!("unexpected replacement: {new_text}");
+        }
+    }
+    assert_eq!(addressed, 3, "the three buf.WriteString calls");
+    assert_eq!(plain, 3, "the three w.Write calls");
+}
+
 #[test]
 fn qf1012_allows_non_writer() {
     let dir = support::testdata("qf1012");

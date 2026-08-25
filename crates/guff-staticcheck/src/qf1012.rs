@@ -82,6 +82,30 @@ fn method_result_count(pass: &Pass<'_>, typ: TypeId, name: &str) -> Option<usize
 /// True Implements against `io.Writer` / `io.StringWriter` when the package is
 /// in the type graph; otherwise fall back to method-arity (Write/WriteString
 /// returning 2 values), which covers fixtures that only declare local ifaces.
+/// Whether the interface check — and therefore the fix — is about `*T`.
+///
+/// Upstream tests `*N` rather than `N` for a named non-interface receiver,
+/// because the pointer has the larger method set
+/// (staticcheck.dev/issues/1097), and then writes `&recv` so the argument
+/// matches what it checked. The receiver is addressable by construction: the
+/// `buf.Write(...)` call being replaced would not compile otherwise.
+///
+/// One predicate for both halves on purpose. guff had the check and not the
+/// `&`, so `fmt.Fprint(buf, ...)` passed a `Buffer` where `Write` has a pointer
+/// receiver — a fix that reports correctly and writes code that does not build.
+fn recv_is_addressed(pass: &Pass<'_>, recv: &Expr) -> bool {
+    let Some(typ) = expr_type(pass, recv) else {
+        return false;
+    };
+    let Some(artifacts) = pass.pkg().type_artifacts.as_ref() else {
+        return false;
+    };
+    let types = &artifacts.types;
+    let resolved = unalias_readonly(types, typ);
+    matches!(types.get(resolved), TypeData::Named(_))
+        && !matches!(types.get(resolved.underlying(types)), TypeData::Interface(_))
+}
+
 fn implements_iface(
     pass: &Pass<'_>,
     recv: &Expr,
@@ -96,11 +120,7 @@ fn implements_iface(
         if let Some(artifacts) = pass.pkg().type_artifacts.as_ref() {
             let resolved = unalias_readonly(&artifacts.types, typ);
             let mut types = artifacts.types.clone();
-            let v = if matches!(types.get(resolved), TypeData::Named(_))
-                && !matches!(
-                    types.get(resolved.underlying(&types)),
-                    TypeData::Interface(_)
-                ) {
+            let v = if recv_is_addressed(pass, recv) {
                 new_pointer(&mut types, resolved)
             } else {
                 typ
@@ -258,7 +278,13 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
         let Some((recv, fprint, write_method, args)) = matched else {
             return;
         };
-        let recv_s = render_expr(recv);
+        // Whatever the interface check took the address of, the fix has to
+        // take the address of too.
+        let recv_s = if recv_is_addressed(pass, recv) {
+            format!("&{}", render_expr(recv))
+        } else {
+            render_expr(recv)
+        };
         let args_s = render_args(args);
         let replacement = if args_s.is_empty() {
             format!("fmt.{fprint}({recv_s})")

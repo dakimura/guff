@@ -11506,3 +11506,82 @@ golden **193/193**。
    （HEAD は `usesNonTypeSymbol` で fix 自体を出さない）。
 4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
 5. pending 46 件。`DEFERRED: SuggestedFix` が 15 linter。
+
+---
+
+### 2026-08-25（続き 42）— QF1012 は `*T` で判定して `T` を渡していた。そして**上流のほうが壊れている**ものが 1 件出た
+
+続き 41 で残った「guff 固有の非ビルド」2 件のうち 1 件。
+
+#### 判定と生成が食い違っていた
+
+```go
+var buf Buffer                 // Write は *Buffer のメソッド
+buf.WriteString(fmt.Sprint(…)) // → fmt.Fprint(&buf, …)
+```
+
+上流の `getRecv` は、receiver が **named かつ非 interface** なら
+`*N` のほうで `io.Writer` を判定する（pointer のほうがメソッド集合が広い、
+staticcheck.dev/issues/1097）。そして**同じ条件で `&recv` を書く**。
+
+guff は**前半だけ**やっていた。`*Buffer` で判定を通し、
+生成する引数は `buf` のまま。結果は
+`cannot use buf … Buffer does not implement io.Writer
+(method Write has pointer receiver)`。
+
+**判定と生成で同じ述語を 2 回書くと、片方だけ直る。**
+`recv_is_addressed` を 1 つ作って両方から呼ぶ形にした。
+単体テストは**両方向**を数える（`&buf` が 3 件、`w` / `w2` が 3 件）——
+無条件に `&` を付ける実装も落ちる。
+
+#### 残り 3 hunk のうち 1 つは、**直すと壊れる**
+
+`staticcheck-qf` の pending には 3 hunk 残った。2 つは穴。3 つ目は違う。
+
+```go
+import ( s "strings" )
+func renamed() { s.Replace("", "", "", -1) }
+```
+
+golangci-lint の QF1004 はこれを
+**`strings.ReplaceAll("", "", "")` に書き換え、import を足さない**。
+そのファイルに `strings` は束縛されていない —— **上流の出力はコンパイルできない**。
+guff は `s.ReplaceAll(...)` と書く。**通る。**
+
+`staticcheck-qf` の木が guff の `--fix` 後に通るのは、この 1 hunk のおかげだった。
+
+続き 38/39/40 で「上流の非ビルドを**再現する**のは正しい」と 5 件書いてきたが、
+それは**上流と同じバイトを書いた結果そうなった**場合の話だった。
+ここは逆で、**バイトを合わせにいくと壊れる**。
+pending は「遅れている」用の台帳で「進んでいる」用の枠が無いので、
+穴 2 つと一緒にそこへ入れ、README に**削除禁止の理由を書いた**。
+続き 37 の revive ratchet と同じ判断:
+**上流が出荷している欠陥は仕様ではない。**
+
+#### 測った
+
+| | 続き 41 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 147 | 147 |
+| pending | 46 | 46 |
+| ビルドが通らない木 | 7 | **6** |
+| うち上流とバイト一致 | 5 | 5 |
+| guff 固有の非ビルド | 2 | **1**（`modernize` のみ） |
+
+golden **193/193**。
+一致数は動いていない —— `staticcheck-qf` は他に 2 hunk 残っているので
+pending のまま。**動いたのは「木が通るか」だけ**で、
+それを数えていなければ**この変更は 1 つも数字を動かさなかった**。
+続き 38 で `go build` を足した理由がこれ。
+
+#### 次にやること
+
+1. **`refactor.DeleteStmt`**（`waitgroupgo` の空白行）。
+   `modernize` は guff 固有で残った唯一の非ビルドだが、
+   その原因は `reflecttypefor` のほうで、DeleteStmt は差分のほう。
+2. `reflecttypefor` の未使用 var 削除。**pin 版の x/tools を取ってから**。
+   `modernize` の木が通らない唯一の理由になった。
+3. `staticcheck-qf` の残り 2 hunk（QF1005 の `float64(...)` 変換、
+   QF1011 の `var b int = gen1()`）。3 つ目は**直さない**。
+4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
+5. pending 46 件。`DEFERRED: SuggestedFix` が 15 linter。
