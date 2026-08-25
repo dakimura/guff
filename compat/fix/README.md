@@ -97,6 +97,11 @@ it renamed the import and not its uses.
 After QF1012 (2026-08-25): 147 matching, 46 pending, and `staticcheck-qf` off
 the un-buildable list too. `modernize` is the only guff-side tree left there.
 
+After `DeleteStmt` / `DeleteUnusedVars` (2026-08-25): **148 matching, 45
+pending**, and `modernize` reached upstream's bytes. **Every tree that no longer
+builds is now byte-identical to what golangci-lint wrote** — the guff-side
+column is empty for the first time.
+
 ## Does it still build?
 
 A `--fix` that rewrites `fmt.Sprint(i)` to `strconv.Itoa(i)` and does not add
@@ -109,8 +114,8 @@ It asks the pristine tree first: several fixtures are deliberately un-buildable
 that was already broken.
 
 The count is printed, not enforced, and the reason is the measurement itself.
-Six cases leave an un-buildable tree, and **five of them are byte-identical
-to what golangci-lint wrote**:
+Six cases leave an un-buildable tree, and **all six are byte-identical to what
+golangci-lint wrote**:
 
 | case | why the fixed tree does not build |
 |------|-----------------------------------|
@@ -119,10 +124,16 @@ to what golangci-lint wrote**:
 | `err113` | the rewritten call is short an argument |
 | `modernize-atomictypes` | rewrites the only use of an aliased second import of `sync/atomic`, leaving `myatomic` unused |
 | `rangeint` | `for i = 0` whose body never reads `i` becomes `for i = range n`, leaving `var i int` unread |
+| `modernize` | `testingcontext` rewrites to `ctx := t.Context()` and does not drop the now-unused `"context"` import |
 
-Upstream's `--fix` breaks the build on all five, guff reproduces it exactly, and
-a hard gate would be demanding that guff be *incompatible*. The only remaining
-guff-side one is `modernize`.
+Upstream's `--fix` breaks the build on all six, guff reproduces each exactly,
+and a hard gate would be demanding that guff be *incompatible*. There is no
+guff-side entry left.
+
+That is what this count is for. It never went to zero and it was never supposed
+to: it went from "six trees, four of them our bug" to "six trees, none of them
+ours" without the total moving at all. Reading the total alone would have shown
+nothing happening.
 
 ## One difference is deliberate, and it is not in `pending/`'s sense
 

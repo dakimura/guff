@@ -78,7 +78,7 @@ use guff::position::{FileSet, Pos};
 use guff::token::Token;
 use guff::walk::{self, NodeRef};
 use guff_analysis::code;
-use guff_analysis::passes::inspect;
+use guff_analysis::passes::{inspect, typeindex};
 // Every checker whose replacement text names a package goes through
 // `refactor::add_import` for the prefix *and* the import edits: the file may
 // not import the package at all, may import it under an alias, or may shadow
@@ -2769,7 +2769,12 @@ fn waitgroup_recv(call: &CallExpr) -> Option<&Expr> {
     }
 }
 
-fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagnostic>) {
+fn check_waitgroupgo(
+    pass: &Pass<'_>,
+    file: &File,
+    block: &BlockStmt,
+    pending: &mut Vec<Diagnostic>,
+) {
     for i in 0..block.list.len().saturating_sub(1) {
         let Stmt::ExprStmt(add_stmt) = &block.list[i] else {
             continue;
@@ -2827,22 +2832,29 @@ fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagn
             message: "Goroutine creation can be simplified using WaitGroup.Go".into(),
             suggested_fixes: vec![SuggestedFix {
                 message: "Simplify by using WaitGroup.Go".into(),
-                text_edits: vec![
-                    TextEdit {
-                        pos: add_stmt.x.pos().0 as u32,
-                        end: add_stmt.x.end().0 as u32,
-                        new_text: String::new(),
-                    },
-                    TextEdit {
+                text_edits: {
+                    // Upstream deletes both statements with
+                    // `refactor.DeleteStmt`, which takes the line as well —
+                    // leaving the span alone strands a line of whitespace where
+                    // `wg.Add(1)` used to be.
+                    let src = refactor::file_source(pass, file);
+                    let mut edits = refactor::delete_with_line(
+                        file,
+                        src,
+                        add_stmt.x.pos().0 as u32,
+                        add_stmt.x.end().0 as u32,
+                    );
+                    edits.push(TextEdit {
                         pos,
                         end: go_call.pos().0 as u32,
                         new_text: format!("{recv_text}.Go("),
-                    },
-                    TextEdit {
-                        pos: defer_stmt.defer_.0 as u32,
-                        end: defer_stmt.call.end().0 as u32,
-                        new_text: String::new(),
-                    },
+                    });
+                    edits.extend(refactor::delete_with_line(
+                        file,
+                        src,
+                        defer_stmt.defer_.0 as u32,
+                        defer_stmt.call.end().0 as u32,
+                    ));
                     // ... }()
                     //      -
                     // ... } )
@@ -2853,12 +2865,13 @@ fn check_waitgroupgo(pass: &Pass<'_>, block: &BlockStmt, pending: &mut Vec<Diagn
                     // every finding-set gate — the diagnostic is identical
                     // either way — and shows up only as a tree that stops
                     // compiling (COMPAT-HARDENING, `compat/fix/`).
-                    TextEdit {
+                    edits.push(TextEdit {
                         pos: go_call.lparen.0 as u32,
                         end: go_call.rparen.0 as u32,
                         new_text: String::new(),
-                    },
-                ],
+                    });
+                    edits
+                },
             }],
             related: Vec::new(),
             url: String::new(),
@@ -3264,7 +3277,104 @@ fn check_reflecttypeassert(
     });
 }
 
-fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diagnostic>) {
+/// Edits deleting the declarations of local variables that `deleted` was the
+/// last use of.
+///
+/// Port of `refactor.DeleteUnusedVars`. Rewriting `reflect.TypeOf(zero)` to
+/// `reflect.TypeFor[MyStruct]()` erases the only mention of `zero`, and Go
+/// rejects the result with `declared and not used` — the fix has to take the
+/// declaration with it.
+///
+/// Scoped to the shape `var x T` with no initialiser and no other names, which
+/// is `deleteVarFromValueSpec`'s `!declaresOtherNames && noRHSEffects` branch
+/// reaching `DeleteSpec` -> `DeleteDecl` -> `DeleteStmt`. DEFERRED: the `n:n`
+/// assignment and multi-name spec forms, which blank out one name rather than
+/// removing a line. Declining there costs a `declared and not used` that guff
+/// already had, never a wrong edit.
+fn delete_newly_unused_vars(
+    pass: &Pass<'_>,
+    file: &File,
+    deleted: &Expr,
+    edits: &mut Vec<TextEdit>,
+) {
+    let Some(index) = pass.result_of::<typeindex::Index>(typeindex::analyzer()) else {
+        return;
+    };
+    let (Some(info), Some(artifacts)) = (pass.types_info(), pass.pkg().type_artifacts.as_ref())
+    else {
+        return;
+    };
+
+    // How many uses of each local var disappear with `deleted`.
+    let mut delcount: HashMap<ObjectId, usize> = HashMap::new();
+    walk::inspect(walk::expr_ref(deleted), |n| {
+        let Some(NodeRef::Ident(id)) = n else {
+            return true;
+        };
+        if let Some(obj) = info.uses.get(&id.id).copied() {
+            if let ObjectData::Var(v) = artifacts.objects.get(obj) {
+                if v.kind() == VarKind::Local {
+                    *delcount.entry(obj).or_default() += 1;
+                }
+            }
+        }
+        true
+    });
+
+    // Deterministic order: two vars in one deleted expression would otherwise
+    // produce edits in hash order, and the recorded diff has to be stable.
+    let mut objs: Vec<ObjectId> = delcount.keys().copied().collect();
+    objs.sort_by_key(|o| index.def(*o).unwrap_or(0));
+
+    let src = refactor::file_source(pass, file);
+    for obj in objs {
+        if index.uses(obj).len() != delcount[&obj] {
+            continue; // still used elsewhere
+        }
+        let Some(def_id) = index.def(obj) else {
+            continue;
+        };
+        if let Some((pos, end)) = sole_var_decl_span(file, def_id) {
+            edits.extend(refactor::delete_with_line(file, src, pos, end));
+        }
+    }
+}
+
+/// The span of `var x T` when `def_id` names its sole variable and it has no
+/// initialiser; `None` for every other declaration shape.
+fn sole_var_decl_span(file: &File, def_id: u32) -> Option<(u32, u32)> {
+    let mut found = None;
+    walk::inspect(NodeRef::File(file), |n| {
+        if found.is_some() {
+            return false;
+        }
+        let Some(NodeRef::DeclStmt(ds)) = n else {
+            return true;
+        };
+        let Decl::GenDecl(gd) = &ds.decl else {
+            return true;
+        };
+        if gd.tok != Some(Token::VAR) || gd.specs.len() != 1 || gd.rparen.is_valid() {
+            return true;
+        }
+        let Spec::ValueSpec(vs) = &gd.specs[0] else {
+            return true;
+        };
+        if vs.names.len() != 1 || !vs.values.is_empty() || vs.names[0].id != def_id {
+            return true;
+        }
+        found = Some((gd.tok_pos.0 as u32, ds.decl.end().0 as u32));
+        false
+    });
+    found
+}
+
+fn check_reflecttypefor(
+    pass: &Pass<'_>,
+    file: &File,
+    call: &CallExpr,
+    pending: &mut Vec<Diagnostic>,
+) {
     if !code::is_call_to(pass, call, "reflect.TypeOf") || call.args.len() != 1 {
         return;
     }
@@ -3328,18 +3438,22 @@ fn check_reflecttypefor(pass: &Pass<'_>, call: &CallExpr, pending: &mut Vec<Diag
         message: "reflect.TypeOf call can be simplified using TypeFor".into(),
         suggested_fixes: vec![SuggestedFix {
             message: "Replace TypeOf by TypeFor".into(),
-            text_edits: vec![
-                TextEdit {
-                    pos: sel.sel.pos().0 as u32,
-                    end: sel.sel.end().0 as u32,
-                    new_text: format!("TypeFor[{tstr}]"),
-                },
-                TextEdit {
-                    pos: (call.lparen.0 + 1) as u32,
-                    end: call.rparen.0 as u32,
-                    new_text: String::new(),
-                },
-            ],
+            text_edits: {
+                let mut edits = vec![
+                    TextEdit {
+                        pos: sel.sel.pos().0 as u32,
+                        end: sel.sel.end().0 as u32,
+                        new_text: format!("TypeFor[{tstr}]"),
+                    },
+                    TextEdit {
+                        pos: (call.lparen.0 + 1) as u32,
+                        end: call.rparen.0 as u32,
+                        new_text: String::new(),
+                    },
+                ];
+                delete_newly_unused_vars(pass, file, &call.args[0], &mut edits);
+                edits
+            },
         }],
         related: Vec::new(),
         url: String::new(),
@@ -6566,7 +6680,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                     }
                     if enabled(&options, "waitgroupgo") {
                         let _before = pending.len();
-                        check_waitgroupgo(pass, b, &mut pending);
+                        check_waitgroupgo(pass, file, b, &mut pending);
                         stamp_category(&mut pending, _before, "waitgroupgo");
                     }
                 }
@@ -6603,7 +6717,7 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
                         // Prefer Elem() special-case; plain TypeOf is handled when
                         // this call is not itself the X of a `.Elem()` selector.
                         check_reflecttypefor_elem(pass, c, &mut pending);
-                        check_reflecttypefor(pass, c, &mut pending);
+                        check_reflecttypefor(pass, file, c, &mut pending);
                         stamp_category(&mut pending, _before, "reflecttypefor");
                     }
                     if enabled(&options, "unsafefuncs") {
@@ -6648,7 +6762,7 @@ pub fn analyzer() -> &'static Analyzer {
             // Still useful on packages guff typechecks incompletely (e.g. missing
             // export-data deps): AST/type-local checks like slicesbackward keep working.
             run_despite_errors: true,
-            requires: vec![inspect::analyzer()],
+            requires: vec![inspect::analyzer(), typeindex::analyzer()],
             fact_types: vec![FactTypeId::of::<NewLikeFact>()],
         }
     })
