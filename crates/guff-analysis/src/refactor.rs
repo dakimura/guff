@@ -252,6 +252,79 @@ fn first_import_spec(gd: &guff::ast::GenDecl) -> Option<&ImportSpec> {
     })
 }
 
+/// The edits to remove `pos..end`, taking the whole line when the range has the
+/// line to itself.
+///
+/// Scoped port of `refactor.DeleteStmt`. Upstream spends ~150 lines deciding
+/// how much of the surrounding line goes with a statement, because it has to
+/// separate three cases that a `token.Pos` alone cannot: a sibling statement on
+/// the same line (`a(); b()`), a comment that belongs to the statement, and a
+/// comment that belongs to its neighbour. It does that with the parent node and
+/// the file's comment list.
+///
+/// This asks one question instead: **is anything other than whitespace on this
+/// line outside the range?** Only comments, sibling statements, and the
+/// enclosing braces can be, and in every one of those cases upstream also
+/// declines to take the line. So the answers agree wherever this returns the
+/// wide edit, and where it returns the narrow one it leaves an empty line that
+/// gofmt tidies — never deleting a comment or a neighbour.
+///
+/// DEFERRED: upstream's finer cases, which trim *some* adjacent comments rather
+/// than none. They need comment positions, which the analysis pipeline does not
+/// parse (see [`add_import_edits`]).
+pub fn delete_with_line(file: &File, src: Option<&[u8]>, pos: u32, end: u32) -> Vec<TextEdit> {
+    let narrow = || {
+        vec![TextEdit {
+            pos,
+            end,
+            new_text: String::new(),
+        }]
+    };
+    let Some(src) = src else {
+        return narrow();
+    };
+    let base = file.file_start.0;
+    let (Ok(start_off), Ok(end_off)) = (
+        usize::try_from(i64::from(pos) - base),
+        usize::try_from(i64::from(end) - base),
+    ) else {
+        return narrow();
+    };
+    if end_off > src.len() || start_off > end_off {
+        return narrow();
+    }
+
+    // Back to the start of the line holding `pos`.
+    let line_start = src[..start_off]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |i| i + 1);
+    // Forward to just past the newline ending the line holding `end`.
+    let rest = &src[end_off..];
+    let line_end = match rest.iter().position(|&b| b == b'\n') {
+        Some(i) => end_off + i + 1,
+        None => src.len(),
+    };
+    let trailing_end = if line_end > end_off && src[line_end - 1] == b'\n' {
+        line_end - 1
+    } else {
+        line_end
+    };
+
+    let alone = src[line_start..start_off].iter().all(u8::is_ascii_whitespace)
+        && src[end_off..trailing_end]
+            .iter()
+            .all(u8::is_ascii_whitespace);
+    if !alone {
+        return narrow();
+    }
+    vec![TextEdit {
+        pos: u32::try_from(line_start as i64 + base).unwrap_or(pos),
+        end: u32::try_from(line_end as i64 + base).unwrap_or(end),
+        new_text: String::new(),
+    }]
+}
+
 /// Where the first declaration's doc comment starts, read from the source text.
 ///
 /// Everything between the package clause and the first declaration is comments
@@ -304,7 +377,7 @@ fn first_decl_doc_pos(file: &File, src: &[u8]) -> Option<u32> {
 }
 
 /// The source bytes of `file`, when the package retained them.
-fn file_source<'p>(pass: &'p Pass<'_>, file: &File) -> Option<&'p [u8]> {
+pub fn file_source<'p>(pass: &'p Pass<'_>, file: &File) -> Option<&'p [u8]> {
     let idx = pass.files().iter().position(|f| f.id == file.id)?;
     pass.pkg().source_bytes(idx)
 }
@@ -361,6 +434,18 @@ mod tests {
     /// Apply `add_import_edits` to `src` and return the rewritten source, so a
     /// test reads as the transformation it is pinning rather than as a pair of
     /// offsets. The offset itself is asserted separately where it is the point.
+    fn parse(src: &str) -> guff::ast::File {
+        let fset = FileSet::new();
+        parse_file(&fset, "t.go", src.as_bytes(), PARSE_COMMENTS).expect("parse")
+    }
+
+    fn apply(src: &str, file: &guff::ast::File, edits: &[TextEdit]) -> String {
+        assert_eq!(edits.len(), 1, "one edit: {edits:?}");
+        let base = file.file_start.0 as usize;
+        let (a, b) = (edits[0].pos as usize - base, edits[0].end as usize - base);
+        format!("{}{}{}", &src[..a], edits[0].new_text, &src[b..])
+    }
+
     fn add_with(src: &str, name: &str, pkgpath: &str, mode: guff::parser::Mode) -> String {
         let fset = FileSet::new();
         let file = parse_file(&fset, "t.go", src.as_bytes(), mode).expect("parse");
@@ -392,6 +477,59 @@ mod tests {
         assert_eq!(
             add("package p\n\n// doc\nfunc f() {}\n", "", "strings"),
             "package p\n\nimport \"strings\"\n\n// doc\nfunc f() {}\n"
+        );
+    }
+
+    /// A statement alone on its line takes the line with it.
+    #[test]
+    fn delete_with_line_takes_the_whole_line() {
+        let src = "package p\n\nfunc f() {\n\tone()\n\ttwo()\n}\n";
+        let file = parse(src);
+        let at = src.find("one()").expect("in source");
+        let base = file.file_start.0 as usize;
+        let edits = delete_with_line(
+            &file,
+            Some(src.as_bytes()),
+            (at + base) as u32,
+            (at + base + "one()".len()) as u32,
+        );
+        assert_eq!(apply(src, &file, &edits), "package p\n\nfunc f() {\n\ttwo()\n}\n");
+    }
+
+    /// A sibling statement on the same line means the line stays: deleting it
+    /// would take the neighbour too.
+    #[test]
+    fn delete_with_line_keeps_a_shared_line() {
+        let src = "package p\n\nfunc f() {\n\tone(); two()\n}\n";
+        let file = parse(src);
+        let at = src.find("one()").expect("in source");
+        let base = file.file_start.0 as usize;
+        let edits = delete_with_line(
+            &file,
+            Some(src.as_bytes()),
+            (at + base) as u32,
+            (at + base + "one()".len()) as u32,
+        );
+        assert_eq!(apply(src, &file, &edits), "package p\n\nfunc f() {\n\t; two()\n}\n");
+    }
+
+    /// Same for a trailing comment — upstream trims some of those, this
+    /// declines to, and declining never destroys one.
+    #[test]
+    fn delete_with_line_keeps_a_line_with_a_trailing_comment() {
+        let src = "package p\n\nfunc f() {\n\tone() // why\n}\n";
+        let file = parse(src);
+        let at = src.find("one()").expect("in source");
+        let base = file.file_start.0 as usize;
+        let edits = delete_with_line(
+            &file,
+            Some(src.as_bytes()),
+            (at + base) as u32,
+            (at + base + "one()".len()) as u32,
+        );
+        assert_eq!(
+            apply(src, &file, &edits),
+            "package p\n\nfunc f() {\n\t // why\n}\n"
         );
     }
 

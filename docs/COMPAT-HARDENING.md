@@ -11585,3 +11585,88 @@ pending のまま。**動いたのは「木が通るか」だけ**で、
    QF1011 の `var b int = gen1()`）。3 つ目は**直さない**。
 4. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
 5. pending 46 件。`DEFERRED: SuggestedFix` が 15 linter。
+
+---
+
+### 2026-08-25（続き 43）— `DeleteStmt` は 150 行あるが、訊いている質問は 1 つだった。**guff 固有の非ビルドがゼロになった**
+
+続き 42 で残った `modernize` の 2 hunk。両方**同じ移植 1 本**で片付いた。
+
+#### まず、pin 版を読んだら「ブロックされている」が消えた
+
+続き 40 で「`reflecttypefor` は pin 版の x/tools を取ってからにする」と書いた。
+`golangci-lint 2.12.2` は `golang.org/x/tools v0.44.0` を pin していて、
+**それは module cache に既にあった**。読んだら 2 つ分かった:
+
+- HEAD にある `usesNonTypeSymbol` は **v0.44.0 に無い**。
+  だから pin 版は `TypeOf(zero)` にも fix を出す。
+  **HEAD から移植していたら逆の実装を書いていた。**
+- 削除の実体は `refactor.DeleteUnusedVars`（`reflect.go:136`）。
+
+そして `DeleteUnusedVars` → `DeleteVar` → `deleteVarFromValueSpec`
+→ `DeleteSpec` → `DeleteDecl` → `DeleteStmt` と辿る。
+`waitgroupgo` は `DeleteStmt` を直接呼ぶ。
+**2 つの残差は 1 つの移植だった。**
+
+#### `DeleteStmt` の 150 行は「親ノードが要る」から
+
+上流が長いのは、`token.Pos` だけでは区別できない 3 つを分けているから:
+同じ行の兄弟文（`a(); b()`）／その文に属するコメント／隣に属するコメント。
+だから親ノードとファイルのコメント一覧を使う。
+
+guff は**ソース文字列に 1 つ訊く**ことにした:
+**この行の、範囲の外に、空白以外があるか。**
+
+そこに来られるのはコメントか兄弟文か囲みの中括弧だけで、
+**そのどれでも上流もまた行を取らない**。
+だから行を取る側では答えが一致し、取らない側では
+gofmt が畳む空行が残るだけ —— **コメントも隣の文も壊れない**。
+親ノードは要らなくなった（＝cursor 抽象も要らない）。
+
+単体テストは 3 本。
+「行を取る」1 本より「**取らない**」2 本のほうが重要:
+`one(); two()` と `one() // why`。
+ここを間違えると**利用者のコメントを黙って消す**——
+どの compat キーにも出ない。
+
+#### `DeleteUnusedVars` は HashMap の順序で不安定になりうる
+
+削除対象が 2 つ以上あると、`HashMap` のイテレーション順で
+edit の順序が変わる。fix tier は**バイト一致の diff**を鍵にするので、
+それは「たまに落ちる case」になる。
+`index.def(obj)` で並べてから出す。
+`--all-linters` が非決定的でゲートにできない話（続き 12）と同じ形:
+**自分の答えを再現できないゲートは何も測っていない。**
+
+#### 測った
+
+| | 続き 42 後 | 今回 |
+|---|---:|---:|
+| `--fix` が上流とバイト一致 | 147 | **148** |
+| pending | 46 | 45 |
+| ビルドが通らない木 | 6 | 6 |
+| うち上流とバイト一致 | 5 | **6** |
+| **guff 固有の非ビルド** | 1 | **0** |
+
+golden **193/193**。
+
+`modernize` は上流と完全一致になり pending を削除。
+**それでも木は通らない** —— 理由は `testingcontext` の
+`"context" imported and not used` で、続き 40 で
+「これは guff の欠陥ではない、上流も同じバイトを書く」と確認したやつ。
+つまり `modernize` は**上流一致の非ビルド**の枠に入った。
+
+**残り 6 件は全部「上流を正確に再現した結果」になった。**
+数え始めたとき（続き 38）は 7 件中 4 件が guff 固有だった。
+**合計は 7→6 とほとんど動いていないのに、内訳は 4→0 になった。**
+合計だけ見ていたら「何も起きていない」に見える。
+
+#### 次にやること
+
+1. pending 45 件。`DEFERRED: SuggestedFix` が 15 linter で、
+   34 件は**1 バイトも書かない**。値段は `compat/fix/pending/` に全部ある。
+2. `staticcheck-qf` の残り 2 hunk（QF1005 の `float64(...)`、
+   QF1011 の `var b int = gen1()`）。3 つ目は**直さない**（続き 42）。
+3. `refactor::fresh_name` を `stringscutprefix` の `after` / `ok` にも通す。
+4. `delete_with_line` の DEFERRED 分（隣接コメントの部分的な削除）。
+   必要とする fixture が出てからでよい。
