@@ -24,6 +24,21 @@
 -	_ = other.Config{nil}
 +	_ = other.Config{Err: nil}
  }
+--- a/hostport/bad/bad.go
++++ b/hostport/bad/bad.go
+@@ -6,10 +6,10 @@
+ )
+ 
+ func direct(host string, port int) {
+-	net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
++	net.Dial("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)))
+ }
+ 
+ func viaVar(host, port string) {
+-	addr := fmt.Sprintf("%s:%s", host, port)
++	addr := net.JoinHostPort(host, port)
+ 	net.Dial("tcp", addr)
+ }
 --- a/sigchanyzer/bad/bad.go
 +++ b/sigchanyzer/bad/bad.go
 @@ -6,6 +6,6 @@
