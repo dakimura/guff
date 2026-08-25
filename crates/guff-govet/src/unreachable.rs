@@ -10,7 +10,9 @@ use guff::node_mask;
 use guff::token::Token;
 use guff::walk::NodeRef;
 use guff_analysis::passes::inspect;
-use guff_analysis::{AnalysisResult, Analyzer, Pass, RunError, RunFn};
+use guff_analysis::{
+    refactor, AnalysisResult, Analyzer, Diagnostic, Pass, RunError, RunFn, SuggestedFix,
+};
 
 use crate::expreq::unparen;
 
@@ -24,7 +26,9 @@ struct DeadState {
     labels: HashMap<String, usize>,
     break_target: Option<usize>,
     reachable: bool,
-    pending: Vec<u32>,
+    /// `(pos, end)`: upstream reports the statement's whole extent and its fix
+    /// deletes exactly that, so the end has to travel with the position.
+    pending: Vec<(u32, u32)>,
 }
 
 impl DeadState {
@@ -166,7 +170,7 @@ impl DeadState {
             match stmt {
                 Stmt::EmptyStmt(_) => {}
                 _ => {
-                    self.pending.push(stmt.pos().0 as u32);
+                    self.pending.push((stmt.pos().0 as u32, stmt.end().0 as u32));
                     self.reachable = true;
                 }
             }
@@ -297,7 +301,7 @@ fn is_panic_call(expr: &Expr) -> bool {
     matches!(unparen(fun), Expr::Ident(Ident { name, .. }) if name == "panic")
 }
 
-fn check_body(body: &BlockStmt) -> Vec<u32> {
+fn check_body(body: &BlockStmt) -> Vec<(u32, u32)> {
     // Traverse the original AST in place (no clones). Both passes walk the same
     // `body`, so `stmt_key` (a `*const Stmt` address) is stable and consistent
     // between them. The former `Stmt::BlockStmt(body.clone())` root plus per-arm
@@ -332,8 +336,26 @@ fn run(pass: &mut Pass<'_>) -> Result<Option<AnalysisResult>, RunError> {
     // (HashMap-backed walks elsewhere can change visit order of FuncDecl/FuncLit).
     pending.sort_unstable();
     pending.dedup();
-    for pos in pending {
-        pass.reportf(pos, "unreachable code");
+    for (pos, end) in pending {
+        let text_edits = refactor::enclosing_file(pass, pos)
+            .map(|file| {
+                refactor::delete_with_line(file, refactor::file_source(pass, file), pos, end)
+            })
+            .unwrap_or_default();
+        if text_edits.is_empty() {
+            pass.reportf(pos, "unreachable code");
+            continue;
+        }
+        pass.report(Diagnostic {
+            pos,
+            end,
+            message: "unreachable code".into(),
+            suggested_fixes: vec![SuggestedFix {
+                message: "Remove".into(),
+                text_edits,
+            }],
+            ..Diagnostic::default()
+        });
     }
     Ok(None)
 }

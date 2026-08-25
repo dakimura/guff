@@ -262,16 +262,20 @@ fn first_import_spec(gd: &guff::ast::GenDecl) -> Option<&ImportSpec> {
 /// comment that belongs to its neighbour. It does that with the parent node and
 /// the file's comment list.
 ///
-/// This asks one question instead: **is anything other than whitespace on this
-/// line outside the range?** Only comments, sibling statements, and the
-/// enclosing braces can be, and in every one of those cases upstream also
-/// declines to take the line. So the answers agree wherever this returns the
-/// wide edit, and where it returns the narrow one it leaves an empty line that
-/// gofmt tidies — never deleting a comment or a neighbour.
+/// This asks two questions of the text instead. The line goes when nothing but
+/// whitespace precedes the range on it, and nothing but whitespace or a `//`
+/// comment follows. Upstream is explicit that a trailing comment goes with its
+/// statement — "it removes whole lines like `stmt // comment`" — and declining
+/// there is not the safe choice it looks like: it strands the comment on a line
+/// whose code is gone.
 ///
-/// DEFERRED: upstream's finer cases, which trim *some* adjacent comments rather
-/// than none. They need comment positions, which the analysis pipeline does not
-/// parse (see [`add_import_edits`]).
+/// A sibling statement (`a(); b()`) or an enclosing brace on the line is what
+/// makes upstream keep it, and those are what the whitespace test rejects.
+///
+/// DEFERRED: block comments around the range, and upstream's finer runs that
+/// trim *part* of a line's comments. Both need comment positions, which the
+/// analysis pipeline does not parse (see [`add_import_edits`]); declining is
+/// conservative for them because a `/* */` neighbour may not be the statement's.
 pub fn delete_with_line(file: &File, src: Option<&[u8]>, pos: u32, end: u32) -> Vec<TextEdit> {
     let narrow = || {
         vec![TextEdit {
@@ -311,11 +315,15 @@ pub fn delete_with_line(file: &File, src: Option<&[u8]>, pos: u32, end: u32) -> 
         line_end
     };
 
-    let alone = src[line_start..start_off].iter().all(u8::is_ascii_whitespace)
-        && src[end_off..trailing_end]
-            .iter()
-            .all(u8::is_ascii_whitespace);
-    if !alone {
+    let before = &src[line_start..start_off];
+    let after = &src[end_off..trailing_end];
+    // A `//` comment after the statement belongs to it and goes with the line;
+    // anything else after it is code that must not.
+    let after_ok = match after.iter().position(|b| !b.is_ascii_whitespace()) {
+        None => true,
+        Some(i) => after[i..].starts_with(b"//"),
+    };
+    if !before.iter().all(u8::is_ascii_whitespace) || !after_ok {
         return narrow();
     }
     vec![TextEdit {
@@ -374,6 +382,17 @@ fn first_decl_doc_pos(file: &File, src: &[u8]) -> Option<u32> {
         return None;
     }
     u32::try_from(after_pkg + off).ok().map(|o| o + base as u32)
+}
+
+/// The file whose extent covers `pos`.
+///
+/// Equivalent to `astutil.EnclosingFile`, which upstream reaches for whenever a
+/// fix is computed from an object or a statement rather than from a syntax walk
+/// that still has the file in hand.
+pub fn enclosing_file<'p>(pass: &'p Pass<'_>, pos: u32) -> Option<&'p File> {
+    pass.files()
+        .iter()
+        .find(|f| f.file_start.0 as u32 <= pos && pos < f.file_end.0 as u32)
 }
 
 /// The source bytes of `file`, when the package retained them.
@@ -513,11 +532,16 @@ mod tests {
         assert_eq!(apply(src, &file, &edits), "package p\n\nfunc f() {\n\t; two()\n}\n");
     }
 
-    /// Same for a trailing comment — upstream trims some of those, this
-    /// declines to, and declining never destroys one.
+    /// A trailing comment goes with the statement it annotates.
+    ///
+    /// Upstream says so outright — "it removes whole lines like `stmt //
+    /// comment`" — and keeping the line is not the cautious choice it appears
+    /// to be: it leaves the comment behind explaining code that is gone.
+    /// `compat/fix` caught this as govet writing one line more than upstream,
+    /// after this test had been asserting the opposite.
     #[test]
-    fn delete_with_line_keeps_a_line_with_a_trailing_comment() {
-        let src = "package p\n\nfunc f() {\n\tone() // why\n}\n";
+    fn delete_with_line_takes_a_trailing_comment_with_the_line() {
+        let src = "package p\n\nfunc f() {\n\tone() // why\n\ttwo()\n}\n";
         let file = parse(src);
         let at = src.find("one()").expect("in source");
         let base = file.file_start.0 as usize;
@@ -529,7 +553,7 @@ mod tests {
         );
         assert_eq!(
             apply(src, &file, &edits),
-            "package p\n\nfunc f() {\n\t // why\n}\n"
+            "package p\n\nfunc f() {\n\ttwo()\n}\n"
         );
     }
 
