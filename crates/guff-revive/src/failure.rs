@@ -18,6 +18,21 @@ pub struct Failure {
     /// `line-length-limit` and `file-length-limit` do exactly that, and both
     /// hardcode `Column: 0` — a column no offset can produce.
     pub column: Option<u32>,
+    /// Replacement text for the whole line(s) the failure covers, without a
+    /// trailing newline.
+    ///
+    /// Upstream's `lint.Failure.ReplacementLine`. golangci-lint turns it into a
+    /// single edit spanning from the start of the failure's first line to the
+    /// end of its last, so the value is a *line*, not an expression — revive's
+    /// rules build it by matching the source text rather than the AST.
+    ///
+    /// `None` means no suggested fix, which is also what upstream reports when
+    /// its regex fails to match the line.
+    pub replacement_line: Option<String>,
+    /// End of the node the replacement covers, when it is not on `pos`'s line.
+    /// Defaults to `pos` — `ReplacementLine` is one line, but the node it
+    /// replaces need not be.
+    pub replacement_end: Option<u32>,
 }
 
 impl Failure {
@@ -29,6 +44,8 @@ impl Failure {
             message: message.into(),
             confidence: None,
             column: None,
+            replacement_line: None,
+            replacement_end: None,
         }
     }
 
@@ -45,6 +62,8 @@ impl Failure {
             message: message.into(),
             confidence: None,
             column: Some(column),
+            replacement_line: None,
+            replacement_end: None,
         }
     }
 
@@ -61,6 +80,8 @@ impl Failure {
             message: message.into(),
             confidence: Some(confidence),
             column: None,
+            replacement_line: None,
+            replacement_end: None,
         }
     }
 

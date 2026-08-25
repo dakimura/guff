@@ -100,12 +100,34 @@ fn check_call(pass: &Pass<'_>, call: &CallExpr, failures: &mut Vec<Failure>) {
     if !is_pkg_dot_name(&inner.fun, "fmt", "Sprintf") {
         return;
     }
+    // Upstream rebuilds the line with a regex over the *source text*, not from
+    // the AST: `^(.*)<rendered selector>\(fmt\.Sprintf\((.*)\)\)(.*)$`, then
+    // splices `prefix + ".Errorf(" + args + ")"` between the outer groups. The
+    // selector goes in unescaped, exactly as upstream writes it — escaping it
+    // would be more correct and less faithful, and `.` matching one character
+    // cannot change the answer for a real package name.
+    //
+    // No match means no fix, which is upstream's behaviour too: a call split
+    // across lines reports and rewrites nothing.
+    let replacement_line = crate::util::src_line_at(pass, inner.fun.pos().0 as u32).and_then(|line| {
+        let pattern = format!(r"^(.*){render_target}\(fmt\.Sprintf\((.*)\)\)(.*)$");
+        let re = regex::Regex::new(&pattern).ok()?;
+        let c = re.captures(&line)?;
+        Some(format!(
+            "{}{prefix}.Errorf({}){}",
+            c.get(1)?.as_str(),
+            c.get(2)?.as_str(),
+            c.get(3)?.as_str()
+        ))
+    });
     failures.push(Failure {
         rule: "errorf",
         pos: call.fun.pos().0 as u32,
         message: format!(
             "should replace {render_target}(fmt.Sprintf(...)) with {prefix}.Errorf(...)"
         ),
+        replacement_line,
+        replacement_end: Some(call.end().0 as u32),
         ..Failure::default()
     });
 }

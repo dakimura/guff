@@ -254,3 +254,29 @@ pub fn run_analyzer_at(
     out.sort();
     out
 }
+
+/// The diagnostics themselves, not just their messages.
+///
+/// A `ReplacementLine` appears in no compat key — the golden tier's is
+/// `path:line:col:linter:severity:text` — so a rule can report perfectly and
+/// rewrite nothing, or rewrite the wrong span, with every finding gate green.
+pub fn run_analyzer_diagnostics(
+    analyzer: &'static guff_analysis::Analyzer,
+    pkg: &Arc<Package>,
+) -> Vec<guff_analysis::Diagnostic> {
+    let result = run_on_packages(
+        &[analyzer],
+        std::slice::from_ref(pkg),
+        &RunnerOptions {
+            sequential: true,
+            ..RunnerOptions::default()
+        },
+    )
+    .expect("run analyzer");
+    for action in result.graph.all_actions() {
+        if let Some(err) = action.error() {
+            panic!("analyzer {} failed: {err}", action.string_id());
+        }
+    }
+    result.diagnostics().into_iter().map(|(_, d)| d).collect()
+}

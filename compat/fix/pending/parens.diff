@@ -31,6 +31,15 @@
  		return "two"
  	}
  	return "other"
+@@ -148,7 +149,7 @@
+ 
+ // The control: reported.
+ func ErrorfPlain(name string) error {
+-	return errors.New(fmt.Sprintf("bad %s", name))
++	return fmt.Errorf("bad %s", name)
+ }
+ 
+ // --- revive range-val-address -----------------------------------------------
 @@ -193,7 +194,7 @@
  // errorlint's `isNil` is a bare `ex.(*ast.Ident)` assertion, so `(nil)` is not
  // a nil comparison to it and the comparison is reported like any other.
